@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/snow-core/snow/internal/auth"
@@ -392,12 +393,19 @@ func (a *Agent) executeToolCalls(ctx context.Context) error {
 			if err := a.appendToolResult(parent, msg); err != nil {
 				return err
 			}
+			// Chain: the next result attaches to this one so every tool call
+			// result stays on the root→tip path (no dangling tool_calls).
+			parent = msg.ID
 			continue
 		}
 		callCount++
-		if _, err := a.executeOne(ctx, cb, parent); err != nil {
+		msg, err := a.executeOne(ctx, cb, parent)
+		if err != nil {
 			return err
 		}
+		// Chain tool results serially so all of them remain on the branch
+		// tip path; otherwise only the last result is visible to Messages().
+		parent = msg.ID
 	}
 	return nil
 }
@@ -611,6 +619,9 @@ func (b *eventBus) Publish(ev protocol.AgentEvent) {
 // IDs
 // ---------------------------------------------------------------------------
 
+// idCounter disambiguates IDs generated within the same nanosecond tick.
+var idCounter uint64
+
 func newID() string {
-	return fmt.Sprintf("%d-%x", time.Now().UnixNano(), time.Now().UnixNano()%0xffff)
+	return fmt.Sprintf("%d-%x", time.Now().UnixNano(), atomic.AddUint64(&idCounter, 1))
 }

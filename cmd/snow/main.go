@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,8 +12,11 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/auth"
+	"github.com/snow-core/snow/internal/config"
 	"github.com/snow-core/snow/internal/rpc"
 	"github.com/snow-core/snow/internal/tui"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -51,6 +55,8 @@ func run() error {
 	root.PersistentFlags().String("thinking", "", "thinking level: off|low|medium|high")
 
 	root.AddCommand(versionCmd())
+	root.AddCommand(loginCmd())
+	root.AddCommand(logoutCmd())
 
 	return root.Execute()
 }
@@ -63,6 +69,62 @@ func versionCmd() *cobra.Command {
 			fmt.Println(version)
 		},
 	}
+}
+
+// loginCmd stores an API key credential for a provider in auth.json.
+// OAuth flows (ChatGPT) are a Phase 2 follow-up.
+func loginCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "login <provider>",
+		Short: "Store an API key credential for a provider",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			provider := args[0]
+			switch provider {
+			case "opencode-go":
+			default:
+				return fmt.Errorf("login: unsupported provider %q (supported: opencode-go)", provider)
+			}
+			key, err := promptSecret("API key: ")
+			if err != nil {
+				return err
+			}
+			if key == "" {
+				return fmt.Errorf("login: empty API key")
+			}
+			authPath, _ := cmd.Flags().GetString("auth")
+			if authPath == "" {
+				_, a, _ := config.DefaultPaths()
+				authPath = a
+			}
+			store, err := auth.NewFileStore(authPath)
+			if err != nil {
+				return err
+			}
+			if err := store.Put(provider, auth.Credential{Type: auth.CredentialAPIKey, Key: key}); err != nil {
+				return err
+			}
+			fmt.Printf("stored %s API key in %s (0600)\n", provider, authPath)
+			return nil
+		},
+	}
+}
+
+// promptSecret reads a line from stdin without echoing (best-effort; falls
+// back to plain readline when the terminal is not interactive).
+func promptSecret(prompt string) (string, error) {
+	fmt.Print(prompt)
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		b, err := term.ReadPassword(fd)
+		fmt.Println()
+		return string(b), err
+	}
+	sc := bufio.NewScanner(os.Stdin)
+	if !sc.Scan() {
+		return "", sc.Err()
+	}
+	return sc.Text(), nil
 }
 
 func buildOptions(cmd *cobra.Command) app.Options {
@@ -153,4 +215,30 @@ func mustCWD() string {
 		os.Exit(1)
 	}
 	return cwd
+}
+
+// logoutCmd clears a provider credential from auth.json.
+func logoutCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "logout <provider>",
+		Short: "Remove a stored credential for a provider",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			provider := args[0]
+			authPath, _ := cmd.Flags().GetString("auth")
+			if authPath == "" {
+				_, a, _ := config.DefaultPaths()
+				authPath = a
+			}
+			store, err := auth.NewFileStore(authPath)
+			if err != nil {
+				return err
+			}
+			if err := store.Delete(provider); err != nil {
+				return err
+			}
+			fmt.Printf("removed %s credential from %s\n", provider, authPath)
+			return nil
+		},
+	}
 }

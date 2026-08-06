@@ -75,7 +75,11 @@ func (g *Grep) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if root == "" {
 		root = host.CWD()
 	}
-	resolved, err := g.guard.Resolve(root)
+	guard := g.guard
+	if host != nil {
+		guard = NewPathGuard(host.Roots(), host.CWD())
+	}
+	resolved, err := guard.Resolve(root)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("grep: %w", err)), nil
 	}
@@ -185,7 +189,11 @@ func (g *Glob) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if root == "" {
 		root = host.CWD()
 	}
-	resolved, err := g.guard.Resolve(root)
+	guard := g.guard
+	if host != nil {
+		guard = NewPathGuard(host.Roots(), host.CWD())
+	}
+	resolved, err := guard.Resolve(root)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("glob: %w", err)), nil
 	}

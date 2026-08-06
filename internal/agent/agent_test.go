@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 
@@ -540,8 +542,10 @@ func TestToolLoopCancelStopsRemaining(t *testing.T) {
 	cancelFirst := func() {}
 
 	tool := &testTool{
-		name:   "slow",
-		schema: protocol.ToolSchema{Name: "slow", Description: "s", Parameters: json.RawMessage(`{}`)},
+		// Named "read" so the permission gate (RiskRead) always allows it
+		// under deny mode; the loop-cancel behavior is what we exercise.
+		name:   "read",
+		schema: protocol.ToolSchema{Name: "read", Description: "r", Parameters: json.RawMessage(`{}`)},
 		runFunc: func(ctx context.Context, args json.RawMessage, host tools.ToolHost) tools.ToolResult {
 			runCount++
 			once.Do(func() {
@@ -556,8 +560,8 @@ func TestToolLoopCancelStopsRemaining(t *testing.T) {
 	}
 
 	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
-		{Type: protocol.EvStreamToolCallDone, ToolCallID: "c1", ToolName: "slow", Arguments: json.RawMessage(`{}`)},
-		{Type: protocol.EvStreamToolCallDone, ToolCallID: "c2", ToolName: "slow", Arguments: json.RawMessage(`{}`)},
+		{Type: protocol.EvStreamToolCallDone, ToolCallID: "c1", ToolName: "read", Arguments: json.RawMessage(`{}`)},
+		{Type: protocol.EvStreamToolCallDone, ToolCallID: "c2", ToolName: "read", Arguments: json.RawMessage(`{}`)},
 		{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
 	}}}
 	a, _ := setup(t, prov, reg, permission.ModeDeny)

@@ -53,8 +53,11 @@ func (w *Write) Run(ctx context.Context, args json.RawMessage, host tools.ToolHo
 		return tools.ErrorResult(fmt.Errorf("write: path is required")), nil
 	}
 
+	// Always re-anchor the guard to the host at call time: the registry-built
+	// guard captures the process cwd at registration, which is wrong when the
+	// host CWD differs (SDK embedding, tests).
 	guard := w.Guard
-	if guard == nil && host != nil {
+	if host != nil {
 		guard = NewPathGuard(host.Roots(), host.CWD())
 	}
 	if guard == nil {

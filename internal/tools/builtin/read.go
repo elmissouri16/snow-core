@@ -65,8 +65,11 @@ func (r *Read) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		return tools.ErrorResult(fmt.Errorf("read: path is required")), nil
 	}
 
+	// Always re-anchor the guard to the host at call time: the registry-built
+	// guard captures the process cwd at registration, which is wrong when the
+	// host CWD differs (SDK embedding, tests).
 	guard := r.Guard
-	if guard == nil && host != nil {
+	if host != nil {
 		guard = NewPathGuard(host.Roots(), host.CWD())
 	}
 	if guard == nil {
