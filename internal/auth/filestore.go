@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // ErrNoCredential is returned when no credential can be resolved for a
@@ -17,6 +18,9 @@ var ErrNoCredential = errors.New("auth: no credential available")
 // maintained with mode 0600 and written atomically (temp file + rename).
 type FileStore struct {
 	path string
+	// mu serializes load-modify-save cycles so concurrent Put/Delete from
+	// the same process cannot lose updates.
+	mu sync.Mutex
 }
 
 // NewFileStore creates a store backed by path. The file is not touched
@@ -107,8 +111,11 @@ func (f *FileStore) save(m map[string]Credential) error {
 	return nil
 }
 
-// Get implements Store.
+// Get implements Store. A corrupt file surfaces as "no credential" but is
+// never overwritten; Put/Delete return the corruption error.
 func (f *FileStore) Get(provider string) (Credential, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	m, err := f.load()
 	if err != nil {
 		return Credential{}, false
@@ -123,6 +130,8 @@ func (f *FileStore) Get(provider string) (Credential, bool) {
 
 // Put implements Store.
 func (f *FileStore) Put(provider string, cred Credential) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	m, err := f.load()
 	if err != nil {
 		return err
@@ -134,6 +143,8 @@ func (f *FileStore) Put(provider string, cred Credential) error {
 
 // Delete implements Store.
 func (f *FileStore) Delete(provider string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	m, err := f.load()
 	if err != nil {
 		return err

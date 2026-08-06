@@ -1,0 +1,156 @@
+{
+  "runId": "5694fd51-0dbf-43e3-ab6d-9d2a66916b92",
+  "agent": "reviewer",
+  "task": "Review the freshly implemented Go packages in /Users/el/Coding/open-source/snow-core that were written by parallel worker agents. This is a code review of other agents' work — find bugs, races, spec violations, and test gaps.\n\nGo is at /Users/el/go/goroot/bin/go (add to PATH).\n\nReview these packages (git log shows they were added in commits 545d49c and earlier; current HEAD is clean):\n1. internal/tools/builtin/ — read/write/edit/bash tools + pathguard (security-critical: path traversal, symlink escapes)\n2. internal/auth/filestore.go — credential file store (security-critical: 0600 perms, atomic writes, corrupt-file handling) and memorystore.go\n3. internal/provider/fake/ — scripted provider for tests\n4. internal/provider/opencodego/ — OpenAI-compatible SSE streaming client (protocol-critical: SSE parsing, tool call accumulation, finish_reason mapping, cancellation)\n5. internal/agent/ — the turn loop (concurrency: running flag, pending map, event bus; correctness: tool loop, aborts, MaxTurns)\n\nFocus areas:\n- Path safety in builtin tools (symlink escape via PathGuard, .. traversal, unicode)\n- Bash tool process-group kill on cancel, output caps, timeout\n- Filestore atomicity and permission correctness (file mode 0600 enforced on every write)\n- SSE parser edge cases in opencodego (CRLF, multi-line data, [DONE], fragmented args, cancellation race)\n- Agent loop races (event bus publish during close, pending map, tool execution under cancel)\n- Spec compliance with the interfaces in pkg/protocol and internal/tools, internal/provider\n\nFor each finding: file:line, severity (critical/major/minor/nit), description, and concrete fix suggestion. If a package is clean, say so explicitly. Run `go vet ./...` and `go test ./...` and report results. Do NOT modify any files — review only. Return a structured findings report.\n\n## Acceptance Contract\nAcceptance level: attested\nCompletion is not accepted from prose alone. End with a structured acceptance report.\n\nCriteria:\n- criterion-1: Return concrete findings with file paths and severity when applicable\n\nRequired evidence: review-findings, residual-risks\n\nFinish with a fenced JSON block tagged `acceptance-report` in this shape:\nUse empty arrays when no items apply; array fields contain strings unless object entries are shown.\n`criteriaSatisfied[].status` must be exactly one of: satisfied, not-satisfied, not-applicable.\n`commandsRun[].result` must be exactly one of: passed, failed, not-run.\n`manualNotes` and `notes` are optional strings; an empty string means no note and does not satisfy `manual-notes` evidence.\n```acceptance-report\n{\n  \"criteriaSatisfied\": [\n    {\n      \"id\": \"criterion-1\",\n      \"status\": \"satisfied\",\n      \"evidence\": \"specific proof\"\n    }\n  ],\n  \"changedFiles\": [\n    \"src/file.ts\"\n  ],\n  \"testsAddedOrUpdated\": [\n    \"test/file.test.ts\"\n  ],\n  \"commandsRun\": [\n    {\n      \"command\": \"command\",\n      \"result\": \"passed\",\n      \"summary\": \"short result\"\n    }\n  ],\n  \"validationOutput\": [\n    \"validation output or concise summary\"\n  ],\n  \"residualRisks\": [\n    \"none\"\n  ],\n  \"noStagedFiles\": true,\n  \"diffSummary\": \"short description of the diff\",\n  \"reviewFindings\": [\n    \"blocker: file.ts:12 - issue found, or no blockers\"\n  ],\n  \"manualNotes\": \"anything else the parent should know\"\n}\n```",
+  "exitCode": 0,
+  "model": "opencode-go/deepseek-v4-flash:high",
+  "attemptedModels": [
+    "opencode-go/deepseek-v4-flash:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "opencode-go/deepseek-v4-flash:high",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 65419,
+        "output": 36359,
+        "cacheRead": 1225472,
+        "cacheWrite": 0,
+        "cost": 0.022770501600000003,
+        "turns": 28
+      }
+    }
+  ],
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "Concrete findings with file:line and severity returned for all five reviewed packages: 3 major + 4 minor + 2 nit in internal/tools/builtin; 1 minor + 3 nit in internal/auth (filestore core correct); 1 minor + 1 nit in internal/provider/fake; 3 major + 3 minor + 2 nit in internal/provider/opencodego; 3 major + 4 minor + 3 nit in internal/agent, plus per-package cleanliness statements and test-gap list."
+        }
+      ],
+      "changedFiles": [],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "go vet ./...",
+          "result": "passed",
+          "summary": "No vet diagnostics across all packages"
+        },
+        {
+          "command": "go test ./...",
+          "result": "passed",
+          "summary": "All packages pass: agent, auth, provider/fake, provider/opencodego, session, tools/builtin (cmd, app, config, context, permission, provider, tools, tui, protocol have no test files)"
+        },
+        {
+          "command": "go test -race ./internal/agent/... ./internal/provider/... ./internal/auth/... ./internal/tools/...",
+          "result": "passed",
+          "summary": "Race detector clean on all five reviewed packages"
+        }
+      ],
+      "validationOutput": [
+        "go vet ./...: clean",
+        "go test ./...: all ok",
+        "go test -race: all ok (agent, auth, fake, opencodego, builtin)",
+        "git status: working tree clean (only untracked .pi-subagents/ artifacts); HEAD eb45a9a"
+      ],
+      "residualRisks": [
+        "PathGuard resolve-then-open TOCTOU: symlink swap between Resolve and the os call can escape the guard; not a privilege boundary while the model has bash, but should be documented",
+        "bash inherits the full parent environment (app toolHost.Environ() returns nil) including OPENCODE_API_KEY",
+        "Windows bash cancel kills only the direct child; grandchildren may survive (documented in process_windows.go)",
+        "opencodego delta/done contract mismatch is masked on the happy path; only exposed when a stream dies mid-tool-call",
+        "Agent session Append errors are swallowed, so ID-collision or IO failures silently drop messages (agent.go:335/380/389/409/430)"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "Review-only: no diff produced, no files modified",
+      "reviewFindings": [
+        "major: internal/tools/builtin/bash.go:61-67 - model-supplied timeout_ms overrides configured cap; fix: min() against b.Timeout",
+        "major: internal/tools/builtin/read.go:75-82 - file tools ignore ctx; FIFO/device inside root blocks forever; fix: reject non-regular files",
+        "major: internal/provider/opencodego/opencodego.go:598-600 vs internal/agent/agent.go:250-261 - cumulative deltas appended by agent => corrupted intermediate args; fix: adapter sends fragments only",
+        "major: internal/provider/opencodego/opencodego.go:554-563 - unparseable data lines silently dropped (multi-line SSE data loses chunks); fix: accumulate data lines / emit error event",
+        "major: internal/provider/opencodego/opencodego.go:594-600 - empty tool-call id in early deltas creates phantom duplicate block in agent; fix: sticky index-based fallback id",
+        "major: internal/agent/agent.go:121-135 - user message appended before running check => ghost message on concurrent Prompt",
+        "major: internal/agent/agent.go:354-360 - tool loop ignores ctx.Err() between calls; cancel does not stop remaining tools",
+        "major: internal/agent/agent.go:335,380,389,409,430 - session Append errors swallowed; silent conversation loss",
+        "minor: internal/tools/builtin/registry.go:31-33 - documented host-root fallback dead code; guard cwd captured at registration",
+        "minor: internal/tools/builtin/read.go:84-85 - byte truncation can split UTF-8 rune",
+        "minor: internal/tools/builtin/bash.go:99 - nil Environ() => full env inherited by shell (incl. API key env var)",
+        "minor: internal/auth/filestore.go:26-28 - no lock around load-modify-save; concurrent Put loses updates",
+        "minor: internal/provider/fake/fake.go:70-72 - ErrExhausted instead of io.EOF at script end => agent reports stream error",
+        "minor: internal/provider/opencodego/opencodego.go:605-618 - finish_reason last-wins; trailing stop after tool_calls drops pending execution",
+        "minor: internal/provider/opencodego/opencodego.go:610-616 + agent.go:306/319/354 - map iteration => nondeterministic tool-call order/execution",
+        "minor: internal/provider/opencodego/opencodego.go:550-552 - done waits for EOF not [DONE]; server keeping connection open hangs turn",
+        "minor: internal/agent/agent.go:355-357 - CallLimit silently drops unexecuted tool calls",
+        "minor: internal/agent/agent.go:217-221 - empty text block persisted on abort; thinking dropped on error paths",
+        "nit: bash.go:106-108 cancel/timeout identical message; write.go:70-75/edit.go:100 non-atomic writes; filestore Get silent on corrupt; newID 16-bit entropy; opencodego BOM handling; agent StopError dead case; synchronous event bus"
+      ],
+      "manualNotes": "Review-only task: no files were modified, no progress.md written (review-only/no-edit instruction takes precedence). PathGuard, filestore atomicity/perms, memorystore, and the agent's locking are verified correct. All tests and vet pass; race detector clean. No blockers found; 3 of the 5 packages' core security properties hold, with the listed majors being integration/robustness defects introduced by parallel workers (bash cap bypass, ctx-blind file tools, opencodego/agent delta contract mismatch, ghost message, tool-loop cancel, swallowed persistence errors)."
+    }
+  },
+  "launchContractDigest": "56df446c1296f58a56ad95e33df20028eb83cd35375781293254d0c8020394e5",
+  "launchResolvedExtensions": {
+    "version": 1,
+    "source": "launch-resolved",
+    "disableAmbientExtensions": false,
+    "runtime": [
+      "sha256:6c18373ccdfd0e2e"
+    ],
+    "configured": [],
+    "effective": [
+      "sha256:6c18373ccdfd0e2e"
+    ],
+    "omitted": {
+      "runtime": 0,
+      "configured": 0,
+      "effective": 0
+    }
+  },
+  "transcriptPath": "/Users/el/Coding/open-source/snow-core/.pi-subagents/artifacts/5694fd51-0dbf-43e3-ab6d-9d2a66916b92_reviewer_transcript.jsonl",
+  "skills": [],
+  "timestamp": 1786013110510
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/snow-core/snow/internal/tools"
 )
@@ -77,11 +78,24 @@ func (r *Read) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		return tools.ErrorResult(fmt.Errorf("read: %w", err)), nil
 	}
 
-	data, err := os.ReadFile(resolved)
+	// Reject non-regular files (FIFOs, devices) so a blocking read cannot
+	// hang the agent turn; also let cancellation abort early.
+	info, err := os.Stat(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return tools.ErrorResult(fmt.Errorf("read: file %q does not exist", a.Path)), nil
 		}
+		return tools.ErrorResult(fmt.Errorf("read: %w", err)), nil
+	}
+	if !info.Mode().IsRegular() {
+		return tools.ErrorResult(fmt.Errorf("read: %q is not a regular file", a.Path)), nil
+	}
+	if err := ctx.Err(); err != nil {
+		return tools.ErrorResult(err), nil
+	}
+
+	data, err := os.ReadFile(resolved)
+	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("read: %w", err)), nil
 	}
 
@@ -99,10 +113,23 @@ func (r *Read) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		cap = DefaultMaxOutputBytes
 	}
 	if len(content) > cap {
-		content = content[:cap] + truncationMarker
+		content = truncateRunes(content, cap) + truncationMarker
 	}
 
 	return tools.TextResult(content), nil
+}
+
+// truncateRunes truncates to the largest rune-boundary prefix of the given
+// byte budget, so multi-byte UTF-8 runes are never split.
+func truncateRunes(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	b := []byte(s)[:maxBytes]
+	for len(b) > 0 && !utf8.Valid(b) {
+		b = b[:len(b)-1]
+	}
+	return string(b)
 }
 
 // isBinary detects NUL bytes in the first 8KiB.

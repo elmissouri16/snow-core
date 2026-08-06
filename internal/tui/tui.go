@@ -27,13 +27,13 @@ func Run(ctx context.Context, opts app.Options) error {
 
 // Styles
 var (
-	styleUser     = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
+	styleUser      = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 	styleAssistant = lipgloss.NewStyle().Foreground(lipgloss.Color("231"))
-	styleTool     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	styleError    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	styleFooter   = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	styleThinking = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	styleBorder   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+	styleTool      = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	styleError     = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	styleFooter    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	styleThinking  = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
+	styleBorder    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
 )
 
 // Messages
@@ -61,15 +61,15 @@ type Model struct {
 	editor     textarea.Model
 	spinner    spinner.Model
 
-	lines           []string // rendered transcript lines
-	assistantBuf    strings.Builder
-	thinkingBuf     strings.Builder
+	lines             []string // rendered transcript lines
+	assistantBuf      strings.Builder
+	thinkingBuf       strings.Builder
 	assistantFinished bool
-	busy            bool
-	done            bool
-	lastErr         error
-	lastStatus      string
-	eventChan       chan protocol.AgentEvent
+	busy              bool
+	done              bool
+	lastErr           error
+	lastStatus        string
+	eventChan         chan protocol.AgentEvent
 
 	cancelRun context.CancelFunc
 }

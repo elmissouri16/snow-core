@@ -67,13 +67,17 @@ func drain(t *testing.T, s protocol.EventStream, ctx context.Context) []protocol
 
 // TestChatStreamSequence verifies the full normalized event sequence: text
 // delta, fragmented tool call across two chunks, tool_call_done with complete
-// parsed arguments, more text, usage, and a final done(stop).
+// parsed arguments, then a separate continuation stream with text, usage,
+// and a final done(stop) — mirroring the agent loop's two provider calls.
 func TestChatStreamSequence(t *testing.T) {
 	var mu sync.Mutex
 	var sawRequest bool
+	var callCount int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		sawRequest = true
+		callCount++
+		n := callCount
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -84,42 +88,42 @@ func TestChatStreamSequence(t *testing.T) {
 				fl.Flush()
 			}
 		}
-		// 1. text delta
-		write(sseChunk(chunkWith(map[string]any{"content": "Hello"}, "", nil)))
-		// 2. tool call fragment 1
-		write(sseChunk(chunkWith(map[string]any{"tool_calls": []map[string]any{{
-			"index": 0, "id": "call_1", "type": "function",
-			"function": map[string]any{"name": "read", "arguments": `{"path": "a`},
-		}}}, "", nil)))
-		// 3. tool call fragment 2 (completes the arguments)
-		write(sseChunk(chunkWith(map[string]any{"tool_calls": []map[string]any{{
-			"index":    0,
-			"function": map[string]any{"arguments": `bc.txt"}`},
-		}}}, "", nil)))
-		// 4. finish_reason tool_calls
-		write(sseChunk(chunkWith(nil, "tool_calls", nil)))
-		// 5. assistant text after tools
-		write(sseChunk(chunkWith(map[string]any{"content": "Done reading"}, "", nil)))
-		// 6. usage + stop
-		write(sseChunk(chunkWith(nil, "stop", map[string]any{
-			"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
-		})))
-		// 7. terminator
+		if n == 1 {
+			// Stream 1: text, fragmented tool call, finish tool_calls.
+			write(sseChunk(chunkWith(map[string]any{"content": "Hello"}, "", nil)))
+			write(sseChunk(chunkWith(map[string]any{"tool_calls": []map[string]any{{
+				"index": 0, "id": "call_1", "type": "function",
+				"function": map[string]any{"name": "read", "arguments": `{"path": "a`},
+			}}}, "", nil)))
+			write(sseChunk(chunkWith(map[string]any{"tool_calls": []map[string]any{{
+				"index":    0,
+				"function": map[string]any{"arguments": `bc.txt"}`},
+			}}}, "", nil)))
+			write(sseChunk(chunkWith(nil, "tool_calls", nil)))
+		} else {
+			// Stream 2: assistant text, usage, finish stop.
+			write(sseChunk(chunkWith(map[string]any{"content": "Done reading"}, "", nil)))
+			write(sseChunk(chunkWith(nil, "stop", map[string]any{
+				"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+			})))
+		}
 		write("data: [DONE]\n\n")
 	}))
 	defer srv.Close()
 
 	p := mustNew(t, srv.URL, "test-key")
-	s, err := p.Chat(context.Background(),
-		auth.Credential{Type: auth.CredentialAPIKey, Key: "test-key"},
-		protocol.ChatRequest{
-			Model:    protocol.Model{ID: "kimi-k2.6"},
-			Messages: []protocol.Message{protocol.NewUserMessage("u1", "", "hi")},
-		})
-	if err != nil {
-		t.Fatalf("Chat: %v", err)
+	ctx := context.Background()
+	req := protocol.ChatRequest{
+		Model:    protocol.Model{ID: "kimi-k2.6"},
+		Messages: []protocol.Message{protocol.NewUserMessage("u1", "", "hi")},
 	}
-	events := drain(t, s, context.Background())
+
+	// Stream 1: tool-call phase.
+	s1, err := p.Chat(ctx, auth.Credential{Type: auth.CredentialAPIKey, Key: "test-key"}, req)
+	if err != nil {
+		t.Fatalf("Chat 1: %v", err)
+	}
+	events := drain(t, s1, ctx)
 
 	var types []protocol.StreamEventType
 	for _, e := range events {
@@ -130,16 +134,14 @@ func TestChatStreamSequence(t *testing.T) {
 		protocol.EvStreamToolCallDelta,
 		protocol.EvStreamToolCallDelta,
 		protocol.EvStreamToolCallDone,
-		protocol.EvStreamTextDelta,
-		protocol.EvStreamUsage,
 		protocol.EvStreamDone,
 	}
 	if len(types) != len(wantTypes) {
-		t.Fatalf("event count mismatch: got %v want %v", types, wantTypes)
+		t.Fatalf("stream1 event count mismatch: got %v want %v", types, wantTypes)
 	}
 	for i := range wantTypes {
 		if types[i] != wantTypes[i] {
-			t.Fatalf("event[%d] = %s, want %s (all: %v)", i, types[i], wantTypes[i], types)
+			t.Fatalf("stream1 event[%d] = %s, want %s (all: %v)", i, types[i], wantTypes[i], types)
 		}
 	}
 	// First text delta
@@ -161,14 +163,38 @@ func TestChatStreamSequence(t *testing.T) {
 	if args["path"] != "abc.txt" {
 		t.Errorf("tool_call_done args = %v, want path=abc.txt", args)
 	}
-	// usage mapping
-	u := events[5].Usage
+	// done(tool_use)
+	if events[4].Type != protocol.EvStreamDone || events[4].StopReason != protocol.StopToolUse {
+		t.Fatalf("stream1 done = %+v, want done(tool_use)", events[4])
+	}
+
+	// Stream 2: continuation phase.
+	s2, err := p.Chat(ctx, auth.Credential{Type: auth.CredentialAPIKey, Key: "test-key"}, req)
+	if err != nil {
+		t.Fatalf("Chat 2: %v", err)
+	}
+	events2 := drain(t, s2, ctx)
+	var types2 []protocol.StreamEventType
+	for _, e := range events2 {
+		types2 = append(types2, e.Type)
+	}
+	wantTypes2 := []protocol.StreamEventType{
+		protocol.EvStreamTextDelta,
+		protocol.EvStreamUsage,
+		protocol.EvStreamDone,
+	}
+	if len(types2) != len(wantTypes2) {
+		t.Fatalf("stream2 event count mismatch: got %v want %v", types2, wantTypes2)
+	}
+	if events2[0].Text != "Done reading" {
+		t.Errorf("stream2 text = %q, want %q", events2[0].Text, "Done reading")
+	}
+	u := events2[1].Usage
 	if u == nil || u.Input != 10 || u.Output != 5 || u.Total != 15 {
 		t.Errorf("usage = %+v, want input=10 output=5 total=15", u)
 	}
-	// final done stop
-	if events[6].StopReason != protocol.StopStop {
-		t.Errorf("done stop reason = %q, want stop", events[6].StopReason)
+	if events2[2].StopReason != protocol.StopStop {
+		t.Errorf("stream2 done stop reason = %q, want stop", events2[2].StopReason)
 	}
 	mu.Lock()
 	defer mu.Unlock()

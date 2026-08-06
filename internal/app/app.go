@@ -25,38 +25,38 @@ import (
 
 // App is the assembled runtime.
 type App struct {
-	Cfg       config.Config
+	Cfg        config.Config
 	ConfigPath string
-	AuthPath  string
+	AuthPath   string
 
-	Auth     auth.Store
-	Registry *tools.SimpleRegistry
-	Provider provider.Provider
+	Auth       auth.Store
+	Registry   *tools.SimpleRegistry
+	Provider   provider.Provider
 	ProviderID string
-	Model    protocol.Model
-	Perm     *permission.SimpleService
-	Session  session.Store
-	Agent    *agent.Agent
+	Model      protocol.Model
+	Perm       *permission.SimpleService
+	Session    session.Store
+	Agent      *agent.Agent
 
 	cwd string
 }
 
 // Options control app assembly.
 type Options struct {
-	CWD         string
-	ConfigPath  string
-	AuthPath    string
-	Provider    string
-	Model       string
-	APIKey      string
-	Permission  string // ask|allow|deny
-	SessionPath string // empty → create new; or existing .jsonl to resume
-	Tools       []string // subset allowlist; empty = all builtins
+	CWD          string
+	ConfigPath   string
+	AuthPath     string
+	Provider     string
+	Model        string
+	APIKey       string
+	Permission   string   // ask|allow|deny
+	SessionPath  string   // empty → create new; or existing .jsonl to resume
+	Tools        []string // subset allowlist; empty = all builtins
 	SystemPrompt string
-	Thinking    string
-	NoSession   bool // in-memory session (SDK ephemeral)
-	UseFake     bool // force fake provider (demo/tests)
-	BaseURL     string // provider base URL override (opencode-go)
+	Thinking     string
+	NoSession    bool   // in-memory session (SDK ephemeral)
+	UseFake      bool   // force fake provider (demo/tests)
+	BaseURL      string // provider base URL override (opencode-go)
 }
 
 // DefaultPaths resolves config/auth paths from the environment.
@@ -261,8 +261,8 @@ type toolHost struct {
 	reg   *tools.SimpleRegistry
 }
 
-func (h *toolHost) CWD() string             { return h.cwd }
-func (h *toolHost) Roots() []string         { return h.roots }
-func (h *toolHost) Permission() permission.Service { return h.perm }
-func (h *toolHost) Environ() []string       { return nil }
+func (h *toolHost) CWD() string                             { return h.cwd }
+func (h *toolHost) Roots() []string                         { return h.roots }
+func (h *toolHost) Permission() permission.Service          { return h.perm }
+func (h *toolHost) Environ() []string                       { return nil }
 func (h *toolHost) EmitProgress(ev tools.ToolProgressEvent) {}

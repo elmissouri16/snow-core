@@ -73,11 +73,23 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
 	}
 
-	data, err := os.ReadFile(resolved)
+	// Reject non-regular files (FIFOs, devices) and honor cancellation.
+	info, err := os.Stat(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return tools.ErrorResult(fmt.Errorf("edit: file %q does not exist", a.Path)), nil
 		}
+		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
+	}
+	if !info.Mode().IsRegular() {
+		return tools.ErrorResult(fmt.Errorf("edit: %q is not a regular file", a.Path)), nil
+	}
+	if err := ctx.Err(); err != nil {
+		return tools.ErrorResult(err), nil
+	}
+
+	data, err := os.ReadFile(resolved)
+	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
 	}
 

@@ -14,8 +14,8 @@ func TestRunPromptFakeProvider(t *testing.T) {
 	defer cancel()
 
 	out, err := RunPrompt(ctx, Options{
-		Provider:   "fake",
-		NoSession:  true,
+		Provider:       "fake",
+		NoSession:      true,
 		PermissionMode: "allow",
 	}, "hello")
 	if err != nil {

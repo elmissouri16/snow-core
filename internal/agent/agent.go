@@ -52,7 +52,8 @@ type Agent struct {
 	running bool
 	// tool results retained between the tool_use assistant message and the
 	// continuation provider call
-	pending map[string]protocol.ContentBlock
+	pending      map[string]protocol.ContentBlock
+	pendingOrder []string
 }
 
 // New creates an agent.
@@ -118,6 +119,26 @@ func (a *Agent) Prompt(ctx context.Context, text string) error {
 	if strings_trim(text) == "" {
 		return errors.New("agent: empty prompt")
 	}
+
+	// Claim the running flag BEFORE appending so a concurrent second Prompt
+	// cannot persist a ghost user message that never gets processed.
+	a.mu.Lock()
+	if a.running {
+		a.mu.Unlock()
+		return errors.New("agent: already running")
+	}
+	a.running = true
+	a.pending = make(map[string]protocol.ContentBlock)
+	a.pendingOrder = a.pendingOrder[:0]
+	a.mu.Unlock()
+
+	// Ensure we stop running on any exit.
+	defer func() {
+		a.mu.Lock()
+		a.running = false
+		a.mu.Unlock()
+	}()
+
 	userMsg := protocol.NewUserMessage(newID(), "", text)
 	if err := a.opts.Session.Append(session.Entry{
 		Type:     session.EntryMessage,
@@ -128,22 +149,6 @@ func (a *Agent) Prompt(ctx context.Context, text string) error {
 		return fmt.Errorf("agent: append user message: %w", err)
 	}
 	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
-
-	a.mu.Lock()
-	if a.running {
-		a.mu.Unlock()
-		return errors.New("agent: already running")
-	}
-	a.running = true
-	a.pending = make(map[string]protocol.ContentBlock)
-	a.mu.Unlock()
-
-	// Ensure we stop running on any exit.
-	defer func() {
-		a.mu.Lock()
-		a.running = false
-		a.mu.Unlock()
-	}()
 
 	return a.run(ctx)
 }
@@ -223,7 +228,9 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 			if errors.Is(err, context.Canceled) {
 				stop = protocol.StopAborted
 				content = append(content, textBlock(textBuf))
-				a.persistAssistant(asstID, parent, content, stop, usage, "")
+				if perr := a.persistAssistant(asstID, parent, content, stop, usage, ""); perr != nil {
+					return protocol.StopAborted, perr
+				}
 				a.bus.Publish(protocol.AgentEvent{Type: protocol.EvAborted})
 				return protocol.StopAborted, nil
 			}
@@ -234,7 +241,9 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 			// Stream error event
 			stop = protocol.StopError
 			content = append(content, textBlock(textBuf))
-			a.persistAssistant(asstID, parent, content, stop, usage, err.Error())
+			if perr := a.persistAssistant(asstID, parent, content, stop, usage, err.Error()); perr != nil {
+				return protocol.StopError, perr
+			}
 			a.bus.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
 			return protocol.StopError, err
 		}
@@ -290,7 +299,9 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 				errMsg = ev.Err.Error()
 			}
 			content = append(content, textBlock(textBuf))
-			a.persistAssistant(asstID, parent, content, stop, usage, errMsg)
+			if perr := a.persistAssistant(asstID, parent, content, stop, usage, errMsg); perr != nil {
+				return protocol.StopError, perr
+			}
 			a.bus.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: errMsg})
 			return protocol.StopError, fmt.Errorf("agent: %s", errMsg)
 		}
@@ -310,15 +321,19 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 		stop = protocol.StopStop
 	}
 
-	a.persistAssistant(asstID, parent, content, stop, usage, "")
+	if err := a.persistAssistant(asstID, parent, content, stop, usage, ""); err != nil {
+		return stop, err
+	}
 
-	// Stash tool calls for execution.
+	// Stash tool calls for execution (ordered).
 	if stop == protocol.StopToolUse {
 		a.mu.Lock()
 		a.pending = make(map[string]protocol.ContentBlock)
+		a.pendingOrder = a.pendingOrder[:0]
 		for _, cb := range toolCalls {
 			if cb.Type == protocol.BlockToolCall {
 				a.pending[cb.ToolCallID] = cb
+				a.pendingOrder = append(a.pendingOrder, cb.ToolCallID)
 			}
 		}
 		a.mu.Unlock()
@@ -327,41 +342,79 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 	return stop, nil
 }
 
-func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBlock, stop protocol.StopReason, usage *protocol.Usage, errMsg string) {
+func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBlock, stop protocol.StopReason, usage *protocol.Usage, errMsg string) error {
 	msg := protocol.NewAssistantMessage(id, parent, a.Model().Provider, a.Model().ID, content, stop, usage)
 	if errMsg != "" {
 		msg.Error = errMsg
 	}
-	_ = a.opts.Session.Append(session.Entry{
+	if err := a.opts.Session.Append(session.Entry{
 		Type:     session.EntryMessage,
 		ID:       id,
 		ParentID: parent,
 		Message:  &msg,
-	})
+	}); err != nil {
+		return fmt.Errorf("agent: persist assistant: %w", err)
+	}
 	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	return nil
 }
 
-// executeToolCalls runs the pending tool calls serially and persists results.
+// executeToolCalls runs the pending tool calls serially (in stream order)
+// and persists results. Aborts early when ctx is cancelled.
 func (a *Agent) executeToolCalls(ctx context.Context) error {
 	a.mu.Lock()
 	pending := a.pending
+	order := append([]string(nil), a.pendingOrder...)
 	a.pending = make(map[string]protocol.ContentBlock)
+	a.pendingOrder = a.pendingOrder[:0]
 	a.mu.Unlock()
 
 	parent := a.opts.Session.BranchTip()
 	callCount := 0
 
-	for _, cb := range pending {
-		if a.opts.CallLimit > 0 && callCount >= a.opts.CallLimit {
-			break
+	for _, id := range order {
+		cb, ok := pending[id]
+		if !ok {
+			continue
 		}
-		callCount++
-		result, err := a.executeOne(ctx, cb, parent)
-		if err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		_ = result
+		if a.opts.CallLimit > 0 && callCount >= a.opts.CallLimit {
+			// Emit an error result for skipped calls so the provider never
+			// sees tool_calls without results.
+			msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
+				[]protocol.ContentBlock{protocol.NewTextBlock(
+					fmt.Sprintf("Error: tool call skipped (call limit %d reached)", a.opts.CallLimit))}, true)
+			if err := a.appendToolResult(parent, msg); err != nil {
+				return err
+			}
+			continue
+		}
+		callCount++
+		if _, err := a.executeOne(ctx, cb, parent); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+// appendToolResult persists a tool_result message and emits its events.
+func (a *Agent) appendToolResult(parent string, msg protocol.Message) error {
+	if err := a.opts.Session.Append(session.Entry{
+		Type:     session.EntryMessage,
+		ID:       msg.ID,
+		ParentID: parent,
+		Message:  &msg,
+	}); err != nil {
+		return fmt.Errorf("agent: append tool result: %w", err)
+	}
+	a.bus.Publish(protocol.AgentEvent{
+		Type:       protocol.EvToolEnd,
+		ToolCallID: msg.ToolCallID,
+		ToolName:   msg.ToolName,
+		IsError:    msg.IsError,
+	})
 	return nil
 }
 
@@ -377,8 +430,9 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
 			[]protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf(
 				"Error: tool arguments are not valid JSON: %v. Raw: %s", err, string(rawArgs)))}, true)
-		_ = a.opts.Session.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, ParentID: parent, Message: &msg})
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolCallID: cb.ToolCallID, ToolName: cb.Name, IsError: true})
+		if err := a.appendToolResult(parent, msg); err != nil {
+			return msg, err
+		}
 		return msg, nil
 	}
 
@@ -386,8 +440,9 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 	if !ok {
 		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
 			[]protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("Error: unknown tool %q", cb.Name))}, true)
-		_ = a.opts.Session.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, ParentID: parent, Message: &msg})
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolCallID: cb.ToolCallID, ToolName: cb.Name, IsError: true})
+		if err := a.appendToolResult(parent, msg); err != nil {
+			return msg, err
+		}
 		return msg, nil
 	}
 
@@ -406,8 +461,9 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		}
 		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
 			[]protocol.ContentBlock{protocol.NewTextBlock("Permission denied: " + reason)}, true)
-		_ = a.opts.Session.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, ParentID: parent, Message: &msg})
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolCallID: cb.ToolCallID, ToolName: cb.Name, IsError: true, Message: reason})
+		if err := a.appendToolResult(parent, msg); err != nil {
+			return msg, err
+		}
 		return msg, nil
 	}
 
@@ -427,13 +483,9 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		out = tr.Content
 	}
 	msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name, out, tr.IsError)
-	_ = a.opts.Session.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, ParentID: parent, Message: &msg})
-	a.bus.Publish(protocol.AgentEvent{
-		Type:       protocol.EvToolEnd,
-		ToolCallID: cb.ToolCallID,
-		ToolName:   cb.Name,
-		IsError:    tr.IsError,
-	})
+	if err := a.appendToolResult(parent, msg); err != nil {
+		return msg, err
+	}
 	return msg, nil
 }
 

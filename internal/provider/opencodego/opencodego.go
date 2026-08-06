@@ -489,6 +489,7 @@ func (s *stream) readSSE(resp *http.Response) {
 	var (
 		eventName string
 		accums    = make(map[int]*toolCallAccum)
+		order     []int // insertion order of tool call indices
 		finish    protocol.StopReason
 		doneSent  bool
 		errored   bool
@@ -511,7 +512,11 @@ func (s *stream) readSSE(resp *http.Response) {
 	for {
 		line, err := r.ReadString('\n')
 		if line != "" {
-			s.handleLine(strings.TrimSpace(line), &eventName, accums, &finish, markError)
+			stop := s.handleLine(strings.TrimSpace(line), &eventName, accums, &order, &finish, markError)
+			if stop {
+				sendDone()
+				return
+			}
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -532,23 +537,26 @@ func (s *stream) readSSE(resp *http.Response) {
 	}
 }
 
-func (s *stream) handleLine(line string, eventName *string, accums map[int]*toolCallAccum, finish *protocol.StopReason, markError func(protocol.StreamEvent)) {
+// handleLine returns true when the stream should stop (e.g. after [DONE]).
+func (s *stream) handleLine(line string, eventName *string, accums map[int]*toolCallAccum, order *[]int, finish *protocol.StopReason, markError func(protocol.StreamEvent)) bool {
 	switch {
 	case strings.HasPrefix(line, "event:"):
 		*eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 	case strings.HasPrefix(line, "data:"):
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "" {
-			return
+			return false
 		}
 		if *eventName == "error" {
 			*eventName = ""
 			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("opencode-go: " + data)})
-			return
+			return false
 		}
 		*eventName = ""
 		if data == "[DONE]" {
-			return // handled by caller via finish state; stream continues to EOF
+			// [DONE] terminates the stream; some servers keep the connection
+			// open afterwards, so signal the caller to stop reading.
+			return true
 		}
 		var chunk openAIChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
@@ -559,14 +567,18 @@ func (s *stream) handleLine(line string, eventName *string, accums map[int]*tool
 			}
 			if uerr := json.Unmarshal([]byte(data), &errPayload); uerr == nil && errPayload.Error != nil && errPayload.Error.Message != "" {
 				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("opencode-go: " + errPayload.Error.Message)})
+			} else {
+				// Malformed chunk: surface it rather than silently dropping.
+				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("opencode-go: unparseable SSE data: %s", truncateStr(data, 500))})
 			}
-			return
+			return false
 		}
-		s.processChunk(chunk, accums, finish)
+		s.processChunk(chunk, accums, order, finish)
 	}
+	return false
 }
 
-func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, finish *protocol.StopReason) {
+func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, order *[]int, finish *protocol.StopReason) {
 	if chunk.Usage != nil {
 		s.send(protocol.StreamEvent{Type: protocol.EvStreamUsage, Usage: mapUsage(*chunk.Usage)})
 	}
@@ -583,38 +595,65 @@ func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, 
 			if !ok {
 				acc = &toolCallAccum{index: tc.Index}
 				accums[tc.Index] = acc
+				*order = append(*order, tc.Index)
 			}
 			if tc.ID != "" {
 				acc.id = tc.ID
 			}
+			// Sticky fallback id: some compatible servers defer/omit ids.
+			if acc.id == "" {
+				acc.id = fmt.Sprintf("tc-%d", acc.index)
+			}
 			if tc.Function.Name != "" {
 				acc.name = tc.Function.Name
 			}
-			if tc.Function.Arguments != "" {
-				acc.argsBuf.WriteString(tc.Function.Arguments)
-			}
+			// Deltas carry only the fragment; the agent appends fragments.
 			s.send(protocol.StreamEvent{
 				Type:       protocol.EvStreamToolCallDelta,
 				ToolCallID: acc.id,
 				ToolName:   acc.name,
-				Arguments:  json.RawMessage(acc.argsBuf.String()),
+				Arguments:  json.RawMessage(tc.Function.Arguments),
 			})
+			if tc.Function.Arguments != "" {
+				acc.argsBuf.WriteString(tc.Function.Arguments)
+			}
 		}
+		// finish_reason is first-wins: a trailing chunk must not overwrite an
+		// earlier tool_calls/stop decision.
 		switch ch.FinishReason {
 		case "stop":
-			*finish = protocol.StopStop
+			if *finish == "" {
+				*finish = protocol.StopStop
+			}
 		case "length":
-			*finish = protocol.StopLength
+			if *finish == "" {
+				*finish = protocol.StopLength
+			}
 		case "tool_calls":
-			*finish = protocol.StopToolUse
-			for _, acc := range accums {
-				s.send(protocol.StreamEvent{
-					Type:       protocol.EvStreamToolCallDone,
-					ToolCallID: acc.id,
-					ToolName:   acc.name,
-					Arguments:  acc.finalArgs(),
-				})
+			if *finish == "" {
+				*finish = protocol.StopToolUse
+			}
+			if *finish == protocol.StopToolUse {
+				for _, idx := range *order {
+					acc := accums[idx]
+					if acc == nil {
+						continue
+					}
+					s.send(protocol.StreamEvent{
+						Type:       protocol.EvStreamToolCallDone,
+						ToolCallID: acc.id,
+						ToolName:   acc.name,
+						Arguments:  acc.finalArgs(),
+					})
+				}
 			}
 		}
 	}
+}
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

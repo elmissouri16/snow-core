@@ -63,8 +63,13 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if timeout <= 0 {
 		timeout = DefaultBashTimeout
 	}
+	// The model-supplied timeout_ms is bounded by the operator-configured cap
+	// (b.Timeout) so a model cannot run commands for arbitrarily long.
 	if a.TimeoutMS != nil && *a.TimeoutMS > 0 {
-		timeout = time.Duration(*a.TimeoutMS) * time.Millisecond
+		t := time.Duration(*a.TimeoutMS) * time.Millisecond
+		if t < timeout {
+			timeout = t
+		}
 	}
 
 	runCtx := ctx
@@ -96,7 +101,9 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 
 	if host != nil {
 		cmd.Dir = host.CWD()
-		cmd.Env = host.Environ()
+		if env := host.Environ(); env != nil {
+			cmd.Env = env
+		}
 	}
 
 	cap := b.MaxOutputBytes

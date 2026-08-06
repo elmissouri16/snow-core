@@ -29,10 +29,10 @@ func main() {
 
 func run() error {
 	root := &cobra.Command{
-		Use:     "snow",
-		Short:   "snow — a minimal modular coding-agent harness in Go",
-		Version: version,
-		RunE:    runInteractive,
+		Use:           "snow",
+		Short:         "snow — a minimal modular coding-agent harness in Go",
+		Version:       version,
+		RunE:          runInteractive,
 		SilenceUsage:  true,
 		SilenceErrors: false,
 	}

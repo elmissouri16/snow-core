@@ -66,6 +66,16 @@ func (w *Write) Run(ctx context.Context, args json.RawMessage, host tools.ToolHo
 		return tools.ErrorResult(fmt.Errorf("write: %w", err)), nil
 	}
 
+	// Reject writes to existing non-regular files (FIFOs, devices, sockets).
+	if info, err := os.Stat(resolved); err == nil {
+		if !info.Mode().IsRegular() && !info.Mode().IsDir() {
+			return tools.ErrorResult(fmt.Errorf("write: %q is not a regular file", a.Path)), nil
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return tools.ErrorResult(err), nil
+	}
+
 	if dir := filepath.Dir(resolved); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return tools.ErrorResult(fmt.Errorf("write: create parent dirs: %w", err)), nil
