@@ -37,6 +37,8 @@ type Options struct {
 	MaxTurns      int // 0 = unlimited
 	CallLimit     int // max tool calls per turn (0 = unlimited)
 	MaxToolOutput int
+	// Thinking level forwarded to providers that support reasoning effort.
+	Thinking protocol.ThinkingLevel
 	// Auth resolves credentials (auth.json). Optional: env fallback is
 	// implemented by providers for known env vars.
 	Auth auth.Store
@@ -178,6 +180,7 @@ func (a *Agent) run(ctx context.Context) error {
 			Messages: msgs,
 			Tools:    a.opts.Registry.Schemas(),
 			System:   a.opts.SystemPrompt,
+			Thinking: a.opts.Thinking,
 		}
 
 		// Call the provider (optionally with a merged retry on malformed args).
@@ -225,6 +228,7 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 	textBuf := ""
 	thinkingBuf := ""
 	toolCalls := map[string]protocol.ContentBlock{} // id -> block
+	toolOrder := []string{}                         // first-seen id order
 
 	for {
 		ev, err := stream.Next(ctx)
@@ -239,7 +243,7 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 				return protocol.StopAborted, nil
 			}
 			// Normal end of stream: io.EOF per the EventStream contract.
-			if errors.Is(err, io.EOF) || errors.Is(err, ErrStreamEOF) {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			// Stream error event
@@ -267,6 +271,7 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 					ToolCallID: ev.ToolCallID,
 					Name:       ev.ToolName,
 				}
+				toolOrder = append(toolOrder, ev.ToolCallID)
 			}
 			if ev.Arguments != nil {
 				cb.Arguments = append(cb.Arguments, ev.Arguments...)
@@ -280,6 +285,7 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 					ToolCallID: ev.ToolCallID,
 					Name:       ev.ToolName,
 				}
+				toolOrder = append(toolOrder, ev.ToolCallID)
 			}
 			if ev.Arguments != nil {
 				cb.Arguments = ev.Arguments
@@ -318,8 +324,10 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 	if textBuf != "" {
 		content = append(content, textBlock(textBuf))
 	}
-	for _, cb := range toolCalls {
-		content = append(content, cb)
+	for _, id := range toolOrder {
+		if cb, ok := toolCalls[id]; ok {
+			content = append(content, cb)
+		}
 	}
 	if stop == protocol.StopPending {
 		stop = protocol.StopStop
@@ -334,8 +342,8 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 		a.mu.Lock()
 		a.pending = make(map[string]protocol.ContentBlock)
 		a.pendingOrder = a.pendingOrder[:0]
-		for _, cb := range toolCalls {
-			if cb.Type == protocol.BlockToolCall {
+		for _, id := range toolOrder {
+			if cb, ok := toolCalls[id]; ok && cb.Type == protocol.BlockToolCall {
 				a.pending[cb.ToolCallID] = cb
 				a.pendingOrder = append(a.pendingOrder, cb.ToolCallID)
 			}
@@ -572,9 +580,6 @@ func textBlock(s string) protocol.ContentBlock {
 }
 
 func strings_trim(s string) string { return strings.TrimSpace(s) }
-
-// ErrStreamEOF signals a normal end of stream.
-var ErrStreamEOF = errors.New("agent: stream EOF")
 
 // ---------------------------------------------------------------------------
 // Event bus

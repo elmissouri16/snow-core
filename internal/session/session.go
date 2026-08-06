@@ -195,12 +195,7 @@ func (s *MemoryStore) Append(entry Entry) error {
 	s.entries = append(s.entries, entry)
 	s.byID[entry.ID] = len(s.entries) - 1
 	s.tip = entry.ID
-	s.header = maybeTouch(s.header)
 	return nil
-}
-
-func maybeTouch(h Header) Header {
-	return h
 }
 
 // BranchTip implements Store.

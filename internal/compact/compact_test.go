@@ -61,8 +61,8 @@ func TestApplyAppendsSummary(t *testing.T) {
 	if len(after) == 0 {
 		t.Fatal("tail messages should still load after compaction")
 	}
-	if res.RemovedMessages <= 0 {
-		t.Fatalf("expected removed messages > 0, got %d", res.RemovedMessages)
+	if res.SummarizedMessages <= 0 {
+		t.Fatalf("expected removed messages > 0, got %d", res.SummarizedMessages)
 	}
 	if res.BeforeEntries <= 0 || res.AfterEntries <= 0 {
 		t.Fatal("expected entry counts")

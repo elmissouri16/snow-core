@@ -207,13 +207,14 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, req protocol
 // ---------------------------------------------------------------------------
 
 type openAIChatRequest struct {
-	Model         string          `json:"model"`
-	Messages      []openAIMessage `json:"messages"`
-	Stream        bool            `json:"stream"`
-	StreamOptions *streamOptions  `json:"stream_options,omitempty"`
-	Tools         []openAITool    `json:"tools,omitempty"`
-	Temperature   *float64        `json:"temperature,omitempty"`
-	MaxTokens     *int            `json:"max_tokens,omitempty"`
+	Model           string          `json:"model"`
+	Messages        []openAIMessage `json:"messages"`
+	Stream          bool            `json:"stream"`
+	StreamOptions   *streamOptions  `json:"stream_options,omitempty"`
+	Tools           []openAITool    `json:"tools,omitempty"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+	MaxTokens       *int            `json:"max_tokens,omitempty"`
+	ReasoningEffort *string         `json:"reasoning_effort,omitempty"`
 }
 
 type streamOptions struct {
@@ -291,7 +292,28 @@ func (p *Provider) buildBody(req protocol.ChatRequest) ([]byte, error) {
 	if req.Temperature != nil {
 		oreq.Temperature = req.Temperature
 	}
+	// Map snow thinking levels to OpenAI reasoning_effort when set.
+	if req.Thinking != "" && req.Thinking != protocol.ThinkingOff {
+		if effort, ok := mapThinkingEffort(req.Thinking); ok {
+			v := effort
+			oreq.ReasoningEffort = &v
+		}
+	}
 	return json.Marshal(oreq)
+}
+
+// mapThinkingEffort maps snow thinking levels to OpenAI reasoning_effort
+// values. minimal has no OpenAI equivalent and is skipped.
+func mapThinkingEffort(l protocol.ThinkingLevel) (string, bool) {
+	switch l {
+	case protocol.ThinkingLow:
+		return "low", true
+	case protocol.ThinkingMedium:
+		return "medium", true
+	case protocol.ThinkingHigh:
+		return "high", true
+	}
+	return "", false
 }
 
 // mapMessage converts a protocol message to the OpenAI wire format. The bool

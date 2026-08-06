@@ -44,6 +44,7 @@ type agentEventMsg struct {
 }
 type doneMsg struct {
 	err error
+	app *app.App // delivered from the Init goroutine
 }
 type appendLineMsg struct {
 	line string
@@ -71,6 +72,7 @@ type Model struct {
 	lastErr           error
 	lastStatus        string
 	eventChan         chan protocol.AgentEvent
+	asker             *tuiAsker
 
 	cancelRun context.CancelFunc
 }
@@ -96,13 +98,15 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 		spinner:    sp,
 		eventChan:  make(chan protocol.AgentEvent, 512),
 	}
+	m.asker = newTUIAsker(m.eventChan)
 	m.transcript.Style = styleBorder
 	return m
 }
 
 // Init implements tea.Model.
 func (m *Model) Init() tea.Cmd {
-	// Build the app asynchronously so the UI paints immediately.
+	// Build the app asynchronously so the UI paints immediately; deliver it
+	// via the doneMsg payload (never mutate m.app from a goroutine).
 	return tea.Batch(
 		spinner.Tick,
 		func() tea.Msg {
@@ -110,13 +114,7 @@ func (m *Model) Init() tea.Cmd {
 			if err != nil {
 				return doneMsg{err: err}
 			}
-			m.app = a
-			m.subscribe()
-			m.pushLine(styleFooter.Render(fmt.Sprintf(
-				"snow %s — cwd %s — provider %s — model %s | /help for commands",
-				"0.1.0-dev", m.app.CWD(), m.app.ProviderID, m.app.Model.ID)))
-			m.pushLine(styleFooter.Render("Type /quit to exit."))
-			return doneMsg{}
+			return doneMsg{app: a}
 		},
 	)
 }
@@ -147,6 +145,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastErr = msg.err
 			m.pushLine(styleError.Render("error: " + msg.err.Error()))
 			return m, nil
+		}
+		if msg.app != nil {
+			m.app = msg.app
+			m.app.Perm.SetAsker(m.asker)
+			m.subscribe()
+			m.pushLine(styleFooter.Render(fmt.Sprintf(
+				"snow %s — cwd %s — provider %s — model %s | /help for commands",
+				"0.1.0-dev", m.app.CWD(), m.app.ProviderID, m.app.Model.ID)))
+			m.pushLine(styleFooter.Render("Type /quit to exit."))
 		}
 		m.busy = false
 		return m, nil
@@ -201,6 +208,12 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		if ev.Usage != nil {
 			m.pushLine(styleFooter.Render(fmt.Sprintf("tokens: in=%d out=%d cache_r=%d cache_w=%d",
 				ev.Usage.Input, ev.Usage.Output, ev.Usage.CacheRead, ev.Usage.CacheWrite)))
+		}
+	case protocol.EvPermissionRequest:
+		if ev.Permission != nil {
+			m.busy = true
+			m.pushLine(styleTool.Render("🔐 permission request: " + ev.Permission.Request.Tool +
+				" — respond with /allow or /deny"))
 		}
 	case protocol.EvError:
 		m.pushLine(styleError.Render("✖ " + ev.Message))
@@ -263,6 +276,10 @@ func (m *Model) layout() {
 
 // handleKey processes key presses and slash commands.
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Ignore input until the app is built.
+	if m.app == nil {
+		return m, nil
+	}
 	// Slash commands are processed on Enter when the editor starts with '/'.
 	if msg.Type == tea.KeyEnter && !m.busy {
 		text := m.editor.Value()
@@ -345,6 +362,24 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 		} else {
 			m.pushLine(styleFooter.Render("model: " + args[0]))
 		}
+	case "/allow", "/deny":
+		// Respond to a pending permission request from the TUI asker.
+		if m.asker == nil {
+			m.pushLine(styleError.Render("no pending permission request"))
+			return m, nil
+		}
+		decision := permission.DecisionDeny
+		if cmd == "/allow" {
+			decision = permission.DecisionAllow
+			if len(args) > 0 && args[0] == "always" {
+				decision = permission.DecisionAllowAlways
+			}
+		}
+		if err := m.asker.Respond(decision); err != nil {
+			m.pushLine(styleError.Render(err.Error()))
+		} else {
+			m.pushLine(styleFooter.Render(cmd + " granted"))
+		}
 	case "/permission":
 		if len(args) == 0 {
 			m.pushLine(styleFooter.Render("permission mode: " + string(m.app.Perm.Mode())))
@@ -388,6 +423,9 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (m *Model) View() string {
+	if m.app == nil {
+		return "loading snow…"
+	}
 	if m.width == 0 {
 		return "loading snow…"
 	}

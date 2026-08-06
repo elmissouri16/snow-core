@@ -146,12 +146,11 @@ func Main(ctx context.Context, opts app.Options) error {
 	}
 	defer a.Close()
 
-	// Stream agent events to stdout as JSONL.
-	a.Agent.Subscribe(func(ev protocol.AgentEvent) {
-		b, _ := json.Marshal(ev)
-		_, _ = os.Stdout.Write(append(b, '\n'))
-	})
-
+	// Stream agent events to stdout as JSONL through the server's locked
+	// writer so responses and events can never interleave corruptly.
 	srv := New(ctx, a, os.Stdin, os.Stdout)
+	a.Agent.Subscribe(func(ev protocol.AgentEvent) {
+		srv.write(ev)
+	})
 	return srv.Serve(ctx)
 }

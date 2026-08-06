@@ -16,10 +16,14 @@ type Summarizer func(ctx context.Context, msgs []protocol.Message) (string, erro
 
 // Result describes a completed compaction.
 type Result struct {
-	RemovedMessages int
-	Summary         string
-	BeforeEntries   int
-	AfterEntries    int
+	// SummarizedMessages counts the messages folded into the summary entry.
+	// NOTE: v1 compaction appends a summary entry but does not rewrite the
+	// tree, so these messages remain loadable; full span replacement is a
+	// phase-4 refinement (see package doc).
+	SummarizedMessages int
+	Summary            string
+	BeforeEntries      int
+	AfterEntries       int
 }
 
 // Plan describes what compaction would do, without applying it.
@@ -94,10 +98,10 @@ func Apply(ctx context.Context, st session.Store, summarizer Summarizer, plan Pl
 
 	afterMsgs, _ := st.Messages()
 	return Result{
-		RemovedMessages: plan.KeepFrom,
-		Summary:         summary,
-		BeforeEntries:   len(msgs),
-		AfterEntries:    len(afterMsgs),
+		SummarizedMessages: plan.KeepFrom,
+		Summary:            summary,
+		BeforeEntries:      len(msgs),
+		AfterEntries:       len(afterMsgs),
 	}, nil
 }
 

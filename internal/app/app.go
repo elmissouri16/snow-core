@@ -4,7 +4,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -143,8 +142,27 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		BashTimeout:    cfg.BashTimeout(),
 		Roots:          []string{absCWD},
 	}
+	// Register builtins, then enforce the Tools allowlist (empty = all).
 	builtin.RegisterBuiltins(reg, toolOpts)
-
+	if len(opts.Tools) > 0 {
+		allowed := make(map[string]bool, len(opts.Tools))
+		for _, name := range opts.Tools {
+			allowed[name] = true
+		}
+		for _, t := range reg.List() {
+			if !allowed[t.Schema().Name] {
+				// Rebuild registry without disallowed tools.
+			}
+		}
+		// SimpleRegistry has no remove; build a filtered registry instead.
+		filtered := tools.NewRegistry()
+		for _, t := range reg.List() {
+			if allowed[t.Schema().Name] {
+				_ = filtered.Register(t)
+			}
+		}
+		reg = filtered
+	}
 	// Provider.
 	providerID := cfg.DefaultProvider
 	if providerID == "" {
@@ -225,6 +243,7 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		ToolHost:     host,
 		SystemPrompt: systemPrompt,
 		Model:        model,
+		Thinking:     thinkingLevel(cfg.Thinking),
 		Auth:         authStore,
 		APIKey:       opts.APIKey,
 	})
@@ -260,9 +279,6 @@ func (a *App) Close() error {
 	return a.Session.Close()
 }
 
-// ErrNoProvider is returned when a requested provider is not configured.
-var ErrNoProvider = errors.New("app: no provider")
-
 // toolHost adapts the tools.ToolHost contract to app state.
 type toolHost struct {
 	cwd   string
@@ -276,3 +292,13 @@ func (h *toolHost) Roots() []string                         { return h.roots }
 func (h *toolHost) Permission() permission.Service          { return h.perm }
 func (h *toolHost) Environ() []string                       { return nil }
 func (h *toolHost) EmitProgress(ev tools.ToolProgressEvent) {}
+
+// thinkingLevel maps a config string to a protocol thinking level.
+func thinkingLevel(s string) protocol.ThinkingLevel {
+	switch protocol.ThinkingLevel(s) {
+	case protocol.ThinkingOff, protocol.ThinkingMinimal, protocol.ThinkingLow,
+		protocol.ThinkingMedium, protocol.ThinkingHigh:
+		return protocol.ThinkingLevel(s)
+	}
+	return protocol.ThinkingOff
+}
