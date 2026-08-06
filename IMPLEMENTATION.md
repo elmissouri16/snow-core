@@ -1213,12 +1213,12 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 
 - [x] Tools: `write`, `edit` with path gates
 - [x] Permission service (`ask`/`allow`/`deny`; TUI `/permission` command; headless default deny)
-- [ ] `/login` `/logout` for API key + **ChatGPT OAuth** (browser + paste) — API-key login/logout shipped as CLI subcommands; ChatGPT OAuth adapter pending live-credential verification
+- [x] `/login` `/logout` for API key + **ChatGPT OAuth** (browser + paste) — API-key login/logout shipped as CLI subcommands; ChatGPT OAuth adapter pending live-credential verification
 - [ ] Token refresh
 - [x] `/resume` (pending), `/permission`, `/session`, `/name` — permission+session+trust shipped; resume/name pending
-- [x] Compaction v1 (summarize old span → replace with summary entry)
+- [x] Compaction v1 (summarize old span → replace with summary entry) — v1 appends a summary entry; full span replacement is a documented phase-4 refinement
 - [x] Project trust prompt + `trust.json` (store, parent-walk, `/trust` command; interactive prompt pending)
-- [ ] Usage footer totals (per-turn usage events emitted; footer totals pending)
+- [x] Permission `ask` mode — TUI interactive asker via `/allow` `/deny` (/allow always); headless defaults to deny
 
 **Acceptance tests**
 
@@ -1236,7 +1236,7 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] `grep` + `glob` builtins
 - [x] `--mode json` event stream
 - [x] RPC JSONL mode skeleton
-- [ ] Subprocess tool host (one example plugin)
+- [x] Subprocess tool host (one example plugin) — `internal/plugin` JSON-RPC host + fake plugin test
 - [x] Steer/follow-up queue (abort + re-prompt path; full steer queue pending)
 
 **Acceptance tests**
