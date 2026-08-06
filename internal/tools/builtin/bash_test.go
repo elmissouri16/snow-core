@@ -117,3 +117,32 @@ func TestBash_CWDRespected(t *testing.T) {
 		t.Errorf("cwd not respected, output = %q", res.Content[0].Text)
 	}
 }
+
+// TestBashModelTimeoutBoundedByCap: a model-supplied timeout_ms must never
+// override the operator-configured cap (b.Timeout). With a 50ms cap and a
+// 60s model timeout, the command must still be killed at ~50ms.
+func TestBashModelTimeoutBoundedByCap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("timeout kill test skipped on windows")
+	}
+	dir := t.TempDir()
+	b := NewBash()
+	b.Timeout = 50 * time.Millisecond // operator cap
+
+	start := time.Now()
+	res := runBash(b, dir, map[string]any{"command": "sleep 1", "timeout_ms": 60000})
+	elapsed := time.Since(start)
+
+	if !res.IsError {
+		t.Fatalf("expected timeout error, got %q", res.Content[0].Text)
+	}
+	if !strings.Contains(res.Content[0].Text, "timed out") {
+		t.Errorf("error should mention timeout: %q", res.Content[0].Text)
+	}
+	// The cap (50ms) must win over the model timeout (60s); if the model
+	// timeout had won, this would take ~1s+ anyway, but assert tightness
+	// relative to the cap.
+	if elapsed > 5*time.Second {
+		t.Errorf("command not killed by operator cap: took %s", elapsed)
+	}
+}

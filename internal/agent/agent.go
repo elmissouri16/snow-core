@@ -85,6 +85,9 @@ func (a *Agent) Model() protocol.Model {
 	return a.model
 }
 
+// SystemPrompt returns the assembled system prompt.
+func (a *Agent) SystemPrompt() string { return a.opts.SystemPrompt }
+
 // SetModel updates the active model.
 func (a *Agent) SetModel(m protocol.Model) error {
 	if m.Provider == "" {

@@ -493,3 +493,160 @@ func TestAlreadyRunning(t *testing.T) {
 		t.Fatalf("first prompt should abort cleanly, got %v", err2)
 	}
 }
+
+// TestConcurrentPromptNoGhostMessage: a second Prompt while a turn is in
+// flight must fail with "already running" WITHOUT persisting a ghost user
+// message that would never be processed.
+func TestConcurrentPromptNoGhostMessage(t *testing.T) {
+	prov := newBlockingProvider()
+	a, st := setup(t, prov, nil, permission.ModeDeny)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- a.Prompt(ctx, "first")
+	}()
+	<-prov.started // first turn claimed the running flag
+
+	err := a.Prompt(context.Background(), "second")
+	if err == nil {
+		t.Fatal("expected already-running error")
+	}
+	if !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("wrong error: %v", err)
+	}
+
+	// No ghost: exactly the first user message is persisted.
+	msgs, _ := st.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected exactly 1 user message (no ghost), got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[0].Role != protocol.RoleUser || msgs[0].Content[0].Text != "first" {
+		t.Fatalf("unexpected message: %+v", msgs[0])
+	}
+
+	// First turn aborts cleanly on cancel.
+	cancel()
+	if err2 := <-done; err2 != nil {
+		t.Fatalf("first prompt should abort cleanly, got %v", err2)
+	}
+}
+
+// TestToolLoopCancelStopsRemaining: cancelling the context during the first
+// tool execution must stop the remaining tool calls (no second run) and
+// surface the context error from Prompt.
+func TestToolLoopCancelStopsRemaining(t *testing.T) {
+	runCount := 0
+	var once sync.Once
+	cancelFirst := func() {}
+
+	tool := &testTool{
+		name:   "slow",
+		schema: protocol.ToolSchema{Name: "slow", Description: "s", Parameters: json.RawMessage(`{}`)},
+		runFunc: func(ctx context.Context, args json.RawMessage, host tools.ToolHost) tools.ToolResult {
+			runCount++
+			once.Do(func() {
+				cancelFirst()
+			})
+			return tools.TextResult("ran")
+		},
+	}
+	reg := tools.NewRegistry()
+	if err := reg.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamToolCallDone, ToolCallID: "c1", ToolName: "slow", Arguments: json.RawMessage(`{}`)},
+		{Type: protocol.EvStreamToolCallDone, ToolCallID: "c2", ToolName: "slow", Arguments: json.RawMessage(`{}`)},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+	}}}
+	a, _ := setup(t, prov, reg, permission.ModeDeny)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelFirst = cancel
+
+	err := a.Prompt(ctx, "run tools")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Prompt = %v, want context.Canceled", err)
+	}
+	if runCount != 1 {
+		t.Fatalf("tool ran %d times, want exactly 1 (second call must be skipped)", runCount)
+	}
+}
+
+// TestToolCallLimitEmitsErrorResults: when CallLimit is exceeded, the skipped
+// tool call must still get an error tool_result so no tool_call is left
+// dangling without a result.
+func TestToolCallLimitEmitsErrorResults(t *testing.T) {
+	ran := 0
+	tool := &testTool{
+		name:   "read",
+		schema: protocol.ToolSchema{Name: "read", Description: "r", Parameters: json.RawMessage(`{}`)},
+		runFunc: func(ctx context.Context, args json.RawMessage, host tools.ToolHost) tools.ToolResult {
+			ran++
+			return tools.TextResult("ok")
+		},
+	}
+	reg := tools.NewRegistry()
+	if err := reg.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{
+			{Type: protocol.EvStreamToolCallDone, ToolCallID: "c1", ToolName: "read", Arguments: json.RawMessage(`{}`)},
+			{Type: protocol.EvStreamToolCallDone, ToolCallID: "c2", ToolName: "read", Arguments: json.RawMessage(`{}`)},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+		},
+		{
+			{Type: protocol.EvStreamTextDelta, Text: "finished"},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+		},
+	}}
+	st := session.NewMemoryStore(session.Options{CWD: t.TempDir()})
+	perm := permission.NewService(permission.ModeDeny, nil)
+	host := &testHost{cwd: t.TempDir(), perm: perm}
+	a, err := New(Options{
+		Provider:     prov,
+		Registry:     reg,
+		Session:      st,
+		Permission:   perm,
+		ToolHost:     host,
+		SystemPrompt: "s",
+		Model:        protocol.Model{Provider: "scripted", ID: "m1"},
+		CallLimit:    1,
+		Auth:         auth.NewMemoryStoreForTest(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "x"); err != nil {
+		t.Fatal(err)
+	}
+	if ran != 1 {
+		t.Fatalf("tool ran %d times, want 1 (limit)", ran)
+	}
+	msgs, _ := st.Messages()
+	// user, assistant(tool_use), tool_result(c1), tool_result(c2 error), assistant(final)
+	if len(msgs) != 5 {
+		t.Fatalf("expected 5 messages, got %d: %+v", len(msgs), msgs)
+	}
+	// Both tool calls must have results (no dangling tool_call).
+	if msgs[2].Role != protocol.RoleTool || msgs[2].ToolCallID != "c1" {
+		t.Fatalf("msgs[2] = %+v, want tool_result for c1", msgs[2])
+	}
+	if msgs[3].Role != protocol.RoleTool || msgs[3].ToolCallID != "c2" {
+		t.Fatalf("msgs[3] = %+v, want tool_result for c2", msgs[3])
+	}
+	// The skipped (limited) call must be an error result.
+	if !msgs[3].IsError {
+		t.Fatalf("skipped call result should be IsError: %+v", msgs[3])
+	}
+	// The executed call is a normal result.
+	if msgs[2].IsError {
+		t.Fatalf("executed call result should not be IsError: %+v", msgs[2])
+	}
+	if msgs[4].Role != protocol.RoleAssistant || msgs[4].Content[0].Text != "finished" {
+		t.Fatalf("final assistant message wrong: %+v", msgs[4])
+	}
+}
