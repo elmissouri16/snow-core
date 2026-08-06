@@ -1,0 +1,6 @@
+/snow
+/dist/
+*.test
+*.out
+coverage/
+.DS_Store
