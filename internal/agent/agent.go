@@ -227,6 +227,7 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 				a.bus.Publish(protocol.AgentEvent{Type: protocol.EvAborted})
 				return protocol.StopAborted, nil
 			}
+			// Normal end of stream: io.EOF per the EventStream contract.
 			if errors.Is(err, io.EOF) || errors.Is(err, ErrStreamEOF) {
 				break
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/snow-core/snow/internal/auth"
@@ -31,7 +32,7 @@ func TestReplayOrderMatchesScript(t *testing.T) {
 	for {
 		ev, err := es.Next(ctx)
 		if err != nil {
-			if errors.Is(err, ErrExhausted) {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			t.Fatalf("Next: %v", err)

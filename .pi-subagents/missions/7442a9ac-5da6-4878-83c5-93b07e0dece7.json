@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "7442a9ac-5da6-4878-83c5-93b07e0dece7",
+  "title": "Review the freshly implemented Go packages in /Users/el/Coding/open-source/snow-core that were wr...",
+  "goal": "Review the freshly implemented Go packages in /Users/el/Coding/open-source/snow-core that were written by parallel worker agents. This is a code review of other agents' work — find bugs, races, spec violations, and test gaps.\n\nGo is at /Users/el/go/goroot/bin/go (add to PATH).\n\nReview these packages (git log shows they were added in commits 545d49c and earlier; current HEAD is clean):\n1. internal/tools/builtin/ — read/write/edit/bash tools + pathguard (security-critical: path traversal, symlink escapes)\n2. internal/auth/filestore.go — credential file store (security-critical: 0600 perms, atomic writes, corrupt-file handling) and memorystore.go\n3. internal/provider/fake/ — scripted provider for tests\n4. internal/provider/opencodego/ — OpenAI-compatible SSE streaming client (protocol-critical: SSE parsing, tool call accumulation, finish_reason mapping, cancellation)\n5. internal/agent/ — the turn loop (concurrency: running flag, pending map, event bus; correctness: tool loop, aborts, MaxTurns)\n\nFocus areas:\n- Path safety in builtin tools (symlink escape via PathGuard, .. traversal, unicode)\n- Bash tool process-group kill on cancel, output caps, timeout\n- Filestore atomicity and permission correctness (file mode 0600 enforced on every write)\n- SSE parser edge cases in opencodego (CRLF, multi-line data, [DONE], fragmented args, cancellation race)\n- Agent loop races (event bus publish during close, pending map, tool execution under cancel)\n- Spec compliance with the interfaces in pkg/protocol and internal/tools, internal/provider\n\nFor each finding: file:line, severity (critical/major/minor/nit), description, and concrete fix suggestion. If a package is clean, say so explicitly. Run `go vet ./...` and `go test ./...` and report results. Do NOT modify any files — review only. Return a structured findings report.",
+  "status": "active",
+  "createdAt": "2026-08-06T10:38:10.609Z",
+  "updatedAt": "2026-08-06T10:38:10.614Z",
+  "runs": [
+    {
+      "runId": "5694fd51-0dbf-43e3-ab6d-9d2a66916b92",
+      "mode": "single",
+      "asyncDir": "/var/folders/_j/d8w7d_sn23348hmv9trrjm480000gn/T/pi-subagents-uid-501/async-subagent-runs/5694fd51-0dbf-43e3-ab6d-9d2a66916b92",
+      "status": "active",
+      "startedAt": "2026-08-06T10:38:10.614Z"
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "status",
+      "path": "/var/folders/_j/d8w7d_sn23348hmv9trrjm480000gn/T/pi-subagents-uid-501/async-subagent-runs/5694fd51-0dbf-43e3-ab6d-9d2a66916b92/status.json"
+    },
+    {
+      "kind": "other",
+      "path": "/var/folders/_j/d8w7d_sn23348hmv9trrjm480000gn/T/pi-subagents-uid-501/async-subagent-runs/5694fd51-0dbf-43e3-ab6d-9d2a66916b92/events.jsonl",
+      "description": "Lifecycle events"
+    }
+  ],
+  "receipts": [],
+  "cwd": "/Users/el/Coding/open-source/snow-core",
+  "ownerSessionId": "/Users/el/.pi/agent/sessions/--Users-el-Coding-open-source-snow-core--/2026-08-06T10-08-08-669Z_019fd68b-69dd-7955-a4c6-7847f6087ed3.jsonl"
+}

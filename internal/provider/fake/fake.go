@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"sync"
 
 	"github.com/snow-core/snow/internal/auth"
@@ -143,7 +144,8 @@ type stream struct {
 	done  bool
 }
 
-// Next implements protocol.EventStream.
+// Next implements protocol.EventStream. Per the EventStream contract, the
+// end of the script is signaled with io.EOF.
 func (s *stream) Next(ctx context.Context) (protocol.StreamEvent, error) {
 	if s.ctx != nil && s.ctx.Err() != nil {
 		return protocol.StreamEvent{}, s.ctx.Err()
@@ -152,7 +154,7 @@ func (s *stream) Next(ctx context.Context) (protocol.StreamEvent, error) {
 		return protocol.StreamEvent{}, ctx.Err()
 	}
 	if s.pos >= len(s.steps) {
-		return protocol.StreamEvent{}, ErrExhausted
+		return protocol.StreamEvent{}, io.EOF
 	}
 	step := s.steps[s.pos]
 	s.pos++
