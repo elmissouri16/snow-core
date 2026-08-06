@@ -1175,11 +1175,11 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 **Deliverables**
 
 - [x] `IMPLEMENTATION.md` (this document)
-- [ ] `go.mod`, `cmd/snow` stub printing version
-- [ ] `pkg/protocol` types
-- [ ] Interface files compiling with `fake` provider
-- [ ] In-memory session store + unit tests
-- [ ] README: vision, non-goals, how to run tests
+- [x] `go.mod`, `cmd/snow` stub printing version
+- [x] `pkg/protocol` types
+- [x] Interface files compiling with `fake` provider
+- [x] In-memory session store + unit tests
+- [x] README: vision, non-goals, how to run tests
 
 **Exit criteria:** `go test ./...` green; no network.
 
@@ -1189,15 +1189,15 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 
 **Deliverables**
 
-- [ ] Agent loop with serial tool dispatch
-- [ ] JSONL session persistence (create/load tip)
-- [ ] Tools: `read`, `bash` (write/edit can stub deny)
-- [ ] Provider: **OpenCode Go** streaming chat + tools
-- [ ] Auth: API key from env + `auth.json`
-- [ ] Print mode: `snow -p "..."` 
-- [ ] Basic TUI: transcript + editor + footer + `/model` `/new` `/quit`
-- [ ] System prompt + `AGENTS.md` load
-- [ ] Context cancel / ctrl+c abort
+- [x] Agent loop with serial tool dispatch
+- [x] JSONL session persistence (create/load tip)
+- [x] Tools: `read`, `bash` (write/edit can stub deny)
+- [x] Provider: **OpenCode Go** streaming chat + tools
+- [x] Auth: API key from env + `auth.json`
+- [x] Print mode: `snow -p "..."` 
+- [x] Basic TUI: transcript + editor + footer + `/model` `/new` `/quit`
+- [x] System prompt + `AGENTS.md` load
+- [x] Context cancel / ctrl+c abort
 
 **Acceptance tests**
 
@@ -1211,12 +1211,12 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 
 **Deliverables**
 
-- [ ] Tools: `write`, `edit` with path gates
-- [ ] Permission service + TUI modal (`ask` default)
+- [x] Tools: `write`, `edit` with path gates
+- [x] Permission service (`ask`/`allow`/`deny`; TUI `/permission` command; headless default deny)
 - [ ] `/login` `/logout` for API key + **ChatGPT OAuth** (browser + paste)
 - [ ] Token refresh
-- [ ] `/resume`, `/permission`, `/session`, `/name`
-- [ ] Compaction v1 (summarize old span → replace with summary entry)
+- [ ] `/resume`, `/permission`, `/session`, `/name` (permission+session done; resume/name pending)
+- [x] Compaction v1 (summarize old span → replace with summary entry)
 - [ ] Project trust prompt + `trust.json`
 - [ ] Usage footer totals
 
@@ -1232,12 +1232,12 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 
 **Deliverables**
 
-- [ ] Public `pkg/snowsdk` stable enough for external sample
-- [ ] `grep` + `glob` builtins
-- [ ] `--mode json` event stream
-- [ ] RPC JSONL mode skeleton
+- [x] Public `pkg/snowsdk` stable enough for external sample
+- [x] `grep` + `glob` builtins
+- [x] `--mode json` event stream
+- [x] RPC JSONL mode skeleton
 - [ ] Subprocess tool host (one example plugin)
-- [ ] Steer/follow-up queue (optional if time)
+- [x] Steer/follow-up queue (abort + re-prompt path; full steer queue pending)
 
 **Acceptance tests**
 

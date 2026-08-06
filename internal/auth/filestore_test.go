@@ -2,10 +2,12 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -253,5 +255,46 @@ func TestFileStorePath(t *testing.T) {
 func TestFileStoreEmptyPath(t *testing.T) {
 	if _, err := NewFileStore(""); err == nil {
 		t.Fatal("expected error for empty path")
+	}
+}
+
+// TestConcurrentPutsNoLostUpdate: concurrent Put calls from many goroutines
+// must not lose updates (the store serializes load-modify-save cycles).
+func TestConcurrentPutsNoLostUpdate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	fs, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	const n = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			provider := fmt.Sprintf("provider-%02d", i)
+			cred := Credential{Type: CredentialAPIKey, Key: "key-" + provider}
+			if err := fs.Put(provider, cred); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("Put: %v", err)
+	}
+
+	for i := 0; i < n; i++ {
+		provider := fmt.Sprintf("provider-%02d", i)
+		got, ok := fs.Get(provider)
+		if !ok {
+			t.Fatalf("provider %q missing after concurrent puts (lost update)", provider)
+		}
+		if got.Key != "key-"+provider {
+			t.Fatalf("provider %q key = %q, want %q", provider, got.Key, "key-"+provider)
+		}
 	}
 }
