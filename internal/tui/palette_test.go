@@ -125,18 +125,33 @@ func TestModelLoginFlow(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 
-	// /login with no args shows status, no capture mode.
+	// /login with no args opens the provider picker.
 	m.editor.SetValue("/login")
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.loginMode {
-		t.Fatal("login with no args should not enter capture mode")
+	if !m.pickProvider {
+		t.Fatal("login with no args should open the provider picker")
 	}
 
-	// /login opencode-go enters masked capture.
-	m.editor.SetValue("/login opencode-go")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	// Navigate to opencode-go and select it.
+	if len(m.providers) == 0 {
+		t.Fatal("expected providers in picker")
+	}
+	idx := -1
+	for i, p := range m.providers {
+		if p == "opencode-go" {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("opencode-go not in picker: %v", m.providers)
+	}
+	m.provIndex = idx
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.loginMode || m.loginProvider != "opencode-go" {
 		t.Fatalf("expected login mode for opencode-go, got mode=%v provider=%q", m.loginMode, m.loginProvider)
+	}
+	if m.pickProvider {
+		t.Fatal("picker should close after selecting a provider")
 	}
 
 	// Type a masked secret.
@@ -161,6 +176,69 @@ func TestModelLoginFlow(t *testing.T) {
 	joined := strings.Join(m.lines, "\n")
 	if strings.Contains(joined, "sk-test-123") {
 		t.Fatalf("secret leaked into transcript: %q", joined)
+	}
+}
+
+func TestModelProviderPickerNavigation(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+
+	m.editor.SetValue("/login")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.pickProvider {
+		t.Fatal("expected provider picker")
+	}
+	before := m.provIndex
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	if m.provIndex != (before+1)%len(m.providers) {
+		t.Fatalf("down: index %d -> %d", before, m.provIndex)
+	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	if m.provIndex != before {
+		t.Fatalf("up should return to %d, got %d", before, m.provIndex)
+	}
+	// Esc closes the picker without entering login mode.
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.pickProvider || m.loginMode {
+		t.Fatal("Esc should close picker without login")
+	}
+}
+
+func TestModelLoginPickerDirectArg(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+
+	// Direct provider arg skips the picker.
+	m.editor.SetValue("/login opencode-go")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.loginMode || m.loginProvider != "opencode-go" || m.pickProvider {
+		t.Fatalf("direct arg should enter capture, mode=%v provider=%q pick=%v", m.loginMode, m.loginProvider, m.pickProvider)
+	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+	// Unsupported provider errors without entering capture.
+	m.editor.SetValue("/login nope")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.loginMode || m.pickProvider {
+		t.Fatal("unsupported provider should not enter login")
+	}
+}
+
+func TestModelPickerShowsChatGPTDisabled(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	m.editor.SetValue("/login")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	view := m.View()
+	if !strings.Contains(view, "chatgpt") || !strings.Contains(view, "not supported yet") {
+		t.Fatalf("picker should show chatgpt as not supported: %q", view)
+	}
+	if !strings.Contains(view, "opencode-go") {
+		t.Fatalf("picker should show opencode-go: %q", view)
 	}
 }
 

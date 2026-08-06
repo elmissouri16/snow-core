@@ -83,6 +83,11 @@ type Model struct {
 	compIndex   int
 	compVisible bool
 
+	// Provider picker state (for /login).
+	pickProvider bool
+	providers    []string
+	provIndex    int
+
 	// Masked auth capture state.
 	loginMode     bool
 	loginProvider string
@@ -298,6 +303,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// --- Masked login capture mode ---
 	if m.loginMode {
 		return m.handleLoginKey(msg)
+	}
+
+	// --- Provider picker (for /login) ---
+	if m.pickProvider {
+		return m.handleProviderPick(msg)
 	}
 
 	// --- Command palette: navigation keys are consumed while open ---
@@ -563,31 +573,118 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startLogin handles /login. No args: show provider + stored status.
-// With provider: enter masked capture mode.
+// startLogin handles /login. No args: open the interactive provider picker.
+// With a provider arg: enter masked capture mode directly.
 func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
 	if len(args) == 0 {
-		status := "not stored"
-		if cred, ok := m.app.Auth.Get("opencode-go"); ok && cred.Valid() {
-			status = "stored ✓"
-		}
-		m.pushLine(styleFooter.Render("providers: opencode-go (" + status + ") | try /login opencode-go"))
+		m.providers = supportedProviders()
+		m.provIndex = 0
+		m.pickProvider = true
+		m.compVisible = false
+		m.editor.Reset()
+		m.pushLine(styleFooter.Render("select a login provider (↑/↓ navigate, Enter to pick, Esc to cancel)"))
 		return m, nil
 	}
 	provider := args[0]
-	switch provider {
-	case "opencode-go":
-	default:
-		m.pushLine(styleError.Render("login: unsupported provider " + provider + " (supported: opencode-go)"))
+	if !isSupportedProvider(provider) {
+		m.pushLine(styleError.Render("login: unsupported provider " + provider +
+			" (supported: " + strings.Join(supportedProviders(), ", ") + ")"))
 		return m, nil
 	}
+	m.beginKeyCapture(provider)
+	return m, nil
+}
+
+// handleProviderPick navigates the /login provider list.
+func (m *Model) handleProviderPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		if len(m.providers) > 0 {
+			m.provIndex = (m.provIndex - 1 + len(m.providers)) % len(m.providers)
+		}
+	case tea.KeyDown:
+		if len(m.providers) > 0 {
+			m.provIndex = (m.provIndex + 1) % len(m.providers)
+		}
+	case tea.KeyTab:
+		if len(m.providers) > 0 {
+			m.provIndex = (m.provIndex + 1) % len(m.providers)
+		}
+	case tea.KeyEsc:
+		m.pickProvider = false
+		m.providers = nil
+	case tea.KeyEnter:
+		if len(m.providers) == 0 {
+			m.pickProvider = false
+			return m, nil
+		}
+		provider := m.providers[m.provIndex]
+		m.pickProvider = false
+		m.providers = nil
+		if !isSupportedProvider(provider) {
+			m.pushLine(styleError.Render("login: " + provider + " is not supported yet"))
+			return m, nil
+		}
+		m.beginKeyCapture(provider)
+	}
+	return m, nil
+}
+
+// beginKeyCapture switches the editor into masked API-key capture mode.
+func (m *Model) beginKeyCapture(provider string) {
 	m.loginMode = true
 	m.loginProvider = provider
 	m.secretBuf.Reset()
 	m.editor.Reset()
 	m.compVisible = false
+	m.pickProvider = false
 	m.pushLine(styleFooter.Render("API key for " + provider + " (hidden): type key then Enter · Esc to cancel"))
-	return m, nil
+}
+
+// supportedProviders lists providers shown in the /login picker. Entries that
+// are not yet key-capable are shown disabled for discoverability.
+func supportedProviders() []string {
+	return []string{"opencode-go", "chatgpt"}
+}
+
+// isSupportedProvider reports whether the provider can take a key now.
+func isSupportedProvider(p string) bool {
+	switch p {
+	case "opencode-go":
+		return true
+	default:
+		return false
+	}
+}
+
+// providerStatus renders a provider line for the picker, including chatgpt
+// as a visible-but-unavailable entry for discoverability.
+func (m *Model) providerStatus(provider string) string {
+	if !isSupportedProvider(provider) {
+		return provider + "  (not supported yet)"
+	}
+	if cred, ok := m.app.Auth.Get(provider); ok && cred.Valid() {
+		return provider + "  (stored ✓)"
+	}
+	return provider + "  (no key)"
+}
+
+// renderProviderPicker renders the /login provider list.
+func (m *Model) renderProviderPicker() string {
+	if !m.pickProvider || len(m.providers) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, p := range m.providers {
+		line := m.providerStatus(p)
+		if i == m.provIndex {
+			b.WriteString(styleCompletionSelected.Render("› " + line))
+		} else {
+			b.WriteString(styleCompletion.Render("  " + line))
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // doLogout handles /logout <provider>.
@@ -641,10 +738,19 @@ func (m *Model) View() string {
 		palette = renderCompletions(m.compMatches, m.compIndex, m.width-2) + "\n"
 	}
 
+	// Provider picker for /login.
+	var picker string
+	if m.pickProvider {
+		if rendered := m.renderProviderPicker(); rendered != "" {
+			picker = rendered + "\n"
+		}
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		m.transcript.View(),
 		editorView,
 		palette,
+		picker,
 		footer,
 	)
 }
