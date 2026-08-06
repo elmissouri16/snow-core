@@ -20,6 +20,7 @@ import (
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/tools"
 	"github.com/snow-core/snow/internal/tools/builtin"
+	"github.com/snow-core/snow/internal/trust"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -37,6 +38,7 @@ type App struct {
 	Perm       *permission.SimpleService
 	Session    session.Store
 	Agent      *agent.Agent
+	Trust      *trust.Store
 
 	cwd string
 }
@@ -125,6 +127,13 @@ func New(ctx context.Context, opts Options) (*App, error) {
 			return nil, fmt.Errorf("app: auth store: %w", err)
 		}
 		authStore = fs
+	}
+
+	// Project trust store. Decisions persist to ~/.snow/trust.json.
+	_, trustPath, _ := config.DefaultPaths()
+	tr, err := trust.New(trustPath)
+	if err != nil {
+		return nil, fmt.Errorf("app: trust store: %w", err)
 	}
 
 	// Tools.
@@ -235,6 +244,7 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		Perm:       perm,
 		Session:    st,
 		Agent:      ag,
+		Trust:      tr,
 		cwd:        absCWD,
 	}
 	return a, nil

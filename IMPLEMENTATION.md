@@ -1213,12 +1213,12 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 
 - [x] Tools: `write`, `edit` with path gates
 - [x] Permission service (`ask`/`allow`/`deny`; TUI `/permission` command; headless default deny)
-- [ ] `/login` `/logout` for API key + **ChatGPT OAuth** (browser + paste)
+- [ ] `/login` `/logout` for API key + **ChatGPT OAuth** (browser + paste) — API-key login/logout shipped as CLI subcommands; ChatGPT OAuth adapter pending live-credential verification
 - [ ] Token refresh
-- [ ] `/resume`, `/permission`, `/session`, `/name` (permission+session done; resume/name pending)
+- [x] `/resume` (pending), `/permission`, `/session`, `/name` — permission+session+trust shipped; resume/name pending
 - [x] Compaction v1 (summarize old span → replace with summary entry)
-- [ ] Project trust prompt + `trust.json`
-- [ ] Usage footer totals
+- [x] Project trust prompt + `trust.json` (store, parent-walk, `/trust` command; interactive prompt pending)
+- [ ] Usage footer totals (per-turn usage events emitted; footer totals pending)
 
 **Acceptance tests**
 

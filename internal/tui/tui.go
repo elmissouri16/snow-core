@@ -15,6 +15,7 @@ import (
 
 	"github.com/snow-core/snow/internal/app"
 	"github.com/snow-core/snow/internal/permission"
+	"github.com/snow-core/snow/internal/trust"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -355,6 +356,25 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 			m.pushLine(styleFooter.Render("permission mode: " + args[0]))
 		default:
 			m.pushLine(styleError.Render("invalid mode: " + args[0]))
+		}
+	case "/trust":
+		if len(args) == 0 {
+			if lvl, ok := m.app.Trust.Get(m.app.CWD()); ok {
+				m.pushLine(styleFooter.Render("trust for " + m.app.CWD() + ": " + string(lvl)))
+			} else {
+				m.pushLine(styleFooter.Render("no trust decision for " + m.app.CWD()))
+			}
+			return m, nil
+		}
+		switch args[0] {
+		case "allow", "deny":
+			if err := m.app.Trust.Set(m.app.CWD(), trust.Level(args[0])); err != nil {
+				m.pushLine(styleError.Render(err.Error()))
+			} else {
+				m.pushLine(styleFooter.Render("trust " + args[0] + " for " + m.app.CWD()))
+			}
+		default:
+			m.pushLine(styleError.Render("invalid trust level: " + args[0]))
 		}
 	case "/session":
 		m.pushLine(styleFooter.Render(fmt.Sprintf(
