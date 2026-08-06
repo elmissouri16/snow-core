@@ -138,12 +138,19 @@ func (s *SimpleService) Authorize(ctx context.Context, req Request) (Decision, e
 
 	switch mode {
 	case ModeDeny:
+		// Read-only requests are always allowed (reads are not mutating).
+		if req.Risk == RiskRead {
+			return DecisionAllow, nil
+		}
 		return DecisionDeny, nil
 	case ModeAllow:
 		return DecisionAllow, nil
 	}
 
 	// ModeAsk
+	if req.Risk == RiskRead {
+		return DecisionAllow, nil
+	}
 	if d, ok := rules[ruleKey(req)]; ok {
 		return d, nil
 	}

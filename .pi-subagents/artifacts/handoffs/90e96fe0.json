@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "runId": "90e96fe0",
+  "mode": "parallel",
+  "source": "foreground",
+  "cwd": "/Users/el/Coding/open-source/snow-core",
+  "createdAt": 1786012093053,
+  "updatedAt": 1786012558004,
+  "groups": [
+    {
+      "stepIndex": 0,
+      "baseCommit": "849fc9d4fa7fc3a0819a4e1675d56dfd5c1671f9",
+      "repoRoot": "/Users/el/Coding/open-source/snow-core",
+      "children": [
+        {
+          "index": 0,
+          "taskIndex": 0,
+          "agent": "worker",
+          "status": "completed",
+          "summary": "All checks pass. My changes are confined to `internal/tools/builtin/` (untracked), nothing staged. The other modified files (`internal/permission/`, `internal/agent/`, etc.) are from parallel workers in the shared checkout — not my scope.\n\nImplemented the complete `internal/tools/builtin` package:\n\n**Files created (14):**\n- `pathguard.go` — PathGuard with symlink-resolved roots, component-safe prefix checks, `..`/symlink escape rejection\n- `read.go` — read tool with offset/limit, NUL-byte binary detection, 256KiB output cap + truncation marker\n- `write.go` — write tool with parent-dir creation, 0644 writes\n- `edit.go` — edit tool: unique-match replace, ambiguity error, `replace_all`\n- `bash.go` — bash tool: `sh -c`, timeout, combined-output cap, non-zero exit reported as content not error, context-cancel precedence\n- `process_unix.go` / `process_windows.go` — Setpgid + process-group SIGKILL via `cmd.Cancel` (unix), no-op (windows)\n- `registry.go` — `RegisterBuiltins` with Options (MaxOutputBytes, BashTimeout, Roots)\n- 7 test files covering all the above (36 tests, race-clean)",
+          "outputPath": "/Users/el/Coding/open-source/snow-core/.pi-subagents/artifacts/90e96fe0_worker_0_output.md",
+          "sessionPath": "/Users/el/.pi/agent/sessions/--Users-el-Coding-open-source-snow-core--/2026-08-06T10-28-12-932Z_019fd69d-ca04-7afe-99bc-5ac325b15be5.jsonl",
+          "patch": {
+            "path": "/Users/el/Coding/open-source/snow-core/.pi-subagents/artifacts/worktree-diffs/90e96fe0/task-0-worker.patch",
+            "branch": "pi-parallel-90e96fe0-0",
+            "changed": false,
+            "diffStat": "",
+            "filesChanged": 0,
+            "insertions": 0,
+            "deletions": 0
+          }
+        }
+      ],
+      "cleanup": {
+        "state": "complete",
+        "tasks": [
+          {
+            "index": 0,
+            "path": "/var/folders/_j/d8w7d_sn23348hmv9trrjm480000gn/T/pi-worktree-90e96fe0-0",
+            "branch": "pi-parallel-90e96fe0-0",
+            "worktreeRemoved": true,
+            "branchRemoved": true
+          }
+        ],
+        "pruned": true
+      }
+    }
+  ]
+}
