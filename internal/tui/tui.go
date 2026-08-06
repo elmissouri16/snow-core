@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/trust"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -35,6 +36,9 @@ var (
 	styleFooter    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	styleThinking  = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
 	styleBorder    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+
+	styleCompletion         = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	styleCompletionSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 )
 
 // Messages
@@ -73,6 +77,16 @@ type Model struct {
 	lastStatus        string
 	eventChan         chan protocol.AgentEvent
 	asker             *tuiAsker
+
+	// Command palette state.
+	compMatches []string
+	compIndex   int
+	compVisible bool
+
+	// Masked auth capture state.
+	loginMode     bool
+	loginProvider string
+	secretBuf     strings.Builder
 
 	cancelRun context.CancelFunc
 }
@@ -274,13 +288,54 @@ func (m *Model) layout() {
 	m.editor.SetWidth(m.width - 4)
 }
 
-// handleKey processes key presses and slash commands.
+// handleKey processes key presses, the command palette, and login capture.
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Ignore input until the app is built.
 	if m.app == nil {
 		return m, nil
 	}
-	// Slash commands are processed on Enter when the editor starts with '/'.
+
+	// --- Masked login capture mode ---
+	if m.loginMode {
+		return m.handleLoginKey(msg)
+	}
+
+	// --- Command palette: navigation keys are consumed while open ---
+	if m.compVisible {
+		switch msg.Type {
+		case tea.KeyUp:
+			if len(m.compMatches) > 0 {
+				m.compIndex = (m.compIndex - 1 + len(m.compMatches)) % len(m.compMatches)
+			}
+			return m, nil
+		case tea.KeyDown:
+			if len(m.compMatches) > 0 {
+				m.compIndex = (m.compIndex + 1) % len(m.compMatches)
+			}
+			return m, nil
+		case tea.KeyTab:
+			if len(m.compMatches) > 0 {
+				m.compIndex = (m.compIndex + 1) % len(m.compMatches)
+			}
+			return m, nil
+		case tea.KeyShiftTab:
+			if len(m.compMatches) > 0 {
+				m.compIndex = (m.compIndex - 1 + len(m.compMatches)) % len(m.compMatches)
+			}
+			return m, nil
+		case tea.KeyEsc:
+			m.compVisible = false
+			return m, nil
+		case tea.KeyEnter:
+			if len(m.compMatches) == 0 {
+				m.compVisible = false
+				return m, nil
+			}
+			return m.pickCompletion(m.compMatches[m.compIndex])
+		}
+	}
+
+	// --- Normal editing / sending ---
 	if msg.Type == tea.KeyEnter && !m.busy {
 		text := m.editor.Value()
 		if strings.HasPrefix(text, "/") {
@@ -297,7 +352,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		if m.busy {
-			// First ctrl+c aborts the running turn.
 			m.abort()
 			m.pushLine(styleError.Render("aborting…"))
 			return m, nil
@@ -309,7 +363,93 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Forward to the editor, then refresh the palette from the new text.
+	prev := m.editor.Value()
 	m.editor, _ = m.editor.Update(msg)
+	if msg.Type == tea.KeyEsc {
+		m.compVisible = false
+		return m, nil
+	}
+	if m.editor.Value() != prev {
+		m.refreshPalette()
+	}
+	return m, nil
+}
+
+// pickCompletion selects a palette entry: commands needing args are inserted
+// into the editor for completion; argument-free commands run immediately.
+func (m *Model) pickCompletion(name string) (tea.Model, tea.Cmd) {
+	m.compVisible = false
+	if spec, ok := commandByExact(name); ok && spec.needsArgs() {
+		m.editor.SetValue(name + " ")
+		m.editor.CursorEnd()
+		m.refreshPalette()
+		return m, nil
+	}
+	return m.runCommand(name)
+}
+
+// refreshPalette recomputes completion candidates from the editor's first
+// token, opening or closing the palette accordingly.
+func (m *Model) refreshPalette() {
+	text := m.editor.Value()
+	if isCommandPrefix(text) {
+		m.compMatches = completeCommand(text[1:])
+		m.compVisible = true
+		if m.compIndex >= len(m.compMatches) {
+			m.compIndex = 0
+		}
+	} else {
+		m.compVisible = false
+		m.compMatches = nil
+		m.compIndex = 0
+	}
+}
+
+// handleLoginKey captures a masked API key.
+func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.loginMode = false
+		m.secretBuf.Reset()
+		m.editor.Reset()
+		m.pushLine(styleFooter.Render("login cancelled"))
+		return m, nil
+	case tea.KeyEnter:
+		secret := m.secretBuf.String()
+		m.loginMode = false
+		m.secretBuf.Reset()
+		m.editor.Reset()
+		if strings.TrimSpace(secret) == "" {
+			m.pushLine(styleError.Render("login: empty API key"))
+			return m, nil
+		}
+		cred := auth.Credential{Type: auth.CredentialAPIKey, Key: secret}
+		if err := m.app.Auth.Put(m.loginProvider, cred); err != nil {
+			m.pushLine(styleError.Render("login: " + err.Error()))
+			return m, nil
+		}
+		m.pushLine(styleFooter.Render("stored API key for " + m.loginProvider + " (0600)"))
+		return m, nil
+	case tea.KeyBackspace:
+		b := m.secretBuf.String()
+		if len(b) > 0 {
+			m.secretBuf.Reset()
+			m.secretBuf.WriteString(b[:len(b)-1])
+		}
+		return m, nil
+	case tea.KeyCtrlC:
+		m.loginMode = false
+		m.secretBuf.Reset()
+		m.editor.Reset()
+		m.pushLine(styleFooter.Render("login cancelled"))
+		return m, nil
+	}
+	if msg.Type == tea.KeyRunes {
+		m.secretBuf.WriteString(string(msg.Runes))
+	} else if msg.Type == tea.KeySpace {
+		m.secretBuf.WriteString(" ")
+	}
 	return m, nil
 }
 
@@ -345,9 +485,11 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 	case "/quit", "/q":
 		return m, tea.Quit
 	case "/help":
-		m.pushLine(styleFooter.Render(
-			"/quit exit · /new new session · /model <id> switch model · " +
-				"/permission <ask|allow|deny> · /session show session"))
+		m.pushLine(styleFooter.Render(formatCommandList()))
+	case "/login":
+		return m.startLogin(args)
+	case "/logout":
+		return m.doLogout(args)
 	case "/new":
 		m.pushLine(styleFooter.Render("new session: restart snow to start fresh (in-memory sessions not persisted in this build)"))
 	case "/model":
@@ -421,6 +563,48 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// startLogin handles /login. No args: show provider + stored status.
+// With provider: enter masked capture mode.
+func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
+	if len(args) == 0 {
+		status := "not stored"
+		if cred, ok := m.app.Auth.Get("opencode-go"); ok && cred.Valid() {
+			status = "stored ✓"
+		}
+		m.pushLine(styleFooter.Render("providers: opencode-go (" + status + ") | try /login opencode-go"))
+		return m, nil
+	}
+	provider := args[0]
+	switch provider {
+	case "opencode-go":
+	default:
+		m.pushLine(styleError.Render("login: unsupported provider " + provider + " (supported: opencode-go)"))
+		return m, nil
+	}
+	m.loginMode = true
+	m.loginProvider = provider
+	m.secretBuf.Reset()
+	m.editor.Reset()
+	m.compVisible = false
+	m.pushLine(styleFooter.Render("API key for " + provider + " (hidden): type key then Enter · Esc to cancel"))
+	return m, nil
+}
+
+// doLogout handles /logout <provider>.
+func (m *Model) doLogout(args []string) (tea.Model, tea.Cmd) {
+	if len(args) == 0 {
+		m.pushLine(styleError.Render("/logout requires a provider (e.g. /logout opencode-go)"))
+		return m, nil
+	}
+	provider := args[0]
+	if err := m.app.Auth.Delete(provider); err != nil {
+		m.pushLine(styleError.Render("logout: " + err.Error()))
+		return m, nil
+	}
+	m.pushLine(styleFooter.Render("removed " + provider + " credential"))
+	return m, nil
+}
+
 // View implements tea.Model.
 func (m *Model) View() string {
 	if m.app == nil {
@@ -437,9 +621,30 @@ func (m *Model) View() string {
 		" %s · %s · %s | %s | %s ",
 		m.app.CWD(), m.app.ProviderID, m.app.Model.ID,
 		status, m.lastStatus))
+
+	// Masked login editor.
+	editorView := m.editor.View()
+	if m.loginMode {
+		n := m.secretBuf.Len()
+		masked := strings.Repeat("•", n)
+		if n == 0 {
+			masked = "(type API key…)"
+		}
+		placeholder := "API key for " + m.loginProvider + " (hidden)"
+		editorView = lipgloss.NewStyle().Faint(true).Render(placeholder+"\n") +
+			styleAssistant.Render(masked)
+	}
+
+	// Command palette popup above the footer.
+	var palette string
+	if m.compVisible && len(m.compMatches) > 0 {
+		palette = renderCompletions(m.compMatches, m.compIndex, m.width-2) + "\n"
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		m.transcript.View(),
-		m.editor.View(),
+		editorView,
+		palette,
 		footer,
 	)
 }
