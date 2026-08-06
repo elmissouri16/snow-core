@@ -41,9 +41,9 @@ const (
 
 // Entry is one line in a session file.
 type Entry struct {
-	Type     EntryType        `json:"type"`
-	ID       string           `json:"id"`
-	ParentID string           `json:"parent_id,omitempty"`
+	Type     EntryType         `json:"type"`
+	ID       string            `json:"id"`
+	ParentID string            `json:"parent_id,omitempty"`
 	Message  *protocol.Message `json:"message,omitempty"`
 	// Compaction
 	Summary string `json:"summary,omitempty"`
@@ -135,13 +135,13 @@ func randomSuffix() string {
 
 // MemoryStore keeps entries in memory. Path() is empty.
 type MemoryStore struct {
-	mu       sync.RWMutex
-	id       string
-	header   Header
-	entries  []Entry
-	byID     map[string]int
-	tip      string
-	closed   bool
+	mu      sync.RWMutex
+	id      string
+	header  Header
+	entries []Entry
+	byID    map[string]int
+	tip     string
+	closed  bool
 }
 
 // NewMemoryStore creates an empty in-memory store.

@@ -21,11 +21,11 @@ import (
 // ---------------------------------------------------------------------------
 
 type scriptedProvider struct {
-	mu       sync.Mutex
-	scripts  [][]protocol.StreamEvent // per Chat call
-	call     int
+	mu         sync.Mutex
+	scripts    [][]protocol.StreamEvent // per Chat call
+	call       int
 	resolveErr error
-	models   []protocol.Model
+	models     []protocol.Model
 }
 
 func (p *scriptedProvider) ID() string { return "scripted" }
@@ -97,8 +97,8 @@ type testHost struct {
 	events []tools.ToolProgressEvent
 }
 
-func (h *testHost) CWD() string             { return h.cwd }
-func (h *testHost) Roots() []string         { return []string{h.cwd} }
+func (h *testHost) CWD() string                    { return h.cwd }
+func (h *testHost) Roots() []string                { return []string{h.cwd} }
 func (h *testHost) Permission() permission.Service { return h.perm }
 func (h *testHost) EmitProgress(e tools.ToolProgressEvent) {
 	h.events = append(h.events, e)

@@ -41,10 +41,10 @@ type Request struct {
 type Decision string
 
 const (
-	DecisionAllow         Decision = "allow"
-	DecisionDeny          Decision = "deny"
-	DecisionAllowSession  Decision = "allow_session"
-	DecisionAllowAlways   Decision = "allow_always"
+	DecisionAllow        Decision = "allow"
+	DecisionDeny         Decision = "deny"
+	DecisionAllowSession Decision = "allow_session"
+	DecisionAllowAlways  Decision = "allow_always"
 )
 
 // Asker resolves interactive ask-mode requests. The TUI and SDK provide

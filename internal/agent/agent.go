@@ -120,10 +120,10 @@ func (a *Agent) Prompt(ctx context.Context, text string) error {
 	}
 	userMsg := protocol.NewUserMessage(newID(), "", text)
 	if err := a.opts.Session.Append(session.Entry{
-		Type:    session.EntryMessage,
-		ID:      userMsg.ID,
+		Type:     session.EntryMessage,
+		ID:       userMsg.ID,
 		ParentID: "",
-		Message: &userMsg,
+		Message:  &userMsg,
 	}); err != nil {
 		return fmt.Errorf("agent: append user message: %w", err)
 	}
@@ -392,10 +392,10 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 
 	// Permission gate.
 	permReq := permission.Request{
-		Tool:   cb.Name,
-		Args:   rawArgs,
-		Paths:  extractPaths(args),
-		Risk:   riskFor(cb.Name),
+		Tool:  cb.Name,
+		Args:  rawArgs,
+		Paths: extractPaths(args),
+		Risk:  riskFor(cb.Name),
 	}
 	decision, err := a.opts.Permission.Authorize(ctx, permReq)
 	if err != nil || decision == permission.DecisionDeny {

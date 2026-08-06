@@ -25,12 +25,12 @@ const (
 type StopReason string
 
 const (
-	StopStop     StopReason = "stop"
-	StopLength   StopReason = "length"
-	StopToolUse  StopReason = "tool_use"
-	StopError    StopReason = "error"
-	StopAborted  StopReason = "aborted"
-	StopPending  StopReason = "pending" // in-memory partial only, never persisted as terminal
+	StopStop    StopReason = "stop"
+	StopLength  StopReason = "length"
+	StopToolUse StopReason = "tool_use"
+	StopError   StopReason = "error"
+	StopAborted StopReason = "aborted"
+	StopPending StopReason = "pending" // in-memory partial only, never persisted as terminal
 )
 
 // ContentBlockType enumerates content block kinds.
@@ -71,11 +71,11 @@ type Cost struct {
 
 // Usage tracks token usage for an assistant turn.
 type Usage struct {
-	Input      int  `json:"input"`
-	Output     int  `json:"output"`
-	CacheRead  int  `json:"cache_read"`
-	CacheWrite int  `json:"cache_write"`
-	Total      int  `json:"total_tokens"`
+	Input      int   `json:"input"`
+	Output     int   `json:"output"`
+	CacheRead  int   `json:"cache_read"`
+	CacheWrite int   `json:"cache_write"`
+	Total      int   `json:"total_tokens"`
 	Cost       *Cost `json:"cost,omitempty"`
 }
 

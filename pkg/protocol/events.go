@@ -7,18 +7,18 @@ import "encoding/json"
 type AgentEventType string
 
 const (
-	EvSessionUpdated   AgentEventType = "session_updated"
-	EvTextDelta        AgentEventType = "text_delta"
-	EvThinkingDelta    AgentEventType = "thinking_delta"
-	EvToolStart        AgentEventType = "tool_start"
-	EvToolProgress     AgentEventType = "tool_progress"
-	EvToolEnd          AgentEventType = "tool_end"
+	EvSessionUpdated    AgentEventType = "session_updated"
+	EvTextDelta         AgentEventType = "text_delta"
+	EvThinkingDelta     AgentEventType = "thinking_delta"
+	EvToolStart         AgentEventType = "tool_start"
+	EvToolProgress      AgentEventType = "tool_progress"
+	EvToolEnd           AgentEventType = "tool_end"
 	EvPermissionRequest AgentEventType = "permission_request"
-	EvUsage            AgentEventType = "usage"
-	EvTurnDone         AgentEventType = "turn_done"
-	EvError            AgentEventType = "error"
-	EvAborted          AgentEventType = "aborted"
-	EvModelChanged     AgentEventType = "model_changed"
+	EvUsage             AgentEventType = "usage"
+	EvTurnDone          AgentEventType = "turn_done"
+	EvError             AgentEventType = "error"
+	EvAborted           AgentEventType = "aborted"
+	EvModelChanged      AgentEventType = "model_changed"
 )
 
 // ToolProgress is emitted by tools running through the agent.
@@ -34,14 +34,14 @@ type ToolProgress struct {
 type AgentEvent struct {
 	Type AgentEventType `json:"type"`
 
-	Text       string       `json:"text,omitempty"`
-	ToolCallID string       `json:"tool_call_id,omitempty"`
-	ToolName   string       `json:"tool_name,omitempty"`
-	Message    string       `json:"message,omitempty"` // error / progress text
-	Usage      *Usage       `json:"usage,omitempty"`
-	Model      *Model       `json:"model,omitempty"`
-	Permission *Permission  `json:"permission,omitempty"`
-	IsError    bool         `json:"is_error,omitempty"`
+	Text       string      `json:"text,omitempty"`
+	ToolCallID string      `json:"tool_call_id,omitempty"`
+	ToolName   string      `json:"tool_name,omitempty"`
+	Message    string      `json:"message,omitempty"` // error / progress text
+	Usage      *Usage      `json:"usage,omitempty"`
+	Model      *Model      `json:"model,omitempty"`
+	Permission *Permission `json:"permission,omitempty"`
+	IsError    bool        `json:"is_error,omitempty"`
 }
 
 // PermissionRequest is embedded in permission_request events.

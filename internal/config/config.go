@@ -21,7 +21,7 @@ const DefaultContextCapBytes = 100 * 1024
 
 // ProviderConfig holds per-provider overrides.
 type ProviderConfig struct {
-	BaseURL     string `json:"base_url,omitempty"`
+	BaseURL      string `json:"base_url,omitempty"`
 	DefaultModel string `json:"default_model,omitempty"`
 }
 
@@ -33,16 +33,16 @@ type TUIConfig struct {
 
 // Config is the global snow configuration.
 type Config struct {
-	DefaultProvider      string                    `json:"default_provider,omitempty"`
-	DefaultModel         string                    `json:"default_model,omitempty"`
-	PermissionMode       string                    `json:"permission_mode,omitempty"` // ask|allow|deny
-	DefaultProjectTrust  string                    `json:"default_project_trust,omitempty"` // ask|always|never
-	Thinking             string                    `json:"thinking,omitempty"`
-	ToolOutputBytes      int                       `json:"tool_output_bytes,omitempty"`
-	BashTimeoutMS        int                       `json:"bash_timeout_ms,omitempty"`
-	ContextCapBytes      int                       `json:"context_cap_bytes,omitempty"`
-	Providers            map[string]ProviderConfig `json:"providers,omitempty"`
-	TUI                  TUIConfig                 `json:"tui,omitempty"`
+	DefaultProvider     string                    `json:"default_provider,omitempty"`
+	DefaultModel        string                    `json:"default_model,omitempty"`
+	PermissionMode      string                    `json:"permission_mode,omitempty"`       // ask|allow|deny
+	DefaultProjectTrust string                    `json:"default_project_trust,omitempty"` // ask|always|never
+	Thinking            string                    `json:"thinking,omitempty"`
+	ToolOutputBytes     int                       `json:"tool_output_bytes,omitempty"`
+	BashTimeoutMS       int                       `json:"bash_timeout_ms,omitempty"`
+	ContextCapBytes     int                       `json:"context_cap_bytes,omitempty"`
+	Providers           map[string]ProviderConfig `json:"providers,omitempty"`
+	TUI                 TUIConfig                 `json:"tui,omitempty"`
 }
 
 // Default returns the default configuration.

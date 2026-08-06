@@ -204,10 +204,10 @@ func TestFileIndexCreateOpenList(t *testing.T) {
 
 func TestEncodeCWD(t *testing.T) {
 	cases := map[string]string{
-		"/":            "root",
-		"/tmp/foo":     "tmp-foo",
-		"/Users/el/x":  "Users-el-x",
-		"/a/b/c/d":     "a-b-c-d",
+		"/":           "root",
+		"/tmp/foo":    "tmp-foo",
+		"/Users/el/x": "Users-el-x",
+		"/a/b/c/d":    "a-b-c-d",
 	}
 	for in, want := range cases {
 		if got := EncodeCWD(in); got != want {
