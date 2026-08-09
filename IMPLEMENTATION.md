@@ -1,11 +1,11 @@
 # snow-core — Implementation Research & Technical Design
 
-> **Status:** Decision-complete design. No application code yet.  
+> **Status:** Active pre-alpha implementation. The design remains the architecture/roadmap reference; verify current behavior in source and tests.
 > **Binary:** `snow`  
 > **Module (placeholder):** `github.com/snow-core/snow`  
 > **Language:** Go  
 > **Surfaces:** Interactive TUI · print/JSON stream · embeddable SDK · RPC (phase 3+)  
-> **Auth MVP:** OpenCode Go (API key) · ChatGPT Plus/Pro Codex OAuth  
+> **Auth MVP:** OpenCode Go (API key) · ChatGPT/Codex browser/device OAuth, guarded refresh, and authenticated catalog runtime
 
 This document is the single source of truth for building **snow-core**: a standalone, modular, efficient coding-agent harness inspired by pi, OpenCode, and Codex—written in Go with a TUI and SDK.
 
@@ -59,7 +59,7 @@ Builders who want a **small, fast, embeddable** harness with **subscription + AP
 
 Philosophy (pi-aligned, Go-native):
 
-> Ship powerful defaults. Keep the core small. Extend at the edges. Do not force product workflows (multi-agent, plan mode, memory DB) into v1.
+> Ship powerful defaults. Keep the core small. Extend at the edges. Keep optional subagent orchestration root-scoped and built from the ordinary agent loop rather than a second runtime.
 
 ### 1.3 Competitive map
 
@@ -75,9 +75,9 @@ Philosophy (pi-aligned, Go-native):
 - Single static-ish Go binary (`snow`) for macOS/Linux (Windows best-effort later).
 - Modular packages with **no UI imports** inside `agent` / `provider` / `session`.
 - MVP auth: **OpenCode Go** + **ChatGPT Codex OAuth**.
-- MVP tools: **read, write, edit, bash**.
+- Default built-in tools: **read, write, edit, bash, grep, glob**, direct **ask_user**, plus deferred **webfetch**.
 - Surfaces: **TUI**, **print/JSON**, **SDK**; RPC mode documented for phase 3.
-- Append-only **JSONL** sessions with tree branch (`id` / `parentId`).
+- Pure-Go **SQLite** sessions with indexed tree branches (`id` / `parentId`).
 - Clear permission + project-trust model; honest non-sandbox security story.
 
 ### 1.5 Non-goals (v1)
@@ -85,7 +85,8 @@ Philosophy (pi-aligned, Go-native):
 - snow-agent / Electron integration.
 - Full pi/OpenCode provider catalog.
 - Built-in OS sandbox or container runtime (document optional backends only).
-- Multi-agent / subagent orchestration.
+- An autonomous multi-agent workflow product. Snow provides only the bounded,
+  opt-in root-scoped subagent tree documented below and in `docs/subagents.md`.
 - Skills marketplace, theme marketplace, WASM extension runtime.
 - Local vector memory DB, notes/tasks product surfaces.
 - Guaranteeing ToS-proof reverse-engineering of undocumented endpoints (isolate adapters; prefer official Codex-for-OSS guidance).
@@ -118,8 +119,8 @@ github.com/snow-core/snow
 │   │   └── chatgpt          # ChatGPT / Codex OAuth adapter
 │   ├── auth                 # credential store, OAuth browser/device flows
 │   ├── tools                # Tool interface, builtins, RPC host
-│   │   └── builtin          # read, write, edit, bash (, grep, glob later)
-│   ├── session              # JSONL tree store, fork/resume/list
+│   │   └── builtin          # read, write, edit, bash, grep, glob, deferred webfetch
+│   ├── session              # SQLite tree store, fork/resume/list
 │   ├── context              # AGENTS.md discovery, system prompt assembly
 │   ├── compact              # context compaction
 │   ├── permission           # ask / allow / deny
@@ -214,11 +215,11 @@ sequenceDiagram
 |-----------|----------|
 | Single binary | Avoid CGo; keep deps lean; Charm + stdlib HTTP |
 | Stream, don’t buffer | Provider adapters yield deltas; TUI paints incrementally |
-| Append-only sessions | JSONL; no DB in MVP; O(1) append, scan on load |
+| Durable sessions | Pure-Go SQLite; WAL transactions; indexed branch queries; no full scan on open |
 | Bound tool output | Truncate stdout/stderr and read payloads with clear markers |
 | Cancel everywhere | `ctx` on HTTP, bash, file IO timeouts |
 | Segregate packages | UI never blocks provider decode on render lock longer than one frame |
-| Cheap default tools | Prefer pure-Go `grep`/`glob` in phase 1.5 over shelling out |
+| Cheap default tools | Use bounded pure-Go `grep`/`glob` before shelling out |
 | Plugins are cold | Subprocess plugins opt-in; document startup cost |
 | Usage from provider | MVP trusts provider token usage; no local tokenizer required |
 
@@ -317,6 +318,7 @@ type Model struct {
     MaxOutputTokens  int
     SupportsTools    bool
     SupportsThinking bool
+    ThinkingLevels   []ThinkingLevel // normalized non-off levels; off is implicit
     SupportsVision   bool
 }
 
@@ -328,6 +330,7 @@ type ChatRequest struct {
     MaxTokens    int
     Temperature  *float64
     Thinking     ThinkingLevel // off|minimal|low|medium|high
+    // Model.ThinkingLevels is authoritative; unsupported non-off effort is rejected.
     // provider-specific extras isolated in adapter options
 }
 
@@ -413,14 +416,14 @@ type Registry interface {
 
 ```go
 type SessionHeader struct {
-    Version   int    `json:"v"` // current: 1
+    Version   int    `json:"v"` // current: 2
     ID        string `json:"id"`
     CreatedAt int64  `json:"created_at"`
     CWD       string `json:"cwd"`
     Name      string `json:"name,omitempty"`
 }
 
-// File is JSONL: line0 header wrapper, then entry lines.
+// SQLite stores the header in session_meta and entries in indexed rows.
 type Entry struct {
     Type     string  `json:"type"` // message | compaction | meta
     ID       string  `json:"id"`
@@ -455,10 +458,11 @@ type SessionIndex interface {
 **On-disk layout**
 
 ```
-~/.snow/sessions/--<cwd-encoded>--/<timestamp>_<uuid>.jsonl
+~/.snow/sessions/<cwd-encoded>/<timestamp>_<suffix>.db
 ```
 
-`cwd-encoded`: absolute path with `/` → `-` (pi-like). Schema is **snow-owned** (`v` field); do not claim pi compatibility.
+`cwd-encoded`: absolute path with `/` → `-` (pi-like). The SQLite schema is
+**snow-owned**; old JSONL sessions are intentionally not migrated.
 
 ### 3.5 Agent
 
@@ -479,7 +483,8 @@ type Agent interface {
 
 type AgentEvent struct {
     Type string // session_updated | text_delta | thinking_delta | tool_start |
-                // tool_progress | tool_end | permission_request | usage |
+                // tool_progress | tool_end | permission_request |
+                // user_input_request | usage |
                 // turn_done | error | aborted
     // payload fields omitted — see pkg/protocol/events.go
 }
@@ -521,9 +526,10 @@ type Credential struct {
     Type     CredentialType  `json:"type"`
     Key      string          `json:"key,omitempty"`
     Access   string          `json:"access,omitempty"`
-    Refresh  string          `json:"refresh,omitempty"`
-    Expires  int64           `json:"expires,omitempty"` // unix seconds
-    Extra    map[string]any  `json:"extra,omitempty"`
+    Refresh   string          `json:"refresh,omitempty"`
+    Expires   int64           `json:"expires,omitempty"` // unix seconds
+    AccountID string          `json:"accountId,omitempty"` // pi/Codex OAuth compatibility
+    Extra     map[string]any  `json:"extra,omitempty"`
 }
 
 type Store interface {
@@ -543,19 +549,22 @@ type Store interface {
 
 | Tool | Purpose | Permission risk | Notes |
 |------|---------|-----------------|-------|
-| `read` | Read file contents (optional offset/limit) | read | Binary → short error; large file truncate |
-| `write` | Create/overwrite file | write | Creates parents; show diff intent in TUI |
+| `read` | Read file contents (optional offset/limit) | read | Binary → short error; streams bounded windows instead of loading large files |
+| `write` | Create/overwrite file | write | Creates parents; atomic same-directory replace; preserves existing mode |
 | `edit` | Exact string replace / patch | write | Fail if `old_str` not unique unless `replace_all` |
 | `bash` | Run shell command in cwd | exec | Timeout; combined output bound; no implicit network policy |
+| `grep` | Search text files with RE2 and line numbers | read | Pure Go; glob filter, case option, match/output caps |
+| `glob` | Match regular file paths | read | Pure Go; `**` recursive segments and result/output caps |
+| `ask_user` | Request one to three user decisions or free-form answers | read/interaction | Direct schema; TUI prompt, SDK callback, or RPC reply/reject; automatic Other choice |
+| `webfetch` | Fetch a public HTTP(S) resource | network | Deferred schema; Surf Chrome 150; secure TLS; HTML → Markdown; SSRF, timeout, redirect, media-type, and output bounds |
 
-### 4.2 Phase 1.5 pure-Go tools
-
-| Tool | Purpose |
-|------|---------|
-| `grep` | Ripgrep-like content search (Go impl or optional external `rg`) |
-| `glob` | Fast file path matching |
-
-These reduce bash round-trips and improve Windows behavior.
+`grep`, `glob`, `ask_user`, and `webfetch` are registered in the default builtin registry.
+The file search tools skip
+hidden/generated directories and symlink entries, and all search roots still
+pass through the path guard. These reduce bash round-trips and improve Windows
+behavior. `webfetch` is the first built-in deferred tool, so the normal app also
+loads the small direct `search_tools` recovery schema while keeping the full
+`webfetch` schema out of unrelated provider requests.
 
 ### 4.3 Schemas (conceptual)
 
@@ -627,18 +636,75 @@ These reduce bash round-trips and improve Windows behavior.
 }
 ```
 
+**webfetch**
+
+```json
+{
+  "name": "webfetch",
+  "discovery": {"mode": "deferred", "namespace": "web"},
+  "parameters": {
+    "type": "object",
+    "required": ["url"],
+    "properties": {
+      "url": {"type": "string"},
+      "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 30000}
+    }
+  }
+}
+```
+
+**ask_user**
+
+```json
+{
+  "name": "ask_user",
+  "parameters": {
+    "type": "object",
+    "required": ["questions"],
+    "properties": {
+      "questions": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 3,
+        "items": {
+          "required": ["id", "header", "question"],
+          "properties": {
+            "id": {"type": "string"},
+            "header": {"type": "string"},
+            "question": {"type": "string"},
+            "options": {"type": "array", "minItems": 2, "maxItems": 3}
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+`ask_user` has no discovery metadata: its full schema is sent with the other
+direct built-ins on every tool-capable request. The explicit SDK/CLI `Tools`
+allowlist remains authoritative. A choice returns its exact label; Other and
+free-form responses return trimmed text. The model-facing result is ordered
+JSON: `{"answers":[{"id":"...","answer":"..."}]}`.
+
 ### 4.4 Safety behaviors (all tools)
 
 1. **Path confinement:** resolve symlinks; require final path under `Roots()` (cwd + configured allows).
 2. **Deny escape:** `..` and symlink escapes return `IsError` without throwing panics.
-3. **Output caps:** default e.g. 256 KiB per tool result to the model; store full artifact path in `Details` if truncated.
-4. **Secrets:** redaction hooks optional later; never echo auth file contents.
-5. **bash:** `Setpgid` / process group kill on cancel (Unix); document weaker Windows cancel.
-6. **write/edit:** optional backup sibling `.snow-bak` **off** by default (explicit config).
+3. **Output caps:** default 256 KiB per tool result; read/search stream bounded data and return explicit truncation markers.
+4. **Atomic writes:** write stages content beside the destination, syncs it, and renames it into place; existing file permissions are retained.
+5. **Secrets:** redaction hooks optional later; never echo auth file contents.
+6. **bash:** `Setpgid` / process group kill on cancel (Unix); document weaker Windows cancel.
+7. **write/edit:** optional backup sibling `.snow-bak` **off** by default (explicit config).
+8. **webfetch:** allow only public HTTP(S), disable environment proxies, validate every
+   redirect, resolve and pin public addresses at dial time, verify TLS certificates,
+   reject binary bodies, and label returned content as untrusted external data.
 
 ### 4.5 Tool dispatch policy
 
 - Parallel tool calls: **serial in MVP** (simpler permissions + FS races); parallel opt-in later for read-only tools.
+- `read`, `grep`, `glob`, and `ask_user` are `RiskRead`; `webfetch` is `RiskNet` and remains
+  deferred/hidden in deny mode; write/edit/bash require permission according to mode.
 - Unknown tool name → `tool_result` error string, not hard crash.
 - Panic in tool → recovered to error result.
 
@@ -693,10 +759,10 @@ For a provider P:
 |------|----------|
 | Provider ID | `opencode-go` |
 | Auth | Bearer API key |
-| Wire protocol | Assume **OpenAI-compatible** Chat Completions **or** Responses API — **verify at implement time** (see checklist) |
-| Base URL | Discover from current OpenCode Go docs/dashboard at implement time; keep `base_url` in config override |
-| Default model | Pin after catalog probe (pi currently defaults something like `kimi-k2.6` for opencode-go — **do not hardcode without verify**) |
-| Streaming | SSE `text/event-stream` preferred |
+| Wire protocol | Verified OpenAI-compatible Chat Completions with SSE |
+| Base URL | `https://opencode.ai/zen/go/v1`; overridable with `base_url` |
+| Default model | `kimi-k2.6`, pinned while the live catalog is refreshed |
+| Streaming | SSE `text/event-stream` |
 | Tools | OpenAI-style `tools` / `tool_calls` normalized to snow events |
 
 **Adapter responsibilities**
@@ -705,7 +771,12 @@ For a provider P:
 - Map stream chunks → `StreamEvent`.
 - Map finish reasons → `stop|length|tool_use|error`.
 - Surface rate-limit / quota errors as structured `EvStreamError`.
-- Optional: fetch remote model catalog; cache under `~/.snow/models-cache.json`.
+- Fetch live `GET /models` availability at startup and enrich matching IDs from
+  OpenCode's public `https://models.dev/api.json` catalog; never send the API key
+  to the metadata host, and let direct gateway fields win.
+- Normalize display, context, output, pricing, tool/vision, and reasoning metadata.
+- Fall back to the pinned static default without failing startup or logging keys.
+- Map normalized effort to OpenAI `reasoning_effort`; reject levels not advertised by the selected model.
 
 **Config knobs**
 
@@ -713,8 +784,8 @@ For a provider P:
 {
   "providers": {
     "opencode-go": {
-      "base_url": "https:///* verify */",
-      "default_model": "/* verify */",
+      "base_url": "https://opencode.ai/zen/go/v1",
+      "default_model": "kimi-k2.6",
       "api_key_env": "OPENCODE_API_KEY"
     }
   }
@@ -722,6 +793,13 @@ For a provider P:
 ```
 
 ### 5.4 ChatGPT Plus/Pro (Codex OAuth)
+
+**Current implementation status:** `internal/provider/chatgpt` performs a
+side-effect-free check of OAuth credentials, browser PKCE and device-code login,
+compatible credential imports, guarded automatic refresh, an origin-and-account-scoped
+ETag model cache, and Codex Responses SSE streaming. The TUI/CLI report
+configured, expired, or missing ChatGPT auth without refreshing during checks.
+The implementation and endpoint notes below follow current official Codex behavior.
 
 **Role:** subscription path for users with ChatGPT Plus/Pro via Codex-for-OSS compatible auth.
 
@@ -731,20 +809,20 @@ For a provider P:
 | Auth | OAuth2 authorization code + PKCE (browser) with **paste-redirect fallback** for SSH |
 | Token storage | `auth.json` oauth fields; auto-refresh on 401/expiry |
 | API | Codex / ChatGPT harness endpoints as documented for OSS clients — **adapter-isolated** |
-| Models | Catalog from auth-capable endpoint or static allowlist refreshed in code bumps |
+| Models | Authenticated `/backend-api/codex/models` discovery with client-version query, versioned origin-and-account-scoped ETag/TTL cache, and bundled offline fallback |
 
 **Login UX (`/login chatgpt`)**
 
 1. Generate PKCE verifier/challenge + state.
-2. Open system browser to authorize URL (or print URL).
-3. Localhost callback server (`127.0.0.1:<ephemeral>`) receives code **or** user pastes final redirect URL/code.
-4. Exchange code → access + refresh; write `auth.json` mode `0600`.
-5. Validate with a lightweight models/me call.
-6. On success, set as active provider if none.
+2. Open the system browser to the authorization URL, or print it with `--no-open`.
+3. The loopback server on `localhost:1455/auth/callback` receives the code; the CLI can instead accept the complete callback URL when the port is occupied or the browser is remote.
+4. Exchange the code for access/refresh tokens and atomically write `auth.json` with mode `0600`.
+5. Validate JWT/account metadata without persisting the ID token.
+6. Force an authenticated model-catalog refresh while retaining the bundled fallback on outage.
 
-**Logout:** delete `chatgpt` key; cancel refresh timers.
+**Logout:** delete the `chatgpt` credential and reset the in-memory catalog to the bundled fallback.
 
-**Refresh:** before `Chat`, if `expires < now+60s`, refresh; on failure mark credential invalid and emit actionable error.
+**Refresh:** before `Chat`, refresh credentials expiring within five minutes under the cross-process auth-store lock. A pre-stream 401 permits one guarded forced refresh and one retry; permanent refresh rejection requests re-login, while transient failures preserve the credential.
 
 #### Compliance and risk (explicit)
 
@@ -767,15 +845,15 @@ CLI `--provider opencode-go --model <id>` and TUI `/model` both resolve through 
 
 Must be completed in Phase 1–2 coding, results folded into adapter constants/tests:
 
-- [ ] OpenCode Go base URL(s) and auth header scheme
-- [ ] OpenCode Go streaming endpoint path (chat completions vs responses)
-- [ ] OpenCode Go tool-call streaming shape
-- [ ] OpenCode Go default + available model IDs
-- [ ] ChatGPT/Codex OAuth authorize/token URLs and client id requirements for OSS
-- [ ] ChatGPT/Codex required headers (e.g. account/session headers if any)
-- [ ] ChatGPT/Codex model IDs allowed on subscription
-- [ ] Error body shapes for quota/auth failures
-- [ ] Whether cache token fields exist for usage mapping
+- [x] OpenCode Go base URL(s) and auth header scheme — https://opencode.ai/zen/go/v1, `Authorization: Bearer <key>` (verified live: GET /models → 200; bad key on /chat/completions → 401 JSON)
+- [x] OpenCode Go streaming endpoint path (chat completions vs responses) — OpenAI-compatible `POST /chat/completions` (SDK `@ai-sdk/openai-compatible`; no `responses` API)
+- [x] OpenCode Go tool-call streaming shape — OpenAI `delta.tool_calls` with index/id/function fragments
+- [x] OpenCode Go default + available model IDs — live catalog has 25 models incl. kimi-k2.6 (default), kimi-k3, deepseek-v4-pro/flash, qwen3.7-max/plus, glm-5.2, minimax-m3, gpt-5.6-luna, grok-4.5
+- [x] ChatGPT/Codex OAuth authorize/token URLs and client id requirements researched against pi and official Codex
+- [x] ChatGPT/Codex required headers researched (`Authorization`, `chatgpt-account-id`, `originator`)
+- [x] ChatGPT/Codex models loaded from the authenticated backend catalog with a small bundled offline compatibility fallback
+- [x] Error body shapes for quota/auth failures — normalized without exposing credentials
+- [x] Cache token fields mapped from Codex Responses usage when present
 
 ---
 
@@ -800,7 +878,7 @@ Must be completed in Phase 1–2 coding, results folded into adapter constants/t
 │                                                          │
 │  transcript (viewport)                                   │
 │   - user bubbles                                         │
-│   - assistant markdown + thinking fold                   │
+│   - assistant markdown + persistent streamed thinking    │
 │   - tool cards (name, status, truncated output)          │
 │   - errors / notifications                               │
 │                                                          │
@@ -820,13 +898,14 @@ Must be completed in Phase 1–2 coding, results folded into adapter constants/t
 |---------|-------|----------|
 | `/login` | 1–2 | Provider picker; API key prompt or OAuth |
 | `/logout` | 2 | Clear provider creds |
-| `/model` | 1 | Fuzzy select model |
+| `/model` | 1 | Interactive model picker; selection persists to `~/.snow/config.json` |
+| `/settings` | 2 | Persistent model, thinking, ChatGPT reasoning-summary/text-verbosity, and permission panel |
 | `/new` | 1 | New session |
-| `/resume` | 2 | Pick prior session |
-| `/name` | 2 | Set display name |
-| `/permission` | 2 | ask/allow/deny |
+| `/resume [path]` | 2 | Pick a current-directory session, or resume an explicit SQLite path |
+| `/permissions` | 2 | ask/allow/deny; interactive Allow/Allow-always/Deny picker on requests (no typing) |
 | `/compact` | 2 | Manual compaction |
-| `/session` | 2 | Paths, counts, usage |
+| `/sessions` | 2 | Open a compact picker for persisted sessions in the current directory |
+| `/tree` | 4 | Select or fork a durable branch in the active session |
 | `/quit` | 1 | Exit |
 
 ### 6.4 Keybindings (defaults)
@@ -847,15 +926,20 @@ Phase 2: `~/.snow/keybindings.json` overrides.
 | AgentEvent | UI |
 |------------|----|
 | `text_delta` | Append to live assistant buffer |
-| `thinking_delta` | Append to folded thinking region |
-| `tool_start` | Open tool card (running) |
-| `tool_end` | Finalize card (ok/err) |
+| `thinking_delta` | Append to persistent muted Markdown thinking region; show animated wait state before the first delta |
+| `tool_start` | Open native tool card (correlation id remains protocol-only) |
+| `tool_progress` | Append bounded progress line |
+| `tool_end` | Finalize card with duration, status, and bounded output preview |
 | `permission_request` | Modal; block tool until decision |
-| `usage` | Footer counters |
+| `user_input_request` | Inline choice/free-form interaction; Esc rejects the tool and Ctrl+C aborts the turn |
+| `usage` | Always-visible current/model context counter in the footer |
 | `turn_done` | Unlock editor; finalize bubbles |
 | `error` | Error banner |
 
-**Performance:** coalesce text deltas per animation frame (~16–32ms) to avoid per-token `View()` thrash.
+**Performance:** Bubble Tea renders after every `Update`, so the TUI coalesces
+queued stream events (bounded batch), caches transcript content, avoids redundant
+viewport `SetContent`, preserves scroll position when the user scrolls up, and
+only follows the tail when already at the bottom. See `docs/tui-performance.md`.
 
 ### 6.6 Themes
 
@@ -881,7 +965,8 @@ type Options struct {
     CWD             string
     Provider        string
     Model           string
-    SessionPath     string // empty → ephemeral memory
+    SessionPath     string // existing SQLite .db to resume; empty creates a new session
+    NoSession       bool   // use an ephemeral in-memory session
     AuthPath        string // default ~/.snow/auth.json
     ConfigPath      string
     PermissionMode  string // ask|allow|deny; default deny for mutating in non-TTY
@@ -889,6 +974,7 @@ type Options struct {
     Tools           []string // subset allowlist; empty = defaults
     SystemPrompt    string
     Thinking        string
+    UserInputHandler func(context.Context, protocol.UserInputRequest) (protocol.UserInputResponse, error)
     // Credential overrides...
 }
 
@@ -897,11 +983,14 @@ type Session struct { /* opaque */ }
 func Open(ctx context.Context, opts Options) (*Session, error)
 
 func (s *Session) Prompt(ctx context.Context, text string) error
+func (s *Session) PromptWithMode(ctx context.Context, text string, mode protocol.CollaborationMode) error
 func (s *Session) Abort(ctx context.Context) error
 func (s *Session) Subscribe(func(protocol.AgentEvent)) (cancel func)
 func (s *Session) Model() protocol.Model
 func (s *Session) SetModel(protocol.Model) error
-func (s *Session) Messages() []protocol.Message
+func (s *Session) Mode() protocol.CollaborationMode
+func (s *Session) SetMode(protocol.CollaborationMode) error
+func (s *Session) Messages() ([]protocol.Message, error)
 func (s *Session) Close() error
 ```
 
@@ -936,13 +1025,19 @@ snow --mode json -p "..."    # JSONL events to stdout
 
 JSON event lines mirror `protocol.AgentEvent` for easy piping.
 
-### 7.5 RPC mode (phase 3)
+### 7.5 RPC mode
 
 JSONL over stdin/stdout (pi-inspired):
 
-- Commands: `prompt`, `abort`, `set_model`, `authorize_response`, …
+- Commands: `prompt`, `abort`, `user_input_reply`, `user_input_reject`, `set_model`, `set_thinking`, `session_info`, …
 - Events: same as SDK events  
 - Framing: split on `\n` only (not Unicode line separators)
+
+RPC prompts run asynchronously so the command reader remains available while
+the agent waits. `user_input_reply.params` is a `UserInputResponse`;
+`user_input_reject.params` contains `request_id`. EOF closes the interactive
+input broker so pending/future questions fail fast while an ordinary one-shot
+prompt is still allowed to finish.
 
 Primary consumers: non-Go hosts, IDE bridges. Go hosts should prefer `snowsdk`.
 
@@ -957,8 +1052,8 @@ Primary consumers: non-Go hosts, IDE bridges. Go hosts should prefer `snowsdk`.
 | `~/.snow/config.json` | Global settings |
 | `~/.snow/auth.json` | Secrets |
 | `~/.snow/trust.json` | Project trust decisions |
-| `~/.snow/sessions/` | JSONL sessions |
-| `~/.snow/models-cache.json` | Cached catalogs |
+| `~/.snow/sessions/` | Pure-Go SQLite session databases |
+| `~/.snow/models-cache.json` | Reserved for future persistent catalog caching; current discovery is startup-only |
 | `~/.snow/keybindings.json` | Phase 2 |
 | `<project>/AGENTS.md` | Always-on project instructions (if present) |
 | `<project>/.snow/config.json` | Project settings (trust-gated) |
@@ -973,6 +1068,8 @@ Primary consumers: non-Go hosts, IDE bridges. Go hosts should prefer `snowsdk`.
   "permission_mode": "ask",
   "default_project_trust": "ask",
   "thinking": "off",
+  "reasoning_summary": "auto",
+  "text_verbosity": "low",
   "tool_output_bytes": 262144,
   "bash_timeout_ms": 120000,
   "providers": {
@@ -1058,6 +1155,7 @@ snow runs **as the user**. Built-in tools can read/write files and execute comma
 |-------|-----------|
 | Core builtins | Go `Tool` / `Provider` interfaces, in-process |
 | Optional external capabilities | **JSON-RPC over stdio** subprocess plugins |
+| Deferred tool discovery | In-memory Bleve BM25 over opt-in metadata; schemas stay in the registry |
 | Explicitly avoided as primary | `plugin.Open` Go `.so` shared libraries (portability/pain) |
 | Skills (phase 4) | Markdown playbooks, not executable code |
 
@@ -1074,35 +1172,78 @@ func RegisterBuiltins(r tools.Registry) {
 
 Build tags may exclude heavy adapters for minimal binaries later (`//go:build chatgpt`).
 
-### 10.3 Subprocess plugin protocol (phase 3–4)
+### 10.3 Extensibility core and subprocess protocol v2
 
-**Transport:** JSONL on plugin stdin/stdout; stderr for logs.
+The extensibility core is implemented in `pkg/plugin`, `internal/tools`, and
+`internal/plugin`. Static Go plugins use `Manifest`, `Register`, and `Close`; no
+Go shared-object loading is used. The manager owns registration, namespaced tool
+descriptors, event subscriptions, diagnostics, and reverse-order lifecycle.
 
-**Handshake**
+External runtimes use JSON-RPC 2.0 JSONL on stdin/stdout, with stderr reserved
+for bounded diagnostics. Request IDs are strings and one reader multiplexer
+supports concurrent calls:
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol_version":1,"cwd":"..."}}
-{"jsonrpc":"2.0","id":1,"result":{"name":"my-plugin","version":"0.1.0","tools":[...]}}
+{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocol_version":2,"cwd":"...","session_id":"..."}}
+{"jsonrpc":"2.0","id":"1","result":{"manifest":{"id":"my-tools","name":"My tools","version":"0.1.0","protocol_version":2},"tools":[...]}}
 ```
 
-**Methods**
+The host sends `initialize`, `tools/list`, `tools/call`, and `shutdown`.
+Progress, sanitized observation events, and bounded logs are notifications.
+Frames, input/output, progress, stderr, timeouts, cancellation, and concurrent
+calls are bounded. Commands are argv arrays and never shell strings.
 
-| Method | Direction | Purpose |
-|--------|-----------|---------|
-| `initialize` | host→plugin | Negotiate version |
-| `tools/list` | host→plugin | Schemas |
-| `tools/call` | host→plugin | Invoke |
-| `tools/progress` | plugin→host | Progress notifications |
-| `shutdown` | host→plugin | Clean exit |
+Project-local plugin declarations are trust-gated. Trust controls input
+loading, not plugin permissions or OS access; untrusted plugins need a
+container/VM/OS sandbox. JavaScript and Python can implement protocol v2;
+MCP and Agent Skills are separate adapters/resources over the registry.
 
-**Isolation benefits:** crash containment, any language plugins, optional tighter OS sandbox around the child.
+### 10.4 MCP and Agent Skills
 
-**Costs:** cold start, serialization, harder shared FS locks — keep off the MVP path.
+`internal/mcp` uses the official `modelcontextprotocol/go-sdk` v1.7.0. It
+negotiates the current stateless `2026-07-28` protocol and the SDK's supported
+legacy revisions across stdio and Streamable HTTP. Server tools become
+permissioned `mcp_<server>_<tool>` descriptors. Resources, templates,
+subscriptions, and prompts use generic namespaced bridges; tool-list changes
+atomically refresh the registry and BM25 index. Static HTTP headers and stdio
+environment values support environment expansion without entering diagnostics.
+Project server config is trust-gated. See `docs/mcp.md`.
 
-### 10.4 What is not a plugin
+The CLI separates side-effect-free configuration inspection (`mcp list|get`)
+from live connection checks (`mcp check`) and atomically manages global or
+project declarations through `add|enable|disable|remove`. Targeted JSON updates
+preserve unrelated and unknown config fields; all inspection output redacts
+credential-bearing values.
+
+`internal/skills` implements the open Agent Skills `SKILL.md` format. Startup
+discovery loads only validated names/descriptions from standard user and
+trust-gated project paths. `activate_skill` loads full instructions and
+`read_skill_resource` confines on-demand resources to the selected directory.
+Activated content is reattached on every provider call and reconstructed from
+session history after resume so compaction does not drop it. See
+`docs/skills.md`.
+
+Discovery retains a management inventory alongside the enabled catalog.
+Global and trust-gated project `skills.disabled`/`skills.overrides` policy can
+hide entries from prompts and activation without deleting their files. CLI
+`skills list|get|enable|disable`, SDK `SkillInventory`, and read-only TUI
+`/skills` expose that inventory; `/mcp` similarly exposes current server state.
+
+### 10.5 Tool schema routing
+
+Existing tools and zero-value discovery metadata remain always loaded. Native,
+Go-plugin, external-plugin, SDK, and MCP registrations may opt into
+`deferred` discovery per tool. Snow builds an in-memory Bleve BM25 index after
+startup registration, indexes only name/namespace/description/keywords, and
+loads the top five permitted full schemas from the authoritative registry.
+`search_tools` provides an explicit recovery pass, while index/search failures
+fall back to direct exposure for that turn. Routing emits structured metrics but
+does not make an extra LLM call. See `docs/tool-routing.md`.
+
+### 10.6 What is not a plugin
 
 - Themes, keybindings, model lists → config.
-- Skills/prompts → markdown expansion.
+- Skills/prompts → resource discovery and markdown activation.
 - Compaction strategies → internal interfaces first.
 
 ---
@@ -1150,6 +1291,8 @@ snow-core/
 | `github.com/charmbracelet/lipgloss` | Style |
 | `github.com/charmbracelet/bubbles` | Components |
 | `github.com/charmbracelet/glamour` | Markdown |
+| `github.com/enetx/surf` | Chrome-profile public web fetching |
+| `github.com/JohannesKaufmann/html-to-markdown/v2` | Bounded HTML-to-Markdown conversion |
 | `golang.org/x/oauth2` | OAuth helpers |
 | `github.com/google/uuid` | IDs |
 | `github.com/tidwall/gjson` / `sjson` optional | Fast JSON surgery for streams |
@@ -1158,7 +1301,8 @@ Avoid: heavy ORMs, full cloud SDKs when raw HTTP + SSE suffices.
 
 ### 11.3 Go version
 
-- Minimum: **Go 1.22+** (or current stable at bootstrap).
+- Minimum language/toolchain line: **Go 1.27**. `go.mod` currently uses
+  **1.27rc2**, the available toolchain required by Surf v1.0.203.
 - Enable: `go test ./...`, race detector in CI later.
 
 ### 11.4 Module path
@@ -1190,12 +1334,15 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 **Deliverables**
 
 - [x] Agent loop with serial tool dispatch
-- [x] JSONL session persistence (create/load tip)
+- [x] SQLite session persistence (create/load indexed branch tip)
 - [x] Tools: `read`, `bash` (write/edit can stub deny)
 - [x] Provider: **OpenCode Go** streaming chat + tools
+- [x] OpenCode Go startup model discovery with live availability, models.dev
+  capability/reasoning enrichment, and a conservative static fallback
+- [x] Normalized model-aware reasoning effort (`off|minimal|low|medium|high`) across provider adapters
 - [x] Auth: API key from env + `auth.json`
 - [x] Print mode: `snow -p "..."` 
-- [x] Basic TUI: transcript + editor + footer + `/model` `/new` `/quit`
+- [x] Basic TUI: transcript + editor + footer, always-visible context usage, and `/model` `/new` `/quit`
 - [x] System prompt + `AGENTS.md` load
 - [x] Context cancel / ctrl+c abort
 
@@ -1212,11 +1359,12 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 **Deliverables**
 
 - [x] Tools: `write`, `edit` with path gates
-- [x] Permission service (`ask`/`allow`/`deny`; TUI `/permission` command; headless default deny)
-- [x] `/login` `/logout` for API key + **ChatGPT OAuth** (browser + paste) — API-key login/logout shipped as CLI subcommands; ChatGPT OAuth adapter pending live-credential verification
-- [ ] Token refresh
-- [x] `/resume` (pending), `/permission`, `/session`, `/name` — permission+session+trust shipped; resume/name pending
-- [x] Compaction v1 (summarize old span → replace with summary entry) — v1 appends a summary entry; full span replacement is a documented phase-4 refinement
+- [x] Permission service (`ask`/`allow`/`deny`; TUI `/permissions` command; headless default deny)
+- [x] `/login` `/logout` for API keys; ChatGPT OAuth status is available through `/login` and `snow auth check chatgpt`
+- [x] ChatGPT browser/device OAuth login, guarded token refresh, and authenticated cached model discovery
+- [x] `/sessions`, `/resume`, and `/new` — current-directory listing, resume picker, and new-session flow
+- [x] Durable same-database branches, SDK branch APIs, and TUI `/tree` picker
+- [x] Manual `/compact` — model-backed summary with deterministic fallback and a logical context boundary; full history remains append-only
 - [x] Project trust prompt + `trust.json` (store, parent-walk, `/trust` command; interactive prompt pending)
 - [x] Permission `ask` mode — TUI interactive asker via `/allow` `/deny` (/allow always); headless defaults to deny
 
@@ -1236,7 +1384,7 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] `grep` + `glob` builtins
 - [x] `--mode json` event stream
 - [x] RPC JSONL mode skeleton
-- [x] Subprocess tool host (one example plugin) — `internal/plugin` JSON-RPC host + fake plugin test
+- [x] Extensibility core — public Go plugin API, lifecycle manager, descriptor registry, observe-only events, and JSON-RPC v2 stdio host
 - [x] Steer/follow-up queue (abort + re-prompt path; full steer queue pending)
 
 **Acceptance tests**
@@ -1251,17 +1399,22 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 
 **Deliverables**
 
-- [ ] Skills + prompt templates (markdown)
+- [x] Agent Skills `SKILL.md` format — separate resource/progressive-disclosure layer
+- [x] MCP client — official Go SDK, 2026-07-28/legacy negotiation, stdio/Streamable HTTP, tools/resources/prompts
 - [ ] Themes + keybindings files
-- [ ] Model catalog refresh/cache
-- [ ] Fork/tree navigation (`/tree` lite)
-- [ ] Optional sandbox backend design spike
+- [x] Persistent ChatGPT model catalog refresh/cache (account- and backend-origin-scoped ETag/TTL entries)
+- [x] Durable fork/tree navigation (`/tree` picker)
+- [ ] Optional sandbox backend design spike (plugins are not sandboxed)
 - [ ] Windows path/bash story hardened
+- [x] Plugin tool appears in schema and executes through the central permission gate
+- [x] Opt-in BM25 tool routing keeps deferred parameter schemas out of normal model context
+- [ ] Hybrid embeddings, namespace-first routing, and embedding cache
 
 **Acceptance tests**
 
-- Custom theme loads; skill expands via slash command.
-- Plugin tool appears in schema and executes.
+- Custom theme loads; skill activates through `$name`/`activate_skill` and survives compaction.
+- MCP stateless HTTP and stdio servers negotiate the expected protocol and execute through permissions.
+- Plugin tool appears in schema and executes through the manager/registry path.
 
 ---
 
@@ -1271,13 +1424,14 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 
 | Area | Cases |
 |------|-------|
-| Session tree | append, branch tip, fork, reload JSONL |
+| Session tree | append, branch tip, fork, reload SQLite |
 | Path safety | symlink escape, outside root, unicode paths |
 | Edit tool | unique/non-unique `old_str`, replace_all |
 | Auth store | 0600 permissions, round-trip, delete |
 | OAuth refresh | mock clock expiry |
 | Event order | tool_start before tool_end; turn_done last |
 | Permission | mode matrix + remember rules |
+| Model/reasoning | provider catalog metadata, conservative effort filtering, wire mappings, and unsupported-level rejection |
 
 ### 13.2 Integration
 
@@ -1285,6 +1439,13 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
   1. assistant tool_call read
   2. consume tool_result
   3. final text
+- Agent end-to-end tests (`internal/agent/agent_e2e_test.go`) run the real
+  read/write/edit/bash/grep/glob registry through streamed multi-tool turns, exercise the
+  deny/allow/ask permission matrix, verify ordered tool results, cover provider
+  resolve/chat/stream/EOF failures, and reopen SQLite sessions for continuation.
+- CLI end-to-end tests (`cmd/snow/main_test.go`) drive Cobra print and JSON modes
+  against a local OpenAI-compatible SSE server; no credentials or network are
+  required.
 - Temp dir workspace fixtures under `testdata/workspaces/`.
 
 ### 13.3 Manual
@@ -1320,8 +1481,8 @@ No network in default CI unit jobs; optional nightly integration with secrets.
 
 | Pattern | Why |
 |---------|-----|
-| Minimal core tools (read/write/edit/bash) | Forces good agent behavior; easy to reason about |
-| JSONL session with tree `id`/`parentId` | Branch/resume without DB |
+| Minimal core tools (read/write/edit/bash) plus bounded search | Forces good agent behavior; easy to reason about |
+| SQLite session with tree `id`/`parentId` | Indexed branch/resume without a server |
 | SDK session = CLI core | No dual maintenance |
 | Project trust ≠ sandbox | Honest security story |
 | Event subscribe model | TUI/RPC/SDK share one bus |
@@ -1331,7 +1492,7 @@ No network in default CI unit jobs; optional nightly integration with secrets.
 References (local install / upstream docs):
 
 - pi README — modes: interactive, print/JSON, RPC, SDK
-- `docs/session-format.md` — JSONL tree, message blocks, usage
+- `docs/sessions.md` — SQLite schema, indexed branch queries, pragmas, and usage
 - `docs/providers.md` — subscriptions vs API keys; OpenCode Go row
 - `docs/sdk.md` — `createAgentSession`, subscribe, prompt
 - `docs/security.md` — trust vs sandbox
@@ -1361,8 +1522,8 @@ Charmbracelet (Bubble Tea) is the de-facto standard for modern Go CLIs (gh-like 
 
 | Axis | Choice |
 |------|--------|
-| Memory | Go single binary; stream processing; JSONL not SQLite MVP |
-| CPU | Coalesced UI updates; serial tools MVP; pure-Go search later |
+| Memory | Go single binary; stream processing; SQLite queries only materialize the active branch |
+| CPU | Coalesced UI updates; serial tools MVP; compiled pure-Go search matchers |
 | Disk | Append-only logs; bounded tool output |
 | Network | HTTP/2 keep-alive client per provider; cancelable streams |
 | Extensibility tax | Pay subprocess cost only when plugins enabled |
@@ -1384,6 +1545,55 @@ Charmbracelet (Bubble Tea) is the de-facto standard for modern Go CLIs (gh-like 
 
 ---
 
+## 19. Codex-style subagent tree (implemented)
+
+Snow implements the Codex V2 architecture directly. `internal/subagent.Manager`
+owns canonical path identity, parent edges, reservation/commit, validated state
+transitions, execution slots, limits, mail routing, child construction,
+persistence, and shutdown. Every child is an ordinary `internal/agent.Agent`;
+`agent` does not import `subagent`, and collaboration enters through registered
+tools plus its generic attributed mailbox.
+
+The six direct model tools are `spawn_agent`, `send_message`, `followup_task`,
+`wait_agent`, `interrupt_agent`, and `list_agents`. Tool instances bind caller
+identity. Spawn/follow-up use `permission.RiskDelegate`; remaining controls use
+read risk. `wait_agent` supports the original next-activity barrier and an
+`until=all` descendant join with aggregate running/queued/terminal counts; SDK
+and RPC expose the same bounded join. The native TUI hides successful control
+JSON and renders compact lifecycle/count summaries. The feature defaults off, max concurrency is four simultaneously
+running children (the root does not consume a slot), depth defaults to one, and
+child authority is role-scoped: the
+`default`/general and `worker` roles may use permission-gated `bash`, while
+`explorer` remains read/search-only. Recursion and file mutation are independent
+intersections of global and role policy; write/edit require both mutation
+switches.
+
+Parent and child transcripts never share a mutable cursor. Context forks use
+`ContextMessages`, strip unsafe or incomplete protocol artifacts, and repair
+IDs. Mailbox producers only enqueue. The admitted receiving loop drains before
+provider requests and atomically marks final mail unread at turn finalization,
+so external delivery cannot fork a serial tool-result chain.
+
+`protocol.AgentPath`, `AgentRef`, `SubagentState`, and `AgentMessage` are public
+DTOs. Ordinary child events carry `agent`; lifecycle and mail add `subagent` and
+`agent_message`. Root events omit correlation for compatibility. SDK, RPC,
+print/JSON, TUI, and plugin observers consume one cloned event bus.
+
+Schema version 5 stores topology in `subagent_threads`. Durable child histories
+default on, use private `<root>.db.agents/<thread>.db` databases, stay out of the session
+index, and load lazily. Cold open never restarts work; surfaces subscribe and
+call `ReadySubagents` before restored topology is published. Shutdown joins the
+manager before closing the root event bus and shared resources. Active children
+block root-session switching; after all children reach a terminal state,
+switching sessions detaches the old in-memory runtimes and restores the target
+session's topology.
+
+The shared cwd and OS authority are not a sandbox. Parallel edits can conflict,
+provider usage is independent, and child/repository output is untrusted.
+The TUI serializes root/child permission requests through an attributed FIFO
+broker; headless ask mode remains fail-closed. Child `ask_user` stays excluded,
+preventing ambiguous input routing.
+
 ## 16. Glossary
 
 | Term | Meaning |
@@ -1391,7 +1601,7 @@ Charmbracelet (Bubble Tea) is the de-facto standard for modern Go CLIs (gh-like 
 | **Harness** | Runtime that hosts model ↔ tool loops for coding agents |
 | **Provider** | LLM backend adapter (HTTP + auth + stream normalize) |
 | **Tool** | Model-invoked capability with JSON schema |
-| **Session** | Durable conversation tree (JSONL) |
+| **Session** | Durable conversation tree (pure-Go SQLite) |
 | **Compaction** | Summarize/replace older turns to free context |
 | **Project trust** | Permission to load project-local config/plugins |
 | **Permission mode** | ask/allow/deny for mutating/exec tools |
@@ -1429,11 +1639,54 @@ snow login chatgpt            # optional non-TUI helper (phase 2)
 
 ---
 
+## 18. Persistent Thread Goals (implemented)
+
+Saved branches carry an atomic goal row and continuation-deferral state in
+SQLite schema v4. `internal/goal` owns validated status transitions,
+model-facing tools, private user-role steering, three-turn blocked gating,
+sub-second accounting remainder, and confined goal-ID-owned objective files.
+SQLite updates usage atomically across database handles; forks copy managed
+objective resources before either branch may clean them up.
+
+The agent owns automatic serial turns, cancellation/join (including the
+pre-first-turn window), cumulative provider-usage snapshot handling, one
+budget wrap-up, terminal-error classification, semantic no-progress pausing,
+and Plan exclusion. Events use a dedicated ordered dispatcher with cloned
+payloads so callbacks never execute under goal locks or provider/tool workers.
+Constructors do not start restored work: TUI/CLI/RPC signal readiness after
+subscribing, and SDK hosts call `ReadyGoals`. See `docs/goals.md`.
+
+## 17. Plan collaboration mode (implemented)
+
+Snow has a branch-persisted `default|plan` collaboration mode. The public
+protocol includes mode state, durable plan content blocks, and
+`plan_started`/`plan_delta`/`plan_completed`/`plan_update` events. The agent
+snapshots mode at turn start, injects the complete three-phase Plan contract on
+every provider request, applies the supported Plan reasoning preset, and parses
+line-delimited `<proposed_plan>` output before any surface sees raw tags.
+
+Mode state lives in the branch-keyed `thread_state` SQLite table (introduced in schema v3; current schema v4),
+not append-only session metadata; forks copy it and branch/session selection
+restores it. `update_plan` remains a Default-mode TODO tool. Default retains
+`ask_user`; Plan exposes `request_user_input` through the same broker. Mutation
+avoidance is instruction-enforced, matching Codex, and is not represented as a
+sandbox.
+
+Surfaces share the normalized implementation: `/plan [message]` and `/default`
+in the TUI, `--collaboration-mode` in CLI modes, attached/set mode in RPC, and
+Mode/SetMode/PromptWithMode in the SDK. The TUI renders streamed and resumed
+plan blocks independently and atomically transitions a completed plan to
+Default mode in either the current or a fresh session. See
+`docs/plan-mode.md` and the research reference
+`docs/codex-plan-mode-and-goals.md`.
+
+---
+
 ## Appendix C — First coding tasks (ordered)
 
 1. `go mod init github.com/snow-core/snow`
 2. `pkg/protocol` types + JSON golden tests
-3. `internal/session` memory + JSONL
+3. `internal/session` memory + SQLite
 4. `internal/tools/builtin` read + bash + path guard tests
 5. `internal/provider/fake` scripted stream
 6. `internal/agent` loop tests with fake
@@ -1457,7 +1710,7 @@ snow login chatgpt            # optional non-TUI helper (phase 2)
 | Binary name | `snow` | 2026-03-22 |
 | Modularity | Interfaces + in-process builtins; JSON-RPC subprocess plugins | 2026-03-22 |
 | Auth MVP | OpenCode Go API key + ChatGPT Codex OAuth only | 2026-03-22 |
-| Sessions | Snow-owned JSONL tree | 2026-03-22 |
+| Sessions | Snow-owned pure-Go SQLite tree | 2026-08-06 |
 | TUI | Charmbracelet Bubble Tea | 2026-03-22 |
 | SDK | `pkg/snowsdk` same core | 2026-03-22 |
 | Sandbox | None in v1; honest docs | 2026-03-22 |
