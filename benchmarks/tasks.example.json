@@ -1,0 +1,142 @@
+{
+  "tasks": [
+    {
+      "id": "create-config",
+      "prompt": "Create a file named benchmark-output/config.json containing exactly {\"ok\":true} as valid JSON. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "import json, pathlib; p=pathlib.Path('benchmark-output/config.json'); assert json.loads(p.read_text()) == {'ok': True}"
+      ]
+    },
+    {
+      "id": "add-test-file",
+      "prompt": "Create benchmark-output/answer.txt containing exactly: snow benchmark passed. Include one final newline after the period. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "from pathlib import Path; assert Path('benchmark-output/answer.txt').read_text() == 'snow benchmark passed.\\n'"
+      ]
+    },
+    {
+      "id": "nested-markdown",
+      "prompt": "Create benchmark-output/docs/notes.md with exactly these three lines, followed by one final newline: # Snow benchmark, blank line, and This file was created by an agent. Create parent directories as needed and do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "from pathlib import Path; assert Path('benchmark-output/docs/notes.md').read_text() == '# Snow benchmark\\n\\nThis file was created by an agent.\\n'"
+      ]
+    },
+    {
+      "id": "normalize-people-json",
+      "prompt": "Create benchmark-output/people.json as valid JSON. It must be an array of exactly three objects sorted by name, with no extra fields: Ada has score 9, Grace has score 10, and Linus has score 8. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "import json; from pathlib import Path; assert json.loads(Path('benchmark-output/people.json').read_text()) == [{'name': 'Ada', 'score': 9}, {'name': 'Grace', 'score': 10}, {'name': 'Linus', 'score': 8}]"
+      ]
+    },
+    {
+      "id": "inspect-module",
+      "prompt": "Read go.mod, then create benchmark-output/module.txt containing exactly two lines: module=github.com/snow-core/snow and go=1.27, followed by one final newline. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "from pathlib import Path; assert Path('benchmark-output/module.txt').read_text() == 'module=github.com/snow-core/snow\\ngo=1.27\\n'"
+      ]
+    },
+    {
+      "id": "implement-slugify",
+      "prompt": "Create benchmark-output/slugify.py using only the Python standard library. It must read one command-line argument and print a lowercase slug: trim whitespace, replace each run of characters other than ASCII letters or digits with one hyphen, and strip leading and trailing hyphens. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "import subprocess; p='benchmark-output/slugify.py'; cases=[(' Hello, Snow! ', 'hello-snow'), ('A/B_test v2', 'a-b-test-v2'), ('---', '')]; assert all(subprocess.check_output(['python3', p, value], text=True).strip() == expected for value, expected in cases)"
+      ]
+    },
+    {
+      "id": "implement-fibonacci",
+      "prompt": "Create benchmark-output/fibonacci.py using only the Python standard library. Define fib(n) for nonnegative integers using fib(0)=0 and fib(1)=1, and when run with one integer argument print fib(n). Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "import importlib.util, subprocess; s=importlib.util.spec_from_file_location('fib','benchmark-output/fibonacci.py'); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); assert [m.fib(i) for i in range(8)] == [0,1,1,2,3,5,8,13]; assert subprocess.check_output(['python3','benchmark-output/fibonacci.py','10'], text=True).strip() == '55'"
+      ]
+    },
+    {
+      "id": "write-unittest",
+      "prompt": "Create benchmark-output/test_math.py as a self-contained Python unittest module. Define add(a,b) and is_even(n), and include tests covering positive and negative addition plus even and odd integers. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-m",
+        "unittest",
+        "benchmark-output/test_math.py"
+      ]
+    },
+    {
+      "id": "create-go-tool",
+      "prompt": "Create benchmark-output/wordcount.go as a standalone Go program. It must count whitespace-separated words across all command-line arguments and print the count followed by a newline. Use only the Go standard library and do not modify any other files.",
+      "verify": [
+        "go",
+        "run",
+        "benchmark-output/wordcount.go",
+        "snow core",
+        "benchmark"
+      ]
+    },
+    {
+      "id": "implement-line-stats",
+      "prompt": "Create benchmark-output/line_stats.py using only the Python standard library. Read all text from stdin and print one JSON object with integer keys lines, words, and chars: count newline-delimited lines, whitespace-separated words, and all characters including newlines. Empty input has zero for all three. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "import json, subprocess; out=subprocess.check_output(['python3','benchmark-output/line_stats.py'], input='alpha beta\\ngamma\\n', text=True); assert json.loads(out) == {'lines': 2, 'words': 3, 'chars': 17}"
+      ]
+    },
+    {
+      "id": "implement-binary-search",
+      "prompt": "Create benchmark-output/search.py using only the Python standard library. Define binary_search(values, target) for an ascending list; return the matching zero-based index or -1 when absent. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "import importlib.util; s=importlib.util.spec_from_file_location('search','benchmark-output/search.py'); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); assert m.binary_search([1,3,4,7,9],7) == 3; assert m.binary_search([1,3,4,7,9],5) == -1"
+      ]
+    },
+    {
+      "id": "implement-jsonl-filter",
+      "prompt": "Create benchmark-output/filter_events.py using only the Python standard library. It must accept a JSONL file path as its only argument, read objects in order, and print a compact JSON array containing the id of every object whose level equals error. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "import json, subprocess; from pathlib import Path; q=Path('benchmark-input.jsonl'); q.write_text('{\"id\":\"a\",\"level\":\"info\"}\\n{\"id\":\"b\",\"level\":\"error\"}\\n{\"id\":\"c\",\"level\":\"error\"}\\n'); out=subprocess.check_output(['python3','benchmark-output/filter_events.py',str(q)], text=True); assert json.loads(out) == ['b','c']"
+      ]
+    },
+    {
+      "id": "implement-csv-summary",
+      "prompt": "Create benchmark-output/csv_summary.py using only the Python standard library. It must accept a CSV file path with headers item,quantity,price and print compact JSON with integer rows and numeric total equal to the sum of quantity times price. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "import json, subprocess; from pathlib import Path; q=Path('benchmark-input.csv'); q.write_text('item,quantity,price\\npen,2,1.50\\nbook,3,4.00\\n'); out=subprocess.check_output(['python3','benchmark-output/csv_summary.py',str(q)], text=True); got=json.loads(out); assert got['rows'] == 2 and abs(got['total'] - 15.0) < 1e-9"
+      ]
+    },
+    {
+      "id": "create-greeting-script",
+      "prompt": "Create benchmark-output/greet.sh. When run with one argument, it must print exactly Hello, NAME! followed by a newline, where NAME is the argument. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "import subprocess; assert subprocess.check_output(['bash','benchmark-output/greet.sh','Snow'], text=True) == 'Hello, Snow!\\n'"
+      ]
+    },
+    {
+      "id": "write-repo-facts",
+      "prompt": "Inspect the repository, then create benchmark-output/repo-facts.json as valid JSON with exactly these fields and values: module github.com/snow-core/snow, go 1.27, has_tui true, and has_sdk true. The booleans indicate whether internal/tui and pkg/snowsdk exist. Do not modify any other files.",
+      "verify": [
+        "python3",
+        "-c",
+        "import json; from pathlib import Path; assert json.loads(Path('benchmark-output/repo-facts.json').read_text()) == {'module': 'github.com/snow-core/snow', 'go': '1.27', 'has_tui': True, 'has_sdk': True}"
+      ]
+    }
+  ]
+}

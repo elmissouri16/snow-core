@@ -5,3 +5,6 @@
 coverage/
 .DS_Store
 .pi-subagents/
+/agent-bench-results.json
+/benchmarks/results*.json
+/benchmarks/*-logs/
