@@ -90,11 +90,36 @@ func (s *Store) save() error {
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	dir := filepath.Dir(s.path)
+	f, err := os.CreateTemp(dir, ".snow-trust-*.tmp")
+	if err != nil {
+		return fmt.Errorf("trust: create temporary file: %w", err)
+	}
+	tmp := f.Name()
+	ok := false
+	defer func() {
+		_ = f.Close()
+		if !ok {
+			_ = os.Remove(tmp)
+		}
+	}()
+	if err := f.Chmod(0o600); err != nil {
+		return fmt.Errorf("trust: chmod: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("trust: write: %w", err)
 	}
-	return os.Rename(tmp, s.path)
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("trust: sync: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("trust: close: %w", err)
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		return fmt.Errorf("trust: replace: %w", err)
+	}
+	ok = true
+	return nil
 }
 
 // HasSensitiveResources reports whether a project directory contains

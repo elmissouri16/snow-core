@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/snow-core/snow/internal/tools"
+	"github.com/snow-core/snow/pkg/protocol"
 )
 
 // Edit is the exact string replace tool.
@@ -49,6 +50,7 @@ func (e *Edit) Schema() tools.ToolSchema {
 
 // Run implements tools.Tool.
 func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHost) (tools.ToolResult, error) {
+	ctx = nonNilContext(ctx)
 	var a editArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return tools.ErrorResult(fmt.Errorf("edit: invalid arguments: %w", err)), nil
@@ -90,6 +92,8 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if err := ctx.Err(); err != nil {
 		return tools.ErrorResult(err), nil
 	}
+	emitProgress(host, "editing file", false, false)
+	defer emitProgress(host, "edit finished", true, false)
 
 	data, err := os.ReadFile(resolved)
 	if err != nil {
@@ -112,9 +116,16 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		updated = strings.Replace(content, a.OldStr, a.NewStr, 1)
 	}
 
+	diff := editDiff(content, updated, a.OldStr, a.NewStr, a.ReplaceAll)
+	if err := ctx.Err(); err != nil {
+		return tools.ErrorResult(err), nil
+	}
 	if err := os.WriteFile(resolved, []byte(updated), 0o644); err != nil {
 		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
 	}
 
-	return tools.TextResult(fmt.Sprintf("Replaced %d occurrence(s) in %s", count, a.Path)), nil
+	return tools.ToolResult{
+		Content: []protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("Replaced %d occurrence(s) in %s", count, a.Path))},
+		Details: tools.DiffDetails{Path: a.Path, Diff: diff},
+	}, nil
 }

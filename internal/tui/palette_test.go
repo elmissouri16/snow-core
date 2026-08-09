@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,6 +13,16 @@ import (
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/pkg/protocol"
 )
+
+func TestCompleteCommandFuzzyMatchesAfterPrefixMatches(t *testing.T) {
+	got := completeCommand("cmp")
+	if len(got) == 0 || got[0] != "/compact" {
+		t.Fatalf("fuzzy compact match = %v", got)
+	}
+	if got := renderCompletions(nil, 0, 40); !strings.Contains(stripANSI(got), "no matching commands") {
+		t.Fatalf("empty palette = %q", got)
+	}
+}
 
 func TestCompleteCommand(t *testing.T) {
 	all := completeCommand("")
@@ -22,14 +34,12 @@ func TestCompleteCommand(t *testing.T) {
 		t.Fatalf("prefix 'mo' = %v, want [/model]", mo)
 	}
 	perm := completeCommand("per")
-	found := false
-	for _, c := range perm {
-		if c == "/permission" {
-			found = true
-		}
+	if len(perm) != 1 || perm[0] != "/permissions" {
+		t.Fatalf("prefix 'per' = %v, want [/permissions]", perm)
 	}
-	if !found {
-		t.Fatalf("prefix 'per' should include /permission, got %v", perm)
+	permissions := completeCommand("permissions")
+	if len(permissions) != 1 || permissions[0] != "/permissions" {
+		t.Fatalf("prefix 'permissions' = %v, want [/permissions]", permissions)
 	}
 	if got := completeCommand("xx"); len(got) != 0 {
 		t.Fatalf("prefix 'xx' = %v, want none", got)
@@ -41,6 +51,26 @@ func TestCompleteCommand(t *testing.T) {
 	}
 	if lo[0] != "/login" || lo[1] != "/logout" {
 		t.Fatalf("prefix 'LO' order = %v, want [/login /logout]", lo)
+	}
+}
+
+func TestCommandRegistryIsCanonical(t *testing.T) {
+	seen := make(map[string]bool, len(commands))
+	for _, command := range commands {
+		if seen[command.name] {
+			t.Fatalf("duplicate command %q", command.name)
+		}
+		seen[command.name] = true
+	}
+	for _, name := range []string{"/compact", "/mcp", "/sessions", "/resume", "/new", "/permissions", "/settings", "/skills", "/tree", "/thinking"} {
+		if _, ok := commandByExact(name); !ok {
+			t.Errorf("missing canonical command %s", name)
+		}
+	}
+	for _, name := range []string{"/session", "/permission", "/name"} {
+		if _, ok := commandByExact(name); ok {
+			t.Errorf("legacy or out-of-scope command %s is still registered", name)
+		}
 	}
 }
 
@@ -65,20 +95,14 @@ func TestModelPaletteNavigation(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 
-	// Typing "/per" opens the palette with /permission among matches.
+	// Typing "/per" opens the palette with /permissions among matches.
 	m.editor.SetValue("/per")
 	m.refreshPalette()
 	if !m.compVisible {
 		t.Fatal("palette should be visible for '/per'")
 	}
-	found := false
-	for _, c := range m.compMatches {
-		if c == "/permission" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("matches for '/per' = %v, want /permission", m.compMatches)
+	if len(m.compMatches) != 1 || m.compMatches[0] != "/permissions" {
+		t.Fatalf("matches for '/per' = %v, want [/permissions]", m.compMatches)
 	}
 
 	// Down arrow moves the selection (wraps).
@@ -87,9 +111,24 @@ func TestModelPaletteNavigation(t *testing.T) {
 	if m.compIndex != (before+1)%len(m.compMatches) {
 		t.Fatalf("down: index %d -> %d, want wrap to %d", before, m.compIndex, (before+1)%len(m.compMatches))
 	}
-	// Tab also navigates.
+	// Tab inserts the highlighted command without executing it.
+	m.compIndex = 0
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
-	// Up wraps backward.
+	if m.editor.Value() != "/permissions" {
+		t.Fatalf("Tab inserted %q, want /permissions", m.editor.Value())
+	}
+	if !m.pickPermissionMode {
+		// Completion fills the command; Enter is still the execution key.
+		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	}
+	if !m.pickPermissionMode {
+		t.Fatal("Enter after Tab should execute /permissions interactively")
+	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+	// Up wraps backward when the palette is open.
+	m.editor.SetValue("/per")
+	m.refreshPalette()
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
 
 	// Enter with exactly one match for "/model" runs it immediately.
@@ -103,6 +142,55 @@ func TestModelPaletteNavigation(t *testing.T) {
 	_, quit := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if quit != nil {
 		t.Fatal("picking /model should not quit")
+	}
+}
+
+// TestModelPaletteLoginRunsNotInserts verifies that picking /login from the
+// palette RUNS it (opening the provider picker) instead of inserting "/login "
+// into the editor for argument completion.
+func TestModelPaletteTabAddsArgumentSpace(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.editor.SetValue("/logout")
+	m.refreshPalette()
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	if m.editor.Value() != "/logout " {
+		t.Fatalf("Tab value = %q, want trailing argument space", m.editor.Value())
+	}
+}
+
+func TestModelPaletteLoginRunsNotInserts(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+
+	m.editor.SetValue("/login")
+	m.refreshPalette()
+	if !m.compVisible {
+		t.Fatal("palette should be visible for '/login'")
+	}
+	idx := -1
+	for i, c := range m.compMatches {
+		if c == "/login" {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("/login not in matches: %v", m.compMatches)
+	}
+	m.compIndex = idx
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if !m.pickProvider {
+		t.Fatalf("picking /login should open the provider picker (pickProvider=%v loginMode=%v)", m.pickProvider, m.loginMode)
+	}
+	if m.loginMode {
+		t.Fatal("picking /login must not enter key-capture mode directly")
+	}
+	if got := m.editor.Value(); got != "" {
+		t.Fatalf("editor = %q, want empty (command ran, not inserted)", got)
+	}
+	if m.compVisible {
+		t.Fatal("palette should close after running /login")
 	}
 }
 
@@ -205,6 +293,7 @@ func TestModelProviderPickerNavigation(t *testing.T) {
 }
 
 func TestModelLoginPickerDirectArg(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 
@@ -222,9 +311,57 @@ func TestModelLoginPickerDirectArg(t *testing.T) {
 	if m.loginMode || m.pickProvider {
 		t.Fatal("unsupported provider should not enter login")
 	}
+
+	// ChatGPT is OAuth-only; it must never be sent through the API-key mask.
+	m.editor.SetValue("/login chatgpt")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.loginMode || m.pickProvider {
+		t.Fatal("chatgpt OAuth should not enter API-key capture")
+	}
+	if !m.pickChatGPTAuth {
+		t.Fatal("chatgpt direct login should offer OAuth actions")
+	}
 }
 
-func TestModelPickerShowsChatGPTDisabled(t *testing.T) {
+func TestModelChatGPTImportPicker(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, ".pi", "agent", "auth.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"openai-codex":{"type":"oauth","access":"source-access","refresh":"source-refresh","accountId":"source-account"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.editor.SetValue("/login chatgpt")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.pickChatGPTAuth || len(m.authSources) != 1 || m.authSources[0].Name != "Pi" {
+		t.Fatalf("unexpected auth picker: pick=%v sources=%+v", m.pickChatGPTAuth, m.authSources)
+	}
+	view := m.View()
+	if strings.Contains(view, "source-access") || !strings.Contains(view, "Pi") || !strings.Contains(view, "source-account") {
+		t.Fatalf("picker leaked token or missed source: %q", view)
+	}
+	m.authIndex = 2 // browser, device, then the discovered Pi import
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.oauthLoading || cmd == nil {
+		t.Fatal("import should refresh the catalog asynchronously")
+	}
+	m.oauthCancel()
+	m.Update(cmd())
+	cred, ok := m.app.Auth.Get("chatgpt")
+	if !ok || cred.Access != "source-access" || cred.AccountID != "source-account" {
+		t.Fatalf("imported credential = %+v, ok=%v", cred, ok)
+	}
+}
+
+func TestModelPickerShowsChatGPTAuthStatus(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.width = 100
@@ -234,11 +371,34 @@ func TestModelPickerShowsChatGPTDisabled(t *testing.T) {
 	m.editor.SetValue("/login")
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	view := m.View()
-	if !strings.Contains(view, "chatgpt") || !strings.Contains(view, "not supported yet") {
-		t.Fatalf("picker should show chatgpt as not supported: %q", view)
+	if !strings.Contains(view, "chatgpt") || !strings.Contains(view, "OAuth not configured") {
+		t.Fatalf("picker should show chatgpt OAuth status: %q", view)
 	}
 	if !strings.Contains(view, "opencode-go") {
 		t.Fatalf("picker should show opencode-go: %q", view)
+	}
+}
+
+func TestModelPickerShowsStoredChatGPTOAuth(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	if err := m.app.Auth.Put("chatgpt", auth.Credential{
+		Type:    auth.CredentialOAuth,
+		Access:  "opaque-access-token",
+		Refresh: "refresh-token",
+		Extra:   map[string]any{"account_id": "account-123"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	m.editor.SetValue("/login")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	view := m.View()
+	if !strings.Contains(view, "authenticated via OAuth") || !strings.Contains(view, "account-123") {
+		t.Fatalf("picker should show stored ChatGPT OAuth status: %q", view)
 	}
 }
 
@@ -291,7 +451,11 @@ func TestModelLogoutFlow(t *testing.T) {
 	}
 
 	m.editor.SetValue("/logout opencode-go")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("logout should run as an async command")
+	}
+	m.Update(cmd())
 	if _, ok := m.app.Auth.Get("opencode-go"); ok {
 		t.Fatal("credential should be removed after logout")
 	}
@@ -311,32 +475,47 @@ func TestHelpUsesRegistry(t *testing.T) {
 	}
 }
 
-// TestModelArgCommandInsertsNotRuns verifies commands with arg hints are
-// inserted into the editor for argument completion rather than executed.
+// TestModelArgCommandInsertsNotRuns verifies only commands whose no-arg form
+// is meaningless are inserted into the editor for argument completion.
 func TestModelArgCommandInsertsNotRuns(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 
-	m.editor.SetValue("/per")
-	m.refreshPalette()
-	// Pick the first match by setting selection to /permission if present.
-	idx := -1
-	for i, c := range m.compMatches {
-		if c == "/permission" {
-			idx = i
+	for _, command := range []string{"/logout"} {
+		m.editor.SetValue(command)
+		m.refreshPalette()
+		idx := -1
+		for i, c := range m.compMatches {
+			if c == command {
+				idx = i
+			}
+		}
+		if idx < 0 {
+			t.Fatalf("%s not in matches: %v", command, m.compMatches)
+		}
+		m.compIndex = idx
+		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+		if got := m.editor.Value(); !strings.HasPrefix(got, command+" ") {
+			t.Fatalf("editor = %q, want it to contain %q for args", got, command+" ")
+		}
+		if m.compVisible {
+			t.Fatal("palette should close after picking", command)
 		}
 	}
-	if idx < 0 {
-		t.Fatalf("/permission not in matches: %v", m.compMatches)
-	}
-	m.compIndex = idx
+
+	// /model has a cached catalog and opens the picker with no argument.
+	m.modelList = []protocol.Model{{Provider: "fake", ID: "fake-1"}}
+	m.editor.SetValue("/model")
+	m.refreshPalette()
+	m.compIndex = 0
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if got := m.editor.Value(); !strings.HasPrefix(got, "/permission ") {
-		t.Fatalf("editor = %q, want it to contain '/permission ' for args", got)
+	if got := m.editor.Value(); got != "" {
+		t.Fatalf("picking /model should run it, editor = %q", got)
 	}
-	if m.compVisible {
-		t.Fatal("palette should close after picking")
+	if m.compVisible || !m.pickModel {
+		t.Fatal("palette should close and model picker should open")
 	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 }
 
 var _ = protocol.AgentEvent{}

@@ -1,4 +1,4 @@
-// Package builtin implements the core snow tools: read, write, edit, bash,
+// Package builtin implements Snow's file, shell, search, and deferred web tools,
 // plus the path confinement guard used to keep file access inside allowed roots.
 package builtin
 

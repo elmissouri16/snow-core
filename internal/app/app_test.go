@@ -2,14 +2,341 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/snow-core/snow/internal/permission"
+	"github.com/snow-core/snow/internal/provider/fake"
+	"github.com/snow-core/snow/internal/session"
+	"github.com/snow-core/snow/internal/userinput"
+	publicmcp "github.com/snow-core/snow/pkg/mcp"
+	publicplugin "github.com/snow-core/snow/pkg/plugin"
 	"github.com/snow-core/snow/pkg/protocol"
 )
+
+type appDeferredPlugin struct{}
+
+type refreshCatalogProvider struct {
+	*fake.Provider
+	models []protocol.Model
+}
+
+func (p *refreshCatalogProvider) RefreshModels(context.Context) ([]protocol.Model, error) {
+	return append([]protocol.Model(nil), p.models...), nil
+}
+
+func (appDeferredPlugin) Manifest() publicplugin.Manifest {
+	return publicplugin.Manifest{ID: "catalog", Name: "Catalog", Version: "1", ProtocolVersion: publicplugin.ProtocolVersion}
+}
+func (appDeferredPlugin) Register(_ context.Context, registrar publicplugin.Registrar) error {
+	return registrar.RegisterTool(publicplugin.ToolDefinition{
+		Name: "lookup", Description: "Look up catalog records", Parameters: json.RawMessage(`{"type":"object"}`), Risk: "read",
+		Discovery: &protocol.ToolDiscovery{Mode: protocol.ToolDiscoveryDeferred, Keywords: []string{"catalog"}},
+		Executor: func(context.Context, publicplugin.ToolContext, json.RawMessage) (publicplugin.ToolResult, error) {
+			return publicplugin.ToolResult{}, nil
+		},
+	})
+}
+func (appDeferredPlugin) Close(context.Context) error { return nil }
+
+// TestAppTrustStoreUsesTrustFileNotAuthFile is a regression test for a real
+// startup bug: the trust store was wired to config.DefaultPaths()[1]
+// (authPath) instead of [2] (trustPath), so once /login stored a credential in
+// auth.json, every app startup failed with "trust: corrupt auth.json".
+func TestAppTrustStoreUsesTrustFileNotAuthFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+
+	// Simulate a successful /login: a stored API key in auth.json.
+	authPath := filepath.Join(home, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"opencode-go":{"type":"api_key","key":"sk-test"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	a, err := New(ctx, Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("app must start with a populated auth.json: %v", err)
+	}
+	defer a.Close()
+
+	// A trust decision must persist to trust.json and must not clobber auth.json.
+	if err := a.Trust.Set(a.CWD(), "allow"); err != nil {
+		t.Fatal(err)
+	}
+	trustData, err := os.ReadFile(filepath.Join(home, "trust.json"))
+	if err != nil {
+		t.Fatalf("trust.json missing: %v", err)
+	}
+	if !strings.Contains(string(trustData), "allow") {
+		t.Fatalf("trust.json = %q, want an allow decision", trustData)
+	}
+	authData, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(authData), "sk-test") {
+		t.Fatalf("auth.json was clobbered by trust save: %q", authData)
+	}
+}
+
+func TestAppSubagentConcurrencyOverrideCountsChildrenAndRaisesIdentityCap(t *testing.T) {
+	enabled := true
+	a, err := New(context.Background(), Options{
+		Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
+		Subagents: &enabled, SubagentMaxConcurrency: 40,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if a.Cfg.Subagents.MaxConcurrentThreads != 40 || a.Cfg.Subagents.MaxAgentsPerSession != 40 {
+		t.Fatalf("subagent limits = %+v", a.Cfg.Subagents)
+	}
+
+	_, err = New(context.Background(), Options{
+		Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
+		Subagents: &enabled, SubagentMaxConcurrency: 10, SubagentMaxAgents: 5,
+	})
+	if err == nil || !strings.Contains(err.Error(), "below child concurrency") {
+		t.Fatalf("explicit inconsistent limits error = %v", err)
+	}
+}
+
+func TestAppRejectsModelFromDifferentProvider(t *testing.T) {
+	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	before := a.Model
+	if err := a.SetModel(protocol.Model{Provider: "other", ID: "foreign"}); err == nil {
+		t.Fatal("cross-provider model was accepted")
+	}
+	agentModel := a.Agent.Model()
+	if a.Model.Provider != before.Provider || a.Model.ID != before.ID || agentModel.Provider != before.Provider || agentModel.ID != before.ID {
+		t.Fatalf("model changed after rejection: app=%+v agent=%+v before=%+v", a.Model, agentModel, before)
+	}
+}
+
+func TestRefreshProviderModelsReturnsActiveThinkingConflict(t *testing.T) {
+	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	current := a.Agent.Model()
+	current.SupportsThinking = true
+	current.ThinkingLevels = []protocol.ThinkingLevel{protocol.ThinkingHigh}
+	if err := a.Agent.SetModel(current); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Agent.SetThinking(protocol.ThinkingHigh); err != nil {
+		t.Fatal(err)
+	}
+	a.Model = current
+	a.Models = []protocol.Model{current}
+	a.modelCatalog["fake"] = []protocol.Model{current}
+	refreshed := protocol.Model{Provider: "fake", ID: current.ID, SupportsTools: true}
+	a.Providers["fake"] = &refreshCatalogProvider{Provider: fake.NewWithModels([]protocol.Model{refreshed}), models: []protocol.Model{refreshed}}
+
+	err = a.RefreshProviderModels(context.Background(), "fake")
+	if err == nil || !strings.Contains(err.Error(), current.ID) || !strings.Contains(err.Error(), "thinking level") || !strings.Contains(err.Error(), "current settings") {
+		t.Fatalf("refresh conflict error = %v", err)
+	}
+	if got := a.Agent.Model(); !got.SupportsThinking || got.ID != current.ID {
+		t.Fatalf("active model changed after incompatible refresh: %+v", got)
+	}
+	if len(a.Models) != 1 || !a.Models[0].SupportsThinking || len(a.modelCatalog["fake"]) != 1 || !a.modelCatalog["fake"][0].SupportsThinking {
+		t.Fatalf("catalog snapshots changed after incompatible refresh: models=%+v catalog=%+v", a.Models, a.modelCatalog["fake"])
+	}
+}
+
+func TestAppRejectsInvalidThinkingConfiguration(t *testing.T) {
+	_, err := New(context.Background(), Options{
+		Provider:   "fake",
+		Thinking:   "xhigh",
+		NoSession:  true,
+		Permission: "allow",
+		CWD:        t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid thinking level") {
+		t.Fatalf("error = %v, want invalid thinking level", err)
+	}
+}
+
+func TestReentrantManualUserInputFailsFast(t *testing.T) {
+	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.EnableUserInputReplies()
+	result := make(chan error, 1)
+	a.Agent.Subscribe(func(ev protocol.AgentEvent) {
+		if ev.Type == protocol.EvModeChanged {
+			_, err := a.RequestUserInput(context.Background(), protocol.UserInputRequest{ID: "nested", Questions: []protocol.UserInputQuestion{{ID: "q", Question: "answer?"}}})
+			result <- err
+		}
+	})
+	a.Agent.Publish(a.Agent.StateEvent())
+	select {
+	case err := <-result:
+		if !errors.Is(err, userinput.ErrUnavailable) {
+			t.Fatalf("err=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reentrant manual request deadlocked")
+	}
+}
+
+func TestAppUserInputCallbackAndManualReply(t *testing.T) {
+	request := protocol.UserInputRequest{ID: "ask-1", Questions: []protocol.UserInputQuestion{{ID: "name", Header: "Name", Question: "What name?"}}}
+	t.Run("callback", func(t *testing.T) {
+		var seen protocol.UserInputRequest
+		a, err := New(context.Background(), Options{
+			Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
+			UserInputHandler: func(_ context.Context, req protocol.UserInputRequest) (protocol.UserInputResponse, error) {
+				seen = req
+				return protocol.UserInputResponse{Answers: []protocol.UserInputAnswer{{QuestionID: "name", Answer: "Snow"}}}, nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer a.Close()
+		var event *protocol.UserInputRequest
+		a.Agent.Subscribe(func(ev protocol.AgentEvent) {
+			if ev.Type == protocol.EvUserInputRequest {
+				event = ev.UserInput
+			}
+		})
+		response, err := a.RequestUserInput(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if seen.ID != request.ID || event == nil || event.ID != request.ID || response.Answers[0].Answer != "Snow" {
+			t.Fatalf("seen=%+v event=%+v response=%+v", seen, event, response)
+		}
+	})
+
+	t.Run("manual", func(t *testing.T) {
+		a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer a.Close()
+		a.EnableUserInputReplies()
+		published := make(chan protocol.UserInputRequest, 1)
+		a.Agent.Subscribe(func(ev protocol.AgentEvent) {
+			if ev.Type == protocol.EvUserInputRequest && ev.UserInput != nil {
+				published <- *ev.UserInput
+			}
+		})
+		resolved := make(chan protocol.UserInputResponse, 1)
+		go func() {
+			response, _ := a.RequestUserInput(context.Background(), request)
+			resolved <- response
+		}()
+		<-published
+		if err := a.ReplyUserInput(protocol.UserInputResponse{RequestID: request.ID, Answers: []protocol.UserInputAnswer{{QuestionID: "name", Answer: "Snow"}}}); err != nil {
+			t.Fatal(err)
+		}
+		if response := <-resolved; response.Answers[0].Answer != "Snow" {
+			t.Fatalf("response = %+v", response)
+		}
+	})
+}
+
+func TestAppRejectsInvalidResponseConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts Options
+		want string
+	}{
+		{name: "summary", opts: Options{ReasoningSummary: "full"}, want: "invalid reasoning summary"},
+		{name: "verbosity", opts: Options{TextVerbosity: "maximum"}, want: "invalid text verbosity"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.opts.Provider = "fake"
+			tc.opts.NoSession = true
+			tc.opts.Permission = "allow"
+			tc.opts.CWD = t.TempDir()
+			_, err := New(context.Background(), tc.opts)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestAppCachesProviderModelsAtStartup(t *testing.T) {
+	a, err := New(context.Background(), Options{
+		Provider:   "fake",
+		Model:      "explicit-model",
+		NoSession:  true,
+		Permission: "allow",
+		CWD:        t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if len(a.Models) == 0 {
+		t.Fatal("startup should cache the provider model catalog even with an explicit model")
+	}
+}
+
+func TestAppCreatesRouterForInitiallyEmptyMutableMCPCatalog(t *testing.T) {
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "mutable", Version: "1"}, nil)
+	server.AddTool(&sdkmcp.Tool{Name: "later", InputSchema: json.RawMessage(`{"type":"object"}`)}, nil)
+	server.RemoveTools("later")
+	httpServer := httptest.NewServer(sdkmcp.NewStreamableHTTPHandler(func(_ *http.Request) *sdkmcp.Server {
+		return server
+	}, &sdkmcp.StreamableHTTPOptions{Stateless: true}))
+	defer httpServer.Close()
+
+	a, err := New(context.Background(), Options{
+		Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
+		MCPServers: []publicmcp.ServerSpec{{ID: "mutable", URL: httpServer.URL}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if a.Router == nil {
+		t.Fatal("mutable MCP tools capability should create an empty deferred router")
+	}
+	if _, ok := a.Registry.Get("search_tools"); !ok {
+		t.Fatal("search_tools should be available before the first tools/list_changed notification")
+	}
+}
+
+func TestAppChatGPTCatalogProvider(t *testing.T) {
+	a, err := New(context.Background(), Options{
+		Provider:   "chatgpt",
+		NoSession:  true,
+		Permission: "allow",
+		CWD:        t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if len(a.Models) == 0 || a.Models[0].Provider != "chatgpt" {
+		t.Fatalf("chatgpt catalog = %+v", a.Models)
+	}
+}
 
 // TestAppFakeProviderRoundTrip wires the full app with the fake provider and
 // verifies a prompt produces a session with user + assistant messages.
@@ -97,6 +424,74 @@ func TestAppSessionPersistence(t *testing.T) {
 	}
 }
 
+func TestAppEmptySessionIsNotPersisted(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	t.Setenv("SNOW_SESSIONS_DIR", filepath.Join(dir, "sessions"))
+
+	a, err := New(ctx, Options{Provider: "fake", Permission: "allow", CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := a.Session.Path()
+	if path == "" {
+		t.Fatal("expected a session file path")
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("empty session file still exists (err=%v)", err)
+	}
+}
+
+func TestAppPermissionStatePersistsPerSession(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	dir := t.TempDir()
+	t.Setenv("SNOW_SESSIONS_DIR", filepath.Join(dir, "sessions"))
+
+	a, err := New(context.Background(), Options{Provider: "fake", CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Perm.SetMode(permission.ModeAllow)
+	message := protocol.NewUserMessage("keep", "", "keep session")
+	if err := a.Session.Append(session.Entry{Type: session.EntryMessage, Message: &message}); err != nil {
+		t.Fatal(err)
+	}
+	path := a.Session.Path()
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	a2, err := New(context.Background(), Options{Provider: "fake", CWD: dir, SessionPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := a2.Perm.Mode(); got != permission.ModeAllow {
+		t.Fatalf("reopened permission mode = %q, want allow", got)
+	}
+	a2.Perm.SetMode(permission.ModeAsk)
+	a2.Perm.Remember(permission.Request{Tool: "bash", Risk: permission.RiskExec}, permission.DecisionAllow)
+	if err := a2.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	a3, err := New(context.Background(), Options{Provider: "fake", CWD: dir, SessionPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a3.Close()
+	if got := a3.Perm.Mode(); got != permission.ModeAsk {
+		t.Fatalf("reopened permission mode = %q, want ask", got)
+	}
+	decision, err := a3.Perm.Authorize(context.Background(), permission.Request{Tool: "bash", Risk: permission.RiskExec})
+	if err != nil || decision != permission.DecisionAllow {
+		t.Fatalf("reopened permission rule = %q, %v", decision, err)
+	}
+}
+
 // TestAppContextLoadsAgents verifies AGENTS.md is picked up into the system prompt.
 func TestAppContextLoadsAgents(t *testing.T) {
 	ctx := context.Background()
@@ -129,5 +524,73 @@ func TestAppPermissionDenyBlocksBash(t *testing.T) {
 	defer a.Close()
 	if string(a.Perm.Mode()) != "deny" {
 		t.Fatalf("mode = %s, want deny", a.Perm.Mode())
+	}
+}
+
+func TestAppBuildsRouterAndRegistersSearchToolsForDeferredCatalog(t *testing.T) {
+	a, err := New(context.Background(), Options{
+		Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
+		GoPlugins: []publicplugin.Plugin{appDeferredPlugin{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if a.Router == nil || a.Router.DeferredCount() != 2 {
+		t.Fatalf("router = %#v", a.Router)
+	}
+	if _, ok := a.Registry.Get("search_tools"); !ok {
+		t.Fatal("search_tools was not registered")
+	}
+	if _, ok := a.Registry.Get("plugin_catalog_lookup"); !ok {
+		t.Fatal("deferred plugin tool was not retained in the execution registry")
+	}
+}
+
+func TestAppRegistersDeferredWebFetchByDefault(t *testing.T) {
+	a, err := New(context.Background(), Options{
+		Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if a.Router == nil || a.Router.DeferredCount() != 1 {
+		t.Fatalf("router = %#v", a.Router)
+	}
+	desc, ok := a.Registry.Descriptor("webfetch")
+	if !ok || desc.Risk != permission.RiskNet || desc.Schema.Discovery == nil || desc.Schema.Discovery.Mode != protocol.ToolDiscoveryDeferred {
+		t.Fatalf("webfetch descriptor = %+v", desc)
+	}
+	ask, ok := a.Registry.Descriptor("ask_user")
+	if !ok || ask.Risk != permission.RiskRead || ask.Schema.Discovery != nil {
+		t.Fatalf("ask_user descriptor = %+v", ask)
+	}
+	if _, ok := a.Registry.Get("search_tools"); !ok {
+		t.Fatal("search_tools was not registered for deferred webfetch")
+	}
+	matches, err := a.Router.Search(context.Background(), "fetch and summarize this website URL", 5)
+	if err != nil || len(matches) == 0 || matches[0].ID != "webfetch" {
+		t.Fatalf("webfetch routing matches = %+v, err=%v", matches, err)
+	}
+}
+
+func TestAppWithoutDeferredToolsKeepsExistingDirectPath(t *testing.T) {
+	a, err := New(context.Background(), Options{
+		Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
+		Tools: []string{"read", "write", "edit", "bash", "grep", "glob"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if a.Router != nil {
+		t.Fatalf("unexpected router for direct-only catalog: %#v", a.Router)
+	}
+	if _, ok := a.Registry.Get("search_tools"); ok {
+		t.Fatal("search_tools should not add schema overhead without deferred tools")
+	}
+	if _, ok := a.Registry.Get("ask_user"); ok {
+		t.Fatal("explicit tool allowlist unexpectedly retained ask_user")
 	}
 }

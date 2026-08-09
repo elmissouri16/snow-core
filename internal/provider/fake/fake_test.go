@@ -158,7 +158,7 @@ func TestDefaultModels(t *testing.T) {
 
 func TestResolveNil(t *testing.T) {
 	p := New(nil)
-	if err := p.Resolve(context.Background(), auth.Credential{}); err != nil {
+	if _, err := p.Resolve(context.Background(), auth.Credential{}); err != nil {
 		t.Fatalf("Resolve should always succeed: %v", err)
 	}
 }

@@ -27,6 +27,22 @@ func TestPlannerKeepsTail(t *testing.T) {
 	}
 }
 
+func TestPlannerKeepsMinimumTail(t *testing.T) {
+	// With a huge budget, at least the last 4 messages must survive even for
+	// short conversations (regression: the walk bound was inverted).
+	msgs := []protocol.Message{
+		mkMsg("1", "", "hello"),
+		mkMsg("2", "", "world"),
+		mkMsg("3", "", "foo"),
+		mkMsg("4", "", "bar"),
+		mkMsg("5", "", "baz"),
+	}
+	plan := Planner(msgs, 1<<30)
+	if tail := len(msgs) - plan.KeepFrom; tail < 4 {
+		t.Fatalf("tail = %d messages, want >= 4 (KeepFrom=%d)", tail, plan.KeepFrom)
+	}
+}
+
 func TestPlannerSmallConversation(t *testing.T) {
 	msgs := []protocol.Message{
 		mkMsg("1", "", "hello"),
@@ -66,6 +82,13 @@ func TestApplyAppendsSummary(t *testing.T) {
 	}
 	if res.BeforeEntries <= 0 || res.AfterEntries <= 0 {
 		t.Fatal("expected entry counts")
+	}
+	projected, err := st.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected) != res.RetainedMessages+1 || projected[0].Role != protocol.RoleCustom {
+		t.Fatalf("projected context = %+v, result = %+v", projected, res)
 	}
 }
 

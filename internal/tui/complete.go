@@ -7,34 +7,76 @@ type commandSpec struct {
 	name    string
 	desc    string
 	argHint string
+	// requiresArg marks commands whose no-arg form is meaningless and that
+	// must therefore be inserted into the editor for argument completion
+	// instead of run immediately when picked from the palette.
+	requiresArg bool
 }
 
 // commands is the registry shown by the "/" palette and /help.
 var commands = []commandSpec{
+	{name: "/agent", desc: "inspect agents or configure concurrency", argHint: "[path | concurrency N]"},
 	{name: "/allow", desc: "approve a pending permission request", argHint: "[always]"},
+	{name: "/compact", desc: "compact older conversation context"},
+	{name: "/default", desc: "switch to Default collaboration mode"},
 	{name: "/deny", desc: "deny a pending permission request"},
 	{name: "/help", desc: "show command help"},
-	{name: "/login", desc: "store an API key for a provider", argHint: "<provider>"},
-	{name: "/logout", desc: "remove a stored credential", argHint: "<provider>"},
-	{name: "/model", desc: "switch model", argHint: "<id>"},
+	{name: "/goal", desc: "show or control a persistent thread goal", argHint: "[objective|edit|pause|resume|clear]"},
+	{name: "/login", desc: "choose a provider and store its API key", argHint: "<provider>"},
+	{name: "/logout", desc: "remove a stored credential", argHint: "<provider>", requiresArg: true},
+	{name: "/mcp", desc: "inspect configured MCP server status"},
+	{name: "/model", desc: "pick a model (persisted)", argHint: "<id>"},
 	{name: "/new", desc: "start a new session"},
-	{name: "/permission", desc: "set permission mode", argHint: "ask|allow|deny"},
+	{name: "/permissions", desc: "choose permission mode", argHint: "ask|allow|deny"},
+	{name: "/plan", desc: "switch to Plan mode", argHint: "[message]"},
 	{name: "/quit", desc: "exit snow"},
-	{name: "/session", desc: "show session info"},
+	{name: "/resume", desc: "resume a session for this directory", argHint: "[path]"},
+	{name: "/sessions", desc: "choose a session for this directory"},
+	{name: "/settings", desc: "configure model and response behavior"},
+	{name: "/skills", desc: "inspect discovered Agent Skills"},
+	{name: "/tree", desc: "navigate branches in this session"},
+	{name: "/thinking", desc: "choose reasoning effort", argHint: "[off|minimal|low|medium|high]"},
 	{name: "/trust", desc: "show or set project trust", argHint: "[allow|deny]"},
 }
 
-// completeCommand returns commands matching the typed prefix (without the
-// leading '/'), case-insensitive, in registry order. Empty prefix returns all.
+// completeCommand returns exact/prefix matches first, followed by stable
+// subsequence matches. Empty prefix returns the complete registry so /help
+// and tests can still enumerate every command; the palette applies its own
+// display cap.
 func completeCommand(prefix string) []string {
-	prefix = strings.ToLower(prefix)
-	var out []string
-	for _, c := range commands {
-		if strings.HasPrefix(strings.ToLower(c.name), "/"+prefix) {
+	prefix = strings.ToLower(strings.TrimPrefix(prefix, "/"))
+	if prefix == "" {
+		out := make([]string, 0, len(commands))
+		for _, c := range commands {
 			out = append(out, c.name)
 		}
+		return out
 	}
-	return out
+	var out []string
+	var fuzzy []string
+	for _, c := range commands {
+		name := strings.ToLower(strings.TrimPrefix(c.name, "/"))
+		switch {
+		case name == prefix, strings.HasPrefix(name, prefix):
+			out = append(out, c.name)
+		case len(prefix) >= 3 && subsequenceMatch(name, prefix):
+			fuzzy = append(fuzzy, c.name)
+		}
+	}
+	return append(out, fuzzy...)
+}
+
+func subsequenceMatch(value, query string) bool {
+	if query == "" {
+		return true
+	}
+	qi := 0
+	for _, r := range value {
+		if qi < len(query) && byte(r) == query[qi] {
+			qi++
+		}
+	}
+	return qi == len(query)
 }
 
 // isCommandPrefix reports whether the editor text is a slash-command first
@@ -58,29 +100,49 @@ func commandByExact(name string) (commandSpec, bool) {
 }
 
 // needsArgs reports whether a command should be inserted into the editor for
-// argument completion rather than run immediately.
+// argument completion rather than run immediately. Only commands whose no-arg
+// form is meaningless need this: the rest (e.g. /login, /permissions, /trust)
+// have real no-arg behavior and must run immediately so their pickers or
+// status output appear.
 func (c commandSpec) needsArgs() bool {
-	return c.argHint != ""
+	return c.requiresArg
 }
 
-// formatCommandList renders a compact one-line reference for /help.
+// formatCommandList renders a readable grouped reference for /help. Each
+// command gets its own row so the list remains useful on narrow terminals.
 func formatCommandList() string {
 	var b strings.Builder
+	b.WriteString("Commands\n")
 	for _, c := range commands {
+		b.WriteString("  ")
 		b.WriteString(c.name)
 		if c.argHint != "" {
-			b.WriteString(" " + c.argHint)
+			b.WriteString(" ")
+			b.WriteString(c.argHint)
 		}
-		b.WriteString(" — " + c.desc + " · ")
+		b.WriteString(" — ")
+		b.WriteString(c.desc)
+		b.WriteByte('\n')
 	}
-	return strings.TrimSuffix(b.String(), " · ")
+	b.WriteString("\nShortcuts\n")
+	for _, binding := range tuiKeys.FullHelp()[0] {
+		b.WriteString("  ")
+		b.WriteString(binding.Help().Key)
+		b.WriteString(" — ")
+		b.WriteString(binding.Help().Desc)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // renderCompletions renders the palette lines: name + dimmed description
 // (+ arg hint), selected line highlighted, truncated to width.
 func renderCompletions(matches []string, selected int, width int) string {
-	if len(matches) == 0 || width <= 0 {
+	if width <= 0 {
 		return ""
+	}
+	if len(matches) == 0 {
+		return styleCompletion.Render("  no matching commands")
 	}
 	var b strings.Builder
 	for i, name := range matches {

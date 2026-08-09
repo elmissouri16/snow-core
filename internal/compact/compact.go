@@ -1,5 +1,5 @@
-// Package compact implements context compaction: summarizing older turns and
-// replacing them with a single summary entry to free context window.
+// Package compact implements manual context compaction: summarizing older
+// turns and recording a logical boundary while preserving append-only history.
 package compact
 
 import (
@@ -17,13 +17,15 @@ type Summarizer func(ctx context.Context, msgs []protocol.Message) (string, erro
 // Result describes a completed compaction.
 type Result struct {
 	// SummarizedMessages counts the messages folded into the summary entry.
-	// NOTE: v1 compaction appends a summary entry but does not rewrite the
-	// tree, so these messages remain loadable; full span replacement is a
-	// phase-4 refinement (see package doc).
+	// History remains physically available; ContextMessages projects the
+	// summary plus retained tail to providers.
 	SummarizedMessages int
+	RetainedMessages   int
 	Summary            string
-	BeforeEntries      int
-	AfterEntries       int
+	// BeforeEntries is the message count before compaction; AfterEntries is
+	// the same count plus the appended marker entry (which is not a message).
+	BeforeEntries int
+	AfterEntries  int
 }
 
 // Plan describes what compaction would do, without applying it.
@@ -46,10 +48,12 @@ func Planner(msgs []protocol.Message, maxTokens int) Plan {
 		return Plan{KeepFrom: 0, EstimatedTokens: estimateTokens(msgs)}
 	}
 	// Walk backwards accumulating "tokens" (chars/4 heuristic) until we reach
-	// maxTokens or the keepMin boundary.
+	// maxTokens or the keepMin boundary. The bound is len(msgs)-keepMin so the
+	// retained tail never shrinks below the last keepMin messages, even when
+	// the budget is huge or the conversation is short.
 	tokens := 0
 	keep := len(msgs)
-	for i := len(msgs) - 1; i >= keepMin; i-- {
+	for i := len(msgs) - 1; i >= len(msgs)-keepMin; i-- {
 		t := estimateTokens(msgs[i : i+1])
 		if tokens+t > maxTokens && tokens > 0 {
 			break
@@ -63,9 +67,9 @@ func Planner(msgs []protocol.Message, maxTokens int) Plan {
 	return plan
 }
 
-// Apply compacts the session: candidates are summarized and replaced in place.
-// Because sessions are append-only, compaction writes a compaction entry
-// carrying the summary and marks the branch tip at the last retained message.
+// Apply compacts the session by appending a marker that records the summary and
+// the last compacted message. ContextMessages uses that marker to project the
+// summary plus retained tail without deleting history.
 func Apply(ctx context.Context, st session.Store, summarizer Summarizer, plan Plan) (Result, error) {
 	if len(plan.CompactionCandidates) == 0 {
 		return Result{}, nil
@@ -80,28 +84,22 @@ func Apply(ctx context.Context, st session.Store, summarizer Summarizer, plan Pl
 		return Result{}, err
 	}
 
-	// Determine the id of the message just before KeepFrom so we can branch
-	// the summary entry there.
-	// Note: entries are appended at the tip, so we need the retained tail.
-	// This simple implementation appends the summary at the current tip and
-	// reports counts; full tree rewriting is a phase-4 refinement.
-	before := len(msgs)
-	_ = before
-
 	entry := session.Entry{
-		Type:    session.EntryCompaction,
-		Summary: summary,
+		Type:             session.EntryCompaction,
+		Summary:          summary,
+		CompactedThrough: plan.CompactionCandidates[len(plan.CompactionCandidates)-1].ID,
 	}
 	if err := st.Append(entry); err != nil {
 		return Result{}, err
 	}
 
-	afterMsgs, _ := st.Messages()
 	return Result{
 		SummarizedMessages: plan.KeepFrom,
+		RetainedMessages:   len(msgs) - plan.KeepFrom,
 		Summary:            summary,
 		BeforeEntries:      len(msgs),
-		AfterEntries:       len(afterMsgs),
+		// The marker entry is appended but is not a message.
+		AfterEntries: len(msgs) + 1,
 	}, nil
 }
 
@@ -134,8 +132,8 @@ func DefaultSummarizer(ctx context.Context, msgs []protocol.Message) (string, er
 		if text == "" {
 			continue
 		}
-		if len(text) > 200 {
-			text = text[:200] + "…"
+		if r := []rune(text); len(r) > 200 {
+			text = string(r[:200]) + "…"
 		}
 		fmt.Fprintf(&b, "- %s: %s\n", m.Role, text)
 		if i >= 20 {

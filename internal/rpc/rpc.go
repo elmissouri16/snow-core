@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/snow-core/snow/internal/app"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -21,11 +22,13 @@ import (
 
 // Request is one command line from the client.
 type Request struct {
-	ID      string          `json:"id,omitempty"`
-	Type    string          `json:"type"`
-	Message string          `json:"message,omitempty"`
-	Model   string          `json:"model,omitempty"`
-	Params  json.RawMessage `json:"params,omitempty"`
+	ID       string          `json:"id,omitempty"`
+	Type     string          `json:"type"`
+	Message  string          `json:"message,omitempty"`
+	Model    string          `json:"model,omitempty"`
+	Thinking string          `json:"thinking,omitempty"`
+	Mode     string          `json:"mode,omitempty"`
+	Params   json.RawMessage `json:"params,omitempty"`
 }
 
 // Response acknowledges a command.
@@ -35,29 +38,89 @@ type Response struct {
 	Command string `json:"command,omitempty"`
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
+	Data    any    `json:"data,omitempty"`
 }
 
 // Server serves RPC on stdin/stdout.
 type Server struct {
-	in  io.Reader
-	out io.Writer
-	app *app.App
-	mu  sync.Mutex
+	in            io.Reader
+	out           io.Writer
+	app           *app.App
+	mu            sync.Mutex
+	writeErr      error
+	writeFailed   chan struct{}
+	writeFailOnce sync.Once
 	// cancel aborts the in-flight prompt.
-	cancel context.CancelFunc
+	cancel     context.CancelFunc
+	promptDone chan struct{}
+	promptWG   sync.WaitGroup
 }
 
 // New creates an RPC server.
 func New(ctx context.Context, a *app.App, in io.Reader, out io.Writer) *Server {
-	return &Server{in: in, out: out, app: a}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	a.EnableUserInputReplies()
+	return &Server{in: in, out: out, app: a, writeFailed: make(chan struct{})}
 }
 
 // Serve reads commands until EOF.
 func (s *Server) Serve(ctx context.Context) error {
-	scanner := bufio.NewScanner(s.in)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	serveCtx, cancelServe := context.WithCancel(ctx)
+	defer cancelServe()
+	type scanResult struct {
+		line string
+		err  error
+		done bool
+	}
+	scans := make(chan scanResult, 1)
+	scanStop := make(chan struct{})
+	defer close(scanStop)
+	go func() {
+		scanner := bufio.NewScanner(s.in)
+		scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+		for scanner.Scan() {
+			select {
+			case scans <- scanResult{line: scanner.Text()}:
+			case <-scanStop:
+				return
+			}
+		}
+		select {
+		case scans <- scanResult{err: scanner.Err(), done: true}:
+		case <-scanStop:
+		}
+	}()
+	for {
+		var line string
+		select {
+		case <-s.writeFailed:
+			goto finish
+		case <-ctx.Done():
+			if closer, ok := s.in.(io.Closer); ok {
+				_ = closer.Close()
+			}
+			cancelServe()
+			goto finish
+		case result := <-scans:
+			if result.done {
+				if result.err != nil && serveCtx.Err() == nil && ctx.Err() == nil {
+					return result.err
+				}
+				goto finish
+			}
+			if result.err != nil {
+				if serveCtx.Err() != nil {
+					goto finish
+				}
+				return result.err
+			}
+			line = result.line
+		}
 		if len(line) == 0 {
 			continue
 		}
@@ -66,18 +129,37 @@ func (s *Server) Serve(ctx context.Context) error {
 			s.write(Response{ID: req.ID, Type: "response", Command: "invalid", Success: false, Error: "invalid JSON: " + err.Error()})
 			continue
 		}
-		if err := s.handle(ctx, req); err != nil {
-			s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error()})
+		if err := s.handle(serveCtx, req); err != nil {
+			_ = s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error()})
 		}
 	}
-	return scanner.Err()
+finish:
+	// No more replies can arrive after EOF or cancellation. Release pending/future interaction
+	// and wait commands. Ordinary prompts retain their own documented join path.
+	cancelServe()
+	s.app.CloseUserInput()
+	s.mu.Lock()
+	done := s.promptDone
+	s.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+	s.promptWG.Wait()
+	s.mu.Lock()
+	writeErr := s.writeErr
+	s.mu.Unlock()
+	return writeErr
 }
 
 func (s *Server) handle(ctx context.Context, req Request) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	switch req.Type {
 	case "prompt":
 		return s.handlePrompt(ctx, req)
 	case "abort":
+		s.app.Agent.Abort()
 		s.mu.Lock()
 		if s.cancel != nil {
 			s.cancel()
@@ -85,27 +167,273 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		s.mu.Unlock()
 		s.write(Response{ID: req.ID, Type: "response", Command: "abort", Success: true})
 		return nil
+	case "user_input_reply":
+		var response protocol.UserInputResponse
+		if len(req.Params) == 0 {
+			return errors.New("user_input_reply requires params")
+		}
+		if err := json.Unmarshal(req.Params, &response); err != nil {
+			return fmt.Errorf("user_input_reply params: %w", err)
+		}
+		if err := s.app.ReplyUserInput(response); err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: "user_input_reply", Success: true})
+		return nil
+	case "user_input_reject":
+		var payload struct {
+			RequestID string `json:"request_id"`
+		}
+		if len(req.Params) == 0 {
+			return errors.New("user_input_reject requires params")
+		}
+		if err := json.Unmarshal(req.Params, &payload); err != nil {
+			return fmt.Errorf("user_input_reject params: %w", err)
+		}
+		if payload.RequestID == "" {
+			return errors.New("user_input_reject requires request_id")
+		}
+		if err := s.app.RejectUserInput(payload.RequestID); err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: "user_input_reject", Success: true})
+		return nil
+	case "subagent_spawn":
+		var p protocol.SpawnSubagentRequest
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return err
+		}
+		state, err := s.app.SpawnSubagent(ctx, p)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: state})
+		return nil
+	case "subagent_send_message", "subagent_followup":
+		var p struct {
+			Target  string `json:"target"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return err
+		}
+		var err error
+		if req.Type == "subagent_followup" {
+			err = s.app.FollowupSubagent(ctx, p.Target, p.Message)
+		} else {
+			err = s.app.SendSubagentMessage(ctx, p.Target, p.Message)
+		}
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true})
+		return nil
+	case "subagent_wait":
+		var p struct {
+			TimeoutMS int    `json:"timeout_ms"`
+			Until     string `json:"until,omitempty"`
+		}
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				return err
+			}
+		}
+		s.promptWG.Add(1)
+		go func() {
+			defer s.promptWG.Done()
+			var (
+				res protocol.WaitSubagentsResult
+				err error
+			)
+			switch p.Until {
+			case "", "activity":
+				res, err = s.app.WaitSubagents(ctx, time.Duration(p.TimeoutMS)*time.Millisecond)
+			case "all":
+				res, err = s.app.WaitSubagentsUntilAll(ctx, time.Duration(p.TimeoutMS)*time.Millisecond)
+			default:
+				err = fmt.Errorf("rpc: invalid subagent_wait mode %q (use activity or all)", p.Until)
+			}
+			if err != nil {
+				s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error()})
+				return
+			}
+			s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: res})
+		}()
+		return nil
+	case "subagent_interrupt":
+		var p struct {
+			Target string `json:"target"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return err
+		}
+		previous, err := s.app.InterruptSubagent(ctx, p.Target)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: map[string]any{"previous_status": previous}})
+		return nil
+	case "subagent_list":
+		var p struct {
+			PathPrefix string `json:"path_prefix"`
+		}
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				return err
+			}
+		}
+		list, err := s.app.ListSubagents(ctx, p.PathPrefix)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: list})
+		return nil
+	case "subagent_get":
+		var p struct {
+			Target string `json:"target"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return err
+		}
+		state, err := s.app.Subagent(ctx, p.Target)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: state})
+		return nil
+	case "subagent_ready":
+		if err := s.app.ReadySubagents(); err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true})
+		return nil
+	case "goal_get":
+		g, err := s.app.GoalState()
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: g})
+		return nil
+	case "goal_set", "goal_create":
+		var p struct {
+			Objective   string `json:"objective"`
+			TokenBudget *int64 `json:"token_budget"`
+			Replace     bool   `json:"replace"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return err
+		}
+		g, err := s.app.CreateGoal(p.Objective, p.TokenBudget, p.Replace)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: g})
+		return nil
+	case "goal_edit":
+		var p struct {
+			Objective string `json:"objective"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return err
+		}
+		g, err := s.app.EditGoal(p.Objective)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: g})
+		return nil
+	case "goal_pause", "goal_resume":
+		var g *protocol.ThreadGoal
+		var err error
+		if req.Type == "goal_pause" {
+			g, err = s.app.PauseGoal()
+		} else {
+			g, err = s.app.ResumeGoal()
+		}
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: g})
+		return nil
+	case "goal_clear":
+		before, err := s.app.GoalState()
+		if err != nil {
+			return err
+		}
+		if err := s.app.ClearGoal(); err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: map[string]bool{"cleared": before != nil}})
+		return nil
+	case "goal_continue":
+		if err := s.app.ContinueGoal(); err != nil {
+			return err
+		}
+		g, err := s.app.GoalState()
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: g})
+		return nil
 	case "set_model":
 		if req.Model == "" {
 			return errors.New("set_model requires model")
 		}
-		m := s.app.Model
-		m.ID = req.Model
-		if err := s.app.Agent.SetModel(m); err != nil {
+		m := protocol.Model{Provider: s.app.ProviderID, ID: req.Model, SupportsTools: true}
+		for _, cached := range s.app.Models {
+			if cached.ID == req.Model {
+				m = cached
+				break
+			}
+		}
+		if err := s.app.SetModel(m); err != nil {
 			return err
 		}
-		s.write(Response{ID: req.ID, Type: "response", Command: "set_model", Success: true})
+		if err := s.write(Response{ID: req.ID, Type: "response", Command: "set_model", Success: true}); err != nil {
+			return err
+		}
+		return nil
+	case "set_mode":
+		mode, err := protocol.ParseCollaborationMode(req.Mode)
+		if err != nil {
+			return err
+		}
+		if err := s.app.Agent.SetMode(mode); err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: "set_mode", Success: true})
+		return nil
+	case "set_thinking":
+		if req.Thinking == "" {
+			return errors.New("set_thinking requires thinking")
+		}
+		level, err := protocol.ParseThinkingLevel(req.Thinking)
+		if err != nil {
+			return err
+		}
+		if err := s.app.Agent.SetThinking(level); err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: "set_thinking", Success: true})
 		return nil
 	case "session_info":
+		model := s.app.Agent.Model()
 		info := map[string]any{
-			"session_id": s.app.Session.ID(),
-			"path":       s.app.Session.Path(),
-			"cwd":        s.app.CWD(),
-			"provider":   s.app.ProviderID,
-			"model":      s.app.Model.ID,
+			"session_id":         s.app.Session.ID(),
+			"path":               s.app.Session.Path(),
+			"cwd":                s.app.CWD(),
+			"provider":           s.app.ProviderID,
+			"model":              model.ID,
+			"thinking":           s.app.Agent.Thinking(),
+			"thinking_levels":    model.SupportedThinkingLevels(),
+			"collaboration_mode": s.app.Agent.Mode(),
 		}
-		b, _ := json.Marshal(info)
-		s.write(Response{ID: req.ID, Type: "response", Command: "session_info", Success: true, Error: string(b)})
+		goal, _ := s.app.GoalState()
+		if goal != nil {
+			info["goal"] = map[string]any{"goal_id": goal.GoalID, "status": goal.Status, "tokens_used": goal.TokensUsed, "token_budget": goal.TokenBudget}
+		}
+		info["subagents"] = map[string]any{"enabled": s.app.Subagents != nil, "max_concurrent_agents": s.app.Cfg.Subagents.MaxConcurrentThreads, "max_concurrent_threads": s.app.Cfg.Subagents.MaxConcurrentThreads, "max_agents_per_session": s.app.Cfg.Subagents.MaxAgentsPerSession, "max_depth": s.app.Cfg.Subagents.MaxDepth, "durable": s.app.Cfg.Subagents.Durable, "allow_mutation": s.app.Cfg.Subagents.AllowMutation}
+		s.write(Response{ID: req.ID, Type: "response", Command: "session_info", Success: true, Data: info})
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", req.Type)
@@ -113,33 +441,106 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 }
 
 func (s *Server) handlePrompt(ctx context.Context, req Request) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if req.Message == "" {
 		return errors.New("prompt requires message")
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	s.mu.Lock()
-	if s.cancel != nil {
-		s.cancel()
+	if req.Mode != "" {
+		if _, err := protocol.ParseCollaborationMode(req.Mode); err != nil {
+			return err
+		}
 	}
+	// Cancel and join the prior prompt before starting another one. Serve keeps
+	// scanning while the new prompt runs, enabling abort and user-input replies.
+	s.mu.Lock()
+	priorCancel := s.cancel
+	priorDone := s.promptDone
+	s.mu.Unlock()
+	if priorCancel != nil {
+		priorCancel()
+	}
+	if priorDone != nil {
+		<-priorDone
+	}
+
+	promptCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	s.mu.Lock()
 	s.cancel = cancel
+	s.promptDone = done
 	s.mu.Unlock()
 
 	s.write(Response{ID: req.ID, Type: "response", Command: "prompt", Success: true})
-	return s.app.Agent.Prompt(ctx, req.Message)
+	s.promptWG.Add(1)
+	go func() {
+		defer s.promptWG.Done()
+		var err error
+		if req.Mode != "" {
+			mode, parseErr := protocol.ParseCollaborationMode(req.Mode)
+			if parseErr != nil {
+				err = parseErr
+			} else {
+				err = s.app.Agent.PromptWithMode(promptCtx, req.Message, mode)
+			}
+		} else {
+			err = s.app.Agent.Prompt(promptCtx, req.Message)
+		}
+		if err != nil && !errors.Is(err, context.Canceled) {
+			s.write(Response{ID: req.ID, Type: "response", Command: "prompt", Success: false, Error: err.Error()})
+		}
+		close(done)
+		s.mu.Lock()
+		if s.promptDone == done {
+			s.promptDone = nil
+			s.cancel = nil
+		}
+		s.mu.Unlock()
+	}()
+	return nil
 }
 
-func (s *Server) write(v any) {
+func (s *Server) write(v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
+		s.recordWriteErr(err)
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	payload := append(b, '\n')
+	n, err := s.out.Write(payload)
+	if err == nil && n != len(payload) {
+		err = io.ErrShortWrite
+	}
+	if err != nil && s.writeErr == nil {
+		s.writeErr = err
+		s.writeFailOnce.Do(func() { close(s.writeFailed) })
+	}
+	return err
+}
+
+func (s *Server) recordWriteErr(err error) {
+	if err == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, _ = s.out.Write(append(b, '\n'))
+	if s.writeErr == nil {
+		s.writeErr = err
+		s.writeFailOnce.Do(func() { close(s.writeFailed) })
+	}
 }
 
 // Main is the RPC entry point used by cmd/snow --mode rpc.
 func Main(ctx context.Context, opts app.Options) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	a, err := app.New(ctx, opts)
 	if err != nil {
 		return err
@@ -152,5 +553,12 @@ func Main(ctx context.Context, opts app.Options) error {
 	a.Agent.Subscribe(func(ev protocol.AgentEvent) {
 		srv.write(ev)
 	})
+	srv.write(a.Agent.StateEvent())
+	if err := a.ReadyGoal(); err != nil {
+		return err
+	}
+	if err := a.ReadySubagents(); err != nil {
+		return err
+	}
 	return srv.Serve(ctx)
 }

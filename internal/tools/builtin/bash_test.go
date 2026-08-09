@@ -121,6 +121,16 @@ func TestBash_CWDRespected(t *testing.T) {
 // TestBashModelTimeoutBoundedByCap: a model-supplied timeout_ms must never
 // override the operator-configured cap (b.Timeout). With a 50ms cap and a
 // 60s model timeout, the command must still be killed at ~50ms.
+func TestBashHugeTimeoutDoesNotOverflow(t *testing.T) {
+	b := NewBash()
+	b.Timeout = time.Second
+	maxInt := int(^uint(0) >> 1)
+	res := runBash(b, t.TempDir(), map[string]any{"command": "printf ok", "timeout_ms": maxInt})
+	if res.IsError || res.Content[0].Text != "ok" {
+		t.Fatalf("huge timeout overflowed: %+v", res)
+	}
+}
+
 func TestBashModelTimeoutBoundedByCap(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("timeout kill test skipped on windows")

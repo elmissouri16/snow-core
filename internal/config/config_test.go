@@ -1,9 +1,12 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	publicmcp "github.com/snow-core/snow/pkg/mcp"
 )
 
 func TestLoadMissingFileReturnsDefaults(t *testing.T) {
@@ -16,6 +19,154 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	}
 	if cfg.PermissionMode != "ask" {
 		t.Fatalf("default permission = %q", cfg.PermissionMode)
+	}
+	if cfg.ReasoningSummary != "auto" || cfg.TextVerbosity != "low" {
+		t.Fatalf("response defaults = summary:%q verbosity:%q", cfg.ReasoningSummary, cfg.TextVerbosity)
+	}
+}
+
+func TestSectionUpdatesPreserveUnknownFieldsAndPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"future":{"kept":true},"thinking":"high"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateMCPServers(path, true, func(servers map[string]publicmcp.ServerSpec) error {
+		servers["demo"] = publicmcp.ServerSpec{Command: "demo-mcp"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateSkills(path, func(skills *SkillsConfig) error {
+		skills.Overrides["review"] = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["future"]; !ok || string(raw["thinking"]) != `"high"` {
+		t.Fatalf("unknown fields were not preserved: %s", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %o, want 600", info.Mode().Perm())
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MCPServers["demo"].Command != "demo-mcp" || cfg.Skills.Overrides["review"] {
+		t.Fatalf("updated config = %+v", cfg)
+	}
+}
+
+func TestProjectSkillUpdateUsesTriStatePolicy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".snow", "config.json")
+	if err := UpdateProjectSkills(path, func(skills *ProjectSkillsConfig) error {
+		disabled := true
+		skills.Disabled = &disabled
+		skills.Overrides["review"] = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	extensions, err := LoadProjectExtensions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if extensions.Skills.Disabled == nil || !*extensions.Skills.Disabled || !extensions.Skills.Overrides["review"] {
+		t.Fatalf("project skills = %+v", extensions.Skills)
+	}
+}
+
+func TestSubagentDefaultsAndValidation(t *testing.T) {
+	cfg := Default()
+	if cfg.Subagents.Enabled || cfg.Subagents.MaxConcurrentThreads != 4 || cfg.Subagents.MaxDepth != 1 || cfg.Subagents.AllowMutation || !cfg.Subagents.Durable {
+		t.Fatalf("defaults=%+v", cfg.Subagents)
+	}
+	if err := cfg.Subagents.ValidateSubagents(); err != nil {
+		t.Fatal(err)
+	}
+	if !hasTool(cfg.Subagents.Roles["default"].Tools, "bash") {
+		t.Fatal("default role is not shell-capable")
+	}
+	if hasTool(cfg.Subagents.Roles["explorer"].Tools, "bash") {
+		t.Fatal("explorer role unexpectedly exposes bash")
+	}
+	bad := cfg.Subagents
+	bad.MaxConcurrentThreads = 0
+	if err := bad.ValidateSubagents(); err == nil {
+		t.Fatal("accepted zero concurrency")
+	}
+	bad = cfg.Subagents
+	bad.MaxConcurrentThreads = MaxConcurrentSubagents + 1
+	bad.MaxAgentsPerSession = bad.MaxConcurrentThreads
+	if err := bad.ValidateSubagents(); err == nil {
+		t.Fatal("accepted excessive concurrency")
+	}
+	bad = cfg.Subagents
+	bad.MaxDepth = 9
+	if err := bad.ValidateSubagents(); err == nil {
+		t.Fatal("accepted excessive depth")
+	}
+	bad = cfg.Subagents
+	bad.MaxAgentsPerSession = bad.MaxConcurrentThreads - 1
+	if err := bad.ValidateSubagents(); err == nil {
+		t.Fatal("accepted agent limit below child concurrency")
+	}
+	bad = cfg.Subagents
+	bad.MaxResultBytes = 1
+	if err := bad.ValidateSubagents(); err == nil {
+		t.Fatal("accepted unsafe result cap")
+	}
+}
+
+func TestSubagentBashCapabilityIsIndependentFromMutation(t *testing.T) {
+	cfg := Default().Subagents
+	cfg.Roles = map[string]AgentRole{
+		"default": {Tools: []string{"read", "bash"}},
+		"shell":   {Tools: []string{"bash"}},
+	}
+	if err := cfg.ValidateSubagents(); err != nil {
+		t.Fatalf("bash-only role rejected: %v", err)
+	}
+	for _, mutationTool := range []string{"write", "edit"} {
+		cfg.Roles["shell"] = AgentRole{Tools: []string{"bash", mutationTool}}
+		if err := cfg.ValidateSubagents(); err == nil {
+			t.Fatalf("%s accepted without role mutation opt-in", mutationTool)
+		}
+	}
+}
+
+func hasTool(tools []string, want string) bool {
+	for _, name := range tools {
+		if name == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLoadOlderConfigGetsResponseDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"default_provider":"fake","thinking":"off"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningSummary != "auto" || cfg.TextVerbosity != "low" {
+		t.Fatalf("older config defaults = summary:%q verbosity:%q", cfg.ReasoningSummary, cfg.TextVerbosity)
 	}
 }
 
@@ -55,6 +206,17 @@ func TestLoadCorruptFile(t *testing.T) {
 	}
 }
 
+func TestTUIThemeValidation(t *testing.T) {
+	for _, theme := range []string{"", "default", "dark", "light", "high-contrast"} {
+		if err := ValidateTUITheme(theme); err != nil {
+			t.Fatalf("theme %q rejected: %v", theme, err)
+		}
+	}
+	if err := ValidateTUITheme("solarized"); err == nil {
+		t.Fatal("unknown theme accepted")
+	}
+}
+
 func TestDefaults(t *testing.T) {
 	cfg := Default()
 	if cfg.ToolOutputLimit() != DefaultToolOutputBytes {
@@ -70,5 +232,37 @@ func TestOverridesFromEnv(t *testing.T) {
 	dir := GlobalDir()
 	if dir == "" {
 		t.Fatal("expected global dir")
+	}
+}
+
+func TestLoadMCPAndSkillsAndTrustedProjectExtensions(t *testing.T) {
+	global := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(global, []byte(`{"mcp_servers":{"remote":{"url":"https://example.test/mcp"}},"skills":{"dirs":["/opt/skills"],"include_claude":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MCPServers["remote"].URL == "" || len(cfg.Skills.Dirs) != 1 || !cfg.Skills.IncludeClaude {
+		t.Fatalf("config = %+v", cfg)
+	}
+	project := filepath.Join(t.TempDir(), "project.json")
+	if err := os.WriteFile(project, []byte(`{"mcp_servers":{"local":{"command":"mcp-local"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := LoadWithProject(global, project, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.MCPServers["local"].Command != "mcp-local" || merged.MCPServers["remote"].URL == "" {
+		t.Fatalf("merged = %+v", merged.MCPServers)
+	}
+	blocked, err := LoadWithProject(global, project, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := blocked.MCPServers["local"]; ok {
+		t.Fatal("untrusted project MCP server loaded")
 	}
 }

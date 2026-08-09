@@ -14,6 +14,51 @@ import (
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
+// TestAppDefaultModelPrefersProviderDefault verifies that with no configured
+// default model, the app pins the provider's documented default (kimi-k2.6)
+// instead of taking whatever the live catalog lists first (minimax-m3).
+func TestAppDefaultModelPrefersProviderDefault(t *testing.T) {
+	// Isolate from the developer's real ~/.snow (never read or write it).
+	t.Setenv("SNOW_HOME", t.TempDir())
+
+	// Catalog lists minimax-m3 FIRST; kimi-k2.6 is present but later.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"data":[{"id":"minimax-m3"},{"id":"kimi-k2.6"},{"id":"glm-5.2"}]}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if fl != nil {
+			fl.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	a, err := New(ctx, Options{
+		Provider:   "opencode-go",
+		NoSession:  true,
+		Permission: "allow",
+		APIKey:     "test-key",
+		BaseURL:    srv.URL,
+		CWD:        t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	if a.Model.ID != "kimi-k2.6" {
+		t.Fatalf("default model = %q, want kimi-k2.6 (provider pinned default, not catalog[0])", a.Model.ID)
+	}
+}
+
 // TestAppOpenCodeGoEndToEnd wires the real opencode-go provider against a
 // local OpenAI-compatible mock and verifies a tool-call round trip through
 // the agent loop: text → tool_call → tool result → final text.

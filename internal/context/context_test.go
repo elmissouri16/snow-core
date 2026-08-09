@@ -33,9 +33,15 @@ func TestFindAgentsWalksParents(t *testing.T) {
 func TestFindAgentsNearestFirst(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "a")
-	os.MkdirAll(sub, 0o755)
-	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("root"), 0o644)
-	os.WriteFile(filepath.Join(sub, "AGENTS.md"), []byte("sub"), 0o644)
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "AGENTS.md"), []byte("sub"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	l := NewLoader(0, false)
 	files := l.FindAgents(sub)
@@ -49,7 +55,9 @@ func TestFindAgentsNearestFirst(t *testing.T) {
 
 func TestAssembleIncludesPreambleAndAgents(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("use tabs"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("use tabs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	l := NewLoader(10000, false)
 	a := l.Assemble(dir, "", "")
@@ -68,7 +76,9 @@ func TestAssembleIncludesPreambleAndAgents(t *testing.T) {
 func TestAssembleCapTruncates(t *testing.T) {
 	dir := t.TempDir()
 	big := strings.Repeat("x", 5000)
-	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(big), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	l := NewLoader(1000, false)
 	a := l.Assemble(dir, "", "")
@@ -85,7 +95,9 @@ func TestAssembleCapTruncates(t *testing.T) {
 
 func TestCLAUDEOffByDefault(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("claude stuff"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("claude stuff"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	l := NewLoader(10000, false)
 	files := l.FindAgents(dir)

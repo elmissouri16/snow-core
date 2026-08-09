@@ -85,6 +85,23 @@ func TestRead_OffsetLimit(t *testing.T) {
 	}
 }
 
+func TestRead_OffsetLimitPreservesEmptyLines(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "empty-lines.txt")
+	if err := os.WriteFile(file, []byte("first\n\nthird\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRead(NewPathGuard([]string{dir}, dir))
+	offset, limit := 2, 2
+	res, _ := r.Run(context.Background(), argsFor(t, map[string]any{"path": file, "offset": offset, "limit": limit}), stubHost{cwd: dir, roots: []string{dir}})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.Content[0].Text)
+	}
+	if got := res.Content[0].Text; got != "\nthird" {
+		t.Fatalf("window = %q, want empty line plus third", got)
+	}
+}
+
 func TestRead_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 	r := NewRead(NewPathGuard([]string{dir}, dir))

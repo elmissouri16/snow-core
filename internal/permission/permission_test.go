@@ -20,6 +20,21 @@ func TestDenyModeAllowsRead(t *testing.T) {
 	}
 }
 
+func TestDelegateRiskPolicy(t *testing.T) {
+	s := NewService(ModeDeny, nil)
+	if s.CanExpose("spawn_agent", RiskDelegate) {
+		t.Fatal("deny mode exposed delegation")
+	}
+	if d, _ := s.Authorize(context.Background(), fakeReq("spawn_agent", RiskDelegate)); d != DecisionDeny {
+		t.Fatalf("decision=%s", d)
+	}
+	calls := 0
+	s = NewService(ModeAsk, askerFunc(func(context.Context, Request) (Decision, error) { calls++; return DecisionAllow, nil }))
+	if d, _ := s.Authorize(context.Background(), fakeReq("spawn_agent", RiskDelegate)); d != DecisionAllow || calls != 1 {
+		t.Fatalf("ask=%s calls=%d", d, calls)
+	}
+}
+
 func TestAllowModeAllowsEverything(t *testing.T) {
 	s := NewService(ModeAllow, nil)
 	if d, _ := s.Authorize(context.Background(), fakeReq("write", RiskWrite)); d != DecisionAllow {
@@ -106,6 +121,28 @@ func TestModeAccessors(t *testing.T) {
 	s.SetMode(ModeDeny)
 	if s.Mode() != ModeDeny {
 		t.Fatal("SetMode failed")
+	}
+}
+
+func TestStateRestoreAndChangeHandler(t *testing.T) {
+	s := NewService(ModeAsk, nil)
+	req := fakeReq("bash", RiskExec)
+	var changes []State
+	s.SetChangeHandler(func(state State) { changes = append(changes, state) })
+	s.SetMode(ModeAllow)
+	s.Remember(req, DecisionAllow)
+	if len(changes) != 2 || changes[1].Mode != ModeAllow || changes[1].Rules[ruleKey(req)] != DecisionAllow {
+		t.Fatalf("changes = %+v", changes)
+	}
+
+	restored := NewService(ModeDeny, nil)
+	restored.RestoreState(changes[1])
+	if restored.Mode() != ModeAllow {
+		t.Fatalf("restored mode = %q", restored.Mode())
+	}
+	state := restored.State()
+	if state.Rules[ruleKey(req)] != DecisionAllow {
+		t.Fatalf("restored rules = %+v", state.Rules)
 	}
 }
 

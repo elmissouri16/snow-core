@@ -8,8 +8,12 @@ import (
 
 // Options configure the builtin tool set.
 type Options struct {
-	// MaxOutputBytes caps tool output (read, bash). 0 means default.
+	// MaxOutputBytes caps tool output (read, bash, grep, glob, webfetch). 0 means default.
 	MaxOutputBytes int
+	// SearchMaxMatches caps grep matches. 0 means the grep default.
+	SearchMaxMatches int
+	// GlobMaxResults caps glob paths. 0 means the glob default.
+	GlobMaxResults int
 	// BashTimeout caps bash execution. 0 means default.
 	BashTimeout time.Duration
 	// Roots are the allowed path roots for file tools. If empty, file tools
@@ -18,7 +22,7 @@ type Options struct {
 	Roots []string
 }
 
-// RegisterBuiltins registers read, write, edit, bash into reg.
+// RegisterBuiltins registers the default file, search, shell, and deferred web tools into reg.
 func RegisterBuiltins(reg tools.Registry, opts Options) error {
 	cwd := ""
 	guard := NewPathGuard(opts.Roots, cwd)
@@ -27,16 +31,31 @@ func RegisterBuiltins(reg tools.Registry, opts Options) error {
 	write := NewWrite(guard)
 	edit := NewEdit(guard)
 	bash := NewBash()
+	grep := NewGrep(guard)
+	glob := NewGlob(guard)
+	webfetch := NewWebFetch()
+	askUser := NewAskUser()
+	requestUserInput := NewRequestUserInput()
+	updatePlan := NewUpdatePlan()
 
 	if opts.MaxOutputBytes > 0 {
 		read.MaxOutputBytes = opts.MaxOutputBytes
 		bash.MaxOutputBytes = opts.MaxOutputBytes
+		grep.MaxOutputBytes = opts.MaxOutputBytes
+		glob.MaxOutputBytes = opts.MaxOutputBytes
+		webfetch.MaxOutputBytes = opts.MaxOutputBytes
+	}
+	if opts.SearchMaxMatches > 0 {
+		grep.MaxMatches = opts.SearchMaxMatches
+	}
+	if opts.GlobMaxResults > 0 {
+		glob.MaxResults = opts.GlobMaxResults
 	}
 	if opts.BashTimeout > 0 {
 		bash.Timeout = opts.BashTimeout
 	}
 
-	for _, t := range []tools.Tool{read, write, edit, bash} {
+	for _, t := range []tools.Tool{read, write, edit, bash, grep, glob, askUser, requestUserInput, updatePlan, webfetch} {
 		if err := reg.Register(t); err != nil {
 			return err
 		}

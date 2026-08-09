@@ -1,7 +1,6 @@
-// Package plugin implements the out-of-process JSON-RPC tool plugin protocol
-// (IMPLEMENTATION.md §10.3): JSONL on stdin/stdout, handshake via initialize,
-// then tools/list and tools/call. Plugins enable crash isolation and
-// non-Go implementations.
+// Package plugin contains the extension lifecycle manager and process
+// adapters. ExternalHost implements JSON-RPC protocol v2; Host below is a
+// deprecated compatibility wrapper for the original internal test fixture.
 package plugin
 
 import (
@@ -18,8 +17,13 @@ import (
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
-// ProtocolVersion is the plugin protocol version.
-const ProtocolVersion = 1
+// ProtocolVersion is the current external plugin protocol version. Host is a
+// deprecated compatibility wrapper; new code uses ExternalHost.
+const ProtocolVersion = 2
+
+// LegacyProtocolVersion identifies the pre-manager host shape kept only for
+// existing embedders while they migrate to ExternalHost.
+const LegacyProtocolVersion = 1
 
 // Request is one JSON-RPC request line sent to the plugin.
 type Request struct {
@@ -61,8 +65,12 @@ type Host struct {
 	toolCache []tools.ToolSchema
 }
 
-// Spawn starts a plugin binary (or "cmd args..." style command via sh -c).
+// Spawn is the deprecated single-binary compatibility host. New code should
+// use SpawnExternal with an explicit PluginSpec argv.
 func Spawn(ctx context.Context, binPath string, cwd string) (*Host, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	cmd := exec.CommandContext(ctx, binPath)
 	if cwd != "" {
 		cmd.Dir = cwd
@@ -73,10 +81,13 @@ func Spawn(ctx context.Context, binPath string, cwd string) (*Host, error) {
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, fmt.Errorf("plugin: stdout: %w", err)
 	}
 	cmd.Stderr = io.Discard // plugin logs go to stderr; discard by default
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, fmt.Errorf("plugin: start: %w", err)
 	}
 	h := &Host{cmd: cmd, stdin: stdin, stdout: bufio.NewScanner(stdout)}
@@ -86,8 +97,14 @@ func Spawn(ctx context.Context, binPath string, cwd string) (*Host, error) {
 
 // Initialize negotiates the protocol and fetches the tool catalog.
 func (h *Host) Initialize(ctx context.Context) (InitResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var res InitResult
-	params, _ := json.Marshal(map[string]any{"protocol_version": ProtocolVersion})
+	params, err := json.Marshal(map[string]any{"protocol_version": LegacyProtocolVersion})
+	if err != nil {
+		return res, fmt.Errorf("plugin: marshal initialize: %w", err)
+	}
 	if err := h.call(ctx, "initialize", params, &res); err != nil {
 		return res, err
 	}
@@ -102,11 +119,17 @@ func (h *Host) ToolSchemas() []tools.ToolSchema {
 
 // Call invokes a tool.
 func (h *Host) Call(ctx context.Context, name string, args json.RawMessage) (tools.ToolResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var res struct {
 		Content []json.RawMessage `json:"content"`
 		IsError bool              `json:"is_error"`
 	}
-	params, _ := json.Marshal(map[string]any{"name": name, "arguments": json.RawMessage(args)})
+	params, err := json.Marshal(map[string]any{"name": name, "arguments": json.RawMessage(args)})
+	if err != nil {
+		return tools.ErrorResult(fmt.Errorf("plugin: marshal call: %w", err)), err
+	}
 	if err := h.call(ctx, "tools/call", params, &res); err != nil {
 		return tools.ErrorResult(err), err
 	}
@@ -126,13 +149,17 @@ func (h *Host) Close() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.cmd != nil && h.cmd.Process != nil {
-		_ = h.stdin.Close()
-		return h.cmd.Wait()
+		closeErr := h.stdin.Close()
+		waitErr := h.cmd.Wait()
+		return errors.Join(closeErr, waitErr)
 	}
 	return nil
 }
 
 func (h *Host) call(ctx context.Context, method string, params json.RawMessage, out any) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	h.mu.Lock()
 	h.nextID++
 	id := h.nextID
@@ -144,8 +171,12 @@ func (h *Host) call(ctx context.Context, method string, params json.RawMessage, 
 		return err
 	}
 	h.mu.Lock()
-	_, err = h.stdin.Write(append(line, '\n'))
+	payload := append(line, '\n')
+	n, err := h.stdin.Write(payload)
 	h.mu.Unlock()
+	if err == nil && n != len(payload) {
+		err = io.ErrShortWrite
+	}
 	if err != nil {
 		return fmt.Errorf("plugin: write: %w", err)
 	}

@@ -46,5 +46,22 @@ func (s *MemoryStore) Delete(provider string) error {
 	return nil
 }
 
+// Update implements Store.
+func (s *MemoryStore) Update(provider string, fn UpdateFunc) (Credential, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.m[provider]
+	next, save, err := fn(current, exists)
+	if err != nil {
+		return current, exists, err
+	}
+	if save {
+		next.Provider = provider
+		s.m[provider] = next
+		return next, true, nil
+	}
+	return next, exists, nil
+}
+
 // Path implements Store.
 func (s *MemoryStore) Path() string { return s.path }

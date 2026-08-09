@@ -100,7 +100,9 @@ func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 }
 
 // Resolve implements provider.Provider. Always succeeds for the fake.
-func (p *Provider) Resolve(ctx context.Context, creds auth.Credential) error { return nil }
+func (p *Provider) Resolve(ctx context.Context, creds auth.Credential) (auth.Credential, error) {
+	return creds, nil
+}
 
 // Chat implements provider.Provider. It replays the script for this call
 // index (all calls share the script from New) as an EventStream, and records

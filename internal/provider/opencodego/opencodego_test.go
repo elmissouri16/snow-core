@@ -50,6 +50,21 @@ func mustNew(t *testing.T, base, key string) *Provider {
 	return p
 }
 
+// TestLiveDefaultsPinned guards against regressions to the verified production
+// constants: these were confirmed live against https://opencode.ai/zen/go/v1
+// (GET /models → 200 OpenAI list; bad key on /chat/completions → 401 JSON).
+func TestLiveDefaultsPinned(t *testing.T) {
+	if DefaultBaseURL != "https://opencode.ai/zen/go/v1" {
+		t.Errorf("DefaultBaseURL = %q, want https://opencode.ai/zen/go/v1 (verified live)", DefaultBaseURL)
+	}
+	if DefaultModelID != "kimi-k2.6" {
+		t.Errorf("DefaultModelID = %q, want kimi-k2.6 (verified in live /zen/go/v1/models catalog)", DefaultModelID)
+	}
+	if DefaultCatalogURL != "https://models.dev/api.json" {
+		t.Errorf("DefaultCatalogURL = %q, want https://models.dev/api.json", DefaultCatalogURL)
+	}
+}
+
 func drain(t *testing.T, s protocol.EventStream, ctx context.Context) []protocol.StreamEvent {
 	t.Helper()
 	defer s.Close()
@@ -320,6 +335,7 @@ func TestChatRequestBody(t *testing.T) {
 			Name:        "edit",
 			Description: "Edit a file",
 			Parameters:  json.RawMessage(`{"type":"object","required":["path"]}`),
+			Discovery:   &protocol.ToolDiscovery{Mode: protocol.ToolDiscoveryDeferred, Namespace: "files"},
 		}},
 		MaxTokens: 512,
 	})
@@ -384,6 +400,9 @@ func TestChatRequestBody(t *testing.T) {
 	}
 	if !json.Valid(tool.Parameters) || !strings.Contains(string(tool.Parameters), `"required"`) {
 		t.Errorf("tool parameters = %s, want valid schema", tool.Parameters)
+	}
+	if strings.Contains(string(gotBody), `"discovery"`) || strings.Contains(string(gotBody), `"namespace":"files"`) {
+		t.Errorf("host discovery metadata leaked to provider: %s", gotBody)
 	}
 	// roles: system, user, assistant, tool
 	if len(req.Messages) != 4 {
@@ -528,14 +547,14 @@ func TestListModelsRemote(t *testing.T) {
 // TestResolve verifies credential resolution behavior.
 func TestResolve(t *testing.T) {
 	p := mustNew(t, "http://unused", "cfg-key")
-	if err := p.Resolve(context.Background(), auth.Credential{}); err != nil {
+	if _, err := p.Resolve(context.Background(), auth.Credential{}); err != nil {
 		t.Errorf("Resolve with config key should pass, got %v", err)
 	}
 	p2 := mustNew(t, "http://unused", "")
-	if err := p2.Resolve(context.Background(), auth.Credential{Key: "direct"}); err != nil {
+	if _, err := p2.Resolve(context.Background(), auth.Credential{Key: "direct"}); err != nil {
 		t.Errorf("Resolve with credential key should pass, got %v", err)
 	}
-	if err := p2.Resolve(context.Background(), auth.Credential{}); err == nil {
+	if _, err := p2.Resolve(context.Background(), auth.Credential{}); err == nil {
 		t.Error("Resolve with no key should fail")
 	}
 }

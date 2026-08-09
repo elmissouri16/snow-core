@@ -165,6 +165,28 @@ func TestJSONLUnsupportedVersion(t *testing.T) {
 	}
 }
 
+func TestMemoryContextProjectionFallsBackOnUnknownBoundary(t *testing.T) {
+	s := NewMemoryStore(Options{CWD: "/tmp"})
+	defer s.Close()
+	for _, entry := range []Entry{msg("a", "", "one"), msg("b", "", "two"), msg("c", "", "three")} {
+		if err := s.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A marker referencing a missing entry (corrupt/hand-edited data) must
+	// hide the prefix after the marker, not resurface it below the summary.
+	if err := s.Append(Entry{Type: EntryCompaction, Summary: "summary", CompactedThrough: "ghost"}); err != nil {
+		t.Fatal(err)
+	}
+	projected, err := s.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected) != 1 || projected[0].Role != protocol.RoleCustom {
+		t.Fatalf("projected = %+v, want summary only", projected)
+	}
+}
+
 func TestFileIndexCreateOpenList(t *testing.T) {
 	root := t.TempDir()
 	idx := NewFileIndex(root)

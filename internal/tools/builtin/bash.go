@@ -51,6 +51,9 @@ func (b *Bash) Schema() tools.ToolSchema {
 
 // Run implements tools.Tool.
 func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHost) (tools.ToolResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var a bashArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return tools.ErrorResult(fmt.Errorf("bash: invalid arguments: %w", err)), nil
@@ -58,6 +61,8 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if a.Command == "" {
 		return tools.ErrorResult(fmt.Errorf("bash: command is required")), nil
 	}
+	emitProgress(host, "running command", false, false)
+	defer emitProgress(host, "command finished", true, false)
 
 	timeout := b.Timeout
 	if timeout <= 0 {
@@ -66,9 +71,12 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	// The model-supplied timeout_ms is bounded by the operator-configured cap
 	// (b.Timeout) so a model cannot run commands for arbitrarily long.
 	if a.TimeoutMS != nil && *a.TimeoutMS > 0 {
-		t := time.Duration(*a.TimeoutMS) * time.Millisecond
-		if t < timeout {
-			timeout = t
+		// Compare before converting: int milliseconds may overflow Duration.
+		// Values above the configured cap need no conversion at all.
+		capMS := int64(timeout / time.Millisecond)
+		requestedMS := int64(*a.TimeoutMS)
+		if requestedMS < capMS {
+			timeout = time.Duration(requestedMS) * time.Millisecond
 		}
 	}
 

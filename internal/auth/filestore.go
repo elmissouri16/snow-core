@@ -130,30 +130,76 @@ func (f *FileStore) Get(provider string) (Credential, bool) {
 
 // Put implements Store.
 func (f *FileStore) Put(provider string, cred Credential) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	m, err := f.load()
-	if err != nil {
-		return err
-	}
-	cred.Provider = provider
-	m[provider] = cred
-	return f.save(m)
+	_, _, err := f.Update(provider, func(Credential, bool) (Credential, bool, error) {
+		return cred, true, nil
+	})
+	return err
 }
 
 // Delete implements Store.
 func (f *FileStore) Delete(provider string) error {
+	return f.withExclusiveLock(func() error {
+		m, err := f.load()
+		if err != nil {
+			return err
+		}
+		if _, ok := m[provider]; !ok {
+			return nil
+		}
+		delete(m, provider)
+		return f.save(m)
+	})
+}
+
+// Update implements Store. The callback runs under a process-wide advisory
+// lock so refresh-token rotation cannot race another Snow process.
+func (f *FileStore) Update(provider string, fn UpdateFunc) (Credential, bool, error) {
+	var out Credential
+	var exists bool
+	err := f.withExclusiveLock(func() error {
+		m, err := f.load()
+		if err != nil {
+			return err
+		}
+		current, ok := m[provider]
+		current.Provider = provider
+		next, save, err := fn(current, ok)
+		if err != nil {
+			out, exists = current, ok
+			return err
+		}
+		out, exists = next, ok
+		if !save {
+			return nil
+		}
+		next.Provider = provider
+		m[provider] = next
+		out, exists = next, true
+		return f.save(m)
+	})
+	return out, exists, err
+}
+
+func (f *FileStore) withExclusiveLock(fn func() error) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	m, err := f.load()
+	if err := os.MkdirAll(filepath.Dir(f.path), 0o700); err != nil {
+		return fmt.Errorf("auth: mkdir lock: %w", err)
+	}
+	lockPath := f.path + ".lock"
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return err
+		return fmt.Errorf("auth: open lock: %w", err)
 	}
-	if _, ok := m[provider]; !ok {
-		return nil // idempotent
+	defer lock.Close()
+	if err := lock.Chmod(0o600); err != nil {
+		return fmt.Errorf("auth: chmod lock: %w", err)
 	}
-	delete(m, provider)
-	return f.save(m)
+	if err := lockFile(lock); err != nil {
+		return fmt.Errorf("auth: lock store: %w", err)
+	}
+	defer unlockFile(lock)
+	return fn()
 }
 
 // ResolveAPIKey resolves an API-key credential for provider by checking the

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/snow-core/snow/internal/tools"
 )
 
 func TestWrite_CreatesFile(t *testing.T) {
@@ -51,6 +53,13 @@ func TestWrite_Overwrite(t *testing.T) {
 	if string(data) != "new" {
 		t.Errorf("content = %q, want new", string(data))
 	}
+	details, ok := res.Details.(tools.DiffDetails)
+	if !ok {
+		t.Fatalf("details = %T, want tools.DiffDetails", res.Details)
+	}
+	if !strings.Contains(details.Diff, "-1 old") || !strings.Contains(details.Diff, "+1 new") {
+		t.Fatalf("write diff = %q", details.Diff)
+	}
 }
 
 func TestWrite_MissingPath(t *testing.T) {
@@ -69,6 +78,48 @@ func TestWrite_EscapeDenied(t *testing.T) {
 	res, _ := w.Run(context.Background(), argsFor(t, map[string]any{"path": filepath.Join(outside, "x.txt"), "content": "x"}), stubHost{cwd: dir, roots: []string{dir}})
 	if !res.IsError {
 		t.Fatal("expected escape rejection")
+	}
+}
+
+func TestWrite_PreservesExistingMode(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "mode.txt")
+	if err := os.WriteFile(file, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := NewWrite(NewPathGuard([]string{dir}, dir))
+	res, _ := w.Run(context.Background(), argsFor(t, map[string]any{"path": file, "content": "new"}), stubHost{cwd: dir, roots: []string{dir}})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.Content[0].Text)
+	}
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode = %o, want 600", got)
+	}
+}
+
+func TestWrite_CancelLeavesExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cancel.txt")
+	if err := os.WriteFile(file, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w := NewWrite(NewPathGuard([]string{dir}, dir))
+	res, _ := w.Run(ctx, argsFor(t, map[string]any{"path": file, "content": "new"}), stubHost{cwd: dir, roots: []string{dir}})
+	if !res.IsError {
+		t.Fatal("cancelled write should fail")
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "old" {
+		t.Fatalf("cancelled write changed destination to %q", data)
 	}
 }
 

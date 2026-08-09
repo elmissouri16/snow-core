@@ -6,15 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/provider"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/tools"
+	"github.com/snow-core/snow/internal/tools/builtin"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -28,6 +32,32 @@ type scriptedProvider struct {
 	call       int
 	resolveErr error
 	models     []protocol.Model
+	requests   []protocol.ChatRequest
+}
+
+func TestActivatedSkillsRestoredIntoSystemContext(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	activation := "<skill_content name=\"review\">\nfollow review workflow\n</skill_content>"
+	msg := protocol.NewToolResultMessage("skill-result", "", "call-1", "activate_skill", []protocol.ContentBlock{protocol.NewTextBlock(activation)}, false)
+	if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+		t.Fatal(err)
+	}
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	a, err := New(Options{
+		Provider: p, Registry: tools.NewRegistry(), Session: st,
+		Permission:   permission.NewService(permission.ModeDeny, nil),
+		SystemPrompt: "base", Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+	requests := p.requests
+	if len(requests) != 1 || !strings.Contains(requests[0].System, "follow review workflow") || !strings.Contains(requests[0].System, "active_agent_skills") {
+		t.Fatalf("system = %q", requests[0].System)
+	}
 }
 
 func (p *scriptedProvider) ID() string { return "scripted" }
@@ -36,8 +66,8 @@ func (p *scriptedProvider) ListModels(ctx context.Context) ([]protocol.Model, er
 	return p.models, nil
 }
 
-func (p *scriptedProvider) Resolve(ctx context.Context, creds auth.Credential) error {
-	return p.resolveErr
+func (p *scriptedProvider) Resolve(ctx context.Context, creds auth.Credential) (auth.Credential, error) {
+	return creds, p.resolveErr
 }
 
 func (p *scriptedProvider) Chat(ctx context.Context, creds auth.Credential, req protocol.ChatRequest) (protocol.EventStream, error) {
@@ -52,6 +82,7 @@ func (p *scriptedProvider) Chat(ctx context.Context, creds auth.Credential, req 
 			evs = p.scripts[len(p.scripts)-1]
 		}
 	}
+	p.requests = append(p.requests, req)
 	p.call++
 	return &sliceStream{evs: evs, ctx: ctx}, nil
 }
@@ -145,6 +176,56 @@ func toolCallBlock(id, name string, args map[string]any) protocol.ContentBlock {
 	}
 }
 
+func TestManualCompactUsesSummaryAndPreservesHistory(t *testing.T) {
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamTextDelta, Text: "model summary"},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+	}}}
+	a, st := setup(t, prov, nil, permission.ModeDeny)
+	for i := 0; i < 6; i++ {
+		msg := protocol.NewUserMessage(fmt.Sprintf("msg-%d", i), "", fmt.Sprintf("message %d", i))
+		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := a.Compact(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Summary != "model summary" || result.UsedFallback || result.SummarizedMessages == 0 {
+		t.Fatalf("compact result = %+v", result)
+	}
+	if len(prov.requests) != 1 || len(prov.requests[0].Tools) != 0 || len(prov.requests[0].Messages) != result.SummarizedMessages {
+		t.Fatalf("summary request = %+v", prov.requests)
+	}
+	full, err := st.Messages()
+	if err != nil || len(full) != 6 {
+		t.Fatalf("full history = %d, err=%v", len(full), err)
+	}
+	projected, err := st.ContextMessages()
+	if err != nil || len(projected) != result.RetainedMessages+1 || projected[0].Role != protocol.RoleCustom {
+		t.Fatalf("projected context = %+v, result=%+v, err=%v", projected, result, err)
+	}
+}
+
+func TestManualCompactFallsBackWhenProviderFails(t *testing.T) {
+	prov := &scriptedProvider{resolveErr: errors.New("summary unavailable")}
+	a, st := setup(t, prov, nil, permission.ModeDeny)
+	for i := 0; i < 6; i++ {
+		msg := protocol.NewUserMessage(fmt.Sprintf("fallback-%d", i), "", fmt.Sprintf("message %d", i))
+		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := a.Compact(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.UsedFallback || result.Summary == "" {
+		t.Fatalf("fallback result = %+v", result)
+	}
+}
+
 // TestSingleTextTurn: provider returns one text delta then done.
 func TestSingleTextTurn(t *testing.T) {
 	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
@@ -173,6 +254,14 @@ func TestSingleTextTurn(t *testing.T) {
 	}
 	if msgs[1].Role != protocol.RoleAssistant || msgs[1].StopReason != protocol.StopStop {
 		t.Fatalf("bad assistant message: %+v", msgs[1])
+	}
+}
+
+func TestSearchToolsAreReadOnly(t *testing.T) {
+	for _, name := range []string{"read", "grep", "glob"} {
+		if got := riskFor(name); got != permission.RiskRead {
+			t.Fatalf("riskFor(%q) = %q, want read", name, got)
+		}
 	}
 }
 
@@ -235,6 +324,96 @@ func TestToolRoundTrip(t *testing.T) {
 	}
 }
 
+func TestToolEventsExposeOutputProgressAndTiming(t *testing.T) {
+	tool := &testTool{
+		name:   "progress_tool",
+		schema: protocol.ToolSchema{Name: "progress_tool", Description: "progress", Parameters: json.RawMessage(`{}`)},
+		runFunc: func(ctx context.Context, args json.RawMessage, host tools.ToolHost) tools.ToolResult {
+			host.EmitProgress(tools.ToolProgressEvent{Message: "halfway"})
+			return tools.TextResult("tool output")
+		},
+	}
+	reg := tools.NewRegistry()
+	if err := reg.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{
+			{Type: protocol.EvStreamToolCallDone, ToolCallID: "progress-1", ToolName: "progress_tool", Arguments: json.RawMessage(`{}`)},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+		},
+		{
+			{Type: protocol.EvStreamTextDelta, Text: "done"},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+		},
+	}}
+	a, _ := setup(t, prov, reg, permission.ModeAllow)
+	var progress, end protocol.AgentEvent
+	a.Subscribe(func(ev protocol.AgentEvent) {
+		switch ev.Type {
+		case protocol.EvToolProgress:
+			progress = ev
+		case protocol.EvToolEnd:
+			end = ev
+		}
+	})
+	if err := a.Prompt(context.Background(), "run tool"); err != nil {
+		t.Fatal(err)
+	}
+	if progress.ToolProgress == nil || progress.ToolProgress.Message != "halfway" {
+		t.Fatalf("progress event = %+v", progress)
+	}
+	if end.ToolOutput != "tool output" || end.ToolDurationMS < 0 {
+		t.Fatalf("tool end = %+v", end)
+	}
+}
+
+func TestToolEditDetailsBecomeUIToolPreview(t *testing.T) {
+	tool := &testTool{
+		name:   "edit",
+		schema: protocol.ToolSchema{Name: "edit", Description: "edit", Parameters: json.RawMessage(`{"type":"object"}`)},
+		runFunc: func(ctx context.Context, args json.RawMessage, host tools.ToolHost) tools.ToolResult {
+			return tools.ToolResult{
+				Content: []protocol.ContentBlock{protocol.NewTextBlock("updated")},
+				Details: tools.DiffDetails{Diff: "-1 old\n+1 new"},
+			}
+		},
+	}
+	reg := tools.NewRegistry()
+	if err := reg.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{
+			{Type: protocol.EvStreamToolCallDone, ToolCallID: "edit-1", ToolName: "edit", Arguments: json.RawMessage(`{"path":"docs/sessions.md"}`)},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+		},
+		{
+			{Type: protocol.EvStreamTextDelta, Text: "done"},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+		},
+	}}
+	a, _ := setup(t, prov, reg, permission.ModeAllow)
+	var start, end protocol.AgentEvent
+	a.Subscribe(func(ev protocol.AgentEvent) {
+		if ev.Type == protocol.EvToolStart {
+			start = ev
+		}
+		if ev.Type == protocol.EvToolEnd {
+			end = ev
+		}
+	})
+	if err := a.Prompt(context.Background(), "edit it"); err != nil {
+		t.Fatal(err)
+	}
+	if start.Message != "docs/sessions.md" {
+		t.Fatalf("tool start message = %q, want edit path", start.Message)
+	}
+	if end.ToolOutput != "-1 old\n+1 new" {
+		t.Fatalf("tool output = %q, want private diff preview", end.ToolOutput)
+	}
+}
+
 // TestToolDenied: permission deny produces error tool result and loop still finishes.
 func TestToolDenied(t *testing.T) {
 	writeTool := &testTool{
@@ -269,7 +448,94 @@ func TestToolDenied(t *testing.T) {
 	}
 }
 
-// TestUnknownTool: unknown tool name yields error result without crashing.
+// TestChildBashPermissionAndExecution exercises the real builtin bash tool
+// through a child-attributed agent and proves denial happens before process start.
+func TestChildBashPermissionAndExecution(t *testing.T) {
+	command := "printf started > started; sleep 0.02; printf child-shell"
+	if runtime.GOOS == "windows" {
+		command = "echo started>started && echo child-shell"
+	}
+
+	for _, tc := range []struct {
+		name  string
+		mode  permission.Mode
+		allow bool
+	}{
+		{name: "allow", mode: permission.ModeAllow, allow: true},
+		{name: "deny", mode: permission.ModeDeny},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cwd := t.TempDir()
+			bash := builtin.NewBash()
+			bash.Timeout = time.Second
+			reg := tools.NewRegistry()
+			if err := reg.Register(bash); err != nil {
+				t.Fatal(err)
+			}
+			prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+				{
+					{Type: protocol.EvStreamToolCallDone, ToolCallID: "bash-1", ToolName: "bash", Arguments: json.RawMessage(fmt.Sprintf(`{"command":%q}`, command))},
+					{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+				},
+				{
+					{Type: protocol.EvStreamTextDelta, Text: "shell turn complete"},
+					{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+				},
+			}}
+			st := session.NewMemoryStore(session.Options{CWD: cwd})
+			perm := permission.NewService(tc.mode, nil)
+			a, err := New(Options{
+				Provider: prov, Registry: reg, Session: st, Permission: perm,
+				ToolHost: &testHost{cwd: cwd, perm: perm},
+				Model:    protocol.Model{Provider: prov.ID(), ID: "m1", SupportsTools: true},
+				Identity: &protocol.AgentRef{ThreadID: "child", ParentThreadID: "root", Path: "/root/child", ParentPath: "/root", Role: "default", Depth: 1},
+				Auth:     auth.NewMemoryStoreForTest(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := a.Prompt(context.Background(), "run the bounded shell check"); err != nil {
+				t.Fatal(err)
+			}
+
+			var toolResult *protocol.Message
+			msgs, err := st.Messages()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range msgs {
+				if msgs[i].Role == protocol.RoleTool && msgs[i].ToolName == "bash" {
+					toolResult = &msgs[i]
+					break
+				}
+			}
+			if toolResult == nil {
+				t.Fatalf("bash result missing: %+v", msgs)
+			}
+			started := false
+			if _, err := os.Stat(cwd + string(os.PathSeparator) + "started"); err == nil {
+				started = true
+			}
+			if tc.allow {
+				if toolResult.IsError || len(toolResult.Content) == 0 || !strings.Contains(toolResult.Content[0].Text, "child-shell") {
+					t.Fatalf("allowed bash result = %+v", toolResult)
+				}
+				if !started {
+					t.Fatal("allowed bash did not execute")
+				}
+			} else {
+				if !toolResult.IsError || len(toolResult.Content) == 0 || !strings.Contains(toolResult.Content[0].Text, "Permission denied") {
+					t.Fatalf("denied bash result = %+v", toolResult)
+				}
+				if started {
+					t.Fatal("denied bash started a process")
+				}
+			}
+			a.Close()
+		})
+	}
+}
+
 func TestUnknownTool(t *testing.T) {
 	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{
 		{
@@ -401,7 +667,9 @@ func (p *blockingProvider) ID() string { return "blocking" }
 func (p *blockingProvider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 	return nil, nil
 }
-func (p *blockingProvider) Resolve(ctx context.Context, creds auth.Credential) error { return nil }
+func (p *blockingProvider) Resolve(ctx context.Context, creds auth.Credential) (auth.Credential, error) {
+	return creds, nil
+}
 func (p *blockingProvider) Chat(ctx context.Context, creds auth.Credential, req protocol.ChatRequest) (protocol.EventStream, error) {
 	if p.started != nil {
 		select {
@@ -564,7 +832,7 @@ func TestToolLoopCancelStopsRemaining(t *testing.T) {
 		{Type: protocol.EvStreamToolCallDone, ToolCallID: "c2", ToolName: "read", Arguments: json.RawMessage(`{}`)},
 		{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
 	}}}
-	a, _ := setup(t, prov, reg, permission.ModeDeny)
+	a, st := setup(t, prov, reg, permission.ModeDeny)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancelFirst = cancel
@@ -575,6 +843,13 @@ func TestToolLoopCancelStopsRemaining(t *testing.T) {
 	}
 	if runCount != 1 {
 		t.Fatalf("tool ran %d times, want exactly 1 (second call must be skipped)", runCount)
+	}
+	msgs, msgErr := st.Messages()
+	if msgErr != nil {
+		t.Fatal(msgErr)
+	}
+	if len(msgs) != 4 || msgs[3].ToolCallID != "c2" || !msgs[3].IsError {
+		t.Fatalf("cancelled tool calls = %+v, want synthetic error result for c2", msgs)
 	}
 }
 

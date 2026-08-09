@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/snow-core/snow/internal/tools"
 )
 
 func TestEdit_UniqueReplace(t *testing.T) {
@@ -22,6 +24,26 @@ func TestEdit_UniqueReplace(t *testing.T) {
 	data, _ := os.ReadFile(file)
 	if string(data) != "foo BAR foo baz" {
 		t.Errorf("content = %q, want replacement", string(data))
+	}
+	details, ok := res.Details.(tools.DiffDetails)
+	if !ok {
+		t.Fatalf("details = %T, want tools.DiffDetails", res.Details)
+	}
+	for _, want := range []string{"-1 foo bar foo baz", "+1 foo BAR foo baz"} {
+		if !strings.Contains(details.Diff, want) {
+			t.Errorf("diff %q missing %q", details.Diff, want)
+		}
+	}
+}
+
+func TestEditDiffUsesContextAndMarkers(t *testing.T) {
+	before := "line 1\nline 2\nline 3\nline 4\nold line\nline 6\nline 7\nline 8\nline 9\nline 10"
+	after := strings.Replace(before, "old line", "new line", 1)
+	got := editDiff(before, after, "old line", "new line", false)
+	for _, want := range []string{"...", " 2 line 2", "-5 old line", "+5 new line", " 8 line 8"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("diff %q missing %q", got, want)
+		}
 	}
 }
 
@@ -68,6 +90,18 @@ func TestEdit_NotFound(t *testing.T) {
 	res, _ := e.Run(context.Background(), argsFor(t, map[string]any{"path": file, "old_str": "zzz", "new_str": "yyy"}), stubHost{cwd: dir, roots: []string{dir}})
 	if !res.IsError {
 		t.Fatal("expected not-found error")
+	}
+}
+
+func TestEditAcceptsNilContext(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(file, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := NewEdit(NewPathGuard([]string{dir}, dir)).Run(nil, argsFor(t, map[string]any{"path": file, "old_str": "before", "new_str": "after"}), stubHost{cwd: dir, roots: []string{dir}})
+	if res.IsError {
+		t.Fatalf("nil-context edit failed: %+v", res)
 	}
 }
 

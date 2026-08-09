@@ -4,22 +4,38 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
+	"sync"
+	"time"
 
 	"github.com/snow-core/snow/internal/agent"
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/config"
 	ctxpkg "github.com/snow-core/snow/internal/context"
+	goalpkg "github.com/snow-core/snow/internal/goal"
+	internalmcp "github.com/snow-core/snow/internal/mcp"
 	"github.com/snow-core/snow/internal/permission"
+	internalplugin "github.com/snow-core/snow/internal/plugin"
 	"github.com/snow-core/snow/internal/provider"
+	"github.com/snow-core/snow/internal/provider/chatgpt"
 	"github.com/snow-core/snow/internal/provider/fake"
 	"github.com/snow-core/snow/internal/provider/opencodego"
 	"github.com/snow-core/snow/internal/session"
+	"github.com/snow-core/snow/internal/skills"
+	"github.com/snow-core/snow/internal/subagent"
 	"github.com/snow-core/snow/internal/tools"
 	"github.com/snow-core/snow/internal/tools/builtin"
+	toolrouter "github.com/snow-core/snow/internal/tools/router"
 	"github.com/snow-core/snow/internal/trust"
+	"github.com/snow-core/snow/internal/userinput"
+	publicmcp "github.com/snow-core/snow/pkg/mcp"
+	publicplugin "github.com/snow-core/snow/pkg/plugin"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -31,33 +47,103 @@ type App struct {
 
 	Auth       auth.Store
 	Registry   *tools.SimpleRegistry
+	Router     tools.Router
 	Provider   provider.Provider
 	ProviderID string
-	Model      protocol.Model
-	Perm       *permission.SimpleService
-	Session    session.Store
-	Agent      *agent.Agent
-	Trust      *trust.Store
+	Providers  map[string]provider.Provider
+	// Models is the active provider catalog; AllModels is the combined live
+	// snapshot used by the TUI picker and replaced on catalog refresh.
+	Models            []protocol.Model
+	AllModels         []protocol.Model
+	Model             protocol.Model
+	Perm              *permission.SimpleService
+	Session           session.Store
+	Agent             *agent.Agent
+	Goal              *goalpkg.Controller
+	Trust             *trust.Store
+	PluginManager     *internalplugin.Manager
+	PluginDiagnostics []internalplugin.Diagnostic
+	MCPManager        *internalmcp.Manager
+	MCPStatuses       []publicmcp.Status
+	Skills            *skills.Registry
+	SkillDiagnostics  []skills.Diagnostic
+	Subagents         *subagent.Manager
 
-	cwd string
+	stateMu            sync.Mutex
+	permissionDefault  permission.Mode
+	permissionOverride bool
+	modelCatalog       map[string][]protocol.Model
+	runtimeSelection   *liveRuntimeSelection
+	cwd                string
+	userInput          *userinput.Broker
+}
+
+type liveRuntimeSelection struct {
+	mu        sync.RWMutex
+	provider  string
+	model     protocol.Model
+	providers map[string]provider.Provider
+	catalogs  map[string][]protocol.Model
+}
+
+func (s *liveRuntimeSelection) childSelection(providerID, modelID string) (provider.Provider, protocol.Model, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if providerID == "" {
+		providerID = s.provider
+	}
+	p, ok := s.providers[providerID]
+	if !ok {
+		return nil, protocol.Model{}, fmt.Errorf("app: subagent provider %q is unavailable", providerID)
+	}
+	if modelID == "" && s.model.Provider == providerID {
+		modelID = s.model.ID
+	}
+	for _, candidate := range s.catalogs[providerID] {
+		if candidate.ID == modelID {
+			return p, candidate, nil
+		}
+	}
+	return nil, protocol.Model{}, fmt.Errorf("app: subagent model %q is unavailable for provider %s", modelID, providerID)
 }
 
 // Options control app assembly.
 type Options struct {
-	CWD          string
-	ConfigPath   string
-	AuthPath     string
-	Provider     string
-	Model        string
-	APIKey       string
-	Permission   string   // ask|allow|deny
-	SessionPath  string   // empty → create new; or existing .jsonl to resume
-	Tools        []string // subset allowlist; empty = all builtins
-	SystemPrompt string
-	Thinking     string
-	NoSession    bool   // in-memory session (SDK ephemeral)
-	UseFake      bool   // force fake provider (demo/tests)
-	BaseURL      string // provider base URL override (opencode-go)
+	CWD                     string
+	ConfigPath              string
+	AuthPath                string
+	Provider                string
+	Model                   string
+	APIKey                  string
+	Permission              string   // ask|allow|deny
+	SessionPath             string   // empty → create new; or existing .db to resume
+	Tools                   []string // subset allowlist; empty = all builtins
+	SystemPrompt            string
+	Thinking                string
+	ReasoningSummary        string
+	TextVerbosity           string
+	CollaborationMode       string
+	PlanModeReasoningEffort string
+	NoSession               bool   // in-memory session (SDK ephemeral)
+	UseFake                 bool   // force fake provider (demo/tests)
+	BaseURL                 string // provider base URL override (opencode-go)
+	Plugins                 []publicplugin.PluginSpec
+	GoPlugins               []publicplugin.Plugin
+	NoPlugins               bool
+	MCPServers              []publicmcp.ServerSpec
+	NoMCP                   bool
+	SkillDirs               []string
+	NoSkills                bool
+	// UserInputHandler answers ask_user calls for embedded/headless clients.
+	// Nil keeps the tool directly visible but makes calls fail fast until an
+	// interactive surface enables manual replies.
+	UserInputHandler userinput.Handler
+	// Subagents overrides config enablement when non-nil. Enabling never implies
+	// recursive spawning or mutation.
+	Subagents              *bool
+	SubagentMaxConcurrency int
+	SubagentMaxAgents      int
+	SubagentMaxDepth       int
 }
 
 // DefaultPaths resolves config/auth paths from the environment.
@@ -68,6 +154,9 @@ func DefaultPaths() (configPath, authPath string) {
 
 // New assembles the app.
 func New(ctx context.Context, opts Options) (*App, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	cwd := opts.CWD
 	if cwd == "" {
 		var err error
@@ -90,8 +179,13 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Apply CLI overrides.
+	// Apply CLI/SDK overrides. A provider override should not carry a model
+	// selected for a different configured provider; that otherwise turns a
+	// valid global effort/model pair into an accidental unsupported pair.
 	if opts.Provider != "" {
+		if cfg.DefaultProvider != "" && cfg.DefaultProvider != opts.Provider && opts.Model == "" {
+			cfg.DefaultModel = ""
+		}
 		cfg.DefaultProvider = opts.Provider
 	}
 	if opts.Model != "" {
@@ -103,6 +197,36 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	if opts.Thinking != "" {
 		cfg.Thinking = opts.Thinking
 	}
+	if opts.ReasoningSummary != "" {
+		cfg.ReasoningSummary = opts.ReasoningSummary
+	}
+	if opts.TextVerbosity != "" {
+		cfg.TextVerbosity = opts.TextVerbosity
+	}
+	if opts.CollaborationMode != "" {
+		cfg.CollaborationMode = opts.CollaborationMode
+	}
+	if opts.PlanModeReasoningEffort != "" {
+		cfg.PlanModeReasoningEffort = opts.PlanModeReasoningEffort
+	}
+	if opts.Subagents != nil {
+		cfg.Subagents.Enabled = *opts.Subagents
+	}
+	if opts.SubagentMaxConcurrency > 0 {
+		cfg.Subagents.MaxConcurrentThreads = opts.SubagentMaxConcurrency
+		if opts.SubagentMaxAgents == 0 && cfg.Subagents.MaxAgentsPerSession < opts.SubagentMaxConcurrency {
+			cfg.Subagents.MaxAgentsPerSession = opts.SubagentMaxConcurrency
+		}
+	}
+	if opts.SubagentMaxAgents > 0 {
+		cfg.Subagents.MaxAgentsPerSession = opts.SubagentMaxAgents
+	}
+	if opts.SubagentMaxDepth > 0 {
+		cfg.Subagents.MaxDepth = opts.SubagentMaxDepth
+	}
+	if err := cfg.Subagents.ValidateSubagents(); err != nil {
+		return nil, err
+	}
 	if opts.BaseURL != "" {
 		if cfg.Providers == nil {
 			cfg.Providers = map[string]config.ProviderConfig{}
@@ -111,28 +235,81 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		pc.BaseURL = opts.BaseURL
 		cfg.Providers[cfg.DefaultProvider] = pc
 	}
+	thinking, err := protocol.ParseThinkingLevel(cfg.Thinking)
+	if err != nil {
+		return nil, fmt.Errorf("app: thinking: %w", err)
+	}
+	reasoningSummary, err := protocol.ParseReasoningSummary(cfg.ReasoningSummary)
+	if err != nil {
+		return nil, fmt.Errorf("app: reasoning summary: %w", err)
+	}
+	textVerbosity, err := protocol.ParseTextVerbosity(cfg.TextVerbosity)
+	if err != nil {
+		return nil, fmt.Errorf("app: text verbosity: %w", err)
+	}
+	collaborationMode, err := protocol.ParseCollaborationMode(cfg.CollaborationMode)
+	if err != nil {
+		return nil, fmt.Errorf("app: collaboration mode: %w", err)
+	}
+	var planThinking *protocol.ThinkingLevel
+	if cfg.PlanModeReasoningEffort != "" {
+		parsed, err := protocol.ParseThinkingLevel(cfg.PlanModeReasoningEffort)
+		if err != nil {
+			return nil, fmt.Errorf("app: plan mode reasoning effort: %w", err)
+		}
+		planThinking = &parsed
+	}
+	// Keep the in-memory config normalized even when older files omit these
+	// newly introduced fields.
+	cfg.ReasoningSummary = string(reasoningSummary)
+	cfg.TextVerbosity = string(textVerbosity)
 
 	authPath := opts.AuthPath
 	if authPath == "" {
 		_, a, _ := config.DefaultPaths()
 		authPath = a
 	}
-	var authStore auth.Store
-	if opts.NoSession {
-		authStore = auth.NewMemoryStore()
-	} else {
-		fs, err := auth.NewFileStore(authPath)
-		if err != nil {
-			return nil, fmt.Errorf("app: auth store: %w", err)
-		}
-		authStore = fs
+	// Session persistence and credential persistence are independent. Ephemeral
+	// conversations still use the configured auth store so OAuth refresh and
+	// account-scoped model discovery work with --no-session and the SDK.
+	fs, err := auth.NewFileStore(authPath)
+	if err != nil {
+		return nil, fmt.Errorf("app: auth store: %w", err)
 	}
+	var authStore auth.Store = fs
 
 	// Project trust store. Decisions persist to ~/.snow/trust.json.
-	_, trustPath, _ := config.DefaultPaths()
+	// NOTE: DefaultPaths returns (configPath, authPath, trustPath); the trust
+	// store must get the THIRD value — wiring it to authPath corrupted
+	// auth.json after the first stored credential and broke every startup.
+	_, _, trustPath := config.DefaultPaths()
 	tr, err := trust.New(trustPath)
 	if err != nil {
 		return nil, fmt.Errorf("app: trust store: %w", err)
+	}
+	// Project configuration is input, not an execution boundary. Only its
+	// explicit plugin declarations are read after an allow decision.
+	var projectPlugins []publicplugin.PluginSpec
+	projectMCPServers := map[string]publicmcp.ServerSpec{}
+	projectSkills := config.ProjectSkillsConfig{Overrides: map[string]bool{}}
+	var pluginDiagnostics []internalplugin.Diagnostic
+	projectConfigPath := filepath.Join(absCWD, ".snow", "config.json")
+	projectAllowed := cfg.DefaultProjectTrust == string(trust.LevelAllow)
+	if lvl, ok := tr.Get(absCWD); ok {
+		projectAllowed = lvl == trust.LevelAllow
+	}
+	if projectAllowed {
+		var extensions config.ProjectExtensions
+		extensions, err = config.LoadProjectExtensions(projectConfigPath)
+		if err != nil {
+			return nil, err
+		}
+		projectPlugins = extensions.Plugins
+		projectMCPServers = extensions.MCPServers
+		projectSkills = extensions.Skills
+		cfg.Plugins = append(cfg.Plugins, projectPlugins...)
+	} else if _, statErr := os.Stat(projectConfigPath); statErr == nil {
+		pluginDiagnostics = append(pluginDiagnostics, internalplugin.Diagnostic{PluginID: ".snow/config.json", Status: "trust-blocked", Message: "project plugin configuration requires an explicit trust allow"})
 	}
 
 	// Tools.
@@ -163,31 +340,108 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		}
 		reg = filtered
 	}
+
+	// Agent Skills use metadata-only startup discovery. Project locations are
+	// trust-gated; full SKILL.md bodies and resources load only through the
+	// dedicated tools after the model or user activates a skill.
+	var skillCatalog *skills.Registry
+	if !opts.NoSkills {
+		skillDirs := append(append([]string(nil), cfg.Skills.Dirs...), opts.SkillDirs...)
+		skillDisabled := cfg.Skills.Disabled
+		skillDisabledReason := "disabled by global skills policy"
+		skillOverrides := make(map[string]bool, len(cfg.Skills.Overrides)+len(projectSkills.Overrides))
+		skillOverrideReasons := make(map[string]string, len(skillOverrides))
+		for name, enabled := range cfg.Skills.Overrides {
+			skillOverrides[name] = enabled
+			skillOverrideReasons[name] = "disabled by global named skill policy"
+		}
+		if projectSkills.Disabled != nil {
+			skillDisabled = *projectSkills.Disabled
+			skillDisabledReason = "disabled by project skills policy"
+			clear(skillOverrides)
+			clear(skillOverrideReasons)
+		}
+		for name, enabled := range projectSkills.Overrides {
+			skillOverrides[name] = enabled
+			skillOverrideReasons[name] = "disabled by project named skill policy"
+		}
+		skillCatalog = skills.Discover(skills.Options{
+			CWD: absCWD, SnowHome: config.GlobalDir(), ProjectTrusted: projectAllowed,
+			ExtraDirs: skillDirs, IncludeClaude: cfg.Skills.IncludeClaude,
+			Disabled: skillDisabled, DisabledReason: skillDisabledReason,
+			Overrides: skillOverrides, OverrideReasons: skillOverrideReasons,
+		})
+		if err := skills.RegisterTools(reg, skillCatalog); err != nil {
+			return nil, fmt.Errorf("app: skills: %w", err)
+		}
+	}
 	// Provider.
 	providerID := cfg.DefaultProvider
 	if providerID == "" {
 		providerID = "opencode-go"
 	}
-	var prov provider.Provider
-	switch providerID {
-	case "fake":
-		prov = fake.NewWithModels(nil)
-	case "opencode-go":
+	newOpenCode := func() (provider.Provider, error) {
 		ocCfg := opencodego.Config{APIKey: opts.APIKey}
-		if pc, ok := cfg.Providers[providerID]; ok {
+		if ocCfg.APIKey == "" {
+			if stored, ok := authStore.Get(opencodego.ProviderID); ok {
+				// ListModels has no credential argument in the stable provider
+				// interface, so provide the stored API key as the adapter's
+				// lowest-priority fallback for startup discovery. Chat still
+				// receives the original credential through Agent.resolveCreds.
+				ocCfg.APIKey = stored.Key
+			}
+		}
+		if pc, ok := cfg.Providers["opencode-go"]; ok {
 			ocCfg.BaseURL = pc.BaseURL
 			ocCfg.DefaultModel = pc.DefaultModel
 		}
-		if opts.BaseURL != "" {
+		if opts.BaseURL != "" && providerID == "opencode-go" {
 			ocCfg.BaseURL = opts.BaseURL
 		}
 		oc, err := opencodego.New(ocCfg)
 		if err != nil {
 			return nil, fmt.Errorf("app: opencode-go: %w", err)
 		}
-		prov = oc
+		return oc, nil
+	}
+
+	newChatGPT := func() *chatgpt.Provider {
+		cgCfg := chatgpt.Config{Store: authStore, CacheRoot: filepath.Join(config.GlobalDir(), "cache", "chatgpt-models")}
+		if pc, ok := cfg.Providers["chatgpt"]; ok {
+			cgCfg.BaseURL = pc.BaseURL
+		}
+		if providerID == "chatgpt" && opts.BaseURL != "" {
+			cgCfg.BaseURL = opts.BaseURL
+		}
+		return chatgpt.New(cgCfg)
+	}
+
+	var prov provider.Provider
+	switch providerID {
+	case "fake":
+		prov = fake.NewWithModels(nil)
+	case "chatgpt":
+		prov = newChatGPT()
+	case "opencode-go":
+		prov, err = newOpenCode()
+		if err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("app: unsupported provider %q", providerID)
+	}
+
+	// Keep catalogs/providers for both supported user-facing providers so the
+	// model picker can show the complete cached list and switch providers.
+	providers := map[string]provider.Provider{providerID: prov}
+	if providerID == "opencode-go" {
+		providers["chatgpt"] = newChatGPT()
+	} else if providerID == "chatgpt" {
+		other, err := newOpenCode()
+		if err != nil {
+			return nil, err
+		}
+		providers["opencode-go"] = other
 	}
 
 	// Session.
@@ -195,7 +449,7 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	if opts.NoSession {
 		st = session.NewMemoryStore(session.Options{CWD: absCWD})
 	} else if opts.SessionPath != "" {
-		st, err = session.NewJSONLStore(opts.SessionPath, absCWD, session.Options{})
+		st, err = session.NewSQLiteStore(opts.SessionPath, absCWD, session.Options{})
 		if err != nil {
 			return nil, fmt.Errorf("app: open session: %w", err)
 		}
@@ -207,6 +461,31 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		}
 	}
 
+	goalController, err := goalpkg.New(st, config.GlobalDir(), nil)
+	if err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("app: goal controller: %w", err)
+	}
+	allowedGoalTool := func(name string) bool {
+		if len(opts.Tools) == 0 {
+			return true
+		}
+		for _, v := range opts.Tools {
+			if v == name {
+				return true
+			}
+		}
+		return false
+	}
+	for _, tool := range goalpkg.Tools(goalController) {
+		if allowedGoalTool(tool.Schema().Name) {
+			if err := reg.Register(tool); err != nil {
+				_ = st.Close()
+				return nil, err
+			}
+		}
+	}
+
 	// Permission service (deny-by-default headless; TUI replaces asker).
 	permMode := permission.Mode(cfg.PermissionMode)
 	if permMode != permission.ModeAsk && permMode != permission.ModeAllow && permMode != permission.ModeDeny {
@@ -214,59 +493,901 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	}
 	perm := permission.NewService(permMode, permission.DenyAll{})
 
+	// Fetch every available provider catalog during startup. Providers may return
+	// cached/bundled fallbacks; authenticated refreshes replace these snapshots.
+	modelCatalog := make(map[string][]protocol.Model, len(providers))
+	for id, p := range providers {
+		models, _ := p.ListModels(ctx)
+		for i := range models {
+			models[i].Provider = id
+		}
+		modelCatalog[id] = append([]protocol.Model(nil), models...)
+	}
+	models := modelCatalog[providerID]
+	var allModels []protocol.Model
+	seenProviders := make(map[string]bool)
+	for _, id := range []string{providerID, "opencode-go", "chatgpt", "fake"} {
+		if catalog, ok := modelCatalog[id]; ok {
+			allModels = append(allModels, catalog...)
+			seenProviders[id] = true
+		}
+	}
+	// Include any future/custom providers after built-ins.
+	for id, catalog := range modelCatalog {
+		if !seenProviders[id] {
+			allModels = append(allModels, catalog...)
+		}
+	}
+
 	// Model resolution.
 	model := protocol.Model{Provider: providerID, ID: cfg.DefaultModel, SupportsTools: true}
+	// Prefer the provider's documented default when it exists in the catalog;
+	// otherwise fall back to the first catalog entry. Without this, the default
+	// silently became whatever the live catalog listed first.
+	if dm, ok := prov.(interface{ DefaultModel() protocol.Model }); ok {
+		dflt := dm.DefaultModel()
+		if dflt.ID != "" {
+			for _, mm := range models {
+				if mm.ID == dflt.ID {
+					if model.ID == "" {
+						model = mm
+					}
+					break
+				}
+			}
+		}
+	}
 	if model.ID == "" {
-		models, err := prov.ListModels(ctx)
-		if err == nil && len(models) > 0 {
+		if len(models) > 0 {
 			model = models[0]
-		} else if err == nil {
-			model.ID = "default"
 		} else {
 			model.ID = "default"
 		}
 	}
+	// Preserve configured model selection while enriching it with catalog
+	// metadata when the startup snapshot contains that model.
+	for _, mm := range models {
+		if mm.ID == model.ID {
+			model = mm
+			break
+		}
+	}
+
+	runtimeSelection := &liveRuntimeSelection{provider: providerID, model: model, providers: providers, catalogs: modelCatalog}
 
 	// Host (path roots + progress bridge).
-	host := &toolHost{cwd: absCWD, roots: []string{absCWD}, perm: perm, reg: reg}
+	inputBroker := userinput.New(opts.UserInputHandler)
+	host := &toolHost{cwd: absCWD, roots: []string{absCWD}, perm: perm, reg: reg, userInput: inputBroker}
+
+	// Extensions are initialized after builtins and the session exist, but
+	// before the agent is constructed. This makes registration deterministic
+	// and lets every plugin receive the same session/cwd capabilities.
+	manager := internalplugin.NewManager(reg, internalplugin.ManagerOptions{
+		CWD: absCWD, SessionID: st.ID(), HostVersion: "snow-core", HostCapabilities: []string{"tools", "events"},
+		MaxProgressBytes: cfg.ToolOutputLimit(), MaxOutputBytes: cfg.ToolOutputLimit(),
+	})
+	if !opts.NoPlugins {
+		for _, p := range opts.GoPlugins {
+			if err := manager.LoadGo(p); err != nil {
+				_ = st.Close()
+				return nil, fmt.Errorf("app: plugin: %w", err)
+			}
+		}
+		allPluginSpecs := append(append([]publicplugin.PluginSpec(nil), cfg.Plugins...), opts.Plugins...)
+		for _, spec := range allPluginSpecs {
+			if err := manager.LoadExternal(spec); err != nil {
+				_ = st.Close()
+				return nil, fmt.Errorf("app: plugin %s: %w", spec.ID, err)
+			}
+		}
+		if err := manager.Initialize(ctx); err != nil {
+			_ = manager.Close(context.Background())
+			_ = st.Close()
+			return nil, fmt.Errorf("app: plugin initialization: %w", err)
+		}
+	} else {
+		for _, spec := range append(append([]publicplugin.PluginSpec(nil), cfg.Plugins...), opts.Plugins...) {
+			pluginDiagnostics = append(pluginDiagnostics, internalplugin.Diagnostic{PluginID: spec.ID, Status: "disabled", Message: "plugin loading disabled by --no-plugins"})
+		}
+	}
+
+	// MCP servers are independent of Snow's plugin protocol. The official Go
+	// SDK performs protocol negotiation and lifecycle handling; negotiated
+	// tools/resources/prompts are adapted into the same permissioned registry.
+	mcpSpecs := mergeMCPServers(cfg.MCPServers, projectMCPServers, opts.MCPServers)
+	var mcpManager *internalmcp.Manager
+	var mcpStatuses []publicmcp.Status
+	if !opts.NoMCP {
+		mcpManager = internalmcp.NewManager(reg, internalmcp.Options{
+			CWD: absCWD, Roots: []string{absCWD}, HostName: "snow", HostVersion: "0.1.0-dev", MaxOutputBytes: cfg.ToolOutputLimit(),
+		})
+		mcpManager.ConnectAll(ctx, mcpSpecs)
+		mcpStatuses = mcpManager.Statuses()
+	} else {
+		for _, spec := range mcpSpecs {
+			mcpStatuses = append(mcpStatuses, publicmcp.Status{ID: spec.ID, Transport: spec.EffectiveTransport(), Message: "disabled by --no-mcp"})
+		}
+	}
+
+	// Collaboration tools are direct and registered before deferred-router
+	// indexing so the model always receives the complete control set together.
+	var subManager *subagent.Manager
+	if cfg.Subagents.Enabled {
+		for name, role := range cfg.Subagents.Roles {
+			if role.Model != "" {
+				found := false
+				for _, candidate := range models {
+					if candidate.ID == role.Model {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return nil, fmt.Errorf("app: subagent role %q references unavailable model %q", name, role.Model)
+				}
+			}
+		}
+		roles := make(map[string]subagent.Role, len(cfg.Subagents.Roles))
+		for name, role := range cfg.Subagents.Roles {
+			roles[name] = subagent.Role{Name: name, Description: role.Description, System: role.System, Model: role.Model, Thinking: role.Thinking, Tools: append([]string(nil), role.Tools...), AllowMutation: role.AllowMutation}
+		}
+		subManager = subagent.New(ctx, subagent.Limits{
+			MaxConcurrentThreads: cfg.Subagents.MaxConcurrentThreads, MaxAgentsPerSession: cfg.Subagents.MaxAgentsPerSession,
+			MaxDepth: cfg.Subagents.MaxDepth, MinWait: time.Duration(cfg.Subagents.MinWaitTimeoutMS) * time.Millisecond,
+			DefaultWait: time.Duration(cfg.Subagents.DefaultWaitTimeoutMS) * time.Millisecond, MaxWait: time.Duration(cfg.Subagents.MaxWaitTimeoutMS) * time.Millisecond,
+			TaskTimeout: time.Duration(cfg.Subagents.TaskTimeoutMS) * time.Millisecond, MaxResultBytes: cfg.Subagents.MaxResultBytes,
+			Recursive: cfg.Subagents.Recursive, Durable: cfg.Subagents.Durable, AllowMutation: cfg.Subagents.AllowMutation,
+			ExposeChildToolEvents: cfg.Subagents.ExposeChildToolEvents, DefaultRole: cfg.Subagents.DefaultRole, Roles: roles,
+		})
+		for _, tool := range subagent.Tools(subManager, subagent.Caller{Path: protocol.RootAgentPath}) {
+			if err := reg.RegisterDescriptor(subagent.ToolDescriptor(tool)); err != nil {
+				return nil, fmt.Errorf("app: register subagent tool: %w", err)
+			}
+		}
+	}
+
+	// Deferred schemas are indexed only after every startup registrar has
+	// completed. Existing tools have no discovery metadata and remain direct.
+	descriptors := reg.Descriptors()
+	var router tools.Router
+	needsRouter := false
+	for _, desc := range descriptors {
+		if tools.IsDeferred(desc) {
+			needsRouter = true
+			break
+		}
+	}
+	// A connected MCP server may advertise a mutable tools catalog that starts
+	// empty. Create the router now so a later tools/list_changed notification can
+	// make its first tool discoverable without restarting Snow.
+	if !needsRouter {
+		for _, status := range mcpStatuses {
+			if status.Connected && slices.Contains(status.Capabilities, "tools") {
+				needsRouter = true
+				break
+			}
+		}
+	}
+	if needsRouter {
+		router = toolrouter.New(descriptors)
+		if err := reg.Register(builtin.NewSearchTools(router, reg)); err != nil {
+			_ = router.Close()
+			if mcpManager != nil {
+				_ = mcpManager.Close()
+			}
+			_ = manager.Close(context.Background())
+			_ = st.Close()
+			return nil, fmt.Errorf("app: register search_tools: %w", err)
+		}
+	}
+	if mcpManager != nil && router != nil {
+		mcpManager.SetCatalogChanged(func() {
+			if refreshable, ok := router.(tools.RefreshableRouter); ok {
+				_ = refreshable.Refresh(reg.Descriptors())
+			}
+		})
+	}
 
 	// Context assembly.
 	loader := ctxpkg.NewLoader(cfg.ContextCapBytes, false)
 	assembly := loader.Assemble(absCWD, opts.SystemPrompt, "")
 	systemPrompt := assembly.Render()
+	if skillCatalog != nil {
+		if catalog := skillCatalog.CatalogPrompt(); catalog != "" {
+			systemPrompt += "\n\n" + catalog
+		}
+	}
+	if mcpManager != nil {
+		if catalog := mcpManager.CatalogPrompt(); catalog != "" {
+			systemPrompt += "\n\n" + catalog
+		}
+	}
+	if subManager != nil {
+		systemPrompt += "\n\n" + subagentPromptGuidance
+	}
 
+	initialMode := collaborationMode
+	if opts.CollaborationMode == "" && opts.SessionPath != "" {
+		initialMode = "" // restore the persisted active-branch mode
+	}
 	ag, err := agent.New(agent.Options{
-		Provider:     prov,
-		Registry:     reg,
-		Session:      st,
-		Permission:   perm,
-		ToolHost:     host,
-		SystemPrompt: systemPrompt,
-		Model:        model,
-		Thinking:     thinkingLevel(cfg.Thinking),
-		Auth:         authStore,
-		APIKey:       opts.APIKey,
+		Provider:          prov,
+		Registry:          reg,
+		Session:           st,
+		Permission:        perm,
+		ToolHost:          host,
+		Router:            router,
+		SystemPrompt:      systemPrompt,
+		Model:             model,
+		Thinking:          thinking,
+		ReasoningSummary:  reasoningSummary,
+		TextVerbosity:     textVerbosity,
+		CollaborationMode: initialMode,
+		PlanThinking:      planThinking,
+		Goal:              goalController,
+		Auth:              authStore,
+		APIKey:            opts.APIKey,
 	})
 	if err != nil {
+		inputBroker.Close()
+		if router != nil {
+			_ = router.Close()
+		}
+		if mcpManager != nil {
+			_ = mcpManager.Close()
+		}
+		_ = manager.Close(context.Background())
+		_ = st.Close()
 		return nil, fmt.Errorf("app: agent: %w", err)
 	}
+	host.emitUserInput = ag.EmitUserInputRequest
+	host.inEventCallback = ag.InEventCallback
+	goalController.SetEmitter(func(ev protocol.AgentEvent) { ag.Publish(ev) })
+
+	if subManager != nil {
+		factory := subagent.ChildFactoryFunc(func(childCtx context.Context, spec subagent.ChildSpec) (subagent.ChildRuntime, error) {
+			var childStore session.Store
+			if spec.Restore {
+				if spec.SessionPath == "" {
+					return nil, errors.New("app: restored subagent has no child session path")
+				}
+				if err := ensurePrivateChildDirectory(filepath.Dir(spec.SessionPath)); err != nil {
+					return nil, err
+				}
+				if info, err := os.Stat(spec.SessionPath); err != nil || info.IsDir() {
+					if err == nil {
+						err = errors.New("child session path is a directory")
+					}
+					return nil, fmt.Errorf("app: restored child session unavailable: %w", err)
+				}
+				opened, err := session.NewSQLiteStore(spec.SessionPath, absCWD, session.Options{})
+				if err != nil {
+					return nil, err
+				}
+				childStore = opened
+			} else {
+				forked, err := subagent.ForkContext(spec.ParentMessages, spec.ForkTurns, absCWD, spec.State.Agent.ThreadID)
+				if err != nil {
+					return nil, err
+				}
+				if cfg.Subagents.Durable && spec.SessionPath != "" {
+					messages, err := forked.Messages()
+					_ = forked.Close()
+					if err != nil {
+						return nil, err
+					}
+					if err := ensurePrivateChildDirectory(filepath.Dir(spec.SessionPath)); err != nil {
+						return nil, err
+					}
+					opened, err := session.NewSQLiteStore(spec.SessionPath, absCWD, session.Options{ID: spec.State.Agent.ThreadID})
+					if err != nil {
+						return nil, err
+					}
+					parent := opened.BranchTip()
+					for i := range messages {
+						msg := messages[i]
+						msg.ParentID = parent
+						if err := opened.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, ParentID: parent, Message: &msg}); err != nil {
+							_ = opened.Close()
+							return nil, err
+						}
+						parent = msg.ID
+					}
+					childStore = opened
+				} else {
+					childStore = forked
+				}
+			}
+
+			childReg, capabilities, err := cloneChildRegistry(reg, spec.Role, cfg.Subagents.AllowMutation)
+			if err != nil {
+				_ = childStore.Close()
+				return nil, err
+			}
+			if cfg.Subagents.Recursive && spec.State.Agent.Depth < cfg.Subagents.MaxDepth {
+				caller := subagent.Caller{ThreadID: spec.State.Agent.ThreadID, Path: spec.State.Agent.Path}
+				for _, tool := range subagent.Tools(subManager, caller) {
+					if err := childReg.RegisterDescriptor(subagent.ToolDescriptor(tool)); err != nil {
+						_ = childStore.Close()
+						return nil, err
+					}
+				}
+			}
+			// Shell, mutation, and recursive delegation calls use the live root
+			// operator policy. Read-only children can retain deny-all because
+			// RiskRead is allowed by that service; this keeps headless children
+			// safe while preserving normal TUI attribution for bash approvals.
+			childPerm := childPermissionService(perm, capabilities, cfg.Subagents.Recursive)
+			childHost := &toolHost{cwd: absCWD, roots: []string{absCWD}, perm: childPerm, reg: childReg}
+			childProvider, childModel, err := runtimeSelection.childSelection(spec.State.Provider, spec.State.Model)
+			if err != nil {
+				_ = childStore.Close()
+				return nil, err
+			}
+			childSystem := systemPrompt + "\n\n<subagent>\nYou are " + string(spec.State.Agent.Path) + ", an independent child agent. Complete the assigned task and return a concise final answer to your parent. The filesystem is shared with peers and is not a sandbox; do not overwrite peer work.\n"
+			if spec.Role.System != "" {
+				childSystem += spec.Role.System + "\n"
+			}
+			childSystem += "</subagent>"
+			child, err := agent.New(agent.Options{Provider: childProvider, Registry: childReg, Session: childStore, Permission: childPerm, ToolHost: childHost,
+				SystemPrompt: childSystem, Model: childModel, Thinking: spec.State.Thinking, ReasoningSummary: reasoningSummary,
+				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Auth: authStore, APIKey: opts.APIKey, Identity: spec.State.Agent.Clone()})
+			if err != nil {
+				_ = childStore.Close()
+				return nil, err
+			}
+			return &childAgentRuntime{Agent: child, store: childStore}, nil
+		})
+		taskStore, ok := st.(session.SubagentTaskStore)
+		if !ok {
+			ag.Close()
+			return nil, errors.New("app: session does not support subagent topology")
+		}
+		if err := subManager.Bind(ag, factory, ag.Publish, taskStore); err != nil {
+			ag.Close()
+			return nil, err
+		}
+	}
+	// Plugins observe the same normalized event stream as every other surface.
+	// Emit the explicit state snapshot only after plugin subscriptions exist.
+	ag.Subscribe(manager.Emit)
+	manager.Emit(ag.StateEvent())
 
 	a := &App{
-		Cfg:        cfg,
-		ConfigPath: configPath,
-		AuthPath:   authPath,
-		Auth:       authStore,
-		Registry:   reg,
-		Provider:   prov,
-		ProviderID: providerID,
-		Model:      model,
-		Perm:       perm,
-		Session:    st,
-		Agent:      ag,
-		Trust:      tr,
-		cwd:        absCWD,
+		Cfg:                cfg,
+		ConfigPath:         configPath,
+		AuthPath:           authPath,
+		Auth:               authStore,
+		Registry:           reg,
+		Router:             router,
+		Provider:           prov,
+		ProviderID:         providerID,
+		Providers:          providers,
+		Models:             append([]protocol.Model(nil), models...),
+		AllModels:          allModels,
+		modelCatalog:       modelCatalog,
+		runtimeSelection:   runtimeSelection,
+		Model:              model,
+		Perm:               perm,
+		Session:            st,
+		Agent:              ag,
+		Goal:               goalController,
+		Trust:              tr,
+		PluginManager:      manager,
+		PluginDiagnostics:  append(pluginDiagnostics, manager.Diagnostics()...),
+		MCPManager:         mcpManager,
+		MCPStatuses:        append([]publicmcp.Status(nil), mcpStatuses...),
+		Skills:             skillCatalog,
+		Subagents:          subManager,
+		permissionDefault:  permMode,
+		permissionOverride: opts.Permission != "",
+		cwd:                absCWD,
+		userInput:          inputBroker,
+	}
+	if skillCatalog != nil {
+		a.SkillDiagnostics = skillCatalog.Diagnostics()
+	}
+	if err := a.bindPermissionSession(st); err != nil {
+		if router != nil {
+			_ = router.Close()
+		}
+		if mcpManager != nil {
+			_ = mcpManager.Close()
+		}
+		_ = manager.Close(context.Background())
+		_ = st.Close()
+		return nil, fmt.Errorf("app: permission state: %w", err)
 	}
 	return a, nil
+}
+
+const permissionMetadataKey = "permission_state"
+
+// bindPermissionSession restores permission state for st and routes future
+// mode/rule changes back into that session's metadata entries.
+func (a *App) bindPermissionSession(st session.Store) error {
+	a.Perm.SetChangeHandler(nil)
+	// Start each session from the configured baseline so switching away from a
+	// session cannot leak its remembered rules into the next one.
+	a.Perm.RestoreState(permission.State{Mode: a.permissionDefault})
+
+	meta, ok := st.(session.MetadataStore)
+	if !ok {
+		return nil
+	}
+	if !a.permissionOverride {
+		raw, found, err := meta.Metadata(permissionMetadataKey)
+		if err != nil {
+			return err
+		}
+		if found && raw != "" {
+			var state permission.State
+			if err := json.Unmarshal([]byte(raw), &state); err == nil {
+				a.Perm.RestoreState(state)
+			}
+		}
+	}
+	a.Perm.SetChangeHandler(func(state permission.State) {
+		raw, err := json.Marshal(state)
+		if err != nil {
+			return
+		}
+		_ = meta.SetMetadata(permissionMetadataKey, string(raw))
+	})
+	return nil
+}
+
+// SetSession switches the active durable conversation store. The old store is
+// closed only after the agent accepts the new store.
+func (a *App) SetSession(st session.Store) error {
+	if a.Subagents != nil && a.Subagents.HasActive() {
+		return errors.New("app: cannot switch session while subagents are active")
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	if a.Subagents != nil && a.Subagents.HasActive() {
+		return errors.New("app: cannot switch session while subagents are active")
+	}
+	if st == nil {
+		return fmt.Errorf("app: session is nil")
+	}
+	if err := a.Goal.ValidateStore(st); err != nil {
+		return err
+	}
+	old := a.Session
+	if err := a.bindPermissionSession(st); err != nil {
+		return fmt.Errorf("app: permission state: %w", err)
+	}
+	if err := a.Agent.SetSessionQuietAdmitted(st); err != nil {
+		_ = a.bindPermissionSession(old)
+		return err
+	}
+	if err := a.Goal.SetStore(st); err != nil {
+		_ = a.Agent.SetSessionQuietAdmitted(old)
+		_ = a.bindPermissionSession(old)
+		return err
+	}
+	if a.Subagents != nil {
+		taskStore, ok := st.(session.SubagentTaskStore)
+		if !ok {
+			_ = a.Goal.SetStore(old)
+			_ = a.Agent.SetSessionQuietAdmitted(old)
+			_ = a.bindPermissionSession(old)
+			return errors.New("app: session does not support subagent topology")
+		}
+		if err := a.Subagents.SetStoreAdmitted(taskStore); err != nil {
+			_ = a.Goal.SetStore(old)
+			_ = a.Agent.SetSessionQuietAdmitted(old)
+			_ = a.bindPermissionSession(old)
+			return err
+		}
+	}
+	a.Session = st
+	g, _ := a.Goal.Get()
+	a.Agent.Publish(a.Agent.StateEvent())
+	a.Agent.Publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g, Cleared: g == nil}})
+	if old != nil && old != st {
+		if err := old.Close(); err != nil {
+			// The switch is already committed across App, Agent, Goal, and
+			// permission state. Surface old-store cleanup as an event instead of
+			// falsely reporting that the new session failed to bind.
+			a.Agent.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: "close previous session: " + err.Error()})
+		}
+	}
+	return nil
+}
+
+func (a *App) SelectBranch(branchID string) error {
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	if a.Subagents != nil && a.Subagents.HasActive() {
+		return errors.New("app: cannot switch branch while subagents are active")
+	}
+	return a.Agent.SelectBranchAdmitted(branchID)
+}
+func (a *App) ForkBranch(fromEntryID string) (protocol.SessionBranch, error) {
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	if a.Subagents != nil && a.Subagents.HasActive() {
+		return protocol.SessionBranch{}, errors.New("app: cannot fork branch while subagents are active")
+	}
+	return a.Agent.ForkAdmitted(fromEntryID)
+}
+
+func (a *App) GoalState() (*protocol.ThreadGoal, error) {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	return a.Goal.Get()
+}
+
+func (a *App) requireGoalCapabilities() error {
+	for _, name := range []string{"get_goal", "create_goal", "update_goal"} {
+		if _, ok := a.Registry.Get(name); !ok {
+			return fmt.Errorf("goal: required capability %s is disabled by tools allowlist", name)
+		}
+	}
+	return nil
+}
+
+// ReadyGoal is called only after a surface installs event subscriptions and interaction handlers.
+func (a *App) ReadyGoal() error {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	g, err := a.Goal.Get()
+	if err != nil {
+		return err
+	}
+	a.Agent.Publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g, Cleared: g == nil}})
+	if g == nil || g.Status != protocol.GoalActive || a.Agent.Mode() != protocol.ModeDefault {
+		return nil
+	}
+	deferred, err := a.Goal.Deferred()
+	if err != nil {
+		return err
+	}
+	if !deferred {
+		if err := a.requireGoalCapabilities(); err != nil {
+			return err
+		}
+		a.Agent.ContinueGoal()
+	}
+	return nil
+}
+func (a *App) goalAutoResumeEligible() (bool, error) {
+	g, err := a.Goal.Get()
+	if err != nil {
+		return false, err
+	}
+	if g == nil || g.Status != protocol.GoalActive || a.Agent.Mode() != protocol.ModeDefault {
+		return false, nil
+	}
+	deferred, err := a.Goal.Deferred()
+	return !deferred, err
+}
+
+func (a *App) restartGoalAfterFailedMutation(eligible bool) {
+	if !eligible {
+		return
+	}
+	g, err := a.Goal.Get()
+	if err != nil || g == nil || g.Status != protocol.GoalActive || a.Agent.Mode() != protocol.ModeDefault {
+		return
+	}
+	deferred, err := a.Goal.Deferred()
+	if err == nil && !deferred {
+		a.Agent.ContinueGoal()
+	}
+}
+
+func (a *App) CreateGoal(objective string, budget *int64, replace bool) (*protocol.ThreadGoal, error) {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	if err := a.requireGoalCapabilities(); err != nil {
+		return nil, err
+	}
+	restartOnFailure := false
+	if replace {
+		var err error
+		restartOnFailure, err = a.goalAutoResumeEligible()
+		if err != nil {
+			return nil, err
+		}
+		if err := a.Agent.StopGoal(context.Background(), false); err != nil {
+			return nil, err
+		}
+	}
+	g, err := a.Goal.Create(objective, budget, replace)
+	if err != nil {
+		a.restartGoalAfterFailedMutation(restartOnFailure)
+		return nil, err
+	}
+	a.Agent.ContinueGoal()
+	return g, nil
+}
+func (a *App) EditGoal(objective string) (*protocol.ThreadGoal, error) {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	g, e := a.Goal.Get()
+	if e != nil {
+		return nil, e
+	}
+	if g == nil {
+		return nil, session.ErrNotFound
+	}
+	restartOnFailure, err := a.goalAutoResumeEligible()
+	if err != nil {
+		return nil, err
+	}
+	if err := a.Agent.StopGoal(context.Background(), false); err != nil {
+		return nil, err
+	}
+	next, err := a.Goal.Edit(g.GoalID, objective)
+	if err != nil {
+		a.restartGoalAfterFailedMutation(restartOnFailure)
+		return nil, err
+	}
+	if next.Status == protocol.GoalActive {
+		a.Agent.ResetGoalAudit()
+		a.Agent.ContinueGoal()
+	}
+	return next, nil
+}
+func (a *App) setGoalStatusLocked(status protocol.ThreadGoalStatus) (*protocol.ThreadGoal, error) {
+	g, err := a.Goal.Get()
+	if err != nil {
+		return nil, err
+	}
+	if g == nil {
+		return nil, session.ErrNotFound
+	}
+	return a.Goal.SetStatus(g.GoalID, status, false)
+}
+
+func (a *App) SetGoalStatus(status protocol.ThreadGoalStatus) (*protocol.ThreadGoal, error) {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	return a.setGoalStatusLocked(status)
+}
+func (a *App) PauseGoal() (*protocol.ThreadGoal, error) {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	if err := a.Agent.StopGoal(context.Background(), true); err != nil {
+		return nil, err
+	}
+	return a.setGoalStatusLocked(protocol.GoalPaused)
+}
+func (a *App) ResumeGoal() (*protocol.ThreadGoal, error) {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	g, err := a.setGoalStatusLocked(protocol.GoalActive)
+	if err == nil {
+		a.Agent.ResetGoalAudit()
+		a.Agent.ContinueGoal()
+	}
+	return g, err
+}
+func (a *App) ClearGoal() error {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	if err := a.Agent.StopGoal(context.Background(), true); err != nil {
+		return err
+	}
+	g, err := a.Goal.Get()
+	if err != nil {
+		return err
+	}
+	id := ""
+	if g != nil {
+		id = g.GoalID
+	}
+	return a.Goal.Clear(id)
+}
+func (a *App) ContinueGoal() error {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	if err := a.requireGoalCapabilities(); err != nil {
+		return err
+	}
+	g, err := a.Goal.Get()
+	if err != nil {
+		return err
+	}
+	if g == nil || g.Status != protocol.GoalActive {
+		return errors.New("goal: no active goal")
+	}
+	if err := a.Goal.Defer(false); err != nil {
+		return err
+	}
+	a.Agent.ContinueGoal()
+	return nil
+}
+
+// RefreshProviderModels forces an authenticated catalog refresh when the
+// provider supports it and atomically replaces app/picker snapshots.
+func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
+	p, ok := a.Providers[id]
+	if !ok {
+		return fmt.Errorf("app: provider %q is not available", id)
+	}
+	var models []protocol.Model
+	var err error
+	if refreshable, ok := p.(interface {
+		RefreshModels(context.Context) ([]protocol.Model, error)
+	}); ok {
+		models, err = refreshable.RefreshModels(ctx)
+	} else {
+		models, err = p.ListModels(ctx)
+	}
+	if len(models) == 0 {
+		return err
+	}
+	for i := range models {
+		models[i].Provider = id
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	var refreshedActive *protocol.Model
+	if a.ProviderID == id {
+		current := a.Agent.Model()
+		for i := range models {
+			if models[i].ID != current.ID {
+				continue
+			}
+			model := models[i]
+			if level := a.Agent.Thinking(); !model.SupportsThinkingLevel(level) {
+				return fmt.Errorf("app: refreshed metadata for active model %q is incompatible with current settings: thinking level %q is not supported (supported: %v)", model.ID, level, model.SupportedThinkingLevels())
+			}
+			if setErr := a.Agent.SetModel(model); setErr != nil {
+				return fmt.Errorf("app: apply refreshed metadata for active model %q: %w", model.ID, setErr)
+			}
+			refreshedActive = &model
+			break
+		}
+	}
+	a.modelCatalog[id] = append([]protocol.Model(nil), models...)
+	if a.runtimeSelection != nil {
+		a.runtimeSelection.mu.Lock()
+		a.runtimeSelection.catalogs[id] = append([]protocol.Model(nil), models...)
+		a.runtimeSelection.mu.Unlock()
+	}
+	var all []protocol.Model
+	seen := map[string]bool{}
+	for _, providerID := range []string{a.ProviderID, "opencode-go", "chatgpt", "fake"} {
+		if seen[providerID] {
+			continue
+		}
+		seen[providerID] = true
+		all = append(all, a.modelCatalog[providerID]...)
+	}
+	for providerID, catalog := range a.modelCatalog {
+		if !seen[providerID] {
+			all = append(all, catalog...)
+		}
+	}
+	a.AllModels = all
+	if a.ProviderID == id {
+		a.Models = append([]protocol.Model(nil), models...)
+		if refreshedActive != nil {
+			a.Model = *refreshedActive
+			if a.runtimeSelection != nil {
+				a.runtimeSelection.mu.Lock()
+				a.runtimeSelection.model = *refreshedActive
+				a.runtimeSelection.mu.Unlock()
+			}
+		}
+	}
+	return err
+}
+
+// SetProvider switches the active provider and model for subsequent turns.
+func (a *App) SetProvider(id string) error {
+	p, ok := a.Providers[id]
+	if !ok {
+		return fmt.Errorf("app: provider %q is not available", id)
+	}
+	catalog := a.modelCatalog[id]
+	target := a.Model
+	if a.Agent != nil {
+		target = a.Agent.Model()
+	}
+	valid := target.Provider == id
+	if valid {
+		valid = false
+		for _, m := range catalog {
+			if m.ID == target.ID {
+				valid = true
+				target = m
+				break
+			}
+		}
+	}
+	if !valid {
+		target = protocol.Model{Provider: id, SupportsTools: true}
+		if dm, ok := p.(interface{ DefaultModel() protocol.Model }); ok {
+			d := dm.DefaultModel()
+			for _, m := range catalog {
+				if m.ID == d.ID {
+					target = m
+					break
+				}
+			}
+		}
+		if target.ID == "" && len(catalog) > 0 {
+			target = catalog[0]
+		}
+		if target.ID == "" {
+			target.ID = "default"
+		}
+	}
+	target.Provider = id
+	if err := a.Agent.SetProviderAndModel(p, target); err != nil {
+		return err
+	}
+	a.ProviderID, a.Provider = id, p
+	a.Models = append([]protocol.Model(nil), catalog...)
+	a.Model = target
+	if a.runtimeSelection != nil {
+		a.runtimeSelection.mu.Lock()
+		a.runtimeSelection.provider = id
+		a.runtimeSelection.model = target
+		a.runtimeSelection.mu.Unlock()
+	}
+	return nil
+}
+
+// SetModel updates the active model and its app mirror. Unknown models remain
+// permitted for providers that accept custom model identifiers.
+func (a *App) SetModel(m protocol.Model) error {
+	if m.Provider == "" {
+		m.Provider = a.ProviderID
+	}
+	m = m.Clone()
+	if m.Provider != a.ProviderID {
+		return fmt.Errorf("app: model provider %q does not match active provider %q", m.Provider, a.ProviderID)
+	}
+	if err := a.Agent.SetModel(m); err != nil {
+		return err
+	}
+	a.Model = m
+	if a.runtimeSelection != nil {
+		a.runtimeSelection.mu.Lock()
+		a.runtimeSelection.provider = a.ProviderID
+		a.runtimeSelection.model = m
+		a.runtimeSelection.mu.Unlock()
+	}
+	return nil
+}
+
+// SetPermissionDefault updates both the active session mode and the baseline
+// restored for subsequently opened sessions. Config persistence remains the
+// caller's responsibility so it can save first and avoid partial updates.
+func (a *App) SetPermissionDefault(mode permission.Mode) error {
+	if mode != permission.ModeAsk && mode != permission.ModeAllow && mode != permission.ModeDeny {
+		return fmt.Errorf("app: invalid permission mode %q", mode)
+	}
+	a.permissionDefault = mode
+	a.Perm.SetMode(mode)
+	return nil
 }
 
 // CWD returns the app working directory.
@@ -274,17 +1395,85 @@ func (a *App) CWD() string { return a.cwd }
 
 func getwd() (string, error) { return os.Getwd() }
 
-// Close releases the session.
+func mergeMCPServers(global, project map[string]publicmcp.ServerSpec, explicit []publicmcp.ServerSpec) []publicmcp.ServerSpec {
+	merged := make(map[string]publicmcp.ServerSpec, len(global)+len(project)+len(explicit))
+	for id, spec := range global {
+		if spec.ID == "" {
+			spec.ID = id
+		}
+		merged[spec.ID] = spec
+	}
+	for id, spec := range project {
+		if spec.ID == "" {
+			spec.ID = id
+		}
+		merged[spec.ID] = spec
+	}
+	for _, spec := range explicit {
+		if spec.ID != "" {
+			merged[spec.ID] = spec
+		}
+	}
+	ids := make([]string, 0, len(merged))
+	for id := range merged {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]publicmcp.ServerSpec, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, merged[id])
+	}
+	return out
+}
+
+// Close releases plugin and router resources before the session store.
 func (a *App) Close() error {
-	return a.Session.Close()
+	var errs []error
+	if a.Subagents != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := a.Subagents.Close(ctx); err != nil {
+			errs = append(errs, err)
+		}
+		cancel()
+	}
+	if a.Agent != nil {
+		a.Agent.Close()
+	}
+	if a.userInput != nil {
+		a.userInput.Close()
+	}
+	if a.MCPManager != nil {
+		if err := a.MCPManager.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if a.PluginManager != nil {
+		if err := a.PluginManager.Close(context.Background()); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if a.Router != nil {
+		if err := a.Router.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if a.Session != nil {
+		if err := a.Session.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // toolHost adapts the tools.ToolHost contract to app state.
 type toolHost struct {
-	cwd   string
-	roots []string
-	perm  permission.Service
-	reg   *tools.SimpleRegistry
+	cwd             string
+	roots           []string
+	perm            permission.Service
+	reg             *tools.SimpleRegistry
+	userInput       *userinput.Broker
+	emitUserInput   func(protocol.UserInputRequest)
+	inEventCallback func() bool
 }
 
 func (h *toolHost) CWD() string                             { return h.cwd }
@@ -292,13 +1481,140 @@ func (h *toolHost) Roots() []string                         { return h.roots }
 func (h *toolHost) Permission() permission.Service          { return h.perm }
 func (h *toolHost) Environ() []string                       { return nil }
 func (h *toolHost) EmitProgress(ev tools.ToolProgressEvent) {}
-
-// thinkingLevel maps a config string to a protocol thinking level.
-func thinkingLevel(s string) protocol.ThinkingLevel {
-	switch protocol.ThinkingLevel(s) {
-	case protocol.ThinkingOff, protocol.ThinkingMinimal, protocol.ThinkingLow,
-		protocol.ThinkingMedium, protocol.ThinkingHigh:
-		return protocol.ThinkingLevel(s)
+func (h *toolHost) RequestUserInput(ctx context.Context, req protocol.UserInputRequest) (protocol.UserInputResponse, error) {
+	if h.userInput == nil {
+		return protocol.UserInputResponse{}, userinput.ErrUnavailable
 	}
-	return protocol.ThinkingOff
+	if h.inEventCallback != nil && h.inEventCallback() && !h.userInput.HasHandler() {
+		return protocol.UserInputResponse{}, userinput.ErrUnavailable
+	}
+	return h.userInput.Ask(ctx, req, h.emitUserInput)
+}
+
+// EnableUserInputReplies enables manual TUI/RPC resolution of ask_user calls.
+func (a *App) EnableUserInputReplies() {
+	if a != nil && a.userInput != nil {
+		a.userInput.EnableManual()
+	}
+}
+
+// CloseUserInput releases a pending request and prevents future interactive
+// waits. RPC uses this when its input stream reaches EOF.
+func (a *App) CloseUserInput() {
+	if a != nil && a.userInput != nil {
+		a.userInput.Close()
+	}
+}
+
+// RequestUserInput submits a host interaction through the app broker. It is
+// primarily useful to non-tool hosts and keeps event publication consistent.
+func (a *App) RequestUserInput(ctx context.Context, request protocol.UserInputRequest) (protocol.UserInputResponse, error) {
+	if a == nil || a.userInput == nil || a.Agent == nil {
+		return protocol.UserInputResponse{}, userinput.ErrUnavailable
+	}
+	reentrantEventCallback := a.Agent.InEventCallback()
+	if reentrantEventCallback && !a.userInput.HasHandler() {
+		return protocol.UserInputResponse{}, userinput.ErrUnavailable
+	}
+	response, err := a.userInput.Ask(ctx, request, a.Agent.EmitUserInputRequest)
+	// RequestUserInput historically guarantees that observers see the request
+	// before the interaction returns. Skip the barrier only for a request made
+	// reentrantly by that same ordered event dispatcher.
+	if !reentrantEventCallback {
+		if drainErr := a.Agent.DrainEvents(ctx); err == nil && drainErr != nil {
+			err = drainErr
+		}
+	}
+	return response, err
+}
+
+// ReplyUserInput resolves the current ask_user call.
+func (a *App) ReplyUserInput(response protocol.UserInputResponse) error {
+	if a == nil || a.userInput == nil {
+		return userinput.ErrUnavailable
+	}
+	return a.userInput.Reply(response)
+}
+
+// RejectUserInput declines the current ask_user call.
+// ReadySubagents is called after a surface subscribes. Restored work is never
+// restarted automatically; the call publishes only topology snapshots.
+func (a *App) ReadySubagents() error {
+	if a.Subagents == nil {
+		return nil
+	}
+	return a.Subagents.Ready(context.Background())
+}
+func (a *App) SpawnSubagent(ctx context.Context, req protocol.SpawnSubagentRequest) (protocol.SubagentState, error) {
+	if a.Subagents == nil {
+		return protocol.SubagentState{}, errors.New("app: subagents disabled")
+	}
+	return a.Subagents.Spawn(ctx, a.Subagents.RootCaller(), req)
+}
+func (a *App) SendSubagentMessage(ctx context.Context, target, message string) error {
+	if a.Subagents == nil {
+		return errors.New("app: subagents disabled")
+	}
+	return a.Subagents.SendMessage(ctx, a.Subagents.RootCaller(), target, message)
+}
+func (a *App) FollowupSubagent(ctx context.Context, target, message string) error {
+	if a.Subagents == nil {
+		return errors.New("app: subagents disabled")
+	}
+	return a.Subagents.Followup(ctx, a.Subagents.RootCaller(), target, message)
+}
+func (a *App) WaitSubagents(ctx context.Context, timeout time.Duration) (protocol.WaitSubagentsResult, error) {
+	if a.Subagents == nil {
+		return protocol.WaitSubagentsResult{}, errors.New("app: subagents disabled")
+	}
+	return a.Subagents.Wait(ctx, a.Subagents.RootCaller(), timeout)
+}
+func (a *App) WaitSubagentsUntilAll(ctx context.Context, timeout time.Duration) (protocol.WaitSubagentsResult, error) {
+	if a.Subagents == nil {
+		return protocol.WaitSubagentsResult{}, errors.New("app: subagents disabled")
+	}
+	return a.Subagents.WaitUntilAll(ctx, a.Subagents.RootCaller(), timeout)
+}
+func (a *App) WaitSubagentsIdle(ctx context.Context) error {
+	if a.Subagents == nil {
+		return nil
+	}
+	return a.Subagents.WaitAll(ctx)
+}
+func (a *App) InterruptSubagent(ctx context.Context, target string) (protocol.AgentStatus, error) {
+	if a.Subagents == nil {
+		return protocol.AgentNotFound, errors.New("app: subagents disabled")
+	}
+	return a.Subagents.Interrupt(ctx, a.Subagents.RootCaller(), target)
+}
+func (a *App) ListSubagents(ctx context.Context, prefix string) (protocol.SubagentList, error) {
+	if a.Subagents == nil {
+		return protocol.SubagentList{}, nil
+	}
+	return a.Subagents.List(ctx, a.Subagents.RootCaller(), prefix)
+}
+func (a *App) Subagent(ctx context.Context, target string) (protocol.SubagentState, error) {
+	if a.Subagents == nil {
+		return protocol.SubagentState{Status: protocol.AgentNotFound}, errors.New("app: subagents disabled")
+	}
+	return a.Subagents.Get(ctx, target)
+}
+func (a *App) SubagentMessages(ctx context.Context, target string) ([]protocol.Message, error) {
+	if a.Subagents == nil {
+		return nil, errors.New("app: subagents disabled")
+	}
+	return a.Subagents.Messages(ctx, target)
+}
+func (a *App) SubagentUsage() (protocol.Usage, error) {
+	if a.Subagents == nil {
+		return protocol.Usage{}, nil
+	}
+	return a.Subagents.Usage()
+}
+
+func (a *App) RejectUserInput(requestID string) error {
+	if a == nil || a.userInput == nil {
+		return userinput.ErrUnavailable
+	}
+	return a.userInput.Reject(requestID)
 }
