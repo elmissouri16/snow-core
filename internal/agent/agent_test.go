@@ -208,6 +208,47 @@ func TestManualCompactUsesSummaryAndPreservesHistory(t *testing.T) {
 	}
 }
 
+func TestManualCompactConfiguredGuidanceAndBudgetReachProvider(t *testing.T) {
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamTextDelta, Text: "summary"}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	a, st := setup(t, prov, nil, permission.ModeDeny)
+	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 333, Fallback: "error", Guidance: "Preserve ticket IDs."}
+	for i := 0; i < 6; i++ {
+		msg := protocol.NewUserMessage(fmt.Sprintf("configured-%d", i), "", fmt.Sprintf("message %d", i))
+		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := a.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(prov.requests) != 1 || prov.requests[0].MaxTokens != 333 || !strings.Contains(prov.requests[0].System, "Preserve ticket IDs") {
+		t.Fatalf("request=%+v", prov.requests)
+	}
+}
+
+func TestRepeatedCompactionSummarizesProjectedContext(t *testing.T) {
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamTextDelta, Text: "first summary"}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}, {{Type: protocol.EvStreamTextDelta, Text: "second summary"}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	a, st := setup(t, prov, nil, permission.ModeDeny)
+	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 500, Fallback: "error"}
+	for i := 0; i < 6; i++ {
+		msg := protocol.NewUserMessage(fmt.Sprintf("repeat-a-%d", i), "", fmt.Sprintf("first %d", i))
+		_ = st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg})
+	}
+	if _, err := a.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		msg := protocol.NewUserMessage(fmt.Sprintf("repeat-b-%d", i), "", fmt.Sprintf("second %d", i))
+		_ = st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg})
+	}
+	if _, err := a.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(prov.requests) != 2 || len(prov.requests[1].Messages) >= 10 || prov.requests[1].Messages[0].Role != protocol.RoleCustom || !strings.Contains(prov.requests[1].Messages[0].Content[0].Text, "first summary") {
+		t.Fatalf("second request=%+v", prov.requests)
+	}
+}
+
 func TestManualCompactFallsBackWhenProviderFails(t *testing.T) {
 	prov := &scriptedProvider{resolveErr: errors.New("summary unavailable")}
 	a, st := setup(t, prov, nil, permission.ModeDeny)

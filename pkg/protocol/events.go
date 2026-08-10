@@ -17,6 +17,7 @@ const (
 	EvPermissionRequest AgentEventType = "permission_request"
 	EvUserInputRequest  AgentEventType = "user_input_request"
 	EvUsage             AgentEventType = "usage"
+	EvQueueUpdated      AgentEventType = "queue_updated"
 	EvTurnDone          AgentEventType = "turn_done"
 	EvError             AgentEventType = "error"
 	EvAborted           AgentEventType = "aborted"
@@ -81,6 +82,7 @@ type AgentEvent struct {
 	Compaction   *CompactionResult       `json:"compaction,omitempty"`
 	Permission   *Permission             `json:"permission,omitempty"`
 	UserInput    *UserInputRequest       `json:"user_input,omitempty"`
+	Queue        *InputQueue             `json:"queue,omitempty"`
 	ThreadGoal   *ThreadGoalUpdate       `json:"thread_goal,omitempty"`
 	// Agent correlates ordinary child stream/tool/usage events. Root events keep
 	// this nil for backward compatibility. Lifecycle snapshots use Subagent.
@@ -140,6 +142,7 @@ func (e AgentEvent) Clone() AgentEvent {
 		}
 		out.UserInput = &v
 	}
+	out.Queue = e.Queue.Clone()
 	out.ThreadGoal = e.ThreadGoal.Clone()
 	out.Agent = e.Agent.Clone()
 	out.Subagent = e.Subagent.Clone()

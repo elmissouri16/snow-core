@@ -36,8 +36,14 @@ const (
 	defaultDeferredTopK  = 5
 	deferredCandidateK   = 20
 	maxRoutingEventTools = 20
+	maxPendingRootInputs = 64
+	maxQueuedInputBytes  = 64 * 1024
 	automaticTurnDelay   = 25 * time.Millisecond
 )
+
+// ErrNotRunning is returned when an operation requires an active,
+// queue-accepting agent run.
+var ErrNotRunning = errors.New("agent: no running turn accepting queued input")
 
 // Options configures an Agent.
 type Options struct {
@@ -73,12 +79,28 @@ type Options struct {
 	// Identity attributes permission and host-interaction requests for child
 	// agents. Root leaves it nil for backward-compatible events.
 	Identity *protocol.AgentRef
+	// Compaction configures manual compaction only.
+	Compaction CompactionOptions
+}
+
+// CompactionOptions is kept in agent to avoid coupling core runtime behavior to
+// persisted configuration packages.
+type CompactionOptions struct {
+	RetainTokens     int
+	MinRetainedTurns int
+	SummaryMaxTokens int
+	Fallback         string
+	Guidance         string
 }
 
 // Agent drives turns against a provider and tool registry.
 type Agent struct {
 	mu          sync.RWMutex
 	admissionMu sync.Mutex
+	// queuePublishMu serializes queue mutation with snapshot publication. Queue
+	// callbacks never run under mu, while observers still see snapshots in the
+	// exact order the underlying queue changed.
+	queuePublishMu sync.Mutex
 	// mailboxMu protects attributed collaboration messages. Producers only
 	// enqueue; the admitted agent loop is the sole writer that drains them into
 	// the mutable session cursor at safe boundaries.
@@ -105,6 +127,12 @@ type Agent struct {
 	// is sticky; the latest search_tools result may add at most five more.
 	baseDeferred     []string
 	searchedDeferred []string
+	// queuedInputs are in-memory until a safe provider boundary persists them as
+	// ordinary user messages. queueAccepting closes atomically with the final
+	// empty check so an accepted input can never become stranded.
+	queuedInputs   []protocol.QueuedInput
+	queueSequence  uint64
+	queueAccepting bool
 	// activeSkills are re-appended to the system instructions on every provider
 	// request so manual compaction cannot silently discard activated guidance.
 	activeSkills  map[string]string
@@ -515,11 +543,134 @@ func (a *Agent) SetModel(m protocol.Model) error {
 	return nil
 }
 
+// WaitIdle waits for the currently admitted operation to release the agent.
+// It returns immediately when already idle.
+func (a *Agent) WaitIdle(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	a.mu.RLock()
+	running := a.running
+	done := a.activeDone
+	a.mu.RUnlock()
+	if !running || done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // IsRunning reports whether a turn is in flight.
 func (a *Agent) IsRunning() bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.running
+}
+
+// Steer queues text for the next safe boundary of an active run. Steering is
+// delivered after the current assistant response and its complete tool batch.
+func (a *Agent) Steer(text string) error {
+	_, err := a.QueueInput(protocol.QueuedInputSteer, text)
+	return err
+}
+
+// FollowUp queues text for delivery after the active run has naturally
+// stopped and no steering input remains.
+func (a *Agent) FollowUp(text string) error {
+	_, err := a.QueueInput(protocol.QueuedInputFollowUp, text)
+	return err
+}
+
+// QueueInput is the correlated queue-admission seam used by the native TUI.
+// SDK and RPC callers should use Steer or FollowUp; the returned item lets the
+// TUI retain the user's compact composer text separately from expanded model
+// input without guessing which queue event belongs to which submission.
+func (a *Agent) QueueInput(kind protocol.QueuedInputKind, text string) (protocol.QueuedInput, error) {
+	return a.enqueueRootInput(kind, text)
+}
+
+// PendingInputs returns an independent submission-ordered queue snapshot.
+func (a *Agent) PendingInputs() protocol.InputQueue {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.inputQueueLocked()
+}
+
+// ClearPendingInputs atomically stops queue admission and returns every input
+// that was accepted but not yet delivered. It is used by interactive abort so
+// an enqueue racing the key press is either returned here or rejected, never
+// silently cleared after the TUI took its recovery snapshot.
+func (a *Agent) ClearPendingInputs() protocol.InputQueue {
+	return a.closeInputQueue(true)
+}
+
+func (a *Agent) enqueueRootInput(kind protocol.QueuedInputKind, text string) (protocol.QueuedInput, error) {
+	if kind != protocol.QueuedInputSteer && kind != protocol.QueuedInputFollowUp {
+		return protocol.QueuedInput{}, fmt.Errorf("agent: invalid queued input kind %q", kind)
+	}
+	if strings.TrimSpace(text) == "" {
+		return protocol.QueuedInput{}, errors.New("agent: queued input is empty")
+	}
+	if len(text) > maxQueuedInputBytes {
+		return protocol.QueuedInput{}, fmt.Errorf("agent: queued input exceeds %d bytes", maxQueuedInputBytes)
+	}
+	a.queuePublishMu.Lock()
+	defer a.queuePublishMu.Unlock()
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return protocol.QueuedInput{}, errors.New("agent: closed")
+	}
+	if !a.running || !a.queueAccepting {
+		a.mu.Unlock()
+		return protocol.QueuedInput{}, ErrNotRunning
+	}
+	if len(a.queuedInputs) >= maxPendingRootInputs {
+		a.mu.Unlock()
+		return protocol.QueuedInput{}, fmt.Errorf("agent: queued input limit %d reached", maxPendingRootInputs)
+	}
+	a.queueSequence++
+	item := protocol.QueuedInput{ID: newID(), Kind: kind, Text: text, Order: a.queueSequence}
+	a.queuedInputs = append(a.queuedInputs, item)
+	snapshot := a.inputQueueLocked()
+	a.mu.Unlock()
+	a.publishInputQueue(snapshot)
+	return item, nil
+}
+
+func (a *Agent) inputQueueLocked() protocol.InputQueue {
+	items := make([]protocol.QueuedInput, len(a.queuedInputs))
+	copy(items, a.queuedInputs)
+	return protocol.InputQueue{Items: items}
+}
+
+func (a *Agent) publishInputQueue(queue protocol.InputQueue) {
+	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvQueueUpdated, Queue: queue.Clone()})
+}
+
+// closeInputQueue stops admissions and optionally drops pending input. It
+// publishes only when the visible snapshot changes.
+func (a *Agent) closeInputQueue(clear bool) protocol.InputQueue {
+	a.queuePublishMu.Lock()
+	defer a.queuePublishMu.Unlock()
+	a.mu.Lock()
+	a.queueAccepting = false
+	cleared := protocol.InputQueue{}
+	changed := clear && len(a.queuedInputs) > 0
+	if changed {
+		cleared = a.inputQueueLocked()
+		a.queuedInputs = nil
+	}
+	snapshot := a.inputQueueLocked()
+	a.mu.Unlock()
+	if changed {
+		a.publishInputQueue(snapshot)
+	}
+	return cleared
 }
 
 // Subscribe registers an event listener; returns an unsubscribe func.
@@ -802,13 +953,22 @@ func (a *Agent) SelectBranchAdmitted(branchID string) error {
 
 // Fork creates and activates a durable branch at an existing entry.
 func (a *Agent) Fork(fromEntryID string) (protocol.SessionBranch, error) {
-	unlockAdmission := a.LockAdmission()
-	defer unlockAdmission()
-	return a.ForkAdmitted(fromEntryID)
+	return a.ForkWithOptions(protocol.BranchForkOptions{FromEntryID: fromEntryID})
 }
 
-// ForkAdmitted creates and activates a branch while the caller holds the admission lock.
+func (a *Agent) ForkWithOptions(opts protocol.BranchForkOptions) (protocol.SessionBranch, error) {
+	unlockAdmission := a.LockAdmission()
+	defer unlockAdmission()
+	return a.ForkWithOptionsAdmitted(opts)
+}
+
+// ForkAdmitted preserves the legacy admitted fork entry point.
 func (a *Agent) ForkAdmitted(fromEntryID string) (protocol.SessionBranch, error) {
+	return a.ForkWithOptionsAdmitted(protocol.BranchForkOptions{FromEntryID: fromEntryID})
+}
+
+// ForkWithOptionsAdmitted creates and activates a branch while admission is held.
+func (a *Agent) ForkWithOptionsAdmitted(opts protocol.BranchForkOptions) (protocol.SessionBranch, error) {
 	if err := a.stopAutomaticForControl(context.Background(), "fork"); err != nil {
 		return protocol.SessionBranch{}, err
 	}
@@ -835,14 +995,27 @@ func (a *Agent) ForkAdmitted(fromEntryID string) (protocol.SessionBranch, error)
 		}
 	}
 	managedText, managed := "", false
+	sourceBranchID := opts.SourceBranchID
+	if sourceBranchID == "" {
+		sourceBranchID = oldBranchID
+	}
 	if a.opts.Goal != nil {
-		managedText, managed, err = a.opts.Goal.ManagedTextForFork()
+		if sourceBranchID == oldBranchID {
+			managedText, managed, err = a.opts.Goal.ManagedTextForFork()
+		} else {
+			managedText, managed, err = a.opts.Goal.ManagedTextForBranch(sourceBranchID)
+		}
 		if err != nil {
 			a.mu.Unlock()
 			return protocol.SessionBranch{}, err
 		}
 	}
-	branch, err := branches.ForkBranch(fromEntryID)
+	var branch protocol.SessionBranch
+	if manager, ok := a.opts.Session.(session.BranchManagementStore); ok {
+		branch, err = manager.ForkBranchWithOptions(opts)
+	} else {
+		branch, err = branches.ForkBranch(opts.FromEntryID)
+	}
 	if err == nil && managed {
 		err = a.opts.Goal.CopyManagedForFork(managedText)
 	}
@@ -871,6 +1044,52 @@ func (a *Agent) ForkAdmitted(fromEntryID string) (protocol.SessionBranch, error)
 	return branch, nil
 }
 
+func (a *Agent) RenameBranch(branchID, name string) (protocol.SessionBranch, error) {
+	unlock := a.LockAdmission()
+	defer unlock()
+	return a.RenameBranchAdmitted(branchID, name)
+}
+func (a *Agent) RenameBranchAdmitted(branchID, name string) (protocol.SessionBranch, error) {
+	a.mu.RLock()
+	running := a.running
+	a.mu.RUnlock()
+	if running {
+		return protocol.SessionBranch{}, errors.New("agent: cannot rename branch while running")
+	}
+	manager, ok := a.opts.Session.(session.BranchManagementStore)
+	if !ok {
+		return protocol.SessionBranch{}, errors.New("agent: session does not support branch management")
+	}
+	branch, err := manager.RenameBranch(branchID, name)
+	if err == nil {
+		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	}
+	return branch, err
+}
+
+func (a *Agent) DeleteBranch(branchID string) error {
+	unlock := a.LockAdmission()
+	defer unlock()
+	return a.DeleteBranchAdmitted(branchID)
+}
+func (a *Agent) DeleteBranchAdmitted(branchID string) error {
+	a.mu.RLock()
+	running := a.running
+	a.mu.RUnlock()
+	if running {
+		return errors.New("agent: cannot delete branch while running")
+	}
+	manager, ok := a.opts.Session.(session.BranchManagementStore)
+	if !ok {
+		return errors.New("agent: session does not support branch management")
+	}
+	if err := manager.DeleteBranch(branchID); err != nil {
+		return err
+	}
+	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	return nil
+}
+
 func rollbackFork(branches session.BranchStore, createdBranchID, oldBranchID string) error {
 	if createdBranchID == "" || oldBranchID == "" {
 		return errors.New("agent: cannot roll back incomplete fork")
@@ -878,11 +1097,11 @@ func rollbackFork(branches session.BranchStore, createdBranchID, oldBranchID str
 	if err := branches.SelectBranch(oldBranchID); err != nil {
 		return fmt.Errorf("agent: restore branch after failed fork: %w", err)
 	}
-	deleter, ok := branches.(session.BranchDeleteStore)
+	deleter, ok := branches.(session.BranchRollbackStore)
 	if !ok {
-		return errors.New("agent: session cannot delete failed fork")
+		return errors.New("agent: session cannot roll back failed fork")
 	}
-	if err := deleter.DeleteBranch(createdBranchID); err != nil {
+	if err := deleter.DeleteBranchForRollback(createdBranchID); err != nil {
 		return fmt.Errorf("agent: delete failed fork: %w", err)
 	}
 	return nil
@@ -917,6 +1136,8 @@ func (a *Agent) Compact(ctx context.Context) (protocol.CompactionResult, error) 
 		return protocol.CompactionResult{}, errors.New("agent: cannot compact while running")
 	}
 	a.running = true
+	a.queuedInputs = nil
+	a.queueAccepting = false
 	a.autoStop = false
 	a.turnOrigin = "compact"
 	a.turnWG.Add(1)
@@ -932,6 +1153,7 @@ func (a *Agent) Compact(ctx context.Context) (protocol.CompactionResult, error) 
 		a.mu.Lock()
 		stopped := a.autoStop
 		a.running = false
+		a.queueAccepting = false
 		a.activeCancel = nil
 		a.goalAtTurn = nil
 		if a.activeDone != nil {
@@ -949,16 +1171,29 @@ func (a *Agent) Compact(ctx context.Context) (protocol.CompactionResult, error) 
 	}()
 	ctx = runCtx
 
-	msgs, err := a.opts.Session.Messages()
+	msgs, err := a.contextMessages()
 	if err != nil {
-		return protocol.CompactionResult{}, fmt.Errorf("agent: compact load messages: %w", err)
+		return protocol.CompactionResult{}, fmt.Errorf("agent: compact load context: %w", err)
 	}
 	model := a.Model()
-	budget := model.ContextWindow / 2
+	budget := a.opts.Compaction.RetainTokens
 	if budget <= 0 {
-		budget = 32 * 1024
+		budget = model.ContextWindow / 4
+		if budget < 8*1024 {
+			budget = 8 * 1024
+		}
+		if budget > 32*1024 {
+			budget = 32 * 1024
+		}
 	}
-	plan := compact.Planner(msgs, budget)
+	if model.ContextWindow > 0 && budget > model.ContextWindow/2 {
+		budget = model.ContextWindow / 2
+	}
+	minTurns := a.opts.Compaction.MinRetainedTurns
+	if minTurns <= 0 {
+		minTurns = 2
+	}
+	plan := compact.PlannerWithOptions(msgs, compact.PlannerOptions{RetainTokens: budget, MinRetainedTurns: minTurns})
 	result := protocol.CompactionResult{
 		SummarizedMessages: len(plan.CompactionCandidates),
 		RetainedMessages:   len(msgs) - len(plan.CompactionCandidates),
@@ -971,7 +1206,10 @@ func (a *Agent) Compact(ctx context.Context) (protocol.CompactionResult, error) 
 
 	summary, summaryErr := a.summarizeForCompaction(ctx, plan.CompactionCandidates)
 	usedFallback := false
-	if summaryErr != nil {
+	if summaryErr == nil && strings.TrimSpace(summary) == "" {
+		summaryErr = errors.New("provider returned a blank compaction summary")
+	}
+	if summaryErr != nil && a.opts.Compaction.Fallback != "error" {
 		if ctx.Err() != nil {
 			a.bus.Publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: ctx.Err().Error(), IsError: true})
 			return protocol.CompactionResult{}, ctx.Err()
@@ -1007,11 +1245,26 @@ func (a *Agent) summarizeForCompaction(ctx context.Context, msgs []protocol.Mess
 	if err != nil {
 		return "", err
 	}
+	contract := `Create factual continuation context for a coding agent, not a conversational recap. Use compact sections for: user objective and constraints; decisions with rationale; exact files and symbols changed; commands/tests and outcomes; important tool results; errors and failed approaches; current repository state; and unresolved next steps. Preserve exact identifiers and paths when known. Do not invent facts or call tools.`
+	if guidance := strings.TrimSpace(a.opts.Compaction.Guidance); guidance != "" {
+		contract += "\n\nAdditional operator guidance (additive; the contract above remains mandatory):\n" + guidance
+	}
+	maxTokens := a.opts.Compaction.SummaryMaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 2000
+	}
+	model := a.Model()
+	if model.ContextWindow > 0 && maxTokens > model.ContextWindow/4 {
+		maxTokens = model.ContextWindow / 4
+	}
+	if maxTokens < 128 {
+		maxTokens = 128
+	}
 	req := protocol.ChatRequest{
-		Model:     a.Model(),
+		Model:     model,
 		Messages:  msgs,
-		System:    "Summarize this coding-agent conversation for later continuation. Preserve decisions, current task state, files changed, important tool results, errors, and unresolved work. Be concise and factual. Do not call tools.",
-		MaxTokens: 1200,
+		System:    contract,
+		MaxTokens: maxTokens,
 		Thinking:  protocol.ThinkingOff,
 	}
 	stream, err := p.Chat(ctx, creds, req)
@@ -1085,6 +1338,8 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 		return errors.New("agent: already running")
 	}
 	a.running = true
+	a.queuedInputs = nil
+	a.queueAccepting = true
 	a.turnWG.Add(1)
 	a.turnMode = a.mode
 	a.turnOrigin, a.turnID = "subagent", newID()
@@ -1103,6 +1358,7 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 	if err := a.drainMailboxForProvider(); err != nil {
 		a.mu.Lock()
 		a.running = false
+		a.queueAccepting = false
 		a.activeCancel = nil
 		close(a.activeDone)
 		a.activeDone = nil
@@ -1114,6 +1370,7 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 	unlock()
 	admissionHeld = false
 	defer func() {
+		a.closeInputQueue(true)
 		cancel()
 		retErr = errors.Join(retErr, a.drainMailbox())
 		var origin, turnID string
@@ -1247,6 +1504,8 @@ func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol
 		}
 	}
 	a.running = true
+	a.queuedInputs = nil
+	a.queueAccepting = true
 	// Stopping the previous automatic worker is an admission barrier for this
 	// user turn, not a permanent abort of subsequent goal continuation.
 	a.autoStop = false
@@ -1289,6 +1548,7 @@ func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol
 
 	// Ensure we stop running on any exit.
 	defer func() {
+		a.closeInputQueue(true)
 		cancel()
 		// Persist any mail that arrived after the final provider request before
 		// releasing turn admission. This keeps delivery ordered and durable for
@@ -1377,6 +1637,8 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 		return errors.New("agent: goal continuation deferred")
 	}
 	a.running = true
+	a.queuedInputs = nil
+	a.queueAccepting = true
 	a.turnWG.Add(1)
 	a.turnMode = a.mode
 	a.turnOrigin, a.turnID = "goal", newID()
@@ -1401,6 +1663,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	a.mu.Unlock()
 	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g.Clone()}, TurnOrigin: "goal", TurnID: a.turnID, GoalContinuing: true})
 	defer func() {
+		a.closeInputQueue(true)
 		cancel()
 		retErr = errors.Join(retErr, a.drainMailbox())
 		continuing, accountingErr := a.finalizeGoalTurn(retErr, false)
@@ -1634,6 +1897,9 @@ func (a *Agent) stopWork(ctx context.Context, deferGoal, anyTurn bool) error {
 	automatic := a.autoRunning
 	compacting := a.turnOrigin == "compact" && a.running
 	controlled := automatic || goal != nil || compacting || (anyTurn && a.running)
+	if controlled {
+		a.queueAccepting = false
+	}
 	controller := a.opts.Goal
 	a.mu.Unlock()
 	if cancel != nil && controlled {
@@ -1707,6 +1973,7 @@ func (a *Agent) Close() {
 	reentrantEventCallback := a.bus.InCallback()
 	a.mu.Lock()
 	a.closed = true
+	a.queueAccepting = false
 	cancel := a.activeCancel
 	if a.autoRunning {
 		a.autoStop = true
@@ -1946,24 +2213,154 @@ func (a *Agent) run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		naturalStop := false
 		switch stop {
 		case protocol.StopToolUse:
+			// Steering never skips tool calls. Finish the complete serial batch,
+			// including cancellation placeholders, before checking the queue.
 			if err := a.executeToolCalls(ctx); err != nil {
 				if ctx.Err() != nil {
 					a.bus.Publish(protocol.AgentEvent{Type: protocol.EvAborted})
 				}
 				return err
 			}
-			continue
 		case protocol.StopStop, protocol.StopLength:
-			return nil
+			naturalStop = true
 		case protocol.StopAborted:
 			return nil
 		case protocol.StopError:
 			return errors.New("agent: provider stopped with error")
+		default:
+			naturalStop = true
 		}
-		return nil
+
+		canContinue := a.opts.MaxTurns == 0 || turn < a.opts.MaxTurns
+		queued, ok, limited := a.takeQueuedInput(naturalStop, canContinue)
+		if limited {
+			a.bus.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: "max turns reached"})
+			return errors.New("agent: max turns reached")
+		}
+		if ok {
+			if err := a.deliverQueuedInput(ctx, queued); err != nil {
+				return err
+			}
+			continue
+		}
+		if naturalStop {
+			// takeQueuedInput atomically closed admission with the final empty
+			// check. A concurrent enqueue is therefore either consumed above or
+			// rejected with ErrNotRunning, never stranded.
+			return nil
+		}
+		// Tool-use without steering continues the ordinary tool-result chain.
 	}
+}
+
+// takeQueuedInput selects one safe-boundary input. Steering always wins. A
+// follow-up becomes eligible only after a natural provider stop. When a
+// naturally stopped run has no eligible input, queue admission closes under
+// the same lock as the empty check. limited reports an eligible input that
+// cannot be persisted because the next provider request would exceed MaxTurns.
+func (a *Agent) takeQueuedInput(naturalStop, canContinue bool) (item protocol.QueuedInput, ok, limited bool) {
+	// Hold queuePublishMu across a successful selection and its durable append.
+	// This makes the safe-boundary priority decision atomic with delivery: a
+	// newly submitted steer cannot slip in after a follow-up was selected but
+	// before that follow-up is persisted.
+	a.queuePublishMu.Lock()
+	a.mu.Lock()
+	index := -1
+	for i, item := range a.queuedInputs {
+		if item.Kind == protocol.QueuedInputSteer {
+			index = i
+			break
+		}
+	}
+	if index < 0 && naturalStop {
+		for i, item := range a.queuedInputs {
+			if item.Kind == protocol.QueuedInputFollowUp {
+				index = i
+				break
+			}
+		}
+	}
+	if index < 0 {
+		if naturalStop {
+			a.queueAccepting = false
+		}
+		a.mu.Unlock()
+		a.queuePublishMu.Unlock()
+		return protocol.QueuedInput{}, false, false
+	}
+	if !canContinue {
+		a.mu.Unlock()
+		a.queuePublishMu.Unlock()
+		return protocol.QueuedInput{}, false, true
+	}
+	item = a.queuedInputs[index]
+	a.mu.Unlock()
+	return item, true, false
+}
+
+func (a *Agent) deliverQueuedInput(ctx context.Context, item protocol.QueuedInput) error {
+	if err := ctx.Err(); err != nil {
+		a.queuePublishMu.Unlock()
+		return err
+	}
+	// takeQueuedInput reserved queuePublishMu across selection. Treat persistence
+	// and removal as the remainder of that transaction, so interactive abort
+	// either restores the item without a durable append or observes it removed.
+	index := -1
+	a.mu.Lock()
+	if a.queueAccepting {
+		for i, pending := range a.queuedInputs {
+			if pending.ID == item.ID {
+				index = i
+				break
+			}
+		}
+	}
+	a.mu.Unlock()
+	if index < 0 {
+		a.queuePublishMu.Unlock()
+		return context.Canceled
+	}
+	if err := ctx.Err(); err != nil {
+		a.queuePublishMu.Unlock()
+		return err
+	}
+	msg := protocol.NewUserMessage(newID(), "", item.Text)
+	a.mailboxPersistMu.Lock()
+	err := a.opts.Session.Append(session.Entry{
+		Type: session.EntryMessage, ID: msg.ID, ParentID: "", Message: &msg,
+	})
+	a.mailboxPersistMu.Unlock()
+	if err != nil {
+		a.queuePublishMu.Unlock()
+		return fmt.Errorf("agent: append queued %s input: %w", item.Kind, err)
+	}
+	a.mu.Lock()
+	// Re-find after persistence defensively, although queue mutation is excluded
+	// by queuePublishMu for the whole transaction.
+	for i, pending := range a.queuedInputs {
+		if pending.ID != item.ID {
+			continue
+		}
+		copy(a.queuedInputs[i:], a.queuedInputs[i+1:])
+		a.queuedInputs = a.queuedInputs[:len(a.queuedInputs)-1]
+		break
+	}
+	snapshot := a.inputQueueLocked()
+	a.mu.Unlock()
+	a.publishInputQueue(snapshot)
+	a.queuePublishMu.Unlock()
+	a.mu.Lock()
+	// A queued Plan-mode instruction starts a fresh plan response inside the
+	// same captured collaboration mode.
+	a.turnPlanSeen = false
+	a.mu.Unlock()
+	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	a.prepareToolRouting(ctx, item.Text)
+	return nil
 }
 
 // streamTurn calls the provider and persists the assistant message; returns stop reason.

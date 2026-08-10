@@ -125,6 +125,40 @@ func TestPlanCompletedRequiresDurableAssistantMessage(t *testing.T) {
 	}
 }
 
+func TestDefaultUpdatePlanPublishesImmutableStructuredEvent(t *testing.T) {
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamToolCallDone, ToolCallID: "p1", ToolName: "update_plan", Arguments: []byte(`{"explanation":"working","plan":[{"step":"inspect","status":"in_progress"}]}`)},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+	}, {{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	st := session.NewMemoryStore(session.Options{})
+	a := newPlanAgent(t, p, nil, st)
+	if err := a.SetMode(protocol.ModeDefault); err != nil {
+		t.Fatal(err)
+	}
+	seen := make(chan protocol.PlanUpdate, 1)
+	a.Subscribe(func(ev protocol.AgentEvent) {
+		if ev.Type == protocol.EvPlanUpdate && ev.PlanUpdate != nil {
+			ev.PlanUpdate.Plan[0].Step = "mutated"
+		}
+	})
+	a.Subscribe(func(ev protocol.AgentEvent) {
+		if ev.Type == protocol.EvPlanUpdate && ev.PlanUpdate != nil {
+			seen <- *ev.PlanUpdate.Clone()
+		}
+	})
+	if err := a.Prompt(context.Background(), "implement"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case update := <-seen:
+		if update.Explanation != "working" || len(update.Plan) != 1 || update.Plan[0].Step != "inspect" {
+			t.Fatalf("update=%+v", update)
+		}
+	default:
+		t.Fatal("missing plan_update event")
+	}
+}
+
 func TestPlanModeRejectsUpdatePlanAndModeSwitchWhileRunning(t *testing.T) {
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
 		{Type: protocol.EvStreamToolCallDone, ToolCallID: "p1", ToolName: "update_plan", Arguments: []byte(`{"plan":[{"step":"x","status":"in_progress"}]}`)},
