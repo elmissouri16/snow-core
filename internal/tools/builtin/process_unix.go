@@ -2,15 +2,27 @@
 
 package builtin
 
-import "syscall"
+import (
+	"os/exec"
+	"syscall"
+	"time"
+)
 
-// processGroupAttr puts the child in its own process group so cancelling the
-// context kills the entire group (children included).
-func processGroupAttr() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{Setpgid: true}
+type managedProcess struct{}
+
+func startManagedProcess(cmd *exec.Cmd) (*managedProcess, error) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 2 * time.Second
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return &managedProcess{}, nil
 }
 
-// killProcessGroup sends SIGKILL to the process group of the given pid.
-func killProcessGroup(pid int) error {
-	return syscall.Kill(-pid, syscall.SIGKILL)
-}
+func (*managedProcess) close() {}

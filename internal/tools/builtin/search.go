@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/snow-core/snow/internal/config"
 	"github.com/snow-core/snow/internal/tools"
 )
 
@@ -31,6 +32,7 @@ type Grep struct {
 	MaxOutputBytes int
 	// MaxMatches bounds total matches returned.
 	MaxMatches int
+	Policy     config.EffectiveSearchPolicy
 }
 
 // NewGrep creates the grep tool.
@@ -39,6 +41,7 @@ func NewGrep(guard *PathGuard) *Grep {
 		guard:          guard,
 		MaxOutputBytes: defaultSearchOutputBytes,
 		MaxMatches:     defaultGrepMaxMatches,
+		Policy:         config.DefaultSearchPolicy(),
 	}
 }
 
@@ -55,18 +58,24 @@ func (g *Grep) Schema() tools.ToolSchema {
 				"path": {"type": "string", "description": "File or directory to search. Defaults to cwd."},
 				"glob": {"type": "string", "description": "Filename/path glob filter, for example '*.go' or '**/*.md'. Empty matches all files."},
 				"ignore_case": {"type": "boolean", "default": false},
-				"max_matches": {"type": "integer", "description": "Maximum matching lines to return (default 1000)"}
+				"max_matches": {"type": "integer", "description": "Maximum matching lines to return (default 1000)"},
+				"hidden": {"type": "boolean", "description": "Include hidden files/directories for this call"},
+				"include_ignored": {"type": "boolean", "description": "Bypass soft ignore rules (never .git or symlinks)"},
+				"exclude": {"type": "array", "items":{"type":"string"}, "description":"Additional path globs to exclude"}
 			}
 		}`),
 	}
 }
 
 type grepArgs struct {
-	Pattern    string `json:"pattern"`
-	Path       string `json:"path"`
-	Glob       string `json:"glob"`
-	IgnoreCase bool   `json:"ignore_case"`
-	MaxMatches int    `json:"max_matches"`
+	Pattern        string   `json:"pattern"`
+	Path           string   `json:"path"`
+	Glob           string   `json:"glob"`
+	IgnoreCase     bool     `json:"ignore_case"`
+	MaxMatches     int      `json:"max_matches"`
+	Hidden         *bool    `json:"hidden"`
+	IncludeIgnored bool     `json:"include_ignored"`
+	Exclude        []string `json:"exclude"`
 }
 
 // Run implements tools.Tool.
@@ -118,7 +127,7 @@ func (g *Grep) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	var out strings.Builder
 	matches := 0
 	truncated := false
-	walkErr := walkSearchFiles(ctx, root, func(path string) error {
+	walkErr := walkSearchFiles(ctx, root, searchWalkOptions{PolicyRoot: searchPolicyRoot(root, host), Policy: g.Policy, Hidden: a.Hidden, IncludeIgnored: a.IncludeIgnored, Exclude: a.Exclude}, func(path string) error {
 		if filter != nil {
 			rel := relativeSearchPath(root, path, rootIsFile)
 			ok, matchErr := filter.Match(rel)
@@ -198,6 +207,7 @@ type Glob struct {
 	MaxOutputBytes int
 	// MaxResults bounds the number of returned paths.
 	MaxResults int
+	Policy     config.EffectiveSearchPolicy
 }
 
 // NewGlob creates the glob tool.
@@ -206,6 +216,7 @@ func NewGlob(guard *PathGuard) *Glob {
 		guard:          guard,
 		MaxOutputBytes: defaultSearchOutputBytes,
 		MaxResults:     defaultGlobMaxResults,
+		Policy:         config.DefaultSearchPolicy(),
 	}
 }
 
@@ -220,16 +231,22 @@ func (g *Glob) Schema() tools.ToolSchema {
 			"properties": {
 				"pattern": {"type": "string", "description": "Glob pattern, for example '*.go', 'src/*.go', or '**/*_test.go'"},
 				"path": {"type": "string", "description": "File or directory to search. Defaults to cwd."},
-				"max_results": {"type": "integer", "description": "Maximum paths to return (default 500)"}
+				"max_results": {"type": "integer", "description": "Maximum paths to return (default 500)"},
+				"hidden": {"type": "boolean", "description": "Include hidden files/directories for this call"},
+				"include_ignored": {"type": "boolean", "description": "Bypass soft ignore rules (never .git or symlinks)"},
+				"exclude": {"type": "array", "items":{"type":"string"}, "description":"Additional path globs to exclude"}
 			}
 		}`),
 	}
 }
 
 type globArgs struct {
-	Pattern    string `json:"pattern"`
-	Path       string `json:"path"`
-	MaxResults int    `json:"max_results"`
+	Pattern        string   `json:"pattern"`
+	Path           string   `json:"path"`
+	MaxResults     int      `json:"max_results"`
+	Hidden         *bool    `json:"hidden"`
+	IncludeIgnored bool     `json:"include_ignored"`
+	Exclude        []string `json:"exclude"`
 }
 
 // Run implements tools.Tool.
@@ -268,7 +285,7 @@ func (g *Glob) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	paths := make([]string, 0, minInt(maxResults, 128))
 	outputBytes := 0
 	truncated := false
-	walkErr := walkSearchFiles(ctx, root, func(path string) error {
+	walkErr := walkSearchFiles(ctx, root, searchWalkOptions{PolicyRoot: searchPolicyRoot(root, host), Policy: g.Policy, Hidden: a.Hidden, IncludeIgnored: a.IncludeIgnored, Exclude: a.Exclude}, func(path string) error {
 		rel := relativeSearchPath(root, path, rootIsFile)
 		matched, matchErr := matcher.Match(rel)
 		if matchErr != nil {
@@ -329,6 +346,18 @@ func resolveSearchRoot(path string, host tools.ToolHost, fallback *PathGuard, na
 	if guard == nil {
 		return "", nil, false, fmt.Errorf("%s: no path guard configured", name)
 	}
+	inputPath := root
+	if !filepath.IsAbs(inputPath) {
+		inputPath = filepath.Join(guard.CWD(), inputPath)
+	} else if host != nil && filepath.Clean(inputPath) == filepath.Clean(host.CWD()) {
+		// The host cwd may use an OS-level alias such as macOS /var -> /private/var.
+		// The guard already canonicalized that trusted root; inspect only user path
+		// components beneath it.
+		inputPath = guard.CWD()
+	}
+	if hasSymlinkComponent(inputPath, guard) {
+		return "", nil, false, fmt.Errorf("%s: explicit roots containing symlinks are not searchable", name)
+	}
 	resolved, err := guard.Resolve(root)
 	if err != nil {
 		return "", nil, false, fmt.Errorf("%s: %w", name, err)
@@ -343,9 +372,9 @@ func resolveSearchRoot(path string, host tools.ToolHost, fallback *PathGuard, na
 	return resolved, guard, info.Mode().IsRegular(), nil
 }
 
-// walkSearchFiles visits regular, non-symlink files below root. Hidden and
-// generated directories are skipped to keep model searches fast and useful.
-func walkSearchFiles(ctx context.Context, root string, fn func(path string) error) error {
+// walkSearchFiles visits regular, non-symlink files below root while applying
+// hard exclusions and one invocation-scoped hierarchical ignore matcher.
+func walkSearchFiles(ctx context.Context, root string, opts searchWalkOptions, fn func(path string) error) error {
 	info, err := os.Stat(root)
 	if err != nil {
 		return err
@@ -354,42 +383,113 @@ func walkSearchFiles(ctx context.Context, root string, fn func(path string) erro
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if hardSearchExcluded(root, opts.PolicyRoot) {
+			return nil
+		}
+		matcher := newSearchIgnoreMatcher(root, opts)
+		if matcher.ignore(root, false) {
+			return nil
+		}
 		return fn(root)
 	}
+	if hardSearchExcluded(root, opts.PolicyRoot) {
+		return nil
+	}
+	matcher := newSearchIgnoreMatcher(root, opts)
 	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil // skip unreadable entries
+			return nil
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if entry.IsDir() {
-			if path != root && ignoredSearchDir(entry.Name()) {
+		if path != root && entry.Type()&os.ModeSymlink != 0 {
+			if entry.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if entry.Type()&os.ModeSymlink != 0 {
+		if path != root && strings.EqualFold(entry.Name(), ".git") {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			if path != root && matcher.ignore(path, true) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		entryInfo, err := entry.Info()
-		if err != nil || !entryInfo.Mode().IsRegular() {
+		if err != nil || !entryInfo.Mode().IsRegular() || matcher.ignore(path, false) {
 			return nil
 		}
 		return fn(path)
 	})
 }
 
-func ignoredSearchDir(name string) bool {
-	if strings.HasPrefix(name, ".") {
+func hasSymlinkComponent(path string, guard *PathGuard) bool {
+	path = filepath.Clean(path)
+	stop := ""
+	roots := append(guard.Roots(), guard.CWD())
+	for _, root := range roots {
+		if within(root, path) && (stop == "" || len(root) > len(stop)) {
+			stop = root
+		}
+	}
+	if stop == "" {
+		info, err := os.Lstat(path)
+		return err == nil && info.Mode()&os.ModeSymlink != 0
+	}
+	for path != stop {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return false
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return false
+		}
+		path = parent
+	}
+	return false
+}
+
+func hardSearchExcluded(path, policyRoot string) bool {
+	if policyRoot == "" {
+		policyRoot = filepath.Dir(path)
+	}
+	rel, err := filepath.Rel(policyRoot, path)
+	if err != nil {
 		return true
 	}
-	switch name {
-	case "node_modules", "vendor", "dist", "build", "coverage":
-		return true
-	default:
-		return false
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		if strings.EqualFold(part, ".git") {
+			return true
+		}
 	}
+	return false
+}
+
+func searchPolicyRoot(searchRoot string, host tools.ToolHost) string {
+	if host == nil || host.CWD() == "" {
+		return searchRoot
+	}
+	cwd, err := filepath.Abs(host.CWD())
+	if err != nil {
+		return searchRoot
+	}
+	if resolved, err := evalWithAncestors(cwd); err == nil {
+		cwd = resolved
+	}
+	if within(cwd, searchRoot) {
+		return cwd
+	}
+	return searchRoot
 }
 
 func relativeSearchPath(root, path string, rootIsFile bool) string {

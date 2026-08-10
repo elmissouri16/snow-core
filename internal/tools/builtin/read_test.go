@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -164,12 +162,13 @@ func TestRead_PathEscapeDenied(t *testing.T) {
 // TestReadRejectsFIFO: reading a FIFO must return an error result instead of
 // blocking the agent turn on a non-regular file.
 func TestReadRejectsFIFO(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("FIFO test skipped on windows")
-	}
 	dir := t.TempDir()
 	fifo := filepath.Join(dir, "pipe")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+	supported, err := makeTestFIFO(fifo)
+	if !supported {
+		t.Skip("FIFO fixtures are unavailable on this platform")
+	}
+	if err != nil {
 		t.Fatalf("mkfifo: %v", err)
 	}
 	r := NewRead(NewPathGuard([]string{dir}, dir))

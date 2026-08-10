@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -45,7 +44,7 @@ func TestBash_OutputCap(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBash()
 	b.MaxOutputBytes = 256
-	res := runBash(b, dir, map[string]any{"command": "head -c 10000 /dev/zero | tr '\\0' 'x'"})
+	res := runBash(b, dir, map[string]any{"command": testOutputCapCommand()})
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.Content[0].Text)
 	}
@@ -58,15 +57,12 @@ func TestBash_OutputCap(t *testing.T) {
 }
 
 func TestBash_TimeoutKillsProcess(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("timeout kill test skipped on windows")
-	}
 	dir := t.TempDir()
 	b := NewBash()
 	b.Timeout = 300 * time.Millisecond
 
 	start := time.Now()
-	res := runBash(b, dir, map[string]any{"command": "sleep 10"})
+	res := runBash(b, dir, map[string]any{"command": testSleepCommand(10 * time.Second)})
 	elapsed := time.Since(start)
 
 	if !res.IsError {
@@ -85,7 +81,7 @@ func TestBash_CustomTimeoutMS(t *testing.T) {
 	b := NewBash()
 	b.Timeout = 30 * time.Second // overridden by args
 	start := time.Now()
-	res := runBash(b, dir, map[string]any{"command": "sleep 10", "timeout_ms": 300})
+	res := runBash(b, dir, map[string]any{"command": testSleepCommand(10 * time.Second), "timeout_ms": 300})
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("custom timeout took too long: %s", elapsed)
 	}
@@ -109,7 +105,7 @@ func TestBash_CWDRespected(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := NewBash()
-	res := runBash(b, dir, map[string]any{"command": "ls marker.txt"})
+	res := runBash(b, dir, map[string]any{"command": testListCommand("marker.txt")})
 	if res.IsError {
 		t.Fatalf("unexpected error: %s", res.Content[0].Text)
 	}
@@ -125,22 +121,34 @@ func TestBashHugeTimeoutDoesNotOverflow(t *testing.T) {
 	b := NewBash()
 	b.Timeout = time.Second
 	maxInt := int(^uint(0) >> 1)
-	res := runBash(b, t.TempDir(), map[string]any{"command": "printf ok", "timeout_ms": maxInt})
+	res := runBash(b, t.TempDir(), map[string]any{"command": testPrintCommand("ok"), "timeout_ms": maxInt})
 	if res.IsError || res.Content[0].Text != "ok" {
 		t.Fatalf("huge timeout overflowed: %+v", res)
 	}
 }
 
-func TestBashModelTimeoutBoundedByCap(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("timeout kill test skipped on windows")
+func TestBashCancellationKillsDescendants(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "escaped.txt")
+	b := NewBash()
+	b.Timeout = 200 * time.Millisecond
+	res := runBash(b, dir, map[string]any{"command": testDescendantCommand(marker)})
+	if !res.IsError {
+		t.Fatalf("expected timeout: %+v", res)
 	}
+	time.Sleep(time.Second)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("descendant survived cancellation: %v", err)
+	}
+}
+
+func TestBashModelTimeoutBoundedByCap(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBash()
 	b.Timeout = 50 * time.Millisecond // operator cap
 
 	start := time.Now()
-	res := runBash(b, dir, map[string]any{"command": "sleep 1", "timeout_ms": 60000})
+	res := runBash(b, dir, map[string]any{"command": testSleepCommand(time.Second), "timeout_ms": 60000})
 	elapsed := time.Since(start)
 
 	if !res.IsError {

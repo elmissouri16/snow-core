@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/snow-core/snow/internal/tools"
@@ -173,20 +172,4 @@ func writeAll(ctx context.Context, dst io.Writer, data []byte) error {
 		}
 	}
 	return ctx.Err()
-}
-
-// renameReplace is atomic on Unix. Windows cannot rename over an existing
-// destination, so it removes the old file only for that platform's limitation.
-func renameReplace(from, to string) error {
-	err := os.Rename(from, to)
-	if err == nil {
-		return nil
-	}
-	if runtime.GOOS != "windows" {
-		return err
-	}
-	if removeErr := os.Remove(to); removeErr != nil && !os.IsNotExist(removeErr) {
-		return err
-	}
-	return os.Rename(from, to)
 }

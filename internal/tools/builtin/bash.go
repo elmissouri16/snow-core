@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"runtime"
 	"time"
 
 	"github.com/snow-core/snow/internal/tools"
@@ -15,11 +14,17 @@ import (
 const DefaultBashTimeout = 120 * time.Second
 
 // Bash is the shell command execution tool.
+type WindowsShellOptions struct {
+	Kind       string
+	Executable string
+}
+
 type Bash struct {
 	// MaxOutputBytes caps combined stdout+stderr. Defaults to 262144.
 	MaxOutputBytes int
 	// Timeout caps execution. Defaults to 120s.
-	Timeout time.Duration
+	Timeout      time.Duration
+	WindowsShell WindowsShellOptions
 }
 
 // NewBash returns a Bash tool with defaults.
@@ -37,7 +42,7 @@ type bashArgs struct {
 func (b *Bash) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "bash",
-		Description: "Run a shell command in the working directory.",
+		Description: shellDescription(),
 		Parameters: json.RawMessage(`{
   "type": "object",
   "required": ["command"],
@@ -87,24 +92,15 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	}
 	defer cancel()
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(runCtx, "cmd", "/c", a.Command)
-	} else {
-		cmd = exec.CommandContext(runCtx, "sh", "-c", a.Command)
+	var hostEnv []string
+	var hostCWD string
+	if host != nil {
+		hostEnv = host.Environ()
+		hostCWD = host.CWD()
 	}
-
-	// Kill the whole process group on cancel so children are reaped too.
-	if runtime.GOOS != "windows" {
-		cmd.SysProcAttr = processGroupAttr()
-		cmd.Cancel = func() error {
-			if cmd.Process == nil {
-				return nil
-			}
-			// Negative pid targets the process group.
-			return killProcessGroup(cmd.Process.Pid)
-		}
-		cmd.WaitDelay = 2 * time.Second
+	cmd, err := shellCommand(runCtx, a.Command, b.WindowsShell, hostEnv, hostCWD)
+	if err != nil {
+		return tools.ErrorResult(fmt.Errorf("bash: %w", err)), nil
 	}
 
 	if host != nil {
@@ -123,7 +119,13 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	cmd.Stdout = limited
 	cmd.Stderr = limited
 
-	err := cmd.Run()
+	managed, err := startManagedProcess(cmd)
+	if err == nil {
+		err = cmd.Wait()
+	}
+	if managed != nil {
+		managed.close()
+	}
 
 	output := limited.String()
 	if limited.truncated {
@@ -133,7 +135,10 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if err != nil {
 		// A timeout or cancellation takes precedence over exit-code reporting.
 		if runCtx.Err() != nil {
-			return tools.ErrorResult(fmt.Errorf("bash: command timed out or cancelled after %s", timeout)), nil
+			if ctx.Err() != nil {
+				return tools.ErrorResult(fmt.Errorf("bash: command cancelled: %w", ctx.Err())), nil
+			}
+			return tools.ErrorResult(fmt.Errorf("bash: command timed out after %s", timeout)), nil
 		}
 		// A non-zero exit code is normal tool feedback, not a tool error.
 		if exitErr, ok := err.(*exec.ExitError); ok {

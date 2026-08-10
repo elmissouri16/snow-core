@@ -3,6 +3,7 @@ package builtin
 import (
 	"time"
 
+	"github.com/snow-core/snow/internal/config"
 	"github.com/snow-core/snow/internal/tools"
 )
 
@@ -15,7 +16,9 @@ type Options struct {
 	// GlobMaxResults caps glob paths. 0 means the glob default.
 	GlobMaxResults int
 	// BashTimeout caps bash execution. 0 means default.
-	BashTimeout time.Duration
+	BashTimeout  time.Duration
+	SearchPolicy config.EffectiveSearchPolicy
+	WindowsShell WindowsShellOptions
 	// Roots are the allowed path roots for file tools. If empty, file tools
 	// are created without a guard and deny all paths unless the host provides
 	// roots at call time.
@@ -31,8 +34,11 @@ func RegisterBuiltins(reg tools.Registry, opts Options) error {
 	write := NewWrite(guard)
 	edit := NewEdit(guard)
 	bash := NewBash()
+	bash.WindowsShell = opts.WindowsShell
 	grep := NewGrep(guard)
+	grep.Policy = opts.SearchPolicy
 	glob := NewGlob(guard)
+	glob.Policy = opts.SearchPolicy
 	webfetch := NewWebFetch()
 	askUser := NewAskUser()
 	requestUserInput := NewRequestUserInput()

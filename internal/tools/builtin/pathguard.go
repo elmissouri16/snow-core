@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // PathGuard confines file access to a set of allowed roots.
@@ -65,6 +64,9 @@ func (g *PathGuard) Resolve(path string) (string, error) {
 		return "", errors.New("path is empty")
 	}
 
+	if err := validatePlatformPath(path); err != nil {
+		return "", err
+	}
 	p := path
 	if !filepath.IsAbs(p) {
 		p = filepath.Join(g.cwd, p)
@@ -97,7 +99,7 @@ func within(root, path string) bool {
 	if rel == "." {
 		return true
 	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return platformPathWithin(rel)
 }
 
 // evalWithAncestors resolves symlinks on the longest existing prefix of path,
