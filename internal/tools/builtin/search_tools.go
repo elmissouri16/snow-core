@@ -71,7 +71,8 @@ func (s *SearchTools) Run(ctx context.Context, raw json.RawMessage, host tools.T
 	}
 
 	started := time.Now()
-	candidates, err := s.Router.Search(ctx, args.Query, toolSearchCandidates)
+	candidateLimit := max(toolSearchCandidates, s.Router.DeferredCount())
+	candidates, err := s.Router.Search(ctx, args.Query, candidateLimit)
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
 		return tools.ErrorResult(err), nil

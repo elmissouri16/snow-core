@@ -5,6 +5,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -167,6 +168,12 @@ type Registry interface {
 	UnregisterOwner(owner string) int
 }
 
+// AtomicOwnerRegistry replaces a dynamic owner's catalog without exposing a
+// partial state to readers.
+type AtomicOwnerRegistry interface {
+	ReplaceOwner(owner string, descriptors []ToolDescriptor, prepare func([]ToolDescriptor) error) error
+}
+
 // DescriptorRegistry is kept as a descriptive alias for manager APIs.
 type DescriptorRegistry = Registry
 
@@ -202,13 +209,113 @@ func (r *SimpleRegistry) Register(t Tool) error {
 
 // RegisterDescriptor adds a tool and its host metadata.
 func (r *SimpleRegistry) RegisterDescriptor(desc ToolDescriptor) error {
+	normalized, err := normalizeDescriptor(desc)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.descriptors[normalized.Schema.Name]; ok {
+		return fmt.Errorf("tool %q already registered", normalized.Schema.Name)
+	}
+	r.descriptors[normalized.Schema.Name] = normalized
+	r.keys = append(r.keys, normalized.Schema.Name)
+	return nil
+}
+
+// PrepareCurrent invokes prepare with a cloned complete catalog while holding
+// the registry's catalog boundary. It is used to reconcile a newly installed
+// dynamic-catalog observer without allowing a replacement to overtake a stale
+// snapshot. prepare must not call back into this registry.
+func (r *SimpleRegistry) PrepareCurrent(prepare func([]ToolDescriptor) error) error {
+	if prepare == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	candidate := make([]ToolDescriptor, 0, len(r.keys))
+	for _, key := range r.keys {
+		candidate = append(candidate, cloneDescriptor(r.descriptors[key]))
+	}
+	return prepare(candidate)
+}
+
+// ReplaceOwner atomically replaces one owner's descriptors. prepare receives a
+// complete candidate catalog while the live registry is unchanged; returning
+// an error aborts the replacement. prepare must not call back into this registry.
+func (r *SimpleRegistry) ReplaceOwner(owner string, descriptors []ToolDescriptor, prepare func([]ToolDescriptor) error) error {
+	if strings.TrimSpace(owner) == "" {
+		return errors.New("tool registry: replacement owner is required")
+	}
+	normalized := make([]ToolDescriptor, len(descriptors))
+	seen := make(map[string]bool, len(descriptors))
+	for i, descriptor := range descriptors {
+		var err error
+		normalized[i], err = normalizeDescriptor(descriptor)
+		if err != nil {
+			return err
+		}
+		if normalized[i].Owner != owner {
+			return fmt.Errorf("tool %q has owner %q, want %q", normalized[i].Schema.Name, normalized[i].Owner, owner)
+		}
+		if seen[normalized[i].Schema.Name] {
+			return fmt.Errorf("tool %q appears more than once in owner replacement", normalized[i].Schema.Name)
+		}
+		seen[normalized[i].Schema.Name] = true
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	candidateMap := make(map[string]ToolDescriptor, len(r.descriptors)-len(r.keys)+len(normalized))
+	candidateKeys := make([]string, 0, len(r.keys)+len(normalized))
+	insertAt := -1
+	for _, key := range r.keys {
+		descriptor := r.descriptors[key]
+		if descriptor.Owner == owner {
+			if insertAt < 0 {
+				insertAt = len(candidateKeys)
+			}
+			continue
+		}
+		candidateMap[key] = descriptor
+		candidateKeys = append(candidateKeys, key)
+	}
+	if insertAt < 0 {
+		insertAt = len(candidateKeys)
+	}
+	for _, descriptor := range normalized {
+		if _, exists := candidateMap[descriptor.Schema.Name]; exists {
+			return fmt.Errorf("tool %q already registered by another owner", descriptor.Schema.Name)
+		}
+		candidateMap[descriptor.Schema.Name] = descriptor
+	}
+	newKeys := make([]string, 0, len(candidateKeys)+len(normalized))
+	newKeys = append(newKeys, candidateKeys[:insertAt]...)
+	for _, descriptor := range normalized {
+		newKeys = append(newKeys, descriptor.Schema.Name)
+	}
+	newKeys = append(newKeys, candidateKeys[insertAt:]...)
+	if prepare != nil {
+		candidate := make([]ToolDescriptor, 0, len(newKeys))
+		for _, key := range newKeys {
+			candidate = append(candidate, cloneDescriptor(candidateMap[key]))
+		}
+		if err := prepare(candidate); err != nil {
+			return err
+		}
+	}
+	r.descriptors, r.keys = candidateMap, newKeys
+	return nil
+}
+
+func normalizeDescriptor(desc ToolDescriptor) (ToolDescriptor, error) {
 	if desc.Source == SourceGoPlugin || desc.Source == SourceExternal || desc.Source == SourceMCP {
 		prefix := "plugin"
 		if desc.Source == SourceMCP {
 			prefix = "mcp"
 		}
 		if desc.PluginID == "" {
-			return fmt.Errorf("tool %q has no plugin/server id", desc.Schema.Name)
+			return ToolDescriptor{}, fmt.Errorf("tool %q has no plugin/server id", desc.Schema.Name)
 		}
 		canonicalPrefix := prefix + "_" + desc.PluginID + "_"
 		if desc.OriginalName == "" {
@@ -217,26 +324,26 @@ func (r *SimpleRegistry) RegisterDescriptor(desc ToolDescriptor) error {
 		if !strings.HasPrefix(desc.Schema.Name, canonicalPrefix) {
 			name, err := publicplugin.Namespace(prefix, desc.PluginID, desc.OriginalName)
 			if err != nil {
-				return err
+				return ToolDescriptor{}, err
 			}
 			desc.Schema.Name = name
 		}
 	}
 	if desc.Tool == nil {
-		return fmt.Errorf("tool %q is nil", desc.Schema.Name)
+		return ToolDescriptor{}, fmt.Errorf("tool %q is nil", desc.Schema.Name)
 	}
 	if desc.Schema.Name == "" {
-		return fmt.Errorf("tool has empty name")
+		return ToolDescriptor{}, fmt.Errorf("tool has empty name")
 	}
 	if !toolNameRE.MatchString(desc.Schema.Name) {
-		return fmt.Errorf("tool %q has invalid name", desc.Schema.Name)
+		return ToolDescriptor{}, fmt.Errorf("tool %q has invalid name", desc.Schema.Name)
 	}
-	if desc.Schema.Parameters == nil || len(desc.Schema.Parameters) == 0 {
+	if len(desc.Schema.Parameters) == 0 {
 		desc.Schema.Parameters = json.RawMessage(`{"type":"object"}`)
 	}
 	var schema map[string]any
 	if err := json.Unmarshal(desc.Schema.Parameters, &schema); err != nil || schema == nil {
-		return fmt.Errorf("tool %q has invalid parameters schema", desc.Schema.Name)
+		return ToolDescriptor{}, fmt.Errorf("tool %q has invalid parameters schema", desc.Schema.Name)
 	}
 	if desc.Risk == "" || !validRisk(desc.Risk) {
 		desc.Risk = defaultRisk(desc.Schema.Name)
@@ -248,19 +355,11 @@ func (r *SimpleRegistry) RegisterDescriptor(desc ToolDescriptor) error {
 		desc.Owner = string(desc.Source)
 	}
 	if err := normalizeDiscovery(&desc); err != nil {
-		return err
+		return ToolDescriptor{}, err
 	}
 	desc.Schema = cloneSchema(desc.Schema)
 	desc.Capabilities = append([]string(nil), desc.Capabilities...)
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.descriptors[desc.Schema.Name]; ok {
-		return fmt.Errorf("tool %q already registered", desc.Schema.Name)
-	}
-	r.descriptors[desc.Schema.Name] = desc
-	r.keys = append(r.keys, desc.Schema.Name)
-	return nil
+	return desc, nil
 }
 
 // Get returns a tool by name.

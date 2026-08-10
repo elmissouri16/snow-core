@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -13,8 +14,12 @@ import (
 
 type searchToolsRouter struct{ matches []tools.ToolMatch }
 
-func (r searchToolsRouter) Search(context.Context, string, int) ([]tools.ToolMatch, error) {
-	return append([]tools.ToolMatch(nil), r.matches...), nil
+func (r searchToolsRouter) Search(_ context.Context, _ string, limit int) ([]tools.ToolMatch, error) {
+	matches := append([]tools.ToolMatch(nil), r.matches...)
+	if len(matches) > limit {
+		matches = matches[:limit]
+	}
+	return matches, nil
 }
 func (r searchToolsRouter) DeferredCount() int { return len(r.matches) }
 func (searchToolsRouter) Close() error         { return nil }
@@ -63,6 +68,27 @@ func TestSearchToolsFiltersDeniedMatchesAndReturnsDiscoveryDetails(t *testing.T)
 	details, ok := result.Details.(tools.DiscoveryDetails)
 	if !ok || len(details.Matches) != 1 || details.Matches[0].ID != "read_catalog" || details.CandidateCount != 2 {
 		t.Fatalf("details = %+v", result.Details)
+	}
+}
+
+func TestSearchToolsDeniedTopCandidatesDoNotHidePermittedResult(t *testing.T) {
+	registry := tools.NewRegistry()
+	matches := make([]tools.ToolMatch, 0, 21)
+	for i := 0; i < 21; i++ {
+		name := fmt.Sprintf("catalog_%02d", i)
+		risk := permission.RiskWrite
+		if i == 20 {
+			risk = permission.RiskRead
+		}
+		schema := protocol.ToolSchema{Name: name, Parameters: json.RawMessage(`{"type":"object"}`), Discovery: &protocol.ToolDiscovery{Mode: protocol.ToolDiscoveryDeferred, Namespace: "catalog"}}
+		if err := registry.RegisterDescriptor(tools.ToolDescriptor{Schema: schema, Tool: searchToolsTestTool{schema}, Source: tools.SourceSDK, Owner: "sdk", Risk: risk}); err != nil {
+			t.Fatal(err)
+		}
+		matches = append(matches, tools.ToolMatch{ID: name})
+	}
+	result, err := NewSearchTools(searchToolsRouter{matches: matches}, registry).Run(context.Background(), json.RawMessage(`{"query":"catalog"}`), searchToolsHost{perm: permission.NewService(permission.ModeDeny, nil)})
+	if err != nil || result.IsError || !strings.Contains(result.Content[0].Text, "catalog_20") {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 
