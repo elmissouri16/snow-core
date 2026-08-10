@@ -167,6 +167,21 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		s.mu.Unlock()
 		s.write(Response{ID: req.ID, Type: "response", Command: "abort", Success: true})
 		return nil
+	case "steer", "follow_up":
+		if req.Message == "" {
+			return fmt.Errorf("%s requires message", req.Type)
+		}
+		var err error
+		if req.Type == "steer" {
+			err = s.app.Agent.Steer(req.Message)
+		} else {
+			err = s.app.Agent.FollowUp(req.Message)
+		}
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true})
+		return nil
 	case "user_input_reply":
 		var response protocol.UserInputResponse
 		if len(req.Params) == 0 {
@@ -433,6 +448,8 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 			info["goal"] = map[string]any{"goal_id": goal.GoalID, "status": goal.Status, "tokens_used": goal.TokensUsed, "token_budget": goal.TokenBudget}
 		}
 		info["subagents"] = map[string]any{"enabled": s.app.Subagents != nil, "max_concurrent_agents": s.app.Cfg.Subagents.MaxConcurrentThreads, "max_concurrent_threads": s.app.Cfg.Subagents.MaxConcurrentThreads, "max_agents_per_session": s.app.Cfg.Subagents.MaxAgentsPerSession, "max_depth": s.app.Cfg.Subagents.MaxDepth, "durable": s.app.Cfg.Subagents.Durable, "allow_mutation": s.app.Cfg.Subagents.AllowMutation}
+		steering, followUps := s.app.Agent.PendingInputs().Counts()
+		info["pending_inputs"] = map[string]any{"steering": steering, "follow_up": followUps, "total": steering + followUps}
 		s.write(Response{ID: req.ID, Type: "response", Command: "session_info", Success: true, Data: info})
 		return nil
 	default:
@@ -452,17 +469,14 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 			return err
 		}
 	}
-	// Cancel and join the prior prompt before starting another one. Serve keeps
-	// scanning while the new prompt runs, enabling abort and user-input replies.
+	// Serve keeps scanning while the prompt runs, enabling explicit queue,
+	// abort, and user-input commands. A second prompt never implicitly cancels
+	// accepted work: callers must choose steer, follow_up, or abort.
 	s.mu.Lock()
-	priorCancel := s.cancel
-	priorDone := s.promptDone
+	active := s.promptDone != nil
 	s.mu.Unlock()
-	if priorCancel != nil {
-		priorCancel()
-	}
-	if priorDone != nil {
-		<-priorDone
+	if active {
+		return errors.New("rpc: prompt already running; use steer, follow_up, or abort")
 	}
 
 	promptCtx, cancel := context.WithCancel(ctx)
@@ -546,6 +560,9 @@ func Main(ctx context.Context, opts app.Options) error {
 		return err
 	}
 	defer a.Close()
+	for _, diagnostic := range a.Diagnostics {
+		fmt.Fprintf(os.Stderr, "config warning: %s: %s\n", diagnostic.Path, diagnostic.Message)
+	}
 
 	// Stream agent events to stdout as JSONL through the server's locked
 	// writer so responses and events can never interleave corruptly.

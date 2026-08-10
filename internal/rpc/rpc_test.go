@@ -7,12 +7,59 @@ import (
 	"fmt"
 	"io"
 	"strings"
-
-	"github.com/snow-core/snow/pkg/protocol"
+	"sync"
 	"testing"
 
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/auth"
+	"github.com/snow-core/snow/pkg/protocol"
 )
+
+type rpcQueueProvider struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *rpcQueueProvider) ID() string { return "rpc-queue" }
+func (p *rpcQueueProvider) ListModels(context.Context) ([]protocol.Model, error) {
+	return nil, nil
+}
+func (p *rpcQueueProvider) Resolve(_ context.Context, credential auth.Credential) (auth.Credential, error) {
+	return credential, nil
+}
+func (p *rpcQueueProvider) Chat(_ context.Context, _ auth.Credential, _ protocol.ChatRequest) (protocol.EventStream, error) {
+	first := false
+	p.once.Do(func() {
+		first = true
+		close(p.started)
+	})
+	if first {
+		return &rpcGateStream{release: p.release}, nil
+	}
+	return &rpcGateStream{}, nil
+}
+
+type rpcGateStream struct {
+	release <-chan struct{}
+	done    bool
+}
+
+func (s *rpcGateStream) Next(ctx context.Context) (protocol.StreamEvent, error) {
+	if s.done {
+		return protocol.StreamEvent{}, io.EOF
+	}
+	if s.release != nil {
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return protocol.StreamEvent{}, ctx.Err()
+		}
+	}
+	s.done = true
+	return protocol.StreamEvent{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}, nil
+}
+func (*rpcGateStream) Close() error { return nil }
 
 type shortWriter struct{}
 
@@ -117,8 +164,106 @@ func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := info.Data.(map[string]any)
-	if info.Command != "session_info" || !info.Success || data["thinking"] != "low" || fmt.Sprint(data["thinking_levels"]) != "[off low]" {
+	pending, _ := data["pending_inputs"].(map[string]any)
+	if info.Command != "session_info" || !info.Success || data["thinking"] != "low" || fmt.Sprint(data["thinking_levels"]) != "[off low]" || pending["total"] != float64(0) {
 		t.Fatalf("session info = %+v", info)
+	}
+}
+
+func TestRPCSecondPromptDoesNotCancelActivePrompt(t *testing.T) {
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	var out bytes.Buffer
+	srv := New(context.Background(), a, strings.NewReader(""), &out)
+	active := make(chan struct{})
+	srv.promptDone = active
+	cancelled := false
+	srv.cancel = func() { cancelled = true }
+	err = srv.handlePrompt(context.Background(), Request{ID: "p2", Type: "prompt", Message: "replacement"})
+	if err == nil || !strings.Contains(err.Error(), "use steer, follow_up, or abort") {
+		t.Fatalf("second prompt error = %v", err)
+	}
+	if cancelled {
+		t.Fatal("second prompt implicitly cancelled active work")
+	}
+}
+
+func TestRPCQueueCommandsAcceptActiveRunAndReportCounts(t *testing.T) {
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	provider := &rpcQueueProvider{started: make(chan struct{}), release: make(chan struct{})}
+	model := a.Agent.Model()
+	model.Provider = provider.ID()
+	if err := a.Agent.SetProviderAndModel(provider, model); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	srv := New(context.Background(), a, strings.NewReader(""), &out)
+	queueEvents := 0
+	a.Agent.Subscribe(func(ev protocol.AgentEvent) {
+		if ev.Type == protocol.EvQueueUpdated {
+			queueEvents++
+		}
+	})
+	done := make(chan error, 1)
+	go func() { done <- a.Agent.Prompt(context.Background(), "initial") }()
+	<-provider.started
+	if err := srv.handle(context.Background(), Request{ID: "s", Type: "steer", Message: "steer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.handle(context.Background(), Request{ID: "f", Type: "follow_up", Message: "follow"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.handle(context.Background(), Request{ID: "i", Type: "session_info"}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("responses = %q", lines)
+	}
+	var info Response
+	if err := json.Unmarshal([]byte(lines[2]), &info); err != nil {
+		t.Fatal(err)
+	}
+	data := info.Data.(map[string]any)
+	pending := data["pending_inputs"].(map[string]any)
+	if pending["steering"] != float64(1) || pending["follow_up"] != float64(1) || pending["total"] != float64(2) {
+		t.Fatalf("pending counts = %+v", pending)
+	}
+	close(provider.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if queueEvents < 4 {
+		t.Fatalf("queue events = %d", queueEvents)
+	}
+}
+
+func TestRPCQueueCommandsRejectIdleAndEmpty(t *testing.T) {
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	var out bytes.Buffer
+	srv := New(context.Background(), a, strings.NewReader(""), &out)
+	for _, req := range []Request{
+		{ID: "s", Type: "steer", Message: "later"},
+		{ID: "f", Type: "follow_up", Message: "later"},
+		{ID: "e", Type: "steer"},
+	} {
+		if err := srv.handle(context.Background(), req); err == nil {
+			t.Fatalf("idle/empty %s accepted", req.Type)
+		}
+	}
+	if out.Len() != 0 {
+		t.Fatalf("rejected queue commands wrote success: %q", out.String())
 	}
 }
 

@@ -3,12 +3,15 @@ package snowsdk
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -26,6 +29,110 @@ func TestRunPromptFakeProvider(t *testing.T) {
 	}
 	// Fake provider with empty script yields no text; just verify no error.
 	_ = out
+}
+
+type sdkQueueProvider struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *sdkQueueProvider) ID() string { return "sdk-queue" }
+func (p *sdkQueueProvider) ListModels(context.Context) ([]protocol.Model, error) {
+	return nil, nil
+}
+func (p *sdkQueueProvider) Resolve(_ context.Context, credential auth.Credential) (auth.Credential, error) {
+	return credential, nil
+}
+func (p *sdkQueueProvider) Chat(_ context.Context, _ auth.Credential, _ protocol.ChatRequest) (protocol.EventStream, error) {
+	first := false
+	p.once.Do(func() {
+		first = true
+		close(p.started)
+	})
+	if first {
+		return &sdkGateStream{release: p.release}, nil
+	}
+	return &sdkGateStream{}, nil
+}
+
+type sdkGateStream struct {
+	release <-chan struct{}
+	done    bool
+}
+
+func (s *sdkGateStream) Next(ctx context.Context) (protocol.StreamEvent, error) {
+	if s.done {
+		return protocol.StreamEvent{}, io.EOF
+	}
+	if s.release != nil {
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return protocol.StreamEvent{}, ctx.Err()
+		}
+	}
+	s.done = true
+	return protocol.StreamEvent{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}, nil
+}
+func (*sdkGateStream) Close() error { return nil }
+
+func TestSDKActiveQueueMethodsAndSnapshots(t *testing.T) {
+	s, err := Open(context.Background(), Options{Provider: "fake", NoSession: true, PermissionMode: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	provider := &sdkQueueProvider{started: make(chan struct{}), release: make(chan struct{})}
+	model := s.Model()
+	model.Provider = provider.ID()
+	if err := s.app.Agent.SetProviderAndModel(provider, model); err != nil {
+		t.Fatal(err)
+	}
+	var queueEvents int
+	s.Subscribe(func(ev protocol.AgentEvent) {
+		if ev.Type == protocol.EvQueueUpdated {
+			queueEvents++
+		}
+	})
+	done := make(chan error, 1)
+	go func() { done <- s.Prompt(context.Background(), "initial") }()
+	<-provider.started
+	if err := s.Steer(context.Background(), "steer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FollowUp(context.Background(), "follow"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := s.PendingInputs()
+	if err != nil || len(snapshot.Items) != 2 {
+		t.Fatalf("PendingInputs = %+v, %v", snapshot, err)
+	}
+	snapshot.Items[0].Text = "mutated"
+	independent, _ := s.PendingInputs()
+	if independent.Items[0].Text != "steer" {
+		t.Fatalf("PendingInputs aliased agent state: %+v", independent)
+	}
+	close(provider.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if queueEvents < 4 {
+		t.Fatalf("queue events = %d, want enqueue and delivery snapshots", queueEvents)
+	}
+	messages, err := s.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var users []string
+	for _, message := range messages {
+		if message.Role == protocol.RoleUser {
+			users = append(users, message.Content[0].Text)
+		}
+	}
+	if strings.Join(users, ",") != "initial,steer,follow" {
+		t.Fatalf("durable users = %q", users)
+	}
 }
 
 func TestOpenSubscribeEvents(t *testing.T) {
@@ -140,6 +247,49 @@ func TestBranchesAndFork(t *testing.T) {
 	}
 	if got, err := s.Messages(); err != nil || len(got) != len(messages) {
 		t.Fatalf("selected main messages = %d, err=%v", len(got), err)
+	}
+	renamed, err := s.RenameBranch(fork.ID, "experiment")
+	if err != nil || renamed.Name != "experiment" {
+		t.Fatalf("rename=%+v err=%v", renamed, err)
+	}
+	if err := s.DeleteBranch(fork.ID); err != nil {
+		t.Fatal(err)
+	}
+	named, err := s.ForkNamed("main", messages[0].ID, "named")
+	if err != nil || named.Name != "named" || named.ParentID != "main" {
+		t.Fatalf("named=%+v err=%v", named, err)
+	}
+}
+
+func TestRootQueueAPIErrorsAndSnapshots(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, Options{Provider: "fake", NoSession: true, PermissionMode: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Steer(ctx, "idle"); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("idle Steer = %v, want ErrNotRunning", err)
+	}
+	if err := s.FollowUp(ctx, "idle"); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("idle FollowUp = %v, want ErrNotRunning", err)
+	}
+	queue, err := s.PendingInputs()
+	if err != nil || len(queue.Items) != 0 {
+		t.Fatalf("PendingInputs = %+v, %v", queue, err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := s.Steer(cancelled, "x"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled Steer = %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FollowUp(ctx, "closed"); !errors.Is(err, ErrStopped) {
+		t.Fatalf("closed FollowUp = %v, want ErrStopped", err)
+	}
+	if _, err := s.PendingInputs(); !errors.Is(err, ErrStopped) {
+		t.Fatalf("closed PendingInputs = %v, want ErrStopped", err)
 	}
 }
 

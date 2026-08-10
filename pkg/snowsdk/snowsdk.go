@@ -8,7 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/snow-core/snow/internal/agent"
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/config"
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
 	publicplugin "github.com/snow-core/snow/pkg/plugin"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -195,7 +197,59 @@ func (s *Session) SetMode(mode protocol.CollaborationMode) error {
 	return a.Agent.SetMode(mode)
 }
 
-// Abort cancels any in-flight turn.
+// Steer queues text for the next safe boundary of an active root run.
+func (s *Session) Steer(ctx context.Context, text string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a, err := s.activeApp()
+	if err != nil {
+		return err
+	}
+	if err := a.Agent.Steer(text); err != nil {
+		if errors.Is(err, agent.ErrNotRunning) {
+			return ErrNotRunning
+		}
+		return err
+	}
+	return nil
+}
+
+// FollowUp queues text after the active root run naturally stops and all
+// steering input has been handled.
+func (s *Session) FollowUp(ctx context.Context, text string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a, err := s.activeApp()
+	if err != nil {
+		return err
+	}
+	if err := a.Agent.FollowUp(text); err != nil {
+		if errors.Is(err, agent.ErrNotRunning) {
+			return ErrNotRunning
+		}
+		return err
+	}
+	return nil
+}
+
+// PendingInputs returns an independent root input queue snapshot.
+func (s *Session) PendingInputs() (protocol.InputQueue, error) {
+	a, err := s.activeApp()
+	if err != nil {
+		return protocol.InputQueue{}, err
+	}
+	return a.Agent.PendingInputs(), nil
+}
+
+// Abort cancels any in-flight turn and clears undelivered queued input.
 func (s *Session) Abort(ctx context.Context) error {
 	a, e := s.activeApp()
 	if e != nil {
@@ -361,6 +415,30 @@ func (s *Session) ContinueGoal() error {
 	return a.ContinueGoal()
 }
 
+// Diagnostics returns an immutable snapshot of non-fatal auxiliary config warnings.
+func (s *Session) Diagnostics() ([]protocol.ConfigDiagnostic, error) {
+	a, err := s.activeApp()
+	if err != nil {
+		return nil, err
+	}
+	all := append([]config.Diagnostic(nil), a.Diagnostics...)
+	themes, themeDiagnostics := config.LoadThemes(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed)
+	_, keyDiagnostics := config.LoadKeybindings(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed)
+	selected := a.Cfg.TUI.Theme
+	if selected != "default" && selected != "dark" && selected != "light" && selected != "high-contrast" {
+		if _, ok := themes[selected]; !ok {
+			themeDiagnostics = append(themeDiagnostics, config.Diagnostic{Path: "tui.theme", Message: "selected custom theme is missing or invalid: " + selected})
+		}
+	}
+	all = append(all, themeDiagnostics...)
+	all = append(all, keyDiagnostics...)
+	out := make([]protocol.ConfigDiagnostic, 0, len(all))
+	for _, d := range all {
+		out = append(out, protocol.ConfigDiagnostic{Path: d.Path, Message: d.Message})
+	}
+	return out, nil
+}
+
 // Compact manually compacts the active branch. It never runs automatically.
 func (s *Session) Compact(ctx context.Context) (protocol.CompactionResult, error) {
 	a, err := s.activeApp()
@@ -397,6 +475,33 @@ func (s *Session) Fork(fromEntryID string) (protocol.SessionBranch, error) {
 		return protocol.SessionBranch{}, err
 	}
 	return a.ForkBranch(fromEntryID)
+}
+
+// ForkNamed creates a durable branch from an explicit source with an optional display name.
+func (s *Session) ForkNamed(sourceBranchID, fromEntryID, name string) (protocol.SessionBranch, error) {
+	a, err := s.activeApp()
+	if err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	return a.ForkBranchWithOptions(protocol.BranchForkOptions{SourceBranchID: sourceBranchID, FromEntryID: fromEntryID, Name: name})
+}
+
+// RenameBranch updates a branch display name without changing its stable ID.
+func (s *Session) RenameBranch(branchID, name string) (protocol.SessionBranch, error) {
+	a, err := s.activeApp()
+	if err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	return a.RenameBranch(branchID, name)
+}
+
+// DeleteBranch removes an eligible inactive leaf branch reference.
+func (s *Session) DeleteBranch(branchID string) error {
+	a, err := s.activeApp()
+	if err != nil {
+		return err
+	}
+	return a.DeleteBranch(branchID)
 }
 
 // Subscribe registers an event listener; returns an unsubscribe func.
