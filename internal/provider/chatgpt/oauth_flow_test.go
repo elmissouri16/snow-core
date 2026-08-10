@@ -46,8 +46,14 @@ func TestBrowserLoginValidatesStateAndPersists(t *testing.T) {
 	}))
 	defer server.Close()
 	store := auth.NewMemoryStoreForTest()
-	status, err := Login(context.Background(), LoginOptions{Method: LoginBrowser, Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client(), OpenBrowser: func(_ context.Context, target string) error {
+	status, err := Login(context.Background(), LoginOptions{Method: LoginBrowser, Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client(), AllowedWorkspaceIDs: []string{"acct"}, OpenBrowser: func(_ context.Context, target string) error {
 		u, _ := url.Parse(target)
+		if got := u.Query().Get("scope"); got != "openid profile email offline_access api.connectors.read api.connectors.invoke" {
+			t.Errorf("scope=%q", got)
+		}
+		if got := u.Query().Get("allowed_workspace_id"); got != "acct" {
+			t.Errorf("allowed_workspace_id=%q", got)
+		}
 		state := u.Query().Get("state")
 		go func() { _, _ = http.Get("http://127.0.0.1:1455/auth/callback?code=ok&state=" + url.QueryEscape(state)) }()
 		return nil
@@ -66,16 +72,30 @@ func TestBrowserLoginValidatesStateAndPersists(t *testing.T) {
 	}
 }
 
+func TestAllowedWorkspaceRejectsDifferentOAuthAccount(t *testing.T) {
+	cred := auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "actual"}
+	if err := ensureAllowedWorkspace(cred, []string{"wanted"}); err == nil || !strings.Contains(err.Error(), "not saved") {
+		t.Fatalf("workspace mismatch error=%v", err)
+	}
+	if err := ensureAllowedWorkspace(cred, []string{"actual", "actual", ""}); err != nil {
+		t.Fatalf("matching workspace rejected: %v", err)
+	}
+}
+
 func TestRefreshRotatesOnceAcrossConcurrentResolvers(t *testing.T) {
 	var calls atomic.Int32
 	now := time.Now()
 	access := testJWT(t, map[string]any{"exp": float64(now.Add(time.Hour).Unix()), "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct"}})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		var body map[string]string
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["refresh_token"] != "old" {
-			t.Errorf("refresh=%q", body["refresh_token"])
+		if got := r.Header.Get("Content-Type"); got != "application/x-www-form-urlencoded" {
+			t.Errorf("content-type=%q", got)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if r.Form.Get("refresh_token") != "old" || r.Form.Get("client_id") != OAuthClientID {
+			t.Errorf("refresh form=%v", r.Form)
 		}
 		_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: access, RefreshToken: "rotated", ExpiresIn: 3600})
 	}))

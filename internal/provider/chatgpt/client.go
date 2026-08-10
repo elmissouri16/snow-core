@@ -1,13 +1,13 @@
 package chatgpt
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -141,14 +141,14 @@ type tokenResponse struct {
 func (p *Provider) refresh(ctx context.Context, current auth.Credential) (auth.Credential, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	payload, _ := json.Marshal(map[string]string{
-		"client_id": OAuthClientID, "grant_type": "refresh_token", "refresh_token": current.Refresh,
-	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.authBaseURL+"/oauth/token", bytes.NewReader(payload))
+	form := url.Values{
+		"client_id": {OAuthClientID}, "grant_type": {"refresh_token"}, "refresh_token": {current.Refresh},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.authBaseURL+"/oauth/token", strings.NewReader(form.Encode()))
 	if err != nil {
 		return current, fmt.Errorf("chatgpt: create refresh request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	var tokens tokenResponse
 	if err := doBoundedJSON(p.client, req, &tokens); err != nil {
 		var endpointErr *oauthEndpointError

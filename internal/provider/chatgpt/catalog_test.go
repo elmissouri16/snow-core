@@ -24,6 +24,20 @@ func TestModelsReturnsCodexCatalog(t *testing.T) {
 	}
 }
 
+func TestCatalogAuthorityRequiresStoredAccount(t *testing.T) {
+	store := auth.NewMemoryStoreForTest()
+	p := New(Config{Store: store})
+	if p.ModelCatalogAuthoritative() {
+		t.Fatal("catalog without stored account should be fallback-only")
+	}
+	if err := store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "account"}); err != nil {
+		t.Fatal(err)
+	}
+	if !p.ModelCatalogAuthoritative() {
+		t.Fatal("stored account catalog should be authoritative")
+	}
+}
+
 func TestResolveRequiresChatGPTOAuth(t *testing.T) {
 	if _, err := New().Resolve(context.Background(), auth.Credential{}); err == nil {
 		t.Fatal("empty credential should fail")

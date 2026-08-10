@@ -53,13 +53,9 @@ func discoverAuthSources(home, xdgDataHome string) []AuthSource {
 	}
 	var sources []AuthSource
 
-	if source, ok := loadCodex(filepath.Join(home, ".codex", "auth.json")); ok {
-		sources = append(sources, source)
-	}
-	if source, ok := loadPi(filepath.Join(home, ".pi", "agent", "auth.json")); ok {
-		sources = append(sources, source)
-	}
-
+	// Prefer OpenCode, then Pi: these provider-scoped credentials already prove
+	// which local ChatGPT account those clients use. A fresh browser login can
+	// otherwise select a different browser account with a different model set.
 	openCodePaths := []string{}
 	if xdgDataHome != "" {
 		openCodePaths = append(openCodePaths, filepath.Join(xdgDataHome, "opencode", "auth.json"))
@@ -77,6 +73,12 @@ func discoverAuthSources(home, xdgDataHome string) []AuthSource {
 		if source, ok := loadOpenCode(path); ok {
 			sources = append(sources, source)
 		}
+	}
+	if source, ok := loadPi(filepath.Join(home, ".pi", "agent", "auth.json")); ok {
+		sources = append(sources, source)
+	}
+	if source, ok := loadCodex(filepath.Join(home, ".codex", "auth.json")); ok {
+		sources = append(sources, source)
 	}
 	return sources
 }

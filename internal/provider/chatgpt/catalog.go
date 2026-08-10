@@ -38,21 +38,23 @@ type modelUpgradeRecord struct {
 }
 
 type modelRecord struct {
-	Slug                              string                 `json:"slug"`
-	DisplayName                       string                 `json:"display_name"`
-	Description                       string                 `json:"description"`
-	DefaultReasoningLevel             string                 `json:"default_reasoning_level"`
-	SupportedReasoningLevels          []reasoningLevelRecord `json:"supported_reasoning_levels"`
-	Visibility                        string                 `json:"visibility"`
-	SupportedInAPI                    bool                   `json:"supported_in_api"`
-	Priority                          int                    `json:"priority"`
-	SupportVerbosity                  bool                   `json:"support_verbosity"`
-	SupportsReasoningSummaryParameter *bool                  `json:"supports_reasoning_summary_parameter"`
-	ContextWindow                     int                    `json:"context_window"`
-	MaxContextWindow                  int                    `json:"max_context_window"`
-	EffectiveContextWindowPercent     int                    `json:"effective_context_window_percent"`
-	InputModalities                   []string               `json:"input_modalities"`
-	Upgrade                           *modelUpgradeRecord    `json:"upgrade"`
+	Slug                     string                 `json:"slug"`
+	DisplayName              string                 `json:"display_name"`
+	Description              string                 `json:"description"`
+	DefaultReasoningLevel    string                 `json:"default_reasoning_level"`
+	SupportedReasoningLevels []reasoningLevelRecord `json:"supported_reasoning_levels"`
+	Visibility               string                 `json:"visibility"`
+	// SupportedInAPI describes public API availability, not whether the model
+	// can run through the ChatGPT/Codex subscription backend.
+	SupportedInAPI                    bool                `json:"supported_in_api"`
+	Priority                          int                 `json:"priority"`
+	SupportVerbosity                  bool                `json:"support_verbosity"`
+	SupportsReasoningSummaryParameter *bool               `json:"supports_reasoning_summary_parameter"`
+	ContextWindow                     int                 `json:"context_window"`
+	MaxContextWindow                  int                 `json:"max_context_window"`
+	EffectiveContextWindowPercent     int                 `json:"effective_context_window_percent"`
+	InputModalities                   []string            `json:"input_modalities"`
+	Upgrade                           *modelUpgradeRecord `json:"upgrade"`
 }
 
 type catalogCache struct {
@@ -80,6 +82,14 @@ func (p *Provider) DefaultModel() protocol.Model {
 	return models[0]
 }
 
+// ModelCatalogAuthoritative reports whether ListModels is scoped to a stored
+// ChatGPT account. App selection uses this to avoid keeping a configured model
+// that the selected account catalog omitted.
+func (p *Provider) ModelCatalogAuthoritative() bool {
+	_, ok := p.storeCredential()
+	return ok
+}
+
 func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 	return p.listModels(ctx, false)
 }
@@ -102,11 +112,14 @@ func (p *Provider) listModels(ctx context.Context, force bool) ([]protocol.Model
 		if cached, ok := p.loadCatalogCache(accountID); ok && cached.ClientVersion == p.clientVersion {
 			return p.acceptRecords(cached.Models), err
 		}
-		return Models(), err
+		return nil, err
 	}
 	status, err := CheckAuth(resolved)
-	if err != nil || status.AccountID == "" {
-		return Models(), err
+	if err != nil {
+		return nil, err
+	}
+	if status.AccountID == "" {
+		return nil, errors.New("chatgpt: OAuth credential has no account ID for model discovery")
 	}
 	cache, cacheOK := p.loadCatalogCache(status.AccountID)
 	compatibleCache := cacheOK && cache.ClientVersion == p.clientVersion
@@ -122,11 +135,11 @@ func (p *Provider) listModels(ctx context.Context, force bool) ([]protocol.Model
 		if compatibleCache {
 			return p.acceptRecords(cache.Models), err
 		}
-		return Models(), err
+		return nil, err
 	}
 	if notModified {
 		if !compatibleCache {
-			return Models(), errors.New("chatgpt: model catalog returned 304 without a local cache")
+			return nil, errors.New("chatgpt: model catalog returned 304 without a local cache")
 		}
 		cache.FetchedAt = p.now().UTC()
 		cache.ClientVersion = p.clientVersion
@@ -209,9 +222,9 @@ func (p *Provider) fetchCatalog(ctx context.Context, cred auth.Credential, etag 
 
 func (p *Provider) acceptRecords(records []modelRecord) []protocol.Model {
 	models := mapModelRecords(records)
-	if len(models) == 0 {
-		return Models()
-	}
+	// The authenticated response is account-scoped. Do not add bundled models
+	// missing from it: the Codex backend can reject a model for one ChatGPT
+	// account even when another local OpenCode/Pi account can invoke it.
 	p.modelsMu.Lock()
 	p.models = append([]modelRecord(nil), records...)
 	p.modelsMu.Unlock()

@@ -78,7 +78,7 @@ func TestDiscoverAuthSourcesAt(t *testing.T) {
 	if len(sources) != 3 {
 		t.Fatalf("sources = %d, want 3: %+v", len(sources), sources)
 	}
-	want := []SourceID{SourceCodex, SourcePi, SourceOpenCode}
+	want := []SourceID{SourceOpenCode, SourcePi, SourceCodex}
 	for i, source := range sources {
 		if source.ID != want[i] || source.Credential.Access == "" {
 			t.Fatalf("source[%d] = %+v", i, source)

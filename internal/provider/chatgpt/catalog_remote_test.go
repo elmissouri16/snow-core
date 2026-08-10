@@ -79,4 +79,30 @@ func TestRemoteCatalogMappingETagAndAccountCache(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedCatalogDoesNotInjectBundledModelsOnFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	store := auth.NewMemoryStoreForTest()
+	if err := store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "access", Refresh: "refresh", AccountID: "acct"}); err != nil {
+		t.Fatal(err)
+	}
+	p := New(Config{BaseURL: server.URL, Store: store, CacheRoot: t.TempDir(), HTTPClient: server.Client()})
+	models, err := p.ListModels(context.Background())
+	if err == nil || len(models) != 0 {
+		t.Fatalf("authenticated failed catalog models=%+v err=%v; bundled models must not be injected", models, err)
+	}
+}
+
+func TestAuthenticatedCatalogReturnsExactlyVisibleAccountRecords(t *testing.T) {
+	models := mapModelRecords([]modelRecord{
+		{Slug: "account-model", Visibility: "list"},
+		{Slug: "hidden", Visibility: "hide"},
+	})
+	if len(models) != 1 || models[0].ID != "account-model" {
+		t.Fatalf("account models=%+v", models)
+	}
+}
+
 func boolPointer(value bool) *bool { return &value }

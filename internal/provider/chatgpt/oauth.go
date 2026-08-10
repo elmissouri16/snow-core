@@ -28,16 +28,20 @@ const (
 type LoginProgress struct{ Kind, Message, URL, UserCode string }
 
 type LoginOptions struct {
-	Method         LoginMethod
-	Store          auth.Store
-	HTTPClient     *http.Client
-	AuthBaseURL    string
-	Now            func() time.Time
-	OpenBrowser    func(context.Context, string) error
-	PasteCallback  func(context.Context) (string, error)
-	Progress       func(LoginProgress)
-	BrowserTimeout time.Duration // tests/embedders; zero uses 10 minutes
-	DeviceTimeout  time.Duration // tests/embedders; zero uses 15 minutes
+	Method        LoginMethod
+	Store         auth.Store
+	HTTPClient    *http.Client
+	AuthBaseURL   string
+	Now           func() time.Time
+	OpenBrowser   func(context.Context, string) error
+	PasteCallback func(context.Context) (string, error)
+	Progress      func(LoginProgress)
+	// AllowedWorkspaceIDs restricts login to specific ChatGPT account/workspace
+	// IDs using the official Codex allowed_workspace_id OAuth parameter and a
+	// post-exchange claim check. Empty allows any account.
+	AllowedWorkspaceIDs []string
+	BrowserTimeout      time.Duration // tests/embedders; zero uses 10 minutes
+	DeviceTimeout       time.Duration // tests/embedders; zero uses 15 minutes
 }
 
 type loginClient struct {
@@ -74,10 +78,47 @@ func Login(ctx context.Context, opts LoginOptions) (AuthStatus, error) {
 	if err != nil {
 		return AuthStatus{}, err
 	}
+	if err = ensureAllowedWorkspace(cred, opts.AllowedWorkspaceIDs); err != nil {
+		return AuthStatus{}, err
+	}
 	if err = opts.Store.Put(ProviderID, cred); err != nil {
 		return AuthStatus{}, fmt.Errorf("chatgpt: persist OAuth credential: %w", err)
 	}
 	return CheckAuth(cred)
+}
+
+func normalizedWorkspaceIDs(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func ensureAllowedWorkspace(cred auth.Credential, allowed []string) error {
+	allowed = normalizedWorkspaceIDs(allowed)
+	if len(allowed) == 0 {
+		return nil
+	}
+	status, err := CheckAuth(cred)
+	if err != nil {
+		return err
+	}
+	for _, expected := range allowed {
+		if status.AccountID == expected {
+			return nil
+		}
+	}
+	return fmt.Errorf("chatgpt: selected account %q is not the requested workspace; login was not saved", status.AccountID)
 }
 
 func (c *loginClient) progress(p LoginProgress) {
@@ -161,6 +202,9 @@ func (c *loginClient) browser(ctx context.Context) (auth.Credential, error) {
 	q.Set("id_token_add_organizations", "true")
 	q.Set("codex_cli_simplified_flow", "true")
 	q.Set("originator", "snow")
+	if allowed := normalizedWorkspaceIDs(c.opts.AllowedWorkspaceIDs); len(allowed) > 0 {
+		q.Set("allowed_workspace_id", strings.Join(allowed, ","))
+	}
 	authURL.RawQuery = q.Encode()
 	c.progress(LoginProgress{Kind: "authorization_url", URL: authURL.String(), Message: "Open this URL to sign in with ChatGPT"})
 	if c.opts.OpenBrowser != nil {
