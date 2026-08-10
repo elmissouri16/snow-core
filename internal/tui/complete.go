@@ -23,7 +23,7 @@ var commands = []commandSpec{
 	{name: "/help", desc: "show command help"},
 	{name: "/goal", desc: "show or control a persistent thread goal", argHint: "[objective|edit|pause|resume|clear]"},
 	{name: "/login", desc: "choose a provider and store its API key", argHint: "<provider>"},
-	{name: "/logout", desc: "remove a stored credential", argHint: "<provider>", requiresArg: true},
+	{name: "/logout", desc: "choose and remove a stored credential", argHint: "[provider]"},
 	{name: "/mcp", desc: "inspect configured MCP server status"},
 	{name: "/model", desc: "pick a model (persisted)", argHint: "<id>"},
 	{name: "/new", desc: "start a new session"},
@@ -103,14 +103,16 @@ func commandByExact(name string) (commandSpec, bool) {
 // argument completion rather than run immediately. Only commands whose no-arg
 // form is meaningless need this: the rest (e.g. /login, /permissions, /trust)
 // have real no-arg behavior and must run immediately so their pickers or
-// status output appear.
+// status output appear. `/logout` also has a no-argument provider picker.
 func (c commandSpec) needsArgs() bool {
 	return c.requiresArg
 }
 
 // formatCommandList renders a readable grouped reference for /help. Each
 // command gets its own row so the list remains useful on narrow terminals.
-func formatCommandList() string {
+func formatCommandList() string { return formatCommandListWithKeys(tuiKeys) }
+
+func formatCommandListWithKeys(keys tuiKeyMap) string {
 	var b strings.Builder
 	b.WriteString("Commands\n")
 	for _, c := range commands {
@@ -125,12 +127,14 @@ func formatCommandList() string {
 		b.WriteByte('\n')
 	}
 	b.WriteString("\nShortcuts\n")
-	for _, binding := range tuiKeys.FullHelp()[0] {
-		b.WriteString("  ")
-		b.WriteString(binding.Help().Key)
-		b.WriteString(" — ")
-		b.WriteString(binding.Help().Desc)
-		b.WriteByte('\n')
+	for _, group := range keys.FullHelp() {
+		for _, binding := range group {
+			b.WriteString("  ")
+			b.WriteString(binding.Help().Key)
+			b.WriteString(" — ")
+			b.WriteString(binding.Help().Desc)
+			b.WriteByte('\n')
+		}
 	}
 	return strings.TrimSuffix(b.String(), "\n")
 }

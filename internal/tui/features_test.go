@@ -211,6 +211,39 @@ func TestModelFrameAlwaysFitsWindow(t *testing.T) {
 	})
 }
 
+func TestRunStatusGeometryKeepsSingleStickyFooter(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width, m.height = 120, 35
+	m.layout()
+	assertFooter := func(stage string) {
+		t.Helper()
+		lines := strings.Split(stripANSI(m.View()), "\n")
+		matches := 0
+		index := -1
+		for i, line := range lines {
+			if strings.Contains(line, "permission: allow") {
+				matches++
+				index = i
+			}
+		}
+		if matches != 1 || index != m.height-1 {
+			t.Fatalf("%s footer matches=%d row=%d want one at %d", stage, matches, index, m.height-1)
+		}
+	}
+	assertFooter("idle")
+	m.editor.SetValue("hello")
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || !m.showRunStatus() {
+		t.Fatal("prompt did not enter visible run status")
+	}
+	m.layout()
+	assertFooter("running")
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
+	m.layout()
+	assertFooter("settled")
+}
+
 func TestComposerAutoGrowsAndShrinks(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
@@ -572,6 +605,63 @@ func TestModelModelPickerFlow(t *testing.T) {
 	}
 	if m.app.Model.ID != "fake-1" {
 		t.Fatalf("model = %q, want fake-1", m.app.Model.ID)
+	}
+}
+
+func TestModelPickerDeduplicatesAndSearches(t *testing.T) {
+	testHome(t)
+
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.app.AllModels = []protocol.Model{
+		{Provider: "fake", ID: "fake-1", DisplayName: "Fake One"},
+		{Provider: "fake", ID: "fake-1", DisplayName: "Duplicate"},
+		{Provider: "fake", ID: "fake-spark", DisplayName: "Spark Fast"},
+	}
+
+	_, _ = m.startModelPick()
+	if len(m.modelList) != 2 {
+		t.Fatalf("deduplicated models = %d, want 2: %+v", len(m.modelList), m.modelList)
+	}
+	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("spark")})
+	matches := m.filteredModels()
+	if len(matches) != 1 || matches[0].ID != "fake-spark" {
+		t.Fatalf("search matches = %+v, want fake-spark", matches)
+	}
+	view := stripANSI(m.renderModelPicker())
+	if !strings.Contains(view, "search: spark") || strings.Contains(view, "fake-1") {
+		t.Fatalf("filtered picker = %q", view)
+	}
+	if strings.Contains(view, "fake/fake-spark") {
+		t.Fatalf("grouped picker repeated provider prefix: %q", view)
+	}
+
+	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.pickModel || m.app.Model.ID != "fake-spark" {
+		t.Fatalf("search selection picker=%v model=%q", m.pickModel, m.app.Model.ID)
+	}
+}
+
+func TestModelPickerSearchCanShowNoMatchesAndClear(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	_, _ = m.startModelPick()
+	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("missing")})
+	if got := stripANSI(m.renderModelPicker()); !strings.Contains(got, "no matching models") {
+		t.Fatalf("no-match picker = %q", got)
+	}
+	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEsc})
+	if !m.pickModel || m.modelQuery != "" || m.modelSearchActive {
+		t.Fatalf("search clear picker=%v query=%q active=%v", m.pickModel, m.modelQuery, m.modelSearchActive)
+	}
+	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.pickModel {
+		t.Fatal("second Esc should close the model picker")
 	}
 }
 

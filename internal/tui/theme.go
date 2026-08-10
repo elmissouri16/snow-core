@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/snow-core/snow/internal/config"
 )
 
 // tuiTheme is intentionally small: semantic roles keep meaning readable even
@@ -63,6 +65,45 @@ func applyTUITheme(name string) error {
 	if err != nil {
 		return err
 	}
+	applyResolvedTheme(t)
+	return nil
+}
+
+func applyCustomTUITheme(custom config.ThemeFile) error {
+	base := custom.Extends
+	if base == "" {
+		base = "default"
+	}
+	t, err := makeTUITheme(base)
+	if err != nil {
+		return err
+	}
+	t.name = custom.Name
+	set := func(pair config.AdaptiveColor, target *lipgloss.TerminalColor) {
+		if pair.Light == "" && pair.Dark == "" {
+			return
+		}
+		light, dark := pair.Light, pair.Dark
+		if light == "" {
+			light = dark
+		}
+		if dark == "" {
+			dark = light
+		}
+		*target = lipgloss.AdaptiveColor{Light: light, Dark: dark}
+	}
+	set(custom.Colors.Accent, &t.accent)
+	set(custom.Colors.Muted, &t.muted)
+	set(custom.Colors.Foreground, &t.soft)
+	set(custom.Colors.Warning, &t.warn)
+	set(custom.Colors.Error, &t.err)
+	set(custom.Colors.Success, &t.ok)
+	set(custom.Colors.Separator, &t.sep)
+	applyResolvedTheme(t)
+	return nil
+}
+
+func applyResolvedTheme(t tuiTheme) {
 	colorAccent, colorMuted, colorSoft = t.accent, t.muted, t.soft
 	colorWarn, colorErr, colorOk = t.warn, t.err, t.ok
 	styleUser = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
@@ -84,7 +125,6 @@ func applyTUITheme(name string) error {
 	styleComposer = lipgloss.NewStyle()
 	styleCompletion = lipgloss.NewStyle().Foreground(colorMuted)
 	styleCompletionSelected = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	return nil
 }
 
 func themeChoices() []string {

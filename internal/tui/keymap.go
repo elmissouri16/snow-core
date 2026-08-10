@@ -1,6 +1,10 @@
 package tui
 
 import (
+	"fmt"
+	"sort"
+	"strings"
+
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -10,6 +14,7 @@ import (
 // consulted by Snow's outer model and picker handlers.
 type tuiKeyMap struct {
 	Submit         key.Binding
+	FollowUp       key.Binding
 	Newline        key.Binding
 	Paste          key.Binding
 	Abort          key.Binding
@@ -31,10 +36,15 @@ type tuiKeyMap struct {
 	PickerBottom   key.Binding
 	Accept         key.Binding
 	Close          key.Binding
+	BranchFork     key.Binding
+	BranchRename   key.Binding
+	BranchDelete   key.Binding
+	Confirm        key.Binding
 }
 
 var tuiKeys = tuiKeyMap{
 	Submit:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
+	FollowUp:       key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("alt+enter", "follow-up")),
 	Newline:        key.NewBinding(key.WithKeys("ctrl+j", "alt+enter"), key.WithHelp("ctrl+j", "newline")),
 	Paste:          key.NewBinding(key.WithKeys("ctrl+v"), key.WithHelp("ctrl+v", "paste")),
 	Abort:          key.NewBinding(key.WithKeys("ctrl+c", "esc"), key.WithHelp("ctrl+c/esc", "abort")),
@@ -56,6 +66,10 @@ var tuiKeys = tuiKeyMap{
 	PickerBottom:   key.NewBinding(key.WithKeys("end"), key.WithHelp("end", "last")),
 	Accept:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
 	Close:          key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
+	BranchFork:     key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "fork")),
+	BranchRename:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rename")),
+	BranchDelete:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+	Confirm:        key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "confirm")),
 }
 
 // ShortHelp implements bubbles/help.KeyMap for the always-visible footer.
@@ -66,22 +80,149 @@ func (k tuiKeyMap) ShortHelp() []key.Binding {
 // FullHelp implements bubbles/help.KeyMap for the detailed /help output.
 func (k tuiKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Submit, k.Newline, k.Paste, k.Mode},
+		{k.Submit, k.FollowUp, k.Newline, k.Paste, k.Abort, k.Quit, k.Mode},
 		{k.PageUp, k.PageDown, k.Top, k.Bottom, k.LineUp, k.LineDown},
 		{k.PickerUp, k.PickerDown, k.PickerNext, k.PickerPrev, k.Accept, k.Close},
+		{k.BranchFork, k.BranchRename, k.BranchDelete, k.Confirm},
 	}
+}
+
+func applyKeybindingOverrides(base tuiKeyMap, overrides map[string][]string) (tuiKeyMap, error) {
+	targets := map[string]*key.Binding{
+		"submit": &base.Submit, "follow_up": &base.FollowUp, "newline": &base.Newline, "paste": &base.Paste, "abort": &base.Abort, "quit": &base.Quit, "toggle_mode": &base.Mode,
+		"page_up": &base.PageUp, "page_down": &base.PageDown, "top": &base.Top, "bottom": &base.Bottom, "line_up": &base.LineUp, "line_down": &base.LineDown,
+		"picker_up": &base.PickerUp, "picker_down": &base.PickerDown, "picker_previous": &base.PickerPrev, "picker_next": &base.PickerNext,
+		"picker_page_up": &base.PickerPageUp, "picker_page_down": &base.PickerPageDown, "picker_top": &base.PickerTop, "picker_bottom": &base.PickerBottom,
+		"accept": &base.Accept, "close": &base.Close, "branch_fork": &base.BranchFork, "branch_rename": &base.BranchRename, "branch_delete": &base.BranchDelete, "confirm": &base.Confirm,
+	}
+	var names []string
+	for name := range overrides {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		target, ok := targets[name]
+		if !ok {
+			return base, fmt.Errorf("unknown keybinding action %q", name)
+		}
+		keys := overrides[name]
+		if len(keys) == 0 {
+			return base, fmt.Errorf("action %q cannot be empty", name)
+		}
+		seen := map[string]bool{}
+		clean := make([]string, 0, len(keys))
+		for _, value := range keys {
+			value = strings.ToLower(strings.TrimSpace(value))
+			if !validKeyName(value) {
+				return base, fmt.Errorf("invalid key %q for %s", value, name)
+			}
+			if !seen[value] {
+				seen[value] = true
+				clean = append(clean, value)
+			}
+		}
+		help := target.Help()
+		*target = key.NewBinding(key.WithKeys(clean...), key.WithHelp(strings.Join(clean, "/"), help.Desc))
+	}
+	// Install non-removable emergency keys before collision validation so an
+	// override cannot bind Escape to accept (or otherwise shadow modal close).
+	base.Abort = ensureBindingKey(base.Abort, "ctrl+c")
+	base.Abort = ensureBindingKey(base.Abort, "esc")
+	base.Quit = ensureBindingKey(base.Quit, "ctrl+c")
+	base.Close = ensureBindingKey(base.Close, "esc")
+	if err := validateBindingCollisions(map[string]key.Binding{"submit": base.Submit, "newline": base.Newline, "paste": base.Paste, "toggle_mode": base.Mode, "abort": base.Abort}); err != nil {
+		return base, err
+	}
+	// Busy submit/steer and follow-up share a context; newline is deliberately
+	// excluded because alt+enter is a newline only while idle.
+	if err := validateBindingCollisions(map[string]key.Binding{"submit": base.Submit, "follow_up": base.FollowUp, "abort": base.Abort}); err != nil {
+		return base, err
+	}
+	if err := validateBindingCollisions(map[string]key.Binding{"picker_up": base.PickerUp, "picker_down": base.PickerDown, "picker_previous": base.PickerPrev, "picker_next": base.PickerNext, "picker_page_up": base.PickerPageUp, "picker_page_down": base.PickerPageDown, "picker_top": base.PickerTop, "picker_bottom": base.PickerBottom, "accept": base.Accept, "close": base.Close, "branch_fork": base.BranchFork, "branch_rename": base.BranchRename, "branch_delete": base.BranchDelete, "confirm": base.Confirm}); err != nil {
+		return base, err
+	}
+	for _, mandatory := range []struct {
+		name    string
+		binding key.Binding
+	}{{"submit", base.Submit}, {"abort", base.Abort}, {"quit", base.Quit}, {"accept", base.Accept}, {"close", base.Close}} {
+		if !mandatory.binding.Enabled() {
+			return base, fmt.Errorf("mandatory action %s is disabled", mandatory.name)
+		}
+	}
+	return base, nil
+}
+
+func validateBindingCollisions(bindings map[string]key.Binding) error {
+	seen := map[string]string{}
+	var names []string
+	for name := range bindings {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		for _, value := range bindings[name].Keys() {
+			if old := seen[value]; old != "" {
+				return fmt.Errorf("key %q collides between %s and %s", value, old, name)
+			}
+			seen[value] = name
+		}
+	}
+	return nil
+}
+
+func validKeyName(value string) bool {
+	if value == "" || strings.ContainsAny(value, " \t\r\n") {
+		return false
+	}
+	known := map[string]bool{"enter": true, "esc": true, "tab": true, "shift+tab": true, "up": true, "down": true, "left": true, "right": true, "home": true, "end": true, "pgup": true, "pgdown": true, "backspace": true, "delete": true}
+	if known[value] {
+		return true
+	}
+	if strings.HasPrefix(value, "ctrl+") || strings.HasPrefix(value, "alt+") {
+		return len([]rune(strings.TrimPrefix(strings.TrimPrefix(value, "ctrl+"), "alt+"))) == 1 || strings.HasSuffix(value, "enter") || strings.HasSuffix(value, "up") || strings.HasSuffix(value, "down")
+	}
+	return len([]rune(value)) == 1
+}
+
+func ensureBindingKey(binding key.Binding, value string) key.Binding {
+	for _, existing := range binding.Keys() {
+		if existing == value {
+			return binding
+		}
+	}
+	keys := append(binding.Keys(), value)
+	help := binding.Help()
+	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(help.Key, help.Desc))
 }
 
 func keyMatches(msg tea.KeyMsg, binding key.Binding) bool {
 	return key.Matches(msg, binding)
 }
 
-func normalizePickerKey(msg tea.KeyMsg) tea.KeyMsg {
-	switch pickerKeyAction(msg) {
+func normalizePickerKey(msg tea.KeyMsg) tea.KeyMsg { return normalizePickerKeyWithMap(msg, tuiKeys) }
+
+func normalizePickerKeyWithMap(msg tea.KeyMsg, keys tuiKeyMap) tea.KeyMsg {
+	switch pickerKeyActionWithMap(msg, keys) {
 	case pickerUp:
 		return tea.KeyMsg{Type: tea.KeyUp}
 	case pickerDown:
 		return tea.KeyMsg{Type: tea.KeyDown}
+	case pickerPrev:
+		return tea.KeyMsg{Type: tea.KeyShiftTab}
+	case pickerNext:
+		return tea.KeyMsg{Type: tea.KeyTab}
+	case pickerPageUp:
+		return tea.KeyMsg{Type: tea.KeyPgUp}
+	case pickerPageDown:
+		return tea.KeyMsg{Type: tea.KeyPgDown}
+	case pickerTop:
+		return tea.KeyMsg{Type: tea.KeyHome}
+	case pickerBottom:
+		return tea.KeyMsg{Type: tea.KeyEnd}
+	case pickerAccept:
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	case pickerClose:
+		return tea.KeyMsg{Type: tea.KeyEsc}
 	default:
 		return msg
 	}
@@ -105,27 +246,29 @@ const (
 	pickerClose
 )
 
-func pickerKeyAction(msg tea.KeyMsg) pickerAction {
+func pickerKeyAction(msg tea.KeyMsg) pickerAction { return pickerKeyActionWithMap(msg, tuiKeys) }
+
+func pickerKeyActionWithMap(msg tea.KeyMsg, keys tuiKeyMap) pickerAction {
 	switch {
-	case keyMatches(msg, tuiKeys.PickerUp):
+	case keyMatches(msg, keys.PickerUp):
 		return pickerUp
-	case keyMatches(msg, tuiKeys.PickerDown):
+	case keyMatches(msg, keys.PickerDown):
 		return pickerDown
-	case keyMatches(msg, tuiKeys.PickerPrev):
+	case keyMatches(msg, keys.PickerPrev):
 		return pickerPrev
-	case keyMatches(msg, tuiKeys.PickerNext):
+	case keyMatches(msg, keys.PickerNext):
 		return pickerNext
-	case keyMatches(msg, tuiKeys.PickerPageUp):
+	case keyMatches(msg, keys.PickerPageUp):
 		return pickerPageUp
-	case keyMatches(msg, tuiKeys.PickerPageDown):
+	case keyMatches(msg, keys.PickerPageDown):
 		return pickerPageDown
-	case keyMatches(msg, tuiKeys.PickerTop):
+	case keyMatches(msg, keys.PickerTop):
 		return pickerTop
-	case keyMatches(msg, tuiKeys.PickerBottom):
+	case keyMatches(msg, keys.PickerBottom):
 		return pickerBottom
-	case keyMatches(msg, tuiKeys.Accept):
+	case keyMatches(msg, keys.Accept):
 		return pickerAccept
-	case keyMatches(msg, tuiKeys.Close):
+	case keyMatches(msg, keys.Close):
 		return pickerClose
 	default:
 		return pickerNone

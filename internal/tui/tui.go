@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 
+	"github.com/snow-core/snow/internal/agent"
 	"github.com/snow-core/snow/internal/app"
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/config"
@@ -134,6 +135,14 @@ type doneMsg struct {
 	err error
 	app *app.App // delivered from the Init goroutine
 }
+type trustPromptMsg struct {
+	path  string
+	store *trust.Store
+}
+type trustDecisionMsg struct {
+	app *app.App
+	err error
+}
 type appendLineMsg struct {
 	line string
 }
@@ -146,6 +155,11 @@ type oauthDoneMsg struct {
 type logoutDoneMsg struct {
 	provider string
 	err      error
+}
+
+type chatGPTAccountChoice struct {
+	AccountID string
+	Sources   []string
 }
 
 type compactDoneMsg struct {
@@ -172,6 +186,29 @@ type textareaResultMsg struct {
 	requestID  string
 	questionID string
 	msg        tea.Msg
+}
+
+type queueSettledMsg struct {
+	epoch uint64
+	err   error
+}
+
+type queueSubmitMsg struct {
+	kind     protocol.QueuedInputKind
+	text     string
+	expanded string
+	itemID   string
+	epoch    uint64
+	accepted bool
+	fallback bool
+	err      error
+}
+
+type queuedTUIAttempt struct {
+	kind     protocol.QueuedInputKind
+	text     string
+	expanded string
+	epoch    uint64
 }
 
 // clearMetaEnterMsg expires the short Escape/terminal-fragment window used to
@@ -213,7 +250,7 @@ type sessionStoreMsg struct {
 type branchActionMsg struct {
 	generation uint64
 	branch     protocol.SessionBranch
-	fork       bool
+	action     string
 	err        error
 }
 
@@ -273,10 +310,22 @@ type Model struct {
 	done                  bool
 	closeOnce             sync.Once
 	closeErr              error
+	startupMu             sync.Mutex
+	startupApps           map[*app.App]struct{}
+	startupClosed         bool
 	lastErr               error
 	lastStatus            string
+	trustPending          bool
+	trustPath             string
+	trustStore            *trust.Store
+	trustChoice           int // 0=continue untrusted, 1=trust project
+	trustError            string
+	trustSaving           bool
 	lastErrorText         string
 	themeName             string
+	customThemes          map[string]config.ThemeFile
+	keys                  tuiKeyMap
+	auxDiagnostics        []config.Diagnostic
 	lastUsage             *protocol.Usage
 	contextTokens         int
 	contextEstimated      bool
@@ -300,6 +349,13 @@ type Model struct {
 	md                     *mdRenderer
 	thinkingMD             *mdRenderer
 	toolRunning            bool
+	pendingInputs          protocol.InputQueue
+	queueEpoch             uint64
+	queueAttempts          []queuedTUIAttempt
+	queueOriginalText      map[string]string
+	queueRendered          map[string]bool
+	queueFallbacks         []queueSubmitMsg
+	queueSettleWaiting     bool
 
 	// Command palette state.
 	compMatches []string
@@ -321,14 +377,15 @@ type Model struct {
 	modelLoading       bool
 	sessionOpLoading   bool
 
-	// Provider picker state (for /login).
-	pickProvider bool
-	providers    []string
-	provIndex    int
+	// Provider picker state (for /login and /logout).
+	pickProvider   bool
+	providerLogout bool
+	providers      []string
+	provIndex      int
 
 	// ChatGPT login actions and compatible credential imports.
 	pickChatGPTAuth bool
-	authSources     []chatgpt.AuthSource
+	authAccounts    []chatGPTAccountChoice
 	authIndex       int
 	oauthLoading    bool
 	oauthProgress   chatgpt.LoginProgress
@@ -336,9 +393,11 @@ type Model struct {
 	oauthEvents     chan tea.Msg
 
 	// Model picker state (for /model).
-	pickModel  bool
-	modelList  []protocol.Model
-	modelIndex int
+	pickModel         bool
+	modelList         []protocol.Model
+	modelIndex        int
+	modelQuery        string
+	modelSearchActive bool
 
 	// Thinking picker state (for /thinking).
 	pickThinking  bool
@@ -380,9 +439,11 @@ type Model struct {
 	sessionIndex int
 
 	// Branch tree picker state.
-	pickTree    bool
-	branches    []protocol.SessionBranch
-	branchIndex int
+	pickTree     bool
+	branches     []protocol.SessionBranch
+	branchIndex  int
+	branchAction string // fork|rename|delete
+	branchInput  string
 
 	// Read-only /mcp and /skills inventory picker state.
 	pickInfo         bool
@@ -449,6 +510,8 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 		ctx:                 ctx,
 		opts:                opts,
 		themeName:           "default",
+		customThemes:        map[string]config.ThemeFile{},
+		keys:                tuiKeys,
 		transcript:          vp,
 		editor:              ta,
 		spinner:             sp,
@@ -459,6 +522,9 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 		thinkingMD:          newThinkingMarkdownRenderer(),
 		nudgeDismissed:      make(map[string]bool),
 		subagentViews:       make(map[string]subagentViewState),
+		queueOriginalText:   make(map[string]string),
+		queueRendered:       make(map[string]bool),
+		startupApps:         make(map[*app.App]struct{}),
 		transcriptBaseDirty: true,
 		now:                 time.Now,
 	}
@@ -472,27 +538,87 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 // Close releases the attached app. It is safe to call repeatedly.
 func (m *Model) Close() error {
 	m.closeOnce.Do(func() {
+		m.startupMu.Lock()
+		m.startupClosed = true
+		pending := make([]*app.App, 0, len(m.startupApps))
+		for candidate := range m.startupApps {
+			pending = append(pending, candidate)
+		}
+		clear(m.startupApps)
+		m.startupMu.Unlock()
+		for _, candidate := range pending {
+			m.closeErr = errors.Join(m.closeErr, candidate.Close())
+		}
 		if m.app != nil {
-			m.closeErr = m.app.Close()
+			m.closeErr = errors.Join(m.closeErr, m.app.Close())
 		}
 	})
 	return m.closeErr
 }
 
+func (m *Model) retainStartupApp(candidate *app.App) bool {
+	if candidate == nil {
+		return true
+	}
+	m.startupMu.Lock()
+	if m.startupClosed {
+		m.startupMu.Unlock()
+		_ = candidate.Close()
+		return false
+	}
+	m.startupApps[candidate] = struct{}{}
+	m.startupMu.Unlock()
+	return true
+}
+
+func (m *Model) releaseStartupApp(candidate *app.App) {
+	if candidate == nil {
+		return
+	}
+	m.startupMu.Lock()
+	delete(m.startupApps, candidate)
+	m.startupMu.Unlock()
+}
+
 // Init implements tea.Model.
 func (m *Model) Init() tea.Cmd {
-	// Build the app asynchronously so the UI paints immediately; deliver it
-	// via the doneMsg payload (never mutate m.app from a goroutine).
-	return tea.Batch(
-		spinner.Tick,
-		func() tea.Msg {
-			a, err := app.New(m.ctx, m.opts)
-			if err != nil {
-				return doneMsg{err: err}
-			}
-			return doneMsg{app: a}
-		},
-	)
+	// Resolve trust before app.New so an allow decision can load project input
+	// on this launch and a deny decision guarantees it is never read.
+	return tea.Batch(spinner.Tick, m.bootstrapCmd())
+}
+
+func (m *Model) bootstrapCmd() tea.Cmd {
+	return func() tea.Msg {
+		preflight, err := app.InspectProjectTrust(m.opts)
+		if err != nil {
+			return doneMsg{err: err}
+		}
+		if preflight.Resolution.Prompt {
+			return trustPromptMsg{path: preflight.Resolution.Path, store: preflight.Store}
+		}
+		a, err := app.New(m.ctx, m.opts)
+		if a != nil && !m.retainStartupApp(a) {
+			return doneMsg{err: context.Canceled}
+		}
+		return doneMsg{app: a, err: err}
+	}
+}
+
+func (m *Model) saveTrustCmd(level trust.Level) tea.Cmd {
+	store, path := m.trustStore, m.trustPath
+	return func() tea.Msg {
+		if store == nil {
+			return trustDecisionMsg{err: errors.New("trust store unavailable")}
+		}
+		if err := store.Set(path, level); err != nil {
+			return trustDecisionMsg{err: err}
+		}
+		a, err := app.New(m.ctx, m.opts)
+		if a != nil && !m.retainStartupApp(a) {
+			return trustDecisionMsg{err: context.Canceled}
+		}
+		return trustDecisionMsg{app: a, err: err}
+	}
 }
 
 func (m *Model) subscribe() error {
@@ -523,6 +649,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.applyMouse(msg)
 		return m, cmd
 	case tea.KeyMsg:
+		runStatusWasVisible := m.showRunStatus()
 		if handled, cmd := m.normalizeTerminalKey(msg); handled {
 			m.layout()
 			return m, cmd
@@ -530,25 +657,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
 		// transcript when not in a picker.
 		if !m.loginMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.permPending && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.mentionVisible {
-			switch msg.Type {
-			case tea.KeyPgUp:
+			switch {
+			case keyMatches(msg, m.keys.PageUp):
 				m.transcript.PageUp()
 				return m, nil
-			case tea.KeyPgDown:
+			case keyMatches(msg, m.keys.PageDown):
 				m.transcript.PageDown()
 				m.catchUpTranscriptAtBottom()
 				return m, nil
-			case tea.KeyHome:
+			case keyMatches(msg, m.keys.Top):
 				m.transcript.GotoTop()
 				return m, nil
-			case tea.KeyEnd:
+			case keyMatches(msg, m.keys.Bottom):
 				m.transcript.GotoBottom()
 				m.catchUpTranscriptAtBottom()
 				return m, nil
-			case tea.KeyCtrlUp:
+			case keyMatches(msg, m.keys.LineUp):
 				m.transcript.ScrollUp(m.transcript.MouseWheelDelta)
 				return m, nil
-			case tea.KeyCtrlDown:
+			case keyMatches(msg, m.keys.LineDown):
 				m.transcript.ScrollDown(m.transcript.MouseWheelDelta)
 				m.catchUpTranscriptAtBottom()
 				return m, nil
@@ -556,9 +683,44 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		model, cmd := m.handleKey(msg)
 		m.layout()
+		if runStatusWasVisible != m.showRunStatus() {
+			// Apple Terminal can retain the previous sticky footer when the
+			// dynamic run-status row changes frame geometry. Clear once at that
+			// boundary before running the potentially long prompt command.
+			cmd = tea.Sequence(tea.ClearScreen, cmd)
+		}
 		return model, cmd
-	case doneMsg:
+	case trustPromptMsg:
+		m.trustPending = true
+		m.trustPath = msg.path
+		m.trustStore = msg.store
+		m.trustChoice = 0
+		m.trustError = ""
+		m.trustSaving = false
+		m.layout()
+		return m, nil
+	case trustDecisionMsg:
+		m.releaseStartupApp(msg.app)
+		m.trustSaving = false
 		if msg.err != nil {
+			if msg.app != nil {
+				_ = msg.app.Close()
+			}
+			m.trustError = msg.err.Error()
+			m.layout()
+			return m, nil
+		}
+		m.trustPending = false
+		m.trustPath = ""
+		m.trustStore = nil
+		m.trustError = ""
+		return m.Update(doneMsg{app: msg.app})
+	case doneMsg:
+		m.releaseStartupApp(msg.app)
+		if msg.err != nil {
+			if msg.app != nil {
+				_ = msg.app.Close()
+			}
 			m.lastErr = msg.err
 			m.busy = false
 			m.editor.Reset()
@@ -571,19 +733,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.app != nil {
 			m.app = msg.app
+			m.loadAuxiliaryTUIConfig()
 			if msg.app.Cfg.TUI.Theme != "" {
-				if err := m.setTheme(msg.app.Cfg.TUI.Theme, false); err != nil {
-					m.lastErr = err
+				if err := m.applyThemeSelection(msg.app.Cfg.TUI.Theme, false, false); err != nil {
+					m.auxDiagnostics = append(m.auxDiagnostics, config.Diagnostic{Path: "tui.theme", Message: err.Error()})
+					_ = m.applyThemeSelection("default", false, false)
 				}
 			}
 			m.app.EnableUserInputReplies()
-			m.modelList = append([]protocol.Model(nil), m.app.AllModels...)
+			m.modelList = uniquePickerModels(m.app.AllModels, m.app.ProviderID)
 			m.asker.SetPublisher(m.app.Agent.Publish)
 			m.app.Perm.SetAsker(m.asker)
 			m.hydrateSession()
 			if err := m.subscribe(); err != nil {
 				m.lastErr = err
 				m.pushLine(styleError.Render("goal restore: " + err.Error()))
+			}
+			for _, diagnostic := range append(append([]config.Diagnostic(nil), msg.app.Diagnostics...), m.auxDiagnostics...) {
+				m.pushLine(styleFooter.Render("config warning: " + diagnostic.Path + ": " + diagnostic.Message))
 			}
 			// The sticky header and footer already expose provider, model, cwd,
 			// and commands; do not duplicate startup chrome in the transcript.
@@ -607,6 +774,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentEventMsg:
 		return m.Update(agentEventBatchMsg{events: []protocol.AgentEvent{msg.ev}})
 	case agentEventBatchMsg:
+		runStatusWasVisible := m.showRunStatus()
 		// Ingest a bounded, already-coalesced logical batch. Streaming deltas
 		// schedule a render separately so input is never queued behind reflow.
 		m.batchingEvents = true
@@ -624,7 +792,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		if m.modeSwitchReady {
+		if runStatusWasVisible != m.showRunStatus() {
+			cmds = append(cmds, tea.ClearScreen)
+		}
+		if len(m.queueFallbacks) > 0 && !m.busy && m.app != nil {
+			if m.app.Agent.IsRunning() {
+				if cmd := m.waitForQueueSettlement(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			} else if cmd := m.startQueueFallback(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		} else if m.modeSwitchReady {
 			if cmd := m.beginPendingModeSwitch(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -748,7 +927,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLine(styleError.Render("tree: " + msg.err.Error()))
 			return m, nil
 		}
-		m.branches = msg.branches
+		m.branches = orderBranches(msg.branches)
 		if len(m.branches) == 0 {
 			m.pickTree = false
 			m.pushLine(styleFooter.Render("tree: no branches"))
@@ -772,7 +951,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLine(styleError.Render("model list: " + msg.err.Error()))
 			return m, nil
 		}
-		m.modelList = msg.models
+		m.modelList = uniquePickerModels(msg.models, m.app.ProviderID)
+		m.modelQuery = ""
+		m.modelSearchActive = false
 		if len(m.modelList) == 0 {
 			m.pickModel = false
 			m.pushLine(styleError.Render("no models available"))
@@ -834,10 +1015,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLine(styleError.Render("tree goal: " + err.Error()))
 			return m, nil
 		}
-		if msg.fork {
-			m.lastStatus = "forked branch " + msg.branch.ID
-		} else {
-			m.lastStatus = "selected branch " + msg.branch.ID
+		switch msg.action {
+		case "fork":
+			m.lastStatus = "forked branch " + msg.branch.Name
+		case "rename":
+			m.lastStatus = "renamed branch " + msg.branch.Name
+		case "delete":
+			m.lastStatus = "deleted branch"
+		default:
+			m.lastStatus = "selected branch " + msg.branch.Name
 		}
 	case sessionStoreMsg:
 		if msg.generation != m.pickerGeneration {
@@ -865,6 +1051,60 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.lastStatus = "resumed " + shortSessionID(msg.store.ID())
 		}
+	case queueSettledMsg:
+		if msg.epoch != m.queueEpoch {
+			return m, nil
+		}
+		m.queueSettleWaiting = false
+		if msg.err != nil || len(m.queueFallbacks) == 0 || m.busy || m.app == nil || m.app.Agent.IsRunning() {
+			return m, nil
+		}
+		return m, m.startQueueFallback()
+	case queueSubmitMsg:
+		m.removeQueueAttempt(msg)
+		if msg.epoch != m.queueEpoch {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.pushLine(styleError.Render(string(msg.kind) + ": " + msg.err.Error()))
+			return m, nil
+		}
+		if msg.fallback {
+			// Wait until the preceding turn_done has been ingested before starting
+			// the fallback prompt. Otherwise that late event can mark the new run
+			// idle after it has already started.
+			m.queueFallbacks = append(m.queueFallbacks, msg)
+			if !m.busy {
+				if m.app.Agent.IsRunning() {
+					return m, m.waitForQueueSettlement()
+				}
+				return m, m.startQueueFallback()
+			}
+			m.lastStatus = "waiting for current turn to settle"
+			return m, nil
+		}
+		if msg.accepted {
+			pending := false
+			for _, item := range m.app.Agent.PendingInputs().Items {
+				if item.ID == msg.itemID {
+					pending = true
+					m.queueOriginalText[item.ID] = msg.text
+					m.renderQueuedInput(item, msg.text)
+					break
+				}
+			}
+			if !pending {
+				// Delivery may beat this acknowledgment. Still render the accepted
+				// submission, but do not retain it as abort-restorable state.
+				m.renderQueuedInput(protocol.QueuedInput{ID: msg.itemID, Kind: msg.kind, Text: msg.text}, msg.text)
+				delete(m.queueRendered, msg.itemID)
+			}
+			if m.editor.Value() == msg.text {
+				m.editor.Reset()
+			}
+		}
+		m.layout()
+		return m, nil
 	case textareaResultMsg:
 		return m.applyTextareaResult(msg)
 	}
@@ -965,6 +1205,18 @@ func (m *Model) handleSubagentEvent(ev protocol.AgentEvent) {
 			m.pushLine(styleTool.Render(fmt.Sprintf("• agent %s %s", ev.Agent.Path, ev.Subagent.Status)))
 		}
 	}
+}
+
+func (m *Model) renderQueuedInput(item protocol.QueuedInput, text string) {
+	if m.queueRendered[item.ID] {
+		return
+	}
+	label := "queued steer"
+	if item.Kind == protocol.QueuedInputFollowUp {
+		label = "queued follow-up"
+	}
+	m.pushLine(styleTool.Render("↳ " + label + ": " + sanitizeToolPreview(text, 300)))
+	m.queueRendered[item.ID] = true
 }
 
 func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
@@ -1118,6 +1370,37 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 					ev.Usage.Input, ev.Usage.Output, ev.Usage.CacheRead)))
 			}
 		}
+	case protocol.EvQueueUpdated:
+		previous := make(map[string]bool, len(m.pendingInputs.Items))
+		for _, item := range m.pendingInputs.Items {
+			previous[item.ID] = true
+		}
+		if ev.Queue == nil {
+			m.pendingInputs = protocol.InputQueue{}
+		} else {
+			m.pendingInputs = *ev.Queue.Clone()
+		}
+		current := make(map[string]bool, len(m.pendingInputs.Items))
+		for _, item := range m.pendingInputs.Items {
+			current[item.ID] = true
+			if previous[item.ID] {
+				continue
+			}
+			if original := m.queueOriginalText[item.ID]; original != "" {
+				m.renderQueuedInput(item, original)
+			} else if !m.hasQueueAttempt(item) {
+				// Inputs admitted by another programmatic surface have no compact
+				// TUI draft to recover, so render their model-visible text directly.
+				m.renderQueuedInput(item, item.Text)
+			}
+		}
+		for id := range m.queueOriginalText {
+			if !current[id] {
+				delete(m.queueOriginalText, id)
+				delete(m.queueRendered, id)
+			}
+		}
+		m.layout()
 	case protocol.EvPermissionRequest:
 		if ev.Permission != nil {
 			if ev.Agent == nil {
@@ -1482,9 +1765,14 @@ func (m *Model) renderRunStatus() string {
 		return ""
 	}
 	elapsed := formatRunElapsed(m.currentTime().Sub(m.runStartedAt))
+	detail := elapsed
+	if pending := len(m.pendingInputs.Items); pending > 0 {
+		detail += fmt.Sprintf(" · %d queued", pending)
+	}
+	detail += " · esc to interrupt"
 	return styleThinking.Render(m.spinner.View()+" ") +
 		styleHeader.Render("Working") +
-		styleHeaderDim.Render(" ("+elapsed+" · esc to interrupt)")
+		styleHeaderDim.Render(" ("+detail+")")
 }
 
 // availableOverlayHeight is the maximum picker/palette area that leaves one
@@ -1524,6 +1812,40 @@ func (m *Model) layout() {
 
 // handleKey processes key presses, the command palette, and login capture.
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.trustPending {
+		// Once persistence starts, keep ownership of the async result so a late
+		// app cannot be constructed after Bubble Tea has already exited. Before
+		// selection, Ctrl+C/Ctrl+D still quit without recording a decision.
+		if m.trustSaving {
+			return m, nil
+		}
+		if msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyCtrlD {
+			return m, tea.Quit
+		}
+		switch msg.Type {
+		case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
+			m.trustChoice = (m.trustChoice + 1) % 2
+			m.trustError = ""
+		case tea.KeyDown, tea.KeyRight, tea.KeyTab:
+			m.trustChoice = (m.trustChoice + 1) % 2
+			m.trustError = ""
+		case tea.KeyEsc:
+			m.trustChoice = 0
+			m.trustSaving = true
+			m.trustError = ""
+			return m, m.saveTrustCmd(trust.LevelDeny)
+		case tea.KeyEnter:
+			level := trust.LevelDeny
+			if m.trustChoice == 1 {
+				level = trust.LevelAllow
+			}
+			m.trustSaving = true
+			m.trustError = ""
+			return m, m.saveTrustCmd(level)
+		}
+		return m, nil
+	}
+
 	// Startup can fail before the app exists. Keep emergency exit keys live
 	// while booting and on the terminal error screen so the alt-screen can
 	// always be restored cleanly.
@@ -1539,7 +1861,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Emergency Ctrl+C is resolved before any configurable action so a custom
+	// submit/accept binding can never shadow terminal recovery.
+	if msg.Type == tea.KeyCtrlC {
+		if m.busy {
+			m.requestAbort()
+			return m, nil
+		}
+		return m, tea.Quit
+	}
+
 	if m.confirmGoalReplace {
+		msg = normalizePickerKeyWithMap(msg, m.keys)
 		switch msg.Type {
 		case tea.KeyEsc:
 			m.confirmGoalReplace = false
@@ -1558,7 +1891,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.planPrompt {
-		return m.handlePlanImplementationKey(msg)
+		return m.handlePlanImplementationKey(normalizePickerKeyWithMap(msg, m.keys))
 	}
 
 	// Bubble Tea recognizes Option+Return when the terminal sends ESC+CR in
@@ -1571,22 +1904,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Normalize j/k to the same navigation actions as arrows only while a
-	// modal/list owns focus. The normal textarea keeps j/k literal.
-	if m.pickProvider || m.pickChatGPTAuth || m.pickModel ||
-		m.pickSettings || m.pickThinking || m.pickSession || m.pickTree ||
-		m.pickInfo || m.permPending || m.userInputPending || m.pickPermissionMode ||
-		m.compVisible || m.mentionVisible {
-		switch pickerKeyAction(msg) {
-		case pickerUp:
-			msg = tea.KeyMsg{Type: tea.KeyUp}
-		case pickerDown:
-			msg = tea.KeyMsg{Type: tea.KeyDown}
-		}
-	}
-
 	// --- Masked login capture mode ---
 	if m.loginMode {
+		if keyMatches(msg, m.keys.Close) {
+			msg = tea.KeyMsg{Type: tea.KeyEsc}
+		} else if keyMatches(msg, m.keys.Accept) {
+			msg = tea.KeyMsg{Type: tea.KeyEnter}
+		} else if keyMatches(msg, m.keys.Paste) {
+			msg = tea.KeyMsg{Type: tea.KeyCtrlV}
+		}
 		return m.handleLoginKey(msg)
 	}
 
@@ -1654,6 +1980,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// --- Command palette: navigation keys are consumed while open ---
 	if m.compVisible {
+		msg = normalizePickerKeyWithMap(msg, m.keys)
 		switch msg.Type {
 		case tea.KeyUp:
 			if len(m.compMatches) > 0 {
@@ -1689,6 +2016,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// --- File mention picker: Enter/Tab insert a path, never submit the prompt ---
 	if m.mentionVisible {
+		msg = normalizePickerKeyWithMap(msg, m.keys)
 		switch msg.Type {
 		case tea.KeyUp, tea.KeyShiftTab:
 			if len(m.mentionMatches) > 0 {
@@ -1712,7 +2040,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// At the top-level composer Shift+Tab cycles collaboration mode. Every
 	// modal/completion path above retains its existing navigation semantics.
-	if msg.Type == tea.KeyShiftTab {
+	if keyMatches(msg, m.keys.Mode) {
 		return m, m.toggleCollaborationMode()
 	}
 
@@ -1731,16 +2059,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// --- Normal editing / sending ---
 	text := m.editor.Value()
-	if msg.Type == tea.KeyEnter && m.modeSwitching {
+	submitKey := keyMatches(msg, m.keys.Submit)
+	followUpKey := keyMatches(msg, m.keys.FollowUp)
+	if submitKey && m.modeSwitching {
 		m.lastStatus = "waiting for mode switch"
 		return m, nil
 	}
-	goalControl := m.busy && (strings.HasPrefix(strings.TrimSpace(text), "/goal pause") || strings.HasPrefix(strings.TrimSpace(text), "/goal clear") || strings.HasPrefix(strings.TrimSpace(text), "/goal edit"))
-	if msg.Type == tea.KeyEnter && !msg.Alt && (!m.busy || goalControl) {
+	trimmed := strings.TrimSpace(text)
+	goalControl := m.busy && (strings.HasPrefix(trimmed, "/goal pause") || strings.HasPrefix(trimmed, "/goal clear") || strings.HasPrefix(trimmed, "/goal edit"))
+	if keyMatches(msg, m.keys.Abort) && m.busy {
+		m.requestAbort()
+		return m, nil
+	}
+	if followUpKey && m.busy && trimmed != "" && !strings.HasPrefix(trimmed, "/") {
+		return m, m.submitQueuedInput(text, protocol.QueuedInputFollowUp)
+	}
+	if submitKey && m.busy && !goalControl && trimmed != "" && !strings.HasPrefix(trimmed, "/") {
+		return m, m.submitQueuedInput(text, protocol.QueuedInputSteer)
+	}
+	if submitKey && (!m.busy || goalControl) {
 		if strings.HasPrefix(text, "/") {
-			return m.runCommand(strings.TrimSpace(text))
+			return m.runCommand(trimmed)
 		}
-		if strings.TrimSpace(text) != "" {
+		if trimmed != "" {
 			m.busy = true
 			m.toolRunning = false
 			m.lastErrorText = ""
@@ -1750,21 +2091,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	switch msg.String() {
-	case "ctrl+c":
-		if m.busy {
-			m.requestAbort()
-			return m, nil
-		}
+	if keyMatches(msg, m.keys.Quit) && !m.busy && (msg.String() != "ctrl+d" || m.editor.Value() == "") {
 		return m, tea.Quit
-	case "ctrl+d":
-		if m.editor.Value() == "" {
-			return m, tea.Quit
-		}
 	}
 
 	// Forward to the editor, then refresh the palette from the new text. Keep
-	// the returned command: textarea uses it to read the clipboard for Ctrl+V.
+	// the returned command: textarea uses it to read the clipboard for paste.
+	if keyMatches(msg, m.keys.Paste) {
+		msg = tea.KeyMsg{Type: tea.KeyCtrlV}
+	}
 	prev := m.editor.Value()
 	var cmd tea.Cmd
 	m.editor, cmd = m.editor.Update(msg)
@@ -1941,6 +2276,86 @@ func (m *Model) expandedPrompt(text string) string {
 	return expandMentionPrompt(text, m.app.CWD(), m.mentionFiles)
 }
 
+func (m *Model) submitQueuedInput(text string, kind protocol.QueuedInputKind) tea.Cmd {
+	expanded := m.expandedPrompt(text)
+	epoch := m.queueEpoch
+	m.queueAttempts = append(m.queueAttempts, queuedTUIAttempt{kind: kind, text: text, expanded: expanded, epoch: epoch})
+	return func() tea.Msg {
+		item, err := m.app.Agent.QueueInput(kind, expanded)
+		if errors.Is(err, agent.ErrNotRunning) {
+			return queueSubmitMsg{kind: kind, text: text, expanded: expanded, epoch: epoch, fallback: true}
+		}
+		return queueSubmitMsg{kind: kind, text: text, expanded: expanded, itemID: item.ID, epoch: epoch, accepted: err == nil, err: err}
+	}
+}
+
+func (m *Model) hasQueueAttempt(item protocol.QueuedInput) bool {
+	for _, attempt := range m.queueAttempts {
+		if attempt.kind == item.Kind && attempt.expanded == item.Text {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) removeQueueAttempt(msg queueSubmitMsg) {
+	for i, attempt := range m.queueAttempts {
+		if attempt.epoch != msg.epoch || attempt.kind != msg.kind || attempt.text != msg.text || attempt.expanded != msg.expanded {
+			continue
+		}
+		m.queueAttempts = append(m.queueAttempts[:i], m.queueAttempts[i+1:]...)
+		return
+	}
+}
+
+func (m *Model) waitForQueueSettlement() tea.Cmd {
+	if m.queueSettleWaiting || m.app == nil || m.app.Agent == nil {
+		return nil
+	}
+	m.queueSettleWaiting = true
+	epoch := m.queueEpoch
+	agent := m.app.Agent
+	ctx := m.ctx
+	return func() tea.Msg {
+		return queueSettledMsg{epoch: epoch, err: agent.WaitIdle(ctx)}
+	}
+}
+
+func (m *Model) startQueueFallback() tea.Cmd {
+	if len(m.queueFallbacks) == 0 || m.app == nil {
+		return nil
+	}
+	msg := m.queueFallbacks[0]
+	m.queueFallbacks = m.queueFallbacks[1:]
+	// The fallback is semantically the steer that narrowly missed admission;
+	// defer any already queued collaboration-mode transition until this prompt's
+	// own turn_done boundary.
+	m.modeSwitchReady = false
+	m.busy = true
+	m.toolRunning = false
+	m.lastErrorText = ""
+	m.planPrompt = false
+	m.pushLine(styleUser.Render("› " + msg.text))
+	if m.editor.Value() == msg.text {
+		m.editor.Reset()
+	}
+	if m.cancelRun != nil {
+		m.cancelRun()
+	}
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.cancelRun = cancel
+	m.runStartedAt = m.currentTime()
+	promptCmd := func() tea.Msg {
+		if err := m.app.Agent.Prompt(ctx, msg.expanded); err != nil {
+			return agentEventMsg{ev: protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()}}
+		}
+		return nil
+	}
+	// This path begins outside the ordinary key handler after the prior Agent
+	// fully settles, so apply the same one-shot geometry repaint explicitly.
+	return tea.Sequence(tea.ClearScreen, promptCmd)
+}
+
 func (m *Model) startPrompt(text string) tea.Cmd {
 	if m.cancelRun != nil {
 		m.cancelRun()
@@ -2004,8 +2419,58 @@ func (m *Model) abort() {
 }
 
 func (m *Model) requestAbort() {
+	// Close queue admission and drain accepted input before cancelling the run.
+	// An enqueue racing this key press is therefore either present in the
+	// returned snapshot or rejected while its unchanged draft stays visible.
+	m.queueEpoch++
+	m.queueSettleWaiting = false
+	queue := protocol.InputQueue{}
+	if m.app != nil && m.app.Agent != nil {
+		queue = m.app.Agent.ClearPendingInputs()
+	}
+	draft := m.editor.Value()
+	fallbacks := append([]queueSubmitMsg(nil), m.queueFallbacks...)
+	m.queueFallbacks = nil
 	m.abort()
+	m.pendingInputs = protocol.InputQueue{}
+	m.restoreAbortedInputs(queue, fallbacks, draft)
 	m.pushLine(styleError.Render("aborting…"))
+}
+
+func (m *Model) restoreAbortedInputs(queue protocol.InputQueue, fallbacks []queueSubmitMsg, draft string) {
+	parts := make([]string, 0, len(queue.Items)+len(fallbacks)+1)
+	for _, item := range queue.Items {
+		parts = append(parts, m.originalQueuedText(item))
+	}
+	for _, fallback := range fallbacks {
+		parts = append(parts, fallback.text)
+	}
+	if draft != "" {
+		duplicateAcceptedDraft := len(parts) > 0 && parts[len(parts)-1] == draft
+		if !duplicateAcceptedDraft {
+			parts = append(parts, draft)
+		}
+	}
+	m.queueAttempts = nil
+	clear(m.queueOriginalText)
+	clear(m.queueRendered)
+	if len(parts) > 0 {
+		m.editor.SetValue(strings.Join(parts, "\n\n"))
+		m.editor.CursorEnd()
+		m.refreshInputCompletions()
+	}
+}
+
+func (m *Model) originalQueuedText(item protocol.QueuedInput) string {
+	if original := m.queueOriginalText[item.ID]; original != "" {
+		return original
+	}
+	for _, attempt := range m.queueAttempts {
+		if attempt.kind == item.Kind && attempt.expanded == item.Text {
+			return attempt.text
+		}
+	}
+	return item.Text
 }
 
 // runCommand handles slash commands.
@@ -2019,7 +2484,7 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 	case "/quit", "/q":
 		return m, tea.Quit
 	case "/help":
-		m.pushLine(styleFooter.Render(formatCommandList() + "\n(mouse capture is opt-in; drag selection remains native by default)"))
+		m.pushLine(styleFooter.Render(formatCommandListWithKeys(m.keys) + "\n(while working: submit queues steer, follow-up uses its configured binding)\n(mouse capture is opt-in; drag selection remains native by default)"))
 	case "/goal":
 		if len(args) == 0 {
 			g, err := m.app.GoalState()
@@ -2249,7 +2714,11 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 			return m.startModelPick()
 		}
 		selected := protocol.Model{Provider: m.app.ProviderID, ID: args[0]}
-		for _, cached := range m.modelList {
+		catalog := m.modelList
+		if len(catalog) == 0 {
+			catalog = uniquePickerModels(m.app.AllModels, m.app.ProviderID)
+		}
+		for _, cached := range catalog {
 			if cached.Provider == selected.Provider && cached.ID == selected.ID {
 				selected = cached
 				break
@@ -2336,7 +2805,7 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 			if err := m.app.Trust.Set(m.app.CWD(), trust.Level(args[0])); err != nil {
 				m.pushLine(styleError.Render(err.Error()))
 			} else {
-				m.pushLine(styleFooter.Render("trust " + args[0] + " for " + m.app.CWD()))
+				m.pushLine(styleFooter.Render("trust " + args[0] + " saved for next launch · " + m.app.CWD()))
 			}
 		default:
 			m.pushLine(styleError.Render("invalid trust level: " + args[0]))
@@ -2353,6 +2822,7 @@ func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
 	if len(args) == 0 {
 		m.providers = supportedProviders()
 		m.provIndex = 0
+		m.providerLogout = false
 		m.pickProvider = true
 		m.compVisible = false
 		m.editor.Reset()
@@ -2361,7 +2831,7 @@ func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
 	}
 	provider := args[0]
 	if provider == chatgpt.ProviderID {
-		return m.startChatGPTAuthImport()
+		return m.startChatGPTAuthPick()
 	}
 	if !isSupportedProvider(provider) {
 		m.pushLine(styleError.Render("login: unsupported provider " + provider +
@@ -2374,7 +2844,7 @@ func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
 
 // handleProviderPick navigates the /login provider list.
 func (m *Model) handleProviderPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	msg = normalizePickerKey(msg)
+	msg = normalizePickerKeyWithMap(msg, m.keys)
 	switch msg.Type {
 	case tea.KeyUp:
 		if len(m.providers) > 0 {
@@ -2390,6 +2860,7 @@ func (m *Model) handleProviderPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyEsc:
 		m.pickProvider = false
+		m.providerLogout = false
 		m.providers = nil
 	case tea.KeyEnter:
 		if len(m.providers) == 0 {
@@ -2397,10 +2868,15 @@ func (m *Model) handleProviderPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		provider := m.providers[m.provIndex]
+		logout := m.providerLogout
 		m.pickProvider = false
+		m.providerLogout = false
 		m.providers = nil
+		if logout {
+			return m.doLogout([]string{provider})
+		}
 		if provider == chatgpt.ProviderID {
-			return m.startChatGPTAuthImport()
+			return m.startChatGPTAuthPick()
 		}
 		if !isSupportedProvider(provider) {
 			m.pushLine(styleError.Render("login: " + provider + " is not supported yet"))
@@ -2411,28 +2887,56 @@ func (m *Model) handleProviderPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startChatGPTAuthImport opens browser/device login actions followed by any
-// compatible Codex, pi, and OpenCode credentials discovered on disk.
-func (m *Model) startChatGPTAuthImport() (tea.Model, tea.Cmd) {
-	m.authSources = chatgpt.DiscoverAuthSources()
+func chatGPTAccountChoices(sources []chatgpt.AuthSource) []chatGPTAccountChoice {
+	choices := make([]chatGPTAccountChoice, 0, len(sources))
+	index := make(map[string]int, len(sources))
+	for _, source := range sources {
+		accountID := strings.TrimSpace(source.Status.AccountID)
+		if accountID == "" {
+			continue
+		}
+		if i, ok := index[accountID]; ok {
+			duplicate := false
+			for _, name := range choices[i].Sources {
+				if name == source.Name {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				choices[i].Sources = append(choices[i].Sources, source.Name)
+			}
+			continue
+		}
+		index[accountID] = len(choices)
+		choices = append(choices, chatGPTAccountChoice{AccountID: accountID, Sources: []string{source.Name}})
+	}
+	return choices
+}
+
+// startChatGPTAuthPick discovers account IDs used by OpenCode/Pi/Codex, then
+// starts a fresh Snow OAuth flow constrained to the selected account. Tokens
+// from other clients are never copied into Snow by this TUI flow.
+func (m *Model) startChatGPTAuthPick() (tea.Model, tea.Cmd) {
+	m.authAccounts = chatGPTAccountChoices(chatgpt.DiscoverAuthSources())
 	m.authIndex = 0
 	m.pickChatGPTAuth = true
 	m.compVisible = false
 	m.editor.Reset()
-	m.pushLine(styleFooter.Render("select a ChatGPT sign-in method (↑/↓ navigate, Enter select, Esc cancel)"))
+	m.pushLine(styleFooter.Render("select an existing ChatGPT account or sign-in method (↑/↓ navigate, Enter select, Esc cancel)"))
 	return m, nil
 }
 
 // handleChatGPTAuthPick selects and imports a discovered local credential.
 func (m *Model) handleChatGPTAuthPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	msg = normalizePickerKey(msg)
+	msg = normalizePickerKeyWithMap(msg, m.keys)
 	if m.oauthLoading {
 		if msg.Type == tea.KeyEsc && m.oauthCancel != nil {
 			m.oauthCancel()
 		}
 		return m, nil
 	}
-	count := len(m.authSources) + 2
+	count := len(m.authAccounts) + 2
 	switch msg.Type {
 	case tea.KeyUp, tea.KeyShiftTab:
 		m.authIndex = (m.authIndex - 1 + count) % count
@@ -2440,34 +2944,34 @@ func (m *Model) handleChatGPTAuthPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.authIndex = (m.authIndex + 1) % count
 	case tea.KeyEsc:
 		m.pickChatGPTAuth = false
-		m.authSources = nil
+		m.authAccounts = nil
 	case tea.KeyEnter:
-		if m.authIndex < 2 {
-			method := chatgpt.LoginBrowser
-			if m.authIndex == 1 {
-				method = chatgpt.LoginDevice
-			}
-			return m, m.startChatGPTOAuth(method)
+		if m.authIndex < len(m.authAccounts) {
+			account := m.authAccounts[m.authIndex]
+			return m, m.startChatGPTOAuth(chatgpt.LoginBrowser, []string{account.AccountID})
 		}
-		source := m.authSources[m.authIndex-2]
-		return m, m.startChatGPTImport(source)
+		method := chatgpt.LoginBrowser
+		if m.authIndex-len(m.authAccounts) == 1 {
+			method = chatgpt.LoginDevice
+		}
+		return m, m.startChatGPTOAuth(method, nil)
 	}
 	return m, nil
 }
 
-func (m *Model) startChatGPTOAuth(method chatgpt.LoginMethod) tea.Cmd {
+func (m *Model) startChatGPTOAuth(method chatgpt.LoginMethod, allowedWorkspaceIDs []string) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	events := make(chan tea.Msg, 8)
 	m.oauthLoading, m.oauthCancel, m.oauthEvents = true, cancel, events
 	go func() {
-		status, err := chatgpt.Login(ctx, chatgpt.LoginOptions{Method: method, Store: m.app.Auth, OpenBrowser: openOAuthBrowser, Progress: func(progress chatgpt.LoginProgress) {
+		status, err := chatgpt.Login(ctx, chatgpt.LoginOptions{Method: method, Store: m.app.Auth, AllowedWorkspaceIDs: allowedWorkspaceIDs, OpenBrowser: openOAuthBrowser, Progress: func(progress chatgpt.LoginProgress) {
 			select {
 			case events <- oauthProgressMsg{progress: progress}:
 			case <-ctx.Done():
 			}
 		}})
 		if err != nil && method == chatgpt.LoginBrowser && strings.Contains(err.Error(), "callback port 1455 is unavailable") && ctx.Err() == nil {
-			status, err = chatgpt.Login(ctx, chatgpt.LoginOptions{Method: chatgpt.LoginDevice, Store: m.app.Auth, OpenBrowser: openOAuthBrowser, Progress: func(progress chatgpt.LoginProgress) {
+			status, err = chatgpt.Login(ctx, chatgpt.LoginOptions{Method: chatgpt.LoginDevice, Store: m.app.Auth, AllowedWorkspaceIDs: allowedWorkspaceIDs, OpenBrowser: openOAuthBrowser, Progress: func(progress chatgpt.LoginProgress) {
 				select {
 				case events <- oauthProgressMsg{progress: progress}:
 				case <-ctx.Done():
@@ -2484,26 +2988,6 @@ func (m *Model) startChatGPTOAuth(method chatgpt.LoginMethod) tea.Cmd {
 		}
 		// Once Login has persisted the credential, cancellation/fallback of this
 		// optional catalog refresh must not turn the committed login into failure.
-		events <- oauthDoneMsg{status: status, err: err}
-	}()
-	return waitOAuthEvent(events)
-}
-
-func (m *Model) startChatGPTImport(source chatgpt.AuthSource) tea.Cmd {
-	ctx, cancel := context.WithCancel(m.ctx)
-	events := make(chan tea.Msg, 4)
-	m.oauthLoading, m.oauthCancel, m.oauthEvents = true, cancel, events
-	m.oauthProgress = chatgpt.LoginProgress{Kind: "import", Message: "Importing " + source.Name + " ChatGPT login…"}
-	go func() {
-		status, err := chatgpt.ImportAuth(m.app.Auth, source)
-		if err == nil {
-			if refreshErr := m.app.RefreshProviderModels(ctx, chatgpt.ProviderID); refreshErr != nil && ctx.Err() == nil {
-				events <- oauthProgressMsg{progress: chatgpt.LoginProgress{Kind: "catalog_fallback", Message: "Imported login; using offline model catalog fallback"}}
-			}
-			if checked, checkErr := chatgpt.CheckStore(m.app.Auth); checkErr == nil {
-				status = checked
-			}
-		}
 		events <- oauthDoneMsg{status: status, err: err}
 	}()
 	return waitOAuthEvent(events)
@@ -2560,17 +3044,14 @@ func (m *Model) renderChatGPTAuthPicker() string {
 		}
 		return styleCompletionSelected.Render(line + "\n\nEsc cancel")
 	}
-	lines := []string{"Sign in with browser", "Sign in with device code"}
-	for _, source := range m.authSources {
-		line := "Import " + source.Name + "  " + shortPath(source.Path, max(24, m.width/2))
-		if source.Status.Expired {
-			line += "  (expired)"
-		} else {
-			line += "  (" + chatgpt.FormatStatus(source.Status) + ")"
-		}
-		lines = append(lines, line)
+	lines := make([]string, 0, len(m.authAccounts)+2)
+	for _, account := range m.authAccounts {
+		lines = append(lines, "Authorize account "+account.AccountID+" for Snow  (used by "+strings.Join(account.Sources, ", ")+")")
 	}
+	lines = append(lines, "Sign in with browser (any ChatGPT account)", "Sign in with device code")
 	var b strings.Builder
+	b.WriteString(styleHeader.Render("ChatGPT account"))
+	b.WriteByte('\n')
 	for i, line := range lines {
 		if i == m.authIndex {
 			b.WriteString(styleCompletionSelected.Render("› " + line))
@@ -2579,6 +3060,7 @@ func (m *Model) renderChatGPTAuthPicker() string {
 		}
 		b.WriteByte('\n')
 	}
+	b.WriteString(styleFooter.Render("(Snow obtains its own OAuth token · Enter authorize · Esc cancel)"))
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
@@ -2634,12 +3116,20 @@ func (m *Model) providerStatus(provider string) string {
 	return provider + "  (no key)"
 }
 
-// renderProviderPicker renders the /login provider list.
+// renderProviderPicker renders the /login or /logout provider list.
 func (m *Model) renderProviderPicker() string {
 	if !m.pickProvider || len(m.providers) == 0 {
 		return ""
 	}
 	var b strings.Builder
+	title := "login provider"
+	hint := "(↑/↓ choose · Enter sign in · Esc cancel)"
+	if m.providerLogout {
+		title = "logout provider"
+		hint = "(↑/↓ choose · Enter log out · Esc cancel)"
+	}
+	b.WriteString(styleHeader.Render(title))
+	b.WriteString("\n")
 	for i, p := range m.providers {
 		line := m.providerStatus(p)
 		if i == m.provIndex {
@@ -2649,13 +3139,26 @@ func (m *Model) renderProviderPicker() string {
 		}
 		b.WriteString("\n")
 	}
+	b.WriteString(styleFooter.Render(hint))
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// doLogout handles /logout <provider>.
+// doLogout opens a picker for /logout or directly removes /logout <provider>.
 func (m *Model) doLogout(args []string) (tea.Model, tea.Cmd) {
 	if len(args) == 0 {
-		m.pushLine(styleError.Render("/logout requires a provider (e.g. /logout opencode-go)"))
+		m.providers = m.storedCredentialProviders()
+		if len(m.providers) == 0 {
+			m.pushLine(styleFooter.Render("logout: no stored credentials"))
+			return m, nil
+		}
+		m.provIndex = 0
+		m.providerLogout = true
+		m.pickProvider = true
+		m.compVisible = false
+		return m, nil
+	}
+	if len(args) != 1 {
+		m.pushLine(styleError.Render("usage: /logout [provider]"))
 		return m, nil
 	}
 	provider := args[0]
@@ -2668,6 +3171,16 @@ func (m *Model) doLogout(args []string) (tea.Model, tea.Cmd) {
 		}
 		return logoutDoneMsg{provider: provider, err: err}
 	}
+}
+
+func (m *Model) storedCredentialProviders() []string {
+	providers := make([]string, 0, len(supportedProviders()))
+	for _, provider := range supportedProviders() {
+		if _, ok := m.app.Auth.Get(provider); ok {
+			providers = append(providers, provider)
+		}
+	}
+	return providers
 }
 
 // ---------------------------------------------------------------------------
@@ -2694,7 +3207,7 @@ func (m *Model) startThinkingPick() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleThinkingPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	msg = normalizePickerKey(msg)
+	msg = normalizePickerKeyWithMap(msg, m.keys)
 	if len(m.thinkingList) == 0 {
 		m.pickThinking = false
 		return m, nil
@@ -2730,7 +3243,7 @@ func (m *Model) setThinking(level protocol.ThinkingLevel, announce bool) error {
 	if err := m.app.Agent.SetThinking(level); err != nil {
 		return err
 	}
-	candidate := m.app.Cfg
+	candidate := m.app.PersistedCfg
 	candidate.Thinking = string(m.app.Agent.Thinking())
 	// A model switch with an incompatible existing effort is runtime-only;
 	// once the user selects a valid effort, persist the complete active choice.
@@ -2742,7 +3255,10 @@ func (m *Model) setThinking(level protocol.ThinkingLevel, announce bool) error {
 			return fmt.Errorf("persist thinking: %w", err)
 		}
 	}
-	m.app.Cfg = candidate
+	m.app.PersistedCfg = candidate
+	m.app.Cfg.Thinking = candidate.Thinking
+	m.app.Cfg.DefaultProvider = candidate.DefaultProvider
+	m.app.Cfg.DefaultModel = candidate.DefaultModel
 	if announce {
 		m.pushLine(styleFooter.Render("thinking: " + string(m.app.Agent.Thinking())))
 	}
@@ -2784,6 +3300,8 @@ func (m *Model) startModelPick() (tea.Model, tea.Cmd) {
 			m.pickModel = true
 			m.modelLoading = true
 			m.modelList = nil
+			m.modelQuery = ""
+			m.modelSearchActive = false
 			m.pickerGeneration++
 			generation := m.pickerGeneration
 			return m, func() tea.Msg {
@@ -2797,14 +3315,17 @@ func (m *Model) startModelPick() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		models = fetched
-		m.app.Models = append([]protocol.Model(nil), models...)
+		m.app.Models = uniquePickerModels(models, m.app.ProviderID)
 	}
+	models = uniquePickerModels(models, m.app.ProviderID)
 	if len(models) == 0 {
 		m.pushLine(styleError.Render("no models available"))
 		return m, nil
 	}
 	m.modelList = models
 	m.modelIndex = 0
+	m.modelQuery = ""
+	m.modelSearchActive = false
 	for i, mm := range models {
 		if mm.Provider == m.app.Model.Provider && mm.ID == m.app.Model.ID {
 			m.modelIndex = i
@@ -2816,10 +3337,53 @@ func (m *Model) startModelPick() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleModelPick navigates the /model picker.
+func uniquePickerModels(models []protocol.Model, defaultProvider string) []protocol.Model {
+	out := make([]protocol.Model, 0, len(models))
+	seen := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		if model.Provider == "" {
+			model.Provider = defaultProvider
+		}
+		if model.ID == "" {
+			continue
+		}
+		key := model.Provider + "\x00" + model.ID
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, model.Clone())
+	}
+	return out
+}
+
+func (m *Model) filteredModels() []protocol.Model {
+	terms := strings.Fields(strings.ToLower(strings.TrimSpace(m.modelQuery)))
+	if len(terms) == 0 {
+		return m.modelList
+	}
+	matches := make([]protocol.Model, 0, len(m.modelList))
+	for _, model := range m.modelList {
+		haystack := strings.ToLower(strings.Join([]string{model.Provider, model.ID, model.DisplayName, model.Description}, " "))
+		matched := true
+		for _, term := range terms {
+			if !strings.Contains(haystack, term) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			matches = append(matches, model)
+		}
+	}
+	return matches
+}
+
+// handleModelPick navigates and searches the /model picker. Slash enters search
+// mode so the usual j/k picker bindings remain available until text entry starts.
 func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	msg = normalizePickerKey(msg)
 	if m.modelLoading {
+		msg = normalizePickerKeyWithMap(msg, m.keys)
 		if msg.Type == tea.KeyEsc {
 			m.pickModel = false
 			m.modelLoading = false
@@ -2827,34 +3391,66 @@ func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if next, handled := movePicker(m.modelIndex, len(m.modelList), pickerKeyAction(msg), m.modelPickerVisibleModels()); handled {
+
+	if m.modelSearchActive {
+		switch msg.Type {
+		case tea.KeyRunes:
+			m.modelQuery += string(msg.Runes)
+			m.modelIndex = 0
+			m.layout()
+			return m, nil
+		case tea.KeyBackspace:
+			runes := []rune(m.modelQuery)
+			if len(runes) > 0 {
+				m.modelQuery = string(runes[:len(runes)-1])
+			}
+			m.modelIndex = 0
+			m.layout()
+			return m, nil
+		case tea.KeyCtrlU:
+			m.modelQuery = ""
+			m.modelIndex = 0
+			m.layout()
+			return m, nil
+		case tea.KeyEsc:
+			m.modelQuery = ""
+			m.modelIndex = 0
+			m.modelSearchActive = false
+			m.layout()
+			return m, nil
+		}
+	} else if msg.Type == tea.KeyRunes && string(msg.Runes) == "/" {
+		m.modelSearchActive = true
+		m.modelIndex = 0
+		m.layout()
+		return m, nil
+	}
+
+	msg = normalizePickerKeyWithMap(msg, m.keys)
+	models := m.filteredModels()
+	if next, handled := movePicker(m.modelIndex, len(models), pickerKeyAction(msg), m.modelPickerVisibleModels()); handled {
 		m.modelIndex = next
 		return m, nil
 	}
 	switch msg.Type {
-	case tea.KeyUp:
-		if len(m.modelList) > 0 {
-			m.modelIndex = (m.modelIndex - 1 + len(m.modelList)) % len(m.modelList)
-		}
-	case tea.KeyDown, tea.KeyTab:
-		if len(m.modelList) > 0 {
-			m.modelIndex = (m.modelIndex + 1) % len(m.modelList)
-		}
 	case tea.KeyEsc:
 		m.pickModel = false
 		m.modelList = nil
+		m.modelQuery = ""
+		m.modelSearchActive = false
 		if m.settingsReturnToPanel {
 			m.settingsReturnToPanel = false
 			m.pickSettings = true
 		}
 	case tea.KeyEnter:
-		if len(m.modelList) == 0 {
-			m.pickModel = false
+		if len(models) == 0 {
 			return m, nil
 		}
-		model := m.modelList[m.modelIndex]
+		model := models[m.modelIndex]
 		m.pickModel = false
 		m.modelList = nil
+		m.modelQuery = ""
+		m.modelSearchActive = false
 		if m.settingsReturnToPanel {
 			m.settingsReturnToPanel = false
 			m.pickSettings = true
@@ -2873,17 +3469,20 @@ func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) modelPickerVisibleModels() int {
-	// Leave room for header, separators, editor, footer, provider headings,
-	// and the scroll markers while using as much terminal height as possible.
-	visible := m.height - 10
-	if visible < 8 {
-		visible = 8
+	// Search makes a short list more useful than filling the whole transcript.
+	// Keep enough space for headings, search state, details, and controls.
+	visible := m.availableOverlayHeight() - 9
+	if visible < 4 {
+		visible = 4
+	}
+	if visible > 10 {
+		visible = 10
 	}
 	return visible
 }
 
-func (m *Model) modelWindow() (start, end int) {
-	end = len(m.modelList)
+func (m *Model) modelWindow(models []protocol.Model) (start, end int) {
+	end = len(models)
 	visible := m.modelPickerVisibleModels()
 	if end <= visible {
 		return 0, end
@@ -2898,25 +3497,7 @@ func (m *Model) modelWindow() (start, end int) {
 	return start, start + visible
 }
 
-func (m *Model) modelPickerRows() int {
-	start, end := m.modelWindow()
-	rows := 1 + end - start // cached-provider summary
-
-	if start > 0 {
-		rows++
-	}
-	if end < len(m.modelList) {
-		rows++
-	}
-	for i := start; i < end; i++ {
-		if i == start || m.modelList[i].Provider != m.modelList[i-1].Provider {
-			rows++
-		}
-	}
-	return rows
-}
-
-// renderModelPicker renders a bounded, provider-grouped /model list.
+// renderModelPicker renders a compact, searchable, provider-grouped /model list.
 func (m *Model) renderModelPicker() string {
 	if !m.pickModel {
 		return ""
@@ -2927,68 +3508,73 @@ func (m *Model) renderModelPicker() string {
 	if len(m.modelList) == 0 {
 		return ""
 	}
-	start, end := m.modelWindow()
+	models := m.filteredModels()
+	start, end := m.modelWindow(models)
 	var b strings.Builder
-	b.WriteString(styleHeaderDim.Render("  cached providers: " + m.modelProviderSummary()))
+	b.WriteString(styleHeader.Render("models"))
+	b.WriteString(styleHeaderDim.Render(fmt.Sprintf("  ·  %d available", len(m.modelList))))
 	b.WriteString("\n")
-	if start > 0 {
-		b.WriteString(styleHeaderDim.Render("  ↑ more models"))
-		b.WriteString("\n")
+	if m.modelSearchActive || m.modelQuery != "" {
+		cursor := ""
+		if m.modelSearchActive {
+			cursor = "_"
+		}
+		b.WriteString(styleHeaderDim.Render(fmt.Sprintf("  search: %s%s  ·  %d matches", m.modelQuery, cursor, len(models))))
+	} else {
+		b.WriteString(styleHeaderDim.Render("  press / to search"))
 	}
-	for i := start; i < end; i++ {
-		mm := m.modelList[i]
-		if i == start || mm.Provider != m.modelList[i-1].Provider {
-			b.WriteString(styleHeaderDim.Render("  " + mm.Provider + " models"))
+	b.WriteString("\n")
+	if len(models) == 0 {
+		b.WriteString(styleFooter.Render("  no matching models"))
+		b.WriteString("\n")
+	} else {
+		if start > 0 {
+			b.WriteString(styleHeaderDim.Render("  ↑ more"))
 			b.WriteString("\n")
 		}
-		line := mm.ID
-		if mm.Provider != "" {
-			line = mm.Provider + "/" + line
+		for i := start; i < end; i++ {
+			mm := models[i]
+			if i == start || mm.Provider != models[i-1].Provider {
+				b.WriteString(styleHeaderDim.Render("  " + mm.Provider))
+				b.WriteString("\n")
+			}
+			line := mm.ID
+			if mm.DisplayName != "" && !strings.EqualFold(mm.DisplayName, mm.ID) {
+				line += "  (" + mm.DisplayName + ")"
+			}
+			if m.app != nil && mm.Provider == m.app.Model.Provider && mm.ID == m.app.Model.ID {
+				line += "  ✓ current"
+			}
+			if i == m.modelIndex {
+				b.WriteString(styleCompletionSelected.Render("› " + line))
+			} else {
+				b.WriteString(styleCompletion.Render("  " + line))
+			}
+			b.WriteString("\n")
 		}
-		if mm.DisplayName != "" && mm.DisplayName != mm.ID {
-			line += "  (" + mm.DisplayName + ")"
+		if end < len(models) {
+			b.WriteString(styleHeaderDim.Render("  ↓ more"))
+			b.WriteString("\n")
 		}
-		if mm.ContextWindow > 0 {
-			line += "  · ctx " + formatTokenCount(mm.ContextWindow)
+		selected := models[m.modelIndex]
+		var details []string
+		if selected.ContextWindow > 0 {
+			details = append(details, "ctx "+formatTokenCount(selected.ContextWindow))
 		}
-		if levels := mm.SupportedThinkingLevels(); len(levels) > 1 {
+		if levels := selected.SupportedThinkingLevels(); len(levels) > 1 {
 			parts := make([]string, 0, len(levels)-1)
 			for _, level := range levels[1:] {
 				parts = append(parts, string(level))
 			}
-			line += "  · thinking " + strings.Join(parts, "/")
+			details = append(details, "thinking "+strings.Join(parts, "/"))
 		}
-		if mm.Provider == m.app.Model.Provider && mm.ID == m.app.Model.ID {
-			line += "  ✓ current"
+		if len(details) > 0 {
+			b.WriteString(styleHeaderDim.Render("  " + strings.Join(details, "  ·  ")))
+			b.WriteString("\n")
 		}
-		if i == m.modelIndex {
-			b.WriteString(styleCompletionSelected.Render("› " + line))
-		} else {
-			b.WriteString(styleCompletion.Render("  " + line))
-		}
-		b.WriteString("\n")
 	}
-	if end < len(m.modelList) {
-		b.WriteString(styleHeaderDim.Render("  ↓ more models"))
-		b.WriteString("\n")
-	}
+	b.WriteString(styleFooter.Render("(↑/↓ choose · / search · Enter apply · Esc cancel)"))
 	return strings.TrimSuffix(b.String(), "\n")
-}
-
-func (m *Model) modelProviderSummary() string {
-	counts := make(map[string]int)
-	var order []string
-	for _, model := range m.modelList {
-		if _, ok := counts[model.Provider]; !ok {
-			order = append(order, model.Provider)
-		}
-		counts[model.Provider]++
-	}
-	parts := make([]string, 0, len(order))
-	for _, provider := range order {
-		parts = append(parts, fmt.Sprintf("%s (%d)", provider, counts[provider]))
-	}
-	return strings.Join(parts, " · ")
 }
 
 // setModel switches the active provider/model and persists the choice so it
@@ -3035,6 +3621,7 @@ func (m *Model) applyModel(selected protocol.Model) error {
 	oldModel := m.app.Agent.Model()
 	oldAppModel := m.app.Model
 	oldCfg := m.app.Cfg
+	oldPersistedCfg := m.app.PersistedCfg
 	if selected.Provider != m.app.ProviderID {
 		if err := m.app.SetProvider(selected.Provider); err != nil {
 			return err
@@ -3046,7 +3633,7 @@ func (m *Model) applyModel(selected protocol.Model) error {
 		}
 		return err
 	}
-	candidate := oldCfg
+	candidate := oldPersistedCfg
 	candidate.DefaultProvider = selected.Provider
 	candidate.DefaultModel = selected.ID
 	if m.app.ConfigPath != "" {
@@ -3061,7 +3648,9 @@ func (m *Model) applyModel(selected protocol.Model) error {
 		}
 	}
 	m.app.Model = selected
-	m.app.Cfg = candidate
+	m.app.PersistedCfg = candidate
+	m.app.Cfg.DefaultProvider = candidate.DefaultProvider
+	m.app.Cfg.DefaultModel = candidate.DefaultModel
 	return nil
 }
 
@@ -3114,7 +3703,7 @@ func (m *Model) startSessionPick() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	msg = normalizePickerKey(msg)
+	msg = normalizePickerKeyWithMap(msg, m.keys)
 	if m.sessionLoading {
 		if msg.Type == tea.KeyEsc {
 			m.pickSession = false
@@ -3605,7 +4194,7 @@ func (m *Model) startInfoPicker(title string, items []statusInfoItem) (tea.Model
 }
 
 func (m *Model) handleInfoPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	msg = normalizePickerKey(msg)
+	msg = normalizePickerKeyWithMap(msg, m.keys)
 	if m.infoLoading {
 		if msg.Type == tea.KeyEsc {
 			m.closeInfoPicker()
@@ -3904,9 +4493,9 @@ func (m *Model) startTreePick() (tea.Model, tea.Cmd) {
 		m.pushLine(styleFooter.Render("tree: no branches"))
 		return m, nil
 	}
-	m.branches = branches
+	m.branches = orderBranches(branches)
 	m.branchIndex = 0
-	for i, branch := range branches {
+	for i, branch := range m.branches {
 		if branch.Active {
 			m.branchIndex = i
 			break
@@ -3918,7 +4507,6 @@ func (m *Model) startTreePick() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleTreePick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	msg = normalizePickerKey(msg)
 	if m.treeLoading {
 		if msg.Type == tea.KeyEsc {
 			m.pickTree = false
@@ -3932,36 +4520,52 @@ func (m *Model) handleTreePick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pickTree = false
 		return m, nil
 	}
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
-		m.branchIndex = (m.branchIndex - 1 + count) % count
-	case tea.KeyDown, tea.KeyRight, tea.KeyTab:
-		m.branchIndex = (m.branchIndex + 1) % count
-	case tea.KeyPgUp:
-		m.branchIndex -= m.treePickerVisibleItems()
-		if m.branchIndex < 0 {
-			m.branchIndex = 0
+	if m.branchAction != "" {
+		if m.branchAction == "delete" {
+			if keyMatches(msg, m.keys.Close) || (msg.Type == tea.KeyRunes && strings.EqualFold(string(msg.Runes), "n")) {
+				m.branchAction = ""
+				return m, nil
+			}
+			if keyMatches(msg, m.keys.Confirm) {
+				return m.executeTreeAction()
+			}
+			return m, nil
 		}
-	case tea.KeyPgDown:
-		m.branchIndex += m.treePickerVisibleItems()
-		if m.branchIndex >= count {
-			m.branchIndex = count - 1
+		switch {
+		case keyMatches(msg, m.keys.Close):
+			m.branchAction, m.branchInput = "", ""
+		case keyMatches(msg, m.keys.Accept):
+			return m.executeTreeAction()
+		case msg.Type == tea.KeyBackspace:
+			r := []rune(m.branchInput)
+			if len(r) > 0 {
+				m.branchInput = string(r[:len(r)-1])
+			}
+		case msg.Type == tea.KeyRunes:
+			if len([]rune(m.branchInput))+len(msg.Runes) <= 64 {
+				m.branchInput += string(msg.Runes)
+			}
 		}
-	case tea.KeyHome:
-		m.branchIndex = 0
-	case tea.KeyEnd:
-		m.branchIndex = count - 1
-	case tea.KeyEsc:
+		return m, nil
+	}
+	action := pickerKeyActionWithMap(msg, m.keys)
+	if next, handled := movePicker(m.branchIndex, count, action, m.treePickerVisibleItems()); handled && action != pickerAccept && action != pickerClose {
+		m.branchIndex = next
+		return m, nil
+	}
+	if action == pickerClose {
 		m.pickTree = false
 		m.branches = nil
-	case tea.KeyEnter:
+		return m, nil
+	}
+	if action == pickerAccept {
 		branch := m.branches[m.branchIndex]
 		if m.asyncIO {
 			m.treeLoading = true
 			m.pickerGeneration++
-			generation := m.pickerGeneration
+			gen := m.pickerGeneration
 			return m, func() tea.Msg {
-				return branchActionMsg{generation: generation, branch: branch, err: m.app.SelectBranch(branch.ID)}
+				return branchActionMsg{generation: gen, branch: branch, action: "select", err: m.app.SelectBranch(branch.ID)}
 			}
 		}
 		if err := m.app.SelectBranch(branch.ID); err != nil {
@@ -3970,42 +4574,101 @@ func (m *Model) handleTreePick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.pickTree = false
 		m.branches = nil
-		m.subagentViews = make(map[string]subagentViewState)
-		m.subagentOrder = nil
 		m.hydrateSession()
-		if err := m.app.ReadyGoal(); err != nil {
-			m.pushLine(styleError.Render("tree goal: " + err.Error()))
-			return m, nil
-		}
-		m.lastStatus = "selected branch " + branch.ID
-	case tea.KeyRunes:
-		if len(msg.Runes) == 1 && (msg.Runes[0] == 'f' || msg.Runes[0] == 'F') {
-			selected := m.branches[m.branchIndex]
-			if m.asyncIO {
-				m.treeLoading = true
-				m.pickerGeneration++
-				generation := m.pickerGeneration
-				return m, func() tea.Msg {
-					branch, err := m.app.ForkBranch(selected.TipID)
-					return branchActionMsg{generation: generation, branch: branch, fork: true, err: err}
-				}
-			}
-			branch, err := m.app.Agent.Fork(selected.TipID)
-			if err != nil {
-				m.pushLine(styleError.Render("tree: " + err.Error()))
-				return m, nil
-			}
-			m.pickTree = false
-			m.branches = nil
-			m.hydrateSession()
-			if err := m.app.ReadyGoal(); err != nil {
-				m.pushLine(styleError.Render("tree goal: " + err.Error()))
-				return m, nil
-			}
-			m.lastStatus = "forked branch " + branch.ID
-		}
+		m.lastStatus = "selected branch " + branch.Name
+		return m, nil
+	}
+	switch {
+	case keyMatches(msg, m.keys.BranchFork):
+		m.branchAction = "fork"
+		m.branchInput = ""
+	case keyMatches(msg, m.keys.BranchRename):
+		m.branchAction = "rename"
+		m.branchInput = m.branches[m.branchIndex].Name
+	case keyMatches(msg, m.keys.BranchDelete):
+		m.branchAction = "delete"
 	}
 	return m, nil
+}
+
+func (m *Model) executeTreeAction() (tea.Model, tea.Cmd) {
+	selected := m.branches[m.branchIndex]
+	action, input := m.branchAction, strings.TrimSpace(m.branchInput)
+	m.branchAction, m.branchInput = "", ""
+	m.treeLoading = m.asyncIO
+	m.pickerGeneration++
+	gen := m.pickerGeneration
+	run := func() branchActionMsg {
+		switch action {
+		case "fork":
+			branch, err := m.app.ForkBranchWithOptions(protocol.BranchForkOptions{SourceBranchID: selected.ID, FromEntryID: selected.TipID, Name: input})
+			return branchActionMsg{generation: gen, branch: branch, action: action, err: err}
+		case "rename":
+			branch, err := m.app.RenameBranch(selected.ID, input)
+			return branchActionMsg{generation: gen, branch: branch, action: action, err: err}
+		case "delete":
+			err := m.app.DeleteBranch(selected.ID)
+			return branchActionMsg{generation: gen, action: action, err: err}
+		default:
+			return branchActionMsg{generation: gen, err: errors.New("unknown branch action")}
+		}
+	}
+	if m.asyncIO {
+		return m, func() tea.Msg { return run() }
+	}
+	return m, func() tea.Msg { return run() }
+}
+
+func orderBranches(branches []protocol.SessionBranch) []protocol.SessionBranch {
+	byParent := map[string][]protocol.SessionBranch{}
+	for _, branch := range branches {
+		byParent[branch.ParentID] = append(byParent[branch.ParentID], branch)
+	}
+	for parent := range byParent {
+		sort.SliceStable(byParent[parent], func(i, j int) bool {
+			if byParent[parent][i].CreatedAt == byParent[parent][j].CreatedAt {
+				return byParent[parent][i].ID < byParent[parent][j].ID
+			}
+			return byParent[parent][i].CreatedAt < byParent[parent][j].CreatedAt
+		})
+	}
+	var out []protocol.SessionBranch
+	seen := map[string]bool{}
+	var visit func(string)
+	visit = func(parent string) {
+		for _, branch := range byParent[parent] {
+			if seen[branch.ID] {
+				continue
+			}
+			seen[branch.ID] = true
+			out = append(out, branch)
+			visit(branch.ID)
+		}
+	}
+	visit("")
+	for _, branch := range branches {
+		if !seen[branch.ID] {
+			out = append(out, branch)
+		}
+	}
+	return out
+}
+
+func branchDepth(branches []protocol.SessionBranch, branch protocol.SessionBranch) int {
+	parents := map[string]string{}
+	for _, b := range branches {
+		parents[b.ID] = b.ParentID
+	}
+	depth := 0
+	seen := map[string]bool{}
+	for parent := branch.ParentID; parent != "" && !seen[parent]; parent = parents[parent] {
+		seen[parent] = true
+		depth++
+		if depth > 8 {
+			break
+		}
+	}
+	return depth
 }
 
 func (m *Model) treePickerVisibleItems() int {
@@ -4077,7 +4740,16 @@ func (m *Model) renderTreePicker() string {
 		if branch.Active {
 			marker = "✓ "
 		}
-		line := fmt.Sprintf("%s%s  ·  %d messages", marker, branch.ID, branch.Messages)
+		name := branch.Name
+		if name == "" {
+			name = branch.ID
+		}
+		indent := strings.Repeat("  ", branchDepth(m.branches, branch))
+		connector := "└─ "
+		if branch.ParentID == "" {
+			connector = ""
+		}
+		line := fmt.Sprintf("%s%s%s%s  ·  %s  ·  %d messages", marker, indent, connector, name, shortSessionID(branch.ID), branch.Messages)
 		if branch.Preview != "" {
 			line += "  ·  " + branch.Preview
 		}
@@ -4092,7 +4764,17 @@ func (m *Model) renderTreePicker() string {
 	if end < len(m.branches) {
 		b.WriteString(styleHeaderDim.Render("  ↓ more branches") + "\n")
 	}
-	b.WriteString(styleFooter.Render(truncateRunes("(↑/↓ choose · Enter switch · f fork · Esc cancel)", width)))
+	hint := fmt.Sprintf("(%s choose · %s switch · %s fork · %s rename · %s delete · %s cancel)", m.keys.PickerDown.Help().Key, m.keys.Accept.Help().Key, m.keys.BranchFork.Help().Key, m.keys.BranchRename.Help().Key, m.keys.BranchDelete.Help().Key, m.keys.Close.Help().Key)
+	if m.branchAction == "fork" {
+		hint = "Fork name (blank = automatic): " + m.branchInput + "_"
+	}
+	if m.branchAction == "rename" {
+		hint = "Rename: " + m.branchInput + "_"
+	}
+	if m.branchAction == "delete" {
+		hint = "Delete selected leaf branch? " + m.keys.Confirm.Help().Key + "/" + m.keys.Close.Help().Key
+	}
+	b.WriteString(styleFooter.Render(truncateRunes(hint, width)))
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
@@ -4111,7 +4793,7 @@ const (
 // handlePermissionPick resolves an interactive permission request with
 // arrows + Enter. Esc denies (safe default).
 func (m *Model) handlePermissionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	msg = normalizePickerKey(msg)
+	msg = normalizePickerKeyWithMap(msg, m.keys)
 	switch msg.Type {
 	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
 		m.permChoice = (m.permChoice - 1 + permChoices) % permChoices
@@ -4204,7 +4886,7 @@ func (m *Model) startPermissionModePick() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handlePermissionModePick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	msg = normalizePickerKey(msg)
+	msg = normalizePickerKeyWithMap(msg, m.keys)
 	const count = 3
 	switch msg.Type {
 	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
@@ -4236,7 +4918,7 @@ func (m *Model) setPermissionMode(mode permission.Mode, announce bool) error {
 	if mode != permission.ModeAsk && mode != permission.ModeAllow && mode != permission.ModeDeny {
 		return fmt.Errorf("invalid permission mode %q", mode)
 	}
-	candidate := m.app.Cfg
+	candidate := m.app.PersistedCfg
 	candidate.PermissionMode = string(mode)
 	if m.app.ConfigPath != "" {
 		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
@@ -4246,7 +4928,8 @@ func (m *Model) setPermissionMode(mode permission.Mode, announce bool) error {
 	if err := m.app.SetPermissionDefault(mode); err != nil {
 		return err
 	}
-	m.app.Cfg = candidate
+	m.app.PersistedCfg = candidate
+	m.app.Cfg.PermissionMode = candidate.PermissionMode
 	if announce {
 		m.pushLine(styleFooter.Render("permission mode: " + string(mode)))
 	}
@@ -4307,7 +4990,7 @@ func (m *Model) startSettings() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	msg = normalizePickerKey(msg)
+	msg = normalizePickerKeyWithMap(msg, m.keys)
 	switch msg.Type {
 	case tea.KeyUp, tea.KeyShiftTab:
 		m.settingsIndex = (m.settingsIndex - 1 + settingsCount) % settingsCount
@@ -4342,7 +5025,7 @@ func (m *Model) cycleSetting(direction int) {
 	var err error
 	switch m.settingsIndex {
 	case settingsTheme:
-		values := themeChoices()
+		values := m.themeChoices()
 		next := cycleValue(values, m.themeName, direction)
 		err = m.setTheme(next, false)
 		if err == nil {
@@ -4443,29 +5126,77 @@ func (m *Model) chatGPTSettingsEnabled() bool {
 	return m.app != nil && m.app.ProviderID == "chatgpt"
 }
 
+func (m *Model) loadAuxiliaryTUIConfig() {
+	if m.app == nil {
+		return
+	}
+	themes, themeDiagnostics := config.LoadThemes(config.GlobalDir(), m.app.ProjectInputRoot, m.app.ProjectAllowed)
+	scopes, keyDiagnostics := config.LoadKeybindingScopes(config.GlobalDir(), m.app.ProjectInputRoot, m.app.ProjectAllowed)
+	m.customThemes = themes
+	m.auxDiagnostics = append(themeDiagnostics, keyDiagnostics...)
+	m.keys = tuiKeys
+	for _, scope := range scopes {
+		keys, err := applyKeybindingOverrides(m.keys, scope.File.Bindings)
+		if err != nil {
+			m.auxDiagnostics = append(m.auxDiagnostics, config.Diagnostic{Path: scope.Path, Message: err.Error()})
+			continue
+		}
+		m.keys = keys
+	}
+	m.editor.KeyMap.InsertNewline = m.keys.Newline
+	m.userInputEditor.KeyMap.InsertNewline = m.keys.Newline
+}
+
+func (m *Model) themeChoices() []string {
+	values := themeChoices()
+	var custom []string
+	for name := range m.customThemes {
+		custom = append(custom, name)
+	}
+	sort.Strings(custom)
+	return append(values, custom...)
+}
+
 func (m *Model) setTheme(name string, announce bool) error {
-	if err := config.ValidateTUITheme(name); err != nil {
-		return err
+	return m.applyThemeSelection(name, announce, true)
+}
+
+func (m *Model) applyThemeSelection(name string, announce, persist bool) error {
+	if _, custom := m.customThemes[name]; !custom {
+		if err := config.ValidateTUITheme(name); err != nil {
+			return err
+		}
 	}
 	if name == "" {
 		name = "default"
 	}
 	old := m.themeName
-	if err := applyTUITheme(name); err != nil {
-		return err
+	var applyErr error
+	if custom, ok := m.customThemes[name]; ok {
+		applyErr = applyCustomTUITheme(custom)
+	} else {
+		applyErr = applyTUITheme(name)
+	}
+	if applyErr != nil {
+		return applyErr
 	}
 	normalizeTextareaStyles(&m.editor)
 	normalizeTextareaStyles(&m.userInputEditor)
-	if m.app != nil {
-		candidate := m.app.Cfg
+	if m.app != nil && persist {
+		candidate := m.app.PersistedCfg
 		candidate.TUI.Theme = name
 		if m.app.ConfigPath != "" {
 			if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-				_ = applyTUITheme(old)
+				if custom, ok := m.customThemes[old]; ok {
+					_ = applyCustomTUITheme(custom)
+				} else {
+					_ = applyTUITheme(old)
+				}
 				return fmt.Errorf("persist theme: %w", err)
 			}
 		}
-		m.app.Cfg = candidate
+		m.app.PersistedCfg = candidate
+		m.app.Cfg.TUI.Theme = name
 	}
 	m.themeName = name
 	if announce {
@@ -4479,7 +5210,7 @@ func (m *Model) setReasoningSummary(summary protocol.ReasoningSummary) error {
 	if err := m.app.Agent.SetReasoningSummary(summary); err != nil {
 		return err
 	}
-	candidate := m.app.Cfg
+	candidate := m.app.PersistedCfg
 	candidate.ReasoningSummary = string(m.app.Agent.ReasoningSummary())
 	if m.app.ConfigPath != "" {
 		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
@@ -4487,7 +5218,8 @@ func (m *Model) setReasoningSummary(summary protocol.ReasoningSummary) error {
 			return fmt.Errorf("persist reasoning summary: %w", err)
 		}
 	}
-	m.app.Cfg = candidate
+	m.app.PersistedCfg = candidate
+	m.app.Cfg.ReasoningSummary = candidate.ReasoningSummary
 	return nil
 }
 
@@ -4496,7 +5228,7 @@ func (m *Model) setTextVerbosity(verbosity protocol.TextVerbosity) error {
 	if err := m.app.Agent.SetTextVerbosity(verbosity); err != nil {
 		return err
 	}
-	candidate := m.app.Cfg
+	candidate := m.app.PersistedCfg
 	candidate.TextVerbosity = string(m.app.Agent.TextVerbosity())
 	if m.app.ConfigPath != "" {
 		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
@@ -4504,12 +5236,13 @@ func (m *Model) setTextVerbosity(verbosity protocol.TextVerbosity) error {
 			return fmt.Errorf("persist text verbosity: %w", err)
 		}
 	}
-	m.app.Cfg = candidate
+	m.app.PersistedCfg = candidate
+	m.app.Cfg.TextVerbosity = candidate.TextVerbosity
 	return nil
 }
 
 func (m *Model) setSubagentsEnabled(enabled bool) error {
-	candidate := m.app.Cfg
+	candidate := m.app.PersistedCfg
 	candidate.Subagents.Enabled = enabled
 	if err := candidate.Subagents.ValidateSubagents(); err != nil {
 		return err
@@ -4519,7 +5252,8 @@ func (m *Model) setSubagentsEnabled(enabled bool) error {
 			return fmt.Errorf("persist subagent setting: %w", err)
 		}
 	}
-	m.app.Cfg = candidate
+	m.app.PersistedCfg = candidate
+	m.app.Cfg.Subagents = candidate.Subagents
 	return nil
 }
 
@@ -4527,7 +5261,7 @@ func (m *Model) setSubagentConcurrency(limit int) error {
 	if limit < 1 {
 		return errors.New("subagent concurrency must be positive")
 	}
-	candidate := m.app.Cfg
+	candidate := m.app.PersistedCfg
 	candidate.Subagents.MaxConcurrentThreads = limit
 	if candidate.Subagents.MaxAgentsPerSession < limit {
 		candidate.Subagents.MaxAgentsPerSession = limit
@@ -4540,19 +5274,21 @@ func (m *Model) setSubagentConcurrency(limit int) error {
 			return fmt.Errorf("persist subagent concurrency: %w", err)
 		}
 	}
-	m.app.Cfg = candidate
+	m.app.PersistedCfg = candidate
+	m.app.Cfg.Subagents = candidate.Subagents
 	return nil
 }
 
 func (m *Model) setSkillsEnabled(enabled bool) error {
-	candidate := m.app.Cfg
+	candidate := m.app.PersistedCfg
 	candidate.Skills.Disabled = !enabled
 	if m.app.ConfigPath != "" {
 		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
 			return fmt.Errorf("persist skills setting: %w", err)
 		}
 	}
-	m.app.Cfg = candidate
+	m.app.PersistedCfg = candidate
+	m.app.Cfg.Skills.Disabled = candidate.Skills.Disabled
 	return nil
 }
 
@@ -4798,6 +5534,9 @@ func (m *Model) View() string {
 	if m.height < minFullFrameHeight+m.runStatusHeight() || m.width < 4 {
 		return fitFrame(styleBrand.Render(" snow ")+styleHeaderDim.Render("terminal too small"), m.width, m.height)
 	}
+	if m.trustPending {
+		return m.renderTrustPrompt()
+	}
 
 	status := "starting…"
 	if m.lastErr != nil {
@@ -4862,6 +5601,43 @@ func (m *Model) View() string {
 	}
 	parts = append(parts, sep, editorView, footer)
 	return fitFrame(lipgloss.JoinVertical(lipgloss.Left, parts...), m.width, m.height)
+}
+
+func (m *Model) renderTrustPrompt() string {
+	width := max(20, m.width-8)
+	choice := func(index int, label string) string {
+		prefix := "  "
+		style := styleHeaderDim
+		if m.trustChoice == index {
+			prefix = "› "
+			style = styleHeader
+		}
+		return prefix + style.Render(label)
+	}
+	status := "Choose with arrows/Tab · Enter confirms · Esc continues untrusted"
+	if m.trustSaving {
+		status = m.spinner.View() + " saving trust decision…"
+	}
+	body := []string{
+		styleBrand.Render(" snow ") + styleHeader.Render("Project trust"),
+		"",
+		styleHeaderDim.Render("Project:"),
+		lipgloss.NewStyle().Width(width).Render(m.trustPath),
+		"",
+		"Snow always reads AGENTS.md as project context. Trust additionally permits",
+		"project config, plugins, MCP declarations, and project skills to load.",
+		styleError.Render("Trust is not a sandbox; loaded code runs with your OS privileges."),
+		"",
+		choice(0, "Continue untrusted"),
+		choice(1, "Trust project"),
+		"",
+		styleFooter.Render(status),
+		styleFooter.Render("Ctrl+C/Ctrl+D exits without recording a decision."),
+	}
+	if m.trustError != "" {
+		body = append(body, styleError.Render("trust: "+m.trustError))
+	}
+	return fitFrame(lipgloss.NewStyle().Padding(1, 3).Render(strings.Join(body, "\n")), m.width, m.height)
 }
 
 func fitFrame(frame string, width, height int) string {
@@ -4986,7 +5762,7 @@ func (m *Model) renderFooter() string {
 	// indicator. Narrow terminals keep the footer quiet and leave shortcuts in
 	// /help rather than forcing the usage counter off-screen.
 	m.help.Width = available
-	helpText := m.help.ShortHelpView(tuiKeys.ShortHelp())
+	helpText := m.help.ShortHelpView(m.keys.ShortHelp())
 	maxRight := available - lipgloss.Width(" "+permissionField)
 	if lipgloss.Width(helpText)+lipgloss.Width(" · ")+lipgloss.Width(right) <= maxRight {
 		right = helpText + " · " + right

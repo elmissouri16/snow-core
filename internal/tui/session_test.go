@@ -159,6 +159,67 @@ func TestTreePickerSelectsAndForksBranches(t *testing.T) {
 	}
 }
 
+func TestTreeAsyncNamedForkAndRenameActions(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.asyncIO = true
+	if err := m.app.Agent.Prompt(context.Background(), "base"); err != nil {
+		t.Fatal(err)
+	}
+	_, cmd := m.startTreePick()
+	if cmd == nil {
+		t.Fatal("missing async list")
+	}
+	m.Update(cmd())
+	_, _ = m.handleTreePick(teaKeyRunes('f'))
+	for _, r := range "named" {
+		_, _ = m.handleTreePick(teaKeyRunes(r))
+	}
+	_, cmd = m.handleTreePick(teaKeyEnter())
+	if cmd == nil {
+		t.Fatal("missing fork action")
+	}
+	m.Update(cmd())
+	branches, err := m.app.Agent.Branches()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, branch := range branches {
+		if branch.Name == "named" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("branches=%+v", branches)
+	}
+	_, cmd = m.startTreePick()
+	m.Update(cmd())
+	for i, branch := range m.branches {
+		if branch.Active {
+			m.branchIndex = i
+		}
+	}
+	_, _ = m.handleTreePick(teaKeyRunes('r'))
+	_, _ = m.handleTreePick(teaKeyRunes('-'))
+	_, _ = m.handleTreePick(teaKeyRunes('x'))
+	_, cmd = m.handleTreePick(teaKeyEnter())
+	if cmd == nil {
+		t.Fatal("missing rename action")
+	}
+	m.Update(cmd())
+	branches, _ = m.app.Agent.Branches()
+	found = false
+	for _, branch := range branches {
+		if branch.Name == "named-x" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("renamed branches=%+v", branches)
+	}
+}
+
 func TestSessionsPickerListsCurrentDirectoryAndNavigates(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	m.width = 100

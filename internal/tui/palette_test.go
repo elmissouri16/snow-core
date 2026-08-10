@@ -11,6 +11,7 @@ import (
 
 	"github.com/snow-core/snow/internal/app"
 	"github.com/snow-core/snow/internal/auth"
+	"github.com/snow-core/snow/internal/provider/chatgpt"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -145,20 +146,27 @@ func TestModelPaletteNavigation(t *testing.T) {
 	}
 }
 
-// TestModelPaletteLoginRunsNotInserts verifies that picking /login from the
-// palette RUNS it (opening the provider picker) instead of inserting "/login "
-// into the editor for argument completion.
-func TestModelPaletteTabAddsArgumentSpace(t *testing.T) {
+func TestModelPaletteLogoutRunsPickerWithoutArgument(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
+	if err := m.app.Auth.Put("opencode-go", auth.Credential{Type: auth.CredentialAPIKey, Key: "sk-x"}); err != nil {
+		t.Fatal(err)
+	}
 	m.editor.SetValue("/logout")
 	m.refreshPalette()
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
-	if m.editor.Value() != "/logout " {
-		t.Fatalf("Tab value = %q, want trailing argument space", m.editor.Value())
+	if m.editor.Value() != "/logout" {
+		t.Fatalf("Tab value = %q, want argument-free command", m.editor.Value())
+	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.pickProvider || !m.providerLogout {
+		t.Fatalf("logout picker open=%v purpose=%v", m.pickProvider, m.providerLogout)
 	}
 }
 
+// TestModelPaletteLoginRunsNotInserts verifies that picking /login from the
+// palette RUNS it (opening the provider picker) instead of inserting "/login "
+// into the editor for argument completion.
 func TestModelPaletteLoginRunsNotInserts(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
@@ -323,7 +331,7 @@ func TestModelLoginPickerDirectArg(t *testing.T) {
 	}
 }
 
-func TestModelChatGPTImportPicker(t *testing.T) {
+func TestModelChatGPTAccountAuthorizationPicker(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	path := filepath.Join(home, ".pi", "agent", "auth.json")
@@ -341,23 +349,29 @@ func TestModelChatGPTImportPicker(t *testing.T) {
 	m.layout()
 	m.editor.SetValue("/login chatgpt")
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if !m.pickChatGPTAuth || len(m.authSources) != 1 || m.authSources[0].Name != "Pi" {
-		t.Fatalf("unexpected auth picker: pick=%v sources=%+v", m.pickChatGPTAuth, m.authSources)
+	if !m.pickChatGPTAuth || len(m.authAccounts) != 1 || m.authAccounts[0].AccountID != "source-account" {
+		t.Fatalf("unexpected auth picker: pick=%v accounts=%+v", m.pickChatGPTAuth, m.authAccounts)
 	}
 	view := m.View()
-	if strings.Contains(view, "source-access") || !strings.Contains(view, "Pi") || !strings.Contains(view, "source-account") {
-		t.Fatalf("picker leaked token or missed source: %q", view)
+	if strings.Contains(view, "source-access") || !strings.Contains(view, "Pi") || !strings.Contains(view, "source-account") || !strings.Contains(view, "own OAuth token") {
+		t.Fatalf("picker leaked token or missed account authorization: %q", view)
 	}
-	m.authIndex = 2 // browser, device, then the discovered Pi import
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if !m.oauthLoading || cmd == nil {
-		t.Fatal("import should refresh the catalog asynchronously")
+	if m.authIndex != 0 {
+		t.Fatalf("known Pi account should be selected by default, index=%d", m.authIndex)
 	}
-	m.oauthCancel()
-	m.Update(cmd())
-	cred, ok := m.app.Auth.Get("chatgpt")
-	if !ok || cred.Access != "source-access" || cred.AccountID != "source-account" {
-		t.Fatalf("imported credential = %+v, ok=%v", cred, ok)
+	if _, ok := m.app.Auth.Get("chatgpt"); ok {
+		t.Fatal("opening the account picker must not import another client's token")
+	}
+}
+
+func TestChatGPTAccountChoicesDeduplicateWorkspace(t *testing.T) {
+	choices := chatGPTAccountChoices([]chatgpt.AuthSource{
+		{Name: "OpenCode", Status: chatgpt.AuthStatus{AccountID: "workspace"}},
+		{Name: "Pi", Status: chatgpt.AuthStatus{AccountID: "workspace"}},
+		{Name: "Codex", Status: chatgpt.AuthStatus{AccountID: "other"}},
+	})
+	if len(choices) != 2 || choices[0].AccountID != "workspace" || strings.Join(choices[0].Sources, ",") != "OpenCode,Pi" || choices[1].AccountID != "other" {
+		t.Fatalf("account choices=%+v", choices)
 	}
 }
 
@@ -445,19 +459,58 @@ func TestModelLogoutFlow(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 
-	// Seed a credential.
+	// Seed two credentials so picker selection proves it removes only the
+	// selected provider.
 	if err := m.app.Auth.Put("opencode-go", auth.Credential{Type: auth.CredentialAPIKey, Key: "sk-x"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := m.app.Auth.Put("chatgpt", auth.Credential{Type: auth.CredentialOAuth, Access: "access"}); err != nil {
+		t.Fatal(err)
+	}
 
-	m.editor.SetValue("/logout opencode-go")
+	m.editor.SetValue("/logout")
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.pickProvider || !m.providerLogout || len(m.providers) != 2 {
+		t.Fatalf("logout picker open=%v purpose=%v providers=%v", m.pickProvider, m.providerLogout, m.providers)
+	}
+	if got := stripANSI(m.renderProviderPicker()); !strings.Contains(got, "logout provider") || !strings.Contains(got, "opencode-go") || !strings.Contains(got, "chatgpt") {
+		t.Fatalf("logout picker = %q", got)
+	}
+	m.provIndex = 0
 	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("logout should run as an async command")
+	if cmd == nil || m.pickProvider || m.providerLogout {
+		t.Fatalf("picker selection cmd=%v open=%v purpose=%v", cmd != nil, m.pickProvider, m.providerLogout)
 	}
 	m.Update(cmd())
 	if _, ok := m.app.Auth.Get("opencode-go"); ok {
-		t.Fatal("credential should be removed after logout")
+		t.Fatal("selected credential should be removed after logout")
+	}
+	if _, ok := m.app.Auth.Get("chatgpt"); !ok {
+		t.Fatal("unselected credential should remain stored")
+	}
+
+	// The explicit form remains available for scripts and experienced users.
+	m.editor.SetValue("/logout chatgpt")
+	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("direct logout should run as an async command")
+	}
+	m.Update(cmd())
+	if _, ok := m.app.Auth.Get("chatgpt"); ok {
+		t.Fatal("direct logout should remove the credential")
+	}
+}
+
+func TestModelLogoutPickerHandlesNoStoredCredentials(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.editor.SetValue("/logout")
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || m.pickProvider {
+		t.Fatalf("empty logout cmd=%v picker=%v", cmd != nil, m.pickProvider)
+	}
+	if got := stripANSI(strings.Join(m.lines, "\n")); !strings.Contains(got, "no stored credentials") {
+		t.Fatalf("logout status = %q", got)
 	}
 }
 
@@ -475,33 +528,9 @@ func TestHelpUsesRegistry(t *testing.T) {
 	}
 }
 
-// TestModelArgCommandInsertsNotRuns verifies only commands whose no-arg form
-// is meaningless are inserted into the editor for argument completion.
-func TestModelArgCommandInsertsNotRuns(t *testing.T) {
+func TestModelNoArgCommandsOpenPickers(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
-
-	for _, command := range []string{"/logout"} {
-		m.editor.SetValue(command)
-		m.refreshPalette()
-		idx := -1
-		for i, c := range m.compMatches {
-			if c == command {
-				idx = i
-			}
-		}
-		if idx < 0 {
-			t.Fatalf("%s not in matches: %v", command, m.compMatches)
-		}
-		m.compIndex = idx
-		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-		if got := m.editor.Value(); !strings.HasPrefix(got, command+" ") {
-			t.Fatalf("editor = %q, want it to contain %q for args", got, command+" ")
-		}
-		if m.compVisible {
-			t.Fatal("palette should close after picking", command)
-		}
-	}
 
 	// /model has a cached catalog and opens the picker with no argument.
 	m.modelList = []protocol.Model{{Provider: "fake", ID: "fake-1"}}

@@ -113,9 +113,16 @@ func (m *Model) beginUserInputEditing(value string) {
 }
 
 func (m *Model) handleUserInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if keyMatches(msg, m.keys.Close) {
+		msg = tea.KeyMsg{Type: tea.KeyEsc}
+	} else if keyMatches(msg, m.keys.Accept) {
+		msg = tea.KeyMsg{Type: tea.KeyEnter}
+	} else if keyMatches(msg, m.keys.Paste) {
+		msg = tea.KeyMsg{Type: tea.KeyCtrlV}
+	}
 	question := m.currentUserInputQuestion()
 	if !m.userInputEditing {
-		msg = normalizePickerKey(msg)
+		msg = normalizePickerKeyWithMap(msg, m.keys)
 	}
 	if question == nil {
 		m.clearUserInput()
