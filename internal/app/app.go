@@ -41,9 +41,13 @@ import (
 
 // App is the assembled runtime.
 type App struct {
-	Cfg        config.Config
-	ConfigPath string
-	AuthPath   string
+	// Cfg is the effective runtime configuration after trusted project overlays.
+	// PersistedCfg is the global/operator configuration and must be the base for
+	// every write to ConfigPath so project-only values never leak globally.
+	Cfg          config.Config
+	PersistedCfg config.Config
+	ConfigPath   string
+	AuthPath     string
 
 	Auth       auth.Store
 	Registry   *tools.SimpleRegistry
@@ -68,6 +72,10 @@ type App struct {
 	Skills            *skills.Registry
 	SkillDiagnostics  []skills.Diagnostic
 	Subagents         *subagent.Manager
+	Diagnostics       []config.Diagnostic
+	SearchPolicy      config.EffectiveSearchPolicy
+	ProjectAllowed    bool
+	ProjectInputRoot  string
 
 	stateMu            sync.Mutex
 	permissionDefault  permission.Mode
@@ -150,6 +158,45 @@ type Options struct {
 func DefaultPaths() (configPath, authPath string) {
 	c, a, _ := config.DefaultPaths()
 	return c, a
+}
+
+// ProjectTrustPreflight is the side-effect-free trust decision needed before
+// an interactive surface constructs the runtime. Store persists the eventual
+// exact-project choice.
+type ProjectTrustPreflight struct {
+	Resolution trust.Resolution
+	Store      *trust.Store
+}
+
+// InspectProjectTrust loads only global policy and the user trust store. It
+// never reads project-local configuration or resources.
+func InspectProjectTrust(opts Options) (ProjectTrustPreflight, error) {
+	cwd := opts.CWD
+	if cwd == "" {
+		var err error
+		cwd, err = getwd()
+		if err != nil {
+			return ProjectTrustPreflight{}, fmt.Errorf("app: cwd: %w", err)
+		}
+	}
+	configPath := opts.ConfigPath
+	if configPath == "" {
+		configPath, _, _ = config.DefaultPaths()
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return ProjectTrustPreflight{}, err
+	}
+	_, _, trustPath := config.DefaultPaths()
+	store, err := trust.New(trustPath)
+	if err != nil {
+		return ProjectTrustPreflight{}, fmt.Errorf("app: trust store: %w", err)
+	}
+	resolution, err := trust.Resolve(cwd, cfg.DefaultProjectTrust, store)
+	if err != nil {
+		return ProjectTrustPreflight{}, err
+	}
+	return ProjectTrustPreflight{Resolution: resolution, Store: store}, nil
 }
 
 // New assembles the app.
@@ -278,6 +325,11 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	}
 	var authStore auth.Store = fs
 
+	// Preserve the operator/global layer before applying any trust-gated project
+	// preferences. CLI/SDK overrides retain their historical persistence behavior
+	// when the interactive settings panel later saves a value.
+	persistedCfg := cfg
+
 	// Project trust store. Decisions persist to ~/.snow/trust.json.
 	// NOTE: DefaultPaths returns (configPath, authPath, trustPath); the trust
 	// store must get the THIRD value — wiring it to authPath corrupted
@@ -293,11 +345,18 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	projectMCPServers := map[string]publicmcp.ServerSpec{}
 	projectSkills := config.ProjectSkillsConfig{Overrides: map[string]bool{}}
 	var pluginDiagnostics []internalplugin.Diagnostic
-	projectConfigPath := filepath.Join(absCWD, ".snow", "config.json")
-	projectAllowed := cfg.DefaultProjectTrust == string(trust.LevelAllow)
-	if lvl, ok := tr.Get(absCWD); ok {
-		projectAllowed = lvl == trust.LevelAllow
+	trustResolution, err := trust.Resolve(absCWD, cfg.DefaultProjectTrust, tr)
+	if err != nil {
+		return nil, err
 	}
+	// Non-interactive ask is deliberately fail-closed. Only an effective allow
+	// reads project-local configuration and resources.
+	projectAllowed := !trustResolution.Prompt && trustResolution.Level == trust.LevelAllow
+	// Keep every trust-gated read pinned to the canonical path that was
+	// authorized. A launch path may be a symlink and must not be able to retarget
+	// the decision between resolution and resource loading.
+	projectInputRoot := trustResolution.Path
+	projectConfigPath := filepath.Join(projectInputRoot, ".snow", "config.json")
 	if projectAllowed {
 		var extensions config.ProjectExtensions
 		extensions, err = config.LoadProjectExtensions(projectConfigPath)
@@ -308,9 +367,14 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		projectMCPServers = extensions.MCPServers
 		projectSkills = extensions.Skills
 		cfg.Plugins = append(cfg.Plugins, projectPlugins...)
+		if err := config.ApplyProjectPreferences(&cfg, extensions); err != nil {
+			return nil, err
+		}
 	} else if _, statErr := os.Stat(projectConfigPath); statErr == nil {
 		pluginDiagnostics = append(pluginDiagnostics, internalplugin.Diagnostic{PluginID: ".snow/config.json", Status: "trust-blocked", Message: "project plugin configuration requires an explicit trust allow"})
 	}
+
+	searchPolicy, configDiagnostics := config.LoadSearchPolicy(config.GlobalDir(), projectInputRoot, projectAllowed)
 
 	// Tools.
 	reg := tools.NewRegistry()
@@ -318,6 +382,8 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		MaxOutputBytes: cfg.ToolOutputLimit(),
 		BashTimeout:    cfg.BashTimeout(),
 		Roots:          []string{absCWD},
+		SearchPolicy:   searchPolicy,
+		WindowsShell:   builtin.WindowsShellOptions{Kind: cfg.WindowsShell.Kind, Executable: cfg.WindowsShell.Executable},
 	}
 	// Register builtins, then enforce the Tools allowlist (empty = all).
 	builtin.RegisterBuiltins(reg, toolOpts)
@@ -366,7 +432,7 @@ func New(ctx context.Context, opts Options) (*App, error) {
 			skillOverrideReasons[name] = "disabled by project named skill policy"
 		}
 		skillCatalog = skills.Discover(skills.Options{
-			CWD: absCWD, SnowHome: config.GlobalDir(), ProjectTrusted: projectAllowed,
+			CWD: projectInputRoot, SnowHome: config.GlobalDir(), ProjectTrusted: projectAllowed,
 			ExtraDirs: skillDirs, IncludeClaude: cfg.Skills.IncludeClaude,
 			Disabled: skillDisabled, DisabledReason: skillDisabledReason,
 			Overrides: skillOverrides, OverrideReasons: skillOverrideReasons,
@@ -498,15 +564,15 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	modelCatalog := make(map[string][]protocol.Model, len(providers))
 	for id, p := range providers {
 		models, _ := p.ListModels(ctx)
-		for i := range models {
-			models[i].Provider = id
-		}
-		modelCatalog[id] = append([]protocol.Model(nil), models...)
+		modelCatalog[id] = normalizeProviderModels(id, models)
 	}
 	models := modelCatalog[providerID]
 	var allModels []protocol.Model
 	seenProviders := make(map[string]bool)
 	for _, id := range []string{providerID, "opencode-go", "chatgpt", "fake"} {
+		if seenProviders[id] {
+			continue
+		}
 		if catalog, ok := modelCatalog[id]; ok {
 			allModels = append(allModels, catalog...)
 			seenProviders[id] = true
@@ -521,35 +587,43 @@ func New(ctx context.Context, opts Options) (*App, error) {
 
 	// Model resolution.
 	model := protocol.Model{Provider: providerID, ID: cfg.DefaultModel, SupportsTools: true}
-	// Prefer the provider's documented default when it exists in the catalog;
-	// otherwise fall back to the first catalog entry. Without this, the default
-	// silently became whatever the live catalog listed first.
-	if dm, ok := prov.(interface{ DefaultModel() protocol.Model }); ok {
-		dflt := dm.DefaultModel()
-		if dflt.ID != "" {
-			for _, mm := range models {
-				if mm.ID == dflt.ID {
-					if model.ID == "" {
-						model = mm
-					}
-					break
-				}
+	configuredFound := false
+	if model.ID != "" {
+		for _, candidate := range models {
+			if candidate.ID == model.ID {
+				model = candidate
+				configuredFound = true
+				break
 			}
 		}
 	}
-	if model.ID == "" {
-		if len(models) > 0 {
-			model = models[0]
-		} else {
-			model.ID = "default"
-		}
+	// Account-scoped providers must not retain a configured model omitted by
+	// the selected account catalog. Other providers preserve explicit unknown
+	// model IDs for compatible custom gateways and CLI use.
+	if model.ID != "" && !configuredFound && modelCatalogAuthoritative(prov) {
+		model.ID = ""
 	}
-	// Preserve configured model selection while enriching it with catalog
-	// metadata when the startup snapshot contains that model.
-	for _, mm := range models {
-		if mm.ID == model.ID {
-			model = mm
-			break
+	// Prefer the provider's documented default when it exists in the catalog;
+	// otherwise fall back to the first catalog entry. Without this, the default
+	// silently became whatever the live catalog listed first.
+	if model.ID == "" {
+		if dm, ok := prov.(interface{ DefaultModel() protocol.Model }); ok {
+			dflt := dm.DefaultModel()
+			if dflt.ID != "" {
+				for _, candidate := range models {
+					if candidate.ID == dflt.ID {
+						model = candidate
+						break
+					}
+				}
+			}
+		}
+		if model.ID == "" {
+			if len(models) > 0 {
+				model = models[0]
+			} else {
+				model.ID = "default"
+			}
 		}
 	}
 
@@ -561,9 +635,15 @@ func New(ctx context.Context, opts Options) (*App, error) {
 
 	// Extensions are initialized after builtins and the session exist, but
 	// before the agent is constructed. This makes registration deterministic
-	// and lets every plugin receive the same session/cwd capabilities.
+	// and lets every plugin receive the same session/cwd capabilities. When
+	// project input was authorized, pin relative extension execution to the same
+	// canonical root rather than the possibly retargetable launch alias.
+	extensionCWD := absCWD
+	if projectAllowed {
+		extensionCWD = projectInputRoot
+	}
 	manager := internalplugin.NewManager(reg, internalplugin.ManagerOptions{
-		CWD: absCWD, SessionID: st.ID(), HostVersion: "snow-core", HostCapabilities: []string{"tools", "events"},
+		CWD: extensionCWD, SessionID: st.ID(), HostVersion: "snow-core", HostCapabilities: []string{"tools", "events"},
 		MaxProgressBytes: cfg.ToolOutputLimit(), MaxOutputBytes: cfg.ToolOutputLimit(),
 	})
 	if !opts.NoPlugins {
@@ -599,7 +679,7 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	var mcpStatuses []publicmcp.Status
 	if !opts.NoMCP {
 		mcpManager = internalmcp.NewManager(reg, internalmcp.Options{
-			CWD: absCWD, Roots: []string{absCWD}, HostName: "snow", HostVersion: "0.1.0-dev", MaxOutputBytes: cfg.ToolOutputLimit(),
+			CWD: extensionCWD, Roots: []string{absCWD}, HostName: "snow", HostVersion: "0.1.0-dev", MaxOutputBytes: cfg.ToolOutputLimit(),
 		})
 		mcpManager.ConnectAll(ctx, mcpSpecs)
 		mcpStatuses = mcpManager.Statuses()
@@ -727,6 +807,8 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		Goal:              goalController,
 		Auth:              authStore,
 		APIKey:            opts.APIKey,
+		Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
+			SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance},
 	})
 	if err != nil {
 		inputBroker.Close()
@@ -831,7 +913,9 @@ func New(ctx context.Context, opts Options) (*App, error) {
 			childSystem += "</subagent>"
 			child, err := agent.New(agent.Options{Provider: childProvider, Registry: childReg, Session: childStore, Permission: childPerm, ToolHost: childHost,
 				SystemPrompt: childSystem, Model: childModel, Thinking: spec.State.Thinking, ReasoningSummary: reasoningSummary,
-				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Auth: authStore, APIKey: opts.APIKey, Identity: spec.State.Agent.Clone()})
+				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Auth: authStore, APIKey: opts.APIKey, Identity: spec.State.Agent.Clone(),
+				Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
+					SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance}})
 			if err != nil {
 				_ = childStore.Close()
 				return nil, err
@@ -855,6 +939,7 @@ func New(ctx context.Context, opts Options) (*App, error) {
 
 	a := &App{
 		Cfg:                cfg,
+		PersistedCfg:       persistedCfg,
 		ConfigPath:         configPath,
 		AuthPath:           authPath,
 		Auth:               authStore,
@@ -879,6 +964,10 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		MCPStatuses:        append([]publicmcp.Status(nil), mcpStatuses...),
 		Skills:             skillCatalog,
 		Subagents:          subManager,
+		Diagnostics:        append([]config.Diagnostic(nil), configDiagnostics...),
+		SearchPolicy:       searchPolicy,
+		ProjectAllowed:     projectAllowed,
+		ProjectInputRoot:   projectInputRoot,
 		permissionDefault:  permMode,
 		permissionOverride: opts.Permission != "",
 		cwd:                absCWD,
@@ -1008,12 +1097,34 @@ func (a *App) SelectBranch(branchID string) error {
 	return a.Agent.SelectBranchAdmitted(branchID)
 }
 func (a *App) ForkBranch(fromEntryID string) (protocol.SessionBranch, error) {
+	return a.ForkBranchWithOptions(protocol.BranchForkOptions{FromEntryID: fromEntryID})
+}
+
+func (a *App) ForkBranchWithOptions(opts protocol.BranchForkOptions) (protocol.SessionBranch, error) {
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return protocol.SessionBranch{}, errors.New("app: cannot fork branch while subagents are active")
 	}
-	return a.Agent.ForkAdmitted(fromEntryID)
+	return a.Agent.ForkWithOptionsAdmitted(opts)
+}
+
+func (a *App) RenameBranch(branchID, name string) (protocol.SessionBranch, error) {
+	unlock := a.Agent.LockAdmission()
+	defer unlock()
+	if a.Subagents != nil && a.Subagents.HasActive() {
+		return protocol.SessionBranch{}, errors.New("app: cannot rename branch while subagents are active")
+	}
+	return a.Agent.RenameBranchAdmitted(branchID, name)
+}
+
+func (a *App) DeleteBranch(branchID string) error {
+	unlock := a.Agent.LockAdmission()
+	defer unlock()
+	if a.Subagents != nil && a.Subagents.HasActive() {
+		return errors.New("app: cannot delete branch while subagents are active")
+	}
+	return a.Agent.DeleteBranchAdmitted(branchID)
 }
 
 func (a *App) GoalState() (*protocol.ThreadGoal, error) {
@@ -1239,22 +1350,24 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 		models, err = p.ListModels(ctx)
 	}
 	if len(models) == 0 {
-		return err
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("app: provider %q returned an empty model catalog", id)
 	}
-	for i := range models {
-		models[i].Provider = id
-	}
+	models = normalizeProviderModels(id, models)
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	var refreshedActive *protocol.Model
 	if a.ProviderID == id {
 		current := a.Agent.Model()
+		level := a.Agent.Thinking()
 		for i := range models {
 			if models[i].ID != current.ID {
 				continue
 			}
 			model := models[i]
-			if level := a.Agent.Thinking(); !model.SupportsThinkingLevel(level) {
+			if !model.SupportsThinkingLevel(level) {
 				return fmt.Errorf("app: refreshed metadata for active model %q is incompatible with current settings: thinking level %q is not supported (supported: %v)", model.ID, level, model.SupportedThinkingLevels())
 			}
 			if setErr := a.Agent.SetModel(model); setErr != nil {
@@ -1262,6 +1375,22 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 			}
 			refreshedActive = &model
 			break
+		}
+		if refreshedActive == nil && modelCatalogAuthoritative(p) {
+			for i := range models {
+				if !models[i].SupportsThinkingLevel(level) {
+					continue
+				}
+				fallback := models[i]
+				if setErr := a.Agent.SetModel(fallback); setErr != nil {
+					return fmt.Errorf("app: replace unavailable active model %q with %q: %w", current.ID, fallback.ID, setErr)
+				}
+				refreshedActive = &fallback
+				break
+			}
+			if refreshedActive == nil {
+				return fmt.Errorf("app: active model %q is unavailable for this account and no catalog model supports thinking level %q", current.ID, level)
+			}
 		}
 	}
 	a.modelCatalog[id] = append([]protocol.Model(nil), models...)
@@ -1297,6 +1426,28 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 		}
 	}
 	return err
+}
+
+func modelCatalogAuthoritative(p provider.Provider) bool {
+	authority, ok := p.(interface{ ModelCatalogAuthoritative() bool })
+	return ok && authority.ModelCatalogAuthoritative()
+}
+
+func normalizeProviderModels(providerID string, models []protocol.Model) []protocol.Model {
+	out := make([]protocol.Model, 0, len(models))
+	seen := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		model.Provider = providerID
+		if model.ID == "" {
+			continue
+		}
+		if _, ok := seen[model.ID]; ok {
+			continue
+		}
+		seen[model.ID] = struct{}{}
+		out = append(out, model.Clone())
+	}
+	return out
 }
 
 // SetProvider switches the active provider and model for subsequent turns.

@@ -27,12 +27,14 @@ type appDeferredPlugin struct{}
 
 type refreshCatalogProvider struct {
 	*fake.Provider
-	models []protocol.Model
+	models        []protocol.Model
+	authoritative bool
 }
 
 func (p *refreshCatalogProvider) RefreshModels(context.Context) ([]protocol.Model, error) {
 	return append([]protocol.Model(nil), p.models...), nil
 }
+func (p *refreshCatalogProvider) ModelCatalogAuthoritative() bool { return p.authoritative }
 
 func (appDeferredPlugin) Manifest() publicplugin.Manifest {
 	return publicplugin.Manifest{ID: "catalog", Name: "Catalog", Version: "1", ProtocolVersion: publicplugin.ProtocolVersion}
@@ -159,6 +161,31 @@ func TestRefreshProviderModelsReturnsActiveThinkingConflict(t *testing.T) {
 	}
 	if len(a.Models) != 1 || !a.Models[0].SupportsThinking || len(a.modelCatalog["fake"]) != 1 || !a.modelCatalog["fake"][0].SupportsThinking {
 		t.Fatalf("catalog snapshots changed after incompatible refresh: models=%+v catalog=%+v", a.Models, a.modelCatalog["fake"])
+	}
+}
+
+func TestRefreshProviderModelsReplacesUnavailableAuthoritativeModel(t *testing.T) {
+	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	unavailable := a.Agent.Model()
+	replacement := protocol.Model{Provider: "fake", ID: "account-model", SupportsTools: true}
+	a.Providers["fake"] = &refreshCatalogProvider{
+		Provider:      fake.NewWithModels([]protocol.Model{replacement}),
+		models:        []protocol.Model{replacement},
+		authoritative: true,
+	}
+	if err := a.RefreshProviderModels(context.Background(), "fake"); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.Agent.Model(); got.ID != replacement.ID {
+		t.Fatalf("agent model=%q, want account model %q (old=%q)", got.ID, replacement.ID, unavailable.ID)
+	}
+	if a.Model.ID != replacement.ID || len(a.Models) != 1 || a.Models[0].ID != replacement.ID {
+		t.Fatalf("app model=%+v models=%+v", a.Model, a.Models)
 	}
 }
 
@@ -294,6 +321,38 @@ func TestAppCachesProviderModelsAtStartup(t *testing.T) {
 	defer a.Close()
 	if len(a.Models) == 0 {
 		t.Fatal("startup should cache the provider model catalog even with an explicit model")
+	}
+}
+
+func TestAppCombinedModelCatalogHasNoDuplicates(t *testing.T) {
+	a, err := New(context.Background(), Options{
+		Provider:   "fake",
+		NoSession:  true,
+		Permission: "allow",
+		CWD:        t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	seen := make(map[string]bool)
+	for _, model := range a.AllModels {
+		key := model.Provider + "/" + model.ID
+		if seen[key] {
+			t.Fatalf("duplicate combined catalog model %q: %+v", key, a.AllModels)
+		}
+		seen[key] = true
+	}
+	if len(a.AllModels) != len(a.Models) {
+		t.Fatalf("fake combined catalog has %d models, active catalog has %d", len(a.AllModels), len(a.Models))
+	}
+}
+
+func TestNormalizeProviderModelsRemovesDuplicateIDs(t *testing.T) {
+	models := normalizeProviderModels("test", []protocol.Model{{ID: "one"}, {Provider: "other", ID: "one"}, {ID: ""}, {ID: "two"}})
+	if len(models) != 2 || models[0].Provider != "test" || models[0].ID != "one" || models[1].ID != "two" {
+		t.Fatalf("normalized models = %+v", models)
 	}
 }
 

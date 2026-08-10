@@ -483,6 +483,9 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 		return err
 	}
 	defer a.Close()
+	for _, diagnostic := range a.Diagnostics {
+		fmt.Fprintf(os.Stderr, "config warning: %s: %s\n", diagnostic.Path, diagnostic.Message)
+	}
 
 	var outputMu sync.Mutex
 	var outputErr error

@@ -578,15 +578,16 @@ func loadMCPConfig(cmd *cobra.Command, includeShadowed bool) (mcpConfigSet, erro
 	}
 	cwd := mustCWD()
 	projectPath := filepath.Join(cwd, ".snow", "config.json")
-	projectAllowed := cfg.DefaultProjectTrust == string(trust.LevelAllow)
 	_, _, trustPath := config.DefaultPaths()
 	store, err := trust.New(trustPath)
 	if err != nil {
 		return mcpConfigSet{}, err
 	}
-	if level, ok := store.Get(cwd); ok {
-		projectAllowed = level == trust.LevelAllow
+	resolution, err := trust.Resolve(cwd, cfg.DefaultProjectTrust, store)
+	if err != nil {
+		return mcpConfigSet{}, err
 	}
+	projectAllowed := !resolution.Prompt && resolution.Level == trust.LevelAllow
 	projectBlocked := false
 	projectServers := map[string]publicmcp.ServerSpec{}
 	if projectAllowed {
