@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	pathpkg "path"
 	"path/filepath"
@@ -23,6 +22,7 @@ const (
 	defaultGrepMaxMatches    = 1000
 	defaultGlobMaxResults    = 500
 	searchLinePreviewBytes   = 300
+	maxSearchLineBytes       = 1 << 20
 )
 
 // Grep is a pure-Go content search tool (no external ripgrep dependency).
@@ -106,7 +106,12 @@ func (g *Grep) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		filter = &compiled
 	}
 
-	root, _, rootIsFile, err := resolveSearchRoot(a.Path, host, g.guard, "grep")
+	searchGuard := g.guard
+	if searchGuard == nil && host != nil {
+		searchGuard = NewPathGuard(host.Roots(), host.CWD())
+		defer searchGuard.Close()
+	}
+	root, guard, rootIsFile, err := resolveSearchRoot(a.Path, host, searchGuard, "grep")
 	if err != nil {
 		return tools.ErrorResult(err), nil
 	}
@@ -127,7 +132,7 @@ func (g *Grep) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	var out strings.Builder
 	matches := 0
 	truncated := false
-	walkErr := walkSearchFiles(ctx, root, searchWalkOptions{PolicyRoot: searchPolicyRoot(root, host), Policy: g.Policy, Hidden: a.Hidden, IncludeIgnored: a.IncludeIgnored, Exclude: a.Exclude}, func(path string) error {
+	walkErr := walkSearchFiles(ctx, root, guard, searchWalkOptions{PolicyRoot: searchPolicyRoot(root, host), Policy: g.Policy, Hidden: a.Hidden, IncludeIgnored: a.IncludeIgnored, Exclude: a.Exclude}, func(path string) error {
 		if filter != nil {
 			rel := relativeSearchPath(root, path, rootIsFile)
 			ok, matchErr := filter.Match(rel)
@@ -138,15 +143,21 @@ func (g *Grep) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 				return nil
 			}
 		}
-		if !isTextFile(path) {
+		rooted, rootErr := guard.rooted(path)
+		if rootErr != nil {
 			return nil
 		}
-
-		file, openErr := os.Open(path)
+		file, _, openErr := openRootedRegular(rooted.root, rooted.name)
 		if openErr != nil {
-			return nil // unreadable files do not abort a repository search
+			return nil // unreadable/non-regular files do not abort a repository search
 		}
 		defer file.Close()
+		if !isTextReader(file) {
+			return nil
+		}
+		if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
+			return nil
+		}
 
 		reader := bufio.NewReaderSize(file, 32*1024)
 		lineNo := 0
@@ -154,11 +165,18 @@ func (g *Grep) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			line, readErr := reader.ReadString('\n')
-			if len(line) > 0 {
+			line, oversized, readErr := readBoundedSearchLine(ctx, reader, maxSearchLineBytes)
+			if len(line) > 0 || oversized {
 				lineNo++
-				line = strings.TrimSuffix(line, "\n")
-				if re.MatchString(line) {
+				if oversized {
+					entry := fmt.Sprintf("%s:%d: [skipped line larger than %d bytes]\n", relativeSearchPath(root, path, rootIsFile), lineNo, maxSearchLineBytes)
+					if out.Len()+len(entry) > maxOutput {
+						truncated = true
+						return filepath.SkipAll
+					}
+					out.WriteString(entry)
+				} else if re.MatchString(strings.TrimSuffix(line, "\n")) {
+					line = strings.TrimSuffix(line, "\n")
 					matches++
 					entry := fmt.Sprintf("%s:%d: %s\n", relativeSearchPath(root, path, rootIsFile), lineNo, truncate(line, searchLinePreviewBytes))
 					if out.Len()+len(entry) > maxOutput {
@@ -264,7 +282,12 @@ func (g *Glob) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		return tools.ErrorResult(fmt.Errorf("glob: invalid pattern: %w", err)), nil
 	}
 
-	root, _, rootIsFile, err := resolveSearchRoot(a.Path, host, g.guard, "glob")
+	searchGuard := g.guard
+	if searchGuard == nil && host != nil {
+		searchGuard = NewPathGuard(host.Roots(), host.CWD())
+		defer searchGuard.Close()
+	}
+	root, guard, rootIsFile, err := resolveSearchRoot(a.Path, host, searchGuard, "glob")
 	if err != nil {
 		return tools.ErrorResult(err), nil
 	}
@@ -285,7 +308,7 @@ func (g *Glob) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	paths := make([]string, 0, minInt(maxResults, 128))
 	outputBytes := 0
 	truncated := false
-	walkErr := walkSearchFiles(ctx, root, searchWalkOptions{PolicyRoot: searchPolicyRoot(root, host), Policy: g.Policy, Hidden: a.Hidden, IncludeIgnored: a.IncludeIgnored, Exclude: a.Exclude}, func(path string) error {
+	walkErr := walkSearchFiles(ctx, root, guard, searchWalkOptions{PolicyRoot: searchPolicyRoot(root, host), Policy: g.Policy, Hidden: a.Hidden, IncludeIgnored: a.IncludeIgnored, Exclude: a.Exclude}, func(path string) error {
 		rel := relativeSearchPath(root, path, rootIsFile)
 		matched, matchErr := matcher.Match(rel)
 		if matchErr != nil {
@@ -335,16 +358,17 @@ func (g *Glob) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 func resolveSearchRoot(path string, host tools.ToolHost, fallback *PathGuard, name string) (string, *PathGuard, bool, error) {
 	guard := fallback
 	root := path
-	if host != nil {
+	if guard == nil && host != nil {
 		guard = NewPathGuard(host.Roots(), host.CWD())
-		if root == "" {
-			root = host.CWD()
-		}
-	} else if root == "" {
-		return "", nil, false, fmt.Errorf("%s: path is required when no host is provided", name)
 	}
 	if guard == nil {
+		if root == "" && host == nil {
+			return "", nil, false, fmt.Errorf("%s: path is required when no host is provided", name)
+		}
 		return "", nil, false, fmt.Errorf("%s: no path guard configured", name)
+	}
+	if root == "" {
+		root = guard.CWD()
 	}
 	inputPath := root
 	if !filepath.IsAbs(inputPath) {
@@ -362,7 +386,11 @@ func resolveSearchRoot(path string, host tools.ToolHost, fallback *PathGuard, na
 	if err != nil {
 		return "", nil, false, fmt.Errorf("%s: %w", name, err)
 	}
-	info, err := os.Stat(resolved)
+	rooted, err := guard.rooted(resolved)
+	if err != nil {
+		return "", nil, false, fmt.Errorf("%s: %w", name, err)
+	}
+	info, err := rooted.root.Stat(rooted.name)
 	if err != nil {
 		return "", nil, false, fmt.Errorf("%s: %w", name, err)
 	}
@@ -373,60 +401,95 @@ func resolveSearchRoot(path string, host tools.ToolHost, fallback *PathGuard, na
 }
 
 // walkSearchFiles visits regular, non-symlink files below root while applying
-// hard exclusions and one invocation-scoped hierarchical ignore matcher.
-func walkSearchFiles(ctx context.Context, root string, opts searchWalkOptions, fn func(path string) error) error {
-	info, err := os.Stat(root)
+// hard exclusions and one invocation-scoped hierarchical ignore matcher. Every
+// enumeration and open is relative to the pinned os.Root; ambient WalkDir would
+// reintroduce an ancestor-swap race before the per-file confinement check.
+func walkSearchFiles(ctx context.Context, root string, guard *PathGuard, opts searchWalkOptions, fn func(path string) error) error {
+	rootedRoot, err := guard.rooted(root)
+	if err != nil {
+		return err
+	}
+	opened, info, err := openRooted(rootedRoot.root, rootedRoot.name)
 	if err != nil {
 		return err
 	}
 	if info.Mode().IsRegular() {
+		_ = opened.Close()
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if hardSearchExcluded(root, opts.PolicyRoot) {
 			return nil
 		}
-		matcher := newSearchIgnoreMatcher(root, opts)
+		matcher := newSearchIgnoreMatcher(root, opts, guard)
 		if matcher.ignore(root, false) {
 			return nil
 		}
 		return fn(root)
 	}
+	if !info.IsDir() {
+		_ = opened.Close()
+		return fmt.Errorf("%q is not a file or directory", root)
+	}
+	_ = opened.Close()
 	if hardSearchExcluded(root, opts.PolicyRoot) {
 		return nil
 	}
-	matcher := newSearchIgnoreMatcher(root, opts)
-	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
+	matcher := newSearchIgnoreMatcher(root, opts, guard)
+	var walk func(string, string) error
+	walk = func(absDir, rootedName string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if path != root && entry.Type()&os.ModeSymlink != 0 {
-			if entry.IsDir() {
-				return filepath.SkipDir
+		dir, dirInfo, err := openRooted(rootedRoot.root, rootedName)
+		if err != nil || !dirInfo.IsDir() {
+			if dir != nil {
+				_ = dir.Close()
 			}
 			return nil
 		}
-		if path != root && strings.EqualFold(entry.Name(), ".git") {
-			if entry.IsDir() {
-				return filepath.SkipDir
+		entries, err := dir.ReadDir(-1)
+		_ = dir.Close()
+		if err != nil {
+			return nil
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-			return nil
-		}
-		if entry.IsDir() {
-			if path != root && matcher.ignore(path, true) {
-				return filepath.SkipDir
+			name := entry.Name()
+			childAbs := filepath.Join(absDir, name)
+			childRooted := filepath.Join(rootedName, name)
+			linkInfo, err := rootedRoot.root.Lstat(childRooted)
+			if err != nil || linkInfo.Mode()&os.ModeSymlink != 0 {
+				continue
 			}
-			return nil
+			if strings.EqualFold(name, ".git") && linkInfo.IsDir() {
+				continue
+			}
+			if linkInfo.IsDir() {
+				if !matcher.ignore(childAbs, true) {
+					if err := walk(childAbs, childRooted); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			file, openedInfo, err := openRootedRegular(rootedRoot.root, childRooted)
+			if err != nil {
+				continue
+			}
+			_ = file.Close()
+			if openedInfo.Mode().IsRegular() && !matcher.ignore(childAbs, false) {
+				if err := fn(childAbs); err != nil {
+					return err
+				}
+			}
 		}
-		entryInfo, err := entry.Info()
-		if err != nil || !entryInfo.Mode().IsRegular() || matcher.ignore(path, false) {
-			return nil
-		}
-		return fn(path)
-	})
+		return nil
+	}
+	return walk(root, rootedRoot.name)
 }
 
 func hasSymlinkComponent(path string, guard *PathGuard) bool {
@@ -594,12 +657,33 @@ func normalizeGlob(value string) string {
 	return strings.Trim(value, "/")
 }
 
-func isTextFile(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
+func readBoundedSearchLine(ctx context.Context, reader *bufio.Reader, maxBytes int) (string, bool, error) {
+	var line []byte
+	oversized := false
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", oversized, err
+		}
+		part, err := reader.ReadSlice('\n')
+		if !oversized {
+			if len(line)+len(part) > maxBytes {
+				oversized = true
+				line = nil
+			} else {
+				line = append(line, part...)
+			}
+		}
+		if err == nil {
+			return string(line), oversized, nil
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return string(line), oversized, err
 	}
-	defer f.Close()
+}
+
+func isTextReader(f io.Reader) bool {
 	buf := make([]byte, 8192)
 	n, _ := f.Read(buf)
 	for _, c := range buf[:n] {

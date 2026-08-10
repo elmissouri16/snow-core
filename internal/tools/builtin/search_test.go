@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/snow-core/snow/internal/config"
 )
 
 func searchArgs(t *testing.T, value any) json.RawMessage {
@@ -16,6 +19,48 @@ func searchArgs(t *testing.T, value any) json.RawMessage {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestWalkSearchFilesUsesPinnedRootAfterLaunchPathReplacement(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation is not reliably available on Windows test hosts")
+	}
+	parent := t.TempDir()
+	launch := filepath.Join(parent, "project")
+	child := filepath.Join(launch, "child")
+	outside := filepath.Join(parent, "outside")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "inside.txt"), []byte("inside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	guard := NewPathGuard([]string{launch}, launch)
+	defer guard.Close()
+	moved := filepath.Join(launch, "moved")
+	if err := os.Rename(child, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, child); err != nil {
+		t.Fatal(err)
+	}
+	var visited []string
+	err := walkSearchFiles(context.Background(), guard.CWD(), guard, searchWalkOptions{PolicyRoot: guard.CWD(), Policy: config.DefaultSearchPolicy()}, func(path string) error {
+		visited = append(visited, filepath.Base(path))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(visited, ",") != "inside.txt" {
+		t.Fatalf("visited = %v, want only pinned-root file", visited)
+	}
 }
 
 func TestGrepMatchesLinesAndGlobFilters(t *testing.T) {
@@ -51,6 +96,23 @@ func TestGrepMatchesLinesAndGlobFilters(t *testing.T) {
 	}
 	if strings.Contains(out, "readme.md") {
 		t.Fatalf("glob filter leaked markdown file: %q", out)
+	}
+}
+
+func TestGrepBoundsOversizedLinesAndContinues(t *testing.T) {
+	root := t.TempDir()
+	contents := strings.Repeat("x", maxSearchLineBytes+1) + "\nneedle\n"
+	if err := os.WriteFile(filepath.Join(root, "large.txt"), []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grep := NewGrep(NewPathGuard([]string{root}, root))
+	result, err := grep.Run(context.Background(), searchArgs(t, map[string]any{"pattern": "needle"}), stubHost{cwd: root, roots: []string{root}})
+	if err != nil || result.IsError {
+		t.Fatalf("grep result=%+v err=%v", result, err)
+	}
+	output := result.Content[0].Text
+	if !strings.Contains(output, "skipped line larger") || !strings.Contains(output, "large.txt:2: needle") {
+		t.Fatalf("oversized-line output = %q", output)
 	}
 }
 

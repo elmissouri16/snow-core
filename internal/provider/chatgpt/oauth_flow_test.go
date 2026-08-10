@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +15,18 @@ import (
 
 	"github.com/snow-core/snow/internal/auth"
 )
+
+func TestDevicePollIntervalClampsBeforeDurationConversion(t *testing.T) {
+	if got := devicePollInterval(flexibleSeconds(math.MaxInt64)); got != maxDevicePollInterval {
+		t.Fatalf("huge interval = %s", got)
+	}
+	if got := devicePollInterval(0); got != 5*time.Second {
+		t.Fatalf("default interval = %s", got)
+	}
+	if got := devicePollInterval(7); got != 7*time.Second {
+		t.Fatalf("normal interval = %s", got)
+	}
+}
 
 func TestPKCEChallengeAndEntropy(t *testing.T) {
 	verifier, err := randomURLString(64)

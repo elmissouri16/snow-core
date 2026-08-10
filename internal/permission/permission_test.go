@@ -95,6 +95,31 @@ func TestAskerErrorDenies(t *testing.T) {
 	}
 }
 
+func TestInvalidAskerDecisionDenies(t *testing.T) {
+	s := NewService(ModeAsk, askerFunc(func(context.Context, Request) (Decision, error) {
+		return Decision("approved"), nil
+	}))
+	d, err := s.Authorize(context.Background(), fakeReq("write", RiskWrite))
+	if d != DecisionDeny || err == nil {
+		t.Fatalf("invalid decision should deny with an error, got %q, %v", d, err)
+	}
+}
+
+func TestAllowSessionPersists(t *testing.T) {
+	calls := 0
+	s := NewService(ModeAsk, askerFunc(func(context.Context, Request) (Decision, error) {
+		calls++
+		return DecisionAllowSession, nil
+	}))
+	req := fakeReq("write", RiskWrite)
+	if d, err := s.Authorize(context.Background(), req); err != nil || d != DecisionAllowSession {
+		t.Fatalf("first decision = %q, %v", d, err)
+	}
+	if d, err := s.Authorize(context.Background(), req); err != nil || d != DecisionAllow || calls != 1 {
+		t.Fatalf("remembered decision = %q, %v; calls=%d", d, err, calls)
+	}
+}
+
 func TestAllowAlwaysPersists(t *testing.T) {
 	calls := 0
 	s := NewService(ModeAsk, askerFunc(func(ctx context.Context, r Request) (Decision, error) {

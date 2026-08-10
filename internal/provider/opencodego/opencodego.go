@@ -55,6 +55,13 @@ const DefaultCatalogURL = "https://models.dev/api.json"
 // catalog (kimi-k2.6, context 262144).
 const DefaultModelID = "kimi-k2.6"
 
+const (
+	maxSSELineBytes           = 4 << 20
+	maxToolArgumentBytes      = 1 << 20
+	maxTotalToolArgumentBytes = 4 << 20
+	maxStreamToolCalls        = 128
+)
+
 // Config controls the OpenCode Go adapter.
 type Config struct {
 	// BaseURL overrides DefaultBaseURL. Empty means default.
@@ -70,15 +77,19 @@ type Config struct {
 	// customized and CatalogURL is empty, catalog enrichment is disabled so
 	// OpenCode-specific metadata is not applied to an unrelated gateway.
 	CatalogURL string
+	// DiscoveryTimeout bounds startup catalog requests without constraining chat
+	// streams. Zero uses five seconds.
+	DiscoveryTimeout time.Duration
 }
 
 // Provider implements provider.Provider for OpenCode Go.
 type Provider struct {
-	baseURL      string
-	apiKey       string
-	client       *http.Client
-	defaultModel string
-	catalogURL   string
+	baseURL          string
+	apiKey           string
+	client           *http.Client
+	defaultModel     string
+	catalogURL       string
+	discoveryTimeout time.Duration
 }
 
 // New validates and constructs the provider.
@@ -99,7 +110,11 @@ func New(cfg Config) (*Provider, error) {
 	if catalogURL == "" && base == DefaultBaseURL {
 		catalogURL = DefaultCatalogURL
 	}
-	return &Provider{baseURL: base, apiKey: cfg.APIKey, client: client, defaultModel: model, catalogURL: catalogURL}, nil
+	discoveryTimeout := cfg.DiscoveryTimeout
+	if discoveryTimeout <= 0 {
+		discoveryTimeout = 5 * time.Second
+	}
+	return &Provider{baseURL: base, apiKey: cfg.APIKey, client: client, defaultModel: model, catalogURL: catalogURL, discoveryTimeout: discoveryTimeout}, nil
 }
 
 // ID implements provider.Provider.
@@ -242,17 +257,20 @@ type modelsDevModalities struct {
 // the remote catalog cannot be fetched; it never fails on network errors.
 func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 	static := p.staticCatalog()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	discoveryCtx, cancel := context.WithTimeout(ctx, p.discoveryTimeout)
+	defer cancel()
 	var catalog <-chan map[string]modelsDevModel
 	if p.catalogURL != "" {
 		catalogResult := make(chan map[string]modelsDevModel, 1)
 		catalog = catalogResult
-		catalogCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
 		go func() {
-			catalogResult <- p.fetchModelsDev(catalogCtx)
+			catalogResult <- p.fetchModelsDev(discoveryCtx)
 		}()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", nil)
+	req, err := http.NewRequestWithContext(discoveryCtx, http.MethodGet, p.baseURL+"/models", nil)
 	if err != nil {
 		return static, nil
 	}
@@ -551,17 +569,18 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, req protocol
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
-		msg := fmt.Sprintf("opencode-go: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+		redactedSnippet := providerpkg.RedactSecrets(strings.TrimSpace(string(snippet)), key)
+		msg := fmt.Sprintf("opencode-go: HTTP %d: %s", resp.StatusCode, redactedSnippet)
 		if resp.StatusCode == http.StatusUnauthorized {
 			msg = "opencode-go: invalid API key (HTTP 401)"
 		}
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusPaymentRequired {
-			return errorStream(ctx, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: strings.TrimSpace(string(snippet))}), nil
+			return errorStream(ctx, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: redactedSnippet}), nil
 		}
 		return errorStream(ctx, errors.New(msg)), nil
 	}
 
-	s := newStream(ctx, 64, func() { _ = resp.Body.Close() })
+	s := newStream(ctx, 64, func() { _ = resp.Body.Close() }, key)
 	go s.readSSE(resp)
 	return s, nil
 }
@@ -857,19 +876,22 @@ func (a *toolCallAccum) finalArgs() json.RawMessage {
 
 // stream is the channel-backed EventStream returned by Chat.
 type stream struct {
-	ch      chan protocol.StreamEvent
-	done    chan struct{}
-	reqCtx  context.Context
-	closeFn func()
-	once    sync.Once
+	ch        chan protocol.StreamEvent
+	done      chan struct{}
+	reqCtx    context.Context
+	closeFn   func()
+	once      sync.Once
+	totalArgs int
+	secret    string
 }
 
-func newStream(ctx context.Context, buf int, closeFn func()) *stream {
+func newStream(ctx context.Context, buf int, closeFn func(), secret string) *stream {
 	return &stream{
 		ch:      make(chan protocol.StreamEvent, buf),
 		done:    make(chan struct{}),
 		reqCtx:  ctx,
 		closeFn: closeFn,
+		secret:  secret,
 	}
 }
 
@@ -912,7 +934,7 @@ func (s *stream) send(ev protocol.StreamEvent) {
 
 // errorStream returns a stream whose first event is EvStreamError, then EOF.
 func errorStream(ctx context.Context, err error) protocol.EventStream {
-	s := newStream(ctx, 1, nil)
+	s := newStream(ctx, 1, nil, "")
 	s.ch <- protocol.StreamEvent{Type: protocol.EvStreamError, Err: err}
 	close(s.ch)
 	return s
@@ -950,7 +972,11 @@ func (s *stream) readSSE(resp *http.Response) {
 	}
 
 	for {
-		line, err := r.ReadString('\n')
+		line, err := readBoundedSSELine(r, maxSSELineBytes)
+		if err != nil && !errors.Is(err, io.EOF) {
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("opencode-go: SSE line exceeds limit or is unreadable: %w", err)})
+			return
+		}
 		if line != "" {
 			stop := s.handleLine(strings.TrimSpace(line), &eventName, accums, &order, &finish, markError)
 			if stop {
@@ -989,7 +1015,7 @@ func (s *stream) handleLine(line string, eventName *string, accums map[int]*tool
 		}
 		if *eventName == "error" {
 			*eventName = ""
-			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("opencode-go: " + data)})
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("opencode-go: " + providerpkg.RedactSecrets(data, s.secret))})
 			return false
 		}
 		*eventName = ""
@@ -1006,19 +1032,22 @@ func (s *stream) handleLine(line string, eventName *string, accums map[int]*tool
 				} `json:"error"`
 			}
 			if uerr := json.Unmarshal([]byte(data), &errPayload); uerr == nil && errPayload.Error != nil && errPayload.Error.Message != "" {
-				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("opencode-go: " + errPayload.Error.Message)})
+				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("opencode-go: " + providerpkg.RedactSecrets(errPayload.Error.Message, s.secret))})
 			} else {
 				// Malformed chunk: surface it rather than silently dropping.
-				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("opencode-go: unparseable SSE data: %s", truncateStr(data, 500))})
+				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("opencode-go: unparseable SSE data: %s", truncateStr(providerpkg.RedactSecrets(data, s.secret), 500))})
 			}
 			return false
 		}
-		s.processChunk(chunk, accums, order, finish)
+		if err := s.processChunk(chunk, accums, order, finish); err != nil {
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: err})
+			return true
+		}
 	}
 	return false
 }
 
-func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, order *[]int, finish *protocol.StopReason) {
+func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, order *[]int, finish *protocol.StopReason) error {
 	if chunk.Usage != nil {
 		s.send(protocol.StreamEvent{Type: protocol.EvStreamUsage, Usage: mapUsage(*chunk.Usage)})
 	}
@@ -1033,6 +1062,9 @@ func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, 
 		for _, tc := range d.ToolCalls {
 			acc, ok := accums[tc.Index]
 			if !ok {
+				if len(accums) >= maxStreamToolCalls {
+					return errors.New("opencode-go: too many streamed tool calls")
+				}
 				acc = &toolCallAccum{index: tc.Index}
 				accums[tc.Index] = acc
 				*order = append(*order, tc.Index)
@@ -1047,6 +1079,10 @@ func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, 
 			if tc.Function.Name != "" {
 				acc.name = tc.Function.Name
 			}
+			fragmentBytes := len(tc.Function.Arguments)
+			if acc.argsBuf.Len()+fragmentBytes > maxToolArgumentBytes || s.totalArgs+fragmentBytes > maxTotalToolArgumentBytes {
+				return errors.New("opencode-go: streamed tool arguments exceed limit")
+			}
 			// Deltas carry only the fragment; the agent appends fragments.
 			s.send(protocol.StreamEvent{
 				Type:       protocol.EvStreamToolCallDelta,
@@ -1056,6 +1092,7 @@ func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, 
 			})
 			if tc.Function.Arguments != "" {
 				acc.argsBuf.WriteString(tc.Function.Arguments)
+				s.totalArgs += fragmentBytes
 			}
 		}
 		// finish_reason is first-wins: a trailing chunk must not overwrite an
@@ -1088,6 +1125,25 @@ func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, 
 				}
 			}
 		}
+	}
+	return nil
+}
+
+func readBoundedSSELine(reader *bufio.Reader, maxBytes int) (string, error) {
+	var line []byte
+	for {
+		part, err := reader.ReadSlice('\n')
+		if len(line)+len(part) > maxBytes {
+			return "", fmt.Errorf("line exceeds %d bytes", maxBytes)
+		}
+		line = append(line, part...)
+		if err == nil {
+			return string(line), nil
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return string(line), err
 	}
 }
 

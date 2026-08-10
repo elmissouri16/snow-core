@@ -1,6 +1,7 @@
 package opencodego
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -257,6 +258,24 @@ func TestChatToolUseDone(t *testing.T) {
 	}
 }
 
+func TestChatRedactsActiveKeyFromProviderError(t *testing.T) {
+	const key = "super-secret-api-key"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprintf(w, "backend echoed %s", key)
+	}))
+	defer server.Close()
+	provider := mustNew(t, server.URL, key)
+	stream, err := provider.Chat(context.Background(), auth.Credential{Key: key}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drain(t, stream, context.Background())
+	if len(events) != 1 || events[0].Err == nil || strings.Contains(events[0].Err.Error(), key) || !strings.Contains(events[0].Err.Error(), "[redacted]") {
+		t.Fatalf("unredacted provider error = %+v", events)
+	}
+}
+
 // TestChatUnauthorized verifies 401 produces a descriptive EvStreamError.
 func TestChatUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -492,6 +511,32 @@ func TestThinkingSkipped(t *testing.T) {
 	}
 	if events[0].Text != "hmm" {
 		t.Errorf("thinking delta = %q, want hmm", events[0].Text)
+	}
+}
+
+func TestReadBoundedSSELineRejectsOversizedRecord(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader(strings.Repeat("x", 128)))
+	if _, err := readBoundedSSELine(reader, 64); err == nil {
+		t.Fatal("oversized SSE record was accepted")
+	}
+}
+
+func TestListModelsDiscoveryTimeoutFallsBack(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	provider, err := New(Config{BaseURL: server.URL, DiscoveryTimeout: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	models, err := provider.ListModels(context.Background())
+	if err != nil || len(models) == 0 {
+		t.Fatalf("fallback models=%+v err=%v", models, err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("catalog timeout took %s", elapsed)
 	}
 }
 

@@ -56,6 +56,38 @@ func TestNewPathGuard_ResolveNested(t *testing.T) {
 	}
 }
 
+func TestPinnedRootRejectsDescendantSwapAfterResolution(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	guard := NewPathGuard([]string{root}, root)
+	defer guard.Close()
+	resolved, err := guard.rooted(filepath.Join(sub, "secret.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(sub); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, sub); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+	if file, err := resolved.root.Open(resolved.name); err == nil {
+		file.Close()
+		t.Fatal("pinned root followed swapped descendant outside the root")
+	}
+}
+
 func TestNewPathGuard_RejectsOutsideRoot(t *testing.T) {
 	dir := t.TempDir()
 	outside := t.TempDir()

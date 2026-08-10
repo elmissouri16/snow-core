@@ -253,8 +253,15 @@ func (s *SimpleService) Authorize(ctx context.Context, req Request) (Decision, e
 	if err != nil {
 		return DecisionDeny, err
 	}
-	if d == DecisionAllowAlways {
+	switch d {
+	case DecisionAllow:
+		return d, nil
+	case DecisionAllowSession, DecisionAllowAlways:
 		s.Remember(req, DecisionAllow)
+		return d, nil
+	case DecisionDeny:
+		return d, nil
+	default:
+		return DecisionDeny, fmt.Errorf("permission: invalid asker decision %q", d)
 	}
-	return d, nil
 }

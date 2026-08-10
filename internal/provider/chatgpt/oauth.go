@@ -281,7 +281,9 @@ func (c *loginClient) exchange(ctx context.Context, code, verifier, redirectURI 
 	return credentialFromTokens(tokens, auth.Credential{}, c.now())
 }
 
-type flexibleSeconds int
+type flexibleSeconds int64
+
+const maxDevicePollInterval = 60 * time.Second
 
 func (s *flexibleSeconds) UnmarshalJSON(data []byte) error {
 	var number json.Number
@@ -335,9 +337,7 @@ func (c *loginClient) device(ctx context.Context) (auth.Credential, error) {
 	if code.VerificationURI == "" {
 		code.VerificationURI = c.base + "/codex/device"
 	}
-	if code.Interval < 1 {
-		code.Interval = 5
-	}
+	interval := devicePollInterval(code.Interval)
 	c.progress(LoginProgress{Kind: "device_code", URL: code.VerificationURI, UserCode: code.UserCode, Message: "Enter this code to sign in with ChatGPT"})
 	if c.opts.OpenBrowser != nil {
 		_ = c.opts.OpenBrowser(ctx, code.VerificationURI)
@@ -348,7 +348,6 @@ func (c *loginClient) device(ctx context.Context) (auth.Credential, error) {
 	}
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
-	interval := time.Duration(code.Interval) * time.Second
 	for {
 		timer := time.NewTimer(interval)
 		select {
@@ -365,7 +364,7 @@ func (c *loginClient) device(ctx context.Context) (auth.Credential, error) {
 			return auth.Credential{}, err
 		}
 		if slow {
-			interval += 5 * time.Second
+			interval = min(interval+5*time.Second, maxDevicePollInterval)
 		}
 		if pending {
 			continue
@@ -373,6 +372,17 @@ func (c *loginClient) device(ctx context.Context) (auth.Credential, error) {
 		return c.exchange(ctx, result.AuthorizationCode, result.CodeVerifier, c.base+"/deviceauth/callback")
 	}
 }
+
+func devicePollInterval(seconds flexibleSeconds) time.Duration {
+	if seconds < 1 {
+		seconds = 5
+	}
+	if seconds > flexibleSeconds(maxDevicePollInterval/time.Second) {
+		return maxDevicePollInterval
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func (c *loginClient) pollDevice(ctx context.Context, code deviceCodeResponse) (deviceTokenResponse, bool, bool, error) {
 	payload, _ := json.Marshal(map[string]string{"device_auth_id": code.DeviceAuthID, "user_code": code.UserCode})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/api/accounts/deviceauth/token", strings.NewReader(string(payload)))

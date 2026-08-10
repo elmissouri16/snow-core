@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,10 +18,13 @@ import (
 )
 
 func TestChatClassifiesUsageLimit(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "quota", http.StatusTooManyRequests) }))
+	const access = "secret-access-token"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "quota "+access, http.StatusTooManyRequests)
+	}))
 	defer server.Close()
 	p := &Provider{baseURL: server.URL, client: server.Client()}
-	stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: "token", Extra: map[string]any{"account_id": "a"}}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
+	stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: access, Extra: map[string]any{"account_id": "a"}}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,6 +35,124 @@ func TestChatClassifiesUsageLimit(t *testing.T) {
 	var limited providerpkg.UsageLimitedError
 	if ev.Err == nil || !errors.As(ev.Err, &limited) {
 		t.Fatalf("event=%+v", ev)
+	}
+	if strings.Contains(ev.Err.Error(), access) || !strings.Contains(ev.Err.Error(), "[redacted]") {
+		t.Fatalf("credential leaked in error: %v", ev.Err)
+	}
+}
+
+func TestCodexStreamRejectsAggregateSSEEvent(t *testing.T) {
+	fragment := strings.Repeat("x", 3<<20)
+	body := "data: " + fragment + "\ndata: " + fragment + "\ndata: " + fragment + "\n"
+	s := &codexStream{ch: make(chan protocol.StreamEvent, 4), done: make(chan struct{}), ctx: context.Background(), body: io.NopCloser(strings.NewReader(body))}
+	s.read()
+	ev := <-s.ch
+	if ev.Type != protocol.EvStreamError || ev.Err == nil || !strings.Contains(ev.Err.Error(), "SSE event exceeds size limit") {
+		t.Fatalf("event = %+v", ev)
+	}
+}
+
+func TestCodexStreamRejectsTooManyEmptySSEFragments(t *testing.T) {
+	body := strings.Repeat("data:\n", maxCodexSSEEventFragments+1)
+	s := &codexStream{ch: make(chan protocol.StreamEvent, 4), done: make(chan struct{}), ctx: context.Background(), body: io.NopCloser(strings.NewReader(body))}
+	s.read()
+	ev := <-s.ch
+	if ev.Type != protocol.EvStreamError || ev.Err == nil || !strings.Contains(ev.Err.Error(), "SSE event exceeds size limit") {
+		t.Fatalf("event = %+v", ev)
+	}
+}
+
+func TestCodexStreamBoundsToolCallsAndArguments(t *testing.T) {
+	t.Run("per-call arguments", func(t *testing.T) {
+		s := &codexStream{ch: make(chan protocol.StreamEvent, 2), done: make(chan struct{}), ctx: context.Background()}
+		stopped := s.processEvent(map[string]any{
+			"type": "response.function_call_arguments.delta", "item_id": "one", "delta": strings.Repeat("x", maxCodexToolArgumentBytes+1),
+		}, map[string]*toolAccum{}, newReasoningAccum(), &codexStreamBounds{}, new(protocol.StopReason), new(bool))
+		if !stopped {
+			t.Fatal("oversized arguments did not stop stream")
+		}
+		ev := <-s.ch
+		if ev.Type != protocol.EvStreamError || ev.Err == nil || !strings.Contains(ev.Err.Error(), "per-call size limit") {
+			t.Fatalf("event = %+v", ev)
+		}
+	})
+	t.Run("completed snapshot is authoritative", func(t *testing.T) {
+		s := &codexStream{ch: make(chan protocol.StreamEvent, 8), done: make(chan struct{}), ctx: context.Background()}
+		calls := make(map[string]*toolAccum)
+		bounds := &codexStreamBounds{}
+		if s.processEvent(map[string]any{"type": "response.function_call_arguments.delta", "item_id": "item", "delta": `{"old":true}`}, calls, newReasoningAccum(), bounds, new(protocol.StopReason), new(bool)) {
+			t.Fatal("delta stopped")
+		}
+		if s.processEvent(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "function_call", "id": "item", "arguments": `{"new":true}`}}, calls, newReasoningAccum(), bounds, new(protocol.StopReason), new(bool)) {
+			t.Fatal("output item stopped")
+		}
+		var lastDone protocol.StreamEvent
+		for len(s.ch) > 0 {
+			ev := <-s.ch
+			if ev.Type == protocol.EvStreamToolCallDone {
+				lastDone = ev
+			}
+		}
+		if string(lastDone.Arguments) != `{"new":true}` {
+			t.Fatalf("last done arguments = %s", lastDone.Arguments)
+		}
+	})
+	t.Run("completed snapshots contribute to aggregate", func(t *testing.T) {
+		s := &codexStream{ch: make(chan protocol.StreamEvent, 16), done: make(chan struct{}), ctx: context.Background()}
+		calls := make(map[string]*toolAccum)
+		bounds := &codexStreamBounds{}
+		for i := 0; i < 4; i++ {
+			id := fmt.Sprintf("snapshot-%d", i)
+			if s.processEvent(map[string]any{"type": "response.function_call_arguments.delta", "item_id": id, "delta": "x"}, calls, newReasoningAccum(), bounds, new(protocol.StopReason), new(bool)) {
+				t.Fatalf("delta %d stopped early", i)
+			}
+			if s.processEvent(map[string]any{"type": "response.function_call_arguments.done", "item_id": id, "arguments": strings.Repeat("x", maxCodexToolArgumentBytes)}, calls, newReasoningAccum(), bounds, new(protocol.StopReason), new(bool)) {
+				t.Fatalf("snapshot %d stopped early", i)
+			}
+		}
+		if !s.processEvent(map[string]any{"type": "response.function_call_arguments.delta", "item_id": "overflow", "delta": "x"}, calls, newReasoningAccum(), bounds, new(protocol.StopReason), new(bool)) {
+			t.Fatal("aggregate snapshot growth did not stop later arguments")
+		}
+	})
+	t.Run("tool count", func(t *testing.T) {
+		s := &codexStream{ch: make(chan protocol.StreamEvent, 2), done: make(chan struct{}), ctx: context.Background()}
+		calls := make(map[string]*toolAccum)
+		bounds := &codexStreamBounds{}
+		for i := 0; i <= maxCodexStreamToolCalls; i++ {
+			stopped := s.processEvent(map[string]any{
+				"type": "response.output_item.added",
+				"item": map[string]any{"type": "function_call"},
+			}, calls, newReasoningAccum(), bounds, new(protocol.StopReason), new(bool))
+			if stopped != (i == maxCodexStreamToolCalls) {
+				t.Fatalf("event %d stopped = %v", i, stopped)
+			}
+		}
+		ev := <-s.ch
+		if ev.Type != protocol.EvStreamError || ev.Err == nil || !strings.Contains(ev.Err.Error(), "tool-call count") {
+			t.Fatalf("event = %+v", ev)
+		}
+	})
+}
+
+func TestCodexStreamBoundsCompletedReasoningItems(t *testing.T) {
+	s := &codexStream{ch: make(chan protocol.StreamEvent, maxCodexReasoningItems+2), done: make(chan struct{}), ctx: context.Background()}
+	calls := make(map[string]*toolAccum)
+	bounds := &codexStreamBounds{}
+	for i := 0; i <= maxCodexReasoningItems; i++ {
+		stopped := s.processEvent(map[string]any{
+			"type": "response.output_item.done",
+			"item": map[string]any{"type": "reasoning", "id": fmt.Sprintf("reasoning-%d", i), "summary": []any{}},
+		}, calls, newReasoningAccum(), bounds, new(protocol.StopReason), new(bool))
+		if stopped != (i == maxCodexReasoningItems) {
+			t.Fatalf("item %d stopped = %v", i, stopped)
+		}
+	}
+	var last protocol.StreamEvent
+	for len(s.ch) > 0 {
+		last = <-s.ch
+	}
+	if last.Type != protocol.EvStreamError || last.Err == nil || !strings.Contains(last.Err.Error(), "completed reasoning") {
+		t.Fatalf("last event = %+v", last)
 	}
 }
 

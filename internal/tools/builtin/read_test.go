@@ -45,6 +45,23 @@ func argsForT(v any) json.RawMessage {
 	return b
 }
 
+func TestReadConfiguredGuardIgnoresRetargetedHostRoots(t *testing.T) {
+	pinned := t.TempDir()
+	retargeted := t.TempDir()
+	secret := filepath.Join(retargeted, "secret.txt")
+	if err := os.WriteFile(secret, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reader := NewRead(NewPathGuard([]string{pinned}, pinned))
+	result, err := reader.Run(context.Background(), argsFor(t, map[string]any{"path": secret}), stubHost{cwd: retargeted, roots: []string{retargeted}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError || result.Content[0].Text == "outside" {
+		t.Fatalf("retargeted host escaped pinned guard: %+v", result)
+	}
+}
+
 func TestRead_Basic(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a.txt")

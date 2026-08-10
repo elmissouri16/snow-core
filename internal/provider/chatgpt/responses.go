@@ -18,6 +18,18 @@ import (
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
+const (
+	maxCodexSSELineBytes           = 4 << 20
+	maxCodexSSEEventBytes          = 8 << 20
+	maxCodexSSEEventFragments      = 4096
+	maxCodexToolArgumentBytes      = 1 << 20
+	maxCodexTotalToolArgumentBytes = 4 << 20
+	maxCodexStreamToolCalls        = 128
+	maxCodexIdentityBytes          = 4096
+	maxCodexReasoningBytes         = 4 << 20
+	maxCodexReasoningItems         = 128
+)
+
 // Chat implements the Codex Responses streaming protocol used by ChatGPT
 // subscription credentials. The access token is only placed in the request
 // header and is never included in errors or stream events.
@@ -69,13 +81,14 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, req protocol
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		defer resp.Body.Close()
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 1000))
+		redacted := providerpkg.RedactSecrets(strings.TrimSpace(string(snippet)), creds.Access, creds.Refresh)
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusPaymentRequired {
-			return errorStream(ctx, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: strings.TrimSpace(string(snippet))}), nil
+			return errorStream(ctx, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: redacted}), nil
 		}
-		return errorStream(ctx, responseError(resp.StatusCode, snippet)), nil
+		return errorStream(ctx, responseError(resp.StatusCode, []byte(redacted))), nil
 	}
 
-	s := newCodexStream(ctx, resp)
+	s := newCodexStream(ctx, resp, creds.Access, creds.Refresh)
 	go s.read()
 	return s, nil
 }
@@ -435,15 +448,16 @@ func messageText(msg protocol.Message) string {
 }
 
 type codexStream struct {
-	ch   chan protocol.StreamEvent
-	done chan struct{}
-	ctx  context.Context
-	body io.ReadCloser
-	once sync.Once
+	ch      chan protocol.StreamEvent
+	done    chan struct{}
+	ctx     context.Context
+	body    io.ReadCloser
+	once    sync.Once
+	secrets []string
 }
 
-func newCodexStream(ctx context.Context, resp *http.Response) *codexStream {
-	return &codexStream{ch: make(chan protocol.StreamEvent, 64), done: make(chan struct{}), ctx: ctx, body: resp.Body}
+func newCodexStream(ctx context.Context, resp *http.Response, secrets ...string) *codexStream {
+	return &codexStream{ch: make(chan protocol.StreamEvent, 64), done: make(chan struct{}), ctx: ctx, body: resp.Body, secrets: append([]string(nil), secrets...)}
 }
 
 func (s *codexStream) Next(ctx context.Context) (protocol.StreamEvent, error) {
@@ -488,6 +502,7 @@ type toolAccum struct {
 
 type reasoningAccum struct {
 	items            map[string]string
+	totalBytes       int
 	emitted          bool
 	trailingNewlines int
 }
@@ -506,6 +521,7 @@ func (r *reasoningAccum) append(key, text string) string {
 	}
 	_, seen := r.items[key]
 	r.items[key] += text
+	r.totalBytes += len(text)
 	out := text
 	if !seen && r.emitted {
 		needed := max(0, 2-r.trailingNewlines)
@@ -516,6 +532,22 @@ func (r *reasoningAccum) append(key, text string) string {
 		r.trailingNewlines = trailingNewlineCount(out)
 	}
 	return out
+}
+
+func (r *reasoningAccum) canAppend(key, text string) error {
+	if r == nil || text == "" {
+		return nil
+	}
+	if len(key) > maxCodexIdentityBytes {
+		return errors.New("reasoning identity exceeds size limit")
+	}
+	if _, exists := r.items[key]; !exists && len(r.items) >= maxCodexReasoningItems {
+		return errors.New("reasoning item count exceeds limit")
+	}
+	if len(text) > maxCodexReasoningBytes-r.totalBytes {
+		return errors.New("reasoning text exceeds total size limit")
+	}
+	return nil
 }
 
 func (r *reasoningAccum) text(key string) string {
@@ -537,9 +569,12 @@ func (s *codexStream) read() {
 	defer close(s.ch)
 	defer s.body.Close()
 	scanner := bufio.NewScanner(s.body)
-	scanner.Buffer(make([]byte, 4096), 4<<20)
+	scanner.Buffer(make([]byte, 4096), maxCodexSSELineBytes)
 	var data []string
+	dataBytes := 0
+	dataFragments := 0
 	calls := make(map[string]*toolAccum)
+	bounds := &codexStreamBounds{}
 	reasoning := newReasoningAccum()
 	var finish protocol.StopReason
 	sawTool := false
@@ -549,6 +584,8 @@ func (s *codexStream) read() {
 		}
 		payload := strings.TrimSpace(strings.Join(data, "\n"))
 		data = nil
+		dataBytes = 0
+		dataFragments = 0
 		if payload == "" || payload == "[DONE]" {
 			return false
 		}
@@ -557,7 +594,7 @@ func (s *codexStream) read() {
 			s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("chatgpt: invalid SSE event: %w", err)})
 			return true
 		}
-		return s.processEvent(event, calls, reasoning, &finish, &sawTool)
+		return s.processEvent(event, calls, reasoning, bounds, &finish, &sawTool)
 	}
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -568,7 +605,16 @@ func (s *codexStream) read() {
 			continue
 		}
 		if strings.HasPrefix(line, "data:") {
-			data = append(data, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+			fragment := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			// Count a separator byte even for an empty fragment and independently
+			// cap fragment count so slice overhead cannot bypass the byte bound.
+			if dataFragments >= maxCodexSSEEventFragments || len(fragment)+1 > maxCodexSSEEventBytes-dataBytes {
+				s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("chatgpt: SSE event exceeds size limit")})
+				return
+			}
+			dataFragments++
+			dataBytes += len(fragment) + 1
+			data = append(data, fragment)
 		}
 	}
 	if flush() {
@@ -588,7 +634,13 @@ func (s *codexStream) read() {
 	s.send(protocol.StreamEvent{Type: protocol.EvStreamDone, StopReason: finish})
 }
 
-func (s *codexStream) processEvent(event map[string]any, calls map[string]*toolAccum, reasoning *reasoningAccum, finish *protocol.StopReason, sawTool *bool) bool {
+type codexStreamBounds struct {
+	totalToolArgumentBytes  int
+	completedReasoningBytes int
+	completedReasoningItems int
+}
+
+func (s *codexStream) processEvent(event map[string]any, calls map[string]*toolAccum, reasoning *reasoningAccum, bounds *codexStreamBounds, finish *protocol.StopReason, sawTool *bool) bool {
 	typ, _ := event["type"].(string)
 	switch typ {
 	case "response.output_text.delta":
@@ -598,29 +650,53 @@ func (s *codexStream) processEvent(event map[string]any, calls map[string]*toolA
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		if delta, _ := event["delta"].(string); delta != "" {
 			key := reasoningIdentity(event, typ)
+			if err := reasoning.canAppend(key, delta); err != nil {
+				return s.streamLimitError(err.Error())
+			}
 			s.send(protocol.StreamEvent{Type: protocol.EvStreamThinkingDelta, Text: reasoning.append(key, delta)})
 		}
 	case "response.reasoning_summary_text.done", "response.reasoning_summary_part.done", "response.reasoning_text.done":
 		if text := reasoningDoneText(event, typ); text != "" {
 			key := reasoningIdentity(event, typ)
 			if suffix := missingReasoningSuffix(reasoning.text(key), text); suffix != "" {
+				if err := reasoning.canAppend(key, suffix); err != nil {
+					return s.streamLimitError(err.Error())
+				}
 				s.send(protocol.StreamEvent{Type: protocol.EvStreamThinkingDelta, Text: reasoning.append(key, suffix)})
 			}
 		}
 	case "response.function_call_arguments.delta":
 		*sawTool = true
-		key, id, name := toolIdentity(event, calls)
+		if codexToolIdentityBytes(event) > maxCodexIdentityBytes {
+			return s.streamLimitError("tool-call identity exceeds size limit")
+		}
+		key, id, name, created := toolIdentity(event, calls)
+		if created && len(calls) > maxCodexStreamToolCalls {
+			return s.streamLimitError("tool-call count exceeds limit")
+		}
 		acc := calls[key]
 		if delta, _ := event["delta"].(string); delta != "" {
-			acc.args.WriteString(delta)
+			if err := appendCodexToolArguments(acc, delta, bounds); err != nil {
+				return s.streamLimitError(err.Error())
+			}
 			s.send(protocol.StreamEvent{Type: protocol.EvStreamToolCallDelta, ToolCallID: id, ToolName: name, Arguments: json.RawMessage(delta)})
 		}
 	case "response.function_call_arguments.done":
 		*sawTool = true
-		key, id, name := toolIdentity(event, calls)
+		if codexToolIdentityBytes(event) > maxCodexIdentityBytes {
+			return s.streamLimitError("tool-call identity exceeds size limit")
+		}
+		key, id, name, created := toolIdentity(event, calls)
+		if created && len(calls) > maxCodexStreamToolCalls {
+			return s.streamLimitError("tool-call count exceeds limit")
+		}
 		acc := calls[key]
 		args, _ := event["arguments"].(string)
-		if args == "" {
+		if args != "" {
+			if err := acceptCodexToolSnapshot(acc, args, bounds); err != nil {
+				return s.streamLimitError(err.Error())
+			}
+		} else {
 			args = acc.args.String()
 		}
 		if args == "" || !json.Valid([]byte(args)) {
@@ -631,17 +707,43 @@ func (s *codexStream) processEvent(event map[string]any, calls map[string]*toolA
 		item, _ := event["item"].(map[string]any)
 		itemType, _ := item["type"].(string)
 		if itemType == "reasoning" && typ == "response.output_item.done" {
+			id, _ := item["id"].(string)
+			if len(id) > maxCodexIdentityBytes {
+				return s.streamLimitError("reasoning identity exceeds size limit")
+			}
 			if block := sanitizeCompletedReasoningItem(item); block != nil {
+				if bounds.completedReasoningItems >= maxCodexReasoningItems || len(block.Data) > maxCodexReasoningBytes-bounds.completedReasoningBytes {
+					return s.streamLimitError("completed reasoning exceeds size limit")
+				}
+				bounds.completedReasoningItems++
+				bounds.completedReasoningBytes += len(block.Data)
 				s.send(protocol.StreamEvent{Type: protocol.EvStreamProviderData, ProviderData: block})
 			}
 		}
 		if itemType == "function_call" {
 			*sawTool = true
-			key, id, name := itemIdentity(item, calls)
+			if codexItemIdentityBytes(item) > maxCodexIdentityBytes {
+				return s.streamLimitError("tool-call identity exceeds size limit")
+			}
+			key, id, name, created := itemIdentity(event, item, calls)
+			if created && len(calls) > maxCodexStreamToolCalls {
+				return s.streamLimitError("tool-call count exceeds limit")
+			}
 			acc := calls[key]
-			if args, _ := item["arguments"].(string); args != "" && acc.args.Len() == 0 {
-				acc.args.WriteString(args)
-				s.send(protocol.StreamEvent{Type: protocol.EvStreamToolCallDelta, ToolCallID: id, ToolName: name, Arguments: json.RawMessage(args)})
+			if args, _ := item["arguments"].(string); args != "" {
+				wasEmpty := acc.args.Len() == 0
+				if typ == "response.output_item.done" {
+					if err := acceptCodexToolSnapshot(acc, args, bounds); err != nil {
+						return s.streamLimitError(err.Error())
+					}
+				} else if wasEmpty {
+					if err := appendCodexToolArguments(acc, args, bounds); err != nil {
+						return s.streamLimitError(err.Error())
+					}
+				}
+				if wasEmpty {
+					s.send(protocol.StreamEvent{Type: protocol.EvStreamToolCallDelta, ToolCallID: id, ToolName: name, Arguments: json.RawMessage(args)})
+				}
 			}
 			if typ == "response.output_item.done" {
 				args := acc.args.String()
@@ -669,7 +771,7 @@ func (s *codexStream) processEvent(event map[string]any, calls map[string]*toolA
 		if message == "" {
 			message = "Codex response failed"
 		}
-		s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("chatgpt: " + message)})
+		s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("chatgpt: " + providerpkg.RedactSecrets(message, s.secrets...))})
 		return true
 	}
 	return false
@@ -769,7 +871,27 @@ func missingReasoningSuffix(streamed, completed string) string {
 	return ""
 }
 
-func toolIdentity(event map[string]any, calls map[string]*toolAccum) (string, string, string) {
+func codexToolIdentityBytes(event map[string]any) int {
+	total := 0
+	for _, field := range []string{"item_id", "call_id", "name"} {
+		if value, _ := event[field].(string); value != "" {
+			total += len(value)
+		}
+	}
+	return total
+}
+
+func codexItemIdentityBytes(item map[string]any) int {
+	total := 0
+	for _, field := range []string{"id", "call_id", "name"} {
+		if value, _ := item[field].(string); value != "" {
+			total += len(value)
+		}
+	}
+	return total
+}
+
+func toolIdentity(event map[string]any, calls map[string]*toolAccum) (string, string, string, bool) {
 	key, _ := event["item_id"].(string)
 	if key == "" {
 		if n, ok := event["output_index"].(float64); ok {
@@ -785,7 +907,8 @@ func toolIdentity(event map[string]any, calls map[string]*toolAccum) (string, st
 		key = "call-0"
 	}
 	acc := calls[key]
-	if acc == nil {
+	created := acc == nil
+	if created {
 		acc = &toolAccum{id: id, name: name}
 		calls[key] = acc
 	}
@@ -802,22 +925,80 @@ func toolIdentity(event map[string]any, calls map[string]*toolAccum) (string, st
 	if name != "" {
 		acc.name = name
 	}
-	return key, id, name
+	return key, id, name, created
 }
 
-func itemIdentity(item map[string]any, calls map[string]*toolAccum) (string, string, string) {
+func itemIdentity(event, item map[string]any, calls map[string]*toolAccum) (string, string, string, bool) {
 	key, _ := item["id"].(string)
 	id, _ := item["call_id"].(string)
 	name, _ := item["name"].(string)
 	if id == "" {
 		id = key
 	}
+	if key == "" {
+		key = id
+	}
+	if key == "" {
+		if n, ok := event["output_index"].(float64); ok {
+			key = fmt.Sprintf("output-%d", int(n))
+		}
+	}
+	if key == "" {
+		// With no protocol identity there is no sound way to correlate items.
+		// Treat each event as a distinct anonymous call so malformed streams
+		// remain count-bounded rather than collapsing forever into call-0.
+		key = fmt.Sprintf("anonymous-%d", len(calls))
+	}
+	if id == "" {
+		id = key
+	}
 	acc := calls[key]
-	if acc == nil {
+	created := acc == nil
+	if created {
 		acc = &toolAccum{id: id, name: name}
 		calls[key] = acc
 	}
-	return key, id, name
+	return key, id, name, created
+}
+
+func appendCodexToolArguments(acc *toolAccum, fragment string, bounds *codexStreamBounds) error {
+	if len(fragment) > maxCodexToolArgumentBytes-acc.args.Len() {
+		return errors.New("tool arguments exceed per-call size limit")
+	}
+	if len(fragment) > maxCodexTotalToolArgumentBytes-bounds.totalToolArgumentBytes {
+		return errors.New("tool arguments exceed total size limit")
+	}
+	acc.args.WriteString(fragment)
+	bounds.totalToolArgumentBytes += len(fragment)
+	return nil
+}
+
+func acceptCodexToolSnapshot(acc *toolAccum, arguments string, bounds *codexStreamBounds) error {
+	if len(arguments) > maxCodexToolArgumentBytes {
+		return errors.New("tool arguments exceed per-call size limit")
+	}
+	if acc.args.Len() == 0 {
+		return appendCodexToolArguments(acc, arguments, bounds)
+	}
+	// Deltas are already charged. A completed snapshot may repeat those bytes;
+	// charge only growth beyond the accumulated form so distinct large
+	// snapshots cannot bypass the aggregate bound without double-counting the
+	// normal repeated snapshot.
+	additional := max(0, len(arguments)-acc.args.Len())
+	if additional > maxCodexTotalToolArgumentBytes-bounds.totalToolArgumentBytes {
+		return errors.New("tool arguments exceed total size limit")
+	}
+	bounds.totalToolArgumentBytes += additional
+	// The completed snapshot is authoritative. Preserve it for any later
+	// output_item.done reconciliation instead of re-emitting stale deltas.
+	acc.args.Reset()
+	acc.args.WriteString(arguments)
+	return nil
+}
+
+func (s *codexStream) streamLimitError(message string) bool {
+	s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("chatgpt: " + message)})
+	return true
 }
 
 func responseUsage(event map[string]any) *protocol.Usage {

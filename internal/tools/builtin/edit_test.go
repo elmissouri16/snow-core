@@ -13,7 +13,7 @@ import (
 func TestEdit_UniqueReplace(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "f.txt")
-	if err := os.WriteFile(file, []byte("foo bar foo baz"), 0o644); err != nil {
+	if err := os.WriteFile(file, []byte("foo bar foo baz"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	e := NewEdit(NewPathGuard([]string{dir}, dir))
@@ -24,6 +24,13 @@ func TestEdit_UniqueReplace(t *testing.T) {
 	data, _ := os.ReadFile(file)
 	if string(data) != "foo BAR foo baz" {
 		t.Errorf("content = %q, want replacement", string(data))
+	}
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("edited file mode = %v", info.Mode().Perm())
 	}
 	details, ok := res.Details.(tools.DiffDetails)
 	if !ok {

@@ -3,7 +3,6 @@ package builtin
 import (
 	"bufio"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -29,6 +28,7 @@ type searchIgnoreRule struct {
 
 type searchIgnoreMatcher struct {
 	root           string
+	guard          *PathGuard
 	policy         config.EffectiveSearchPolicy
 	hidden         bool
 	includeIgnored bool
@@ -37,7 +37,7 @@ type searchIgnoreMatcher struct {
 	cache          map[string][]searchIgnoreRule
 }
 
-func newSearchIgnoreMatcher(root string, opts searchWalkOptions) *searchIgnoreMatcher {
+func newSearchIgnoreMatcher(root string, opts searchWalkOptions, guard *PathGuard) *searchIgnoreMatcher {
 	if opts.PolicyRoot != "" {
 		root = opts.PolicyRoot
 	}
@@ -45,7 +45,7 @@ func newSearchIgnoreMatcher(root string, opts searchWalkOptions) *searchIgnoreMa
 	if opts.Hidden != nil {
 		hidden = *opts.Hidden
 	}
-	m := &searchIgnoreMatcher{root: root, policy: opts.Policy, hidden: hidden, includeIgnored: opts.IncludeIgnored, cache: map[string][]searchIgnoreRule{}}
+	m := &searchIgnoreMatcher{root: root, guard: guard, policy: opts.Policy, hidden: hidden, includeIgnored: opts.IncludeIgnored, cache: map[string][]searchIgnoreRule{}}
 	for _, value := range opts.Policy.Exclude {
 		if rule, ok := parseSearchIgnoreRule("", value); ok {
 			m.policyExtra = append(m.policyExtra, rule)
@@ -151,19 +151,21 @@ func (m *searchIgnoreMatcher) loadIgnoreFile(path, base string) []searchIgnoreRu
 		return cached
 	}
 	m.cache[path] = nil
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 256*1024 {
+	if m.guard == nil {
 		return nil
 	}
-	file, err := os.Open(path)
+	rooted, err := m.guard.rooted(path)
 	if err != nil {
 		return nil
 	}
-	defer file.Close()
-	opened, err := file.Stat()
-	if err != nil || !opened.Mode().IsRegular() || opened.Size() > 256*1024 {
+	file, opened, err := openRootedRegular(rooted.root, rooted.name)
+	if err != nil || opened.Size() > 256*1024 {
+		if file != nil {
+			_ = file.Close()
+		}
 		return nil
 	}
+	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, 256*1024+1))
 	if err != nil || len(data) > 256*1024 {
 		return nil

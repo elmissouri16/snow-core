@@ -11,8 +11,19 @@ import (
 
 // PathGuard confines file access to a set of allowed roots.
 type PathGuard struct {
-	roots []string
+	roots []guardedRoot
 	cwd   string
+}
+
+type guardedRoot struct {
+	path string
+	root *os.Root
+}
+
+type rootedPath struct {
+	root     *os.Root
+	name     string
+	resolved string
 }
 
 // NewPathGuard creates a guard. Roots are normalized to absolute cleaned
@@ -20,7 +31,7 @@ type PathGuard struct {
 // the resolution applied to target paths. An empty root list means the guard
 // allows nothing (deny by default).
 func NewPathGuard(roots []string, cwd string) *PathGuard {
-	norm := make([]string, 0, len(roots))
+	norm := make([]guardedRoot, 0, len(roots))
 	for _, r := range roots {
 		if r == "" {
 			continue
@@ -33,7 +44,11 @@ func NewPathGuard(roots []string, cwd string) *PathGuard {
 		if resolved, err := evalWithAncestors(abs); err == nil {
 			abs = resolved
 		}
-		norm = append(norm, abs)
+		handle, err := os.OpenRoot(abs)
+		if err != nil {
+			continue
+		}
+		norm = append(norm, guardedRoot{path: abs, root: handle})
 	}
 	absCwd, err := filepath.Abs(cwd)
 	if err != nil {
@@ -48,9 +63,30 @@ func NewPathGuard(roots []string, cwd string) *PathGuard {
 
 // Roots returns the normalized allowed roots.
 func (g *PathGuard) Roots() []string {
-	out := make([]string, len(g.roots))
-	copy(out, g.roots)
+	if g == nil {
+		return nil
+	}
+	out := make([]string, 0, len(g.roots))
+	for _, root := range g.roots {
+		out = append(out, root.path)
+	}
 	return out
+}
+
+// Close releases the pinned directory handles. Callers must stop tool use
+// before closing the guard.
+func (g *PathGuard) Close() error {
+	if g == nil {
+		return nil
+	}
+	var errs []error
+	for i := range g.roots {
+		if g.roots[i].root != nil {
+			errs = append(errs, g.roots[i].root.Close())
+			g.roots[i].root = nil
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // CWD returns the guard's working directory.
@@ -81,11 +117,32 @@ func (g *PathGuard) Resolve(path string) (string, error) {
 	}
 
 	for _, root := range g.roots {
-		if within(root, resolved) {
+		if root.root != nil && within(root.path, resolved) {
 			return resolved, nil
 		}
 	}
 	return "", fmt.Errorf("path %q resolves outside allowed roots", path)
+}
+
+// rooted resolves path for user-facing diagnostics, then converts it to a
+// name operated on through a pinned os.Root handle. The subsequent operation
+// remains confined even if an ancestor is swapped after validation.
+func (g *PathGuard) rooted(path string) (rootedPath, error) {
+	resolved, err := g.Resolve(path)
+	if err != nil {
+		return rootedPath{}, err
+	}
+	for _, root := range g.roots {
+		if root.root == nil || !within(root.path, resolved) {
+			continue
+		}
+		rel, err := filepath.Rel(root.path, resolved)
+		if err != nil {
+			return rootedPath{}, err
+		}
+		return rootedPath{root: root.root, name: rel, resolved: resolved}, nil
+	}
+	return rootedPath{}, fmt.Errorf("path %q has no open allowed root", path)
 }
 
 // within reports whether path is equal to root or nested inside it, comparing

@@ -20,15 +20,25 @@ type Options struct {
 	SearchPolicy config.EffectiveSearchPolicy
 	WindowsShell WindowsShellOptions
 	// Roots are the allowed path roots for file tools. If empty, file tools
-	// are created without a guard and deny all paths unless the host provides
-	// roots at call time.
+	// are created without a guard and use host roots at call time.
 	Roots []string
+	// CWD anchors relative paths for a pinned root set.
+	CWD string
+	// Guard reuses a host-owned pinned root set. When set it takes precedence
+	// over Roots/CWD and must outlive all registered tools.
+	Guard *PathGuard
 }
 
 // RegisterBuiltins registers the default file, search, shell, and deferred web tools into reg.
 func RegisterBuiltins(reg tools.Registry, opts Options) error {
-	cwd := ""
-	guard := NewPathGuard(opts.Roots, cwd)
+	guard := opts.Guard
+	if guard == nil && len(opts.Roots) > 0 {
+		cwd := opts.CWD
+		if cwd == "" {
+			cwd = opts.Roots[0]
+		}
+		guard = NewPathGuard(opts.Roots, cwd)
+	}
 
 	read := NewRead(guard)
 	write := NewWrite(guard)

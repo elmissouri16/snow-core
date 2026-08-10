@@ -78,32 +78,24 @@ func (r *Read) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	// Re-anchor the guard to the host at call time. The registry guard is only
 	// a fallback because an embedded SDK may have a different cwd and roots.
 	guard := r.Guard
-	if host != nil {
+	if guard == nil && host != nil {
 		guard = NewPathGuard(host.Roots(), host.CWD())
+		defer guard.Close()
 	}
 	if guard == nil {
 		return tools.ErrorResult(fmt.Errorf("read: no path guard configured")), nil
 	}
-	resolved, err := guard.Resolve(a.Path)
+	rooted, err := guard.rooted(a.Path)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("read: %w", err)), nil
 	}
 
-	info, err := os.Stat(resolved)
+	file, _, err := openRootedRegular(rooted.root, rooted.name)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return tools.ErrorResult(fmt.Errorf("read: file %q does not exist", a.Path)), nil
 		}
-		return tools.ErrorResult(fmt.Errorf("read: %w", err)), nil
-	}
-	// Reject FIFOs/devices before opening: opening one can block forever.
-	if !info.Mode().IsRegular() {
-		return tools.ErrorResult(fmt.Errorf("read: %q is not a regular file", a.Path)), nil
-	}
-
-	file, err := os.Open(resolved)
-	if err != nil {
-		return tools.ErrorResult(fmt.Errorf("read: %w", err)), nil
+		return tools.ErrorResult(fmt.Errorf("read: %q is not a regular file: %w", a.Path, err)), nil
 	}
 	defer file.Close()
 	emitProgress(host, "reading file", false, false)

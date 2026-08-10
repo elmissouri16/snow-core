@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -66,36 +67,34 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	// guard captures the process cwd at registration, which is wrong when the
 	// host CWD differs (SDK embedding, tests).
 	guard := e.Guard
-	if host != nil {
+	if guard == nil && host != nil {
 		guard = NewPathGuard(host.Roots(), host.CWD())
+		defer guard.Close()
 	}
 	if guard == nil {
 		return tools.ErrorResult(fmt.Errorf("edit: no path guard configured")), nil
 	}
 
-	resolved, err := guard.Resolve(a.Path)
+	rooted, err := guard.rooted(a.Path)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
 	}
 
-	// Reject non-regular files (FIFOs, devices) and honor cancellation.
-	info, err := os.Stat(resolved)
+	file, info, err := openRootedRegular(rooted.root, rooted.name)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return tools.ErrorResult(fmt.Errorf("edit: file %q does not exist", a.Path)), nil
 		}
-		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
+		return tools.ErrorResult(fmt.Errorf("edit: %q is not a regular file: %w", a.Path, err)), nil
 	}
-	if !info.Mode().IsRegular() {
-		return tools.ErrorResult(fmt.Errorf("edit: %q is not a regular file", a.Path)), nil
-	}
+	defer file.Close()
 	if err := ctx.Err(); err != nil {
 		return tools.ErrorResult(err), nil
 	}
 	emitProgress(host, "editing file", false, false)
 	defer emitProgress(host, "edit finished", true, false)
 
-	data, err := os.ReadFile(resolved)
+	data, err := io.ReadAll(file)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
 	}
@@ -120,7 +119,7 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if err := ctx.Err(); err != nil {
 		return tools.ErrorResult(err), nil
 	}
-	if err := os.WriteFile(resolved, []byte(updated), 0o644); err != nil {
+	if err := atomicReplaceRooted(ctx, rooted, []byte(updated), info.Mode().Perm()); err != nil {
 		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
 	}
 
