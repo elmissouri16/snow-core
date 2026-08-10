@@ -23,7 +23,7 @@ OpenCode, and Codex.
 - **Three surfaces, one loop** — interactive TUI, print/JSON/RPC CLI modes, and a
   pure-Go SDK (`pkg/snowsdk`) with no TUI dependency.
 - **Sessions** — pure-Go SQLite storage with indexed tree branching (`id`/`parentId`), fork/resume.
-- **Built-in tools** — bounded `read`/`write`/`edit`/`bash`, pure-Go `grep` and `glob`, direct `ask_user` interaction, plus deferred public-web `webfetch` with Surf Chrome 150 impersonation and HTML-to-Markdown conversion; interactive file edits and overwrites show compact red/green diffs.
+- **Built-in tools** — bounded `read`/`write`/`edit`/`bash`, pure-Go `grep` and `glob`, direct `ask_user` interaction, Default-mode turn-local `update_plan` checklists, plus deferred public-web `webfetch` with Surf Chrome 150 impersonation and HTML-to-Markdown conversion; interactive file edits and overwrites show compact red/green diffs.
 - **Progressive tool discovery** — existing schemas remain direct; MCP and
   plugin tools can opt into an in-process Bleve BM25 router that exposes only
   the five most relevant schemas and provides `search_tools` recovery.
@@ -92,10 +92,17 @@ Run `snow login chatgpt` for browser PKCE login, or
 `snow login chatgpt --device-code` on a headless machine. `--no-open` prints the
 browser URL without launching it. In the TUI, `/login` → `chatgpt` offers browser
 login, device-code login, and import from an existing Codex, Pi, or OpenCode
-credential. Access tokens refresh automatically and rotated refresh tokens are
-saved atomically. `/model` opens the cached model catalog for the active provider
+credential. When OpenCode, Pi, or Codex identifies compatible local ChatGPT
+accounts, Snow groups those account IDs in the login picker and starts its own
+browser OAuth flow constrained to the selected workspace using Codex's official
+`allowed_workspace_id` mechanism. Snow never copies another client's token in
+this TUI flow. Access tokens refresh automatically and rotated refresh tokens are
+saved atomically. `/logout` opens a picker containing stored provider credentials;
+`/logout <provider>` remains available as a direct shortcut. `/model` opens the cached model catalog for the active provider
 (OpenCode Go or ChatGPT/Codex); ChatGPT catalogs are fetched per account from the
-Codex backend, cached for 15 minutes with ETags, and fall back safely offline. OpenCode
+Codex backend and cached for 15 minutes with ETags. Authenticated sessions fall
+back only to that same account's cache; bundled models are used only before an
+account is configured. Account catalogs remain authoritative so a model omitted for one account is not falsely offered there. OpenCode
 Go availability from `GET /models` is enriched with the same public models.dev
 capability, limit, pricing, and reasoning-effort metadata used by OpenCode.
 Direct gateway fields remain authoritative. `/thinking`
@@ -105,8 +112,13 @@ selections are rejected rather than silently downgraded. The equivalent CLI
 flag is `--thinking off|minimal|low|medium|high`. Tab completes slash commands,
 while Enter runs them. `/settings` opens one persistent panel for model, theme, thinking effort,
 reasoning summary, text verbosity, permission mode, subagent enablement, and
-Agent Skills enablement. Built-in themes are `default` (adaptive), `dark`,
-`light`, and `high-contrast`. Changes
+Agent Skills enablement. Built-in themes are `default` (adaptive), `dark`, `light`, and
+`high-contrast`. Custom adaptive themes are versioned YAML files under
+`$SNOW_HOME/themes/*.yaml`; trusted projects may override same-named custom
+themes from `.snow/themes/*.yaml` (built-in names are reserved). Key overrides
+live in `$SNOW_HOME/keybindings.yaml` and trusted `.snow/keybindings.yaml`.
+Invalid auxiliary files produce warnings and fall back without breaking startup;
+`ctrl+c` and modal `esc` remain emergency bindings. Changes
 save immediately to `~/.snow/config.json`; reasoning summary
 (`off|auto|concise|detailed`) and text verbosity (`low|medium|high`) are enabled
 for ChatGPT/Codex and shown as unavailable for other providers. `/permissions`
@@ -120,17 +132,26 @@ the transcript scrollable, while the composer grows from three to six rows as
 needed. By default Snow leaves mouse reporting disabled, so ordinary drag
 selection and the terminal's copy shortcut work on generated content.
 PageUp/PageDown, Home/End, and `Ctrl+Up`/`Ctrl+Down` scroll the transcript.
-Pickers accept arrows or `j`/`k`, plus Tab/Shift+Tab and Home/End. Set
-`"tui": {"mouse": true}` in `~/.snow/config.json` to opt into mouse/trackpad
+Pickers accept arrows or `j`/`k`, plus Tab/Shift+Tab and Home/End. The model
+picker shows a compact deduplicated catalog; press `/` to search provider names,
+model IDs, display names, and descriptions, then press Enter to apply the match.
+Set `"tui": {"mouse": true}` in `~/.snow/config.json` to opt into mouse/trackpad
 scrolling (terminal selection may then require the terminal's mouse-override
 modifier). Long streams freeze an off-tail snapshot until it reaches the bottom
 again. `Ctrl+V` reads the clipboard into the active textarea, while platform
 terminal paste shortcuts such as `Cmd+V` or `Ctrl+Shift+V` arrive as safe
-bracketed paste. `Ctrl+J` reliably inserts a newline; `Option+Return` also works
-when the macOS terminal reports Option as Meta/Alt. Plain Enter submits. `Ctrl+C`
-continues to abort while busy and quit while idle, so use the terminal's copy
-shortcut for selected text. While a prompt runs, a live row shows its elapsed
-time and `Esc` cancels the run.
+bracketed paste. `Ctrl+J` reliably inserts a newline; `Option+Return` also inserts a newline while
+idle when the macOS terminal reports Option as Meta/Alt. Plain Enter submits.
+While a run is active, Enter queues a steering message for the next safe boundary
+(after the current assistant response and its complete serial tool batch), while
+Alt+Enter queues a follow-up that runs only after steering and ordinary model work
+settle. Delivery is bounded and one message at a time, FIFO within each class
+with steering priority, and the live row shows pending count plus elapsed time. `Ctrl+C` or `Esc` aborts, clears pending queue
+work, and restores queued TUI text to the composer; `Ctrl+J` remains the reliable
+busy-time multiline binding. `Ctrl+C` quits while idle, so use the terminal's copy
+shortcut for selected text.
+`update_plan` is a turn-local Default-mode checklist event and is deliberately
+unavailable in collaboration Plan Mode; it is not persisted across resume.
 `Shift+Tab` toggles Default/Plan mode at the top-level composer; during an active
 turn the toggle is queued until `turn_done`. `/plan [message]` enters Plan Mode
 and `/default` returns to normal execution. Proposed
@@ -156,9 +177,10 @@ and `/settings` exposes the same restart-applied value. Durable child histories
 are enabled by default so `/agent` remains useful after session resume.
 `/sessions` opens a compact picker for persisted sessions in the current
 directory, `/resume` opens the same picker (or resumes an explicit path), `/new`
-creates a persisted session, `/compact` manually summarizes older context with
-an animated progress indicator, and `/tree` navigates branches inside the active
-session. Check the configured credential without refreshing it or printing secrets:
+creates a persisted session, `/compact` manually summarizes older complete turns with
+an animated progress indicator, and `/tree` navigates named branches inside the active
+session. The tree shows durable parent/fork topology; `f`, `r`, and `d` create a
+named fork, rename, or guarded-delete an inactive leaf branch. Check the configured credential without refreshing it or printing secrets:
 
 ```bash
 snow auth check chatgpt
@@ -207,6 +229,10 @@ func main() {
 
 For an SDK session resumed with persisted state, install event subscriptions
 first and then call `Session.ReadyGoals()` and/or `Session.ReadySubagents()`.
+`Session.Steer(ctx, text)` and `Session.FollowUp(ctx, text)` accept input only
+while a root run is active; idle calls return `snowsdk.ErrNotRunning` and ordinary
+idle continuation uses `Prompt`. `Session.PendingInputs()` returns an independent
+snapshot. `queue_updated` events expose the complete bounded pending queue.
 These explicit surface-ready steps prevent constructor-time event loss;
 subagent readiness restores topology but never silently restarts stale work.
 
@@ -242,6 +268,11 @@ SDK embeddings supply `Options.UserInputHandler`. The callback receives a
 are normalized to question order before the model receives them. Without a
 handler, print/JSON and SDK calls fail fast with an unavailable-input tool
 result instead of hanging.
+
+RPC accepts explicit `steer` and `follow_up` commands with a top-level
+`message`. A second `prompt` never cancels active work implicitly: use one of the
+queue commands, or send `abort` before a replacement prompt. `session_info`
+reports pending steer/follow-up counts.
 
 RPC also exposes `subagent_ready`, `subagent_spawn`,
 `subagent_send_message`, `subagent_followup`, `subagent_wait` (with optional
@@ -324,10 +355,24 @@ read-only `/mcp` and `/skills` status pickers. See [docs/skills.md](docs/skills.
   global default and applies to the active session; “allow always” rules remain
   scoped to the active session.
   Headless default is `deny`.
-- Project MCP declarations and Agent Skills are trust-gated. Configured stdio
-  MCP servers and skill scripts still run with user OS privileges when invoked;
-  neither project trust nor the skill format is a sandbox.
+- Project MCP declarations, plugin configuration, and Agent Skills are
+  trust-gated. On first interactive launch in every previously undecided project,
+  Snow asks before constructing the runtime; allow or deny is persisted for the
+  exact canonical project and applies immediately. Headless surfaces never ask
+  and treat `ask` as deny. `/trust allow|deny` changes an already running TUI's
+  policy for the next launch because loaded extensions cannot be hot-unloaded
+  safely. Configured stdio MCP servers and skill scripts still run with user OS
+  privileges when invoked; neither project trust nor the skill format is a
+  sandbox. `AGENTS.md` context remains always loaded.
 - File tools enforce path roots (cwd + explicit allows) with symlink resolution.
+  Path validation and the later filesystem operation are separate OS calls, so
+  a hostile concurrent process can still race by replacing an ancestor after
+  validation; descriptor-relative traversal is a documented residual hardening
+  item rather than an in-process sandbox guarantee.
+  `grep` and `glob` honor hierarchical `.gitignore`/`.ignore` files and
+  `$SNOW_HOME/search.yaml` plus trusted `.snow/search.yaml`; per-call `hidden`,
+  `include_ignored`, and `exclude` options control soft exclusions while `.git`
+  and symlink entries are always skipped.
 - Plan Mode's non-mutation rule is model instruction, not a sandbox; shell,
   plugin, and MCP tools still run with the user's OS privileges.
 - Auth secrets are never logged; the auth file is `0600`.
@@ -340,12 +385,28 @@ read-only `/mcp` and `/skills` status pickers. See [docs/skills.md](docs/skills.
   recursion. See [docs/subagents.md](docs/subagents.md) for the explicit worker
   configuration example.
 
+### Auxiliary configuration
+
+Auxiliary YAML uses `version: 1`, is strictly decoded, bounded to 64 KiB, and
+warns/falls back on invalid input. A custom theme names one built-in `extends`
+base and supplies semantic `light`/`dark` colors (`#RRGGBB` or `0..255`). Search
+policy supports `respect_gitignore`, `respect_ignore`, `hidden`,
+`generated_dirs`, and additive `exclude` lists. Manual compaction is configured
+in `config.json` under `compaction` with `retain_tokens`,
+`min_retained_turns`, `summary_max_tokens`, `fallback` (`local|error`), and
+additive `guidance`. On Windows the compatibility-named `bash` tool uses
+PowerShell (`pwsh.exe`, then `powershell.exe`) by default and accepts only a
+global `windows_shell` override. Snow creates the shell suspended, assigns it to
+a kill-on-close Job Object, then resumes it so cancellation covers descendants.
+
 ## Development
 
 ```bash
 go test ./...
 go vet ./...
 go test -race ./internal/...
+# Native Windows validation
+powershell -ExecutionPolicy Bypass -File scripts/test-windows.ps1
 ```
 
 The default test suite is network-free and includes end-to-end coverage for the

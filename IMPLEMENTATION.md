@@ -469,8 +469,9 @@ type SessionIndex interface {
 ```go
 type Agent interface {
     Prompt(ctx context.Context, text string, opts ...PromptOption) error
-    Steer(ctx context.Context, text string) error     // mid-run queue (phase 2+)
-    FollowUp(ctx context.Context, text string) error  // after run (phase 2+)
+    Steer(text string) error     // active-run queue; next safe assistant+tool boundary
+    FollowUp(text string) error  // active-run queue; after natural stop and all steering
+    PendingInputs() protocol.InputQueue
     Abort(ctx context.Context) error
     Subscribe(func(AgentEvent)) (unsubscribe func)
 
@@ -556,9 +557,10 @@ type Store interface {
 | `grep` | Search text files with RE2 and line numbers | read | Pure Go; glob filter, case option, match/output caps |
 | `glob` | Match regular file paths | read | Pure Go; `**` recursive segments and result/output caps |
 | `ask_user` | Request one to three user decisions or free-form answers | read/interaction | Direct schema; TUI prompt, SDK callback, or RPC reply/reject; automatic Other choice |
+| `update_plan` | Emit a turn-local implementation checklist | read | Direct Default-mode schema; structured cloned event; unavailable/rejected in Plan Mode; not persisted |
 | `webfetch` | Fetch a public HTTP(S) resource | network | Deferred schema; Surf Chrome 150; secure TLS; HTML → Markdown; SSRF, timeout, redirect, media-type, and output bounds |
 
-`grep`, `glob`, `ask_user`, and `webfetch` are registered in the default builtin registry.
+`grep`, `glob`, `ask_user`, `update_plan`, and `webfetch` are registered in the default builtin registry.
 The file search tools skip
 hidden/generated directories and symlink entries, and all search roots still
 pass through the path guard. These reduce bash round-trips and improve Windows
@@ -694,7 +696,7 @@ JSON: `{"answers":[{"id":"...","answer":"..."}]}`.
 3. **Output caps:** default 256 KiB per tool result; read/search stream bounded data and return explicit truncation markers.
 4. **Atomic writes:** write stages content beside the destination, syncs it, and renames it into place; existing file permissions are retained.
 5. **Secrets:** redaction hooks optional later; never echo auth file contents.
-6. **bash:** `Setpgid` / process group kill on cancel (Unix); document weaker Windows cancel.
+6. **bash:** `Setpgid` / process-group kill on Unix; Windows starts the shell suspended, assigns it to a kill-on-close Job Object, resumes its primary thread, and covers descendant cleanup with native tests.
 7. **write/edit:** optional backup sibling `.snow-bak` **off** by default (explicit config).
 8. **webfetch:** allow only public HTTP(S), disable environment proxies, validate every
    redirect, resolve and pin public addresses at dial time, verify TLS certificates,
@@ -912,14 +914,18 @@ Must be completed in Phase 1–2 coding, results folded into adapter constants/t
 
 | Key | Action |
 |-----|--------|
-| `enter` | Send (single-line mode) / send if configured |
-| `ctrl+j` or `shift+enter` | Newline (terminal-dependent) |
-| `ctrl+c` | Abort running turn; second press quit if idle |
+| `enter` | Send while idle; queue one steering message while busy |
+| `alt+enter` | Newline while idle; queue one follow-up while busy |
+| `ctrl+j` | Reliable newline while idle or busy |
+| `ctrl+c` / `esc` | Abort running turn, clear queues, and restore queued TUI text |
 | `ctrl+d` | Quit on empty editor |
 | `ctrl+l` | `/model` |
 | `pgup/pgdn` | Transcript scroll |
 
-Phase 2: `~/.snow/keybindings.json` overrides.
+Implemented: versioned YAML overrides load from `$SNOW_HOME/keybindings.yaml`
+and trusted project `.snow/keybindings.yaml`; custom semantic adaptive themes
+load from bounded `themes/*.yaml` directories with project-over-global
+precedence, strict validation, diagnostics, and safe emergency bindings.
 
 ### 6.5 Event → UI mapping
 
@@ -943,8 +949,9 @@ only follows the tail when already at the bottom. See `docs/tui-performance.md`.
 
 ### 6.6 Themes
 
-MVP: one dark default (snow-agent-inspired slate + coral accent optional).  
-Phase 4: `~/.snow/themes/*.json` lipgloss token maps.
+Built-in adaptive, dark, light, and high-contrast palettes are joined by bounded
+YAML semantic token maps under `~/.snow/themes/*.yaml` and trusted project
+`.snow/themes/*.yaml`.
 
 ---
 
@@ -984,6 +991,9 @@ func Open(ctx context.Context, opts Options) (*Session, error)
 
 func (s *Session) Prompt(ctx context.Context, text string) error
 func (s *Session) PromptWithMode(ctx context.Context, text string, mode protocol.CollaborationMode) error
+func (s *Session) Steer(ctx context.Context, text string) error
+func (s *Session) FollowUp(ctx context.Context, text string) error
+func (s *Session) PendingInputs() (protocol.InputQueue, error)
 func (s *Session) Abort(ctx context.Context) error
 func (s *Session) Subscribe(func(protocol.AgentEvent)) (cancel func)
 func (s *Session) Model() protocol.Model
@@ -1054,7 +1064,9 @@ Primary consumers: non-Go hosts, IDE bridges. Go hosts should prefer `snowsdk`.
 | `~/.snow/trust.json` | Project trust decisions |
 | `~/.snow/sessions/` | Pure-Go SQLite session databases |
 | `~/.snow/models-cache.json` | Reserved for future persistent catalog caching; current discovery is startup-only |
-| `~/.snow/keybindings.json` | Phase 2 |
+| `~/.snow/keybindings.yaml` | Versioned global TUI binding overrides |
+| `~/.snow/themes/*.yaml` | Versioned custom semantic themes |
+| `~/.snow/search.yaml` | Git-aware grep/glob search policy |
 | `<project>/AGENTS.md` | Always-on project instructions (if present) |
 | `<project>/.snow/config.json` | Project settings (trust-gated) |
 | `<project>/.snow/plugins/*` | Phase 4 plugin manifests (trust-gated) |
@@ -1098,11 +1110,18 @@ Hard cap total injected context (e.g. 100 KiB) with truncation notice.
 
 Mirrors pi’s *input-loading guard*, **not** a sandbox.
 
-**When prompted:** project contains trust-sensitive resources (`.snow/config.json`, plugins, etc.).
+**When prompted:** every previously undecided project in the interactive TUI,
+before runtime construction. This intentionally covers trust-sensitive resources
+added after the first launch.
 
-**Decisions:** store canonical path → `allow` | `deny` in `~/.snow/trust.json`.
+**Decisions:** store canonical exact path → `allow` | `deny` in
+`~/.snow/trust.json`; nearest ancestor decisions apply until an exact child
+override exists. Decisions load or block project config, plugins, MCP declarations,
+and skills on the same launch.
 
-**Headless:** `default_project_trust: ask` behaves as **deny** unless `--trust` / config `always`.
+**Headless:** `default_project_trust: ask` behaves as **deny**. Global policy is
+`ask|allow|deny`; legacy `always|never` remain aliases. Headless surfaces never
+prompt. Runtime `/trust allow|deny` changes apply on the next launch.
 
 **Always loaded without trust:** `AGENTS.md` (documented residual prompt-injection risk).
 
@@ -1365,7 +1384,7 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] `/sessions`, `/resume`, and `/new` — current-directory listing, resume picker, and new-session flow
 - [x] Durable same-database branches, SDK branch APIs, and TUI `/tree` picker
 - [x] Manual `/compact` — model-backed summary with deterministic fallback and a logical context boundary; full history remains append-only
-- [x] Project trust prompt + `trust.json` (store, parent-walk, `/trust` command; interactive prompt pending)
+- [x] Pre-runtime interactive project trust prompt + canonical `trust.json` parent-walk and `/trust` command
 - [x] Permission `ask` mode — TUI interactive asker via `/allow` `/deny` (/allow always); headless defaults to deny
 
 **Acceptance tests**
@@ -1385,7 +1404,7 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] `--mode json` event stream
 - [x] RPC JSONL mode skeleton
 - [x] Extensibility core — public Go plugin API, lifecycle manager, descriptor registry, observe-only events, and JSON-RPC v2 stdio host
-- [x] Steer/follow-up queue (abort + re-prompt path; full steer queue pending)
+- [x] Bounded root steer/follow-up queue across Agent, SDK, RPC, and TUI, with safe tool-batch boundaries and abort restoration
 
 **Acceptance tests**
 
@@ -1401,18 +1420,18 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 
 - [x] Agent Skills `SKILL.md` format — separate resource/progressive-disclosure layer
 - [x] MCP client — official Go SDK, 2026-07-28/legacy negotiation, stdio/Streamable HTTP, tools/resources/prompts
-- [ ] Themes + keybindings files
+- [x] Themes + keybindings files (bounded strict YAML, trusted project overrides)
 - [x] Persistent ChatGPT model catalog refresh/cache (account- and backend-origin-scoped ETag/TTL entries)
 - [x] Durable fork/tree navigation (`/tree` picker)
 - [ ] Optional sandbox backend design spike (plugins are not sandboxed)
-- [ ] Windows path/bash story hardened
+- [x] Windows path/bash story hardened (suspended Job assignment, PowerShell, path aliases, atomic replacement, native script)
 - [x] Plugin tool appears in schema and executes through the central permission gate
 - [x] Opt-in BM25 tool routing keeps deferred parameter schemas out of normal model context
 - [ ] Hybrid embeddings, namespace-first routing, and embedding cache
 
 **Acceptance tests**
 
-- Custom theme loads; skill activates through `$name`/`activate_skill` and survives compaction.
+- Custom theme/keybindings load with safe fallback; skill activates through `$name`/`activate_skill` and survives compaction.
 - MCP stateless HTTP and stdio servers negotiate the expected protocol and execute through permissions.
 - Plugin tool appears in schema and executes through the manager/registry path.
 
@@ -1603,7 +1622,7 @@ preventing ambiguous input routing.
 | **Tool** | Model-invoked capability with JSON schema |
 | **Session** | Durable conversation tree (pure-Go SQLite) |
 | **Compaction** | Summarize/replace older turns to free context |
-| **Project trust** | Permission to load project-local config/plugins |
+| **Project trust** | Permission to load project-local config, plugins, MCP declarations, and skills |
 | **Permission mode** | ask/allow/deny for mutating/exec tools |
 | **SDK** | In-process Go API (`pkg/snowsdk`) |
 | **RPC mode** | Subprocess JSONL control plane for foreign hosts |

@@ -52,7 +52,8 @@ behavior in code before relying on a checklist item.
   version, API-key login/logout, and ChatGPT auth inspection.
 - Streaming agent loop with serial tool calls, tool-result chaining, cancellation,
   event subscriptions, provider errors, malformed-argument handling, call/turn limits,
-  session persistence, and branch-persisted Default/Plan collaboration modes.
+  session persistence, branch-persisted Default/Plan collaboration modes, and a
+  bounded safe-boundary root steer/follow-up queue exposed across SDK/RPC/TUI.
 - `internal/session`: in-memory and SQLite stores, indexed branch tips,
   parent traversal, fork primitive, file index/listing, and resume by database path.
 - Built-in tools in `internal/tools/builtin`: `read`, `write`, `edit`, `bash`,
@@ -67,6 +68,8 @@ behavior in code before relying on a checklist item.
   selected per prompt, and recoverable through the direct `search_tools` tool.
 - Grep supports RE2, line numbers, case-insensitive search, path globs, and
   match/output caps. Glob supports ordinary path patterns plus recursive `**`.
+  Both honor hierarchical `.gitignore`/`.ignore`, bounded global/trusted-project
+  YAML policy, hidden/generated defaults, and per-call soft-ignore overrides.
 - Provider adapters: OpenCode Go OpenAI-compatible Chat Completions/SSE with live
   startup availability merged with models.dev capability/reasoning metadata, ChatGPT/Codex
   Responses/SSE with a static subscription catalog, and deterministic `fake`
@@ -77,12 +80,14 @@ behavior in code before relying on a checklist item.
   JWT metadata extraction, compatible Codex/Pi/OpenCode imports, guarded token
   refresh with atomic rotation, and account-scoped authenticated model catalogs.
 - `ask`/`allow`/`deny` permissions, interactive TUI asker, session rules, and
-  `/permissions`; project trust persistence and `/trust` are present.
+  `/permissions`; canonical project trust persistence, pre-runtime TUI prompting,
+  fail-closed headless behavior, and `/trust` are present.
 - Context assembly from the built-in preamble and nearest-first `AGENTS.md` files,
   with a byte cap. CLAUDE.md compatibility is off by default.
 - Bubble Tea TUI transcript, markdown rendering, streaming updates, model/provider
   pickers, model-aware `/thinking` effort selection, login/logout, permissions,
-  sessions, slash completion, and `@` file mentions.
+  sessions, slash completion, and `@` file mentions. Strict bounded YAML custom
+  themes/keybindings support global and trusted-project precedence with warnings.
 - `pkg/snowsdk` prompt/event/session API, `pkg/protocol` public DTOs, JSONL RPC,
   and a capability-oriented Go plugin API/manager with namespaced tools,
   observe-only events, and JSON-RPC v2 stdio runtimes.
@@ -111,22 +116,13 @@ behavior in code before relying on a checklist item.
 
 ### Known gaps / next work
 
-1. Add additional search configuration/ignore controls if needed after the
-   default `grep`/`glob` implementation is exercised in real repositories.
-2. Improve manual compaction quality and configuration if needed. `/compact` now
-   stores a logical summary boundary while preserving the complete history.
-3. Implement real SDK abort/steer/follow-up semantics. `snowsdk.Session.Abort` is
-   currently a no-op; full steer queue support remains pending.
-4. Add branch naming/tree polish if desired. Current TUI session commands are
-   `/sessions` (pick a current-directory session), `/resume` (same picker or an
-   explicit path), `/new`, and `/tree` (navigate branches).
-5. Add optional MCP extension product surfaces (Apps, Tasks, Enterprise Managed
+1. Add optional MCP extension product surfaces (Apps, Tasks, Enterprise Managed
    Authorization) and interactive OAuth callback/token persistence if needed.
    Core MCP and Agent Skills are implemented. Embeddings and namespace-first
    routing remain future work; plugins and stdio MCP servers still execute with
    OS privileges and are not a sandbox.
-6. Add CI, scripts, external SDK/RPC examples, configurable
-   themes/keybindings, and hardened Windows behavior.
+2. Add CI and external SDK/RPC examples. Native Windows verification is
+   available through `scripts/test-windows.ps1`, but hosted CI is not configured.
 
 ## Repository structure
 
@@ -235,8 +231,11 @@ and subagent concurrency/depth overrides. `snow mcp` and
 skills subcommands are `list|get|enable|disable`. Mutations are global by
 default and accept `--project`.
 
+The active TUI composer queues plain Enter as steering and Alt+Enter as a
+follow-up; Ctrl+J remains multiline, and abort clears/restores queued TUI text.
+Queue delivery is bounded, one-at-a-time, after complete serial tool batches.
 Current TUI slash commands are `/allow [always]`, `/default`, `/deny`, `/help`, `/login`,
-`/logout <provider>`, `/model`, `/plan [message]`, `/thinking`, `/new`, `/permissions`, `/resume`,
+`/logout [provider]`, `/model`, `/plan [message]`, `/thinking`, `/new`, `/permissions`, `/resume`,
 `/agent [path]`, `/agent concurrency N`, `/sessions`, `/settings`, `/compact`, `/mcp`, `/skills`, `/tree`, `/quit`, and `/trust [allow|deny]`. Top-level `Shift+Tab` toggles Default/Plan mode (queued to `turn_done` while busy). Native terminal drag selection/copy is the default; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down scroll the transcript. Setting `tui.mouse` to `true` opts into mouse/trackpad scrolling at the cost of terminal-dependent selection overrides. `Ctrl+V` pastes through the active textarea, while platform terminal shortcuts use bracketed paste; `Ctrl+C` remains abort/quit. `@` in the composer discovers
 project files; Enter/Tab inserts a reference without submitting the prompt.
 
@@ -254,7 +253,10 @@ also offers both flows and compatible Codex/Pi/OpenCode credential imports.
 
 Credential precedence is explicit API key/SDK option, auth store, then known
 environment fallback (`OPENCODE_API_KEY`). Snow's auth file is normally
-`~/.snow/auth.json`; never print `Key`, `Access`, or `Refresh` values. ChatGPT
+`~/.snow/auth.json`; never print `Key`, `Access`, or `Refresh` values. Project
+trust is resolved on canonical paths before TUI runtime construction; every
+undecided interactive project prompts, while headless `ask` remains fail-closed.
+Runtime `/trust` changes apply on the next launch. ChatGPT
 compatible sources are `~/.codex/auth.json`, `~/.pi/agent/auth.json`, and
 OpenCode's XDG/local data auth file.
 

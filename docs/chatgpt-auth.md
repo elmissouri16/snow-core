@@ -33,18 +33,23 @@ Use `snow login chatgpt` for loopback browser PKCE login,
 `snow login chatgpt --device-code` for the 15-minute device flow, or
 `--no-open` to print the browser URL without launching it. The browser flow
 validates state and PKCE and accepts a complete pasted callback URL as a
-headless fallback, including when callback port 1455 is occupied. In the TUI,
-`/login` → `chatgpt` offers browser login (with device fallback),
-device-code login, and these compatible local import sources:
+headless fallback, including when callback port 1455 is occupied. In the TUI, `/login` → `chatgpt` offers known local account/workspace IDs
+first, then unrestricted browser login (with device fallback) and device-code
+login. Local sources are ordered OpenCode, Pi, then Codex:
 
-- Codex: `~/.codex/auth.json` (`tokens.access_token`, `refresh_token`, `account_id`)
-- Pi: `~/.pi/agent/auth.json` (`openai-codex` OAuth entry)
 - OpenCode: `$XDG_DATA_HOME/opencode/auth.json` or
   `~/.local/share/opencode/auth.json` (`openai` OAuth entry)
+- Pi: `~/.pi/agent/auth.json` (`openai-codex` OAuth entry)
+- Codex: `~/.codex/auth.json` (`tokens.access_token`, `refresh_token`, `account_id`)
 
-Selecting a source requires a ChatGPT account ID, validates and atomically
-imports it as Snow's `chatgpt` credential. Refreshable expired imports are
-accepted and refreshed before use.
+The picker groups duplicate source entries by account ID and displays source
+names without tokens. Selecting a known account starts a fresh Snow browser OAuth
+flow with the official Codex `allowed_workspace_id` restriction and validates the
+returned token claim before saving it. Snow never copies OpenCode/Pi/Codex token
+material in this TUI flow. Unrestricted browser/device login remains available
+when a new or different account is intended. The lower-level importer remains
+covered for explicit compatibility use. Snow uses official Codex scopes and the
+same form-encoded token refresh contract used by Codex, Pi, and OpenCode.
 Tokens are never shown in the picker. `snow auth check chatgpt` remains strictly
 side-effect-free; runtime resolution refreshes tokens that expire within five
 minutes under a cross-process auth-store lock and atomically persists rotated
@@ -59,9 +64,13 @@ discovery. Raw records are cached for 15 minutes under
 origin/account metadata, ETags, and mode `0600`.
 Only `visibility=list` entries are shown; `supported_in_api=false` does not hide
 subscription-only models. Snow maps low/medium/high reasoning and intentionally
-omits xhigh/max/ultra. A same-account stale cache, then a bundled snapshot,
-keeps startup usable offline. The auth store lock is `~/.snow/auth.json.lock`
-and is also `0600`.
+omits xhigh/max/ultra. Authenticated account catalogs are authoritative: a model
+missing from the selected account is not merged back from the bundled snapshot,
+and an unavailable active model is replaced by a compatible account model.
+Authenticated sessions fall back only to a same-account cache; they never inject
+a bundled model after account discovery fails. The bundled snapshot is used only
+before a ChatGPT account is configured. The auth store lock is
+`~/.snow/auth.json.lock` and is also `0600`.
 
 ## Research findings
 
@@ -106,10 +115,18 @@ for every refresh error.
 
 ### OpenCode
 
-The current [OpenCode Go repository](https://github.com/opencode-ai/opencode)
-does not implement ChatGPT subscription OAuth. Its provider adapters load API
-keys and use provider-specific HTTP clients. Therefore it is useful as a
-provider-interface reference, but not as a source for ChatGPT OAuth behavior.
+Current OpenCode (`anomalyco/opencode`) implements ChatGPT Plus/Pro OAuth in
+[`packages/opencode/src/plugin/openai/codex.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/openai/codex.ts).
+It stores the credential under `openai`, extracts `accountId` from OAuth tokens,
+refreshes with a form-encoded `/oauth/token` request, rewrites Responses calls to
+`https://chatgpt.com/backend-api/codex/responses`, and sends bearer,
+`ChatGPT-Account-Id`, `originator`, user-agent, and session headers. Its OAuth
+model filter explicitly allows `gpt-5.3-codex-spark`. The backend still applies
+account entitlements: a Spark-capable OpenCode account and a different browser-
+selected Snow account are not interchangeable merely because both report a
+ChatGPT Plus plan. Snow therefore uses the discovered account ID only as an
+official OAuth workspace restriction, obtains its own token, and rejects a login
+whose returned claim belongs to a different account.
 
 ## Compatibility boundary
 
