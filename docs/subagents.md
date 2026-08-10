@@ -20,7 +20,9 @@ When enabled, the complete direct tool set is always exposed together:
 - `interrupt_agent`: cancel only the target's current turn;
 - `list_agents`: list stable paths and states without prompts or full results.
 
-Paths start at `/root`. Segments are lowercase letters, digits, and underscores, begin with a letter, and are at most 64 bytes. Children cannot supply or forge their sender identity: every tool instance is bound to its caller by the host.
+Paths start at `/root`. Segments are lowercase letters, digits, and underscores, begin with a letter, and are at most 64 bytes. For the model-facing `spawn_agent` tool only, a hyphenated task label is normalized to this canonical form (`api-review` becomes `/root/api_review`). SDK and RPC requests remain strict and must supply canonical underscore-only task names. Targeting tools always use the final canonical path. Children cannot supply or forge their sender identity: every tool instance is bound to its caller by the host.
+
+At the provider boundary, manager-bound model tools also accept a sole `{"_raw":"<JSON object>"}` compatibility envelope produced by some tool-call parsers. `_raw` is not a public tool argument: Snow unwraps it internally, then applies the same strict schema validation. Mixed fields, malformed JSON, non-object values, trailing input, and unknown inner fields are rejected rather than repaired.
 
 A child completion is delivered exactly once as a sealed `agent` role mailbox message containing type, sender, recipient, and payload. Mail is appended only by the receiving agent at a safe loop boundary, so it cannot fork a serial tool-result chain. `wait_agent` does not duplicate the payload: its default/activity mode returns on one event, while `until=all` waits until every descendant is terminal or the bounded timeout expires and returns aggregate counts.
 

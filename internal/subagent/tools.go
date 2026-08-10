@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
 	"github.com/snow-core/snow/internal/permission"
@@ -39,6 +41,9 @@ func (t *managerTool) Run(ctx context.Context, raw json.RawMessage, _ tools.Tool
 		if err := decodeStrict(raw, &in); err != nil {
 			return tools.ErrorResult(err), nil
 		}
+		// Model providers sometimes emit readable task labels with hyphens. Keep
+		// persisted identities canonical without relaxing the manager/SDK API.
+		in.TaskName = strings.ReplaceAll(in.TaskName, "-", "_")
 		state, err := t.manager.Spawn(ctx, t.caller, in)
 		if err != nil {
 			return tools.ErrorResult(err), nil
@@ -141,16 +146,61 @@ func decodeStrict(raw json.RawMessage, out any) error {
 	if len(raw) == 0 {
 		raw = []byte(`{}`)
 	}
+	var err error
+	raw, err = unwrapRawArguments(raw)
+	if err != nil {
+		return fmt.Errorf("invalid arguments: %w", err)
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return errors.New("invalid arguments: expected a JSON object")
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
 		return fmt.Errorf("invalid arguments: %w", err)
 	}
-	if dec.More() {
-		return errors.New("invalid trailing arguments")
+	var trailing any
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("invalid trailing arguments")
+		}
+		return fmt.Errorf("invalid trailing arguments: %w", err)
 	}
 	return nil
 }
+
+// unwrapRawArguments accepts the sole-field compatibility envelope used by
+// some provider tool-call parsers. The contained value must still be one valid
+// JSON object and is subsequently decoded with the ordinary strict schema.
+func unwrapRawArguments(raw json.RawMessage) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		// Let the strict decoder report ordinary malformed or trailing JSON.
+		return raw, nil
+	}
+	encoded, ok := fields["_raw"]
+	if !ok {
+		return raw, nil
+	}
+	if len(fields) != 1 {
+		return nil, errors.New(`compatibility field "_raw" must be the only argument`)
+	}
+	var inner string
+	if err := json.Unmarshal(encoded, &inner); err != nil {
+		return nil, errors.New(`compatibility field "_raw" must contain a JSON string`)
+	}
+	inner = strings.TrimSpace(inner)
+	if !json.Valid([]byte(inner)) {
+		return nil, errors.New(`compatibility field "_raw" contains malformed JSON`)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(inner), &object); err != nil || object == nil || !strings.HasPrefix(inner, "{") {
+		return nil, errors.New(`compatibility field "_raw" must contain a JSON object`)
+	}
+	return json.RawMessage(inner), nil
+}
+
 func jsonResult(v any) (tools.ToolResult, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -160,7 +210,7 @@ func jsonResult(v any) (tools.ToolResult, error) {
 }
 
 var toolSchemas = map[string]protocol.ToolSchema{
-	"spawn_agent":     {Name: "spawn_agent", Description: "Start an independent bounded subagent task. Use fork_turns=none for self-contained exploration. The default role (general is an accepted alias) can run permission-gated bash for investigation; explorer is read-only; worker is shell-capable but write/edit require explicit global and role mutation opt-in.", Parameters: json.RawMessage(`{"type":"object","properties":{"task_name":{"type":"string"},"message":{"type":"string"},"agent_type":{"type":"string","description":"Optional role: default is shell-capable (general is an accepted alias), explorer is read-only, and worker is shell-capable with file mutation only when explicitly enabled. Omit to use the configured default role."},"fork_turns":{"type":"string"},"model":{"type":"string"},"reasoning_effort":{"type":"string","enum":["off","minimal","low","medium","high"]}},"required":["task_name","message"],"additionalProperties":false}`)},
+	"spawn_agent":     {Name: "spawn_agent", Description: "Start an independent bounded subagent task. The task name becomes a canonical /root/... path; hyphens normalize to underscores. Use fork_turns=none for self-contained exploration. The default role (general is an accepted alias) can run permission-gated bash for investigation; explorer is read-only; worker is shell-capable but write/edit require explicit global and role mutation opt-in.", Parameters: json.RawMessage(`{"type":"object","properties":{"task_name":{"type":"string","description":"One lowercase task label. It becomes a canonical /root/... agent path; hyphens normalize to underscores.","minLength":1,"maxLength":64,"pattern":"^[a-z][a-z0-9_-]{0,63}$"},"message":{"type":"string"},"agent_type":{"type":"string","description":"Optional role: default is shell-capable (general is an accepted alias), explorer is read-only, and worker is shell-capable with file mutation only when explicitly enabled. Omit to use the configured default role."},"fork_turns":{"type":"string","description":"Parent context to copy: none, all, or a positive integer string.","pattern":"^(none|all|[1-9][0-9]*)$"},"model":{"type":"string"},"reasoning_effort":{"type":"string","enum":["off","minimal","low","medium","high"]}},"required":["task_name","message"],"additionalProperties":false}`)},
 	"send_message":    {Name: "send_message", Description: "Queue an attributed message to an existing agent without starting a turn.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"},"message":{"type":"string"}},"required":["target","message"],"additionalProperties":false}`)},
 	"followup_task":   {Name: "followup_task", Description: "Queue an attributed task and run or reuse the target when it is idle.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"},"message":{"type":"string"}},"required":["target","message"],"additionalProperties":false}`)},
 	"wait_agent":      {Name: "wait_agent", Description: "Wait for subagents. Use until=all whenever the answer depends on outstanding child work; activity returns after the next mailbox or lifecycle event. Result content arrives through attributed mailbox messages.", Parameters: json.RawMessage(`{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":0},"until":{"type":"string","enum":["activity","all"],"description":"activity waits for one event; all waits until every descendant is terminal or the timeout expires"}},"additionalProperties":false}`)},
