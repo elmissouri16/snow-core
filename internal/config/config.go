@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
@@ -42,18 +43,84 @@ type TUIConfig struct {
 	Mouse bool   `json:"mouse,omitempty"`
 }
 
+// CompactionConfig controls manual context compaction. Zero RetainTokens uses
+// a model-aware automatic target.
+type CompactionConfig struct {
+	RetainTokens     int    `json:"retain_tokens,omitempty"`
+	MinRetainedTurns int    `json:"min_retained_turns,omitempty"`
+	SummaryMaxTokens int    `json:"summary_max_tokens,omitempty"`
+	Fallback         string `json:"fallback,omitempty"` // local|error
+	Guidance         string `json:"guidance,omitempty"`
+}
+
+// WindowsShellConfig controls the compatibility-named bash tool on Windows.
+// It is global-only because project configuration must not select executables.
+type WindowsShellConfig struct {
+	Kind       string `json:"kind,omitempty"`       // powershell|cmd|executable
+	Executable string `json:"executable,omitempty"` // absolute when kind=executable
+}
+
+func DefaultCompaction() CompactionConfig {
+	return CompactionConfig{MinRetainedTurns: 2, SummaryMaxTokens: 2000, Fallback: "local"}
+}
+
+func (c CompactionConfig) Validate() error {
+	if c.RetainTokens < 0 || c.RetainTokens > 1_000_000 {
+		return errors.New("config: compaction retain_tokens must be 0..1000000")
+	}
+	if c.MinRetainedTurns < 1 || c.MinRetainedTurns > 100 {
+		return errors.New("config: compaction min_retained_turns must be 1..100")
+	}
+	if c.SummaryMaxTokens < 128 || c.SummaryMaxTokens > 32_768 {
+		return errors.New("config: compaction summary_max_tokens must be 128..32768")
+	}
+	if c.Fallback != "local" && c.Fallback != "error" {
+		return errors.New("config: compaction fallback must be local or error")
+	}
+	if len(c.Guidance) > 16*1024 {
+		return errors.New("config: compaction guidance exceeds 16 KiB")
+	}
+	return nil
+}
+
+func (c WindowsShellConfig) Validate() error {
+	if c.Kind == "" {
+		c.Kind = "powershell"
+	}
+	switch c.Kind {
+	case "powershell", "cmd":
+		if c.Executable != "" {
+			return errors.New("config: windows shell executable requires kind=executable")
+		}
+	case "executable":
+		if c.Executable == "" || !filepath.IsAbs(c.Executable) {
+			return errors.New("config: windows shell executable must be absolute")
+		}
+	default:
+		return fmt.Errorf("config: unsupported windows shell kind %q", c.Kind)
+	}
+	return nil
+}
+
 const defaultTUITheme = "default"
 
 // ValidateTUITheme accepts the small built-in palette set. Keeping this in the
 // config package makes persisted settings fail early instead of producing a
 // partially styled terminal later.
 func ValidateTUITheme(theme string) error {
-	switch theme {
-	case "", "default", "dark", "light", "high-contrast":
+	theme = strings.TrimSpace(theme)
+	if theme == "" {
 		return nil
-	default:
-		return fmt.Errorf("config: unsupported TUI theme %q (use default, dark, light, or high-contrast)", theme)
 	}
+	if len([]rune(theme)) > 64 {
+		return fmt.Errorf("config: invalid TUI theme name %q", theme)
+	}
+	for _, r := range theme {
+		if r < 0x20 || strings.ContainsRune(`/\\`, r) {
+			return fmt.Errorf("config: invalid TUI theme name %q", theme)
+		}
+	}
+	return nil
 }
 
 // SkillsConfig controls Agent Skills discovery. Standard .snow/.agents paths
@@ -175,12 +242,27 @@ type ProjectSkillsConfig struct {
 	Overrides map[string]bool `json:"overrides,omitempty"`
 }
 
+// ProjectTUIConfig is the trust-gated subset of TUI preferences.
+type ProjectTUIConfig struct {
+	Theme *string `json:"theme,omitempty"`
+}
+
+// ProjectCompactionConfig is a narrow trust-gated overlay. Pointer fields
+// preserve omission while guidance is additive to the fixed/global contract.
+type ProjectCompactionConfig struct {
+	RetainTokens     *int    `json:"retain_tokens,omitempty"`
+	MinRetainedTurns *int    `json:"min_retained_turns,omitempty"`
+	SummaryMaxTokens *int    `json:"summary_max_tokens,omitempty"`
+	Fallback         *string `json:"fallback,omitempty"`
+	Guidance         string  `json:"guidance,omitempty"`
+}
+
 // Config is the global snow configuration.
 type Config struct {
 	DefaultProvider         string                          `json:"default_provider,omitempty"`
 	DefaultModel            string                          `json:"default_model,omitempty"`
 	PermissionMode          string                          `json:"permission_mode,omitempty"`            // ask|allow|deny
-	DefaultProjectTrust     string                          `json:"default_project_trust,omitempty"`      // ask|always|never
+	DefaultProjectTrust     string                          `json:"default_project_trust,omitempty"`      // ask|allow|deny (always|never aliases)
 	Thinking                string                          `json:"thinking,omitempty"`                   // off|minimal|low|medium|high
 	ReasoningSummary        string                          `json:"reasoning_summary,omitempty"`          // off|auto|concise|detailed
 	TextVerbosity           string                          `json:"text_verbosity,omitempty"`             // low|medium|high
@@ -195,6 +277,8 @@ type Config struct {
 	MCPServers              map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
 	Skills                  SkillsConfig                    `json:"skills,omitempty"`
 	Subagents               SubagentConfig                  `json:"subagents,omitempty"`
+	Compaction              CompactionConfig                `json:"compaction,omitempty"`
+	WindowsShell            WindowsShellConfig              `json:"windows_shell,omitempty"`
 }
 
 // Default returns the default configuration.
@@ -214,10 +298,12 @@ func Default() Config {
 			"opencode-go": {},
 			"chatgpt":     {},
 		},
-		MCPServers: map[string]publicmcp.ServerSpec{},
-		Skills:     SkillsConfig{Overrides: map[string]bool{}},
-		Subagents:  DefaultSubagents(),
-		TUI:        TUIConfig{Theme: "default", Mouse: false},
+		MCPServers:   map[string]publicmcp.ServerSpec{},
+		Skills:       SkillsConfig{Overrides: map[string]bool{}},
+		Subagents:    DefaultSubagents(),
+		Compaction:   DefaultCompaction(),
+		WindowsShell: WindowsShellConfig{Kind: "powershell"},
+		TUI:          TUIConfig{Theme: "default", Mouse: false},
 	}
 }
 
@@ -272,10 +358,29 @@ func Load(path string) (Config, error) {
 	if cfg.TUI.Theme == "" {
 		cfg.TUI.Theme = defaultTUITheme
 	}
+	defaults := DefaultCompaction()
+	if cfg.Compaction.MinRetainedTurns == 0 {
+		cfg.Compaction.MinRetainedTurns = defaults.MinRetainedTurns
+	}
+	if cfg.Compaction.SummaryMaxTokens == 0 {
+		cfg.Compaction.SummaryMaxTokens = defaults.SummaryMaxTokens
+	}
+	if cfg.Compaction.Fallback == "" {
+		cfg.Compaction.Fallback = defaults.Fallback
+	}
+	if cfg.WindowsShell.Kind == "" {
+		cfg.WindowsShell.Kind = "powershell"
+	}
 	if err := ValidateTUITheme(cfg.TUI.Theme); err != nil {
 		return cfg, err
 	}
 	if err := cfg.Subagents.ValidateSubagents(); err != nil {
+		return cfg, err
+	}
+	if err := cfg.Compaction.Validate(); err != nil {
+		return cfg, err
+	}
+	if err := cfg.WindowsShell.Validate(); err != nil {
 		return cfg, err
 	}
 	return cfg, nil
@@ -287,6 +392,37 @@ type ProjectExtensions struct {
 	Plugins    []plugin.PluginSpec             `json:"plugins,omitempty"`
 	MCPServers map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
 	Skills     ProjectSkillsConfig             `json:"skills,omitempty"`
+	TUI        ProjectTUIConfig                `json:"tui,omitempty"`
+	Compaction ProjectCompactionConfig         `json:"compaction,omitempty"`
+}
+
+// ApplyProjectPreferences applies only explicitly allowed trust-gated fields.
+func ApplyProjectPreferences(cfg *Config, project ProjectExtensions) error {
+	if cfg == nil {
+		return nil
+	}
+	if project.TUI.Theme != nil {
+		cfg.TUI.Theme = strings.TrimSpace(*project.TUI.Theme)
+	}
+	if project.Compaction.RetainTokens != nil {
+		cfg.Compaction.RetainTokens = *project.Compaction.RetainTokens
+	}
+	if project.Compaction.MinRetainedTurns != nil {
+		cfg.Compaction.MinRetainedTurns = *project.Compaction.MinRetainedTurns
+	}
+	if project.Compaction.SummaryMaxTokens != nil {
+		cfg.Compaction.SummaryMaxTokens = *project.Compaction.SummaryMaxTokens
+	}
+	if project.Compaction.Fallback != nil {
+		cfg.Compaction.Fallback = strings.TrimSpace(*project.Compaction.Fallback)
+	}
+	if strings.TrimSpace(project.Compaction.Guidance) != "" {
+		if cfg.Compaction.Guidance != "" {
+			cfg.Compaction.Guidance += "\n"
+		}
+		cfg.Compaction.Guidance += project.Compaction.Guidance
+	}
+	return cfg.Compaction.Validate()
 }
 
 // LoadProject reads only the plugin declarations from a project config. It is

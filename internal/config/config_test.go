@@ -212,8 +212,11 @@ func TestTUIThemeValidation(t *testing.T) {
 			t.Fatalf("theme %q rejected: %v", theme, err)
 		}
 	}
-	if err := ValidateTUITheme("solarized"); err == nil {
-		t.Fatal("unknown theme accepted")
+	if err := ValidateTUITheme("solarized"); err != nil {
+		t.Fatalf("custom theme name rejected: %v", err)
+	}
+	if err := ValidateTUITheme("../escape"); err == nil {
+		t.Fatal("unsafe theme name accepted")
 	}
 }
 
