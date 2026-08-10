@@ -105,7 +105,7 @@ The root database stores only bounded topology/status/usage metadata in `subagen
 ## Surfaces
 
 - TUI: `/settings` persists enablement and child concurrency (applied on the next launch); `/agent` shows aggregate running/queued/finished counts, capacity, role/model/effort, duration, usage, result/error, and durability; `/agent <path-or-id>` displays full state plus a bounded tool-aware transcript; `/agent concurrency N` persists a positive child limit up to the safety cap of 256. The root transcript receives compact lifecycle rows, not child token streams.
-- SDK: `ReadySubagents`, `SpawnSubagent`, `SendSubagentMessage`, `FollowupSubagent`, `WaitSubagents`, `InterruptSubagent`, `Subagents`, `Subagent`, and `SubagentUsage`.
+- SDK: `ReadySubagents`, `SpawnSubagent`, `SendSubagentMessage`, `FollowupSubagent`, `WaitSubagents`, `WaitSubagentsUntilAll`, `InterruptSubagent`, `Subagents`, `Subagent`, and `SubagentUsage`.
 - RPC: `subagent_ready`, `subagent_spawn`, `subagent_send_message`, `subagent_followup`, `subagent_wait`, `subagent_interrupt`, `subagent_list`, and `subagent_get`.
 - JSON/events/plugins: ordinary child events carry `agent`; lifecycle events also carry `subagent`, and mailbox events carry `agent_message`. Root events retain omitted correlation fields for compatibility.
 

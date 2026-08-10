@@ -121,8 +121,9 @@ behavior in code before relying on a checklist item.
    Core MCP and Agent Skills are implemented. Embeddings and namespace-first
    routing remain future work; plugins and stdio MCP servers still execute with
    OS privileges and are not a sandbox.
-2. Add CI and external SDK/RPC examples. Native Windows verification is
-   available through `scripts/test-windows.ps1`, but hosted CI is not configured.
+2. Add hosted CI and standalone external SDK/RPC example projects. The in-repo
+   SDK/RPC guides include runnable examples, and native Windows verification is
+   available through `scripts/test-windows.ps1`.
 
 ## Repository structure
 
@@ -132,6 +133,12 @@ behavior in code before relying on a checklist item.
 ├── README.md                 # user quickstart, providers, SDK, security, tests
 ├── IMPLEMENTATION.md         # architecture, interfaces, research, roadmap
 ├── docs/
+│   ├── README.md             # documentation index and canonical ownership map
+│   ├── using-snow.md         # TUI/CLI modes, keys, commands, and workflows
+│   ├── configuration.md      # config precedence, paths, JSON/YAML references
+│   ├── security.md           # consolidated privilege and threat boundaries
+│   ├── sdk.md                # public Go SDK lifecycle and API reference
+│   ├── rpc.md                # JSONL framing, commands, events, and examples
 │   ├── chatgpt-auth.md       # ChatGPT auth format, imports, research, boundary
 │   ├── sessions.md           # Pure-Go SQLite session storage and schema
 │   ├── plugins.md            # Go/plugin manager and JSON-RPC v2 extension core
@@ -305,7 +312,18 @@ append-only/tree model when adding resume or fork features.
 
 ## Documentation map
 
-- `README.md`: user-facing install, run, providers/auth, SDK, security, development.
+- `README.md`: polished project overview, quickstart, surfaces, capabilities,
+  safety summary, and links to canonical guides.
+- `docs/README.md`: documentation index grouped by user intent and canonical ownership.
+- `docs/using-snow.md`: CLI/TUI modes, flags, keys, slash commands, queues, and workflows.
+- `docs/configuration.md`: precedence, paths, global/project JSON, auxiliary YAML,
+  environment variables, validation, and diagnostics.
+- `docs/security.md`: permissions, trust, path/process/network boundaries,
+  credentials, extensions, skills, subagents, and recommended operating profiles.
+- `docs/sdk.md`: public Go SDK options, lifecycle, methods, events, readiness,
+  errors, concurrency, permissions, and examples.
+- `docs/rpc.md`: Snow JSONL framing, all commands, responses/events, ordering,
+  user input, goals, subagents, shutdown, and Python example.
 - `IMPLEMENTATION.md`: detailed design, package map, public interface sketches,
   security model, plugin protocol, phased roadmap, testing plan, research, decisions.
 - `docs/chatgpt-auth.md`: supported OAuth credential shape, source import locations,

@@ -20,11 +20,11 @@ import (
 type Options struct {
 	// CWD is the working directory. Empty means the caller's cwd.
 	CWD string
-	// Provider is the provider id (opencode-go | fake). Empty uses config default.
+	// Provider is the provider id (opencode-go | chatgpt | fake). Empty uses config default.
 	Provider string
 	// Model is the model id. Empty resolves the provider default.
 	Model string
-	// SessionPath resumes an existing SQLite .db session. Empty creates a new one.
+	// SessionPath opens or creates a SQLite .db session. Empty creates an indexed one.
 	SessionPath string
 	// NoSession uses an ephemeral in-memory conversation. Provider credentials
 	// and model caches still use AuthPath/SNOW_HOME.

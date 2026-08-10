@@ -2,12 +2,12 @@
 
 > **Status:** Active pre-alpha implementation. The design remains the architecture/roadmap reference; verify current behavior in source and tests.
 > **Binary:** `snow`  
-> **Module (placeholder):** `github.com/snow-core/snow`  
-> **Language:** Go  
-> **Surfaces:** Interactive TUI · print/JSON stream · embeddable SDK · RPC (phase 3+)  
+> **Module:** `github.com/snow-core/snow`
+> **Language:** Go
+> **Surfaces:** Interactive TUI · print/JSON stream · embeddable SDK · JSONL RPC
 > **Auth MVP:** OpenCode Go (API key) · ChatGPT/Codex browser/device OAuth, guarded refresh, and authenticated catalog runtime
 
-This document is the single source of truth for building **snow-core**: a standalone, modular, efficient coding-agent harness inspired by pi, OpenCode, and Codex—written in Go with a TUI and SDK.
+This document is the architecture, design-history, and roadmap reference for **snow-core**: a standalone, modular, efficient coding-agent harness inspired by pi, OpenCode, and Codex—written in Go with a TUI and SDK. Current source and tests are the behavioral authority.
 
 ---
 

@@ -1,198 +1,204 @@
 # snow-core
 
-**snow** is a minimal, modular coding-agent harness written in Go — a fast
-terminal client and embeddable library in one binary, inspired by pi,
-OpenCode, and Codex.
+**snow** is a small, streaming coding-agent harness written in Go. It ships as
+one terminal application and as an embeddable Go SDK, with the same agent loop,
+tools, sessions, permissions, and events behind every surface.
 
-> **Status:** pre-alpha (Phase 1–4 of the [IMPLEMENTATION.md](./IMPLEMENTATION.md)
-> roadmap). Core loop, sessions, tools, OpenCode Go adapter, TUI, print/JSON/RPC
-> modes, and the SDK are functional and tested.
+> **Project status:** pre-alpha. The core runtime is functional and tested, but
+> public APIs and file formats may still change before v1.
 
-## Highlights
+- Interactive terminal UI, print mode, JSONL events, and JSONL RPC
+- OpenCode Go API-key access and ChatGPT/Codex OAuth
+- SQLite sessions with resume, branches, compaction, and persistent goals
+- Built-in coding tools, MCP, plugins, Agent Skills, and optional subagents
+- Pure-Go SDK under [`pkg/snowsdk`](pkg/snowsdk)
 
-- **Small core** — agent loop, sessions, tools, providers, permissions. No Electron or external database server.
-- **Streaming-first** — tokens, tool progress, bounded tool previews, and lifecycle events flow to the UI/SDK without buffering full turns.
-- **Modular** — `Tool`, `Provider`, `permission.Service`, `session.Store`, and
-  capability-oriented Go plugin interfaces; optional JSON-RPC v2 plugins run as
-  explicit argv-based child processes.
-- **MCP 2026-07-28** — official Go SDK v1.7.0 client with modern stateless
-  Streamable HTTP, stdio, legacy negotiation, tools, resources, prompts, and
-  live tool-catalog refresh.
-- **Agent Skills** — open `SKILL.md` format, trust-gated project/user discovery,
-  metadata-only startup catalogs, on-demand activation, and confined resources.
-- **Three surfaces, one loop** — interactive TUI, print/JSON/RPC CLI modes, and a
-  pure-Go SDK (`pkg/snowsdk`) with no TUI dependency.
-- **Sessions** — pure-Go SQLite storage with indexed tree branching (`id`/`parentId`), fork/resume.
-- **Built-in tools** — bounded `read`/`write`/`edit`/`bash`, pure-Go `grep` and `glob`, direct `ask_user` interaction, Default-mode turn-local `update_plan` checklists, plus deferred public-web `webfetch` with Surf Chrome 150 impersonation and HTML-to-Markdown conversion; interactive file edits and overwrites show compact red/green diffs.
-- **Progressive tool discovery** — existing schemas remain direct; MCP and
-  plugin tools can opt into an in-process Bleve BM25 router that exposes only
-  the five most relevant schemas and provides `search_tools` recovery.
-- **Persistent Thread Goals** — saved branch objectives, budgets, private automatic continuation, usage accounting, and `/goal`/SDK/RPC controls. See [docs/goals.md](docs/goals.md).
-- **Plan Mode** — branch-persisted Codex-style non-mutating planning,
-  blocking `request_user_input`, chunk-safe structured proposed-plan streaming,
-  and an atomic Plan-to-implementation TUI handoff.
-- **Opt-in Codex-style subagents** — independent child agent loops, canonical
-  task paths, safe attributed mailboxes, six V2 control tools, SDK/RPC/TUI
-  observation, bounded concurrency, and optional independent SQLite history.
+[Quick start](#quick-start) · [Surfaces](#choose-a-surface) ·
+[Capabilities](#capabilities) · [Security](#security-first) ·
+[Documentation](#documentation) · [Roadmap](IMPLEMENTATION.md)
 
-## Install & run
+## Quick start
 
-Requires Go 1.27. The module currently declares Go 1.27rc2 because that is the
-available 1.27 toolchain required by the latest Surf release.
+### Requirements
 
-```bash
-go build ./cmd/snow
-# Install/update the development build at ~/.local/bin/snow
+- Go 1.27; `go.mod` currently declares `1.27rc2` because that is the available
+  toolchain required by the pinned Surf release.
+- macOS or Linux for the primary supported path. Windows behavior is covered by
+  native path, PowerShell, process-job, and atomic-replacement tests.
+
+### Build or install
+
+```sh
+git clone https://github.com/elmissouri16/snow-core.git
+cd snow-core
+
+# Build a repository-local binary
+
+go build -o snow ./cmd/snow
+./snow --version
+
+# Or install/update ~/.local/bin/snow
 ./scripts/install-local.sh
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-`install-local.sh` builds a stripped binary and atomically replaces the existing
-installation. Override the destination with `SNOW_INSTALL_DIR=/another/bin`.
-After installation, `snow` is available from any directory on a shell whose
-`PATH` contains `~/.local/bin`. Snow treats the directory where it is launched
-as the active project:
+Choose either build path. Override the install directory with
+`SNOW_INSTALL_DIR=/path/to/bin`. Snow uses the directory where it is launched as
+the active project.
 
-```bash
-cd ~/Coding/my-project
-snow
-```
+### Authenticate
 
-```bash
-# Interactive TUI
-snow
+OpenCode Go:
 
-# Print mode
-snow -p "summarize this repo"
-
-# JSONL event stream
-snow --mode json -p "list the files"
-snow --subagents --subagent-max-concurrency 10  # run up to 10 children at once
-
-# RPC mode (JSONL over stdin/stdout)
-echo '{"id":"1","type":"prompt","message":"hello"}' | snow --mode rpc
-```
-
-## Providers & auth
-
-| Provider | Auth | Notes |
-|----------|------|-------|
-| `opencode-go` | `OPENCODE_API_KEY` env, `~/.snow/auth.json` (`opencode-go`), or `--api-key` | OpenAI-compatible streaming adapter with live startup model discovery and capability metadata |
-| `chatgpt` | ChatGPT/Codex OAuth in `~/.snow/auth.json` (`chatgpt`) | Browser PKCE/device login, automatic refresh, authenticated cached catalog, and Responses streaming |
-| `fake` | none | Deterministic scripted provider for tests/demos |
-
-```bash
+```sh
 export OPENCODE_API_KEY=oc-...
-snow -p "hello"
+snow -p "summarize this repository"
 ```
 
-Credentials resolution order: explicit flag/SDK option → `~/.snow/auth.json` →
-environment. The auth file is created with `0600` permissions.
+Or save the key in Snow's credential store:
 
-Run `snow login chatgpt` for browser PKCE login, or
-`snow login chatgpt --device-code` on a headless machine. `--no-open` prints the
-browser URL without launching it. In the TUI, `/login` → `chatgpt` offers browser
-login, device-code login, and import from an existing Codex, Pi, or OpenCode
-credential. When OpenCode, Pi, or Codex identifies compatible local ChatGPT
-accounts, Snow groups those account IDs in the login picker and starts its own
-browser OAuth flow constrained to the selected workspace using Codex's official
-`allowed_workspace_id` mechanism. Snow never copies another client's token in
-this TUI flow. Access tokens refresh automatically and rotated refresh tokens are
-saved atomically. `/logout` opens a picker containing stored provider credentials;
-`/logout <provider>` remains available as a direct shortcut. `/model` opens the cached model catalog for the active provider
-(OpenCode Go or ChatGPT/Codex); ChatGPT catalogs are fetched per account from the
-Codex backend and cached for 15 minutes with ETags. Authenticated sessions fall
-back only to that same account's cache; bundled models are used only before an
-account is configured. Account catalogs remain authoritative so a model omitted for one account is not falsely offered there. OpenCode
-Go availability from `GET /models` is enriched with the same public models.dev
-capability, limit, pricing, and reasoning-effort metadata used by OpenCode.
-Direct gateway fields remain authoritative. `/thinking`
-opens only the reasoning levels advertised by the active model. The normalized
-levels are `off`, `minimal`, `low`, `medium`, and `high`; unsupported explicit
-selections are rejected rather than silently downgraded. The equivalent CLI
-flag is `--thinking off|minimal|low|medium|high`. Tab completes slash commands,
-while Enter runs them. `/settings` opens one persistent panel for model, theme, thinking effort,
-reasoning summary, text verbosity, permission mode, subagent enablement, and
-Agent Skills enablement. Built-in themes are `default` (adaptive), `dark`, `light`, and
-`high-contrast`. Custom adaptive themes are versioned YAML files under
-`$SNOW_HOME/themes/*.yaml`; trusted projects may override same-named custom
-themes from `.snow/themes/*.yaml` (built-in names are reserved). Key overrides
-live in `$SNOW_HOME/keybindings.yaml` and trusted `.snow/keybindings.yaml`.
-Invalid auxiliary files produce warnings and fall back without breaking startup;
-`ctrl+c` and modal `esc` remain emergency bindings. Changes
-save immediately to `~/.snow/config.json`; reasoning summary
-(`off|auto|concise|detailed`) and text verbosity (`low|medium|high`) are enabled
-for ChatGPT/Codex and shown as unavailable for other providers. `/permissions`
-remains a focused shortcut to the same persisted permission setting. The
-subagent and Agent Skills toggles are persisted and take effect on the next
-Snow launch.
-Reasoning summaries stream into a muted Markdown-styled `think:` block and stay
-visible in the transcript; an animated placeholder remains visible when the
-provider has not emitted a summary delta yet. The full-screen frame keeps only
-the transcript scrollable, while the composer grows from three to six rows as
-needed. By default Snow leaves mouse reporting disabled, so ordinary drag
-selection and the terminal's copy shortcut work on generated content.
-PageUp/PageDown, Home/End, and `Ctrl+Up`/`Ctrl+Down` scroll the transcript.
-Pickers accept arrows or `j`/`k`, plus Tab/Shift+Tab and Home/End. The model
-picker shows a compact deduplicated catalog; press `/` to search provider names,
-model IDs, display names, and descriptions, then press Enter to apply the match.
-Set `"tui": {"mouse": true}` in `~/.snow/config.json` to opt into mouse/trackpad
-scrolling (terminal selection may then require the terminal's mouse-override
-modifier). Long streams freeze an off-tail snapshot until it reaches the bottom
-again. `Ctrl+V` reads the clipboard into the active textarea, while platform
-terminal paste shortcuts such as `Cmd+V` or `Ctrl+Shift+V` arrive as safe
-bracketed paste. `Ctrl+J` reliably inserts a newline; `Option+Return` also inserts a newline while
-idle when the macOS terminal reports Option as Meta/Alt. Plain Enter submits.
-While a run is active, Enter queues a steering message for the next safe boundary
-(after the current assistant response and its complete serial tool batch), while
-Alt+Enter queues a follow-up that runs only after steering and ordinary model work
-settle. Delivery is bounded and one message at a time, FIFO within each class
-with steering priority, and the live row shows pending count plus elapsed time. `Ctrl+C` or `Esc` aborts, clears pending queue
-work, and restores queued TUI text to the composer; `Ctrl+J` remains the reliable
-busy-time multiline binding. `Ctrl+C` quits while idle, so use the terminal's copy
-shortcut for selected text.
-`update_plan` is a turn-local Default-mode checklist event and is deliberately
-unavailable in collaboration Plan Mode; it is not persisted across resume.
-`Shift+Tab` toggles Default/Plan mode at the top-level composer; during an active
-turn the toggle is queued until `turn_done`. `/plan [message]` enters Plan Mode
-and `/default` returns to normal execution. Proposed
-plans stream as separate Markdown items, followed by current-context, fresh-
-context, or keep-planning choices. See [docs/plan-mode.md](docs/plan-mode.md).
-`/goal [objective]` creates a saved branch goal; `/goal pause|resume|edit|clear`
-controls its private automatic continuation. Pause/edit/clear stay available
-while goal work runs. See [docs/goals.md](docs/goals.md).
-Type `@` in
-the composer to browse current project files and insert a path reference;
-file discovery runs asynchronously so the first `@` never blocks typing.
-Enter/Tab accepts a file without submitting the prompt. The composer footer
-always shows the active permission mode and current/model context-token usage.
-If startup fails before the agent is ready, the frame switches to an explicit
-error state and keeps `Ctrl+C`/`Ctrl+D` available to restore the terminal and
-quit.
-`/agent` shows the current subagent tree with running/queued/finished totals,
-capacity, role/model, timing, usage, results/errors, and durability;
-`/agent <path-or-id>` shows a bounded tool-aware transcript without turning the
-root composer into direct child input. `/agent concurrency N` persists the
-maximum simultaneously running children (the root does not consume a slot),
-and `/settings` exposes the same restart-applied value. Durable child histories
-are enabled by default so `/agent` remains useful after session resume.
-`/sessions` opens a compact picker for persisted sessions in the current
-directory, `/resume` opens the same picker (or resumes an explicit path), `/new`
-creates a persisted session, `/compact` manually summarizes older complete turns with
-an animated progress indicator, and `/tree` navigates named branches inside the active
-session. The tree shows durable parent/fork topology; `f`, `r`, and `d` create a
-named fork, rename, or guarded-delete an inactive leaf branch. Check the configured credential without refreshing it or printing secrets:
-
-```bash
-snow auth check chatgpt
-
-# Resume a persisted session from the CLI
-snow --session ~/.snow/sessions/<cwd>/<session>.db
+```sh
+snow login opencode-go
 ```
 
-See [docs/chatgpt-auth.md](docs/chatgpt-auth.md) for OAuth commands, compatible
-import locations, refresh behavior, cache paths, and the backend compatibility boundary.
+ChatGPT/Codex:
 
-## SDK
+```sh
+snow login chatgpt                 # browser PKCE
+snow login chatgpt --device-code   # headless/device flow
+snow auth check chatgpt            # inspect without refreshing
+```
+
+Credentials resolve in this order: explicit `--api-key`/SDK option, Snow's auth
+store, then a known environment fallback such as `OPENCODE_API_KEY`. Secrets are
+stored separately from configuration and are never printed by inventory commands.
+See [ChatGPT authentication](docs/chatgpt-auth.md) for OAuth, refresh, imports,
+and account-scoped model catalogs.
+
+### Start the TUI
+
+```sh
+cd /path/to/project
+snow
+```
+
+The first interactive launch in an undecided project asks whether project-local
+Snow configuration may be loaded. This is an input-loading decision, not a
+sandbox boundary.
+
+## Choose a surface
+
+All surfaces observe the same normalized `protocol.AgentEvent` stream and use
+the same provider → tool → session loop.
+
+| Surface | Command or package | Best for |
+|---|---|---|
+| Interactive TUI | `snow` | Daily terminal coding with pickers, approvals, sessions, Plan Mode, goals, and subagent inspection |
+| Print | `snow -p "..."` | Human-readable one-shot automation |
+| JSON events | `snow --mode json -p "..."` | Shell pipelines and event recording |
+| RPC | `snow --mode rpc` | Long-lived foreign-language/IDE control over JSONL stdio |
+| Go SDK | `github.com/snow-core/snow/pkg/snowsdk` | In-process embedding without Cobra or Bubble Tea |
+
+Common examples:
+
+```sh
+# Print assistant text and tool status
+snow --permission deny -p "list the Go packages"
+
+# Emit one AgentEvent JSON object per line
+snow --mode json --permission deny -p "summarize recent changes"
+
+# Resume a SQLite session
+snow --session ~/.snow/sessions/<encoded-cwd>/<session>.db
+
+# Start a long-lived RPC process; keep stdin open while prompts run
+snow --mode rpc --permission deny
+```
+
+Read the [user guide](docs/using-snow.md) for TUI keys, slash commands, queue
+semantics, sessions, and modes. Read the [RPC protocol](docs/rpc.md) before
+building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
+
+## Providers
+
+| Provider | ID | Authentication | Runtime |
+|---|---|---|---|
+| OpenCode Go | `opencode-go` | API key | OpenAI-compatible chat completions/SSE with live model discovery enriched by models.dev metadata |
+| ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | Codex Responses/SSE, browser/device login, guarded refresh, and account-scoped cached catalogs |
+| Fake | `fake` | None | Deterministic local provider for tests and examples |
+
+Model metadata controls tool, vision, context, reasoning, summary, verbosity,
+and pricing behavior. Thinking levels are normalized to `off`, `minimal`, `low`,
+`medium`, and `high`; Snow rejects an unsupported explicit level rather than
+silently changing it.
+
+## Capabilities
+
+### Built-in tools
+
+| Tool | Purpose | Default risk |
+|---|---|---|
+| `read` | Read a bounded file window | read |
+| `write` | Atomically create or replace a file | write |
+| `edit` | Apply exact, uniqueness-checked replacements | write |
+| `bash` | Run a bounded shell command (`sh` on Unix, PowerShell on Windows) | exec |
+| `grep` | RE2 text search with globs, ignore files, and output caps | read |
+| `glob` | Pure-Go path matching, including recursive `**` | read |
+| `ask_user` | Ask the host structured questions | read/interaction |
+| `update_plan` | Emit a turn-local Default-mode checklist | read |
+| `webfetch` | Fetch bounded public HTTP(S) content as text/Markdown | network |
+
+File tools enforce configured roots with symlink-aware path checks. Search honors
+hierarchical `.gitignore` and `.ignore`, global/trusted-project search policy,
+hidden/generated defaults, and per-call exclusions. `webfetch` is deferred,
+public-address-only, redirect-checked, and never executes JavaScript.
+
+### Sessions and context
+
+- Pure-Go SQLite session databases with append-only parent-linked entries
+- Indexed branch tips, named forks, branch selection, rename, and guarded delete
+- Current-directory session picker and explicit path resume
+- Manual, turn-aware compaction that preserves complete history
+- `AGENTS.md` context discovery with a hard byte cap
+- Usage and optional catalog-derived cost persisted with assistant messages
+
+See [sessions](docs/sessions.md) and [configuration](docs/configuration.md).
+
+### Collaboration
+
+- **Default mode** allows the normal coding tool surface and turn-local
+  `update_plan` checklists.
+- **Plan Mode** is a branch-persisted collaboration instruction that asks the
+  model not to mutate and emits structured proposed-plan events plus
+  `request_user_input`. It is not a permission or sandbox boundary: ordinary
+  write, shell, plugin, and MCP capabilities remain behind their normal gates.
+- **Thread Goals** attach a persisted objective and optional token budget to a
+  session branch and may continue through bounded private turns.
+- **Steering and follow-ups** are accepted only during an active root run and
+  delivered one at a time at safe assistant/tool boundaries.
+
+See [Plan Mode](docs/plan-mode.md), [Thread Goals](docs/goals.md), and
+[model-requested user input](docs/user-input.md).
+
+### Extensibility
+
+- **MCP:** official Go SDK client for current stateless Streamable HTTP and stdio,
+  with legacy negotiation, tools, resources, prompts, subscriptions, and live
+  tool-catalog refresh.
+- **Plugins:** statically linked Go extensions or explicit JSON-RPC v2 child
+  runtimes with namespaced tools and observe-only events.
+- **Agent Skills:** open `SKILL.md` discovery with metadata-only startup context,
+  on-demand activation, resource confinement, and trust-aware precedence.
+- **Tool routing:** opt-in Bleve BM25 discovery keeps deferred schemas out of
+  ordinary provider requests and exposes `search_tools` as a recovery path.
+- **Subagents:** optional bounded child agent tree with independent sessions,
+  role-scoped tools, attributed mailboxes, concurrency/depth limits, and
+  SDK/RPC/TUI observation.
+
+See [MCP](docs/mcp.md), [plugins](docs/plugins.md), [Agent Skills](docs/skills.md),
+[tool routing](docs/tool-routing.md), and [subagents](docs/subagents.md).
+
+## Embed with Go
 
 ```go
 package main
@@ -201,238 +207,151 @@ import (
     "context"
     "fmt"
 
-    "github.com/snow-core/snow/pkg/snowsdk"
     "github.com/snow-core/snow/pkg/protocol"
+    "github.com/snow-core/snow/pkg/snowsdk"
 )
 
 func main() {
     ctx := context.Background()
-    s, err := snowsdk.Open(ctx, snowsdk.Options{
+    session, err := snowsdk.Open(ctx, snowsdk.Options{
         Provider:       "opencode-go",
         NoSession:      true,
         PermissionMode: "deny",
     })
-    if err != nil { panic(err) }
-    defer s.Close()
+    if err != nil {
+        panic(err)
+    }
+    defer session.Close()
 
-    s.Subscribe(func(ev protocol.AgentEvent) {
-        if ev.Type == protocol.EvTextDelta {
-            fmt.Print(ev.Text)
+    session.Subscribe(func(event protocol.AgentEvent) {
+        if event.Agent == nil && event.Type == protocol.EvTextDelta {
+            fmt.Print(event.Text)
         }
     })
 
-    if err := s.Prompt(ctx, "List the Go files in this repo."); err != nil {
+    // Safe to call for both new and resumed sessions after subscriptions exist.
+    if err := session.ReadyGoals(); err != nil {
+        panic(err)
+    }
+    if err := session.ReadySubagents(); err != nil {
+        panic(err)
+    }
+    if err := session.Prompt(ctx, "List the Go packages in this repository."); err != nil {
         panic(err)
     }
 }
 ```
 
-For an SDK session resumed with persisted state, install event subscriptions
-first and then call `Session.ReadyGoals()` and/or `Session.ReadySubagents()`.
-`Session.Steer(ctx, text)` and `Session.FollowUp(ctx, text)` accept input only
-while a root run is active; idle calls return `snowsdk.ErrNotRunning` and ordinary
-idle continuation uses `Prompt`. `Session.PendingInputs()` returns an independent
-snapshot. `queue_updated` events expose the complete bounded pending queue.
-These explicit surface-ready steps prevent constructor-time event loss;
-subagent readiness restores topology but never silently restarts stale work.
+The SDK defaults headless permission handling to `deny`. `AutoApprove` forces
+`allow` and is suitable only for deliberately trusted environments. See the
+complete [Go SDK guide and API map](docs/sdk.md).
 
-Enable subagents with `Options.EnableSubagents`; set
-`Options.SubagentMaxConcurrency` and `Options.SubagentMaxAgents` for execution
-and identity limits. SDK orchestration methods are
-`SpawnSubagent`, `SendSubagentMessage`, `FollowupSubagent`, `WaitSubagents`,
-`WaitSubagentsUntilAll`, `InterruptSubagent`, `Subagents`, `Subagent`, and `SubagentUsage`. See
-[docs/subagents.md](docs/subagents.md) for contracts and limits.
+## Automate over RPC
 
-Usage is reported as normalized `protocol.Usage` events and persisted on
-assistant messages. It includes input/output, cache-read/cache-write,
-reasoning, totals, and optional catalog-derived cost. SDK callers can retrieve
-branch totals with `Session.Usage()`, inspect the current provider catalog with
-`Session.Models()`, and change effort at runtime with `Session.SetThinking`.
-Response controls are also available through `Options.ReasoningSummary`,
-`Options.TextVerbosity`, `Session.SetReasoningSummary`, and
-`Session.SetTextVerbosity`.
-JSON mode emits the same usage events, and print mode supports `--usage`.
-
-### Model-requested user input
-
-`ask_user` is an always-loaded direct built-in (unless an explicit `Tools`
-allowlist excludes it). A call contains one to three questions. Each question
-is either free-form or has two to three single-select choices; choice questions
-also show an automatic **Other** free-form option. The TUI presents the request
-inline and keeps the transcript scrollable. Use Enter to accept, `Ctrl+V` to
-paste, `Ctrl+J` for a newline in free-form answers, Tab/Shift+Tab to move between
-questions, Esc to decline the tool call, or Ctrl+C to abort the whole turn.
-
-SDK embeddings supply `Options.UserInputHandler`. The callback receives a
-`protocol.UserInputRequest` and returns a `protocol.UserInputResponse`; answers
-are normalized to question order before the model receives them. Without a
-handler, print/JSON and SDK calls fail fast with an unavailable-input tool
-result instead of hanging.
-
-RPC accepts explicit `steer` and `follow_up` commands with a top-level
-`message`. A second `prompt` never cancels active work implicitly: use one of the
-queue commands, or send `abort` before a replacement prompt. `session_info`
-reports pending steer/follow-up counts.
-
-RPC also exposes `subagent_ready`, `subagent_spawn`,
-`subagent_send_message`, `subagent_followup`, `subagent_wait` (with optional
-`until: "activity"|"all"`), `subagent_interrupt`, `subagent_list`, and `subagent_get`; `session_info`
-reports bounded capability/limit metadata.
-
-RPC clients resolve the emitted `user_input_request` event with one of these
-commands:
+RPC uses LF-delimited JSON objects over stdin/stdout. Responses and asynchronous
+agent events share stdout, so clients must continuously read output and correlate
+only objects whose `type` is `response` by `id`.
 
 ```json
-{"id":"reply-1","type":"user_input_reply","params":{"request_id":"call-1","answers":[{"id":"format","answer":"JSON"}]}}
-{"id":"reject-1","type":"user_input_reject","params":{"request_id":"call-1"}}
+{"id":"info-1","type":"session_info"}
+{"id":"prompt-1","type":"prompt","message":"Summarize this repository"}
+{"id":"steer-1","type":"steer","message":"Focus on public APIs"}
+{"id":"abort-1","type":"abort"}
 ```
 
-Answers are trimmed, must be non-empty, and are limited to 8 KiB each. See
-[docs/user-input.md](docs/user-input.md) for the complete schema and surface
-behavior.
+A prompt receives an immediate acknowledgement; completion is signaled by the
+normal event stream, especially `turn_done`. Keep stdin open until work finishes.
+See the [RPC protocol reference](docs/rpc.md) for every command, response and
+event shape, concurrency rules, user-input replies, goals, and subagents.
 
-## Plugins
+## Security first
 
-The JSONL RPC control plane also accepts `{"type":"set_thinking","thinking":"low"}`
-and `{"type":"set_mode","mode":"plan"}`; prompts may attach a mode
-atomically. `session_info` reports effort, supported levels, and mode.
-The first extensibility slice supports statically linked Go plugins and explicit
-JSON-RPC v2 stdio runtimes. Use `--plugin <manifest-or-executable>` repeatedly,
-`--no-plugins`, or `snowsdk.Options.Plugins`/`GoPlugins`. Plugin tools are
-namespaced as `plugin_<id>_<tool>` and remain behind the normal permission
-service. Project-local plugin declarations are trust-gated; plugins run with
-user OS privileges and are not a sandbox. Tool definitions may opt into
-per-tool deferred discovery without changing their execution transport. See
-[docs/plugins.md](docs/plugins.md) and [docs/tool-routing.md](docs/tool-routing.md).
+Snow is a harness, **not a sandbox**:
 
-## MCP servers
+- Snow, `bash`, plugins, stdio MCP servers, and subagents run with the user's OS
+  privileges.
+- Headless SDK/RPC/print callers should normally use `deny`; `ask` has no
+  interactive permission reply channel outside the TUI and therefore fails closed.
+- Project trust permits loading project-local configuration and extensions. It
+  does not constrain what an enabled process can do.
+- Plan Mode is a collaboration contract, not an OS enforcement boundary.
+- Repository text, tool output, extensions, skills, and child results may contain
+  prompt injection.
+- Subagents share the working tree and process side effects; parallel mutation
+  can conflict and each provider request incurs separate usage.
+- Auth tokens, API keys, MCP headers, and provider continuity data must never be
+  logged.
 
-Snow uses the official MCP Go SDK v1.7.0 and negotiates the current
-`2026-07-28` protocol, including its stateless Streamable HTTP lifecycle, with
-legacy fallback for older servers. Configure `mcp_servers` globally in
-`~/.snow/config.json`, in trust-gated project `.snow/config.json`, or use
-`--mcp <manifest-or-url-or-executable>` repeatedly. `--no-mcp` disables all
-servers. `snow mcp`/`snow mcp list` show configured servers without starting
-them; `snow mcp check [name]` performs a live negotiation. The management
-surface also provides `get`, `add`, `enable`, `disable`, and `remove`, with
-`--project` on mutations for current-project configuration.
+Read the consolidated [security model](docs/security.md) before enabling shell,
+network, extension, subagent mutation, or automatic approval in an embedding.
 
-MCP tools are namespaced as `mcp_<server>_<tool>` and deferred through the
-local router by default. Resources and prompts receive namespaced list/read/get
-bridges; `tools/list_changed` refreshes the registry and BM25 index live. HTTP
-calls remain network-risk permission requests, while stdio calls remain
-execution-risk requests. See [docs/mcp.md](docs/mcp.md) for config, SDK usage,
-capabilities, authentication, and security boundaries.
+## Configuration and storage
 
-## Agent Skills
+Default global paths:
 
-Snow discovers the open Agent Skills format from user `~/.agents/skills` and
-`~/.snow/skills` locations plus trust-gated project `.agents/skills` and
-`.snow/skills`. Only names and descriptions enter startup context;
-`activate_skill` loads full instructions and `read_skill_resource` loads one
-bundled file on demand. Activated instructions survive compaction and resume.
+```text
+~/.snow/config.json       runtime defaults
+~/.snow/auth.json         provider credentials (0600)
+~/.snow/trust.json        project trust decisions (0600)
+~/.snow/sessions/         SQLite session databases
+~/.snow/keybindings.yaml  TUI key overrides
+~/.snow/themes/*.yaml     custom themes
+~/.snow/search.yaml       grep/glob policy
+```
 
-Use `--skill-dir` for an additional trusted directory and `--no-skills` for a
-one-run disable. `snow skills list|get|enable|disable` inventories and controls
-global or project policy without modifying skill files. SDK callers use
-`Options.SkillDirs`/`MCPServers`, `Session.Skills()` for enabled entries, and
-`Session.SkillInventory()` for enabled plus disabled entries. The TUI exposes
-read-only `/mcp` and `/skills` status pickers. See [docs/skills.md](docs/skills.md).
+`SNOW_HOME` relocates global configuration/auth/trust/auxiliary files and
+`SNOW_SESSIONS_DIR` relocates session databases. Trusted projects may define a
+restricted `.snow/config.json`, `.snow/keybindings.yaml`, `.snow/search.yaml`,
+and `.snow/themes/*.yaml`. See the [configuration reference](docs/configuration.md)
+for precedence, every global field, project scope, environment variables, and
+YAML examples.
 
-## Permissions & security
+## Documentation
 
-- Runs **as the user**; no in-process sandbox (see
-  [IMPLEMENTATION.md §9](./IMPLEMENTATION.md#9-security-model)).
-- `--permission ask|allow|deny` gates write/edit/bash, deferred network tools,
-  and the separate `delegate` risk used to start/follow up subagents.
-  `--tools read,write,edit,bash,grep,glob` optionally restricts the built-in
-  tool registry to an explicit allowlist, which is useful for reproducible
-  headless runs and capability-matched benchmarks.
-  `read`, `grep`, and `glob` are read-only and allowed in ask/deny modes;
-  `webfetch` is classified as network access, prompts in ask mode, and is hidden
-  in deny mode. Interactive
-  permission mode selected through `/settings` or `/permissions` becomes the
-  global default and applies to the active session; “allow always” rules remain
-  scoped to the active session.
-  Headless default is `deny`.
-- Project MCP declarations, plugin configuration, and Agent Skills are
-  trust-gated. On first interactive launch in every previously undecided project,
-  Snow asks before constructing the runtime; allow or deny is persisted for the
-  exact canonical project and applies immediately. Headless surfaces never ask
-  and treat `ask` as deny. `/trust allow|deny` changes an already running TUI's
-  policy for the next launch because loaded extensions cannot be hot-unloaded
-  safely. Configured stdio MCP servers and skill scripts still run with user OS
-  privileges when invoked; neither project trust nor the skill format is a
-  sandbox. `AGENTS.md` context remains always loaded.
-- File tools enforce path roots (cwd + explicit allows) with symlink resolution.
-  Path validation and the later filesystem operation are separate OS calls, so
-  a hostile concurrent process can still race by replacing an ancestor after
-  validation; descriptor-relative traversal is a documented residual hardening
-  item rather than an in-process sandbox guarantee.
-  `grep` and `glob` honor hierarchical `.gitignore`/`.ignore` files and
-  `$SNOW_HOME/search.yaml` plus trusted `.snow/search.yaml`; per-call `hidden`,
-  `include_ignored`, and `exclude` options control soft exclusions while `.git`
-  and symlink entries are always skipped.
-- Plan Mode's non-mutation rule is model instruction, not a sandbox; shell,
-  plugin, and MCP tools still run with the user's OS privileges.
-- Auth secrets are never logged; the auth file is `0600`.
-- Prompt injection from repo files, tool output, extensions, and child results is a documented residual risk.
-- Subagents share the cwd, OS privileges, processes, and provider usage. They are
-  not sandboxed; parallel mutation can conflict. The `default` (`general` alias) and `worker`
-  roles can use permission-gated `bash`; `explorer` remains read-only. File
-  mutation still requires both `subagents.allow_mutation=true` and the selected
-  role's `allow_mutation=true`, and enabling subagents never implies mutation or
-  recursion. See [docs/subagents.md](docs/subagents.md) for the explicit worker
-  configuration example.
+Start at the [documentation index](docs/README.md).
 
-### Auxiliary configuration
-
-Auxiliary YAML uses `version: 1`, is strictly decoded, bounded to 64 KiB, and
-warns/falls back on invalid input. A custom theme names one built-in `extends`
-base and supplies semantic `light`/`dark` colors (`#RRGGBB` or `0..255`). Search
-policy supports `respect_gitignore`, `respect_ignore`, `hidden`,
-`generated_dirs`, and additive `exclude` lists. Manual compaction is configured
-in `config.json` under `compaction` with `retain_tokens`,
-`min_retained_turns`, `summary_max_tokens`, `fallback` (`local|error`), and
-additive `guidance`. On Windows the compatibility-named `bash` tool uses
-PowerShell (`pwsh.exe`, then `powershell.exe`) by default and accepts only a
-global `windows_shell` override. Snow creates the shell suspended, assigns it to
-a kill-on-close Job Object, then resumes it so cancellation covers descendants.
+| Task | Guide |
+|---|---|
+| Learn the TUI and CLI modes | [Using Snow](docs/using-snow.md) |
+| Configure paths, providers, tools, themes, and search | [Configuration](docs/configuration.md) |
+| Embed Snow in Go | [SDK](docs/sdk.md) |
+| Build a JSONL client | [RPC](docs/rpc.md) |
+| Review operational boundaries | [Security](docs/security.md) |
+| Authenticate ChatGPT/Codex | [ChatGPT auth](docs/chatgpt-auth.md) |
+| Resume and branch conversations | [Sessions](docs/sessions.md) |
+| Use Plan Mode, goals, or subagents | [Plan Mode](docs/plan-mode.md) · [Goals](docs/goals.md) · [Subagents](docs/subagents.md) |
+| Extend Snow | [MCP](docs/mcp.md) · [Plugins](docs/plugins.md) · [Skills](docs/skills.md) |
+| Understand architecture and roadmap | [IMPLEMENTATION.md](IMPLEMENTATION.md) |
 
 ## Development
 
-```bash
+The normal suite is network-free:
+
+```sh
+gofmt -w <changed-go-files>
 go test ./...
 go vet ./...
 go test -race ./internal/...
+
 # Native Windows validation
 powershell -ExecutionPolicy Bypass -File scripts/test-windows.ps1
 ```
 
-The default test suite is network-free and includes end-to-end coverage for the
-agent's real built-in tools, ordered tool calls and progress events, permission
-modes, SQLite resume/continuation, provider failure paths, search bounds/path
-safety, optimized read/write behavior, BM25 deferred-tool routing/fallback,
-Surf Chrome 150 web fetching with public-address/redirect guards, MCP
-`2026-07-28` stdio/stateless-HTTP negotiation and capability bridging, Agent
-Skills trust/disclosure/path confinement, and the CLI print/JSON modes against
-local HTTP/SSE fixtures.
+Provider integration tests use local mocked HTTP/SSE servers. Real-provider
+checks require credentials and should not be added to the default suite.
 
-```bash
-# Focused agent and CLI end-to-end suites
-go test ./internal/agent ./cmd/snow -count=1
-```
+Repository package boundaries and contributor workflow are documented in
+[`AGENTS.md`](AGENTS.md). The architecture, interfaces, decisions, and phased
+roadmap live in [`IMPLEMENTATION.md`](IMPLEMENTATION.md).
 
-See [IMPLEMENTATION.md](./IMPLEMENTATION.md) for the full architecture,
-interfaces, phased roadmap (0–4), and provider verification checklist. See
-[docs/sessions.md](./docs/sessions.md) for SQLite storage and usage. See
-[docs/tui-performance.md](./docs/tui-performance.md) for Bubble Tea integration,
-upstream examples, and rendering practices.
+## Current boundaries and non-goals
 
-## Non-goals (v1)
-
-- No Electron/desktop shell, no notes/tasks/memory product surfaces.
-- No full pi/OpenCode provider catalog (only OpenCode Go + fake today).
-- No built-in sandbox/container backend.
-- No autonomous multi-agent product/workflow engine beyond the bounded,
-  root-scoped subagent tree documented in [docs/subagents.md](docs/subagents.md).
+- No Electron or desktop shell
+- No broad pi/OpenCode-style provider catalog beyond OpenCode Go,
+  ChatGPT/Codex, and fake
+- No built-in sandbox/container runtime
+- No autonomous workflow product beyond the bounded root-scoped subagent tree
+- No notes, vector-memory, or marketplace product surface
+- Optional MCP Apps, Tasks, Enterprise Managed Authorization, and interactive
+  MCP OAuth are not yet exposed
+- Hybrid embedding/namespace-first tool routing remains future work

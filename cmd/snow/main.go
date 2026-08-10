@@ -1,5 +1,5 @@
-// Command snow is the snow-core CLI: interactive TUI, print mode, and
-// JSON event stream mode.
+// Command snow is the snow-core CLI: interactive TUI, print/JSON modes, and
+// the JSONL RPC control plane.
 package main
 
 import (
@@ -54,7 +54,7 @@ func run() error {
 	}
 
 	root.PersistentFlags().StringP("prompt", "p", "", "run in print mode with this prompt")
-	root.PersistentFlags().String("mode", "", "output mode: print|json")
+	root.PersistentFlags().String("mode", "", "output mode: print|json|rpc")
 	root.PersistentFlags().String("collaboration-mode", "", "collaboration mode: default|plan")
 	root.PersistentFlags().String("provider", "", "provider id (opencode-go|fake|chatgpt)")
 	root.PersistentFlags().String("model", "", "model id")
