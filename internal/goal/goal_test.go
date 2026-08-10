@@ -84,6 +84,40 @@ func TestOversizedObjectiveMaterialized(t *testing.T) {
 		t.Fatalf("file=%v %v", info, e)
 	}
 }
+func TestManagedTextForNonActiveSourceBranch(t *testing.T) {
+	home := t.TempDir()
+	st := persisted(t)
+	c, _ := New(st, home, nil)
+	text := strings.Repeat("source", materializeThreshold)
+	if _, err := c.Create(text, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	captured, managed, err := c.ManagedTextForFork()
+	if err != nil || !managed {
+		t.Fatalf("managed=%v err=%v", managed, err)
+	}
+	fork, err := st.ForkBranch("root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.CopyManagedForFork(captured); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SelectBranch("main"); err != nil {
+		t.Fatal(err)
+	}
+	got, managed, err := c.ManagedTextForBranch(fork.ID)
+	if err != nil || !managed || got != text {
+		t.Fatalf("len=%d managed=%v err=%v", len(got), managed, err)
+	}
+	branches, _ := st.Branches()
+	for _, branch := range branches {
+		if branch.ID == "main" && !branch.Active {
+			t.Fatal("active branch was not restored")
+		}
+	}
+}
+
 func TestReentrantEmitterAndTurnGate(t *testing.T) {
 	st := persisted(t)
 	var c *Controller

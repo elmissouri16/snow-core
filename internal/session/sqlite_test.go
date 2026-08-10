@@ -132,6 +132,40 @@ func TestSQLiteMigratesVersionOneToMainBranch(t *testing.T) {
 	}
 }
 
+func TestSQLiteMigratesVersionSixMultibranchTopology(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v6.db")
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE session_meta(singleton INTEGER PRIMARY KEY,version INTEGER NOT NULL,session_id TEXT NOT NULL UNIQUE,created_at INTEGER NOT NULL,cwd TEXT NOT NULL,name TEXT NOT NULL DEFAULT '',branch_tip TEXT NOT NULL);
+CREATE TABLE entries(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,parent_id TEXT NOT NULL DEFAULT '',entry_type TEXT NOT NULL,message BLOB,summary TEXT NOT NULL DEFAULT '',compacted_through TEXT NOT NULL DEFAULT '',meta_key TEXT NOT NULL DEFAULT '',meta_value TEXT NOT NULL DEFAULT '');
+CREATE TABLE session_branches(branch_id TEXT PRIMARY KEY,tip_id TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,active INTEGER NOT NULL DEFAULT 0);
+INSERT INTO session_meta VALUES(1,6,'v6',1,'/tmp','', 'root'); INSERT INTO entries(id,parent_id,entry_type,meta_key,meta_value) VALUES('root','','meta','root','v6');
+INSERT INTO session_branches VALUES('main','root',1,1,0); INSERT INTO session_branches VALUES('branch-old','root',2,2,1);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	st, err := NewSQLiteStore(path, "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	branches, err := st.Branches()
+	if err != nil || len(branches) != 2 {
+		t.Fatalf("branches=%+v err=%v", branches, err)
+	}
+	for _, branch := range branches {
+		if branch.ID == "main" && branch.Name != "main" {
+			t.Fatalf("main=%+v", branch)
+		}
+		if branch.ID == "branch-old" && (branch.Name != "branch-old" || branch.ParentID != "main") {
+			t.Fatalf("legacy=%+v", branch)
+		}
+	}
+}
+
 func TestSQLiteDurableBranchesShareEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "branches.db")
 	st, err := NewSQLiteStore(path, "/tmp/work", Options{})

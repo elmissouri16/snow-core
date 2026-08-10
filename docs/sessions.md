@@ -31,8 +31,8 @@ Each database contains:
 
 - `session_meta`: one metadata row with schema version, session identity, CWD,
   display name, and the compatibility active branch tip;
-- `session_branches`: durable branch references with branch ID, tip entry,
-  timestamps, and active state;
+- `session_branches`: durable branch references with stable ID, unique display
+  name, parent branch/fork point, tip entry, timestamps, and active state;
 - `entries`: append-ordered parent-linked entries with a unique ID, type,
   optional JSON-encoded protocol message, and optional compaction boundary;
 - indexes on `entries.parent_id`, `entries.entry_type`, and active branches.
@@ -41,7 +41,9 @@ Version-1 databases are upgraded on open by creating a `main` branch pointing
 at the existing `branch_tip`. Forking creates another reference in the same
 SQLite tree; message rows are not copied. Selecting a branch changes the active
 tip used by subsequent appends, `Messages`, `Usage`, and prompts. `Branches`
-returns branch previews and message counts for the TUI/SDK tree picker.
+returns branch topology, previews, and message counts for the TUI/SDK tree picker.
+Schema version 7 adds names and parent/fork metadata; legacy non-main branches
+retain their IDs as names and attach to `main` when ancestry is unavailable.
 
 An append inserts the entry and updates the active branch tip in one transaction.
 Databases with neither messages nor subagent topology are removed on close and

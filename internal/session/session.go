@@ -21,7 +21,7 @@ import (
 )
 
 // SessionVersion is the current on-disk schema version.
-const SessionVersion = 6
+const SessionVersion = 7
 
 // Header is the first line of every session file.
 type Header struct {
@@ -94,7 +94,17 @@ type BranchStore interface {
 
 // BranchDeleteStore is implemented by built-in stores so callers can roll
 // back a newly committed fork if post-fork resource preparation fails.
-type BranchDeleteStore interface {
+type BranchDeleteStore interface{ DeleteBranch(branchID string) error }
+
+// BranchRollbackStore is an internal recovery seam for deleting a just-created
+// inactive fork even when cloned state would block user-facing guarded delete.
+type BranchRollbackStore interface{ DeleteBranchForRollback(branchID string) error }
+
+// BranchManagementStore adds names/topology without breaking BranchStore.
+type BranchManagementStore interface {
+	BranchStore
+	ForkBranchWithOptions(protocol.BranchForkOptions) (protocol.SessionBranch, error)
+	RenameBranch(branchID, name string) (protocol.SessionBranch, error)
 	DeleteBranch(branchID string) error
 }
 
@@ -190,9 +200,43 @@ type Options struct {
 // Errors
 // ---------------------------------------------------------------------------
 
+func validateBranchName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || len([]rune(name)) > 64 {
+		return errors.New("session: branch name must be 1..64 runes")
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return errors.New("session: branch name contains control characters")
+		}
+	}
+	return nil
+}
+
+func branchNameExists(branches map[string]protocol.SessionBranch, name, except string) bool {
+	for id, branch := range branches {
+		if id != except && strings.EqualFold(branch.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func nextBranchName(branches map[string]protocol.SessionBranch) string {
+	for n := 2; ; n++ {
+		name := fmt.Sprintf("branch-%d", n)
+		if !branchNameExists(branches, name, "") {
+			return name
+		}
+	}
+}
+
 var (
 	ErrNotFound  = errors.New("session: not found")
 	ErrNoParents = errors.New("session: cannot resolve branch tip")
+	// ErrConflict reports an optimistic branch-tip race between store handles.
+	// The failed transaction is rolled back; callers may reload/select and retry.
+	ErrConflict = errors.New("session: branch tip conflict")
 )
 
 // ---------------------------------------------------------------------------
@@ -258,7 +302,7 @@ func NewMemoryStore(opts Options) *MemoryStore {
 	s.entries = append(s.entries, root)
 	s.byID["root"] = 0
 	s.tip = "root"
-	s.branches["main"] = protocol.SessionBranch{ID: "main", TipID: "root", CreatedAt: now, UpdatedAt: now, Active: true}
+	s.branches["main"] = protocol.SessionBranch{ID: "main", Name: "main", TipID: "root", CreatedAt: now, UpdatedAt: now, Active: true}
 	return s
 }
 
@@ -687,30 +731,63 @@ func (s *MemoryStore) SelectBranch(branchID string) error {
 
 // ForkBranch implements BranchStore. The new branch shares the same entry tree.
 func (s *MemoryStore) ForkBranch(fromEntryID string) (protocol.SessionBranch, error) {
+	return s.ForkBranchWithOptions(protocol.BranchForkOptions{FromEntryID: fromEntryID})
+}
+
+func (s *MemoryStore) ForkBranchWithOptions(opts protocol.BranchForkOptions) (protocol.SessionBranch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	fromEntryID := opts.FromEntryID
 	if s.closed {
 		return protocol.SessionBranch{}, errors.New("session: store closed")
 	}
 	if _, ok := s.byID[fromEntryID]; !ok {
 		return protocol.SessionBranch{}, ErrNotFound
 	}
+	sourceID := opts.SourceBranchID
+	if sourceID == "" {
+		sourceID = s.activeBranch
+	}
+	source, ok := s.branches[sourceID]
+	if !ok {
+		return protocol.SessionBranch{}, ErrNotFound
+	}
+	belongs := false
+	for _, entry := range pathFrom(s.entries, s.byID, source.TipID) {
+		if entry.ID == fromEntryID {
+			belongs = true
+			break
+		}
+	}
+	if !belongs {
+		return protocol.SessionBranch{}, errors.New("session: fork entry is not on source branch")
+	}
+	name := strings.TrimSpace(opts.Name)
+	if name == "" {
+		name = nextBranchName(s.branches)
+	}
+	if err := validateBranchName(name); err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	if branchNameExists(s.branches, name, "") {
+		return protocol.SessionBranch{}, errors.New("session: branch name already exists")
+	}
 	now := time.Now().UnixMilli()
-	branch := protocol.SessionBranch{ID: "branch-" + randomSuffix(), TipID: fromEntryID, CreatedAt: now, UpdatedAt: now, Active: true}
+	branch := protocol.SessionBranch{ID: "branch-" + randomSuffix(), Name: name, ParentID: sourceID, ForkedFromID: fromEntryID, TipID: fromEntryID, CreatedAt: now, UpdatedAt: now, Active: true}
 	for id, current := range s.branches {
 		current.Active = false
 		s.branches[id] = current
 	}
 	s.branches[branch.ID] = branch
-	s.threadModes[branch.ID] = s.threadModes[s.activeBranch]
-	if goal := s.threadGoals[s.activeBranch]; goal != nil {
+	s.threadModes[branch.ID] = s.threadModes[sourceID]
+	if goal := s.threadGoals[sourceID]; goal != nil {
 		copy := goal.Clone()
 		copy.BranchID = branch.ID
 		copy.GoalID = newID()
 		copy.UpdatedAt = now
 		s.threadGoals[branch.ID] = copy
 	}
-	s.goalDeferred[branch.ID] = s.goalDeferred[s.activeBranch]
+	s.goalDeferred[branch.ID] = s.goalDeferred[sourceID]
 	if s.threadModes[branch.ID] == "" {
 		s.threadModes[branch.ID] = protocol.ModeDefault
 	}
@@ -721,7 +798,30 @@ func (s *MemoryStore) ForkBranch(fromEntryID string) (protocol.SessionBranch, er
 	return branch, nil
 }
 
-// DeleteBranch removes an inactive non-main branch and its branch-scoped state.
+func (s *MemoryStore) RenameBranch(branchID, name string) (protocol.SessionBranch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return protocol.SessionBranch{}, errors.New("session: store closed")
+	}
+	branch, ok := s.branches[branchID]
+	if !ok {
+		return protocol.SessionBranch{}, ErrNotFound
+	}
+	name = strings.TrimSpace(name)
+	if err := validateBranchName(name); err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	if branchNameExists(s.branches, name, branchID) {
+		return protocol.SessionBranch{}, errors.New("session: branch name already exists")
+	}
+	branch.Name = name
+	branch.UpdatedAt = time.Now().UnixMilli()
+	s.branches[branchID] = branch
+	return branch, nil
+}
+
+// DeleteBranch removes an inactive non-main leaf branch and its branch-scoped state.
 func (s *MemoryStore) DeleteBranch(branchID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -730,6 +830,38 @@ func (s *MemoryStore) DeleteBranch(branchID string) error {
 	}
 	if branchID == "" || branchID == "main" || branchID == s.activeBranch {
 		return errors.New("session: cannot delete active or main branch")
+	}
+	if _, ok := s.branches[branchID]; !ok {
+		return ErrNotFound
+	}
+	for _, branch := range s.branches {
+		if branch.ParentID == branchID {
+			return errors.New("session: cannot delete branch with children")
+		}
+	}
+	if goal := s.threadGoals[branchID]; goal != nil && !goal.Status.Terminal() {
+		return errors.New("session: cannot delete branch with nonterminal goal")
+	}
+	for _, record := range s.subagents {
+		if record.ParentBranchID == branchID {
+			return errors.New("session: cannot delete branch with durable subagents")
+		}
+	}
+	delete(s.branches, branchID)
+	delete(s.threadModes, branchID)
+	delete(s.threadGoals, branchID)
+	delete(s.goalDeferred, branchID)
+	return nil
+}
+
+func (s *MemoryStore) DeleteBranchForRollback(branchID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("session: store closed")
+	}
+	if branchID == "" || branchID == "main" || branchID == s.activeBranch {
+		return errors.New("session: cannot roll back active or main branch")
 	}
 	if _, ok := s.branches[branchID]; !ok {
 		return ErrNotFound

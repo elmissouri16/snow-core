@@ -112,8 +112,8 @@ func NewSQLiteStore(path, cwd string, opts Options) (*SQLiteStore, error) {
 			return closeDB(fmt.Errorf("session: sqlite root: %w", err))
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO session_branches(branch_id, tip_id, created_at, updated_at, active)
-			VALUES('main', ?, ?, ?, 1)`, s.tip, s.header.CreatedAt, s.header.CreatedAt); err != nil {
+			INSERT INTO session_branches(branch_id, branch_name, parent_branch_id, forked_from_id, tip_id, created_at, updated_at, active)
+			VALUES('main', 'main', '', '', ?, ?, ?, 1)`, s.tip, s.header.CreatedAt, s.header.CreatedAt); err != nil {
 			_ = tx.Rollback()
 			return closeDB(fmt.Errorf("session: sqlite main branch: %w", err))
 		}
@@ -195,6 +195,9 @@ func createSQLiteSchema(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS entries_type_idx ON entries(entry_type);
 		CREATE TABLE IF NOT EXISTS session_branches (
 			branch_id TEXT PRIMARY KEY,
+			branch_name TEXT NOT NULL DEFAULT '',
+			parent_branch_id TEXT NOT NULL DEFAULT '',
+			forked_from_id TEXT NOT NULL DEFAULT '',
 			tip_id TEXT NOT NULL,
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL,
@@ -268,8 +271,8 @@ func ensureBranches(db *sql.DB, tip string, createdAt int64, version int) error 
 			createdAt = now
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO session_branches(branch_id, tip_id, created_at, updated_at, active)
-			VALUES('main', ?, ?, ?, 1)`, tip, createdAt, now); err != nil {
+			INSERT INTO session_branches(branch_id, branch_name, parent_branch_id, forked_from_id, tip_id, created_at, updated_at, active)
+			VALUES('main', 'main', '', '', ?, ?, ?, 1)`, tip, createdAt, now); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("session: sqlite branch migration insert: %w", err)
 		}
@@ -297,6 +300,30 @@ func ensureBranches(db *sql.DB, tip string, createdAt int64, version int) error 
 			_ = tx.Rollback()
 			return fmt.Errorf("session: subagent role fingerprint migration: %w", err)
 		}
+	}
+	if version < 7 {
+		for _, statement := range []string{
+			`ALTER TABLE session_branches ADD COLUMN branch_name TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE session_branches ADD COLUMN parent_branch_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE session_branches ADD COLUMN forked_from_id TEXT NOT NULL DEFAULT ''`,
+		} {
+			if _, err := tx.Exec(statement); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+				_ = tx.Rollback()
+				return fmt.Errorf("session: branch topology migration: %w", err)
+			}
+		}
+		if _, err := tx.Exec(`UPDATE session_branches SET branch_name = CASE WHEN branch_id='main' THEN 'main' ELSE branch_id END WHERE branch_name=''`); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("session: branch name migration: %w", err)
+		}
+		if _, err := tx.Exec(`UPDATE session_branches SET parent_branch_id='main' WHERE branch_id!='main' AND parent_branch_id=''`); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("session: branch parent migration: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS session_branches_name_idx ON session_branches(branch_name COLLATE NOCASE)`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("session: branch name index: %w", err)
 	}
 	if version < SessionVersion {
 		if _, err := tx.Exec(`UPDATE session_meta SET version = ? WHERE singleton = 1`, SessionVersion); err != nil {
@@ -700,11 +727,12 @@ func (s *SQLiteStore) Append(entry Entry) error {
 	if s.closed {
 		return errors.New("session: store closed")
 	}
+	expectedTip := s.tip
 	if entry.ID == "" {
 		entry.ID = newID()
 	}
 	if entry.ParentID == "" {
-		entry.ParentID = s.tip
+		entry.ParentID = expectedTip
 	}
 	var exists int
 	if err := s.db.QueryRow(`SELECT count(*) FROM entries WHERE id = ?`, entry.ID).Scan(&exists); err != nil {
@@ -740,14 +768,16 @@ func (s *SQLiteStore) Append(entry Entry) error {
 		return fmt.Errorf("session: sqlite append: %w", err)
 	}
 	now := time.Now().UnixMilli()
-	if result, err := tx.Exec(`UPDATE session_branches SET tip_id = ?, updated_at = ? WHERE branch_id = ?`, entry.ID, now, s.branchID); err != nil {
+	if result, err := tx.Exec(`UPDATE session_branches SET tip_id = ?, updated_at = ? WHERE branch_id = ? AND tip_id = ?`, entry.ID, now, s.branchID, expectedTip); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("session: sqlite branch tip: %w", err)
 	} else if n, _ := result.RowsAffected(); n != 1 {
 		_ = tx.Rollback()
-		return fmt.Errorf("session: sqlite active branch %q not found", s.branchID)
+		s.refreshBranchTipLocked()
+		return fmt.Errorf("%w on branch %q (expected %q)", ErrConflict, s.branchID, expectedTip)
 	}
-	if _, err := tx.Exec(`UPDATE session_meta SET branch_tip = ? WHERE singleton = 1`, entry.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE session_meta SET branch_tip = ? WHERE singleton = 1
+		AND EXISTS (SELECT 1 FROM session_branches WHERE branch_id = ? AND active = 1)`, entry.ID, s.branchID); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("session: sqlite tip: %w", err)
 	}
@@ -769,7 +799,8 @@ func (s *SQLiteStore) AppendBatch(batch []Entry) error {
 	if s.closed {
 		return errors.New("session: store closed")
 	}
-	parent := s.tip
+	expectedTip := s.tip
+	parent := expectedTip
 	seen := map[string]bool{}
 	for i := range batch {
 		if batch[i].ID == "" {
@@ -815,12 +846,15 @@ func (s *SQLiteStore) AppendBatch(batch []Entry) error {
 		}
 	}
 	now := time.Now().UnixMilli()
-	if res, err := tx.Exec(`UPDATE session_branches SET tip_id=?,updated_at=? WHERE branch_id=?`, parent, now, s.branchID); err != nil {
+	if res, err := tx.Exec(`UPDATE session_branches SET tip_id=?,updated_at=? WHERE branch_id=? AND tip_id=?`, parent, now, s.branchID, expectedTip); err != nil {
 		return err
 	} else if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("session: sqlite active branch %q not found", s.branchID)
+		_ = tx.Rollback()
+		s.refreshBranchTipLocked()
+		return fmt.Errorf("%w on branch %q (expected %q)", ErrConflict, s.branchID, expectedTip)
 	}
-	if _, err := tx.Exec(`UPDATE session_meta SET branch_tip=? WHERE singleton=1`, parent); err != nil {
+	if _, err := tx.Exec(`UPDATE session_meta SET branch_tip=? WHERE singleton=1
+		AND EXISTS (SELECT 1 FROM session_branches WHERE branch_id=? AND active=1)`, parent, s.branchID); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -828,6 +862,13 @@ func (s *SQLiteStore) AppendBatch(batch []Entry) error {
 	}
 	s.tip = parent
 	return nil
+}
+
+func (s *SQLiteStore) refreshBranchTipLocked() {
+	var tip string
+	if err := s.db.QueryRow(`SELECT tip_id FROM session_branches WHERE branch_id=?`, s.branchID).Scan(&tip); err == nil {
+		s.tip = tip
+	}
 }
 
 // BranchTip implements Store.
@@ -931,7 +972,7 @@ func (s *SQLiteStore) Branches() ([]protocol.SessionBranch, error) {
 		return nil, errors.New("session: store closed")
 	}
 	rows, err := s.db.Query(`
-		SELECT branch_id, tip_id, created_at, updated_at, active
+		SELECT branch_id, branch_name, parent_branch_id, forked_from_id, tip_id, created_at, updated_at, active
 		FROM session_branches ORDER BY created_at, branch_id`)
 	if err != nil {
 		return nil, fmt.Errorf("session: sqlite branches: %w", err)
@@ -940,7 +981,7 @@ func (s *SQLiteStore) Branches() ([]protocol.SessionBranch, error) {
 	for rows.Next() {
 		var branch protocol.SessionBranch
 		var active int
-		if err := rows.Scan(&branch.ID, &branch.TipID, &branch.CreatedAt, &branch.UpdatedAt, &active); err != nil {
+		if err := rows.Scan(&branch.ID, &branch.Name, &branch.ParentID, &branch.ForkedFromID, &branch.TipID, &branch.CreatedAt, &branch.UpdatedAt, &active); err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("session: sqlite branch scan: %w", err)
 		}
@@ -971,15 +1012,23 @@ func (s *SQLiteStore) SelectBranch(branchID string) error {
 	if s.closed {
 		return errors.New("session: store closed")
 	}
-	var tip string
-	if err := s.db.QueryRow(`SELECT tip_id FROM session_branches WHERE branch_id = ?`, branchID).Scan(&tip); errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	} else if err != nil {
-		return fmt.Errorf("session: sqlite select branch: %w", err)
-	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("session: sqlite select branch begin: %w", err)
+	}
+	locked, err := tx.Exec(`UPDATE session_branches SET updated_at=updated_at WHERE branch_id=?`, branchID)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("session: sqlite lock selected branch: %w", err)
+	}
+	if n, _ := locked.RowsAffected(); n != 1 {
+		_ = tx.Rollback()
+		return ErrNotFound
+	}
+	var tip string
+	if err := tx.QueryRow(`SELECT tip_id FROM session_branches WHERE branch_id = ?`, branchID).Scan(&tip); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("session: sqlite select branch: %w", err)
 	}
 	if _, err := tx.Exec(`UPDATE session_branches SET active = 0`); err != nil {
 		_ = tx.Rollback()
@@ -1003,8 +1052,13 @@ func (s *SQLiteStore) SelectBranch(branchID string) error {
 
 // ForkBranch implements BranchStore without copying entries.
 func (s *SQLiteStore) ForkBranch(fromEntryID string) (protocol.SessionBranch, error) {
+	return s.ForkBranchWithOptions(protocol.BranchForkOptions{FromEntryID: fromEntryID})
+}
+
+func (s *SQLiteStore) ForkBranchWithOptions(opts protocol.BranchForkOptions) (protocol.SessionBranch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	fromEntryID := opts.FromEntryID
 	if s.closed {
 		return protocol.SessionBranch{}, errors.New("session: store closed")
 	}
@@ -1020,31 +1074,84 @@ func (s *SQLiteStore) ForkBranch(fromEntryID string) (protocol.SessionBranch, er
 		return protocol.SessionBranch{}, err
 	}
 	messages, preview := branchStats(entries)
-	branchID := "branch-" + randomSuffix()
-	now := time.Now().UnixMilli()
+	sourceID := opts.SourceBranchID
+	// The no-op write acquires SQLite's writer reservation before source,
+	// ancestry, and uniqueness checks. Other handles therefore cannot delete or
+	// retarget the source between validation and insertion.
 	tx, err := s.db.Begin()
 	if err != nil {
 		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork begin: %w", err)
 	}
+	defer func() { _ = tx.Rollback() }()
+	var locked sql.Result
+	if sourceID == "" {
+		locked, err = tx.Exec(`UPDATE session_branches SET updated_at=updated_at WHERE active=1`)
+		if err == nil {
+			err = tx.QueryRow(`SELECT branch_id FROM session_branches WHERE active=1`).Scan(&sourceID)
+		}
+	} else {
+		locked, err = tx.Exec(`UPDATE session_branches SET updated_at=updated_at WHERE branch_id=?`, sourceID)
+	}
+	if err != nil {
+		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite lock fork source: %w", err)
+	}
+	if n, _ := locked.RowsAffected(); n != 1 {
+		return protocol.SessionBranch{}, ErrNotFound
+	}
+	var belongs int
+	if err := tx.QueryRow(`WITH RECURSIVE ancestry(id,parent_id) AS (
+		SELECT id,parent_id FROM entries WHERE id=(SELECT tip_id FROM session_branches WHERE branch_id=?)
+		UNION ALL SELECT e.id,e.parent_id FROM entries e JOIN ancestry a ON e.id=a.parent_id
+	) SELECT count(*) FROM ancestry WHERE id=?`, sourceID, fromEntryID).Scan(&belongs); err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	if belongs == 0 {
+		return protocol.SessionBranch{}, errors.New("session: fork entry is not on source branch")
+	}
+	name := strings.TrimSpace(opts.Name)
+	if name == "" {
+		var count int
+		_ = tx.QueryRow(`SELECT count(*) FROM session_branches`).Scan(&count)
+		for n := count + 1; ; n++ {
+			name = fmt.Sprintf("branch-%d", n)
+			var exists int
+			_ = tx.QueryRow(`SELECT count(*) FROM session_branches WHERE branch_name=? COLLATE NOCASE`, name).Scan(&exists)
+			if exists == 0 {
+				break
+			}
+		}
+	}
+	if err := validateBranchName(name); err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	var duplicate int
+	if err := tx.QueryRow(`SELECT count(*) FROM session_branches WHERE branch_name=? COLLATE NOCASE`, name).Scan(&duplicate); err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	if duplicate > 0 {
+		return protocol.SessionBranch{}, errors.New("session: branch name already exists")
+	}
+	branchID := "branch-" + randomSuffix()
+	now := time.Now().UnixMilli()
 	if _, err := tx.Exec(`UPDATE session_branches SET active = 0`); err != nil {
 		_ = tx.Rollback()
 		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork deactivate: %w", err)
 	}
-	if _, err := tx.Exec(`INSERT INTO session_branches(branch_id, tip_id, created_at, updated_at, active) VALUES(?, ?, ?, ?, 1)`, branchID, fromEntryID, now, now); err != nil {
+	if _, err := tx.Exec(`INSERT INTO session_branches(branch_id, branch_name, parent_branch_id, forked_from_id, tip_id, created_at, updated_at, active) VALUES(?, ?, ?, ?, ?, ?, ?, 1)`, branchID, name, sourceID, fromEntryID, fromEntryID, now, now); err != nil {
 		_ = tx.Rollback()
 		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork insert: %w", err)
 	}
 	if _, err := tx.Exec(`INSERT INTO thread_state(branch_id, collaboration_mode)
-		SELECT ?, collaboration_mode FROM thread_state WHERE branch_id = ?`, branchID, s.branchID); err != nil {
+		SELECT ?, collaboration_mode FROM thread_state WHERE branch_id = ?`, branchID, sourceID); err != nil {
 		_ = tx.Rollback()
 		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork thread state: %w", err)
 	}
 	if _, err := tx.Exec(`INSERT INTO thread_goals(branch_id, goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at)
-		SELECT ?, ?, objective, status, token_budget, tokens_used, seconds_used, created_at, ? FROM thread_goals WHERE branch_id = ?`, branchID, newID(), now, s.branchID); err != nil {
+		SELECT ?, ?, objective, status, token_budget, tokens_used, seconds_used, created_at, ? FROM thread_goals WHERE branch_id = ?`, branchID, newID(), now, sourceID); err != nil {
 		_ = tx.Rollback()
 		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork goal: %w", err)
 	}
-	if _, err := tx.Exec(`INSERT INTO thread_goal_deferrals(branch_id, deferred) SELECT ?, deferred FROM thread_goal_deferrals WHERE branch_id = ?`, branchID, s.branchID); err != nil {
+	if _, err := tx.Exec(`INSERT INTO thread_goal_deferrals(branch_id, deferred) SELECT ?, deferred FROM thread_goal_deferrals WHERE branch_id = ?`, branchID, sourceID); err != nil {
 		_ = tx.Rollback()
 		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork goal deferral: %w", err)
 	}
@@ -1057,17 +1164,51 @@ func (s *SQLiteStore) ForkBranch(fromEntryID string) (protocol.SessionBranch, er
 	}
 	s.branchID = branchID
 	s.tip = fromEntryID
-	return protocol.SessionBranch{ID: branchID, TipID: fromEntryID, Messages: messages, Preview: preview, CreatedAt: now, UpdatedAt: now, Active: true}, nil
+	return protocol.SessionBranch{ID: branchID, Name: name, ParentID: sourceID, ForkedFromID: fromEntryID, TipID: fromEntryID, Messages: messages, Preview: preview, CreatedAt: now, UpdatedAt: now, Active: true}, nil
 }
 
-// DeleteBranch removes an inactive non-main branch and its branch-scoped state.
+func (s *SQLiteStore) RenameBranch(branchID, name string) (protocol.SessionBranch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return protocol.SessionBranch{}, errors.New("session: store closed")
+	}
+	name = strings.TrimSpace(name)
+	if err := validateBranchName(name); err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	var duplicate int
+	if err := s.db.QueryRow(`SELECT count(*) FROM session_branches WHERE branch_name=? COLLATE NOCASE AND branch_id!=?`, name, branchID).Scan(&duplicate); err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	if duplicate > 0 {
+		return protocol.SessionBranch{}, errors.New("session: branch name already exists")
+	}
+	now := time.Now().UnixMilli()
+	res, err := s.db.Exec(`UPDATE session_branches SET branch_name=?, updated_at=? WHERE branch_id=?`, name, now, branchID)
+	if err != nil {
+		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite rename branch: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return protocol.SessionBranch{}, ErrNotFound
+	}
+	var branch protocol.SessionBranch
+	var active int
+	if err := s.db.QueryRow(`SELECT branch_id,branch_name,parent_branch_id,forked_from_id,tip_id,created_at,updated_at,active FROM session_branches WHERE branch_id=?`, branchID).Scan(&branch.ID, &branch.Name, &branch.ParentID, &branch.ForkedFromID, &branch.TipID, &branch.CreatedAt, &branch.UpdatedAt, &active); err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	branch.Active = active != 0
+	return branch, nil
+}
+
+// DeleteBranch removes an inactive non-main leaf branch and its branch-scoped state.
 func (s *SQLiteStore) DeleteBranch(branchID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return errors.New("session: store closed")
 	}
-	if branchID == "" || branchID == "main" || branchID == s.branchID {
+	if branchID == "" || branchID == "main" {
 		return errors.New("session: cannot delete active or main branch")
 	}
 	tx, err := s.db.Begin()
@@ -1075,12 +1216,41 @@ func (s *SQLiteStore) DeleteBranch(branchID string) error {
 		return fmt.Errorf("session: sqlite delete branch begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	var exists int
-	if err := tx.QueryRow(`SELECT count(*) FROM session_branches WHERE branch_id = ?`, branchID).Scan(&exists); err != nil {
-		return fmt.Errorf("session: sqlite delete branch lookup: %w", err)
+	// Acquire the writer lock before checking database-authoritative active and
+	// topology state. This prevents stale handles from deleting a branch another
+	// handle selected concurrently.
+	locked, err := tx.Exec(`UPDATE session_branches SET updated_at=updated_at WHERE branch_id=?`, branchID)
+	if err != nil {
+		return fmt.Errorf("session: sqlite lock delete branch: %w", err)
 	}
-	if exists == 0 {
+	if n, _ := locked.RowsAffected(); n != 1 {
 		return ErrNotFound
+	}
+	var active int
+	if err := tx.QueryRow(`SELECT active FROM session_branches WHERE branch_id=?`, branchID).Scan(&active); err != nil {
+		return err
+	}
+	if active != 0 {
+		return errors.New("session: cannot delete active or main branch")
+	}
+	var children, agents, goals int
+	if err := tx.QueryRow(`SELECT count(*) FROM session_branches WHERE parent_branch_id=?`, branchID).Scan(&children); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(`SELECT count(*) FROM subagent_threads WHERE parent_branch_id=?`, branchID).Scan(&agents); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(`SELECT count(*) FROM thread_goals WHERE branch_id=? AND status NOT IN ('complete','budget_limited')`, branchID).Scan(&goals); err != nil {
+		return err
+	}
+	if children > 0 {
+		return errors.New("session: cannot delete branch with children")
+	}
+	if agents > 0 {
+		return errors.New("session: cannot delete branch with durable subagents")
+	}
+	if goals > 0 {
+		return errors.New("session: cannot delete branch with nonterminal goal")
 	}
 	for _, table := range []string{"thread_goal_deferrals", "thread_goals", "thread_state", "session_branches"} {
 		if _, err := tx.Exec(`DELETE FROM `+table+` WHERE branch_id = ?`, branchID); err != nil {
@@ -1091,6 +1261,35 @@ func (s *SQLiteStore) DeleteBranch(branchID string) error {
 		return fmt.Errorf("session: sqlite delete branch commit: %w", err)
 	}
 	return nil
+}
+
+func (s *SQLiteStore) DeleteBranchForRollback(branchID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("session: store closed")
+	}
+	if branchID == "" || branchID == "main" || branchID == s.branchID {
+		return errors.New("session: cannot roll back active or main branch")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var exists int
+	if err := tx.QueryRow(`SELECT count(*) FROM session_branches WHERE branch_id=?`, branchID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return ErrNotFound
+	}
+	for _, table := range []string{"thread_goal_deferrals", "thread_goals", "thread_state", "session_branches"} {
+		if _, err := tx.Exec(`DELETE FROM `+table+` WHERE branch_id=?`, branchID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) branchEntries(tip string) ([]Entry, error) {

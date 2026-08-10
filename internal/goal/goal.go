@@ -553,11 +553,45 @@ func (c *Controller) removeManaged(ownerGoalID, ref string) {
 	removeManagedAt(home, sessionID, ownerGoalID, ref)
 }
 
-// ManagedTextForFork resolves a generated objective before the session store
-// switches branches. The returned flag is false for ordinary inline goals.
+// ManagedTextForFork resolves a generated objective on the active branch.
 func (c *Controller) ManagedTextForFork() (string, bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.managedTextLocked()
+}
+
+// ManagedTextForBranch resolves managed content from an explicit source branch
+// and restores the prior active branch before returning.
+func (c *Controller) ManagedTextForBranch(branchID string) (string, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	branches, ok := c.store.(session.BranchStore)
+	if !ok {
+		return "", false, errors.New("goal: session does not support branches")
+	}
+	listed, err := branches.Branches()
+	if err != nil {
+		return "", false, err
+	}
+	active := ""
+	for _, branch := range listed {
+		if branch.Active {
+			active = branch.ID
+			break
+		}
+	}
+	if branchID == "" || branchID == active {
+		return c.managedTextLocked()
+	}
+	if err := branches.SelectBranch(branchID); err != nil {
+		return "", false, err
+	}
+	text, managed, resolveErr := c.managedTextLocked()
+	restoreErr := branches.SelectBranch(active)
+	return text, managed, errors.Join(resolveErr, restoreErr)
+}
+
+func (c *Controller) managedTextLocked() (string, bool, error) {
 	g, err := c.goalStore().Goal()
 	if err != nil || g == nil {
 		return "", false, err
