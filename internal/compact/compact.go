@@ -32,38 +32,72 @@ type Result struct {
 type Plan struct {
 	// CompactionCandidates are the messages that would be summarized.
 	CompactionCandidates []protocol.Message
-	// KeepFrom is the index in the linearized messages where the retained
-	// tail begins.
+	// KeepFrom is the index in the provider-facing messages where the retained
+	// complete-turn tail begins.
 	KeepFrom int
+	// BoundaryID is the last real persisted message folded into the summary.
+	BoundaryID string
 	// EstimatedTokens is a rough estimate (chars/4).
 	EstimatedTokens int
 }
 
-// Planner finds the prefix of messages to compact, keeping the most recent
-// maxTokens worth (roughly). It is deterministic and pure.
+// PlannerOptions controls turn-aware tail retention.
+type PlannerOptions struct {
+	RetainTokens     int
+	MinRetainedTurns int
+}
+
+// Planner preserves the legacy entry point while using turn-aware planning.
 func Planner(msgs []protocol.Message, maxTokens int) Plan {
-	// Always keep at least the last 4 messages (system-adjacent tail).
-	keepMin := 4
-	if len(msgs) <= keepMin {
-		return Plan{KeepFrom: 0, EstimatedTokens: estimateTokens(msgs)}
+	return PlannerWithOptions(msgs, PlannerOptions{RetainTokens: maxTokens, MinRetainedTurns: 2})
+}
+
+// PlannerWithOptions finds a prefix to compact while retaining complete recent
+// user turns. Tool calls and results remain in the same turn by construction.
+func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
+	if opts.MinRetainedTurns < 1 {
+		opts.MinRetainedTurns = 2
 	}
-	// Walk backwards accumulating "tokens" (chars/4 heuristic) until we reach
-	// maxTokens or the keepMin boundary. The bound is len(msgs)-keepMin so the
-	// retained tail never shrinks below the last keepMin messages, even when
-	// the budget is huge or the conversation is short.
-	tokens := 0
-	keep := len(msgs)
-	for i := len(msgs) - 1; i >= len(msgs)-keepMin; i-- {
-		t := estimateTokens(msgs[i : i+1])
-		if tokens+t > maxTokens && tokens > 0 {
+	if opts.RetainTokens < 1 {
+		opts.RetainTokens = 8 * 1024
+	}
+	if len(msgs) <= 1 {
+		return Plan{EstimatedTokens: estimateTokens(msgs)}
+	}
+	var starts []int
+	for i, msg := range msgs {
+		if msg.Role == protocol.RoleUser {
+			starts = append(starts, i)
+		}
+	}
+	keep := 0
+	if len(starts) > opts.MinRetainedTurns {
+		keep = starts[len(starts)-opts.MinRetainedTurns]
+		for turn := len(starts) - opts.MinRetainedTurns - 1; turn >= 1; turn-- {
+			candidate := starts[turn]
+			if estimateTokens(msgs[candidate:]) > opts.RetainTokens {
+				break
+			}
+			keep = candidate
+		}
+	} else if len(starts) == 0 && len(msgs) > 4 {
+		keep = len(msgs) - 4
+	}
+	if keep <= 0 {
+		return Plan{EstimatedTokens: estimateTokens(msgs)}
+	}
+	plan := Plan{KeepFrom: keep, CompactionCandidates: msgs[:keep]}
+	plan.EstimatedTokens = estimateTokens(plan.CompactionCandidates)
+	for i := len(plan.CompactionCandidates) - 1; i >= 0; i-- {
+		id := plan.CompactionCandidates[i].ID
+		if id != "" && !strings.HasPrefix(id, "compaction-") {
+			plan.BoundaryID = id
 			break
 		}
-		tokens += t
-		keep = i
 	}
-	plan := Plan{KeepFrom: keep}
-	plan.CompactionCandidates = msgs[:keep]
-	plan.EstimatedTokens = estimateTokens(msgs[:keep])
+	if plan.BoundaryID == "" {
+		return Plan{EstimatedTokens: estimateTokens(msgs)}
+	}
 	return plan
 }
 
@@ -84,10 +118,14 @@ func Apply(ctx context.Context, st session.Store, summarizer Summarizer, plan Pl
 		return Result{}, err
 	}
 
+	boundary := plan.BoundaryID
+	if boundary == "" {
+		boundary = plan.CompactionCandidates[len(plan.CompactionCandidates)-1].ID
+	}
 	entry := session.Entry{
 		Type:             session.EntryCompaction,
 		Summary:          summary,
-		CompactedThrough: plan.CompactionCandidates[len(plan.CompactionCandidates)-1].ID,
+		CompactedThrough: boundary,
 	}
 	if err := st.Append(entry); err != nil {
 		return Result{}, err
@@ -116,30 +154,72 @@ func estimateTokens(msgs []protocol.Message) int {
 	return n
 }
 
-// DefaultSummarizer produces a structured summary using the first N messages'
-// text content (used when no model-backed summarizer is configured).
+// DefaultSummarizer produces a bounded role/tool-aware continuation summary.
 func DefaultSummarizer(ctx context.Context, msgs []protocol.Message) (string, error) {
-	var b strings.Builder
-	b.WriteString("Compacted conversation summary:\n")
-	for i, m := range msgs {
-		text := ""
+	const maxRunes = 8000
+	var users, assistants, toolsOut, failures []string
+	for _, m := range msgs {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		for _, c := range m.Content {
-			if c.Type == protocol.BlockText {
-				text = c.Text
-				break
+			text := strings.TrimSpace(c.Text)
+			if text == "" && len(c.Arguments) > 0 {
+				text = strings.TrimSpace(string(c.Arguments))
+			}
+			if text == "" {
+				continue
+			}
+			text = compactText(text, 500)
+			switch m.Role {
+			case protocol.RoleUser:
+				users = append(users, text)
+			case protocol.RoleTool:
+				line := m.ToolName + ": " + text
+				toolsOut = append(toolsOut, line)
+				if m.IsError || strings.Contains(strings.ToLower(text), "error") || strings.Contains(strings.ToLower(text), "failed") {
+					failures = append(failures, line)
+				}
+			case protocol.RoleAssistant:
+				assistants = append(assistants, text)
 			}
 		}
-		if text == "" {
-			continue
+	}
+	var b strings.Builder
+	b.WriteString("Compacted continuation context (local fallback):\n")
+	writeRecent := func(title string, values []string, n int) {
+		b.WriteString("\n## " + title + "\n")
+		if len(values) == 0 {
+			b.WriteString("- None recorded.\n")
+			return
 		}
-		if r := []rune(text); len(r) > 200 {
-			text = string(r[:200]) + "…"
+		start := len(values) - n
+		if start < 0 {
+			start = 0
 		}
-		fmt.Fprintf(&b, "- %s: %s\n", m.Role, text)
-		if i >= 20 {
-			b.WriteString("…\n")
-			break
+		for _, value := range values[start:] {
+			fmt.Fprintf(&b, "- %s\n", value)
+			if len([]rune(b.String())) >= maxRunes {
+				return
+			}
 		}
 	}
-	return b.String(), nil
+	writeRecent("User objectives and constraints", users, 8)
+	writeRecent("Decisions and current work", assistants, 12)
+	writeRecent("Important tool results", toolsOut, 12)
+	writeRecent("Errors and unresolved failures", failures, 8)
+	out := []rune(b.String())
+	if len(out) > maxRunes {
+		out = out[:maxRunes]
+	}
+	return string(out), nil
+}
+
+func compactText(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	r := []rune(value)
+	if len(r) > limit {
+		return string(r[:limit]) + "…"
+	}
+	return value
 }
