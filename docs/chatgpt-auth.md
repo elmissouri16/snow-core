@@ -56,7 +56,9 @@ minutes under a cross-process auth-store lock and atomically persists rotated
 refresh tokens. A pre-stream HTTP 401 forces one guarded refresh and one retry,
 while reusing a newer credential already rotated by another process. Permanent
 `invalid_grant`-class failures require login; transient/network failures remain
-retryable and secret-free.
+retryable and secret-free. Responses/SSE parsing bounds individual and
+aggregate events, tool-call count/identities/arguments, and retained reasoning;
+a limit violation emits one normalized stream error and stops parsing.
 
 `/model` uses authenticated `GET /backend-api/codex/models?client_version=0.147.0`
 discovery. Raw records are cached for 15 minutes under

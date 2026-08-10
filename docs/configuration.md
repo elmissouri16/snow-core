@@ -127,7 +127,7 @@ fills required zero-value defaults before validation.
 |---|---|---|
 | `default_provider` | `opencode-go` | Active provider ID |
 | `default_model` | provider default | Active model ID; provider-specific config may also declare a default |
-| `permission_mode` | `ask` | Interactive default: `ask`, `allow`, or `deny` |
+| `permission_mode` | `ask` | Interactive default: `ask`, `allow`, or `deny`; unknown nonempty values are startup errors |
 | `default_project_trust` | `ask` | `ask`, `allow`, or `deny`; legacy `always`/`never` are aliases |
 | `thinking` | `off` | `off`, `minimal`, `low`, `medium`, or `high` |
 | `reasoning_summary` | `auto` | `off`, `auto`, `concise`, or `detailed` |
@@ -246,9 +246,14 @@ See [Subagents](subagents.md) for role examples and the full safety model.
 - `plugins` is an array of public `plugin.PluginSpec` declarations.
 - `mcp_servers` maps stable names to public `mcp.ServerSpec` declarations.
 
-These processes run with the user's OS privileges. Keep credentials in expanded
-environment variables rather than static configuration. See [Plugins](plugins.md)
-and [MCP](mcp.md) for schemas and management commands.
+These processes run with the user's OS privileges. External plugins receive
+their literal configured `env` and otherwise start with an empty environment,
+except for platform-required entries Go may add such as Windows `SYSTEMROOT`;
+plugin env values do not expand `${VAR}`. Snow resolves a bare
+`command[0]` using its own launch environment before assigning the child env, so
+prefer absolute interpreter paths and never commit credentials. MCP has separate
+environment/header expansion rules. See [Plugins](plugins.md) and [MCP](mcp.md)
+for schemas and management commands.
 
 ## Trusted project configuration
 

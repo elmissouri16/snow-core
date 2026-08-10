@@ -356,7 +356,9 @@ hyphens are not normalized. Success returns `SubagentState`.
 ```
 
 The default/empty `until` is `activity`. `all` waits until every descendant is
-terminal or the bounded timeout expires. Wait handling is asynchronous; several
+terminal or the bounded timeout expires. `timeout_ms` must be nonnegative; zero
+uses the configured default, and values that cannot be represented safely are
+rejected before a wait worker starts. Wait handling is asynchronous; several
 wait responses may arrive out of request order. `data` is a
 `WaitSubagentsResult` aggregate and never contains private child result text.
 
@@ -436,6 +438,8 @@ Important ordering rules:
 - `subagent_wait` responses are asynchronous.
 - Different command responses can arrive out of request order.
 - Writes are frame-atomic, so a single JSON line is never mixed with another.
+- EOF, cancellation, and scanner failures cancel and join prompt/wait workers
+  before `Serve` returns; cleanup failures are returned to the host.
 - Keep a response table keyed by ID and process events independently.
 
 ## Complete Python client

@@ -13,9 +13,12 @@ see [JSONL RPC](rpc.md). For embedding, see the [Go SDK](sdk.md).
 | JSON | `snow --mode json -p "prompt"` | Emits one normalized `AgentEvent` JSON object per line |
 | RPC | `snow --mode rpc` | Long-lived Snow-specific JSONL request/response/event protocol over stdio |
 
-`--mode print` can be used explicitly. Supplying `-p` selects print behavior
-unless `--mode json` is set. RPC keeps stdin open for asynchronous commands;
-it is not a one-shot `echo | snow` protocol for prompts.
+`--mode print` can be used explicitly. Explicit print and JSON modes require a
+nonblank `-p`; Snow validates that before constructing sessions or extensions.
+Supplying `-p` selects print behavior unless `--mode json` is set. RPC keeps
+stdin open for asynchronous commands; it is not a one-shot `echo | snow`
+protocol for prompts. Unknown permission modes are startup errors rather than
+silently falling back.
 
 ## Common flags
 
@@ -239,8 +242,11 @@ snow skills list [--json]
 snow skills get NAME
 snow skills enable NAME
 snow skills disable NAME
+
+snow plugin check MANIFEST_OR_EXECUTABLE [--json]
 ```
 
 MCP and skill mutations are global by default; add `--project` to target trusted
-project configuration. Full details are in [MCP](mcp.md) and
-[Agent Skills](skills.md).
+project configuration. `plugin check` performs a bounded runtime handshake and
+does not mutate configuration. Full details are in [MCP](mcp.md),
+[Agent Skills](skills.md), and [Plugins](plugins.md).

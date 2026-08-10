@@ -148,7 +148,9 @@ silently changing it.
 | `update_plan` | Emit a turn-local Default-mode checklist | read |
 | `webfetch` | Fetch bounded public HTTP(S) content as text/Markdown | network |
 
-File tools enforce configured roots with symlink-aware path checks. Search honors
+File tools enforce configured roots through pinned Go `os.Root` handles, so
+launch-path replacement and ancestor-swap races cannot redirect built-in file
+operations outside the root. Search honors
 hierarchical `.gitignore` and `.ignore`, global/trusted-project search policy,
 hidden/generated defaults, and per-call exclusions. `webfetch` is deferred,
 public-address-only, redirect-checked, and never executes JavaScript.
@@ -185,17 +187,28 @@ See [Plan Mode](docs/plan-mode.md), [Thread Goals](docs/goals.md), and
 - **MCP:** official Go SDK client for current stateless Streamable HTTP and stdio,
   with legacy negotiation, tools, resources, prompts, subscriptions, and live
   tool-catalog refresh.
-- **Plugins:** statically linked Go extensions or explicit JSON-RPC v2 child
-  runtimes with namespaced tools and observe-only events.
+- **Plugins:** statically linked Go extensions or persistent JSON-RPC v2 child
+  runtimes with namespaced tools, declared risk, private result metadata,
+  progress, cancellation, and explicitly subscribed observe-only events.
+  Dependency-free JavaScript and Python examples are included.
 - **Agent Skills:** open `SKILL.md` discovery with metadata-only startup context,
   on-demand activation, resource confinement, and trust-aware precedence.
-- **Tool routing:** opt-in Bleve BM25 discovery keeps deferred schemas out of
-  ordinary provider requests and exposes `search_tools` as a recovery path.
+- **Tool routing:** opt-in, namespace-first Bleve BM25 discovery keeps deferred
+  schemas out of ordinary provider requests, retains a global rescue ranking,
+  and exposes `search_tools` as a recovery path.
 - **Subagents:** optional bounded child agent tree with independent sessions,
   role-scoped tools, attributed mailboxes, concurrency/depth limits, and
   SDK/RPC/TUI observation.
 
-See [MCP](docs/mcp.md), [plugins](docs/plugins.md), [Agent Skills](docs/skills.md),
+Validate an external runtime without starting an agent:
+
+```sh
+snow plugin check examples/plugins/javascript/manifest.json
+snow plugin check examples/plugins/python/manifest.json --json
+```
+
+See [MCP](docs/mcp.md), [plugins](docs/plugins.md), the complete
+[plugin protocol](docs/plugin-protocol.md), [Agent Skills](docs/skills.md),
 [tool routing](docs/tool-routing.md), and [subagents](docs/subagents.md).
 
 ## Embed with Go
@@ -316,6 +329,7 @@ Start at the [documentation index](docs/README.md).
 | Configure paths, providers, tools, themes, and search | [Configuration](docs/configuration.md) |
 | Embed Snow in Go | [SDK](docs/sdk.md) |
 | Build a JSONL client | [RPC](docs/rpc.md) |
+| Author JavaScript/Python plugins | [Plugins](docs/plugins.md) · [Protocol v2](docs/plugin-protocol.md) |
 | Review operational boundaries | [Security](docs/security.md) |
 | Authenticate ChatGPT/Codex | [ChatGPT auth](docs/chatgpt-auth.md) |
 | Resume and branch conversations | [Sessions](docs/sessions.md) |
@@ -354,4 +368,5 @@ roadmap live in [`IMPLEMENTATION.md`](IMPLEMENTATION.md).
 - No notes, vector-memory, or marketplace product surface
 - Optional MCP Apps, Tasks, Enterprise Managed Authorization, and interactive
   MCP OAuth are not yet exposed
-- Hybrid embedding/namespace-first tool routing remains future work
+- Namespace-first tool routing remains local BM25; optional semantic/vector
+  routing is deferred pending a suitable downloadable cross-platform model

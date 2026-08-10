@@ -27,7 +27,7 @@ enabling shell, network, plugins, MCP, skills, goals, or subagents.
 | Risk | Snow control | Residual boundary |
 |---|---|---|
 | Accidental file mutation | `ask|allow|deny`, tool allowlists, role intersections | `allow` intentionally permits the operation |
-| Path escape | Absolute roots, canonicalization, symlink-aware checks, Windows alias rejection | Validation and filesystem operation are separate calls; a hostile concurrent process can race ancestors |
+| Path escape | Pinned `os.Root` handles, canonical roots, symlink-aware checks, Windows alias rejection | Bind mounts, device files, and processes already running as the user remain outside this boundary |
 | Unbounded output/processes | Read/search/tool byte caps, shell timeout, cancellation, process-group/job cleanup | Child processes still run as the user before cancellation |
 | Network access | Network risk classification; public-address-only `webfetch` | Allowed MCP/plugins/shell can implement their own networking |
 | Project-supplied executable config | Canonical trust decision before project config/extension loading | Trust is not code signing or sandboxing |
@@ -83,25 +83,31 @@ not mean:
 - a plugin or stdio server is sandboxed;
 - shell commands are contained;
 - project files cannot contain malicious instructions;
-- symlink/path races are impossible.
+- path confinement is an OS sandbox for shell, plugins, MCP servers, or other processes.
 
 Runtime `/trust allow|deny` changes apply on the next launch because already
 loaded executable extensions cannot be safely hot-unloaded.
 
 ## File and search confinement
 
-File tools resolve paths against the active working directory and allowed roots.
-They reject escapes and symlink traversal through existing ancestors. Windows
-validation also rejects alternate names and reserved device aliases that could
-refer outside the intended lexical path.
+File tools pin allowed directories with Go's `os.Root` handles when the runtime
+is built. Read, write, edit, and search file opens then operate relative to those
+handles, so replacing a launch alias or racing an ancestor cannot redirect the
+operation outside the configured root. Windows validation also rejects alternate
+names and reserved device aliases.
 
-`write` stages content in the destination directory, preserves existing modes,
-syncs, and uses platform-specific atomic replacement. `edit` requires exact
-matching and refuses ambiguous replacements unless explicitly configured for all
-matches.
+Read/edit/write/grep validate the opened inode rather than trusting a separate
+path stat; Unix-like hosts use nonblocking opens so a raced FIFO cannot hang the
+process. `write` and `edit` stage content inside the rooted destination directory,
+preserve existing modes, sync, and atomically rename the temporary file. On
+Windows replacement also reopens that exact temporary handle with `WRITE_DAC`
+and copies the destination DACL plus its protected/inheritable state before
+rename. `edit` still requires exact matching and refuses ambiguous
+replacements unless explicitly configured for all matches.
 
 `grep` and `glob`:
 
+- enumerate directories and read ignore files through the pinned root;
 - skip symlink entries;
 - always exclude `.git`;
 - honor hierarchical `.gitignore` and `.ignore` by default;
@@ -109,10 +115,10 @@ matches.
 - bound matches/results and output bytes;
 - support per-call soft-policy overrides without disabling hard exclusions.
 
-Residual race: path validation and a later filesystem operation are distinct OS
-calls. A hostile process with concurrent write access may replace an ancestor
-after validation. Snow documents this honestly rather than presenting project
-trust or path checks as an in-process sandbox.
+This confinement applies only to built-in file operations. Shell, plugins,
+stdio MCP servers, and subagents run with the user's OS privileges. Go's rooted
+filesystem API also does not prohibit bind mounts, device files, or traversal of
+filesystem boundaries, so Snow still is not a sandbox.
 
 ## Shell and process execution
 
@@ -174,6 +180,13 @@ Statically linked plugins and external JSON-RPC v2 plugins register namespaced
 tools through the central registry and permission gate. Stdio MCP servers and
 external plugins are ordinary child processes, not sandboxes.
 
+Snow's sandbox design investigation is complete, and no built-in per-extension
+sandbox backend is planned now. When containment is required, run the whole Snow
+process inside an appropriately constrained container or virtual machine. This
+also contains bash and other in-process capabilities; wrapping only one plugin
+or MCP launcher would not. Permissions and project trust remain policy and input-
+loading controls, not OS isolation boundaries.
+
 Before enabling one, review:
 
 - executable and arguments;
@@ -184,11 +197,16 @@ Before enabling one, review:
 - output/time/concurrency limits;
 - project trust source.
 
-Server/tool annotations are untrusted hints and do not lower Snow's risk
-classification. MCP/plugin results and instructions are external model context
-and cannot override system or user authority.
+External plugin risk defaults to `exec`; a trusted plugin may explicitly declare
+`read`, `write`, or `network`. That declaration changes permission
+classification but does not constrain what the child process can actually do.
+MCP annotations remain untrusted hints. Plugin/MCP results and instructions are
+external model context and cannot override system or user authority.
 
-See [Plugins](plugins.md) and [MCP](mcp.md).
+Use `snow plugin check` to inspect a runtime's declared tools, risks, subscribed
+events, and bounded diagnostics. Diagnostic credential redaction is best effort;
+plugins must never emit secrets. See [Plugins](plugins.md), the external
+[protocol contract](plugin-protocol.md), and [MCP](mcp.md).
 
 ## Agent Skills
 

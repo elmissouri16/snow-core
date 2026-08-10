@@ -57,9 +57,9 @@ behavior in code before relying on a checklist item.
 - `internal/session`: in-memory and SQLite stores, indexed branch tips,
   parent traversal, fork primitive, file index/listing, and resume by database path.
 - Built-in tools in `internal/tools/builtin`: `read`, `write`, `edit`, `bash`,
-  `grep`, `glob`, direct read-risk `ask_user`, and deferred network-risk `webfetch`. File/search tools use symlink-aware root confinement;
-  output and bash time are bounded. Read streams bounded windows and write uses
-  an atomic same-directory replace while preserving existing permissions.
+  `grep`, `glob`, direct read-risk `ask_user`, and deferred network-risk `webfetch`. File/search tools use pinned `os.Root` confinement;
+  output, search lines, and bash time are bounded. Read streams bounded windows,
+  while write and edit use atomic same-directory replacement with mode preservation.
 - `webfetch` uses Surf v1.0.203's Windows Chrome 150 profile with secure TLS,
   public-address-only dial/redirect enforcement, bounded text responses, and
   automatic HTML-to-Markdown conversion. It never executes JavaScript.
@@ -90,7 +90,9 @@ behavior in code before relying on a checklist item.
   themes/keybindings support global and trusted-project precedence with warnings.
 - `pkg/snowsdk` prompt/event/session API, `pkg/protocol` public DTOs, JSONL RPC,
   and a capability-oriented Go plugin API/manager with namespaced tools,
-  observe-only events, and JSON-RPC v2 stdio runtimes.
+  declared external risk/capabilities, preserved private result details,
+  explicitly subscribed best-effort events, JSON-RPC v2 stdio runtimes,
+  `snow plugin check`, and dependency-free JavaScript/Python examples.
 - Branch-scoped persistent Thread Goals with budgets, cross-handle atomic usage
   accounting, private idle continuation, model tools, ordered cloned events,
   confined managed objectives, explicit surface readiness, and safe
@@ -118,9 +120,10 @@ behavior in code before relying on a checklist item.
 
 1. Add optional MCP extension product surfaces (Apps, Tasks, Enterprise Managed
    Authorization) and interactive OAuth callback/token persistence if needed.
-   Core MCP and Agent Skills are implemented. Embeddings and namespace-first
-   routing remain future work; plugins and stdio MCP servers still execute with
-   OS privileges and are not a sandbox.
+   Core MCP and Agent Skills are implemented. Namespace-first BM25 routing is
+   local and network-free; optional semantic/vector routing remains deferred.
+   Plugins and stdio MCP servers still execute with OS privileges and are not a
+   sandbox, and no built-in sandbox backend is currently planned.
 2. Add hosted CI and standalone external SDK/RPC example projects. The in-repo
    SDK/RPC guides include runnable examples, and native Windows verification is
    available through `scripts/test-windows.ps1`.
@@ -141,11 +144,14 @@ behavior in code before relying on a checklist item.
 │   ├── rpc.md                # JSONL framing, commands, events, and examples
 │   ├── chatgpt-auth.md       # ChatGPT auth format, imports, research, boundary
 │   ├── sessions.md           # Pure-Go SQLite session storage and schema
-│   ├── plugins.md            # Go/plugin manager and JSON-RPC v2 extension core
+│   ├── plugins.md            # Go/external plugin overview and authoring quickstart
+│   ├── plugin-protocol.md    # complete JSON-RPC v2 external runtime contract
+│   ├── plugin-js-python-research.md # language-runtime architecture decision
 │   ├── mcp.md                # MCP transports, config, capabilities, and security
 │   ├── skills.md             # Agent Skills discovery and disclosure behavior
 │   ├── tool-routing.md       # Opt-in Bleve BM25 schema discovery and recovery
 │   └── tui-performance.md    # Bubble Tea/Bubbles integration and render rules
+├── examples/plugins/         # dependency-free JavaScript/Python v2 runtimes
 ├── go.mod / go.sum           # module github.com/snow-core/snow and dependencies
 ├── cmd/snow/
 │   ├── main.go               # Cobra entry point and CLI mode selection
@@ -232,7 +238,8 @@ Important flags: `--provider opencode-go|chatgpt|fake`, `--model`, `--api-key`,
 `--config`, `--auth`, `--thinking off|minimal|low|medium|high`,
 `--collaboration-mode default|plan`, repeated
 `--mcp`/`--skill-dir`, `--no-mcp`/`--no-skills`, `--subagents`/`--no-subagents`,
-and subagent concurrency/depth overrides. `snow mcp` and
+and subagent concurrency/depth overrides. `snow plugin check <manifest>`
+performs a provider-free external runtime handshake. `snow mcp` and
 `snow skills` provide side-effect-free inventories; MCP live negotiation is
 `snow mcp check [name]`. MCP subcommands are `list|get|add|check|enable|disable|remove`;
 skills subcommands are `list|get|enable|disable`. Mutations are global by
@@ -299,7 +306,9 @@ append-only/tree model when adding resume or fork features.
   use permission-gated bash, while explorer remains read-only. File mutation
   requires both global and role mutation opt-ins.
 - Permission gates write/edit/bash and network tools: `read` remains allowed in
-  deny/ask modes, while deferred `webfetch` is filtered in deny mode.
+  deny/ask modes, while deferred `webfetch` is filtered in deny mode. External
+  plugin tool risk defaults to `exec`; less restrictive declarations are trusted
+  metadata and do not constrain the child process.
 - SDK/headless code should use deny mode unless the caller deliberately opts into
   `allow`/`AutoApprove` in a trusted environment.
 - File tools resolve symlinks and enforce allowed roots; do not weaken this guard.
@@ -330,8 +339,12 @@ append-only/tree model when adding resume or fork features.
   JWT/status behavior, browser/device login, refresh, catalog caching, and compatibility notes.
 - `docs/sessions.md`: pure-Go SQLite driver, database pragmas, schema, branch
   queries, and embedding guidance.
-- `docs/plugins.md`: public Go plugin API, manager lifecycle, protocol v2,
-  trust, and security boundaries.
+- `docs/plugins.md`: public Go/external plugin overview, JavaScript/Python
+  quickstart, runtime checks, trust, and security boundaries.
+- `docs/plugin-protocol.md`: canonical external JSON-RPC v2 framing, lifecycle,
+  tools, risk, progress, events, errors, limits, cancellation, and shutdown.
+- `docs/plugin-js-python-research.md`: benchmarked runtime decision, alternatives,
+  host-hardening rationale, SDK direction, acceptance criteria, and deferrals.
 - `docs/mcp.md`: MCP 2026-07-28/legacy negotiation, stdio/HTTP config,
   capability bridges, SDK surface, permissions, and unsupported extensions.
 - `docs/skills.md`: Agent Skills paths, precedence, validation, activation,

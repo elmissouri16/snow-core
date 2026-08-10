@@ -550,9 +550,9 @@ type Store interface {
 
 | Tool | Purpose | Permission risk | Notes |
 |------|---------|-----------------|-------|
-| `read` | Read file contents (optional offset/limit) | read | Binary → short error; streams bounded windows instead of loading large files |
-| `write` | Create/overwrite file | write | Creates parents; atomic same-directory replace; preserves existing mode |
-| `edit` | Exact string replace / patch | write | Fail if `old_str` not unique unless `replace_all` |
+| `read` | Read file contents (optional offset/limit) | read | Pinned `os.Root`; binary → short error; streams bounded windows |
+| `write` | Create/overwrite file | write | Rooted parent creation; atomic same-directory replace; preserves existing mode |
+| `edit` | Exact string replace / patch | write | Rooted atomic replacement; fails if `old_str` is not unique unless `replace_all` |
 | `bash` | Run shell command in cwd | exec | Timeout; combined output bound; no implicit network policy |
 | `grep` | Search text files with RE2 and line numbers | read | Pure Go; glob filter, case option, match/output caps |
 | `glob` | Match regular file paths | read | Pure Go; `**` recursive segments and result/output caps |
@@ -1208,14 +1208,22 @@ supports concurrent calls:
 ```
 
 The host sends `initialize`, `tools/list`, `tools/call`, and `shutdown`.
-Progress, sanitized observation events, and bounded logs are notifications.
+Progress, explicitly subscribed sanitized observation events, cancellation, and
+bounded logs are notifications. Empty `supported_events` means no event fanout;
+delivery is best effort and cannot block the agent loop. External tool risk is
+optional (`read|write|exec|network`) and fails closed to `exec`; per-tool
+capabilities and private raw-JSON result details survive registry adaptation.
 Frames, input/output, progress, stderr, timeouts, cancellation, and concurrent
 calls are bounded. Commands are argv arrays and never shell strings.
 
 Project-local plugin declarations are trust-gated. Trust controls input
 loading, not plugin permissions or OS access; untrusted plugins need a
-container/VM/OS sandbox. JavaScript and Python can implement protocol v2;
-MCP and Agent Skills are separate adapters/resources over the registry.
+container/VM/OS sandbox. Persistent JavaScript and Python examples implement
+protocol v2 under `examples/plugins`, and `snow plugin check` performs a
+provider-free live handshake with schema/event/risk and bounded-diagnostics
+reporting. MCP and Agent Skills remain separate adapters/resources over the
+registry. The canonical wire contract is `docs/plugin-protocol.md`; runtime
+selection benchmarks and deferrals are in `docs/plugin-js-python-research.md`.
 
 ### 10.4 MCP and Agent Skills
 
@@ -1423,11 +1431,12 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] Themes + keybindings files (bounded strict YAML, trusted project overrides)
 - [x] Persistent ChatGPT model catalog refresh/cache (account- and backend-origin-scoped ETag/TTL entries)
 - [x] Durable fork/tree navigation (`/tree` picker)
-- [ ] Optional sandbox backend design spike (plugins are not sandboxed)
+- [x] Optional sandbox backend design investigation — no built-in backend planned now; use whole-process container/VM isolation when required
 - [x] Windows path/bash story hardened (suspended Job assignment, PowerShell, path aliases, atomic replacement, native script)
 - [x] Plugin tool appears in schema and executes through the central permission gate
 - [x] Opt-in BM25 tool routing keeps deferred parameter schemas out of normal model context
-- [ ] Hybrid embeddings, namespace-first routing, and embedding cache
+- [x] Namespace-first in-memory BM25 routing with deterministic global rescue and bounded summaries
+- [ ] Optional semantic/vector routing remains deferred pending a locally downloadable open-source model with acceptable licensing, macOS/Linux/Windows support, binary size, memory use, and startup time; no mandatory API/service
 
 **Acceptance tests**
 

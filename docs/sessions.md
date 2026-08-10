@@ -6,9 +6,14 @@ Snow stores persisted conversations in one SQLite database per session:
 ~/.snow/sessions/<encoded-working-directory>/<timestamp>_<suffix>.db
 ```
 
-Set `SNOW_SESSIONS_DIR` to move the root. `--no-session`/`NoSession` keeps the
-session in memory. `--session /path/to/session.db` resumes a specific database.
-The previous JSONL format is intentionally not migrated.
+Set `SNOW_SESSIONS_DIR` to move the root. New directory names use
+`cwd-v2-<full-sha256>` over the normalized absolute working directory, avoiding
+the collisions and path-length growth of the legacy flattened format.
+`FileIndex.List` also searches the legacy directory and filters every database
+by its stored CWD, so old sessions remain discoverable without cross-project
+mixing. `--no-session`/`NoSession` keeps the session in memory. `--session
+/path/to/session.db` resumes a specific database. The previous JSONL format is
+intentionally not migrated.
 
 ## Driver
 
@@ -46,8 +51,14 @@ Schema version 7 adds names and parent/fork metadata; legacy non-main branches
 retain their IDs as names and attach to `main` when ancestry is unavailable.
 
 An append inserts the entry and updates the active branch tip in one transaction.
-Databases with neither messages nor subagent topology are removed on close and
-are omitted from `FileIndex.List`; a durable root with child topology is kept.
+Entry ID/parent columns are authoritative and normalize embedded message
+identity on write and read. Branch-tip moves also use transactional optimistic
+compare-and-swap, so stale handles return a conflict instead of overwriting a
+newer tip.
+Root-only databases are removed on close and omitted from `FileIndex.List`.
+Messages, goals, additional branches, non-default thread state, remembered
+metadata, or subagent topology make a session durable and listable even when its
+active branch currently has zero messages.
 `Messages()` uses a recursive CTE to walk only the active branch, so opening a
 large session does not deserialize every historical branch into memory.
 `ContextMessages()` applies the latest compaction marker logically: providers

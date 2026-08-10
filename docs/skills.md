@@ -51,7 +51,9 @@ Set `skills.include_claude` to also scan user/project `.claude/skills/`
 locations. Project skills always override same-named user skills. Snow-native
 locations override cross-client locations within the same scope. Collisions,
 malformed files, bounds, and trust-blocked project directories are retained as
-diagnostics.
+diagnostics. The global discovery limit counts every candidate directory,
+including malformed and duplicate-name skills, and stops all remaining roots
+when reached so shadowing cannot bypass the startup I/O bound.
 
 ```json
 {

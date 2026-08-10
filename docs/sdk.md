@@ -151,7 +151,9 @@ Full persistent configuration and project trust rules are in
 | `RunPrompt(ctx, options, prompt)` | Open, collect root text, prompt, wait for goal/subagent/event quiescence, close |
 
 `RunPrompt` returns only root `text_delta` content. Attributed child text remains
-available only through a normal subscribed session.
+available only through a normal subscribed session. The helper closes the
+runtime before returning and joins any plugin/session cleanup failure into its
+returned error without discarding accumulated text.
 
 ### Turns, modes, and active input
 
