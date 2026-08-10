@@ -64,12 +64,7 @@ func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
 	if len(msgs) <= 1 {
 		return Plan{EstimatedTokens: estimateTokens(msgs)}
 	}
-	var starts []int
-	for i, msg := range msgs {
-		if msg.Role == protocol.RoleUser {
-			starts = append(starts, i)
-		}
-	}
+	starts := completeTurnStarts(msgs)
 	keep := 0
 	if len(starts) > opts.MinRetainedTurns {
 		keep = starts[len(starts)-opts.MinRetainedTurns]
@@ -80,8 +75,6 @@ func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
 			}
 			keep = candidate
 		}
-	} else if len(starts) == 0 && len(msgs) > 4 {
-		keep = len(msgs) - 4
 	}
 	if keep <= 0 {
 		return Plan{EstimatedTokens: estimateTokens(msgs)}
@@ -99,6 +92,26 @@ func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
 		return Plan{EstimatedTokens: estimateTokens(msgs)}
 	}
 	return plan
+}
+
+// completeTurnStarts returns boundaries that can safely begin retained provider
+// context. User and mailbox messages always begin a turn. Private goal turns do
+// not append another user message, so an assistant message after a terminal
+// assistant response also begins a turn. An assistant following a tool result
+// is deliberately not a boundary: it belongs to the same tool-call/result group.
+func completeTurnStarts(msgs []protocol.Message) []int {
+	starts := make([]int, 0)
+	for i, msg := range msgs {
+		switch msg.Role {
+		case protocol.RoleUser, protocol.RoleAgent:
+			starts = append(starts, i)
+		case protocol.RoleAssistant:
+			if i > 0 && msgs[i-1].Role == protocol.RoleAssistant && msgs[i-1].StopReason != protocol.StopToolUse {
+				starts = append(starts, i)
+			}
+		}
+	}
+	return starts
 }
 
 // Apply compacts the session by appending a marker that records the summary and

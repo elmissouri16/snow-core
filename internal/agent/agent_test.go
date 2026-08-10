@@ -93,6 +93,48 @@ type sliceStream struct {
 	ctx context.Context
 }
 
+type blockingSummaryProvider struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (*blockingSummaryProvider) ID() string { return "blocking-summary" }
+func (*blockingSummaryProvider) ListModels(context.Context) ([]protocol.Model, error) {
+	return nil, nil
+}
+func (*blockingSummaryProvider) Resolve(_ context.Context, credential auth.Credential) (auth.Credential, error) {
+	return credential, nil
+}
+func (p *blockingSummaryProvider) Chat(context.Context, auth.Credential, protocol.ChatRequest) (protocol.EventStream, error) {
+	return &blockingSummaryStream{started: p.started, release: p.release}, nil
+}
+
+type blockingSummaryStream struct {
+	started chan struct{}
+	release chan struct{}
+	step    int
+}
+
+func (s *blockingSummaryStream) Next(ctx context.Context) (protocol.StreamEvent, error) {
+	switch s.step {
+	case 0:
+		s.step++
+		close(s.started)
+		select {
+		case <-s.release:
+			return protocol.StreamEvent{Type: protocol.EvStreamTextDelta, Text: "summary"}, nil
+		case <-ctx.Done():
+			return protocol.StreamEvent{}, ctx.Err()
+		}
+	case 1:
+		s.step++
+		return protocol.StreamEvent{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}, nil
+	default:
+		return protocol.StreamEvent{}, io.EOF
+	}
+}
+func (*blockingSummaryStream) Close() error { return nil }
+
 func (s *sliceStream) Next(ctx context.Context) (protocol.StreamEvent, error) {
 	if s.i >= len(s.evs) {
 		return protocol.StreamEvent{}, io.EOF
@@ -205,6 +247,42 @@ func TestManualCompactUsesSummaryAndPreservesHistory(t *testing.T) {
 	projected, err := st.ContextMessages()
 	if err != nil || len(projected) != result.RetainedMessages+1 || projected[0].Role != protocol.RoleCustom {
 		t.Fatalf("projected context = %+v, result=%+v, err=%v", projected, result, err)
+	}
+}
+
+func TestManualCompactPersistsMailboxArrivingDuringSummary(t *testing.T) {
+	provider := &blockingSummaryProvider{started: make(chan struct{}), release: make(chan struct{})}
+	a, store := setup(t, provider, nil, permission.ModeDeny)
+	for i := 0; i < 6; i++ {
+		message := protocol.NewUserMessage(fmt.Sprintf("mailbox-%d", i), "", fmt.Sprintf("message %d", i))
+		if err := store.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	completed := make(chan error, 1)
+	go func() {
+		_, err := a.Compact(context.Background())
+		completed <- err
+	}()
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("compaction summary did not start")
+	}
+	envelope := protocol.AgentMessage{ID: "mail-during-compact", Author: protocol.AgentPath("/root/child"), Recipient: protocol.RootAgentPath, Kind: protocol.AgentMessageNormal, Content: "important mail", CreatedAt: time.Now().UnixMilli()}
+	if err := a.EnqueueMailbox(envelope); err != nil {
+		t.Fatal(err)
+	}
+	close(provider.release)
+	if err := <-completed; err != nil {
+		t.Fatal(err)
+	}
+	messages, err := store.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) == 0 || messages[len(messages)-1].Role != protocol.RoleAgent || !strings.Contains(messages[len(messages)-1].Content[0].Text, "important mail") {
+		t.Fatalf("mail was not persisted after compaction: %+v", messages)
 	}
 }
 

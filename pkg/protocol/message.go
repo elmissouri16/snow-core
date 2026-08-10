@@ -215,6 +215,21 @@ type Message struct {
 	IsError    bool   `json:"is_error,omitempty"`
 }
 
+// Clone returns an independent message, including mutable block payloads and
+// usage metadata. Session and event boundaries use it to prevent callers from
+// mutating durable provider context through returned slices or pointers.
+func (m Message) Clone() Message {
+	out := m
+	out.Content = make([]ContentBlock, len(m.Content))
+	for i, block := range m.Content {
+		out.Content[i] = block
+		out.Content[i].Data = append([]byte(nil), block.Data...)
+		out.Content[i].Arguments = append(json.RawMessage(nil), block.Arguments...)
+	}
+	out.Usage = m.Usage.Clone()
+	return out
+}
+
 // NewUserMessage builds a simple user text message.
 func NewUserMessage(id, parentID, text string) Message {
 	return Message{

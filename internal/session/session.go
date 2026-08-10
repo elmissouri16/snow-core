@@ -6,16 +6,19 @@ package session
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/snow-core/snow/pkg/protocol"
 )
@@ -53,6 +56,30 @@ type Entry struct {
 	// Meta
 	Key   string `json:"key,omitempty"`
 	Value string `json:"value,omitempty"`
+}
+
+func cloneEntry(entry Entry) Entry {
+	if entry.Message != nil {
+		message := entry.Message.Clone()
+		entry.Message = &message
+	}
+	return entry
+}
+
+func cloneEntries(entries []Entry) []Entry {
+	out := make([]Entry, len(entries))
+	for i, entry := range entries {
+		out[i] = cloneEntry(entry)
+	}
+	return out
+}
+
+func normalizeEntryMessage(entry *Entry) {
+	if entry == nil || entry.Message == nil {
+		return
+	}
+	entry.Message.ID = entry.ID
+	entry.Message.ParentID = entry.ParentID
 }
 
 // Store is the session abstraction used by the agent.
@@ -566,6 +593,7 @@ func (s *MemoryStore) SetMetadata(key, value string) error {
 
 // Append implements Store.
 func (s *MemoryStore) Append(entry Entry) error {
+	entry = cloneEntry(entry)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -583,6 +611,7 @@ func (s *MemoryStore) Append(entry Entry) error {
 	if _, ok := s.byID[entry.ParentID]; !ok {
 		return fmt.Errorf("session: unknown parent %q", entry.ParentID)
 	}
+	normalizeEntryMessage(&entry)
 	s.entries = append(s.entries, entry)
 	s.byID[entry.ID] = len(s.entries) - 1
 	s.tip = entry.ID
@@ -598,6 +627,7 @@ func (s *MemoryStore) AppendBatch(batch []Entry) error {
 	if len(batch) == 0 {
 		return nil
 	}
+	batch = cloneEntries(batch)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -623,9 +653,7 @@ func (s *MemoryStore) AppendBatch(batch []Entry) error {
 				return fmt.Errorf("session: unknown parent %q", batch[i].ParentID)
 			}
 		}
-		if batch[i].Message != nil {
-			batch[i].Message.ParentID = batch[i].ParentID
-		}
+		normalizeEntryMessage(&batch[i])
 		seen[batch[i].ID] = true
 		parent = batch[i].ID
 	}
@@ -1024,7 +1052,7 @@ func linearize(entries []Entry, byID map[string]int, tip string) ([]protocol.Mes
 	var msgs []protocol.Message
 	for _, e := range path {
 		if e.Type == EntryMessage && e.Message != nil {
-			msgs = append(msgs, *e.Message)
+			msgs = append(msgs, e.Message.Clone())
 		}
 	}
 	return msgs, nil
@@ -1072,7 +1100,7 @@ func contextMessagesFromEntries(entries []Entry) []protocol.Message {
 	}
 	for _, entry := range entries[start:] {
 		if entry.Type == EntryMessage && entry.Message != nil {
-			msgs = append(msgs, *entry.Message)
+			msgs = append(msgs, entry.Message.Clone())
 		}
 	}
 	return msgs
@@ -1179,6 +1207,7 @@ func (s *JSONLStore) load(f *os.File) error {
 		if _, ok := s.byID[e.ParentID]; !ok && e.ParentID != "" {
 			return fmt.Errorf("session: orphan parent %q for %q", e.ParentID, e.ID)
 		}
+		normalizeEntryMessage(&e)
 		s.entries = append(s.entries, e)
 		s.byID[e.ID] = len(s.entries) - 1
 		if e.ParentID == s.tip || (e.ParentID == "" && e.ID != "root") {
@@ -1225,6 +1254,7 @@ func (s *JSONLStore) SetMetadata(key, value string) error {
 
 // Append implements Store.
 func (s *JSONLStore) Append(entry Entry) error {
+	entry = cloneEntry(entry)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -1242,6 +1272,7 @@ func (s *JSONLStore) Append(entry Entry) error {
 	if _, ok := s.byID[entry.ParentID]; !ok {
 		return fmt.Errorf("session: unknown parent %q", entry.ParentID)
 	}
+	normalizeEntryMessage(&entry)
 	line, err := json.Marshal(entry)
 	if err != nil {
 		return err
@@ -1367,62 +1398,116 @@ func (f *FileIndex) Open(path string) (Store, error) {
 }
 
 // List implements Index. Returns sessions sorted by most recently updated.
+// It searches the collision-resistant directory and the legacy flattened
+// directory, filtering the latter by its stored CWD so colliding projects can
+// never see each other's sessions.
 func (f *FileIndex) List(cwd string) ([]SessionInfo, error) {
-	dir := filepath.Join(f.Root, EncodeCWD(cwd))
+	dirNames := []string{EncodeCWD(cwd), legacyEncodeCWD(cwd)}
+	seenDirs := make(map[string]bool, len(dirNames))
+	seenPaths := make(map[string]bool)
 	var out []SessionInfo
-	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
+	for _, dirName := range dirNames {
+		dir := filepath.Join(f.Root, dirName)
+		if seenDirs[dir] {
+			continue
 		}
-		if info.IsDir() {
-			if strings.HasSuffix(path, ".db.agents") {
-				return filepath.SkipDir
+		seenDirs[dir] = true
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
 			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".db") {
-			return nil
-		}
-		st, err := NewSQLiteStore(path, cwd, Options{})
-		if err != nil {
-			return nil // skip corrupt/partial files
-		}
-		hasMessages, hasMessagesErr := st.hasMessages()
-		last := info.ModTime().UnixMilli()
-		if hasMessagesErr != nil {
+			if info.IsDir() {
+				if strings.HasSuffix(path, ".db.agents") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".db") || seenPaths[path] {
+				return nil
+			}
+			st, openErr := NewSQLiteStore(path, cwd, Options{})
+			if openErr != nil {
+				return nil // skip corrupt/partial files
+			}
+			h := st.Header()
+			if !sameCWD(h.CWD, cwd) {
+				_ = st.Close()
+				return nil
+			}
+			hasState, hasStateErr := st.hasDurableState()
+			last := info.ModTime().UnixMilli()
+			if hasStateErr != nil {
+				_ = st.Close()
+				return nil
+			}
+			// A root-only database is an unused session, not a session to resume
+			// or display. Close removes it from disk as well.
+			if !hasState {
+				_ = st.Close()
+				return nil
+			}
+			count, countErr := st.messageCount()
+			if countErr != nil {
+				_ = st.Close()
+				return nil
+			}
+			out = append(out, SessionInfo{
+				Path:      path,
+				ID:        h.ID,
+				CWD:       h.CWD,
+				Name:      h.Name,
+				CreatedAt: h.CreatedAt,
+				UpdatedAt: last,
+				Messages:  count,
+			})
+			seenPaths[path] = true
 			_ = st.Close()
 			return nil
-		}
-		// A metadata-only database is an unused session, not a session to
-		// resume or display. Close removes it from disk as well.
-		if !hasMessages {
-			_ = st.Close()
-			return nil
-		}
-		count, countErr := st.messageCount()
-		if countErr != nil {
-			_ = st.Close()
-			return nil
-		}
-		h := st.Header()
-		out = append(out, SessionInfo{
-			Path:      path,
-			ID:        h.ID,
-			CWD:       h.CWD,
-			Name:      h.Name,
-			CreatedAt: h.CreatedAt,
-			UpdatedAt: last,
-			Messages:  count,
 		})
-		_ = st.Close()
-		return nil
-	})
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt > out[j].UpdatedAt })
 	return out, nil
 }
 
-// EncodeCWD encodes an absolute path into a directory name (pi-like).
+// EncodeCWD returns a fixed-size, collision-resistant directory name for an
+// absolute project path. The v2 prefix distinguishes it from legacy slugs.
 func EncodeCWD(cwd string) string {
+	return encodeCleanedCWD(normalizeCWD(cwd), runtime.GOOS)
+}
+
+func encodeCleanedCWD(cleaned, goos string) string {
+	if goos == "windows" {
+		// sameCWD uses Unicode simple case folding on Windows. Hash the canonical
+		// representative of each fold orbit rather than strings.ToLower, which is
+		// not equivalent for runes such as S/s/long-s.
+		cleaned = simpleFoldCanonical(cleaned)
+	}
+	sum := sha256.Sum256([]byte(cleaned))
+	return fmt.Sprintf("cwd-v2-%x", sum[:])
+}
+
+func simpleFoldCanonical(value string) string {
+	var out strings.Builder
+	out.Grow(len(value))
+	for _, r := range value {
+		canonical := r
+		for folded := unicode.SimpleFold(r); folded != r; folded = unicode.SimpleFold(folded) {
+			if folded < canonical {
+				canonical = folded
+			}
+		}
+		out.WriteRune(canonical)
+	}
+	return out.String()
+}
+
+func legacyEncodeCWD(cwd string) string {
 	abs, err := filepath.Abs(cwd)
 	if err != nil {
 		abs = cwd
@@ -1431,6 +1516,13 @@ func EncodeCWD(cwd string) string {
 	if cleaned == "." || cleaned == "" {
 		cleaned, _ = os.Getwd()
 	}
+	return legacyEncodeCleanedCWD(cleaned)
+}
+
+// legacyEncodeCleanedCWD intentionally reproduces the original encoder byte
+// for byte. In particular it removes only one leading hyphen, preserves
+// trailing hyphens, and leaves Windows backslashes untouched.
+func legacyEncodeCleanedCWD(cleaned string) string {
 	if cleaned == "/" {
 		return "root"
 	}
@@ -1441,4 +1533,26 @@ func EncodeCWD(cwd string) string {
 		enc = "root"
 	}
 	return enc
+}
+
+func normalizeCWD(cwd string) string {
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		abs = cwd
+	}
+	cleaned := filepath.Clean(abs)
+	if cleaned == "." || cleaned == "" {
+		if current, getwdErr := os.Getwd(); getwdErr == nil {
+			cleaned = filepath.Clean(current)
+		}
+	}
+	return cleaned
+}
+
+func sameCWD(left, right string) bool {
+	left, right = normalizeCWD(left), normalizeCWD(right)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }

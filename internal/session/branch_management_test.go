@@ -199,6 +199,34 @@ func TestSQLiteMultipleHandlesAppendUsesTipCAS(t *testing.T) {
 	}
 }
 
+func TestSQLiteMultipleHandlesSetBranchTipUsesCAS(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "set-tip-cas.db")
+	first, err := NewSQLiteStore(path, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	for _, entry := range []Entry{msg("one", "", "one"), msg("two", "", "two")} {
+		if err := first.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second, err := NewSQLiteStore(path, "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if err := first.SetBranchTip("one"); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.SetBranchTip("root"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale set-tip error=%v, want ErrConflict", err)
+	}
+	if second.BranchTip() != "one" {
+		t.Fatalf("stale handle refreshed to %q, want one", second.BranchTip())
+	}
+}
+
 func TestSQLiteMultipleHandlesAppendBatchUsesTipCAS(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "batch-cas.db")
 	first, err := NewSQLiteStore(path, t.TempDir(), Options{})

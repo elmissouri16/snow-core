@@ -442,6 +442,12 @@ func (a *Agent) setSessionAdmitted(st session.Store, publish bool) error {
 	if st == nil {
 		return errors.New("agent: session is nil")
 	}
+	a.mu.RLock()
+	closed := a.closed
+	a.mu.RUnlock()
+	if closed {
+		return errors.New("agent: closed")
+	}
 	if err := a.stopAutomaticForControl(context.Background(), "switch session"); err != nil {
 		return err
 	}
@@ -521,8 +527,11 @@ func (a *Agent) currentProvider() provider.Provider {
 
 // SetModel updates the active model.
 func (a *Agent) SetModel(m protocol.Model) error {
-	if m.Provider == "" {
+	if strings.TrimSpace(m.Provider) == "" {
 		return errors.New("agent: model has no provider")
+	}
+	if strings.TrimSpace(m.ID) == "" {
+		return errors.New("agent: model has no id")
 	}
 	m = m.Clone()
 	unlock := a.LockAdmission()
@@ -705,8 +714,37 @@ func (a *Agent) EmitUserInputRequest(req protocol.UserInputRequest) {
 }
 
 // Messages returns the linearized session messages.
-func (a *Agent) Messages() ([]protocol.Message, error) {
-	return a.opts.Session.Messages()
+func (a *Agent) Messages() (messages []protocol.Message, err error) {
+	err = a.withSessionRead(func(store session.Store) error {
+		messages, err = store.Messages()
+		return err
+	})
+	return messages, err
+}
+
+// SessionIdentity returns a synchronized snapshot of the active store identity.
+func (a *Agent) SessionIdentity() (id, path string, err error) {
+	err = a.withSessionRead(func(store session.Store) error {
+		id, path = store.ID(), store.Path()
+		return nil
+	})
+	return id, path, err
+}
+
+func (a *Agent) withSessionRead(read func(session.Store) error) error {
+	unlock := a.LockAdmission()
+	defer unlock()
+	a.mu.RLock()
+	if a.closed {
+		a.mu.RUnlock()
+		return errors.New("agent: closed")
+	}
+	store := a.opts.Session
+	a.mu.RUnlock()
+	if store == nil {
+		return errors.New("agent: session is nil")
+	}
+	return read(store)
 }
 
 // EnqueueMailbox queues an attributed message without allowing an external
@@ -849,18 +887,20 @@ func (a *Agent) finishTurnMailbox(mark func()) error {
 }
 
 // Usage returns the aggregate usage for the active session branch.
-func (a *Agent) Usage() (protocol.Usage, error) {
-	msgs, err := a.opts.Session.Messages()
-	if err != nil {
-		return protocol.Usage{}, err
-	}
-	var total protocol.Usage
-	for _, msg := range msgs {
-		if msg.Usage != nil {
-			total = total.Add(*msg.Usage)
+func (a *Agent) Usage() (total protocol.Usage, err error) {
+	err = a.withSessionRead(func(store session.Store) error {
+		msgs, readErr := store.Messages()
+		if readErr != nil {
+			return readErr
 		}
-	}
-	return total, nil
+		for _, msg := range msgs {
+			if msg.Usage != nil {
+				total = total.Add(*msg.Usage)
+			}
+		}
+		return nil
+	})
+	return total, err
 }
 
 // ContextMessages returns the provider-facing post-compaction projection. It
@@ -868,20 +908,54 @@ func (a *Agent) Usage() (protocol.Usage, error) {
 // pre-compaction history.
 func (a *Agent) ContextMessages() ([]protocol.Message, error) { return a.contextMessages() }
 
-func (a *Agent) contextMessages() ([]protocol.Message, error) {
-	if projected, ok := a.opts.Session.(session.ContextStore); ok {
+func (a *Agent) contextMessages() (messages []protocol.Message, err error) {
+	err = a.withSessionRead(func(store session.Store) error {
+		messages, err = contextMessagesFromStore(store)
+		return err
+	})
+	return messages, err
+}
+
+// ContextMessagesAdmitted is the non-reentrant variant for callers that
+// already hold LockAdmission while creating a child from the active branch.
+func (a *Agent) ContextMessagesAdmitted() ([]protocol.Message, error) {
+	return a.contextMessagesCurrent()
+}
+
+// contextMessagesCurrent is used by an admitted caller or an active turn.
+// Session switching rejects active turns, so the captured store remains live.
+func (a *Agent) contextMessagesCurrent() ([]protocol.Message, error) {
+	a.mu.RLock()
+	if a.closed {
+		a.mu.RUnlock()
+		return nil, errors.New("agent: closed")
+	}
+	store := a.opts.Session
+	a.mu.RUnlock()
+	return contextMessagesFromStore(store)
+}
+
+func contextMessagesFromStore(store session.Store) ([]protocol.Message, error) {
+	if store == nil {
+		return nil, errors.New("agent: session is nil")
+	}
+	if projected, ok := store.(session.ContextStore); ok {
 		return projected.ContextMessages()
 	}
-	return a.opts.Session.Messages()
+	return store.Messages()
 }
 
 // Branches lists durable branch references for the active session.
-func (a *Agent) Branches() ([]protocol.SessionBranch, error) {
-	branches, ok := a.opts.Session.(session.BranchStore)
-	if !ok {
-		return nil, errors.New("agent: session does not support durable branches")
-	}
-	return branches.Branches()
+func (a *Agent) Branches() (result []protocol.SessionBranch, err error) {
+	err = a.withSessionRead(func(store session.Store) error {
+		branches, ok := store.(session.BranchStore)
+		if !ok {
+			return errors.New("agent: session does not support durable branches")
+		}
+		result, err = branches.Branches()
+		return err
+	})
+	return result, err
 }
 
 func (a *Agent) stopAutomaticForControl(ctx context.Context, operation string) error {
@@ -1110,7 +1184,7 @@ func rollbackFork(branches session.BranchStore, createdBranchID, oldBranchID str
 // Compact manually compacts the active branch. It never runs automatically.
 // The active provider is asked for a concise summary; the local summarizer is
 // used when that request fails, provided the context is still live.
-func (a *Agent) Compact(ctx context.Context) (protocol.CompactionResult, error) {
+func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, retErr error) {
 	unlockAdmission := a.LockAdmission()
 	admissionHeld := true
 	defer func() {
@@ -1150,17 +1224,18 @@ func (a *Agent) Compact(ctx context.Context) (protocol.CompactionResult, error) 
 	defer func() {
 		wasCanceled := runCtx.Err() != nil
 		cancel()
-		a.mu.Lock()
-		stopped := a.autoStop
-		a.running = false
-		a.queueAccepting = false
-		a.activeCancel = nil
-		a.goalAtTurn = nil
-		if a.activeDone != nil {
-			close(a.activeDone)
-			a.activeDone = nil
-		}
-		a.mu.Unlock()
+		var stopped bool
+		retErr = errors.Join(retErr, a.finishTurnMailbox(func() {
+			stopped = a.autoStop
+			a.running = false
+			a.queueAccepting = false
+			a.activeCancel = nil
+			a.goalAtTurn = nil
+			if a.activeDone != nil {
+				close(a.activeDone)
+				a.activeDone = nil
+			}
+		}))
 		a.turnWG.Done()
 		if resumeAutomaticGoal && wasCanceled && a.opts.Goal != nil {
 			_ = a.opts.Goal.Defer(true)
@@ -1171,7 +1246,7 @@ func (a *Agent) Compact(ctx context.Context) (protocol.CompactionResult, error) 
 	}()
 	ctx = runCtx
 
-	msgs, err := a.contextMessages()
+	msgs, err := a.contextMessagesCurrent()
 	if err != nil {
 		return protocol.CompactionResult{}, fmt.Errorf("agent: compact load context: %w", err)
 	}
@@ -1194,7 +1269,7 @@ func (a *Agent) Compact(ctx context.Context) (protocol.CompactionResult, error) 
 		minTurns = 2
 	}
 	plan := compact.PlannerWithOptions(msgs, compact.PlannerOptions{RetainTokens: budget, MinRetainedTurns: minTurns})
-	result := protocol.CompactionResult{
+	result = protocol.CompactionResult{
 		SummarizedMessages: len(plan.CompactionCandidates),
 		RetainedMessages:   len(msgs) - len(plan.CompactionCandidates),
 	}
@@ -1971,6 +2046,7 @@ func (a *Agent) WaitGoal(ctx context.Context) error {
 
 func (a *Agent) Close() {
 	reentrantEventCallback := a.bus.InCallback()
+	unlockAdmission := a.LockAdmission()
 	a.mu.Lock()
 	a.closed = true
 	a.queueAccepting = false
@@ -1979,6 +2055,7 @@ func (a *Agent) Close() {
 		a.autoStop = true
 	}
 	a.mu.Unlock()
+	unlockAdmission()
 	if cancel != nil {
 		cancel()
 	}
@@ -2002,7 +2079,8 @@ func (a *Agent) prepareToolRouting(ctx context.Context, query string) {
 		return
 	}
 	started := time.Now()
-	candidates, err := router.Search(ctx, query, deferredCandidateK)
+	candidateLimit := max(deferredCandidateK, router.DeferredCount())
+	candidates, err := router.Search(ctx, query, candidateLimit)
 	latency := time.Since(started).Milliseconds()
 	fallback := err != nil
 	selected := a.selectPermittedMatches(candidates, defaultDeferredTopK)
@@ -2188,7 +2266,7 @@ func (a *Agent) run(ctx context.Context) error {
 		if err := a.drainMailboxForProvider(); err != nil {
 			return err
 		}
-		msgs, err := a.contextMessages()
+		msgs, err := a.contextMessagesCurrent()
 		if err != nil {
 			return fmt.Errorf("agent: load context: %w", err)
 		}

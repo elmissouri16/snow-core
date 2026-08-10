@@ -722,6 +722,7 @@ func (s *SQLiteStore) SetMetadata(key, value string) error {
 
 // Append implements Store. The entry and branch-tip update commit together.
 func (s *SQLiteStore) Append(entry Entry) error {
+	entry = cloneEntry(entry)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -747,6 +748,7 @@ func (s *SQLiteStore) Append(entry Entry) error {
 	if exists == 0 {
 		return fmt.Errorf("session: unknown parent %q", entry.ParentID)
 	}
+	normalizeEntryMessage(&entry)
 
 	var raw []byte
 	var err error
@@ -794,6 +796,7 @@ func (s *SQLiteStore) AppendBatch(batch []Entry) error {
 	if len(batch) == 0 {
 		return nil
 	}
+	batch = cloneEntries(batch)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -815,9 +818,7 @@ func (s *SQLiteStore) AppendBatch(batch []Entry) error {
 		if seen[batch[i].ID] {
 			return fmt.Errorf("session: duplicate entry id %q", batch[i].ID)
 		}
-		if batch[i].Message != nil {
-			batch[i].Message.ParentID = batch[i].ParentID
-		}
+		normalizeEntryMessage(&batch[i])
 		seen[batch[i].ID] = true
 		parent = batch[i].ID
 	}
@@ -885,21 +886,38 @@ func (s *SQLiteStore) SetBranchTip(id string) error {
 	if s.closed {
 		return errors.New("session: store closed")
 	}
+	expectedTip := s.tip
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("session: sqlite begin set tip: %w", err)
+	}
 	var exists int
-	if err := s.db.QueryRow(`SELECT count(*) FROM entries WHERE id = ?`, id).Scan(&exists); err != nil {
+	if err := tx.QueryRow(`SELECT count(*) FROM entries WHERE id = ?`, id).Scan(&exists); err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("session: sqlite lookup tip: %w", err)
 	}
 	if exists == 0 {
+		_ = tx.Rollback()
 		return ErrNotFound
 	}
 	now := time.Now().UnixMilli()
-	if result, err := s.db.Exec(`UPDATE session_branches SET tip_id = ?, updated_at = ? WHERE branch_id = ?`, id, now, s.branchID); err != nil {
+	result, err := tx.Exec(`UPDATE session_branches SET tip_id = ?, updated_at = ? WHERE branch_id = ? AND tip_id = ?`, id, now, s.branchID, expectedTip)
+	if err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("session: sqlite set branch tip: %w", err)
-	} else if n, _ := result.RowsAffected(); n != 1 {
-		return fmt.Errorf("session: sqlite active branch %q not found", s.branchID)
 	}
-	if _, err := s.db.Exec(`UPDATE session_meta SET branch_tip = ? WHERE singleton = 1`, id); err != nil {
+	if n, _ := result.RowsAffected(); n != 1 {
+		_ = tx.Rollback()
+		s.refreshBranchTipLocked()
+		return fmt.Errorf("%w on branch %q (expected %q)", ErrConflict, s.branchID, expectedTip)
+	}
+	if _, err := tx.Exec(`UPDATE session_meta SET branch_tip = ? WHERE singleton = 1
+		AND EXISTS (SELECT 1 FROM session_branches WHERE branch_id = ? AND active = 1)`, id, s.branchID); err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("session: sqlite set tip: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("session: sqlite commit set tip: %w", err)
 	}
 	s.tip = id
 	return nil
@@ -922,16 +940,17 @@ func (s *SQLiteStore) Messages() ([]protocol.Message, error) {
 			SELECT e.seq, e.id, e.parent_id, e.entry_type, e.message
 			FROM entries e JOIN branch b ON e.id = b.parent_id
 		)
-		SELECT entry_type, message FROM branch ORDER BY seq`, s.tip)
+		SELECT id, parent_id, entry_type, message FROM branch ORDER BY seq`, s.tip)
 	if err != nil {
 		return nil, fmt.Errorf("session: sqlite messages: %w", err)
 	}
 	defer rows.Close()
 	var messages []protocol.Message
 	for rows.Next() {
+		var id, parentID string
 		var typ EntryType
 		var raw []byte
-		if err := rows.Scan(&typ, &raw); err != nil {
+		if err := rows.Scan(&id, &parentID, &typ, &raw); err != nil {
 			return nil, fmt.Errorf("session: sqlite scan message: %w", err)
 		}
 		if typ != EntryMessage || len(raw) == 0 {
@@ -941,6 +960,7 @@ func (s *SQLiteStore) Messages() ([]protocol.Message, error) {
 		if err := json.Unmarshal(raw, &message); err != nil {
 			return nil, fmt.Errorf("session: sqlite decode message: %w", err)
 		}
+		message.ID, message.ParentID = id, parentID
 		messages = append(messages, message)
 	}
 	if err := rows.Err(); err != nil {
@@ -1319,6 +1339,7 @@ func (s *SQLiteStore) branchEntries(tip string) ([]Entry, error) {
 			if err := json.Unmarshal(raw, e.Message); err != nil {
 				return nil, fmt.Errorf("session: sqlite decode entry: %w", err)
 			}
+			normalizeEntryMessage(&e)
 		}
 		entries = append(entries, e)
 	}
@@ -1464,17 +1485,13 @@ func (s *SQLiteStore) Close() error {
 		return nil
 	}
 
-	var messageCount, topologyCount int
-	countErr := s.db.QueryRow(`SELECT count(*) FROM entries WHERE entry_type = ?`, EntryMessage).Scan(&messageCount)
-	if countErr == nil {
-		countErr = s.db.QueryRow(`SELECT count(*) FROM subagent_threads`).Scan(&topologyCount)
-	}
+	meaningfulCount, countErr := s.durableStateCountLocked()
 	closeErr := s.db.Close()
 	s.closed = true
 	if countErr != nil || closeErr != nil {
 		return errors.Join(countErr, closeErr)
 	}
-	if messageCount > 0 || topologyCount > 0 {
+	if meaningfulCount > 0 {
 		return nil
 	}
 
@@ -1505,17 +1522,28 @@ func (s *SQLiteStore) messageCount() (int, error) {
 	return count, err
 }
 
-// hasMessages reports whether the database contains any message, including
-// messages on inactive historical branches.
-func (s *SQLiteStore) hasMessages() (bool, error) {
+// hasDurableState reports whether the database contains any user-visible or
+// persisted branch state, including state on inactive historical branches.
+func (s *SQLiteStore) hasDurableState() (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
 		return false, errors.New("session: store closed")
 	}
+	count, err := s.durableStateCountLocked()
+	return count > 0, err
+}
+
+func (s *SQLiteStore) durableStateCountLocked() (int, error) {
 	var count int
-	if err := s.db.QueryRow(`SELECT count(*) FROM entries WHERE entry_type = ?`, EntryMessage).Scan(&count); err != nil {
-		return false, err
-	}
-	return count > 0, nil
+	err := s.db.QueryRow(`
+		SELECT
+			(SELECT count(*) FROM entries WHERE id <> 'root') +
+			(SELECT count(*) FROM subagent_threads) +
+			(SELECT count(*) FROM thread_goals) +
+			(SELECT count(*) FROM session_branches WHERE branch_id <> 'main') +
+			(SELECT count(*) FROM thread_state WHERE collaboration_mode <> 'default') +
+			(SELECT count(*) FROM thread_goal_deferrals WHERE deferred <> 0)
+	`).Scan(&count)
+	return count, err
 }

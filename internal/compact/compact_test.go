@@ -43,6 +43,44 @@ func TestPlannerKeepsMinimumTail(t *testing.T) {
 	}
 }
 
+func TestPlannerKeepsToolCallsWithResultsAcrossAutonomousTurns(t *testing.T) {
+	assistant := func(id string, stop protocol.StopReason, blocks ...protocol.ContentBlock) protocol.Message {
+		return protocol.NewAssistantMessage(id, "", "test", "model", blocks, stop, nil)
+	}
+	msgs := []protocol.Message{
+		mkMsg("user", "", "start"),
+		assistant("call-1", protocol.StopToolUse, protocol.ContentBlock{Type: protocol.BlockToolCall, ToolCallID: "tc-1", Name: "read"}),
+		protocol.NewToolResultMessage("result-1", "", "tc-1", "read", []protocol.ContentBlock{protocol.NewTextBlock("ok")}, false),
+		assistant("done-1", protocol.StopStop, protocol.NewTextBlock("done")),
+		assistant("call-2", protocol.StopToolUse, protocol.ContentBlock{Type: protocol.BlockToolCall, ToolCallID: "tc-2", Name: "read"}),
+		protocol.NewToolResultMessage("result-2", "", "tc-2", "read", []protocol.ContentBlock{protocol.NewTextBlock("ok")}, false),
+		assistant("done-2", protocol.StopStop, protocol.NewTextBlock("done")),
+		assistant("done-3", protocol.StopStop, protocol.NewTextBlock("continued")),
+		assistant("done-4", protocol.StopStop, protocol.NewTextBlock("continued")),
+	}
+	plan := PlannerWithOptions(msgs, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2})
+	if plan.KeepFrom != 7 {
+		t.Fatalf("KeepFrom=%d, want complete autonomous turn boundary 7", plan.KeepFrom)
+	}
+	if msgs[plan.KeepFrom].Role == protocol.RoleTool {
+		t.Fatal("retained context begins with an orphan tool result")
+	}
+}
+
+func TestPlannerTreatsMailboxAsTurnBoundary(t *testing.T) {
+	msgs := []protocol.Message{
+		mkMsg("user", "", "start"),
+		protocol.NewAssistantMessage("a1", "", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("done")}, protocol.StopStop, nil),
+		{ID: "mail-1", Role: protocol.RoleAgent, Content: []protocol.ContentBlock{protocol.NewTextBlock("mail")}},
+		protocol.NewAssistantMessage("a2", "", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("done")}, protocol.StopStop, nil),
+		{ID: "mail-2", Role: protocol.RoleAgent, Content: []protocol.ContentBlock{protocol.NewTextBlock("mail")}},
+	}
+	plan := PlannerWithOptions(msgs, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2})
+	if plan.KeepFrom != 2 {
+		t.Fatalf("KeepFrom=%d, want mailbox boundary 2", plan.KeepFrom)
+	}
+}
+
 func TestPlannerSmallConversation(t *testing.T) {
 	msgs := []protocol.Message{
 		mkMsg("1", "", "hello"),

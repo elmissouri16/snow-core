@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/snow-core/snow/pkg/protocol"
@@ -33,6 +34,42 @@ func TestMemoryAppendAndLinearize(t *testing.T) {
 	}
 	if msgs[0].Content[0].Text != "first" || msgs[1].Content[0].Text != "second" {
 		t.Fatalf("wrong order: %v", msgs)
+	}
+}
+
+func TestMemoryAppendNormalizesTopologyAndClonesMessages(t *testing.T) {
+	s := NewMemoryStore(Options{})
+	entry := msg("a", "", "first")
+	entry.Message.Content[0].Data = []byte("image")
+	entry.Message.Content[0].Arguments = []byte(`{"value":1}`)
+	if err := s.Append(entry); err != nil {
+		t.Fatal(err)
+	}
+	entry.Message.Content[0].Text = "caller mutation"
+	entry.Message.Content[0].Data[0] = 'X'
+	entry.Message.Content[0].Arguments[0] = 'X'
+	if err := s.Append(msg("b", "", "second")); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := s.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messages[0].ParentID != "root" || messages[1].ParentID != "a" {
+		t.Fatalf("parents = %q, %q", messages[0].ParentID, messages[1].ParentID)
+	}
+	if messages[0].Content[0].Text != "first" || string(messages[0].Content[0].Data) != "image" || string(messages[0].Content[0].Arguments) != `{"value":1}` {
+		t.Fatalf("stored message aliased caller: %+v", messages[0])
+	}
+	messages[0].Content[0].Text = "returned mutation"
+	messages[0].Content[0].Data[0] = 'Y'
+	again, err := s.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again[0].Content[0].Text != "first" || string(again[0].Content[0].Data) != "image" {
+		t.Fatalf("returned message aliased store: %+v", again[0])
 	}
 }
 
@@ -224,16 +261,115 @@ func TestFileIndexCreateOpenList(t *testing.T) {
 	}
 }
 
-func TestEncodeCWD(t *testing.T) {
-	cases := map[string]string{
-		"/":           "root",
-		"/tmp/foo":    "tmp-foo",
-		"/Users/el/x": "Users-el-x",
-		"/a/b/c/d":    "a-b-c-d",
+func TestFileIndexListsGoalOnlySession(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	store, err := NewFileIndex(root).Create(cwd)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for in, want := range cases {
-		if got := EncodeCWD(in); got != want {
-			t.Errorf("EncodeCWD(%q) = %q, want %q", in, got, want)
+	sqliteStore := store.(*SQLiteStore)
+	if err := sqliteStore.CreateGoal(protocol.ThreadGoal{GoalID: "goal", Objective: "work", Status: protocol.GoalPaused, CreatedAt: 1, UpdatedAt: 1}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqliteStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+	list, err := NewFileIndex(root).List(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Messages != 0 {
+		t.Fatalf("goal-only listing = %+v", list)
+	}
+}
+
+func TestFileIndexLegacyCollisionFiltersByStoredCWD(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "a-b", "c")
+	second := filepath.Join(root, "a", "b-c")
+	if legacyEncodeCWD(first) != legacyEncodeCWD(second) {
+		t.Fatalf("test paths did not produce a legacy collision")
+	}
+	legacyDir := filepath.Join(root, "sessions", legacyEncodeCWD(first))
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i, cwd := range []string{first, second} {
+		store, err := NewSQLiteStore(filepath.Join(legacyDir, string(rune('a'+i))+".db"), cwd, Options{})
+		if err != nil {
+			t.Fatal(err)
 		}
+		if err := store.Append(msg(string(rune('a'+i)), "", cwd)); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := NewFileIndex(filepath.Join(root, "sessions")).List(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || !sameCWD(list[0].CWD, first) {
+		t.Fatalf("legacy collision listing = %+v", list)
+	}
+}
+
+func TestLegacyEncodeCWDReproducesOriginalEdgeCases(t *testing.T) {
+	if got := legacyEncodeCleanedCWD("/tmp/repo-"); got != "tmp-repo-" {
+		t.Fatalf("trailing-hyphen encoding = %q", got)
+	}
+	if got := legacyEncodeCleanedCWD(`C:\Repo`); got != `C-\Repo` {
+		t.Fatalf("Windows legacy encoding = %q", got)
+	}
+	if encodeCleanedCWD(`C:\Repo`, "windows") != encodeCleanedCWD(`c:\repo`, "windows") {
+		t.Fatal("Windows v2 encoding is not ASCII-case-insensitive")
+	}
+	if encodeCleanedCWD(`C:\S`, "windows") != encodeCleanedCWD(`c:\ſ`, "windows") {
+		t.Fatal("Windows v2 encoding does not match Unicode simple folding")
+	}
+}
+
+func TestFileIndexFindsTrailingHyphenLegacyDirectory(t *testing.T) {
+	root := t.TempDir()
+	cwd := filepath.Join(root, "repo-")
+	legacyDir := filepath.Join(root, "sessions", legacyEncodeCWD(cwd))
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewSQLiteStore(filepath.Join(legacyDir, "legacy.db"), cwd, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(msg("legacy", "", "hello")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	list, err := NewFileIndex(filepath.Join(root, "sessions")).List(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Path != filepath.Join(legacyDir, "legacy.db") {
+		t.Fatalf("legacy listing = %+v", list)
+	}
+}
+
+func TestEncodeCWDIsDeterministicAndCollisionResistant(t *testing.T) {
+	first, second := "/a-b/c", "/a/b-c"
+	if legacyEncodeCWD(first) != legacyEncodeCWD(second) {
+		t.Fatal("test paths should collide under the legacy encoding")
+	}
+	firstEncoded := EncodeCWD(first)
+	if firstEncoded != EncodeCWD(first) {
+		t.Fatal("encoding is not deterministic")
+	}
+	if firstEncoded == EncodeCWD(second) {
+		t.Fatalf("collision-resistant encodings match: %q", firstEncoded)
+	}
+	if !strings.HasPrefix(firstEncoded, "cwd-v2-") || len(firstEncoded) != len("cwd-v2-")+64 {
+		t.Fatalf("encoding %q is not a fixed-size v2 hash", firstEncoded)
 	}
 }

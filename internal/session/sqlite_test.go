@@ -74,6 +74,73 @@ func TestSQLiteRoundTripAndBranch(t *testing.T) {
 	}
 }
 
+func TestSQLiteReadNormalizesHistoricalMessageTopology(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.db")
+	store, err := NewSQLiteStore(path, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(msg("entry-id", "", "text")); err != nil {
+		t.Fatal(err)
+	}
+	mismatched := protocol.NewUserMessage("wrong-id", "wrong-parent", "text")
+	raw, err := json.Marshal(mismatched)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`UPDATE entries SET message=? WHERE id='entry-id'`, raw); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := store.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].ID != "entry-id" || messages[0].ParentID != "root" {
+		t.Fatalf("normalized messages = %+v", messages)
+	}
+	store.Close()
+}
+
+func TestSQLiteClosePreservesGoalOnlyAndBranchOnlyState(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*SQLiteStore) error
+	}{
+		{name: "goal", setup: func(st *SQLiteStore) error {
+			return st.CreateGoal(protocol.ThreadGoal{GoalID: "goal", Objective: "work", Status: protocol.GoalPaused, CreatedAt: 1, UpdatedAt: 1}, false)
+		}},
+		{name: "branch", setup: func(st *SQLiteStore) error {
+			_, err := st.ForkBranch("root")
+			return err
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "session.db")
+			st, err := NewSQLiteStore(path, t.TempDir(), Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := test.setup(st); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("meaningful session removed on close: %v", err)
+			}
+			reopened, err := NewSQLiteStore(path, "", Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := reopened.Close(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestSQLiteMigratesVersionOneToMainBranch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	db, err := sql.Open("sqlite", sqliteDSN(path))

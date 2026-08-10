@@ -218,6 +218,9 @@ func TestAgentLifecycleAndConfiguration(t *testing.T) {
 	if err := a.SetModel(protocol.Model{}); err == nil {
 		t.Fatal("SetModel should reject a model without provider")
 	}
+	if err := a.SetModel(protocol.Model{Provider: "e2e"}); err == nil {
+		t.Fatal("SetModel should reject a model without an id")
+	}
 	summarySupported := true
 	changed := protocol.Model{Provider: "e2e", ID: "changed", SupportsReasoningSummary: &summarySupported, Upgrade: &protocol.ModelUpgrade{Model: "next"}}
 	var eventModel *protocol.Model
