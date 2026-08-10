@@ -41,16 +41,19 @@ type managedPlugin struct {
 
 // Manager owns plugin lifecycles, registrations, and observation delivery.
 type Manager struct {
-	mu          sync.Mutex
-	registry    tools.DescriptorRegistry
-	options     ManagerOptions
-	plugins     []*managedPlugin
-	ids         map[string]bool
-	subs        map[publicplugin.EventType]map[int]publicplugin.EventHandler
-	nextSub     int
-	initialized bool
-	closed      bool
-	diagnostics []Diagnostic
+	lifecycleMu   sync.Mutex
+	mu            sync.Mutex
+	registry      tools.DescriptorRegistry
+	options       ManagerOptions
+	plugins       []*managedPlugin
+	ids           map[string]bool
+	subs          map[publicplugin.EventType]map[int]publicplugin.EventHandler
+	nextSub       int
+	initialized   bool
+	initializeErr error
+	ready         bool
+	closed        bool
+	diagnostics   []Diagnostic
 }
 
 // NewManager creates an empty deterministic plugin manager. Options are
@@ -126,14 +129,17 @@ func (m *Manager) LoadExternal(spec publicplugin.PluginSpec) error {
 // partially initialized registry.
 func (m *Manager) Initialize(ctx context.Context) error {
 	ctx = nonNilContext(ctx)
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
 		return errors.New("plugin manager: closed")
 	}
 	if m.initialized {
+		err := m.initializeErr
 		m.mu.Unlock()
-		return nil
+		return err
 	}
 	plugins := append([]*managedPlugin(nil), m.plugins...)
 	m.initialized = true
@@ -148,7 +154,9 @@ func (m *Manager) Initialize(ctx context.Context) error {
 				if spawnErr != nil {
 					err = spawnErr
 				} else {
+					m.mu.Lock()
 					p.external = host
+					m.mu.Unlock()
 					var init ExternalInitResult
 					init, err = host.Initialize(ctx, m.options.HostVersion, host.WorkingDir(), m.options.SessionID, m.options.HostCapabilities)
 					if err == nil {
@@ -163,10 +171,16 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		}
 		if err != nil {
 			message := err.Error()
-			if p.external != nil && p.external.Diagnostics() != "" {
-				message += "; diagnostics: " + p.external.Diagnostics()
+			m.mu.Lock()
+			externalHost := p.external
+			m.mu.Unlock()
+			if externalHost != nil && externalHost.Diagnostics() != "" {
+				message += "; diagnostics: " + externalHost.Diagnostics()
 			}
-			m.rollback(p)
+			rollbackErr := m.rollback(p)
+			if rollbackErr != nil {
+				message += "; cleanup: " + rollbackErr.Error()
+			}
 			m.addDiagnostic(p.id, "failed", message)
 			// A foreign runtime is an optional isolated resource. A bad
 			// handshake/schema/crash must not prevent the core agent from
@@ -175,9 +189,16 @@ func (m *Manager) Initialize(ctx context.Context) error {
 			if external {
 				continue
 			}
-			return fmt.Errorf("plugin %s: initialize: %w", p.id, err)
+			initializeErr := errors.Join(fmt.Errorf("plugin %s: initialize: %w", p.id, err), rollbackErr)
+			m.mu.Lock()
+			m.initializeErr = initializeErr
+			m.mu.Unlock()
+			return initializeErr
 		}
 	}
+	m.mu.Lock()
+	m.ready = true
+	m.mu.Unlock()
 	return nil
 }
 
@@ -186,13 +207,17 @@ func (m *Manager) Emit(ev protocol.AgentEvent) {
 	ev = sanitizeEvent(ev.Clone())
 	e := publicplugin.Event{Version: publicplugin.ProtocolVersion, Type: publicplugin.EventType(ev.Type), Payload: ev}
 	m.mu.Lock()
+	if !m.ready || m.closed {
+		m.mu.Unlock()
+		return
+	}
 	fns := make([]publicplugin.EventHandler, 0, len(m.subs[e.Type]))
 	var externals []*ExternalHost
 	for _, fn := range m.subs[e.Type] {
 		fns = append(fns, fn)
 	}
 	for _, p := range m.plugins {
-		if p.external != nil {
+		if p.external != nil && p.external.SupportsEvent(e.Type) {
 			externals = append(externals, p.external)
 		}
 	}
@@ -247,7 +272,16 @@ func (m *Manager) Close(ctx context.Context) error {
 		m.mu.Unlock()
 		return nil
 	}
+	m.mu.Unlock()
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil
+	}
 	m.closed = true
+	m.ready = false
 	plugins := append([]*managedPlugin(nil), m.plugins...)
 	m.mu.Unlock()
 	var errs []error
@@ -270,38 +304,52 @@ func (m *Manager) Close(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (m *Manager) rollback(p *managedPlugin) {
+func (m *Manager) rollback(p *managedPlugin) error {
 	m.registry.UnregisterOwner(p.owner)
 	for i := len(p.cleanups) - 1; i >= 0; i-- {
 		p.cleanups[i]()
 	}
-	if p.external != nil {
-		_ = p.external.Close(context.Background())
-		p.external = nil
+	m.mu.Lock()
+	externalHost := p.external
+	p.external = nil
+	m.mu.Unlock()
+	var errs []error
+	if externalHost != nil {
+		if err := externalHost.Close(context.Background()); err != nil {
+			errs = append(errs, fmt.Errorf("plugin %s external close: %w", p.id, err))
+		}
 	}
 	if p.goPlugin != nil {
 		if _, ok := p.goPlugin.(*externalPlaceholder); !ok {
-			_ = p.goPlugin.Close(context.Background())
+			if err := p.goPlugin.Close(context.Background()); err != nil {
+				errs = append(errs, fmt.Errorf("plugin %s close: %w", p.id, err))
+			}
 		}
 		p.goPlugin = nil
 	}
+	return errors.Join(errs...)
 }
 
 func (m *Manager) registerExternal(p *managedPlugin, init ExternalInitResult) error {
-	capabilities := append([]string(nil), init.Manifest.Capabilities...)
-	capabilities = append(capabilities, init.Capabilities...)
+	var specCapabilities []string
 	if ext, ok := p.goPlugin.(*externalPlaceholder); ok {
-		capabilities = append(capabilities, ext.spec.Capabilities...)
+		specCapabilities = ext.spec.Capabilities
 	}
+	capabilities := publicplugin.MergeCapabilities(init.Manifest.Capabilities, init.Capabilities, specCapabilities)
 	for _, schema := range init.Tools {
 		name, err := publicplugin.Namespace("plugin", p.id, schema.Name)
 		if err != nil {
 			return err
 		}
+		risk, err := declaredRisk(schema.Risk)
+		if err != nil {
+			return err
+		}
+		toolCapabilities := publicplugin.MergeCapabilities(capabilities, schema.Capabilities)
 		tool := &externalManagedTool{schema: protocol.ToolSchema{Name: name, Description: schema.Description, Parameters: schema.Parameters, Discovery: cloneDiscovery(schema.Discovery)}, original: schema.Name, host: p.external}
 		if err := m.registry.RegisterDescriptor(tools.ToolDescriptor{
 			Schema: tool.schema, Tool: tool, Source: tools.SourceExternal, Owner: p.owner,
-			PluginID: p.id, OriginalName: schema.Name, Risk: permission.RiskExec, Capabilities: capabilities,
+			PluginID: p.id, OriginalName: schema.Name, Risk: risk, Capabilities: toolCapabilities,
 		}); err != nil {
 			return err
 		}
@@ -443,7 +491,11 @@ func (t *externalManagedTool) Run(ctx context.Context, args json.RawMessage, hos
 	if err != nil {
 		return tools.ErrorResult(err), nil
 	}
-	return tools.ToolResult{Content: res.Content, IsError: res.IsError}, nil
+	var details any
+	if len(res.Details) > 0 {
+		details = append(json.RawMessage(nil), res.Details...)
+	}
+	return tools.ToolResult{Content: res.Content, Details: details, IsError: res.IsError}, nil
 }
 
 func sanitizeEvent(ev protocol.AgentEvent) protocol.AgentEvent {

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/snow-core/snow/pkg/protocol"
@@ -54,6 +55,38 @@ type ToolDefinition struct {
 	Risk         string
 	Capabilities []string
 	Executor     ToolExecutor
+}
+
+// ExternalToolDefinition is the protocol-v2 wire descriptor returned by an
+// external runtime from initialize or tools/list. Risk is optional and defaults
+// to exec so existing runtimes remain fail-closed. Capabilities are additional
+// descriptor metadata scoped to this tool; risk controls permission classification.
+type ExternalToolDefinition struct {
+	Name         string                  `json:"name"`
+	Description  string                  `json:"description"`
+	Parameters   json.RawMessage         `json:"parameters"`
+	Discovery    *protocol.ToolDiscovery `json:"discovery,omitempty"`
+	Risk         string                  `json:"risk,omitempty"`
+	Capabilities []string                `json:"capabilities,omitempty"`
+}
+
+// MergeCapabilities returns the sorted union of capability metadata groups.
+func MergeCapabilities(groups ...[]string) []string {
+	seen := make(map[string]struct{})
+	for _, group := range groups {
+		for _, capability := range group {
+			capability = strings.TrimSpace(capability)
+			if capability != "" {
+				seen[capability] = struct{}{}
+			}
+		}
+	}
+	merged := make([]string, 0, len(seen))
+	for capability := range seen {
+		merged = append(merged, capability)
+	}
+	sort.Strings(merged)
+	return merged
 }
 
 // ToolExecutor executes a registered tool.

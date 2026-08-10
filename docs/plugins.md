@@ -1,19 +1,30 @@
 # Plugins
 
-Snow's extensibility core has two adapters that share one capability registry:
+Snow's extensibility core has two adapters sharing one permissioned capability
+registry:
 
 - statically linked Go plugins implement `pkg/plugin.Plugin`;
-- external runtimes implement JSON-RPC 2.0 over stdin/stdout (protocol v2).
+- external runtimes implement Snow's JSON-RPC 2.0 JSONL protocol v2.
 
-MCP and skills are intentionally not plugin transports. MCP now adapts the
-official Go SDK into the same registry (see [mcp.md](mcp.md)); skills are an
-instructional resource layer with dedicated activation tools (see
-[skills.md](skills.md)). JavaScript and Python may still use the external
-JSON-RPC plugin protocol.
+External runtimes are the supported JavaScript/Python plugin ABI. Snow keeps one
+process alive per plugin package, so interpreter startup is paid once while
+several related tools share the same runtime.
+
+MCP and skills are intentionally separate. Use [MCP](mcp.md) for interoperable
+tools, resources, and prompts; use Snow plugins for Snow-specific lifecycle,
+private configuration, progress, and observation-only agent events. Skills are
+an instructional resource layer with dedicated activation tools.
+
+References:
+
+- [Complete external protocol v2](plugin-protocol.md)
+- [JavaScript/Python architecture research](plugin-js-python-research.md)
+- [Tool routing](tool-routing.md)
+- dependency-free examples under `examples/plugins/`
 
 ## Go API
 
-A plugin has a stable manifest, a registration phase, and an idempotent close:
+A plugin has a stable manifest, registration phase, and idempotent close:
 
 ```go
 p := myPlugin{}
@@ -25,88 +36,180 @@ s, err := snowsdk.Open(ctx, snowsdk.Options{
 ```
 
 `Plugin.Register` receives a scoped `plugin.Registrar`. Tool names are local to
-the plugin and are exposed to the model as `plugin_<plugin-id>_<tool-name>`.
+the plugin and exposed to the model as `plugin_<plugin-id>_<tool-name>`.
 Duplicate IDs, invalid identifiers, malformed schemas, and duplicate names are
-rejected before the agent starts. Tools declare a risk (`read`, `write`, `exec`,
-or `network`) and all calls still pass through Snow's central permission
-service. Tool contexts carry cancellation, session/cwd/call identity, and a
-bounded progress callback.
+rejected before the agent starts.
 
-Tools may also set optional `protocol.ToolDiscovery` metadata. The default is
-direct exposure; `mode: deferred` keeps the full schema in the registry and
-uses the local Bleve router to select it per prompt. This is independent of the
-plugin transport and never bypasses the central execution permission gate. See
-[tool-routing.md](tool-routing.md) for Go and JSON examples.
+Tools declare a risk (`read`, `write`, `exec`, or `network`) and all calls pass
+through Snow's central permission service. Tool contexts carry cancellation,
+session/cwd/call identity, and a bounded progress callback.
 
-Plugins may subscribe to versioned agent events. Protocol v2 is observation-only:
-event handlers cannot mutate, veto, or reorder the agent loop. Handler panics
-are isolated from the host.
+Tools may set optional `protocol.ToolDiscovery` metadata. The default is direct
+exposure; `mode: deferred` keeps the full schema in the registry and lets the
+local router select it per prompt. Routing never bypasses execution permissions.
+
+Go plugins may subscribe to versioned agent events. Handlers are
+observation-only: they cannot mutate, veto, or reorder the loop, and panics are
+isolated from the host. Delivery is best effort: shutdown stops new emissions
+but does not wait for a blocked observer, preventing observer-driven deadlocks.
 
 ## External configuration
 
-Global configuration and SDK/CLI options use the same explicit `PluginSpec`:
+Global configuration and SDK/CLI options use the same `PluginSpec`:
 
 ```json
 {
   "plugins": [
     {
       "id": "my-tools",
-      "command": ["/absolute/path/to/plugin", "serve"],
+      "command": [
+        "/absolute/path/to/python",
+        "-u",
+        "/absolute/path/to/plugin.py"
+      ],
       "enabled": true,
       "timeout_ms": 120000,
       "max_output_bytes": 262144,
-      "env": ["PATH=/usr/bin"]
+      "env": ["PATH=/usr/local/bin:/usr/bin:/bin"]
     }
   ]
 }
 ```
 
-`command` is an argv array. Snow never invokes `sh -c` or parses a shell
-command string. `snow --plugin /absolute/path/to/plugin` is shorthand for an
-enabled spec; `--plugin manifest.json` loads a JSON spec. `--no-plugins`
-disables config and statically supplied plugins.
+`command` is argv. Snow never invokes `sh -c` or parses a shell string.
 
-Project `.snow/config.json` plugin entries are read only after the existing
-trust store has an explicit `allow` decision (or the configured always-trust
-policy). Denied, unresolved, or disabled entries are skipped with diagnostics.
-There is no executable directory scan or marketplace.
+```sh
+snow --plugin /absolute/path/to/executable
+snow --plugin manifest.json
+snow --no-plugins
+```
 
-## Protocol v2
+The executable shorthand derives an ID and enables the plugin. A manifest is
+required when an interpreter and script need separate argv entries.
 
-The wire format is JSON-RPC 2.0 JSONL. stdout is reserved for frames; stderr is
-captured as bounded diagnostics. Request IDs are strings and one reader
-multiplexer correlates concurrent calls.
+Project `.snow/config.json` entries are loaded only after project trust has an
+explicit `allow` decision (or always-trust policy). Denied, unresolved, and
+disabled entries are skipped with diagnostics. Snow does not scan executable
+directories and has no plugin marketplace.
+
+### Environment behavior
+
+Snow intentionally supplies the configured `env`; omitted `env` means an empty
+child environment except for platform-required entries that Go may add (notably
+`SYSTEMROOT` on Windows). This reduces accidental credential inheritance but can
+affect interpreter shebangs, subprocess lookup, locale, and certificate
+configuration.
+
+When `command[0]` has no path separator, Go resolves it using Snow's launch
+environment before applying the configured child `env`. The child's `PATH`
+affects only the running plugin and subprocesses it starts; it does not select
+the already resolved interpreter. Plugin `env` values are literal and do not
+expand `${VAR}`.
+
+Prefer an absolute interpreter path, especially a Python virtual environment's
+interpreter. Otherwise provide a deliberately minimal `PATH`. Never put secrets
+in a committed manifest; use a plugin-owned secure credential store or inject a
+runtime-only `PluginSpec` from an embedding host.
+
+## JavaScript and Python quickstart
+
+From the repository root:
+
+```sh
+snow plugin check examples/plugins/javascript/manifest.json
+snow plugin check examples/plugins/python/manifest.json
+
+snow --plugin examples/plugins/javascript/manifest.json
+snow --plugin examples/plugins/python/manifest.json
+```
+
+The checked-in examples use only Node/Python standard libraries. Their manifests
+use runtime names plus a minimal POSIX `PATH` for readability; production and
+Windows declarations should replace those values with explicit paths.
+
+Stdout belongs exclusively to JSON-RPC frames. JavaScript plugins must log with
+`console.error` or stderr; Python plugins must configure logging/printing for
+stderr.
+
+## Validate a runtime
+
+```sh
+snow plugin check manifest.json
+snow plugin check manifest.json --json
+snow plugin check manifest.json --timeout 20s --cwd /path/to/project
+```
+
+`plugin check` starts no provider or agent session. It:
+
+- starts the configured process;
+- validates the manifest ID/version/protocol and tool schemas;
+- reports initialization time and effective cwd;
+- lists effective plugin/tool capabilities, tools, risks, discovery modes, and
+  subscribed events;
+- includes informational negotiated limits;
+- prints bounded diagnostics with best-effort redaction of common credential
+  assignments/headers;
+- verifies graceful shutdown.
+
+Redaction is defense in depth, not a secret-handling API. Plugins must never emit
+credentials to stderr, protocol logs, results, progress, or errors.
+
+An explicit check runs even when the declaration has `enabled: false`; it does
+not modify stored configuration.
+
+## Protocol v2 summary
+
+The wire transport is JSON-RPC 2.0 with one object per LF-terminated line.
+Request IDs are strings and one host reader correlates concurrent responses.
 
 Host requests:
 
-- `initialize`: protocol version, host version, cwd, session ID, capabilities,
-  and plugin config;
-- `tools/list`: refresh descriptors;
-- `tools/call`: original tool name, call ID, JSON arguments, timeout and
-  cancellation metadata;
+- `initialize`: protocol/host version, cwd, session ID, capabilities, config;
+- `tools/list`: authoritative tool descriptors;
+- `tools/call`: original name, call ID, arguments, deadline, cancellation hint;
 - `shutdown`: graceful close.
 
-Plugin responses/notifications:
+Plugin-to-host notifications:
 
-- initialize returns a manifest, capabilities, tools, supported events, and
-  limits;
-- `notifications/progress` reports bounded call progress;
-- `notifications/event` carries sanitized host observations;
-- `notifications/log` is bounded diagnostics.
+- `notifications/progress`: bounded progress for a non-empty call ID;
+- `notifications/log`: bounded diagnostics.
 
-Frames, arguments, results, progress, stderr, and concurrent calls are bounded
-by the spec. EOF, crashes, malformed frames, JSON-RPC errors, timeout, and
-cancellation become isolated tool/startup errors rather than panics. External
-processes are closed in reverse load order.
+Host-to-plugin notifications:
+
+- `notifications/event`: sanitized events listed in `supported_events`;
+- `notifications/cancelled`: best-effort cancellation by request/call ID.
+
+Tool descriptors may declare `risk` and per-tool capabilities. Omitted risk
+fails closed to `exec`; invalid risks reject initialization. Result `details`
+are preserved as private host metadata and are not sent to the model.
+
+`supported_events` is an explicit subscription. Empty or omitted lists receive
+no events. Delivery uses a bounded queue and is best effort, so plugins must not
+treat events as a reliable transaction log.
+
+Frames, inputs, results, progress, stderr, logs, event queues, deadlines, and
+concurrent calls are bounded. EOF, crashes, malformed frames, JSON-RPC errors,
+timeouts, and cancellation become isolated errors instead of panics. Processes
+close in reverse load order.
+
+See [External plugin protocol v2](plugin-protocol.md) for every field and frame.
 
 ## Security
 
-Plugins execute with the user's OS privileges. Trust is an input-loading gate,
-not a sandbox: an already loaded plugin is not restricted by the trust store.
-Use containers, a VM, or an OS sandbox for untrusted code. Snow does not inherit
-the host environment by default, does not log credentials, enforces permissions
-for plugin tools, and keeps plugin diagnostics bounded.
+Plugins execute with the user's OS privileges. Process separation provides a
+crash/termination boundary, not a sandbox. Trust controls whether project input
+is loaded; it does not confine an already loaded plugin.
 
-The registration/lifecycle separation is inspired by Pi's extension and
-progressive-disclosure model and OpenCode's explicit plugin lifecycle and
-permission-aware tools. Snow does not promise compatibility with either API.
+Tool risk is plugin-declared metadata used by the central permission service;
+capabilities are retained descriptor/discovery metadata and do not independently
+authorize a call. Neither field stops the process from accessing files, network,
+or subprocesses directly. Only trusted plugins should receive `read`, `write`,
+or `network` classifications instead of the safe `exec` default.
+
+Use containers, a VM, or an OS sandbox for untrusted code. Snow avoids implicit
+environment inheritance, does not intentionally log credentials, applies
+best-effort common-credential redaction to diagnostics, and bounds plugin I/O.
+
+Snow's lifecycle draws inspiration from Pi's extension/progressive-disclosure
+model and OpenCode's explicit permission-aware plugins, but does not promise API
+compatibility with either.

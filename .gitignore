@@ -3,6 +3,9 @@
 *.test
 *.out
 coverage/
+__pycache__/
+*.py[cod]
+node_modules/
 .DS_Store
 .pi-subagents/
 /agent-bench-results.json

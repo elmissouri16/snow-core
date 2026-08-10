@@ -27,11 +27,11 @@ const (
 
 // ExternalInitResult is the version-2 initialize result.
 type ExternalInitResult struct {
-	Manifest        plugin.Manifest       `json:"manifest"`
-	Capabilities    []string              `json:"capabilities,omitempty"`
-	Tools           []protocol.ToolSchema `json:"tools,omitempty"`
-	SupportedEvents []plugin.EventType    `json:"supported_events,omitempty"`
-	Limits          map[string]int        `json:"limits,omitempty"`
+	Manifest        plugin.Manifest                 `json:"manifest"`
+	Capabilities    []string                        `json:"capabilities,omitempty"`
+	Tools           []plugin.ExternalToolDefinition `json:"tools,omitempty"`
+	SupportedEvents []plugin.EventType              `json:"supported_events,omitempty"`
+	Limits          map[string]int                  `json:"limits,omitempty"`
 
 	// Name and Version are accepted as a convenience for small runtimes. New
 	// runtimes should return Manifest.
@@ -87,33 +87,35 @@ type ExternalHost struct {
 	cmd  *exec.Cmd
 	in   io.WriteCloser
 
-	writeMu  sync.Mutex
-	mu       sync.Mutex
-	pending  map[string]*pendingV2
-	failed   error
-	done     chan struct{}
-	failOnce sync.Once
-	nextID   uint64
+	writeToken chan struct{}
+	mu         sync.Mutex
+	pending    map[string]*pendingV2
+	failed     error
+	done       chan struct{}
+	failOnce   sync.Once
+	nextID     uint64
 
-	maxFrame    int
-	maxOutput   int
-	maxProgress int
-	maxInput    int
-	semaphore   chan struct{}
-	stderr      *boundedBuffer
-	logs        *boundedBuffer
-	waitDone    chan struct{}
-	waitErr     error
-	notifyQueue chan []byte
-	closeOnce   sync.Once
-	closeErr    error
-	manifest    plugin.Manifest
-	tools       []protocol.ToolSchema
+	maxFrame        int
+	maxOutput       int
+	maxProgress     int
+	maxInput        int
+	semaphore       chan struct{}
+	stderr          *boundedBuffer
+	logs            *boundedBuffer
+	waitDone        chan struct{}
+	waitErr         error
+	notifyQueue     chan []byte
+	closeOnce       sync.Once
+	closeErr        error
+	manifest        plugin.Manifest
+	tools           []plugin.ExternalToolDefinition
+	supportedEvents map[plugin.EventType]struct{}
 }
 
 // SpawnExternal starts an explicit argv-based plugin process. No shell is
-// involved. Environment is exactly spec.Env when provided; an empty
-// environment is used otherwise.
+// involved. Environment is spec.Env when provided and empty otherwise, except
+// that Go's os/exec may add required platform entries such as SYSTEMROOT on
+// Windows.
 func SpawnExternal(ctx context.Context, spec plugin.PluginSpec, cwd string) (*ExternalHost, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -157,7 +159,9 @@ func SpawnExternal(ctx context.Context, spec plugin.PluginSpec, cwd string) (*Ex
 		maxProgress: spec.MaxProgressBytes, maxInput: spec.MaxInputBytes,
 		stderr: newBoundedBuffer(diagnosticLimit), logs: newBoundedBuffer(diagnosticLimit),
 		waitDone: make(chan struct{}), notifyQueue: make(chan []byte, 64),
+		writeToken: make(chan struct{}, 1),
 	}
+	h.writeToken <- struct{}{}
 	if h.maxFrame <= 0 {
 		h.maxFrame = defaultFrameBytes
 	}
@@ -254,7 +258,7 @@ func (h *ExternalHost) Initialize(ctx context.Context, hostVersion, cwd, session
 		return out, fmt.Errorf("plugin %s: manifest id %q does not match spec", h.spec.ID, out.Manifest.ID)
 	}
 	var listed struct {
-		Tools []protocol.ToolSchema `json:"tools"`
+		Tools []plugin.ExternalToolDefinition `json:"tools"`
 	}
 	if err := h.call(initCtx, "tools/list", []byte(`{}`), "", nil, &listed); err != nil {
 		return out, err
@@ -265,10 +269,17 @@ func (h *ExternalHost) Initialize(ctx context.Context, hostVersion, cwd, session
 	if err := validateSchemas(listed.Tools); err != nil {
 		return out, err
 	}
+	supported := make(map[plugin.EventType]struct{}, len(out.SupportedEvents))
+	for _, eventType := range out.SupportedEvents {
+		supported[eventType] = struct{}{}
+	}
+	manifest := cloneManifest(out.Manifest)
 	h.mu.Lock()
-	h.manifest, h.tools = out.Manifest, cloneSchemas(listed.Tools)
+	h.manifest, h.tools, h.supportedEvents = manifest, cloneExternalSchemas(listed.Tools), supported
 	h.mu.Unlock()
-	out.Tools = cloneSchemas(listed.Tools)
+	out.Manifest = cloneManifest(manifest)
+	out.Tools = cloneExternalSchemas(listed.Tools)
+	out.SupportedEvents = append([]plugin.EventType(nil), out.SupportedEvents...)
 	return out, nil
 }
 
@@ -279,14 +290,24 @@ func (h *ExternalHost) WorkingDir() string { return h.cwd }
 func (h *ExternalHost) Manifest() plugin.Manifest {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.manifest
+	return cloneManifest(h.manifest)
 }
 
-// ToolSchemas returns the latest negotiated schemas.
-func (h *ExternalHost) ToolSchemas() []protocol.ToolSchema {
+// ToolSchemas returns the latest negotiated external tool definitions.
+func (h *ExternalHost) ToolSchemas() []plugin.ExternalToolDefinition {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return cloneSchemas(h.tools)
+	return cloneExternalSchemas(h.tools)
+}
+
+// SupportsEvent reports whether the runtime subscribed to an event during
+// initialization. An omitted or empty supported_events list subscribes to no
+// events, preserving the agent loop from unnecessary external fanout.
+func (h *ExternalHost) SupportsEvent(eventType plugin.EventType) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.supportedEvents[eventType]
+	return ok
 }
 
 // Call invokes a child tool and routes progress notifications to onProgress.
@@ -364,7 +385,7 @@ func (h *ExternalHost) call(ctx context.Context, method string, params []byte, c
 		h.removePending(id)
 		return fmt.Errorf("plugin %s: request exceeds frame limit", h.spec.ID)
 	}
-	if err := h.lockWriter(ctx); err != nil {
+	if err := h.acquireWriter(ctx); err != nil {
 		h.removePending(id)
 		return err
 	}
@@ -375,7 +396,7 @@ func (h *ExternalHost) call(ctx context.Context, method string, params []byte, c
 		if writeErr == nil && n != len(payload) {
 			writeErr = io.ErrShortWrite
 		}
-		h.writeMu.Unlock()
+		h.releaseWriter()
 		writeDone <- writeErr
 	}()
 	select {
@@ -412,17 +433,32 @@ func (h *ExternalHost) call(ctx context.Context, method string, params []byte, c
 	}
 }
 
-func (h *ExternalHost) lockWriter(ctx context.Context) error {
-	for !h.writeMu.TryLock() {
-		timer := time.NewTimer(time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
+func (h *ExternalHost) acquireWriter(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-h.done:
+		return h.failureError()
+	case <-h.writeToken:
 	}
-	return nil
+	select {
+	case <-ctx.Done():
+		h.releaseWriter()
+		return ctx.Err()
+	case <-h.done:
+		h.releaseWriter()
+		return h.failureError()
+	default:
+		return nil
+	}
+}
+
+func (h *ExternalHost) releaseWriter() {
+	select {
+	case h.writeToken <- struct{}{}:
+	default:
+		panic("plugin: writer token released twice")
+	}
 }
 
 func (h *ExternalHost) removePending(id string) {
@@ -501,13 +537,13 @@ func (h *ExternalHost) notification(method string, params json.RawMessage) {
 	switch method {
 	case "notifications/progress":
 		var n ProgressNotification
-		if json.Unmarshal(params, &n) != nil || len(n.Message) > h.maxProgress {
+		if json.Unmarshal(params, &n) != nil || n.CallID == "" || len(n.Message) > h.maxProgress {
 			return
 		}
 		h.mu.Lock()
 		callbacks := make([]func(ProgressNotification), 0)
 		for _, p := range h.pending {
-			if p.progress != nil && (n.CallID == "" || p.callID == n.CallID) {
+			if p.progress != nil && p.callID == n.CallID {
 				callbacks = append(callbacks, p.progress)
 			}
 		}
@@ -576,12 +612,14 @@ func (h *ExternalHost) writeNotificationLoop() {
 	for {
 		select {
 		case frame := <-h.notifyQueue:
-			h.writeMu.Lock()
+			if err := h.acquireWriter(context.Background()); err != nil {
+				return
+			}
 			n, err := h.in.Write(frame)
 			if err == nil && n != len(frame) {
 				err = io.ErrShortWrite
 			}
-			h.writeMu.Unlock()
+			h.releaseWriter()
 			if err != nil {
 				h.fail(fmt.Errorf("plugin %s: notification write: %w", h.spec.ID, err))
 				return
@@ -704,36 +742,41 @@ func boundString(s string, max int) string {
 	return s[:max] + "…"
 }
 
+var diagnosticCredentialRE = regexp.MustCompile(`(?i)(^|[^a-z0-9])["']?(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret|token|key)["']?\s*[:=]`)
+
 func redactDiagnostics(s string) string {
-	for _, key := range []string{"key", "token", "secret", "password", "authorization"} {
-		for _, sep := range []string{"=", ":"} {
-			// Keep this deliberately conservative: it only redacts one-line
-			// key/value diagnostics and never logs the value.
-			for i := 0; i < len(s); {
-				lower := strings.ToLower(s[i:])
-				idx := strings.Index(lower, key+sep)
-				if idx < 0 {
-					break
-				}
-				start := i + idx + len(key) + len(sep)
-				end := start
-				for end < len(s) && s[end] != '\n' && s[end] != ' ' && s[end] != '\t' {
-					end++
-				}
-				s = s[:start] + "[REDACTED]" + s[end:]
-				i = start + len("[REDACTED]")
-			}
+	// Diagnostics are still untrusted and must never intentionally contain
+	// credentials. Redact the complete line when it contains a common credential
+	// assignment/header. Whole-line replacement avoids leaking escaped quoted
+	// values or auth schemes that a value-oriented regexp could parse partially.
+	lines := strings.SplitAfter(s, "\n")
+	for i, line := range lines {
+		ending := ""
+		content := line
+		if strings.HasSuffix(content, "\n") {
+			content = strings.TrimSuffix(content, "\n")
+			ending = "\n"
+		}
+		if diagnosticCredentialRE.MatchString(content) {
+			lines[i] = "[REDACTED]" + ending
 		}
 	}
-	return s
+	return strings.Join(lines, "")
 }
 
-func cloneSchemas(in []protocol.ToolSchema) []protocol.ToolSchema {
-	out := make([]protocol.ToolSchema, len(in))
-	for i, s := range in {
-		out[i] = s
-		out[i].Parameters = append(json.RawMessage(nil), s.Parameters...)
-		out[i].Discovery = cloneDiscovery(s.Discovery)
+func cloneManifest(in plugin.Manifest) plugin.Manifest {
+	out := in
+	out.Capabilities = append([]string(nil), in.Capabilities...)
+	return out
+}
+
+func cloneExternalSchemas(in []plugin.ExternalToolDefinition) []plugin.ExternalToolDefinition {
+	out := make([]plugin.ExternalToolDefinition, len(in))
+	for i, schema := range in {
+		out[i] = schema
+		out[i].Parameters = append(json.RawMessage(nil), schema.Parameters...)
+		out[i].Discovery = cloneDiscovery(schema.Discovery)
+		out[i].Capabilities = append([]string(nil), schema.Capabilities...)
 	}
 	return out
 }
@@ -749,18 +792,21 @@ func cloneDiscovery(in *protocol.ToolDiscovery) *protocol.ToolDiscovery {
 
 var externalToolNameRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,127}$`)
 
-func validateSchemas(schemas []protocol.ToolSchema) error {
+func validateSchemas(schemas []plugin.ExternalToolDefinition) error {
 	seen := make(map[string]bool, len(schemas))
-	for _, s := range schemas {
-		if !externalToolNameRE.MatchString(s.Name) {
-			return fmt.Errorf("invalid plugin tool name %q", s.Name)
+	for _, schema := range schemas {
+		if !externalToolNameRE.MatchString(schema.Name) {
+			return fmt.Errorf("invalid plugin tool name %q", schema.Name)
 		}
-		if seen[s.Name] {
-			return fmt.Errorf("duplicate plugin tool %q", s.Name)
+		if seen[schema.Name] {
+			return fmt.Errorf("duplicate plugin tool %q", schema.Name)
 		}
-		seen[s.Name] = true
-		if !validSchema(s.Parameters) {
-			return fmt.Errorf("plugin tool %q has invalid parameters schema", s.Name)
+		seen[schema.Name] = true
+		if !validSchema(schema.Parameters) {
+			return fmt.Errorf("plugin tool %q has invalid parameters schema", schema.Name)
+		}
+		if _, err := declaredRisk(schema.Risk); err != nil {
+			return fmt.Errorf("plugin tool %q: %w", schema.Name, err)
 		}
 	}
 	return nil
