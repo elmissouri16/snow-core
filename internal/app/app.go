@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,6 +85,7 @@ type App struct {
 	runtimeSelection   *liveRuntimeSelection
 	cwd                string
 	userInput          *userinput.Broker
+	toolGuard          *builtin.PathGuard
 }
 
 type liveRuntimeSelection struct {
@@ -200,7 +202,7 @@ func InspectProjectTrust(opts Options) (ProjectTrustPreflight, error) {
 }
 
 // New assembles the app.
-func New(ctx context.Context, opts Options) (*App, error) {
+func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -238,6 +240,9 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	if opts.Model != "" {
 		cfg.DefaultModel = opts.Model
 	}
+	if cfg.DefaultModel != "" && strings.TrimSpace(cfg.DefaultModel) == "" {
+		return nil, errors.New("app: model id must not be blank")
+	}
 	if opts.Permission != "" {
 		cfg.PermissionMode = opts.Permission
 	}
@@ -273,6 +278,10 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	}
 	if err := cfg.Subagents.ValidateSubagents(); err != nil {
 		return nil, err
+	}
+	permMode := permission.Mode(cfg.PermissionMode)
+	if permMode != permission.ModeAsk && permMode != permission.ModeAllow && permMode != permission.ModeDeny {
+		return nil, fmt.Errorf("app: invalid permission mode %q (want ask, allow, or deny)", cfg.PermissionMode)
 	}
 	if opts.BaseURL != "" {
 		if cfg.Providers == nil {
@@ -376,12 +385,22 @@ func New(ctx context.Context, opts Options) (*App, error) {
 
 	searchPolicy, configDiagnostics := config.LoadSearchPolicy(config.GlobalDir(), projectInputRoot, projectAllowed)
 
-	// Tools.
+	// Tools. Pin the canonical root once so later launch-path replacement cannot
+	// retarget the file capability.
 	reg := tools.NewRegistry()
+	toolGuard := builtin.NewPathGuard([]string{absCWD}, absCWD)
+	guardCommitted := false
+	defer func() {
+		if !guardCommitted {
+			retErr = errors.Join(retErr, toolGuard.Close())
+		}
+	}()
 	toolOpts := builtin.Options{
 		MaxOutputBytes: cfg.ToolOutputLimit(),
 		BashTimeout:    cfg.BashTimeout(),
 		Roots:          []string{absCWD},
+		CWD:            absCWD,
+		Guard:          toolGuard,
 		SearchPolicy:   searchPolicy,
 		WindowsShell:   builtin.WindowsShellOptions{Kind: cfg.WindowsShell.Kind, Executable: cfg.WindowsShell.Executable},
 	}
@@ -527,9 +546,46 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		}
 	}
 
+	var (
+		inputBroker *userinput.Broker
+		manager     *internalplugin.Manager
+		mcpManager  *internalmcp.Manager
+		subManager  *subagent.Manager
+		router      tools.Router
+		ag          *agent.Agent
+	)
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		var cleanupErrs []error
+		if subManager != nil {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			cleanupErrs = append(cleanupErrs, subManager.Close(closeCtx))
+			cancel()
+		}
+		if ag != nil {
+			ag.Close()
+		}
+		if inputBroker != nil {
+			inputBroker.Close()
+		}
+		if mcpManager != nil {
+			cleanupErrs = append(cleanupErrs, mcpManager.Close())
+		}
+		if manager != nil {
+			cleanupErrs = append(cleanupErrs, manager.Close(context.Background()))
+		}
+		if router != nil {
+			cleanupErrs = append(cleanupErrs, router.Close())
+		}
+		cleanupErrs = append(cleanupErrs, st.Close())
+		retErr = errors.Join(retErr, errors.Join(cleanupErrs...))
+	}()
+
 	goalController, err := goalpkg.New(st, config.GlobalDir(), nil)
 	if err != nil {
-		_ = st.Close()
 		return nil, fmt.Errorf("app: goal controller: %w", err)
 	}
 	allowedGoalTool := func(name string) bool {
@@ -546,17 +602,12 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	for _, tool := range goalpkg.Tools(goalController) {
 		if allowedGoalTool(tool.Schema().Name) {
 			if err := reg.Register(tool); err != nil {
-				_ = st.Close()
 				return nil, err
 			}
 		}
 	}
 
 	// Permission service (deny-by-default headless; TUI replaces asker).
-	permMode := permission.Mode(cfg.PermissionMode)
-	if permMode != permission.ModeAsk && permMode != permission.ModeAllow && permMode != permission.ModeDeny {
-		permMode = permission.ModeDeny
-	}
 	perm := permission.NewService(permMode, permission.DenyAll{})
 
 	// Fetch every available provider catalog during startup. Providers may return
@@ -630,7 +681,7 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	runtimeSelection := &liveRuntimeSelection{provider: providerID, model: model, providers: providers, catalogs: modelCatalog}
 
 	// Host (path roots + progress bridge).
-	inputBroker := userinput.New(opts.UserInputHandler)
+	inputBroker = userinput.New(opts.UserInputHandler)
 	host := &toolHost{cwd: absCWD, roots: []string{absCWD}, perm: perm, reg: reg, userInput: inputBroker}
 
 	// Extensions are initialized after builtins and the session exist, but
@@ -642,27 +693,23 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	if projectAllowed {
 		extensionCWD = projectInputRoot
 	}
-	manager := internalplugin.NewManager(reg, internalplugin.ManagerOptions{
+	manager = internalplugin.NewManager(reg, internalplugin.ManagerOptions{
 		CWD: extensionCWD, SessionID: st.ID(), HostVersion: "snow-core", HostCapabilities: []string{"tools", "events"},
 		MaxProgressBytes: cfg.ToolOutputLimit(), MaxOutputBytes: cfg.ToolOutputLimit(),
 	})
 	if !opts.NoPlugins {
 		for _, p := range opts.GoPlugins {
 			if err := manager.LoadGo(p); err != nil {
-				_ = st.Close()
 				return nil, fmt.Errorf("app: plugin: %w", err)
 			}
 		}
 		allPluginSpecs := append(append([]publicplugin.PluginSpec(nil), cfg.Plugins...), opts.Plugins...)
 		for _, spec := range allPluginSpecs {
 			if err := manager.LoadExternal(spec); err != nil {
-				_ = st.Close()
 				return nil, fmt.Errorf("app: plugin %s: %w", spec.ID, err)
 			}
 		}
 		if err := manager.Initialize(ctx); err != nil {
-			_ = manager.Close(context.Background())
-			_ = st.Close()
 			return nil, fmt.Errorf("app: plugin initialization: %w", err)
 		}
 	} else {
@@ -675,7 +722,6 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	// SDK performs protocol negotiation and lifecycle handling; negotiated
 	// tools/resources/prompts are adapted into the same permissioned registry.
 	mcpSpecs := mergeMCPServers(cfg.MCPServers, projectMCPServers, opts.MCPServers)
-	var mcpManager *internalmcp.Manager
 	var mcpStatuses []publicmcp.Status
 	if !opts.NoMCP {
 		mcpManager = internalmcp.NewManager(reg, internalmcp.Options{
@@ -691,7 +737,6 @@ func New(ctx context.Context, opts Options) (*App, error) {
 
 	// Collaboration tools are direct and registered before deferred-router
 	// indexing so the model always receives the complete control set together.
-	var subManager *subagent.Manager
 	if cfg.Subagents.Enabled {
 		for name, role := range cfg.Subagents.Roles {
 			if role.Model != "" {
@@ -729,7 +774,6 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	// Deferred schemas are indexed only after every startup registrar has
 	// completed. Existing tools have no discovery metadata and remain direct.
 	descriptors := reg.Descriptors()
-	var router tools.Router
 	needsRouter := false
 	for _, desc := range descriptors {
 		if tools.IsDeferred(desc) {
@@ -751,21 +795,23 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	if needsRouter {
 		router = toolrouter.New(descriptors)
 		if err := reg.Register(builtin.NewSearchTools(router, reg)); err != nil {
-			_ = router.Close()
-			if mcpManager != nil {
-				_ = mcpManager.Close()
-			}
-			_ = manager.Close(context.Background())
-			_ = st.Close()
 			return nil, fmt.Errorf("app: register search_tools: %w", err)
 		}
 	}
 	if mcpManager != nil && router != nil {
-		mcpManager.SetCatalogChanged(func() {
+		catalogChanged := func(candidate []tools.ToolDescriptor) error {
 			if refreshable, ok := router.(tools.RefreshableRouter); ok {
-				_ = refreshable.Refresh(reg.Descriptors())
+				return refreshable.Refresh(candidate)
 			}
-		})
+			return nil
+		}
+		mcpManager.SetCatalogChanged(catalogChanged)
+		// Reconcile after installing the callback while holding the registry's
+		// catalog boundary. A list_changed event can therefore occur before this
+		// snapshot or after it, but cannot overtake it and leave a stale router.
+		if err := reg.PrepareCurrent(catalogChanged); err != nil {
+			return nil, fmt.Errorf("app: reconcile tool router: %w", err)
+		}
 	}
 
 	// Context assembly.
@@ -790,7 +836,7 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	if opts.CollaborationMode == "" && opts.SessionPath != "" {
 		initialMode = "" // restore the persisted active-branch mode
 	}
-	ag, err := agent.New(agent.Options{
+	ag, err = agent.New(agent.Options{
 		Provider:          prov,
 		Registry:          reg,
 		Session:           st,
@@ -811,15 +857,6 @@ func New(ctx context.Context, opts Options) (*App, error) {
 			SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance},
 	})
 	if err != nil {
-		inputBroker.Close()
-		if router != nil {
-			_ = router.Close()
-		}
-		if mcpManager != nil {
-			_ = mcpManager.Close()
-		}
-		_ = manager.Close(context.Background())
-		_ = st.Close()
 		return nil, fmt.Errorf("app: agent: %w", err)
 	}
 	host.emitUserInput = ag.EmitUserInputRequest
@@ -924,11 +961,9 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		})
 		taskStore, ok := st.(session.SubagentTaskStore)
 		if !ok {
-			ag.Close()
 			return nil, errors.New("app: session does not support subagent topology")
 		}
 		if err := subManager.Bind(ag, factory, ag.Publish, taskStore); err != nil {
-			ag.Close()
 			return nil, err
 		}
 	}
@@ -972,21 +1007,16 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		permissionOverride: opts.Permission != "",
 		cwd:                absCWD,
 		userInput:          inputBroker,
+		toolGuard:          toolGuard,
 	}
 	if skillCatalog != nil {
 		a.SkillDiagnostics = skillCatalog.Diagnostics()
 	}
 	if err := a.bindPermissionSession(st); err != nil {
-		if router != nil {
-			_ = router.Close()
-		}
-		if mcpManager != nil {
-			_ = mcpManager.Close()
-		}
-		_ = manager.Close(context.Background())
-		_ = st.Close()
 		return nil, fmt.Errorf("app: permission state: %w", err)
 	}
+	committed = true
+	guardCommitted = true
 	return a, nil
 }
 
@@ -1509,6 +1539,9 @@ func (a *App) SetProvider(id string) error {
 // SetModel updates the active model and its app mirror. Unknown models remain
 // permitted for providers that accept custom model identifiers.
 func (a *App) SetModel(m protocol.Model) error {
+	if strings.TrimSpace(m.ID) == "" {
+		return errors.New("app: model id is required")
+	}
 	if m.Provider == "" {
 		m.Provider = a.ProviderID
 	}
@@ -1610,6 +1643,11 @@ func (a *App) Close() error {
 	}
 	if a.Session != nil {
 		if err := a.Session.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if a.toolGuard != nil {
+		if err := a.toolGuard.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}

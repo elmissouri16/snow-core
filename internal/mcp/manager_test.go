@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,12 +12,73 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/snow-core/snow/internal/tools"
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
 )
+
+func TestManagerCloseWaitsForAdmittedConnections(t *testing.T) {
+	manager := NewManager(tools.NewRegistry(), Options{})
+	manager.mu.Lock()
+	manager.connectWG.Add(1) // model ConnectAll admission under the manager lock
+	manager.mu.Unlock()
+	closed := make(chan error, 1)
+	go func() { closed <- manager.Close() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned during connection: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	manager.mu.Lock()
+	manager.connectErr = errors.New("late connection close sentinel")
+	manager.mu.Unlock()
+	manager.connectWG.Done()
+	if err := <-closed; err == nil || !strings.Contains(err.Error(), "late connection close sentinel") {
+		t.Fatalf("Close error = %v", err)
+	}
+}
+
+func TestManagerCloseSerializesWithRuntimeRefresh(t *testing.T) {
+	manager := NewManager(tools.NewRegistry(), Options{})
+	runtime := &serverRuntime{manager: manager, spec: publicmcp.ServerSpec{ID: "race"}, owner: "mcp:race"}
+	manager.runtimes["race"] = runtime
+	runtime.mu.Lock() // model an in-flight refresh holding the lifecycle lock
+	closed := make(chan error, 1)
+	go func() { closed <- manager.Close() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned during refresh: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	runtime.mu.Unlock()
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	if !runtime.closed {
+		t.Fatal("runtime was not marked closed")
+	}
+	if err := runtime.refresh(context.Background()); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("post-close refresh error = %v", err)
+	}
+}
+
+func TestConnectAllRejectsDuplicateServerIDsBeforeConnecting(t *testing.T) {
+	manager := NewManager(tools.NewRegistry(), Options{})
+	manager.ConnectAll(context.Background(), []publicmcp.ServerSpec{
+		{ID: "duplicate", Disabled: true},
+		{ID: "duplicate", Disabled: true},
+	})
+	statuses := manager.Statuses()
+	if len(statuses) != 1 || !strings.Contains(statuses[0].Message, "duplicate") {
+		t.Fatalf("statuses = %+v", statuses)
+	}
+	if len(manager.runtimes) != 0 {
+		t.Fatalf("duplicate declarations created runtimes: %d", len(manager.runtimes))
+	}
+}
 
 func testServer() *sdkmcp.Server {
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-server", Version: "1.0.0"}, &sdkmcp.ServerOptions{Instructions: "Use echo for exact repetition."})

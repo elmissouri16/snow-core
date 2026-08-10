@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/tools"
@@ -81,15 +80,16 @@ func (t *managerTool) Run(ctx context.Context, raw json.RawMessage, _ tools.Tool
 		if err := decodeStrict(raw, &in); err != nil {
 			return tools.ErrorResult(err), nil
 		}
-		var (
-			res protocol.WaitSubagentsResult
-			err error
-		)
+		timeout, err := ParseWaitTimeoutMS(in.TimeoutMS)
+		if err != nil {
+			return tools.ErrorResult(err), nil
+		}
+		var res protocol.WaitSubagentsResult
 		switch in.Until {
 		case "", "activity":
-			res, err = t.manager.Wait(ctx, t.caller, time.Duration(in.TimeoutMS)*time.Millisecond)
+			res, err = t.manager.Wait(ctx, t.caller, timeout)
 		case "all":
-			res, err = t.manager.WaitUntilAll(ctx, t.caller, time.Duration(in.TimeoutMS)*time.Millisecond)
+			res, err = t.manager.WaitUntilAll(ctx, t.caller, timeout)
 		default:
 			return tools.ErrorResult(fmt.Errorf("invalid wait mode %q (use activity or all)", in.Until)), nil
 		}

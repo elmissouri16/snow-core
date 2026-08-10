@@ -711,7 +711,11 @@ func (s *Session) SessionID() string {
 	if err != nil {
 		return ""
 	}
-	return a.Session.ID()
+	id, _, err := a.Agent.SessionIdentity()
+	if err != nil {
+		return ""
+	}
+	return id
 }
 
 // SessionPath returns the session file path ("" for in-memory).
@@ -720,7 +724,11 @@ func (s *Session) SessionPath() string {
 	if err != nil {
 		return ""
 	}
-	return a.Session.Path()
+	_, path, err := a.Agent.SessionIdentity()
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // CWD returns the session working directory.
@@ -761,7 +769,7 @@ func MustOpen(ctx context.Context, opts Options) *Session {
 
 // RunPrompt is a one-shot helper: open, prompt, collect text deltas, close.
 // Returns the accumulated assistant text.
-func RunPrompt(ctx context.Context, opts Options, prompt string) (string, error) {
+func RunPrompt(ctx context.Context, opts Options, prompt string) (result string, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -769,7 +777,7 @@ func RunPrompt(ctx context.Context, opts Options, prompt string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	defer s.Close()
+	defer func() { err = errors.Join(err, s.Close()) }()
 
 	var out []byte
 	s.Subscribe(func(ev protocol.AgentEvent) {

@@ -146,6 +146,8 @@ func Discover(opts Options) *Registry {
 	}
 
 	seenLocations := make(map[string]bool)
+	candidateCount := 0
+scanDirs:
 	for _, dir := range dirs {
 		abs, err := filepath.Abs(dir.path)
 		if err != nil || seenLocations[abs] {
@@ -161,13 +163,14 @@ func Discover(opts Options) *Registry {
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 		for _, entry := range entries {
-			if len(r.allByName) >= maxSkills {
-				r.diagnostics = append(r.diagnostics, Diagnostic{Path: abs, Level: "warning", Message: fmt.Sprintf("skill discovery stopped at %d skills", maxSkills)})
-				break
-			}
 			if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 				continue
 			}
+			if candidateCount >= maxSkills {
+				r.diagnostics = append(r.diagnostics, Diagnostic{Path: abs, Level: "warning", Message: fmt.Sprintf("skill discovery stopped at %d candidates", maxSkills)})
+				break scanDirs
+			}
+			candidateCount++
 			location := filepath.Join(abs, entry.Name(), "SKILL.md")
 			skill, diagnostics, err := parse(location, maxFile)
 			r.diagnostics = append(r.diagnostics, diagnostics...)

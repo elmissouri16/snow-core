@@ -52,6 +52,25 @@ func TestDiscoverPrecedenceTrustAndProgressiveDisclosure(t *testing.T) {
 	}
 }
 
+func TestDiscoveryCandidateLimitCountsDuplicateNamesAcrossRoots(t *testing.T) {
+	roots := []string{t.TempDir(), t.TempDir(), t.TempDir()}
+	locations := make([]string, len(roots))
+	for i, root := range roots {
+		locations[i] = writeSkill(t, root, "duplicate", "duplicate", fmt.Sprintf("duplicate %d", i), "body")
+	}
+	registry := Discover(Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: roots, MaxSkills: 2})
+	skill, ok := registry.Get("duplicate")
+	if !ok || skill.Directory != locations[1] {
+		t.Fatalf("bounded duplicate skill = %+v", skill)
+	}
+	for _, diagnostic := range registry.Diagnostics() {
+		if strings.Contains(diagnostic.Message, "stopped at 2 candidates") {
+			return
+		}
+	}
+	t.Fatalf("missing candidate-limit diagnostic: %+v", registry.Diagnostics())
+}
+
 func TestActivationAndResourceReadAreConfined(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, "pdf-tools", "pdf-tools", "Process PDFs.", "Follow the PDF workflow.")

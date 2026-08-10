@@ -14,9 +14,9 @@ import (
 	"io"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/subagent"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -95,6 +95,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		case <-scanStop:
 		}
 	}()
+	var terminalErr error
 	for {
 		var line string
 		select {
@@ -109,15 +110,15 @@ func (s *Server) Serve(ctx context.Context) error {
 		case result := <-scans:
 			if result.done {
 				if result.err != nil && serveCtx.Err() == nil && ctx.Err() == nil {
-					return result.err
+					terminalErr = result.err
 				}
 				goto finish
 			}
 			if result.err != nil {
-				if serveCtx.Err() != nil {
-					goto finish
+				if serveCtx.Err() == nil && ctx.Err() == nil {
+					terminalErr = result.err
 				}
-				return result.err
+				goto finish
 			}
 			line = result.line
 		}
@@ -148,7 +149,13 @@ finish:
 	s.mu.Lock()
 	writeErr := s.writeErr
 	s.mu.Unlock()
-	return writeErr
+	if terminalErr == nil {
+		return writeErr
+	}
+	if writeErr == nil {
+		return terminalErr
+	}
+	return errors.Join(terminalErr, writeErr)
 }
 
 func (s *Server) handle(ctx context.Context, req Request) error {
@@ -253,6 +260,10 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 				return err
 			}
 		}
+		timeout, err := subagent.ParseWaitTimeoutMS(p.TimeoutMS)
+		if err != nil {
+			return err
+		}
 		s.promptWG.Add(1)
 		go func() {
 			defer s.promptWG.Done()
@@ -262,9 +273,9 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 			)
 			switch p.Until {
 			case "", "activity":
-				res, err = s.app.WaitSubagents(ctx, time.Duration(p.TimeoutMS)*time.Millisecond)
+				res, err = s.app.WaitSubagents(ctx, timeout)
 			case "all":
-				res, err = s.app.WaitSubagentsUntilAll(ctx, time.Duration(p.TimeoutMS)*time.Millisecond)
+				res, err = s.app.WaitSubagentsUntilAll(ctx, timeout)
 			default:
 				err = fmt.Errorf("rpc: invalid subagent_wait mode %q (use activity or all)", p.Until)
 			}
@@ -433,9 +444,13 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		return nil
 	case "session_info":
 		model := s.app.Agent.Model()
+		sessionID, sessionPath, err := s.app.Agent.SessionIdentity()
+		if err != nil {
+			return err
+		}
 		info := map[string]any{
-			"session_id":         s.app.Session.ID(),
-			"path":               s.app.Session.Path(),
+			"session_id":         sessionID,
+			"path":               sessionPath,
 			"cwd":                s.app.CWD(),
 			"provider":           s.app.ProviderID,
 			"model":              model.ID,
@@ -551,7 +566,7 @@ func (s *Server) recordWriteErr(err error) {
 }
 
 // Main is the RPC entry point used by cmd/snow --mode rpc.
-func Main(ctx context.Context, opts app.Options) error {
+func Main(ctx context.Context, opts app.Options) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -559,7 +574,7 @@ func Main(ctx context.Context, opts app.Options) error {
 	if err != nil {
 		return err
 	}
-	defer a.Close()
+	defer func() { err = errors.Join(err, a.Close()) }()
 	for _, diagnostic := range a.Diagnostics {
 		fmt.Fprintf(os.Stderr, "config warning: %s: %s\n", diagnostic.Path, diagnostic.Message)
 	}

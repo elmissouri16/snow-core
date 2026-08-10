@@ -2,14 +2,17 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/trust"
 	"github.com/snow-core/snow/pkg/protocol"
 )
@@ -227,6 +230,47 @@ func TestTrustPersistenceFailureKeepsPromptActive(t *testing.T) {
 	_, _ = m.Update(result)
 	if !m.trustPending || m.trustError == "" {
 		t.Fatalf("persistence failure state = pending:%v error:%q", m.trustPending, m.trustError)
+	}
+}
+
+type closeErrorSession struct{ session.Store }
+
+func (closeErrorSession) Close() error { return errors.New("late close sentinel") }
+
+func TestCloseWaitsForLateStartupAndReturnsItsCloseError(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	if !m.beginStartup() {
+		t.Fatal("startup admission failed")
+	}
+	release := make(chan struct{})
+	go func() {
+		defer m.startupWG.Done()
+		<-release
+		m.retainStartupApp(&app.App{Session: closeErrorSession{}})
+	}()
+	closed := make(chan error, 1)
+	go func() { closed <- m.Close() }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		m.startupMu.Lock()
+		startupClosed := m.startupClosed
+		m.startupMu.Unlock()
+		if startupClosed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Close did not enter startup shutdown")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned before admitted startup completed: %v", err)
+	default:
+	}
+	close(release)
+	if err := <-closed; err == nil || !strings.Contains(err.Error(), "late close sentinel") {
+		t.Fatalf("Close error = %v", err)
 	}
 }
 

@@ -50,7 +50,7 @@ func run() error {
 		Version:       version,
 		RunE:          runInteractive,
 		SilenceUsage:  true,
-		SilenceErrors: false,
+		SilenceErrors: true,
 	}
 
 	root.PersistentFlags().StringP("prompt", "p", "", "run in print mode with this prompt")
@@ -86,6 +86,7 @@ func run() error {
 	root.AddCommand(logoutCmd())
 	root.AddCommand(skillsCmd())
 	root.AddCommand(mcpCmd())
+	root.AddCommand(pluginCmd())
 
 	return root.Execute()
 }
@@ -477,12 +478,15 @@ func runInteractive(cmd *cobra.Command, args []string) error {
 	return runTUI(ctx, opts)
 }
 
-func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, showUsage bool) error {
+func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, showUsage bool) (err error) {
+	if strings.TrimSpace(prompt) == "" {
+		return fmt.Errorf("print mode requires -p prompt")
+	}
 	a, err := app.New(ctx, opts)
 	if err != nil {
 		return err
 	}
-	defer a.Close()
+	defer func() { err = errors.Join(err, a.Close()) }()
 	for _, diagnostic := range a.Diagnostics {
 		fmt.Fprintf(os.Stderr, "config warning: %s: %s\n", diagnostic.Path, diagnostic.Message)
 	}
@@ -576,9 +580,6 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 		return err
 	}
 
-	if prompt == "" {
-		return fmt.Errorf("print mode requires -p prompt")
-	}
 	if err := a.Agent.Prompt(ctx, prompt); err != nil {
 		return err
 	}

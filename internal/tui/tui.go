@@ -311,8 +311,10 @@ type Model struct {
 	closeOnce             sync.Once
 	closeErr              error
 	startupMu             sync.Mutex
+	startupWG             sync.WaitGroup
 	startupApps           map[*app.App]struct{}
 	startupClosed         bool
+	startupCloseErr       error
 	lastErr               error
 	lastStatus            string
 	trustPending          bool
@@ -538,6 +540,7 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 // Close releases the attached app. It is safe to call repeatedly.
 func (m *Model) Close() error {
 	m.closeOnce.Do(func() {
+		m.events.Close()
 		m.startupMu.Lock()
 		m.startupClosed = true
 		pending := make([]*app.App, 0, len(m.startupApps))
@@ -549,6 +552,13 @@ func (m *Model) Close() error {
 		for _, candidate := range pending {
 			m.closeErr = errors.Join(m.closeErr, candidate.Close())
 		}
+		// Commands admitted before startupClosed may still be inside app.New.
+		// They either retained an app above or close a late app themselves and
+		// record its error before dropping their WaitGroup reference.
+		m.startupWG.Wait()
+		m.startupMu.Lock()
+		m.closeErr = errors.Join(m.closeErr, m.startupCloseErr)
+		m.startupMu.Unlock()
 		if m.app != nil {
 			m.closeErr = errors.Join(m.closeErr, m.app.Close())
 		}
@@ -563,11 +573,24 @@ func (m *Model) retainStartupApp(candidate *app.App) bool {
 	m.startupMu.Lock()
 	if m.startupClosed {
 		m.startupMu.Unlock()
-		_ = candidate.Close()
+		closeErr := candidate.Close()
+		m.startupMu.Lock()
+		m.startupCloseErr = errors.Join(m.startupCloseErr, closeErr)
+		m.startupMu.Unlock()
 		return false
 	}
 	m.startupApps[candidate] = struct{}{}
 	m.startupMu.Unlock()
+	return true
+}
+
+func (m *Model) beginStartup() bool {
+	m.startupMu.Lock()
+	defer m.startupMu.Unlock()
+	if m.startupClosed {
+		return false
+	}
+	m.startupWG.Add(1)
 	return true
 }
 
@@ -589,6 +612,10 @@ func (m *Model) Init() tea.Cmd {
 
 func (m *Model) bootstrapCmd() tea.Cmd {
 	return func() tea.Msg {
+		if !m.beginStartup() {
+			return doneMsg{err: context.Canceled}
+		}
+		defer m.startupWG.Done()
 		preflight, err := app.InspectProjectTrust(m.opts)
 		if err != nil {
 			return doneMsg{err: err}
@@ -607,6 +634,10 @@ func (m *Model) bootstrapCmd() tea.Cmd {
 func (m *Model) saveTrustCmd(level trust.Level) tea.Cmd {
 	store, path := m.trustStore, m.trustPath
 	return func() tea.Msg {
+		if !m.beginStartup() {
+			return trustDecisionMsg{err: context.Canceled}
+		}
+		defer m.startupWG.Done()
 		if store == nil {
 			return trustDecisionMsg{err: errors.New("trust store unavailable")}
 		}
@@ -911,7 +942,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.sessionIndex = 0
 		for i, info := range m.sessions {
-			if m.app != nil && info.ID == m.app.Session.ID() {
+			if m.app != nil && info.ID == currentSessionID(m.app) {
 				m.sessionIndex = i
 				break
 			}
@@ -3592,11 +3623,10 @@ func (m *Model) setModel(selected protocol.Model) {
 					return
 				}
 			}
-			if err := m.app.Agent.SetModel(selected); err != nil {
+			if err := m.app.SetModel(selected); err != nil {
 				m.pushLine(styleError.Render(err.Error()))
 				return
 			}
-			m.app.Model = selected
 			m.pushLine(styleTool.Render("model does not advertise thinking level " + string(currentThinking) + "; choose /thinking before the next prompt"))
 			return
 		}
@@ -3627,7 +3657,7 @@ func (m *Model) applyModel(selected protocol.Model) error {
 			return err
 		}
 	}
-	if err := m.app.Agent.SetModel(selected); err != nil {
+	if err := m.app.SetModel(selected); err != nil {
 		if oldProvider != m.app.ProviderID {
 			_ = m.app.SetProvider(oldProvider)
 		}
@@ -3641,7 +3671,7 @@ func (m *Model) applyModel(selected protocol.Model) error {
 			if oldProvider != m.app.ProviderID {
 				_ = m.app.SetProvider(oldProvider)
 			}
-			_ = m.app.Agent.SetModel(oldModel)
+			_ = m.app.SetModel(oldModel)
 			m.app.Model = oldAppModel
 			m.app.Cfg = oldCfg
 			return fmt.Errorf("persist model: %w", err)
@@ -3660,6 +3690,28 @@ func (m *Model) applyModel(selected protocol.Model) error {
 
 func (m *Model) currentSessions() ([]session.SessionInfo, error) {
 	return session.NewFileIndex(session.DefaultSessionsRoot()).List(m.app.CWD())
+}
+
+func currentSessionID(a *app.App) string {
+	if a == nil || a.Agent == nil {
+		return ""
+	}
+	id, _, err := a.Agent.SessionIdentity()
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
+func currentSessionPath(a *app.App) string {
+	if a == nil || a.Agent == nil {
+		return ""
+	}
+	_, path, err := a.Agent.SessionIdentity()
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 func (m *Model) startSessionPick() (tea.Model, tea.Cmd) {
@@ -3692,7 +3744,7 @@ func (m *Model) startSessionPick() (tea.Model, tea.Cmd) {
 	m.sessions = infos
 	m.sessionIndex = 0
 	for i, info := range infos {
-		if info.ID == m.app.Session.ID() {
+		if info.ID == currentSessionID(m.app) {
 			m.sessionIndex = i
 			break
 		}
@@ -3853,11 +3905,11 @@ func (m *Model) hydrateSession() {
 	m.latestPlan = ""
 	m.transcriptBaseDirty = true
 	m.transcriptDirty = true
-	if m.app == nil || m.app.Session == nil {
+	if m.app == nil || m.app.Agent == nil {
 		m.refreshTranscript()
 		return
 	}
-	messages, err := m.app.Session.Messages()
+	messages, err := m.app.Agent.Messages()
 	if err != nil {
 		m.pushLine(styleError.Render("session read: " + err.Error()))
 		return
@@ -3916,12 +3968,12 @@ func sessionMessageThinking(msg protocol.Message) string {
 }
 
 func (m *Model) refreshContextUsageFromSession() {
-	if m.app == nil || m.app.Session == nil {
+	if m.app == nil || m.app.Agent == nil {
 		m.contextTokens = 0
 		m.contextEstimated = false
 		return
 	}
-	messages, err := m.app.Session.Messages()
+	messages, err := m.app.Agent.Messages()
 	if err != nil {
 		return
 	}
@@ -4440,7 +4492,7 @@ func (m *Model) renderSessionPicker() string {
 		b.WriteString(styleHeaderDim.Render(truncateRunes("  ↑ more sessions", pickerWidth)) + "\n")
 	}
 	for i := start; i < end; i++ {
-		line := formatSessionPickerInfo(m.sessions[i], m.app.Session.ID())
+		line := formatSessionPickerInfo(m.sessions[i], currentSessionID(m.app))
 		line = truncateRunes(line, max(8, m.width-4))
 		if i == m.sessionIndex {
 			b.WriteString(styleCompletionSelected.Render("› " + line))
@@ -5451,7 +5503,7 @@ func (m *Model) planNudgeScope() string {
 			}
 		}
 	}
-	return m.app.Session.ID() + ":" + branchID
+	return currentSessionID(m.app) + ":" + branchID
 }
 
 func (m *Model) planNudgeVisible() bool {
@@ -5502,7 +5554,7 @@ func (m *Model) handlePlanImplementationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		if choice == 1 {
 			var st session.Store
 			var err error
-			if m.app.Session.Path() == "" {
+			if currentSessionPath(m.app) == "" {
 				st = session.NewMemoryStore(session.Options{CWD: m.app.CWD()})
 			} else {
 				st, err = session.NewFileIndex(session.DefaultSessionsRoot()).Create(m.app.CWD())

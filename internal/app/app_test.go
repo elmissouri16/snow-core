@@ -25,6 +25,42 @@ import (
 
 type appDeferredPlugin struct{}
 
+type appCloseTrackingPlugin struct{ closed *int }
+
+type blockingSessionStore struct {
+	*session.MemoryStore
+	started chan struct{}
+	release chan struct{}
+	closed  chan struct{}
+}
+
+func (s *blockingSessionStore) Messages() ([]protocol.Message, error) {
+	select {
+	case <-s.started:
+	default:
+		close(s.started)
+	}
+	<-s.release
+	return s.MemoryStore.Messages()
+}
+func (s *blockingSessionStore) Close() error {
+	select {
+	case <-s.closed:
+	default:
+		close(s.closed)
+	}
+	return s.MemoryStore.Close()
+}
+
+func (p appCloseTrackingPlugin) Manifest() publicplugin.Manifest {
+	return publicplugin.Manifest{ID: "close-tracker", Name: "Close tracker", Version: "1", ProtocolVersion: publicplugin.ProtocolVersion}
+}
+func (appCloseTrackingPlugin) Register(context.Context, publicplugin.Registrar) error { return nil }
+func (p appCloseTrackingPlugin) Close(context.Context) error {
+	*p.closed++
+	return nil
+}
+
 type refreshCatalogProvider struct {
 	*fake.Provider
 	models        []protocol.Model
@@ -91,6 +127,53 @@ func TestAppTrustStoreUsesTrustFileNotAuthFile(t *testing.T) {
 	}
 }
 
+func TestAppRejectsInvalidPermissionMode(t *testing.T) {
+	t.Setenv("SNOW_HOME", t.TempDir())
+	_, err := New(context.Background(), Options{
+		Provider: "fake", NoSession: true, Permission: "alow", CWD: t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid permission mode") {
+		t.Fatalf("invalid permission error = %v", err)
+	}
+}
+
+func TestAppRejectsInvalidPermissionFromConfigBeforePluginStartup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	configPath := filepath.Join(home, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"permission_mode":"alow"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	closed := 0
+	_, err := New(context.Background(), Options{Provider: "fake", NoSession: true, CWD: t.TempDir(), ConfigPath: configPath, GoPlugins: []publicplugin.Plugin{appCloseTrackingPlugin{closed: &closed}}})
+	if err == nil || !strings.Contains(err.Error(), "invalid permission mode") {
+		t.Fatalf("invalid config error = %v", err)
+	}
+	if closed != 0 {
+		t.Fatalf("plugin was acquired before permission validation; close count=%d", closed)
+	}
+}
+
+func TestAppNewCleansInitializedPluginsOnLaterFailure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	configPath := filepath.Join(home, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"subagents":{"enabled":true,"roles":{"default":{"model":"missing-model"}}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	closed := 0
+	_, err := New(context.Background(), Options{
+		Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
+		ConfigPath: configPath, GoPlugins: []publicplugin.Plugin{appCloseTrackingPlugin{closed: &closed}}, NoMCP: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "unavailable model") {
+		t.Fatalf("constructor error = %v", err)
+	}
+	if closed != 1 {
+		t.Fatalf("plugin close count = %d, want 1", closed)
+	}
+}
+
 func TestAppSubagentConcurrencyOverrideCountsChildrenAndRaisesIdentityCap(t *testing.T) {
 	enabled := true
 	a, err := New(context.Background(), Options{
@@ -111,6 +194,77 @@ func TestAppSubagentConcurrencyOverrideCountsChildrenAndRaisesIdentityCap(t *tes
 	})
 	if err == nil || !strings.Contains(err.Error(), "below child concurrency") {
 		t.Fatalf("explicit inconsistent limits error = %v", err)
+	}
+}
+
+func TestAppRejectsBlankStartupModelID(t *testing.T) {
+	_, err := New(context.Background(), Options{Provider: "fake", Model: "   ", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "model id must not be blank") {
+		t.Fatalf("blank startup model error = %v", err)
+	}
+}
+
+func TestAppRejectsBlankModelIDWithoutChangingSelection(t *testing.T) {
+	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	before := a.Agent.Model()
+	if err := a.SetModel(protocol.Model{Provider: before.Provider, ID: "   "}); err == nil {
+		t.Fatal("blank model id was accepted")
+	}
+	after := a.Agent.Model()
+	if after.ID != before.ID || a.Model.ID != before.ID {
+		t.Fatalf("selection changed: before=%+v app=%+v agent=%+v", before, a.Model, after)
+	}
+	_, childModel, err := a.runtimeSelection.childSelection("", "")
+	if err != nil || childModel.ID != before.ID {
+		t.Fatalf("child selection=%+v err=%v", childModel, err)
+	}
+}
+
+func TestSetSessionWaitsForActiveSessionReadBeforeClosingOldStore(t *testing.T) {
+	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	initialRelease := make(chan struct{})
+	close(initialRelease)
+	old := &blockingSessionStore{MemoryStore: session.NewMemoryStore(session.Options{CWD: a.CWD()}), started: make(chan struct{}), release: initialRelease, closed: make(chan struct{})}
+	if err := a.SetSession(old); err != nil {
+		t.Fatal(err)
+	}
+	old.started = make(chan struct{})
+	old.release = make(chan struct{})
+	readDone := make(chan error, 1)
+	go func() { _, err := a.Agent.Messages(); readDone <- err }()
+	<-old.started
+	newStore := session.NewMemoryStore(session.Options{CWD: a.CWD()})
+	switchDone := make(chan error, 1)
+	go func() { switchDone <- a.SetSession(newStore) }()
+	select {
+	case err := <-switchDone:
+		t.Fatalf("session switched during active read: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	select {
+	case <-old.closed:
+		t.Fatal("old store closed during active read")
+	default:
+	}
+	close(old.release)
+	if err := <-readDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-switchDone; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-old.closed:
+	case <-time.After(time.Second):
+		t.Fatal("old store was not closed after read completed")
 	}
 }
 

@@ -4,26 +4,81 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/snow-core/snow/internal/app"
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
+	publicplugin "github.com/snow-core/snow/pkg/plugin"
 	"github.com/snow-core/snow/pkg/protocol"
 )
+
+var errCLIClose = errors.New("cli close failed")
+
+type closeFailingCLIPlugin struct{}
+
+func (closeFailingCLIPlugin) Manifest() publicplugin.Manifest {
+	return publicplugin.Manifest{ID: "close-failure", Name: "Close failure", Version: "1", ProtocolVersion: publicplugin.ProtocolVersion}
+}
+func (closeFailingCLIPlugin) Register(context.Context, publicplugin.Registrar) error { return nil }
+func (closeFailingCLIPlugin) Close(context.Context) error                            { return errCLIClose }
+
+func TestCLIHelperProcess(t *testing.T) {
+	if os.Getenv("SNOW_CLI_HELPER") != "1" {
+		return
+	}
+	os.Args = []string{"snow", "--definitely-invalid"}
+	main()
+}
+
+func TestCLIPrintsCommandErrorsOnce(t *testing.T) {
+	command := exec.Command(os.Args[0], "-test.run=TestCLIHelperProcess")
+	command.Env = append(os.Environ(), "SNOW_CLI_HELPER=1", "SNOW_HOME="+t.TempDir())
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatal("invalid command unexpectedly succeeded")
+	}
+	text := string(output)
+	if strings.Count(text, "snow: unknown flag") != 1 || strings.Contains(text, "Error: unknown flag") {
+		t.Fatalf("stderr contained duplicate command diagnostics: %q", text)
+	}
+}
 
 // TestCLIPrintAndJSONEndToEnd drives the actual Cobra command through both
 // non-interactive output modes. The provider is a local OpenAI-compatible SSE
 // server, so the test covers CLI flag parsing, app wiring, provider streaming,
 // the agent loop, and output serialization without requiring credentials or
 // network access.
+func TestRunPrintPropagatesCloseFailure(t *testing.T) {
+	t.Setenv("SNOW_HOME", t.TempDir())
+	_, err := captureStdout(t, func() error {
+		return runPrint(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(), GoPlugins: []publicplugin.Plugin{closeFailingCLIPlugin{}}, NoMCP: true}, "hello", false, false)
+	})
+	if !errors.Is(err, errCLIClose) {
+		t.Fatalf("close error = %v", err)
+	}
+}
+
+func TestRunPrintRejectsBlankPromptBeforeRuntimeConstruction(t *testing.T) {
+	err := runPrint(context.Background(), app.Options{Provider: "definitely-invalid", CWD: t.TempDir()}, " \n\t", true, false)
+	if err == nil || !strings.Contains(err.Error(), "requires -p prompt") {
+		t.Fatalf("blank prompt error = %v", err)
+	}
+	if strings.Contains(err.Error(), "unsupported provider") {
+		t.Fatalf("runtime was constructed before prompt validation: %v", err)
+	}
+}
+
 func TestCLIPrintAndJSONEndToEnd(t *testing.T) {
 	for _, tc := range []struct {
 		name string

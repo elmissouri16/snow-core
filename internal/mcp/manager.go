@@ -49,12 +49,16 @@ type Options struct {
 // Manager owns MCP clients, sessions, dynamically registered tools, and
 // secret-free status diagnostics.
 type Manager struct {
-	mu        sync.RWMutex
-	registry  tools.Registry
-	opts      Options
-	runtimes  map[string]*serverRuntime
-	statuses  map[string]publicmcp.Status
-	onChanged func()
+	mu         sync.RWMutex
+	registry   tools.Registry
+	opts       Options
+	runtimes   map[string]*serverRuntime
+	statuses   map[string]publicmcp.Status
+	claimed    map[string]bool
+	onChanged  func([]tools.ToolDescriptor) error
+	closed     bool
+	connectWG  sync.WaitGroup
+	connectErr error
 }
 
 type serverRuntime struct {
@@ -63,6 +67,7 @@ type serverRuntime struct {
 	spec    publicmcp.ServerSpec
 	client  *sdkmcp.Client
 	session *sdkmcp.ClientSession
+	closed  bool
 	owner   string
 	used    map[string]string
 }
@@ -81,14 +86,49 @@ func NewManager(registry tools.Registry, opts Options) *Manager {
 	if opts.ServerStderr == nil {
 		opts.ServerStderr = io.Discard
 	}
-	return &Manager{registry: registry, opts: opts, runtimes: make(map[string]*serverRuntime), statuses: make(map[string]publicmcp.Status)}
+	return &Manager{registry: registry, opts: opts, runtimes: make(map[string]*serverRuntime), statuses: make(map[string]publicmcp.Status), claimed: make(map[string]bool)}
 }
 
 // ConnectAll validates and connects enabled servers. One unavailable server
 // does not make the agent unusable; its failure is retained in Statuses.
 func (m *Manager) ConnectAll(ctx context.Context, specs []publicmcp.ServerSpec) {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		for _, spec := range specs {
+			m.setStatus(publicmcp.Status{ID: spec.ID, Transport: spec.EffectiveTransport(), Message: "MCP manager is closed"})
+		}
+		return
+	}
+	m.connectWG.Add(1)
+	m.mu.Unlock()
+	defer m.connectWG.Done()
+
+	counts := make(map[string]int, len(specs))
+	for _, spec := range specs {
+		counts[spec.ID]++
+	}
 	for _, spec := range specs {
 		status := publicmcp.Status{ID: spec.ID, Transport: spec.EffectiveTransport()}
+		if counts[spec.ID] > 1 {
+			status.Message = "duplicate MCP server id"
+			m.setStatus(status)
+			continue
+		}
+		m.mu.Lock()
+		if m.closed {
+			m.mu.Unlock()
+			status.Message = "MCP manager is closed"
+			m.setStatus(status)
+			continue
+		}
+		if m.claimed[spec.ID] {
+			m.mu.Unlock()
+			m.setRuntimeMessage(spec.ID, "duplicate MCP server id ignored")
+			continue
+		}
+		m.claimed[spec.ID] = true
+		m.mu.Unlock()
 		if spec.Disabled {
 			status.Message = "disabled"
 			m.setStatus(status)
@@ -106,6 +146,24 @@ func (m *Manager) ConnectAll(ctx context.Context, specs []publicmcp.ServerSpec) 
 			continue
 		}
 		m.mu.Lock()
+		if m.closed {
+			m.mu.Unlock()
+			rt.mu.Lock()
+			rt.closed = true
+			session := rt.session
+			rt.mu.Unlock()
+			if session != nil {
+				if closeErr := session.Close(); closeErr != nil {
+					m.mu.Lock()
+					m.connectErr = errors.Join(m.connectErr, fmt.Errorf("mcp %s late close: %w", spec.ID, closeErr))
+					m.mu.Unlock()
+				}
+			}
+			m.registry.UnregisterOwner(rt.owner)
+			status.Message = "MCP manager closed during connect"
+			m.setStatus(status)
+			continue
+		}
 		m.runtimes[spec.ID] = rt
 		m.mu.Unlock()
 		m.updateConnectedStatus(rt)
@@ -163,8 +221,11 @@ func (rt *serverRuntime) connect(parent context.Context) error {
 	}
 	rt.session = session
 	if err := rt.refresh(ctx); err != nil {
-		_ = session.Close()
-		return err
+		closeErr := session.Close()
+		if closeErr != nil {
+			closeErr = fmt.Errorf("mcp %s close after refresh failure: %w", rt.spec.ID, closeErr)
+		}
+		return errors.Join(err, closeErr)
 	}
 	return nil
 }
@@ -172,6 +233,9 @@ func (rt *serverRuntime) connect(parent context.Context) error {
 func (rt *serverRuntime) refresh(ctx context.Context) error {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
+	if rt.closed {
+		return errors.New("runtime is closed")
+	}
 	if rt.session == nil {
 		return errors.New("session is not connected")
 	}
@@ -186,52 +250,73 @@ func (rt *serverRuntime) refresh(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("mcp %s list tools: %w", rt.spec.ID, err)
 		}
+		sort.SliceStable(remoteTools, func(i, j int) bool {
+			if remoteTools[i] == nil {
+				return false
+			}
+			if remoteTools[j] == nil {
+				return true
+			}
+			return remoteTools[i].Name < remoteTools[j].Name
+		})
 	}
-	rt.manager.registry.UnregisterOwner(rt.owner)
-	rt.used = make(map[string]string)
+	used := make(map[string]string)
+	var descriptors []tools.ToolDescriptor
 	if init.Capabilities.Tools != nil {
+		seenRemote := make(map[string]bool)
 		for _, remote := range remoteTools {
 			if remote == nil || strings.TrimSpace(remote.Name) == "" {
 				continue
 			}
-			if err := rt.registerTool(remote); err != nil {
+			if seenRemote[remote.Name] {
+				return fmt.Errorf("mcp %s returned duplicate tool %q", rt.spec.ID, remote.Name)
+			}
+			seenRemote[remote.Name] = true
+			descriptor, err := rt.toolDescriptor(remote, used)
+			if err != nil {
 				return err
 			}
+			descriptors = append(descriptors, descriptor)
 		}
 	}
 	if init.Capabilities.Resources != nil {
-		for _, adapter := range []tools.Tool{
-			newListResourcesTool(rt), newReadResourceTool(rt),
-		} {
-			if err := rt.registerBridge(adapter, "resources"); err != nil {
-				return err
-			}
+		for _, adapter := range []tools.Tool{newListResourcesTool(rt), newReadResourceTool(rt)} {
+			descriptors = append(descriptors, rt.bridgeDescriptor(adapter, "resources", used))
 		}
 		if init.Capabilities.Resources.Subscribe {
-			if err := rt.registerBridge(newResourceSubscriptionTool(rt), "resources"); err != nil {
-				return err
-			}
+			descriptors = append(descriptors, rt.bridgeDescriptor(newResourceSubscriptionTool(rt), "resources", used))
 		}
 	}
 	if init.Capabilities.Prompts != nil {
 		for _, adapter := range []tools.Tool{newListPromptsTool(rt), newGetPromptTool(rt)} {
-			if err := rt.registerBridge(adapter, "prompts"); err != nil {
-				return err
-			}
+			descriptors = append(descriptors, rt.bridgeDescriptor(adapter, "prompts", used))
 		}
 	}
-	rt.manager.updateConnectedStatus(rt)
-	if changed := rt.manager.changedHandler(); changed != nil {
-		changed()
+	replacer, ok := rt.manager.registry.(tools.AtomicOwnerRegistry)
+	if !ok {
+		return errors.New("MCP registry does not support atomic owner replacement")
 	}
+	if err := replacer.ReplaceOwner(rt.owner, descriptors, func(candidate []tools.ToolDescriptor) error {
+		// Resolve the observer inside the registry boundary. Capturing it before
+		// ReplaceOwner could let handler installation reconcile an older catalog
+		// before this replacement commits without a callback.
+		if changed := rt.manager.changedHandler(); changed != nil {
+			return changed(candidate)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	rt.used = used
+	rt.manager.updateConnectedStatus(rt)
 	return nil
 }
 
-func (rt *serverRuntime) registerTool(remote *sdkmcp.Tool) error {
-	name := rt.canonical(remote.Name)
+func (rt *serverRuntime) toolDescriptor(remote *sdkmcp.Tool, used map[string]string) (tools.ToolDescriptor, error) {
+	name := rt.canonical(remote.Name, used)
 	params, err := marshalSchema(remote.InputSchema)
 	if err != nil {
-		return fmt.Errorf("mcp %s tool %s schema: %w", rt.spec.ID, remote.Name, err)
+		return tools.ToolDescriptor{}, fmt.Errorf("mcp %s tool %s schema: %w", rt.spec.ID, remote.Name, err)
 	}
 	discovery := rt.discovery(remote.Name, remote.Title, remote.Description)
 	schema := tools.ToolSchema{Name: name, Description: remote.Description, Parameters: params, Discovery: discovery}
@@ -239,22 +324,22 @@ func (rt *serverRuntime) registerTool(remote *sdkmcp.Tool) error {
 		schema.Description = "Call MCP tool " + remote.Name + " on server " + rt.spec.ID + "."
 	}
 	adapter := &remoteTool{runtime: rt, schema: schema, remoteName: remote.Name}
-	return rt.manager.registry.RegisterDescriptor(tools.ToolDescriptor{
+	return tools.ToolDescriptor{
 		Schema: schema, Tool: adapter, Source: tools.SourceMCP, Owner: rt.owner, PluginID: rt.spec.ID,
 		OriginalName: remote.Name, Risk: rt.risk(), Capabilities: []string{"mcp", "tools"}, Prompt: remote.Description,
-	})
+	}, nil
 }
 
-func (rt *serverRuntime) registerBridge(adapter tools.Tool, capability string) error {
+func (rt *serverRuntime) bridgeDescriptor(adapter tools.Tool, capability string, used map[string]string) tools.ToolDescriptor {
 	schema := adapter.Schema()
 	originalName := schema.Name
-	schema.Name = rt.canonical(originalName)
+	schema.Name = rt.canonical(originalName, used)
 	schema.Discovery = rt.discovery(schema.Name, capability, schema.Description)
 	setSchema(adapter, schema)
-	return rt.manager.registry.RegisterDescriptor(tools.ToolDescriptor{
+	return tools.ToolDescriptor{
 		Schema: schema, Tool: adapter, Source: tools.SourceMCP, Owner: rt.owner, PluginID: rt.spec.ID,
 		OriginalName: originalName, Risk: rt.risk(), Capabilities: []string{"mcp", capability}, Prompt: schema.Description,
-	})
+	}
 }
 
 func (rt *serverRuntime) risk() permission.Risk {
@@ -288,7 +373,7 @@ func (rt *serverRuntime) discovery(values ...string) *protocol.ToolDiscovery {
 	return &protocol.ToolDiscovery{Mode: mode, Namespace: rt.spec.ID, Keywords: keywords}
 }
 
-func (rt *serverRuntime) canonical(remote string) string {
+func (rt *serverRuntime) canonical(remote string, used map[string]string) string {
 	base := sanitize(remote)
 	prefix := "mcp_" + rt.spec.ID + "_"
 	max := 127 - len(prefix)
@@ -299,8 +384,8 @@ func (rt *serverRuntime) canonical(remote string) string {
 		base = strings.Trim(base[:max], "_-")
 	}
 	candidate := prefix + base
-	if prior, exists := rt.used[candidate]; !exists || prior == remote {
-		rt.used[candidate] = remote
+	if prior, exists := used[candidate]; !exists || prior == remote {
+		used[candidate] = remote
 		return candidate
 	}
 	for n := 2; ; n++ {
@@ -310,8 +395,8 @@ func (rt *serverRuntime) canonical(remote string) string {
 			trimmed = strings.Trim(trimmed[:max-len(suffix)], "_-")
 		}
 		candidate = prefix + trimmed + suffix
-		if _, exists := rt.used[candidate]; !exists {
-			rt.used[candidate] = remote
+		if _, exists := used[candidate]; !exists {
+			used[candidate] = remote
 			return candidate
 		}
 	}
@@ -356,13 +441,13 @@ func listAllTools(ctx context.Context, session *sdkmcp.ClientSession) ([]*sdkmcp
 
 // SetCatalogChanged installs a callback used to rebuild deferred discovery
 // after a tools/list_changed notification.
-func (m *Manager) SetCatalogChanged(fn func()) {
+func (m *Manager) SetCatalogChanged(fn func([]tools.ToolDescriptor) error) {
 	m.mu.Lock()
 	m.onChanged = fn
 	m.mu.Unlock()
 }
 
-func (m *Manager) changedHandler() func() {
+func (m *Manager) changedHandler() func([]tools.ToolDescriptor) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.onChanged
@@ -473,16 +558,33 @@ func (m *Manager) updateConnectedStatus(rt *serverRuntime) {
 // Close gracefully terminates every MCP session.
 func (m *Manager) Close() error {
 	m.mu.Lock()
+	m.closed = true
+	m.mu.Unlock()
+	// ConnectAll admits work under m.mu, so no Add can race this Wait after
+	// closed becomes visible. Late connections close themselves before Done.
+	m.connectWG.Wait()
+	m.mu.Lock()
 	runtimes := make([]*serverRuntime, 0, len(m.runtimes))
 	for _, rt := range m.runtimes {
 		runtimes = append(runtimes, rt)
 	}
 	m.runtimes = make(map[string]*serverRuntime)
+	connectErr := m.connectErr
+	m.connectErr = nil
 	m.mu.Unlock()
 	var errs []error
+	if connectErr != nil {
+		errs = append(errs, connectErr)
+	}
 	for _, rt := range runtimes {
-		if rt.session != nil {
-			if err := rt.session.Close(); err != nil {
+		// Serialize with refresh through rt.mu. Once closed is visible, a list
+		// change callback can no longer republish this owner's descriptors.
+		rt.mu.Lock()
+		rt.closed = true
+		session := rt.session
+		rt.mu.Unlock()
+		if session != nil {
+			if err := session.Close(); err != nil {
 				errs = append(errs, fmt.Errorf("mcp %s close: %w", rt.spec.ID, err))
 			}
 		}

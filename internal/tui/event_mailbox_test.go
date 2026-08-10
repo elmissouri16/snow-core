@@ -93,6 +93,26 @@ func TestAgentEventMailboxDoesNotLeaveStaleWakeAfterConsumerRace(t *testing.T) {
 	}
 }
 
+func TestAgentEventMailboxCloseReleasesWaiterAndDropsLateEvents(t *testing.T) {
+	q := newAgentEventMailbox()
+	result := make(chan tea.Msg, 1)
+	go func() { result <- q.wait() }()
+	q.Close()
+	q.Close()
+	select {
+	case msg := <-result:
+		if msg != nil {
+			t.Fatalf("closed waiter returned %T", msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("close did not release waiter")
+	}
+	q.Push(protocol.AgentEvent{Type: protocol.EvTurnDone})
+	if q.len() != 0 {
+		t.Fatal("push after close queued an event")
+	}
+}
+
 func TestAgentEventMailboxRearmsBoundedBatches(t *testing.T) {
 	q := newAgentEventMailbox()
 	for i := 0; i < maxAgentEventsPerUpdate+7; i++ {

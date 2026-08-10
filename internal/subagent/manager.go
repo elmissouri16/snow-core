@@ -1891,7 +1891,7 @@ func (m *Manager) pendingFor(c Caller) bool {
 }
 func (m *Manager) messagesFor(c Caller) ([]protocol.Message, error) {
 	if c.Path == protocol.RootAgentPath {
-		return m.root.ContextMessages()
+		return m.root.ContextMessagesAdmitted()
 	}
 	m.mu.RLock()
 	r := m.byPath[c.Path]

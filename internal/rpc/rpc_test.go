@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -61,6 +62,20 @@ func (s *rpcGateStream) Next(ctx context.Context) (protocol.StreamEvent, error) 
 }
 func (*rpcGateStream) Close() error { return nil }
 
+type terminalErrorReader struct {
+	data []byte
+	err  error
+}
+
+func (r *terminalErrorReader) Read(p []byte) (int, error) {
+	if len(r.data) > 0 {
+		n := copy(p, r.data)
+		r.data = r.data[n:]
+		return n, nil
+	}
+	return 0, r.err
+}
+
 type shortWriter struct{}
 
 func (shortWriter) Write(p []byte) (int, error) {
@@ -80,6 +95,37 @@ func TestRPCPropagatesShortWrites(t *testing.T) {
 	defer a.Close()
 	if err := New(context.Background(), a, &in, shortWriter{}).Serve(context.Background()); err != io.ErrShortWrite {
 		t.Fatalf("Serve error = %v, want %v", err, io.ErrShortWrite)
+	}
+}
+
+func TestRPCRejectsNegativeWaitTimeoutBeforeStartingWorker(t *testing.T) {
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	server := New(context.Background(), a, strings.NewReader(""), io.Discard)
+	err = server.handle(context.Background(), Request{Type: "subagent_wait", Params: json.RawMessage(`{"timeout_ms":-1}`)})
+	if err == nil || !strings.Contains(err.Error(), "cannot be negative") {
+		t.Fatalf("negative timeout error = %v", err)
+	}
+}
+
+func TestRPCScannerErrorUsesOrderlyShutdown(t *testing.T) {
+	sentinel := errors.New("input failed")
+	reader := &terminalErrorReader{data: []byte(`{"id":"p1","type":"prompt","message":"hello"}` + "\n"), err: sentinel}
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	var out bytes.Buffer
+	err = New(context.Background(), a, reader, &out).Serve(context.Background())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("Serve error = %v", err)
+	}
+	if a.Agent.IsRunning() {
+		t.Fatal("Serve returned while prompt worker was still running")
 	}
 }
 

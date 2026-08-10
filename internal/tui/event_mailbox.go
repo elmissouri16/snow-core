@@ -26,13 +26,15 @@ type queuedAgentEvent struct {
 // stream deltas are represented as parts and joined only when a batch is
 // popped, avoiding quadratic concatenation while the UI is busy rendering.
 type agentEventMailbox struct {
-	mu    sync.Mutex
-	items []queuedAgentEvent
-	wake  chan struct{}
+	mu     sync.Mutex
+	items  []queuedAgentEvent
+	wake   chan struct{}
+	done   chan struct{}
+	closed bool
 }
 
 func newAgentEventMailbox() *agentEventMailbox {
-	return &agentEventMailbox{wake: make(chan struct{}, 1)}
+	return &agentEventMailbox{wake: make(chan struct{}, 1), done: make(chan struct{})}
 }
 
 func (q *agentEventMailbox) Push(ev protocol.AgentEvent) {
@@ -41,6 +43,10 @@ func (q *agentEventMailbox) Push(ev protocol.AgentEvent) {
 	}
 	copy := ev.Clone()
 	q.mu.Lock()
+	if q.closed {
+		q.mu.Unlock()
+		return
+	}
 	wasEmpty := len(q.items) == 0
 	if len(q.items) > 0 && compatibleStreamDeltas(q.items[len(q.items)-1].event, copy) {
 		q.items[len(q.items)-1].textParts = append(q.items[len(q.items)-1].textParts, copy.Text)
@@ -103,14 +109,37 @@ func (q *agentEventMailbox) wait() tea.Msg {
 		return nil
 	}
 	for {
-		<-q.wake
+		select {
+		case <-q.wake:
+		case <-q.done:
+		}
 		events := q.popBatch(maxAgentEventsPerUpdate)
 		if len(events) > 0 {
 			return agentEventBatchMsg{events: events}
 		}
+		q.mu.Lock()
+		closed := q.closed
+		q.mu.Unlock()
+		if closed {
+			return nil
+		}
 		// A defensive stale wake must never return nil: Bubble Tea would not
 		// run Update and therefore would not install the next waiter.
 	}
+}
+
+// Close releases blocked Bubble Tea commands. Queued events may still be
+// drained once; later pushes are dropped.
+func (q *agentEventMailbox) Close() {
+	if q == nil {
+		return
+	}
+	q.mu.Lock()
+	if !q.closed {
+		q.closed = true
+		close(q.done)
+	}
+	q.mu.Unlock()
 }
 
 func (q *agentEventMailbox) len() int {
