@@ -31,7 +31,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          # setup-go currently drops rc suffixes when parsing go.mod. Keep this
+          # semver-form prerelease synchronized with the root/module go lines.
+          go-version: '1.27.0-rc.2'
           check-latest: true
           cache: true
           cache-dependency-path: |
@@ -82,7 +84,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          # setup-go currently drops rc suffixes when parsing go.mod. Keep this
+          # semver-form prerelease synchronized with the root/module go lines.
+          go-version: '1.27.0-rc.2'
           check-latest: true
           cache: true
           cache-dependency-path: go.sum
