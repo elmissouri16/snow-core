@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            examples/sdk/go.sum
+
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l $(git ls-files '*.go'))"
+          if [[ -n "$unformatted" ]]; then
+            printf 'gofmt required:\n%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -count=1
+
+      - name: Build snow
+        shell: bash
+        run: go build -o "$RUNNER_TEMP/snow" ./cmd/snow
+
+      - name: Test standalone SDK example
+        working-directory: examples/sdk
+        run: go test ./...
+
+      - name: Run standalone SDK example
+        working-directory: examples/sdk
+        run: go run . -provider fake -prompt "CI lifecycle smoke test"
+
+      - name: Run standalone RPC example
+        shell: bash
+        run: python3 examples/rpc/python/client.py --snow "$RUNNER_TEMP/snow" --provider fake --prompt "CI lifecycle smoke test"
+
+  race:
+    name: Race detector (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Test internal runtime and SDK with race detector
+        run: go test -race ./internal/... ./pkg/snowsdk -count=1

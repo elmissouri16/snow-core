@@ -16,6 +16,15 @@ shared by SDK, JSON, RPC, plugins, sessions, and the TUI.
 go get github.com/snow-core/snow/pkg/snowsdk
 ```
 
+A separate checked-in module under [`examples/sdk`](../examples/sdk) exercises
+only the public packages and is run by Linux/macOS CI. From this checkout:
+
+```sh
+cd examples/sdk
+go run .                         # credential-free fake-provider lifecycle
+go run . -provider opencode-go  # real streaming provider
+```
+
 Import both packages:
 
 ```go
@@ -115,7 +124,7 @@ separates inheritance from clean-install defaults.
 | `PermissionMode` | `ask`, `allow`, or `deny`. **Omission in the SDK forces `deny`**, rather than inheriting interactive `ask`. |
 | `AutoApprove` | Forces `allow` and takes precedence over `PermissionMode`. Dangerous outside externally isolated/trusted environments. |
 | `Tools` | Built-in tool allowlist. Empty exposes all registered built-ins. |
-| `SystemPrompt` | Overrides Snow's built-in preamble. Project context and runtime steering remain separately assembled where applicable. |
+| `SystemPrompt` | Overrides configured system-prompt files and Snow's embedded Markdown preamble. Project context and runtime steering remain separately assembled where applicable. |
 | `Thinking` | `off`, `minimal`, `low`, `medium`, or `high`. Empty inherits config; model metadata may reject a level. |
 | `ReasoningSummary` | `off`, `auto`, `concise`, or `detailed`. Empty inherits config. |
 | `TextVerbosity` | `low`, `medium`, or `high`. Empty inherits config. |

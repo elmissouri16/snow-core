@@ -444,9 +444,18 @@ Important ordering rules:
 
 ## Complete Python client
 
-This example starts a persistent RPC process, sends one prompt, prints root text,
-answers model questions, waits for `turn_done`, then closes stdin for orderly
-shutdown.
+A dependency-free, directly runnable version lives at
+[`examples/rpc/python/client.py`](../examples/rpc/python/client.py) and is
+exercised by Linux/macOS CI against the fake provider:
+
+```sh
+go build -o ./snow ./cmd/snow
+python3 examples/rpc/python/client.py --snow ./snow
+```
+
+The following equivalent core example starts a persistent RPC process, sends one
+prompt, prints root text, answers model questions, waits for `turn_done`, then
+closes stdin for orderly shutdown.
 
 ```python
 #!/usr/bin/env python3

@@ -82,8 +82,9 @@ behavior in code before relying on a checklist item.
 - `ask`/`allow`/`deny` permissions, interactive TUI asker, session rules, and
   `/permissions`; canonical project trust persistence, pre-runtime TUI prompting,
   fail-closed headless behavior, and `/trust` are present.
-- Context assembly from the built-in preamble and nearest-first `AGENTS.md` files,
-  with a byte cap. CLAUDE.md compatibility is off by default.
+- Context assembly from an embedded Markdown preamble (with optional global or
+  trust-gated project file override) and nearest-first `AGENTS.md` files, with a
+  byte cap. CLAUDE.md compatibility is off by default.
 - Bubble Tea TUI transcript, markdown rendering, streaming updates, model/provider
   pickers, model-aware `/thinking` effort selection, login/logout, permissions,
   sessions, slash completion, and `@` file mentions. Strict bounded YAML custom
@@ -94,13 +95,15 @@ behavior in code before relying on a checklist item.
   explicitly subscribed best-effort events, JSON-RPC v2 stdio runtimes,
   `snow plugin check`, and dependency-free JavaScript/Python examples.
 - Branch-scoped persistent Thread Goals with budgets, cross-handle atomic usage
-  accounting, private idle continuation, model tools, ordered cloned events,
-  confined managed objectives, explicit surface readiness, and safe
-  abort/resume/fork/compaction lifecycle controls.
+  accounting, embedded Markdown continuation/update templates, private idle
+  continuation, model tools, ordered cloned events, confined managed objectives,
+  explicit surface readiness, and safe abort/resume/fork/compaction lifecycle
+  controls.
 - `ask_user` host interaction across all surfaces: inline TUI choices/free-form
   input, SDK callback, asynchronous RPC reply/reject, and fail-fast print/JSON
-  behavior when no interactive input provider exists. Plan Mode exposes the
-  compatible `request_user_input` alias and structured proposed-plan events.
+  behavior when no interactive input provider exists. Plan Mode uses an
+  embedded Markdown contract and exposes the compatible `request_user_input`
+  alias plus structured proposed-plan events.
 - MCP client integration through the official Go SDK v1.7.0: current stateless
   `2026-07-28` Streamable HTTP, stdio, legacy negotiation, tools, resources,
   prompts, subscriptions, list-change refresh, and permissioned BM25 routing.
@@ -115,6 +118,9 @@ behavior in code before relying on a checklist item.
   resource reads, and activation persistence across compaction/resume.
 - Unit, integration, lifecycle, end-to-end, CLI, provider, TUI, auth, path-safety,
   session, permission, and benchmark tests across the packages.
+- GitHub Actions CI on Linux and macOS, including formatting, vet, ordinary and
+  race tests, production builds, and credential-free standalone SDK/RPC smoke
+  examples.
 
 ### Known gaps / next work
 
@@ -124,14 +130,15 @@ behavior in code before relying on a checklist item.
    local and network-free; optional semantic/vector routing remains deferred.
    Plugins and stdio MCP servers still execute with OS privileges and are not a
    sandbox, and no built-in sandbox backend is currently planned.
-2. Add hosted CI and standalone external SDK/RPC example projects. The in-repo
-   SDK/RPC guides include runnable examples, and native Windows verification is
-   available through `scripts/test-windows.ps1`.
+2. Continue pre-v1 API/file-format stabilization and real-provider/TUI smoke
+   coverage. Hosted CI prioritizes Linux and macOS; native Windows verification
+   remains available through `scripts/test-windows.ps1` but is not a hosted gate.
 
 ## Repository structure
 
 ```text
 .
+├── .github/workflows/ci.yml  # Linux/macOS tests, vet, race, builds, examples
 ├── AGENTS.md                 # this agent guide; loaded as project context
 ├── README.md                 # user quickstart, providers, SDK, security, tests
 ├── IMPLEMENTATION.md         # architecture, interfaces, research, roadmap
@@ -151,7 +158,10 @@ behavior in code before relying on a checklist item.
 │   ├── skills.md             # Agent Skills discovery and disclosure behavior
 │   ├── tool-routing.md       # Opt-in Bleve BM25 schema discovery and recovery
 │   └── tui-performance.md    # Bubble Tea/Bubbles integration and render rules
-├── examples/plugins/         # dependency-free JavaScript/Python v2 runtimes
+├── examples/
+│   ├── sdk/                  # standalone public Go SDK module
+│   ├── rpc/python/           # dependency-free persistent RPC client
+│   └── plugins/              # dependency-free JavaScript/Python v2 runtimes
 ├── go.mod / go.sum           # module github.com/snow-core/snow and dependencies
 ├── cmd/snow/
 │   ├── main.go               # Cobra entry point and CLI mode selection
@@ -280,7 +290,7 @@ OpenCode's XDG/local data auth file.
 session root. Standard paths are:
 
 ```text
-~/.snow/config.json       # provider/model, permissions, timeouts, TUI settings
+~/.snow/config.json       # provider/model, permissions, prompt path, timeouts, TUI settings
 ~/.snow/auth.json         # credentials; 0600
 ~/.snow/trust.json        # project trust decisions; 0600
 ~/.snow/sessions/         # cwd-encoded SQLite .db files; 0600
@@ -360,8 +370,8 @@ for checking current source and tests.
 
 ## Scripts and verification
 
-There is currently no Makefile, Taskfile, or CI workflow. Use these commands
-directly:
+There is no Makefile or Taskfile. Hosted CI is defined in
+`.github/workflows/ci.yml` for Linux and macOS; use these commands locally:
 
 ```sh
 gofmt -w <changed-go-files>
@@ -370,6 +380,9 @@ go vet ./...
 go test -race ./internal/...
 go test -race ./internal/subagent ./internal/agent ./internal/app ./internal/session ./internal/rpc ./pkg/snowsdk
 go test ./internal/agent ./cmd/snow -count=1
+(cd examples/sdk && go test ./... && go run .)
+go build -o ./snow ./cmd/snow
+python3 examples/rpc/python/client.py --snow ./snow
 
 # After a verified feature change, refresh the user-local snow binary.
 ./scripts/install-local.sh

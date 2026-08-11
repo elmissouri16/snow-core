@@ -19,9 +19,10 @@ and maintainer design material for snow-core.
 ## Embed and automate
 
 - [Go SDK](sdk.md) — options, lifecycle, methods, events, errors, concurrency,
-  readiness, permissions, and runnable examples.
+  readiness, permissions, and a [standalone Go module](../examples/sdk).
 - [JSONL RPC](rpc.md) — framing, every command, responses/events, ordering,
-  interactive input, goals, subagents, shutdown, and a Python client.
+  interactive input, goals, subagents, shutdown, and a runnable
+  [Python client](../examples/rpc/python).
 - [Model-requested user input](user-input.md) — `ask_user` request/response
   schema across TUI, SDK, RPC, print, and JSON surfaces.
 - [SQLite sessions](sessions.md) — session storage, branches, resume, and the

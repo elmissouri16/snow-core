@@ -1060,6 +1060,7 @@ Primary consumers: non-Go hosts, IDE bridges. Go hosts should prefer `snowsdk`.
 | Path | Purpose |
 |------|---------|
 | `~/.snow/config.json` | Global settings |
+| `~/.snow/system.md` | Suggested optional configured system preamble |
 | `~/.snow/auth.json` | Secrets |
 | `~/.snow/trust.json` | Project trust decisions |
 | `~/.snow/sessions/` | Pure-Go SQLite session databases |
@@ -1082,6 +1083,7 @@ Primary consumers: non-Go hosts, IDE bridges. Go hosts should prefer `snowsdk`.
   "thinking": "off",
   "reasoning_summary": "auto",
   "text_verbosity": "low",
+  "system_prompt_file": "system.md",
   "tool_output_bytes": 262144,
   "bash_timeout_ms": 120000,
   "providers": {
@@ -1097,14 +1099,20 @@ Primary consumers: non-Go hosts, IDE bridges. Go hosts should prefer `snowsdk`.
 
 ### 8.3 Context assembly order
 
-1. Built-in system preamble (tools, style, safety short rules).
-2. Global user instructions if configured.
-3. `AGENTS.md` walk: cwd → parents (cap depth / total bytes).
-4. Optional `CLAUDE.md` compatibility read (**off** by default; config gate).
-5. Project `.snow` append system (trust-gated).
-6. Per-turn SDK/CLI system override.
+1. Base preamble: explicit SDK `SystemPrompt`, trusted-project configured file,
+   global configured file, or embedded `internal/context/system.md`.
+2. `AGENTS.md` walk: cwd → parents (cap depth / total bytes).
+3. Optional `CLAUDE.md` compatibility read (**off** in current app wiring).
+4. Startup skill metadata, MCP instructions, and subagent guidance when enabled.
+5. Per-request collaboration-mode instructions from embedded
+   `internal/plan/system.md` and activated-skill instructions.
+6. Goal-bearing turns receive separate trailing internal context rendered from
+   embedded templates under `internal/goal/`; this is not system context.
 
-Hard cap total injected context (e.g. 100 KiB) with truncation notice.
+Configured prompt files are bounded by `context_cap_bytes`; project prompt paths
+are trust-gated, confined to the canonical project root, and reject symlink
+components. `AGENTS.md` content uses the same byte budget and adds a truncation
+notice when needed.
 
 ### 8.4 Project trust
 
@@ -1116,8 +1124,8 @@ added after the first launch.
 
 **Decisions:** store canonical exact path → `allow` | `deny` in
 `~/.snow/trust.json`; nearest ancestor decisions apply until an exact child
-override exists. Decisions load or block project config, plugins, MCP declarations,
-and skills on the same launch.
+override exists. Decisions load or block project config, configured
+system-prompt files, plugins, MCP declarations, and skills on the same launch.
 
 **Headless:** `default_project_trust: ask` behaves as **deny**. Global policy is
 `ask|allow|deny`; legacy `always|never` remain aliases. Headless surfaces never
@@ -1330,7 +1338,7 @@ Avoid: heavy ORMs, full cloud SDKs when raw HTTP + SSE suffices.
 
 - Minimum language/toolchain line: **Go 1.27**. `go.mod` currently uses
   **1.27rc2**, the available toolchain required by Surf v1.0.203.
-- Enable: `go test ./...`, race detector in CI later.
+- Hosted Linux/macOS CI runs `go test ./...`; Linux also runs the race detector.
 
 ### 11.4 Module path
 
@@ -1416,9 +1424,10 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 
 **Acceptance tests**
 
-- External module example `go run` against snowsdk.
-- JSON mode parses with `jq`.
-- Example Python/node RPC client sends `prompt` and prints deltas.
+- [x] Standalone `examples/sdk` module builds and runs against `pkg/snowsdk`.
+- [x] JSON mode parses with `jq`.
+- [x] Dependency-free Python RPC client sends `prompt`, consumes events, and
+  waits for `turn_done`.
 
 ---
 
@@ -1491,15 +1500,17 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 | Stream lag | UI shows first delta &lt; 50ms after recv |
 | Large session reload | 10k entries load &lt; 500ms |
 
-### 13.5 CI (when repo is live)
+### 13.5 CI
 
-```
-go test ./...
-go vet ./...
-go test -race ./internal/...
-```
+`.github/workflows/ci.yml` runs on pushes, pull requests, and manual dispatches:
 
-No network in default CI unit jobs; optional nightly integration with secrets.
+- Linux and macOS: formatting (Linux), vet, `go test ./...`, production build,
+  and credential-free standalone SDK/RPC example execution.
+- Linux: `go test -race ./internal/... ./pkg/snowsdk`.
+
+The hosted workflow is network-free after dependency download and requires no
+provider credentials. Real-provider checks remain manual; Windows verification
+is available through `scripts/test-windows.ps1` but is not a hosted gate.
 
 ---
 

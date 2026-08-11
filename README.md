@@ -161,7 +161,8 @@ public-address-only, redirect-checked, and never executes JavaScript.
 - Indexed branch tips, named forks, branch selection, rename, and guarded delete
 - Current-directory session picker and explicit path resume
 - Manual, turn-aware compaction that preserves complete history
-- `AGENTS.md` context discovery with a hard byte cap
+- Embedded Markdown system preamble with optional global/trusted-project file
+  override, plus `AGENTS.md` discovery with a hard byte cap
 - Usage and optional catalog-derived cost persisted with assistant messages
 
 See [sessions](docs/sessions.md) and [configuration](docs/configuration.md).
@@ -179,6 +180,8 @@ See [sessions](docs/sessions.md) and [configuration](docs/configuration.md).
 - **Steering and follow-ups** are accepted only during an active root run and
   delivered one at a time at safe assistant/tool boundaries.
 
+Plan and Goal contracts also use embedded Markdown sources under `internal/plan`
+and `internal/goal`; they remain separate from a configurable base preamble.
 See [Plan Mode](docs/plan-mode.md), [Thread Goals](docs/goals.md), and
 [model-requested user input](docs/user-input.md).
 
@@ -210,6 +213,11 @@ snow plugin check examples/plugins/python/manifest.json --json
 See [MCP](docs/mcp.md), [plugins](docs/plugins.md), the complete
 [plugin protocol](docs/plugin-protocol.md), [Agent Skills](docs/skills.md),
 [tool routing](docs/tool-routing.md), and [subagents](docs/subagents.md).
+
+Runnable integration projects live under [`examples/`](examples/): a standalone
+[Go SDK module](examples/sdk), a dependency-free [Python RPC client](examples/rpc/python),
+and JavaScript/Python plugin runtimes. The SDK and RPC examples default to the
+credential-free fake provider and are exercised by CI on Linux and macOS.
 
 ## Embed with Go
 
@@ -313,7 +321,9 @@ Default global paths:
 ```
 
 `SNOW_HOME` relocates global configuration/auth/trust/auxiliary files and
-`SNOW_SESSIONS_DIR` relocates session databases. Trusted projects may define a
+`SNOW_SESSIONS_DIR` relocates session databases. Global or trusted-project
+configuration may select a Markdown `system_prompt_file`; explicit SDK
+`SystemPrompt` remains highest precedence. Trusted projects may also define a
 restricted `.snow/config.json`, `.snow/keybindings.yaml`, `.snow/search.yaml`,
 and `.snow/themes/*.yaml`. See the [configuration reference](docs/configuration.md)
 for precedence, every global field, project scope, environment variables, and
@@ -327,8 +337,8 @@ Start at the [documentation index](docs/README.md).
 |---|---|
 | Learn the TUI and CLI modes | [Using Snow](docs/using-snow.md) |
 | Configure paths, providers, tools, themes, and search | [Configuration](docs/configuration.md) |
-| Embed Snow in Go | [SDK](docs/sdk.md) |
-| Build a JSONL client | [RPC](docs/rpc.md) |
+| Embed Snow in Go | [SDK](docs/sdk.md) · [standalone example](examples/sdk) |
+| Build a JSONL client | [RPC](docs/rpc.md) · [Python example](examples/rpc/python) |
 | Author JavaScript/Python plugins | [Plugins](docs/plugins.md) · [Protocol v2](docs/plugin-protocol.md) |
 | Review operational boundaries | [Security](docs/security.md) |
 | Authenticate ChatGPT/Codex | [ChatGPT auth](docs/chatgpt-auth.md) |
@@ -339,15 +349,20 @@ Start at the [documentation index](docs/README.md).
 
 ## Development
 
-The normal suite is network-free:
+[GitHub Actions CI](.github/workflows/ci.yml) runs the network-free suite on
+Linux and macOS, builds the binary, executes the standalone SDK/RPC examples,
+and runs the race detector on Linux. The same core checks can be run locally:
 
 ```sh
 gofmt -w <changed-go-files>
 go test ./...
 go vet ./...
-go test -race ./internal/...
+go test -race ./internal/... ./pkg/snowsdk
+(cd examples/sdk && go test ./... && go run .)
+go build -o ./snow ./cmd/snow
+python3 examples/rpc/python/client.py --snow ./snow
 
-# Native Windows validation
+# Optional native Windows validation (not a hosted CI gate)
 powershell -ExecutionPolicy Bypass -File scripts/test-windows.ps1
 ```
 
