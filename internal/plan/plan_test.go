@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func TestInstructionsComeFromEmbeddedMarkdown(t *testing.T) {
+	if !strings.HasPrefix(Instructions, "# Plan Mode (Conversational)") || !strings.Contains(Instructions, "<proposed_plan>") {
+		t.Fatalf("embedded plan instructions = %q", Instructions)
+	}
+	if strings.HasSuffix(Instructions, "\n") {
+		t.Fatal("embedded plan instructions retain source-file trailing newline")
+	}
+}
+
 func collect(chunks ...string) []Segment {
 	var parser Parser
 	var out []Segment

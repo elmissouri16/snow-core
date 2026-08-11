@@ -17,6 +17,7 @@ import (
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/provider/fake"
 	"github.com/snow-core/snow/internal/session"
+	"github.com/snow-core/snow/internal/trust"
 	"github.com/snow-core/snow/internal/userinput"
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
 	publicplugin "github.com/snow-core/snow/pkg/plugin"
@@ -720,6 +721,124 @@ func TestAppContextLoadsAgents(t *testing.T) {
 	defer a.Close()
 	if !strings.Contains(a.Agent.SystemPrompt(), "always use tabs") {
 		t.Fatalf("AGENTS.md not in system prompt: %q", a.Agent.SystemPrompt())
+	}
+}
+
+func TestAppLoadsConfiguredSystemPromptFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	configPath := filepath.Join(home, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"system_prompt_file":"system.md"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "system.md"), []byte("Custom global system prompt."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("Keep project context."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := New(context.Background(), Options{Provider: "fake", ConfigPath: configPath, NoSession: true, Permission: "allow", CWD: cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	prompt := a.Agent.SystemPrompt()
+	if !strings.Contains(prompt, "Custom global system prompt.") || !strings.Contains(prompt, "Keep project context.") {
+		t.Fatalf("assembled system prompt = %q", prompt)
+	}
+	if strings.Contains(prompt, "You are snow") {
+		t.Fatalf("embedded preamble was not replaced: %q", prompt)
+	}
+}
+
+func TestExplicitSystemPromptWinsWithoutReadingConfiguredFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	configPath := filepath.Join(home, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"system_prompt_file":"missing.md"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := New(context.Background(), Options{Provider: "fake", ConfigPath: configPath, SystemPrompt: "Explicit prompt.", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if !strings.Contains(a.Agent.SystemPrompt(), "Explicit prompt.") {
+		t.Fatalf("system prompt = %q", a.Agent.SystemPrompt())
+	}
+}
+
+func TestTrustedProjectSystemPromptOverridesGlobal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	configPath := filepath.Join(home, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"system_prompt_file":"global.md"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "global.md"), []byte("Global prompt."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".snow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".snow", "config.json"), []byte(`{"system_prompt_file":".snow/system.md"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".snow", "system.md"), []byte("Project prompt."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{Provider: "fake", ConfigPath: configPath, NoSession: true, Permission: "allow", CWD: cwd}
+
+	blocked, err := New(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prompt := blocked.Agent.SystemPrompt(); !strings.Contains(prompt, "Global prompt.") || strings.Contains(prompt, "Project prompt.") {
+		blocked.Close()
+		t.Fatalf("untrusted prompt = %q", prompt)
+	}
+	blocked.Close()
+
+	preflight, err := InspectProjectTrust(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := preflight.Store.Set(cwd, trust.LevelAllow); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := New(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer allowed.Close()
+	if prompt := allowed.Agent.SystemPrompt(); !strings.Contains(prompt, "Project prompt.") || strings.Contains(prompt, "Global prompt.") {
+		t.Fatalf("trusted prompt = %q", prompt)
+	}
+}
+
+func TestTrustedProjectSystemPromptCannotEscapeProject(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".snow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".snow", "config.json"), []byte(`{"system_prompt_file":"../outside.md"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: cwd}
+	preflight, err := InspectProjectTrust(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := preflight.Store.Set(cwd, trust.LevelAllow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "escapes trusted project root") {
+		t.Fatalf("project prompt escape error = %v", err)
 	}
 }
 

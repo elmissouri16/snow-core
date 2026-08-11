@@ -176,6 +176,7 @@ func TestLoadAndSaveRoundTrip(t *testing.T) {
 	cfg.DefaultProvider = "fake"
 	cfg.DefaultModel = "m2"
 	cfg.PermissionMode = "deny"
+	cfg.SystemPromptFile = "system.md"
 	cfg.Providers = map[string]ProviderConfig{
 		"opencode-go": {BaseURL: "https://example.com/v1", DefaultModel: "kimi-k2.6"},
 	}
@@ -187,7 +188,7 @@ func TestLoadAndSaveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.DefaultProvider != "fake" || got.DefaultModel != "m2" || got.PermissionMode != "deny" {
+	if got.DefaultProvider != "fake" || got.DefaultModel != "m2" || got.PermissionMode != "deny" || got.SystemPromptFile != "system.md" {
 		t.Fatalf("round trip mismatch: %+v", got)
 	}
 	pc, ok := got.Providers["opencode-go"]
@@ -251,7 +252,7 @@ func TestLoadMCPAndSkillsAndTrustedProjectExtensions(t *testing.T) {
 		t.Fatalf("config = %+v", cfg)
 	}
 	project := filepath.Join(t.TempDir(), "project.json")
-	if err := os.WriteFile(project, []byte(`{"mcp_servers":{"local":{"command":"mcp-local"}}}`), 0o644); err != nil {
+	if err := os.WriteFile(project, []byte(`{"mcp_servers":{"local":{"command":"mcp-local"}},"system_prompt_file":".snow/system.md"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	merged, err := LoadWithProject(global, project, true)
@@ -261,11 +262,36 @@ func TestLoadMCPAndSkillsAndTrustedProjectExtensions(t *testing.T) {
 	if merged.MCPServers["local"].Command != "mcp-local" || merged.MCPServers["remote"].URL == "" {
 		t.Fatalf("merged = %+v", merged.MCPServers)
 	}
+	projectExtensions, err := LoadProjectExtensions(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectExtensions.SystemPromptFile == nil || *projectExtensions.SystemPromptFile != ".snow/system.md" {
+		t.Fatalf("project system prompt = %#v", projectExtensions.SystemPromptFile)
+	}
 	blocked, err := LoadWithProject(global, project, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := blocked.MCPServers["local"]; ok {
 		t.Fatal("untrusted project MCP server loaded")
+	}
+}
+
+func TestSystemPromptFileValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"system_prompt_file":"   "}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("blank global system prompt path was accepted")
+	}
+
+	project := filepath.Join(t.TempDir(), "project.json")
+	if err := os.WriteFile(project, []byte(`{"system_prompt_file":""}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadProjectExtensions(project); err == nil {
+		t.Fatal("empty project system prompt path was accepted")
 	}
 }

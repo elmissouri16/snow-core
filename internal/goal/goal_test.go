@@ -38,6 +38,28 @@ func TestControllerCreateConflictStatusAndSteeringEscape(t *testing.T) {
 		t.Fatalf("fragment=%q", f.Text)
 	}
 }
+func TestEmbeddedGoalPromptTemplates(t *testing.T) {
+	budget := int64(10)
+	goal := protocol.ThreadGoal{Objective: "finish <all>", TokenBudget: &budget, TokensUsed: 3}
+	continuation := ContinuationFragment(goal, 4, false).Text
+	for _, want := range []string{"Continue working on the thread goal", "goal turn 4", "Token budget remaining: 7", "finish &lt;all&gt;"} {
+		if !strings.Contains(continuation, want) {
+			t.Fatalf("continuation %q missing %q", continuation, want)
+		}
+	}
+	if strings.Contains(continuation, "budget has been reached") {
+		t.Fatalf("ordinary continuation has budget notice: %q", continuation)
+	}
+	wrapped := ContinuationFragment(goal, 5, true).Text
+	if !strings.HasPrefix(wrapped, "The goal token budget has been reached") {
+		t.Fatalf("budget continuation = %q", wrapped)
+	}
+	updated := ObjectiveUpdatedFragment(goal).Text
+	if !strings.Contains(updated, "persisted goal objective was updated") || !strings.Contains(updated, "finish &lt;all&gt;") {
+		t.Fatalf("updated objective prompt = %q", updated)
+	}
+}
+
 func TestExternalStatusTransitionsAreValidated(t *testing.T) {
 	c, _ := New(persisted(t), t.TempDir(), nil)
 	g, err := c.Create("transition", nil, false)

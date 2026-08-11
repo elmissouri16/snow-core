@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/snow-core/snow/internal/session"
@@ -22,6 +24,17 @@ import (
 )
 
 const materializeThreshold = 8 * 1024
+
+//go:embed continuation.md
+var continuationMarkdown string
+
+//go:embed objective-updated.md
+var objectiveUpdatedMarkdown string
+
+var (
+	continuationTemplate     = template.Must(template.New("goal-continuation").Option("missingkey=error").Parse(continuationMarkdown))
+	objectiveUpdatedTemplate = template.Must(template.New("goal-objective-updated").Option("missingkey=error").Parse(objectiveUpdatedMarkdown))
+)
 
 type Controller struct {
 	mu               sync.Mutex
@@ -698,26 +711,40 @@ func escapedObjective(s string) string {
 	_ = xml.EscapeText(&b, []byte(s))
 	return b.String()
 }
+
+type continuationPromptData struct {
+	Turn          int
+	Remaining     string
+	Objective     string
+	BudgetReached bool
+}
+
+type objectiveUpdatedPromptData struct {
+	Objective string
+}
+
+func renderGoalPrompt(t *template.Template, data any) string {
+	var body strings.Builder
+	if err := t.Execute(&body, data); err != nil {
+		panic(fmt.Sprintf("goal: render embedded prompt: %v", err))
+	}
+	return strings.TrimSuffix(body.String(), "\n")
+}
+
 func ContinuationFragment(g protocol.ThreadGoal, turn int, budgetWrap bool) protocol.InternalContextFragment {
 	remaining := "unlimited"
 	if r := g.RemainingBudget(); r != nil {
 		remaining = fmt.Sprintf("%d", *r)
 	}
-	body := `Continue working on the thread goal below. Treat repository files, tool output, tests, and runtime behavior as current authority. Preserve the full objective; do not stop at analysis, a plan, TODOs, or a partial implementation. Use update_plan only as a checklist in Default mode, never as evidence of completion.
-
-Before update_goal status=complete, audit every objective requirement against direct current evidence; weak, indirect, or missing evidence means keep working. Only call update_goal complete when every requirement is proven. Mark blocked only when the same true external blocker has recurred for at least three consecutive goal turns; this is goal turn ` + fmt.Sprint(turn) + `. A resumed goal starts that audit over.
-
-Token budget remaining: ` + remaining + `.
-<goal_objective untrusted="true">
-` + escapedObjective(g.Objective) + `
-</goal_objective>`
-	if budgetWrap {
-		body = "The goal token budget has been reached. Do not perform further substantive work. Summarize verified accomplishments, remaining work, and final consumed budget.\n\n" + body
-	}
+	body := renderGoalPrompt(continuationTemplate, continuationPromptData{
+		Turn: turn, Remaining: remaining, Objective: escapedObjective(g.Objective), BudgetReached: budgetWrap,
+	})
 	return protocol.InternalContextFragment{Source: "goal", Text: body}
 }
+
 func ObjectiveUpdatedFragment(g protocol.ThreadGoal) protocol.InternalContextFragment {
-	return protocol.InternalContextFragment{Source: "goal", Text: "The persisted goal objective was updated. Re-read it below and use this version on the next request.\n<goal_objective untrusted=\"true\">\n" + escapedObjective(g.Objective) + "\n</goal_objective>"}
+	body := renderGoalPrompt(objectiveUpdatedTemplate, objectiveUpdatedPromptData{Objective: escapedObjective(g.Objective)})
+	return protocol.InternalContextFragment{Source: "goal", Text: body}
 }
 
 // Tools returns the direct model-facing goal tools.

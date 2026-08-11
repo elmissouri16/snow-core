@@ -271,6 +271,7 @@ type Config struct {
 	ToolOutputBytes         int                             `json:"tool_output_bytes,omitempty"`
 	BashTimeoutMS           int                             `json:"bash_timeout_ms,omitempty"`
 	ContextCapBytes         int                             `json:"context_cap_bytes,omitempty"`
+	SystemPromptFile        string                          `json:"system_prompt_file,omitempty"`
 	Providers               map[string]ProviderConfig       `json:"providers,omitempty"`
 	TUI                     TUIConfig                       `json:"tui,omitempty"`
 	Plugins                 []plugin.PluginSpec             `json:"plugins,omitempty"`
@@ -383,17 +384,37 @@ func Load(path string) (Config, error) {
 	if err := cfg.WindowsShell.Validate(); err != nil {
 		return cfg, err
 	}
+	if err := validateSystemPromptFile(cfg.SystemPromptFile, true); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
+}
+
+func validateSystemPromptFile(path string, allowEmpty bool) error {
+	if path == "" {
+		if allowEmpty {
+			return nil
+		}
+		return errors.New("config: system_prompt_file must not be empty")
+	}
+	if strings.TrimSpace(path) == "" {
+		return errors.New("config: system_prompt_file must not be blank")
+	}
+	if len(path) > 4096 {
+		return errors.New("config: system_prompt_file path exceeds 4096 bytes")
+	}
+	return nil
 }
 
 // ProjectExtensions are the only project configuration fields loaded after a
 // trust allow. Project files cannot override global provider or permissions.
 type ProjectExtensions struct {
-	Plugins    []plugin.PluginSpec             `json:"plugins,omitempty"`
-	MCPServers map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
-	Skills     ProjectSkillsConfig             `json:"skills,omitempty"`
-	TUI        ProjectTUIConfig                `json:"tui,omitempty"`
-	Compaction ProjectCompactionConfig         `json:"compaction,omitempty"`
+	Plugins          []plugin.PluginSpec             `json:"plugins,omitempty"`
+	MCPServers       map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
+	Skills           ProjectSkillsConfig             `json:"skills,omitempty"`
+	TUI              ProjectTUIConfig                `json:"tui,omitempty"`
+	Compaction       ProjectCompactionConfig         `json:"compaction,omitempty"`
+	SystemPromptFile *string                         `json:"system_prompt_file,omitempty"`
 }
 
 // ApplyProjectPreferences applies only explicitly allowed trust-gated fields.
@@ -422,6 +443,12 @@ func ApplyProjectPreferences(cfg *Config, project ProjectExtensions) error {
 		}
 		cfg.Compaction.Guidance += project.Compaction.Guidance
 	}
+	if project.SystemPromptFile != nil {
+		if err := validateSystemPromptFile(*project.SystemPromptFile, false); err != nil {
+			return err
+		}
+		cfg.SystemPromptFile = strings.TrimSpace(*project.SystemPromptFile)
+	}
 	return cfg.Compaction.Validate()
 }
 
@@ -433,7 +460,7 @@ func LoadProject(path string) ([]plugin.PluginSpec, error) {
 	return extensions.Plugins, err
 }
 
-// LoadProjectExtensions reads trust-gated plugin and MCP declarations.
+// LoadProjectExtensions reads the restricted trust-gated project configuration.
 func LoadProjectExtensions(path string) (ProjectExtensions, error) {
 	if path == "" {
 		return ProjectExtensions{}, nil
@@ -454,6 +481,11 @@ func LoadProjectExtensions(path string) (ProjectExtensions, error) {
 	}
 	if raw.Skills.Overrides == nil {
 		raw.Skills.Overrides = map[string]bool{}
+	}
+	if raw.SystemPromptFile != nil {
+		if err := validateSystemPromptFile(*raw.SystemPromptFile, false); err != nil {
+			return ProjectExtensions{}, err
+		}
 	}
 	return raw, nil
 }

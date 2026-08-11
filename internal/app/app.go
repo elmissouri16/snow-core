@@ -348,11 +348,12 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: trust store: %w", err)
 	}
-	// Project configuration is input, not an execution boundary. Only its
-	// explicit plugin declarations are read after an allow decision.
+	// Project configuration is input, not an execution boundary. Its restricted
+	// extension and preference fields are read only after an allow decision.
 	var projectPlugins []publicplugin.PluginSpec
 	projectMCPServers := map[string]publicmcp.ServerSpec{}
 	projectSkills := config.ProjectSkillsConfig{Overrides: map[string]bool{}}
+	projectSystemPrompt := false
 	var pluginDiagnostics []internalplugin.Diagnostic
 	trustResolution, err := trust.Resolve(absCWD, cfg.DefaultProjectTrust, tr)
 	if err != nil {
@@ -375,12 +376,13 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		projectPlugins = extensions.Plugins
 		projectMCPServers = extensions.MCPServers
 		projectSkills = extensions.Skills
+		projectSystemPrompt = extensions.SystemPromptFile != nil
 		cfg.Plugins = append(cfg.Plugins, projectPlugins...)
 		if err := config.ApplyProjectPreferences(&cfg, extensions); err != nil {
 			return nil, err
 		}
 	} else if _, statErr := os.Stat(projectConfigPath); statErr == nil {
-		pluginDiagnostics = append(pluginDiagnostics, internalplugin.Diagnostic{PluginID: ".snow/config.json", Status: "trust-blocked", Message: "project plugin configuration requires an explicit trust allow"})
+		pluginDiagnostics = append(pluginDiagnostics, internalplugin.Diagnostic{PluginID: ".snow/config.json", Status: "trust-blocked", Message: "project configuration requires an explicit trust allow"})
 	}
 
 	searchPolicy, configDiagnostics := config.LoadSearchPolicy(config.GlobalDir(), projectInputRoot, projectAllowed)
@@ -814,9 +816,25 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 	}
 
-	// Context assembly.
+	// Context assembly. An explicit SDK prompt wins without touching a configured
+	// file. Trusted project paths override the global file and remain confined to
+	// the canonical project root; otherwise relative paths use the global config
+	// directory. The embedded Markdown preamble remains the final fallback.
+	preamble := opts.SystemPrompt
+	if preamble == "" && cfg.SystemPromptFile != "" {
+		promptBase := filepath.Dir(configPath)
+		promptRoot := ""
+		if projectSystemPrompt {
+			promptBase = projectInputRoot
+			promptRoot = projectInputRoot
+		}
+		preamble, err = loadSystemPromptFile(cfg.SystemPromptFile, promptBase, promptRoot, cfg.ContextCapBytes)
+		if err != nil {
+			return nil, fmt.Errorf("app: system prompt file: %w", err)
+		}
+	}
 	loader := ctxpkg.NewLoader(cfg.ContextCapBytes, false)
-	assembly := loader.Assemble(absCWD, opts.SystemPrompt, "")
+	assembly := loader.Assemble(absCWD, preamble, "")
 	systemPrompt := assembly.Render()
 	if skillCatalog != nil {
 		if catalog := skillCatalog.CatalogPrompt(); catalog != "" {

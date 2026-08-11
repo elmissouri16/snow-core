@@ -7,6 +7,12 @@ import (
 	"testing"
 )
 
+func TestDefaultPreambleIsEmbeddedMarkdown(t *testing.T) {
+	if !strings.Contains(DefaultPreamble, "You are snow") {
+		t.Fatalf("embedded preamble = %q", DefaultPreamble)
+	}
+}
+
 func TestFindAgentsWalksParents(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "a", "b")

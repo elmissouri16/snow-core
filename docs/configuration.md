@@ -9,6 +9,7 @@ and the supported global/project fields.
 | Path | Purpose | Notes |
 |---|---|---|
 | `~/.snow/config.json` | Global runtime configuration | JSON; created/updated by TUI settings and management commands |
+| `~/.snow/system.md` | Suggested custom system preamble | Optional; loaded only when selected by `system_prompt_file` |
 | `~/.snow/auth.json` | Provider credentials | Atomic writes, mode `0600` |
 | `~/.snow/trust.json` | Canonical project decisions | Atomic locked writes, mode `0600` |
 | `~/.snow/sessions/` | Per-project SQLite sessions | Child histories live beside root databases under `.db.agents/` |
@@ -38,10 +39,16 @@ Runtime selection generally follows this order:
 2. Global `config.json`
 3. Built-in defaults
 
+The base system preamble has a more specific precedence: explicit SDK
+`SystemPrompt`, trusted-project `system_prompt_file`, global
+`system_prompt_file`, then the embedded `internal/context/system.md`. Project
+`AGENTS.md` files and runtime mode/skill guidance are appended separately.
+
 Trusted project configuration is a separate, deliberately narrow overlay. It
-may add plugins, MCP servers, and skill policy, and may override only the project
-TUI theme and compaction preferences described below. It cannot select provider
-credentials, permission mode, shell executable, model, or global tool authority.
+may add plugins, MCP servers, and skill policy, select a confined project system
+preamble, and override only the project TUI theme and compaction preferences
+described below. It cannot select provider credentials, permission mode, shell
+executable, model, or global tool authority.
 
 Credentials use a separate order:
 
@@ -70,6 +77,7 @@ A representative configuration:
   "tool_output_bytes": 262144,
   "bash_timeout_ms": 120000,
   "context_cap_bytes": 102400,
+  "system_prompt_file": "system.md",
   "providers": {
     "opencode-go": {
       "base_url": "https://opencode.ai/zen/go/v1",
@@ -136,7 +144,8 @@ fills required zero-value defaults before validation.
 | `plan_mode_reasoning_effort` | Plan preset | Optional explicit normalized thinking level |
 | `tool_output_bytes` | `262144` | Bound for provider-facing tool results and previews |
 | `bash_timeout_ms` | `120000` | Host cap for shell execution |
-| `context_cap_bytes` | `102400` | Hard cap for loaded project instructions |
+| `context_cap_bytes` | `102400` | Hard cap for loaded project instructions and maximum configured system-prompt file size |
+| `system_prompt_file` | unset | Markdown/text file replacing the embedded base preamble; relative paths resolve from the global config directory and `~` is supported |
 
 Model capabilities remain authoritative. A configured reasoning level that is
 not advertised by the selected model is rejected.
@@ -275,7 +284,8 @@ for schemas and management commands.
   "compaction": {
     "min_retained_turns": 4,
     "guidance": "Preserve release verification commands."
-  }
+  },
+  "system_prompt_file": ".snow/system.md"
 }
 ```
 
@@ -285,8 +295,13 @@ never prompt and treat `ask` as deny. An exact project decision can override an
 inherited parent decision. Runtime `/trust` changes apply on the next launch
 because loaded extensions cannot be safely hot-unloaded.
 
-Project input loading is pinned to the authorized canonical root. Project
-auxiliary paths must stay under that root and cannot contain symlink components.
+Project input loading is pinned to the authorized canonical root. A project
+`system_prompt_file` replaces the global/embedded base preamble only after trust
+is allowed; relative paths resolve from the project root. The file must stay
+under that root, cannot contain symlink components, and is bounded by
+`context_cap_bytes`. Project `AGENTS.md` and runtime guidance are still appended.
+Project auxiliary paths must likewise stay under the root and cannot contain
+symlink components.
 
 ## Search policy
 

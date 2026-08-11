@@ -45,7 +45,9 @@ advertises it; `plan_mode_reasoning_effort` can override that preset.
 
 Every Plan-mode provider request receives the three-phase planning contract:
 non-mutating repository exploration first, intent clarification second, and a
-decision-complete implementation specification last. The rule is an
+decision-complete implementation specification last. Its editable source is
+`internal/plan/system.md`, embedded into the binary at build time and appended
+separately from the configurable base system preamble. The rule is an
 instruction boundary, not a sandbox: Snow still runs with user OS privileges
 and does not attempt to classify arbitrary shell commands as read-only.
 

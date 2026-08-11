@@ -64,7 +64,7 @@ such as `ask_user` if omitted.
 
 Project trust controls whether Snow loads these project-local inputs:
 
-- `.snow/config.json` plugin/MCP/skill declarations and limited preferences;
+- `.snow/config.json` plugin/MCP/skill declarations, a confined system-prompt file, and limited preferences;
 - `.snow/keybindings.yaml`, `.snow/search.yaml`, and `.snow/themes/*.yaml`;
 - project Agent Skills and other trust-gated extension resources.
 
@@ -73,8 +73,11 @@ Exact decisions are stored in `~/.snow/trust.json`; a nearest parent decision ma
 apply until an exact child override exists. Interactive TUI launches ask for an
 undecided project. Headless launches never ask and treat `ask` as deny.
 
-Project `AGENTS.md` files are always loaded as model instructions and are not
-controlled by extension trust. They remain a prompt-injection input.
+A trusted project's configured system-prompt file may replace the global or
+embedded base preamble. Its path is confined beneath the canonical project root,
+rejects symlink components, and is size-bounded. Project `AGENTS.md` files are
+always loaded as model instructions and are not controlled by extension trust.
+Both remain prompt-injection inputs.
 
 Allowing project trust means “load these declarations from this path.” It does
 not mean:

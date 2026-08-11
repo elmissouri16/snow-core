@@ -103,9 +103,14 @@ Pause/resume/clear and limit states remain host-controlled.
 
 The current objective is synthesized on every goal-bearing provider request as
 trusted host-generated internal context and serialized as trailing
-**user-role** input. It is never a system/developer/assistant message and is not
-persisted as visible conversation text. Goal tool previews are private;
-permission, routing, and session-summary events omit objective text.
+**user-role** input. The editable static templates are
+`internal/goal/continuation.md` and `internal/goal/objective-updated.md`; Snow
+embeds them at build time and fills `.Turn`, `.Remaining`, `.BudgetReached`, and
+an XML-escaped `.Objective` through Go templates (`objective-updated.md` uses
+only `.Objective`). They are independent of `system_prompt_file`. Goal context
+is never a system/developer/assistant message
+and is not persisted as visible conversation text. Goal tool previews are
+private; permission, routing, and session-summary events omit objective text.
 
 Objectives over 8 KiB **by byte length** are atomically materialized under
 `SNOW_HOME/goals/<session>/<goal-id>/goal-objective.md`. Directories are real
