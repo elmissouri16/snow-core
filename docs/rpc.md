@@ -152,8 +152,10 @@ stop and after earlier steering. Queue updates arrive as `queue_updated` events.
 {"id":"abort-1","type":"abort"}
 ```
 
-Cancels admitted root work and clears undelivered queued input. The command is
-acknowledged even when no prompt is active.
+Cancels admitted root work and clears undelivered queued input. If goal work was
+active, it remains deferred across ordinary `prompt` commands until an explicit
+`goal_resume` or `goal_continue`. The command is acknowledged even when no
+prompt is active.
 
 ### `set_model`
 
@@ -206,7 +208,10 @@ Successful `data` contains:
     "goal_id": "...",
     "status": "active",
     "tokens_used": 1200,
-    "token_budget": 20000
+    "token_budget": 20000,
+    "estimated_costs": [
+      {"currency":"USD","input":0.004,"output":0.002,"cache_read":0.0001,"cache_write":0,"total":0.0061}
+    ]
   },
   "subagents": {
     "enabled": false,
@@ -296,7 +301,7 @@ Goals require a persisted SQLite session. Full semantics are documented in
 | `goal_set` | same as `goal_create` | Alias of create |
 | `goal_edit` | `objective` | Updated/rotated goal |
 | `goal_pause` | none | Updated goal |
-| `goal_resume` | none | Updated goal |
+| `goal_resume` | none | Updated goal; also resumes an active abort-deferred goal |
 | `goal_clear` | none | `{"cleared":true|false}` |
 | `goal_continue` | none | Eligible continued goal state |
 
@@ -311,7 +316,9 @@ Examples:
 ```
 
 Objectives are required and limited to 32 Ki Unicode characters. Token budgets
-must be positive. Goal state also streams through `thread_goal_updated`.
+must be positive. When pricing is available, goal DTOs include optional
+`estimated_costs` grouped by currency; these are catalog/provider estimates,
+not invoices. Goal state also streams through `thread_goal_updated`.
 
 ## Subagent commands
 
@@ -325,18 +332,20 @@ for role, authority, persistence, and lifecycle details.
   "id": "agent-1",
   "type": "subagent_spawn",
   "params": {
-    "task_name": "api_review",
-    "message": "Review the public API for compatibility risks.",
-    "agent_type": "explorer",
+    "name": "api_review",
+    "task": "Review the public API for compatibility risks.",
+    "role": "explorer",
+    "provider": "opencode-go",
+    "model": "exact-model-id",
     "fork_turns": "all",
     "reasoning_effort": "low"
   }
 }
 ```
 
-Required: `task_name`, `message`. Optional: `agent_type`, `fork_turns`, `model`,
-`reasoning_effort`. RPC task names are strict lowercase canonical segments;
-hyphens are not normalized. Success returns `SubagentState`.
+Required: `name`, `task`. Optional: `role`, `fork_turns`, `provider`, `model`,
+`reasoning_effort`. RPC names are strict lowercase canonical segments; hyphens
+are not normalized. Success returns `SubagentState`.
 
 ### Messaging and follow-up
 
@@ -389,7 +398,7 @@ Every non-response stdout object is a normalized `protocol.AgentEvent`.
 | Interaction | `user_input_request`, `queue_updated` |
 | Lifecycle/state | `session_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
 | Plan | `plan_started`, `plan_delta`, `plan_completed`, `plan_update` |
-| Compaction | `compaction_started`, `compaction_done` |
+| Compaction | `compaction_started`, `compaction_done` (`compaction.automatic` marks goal-triggered runs) |
 | Goals | `thread_goal_updated` |
 | Subagents | `subagent_started`, `subagent_status`, `subagent_message`, `subagent_activity` |
 

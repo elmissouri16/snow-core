@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -19,6 +20,70 @@ func BenchmarkMailboxIngestion(b *testing.B) {
 			q.Push(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: "token "})
 		}
 		_ = q.popBatch(maxAgentEventsPerUpdate)
+	}
+}
+
+func BenchmarkBusySessionUpdateBurst12MB(b *testing.B) {
+	home := b.TempDir()
+	runtime, err := app.New(context.Background(), app.Options{
+		Provider: "fake", Permission: "allow", CWD: home,
+		SessionPath: filepath.Join(home, "session.db"),
+		ConfigPath:  filepath.Join(home, "config.json"), AuthPath: filepath.Join(home, "auth.json"),
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer runtime.Close()
+	payload := strings.Repeat("x", 2400)
+	for i := 0; i < 5000; i++ {
+		message := protocol.NewAssistantMessage(fmt.Sprintf("message-%d", i), "", "fake", "fake-model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: payload}}, protocol.StopStop, nil)
+		if err := runtime.Session.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	m := newModel(context.Background(), app.Options{})
+	m.app = runtime
+	m.busy = true
+	events := make([]protocol.AgentEvent, 32)
+	for i := range events {
+		events[i] = protocol.AgentEvent{Type: protocol.EvSessionUpdated}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, event := range events {
+			m.handleAgentEvent(event)
+		}
+	}
+}
+
+func BenchmarkPlanNudgeLongSession(b *testing.B) {
+	home := b.TempDir()
+	runtime, err := app.New(context.Background(), app.Options{
+		Provider: "fake", Permission: "allow", CWD: home,
+		SessionPath: filepath.Join(home, "session.db"),
+		ConfigPath:  filepath.Join(home, "config.json"), AuthPath: filepath.Join(home, "auth.json"),
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer runtime.Close()
+	payload := strings.Repeat("x", 2400)
+	for i := 0; i < 5000; i++ {
+		message := protocol.NewAssistantMessage(fmt.Sprintf("message-%d", i), "", "fake", "fake-model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: payload}}, protocol.StopStop, nil)
+		if err := runtime.Session.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	m := newModel(context.Background(), app.Options{})
+	m.app = runtime
+	m.editor.SetValue("make a plan first")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !m.planNudgeVisible() {
+			b.Fatal("plan nudge unexpectedly hidden")
+		}
 	}
 }
 

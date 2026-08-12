@@ -24,7 +24,7 @@ import (
 )
 
 // SessionVersion is the current on-disk schema version.
-const SessionVersion = 7
+const SessionVersion = 8
 
 // Header is the first line of every session file.
 type Header struct {
@@ -111,6 +111,13 @@ type ContextStore interface {
 	ContextMessages() ([]protocol.Message, error)
 }
 
+// BranchEntryStore exposes a defensive root-to-tip entry snapshot for durable
+// host state that must remain branch-scoped but must not enter provider message
+// context. Built-in stores implement it.
+type BranchEntryStore interface {
+	BranchEntries() ([]Entry, error)
+}
+
 // BranchStore provides durable same-database branch references. A fork shares
 // the existing entry tree and starts with its tip at fromEntryID.
 type BranchStore interface {
@@ -118,6 +125,11 @@ type BranchStore interface {
 	SelectBranch(branchID string) error
 	ForkBranch(fromEntryID string) (protocol.SessionBranch, error)
 }
+
+// ActiveBranchStore optionally exposes the stable active branch identity used
+// for provider request affinity. Custom stores may omit it and use session-wide
+// affinity instead.
+type ActiveBranchStore interface{ ActiveBranchID() string }
 
 // BranchDeleteStore is implemented by built-in stores so callers can roll
 // back a newly committed fork if post-fork resource preparation fails.
@@ -157,7 +169,7 @@ type ThreadGoalStore interface {
 	CreateGoal(protocol.ThreadGoal, bool) error
 	UpdateGoal(expectedGoalID string, objective *string, status *protocol.ThreadGoalStatus, budget *int64) (*protocol.ThreadGoal, error)
 	ClearGoal(expectedGoalID string) error
-	AccountGoal(expectedGoalID string, tokenDelta, secondDelta int64) (*protocol.ThreadGoal, bool, error)
+	AccountGoal(expectedGoalID string, tokenDelta, secondDelta int64, estimatedCostDelta *protocol.Cost) (*protocol.ThreadGoal, bool, error)
 	GoalContinuationDeferred() (bool, error)
 	SetGoalContinuationDeferred(bool) error
 }
@@ -530,9 +542,52 @@ func (s *MemoryStore) ClearGoal(expected string) error {
 	return nil
 }
 
-func (s *MemoryStore) AccountGoal(expected string, tokens, seconds int64) (*protocol.ThreadGoal, bool, error) {
+func normalizedGoalCostDelta(cost *protocol.Cost) (*protocol.Cost, error) {
+	if cost == nil {
+		return nil, nil
+	}
+	copy := *cost
+	copy.Currency = strings.ToUpper(strings.TrimSpace(copy.Currency))
+	if copy.Currency == "" {
+		copy.Currency = "USD"
+	}
+	for _, value := range []float64{copy.Input, copy.Output, copy.CacheRead, copy.CacheWrite, copy.Total} {
+		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil, errors.New("session: estimated goal cost delta must be finite and non-negative")
+		}
+	}
+	return &copy, nil
+}
+
+func addGoalCost(costs []protocol.Cost, delta *protocol.Cost) ([]protocol.Cost, error) {
+	if delta == nil {
+		return costs, nil
+	}
+	for i := range costs {
+		if !strings.EqualFold(costs[i].Currency, delta.Currency) {
+			continue
+		}
+		values := []*float64{&costs[i].Input, &costs[i].Output, &costs[i].CacheRead, &costs[i].CacheWrite, &costs[i].Total}
+		deltas := []float64{delta.Input, delta.Output, delta.CacheRead, delta.CacheWrite, delta.Total}
+		for j := range values {
+			sum := *values[j] + deltas[j]
+			if math.IsNaN(sum) || math.IsInf(sum, 0) {
+				return nil, errors.New("session: estimated goal cost overflow")
+			}
+			*values[j] = sum
+		}
+		return costs, nil
+	}
+	return append(costs, *delta), nil
+}
+
+func (s *MemoryStore) AccountGoal(expected string, tokens, seconds int64, estimatedCostDelta *protocol.Cost) (*protocol.ThreadGoal, bool, error) {
 	if tokens < 0 || seconds < 0 {
 		return nil, false, errors.New("session: goal usage delta cannot be negative")
+	}
+	cost, err := normalizedGoalCostDelta(estimatedCostDelta)
+	if err != nil {
+		return nil, false, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -546,6 +601,10 @@ func (s *MemoryStore) AccountGoal(expected string, tokens, seconds int64) (*prot
 	copy := g.Clone()
 	copy.TokensUsed += tokens
 	copy.SecondsUsed += seconds
+	copy.EstimatedCosts, err = addGoalCost(copy.EstimatedCosts, cost)
+	if err != nil {
+		return nil, false, err
+	}
 	copy.UpdatedAt = time.Now().UnixMilli()
 	crossed := false
 	if copy.Status == protocol.GoalActive && copy.TokenBudget != nil && copy.TokensUsed >= *copy.TokenBudget {
@@ -712,6 +771,16 @@ func (s *MemoryStore) ContextMessages() ([]protocol.Message, error) {
 		return nil, errors.New("session: store closed")
 	}
 	return contextMessagesFromEntries(pathFrom(s.entries, s.byID, s.tip)), nil
+}
+
+// BranchEntries implements BranchEntryStore.
+func (s *MemoryStore) BranchEntries() ([]Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, errors.New("session: store closed")
+	}
+	return cloneEntries(pathFrom(s.entries, s.byID, s.tip)), nil
 }
 
 // Branches implements BranchStore.
@@ -1321,6 +1390,13 @@ func (s *JSONLStore) ContextMessages() ([]protocol.Message, error) {
 	return contextMessagesFromEntries(pathFrom(s.entries, s.byID, s.tip)), nil
 }
 
+// BranchEntries implements BranchEntryStore for legacy fixtures.
+func (s *JSONLStore) BranchEntries() ([]Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneEntries(pathFrom(s.entries, s.byID, s.tip)), nil
+}
+
 // Fork implements Store. Returns an in-memory branch for now (JSONL fork
 // writes are deferred to phase 4 tree navigation).
 func (s *JSONLStore) Fork(fromID string) (Store, error) {
@@ -1392,9 +1468,9 @@ func (f *FileIndex) Create(cwd string) (Store, error) {
 	return NewSQLiteStore(filepath.Join(dir, name), cwd, Options{})
 }
 
-// Open implements Index.
+// Open implements Index. It never creates a missing session path.
 func (f *FileIndex) Open(path string) (Store, error) {
-	return NewSQLiteStore(path, "", Options{})
+	return OpenSQLiteStore(path, "", Options{})
 }
 
 // List implements Index. Returns sessions sorted by most recently updated.
@@ -1428,7 +1504,10 @@ func (f *FileIndex) List(cwd string) ([]SessionInfo, error) {
 			if !strings.HasSuffix(path, ".db") || seenPaths[path] {
 				return nil
 			}
-			st, openErr := NewSQLiteStore(path, cwd, Options{})
+			// Listing is discovery, not creation. Existing-only open validates
+			// candidates before migration so unrelated or disappearing .db files
+			// are skipped without being modified or recreated.
+			st, openErr := OpenSQLiteStore(path, cwd, Options{})
 			if openErr != nil {
 				return nil // skip corrupt/partial files
 			}

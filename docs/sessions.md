@@ -11,9 +11,13 @@ Set `SNOW_SESSIONS_DIR` to move the root. New directory names use
 the collisions and path-length growth of the legacy flattened format.
 `FileIndex.List` also searches the legacy directory and filters every database
 by its stored CWD, so old sessions remain discoverable without cross-project
-mixing. `--no-session`/`NoSession` keeps the session in memory. `--session
-/path/to/session.db` resumes a specific database. The previous JSONL format is
-intentionally not migrated.
+mixing. `--no-session`/`NoSession` keeps the session in memory. Interactive
+`snow resume` opens a current-working-directory session picker; `snow resume
+/path/to/session.db` requires and opens that explicit database. In headless
+print/JSON/RPC use, no-argument resume selects the newest indexed session because
+a picker is unavailable. The lower-level `--session /path/to/session.db` flag
+and SDK `SessionPath` option also select a session path. The previous JSONL
+format is intentionally not migrated.
 
 ## Driver
 
@@ -40,7 +44,13 @@ Each database contains:
   name, parent branch/fork point, tip entry, timestamps, and active state;
 - `entries`: append-ordered parent-linked entries with a unique ID, type,
   optional JSON-encoded protocol message, and optional compaction boundary;
+- `thread_goals` and `thread_goal_costs`: branch-scoped objective, token/time
+  accounting, and optional per-currency estimated pricing totals;
 - indexes on `entries.parent_id`, `entries.entry_type`, and active branches.
+
+User image attachments are stored as `image` content blocks in the message JSON;
+Go's JSON encoding represents their bytes as base64. Clipboard images therefore
+increase the session database size and remain available when a branch is resumed.
 
 Version-1 databases are upgraded on open by creating a `main` branch pointing
 at the existing `branch_tip`. Forking creates another reference in the same
@@ -49,6 +59,9 @@ tip used by subsequent appends, `Messages`, `Usage`, and prompts. `Branches`
 returns branch topology, previews, and message counts for the TUI/SDK tree picker.
 Schema version 7 adds names and parent/fork metadata; legacy non-main branches
 retain their IDs as names and attach to `main` when ancestry is unavailable.
+Schema version 8 adds atomic per-currency goal cost totals. Migration backfills
+priced historical goal usage only when its exact token sum matches the persisted
+goal counter.
 
 An append inserts the entry and updates the active branch tip in one transaction.
 Entry ID/parent columns are authoritative and normalize embedded message

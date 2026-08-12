@@ -65,6 +65,9 @@ const (
 	ThinkingLow     ThinkingLevel = "low"
 	ThinkingMedium  ThinkingLevel = "medium"
 	ThinkingHigh    ThinkingLevel = "high"
+	ThinkingXHigh   ThinkingLevel = "xhigh"
+	ThinkingMax     ThinkingLevel = "max"
+	ThinkingUltra   ThinkingLevel = "ultra"
 )
 
 // KnownThinkingLevels returns the normalized levels accepted by the public
@@ -76,6 +79,9 @@ func KnownThinkingLevels() []ThinkingLevel {
 		ThinkingLow,
 		ThinkingMedium,
 		ThinkingHigh,
+		ThinkingXHigh,
+		ThinkingMax,
+		ThinkingUltra,
 	}
 }
 
@@ -93,10 +99,10 @@ func NormalizeThinkingLevel(level ThinkingLevel) ThinkingLevel {
 func ParseThinkingLevel(value string) (ThinkingLevel, error) {
 	level := NormalizeThinkingLevel(ThinkingLevel(value))
 	switch level {
-	case ThinkingOff, ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh:
+	case ThinkingOff, ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh, ThinkingMax, ThinkingUltra:
 		return level, nil
 	default:
-		return ThinkingOff, fmt.Errorf("invalid thinking level %q (want off|minimal|low|medium|high)", value)
+		return ThinkingOff, fmt.Errorf("invalid thinking level %q (want off|minimal|low|medium|high|xhigh|max|ultra)", value)
 	}
 }
 
@@ -191,7 +197,7 @@ func (m Model) SupportedThinkingLevels() []ThinkingLevel {
 			continue
 		}
 		switch level {
-		case ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh:
+		case ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh, ThinkingMax, ThinkingUltra:
 			seen[level] = true
 			out = append(out, level)
 		}
@@ -206,7 +212,9 @@ func (m Model) SupportsThinkingLevel(level ThinkingLevel) bool {
 	if level == ThinkingOff {
 		return true
 	}
-	if level != ThinkingMinimal && level != ThinkingLow && level != ThinkingMedium && level != ThinkingHigh {
+	switch level {
+	case ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh, ThinkingMax, ThinkingUltra:
+	default:
 		return false
 	}
 	for _, supported := range m.SupportedThinkingLevels() {
@@ -258,6 +266,9 @@ type ChatRequest struct {
 	ReasoningSummary ReasoningSummary
 	TextVerbosity    TextVerbosity
 	InternalContext  []InternalContextFragment
+	// SessionAffinityKey is a stable, non-secret host hint for provider-side
+	// prompt caching and request affinity. Providers may ignore it.
+	SessionAffinityKey string
 	// Extra carries adapter-specific options; keep opaque to the core.
 	Extra map[string]any
 }

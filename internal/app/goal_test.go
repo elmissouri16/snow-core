@@ -111,6 +111,45 @@ func TestPersistedDeferralHonoredUntilReady(t *testing.T) {
 	if g.Status != protocol.GoalActive {
 		t.Fatalf("goal=%+v", g)
 	}
+	resumed, err := a.ResumeGoal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.GoalID != g.GoalID {
+		t.Fatalf("resumed goal=%+v", resumed)
+	}
+	deferred, err := a.Goal.Deferred()
+	if err != nil || deferred {
+		t.Fatalf("deferred=%v err=%v", deferred, err)
+	}
+	a.Agent.Abort()
+}
+
+func TestResumeGoalChecksCapabilitiesBeforeTransition(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "restricted-resume.db")
+	st, err := session.NewSQLiteStore(path, t.TempDir(), session.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	if err := st.CreateGoal(protocol.ThreadGoal{GoalID: "paused", Objective: "resume safely", Status: protocol.GoalPaused, CreatedAt: now, UpdatedAt: now}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	a, err := New(context.Background(), Options{Provider: "fake", Permission: "allow", SessionPath: path, CWD: t.TempDir(), Tools: []string{"read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if _, err := a.ResumeGoal(); err == nil || !strings.Contains(err.Error(), "required capability") {
+		t.Fatalf("resume error=%v", err)
+	}
+	goal, err := a.GoalState()
+	if err != nil || goal.Status != protocol.GoalPaused {
+		t.Fatalf("goal=%+v err=%v", goal, err)
+	}
 }
 
 func TestFailedGoalMutationRestartsPreviousAutomaticGoal(t *testing.T) {

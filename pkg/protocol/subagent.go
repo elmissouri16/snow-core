@@ -11,7 +11,7 @@ const (
 	RootAgentPath         AgentPath = "/root"
 	MaxAgentPathBytes               = 512
 	MaxAgentMessageBytes            = 64 * 1024
-	MaxAgentTaskNameBytes           = 64
+	MaxAgentNameBytes               = 64
 	MaxAgentMetadataBytes           = 256
 )
 
@@ -252,10 +252,11 @@ func (m *AgentMessage) Clone() *AgentMessage {
 
 // SpawnSubagentRequest is shared by SDK/RPC and manager-bound model tools.
 type SpawnSubagentRequest struct {
-	TaskName        string        `json:"task_name"`
-	Message         string        `json:"message"`
-	AgentType       string        `json:"agent_type,omitempty"`
+	Name            string        `json:"name"`
+	Task            string        `json:"task"`
+	Role            string        `json:"role,omitempty"`
 	ForkTurns       string        `json:"fork_turns,omitempty"`
+	Provider        string        `json:"provider,omitempty"`
 	Model           string        `json:"model,omitempty"`
 	ReasoningEffort ThinkingLevel `json:"reasoning_effort,omitempty"`
 }

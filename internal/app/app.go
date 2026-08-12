@@ -26,6 +26,7 @@ import (
 	"github.com/snow-core/snow/internal/provider"
 	"github.com/snow-core/snow/internal/provider/chatgpt"
 	"github.com/snow-core/snow/internal/provider/fake"
+	"github.com/snow-core/snow/internal/provider/openaicompat"
 	"github.com/snow-core/snow/internal/provider/opencodego"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/skills"
@@ -78,14 +79,16 @@ type App struct {
 	ProjectAllowed    bool
 	ProjectInputRoot  string
 
-	stateMu            sync.Mutex
-	permissionDefault  permission.Mode
-	permissionOverride bool
-	modelCatalog       map[string][]protocol.Model
-	runtimeSelection   *liveRuntimeSelection
-	cwd                string
-	userInput          *userinput.Broker
-	toolGuard          *builtin.PathGuard
+	stateMu                sync.Mutex
+	permissionDefault      permission.Mode
+	permissionOverride     bool
+	explicitAPIKey         string
+	explicitAPIKeyProvider string
+	modelCatalog           map[string][]protocol.Model
+	runtimeSelection       *liveRuntimeSelection
+	cwd                    string
+	userInput              *userinput.Broker
+	toolGuard              *builtin.PathGuard
 }
 
 type liveRuntimeSelection struct {
@@ -109,12 +112,43 @@ func (s *liveRuntimeSelection) childSelection(providerID, modelID string) (provi
 	if modelID == "" && s.model.Provider == providerID {
 		modelID = s.model.ID
 	}
+	if modelID == "" {
+		if defaults, ok := p.(interface{ DefaultModel() protocol.Model }); ok {
+			modelID = defaults.DefaultModel().ID
+		}
+		if modelID == "" && len(s.catalogs[providerID]) > 0 {
+			modelID = s.catalogs[providerID][0].ID
+		}
+	}
 	for _, candidate := range s.catalogs[providerID] {
 		if candidate.ID == modelID {
 			return p, candidate, nil
 		}
 	}
+	// The active model may be an explicit custom ID intentionally preserved
+	// when discovery is unavailable. Children inheriting that exact selection
+	// must not require it to appear in the remote catalog.
+	if s.model.Provider == providerID && s.model.ID == modelID {
+		return p, s.model.Clone(), nil
+	}
 	return nil, protocol.Model{}, fmt.Errorf("app: subagent model %q is unavailable for provider %s", modelID, providerID)
+}
+
+func (s *liveRuntimeSelection) availableModels() []protocol.Model {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	providers := make([]string, 0, len(s.catalogs))
+	for id := range s.catalogs {
+		providers = append(providers, id)
+	}
+	sort.Strings(providers)
+	var out []protocol.Model
+	for _, id := range providers {
+		for _, model := range s.catalogs[id] {
+			out = append(out, model.Clone())
+		}
+	}
+	return out
 }
 
 // Options control app assembly.
@@ -127,6 +161,7 @@ type Options struct {
 	APIKey                  string
 	Permission              string   // ask|allow|deny
 	SessionPath             string   // empty → create new; or existing .db to resume
+	RequireExistingSession  bool     // reject missing/non-Snow SessionPath instead of creating it
 	Tools                   []string // subset allowlist; empty = all builtins
 	SystemPrompt            string
 	Thinking                string
@@ -136,7 +171,7 @@ type Options struct {
 	PlanModeReasoningEffort string
 	NoSession               bool   // in-memory session (SDK ephemeral)
 	UseFake                 bool   // force fake provider (demo/tests)
-	BaseURL                 string // provider base URL override (opencode-go)
+	BaseURL                 string // active provider base URL override
 	Plugins                 []publicplugin.PluginSpec
 	GoPlugins               []publicplugin.Plugin
 	NoPlugins               bool
@@ -151,9 +186,34 @@ type Options struct {
 	// Subagents overrides config enablement when non-nil. Enabling never implies
 	// recursive spawning or mutation.
 	Subagents              *bool
+	SubagentProvider       string
+	SubagentModel          string
 	SubagentMaxConcurrency int
 	SubagentMaxAgents      int
 	SubagentMaxDepth       int
+}
+
+func skillNamesForRegistry(catalog *skills.Registry, registry tools.Registry) map[string]bool {
+	names := make(map[string]bool)
+	if catalog == nil || registry == nil {
+		return names
+	}
+	descriptor, ok := registry.Descriptor("activate_skill")
+	if !ok || descriptor.Owner != "skills" {
+		return names
+	}
+	for _, skill := range catalog.List() {
+		names[skill.Name] = true
+	}
+	return names
+}
+
+func skillPromptForRegistry(catalog *skills.Registry, registry tools.Registry) string {
+	if len(skillNamesForRegistry(catalog, registry)) == 0 {
+		return ""
+	}
+	reader, ok := registry.Descriptor("read_skill_resource")
+	return catalog.CatalogPromptForTools(ok && reader.Owner == "skills")
 }
 
 // DefaultPaths resolves config/auth paths from the environment.
@@ -263,6 +323,12 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	}
 	if opts.Subagents != nil {
 		cfg.Subagents.Enabled = *opts.Subagents
+	}
+	if opts.SubagentProvider != "" {
+		cfg.Subagents.DefaultProvider = opts.SubagentProvider
+	}
+	if opts.SubagentModel != "" {
+		cfg.Subagents.DefaultModel = opts.SubagentModel
 	}
 	if opts.SubagentMaxConcurrency > 0 {
 		cfg.Subagents.MaxConcurrentThreads = opts.SubagentMaxConcurrency
@@ -406,27 +472,10 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		SearchPolicy:   searchPolicy,
 		WindowsShell:   builtin.WindowsShellOptions{Kind: cfg.WindowsShell.Kind, Executable: cfg.WindowsShell.Executable},
 	}
-	// Register builtins, then enforce the Tools allowlist (empty = all).
+	// Register builtins. The explicit tool allowlist is applied after Agent
+	// Skills register their built-in capabilities so it remains a true upper
+	// bound for every built-in tool.
 	builtin.RegisterBuiltins(reg, toolOpts)
-	if len(opts.Tools) > 0 {
-		allowed := make(map[string]bool, len(opts.Tools))
-		for _, name := range opts.Tools {
-			allowed[name] = true
-		}
-		for _, t := range reg.List() {
-			if !allowed[t.Schema().Name] {
-				// Rebuild registry without disallowed tools.
-			}
-		}
-		// SimpleRegistry has no remove; build a filtered registry instead.
-		filtered := tools.NewRegistry()
-		for _, t := range reg.List() {
-			if allowed[t.Schema().Name] {
-				_ = filtered.Register(t)
-			}
-		}
-		reg = filtered
-	}
 
 	// Agent Skills use metadata-only startup discovery. Project locations are
 	// trust-gated; full SKILL.md bodies and resources load only through the
@@ -462,13 +511,45 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			return nil, fmt.Errorf("app: skills: %w", err)
 		}
 	}
+	if len(opts.Tools) > 0 {
+		allowed := make(map[string]bool, len(opts.Tools))
+		for _, name := range opts.Tools {
+			allowed[name] = true
+		}
+		activationAllowed := allowed["activate_skill"]
+		filtered := tools.NewRegistry()
+		for _, descriptor := range reg.Descriptors() {
+			// The resource reader is meaningful only with tier-one disclosure and
+			// activation, and otherwise leaks a names-only enum surface.
+			if descriptor.Schema.Name == "read_skill_resource" && !activationAllowed {
+				continue
+			}
+			if allowed[descriptor.Schema.Name] {
+				if err := filtered.RegisterDescriptor(descriptor); err != nil {
+					return nil, fmt.Errorf("app: filter built-in tool %s: %w", descriptor.Schema.Name, err)
+				}
+			}
+		}
+		reg = filtered
+		if !activationAllowed && skillCatalog != nil {
+			skillCatalog.DisableAll("activate_skill disabled by explicit tool allowlist")
+		}
+	}
+	defer func() {
+		if retErr != nil && skillCatalog != nil {
+			retErr = errors.Join(retErr, skillCatalog.Close())
+		}
+	}()
 	// Provider.
 	providerID := cfg.DefaultProvider
 	if providerID == "" {
 		providerID = "opencode-go"
 	}
 	newOpenCode := func() (provider.Provider, error) {
-		ocCfg := opencodego.Config{APIKey: opts.APIKey}
+		ocCfg := opencodego.Config{}
+		if providerID == opencodego.ProviderID {
+			ocCfg.APIKey = opts.APIKey
+		}
 		if ocCfg.APIKey == "" {
 			if stored, ok := authStore.Get(opencodego.ProviderID); ok {
 				// ListModels has no credential argument in the stable provider
@@ -503,6 +584,26 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		return chatgpt.New(cgCfg)
 	}
 
+	newOpenAICompatible := func() (*openaicompat.Provider, error) {
+		compatibleCfg := openaicompat.Config{}
+		if pc, ok := cfg.Providers[openaicompat.ProviderID]; ok {
+			compatibleCfg.BaseURL = pc.BaseURL
+			compatibleCfg.DefaultModel = pc.DefaultModel
+		}
+		if providerID == openaicompat.ProviderID {
+			if opts.BaseURL != "" {
+				compatibleCfg.BaseURL = opts.BaseURL
+			}
+			compatibleCfg.APIKey = opts.APIKey
+		}
+		if stored, ok := authStore.Get(openaicompat.ProviderID); ok {
+			// Startup discovery has no credential argument. Keep this key out of
+			// the adapter's runtime fallback so logout takes effect immediately.
+			compatibleCfg.DiscoveryAPIKey = stored.Key
+		}
+		return openaicompat.New(compatibleCfg)
+	}
+
 	var prov provider.Provider
 	switch providerID {
 	case "fake":
@@ -514,21 +615,40 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		if err != nil {
 			return nil, err
 		}
+	case openaicompat.ProviderID:
+		compatible, compatibleErr := newOpenAICompatible()
+		if compatibleErr != nil {
+			return nil, fmt.Errorf("app: %s: %w", openaicompat.ProviderID, compatibleErr)
+		}
+		if !compatible.Configured() {
+			return nil, errors.New("app: openai-compatible base URL is required; pass --base-url or configure providers.openai-compatible.base_url")
+		}
+		prov = compatible
 	default:
 		return nil, fmt.Errorf("app: unsupported provider %q", providerID)
 	}
 
-	// Keep catalogs/providers for both supported user-facing providers so the
-	// model picker can show the complete cached list and switch providers.
+	// Keep catalogs/providers for every user-facing provider so the model picker
+	// and subagent runtime can switch without rebuilding the app.
 	providers := map[string]provider.Provider{providerID: prov}
-	if providerID == "opencode-go" {
-		providers["chatgpt"] = newChatGPT()
-	} else if providerID == "chatgpt" {
-		other, err := newOpenCode()
-		if err != nil {
-			return nil, err
+	if providerID != "fake" {
+		if _, ok := providers["chatgpt"]; !ok {
+			providers["chatgpt"] = newChatGPT()
 		}
-		providers["opencode-go"] = other
+		if _, ok := providers["opencode-go"]; !ok {
+			other, openCodeErr := newOpenCode()
+			if openCodeErr != nil {
+				return nil, openCodeErr
+			}
+			providers["opencode-go"] = other
+		}
+		if _, ok := providers[openaicompat.ProviderID]; !ok {
+			compatible, compatibleErr := newOpenAICompatible()
+			if compatibleErr != nil {
+				return nil, fmt.Errorf("app: %s: %w", openaicompat.ProviderID, compatibleErr)
+			}
+			providers[openaicompat.ProviderID] = compatible
+		}
 	}
 
 	// Session.
@@ -536,7 +656,11 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	if opts.NoSession {
 		st = session.NewMemoryStore(session.Options{CWD: absCWD})
 	} else if opts.SessionPath != "" {
-		st, err = session.NewSQLiteStore(opts.SessionPath, absCWD, session.Options{})
+		if opts.RequireExistingSession {
+			st, err = session.OpenSQLiteStore(opts.SessionPath, absCWD, session.Options{})
+		} else {
+			st, err = session.NewSQLiteStore(opts.SessionPath, absCWD, session.Options{})
+		}
 		if err != nil {
 			return nil, fmt.Errorf("app: open session: %w", err)
 		}
@@ -615,14 +739,22 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	// Fetch every available provider catalog during startup. Providers may return
 	// cached/bundled fallbacks; authenticated refreshes replace these snapshots.
 	modelCatalog := make(map[string][]protocol.Model, len(providers))
+	modelCatalogErrors := make(map[string]error, len(providers))
 	for id, p := range providers {
-		models, _ := p.ListModels(ctx)
+		models, listErr := p.ListModels(ctx)
 		modelCatalog[id] = normalizeProviderModels(id, models)
+		modelCatalogErrors[id] = listErr
 	}
 	models := modelCatalog[providerID]
+	if providerID == openaicompat.ProviderID && cfg.DefaultModel == "" && len(models) == 0 {
+		if listErr := modelCatalogErrors[providerID]; listErr != nil {
+			return nil, fmt.Errorf("app: openai-compatible model discovery failed; pass --model or configure default_model: %w", listErr)
+		}
+		return nil, errors.New("app: openai-compatible model discovery returned no models; pass --model or configure default_model")
+	}
 	var allModels []protocol.Model
 	seenProviders := make(map[string]bool)
-	for _, id := range []string{providerID, "opencode-go", "chatgpt", "fake"} {
+	for _, id := range []string{providerID, "opencode-go", "openai-compatible", "chatgpt", "fake"} {
 		if seenProviders[id] {
 			continue
 		}
@@ -740,23 +872,34 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	// Collaboration tools are direct and registered before deferred-router
 	// indexing so the model always receives the complete control set together.
 	if cfg.Subagents.Enabled {
+		validateChildSelection := func(label, providerOverride, modelID string) error {
+			if providerOverride == "" && modelID == "" {
+				return nil
+			}
+			childProvider := providerOverride
+			if childProvider == "" {
+				childProvider = providerID
+			}
+			if _, _, err := runtimeSelection.childSelection(childProvider, modelID); err != nil {
+				return fmt.Errorf("app: %s references unavailable selection %s/%s: %w", label, childProvider, modelID, err)
+			}
+			return nil
+		}
+		if err := validateChildSelection("subagent defaults", cfg.Subagents.DefaultProvider, cfg.Subagents.DefaultModel); err != nil {
+			return nil, err
+		}
 		for name, role := range cfg.Subagents.Roles {
-			if role.Model != "" {
-				found := false
-				for _, candidate := range models {
-					if candidate.ID == role.Model {
-						found = true
-						break
-					}
-				}
-				if !found {
-					return nil, fmt.Errorf("app: subagent role %q references unavailable model %q", name, role.Model)
-				}
+			roleProvider := role.Provider
+			if roleProvider == "" {
+				roleProvider = cfg.Subagents.DefaultProvider
+			}
+			if err := validateChildSelection(fmt.Sprintf("subagent role %q", name), roleProvider, role.Model); err != nil {
+				return nil, err
 			}
 		}
 		roles := make(map[string]subagent.Role, len(cfg.Subagents.Roles))
 		for name, role := range cfg.Subagents.Roles {
-			roles[name] = subagent.Role{Name: name, Description: role.Description, System: role.System, Model: role.Model, Thinking: role.Thinking, Tools: append([]string(nil), role.Tools...), AllowMutation: role.AllowMutation}
+			roles[name] = subagent.Role{Name: name, Description: role.Description, System: role.System, Provider: role.Provider, Model: role.Model, Thinking: role.Thinking, Tools: append([]string(nil), role.Tools...), AllowMutation: role.AllowMutation}
 		}
 		subManager = subagent.New(ctx, subagent.Limits{
 			MaxConcurrentThreads: cfg.Subagents.MaxConcurrentThreads, MaxAgentsPerSession: cfg.Subagents.MaxAgentsPerSession,
@@ -764,7 +907,12 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			DefaultWait: time.Duration(cfg.Subagents.DefaultWaitTimeoutMS) * time.Millisecond, MaxWait: time.Duration(cfg.Subagents.MaxWaitTimeoutMS) * time.Millisecond,
 			TaskTimeout: time.Duration(cfg.Subagents.TaskTimeoutMS) * time.Millisecond, MaxResultBytes: cfg.Subagents.MaxResultBytes,
 			Recursive: cfg.Subagents.Recursive, Durable: cfg.Subagents.Durable, AllowMutation: cfg.Subagents.AllowMutation,
-			ExposeChildToolEvents: cfg.Subagents.ExposeChildToolEvents, DefaultRole: cfg.Subagents.DefaultRole, Roles: roles,
+			ExposeChildToolEvents: cfg.Subagents.ExposeChildToolEvents, DefaultProvider: cfg.Subagents.DefaultProvider, DefaultModel: cfg.Subagents.DefaultModel, DefaultRole: cfg.Subagents.DefaultRole, Roles: roles,
+		})
+		subManager.SetModelCatalog(runtimeSelection.availableModels)
+		subManager.SetModelSelection(func(providerID, modelID string) (protocol.Model, error) {
+			_, selected, err := runtimeSelection.childSelection(providerID, modelID)
+			return selected, err
 		})
 		for _, tool := range subagent.Tools(subManager, subagent.Caller{Path: protocol.RootAgentPath}) {
 			if err := reg.RegisterDescriptor(subagent.ToolDescriptor(tool)); err != nil {
@@ -835,19 +983,19 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	}
 	loader := ctxpkg.NewLoader(cfg.ContextCapBytes, false)
 	assembly := loader.Assemble(absCWD, preamble, "")
-	systemPrompt := assembly.Render()
-	if skillCatalog != nil {
-		if catalog := skillCatalog.CatalogPrompt(); catalog != "" {
-			systemPrompt += "\n\n" + catalog
-		}
-	}
+	baseSystemPrompt := assembly.Render()
 	if mcpManager != nil {
 		if catalog := mcpManager.CatalogPrompt(); catalog != "" {
-			systemPrompt += "\n\n" + catalog
+			baseSystemPrompt += "\n\n" + catalog
 		}
 	}
 	if subManager != nil {
-		systemPrompt += "\n\n" + subagentPromptGuidance
+		baseSystemPrompt += "\n\n" + subagentPromptGuidance
+	}
+	systemPrompt := baseSystemPrompt
+	skillNames := skillNamesForRegistry(skillCatalog, reg)
+	if catalog := skillPromptForRegistry(skillCatalog, reg); catalog != "" {
+		systemPrompt += "\n\n" + catalog
 	}
 
 	initialMode := collaborationMode
@@ -871,8 +1019,11 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		Goal:              goalController,
 		Auth:              authStore,
 		APIKey:            opts.APIKey,
+		APIKeyProvider:    providerID,
+		SkillNames:        skillNames,
 		Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
-			SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance},
+			SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance,
+			GoalAutoThresholdPercent: cfg.Compaction.GoalAutoThresholdPercent},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("app: agent: %w", err)
@@ -961,15 +1112,20 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 				_ = childStore.Close()
 				return nil, err
 			}
-			childSystem := systemPrompt + "\n\n<subagent>\nYou are " + string(spec.State.Agent.Path) + ", an independent child agent. Complete the assigned task and return a concise final answer to your parent. The filesystem is shared with peers and is not a sandbox; do not overwrite peer work.\n"
+			childSkillNames := skillNamesForRegistry(skillCatalog, childReg)
+			childSystem := baseSystemPrompt
+			if catalog := skillPromptForRegistry(skillCatalog, childReg); catalog != "" {
+				childSystem += "\n\n" + catalog
+			}
+			childSystem += "\n\n<subagent>\nYou are " + string(spec.State.Agent.Path) + ", an independent child agent. Complete the assigned task and return a concise final answer to your parent. The filesystem is shared with peers and is not a sandbox; do not overwrite peer work.\n"
 			if spec.Role.System != "" {
 				childSystem += spec.Role.System + "\n"
 			}
 			childSystem += "</subagent>"
 			child, err := agent.New(agent.Options{Provider: childProvider, Registry: childReg, Session: childStore, Permission: childPerm, ToolHost: childHost,
 				SystemPrompt: childSystem, Model: childModel, Thinking: spec.State.Thinking, ReasoningSummary: reasoningSummary,
-				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Auth: authStore, APIKey: opts.APIKey, Identity: spec.State.Agent.Clone(),
-				Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
+				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Auth: authStore, APIKey: opts.APIKey, APIKeyProvider: providerID, Identity: spec.State.Agent.Clone(),
+				SkillNames: childSkillNames, Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
 					SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance}})
 			if err != nil {
 				_ = childStore.Close()
@@ -991,41 +1147,43 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	manager.Emit(ag.StateEvent())
 
 	a := &App{
-		Cfg:                cfg,
-		PersistedCfg:       persistedCfg,
-		ConfigPath:         configPath,
-		AuthPath:           authPath,
-		Auth:               authStore,
-		Registry:           reg,
-		Router:             router,
-		Provider:           prov,
-		ProviderID:         providerID,
-		Providers:          providers,
-		Models:             append([]protocol.Model(nil), models...),
-		AllModels:          allModels,
-		modelCatalog:       modelCatalog,
-		runtimeSelection:   runtimeSelection,
-		Model:              model,
-		Perm:               perm,
-		Session:            st,
-		Agent:              ag,
-		Goal:               goalController,
-		Trust:              tr,
-		PluginManager:      manager,
-		PluginDiagnostics:  append(pluginDiagnostics, manager.Diagnostics()...),
-		MCPManager:         mcpManager,
-		MCPStatuses:        append([]publicmcp.Status(nil), mcpStatuses...),
-		Skills:             skillCatalog,
-		Subagents:          subManager,
-		Diagnostics:        append([]config.Diagnostic(nil), configDiagnostics...),
-		SearchPolicy:       searchPolicy,
-		ProjectAllowed:     projectAllowed,
-		ProjectInputRoot:   projectInputRoot,
-		permissionDefault:  permMode,
-		permissionOverride: opts.Permission != "",
-		cwd:                absCWD,
-		userInput:          inputBroker,
-		toolGuard:          toolGuard,
+		Cfg:                    cfg,
+		PersistedCfg:           persistedCfg,
+		ConfigPath:             configPath,
+		AuthPath:               authPath,
+		Auth:                   authStore,
+		Registry:               reg,
+		Router:                 router,
+		Provider:               prov,
+		ProviderID:             providerID,
+		Providers:              providers,
+		Models:                 append([]protocol.Model(nil), models...),
+		AllModels:              allModels,
+		modelCatalog:           modelCatalog,
+		runtimeSelection:       runtimeSelection,
+		Model:                  model,
+		Perm:                   perm,
+		Session:                st,
+		Agent:                  ag,
+		Goal:                   goalController,
+		Trust:                  tr,
+		PluginManager:          manager,
+		PluginDiagnostics:      append(pluginDiagnostics, manager.Diagnostics()...),
+		MCPManager:             mcpManager,
+		MCPStatuses:            append([]publicmcp.Status(nil), mcpStatuses...),
+		Skills:                 skillCatalog,
+		Subagents:              subManager,
+		Diagnostics:            append([]config.Diagnostic(nil), configDiagnostics...),
+		SearchPolicy:           searchPolicy,
+		ProjectAllowed:         projectAllowed,
+		ProjectInputRoot:       projectInputRoot,
+		permissionDefault:      permMode,
+		permissionOverride:     opts.Permission != "",
+		explicitAPIKey:         opts.APIKey,
+		explicitAPIKeyProvider: providerID,
+		cwd:                    absCWD,
+		userInput:              inputBroker,
+		toolGuard:              toolGuard,
 	}
 	if skillCatalog != nil {
 		a.SkillDiagnostics = skillCatalog.Diagnostics()
@@ -1334,12 +1492,36 @@ func (a *App) ResumeGoal() (*protocol.ThreadGoal, error) {
 	defer a.stateMu.Unlock()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
-	g, err := a.setGoalStatusLocked(protocol.GoalActive)
-	if err == nil {
-		a.Agent.ResetGoalAudit()
-		a.Agent.ContinueGoal()
+	g, err := a.Goal.Get()
+	if err != nil {
+		return nil, err
 	}
-	return g, err
+	if g == nil {
+		return nil, session.ErrNotFound
+	}
+	if err := a.requireGoalCapabilities(); err != nil {
+		return nil, err
+	}
+	if g.Status == protocol.GoalActive {
+		deferred, err := a.Goal.Deferred()
+		if err != nil {
+			return nil, err
+		}
+		if !deferred {
+			return nil, errors.New("goal: active goal is not deferred")
+		}
+		if err := a.Goal.Defer(false); err != nil {
+			return nil, err
+		}
+	} else {
+		g, err = a.Goal.SetStatus(g.GoalID, protocol.GoalActive, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	a.Agent.ResetGoalAudit()
+	a.Agent.ContinueGoal()
+	return g, nil
 }
 func (a *App) ClearGoal() error {
 	a.stateMu.Lock()
@@ -1381,10 +1563,70 @@ func (a *App) ContinueGoal() error {
 	return nil
 }
 
+// ConfigureOpenAICompatible replaces the runtime adapter after an operator
+// changes its endpoint. Persistence remains the caller's responsibility so TUI
+// configuration can save endpoint and credential as one user action.
+func (a *App) ConfigureOpenAICompatible(baseURL string) error {
+	pc := a.Cfg.Providers[openaicompat.ProviderID]
+	cfg := openaicompat.Config{BaseURL: baseURL, DefaultModel: pc.DefaultModel}
+	if a.explicitAPIKey != "" && a.explicitAPIKeyProvider == openaicompat.ProviderID {
+		cfg.APIKey = a.explicitAPIKey
+	}
+	if stored, ok := a.Auth.Get(openaicompat.ProviderID); ok {
+		cfg.DiscoveryAPIKey = stored.Key
+	}
+	compatible, err := openaicompat.New(cfg)
+	if err != nil {
+		return fmt.Errorf("app: %s: %w", openaicompat.ProviderID, err)
+	}
+	if !compatible.Configured() {
+		return errors.New("app: openai-compatible base URL is required")
+	}
+
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	if a.ProviderID == openaicompat.ProviderID {
+		model := a.Agent.Model()
+		if err := a.Agent.SetProviderAndModel(compatible, model); err != nil {
+			return err
+		}
+	}
+	a.Providers[openaicompat.ProviderID] = compatible
+	a.modelCatalog[openaicompat.ProviderID] = nil
+	if a.ProviderID == openaicompat.ProviderID {
+		a.Provider = compatible
+		a.Models = nil
+	}
+	if a.runtimeSelection != nil {
+		a.runtimeSelection.mu.Lock()
+		a.runtimeSelection.providers[openaicompat.ProviderID] = compatible
+		a.runtimeSelection.catalogs[openaicompat.ProviderID] = nil
+		a.runtimeSelection.mu.Unlock()
+	}
+	var all []protocol.Model
+	seen := map[string]bool{}
+	for _, providerID := range []string{a.ProviderID, "opencode-go", openaicompat.ProviderID, "chatgpt", "fake"} {
+		if seen[providerID] {
+			continue
+		}
+		seen[providerID] = true
+		all = append(all, a.modelCatalog[providerID]...)
+	}
+	for providerID, catalog := range a.modelCatalog {
+		if !seen[providerID] {
+			all = append(all, catalog...)
+		}
+	}
+	a.AllModels = all
+	return nil
+}
+
 // RefreshProviderModels forces an authenticated catalog refresh when the
 // provider supports it and atomically replaces app/picker snapshots.
 func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
+	a.stateMu.Lock()
 	p, ok := a.Providers[id]
+	a.stateMu.Unlock()
 	if !ok {
 		return fmt.Errorf("app: provider %q is not available", id)
 	}
@@ -1406,6 +1648,9 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 	models = normalizeProviderModels(id, models)
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
+	if current, ok := a.Providers[id]; !ok || current != p {
+		return fmt.Errorf("app: provider %q configuration changed during model refresh", id)
+	}
 	var refreshedActive *protocol.Model
 	if a.ProviderID == id {
 		current := a.Agent.Model()
@@ -1449,7 +1694,7 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 	}
 	var all []protocol.Model
 	seen := map[string]bool{}
-	for _, providerID := range []string{a.ProviderID, "opencode-go", "chatgpt", "fake"} {
+	for _, providerID := range []string{a.ProviderID, "opencode-go", "openai-compatible", "chatgpt", "fake"} {
 		if seen[providerID] {
 			continue
 		}
@@ -1580,6 +1825,35 @@ func (a *App) SetModel(m protocol.Model) error {
 	return nil
 }
 
+// SetProviderModelThinking updates the active provider, model, and effort as
+// one admitted Agent transaction and refreshes the App/runtime mirrors.
+func (a *App) SetProviderModelThinking(providerID string, model protocol.Model, level protocol.ThinkingLevel) error {
+	p, ok := a.Providers[providerID]
+	if !ok {
+		return fmt.Errorf("app: provider %q is not available", providerID)
+	}
+	if model.Provider == "" {
+		model.Provider = providerID
+	}
+	if model.Provider != providerID {
+		return fmt.Errorf("app: model provider %q does not match selected provider %q", model.Provider, providerID)
+	}
+	model = model.Clone()
+	if err := a.Agent.SetProviderModelThinking(p, model, level); err != nil {
+		return err
+	}
+	a.ProviderID, a.Provider = providerID, p
+	a.Models = append([]protocol.Model(nil), a.modelCatalog[providerID]...)
+	a.Model = model
+	if a.runtimeSelection != nil {
+		a.runtimeSelection.mu.Lock()
+		a.runtimeSelection.provider = providerID
+		a.runtimeSelection.model = model
+		a.runtimeSelection.mu.Unlock()
+	}
+	return nil
+}
+
 // SetPermissionDefault updates both the active session mode and the baseline
 // restored for subsequently opened sessions. Config persistence remains the
 // caller's responsibility so it can save first and avoid partial updates.
@@ -1656,6 +1930,11 @@ func (a *App) Close() error {
 	}
 	if a.Router != nil {
 		if err := a.Router.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if a.Skills != nil {
+		if err := a.Skills.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -1812,6 +2091,15 @@ func (a *App) SubagentMessages(ctx context.Context, target string) ([]protocol.M
 	}
 	return a.Subagents.Messages(ctx, target)
 }
+
+// SubagentModels returns exact provider/model pairs currently available to children.
+func (a *App) SubagentModels() []protocol.Model {
+	if a == nil || a.runtimeSelection == nil {
+		return nil
+	}
+	return a.runtimeSelection.availableModels()
+}
+
 func (a *App) SubagentUsage() (protocol.Usage, error) {
 	if a.Subagents == nil {
 		return protocol.Usage{}, nil

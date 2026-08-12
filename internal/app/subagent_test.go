@@ -23,7 +23,7 @@ func TestSubagentLifecycleIndependentTranscriptAndFollowup(t *testing.T) {
 	if err := a.ReadySubagents(); err != nil {
 		t.Fatal(err)
 	}
-	state, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{TaskName: "inspect", Message: "inspect files", AgentType: "explorer", ForkTurns: "none"})
+	state, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{Name: "inspect", Task: "inspect files", Role: "explorer", ForkTurns: "none"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestSubagentSessionSwitchAfterChildrenComplete(t *testing.T) {
 	if err := a.ReadySubagents(); err != nil {
 		t.Fatal(err)
 	}
-	state, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{TaskName: "finished", Message: "inspect", AgentType: "explorer", ForkTurns: "none"})
+	state, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{Name: "finished", Task: "inspect", Role: "explorer", ForkTurns: "none"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestSubagentSessionSwitchAfterChildrenComplete(t *testing.T) {
 	}
 
 	// The manager remains usable for the new root session.
-	state, err = a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{TaskName: "new_child", Message: "inspect again", AgentType: "explorer", ForkTurns: "none"})
+	state, err = a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{Name: "new_child", Task: "inspect again", Role: "explorer", ForkTurns: "none"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,10 +123,10 @@ func TestSubagentDuplicateRollbackAndDelegationRisk(t *testing.T) {
 	if err := a.ReadySubagents(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{TaskName: "same", Message: "one", ForkTurns: "none"}); err != nil {
+	if _, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{Name: "same", Task: "one", ForkTurns: "none"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{TaskName: "same", Message: "two", ForkTurns: "none"}); err == nil {
+	if _, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{Name: "same", Task: "two", ForkTurns: "none"}); err == nil {
 		t.Fatal("duplicate accepted")
 	}
 	for _, name := range []string{"spawn_agent", "followup_task"} {
@@ -163,7 +163,7 @@ func TestDefaultDurableSubagentColdResumeDoesNotRestart(t *testing.T) {
 	if err := a.ReadySubagents(); err != nil {
 		t.Fatal(err)
 	}
-	state, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{TaskName: "durable", Message: "inspect", ForkTurns: "none"})
+	state, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{Name: "durable", Task: "inspect", ForkTurns: "none"})
 	if err != nil {
 		t.Fatal(err)
 	}

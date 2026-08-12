@@ -262,11 +262,11 @@ func mapModelRecords(records []modelRecord) []protocol.Model {
 		if r.EffectiveContextWindowPercent > 0 && r.EffectiveContextWindowPercent < 100 {
 			ctx = ctx * r.EffectiveContextWindowPercent / 100
 		}
-		levels := make([]protocol.ThinkingLevel, 0, 3)
+		levels := make([]protocol.ThinkingLevel, 0, len(r.SupportedReasoningLevels))
 		for _, level := range r.SupportedReasoningLevels {
-			switch protocol.ThinkingLevel(level.Effort) {
-			case protocol.ThinkingLow, protocol.ThinkingMedium, protocol.ThinkingHigh:
-				levels = appendUniqueThinking(levels, protocol.ThinkingLevel(level.Effort))
+			parsed, err := protocol.ParseThinkingLevel(level.Effort)
+			if err == nil && parsed != protocol.ThinkingOff {
+				levels = appendUniqueThinking(levels, parsed)
 			}
 		}
 		m := protocol.Model{Provider: ProviderID, ID: r.Slug, DisplayName: r.DisplayName, Description: r.Description, ContextWindow: ctx, MaxContextWindow: r.MaxContextWindow, SupportsTools: true, SupportsThinking: len(levels) > 0, ThinkingLevels: levels, SupportsVerbosity: r.SupportVerbosity}
@@ -279,9 +279,8 @@ func mapModelRecords(records []modelRecord) []protocol.Model {
 				m.SupportsVision = true
 			}
 		}
-		switch protocol.ThinkingLevel(r.DefaultReasoningLevel) {
-		case protocol.ThinkingLow, protocol.ThinkingMedium, protocol.ThinkingHigh:
-			m.DefaultThinking = protocol.ThinkingLevel(r.DefaultReasoningLevel)
+		if defaultThinking, err := protocol.ParseThinkingLevel(r.DefaultReasoningLevel); err == nil && defaultThinking != protocol.ThinkingOff {
+			m.DefaultThinking = defaultThinking
 		}
 		if r.Upgrade != nil {
 			m.Upgrade = &protocol.ModelUpgrade{Model: r.Upgrade.Model, Message: r.Upgrade.MigrationMarkdown}
@@ -303,7 +302,7 @@ func appendUniqueThinking(levels []protocol.ThinkingLevel, level protocol.Thinki
 func Models() []protocol.Model { return mapModelRecords(bundledModels()) }
 func bundledModels() []modelRecord {
 	return []modelRecord{
-		{Slug: "gpt-5.6-sol", DisplayName: "GPT-5.6-Sol", Description: "Latest frontier agentic coding model.", DefaultReasoningLevel: "low", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"medium"}, {"high"}}, Visibility: "list", Priority: 1, SupportVerbosity: true, ContextWindow: 272000, MaxContextWindow: 272000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text", "image"}},
+		{Slug: "gpt-5.6-sol", DisplayName: "GPT-5.6-Sol", Description: "Latest frontier agentic coding model.", DefaultReasoningLevel: "low", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"medium"}, {"high"}, {"xhigh"}, {"max"}, {"ultra"}}, Visibility: "list", Priority: 1, SupportVerbosity: true, ContextWindow: 272000, MaxContextWindow: 272000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text", "image"}},
 		{Slug: "gpt-5.6-terra", DisplayName: "GPT-5.6-Terra", Description: "Balanced agentic coding model for everyday work.", DefaultReasoningLevel: "medium", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"medium"}, {"high"}}, Visibility: "list", Priority: 2, SupportVerbosity: true, ContextWindow: 272000, MaxContextWindow: 272000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text", "image"}},
 		{Slug: "gpt-5.6-luna", DisplayName: "GPT-5.6-Luna", Description: "Fast and affordable agentic coding model.", DefaultReasoningLevel: "medium", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"medium"}, {"high"}}, Visibility: "list", Priority: 3, SupportVerbosity: true, ContextWindow: 272000, MaxContextWindow: 272000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text", "image"}},
 		{Slug: "gpt-5.3-codex-spark", DisplayName: "GPT-5.3-Codex-Spark", Description: "Ultra-fast coding model.", DefaultReasoningLevel: "high", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"medium"}, {"high"}}, Visibility: "list", Priority: 26, SupportVerbosity: true, ContextWindow: 128000, MaxContextWindow: 128000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text"}},

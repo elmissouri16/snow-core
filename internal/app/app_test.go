@@ -159,7 +159,7 @@ func TestAppNewCleansInitializedPluginsOnLaterFailure(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SNOW_HOME", home)
 	configPath := filepath.Join(home, "config.json")
-	if err := os.WriteFile(configPath, []byte(`{"subagents":{"enabled":true,"roles":{"default":{"model":"missing-model"}}}}`), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(`{"subagents":{"enabled":true,"roles":{"general":{"model":"missing-model"}}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	closed := 0
@@ -167,11 +167,32 @@ func TestAppNewCleansInitializedPluginsOnLaterFailure(t *testing.T) {
 		Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
 		ConfigPath: configPath, GoPlugins: []publicplugin.Plugin{appCloseTrackingPlugin{closed: &closed}}, NoMCP: true,
 	})
-	if err == nil || !strings.Contains(err.Error(), "unavailable model") {
+	if err == nil || !strings.Contains(err.Error(), "unavailable selection") {
 		t.Fatalf("constructor error = %v", err)
 	}
 	if closed != 1 {
 		t.Fatalf("plugin close count = %d, want 1", closed)
+	}
+}
+
+func TestAppSubagentModelOverride(t *testing.T) {
+	enabled := true
+	a, err := New(context.Background(), Options{
+		Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
+		Subagents: &enabled, SubagentProvider: "fake", SubagentModel: "fake-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if a.Cfg.Subagents.DefaultProvider != "fake" || a.Cfg.Subagents.DefaultModel != "fake-1" {
+		t.Fatalf("subagent defaults = %s/%s", a.Cfg.Subagents.DefaultProvider, a.Cfg.Subagents.DefaultModel)
+	}
+	if _, err := New(context.Background(), Options{
+		Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
+		Subagents: &enabled, SubagentModel: "missing-model",
+	}); err == nil || !strings.Contains(err.Error(), "subagent defaults references unavailable selection") {
+		t.Fatalf("missing subagent model error = %v", err)
 	}
 }
 
@@ -347,7 +368,7 @@ func TestRefreshProviderModelsReplacesUnavailableAuthoritativeModel(t *testing.T
 func TestAppRejectsInvalidThinkingConfiguration(t *testing.T) {
 	_, err := New(context.Background(), Options{
 		Provider:   "fake",
-		Thinking:   "xhigh",
+		Thinking:   "extreme",
 		NoSession:  true,
 		Permission: "allow",
 		CWD:        t.TempDir(),
@@ -904,6 +925,54 @@ func TestAppRegistersDeferredWebFetchByDefault(t *testing.T) {
 	matches, err := a.Router.Search(context.Background(), "fetch and summarize this website URL", 5)
 	if err != nil || len(matches) == 0 || matches[0].ID != "webfetch" {
 		t.Fatalf("webfetch routing matches = %+v, err=%v", matches, err)
+	}
+}
+
+func TestToolAllowlistIsUpperBoundForSkillTools(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	dir := filepath.Join(home, "skills", "review")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: review\ndescription: Review code.\n---\nreview body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(), Tools: []string{"read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if skill, ok := a.Skills.Lookup("review"); !ok || skill.Enabled || !strings.Contains(skill.DisabledBy, "tool allowlist") {
+		t.Fatalf("tool-disabled skill inventory = %+v, %v", skill, ok)
+	}
+	for _, name := range []string{"activate_skill", "read_skill_resource"} {
+		if _, ok := a.Registry.Get(name); ok {
+			t.Fatalf("explicit tool allowlist unexpectedly retained %s", name)
+		}
+	}
+	activationOnly, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(), Tools: []string{"activate_skill"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer activationOnly.Close()
+	if _, ok := activationOnly.Registry.Get("activate_skill"); !ok {
+		t.Fatal("activation-only allowlist omitted activate_skill")
+	}
+	if _, ok := activationOnly.Registry.Get("read_skill_resource"); ok {
+		t.Fatal("activation-only allowlist retained read_skill_resource")
+	}
+	if _, ok := activationOnly.Skills.Get("review"); !ok {
+		t.Fatal("activation-only allowlist disabled the skill catalog")
+	}
+
+	readerOnly, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(), Tools: []string{"read_skill_resource"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readerOnly.Close()
+	if _, ok := readerOnly.Registry.Get("read_skill_resource"); ok {
+		t.Fatal("resource-only allowlist retained an incoherent names-only reader")
 	}
 }
 

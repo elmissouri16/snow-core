@@ -89,11 +89,11 @@ func TestSubagentToolRenderingIsCompact(t *testing.T) {
 
 func TestSuccessfulSpawnUsesSingleLifecycleRow(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
-	ref := &protocol.AgentRef{ThreadID: "child", ParentThreadID: "root", Path: "/root/count", ParentPath: "/root", Role: "default", Depth: 1}
+	ref := &protocol.AgentRef{ThreadID: "child", ParentThreadID: "root", Path: "/root/count", ParentPath: "/root", Role: "general", Depth: 1}
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolStart, ToolName: "spawn_agent"})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvSubagentStarted, Agent: ref})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolName: "spawn_agent", ToolOutput: `{"status":"queued"}`})
-	if len(m.lines) != 1 || !strings.Contains(stripANSI(m.lines[0]), "agent /root/count started (default)") {
+	if len(m.lines) != 1 || !strings.Contains(stripANSI(m.lines[0]), "agent /root/count started (general)") {
 		t.Fatalf("spawn transcript rows=%d lines=%q", len(m.lines), m.lines)
 	}
 }
@@ -107,7 +107,7 @@ func TestAgentCommandRegistered(t *testing.T) {
 func TestAgentDisplayIncludesCapacityStateAndTranscriptMetadata(t *testing.T) {
 	now := time.UnixMilli(10_000)
 	state := protocol.SubagentState{
-		Agent:  protocol.AgentRef{ThreadID: "child-1", ParentThreadID: "root-1", Path: "/root/build", ParentPath: "/root", Role: "worker", Depth: 1},
+		Agent:  protocol.AgentRef{ThreadID: "child-1", ParentThreadID: "root-1", Path: "/root/build", ParentPath: "/root", Role: "implementer", Depth: 1},
 		Status: protocol.AgentErrored, Provider: "fake", Model: "m", Thinking: protocol.ThinkingHigh,
 		CreatedAt: 1_000, StartedAt: 2_000, FinishedAt: 8_000, Error: "command failed", Generation: 4,
 		Usage: &protocol.Usage{Input: 10, Output: 5, Total: 15},

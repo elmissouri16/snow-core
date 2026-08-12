@@ -2,6 +2,9 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -227,16 +230,35 @@ func TestModelLoginFlow(t *testing.T) {
 	if !m.pickProvider {
 		t.Fatal("login with no args should open the provider picker")
 	}
+	m.width, m.height = 120, 30
+	m.inlineTranscript = true
+	m.layout()
+	if got := m.managedFrameHeight(); got != m.height {
+		t.Fatalf("inline provider picker frame height=%d want terminal height %d", got, m.height)
+	}
+	pickerView := stripANSI(m.View())
+	for _, provider := range []string{"opencode-go", "openai-compatible", "chatgpt"} {
+		if !strings.Contains(pickerView, provider) {
+			t.Fatalf("inline provider picker truncated %q: %q", provider, pickerView)
+		}
+	}
 
 	// Navigate to opencode-go and select it.
 	if len(m.providers) == 0 {
 		t.Fatal("expected providers in picker")
 	}
 	idx := -1
+	compatibleFound := false
 	for i, p := range m.providers {
 		if p == "opencode-go" {
 			idx = i
 		}
+		if p == "openai-compatible" {
+			compatibleFound = true
+		}
+	}
+	if !compatibleFound {
+		t.Fatalf("openai-compatible not in picker: %v", m.providers)
 	}
 	if idx < 0 {
 		t.Fatalf("opencode-go not in picker: %v", m.providers)
@@ -272,6 +294,26 @@ func TestModelLoginFlow(t *testing.T) {
 	joined := strings.Join(m.lines, "\n")
 	if strings.Contains(joined, "sk-test-123") {
 		t.Fatalf("secret leaked into transcript: %q", joined)
+	}
+}
+
+func TestInlineCommandPaletteWindowFollowsSelection(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width, m.height = 120, 30
+	m.inlineTranscript = true
+	m.editor.SetValue("/")
+	m.compMatches = []string{"/a0", "/a1", "/a2", "/a3", "/a4", "/a5", "/a6", "/a7", "/a8", "/a9"}
+	m.compIndex = len(m.compMatches) - 1
+	m.compVisible = true
+	m.layout()
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "/a9") || !strings.Contains(view, "/") {
+		t.Fatalf("inline command palette lost selection or composer: %q", view)
+	}
+	if got := m.managedFrameHeight(); got != m.height {
+		t.Fatalf("inline command palette frame height=%d want terminal height %d", got, m.height)
 	}
 }
 
@@ -313,6 +355,75 @@ func TestModelLoginPickerDirectArg(t *testing.T) {
 	}
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 
+	// The generic Responses login captures and persists its endpoint before the
+	// masked optional key, then refreshes models without rendering the secret.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer compatible-secret" {
+			t.Errorf("discovery authorization = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"compatible-model"}]}`))
+	}))
+	defer server.Close()
+	m.editor.SetValue("/login openai-compatible")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.loginEndpointMode || m.loginProvider != "openai-compatible" {
+		t.Fatalf("compatible endpoint mode=%v provider=%q", m.loginEndpointMode, m.loginProvider)
+	}
+	m.editor.SetValue(server.URL + "/v1")
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.loginEndpointMode || !m.loginMode {
+		t.Fatalf("compatible key step endpoint=%v key=%v", m.loginEndpointMode, m.loginMode)
+	}
+	for _, r := range "compatible-secret" {
+		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("compatible login did not schedule model discovery")
+	}
+	m.Update(cmd())
+	cred, ok := m.app.Auth.Get("openai-compatible")
+	if !ok || cred.Key != "compatible-secret" {
+		t.Fatalf("compatible credential=%+v ok=%v", cred, ok)
+	}
+	if got := m.app.PersistedCfg.Providers["openai-compatible"].BaseURL; got != server.URL+"/v1" {
+		t.Fatalf("compatible endpoint=%q", got)
+	}
+	persisted, err := os.ReadFile(m.app.ConfigPath)
+	if err != nil || !strings.Contains(string(persisted), server.URL+"/v1") {
+		t.Fatalf("persisted config=%q err=%v", persisted, err)
+	}
+	foundModel := false
+	for _, model := range m.app.AllModels {
+		foundModel = foundModel || model.Provider == "openai-compatible" && model.ID == "compatible-model"
+	}
+	if !foundModel {
+		t.Fatalf("discovered models=%+v", m.app.AllModels)
+	}
+	status := m.providerStatus("openai-compatible")
+	if strings.Contains(status, "compatible-secret") || !strings.Contains(status, "endpoint configured") || !strings.Contains(status, "stored") {
+		t.Fatalf("compatible status leaked or missed configuration: %q", status)
+	}
+	m.editor.SetValue("/login openai-compatible")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.loginEndpointMode || m.editor.Value() != server.URL+"/v1" {
+		t.Fatalf("saved endpoint was not prefilled: mode=%v value=%q", m.loginEndpointMode, m.editor.Value())
+	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m.editor.SetValue("/logout openai-compatible")
+	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("compatible logout did not return command")
+	}
+	m.Update(cmd())
+	if _, ok := m.app.Auth.Get("openai-compatible"); ok {
+		t.Fatal("compatible logout did not remove key")
+	}
+
 	// Unsupported provider errors without entering capture.
 	m.editor.SetValue("/login nope")
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -328,6 +439,67 @@ func TestModelLoginPickerDirectArg(t *testing.T) {
 	}
 	if !m.pickChatGPTAuth {
 		t.Fatal("chatgpt direct login should offer OAuth actions")
+	}
+}
+
+func TestOpenAICompatibleTUILoginAllowsKeylessAndRejectsInvalidEndpoint(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.editor.SetValue("/login openai-compatible")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.editor.SetValue("relative/path")
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || !m.loginEndpointMode {
+		t.Fatalf("invalid endpoint cmd=%v mode=%v", cmd != nil, m.loginEndpointMode)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("keyless discovery authorization=%q", got)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"local-model"}]}`))
+	}))
+	defer server.Close()
+	m.editor.SetValue(server.URL)
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.loginMode {
+		t.Fatal("valid endpoint did not advance to optional key")
+	}
+	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("empty optional key did not configure keyless endpoint")
+	}
+	m.Update(cmd())
+	if _, ok := m.app.Auth.Get("openai-compatible"); ok {
+		t.Fatal("keyless login stored a credential")
+	}
+	if got := m.app.PersistedCfg.Providers["openai-compatible"].BaseURL; got != server.URL {
+		t.Fatalf("keyless endpoint=%q", got)
+	}
+}
+
+func TestOpenAICompatibleLoginIgnoresStaleDiscoveryCompletion(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.compatibleLoginGeneration = 2
+	m.compatibleLoginPending = true
+	_, cmd := m.startModelPick()
+	if cmd != nil || m.pickModel {
+		t.Fatalf("model picker opened during discovery: cmd=%v picker=%v", cmd != nil, m.pickModel)
+	}
+	before := m.app.Agent.Model()
+	_, _ = m.runCommand("/model blocked-model")
+	if after := m.app.Agent.Model(); after.ID != before.ID || after.Provider != before.Provider {
+		t.Fatalf("direct model command changed selection during discovery: before=%+v after=%+v", before, after)
+	}
+	m.Update(compatibleLoginDoneMsg{generation: 1, endpoint: "https://old.invalid", err: errors.New("old failure")})
+	if !m.compatibleLoginPending || strings.Contains(strings.Join(m.lines, "\n"), "old failure") {
+		t.Fatalf("stale completion changed state: pending=%v lines=%q", m.compatibleLoginPending, m.lines)
+	}
+	m.Update(compatibleLoginDoneMsg{generation: 2, endpoint: "https://new.invalid"})
+	if m.compatibleLoginPending {
+		t.Fatal("current completion did not clear pending state")
 	}
 }
 

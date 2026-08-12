@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/snow-core/snow/internal/app"
 	"github.com/snow-core/snow/internal/auth"
+	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -176,7 +178,8 @@ func TestRPCPromptAndEvents(t *testing.T) {
 func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 	var in bytes.Buffer
 	var out bytes.Buffer
-	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow"})
+	dir := t.TempDir()
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", SessionPath: filepath.Join(dir, "session.db"), CWD: dir, Permission: "allow"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,6 +188,13 @@ func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 	model.SupportsThinking = true
 	model.ThinkingLevels = []protocol.ThinkingLevel{protocol.ThinkingLow}
 	if err := a.Agent.SetModel(model); err != nil {
+		t.Fatal(err)
+	}
+	goal, err := a.CreateGoal("priced goal", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.Session.(session.ThreadGoalStore).AccountGoal(goal.GoalID, 10, 1, &protocol.Cost{Currency: "USD", Total: 0.02}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -211,7 +221,9 @@ func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 	}
 	data, _ := info.Data.(map[string]any)
 	pending, _ := data["pending_inputs"].(map[string]any)
-	if info.Command != "session_info" || !info.Success || data["thinking"] != "low" || fmt.Sprint(data["thinking_levels"]) != "[off low]" || pending["total"] != float64(0) {
+	goalInfo, _ := data["goal"].(map[string]any)
+	costs, _ := goalInfo["estimated_costs"].([]any)
+	if info.Command != "session_info" || !info.Success || data["thinking"] != "low" || fmt.Sprint(data["thinking_levels"]) != "[off low]" || pending["total"] != float64(0) || len(costs) != 1 {
 		t.Fatalf("session info = %+v", info)
 	}
 }

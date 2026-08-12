@@ -1,0 +1,582 @@
+package tui
+
+import (
+	"os"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	osc52 "github.com/aymanbagabas/go-osc52/v2"
+	tea "github.com/charmbracelet/bubbletea"
+	xansi "github.com/charmbracelet/x/ansi"
+)
+
+const (
+	transcriptSelectionAutoScrollInterval = 8 * time.Millisecond
+	transcriptSelectionMultiClickInterval = 400 * time.Millisecond
+	// Bubble Tea throttles physical terminal writes to the configured frame rate.
+	// Keep OSC52 in the rendered frame long enough for at least one flush instead
+	// of clearing it in the same event-loop burst.
+	transcriptSelectionClipboardRenderGrace = 100 * time.Millisecond
+)
+
+type transcriptSelectionGranularity uint8
+
+const (
+	transcriptSelectionCharacter transcriptSelectionGranularity = iota
+	transcriptSelectionWord
+	transcriptSelectionLine
+)
+
+type transcriptSelectionPoint struct {
+	row      int
+	col      int
+	boundary bool
+}
+
+type transcriptSelectionRange struct {
+	start transcriptSelectionPoint
+	end   transcriptSelectionPoint
+}
+
+type transcriptSelectionClick struct {
+	at        time.Time
+	count     int
+	row       int
+	wordStart int
+	wordEnd   int
+}
+
+type transcriptSelectionState struct {
+	anchor          *transcriptSelectionPoint
+	focus           *transcriptSelectionPoint
+	initial         *transcriptSelectionRange
+	granularity     transcriptSelectionGranularity
+	pressActive     bool
+	dragged         bool
+	lastClick       *transcriptSelectionClick
+	autoScroll      int
+	autoScrollStep  int
+	autoScrollTicks int
+	autoScrollX     int
+	autoScrollY     int
+	autoScrollID    uint64
+}
+
+type transcriptSelectionAutoScrollMsg uint64
+
+type transcriptSelectionCopiedMsg struct {
+	characters int
+	sequence   string
+	err        error
+}
+
+type transcriptSelectionClipboardClearMsg uint64
+
+func (m *Model) clearTranscriptSelection() {
+	nextID := m.transcriptSelection.autoScrollID + 1
+	m.transcriptSelection = transcriptSelectionState{autoScrollID: nextID}
+	m.transcriptSelectionView = ""
+	m.transcriptSelectionViewValid = false
+	m.transcriptSelectionRendered = ""
+	m.transcriptSelectionRenderedValid = false
+}
+
+func splitTranscriptSelectionLines(content string) []string {
+	if content == "" {
+		return nil
+	}
+	return strings.Split(content, "\n")
+}
+
+func (m *Model) transcriptSelectionSourceLines() []string {
+	return m.transcriptSelectionLines
+}
+
+func (m *Model) transcriptSelectionTop() int {
+	// The full-screen frame always places the transcript after the one-row
+	// header and separator. Inline mode leaves history to terminal selection.
+	return 2
+}
+
+func (m *Model) transcriptSelectionPointAt(x, y int, clampToViewport bool) (transcriptSelectionPoint, bool) {
+	if m.inlineTranscript || m.transcript.Height <= 0 || m.transcript.Width <= 0 {
+		return transcriptSelectionPoint{}, false
+	}
+	top := m.transcriptSelectionTop()
+	bottom := top + m.transcript.Height - 1
+	if clampToViewport {
+		x = min(max(0, x), m.transcript.Width-1)
+		y = min(max(top, y), bottom)
+	} else if x < 0 || x >= m.transcript.Width || y < top || y > bottom {
+		return transcriptSelectionPoint{}, false
+	}
+	lines := m.transcriptSelectionSourceLines()
+	if len(lines) == 0 {
+		return transcriptSelectionPoint{}, false
+	}
+	row := max(0, m.transcript.YOffset+y-top)
+	if !clampToViewport && row >= len(lines) {
+		// The viewport pads short content to its configured height. A click in
+		// those blank rows must not select the final actual transcript line.
+		return transcriptSelectionPoint{}, false
+	}
+	row = min(row, len(lines)-1)
+	return transcriptSelectionPoint{row: row, col: x}, true
+}
+
+func (m *Model) applyTranscriptSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
+	if m.app == nil || !m.app.Cfg.TUI.Mouse || m.inlineTranscript {
+		return false, nil
+	}
+	event := tea.MouseEvent(msg)
+	if event.Action == tea.MouseActionRelease {
+		if !m.transcriptSelection.pressActive {
+			return false, nil
+		}
+		m.transcriptSelection.pressActive = false
+		m.stopTranscriptSelectionAutoScroll()
+		if point, ok := m.transcriptSelectionPointAt(event.X, event.Y, true); ok {
+			m.updateTranscriptSelectionFocus(point)
+		}
+		text := m.selectedTranscriptText()
+		// Publish any stream updates that were frozen against the immutable drag
+		// snapshot only after extracting the selected text.
+		m.catchUpTranscriptAfterSelection()
+		if text == "" {
+			return true, nil
+		}
+		copyText := m.copySelectionToClipboard
+		return true, func() tea.Msg {
+			message := transcriptSelectionCopiedMsg{characters: utf8.RuneCountInString(text)}
+			if copyText != nil {
+				message.err = copyText(text)
+			} else {
+				message.sequence = transcriptSelectionClipboardSequence(text)
+			}
+			return message
+		}
+	}
+
+	if event.Action == tea.MouseActionMotion {
+		if !m.transcriptSelection.pressActive || m.transcriptSelection.anchor == nil {
+			return false, nil
+		}
+		point, ok := m.transcriptSelectionPointAt(event.X, event.Y, true)
+		if !ok {
+			return true, nil
+		}
+		// Bubble Tea already coalesces physical terminal writes. Update selection
+		// immediately so a flood of cell-motion messages cannot queue ahead of a
+		// second selection timer and leave the highlight trailing the pointer.
+		focus := m.transcriptSelection.focus
+		if focus != nil && focus.row == point.row && focus.col == point.col {
+			return true, m.updateTranscriptSelectionAutoScroll(event.X, event.Y)
+		}
+		m.transcriptSelection.dragged = true
+		m.transcriptSelection.lastClick = nil
+		m.updateTranscriptSelectionFocus(point)
+		return true, m.updateTranscriptSelectionAutoScroll(event.X, event.Y)
+	}
+
+	if event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft {
+		return false, nil
+	}
+	point, ok := m.transcriptSelectionPointAt(event.X, event.Y, false)
+	if !ok {
+		m.clearTranscriptSelection()
+		return false, nil
+	}
+	m.stopTranscriptSelectionAutoScroll()
+	word, hasWord := m.transcriptWordRange(point)
+	clickCount := m.transcriptSelectionClickCount(point, word, hasWord)
+	var selected transcriptSelectionRange
+	switch clickCount {
+	case 2:
+		selected = word
+		m.transcriptSelection.granularity = transcriptSelectionWord
+	case 3:
+		selected = m.transcriptLineRange(point)
+		m.transcriptSelection.granularity = transcriptSelectionLine
+	default:
+		selected = transcriptSelectionRange{start: point, end: point}
+		m.transcriptSelection.granularity = transcriptSelectionCharacter
+	}
+	m.transcriptSelection.anchor = cloneTranscriptSelectionPoint(selected.start)
+	m.transcriptSelection.focus = cloneTranscriptSelectionPoint(selected.end)
+	m.transcriptSelection.initial = nil
+	if clickCount == 2 || clickCount == 3 {
+		initial := selected
+		m.transcriptSelection.initial = &initial
+	}
+	m.transcriptSelection.pressActive = true
+	m.transcriptSelection.dragged = false
+	m.cacheTranscriptSelectionView()
+	return true, nil
+}
+
+func (m *Model) catchUpTranscriptAfterSelection() {
+	if !m.transcriptDirty {
+		return
+	}
+	wasAtBottom := m.transcript.AtBottom()
+	m.flushTranscriptImmediately()
+	if wasAtBottom {
+		m.transcript.GotoBottom()
+	}
+}
+
+func transcriptSelectionClipboardSequence(text string) string {
+	sequence := osc52.New(text)
+	if strings.TrimSpace(strings.ToLower(os.Getenv("TMUX"))) != "" {
+		sequence = sequence.Tmux()
+	} else if strings.HasPrefix(strings.ToLower(os.Getenv("TERM")), "screen") {
+		sequence = sequence.Screen()
+	}
+	return sequence.String()
+}
+
+func cloneTranscriptSelectionPoint(point transcriptSelectionPoint) *transcriptSelectionPoint {
+	copy := point
+	return &copy
+}
+
+func (m *Model) transcriptSelectionClickCount(point transcriptSelectionPoint, word transcriptSelectionRange, hasWord bool) int {
+	now := m.currentTime()
+	previous := m.transcriptSelection.lastClick
+	count := 1
+	if hasWord && previous != nil && now.Sub(previous.at) <= transcriptSelectionMultiClickInterval &&
+		previous.row == point.row && previous.wordStart == word.start.col && previous.wordEnd == word.end.col {
+		count = previous.count%3 + 1
+	}
+	if !hasWord {
+		m.transcriptSelection.lastClick = nil
+		return count
+	}
+	m.transcriptSelection.lastClick = &transcriptSelectionClick{
+		at: now, count: count, row: point.row, wordStart: word.start.col, wordEnd: word.end.col,
+	}
+	return count
+}
+
+func (m *Model) updateTranscriptSelectionFocus(point transcriptSelectionPoint) {
+	m.transcriptSelectionRenderedValid = false
+	initial := m.transcriptSelection.initial
+	if m.transcriptSelection.granularity == transcriptSelectionCharacter || initial == nil {
+		m.transcriptSelection.focus = cloneTranscriptSelectionPoint(point)
+		return
+	}
+	var target transcriptSelectionRange
+	if m.transcriptSelection.granularity == transcriptSelectionWord {
+		var ok bool
+		target, ok = m.transcriptWordRange(point)
+		if !ok {
+			return
+		}
+	} else {
+		target = m.transcriptLineRange(point)
+	}
+	if transcriptSelectionPointBefore(target.start, initial.start) {
+		m.transcriptSelection.anchor = cloneTranscriptSelectionPoint(initial.end)
+		m.transcriptSelection.focus = cloneTranscriptSelectionPoint(target.start)
+		return
+	}
+	m.transcriptSelection.anchor = cloneTranscriptSelectionPoint(initial.start)
+	m.transcriptSelection.focus = cloneTranscriptSelectionPoint(target.end)
+}
+
+func transcriptSelectionPointBefore(left, right transcriptSelectionPoint) bool {
+	return left.row < right.row || left.row == right.row && left.col < right.col
+}
+
+func (m *Model) transcriptSelectionBounds() (transcriptSelectionRange, bool) {
+	anchor, focus := m.transcriptSelection.anchor, m.transcriptSelection.focus
+	if anchor == nil || focus == nil || anchor.row == focus.row && anchor.col == focus.col {
+		return transcriptSelectionRange{}, false
+	}
+	if transcriptSelectionPointBefore(*anchor, *focus) {
+		return transcriptSelectionRange{start: *anchor, end: *focus}, true
+	}
+	return transcriptSelectionRange{start: *focus, end: *anchor}, true
+}
+
+func (m *Model) transcriptLine(row int) string {
+	lines := m.transcriptSelectionSourceLines()
+	if row < 0 || row >= len(lines) {
+		return ""
+	}
+	return lines[row]
+}
+
+func (m *Model) transcriptLineRange(point transcriptSelectionPoint) transcriptSelectionRange {
+	return transcriptSelectionRange{
+		start: transcriptSelectionPoint{row: point.row, col: 0},
+		end:   transcriptSelectionPoint{row: point.row, col: xansi.StringWidth(m.transcriptLine(point.row)), boundary: true},
+	}
+}
+
+type transcriptWordSegment struct {
+	start int
+	end   int
+	kind  uint8
+}
+
+func transcriptWordKind(cluster string) uint8 {
+	r, _ := utf8.DecodeRuneInString(cluster)
+	switch {
+	case unicode.IsSpace(r):
+		return 0
+	case unicode.IsLetter(r) || unicode.IsNumber(r) || r == '_':
+		return 1
+	default:
+		return 2
+	}
+}
+
+func (m *Model) transcriptWordRange(point transcriptSelectionPoint) (transcriptSelectionRange, bool) {
+	plain := xansi.Strip(m.transcriptLine(point.row))
+	segments := make([]transcriptWordSegment, 0, len(plain))
+	column := 0
+	for len(plain) > 0 {
+		cluster, width := xansi.FirstGraphemeCluster(plain, xansi.GraphemeWidth)
+		if len(cluster) == 0 {
+			break
+		}
+		if width < 1 {
+			width = 1
+		}
+		kind := transcriptWordKind(cluster)
+		if len(segments) > 0 && segments[len(segments)-1].kind == kind {
+			segments[len(segments)-1].end = column + width
+		} else {
+			segments = append(segments, transcriptWordSegment{start: column, end: column + width, kind: kind})
+		}
+		column += width
+		plain = plain[len(cluster):]
+	}
+	for _, segment := range segments {
+		if point.col >= segment.start && point.col < segment.end {
+			return transcriptSelectionRange{
+				start: transcriptSelectionPoint{row: point.row, col: segment.start},
+				end:   transcriptSelectionPoint{row: point.row, col: segment.end, boundary: true},
+			}, true
+		}
+	}
+	return transcriptSelectionRange{}, false
+}
+
+func transcriptGraphemeCellRange(line string, column int) (int, int, bool) {
+	plain := xansi.Strip(line)
+	position := 0
+	for len(plain) > 0 {
+		cluster, width := xansi.FirstGraphemeCluster(plain, xansi.GraphemeWidth)
+		if len(cluster) == 0 {
+			break
+		}
+		if width < 1 {
+			width = 1
+		}
+		if column >= position && column < position+width {
+			return position, position + width, true
+		}
+		position += width
+		plain = plain[len(cluster):]
+	}
+	return position, position, false
+}
+
+func transcriptSelectionColumns(line string, row int, selection transcriptSelectionRange) (int, int) {
+	lineWidth := xansi.StringWidth(line)
+	start, end := 0, lineWidth
+	if row == selection.start.row {
+		if cellStart, _, ok := transcriptGraphemeCellRange(line, selection.start.col); ok {
+			start = cellStart
+		} else {
+			start = min(max(0, selection.start.col), lineWidth)
+		}
+	}
+	if row == selection.end.row {
+		if selection.end.boundary {
+			end = min(max(0, selection.end.col), lineWidth)
+		} else if _, cellEnd, ok := transcriptGraphemeCellRange(line, selection.end.col); ok {
+			end = cellEnd
+		} else {
+			end = min(max(0, selection.end.col+1), lineWidth)
+		}
+	}
+	return min(start, lineWidth), max(min(end, lineWidth), min(start, lineWidth))
+}
+
+func (m *Model) selectedTranscriptText() string {
+	selection, ok := m.transcriptSelectionBounds()
+	if !ok {
+		return ""
+	}
+	lines := m.transcriptSelectionSourceLines()
+	if selection.start.row < 0 || selection.end.row >= len(lines) {
+		return ""
+	}
+	selected := make([]string, 0, selection.end.row-selection.start.row+1)
+	for row := selection.start.row; row <= selection.end.row; row++ {
+		line := lines[row]
+		start, end := transcriptSelectionColumns(line, row, selection)
+		text := xansi.Strip(xansi.Cut(line, start, end))
+		selected = append(selected, strings.TrimRight(text, " \t"))
+	}
+	return strings.Join(selected, "\n")
+}
+
+func applyTranscriptSelectionHighlight(text string) string {
+	if text == "" {
+		return text
+	}
+	var out strings.Builder
+	out.Grow(len(text) + 16)
+	out.WriteString("\x1b[7m")
+	for index := 0; index < len(text); {
+		if text[index] != '\x1b' || index+1 >= len(text) || text[index+1] != '[' {
+			out.WriteByte(text[index])
+			index++
+			continue
+		}
+		end := index + 2
+		for end < len(text) && (text[end] < 0x40 || text[end] > 0x7e) {
+			end++
+		}
+		if end >= len(text) {
+			out.WriteString(text[index:])
+			break
+		}
+		end++
+		out.WriteString(text[index:end])
+		if text[end-1] == 'm' {
+			out.WriteString("\x1b[7m")
+		}
+		index = end
+	}
+	out.WriteString("\x1b[27m")
+	return out.String()
+}
+
+func (m *Model) cacheTranscriptSelectionView() {
+	m.transcriptSelectionView = m.transcript.View()
+	m.transcriptSelectionViewRow = m.transcript.YOffset
+	m.transcriptSelectionViewValid = true
+}
+
+func (m *Model) renderTranscriptView() string {
+	if m.transcriptSelection.pressActive && m.transcriptSelectionRenderedValid {
+		return m.transcriptSelectionRendered
+	}
+	view := ""
+	if m.transcriptSelectionViewValid && m.transcriptSelectionViewRow == m.transcript.YOffset {
+		view = m.transcriptSelectionView
+	} else {
+		view = m.transcript.View()
+		if m.transcriptSelection.pressActive {
+			m.transcriptSelectionView = view
+			m.transcriptSelectionViewRow = m.transcript.YOffset
+			m.transcriptSelectionViewValid = true
+		}
+	}
+	selection, ok := m.transcriptSelectionBounds()
+	if !ok || view == "" {
+		m.transcriptSelectionRendered = view
+		m.transcriptSelectionRenderedValid = true
+		return view
+	}
+	visible := strings.Split(view, "\n")
+	for index, line := range visible {
+		row := m.transcript.YOffset + index
+		if row < selection.start.row || row > selection.end.row {
+			continue
+		}
+		source := m.transcriptLine(row)
+		start, end := transcriptSelectionColumns(source, row, selection)
+		if end <= start {
+			continue
+		}
+		lineWidth := xansi.StringWidth(line)
+		start = min(start, lineWidth)
+		end = min(end, lineWidth)
+		before := xansi.Cut(line, 0, start)
+		selected := xansi.Cut(line, start, end)
+		after := xansi.Cut(line, end, lineWidth)
+		visible[index] = before + applyTranscriptSelectionHighlight(selected) + after
+	}
+	rendered := strings.Join(visible, "\n")
+	m.transcriptSelectionRendered = rendered
+	m.transcriptSelectionRenderedValid = true
+	return rendered
+}
+
+func (m *Model) updateTranscriptSelectionAutoScroll(x, y int) tea.Cmd {
+	top := m.transcriptSelectionTop()
+	bottom := top + m.transcript.Height - 1
+	direction := 0
+	step := 0
+	if y <= top {
+		direction = -1
+		step = (top-y+1)*2 + 2
+	} else if y >= bottom {
+		direction = 1
+		step = (y-bottom+1)*2 + 2
+	}
+	m.transcriptSelection.autoScrollX = x
+	m.transcriptSelection.autoScrollY = y
+	// Native terminal selection accelerates as the pointer moves farther beyond
+	// the text region. Cell-motion coordinates may be outside the viewport, so
+	// use that distance while capping jumps to preserve visual tracking.
+	m.transcriptSelection.autoScrollStep = min(max(4, step), max(8, m.transcript.Height/2))
+	if direction == 0 {
+		m.stopTranscriptSelectionAutoScroll()
+		return nil
+	}
+	if m.transcriptSelection.autoScroll == direction {
+		return nil
+	}
+	m.transcriptSelection.autoScroll = direction
+	m.transcriptSelection.autoScrollTicks = 0
+	m.transcriptSelection.autoScrollID++
+	id := m.transcriptSelection.autoScrollID
+	return tea.Tick(transcriptSelectionAutoScrollInterval, func(time.Time) tea.Msg {
+		return transcriptSelectionAutoScrollMsg(id)
+	})
+}
+
+func (m *Model) stopTranscriptSelectionAutoScroll() {
+	m.transcriptSelection.autoScroll = 0
+	m.transcriptSelection.autoScrollTicks = 0
+	m.transcriptSelection.autoScrollID++
+}
+
+func (m *Model) handleTranscriptSelectionAutoScroll(id uint64) tea.Cmd {
+	selection := &m.transcriptSelection
+	if !selection.pressActive || selection.autoScroll == 0 || selection.autoScrollID != id {
+		return nil
+	}
+	before := m.transcript.YOffset
+	// Terminal mouse coordinates commonly clamp to the last visible row, so
+	// pointer distance alone cannot accelerate further. Ramp with dwell time as
+	// native terminal selection does, eventually moving one viewport per frame.
+	selection.autoScrollTicks++
+	step := min(max(1, selection.autoScrollStep+selection.autoScrollTicks/2), max(1, m.transcript.Height))
+	if selection.autoScroll < 0 {
+		m.transcript.ScrollUp(step)
+	} else {
+		m.transcript.ScrollDown(step)
+		m.catchUpTranscriptAtBottom()
+	}
+	if m.transcript.YOffset == before {
+		m.stopTranscriptSelectionAutoScroll()
+		return nil
+	}
+	if point, ok := m.transcriptSelectionPointAt(selection.autoScrollX, selection.autoScrollY, true); ok {
+		m.updateTranscriptSelectionFocus(point)
+		m.transcriptSelectionRenderedValid = false
+	}
+	return tea.Tick(transcriptSelectionAutoScrollInterval, func(time.Time) tea.Msg {
+		return transcriptSelectionAutoScrollMsg(id)
+	})
+}

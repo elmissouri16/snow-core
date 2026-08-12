@@ -46,7 +46,7 @@ func TestListModelsRemoteMetadata(t *testing.T) {
 	if model.SupportsTools || !model.SupportsThinking || !model.SupportsVision {
 		t.Fatalf("capabilities = %+v", model)
 	}
-	if got := model.SupportedThinkingLevels(); len(got) != 3 || got[0] != protocol.ThinkingOff || got[1] != protocol.ThinkingLow || got[2] != protocol.ThinkingHigh {
+	if got := model.SupportedThinkingLevels(); len(got) != 4 || got[0] != protocol.ThinkingOff || got[1] != protocol.ThinkingLow || got[2] != protocol.ThinkingHigh || got[3] != protocol.ThinkingXHigh {
 		t.Fatalf("thinking levels = %v", got)
 	}
 	if model.Pricing == nil || model.Pricing.InputPerMillion != 1.2 {
@@ -103,7 +103,7 @@ func TestListModelsEnrichesAvailabilityFromOpenCodeCatalog(t *testing.T) {
 	if !deepseek.SupportsThinking || !deepseek.SupportsTools {
 		t.Fatalf("enriched capabilities = %+v", deepseek)
 	}
-	if got := deepseek.SupportedThinkingLevels(); len(got) != 3 || got[0] != protocol.ThinkingOff || got[1] != protocol.ThinkingLow || got[2] != protocol.ThinkingHigh {
+	if got := deepseek.SupportedThinkingLevels(); len(got) != 4 || got[0] != protocol.ThinkingOff || got[1] != protocol.ThinkingLow || got[2] != protocol.ThinkingHigh || got[3] != protocol.ThinkingMax {
 		t.Fatalf("enriched thinking levels = %v", got)
 	}
 	if deepseek.Pricing == nil || deepseek.Pricing.InputPerMillion != 0.07 || deepseek.Pricing.CacheReadPerMillion != 0.0014 {
@@ -148,7 +148,7 @@ func TestListModelsSupportedParameterAdvertisesLevels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || !models[0].SupportsThinking || len(models[0].SupportedThinkingLevels()) != 5 {
+	if len(models) != 1 || !models[0].SupportsThinking || len(models[0].SupportedThinkingLevels()) != 4 {
 		t.Fatalf("parameter capability = %+v", models)
 	}
 }
@@ -178,14 +178,20 @@ func TestBuildBodyThinkingMapping(t *testing.T) {
 			protocol.ThinkingLow,
 			protocol.ThinkingMedium,
 			protocol.ThinkingHigh,
+			protocol.ThinkingXHigh,
+			protocol.ThinkingMax,
+			protocol.ThinkingUltra,
 		},
 	}
 	want := map[protocol.ThinkingLevel]string{
 		protocol.ThinkingOff:     "",
-		protocol.ThinkingMinimal: "low",
+		protocol.ThinkingMinimal: "minimal",
 		protocol.ThinkingLow:     "low",
 		protocol.ThinkingMedium:  "medium",
 		protocol.ThinkingHigh:    "high",
+		protocol.ThinkingXHigh:   "xhigh",
+		protocol.ThinkingMax:     "max",
+		protocol.ThinkingUltra:   "ultra",
 	}
 	p := mustNew(t, "http://unused", "key")
 	for level, native := range want {

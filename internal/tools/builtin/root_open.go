@@ -21,7 +21,10 @@ func openRooted(root *os.Root, name string) (*os.File, os.FileInfo, error) {
 	return file, info, nil
 }
 
-func openRootedRegular(root *os.Root, name string) (*os.File, os.FileInfo, error) {
+// OpenRootedRegular opens a regular file through a pinned os.Root. It is
+// exported for other built-in capability packages that need the same
+// race-resistant confinement without broadening filesystem roots.
+func OpenRootedRegular(root *os.Root, name string) (*os.File, os.FileInfo, error) {
 	file, info, err := openRooted(root, name)
 	if err != nil {
 		return nil, nil, err
@@ -31,4 +34,8 @@ func openRootedRegular(root *os.Root, name string) (*os.File, os.FileInfo, error
 		return nil, nil, fmt.Errorf("not a regular file")
 	}
 	return file, info, nil
+}
+
+func openRootedRegular(root *os.Root, name string) (*os.File, os.FileInfo, error) {
+	return OpenRootedRegular(root, name)
 }

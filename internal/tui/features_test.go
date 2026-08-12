@@ -362,6 +362,7 @@ func TestModelPermissionPickerShowsAndNavigates(t *testing.T) {
 	buildAppForTest(t, m)
 	m.width = 100
 	m.height = 30
+	m.inlineTranscript = true
 	m.layout()
 
 	m.handleAgentEvent(permRequestEvent("bash"))

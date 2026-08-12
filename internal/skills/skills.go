@@ -5,27 +5,36 @@ package skills
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	pathpkg "path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
+	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
+
+	"github.com/snow-core/snow/internal/tools/builtin"
 )
 
 const (
-	defaultMaxSkills    = 1000
-	defaultMaxSkillFile = 2 << 20
-	defaultCatalogBytes = 64 << 10
+	defaultMaxSkills      = 1000
+	defaultMaxSkillFile   = 2 << 20
+	defaultCatalogBytes   = 64 << 10
+	catalogDisabledReason = "excluded by Agent Skills catalog byte limit"
 )
 
-var strictNameRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
+var allowedFrontmatterFields = map[string]struct{}{
+	"name": {}, "description": {}, "license": {}, "compatibility": {}, "metadata": {}, "allowed-tools": {},
+}
 
 // Skill is metadata for a discovered Agent Skill. Body is deliberately not
 // retained so edits are picked up at activation time.
@@ -43,6 +52,7 @@ type Skill struct {
 	Enabled       bool              `json:"enabled"`
 	DisabledBy    string            `json:"disabled_by,omitempty"`
 	rank          int
+	identity      fs.FileInfo
 }
 
 // Diagnostic records malformed or shadowed skills without aborting startup.
@@ -67,6 +77,7 @@ type Options struct {
 	OverrideReasons  map[string]string
 	MaxSkills        int
 	MaxSkillFileSize int64
+	MaxCatalogBytes  int
 }
 
 // Registry is the deterministic, collision-resolved skill catalog.
@@ -171,15 +182,27 @@ scanDirs:
 				break scanDirs
 			}
 			candidateCount++
-			location := filepath.Join(abs, entry.Name(), "SKILL.md")
-			skill, diagnostics, err := parse(location, maxFile)
+			directory := filepath.Join(abs, entry.Name())
+			location := filepath.Join(directory, "SKILL.md")
+			root, identity, err := openPinnedSkillRoot(directory)
+			if err != nil {
+				r.diagnostics = append(r.diagnostics, Diagnostic{Path: directory, Level: "error", Message: err.Error()})
+				continue
+			}
+			skill, diagnostics, err := parseRoot(root, location, maxFile)
+			closeErr := root.Close()
 			r.diagnostics = append(r.diagnostics, diagnostics...)
 			if err != nil {
-				if !errors.Is(err, os.ErrNotExist) {
+				if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errNonconformant) {
 					r.diagnostics = append(r.diagnostics, Diagnostic{Path: location, Level: "error", Message: err.Error()})
 				}
 				continue
 			}
+			if closeErr != nil {
+				r.diagnostics = append(r.diagnostics, Diagnostic{Path: directory, Level: "error", Message: closeErr.Error()})
+				continue
+			}
+			skill.identity = identity
 			skill.Scope, skill.Source, skill.rank = dir.scope, dir.source, dir.rank
 			if prior, exists := r.allByName[skill.Name]; exists {
 				if prior.rank > skill.rank {
@@ -191,6 +214,7 @@ scanDirs:
 			r.allByName[skill.Name] = skill
 		}
 	}
+	candidates := make([]Skill, 0, len(r.allByName))
 	for _, skill := range r.allByName {
 		skill.Enabled = !opts.Disabled
 		if !skill.Enabled {
@@ -209,6 +233,32 @@ scanDirs:
 				}
 			}
 		}
+		candidates = append(candidates, skill)
+	}
+	// Prefer higher-precedence locations when the bounded catalog cannot admit
+	// every otherwise-valid entry, then sort the admitted/provider view by name.
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].rank != candidates[j].rank {
+			return candidates[i].rank > candidates[j].rank
+		}
+		return candidates[i].Name < candidates[j].Name
+	})
+	catalogLimit := opts.MaxCatalogBytes
+	if catalogLimit <= 0 {
+		catalogLimit = defaultCatalogBytes
+	}
+	catalogBytes := len(catalogPromptPrefix(true)) + len("</available_skills>")
+	for _, skill := range candidates {
+		if skill.Enabled {
+			entryBytes := len(catalogPromptEntry(skill))
+			if catalogBytes+entryBytes > catalogLimit {
+				skill.Enabled = false
+				skill.DisabledBy = catalogDisabledReason
+				r.diagnostics = append(r.diagnostics, Diagnostic{Path: skill.Location, Skill: skill.Name, Level: "warning", Message: catalogDisabledReason})
+			} else {
+				catalogBytes += entryBytes
+			}
+		}
 		r.allByName[skill.Name] = skill
 		r.allOrdered = append(r.allOrdered, skill)
 		if skill.Enabled {
@@ -221,8 +271,10 @@ scanDirs:
 	return r
 }
 
-func parse(path string, maxBytes int64) (Skill, []Diagnostic, error) {
-	data, err := readBounded(path, maxBytes)
+var errNonconformant = errors.New("Agent Skills frontmatter is nonconformant")
+
+func parseRoot(root *os.Root, path string, maxBytes int64) (Skill, []Diagnostic, error) {
+	data, err := readBoundedRoot(root, "SKILL.md", maxBytes)
 	if err != nil {
 		return Skill{}, nil, err
 	}
@@ -230,34 +282,84 @@ func parse(path string, maxBytes int64) (Skill, []Diagnostic, error) {
 	if err != nil {
 		return Skill{}, nil, err
 	}
+	var raw map[string]any
+	if err := yaml.Unmarshal(meta, &raw); err != nil {
+		return Skill{}, nil, fmt.Errorf("parse YAML frontmatter: %w", err)
+	}
 	var fm frontmatter
 	if err := yaml.Unmarshal(meta, &fm); err != nil {
 		return Skill{}, nil, fmt.Errorf("parse YAML frontmatter: %w", err)
 	}
-	fm.Name = strings.TrimSpace(fm.Name)
+	rawDescription := fm.Description
+	rawCompatibility := fm.Compatibility
+	fm.Name = norm.NFKC.String(strings.TrimSpace(fm.Name))
 	fm.Description = strings.TrimSpace(fm.Description)
-	if fm.Name == "" {
-		return Skill{}, nil, errors.New("missing required name")
-	}
-	if fm.Description == "" {
-		return Skill{}, nil, errors.New("missing required description")
-	}
 	dir := filepath.Dir(path)
 	skill := Skill{Name: fm.Name, Description: fm.Description, License: strings.TrimSpace(fm.License), Compatibility: strings.TrimSpace(fm.Compatibility), Metadata: fm.Metadata, AllowedTools: strings.TrimSpace(fm.AllowedTools), Location: path, Directory: dir}
 	var diagnostics []Diagnostic
-	if len(skill.Name) > 64 || !strictNameRE.MatchString(skill.Name) || strings.Contains(skill.Name, "--") {
-		diagnostics = append(diagnostics, Diagnostic{Path: path, Skill: skill.Name, Level: "warning", Message: "name does not satisfy the Agent Skills naming constraints; loaded leniently"})
+	invalid := func(message string) {
+		diagnostics = append(diagnostics, Diagnostic{Path: path, Skill: skill.Name, Level: "error", Message: message})
 	}
-	if filepath.Base(dir) != skill.Name {
-		diagnostics = append(diagnostics, Diagnostic{Path: path, Skill: skill.Name, Level: "warning", Message: "name does not match parent directory; loaded leniently"})
+	for _, field := range []string{"name", "description", "license", "compatibility", "allowed-tools"} {
+		if value, present := raw[field]; present {
+			if _, ok := value.(string); !ok {
+				invalid(fmt.Sprintf("frontmatter field %q must be a string", field))
+			}
+		}
 	}
-	if len(skill.Description) > 1024 {
-		diagnostics = append(diagnostics, Diagnostic{Path: path, Skill: skill.Name, Level: "warning", Message: "description exceeds 1024 characters; loaded leniently"})
+	if value, present := raw["metadata"]; present {
+		mapping, ok := value.(map[string]any)
+		if !ok || mapping == nil {
+			invalid("frontmatter field \"metadata\" must be a string-to-string mapping")
+		} else {
+			for key, metadataValue := range mapping {
+				if _, ok := metadataValue.(string); !ok {
+					invalid(fmt.Sprintf("metadata value %q must be a string", key))
+				}
+			}
+		}
 	}
-	if len(skill.Compatibility) > 500 {
-		diagnostics = append(diagnostics, Diagnostic{Path: path, Skill: skill.Name, Level: "warning", Message: "compatibility exceeds 500 characters; loaded leniently"})
+	if skill.Name == "" {
+		invalid("missing required name")
+	} else if !validSkillName(skill.Name) {
+		invalid("name does not satisfy the Agent Skills naming constraints")
 	}
-	return skill, diagnostics, nil
+	if norm.NFKC.String(filepath.Base(dir)) != skill.Name {
+		invalid("name must match the parent directory")
+	}
+	if skill.Description == "" {
+		invalid("missing required description")
+	} else if utf8.RuneCountInString(rawDescription) > 1024 {
+		invalid("description exceeds 1024 characters")
+	}
+	if _, present := raw["compatibility"]; present {
+		if skill.Compatibility == "" {
+			invalid("compatibility must be non-empty when provided")
+		} else if utf8.RuneCountInString(rawCompatibility) > 500 {
+			invalid("compatibility exceeds 500 characters")
+		}
+	}
+	for field := range raw {
+		if _, ok := allowedFrontmatterFields[field]; !ok {
+			invalid(fmt.Sprintf("unexpected frontmatter field %q", field))
+		}
+	}
+	if len(diagnostics) > 0 {
+		return Skill{}, diagnostics, errNonconformant
+	}
+	return skill, nil, nil
+}
+
+func validSkillName(name string) bool {
+	if name == "" || utf8.RuneCountInString(name) > 64 || name != strings.ToLower(name) || strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") || strings.Contains(name, "--") {
+		return false
+	}
+	for _, r := range name {
+		if r != '-' && !unicode.IsLetter(r) && !unicode.IsNumber(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func split(data []byte) (meta, body []byte, err error) {
@@ -279,19 +381,52 @@ func split(data []byte) (meta, body []byte, err error) {
 	return data[4:end], bytes.TrimSpace(data[end+5:]), nil
 }
 
-func readBounded(path string, maxBytes int64) ([]byte, error) {
-	file, err := os.Open(path)
+func openPinnedSkillRoot(path string) (*os.Root, fs.FileInfo, error) {
+	before, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !before.IsDir() || before.Mode()&os.ModeSymlink != 0 {
+		return nil, nil, errors.New("skill path is not a real directory")
+	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	opened, err := root.Stat(".")
+	if err != nil {
+		_ = root.Close()
+		return nil, nil, err
+	}
+	after, err := os.Lstat(path)
+	if err != nil || !after.IsDir() || after.Mode()&os.ModeSymlink != 0 || !os.SameFile(before, opened) || !os.SameFile(after, opened) {
+		_ = root.Close()
+		return nil, nil, errors.New("skill directory changed while it was being opened")
+	}
+	return root, opened, nil
+}
+
+func openSkillRoot(skill Skill) (*os.Root, error) {
+	root, identity, err := openPinnedSkillRoot(skill.Directory)
+	if err != nil {
+		return nil, err
+	}
+	if skill.identity == nil || !os.SameFile(skill.identity, identity) {
+		_ = root.Close()
+		return nil, errors.New("skill directory no longer matches the discovered directory")
+	}
+	return root, nil
+}
+
+func readBoundedRoot(root *os.Root, name string, maxBytes int64) ([]byte, error) {
+	if root == nil {
+		return nil, errors.New("skill directory is closed")
+	}
+	file, info, err := builtin.OpenRootedRegular(root, name)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
-	}
 	if info.Size() > maxBytes {
 		return nil, fmt.Errorf("file exceeds %d-byte limit", maxBytes)
 	}
@@ -338,7 +473,7 @@ func (r *Registry) ResourceSummary(name string) (count int, truncated bool, err 
 	if !ok {
 		return 0, false, fmt.Errorf("unknown skill %q", name)
 	}
-	resources, truncated, err := listResources(skill.Directory, 200)
+	resources, truncated, err := listResources(context.Background(), skill, 200)
 	return len(resources), truncated, err
 }
 
@@ -359,35 +494,66 @@ func (r *Registry) Diagnostics() []Diagnostic {
 	return append([]Diagnostic(nil), r.diagnostics...)
 }
 
-// CatalogPrompt returns tier-one progressive disclosure for the system prompt.
-func (r *Registry) CatalogPrompt() string {
+// DisableAll removes every currently enabled skill from runtime/provider
+// surfaces while retaining the complete management inventory.
+func (r *Registry) DisableAll(reason string) {
+	if r == nil {
+		return
+	}
+	if strings.TrimSpace(reason) == "" {
+		reason = "skills disabled by runtime policy"
+	}
+	for i, skill := range r.allOrdered {
+		if skill.Enabled {
+			skill.Enabled = false
+			skill.DisabledBy = reason
+			r.allOrdered[i] = skill
+			r.allByName[skill.Name] = skill
+		}
+	}
+	clear(r.byName)
+	r.ordered = nil
+}
+
+// Close is retained as the registry lifecycle hook. Resource directory handles
+// are opened per operation and closed immediately, so there is currently no
+// long-lived state to release.
+func (r *Registry) Close() error { return nil }
+
+// CatalogPrompt returns tier-one progressive disclosure for the standard Snow
+// skill tool set.
+func (r *Registry) CatalogPrompt() string { return r.CatalogPromptForTools(true) }
+
+// CatalogPromptForTools omits resource-reader instructions when an explicit
+// tool allowlist excludes that optional capability.
+func (r *Registry) CatalogPromptForTools(resourceReader bool) string {
 	if r == nil || len(r.ordered) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("The following Agent Skills provide specialized instructions. When a task matches a description, or the user explicitly names a skill as $skill-name, call activate_skill with its name before proceeding. Use read_skill_resource for referenced files. Relative paths are rooted at the activated skill directory.\n<available_skills>\n")
-	truncated := false
+	b.WriteString(catalogPromptPrefix(resourceReader))
 	for _, skill := range r.ordered {
-		var entry strings.Builder
-		entry.WriteString("  <skill><name>")
-		_ = xml.EscapeText(&entry, []byte(skill.Name))
-		entry.WriteString("</name><description>")
-		description := skill.Description
-		if len(description) > 1024 {
-			description = strings.ToValidUTF8(description[:1024], "")
-		}
-		_ = xml.EscapeText(&entry, []byte(description))
-		entry.WriteString("</description></skill>\n")
-		if b.Len()+entry.Len()+len("  <truncated>true</truncated>\n</available_skills>") > defaultCatalogBytes {
-			truncated = true
-			break
-		}
-		b.WriteString(entry.String())
-	}
-	if truncated {
-		b.WriteString("  <truncated>true</truncated>\n")
+		b.WriteString(catalogPromptEntry(skill))
 	}
 	b.WriteString("</available_skills>")
+	return b.String()
+}
+
+func catalogPromptPrefix(resourceReader bool) string {
+	prefix := "The following Agent Skills provide specialized instructions. When a task matches a description, call activate_skill with its name before proceeding. A prompt beginning with $skill-name activates that skill directly. Relative paths are rooted at the activated skill directory."
+	if resourceReader {
+		prefix += " Use read_skill_resource for referenced files."
+	}
+	return prefix + "\n<available_skills>\n"
+}
+
+func catalogPromptEntry(skill Skill) string {
+	var b strings.Builder
+	b.WriteString("  <skill><name>")
+	_ = xml.EscapeText(&b, []byte(skill.Name))
+	b.WriteString("</name><description>")
+	_ = xml.EscapeText(&b, []byte(skill.Description))
+	b.WriteString("</description></skill>\n")
 	return b.String()
 }
 
@@ -396,7 +562,12 @@ func (r *Registry) load(name string) (Skill, []byte, error) {
 	if !ok {
 		return Skill{}, nil, fmt.Errorf("unknown skill %q", name)
 	}
-	data, err := readBounded(skill.Location, r.maxFileSize)
+	root, err := openSkillRoot(skill)
+	if err != nil {
+		return Skill{}, nil, err
+	}
+	defer root.Close()
+	data, err := readBoundedRoot(root, "SKILL.md", r.maxFileSize)
 	if err != nil {
 		return Skill{}, nil, err
 	}
@@ -404,42 +575,80 @@ func (r *Registry) load(name string) (Skill, []byte, error) {
 	return skill, body, err
 }
 
-func listResources(root string, limit int) ([]string, bool, error) {
+func listResources(ctx context.Context, skill Skill, limit int) ([]string, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	root, err := openSkillRoot(skill)
+	if err != nil {
+		return nil, false, err
+	}
+	defer root.Close()
+	type directory struct {
+		path  string
+		depth int
+	}
+	stack := []directory{{path: "."}}
 	var resources []string
-	truncated := false
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	entriesSeen := 0
+	for len(stack) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		dir, err := root.Open(current.path)
 		if err != nil {
-			return err
+			return nil, false, err
 		}
-		if path == root {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			if entry.IsDir() {
-				return filepath.SkipDir
+		for {
+			if err := ctx.Err(); err != nil {
+				_ = dir.Close()
+				return nil, false, err
 			}
-			return nil
-		}
-		if entry.IsDir() {
-			if strings.Count(rel, string(filepath.Separator)) >= 5 || entry.Name() == ".git" || entry.Name() == "node_modules" {
-				return filepath.SkipDir
+			entries, readErr := dir.ReadDir(64)
+			for _, entry := range entries {
+				entriesSeen++
+				if entriesSeen > 2000 {
+					_ = dir.Close()
+					sort.Strings(resources)
+					return resources, true, nil
+				}
+				if entry.Type()&os.ModeSymlink != 0 {
+					continue
+				}
+				resourcePath := entry.Name()
+				if current.path != "." {
+					resourcePath = pathpkg.Join(current.path, entry.Name())
+				}
+				if entry.IsDir() {
+					if current.depth < 5 && entry.Name() != ".git" && entry.Name() != "node_modules" {
+						stack = append(stack, directory{path: resourcePath, depth: current.depth + 1})
+					}
+					continue
+				}
+				if resourcePath == "SKILL.md" {
+					continue
+				}
+				if len(resources) >= limit {
+					_ = dir.Close()
+					sort.Strings(resources)
+					return resources, true, nil
+				}
+				resources = append(resources, resourcePath)
 			}
-			return nil
+			if readErr != nil {
+				if errors.Is(readErr, io.EOF) {
+					break
+				}
+				_ = dir.Close()
+				return nil, false, readErr
+			}
 		}
-		if rel == "SKILL.md" {
-			return nil
+		if err := dir.Close(); err != nil {
+			return nil, false, err
 		}
-		if len(resources) >= limit {
-			truncated = true
-			return nil
-		}
-		resources = append(resources, filepath.ToSlash(rel))
-		return nil
-	})
+	}
 	sort.Strings(resources)
-	return resources, truncated, err
+	return resources, false, nil
 }

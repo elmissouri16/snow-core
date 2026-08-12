@@ -1,6 +1,35 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestCompactionGoalAutoThresholdDefaultsDisablesAndValidates(t *testing.T) {
+	cfg := Default()
+	if cfg.Compaction.GoalAutoThresholdPercent != 90 {
+		t.Fatalf("default threshold=%d, want 90", cfg.Compaction.GoalAutoThresholdPercent)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"compaction":{"goal_auto_threshold_percent":0}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Compaction.GoalAutoThresholdPercent != 0 {
+		t.Fatalf("explicit disabled threshold=%d", loaded.Compaction.GoalAutoThresholdPercent)
+	}
+	for _, value := range []int{49, 100} {
+		candidate := DefaultCompaction()
+		candidate.GoalAutoThresholdPercent = value
+		if err := candidate.Validate(); err == nil {
+			t.Fatalf("threshold %d was accepted", value)
+		}
+	}
+}
 
 func TestApplyProjectCompactionPreferences(t *testing.T) {
 	cfg := Default()

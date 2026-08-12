@@ -33,7 +33,7 @@ func TestRemoteCatalogMappingETagAndAccountCache(t *testing.T) {
 		}
 		w.Header().Set("ETag", "tag")
 		_ = json.NewEncoder(w).Encode(modelsResponse{Models: []modelRecord{
-			{Slug: "visible", DisplayName: "Visible", Description: "desc", Visibility: "list", Priority: 2, ContextWindow: 1000, MaxContextWindow: 2000, EffectiveContextWindowPercent: 95, SupportVerbosity: true, SupportsReasoningSummaryParameter: boolPointer(true), InputModalities: []string{"text", "image"}, DefaultReasoningLevel: "medium", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"xhigh"}, {"high"}}, Upgrade: &modelUpgradeRecord{Model: "next", MigrationMarkdown: "move"}},
+			{Slug: "visible", DisplayName: "Visible", Description: "desc", Visibility: "list", Priority: 2, ContextWindow: 1000, MaxContextWindow: 2000, EffectiveContextWindowPercent: 95, SupportVerbosity: true, SupportsReasoningSummaryParameter: boolPointer(true), InputModalities: []string{"text", "image"}, DefaultReasoningLevel: "xhigh", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"xhigh"}, {"max"}, {"ultra"}, {"high"}}, Upgrade: &modelUpgradeRecord{Model: "next", MigrationMarkdown: "move"}},
 			{Slug: "hidden", Visibility: "hide", Priority: 1},
 			{Slug: "spark", Visibility: "list", Priority: 1, SupportedInAPI: false, ContextWindow: 128000, SupportsReasoningSummaryParameter: boolPointer(false), SupportedReasoningLevels: []reasoningLevelRecord{{"medium"}}},
 		}})
@@ -51,13 +51,13 @@ func TestRemoteCatalogMappingETagAndAccountCache(t *testing.T) {
 		t.Fatalf("models=%+v", models)
 	}
 	m := models[1]
-	if m.ContextWindow != 950 || m.MaxContextWindow != 2000 || !m.SupportsVision || !m.SupportsVerbosity || m.SupportsReasoningSummary == nil || !*m.SupportsReasoningSummary || m.DefaultThinking != protocol.ThinkingMedium || m.Upgrade == nil || m.Upgrade.Model != "next" {
+	if m.ContextWindow != 950 || m.MaxContextWindow != 2000 || !m.SupportsVision || !m.SupportsVerbosity || m.SupportsReasoningSummary == nil || !*m.SupportsReasoningSummary || m.DefaultThinking != protocol.ThinkingXHigh || m.Upgrade == nil || m.Upgrade.Model != "next" {
 		t.Fatalf("mapped=%+v", m)
 	}
 	if models[0].SupportsReasoningSummary == nil || *models[0].SupportsReasoningSummary {
 		t.Fatalf("Spark-like explicit summary capability was not preserved: %+v", models[0])
 	}
-	if got := m.SupportedThinkingLevels(); len(got) != 3 || got[1] != protocol.ThinkingLow || got[2] != protocol.ThinkingHigh {
+	if got := m.SupportedThinkingLevels(); len(got) != 6 || got[1] != protocol.ThinkingLow || got[2] != protocol.ThinkingXHigh || got[3] != protocol.ThinkingMax || got[4] != protocol.ThinkingUltra || got[5] != protocol.ThinkingHigh {
 		t.Fatalf("levels=%v", got)
 	}
 	if _, err = p.RefreshModels(context.Background()); err != nil {

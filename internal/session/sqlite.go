@@ -22,39 +22,125 @@ import (
 // queried when Messages or ContextMessages is requested. modernc.org/sqlite is
 // a pure-Go, CGo-free database/sql driver.
 type SQLiteStore struct {
-	mu       sync.RWMutex
-	path     string
-	header   Header
-	tip      string
-	branchID string
-	db       *sql.DB
-	closed   bool
+	mu            sync.RWMutex
+	path          string
+	header        Header
+	tip           string
+	branchID      string
+	db            *sql.DB
+	closed        bool
+	deleteIfEmpty bool
+}
+
+// ValidateSQLiteSession verifies that path is an existing Snow session without
+// changing its contents or permissions. Resume-oriented surfaces use this
+// before runtime construction so an unrelated SQLite database is never opened
+// through the schema-migrating store constructor.
+func ValidateSQLiteSession(path string) error {
+	if path == "" {
+		return errors.New("session: sqlite path is empty")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("session: stat: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("session: sqlite path is not a regular file")
+	}
+	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(path))
+	if err != nil {
+		return fmt.Errorf("session: validate sqlite open: %w", err)
+	}
+	defer db.Close()
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("session: validate sqlite ping: %w", err)
+	}
+	return validateSQLiteSessionDB(db)
+}
+
+func validateSQLiteSessionDB(db *sql.DB) error {
+	var version, count int
+	var id, cwd, name, tip string
+	var createdAt int64
+	if err := db.QueryRow(`SELECT count(*) FROM session_meta`).Scan(&count); err != nil {
+		return fmt.Errorf("session: invalid sqlite session metadata: %w", err)
+	}
+	if count != 1 {
+		return fmt.Errorf("session: invalid sqlite session metadata rows: %d", count)
+	}
+	if err := db.QueryRow(`SELECT version, session_id, created_at, cwd, name, branch_tip FROM session_meta WHERE singleton = 1`).
+		Scan(&version, &id, &createdAt, &cwd, &name, &tip); err != nil {
+		return fmt.Errorf("session: invalid sqlite session metadata: %w", err)
+	}
+	if version < 1 || version > SessionVersion {
+		return fmt.Errorf("session: unsupported version %d", version)
+	}
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(tip) == "" {
+		return errors.New("session: invalid sqlite session identity")
+	}
+	var seq int64
+	var parentID, entryType, summary, metaKey, metaValue string
+	var message []byte
+	if err := db.QueryRow(`SELECT seq, parent_id, entry_type, message, summary, meta_key, meta_value FROM entries WHERE id = 'root'`).
+		Scan(&seq, &parentID, &entryType, &message, &summary, &metaKey, &metaValue); err != nil {
+		return fmt.Errorf("session: invalid sqlite session root: %w", err)
+	}
+	if seq < 1 || parentID != "" || entryType != string(EntryMeta) || metaKey != "root" || metaValue != id {
+		return errors.New("session: invalid sqlite session root")
+	}
+	var tipCount int
+	if err := db.QueryRow(`SELECT count(*) FROM entries WHERE id = ?`, tip).Scan(&tipCount); err != nil {
+		return fmt.Errorf("session: invalid sqlite session tip: %w", err)
+	}
+	if tipCount != 1 {
+		return errors.New("session: invalid sqlite session tip")
+	}
+	return nil
 }
 
 // NewSQLiteStore opens or creates a SQLite-backed session database at path.
 // Existing JSONL files are intentionally not supported; session storage now
 // uses the SQLite schema exclusively.
 func NewSQLiteStore(path, cwd string, opts Options) (*SQLiteStore, error) {
+	return newSQLiteStore(path, cwd, opts, false)
+}
+
+// OpenSQLiteStore opens an existing Snow session without creating a missing
+// path or mutating a non-Snow SQLite database.
+func OpenSQLiteStore(path, cwd string, opts Options) (*SQLiteStore, error) {
+	return newSQLiteStore(path, cwd, opts, true)
+}
+
+func newSQLiteStore(path, cwd string, opts Options, existingOnly bool) (*SQLiteStore, error) {
 	if path == "" {
 		return nil, errors.New("session: sqlite path is empty")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("session: mkdir: %w", err)
+	if !existingOnly {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, fmt.Errorf("session: mkdir: %w", err)
+		}
 	}
 	existing := false
 	if info, err := os.Stat(path); err == nil {
 		existing = true
-		if info.Mode().IsRegular() && info.Size() == 0 {
+		if !info.Mode().IsRegular() {
+			return nil, errors.New("session: sqlite path is not a regular file")
+		}
+		if info.Size() == 0 {
 			return nil, errors.New("session: existing sqlite database is empty")
 		}
-	} else if !os.IsNotExist(err) {
+	} else if existingOnly || !os.IsNotExist(err) {
 		return nil, fmt.Errorf("session: stat: %w", err)
 	}
 	id := opts.ID
 	if id == "" {
 		id = newID()
 	}
-	db, err := sql.Open("sqlite", sqliteDSN(path))
+	dsn := sqliteDSN(path)
+	if existingOnly {
+		dsn = sqliteExistingDSN(path)
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("session: sqlite open: %w", err)
 	}
@@ -69,15 +155,31 @@ func NewSQLiteStore(path, cwd string, opts Options) (*SQLiteStore, error) {
 	if err := db.Ping(); err != nil {
 		return closeDB(fmt.Errorf("session: sqlite ping: %w", err))
 	}
-	// Session databases contain prompts and tool results.
-	if err := os.Chmod(path, 0o600); err != nil {
-		return closeDB(fmt.Errorf("session: sqlite chmod: %w", err))
+	if existingOnly {
+		// Validate through the exact read/write connection before chmod, persistent
+		// journal changes, or schema migration. This closes both missing-path
+		// recreation and replacement races without touching unrelated databases.
+		if err := validateSQLiteSessionDB(db); err != nil {
+			return closeDB(err)
+		}
+		if _, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000`); err != nil {
+			return closeDB(fmt.Errorf("session: sqlite configure existing: %w", err))
+		}
+	}
+	// New/create-capable paths are owned by Snow and contain prompts and tool
+	// results. Existing-only opens intentionally avoid name-based chmod: the
+	// validated SQLite connection is pinned to an inode, while path could be
+	// replaced with an unrelated file or symlink before chmod executes.
+	if !existingOnly {
+		if err := os.Chmod(path, 0o600); err != nil {
+			return closeDB(fmt.Errorf("session: sqlite chmod: %w", err))
+		}
 	}
 	if err := createSQLiteSchema(db); err != nil {
 		return closeDB(err)
 	}
 
-	s := &SQLiteStore{path: path, db: db, branchID: "main"}
+	s := &SQLiteStore{path: path, db: db, branchID: "main", deleteIfEmpty: !existingOnly}
 	var count int
 	if err := db.QueryRow(`SELECT count(*) FROM session_meta`).Scan(&count); err != nil {
 		return closeDB(fmt.Errorf("session: sqlite metadata count: %w", err))
@@ -150,6 +252,34 @@ func NewSQLiteStore(path, cwd string, opts Options) (*SQLiteStore, error) {
 	return s, nil
 }
 
+func sqliteReadOnlyDSN(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	u := url.URL{Scheme: "file", Path: abs}
+	q := u.Query()
+	q.Set("mode", "ro")
+	q.Add("_pragma", "query_only(1)")
+	q.Add("_pragma", "busy_timeout(5000)")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func sqliteExistingDSN(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	u := url.URL{Scheme: "file", Path: abs}
+	q := u.Query()
+	q.Set("mode", "rw")
+	q.Add("_pragma", "foreign_keys(1)")
+	q.Add("_pragma", "busy_timeout(5000)")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 func sqliteDSN(path string) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -218,6 +348,17 @@ func createSQLiteSchema(db *sql.DB) error {
 			seconds_used INTEGER NOT NULL DEFAULT 0,
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS thread_goal_costs (
+			branch_id TEXT NOT NULL,
+			currency TEXT NOT NULL,
+			input_cost REAL NOT NULL DEFAULT 0,
+			output_cost REAL NOT NULL DEFAULT 0,
+			cache_read_cost REAL NOT NULL DEFAULT 0,
+			cache_write_cost REAL NOT NULL DEFAULT 0,
+			total_cost REAL NOT NULL DEFAULT 0,
+			PRIMARY KEY(branch_id, currency),
+			FOREIGN KEY(branch_id) REFERENCES thread_goals(branch_id) ON DELETE CASCADE
 		);
 		CREATE TABLE IF NOT EXISTS thread_goal_deferrals (
 			branch_id TEXT PRIMARY KEY,
@@ -321,6 +462,12 @@ func ensureBranches(db *sql.DB, tip string, createdAt int64, version int) error 
 			return fmt.Errorf("session: branch parent migration: %w", err)
 		}
 	}
+	if version < 8 {
+		if err := backfillGoalCosts(tx); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("session: goal cost migration: %w", err)
+		}
+	}
 	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS session_branches_name_idx ON session_branches(branch_name COLLATE NOCASE)`); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("session: branch name index: %w", err)
@@ -333,6 +480,83 @@ func ensureBranches(db *sql.DB, tip string, createdAt int64, version int) error 
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("session: sqlite branch migration commit: %w", err)
+	}
+	return nil
+}
+
+func backfillGoalCosts(tx *sql.Tx) error {
+	type legacyGoal struct {
+		branchID           string
+		tokens, start, end int64
+	}
+	rows, err := tx.Query(`SELECT branch_id, tokens_used, created_at, updated_at FROM thread_goals
+		WHERE tokens_used > 0 AND NOT EXISTS (SELECT 1 FROM thread_goal_costs WHERE thread_goal_costs.branch_id = thread_goals.branch_id)`)
+	if err != nil {
+		return err
+	}
+	var goals []legacyGoal
+	for rows.Next() {
+		var goal legacyGoal
+		if err := rows.Scan(&goal.branchID, &goal.tokens, &goal.start, &goal.end); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		goals = append(goals, goal)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, goal := range goals {
+		messageRows, err := tx.Query(`WITH RECURSIVE chain(id, parent_id, entry_type, message) AS (
+			SELECT e.id, e.parent_id, e.entry_type, e.message FROM entries e
+			JOIN session_branches b ON b.tip_id = e.id WHERE b.branch_id = ?
+			UNION ALL
+			SELECT e.id, e.parent_id, e.entry_type, e.message FROM entries e
+			JOIN chain c ON c.parent_id = e.id WHERE c.parent_id != ''
+		) SELECT message FROM chain WHERE entry_type = ? AND message IS NOT NULL`, goal.branchID, EntryMessage)
+		if err != nil {
+			return err
+		}
+		var tokenTotal int64
+		costs := []protocol.Cost(nil)
+		priced := true
+		for messageRows.Next() {
+			var raw []byte
+			if err := messageRows.Scan(&raw); err != nil {
+				_ = messageRows.Close()
+				return err
+			}
+			var message protocol.Message
+			if err := json.Unmarshal(raw, &message); err != nil || message.Role != protocol.RoleAssistant || message.Usage == nil || message.Timestamp < goal.start || message.Timestamp > goal.end {
+				continue
+			}
+			tokens := message.Usage.Total
+			if tokens == 0 {
+				tokens = message.Usage.Input + message.Usage.Output
+			}
+			tokenTotal += int64(tokens)
+			cost, costErr := normalizedGoalCostDelta(message.Usage.Cost)
+			if costErr != nil || cost == nil {
+				priced = false
+				continue
+			}
+			costs, costErr = addGoalCost(costs, cost)
+			if costErr != nil {
+				_ = messageRows.Close()
+				return costErr
+			}
+		}
+		if err := messageRows.Close(); err != nil {
+			return err
+		}
+		// Historical messages did not carry an explicit goal-origin marker.
+		// Backfill only when their exact token sum proves an unambiguous match.
+		if !priced || tokenTotal != goal.tokens || len(costs) == 0 {
+			continue
+		}
+		if err := replaceGoalCosts(tx, goal.branchID, costs); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -401,15 +625,76 @@ func scanGoal(row interface{ Scan(...any) error }, sessionID, branchID string) (
 	return &g, g.Validate()
 }
 
+type goalCostQuerier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func loadGoalCosts(queryer goalCostQuerier, branchID string, goal *protocol.ThreadGoal) error {
+	if goal == nil {
+		return nil
+	}
+	rows, err := queryer.Query(`SELECT currency, input_cost, output_cost, cache_read_cost, cache_write_cost, total_cost
+		FROM thread_goal_costs WHERE branch_id = ? ORDER BY currency`, branchID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	goal.EstimatedCosts = nil
+	for rows.Next() {
+		var cost protocol.Cost
+		if err := rows.Scan(&cost.Currency, &cost.Input, &cost.Output, &cost.CacheRead, &cost.CacheWrite, &cost.Total); err != nil {
+			return err
+		}
+		goal.EstimatedCosts = append(goal.EstimatedCosts, cost)
+	}
+	return rows.Err()
+}
+
+func scanGoalWithCosts(row interface{ Scan(...any) error }, queryer goalCostQuerier, sessionID, branchID string) (*protocol.ThreadGoal, error) {
+	goal, err := scanGoal(row, sessionID, branchID)
+	if err != nil || goal == nil {
+		return goal, err
+	}
+	if err := loadGoalCosts(queryer, branchID, goal); err != nil {
+		return nil, err
+	}
+	return goal, goal.Validate()
+}
+
+func replaceGoalCosts(tx *sql.Tx, branchID string, costs []protocol.Cost) error {
+	if _, err := tx.Exec(`DELETE FROM thread_goal_costs WHERE branch_id = ?`, branchID); err != nil {
+		return err
+	}
+	for i := range costs {
+		cost, err := normalizedGoalCostDelta(&costs[i])
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO thread_goal_costs(branch_id, currency, input_cost, output_cost, cache_read_cost, cache_write_cost, total_cost)
+			VALUES(?,?,?,?,?,?,?)`, branchID, cost.Currency, cost.Input, cost.Output, cost.CacheRead, cost.CacheWrite, cost.Total); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *SQLiteStore) Goal() (*protocol.ThreadGoal, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
 		return nil, errors.New("session: store closed")
 	}
-	g, err := scanGoal(s.db.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), s.header.ID, s.branchID)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("session: sqlite goal begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	g, err := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
 	if err != nil {
 		return nil, fmt.Errorf("session: sqlite goal: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("session: sqlite goal commit: %w", err)
 	}
 	return g, nil
 }
@@ -442,6 +727,9 @@ func (s *SQLiteStore) CreateGoal(goal protocol.ThreadGoal, replace bool) error {
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
 		return errors.New("session: unfinished goal already exists")
+	}
+	if err := replaceGoalCosts(tx, s.branchID, goal.EstimatedCosts); err != nil {
+		return fmt.Errorf("session: sqlite replace goal costs: %w", err)
 	}
 	if _, err := tx.Exec(`DELETE FROM thread_goal_deferrals WHERE branch_id = ?`, s.branchID); err != nil {
 		return fmt.Errorf("session: sqlite clear goal deferral: %w", err)
@@ -478,6 +766,9 @@ func (s *SQLiteStore) ReplaceGoal(expected string, goal protocol.ThreadGoal) err
 	if n, _ := res.RowsAffected(); n != 1 {
 		return errors.New("session: stale goal id")
 	}
+	if err := replaceGoalCosts(tx, s.branchID, goal.EstimatedCosts); err != nil {
+		return fmt.Errorf("session: sqlite replace goal costs: %w", err)
+	}
 	if _, err := tx.Exec(`DELETE FROM thread_goal_deferrals WHERE branch_id = ?`, s.branchID); err != nil {
 		return fmt.Errorf("session: sqlite clear goal deferral: %w", err)
 	}
@@ -500,14 +791,14 @@ func (s *SQLiteStore) ReviseGoal(expected, nextGoalID, objective string) (*proto
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UnixMilli()
-	g, err := scanGoal(tx.QueryRow(`UPDATE thread_goals SET goal_id=?, objective=?, status=?, updated_at=?
+	g, err := scanGoalWithCosts(tx.QueryRow(`UPDATE thread_goals SET goal_id=?, objective=?, status=?, updated_at=?
 		WHERE branch_id=? AND goal_id=?
-		RETURNING goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at`, nextGoalID, objective, protocol.GoalActive, now, s.branchID, expected), s.header.ID, s.branchID)
+		RETURNING goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at`, nextGoalID, objective, protocol.GoalActive, now, s.branchID, expected), tx, s.header.ID, s.branchID)
 	if err != nil {
 		return nil, err
 	}
 	if g == nil {
-		current, readErr := scanGoal(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), s.header.ID, s.branchID)
+		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
 		if readErr != nil {
 			return nil, readErr
 		}
@@ -537,14 +828,14 @@ func (s *SQLiteStore) TransitionGoal(expected string, expectedStatus, nextStatus
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UnixMilli()
-	g, err := scanGoal(tx.QueryRow(`UPDATE thread_goals SET status=?, updated_at=?
+	g, err := scanGoalWithCosts(tx.QueryRow(`UPDATE thread_goals SET status=?, updated_at=?
 		WHERE branch_id=? AND goal_id=? AND status=?
-		RETURNING goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at`, nextStatus, now, s.branchID, expected, expectedStatus), s.header.ID, s.branchID)
+		RETURNING goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at`, nextStatus, now, s.branchID, expected, expectedStatus), tx, s.header.ID, s.branchID)
 	if err != nil {
 		return nil, err
 	}
 	if g == nil {
-		current, readErr := scanGoal(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), s.header.ID, s.branchID)
+		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
 		if readErr != nil {
 			return nil, readErr
 		}
@@ -589,29 +880,37 @@ func (s *SQLiteStore) UpdateGoal(expected string, objective *string, status *pro
 		}
 		budgetSet, budgetValue = 1, *budget
 	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("session: sqlite update goal begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UnixMilli()
-	g, err := scanGoal(s.db.QueryRow(`UPDATE thread_goals SET
+	g, err := scanGoalWithCosts(tx.QueryRow(`UPDATE thread_goals SET
 		objective = CASE WHEN ? = 1 THEN ? ELSE objective END,
 		status = CASE WHEN ? = 1 THEN ? ELSE status END,
 		token_budget = CASE WHEN ? = 1 THEN ? ELSE token_budget END,
 		updated_at = ?
 		WHERE branch_id = ? AND goal_id = ?
 		RETURNING goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at`,
-		objectiveSet, objectiveValue, statusSet, statusValue, budgetSet, budgetValue, now, s.branchID, expected), s.header.ID, s.branchID)
+		objectiveSet, objectiveValue, statusSet, statusValue, budgetSet, budgetValue, now, s.branchID, expected), tx, s.header.ID, s.branchID)
 	if err != nil {
 		return nil, err
 	}
-	if g != nil {
-		return g.Clone(), nil
+	if g == nil {
+		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
+		if readErr != nil {
+			return nil, readErr
+		}
+		if current == nil {
+			return nil, ErrNotFound
+		}
+		return nil, errors.New("session: stale goal id")
 	}
-	current, readErr := scanGoal(s.db.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), s.header.ID, s.branchID)
-	if readErr != nil {
-		return nil, readErr
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("session: sqlite update goal commit: %w", err)
 	}
-	if current == nil {
-		return nil, ErrNotFound
-	}
-	return nil, errors.New("session: stale goal id")
+	return g.Clone(), nil
 }
 
 func (s *SQLiteStore) ClearGoal(expected string) error {
@@ -645,14 +944,23 @@ func (s *SQLiteStore) ClearGoal(expected string) error {
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) AccountGoal(expected string, tokens, seconds int64) (*protocol.ThreadGoal, bool, error) {
+func (s *SQLiteStore) AccountGoal(expected string, tokens, seconds int64, estimatedCostDelta *protocol.Cost) (*protocol.ThreadGoal, bool, error) {
 	if tokens < 0 || seconds < 0 {
 		return nil, false, errors.New("session: goal usage delta cannot be negative")
 	}
+	cost, err := normalizedGoalCostDelta(estimatedCostDelta)
+	if err != nil {
+		return nil, false, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, false, fmt.Errorf("session: sqlite account goal begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UnixMilli()
-	g, err := scanGoal(s.db.QueryRow(`UPDATE thread_goals
+	g, err := scanGoal(tx.QueryRow(`UPDATE thread_goals
 		SET tokens_used = tokens_used + ?, seconds_used = seconds_used + ?,
 			status = CASE WHEN status = ? AND token_budget IS NOT NULL AND tokens_used + ? >= token_budget THEN ? ELSE status END,
 			updated_at = ?
@@ -664,7 +972,7 @@ func (s *SQLiteStore) AccountGoal(expected string, tokens, seconds int64) (*prot
 		return nil, false, err
 	}
 	if g == nil {
-		current, readErr := scanGoal(s.db.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), s.header.ID, s.branchID)
+		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
 		if readErr != nil {
 			return nil, false, readErr
 		}
@@ -672,6 +980,38 @@ func (s *SQLiteStore) AccountGoal(expected string, tokens, seconds int64) (*prot
 			return current, false, nil
 		}
 		return nil, false, errors.New("session: goal usage overflow")
+	}
+	if cost != nil {
+		var existing protocol.Cost
+		err := tx.QueryRow(`SELECT currency, input_cost, output_cost, cache_read_cost, cache_write_cost, total_cost
+			FROM thread_goal_costs WHERE branch_id=? AND currency=?`, s.branchID, cost.Currency).
+			Scan(&existing.Currency, &existing.Input, &existing.Output, &existing.CacheRead, &existing.CacheWrite, &existing.Total)
+		costs := []protocol.Cost(nil)
+		if err == nil {
+			costs = append(costs, existing)
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, false, fmt.Errorf("session: sqlite read goal cost: %w", err)
+		}
+		costs, err = addGoalCost(costs, cost)
+		if err != nil {
+			return nil, false, err
+		}
+		updatedCost := costs[0]
+		if _, err := tx.Exec(`INSERT INTO thread_goal_costs(branch_id, currency, input_cost, output_cost, cache_read_cost, cache_write_cost, total_cost)
+			VALUES(?,?,?,?,?,?,?) ON CONFLICT(branch_id, currency) DO UPDATE SET
+				input_cost=excluded.input_cost,
+				output_cost=excluded.output_cost,
+				cache_read_cost=excluded.cache_read_cost,
+				cache_write_cost=excluded.cache_write_cost,
+				total_cost=excluded.total_cost`, s.branchID, updatedCost.Currency, updatedCost.Input, updatedCost.Output, updatedCost.CacheRead, updatedCost.CacheWrite, updatedCost.Total); err != nil {
+			return nil, false, fmt.Errorf("session: sqlite account goal cost: %w", err)
+		}
+	}
+	if err := loadGoalCosts(tx, s.branchID, g); err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("session: sqlite account goal commit: %w", err)
 	}
 	crossed := g.Status == protocol.GoalBudgetLimited && g.TokenBudget != nil && g.TokensUsed-tokens < *g.TokenBudget
 	return g.Clone(), crossed, nil
@@ -984,6 +1324,17 @@ func (s *SQLiteStore) ContextMessages() ([]protocol.Message, error) {
 	return contextMessagesFromEntries(entries), nil
 }
 
+// BranchEntries implements BranchEntryStore.
+func (s *SQLiteStore) BranchEntries() ([]Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, errors.New("session: store closed")
+	}
+	entries, err := s.branchEntries(s.tip)
+	return cloneEntries(entries), err
+}
+
 // Branches implements BranchStore.
 func (s *SQLiteStore) Branches() ([]protocol.SessionBranch, error) {
 	s.mu.RLock()
@@ -1170,6 +1521,11 @@ func (s *SQLiteStore) ForkBranchWithOptions(opts protocol.BranchForkOptions) (pr
 		SELECT ?, ?, objective, status, token_budget, tokens_used, seconds_used, created_at, ? FROM thread_goals WHERE branch_id = ?`, branchID, newID(), now, sourceID); err != nil {
 		_ = tx.Rollback()
 		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork goal: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO thread_goal_costs(branch_id, currency, input_cost, output_cost, cache_read_cost, cache_write_cost, total_cost)
+		SELECT ?, currency, input_cost, output_cost, cache_read_cost, cache_write_cost, total_cost FROM thread_goal_costs WHERE branch_id = ?`, branchID, sourceID); err != nil {
+		_ = tx.Rollback()
+		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork goal costs: %w", err)
 	}
 	if _, err := tx.Exec(`INSERT INTO thread_goal_deferrals(branch_id, deferred) SELECT ?, deferred FROM thread_goal_deferrals WHERE branch_id = ?`, branchID, sourceID); err != nil {
 		_ = tx.Rollback()
@@ -1491,7 +1847,7 @@ func (s *SQLiteStore) Close() error {
 	if countErr != nil || closeErr != nil {
 		return errors.Join(countErr, closeErr)
 	}
-	if meaningfulCount > 0 {
+	if meaningfulCount > 0 || !s.deleteIfEmpty {
 		return nil
 	}
 

@@ -56,9 +56,26 @@ minutes under a cross-process auth-store lock and atomically persists rotated
 refresh tokens. A pre-stream HTTP 401 forces one guarded refresh and one retry,
 while reusing a newer credential already rotated by another process. Permanent
 `invalid_grant`-class failures require login; transient/network failures remain
-retryable and secret-free. Responses/SSE parsing bounds individual and
-aggregate events, tool-call count/identities/arguments, and retained reasoning;
-a limit violation emits one normalized stream error and stops parsing.
+retryable and secret-free.
+
+Codex inference requests attach one SHA-256 affinity value derived from the Snow
+session, active branch, and request purpose as `prompt_cache_key`, `session-id`,
+and `x-client-request-id`; raw session and branch IDs never leave the process.
+The request also identifies `User-Agent: snow`, explicitly enables automatic
+and parallel tool selection (execution inside Snow remains serial), and omits
+sampling/output-limit fields unsupported by the subscription path. JSON bodies
+of at least 32 KiB use zstd compression. Snow retries network failures, HTTP
+408/500/502/503/504, and immediate pre-output overload/truncation failures at
+most twice with context-cancellable, `Retry-After`-aware backoff. It never
+retries 402/429, a second 401, validation errors, or a stream after any normalized
+activity was delivered.
+
+Responses/SSE parsing bounds individual and aggregate events, tool-call
+count/identities/arguments, retained reasoning, error codes, and request IDs. A
+limit violation emits one normalized stream error and stops parsing. A stream
+must terminate with `response.completed`, `response.done`,
+`response.incomplete`, or `[DONE]`; clean EOF without one is an error rather
+than a successful partial answer.
 
 `/model` uses authenticated `GET /backend-api/codex/models?client_version=0.147.0`
 discovery. Raw records are cached for 15 minutes under

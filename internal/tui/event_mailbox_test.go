@@ -38,6 +38,24 @@ func TestAgentEventMailboxCoalescesWithoutBlockingProducer(t *testing.T) {
 	}
 }
 
+func TestCoalesceRootSessionUpdatesKeepsLatestAndPreservesChildEvents(t *testing.T) {
+	child := &protocol.AgentRef{ThreadID: "child", Path: "/root/child"}
+	events := []protocol.AgentEvent{
+		{Type: protocol.EvSessionUpdated, TurnID: "old"},
+		{Type: protocol.EvToolStart, ToolName: "read"},
+		{Type: protocol.EvSessionUpdated, Agent: child, TurnID: "child"},
+		{Type: protocol.EvSessionUpdated, TurnID: "latest"},
+		{Type: protocol.EvTurnDone, TurnID: "turn"},
+	}
+	got := coalesceRootSessionUpdates(events)
+	if len(got) != 4 {
+		t.Fatalf("events=%+v", got)
+	}
+	if got[0].Type != protocol.EvToolStart || got[1].Agent != child || got[2].TurnID != "latest" || got[3].Type != protocol.EvTurnDone {
+		t.Fatalf("ordering=%+v", got)
+	}
+}
+
 func TestAgentEventMailboxPreservesLifecycleAndPlanBoundaries(t *testing.T) {
 	q := newAgentEventMailbox()
 	q.Push(protocol.AgentEvent{Type: protocol.EvPlanDelta, Text: "a", Plan: &protocol.PlanItem{ID: "one"}})

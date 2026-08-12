@@ -21,6 +21,7 @@ func TestSettingsPanelNavigationModelReturnAndPermissionPersistence(t *testing.T
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.width, m.height = 100, 30
+	m.inlineTranscript = true
 	m.layout()
 
 	_, _ = m.runCommand("/settings")
@@ -31,6 +32,16 @@ func TestSettingsPanelNavigationModelReturnAndPermissionPersistence(t *testing.T
 	for _, want := range []string{"Model", "Thinking effort", "Reasoning summary", "Text verbosity", "Permission mode", "Subagents", "Concurrent subagents", "Agent Skills", "ChatGPT only"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("settings panel missing %q: %q", want, view)
+		}
+	}
+	m.layout()
+	fullView := stripANSI(m.View())
+	if got := m.managedFrameHeight(); got != m.height {
+		t.Fatalf("inline settings frame height=%d want terminal height %d", got, m.height)
+	}
+	for _, want := range []string{"Model", "Theme", "Agent Skills"} {
+		if !strings.Contains(fullView, want) {
+			t.Fatalf("inline settings frame truncated %q: %q", want, fullView)
 		}
 	}
 
@@ -180,6 +191,9 @@ func TestSettingsSaveFailureRollsBackAndStaysOpen(t *testing.T) {
 	}
 	m.modelIndex = (m.modelIndex + 1) % len(m.modelList)
 	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.pickThinking {
+		_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyEnter})
+	}
 	if !m.pickSettings || m.settingsError == "" {
 		t.Fatalf("failed model save panel=%v error=%q", m.pickSettings, m.settingsError)
 	}

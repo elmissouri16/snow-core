@@ -166,8 +166,8 @@ func TestShellChildrenOverlapAndInterruptCleanup(t *testing.T) {
 		MinWait:              time.Millisecond,
 		DefaultWait:          20 * time.Millisecond,
 		MaxWait:              time.Second,
-		DefaultRole:          "default",
-		Roles:                map[string]Role{"default": {Name: "default"}},
+		DefaultRole:          "general",
+		Roles:                map[string]Role{"general": {Name: "general"}},
 	})
 	defer m.Close(context.Background())
 	if err := m.Bind(root, factory, root.Publish, rootStore); err != nil {
@@ -179,7 +179,7 @@ func TestShellChildrenOverlapAndInterruptCleanup(t *testing.T) {
 
 	caller := m.RootCaller()
 	for _, name := range []string{"one", "two"} {
-		if _, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{TaskName: name, Message: "run shell", ForkTurns: "none"}); err != nil {
+		if _, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{Name: name, Task: "run shell", ForkTurns: "none"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -196,7 +196,7 @@ func TestShellChildrenOverlapAndInterruptCleanup(t *testing.T) {
 		t.Fatalf("shell processes still active after completion: %d", active.Load())
 	}
 
-	if _, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{TaskName: "interrupt", Message: "run long shell", ForkTurns: "none"}); err != nil {
+	if _, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{Name: "interrupt", Task: "run long shell", ForkTurns: "none"}); err != nil {
 		t.Fatal(err)
 	}
 	deadline = time.Now().Add(2 * time.Second)

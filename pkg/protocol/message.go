@@ -232,13 +232,18 @@ func (m Message) Clone() Message {
 
 // NewUserMessage builds a simple user text message.
 func NewUserMessage(id, parentID, text string) Message {
-	return Message{
-		ID:        id,
-		ParentID:  parentID,
-		Role:      RoleUser,
-		Content:   []ContentBlock{{Type: BlockText, Text: text}},
+	return NewUserContentMessage(id, parentID, []ContentBlock{{Type: BlockText, Text: text}})
+}
+
+// NewUserContentMessage builds a user message containing mixed text and image
+// blocks. Payload slices are cloned so callers cannot mutate durable context.
+func NewUserContentMessage(id, parentID string, content []ContentBlock) Message {
+	message := Message{
+		ID: id, ParentID: parentID, Role: RoleUser,
+		Content:   content,
 		Timestamp: time.Now().UnixMilli(),
 	}
+	return message.Clone()
 }
 
 // NewAgentMessage builds a durable attributed mailbox entry.

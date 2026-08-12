@@ -21,7 +21,7 @@ type managerTool struct {
 }
 
 func Tools(m *Manager, caller Caller) []tools.Tool {
-	names := []string{"spawn_agent", "send_message", "followup_task", "wait_agent", "interrupt_agent", "list_agents"}
+	names := []string{"spawn_agent", "list_subagent_models", "send_message", "followup_task", "wait_agent", "interrupt_agent", "list_agents"}
 	out := make([]tools.Tool, 0, len(names))
 	for _, name := range names {
 		out = append(out, &managerTool{name: name, manager: m, caller: caller})
@@ -40,14 +40,48 @@ func (t *managerTool) Run(ctx context.Context, raw json.RawMessage, _ tools.Tool
 		if err := decodeStrict(raw, &in); err != nil {
 			return tools.ErrorResult(err), nil
 		}
-		// Model providers sometimes emit readable task labels with hyphens. Keep
+		// Model providers sometimes emit readable names with hyphens. Keep
 		// persisted identities canonical without relaxing the manager/SDK API.
-		in.TaskName = strings.ReplaceAll(in.TaskName, "-", "_")
+		in.Name = strings.ReplaceAll(in.Name, "-", "_")
 		state, err := t.manager.Spawn(ctx, t.caller, in)
 		if err != nil {
 			return tools.ErrorResult(err), nil
 		}
-		return jsonResult(map[string]any{"task_name": state.Agent.Path, "status": state.Status})
+		return jsonResult(map[string]any{"name": state.Agent.Path, "status": state.Status})
+	case "list_subagent_models":
+		var in struct {
+			Provider string `json:"provider,omitempty"`
+		}
+		if err := decodeStrict(raw, &in); err != nil {
+			return tools.ErrorResult(err), nil
+		}
+		type item struct {
+			Provider        string                   `json:"provider"`
+			Model           string                   `json:"model"`
+			DisplayName     string                   `json:"display_name,omitempty"`
+			Tools           bool                     `json:"supports_tools"`
+			ThinkingLevels  []protocol.ThinkingLevel `json:"thinking_levels"`
+			DefaultThinking protocol.ThinkingLevel   `json:"default_thinking,omitempty"`
+		}
+		models := t.manager.Models()
+		out := make([]item, 0, len(models))
+		providers := make([]string, 0)
+		seenProviders := make(map[string]bool)
+		for _, model := range models {
+			if !seenProviders[model.Provider] {
+				seenProviders[model.Provider] = true
+				providers = append(providers, model.Provider)
+			}
+			if in.Provider != "" && model.Provider != in.Provider {
+				continue
+			}
+			out = append(out, item{Provider: model.Provider, Model: model.ID, DisplayName: model.DisplayName, Tools: model.SupportsTools, ThinkingLevels: model.SupportedThinkingLevels(), DefaultThinking: model.DefaultThinking})
+		}
+		result := map[string]any{"models": out, "available_providers": providers}
+		if in.Provider != "" && len(out) == 0 {
+			result["message"] = fmt.Sprintf("no models found for exact provider %q; use one of available_providers", in.Provider)
+		}
+		return jsonResult(result)
 	case "send_message":
 		var in struct {
 			Target  string `json:"target"`
@@ -210,12 +244,13 @@ func jsonResult(v any) (tools.ToolResult, error) {
 }
 
 var toolSchemas = map[string]protocol.ToolSchema{
-	"spawn_agent":     {Name: "spawn_agent", Description: "Start an independent bounded subagent task. The task name becomes a canonical /root/... path; hyphens normalize to underscores. Use fork_turns=none for self-contained exploration. The default role (general is an accepted alias) can run permission-gated bash for investigation; explorer is read-only; worker is shell-capable but write/edit require explicit global and role mutation opt-in.", Parameters: json.RawMessage(`{"type":"object","properties":{"task_name":{"type":"string","description":"One lowercase task label. It becomes a canonical /root/... agent path; hyphens normalize to underscores.","minLength":1,"maxLength":64,"pattern":"^[a-z][a-z0-9_-]{0,63}$"},"message":{"type":"string"},"agent_type":{"type":"string","description":"Optional role: default is shell-capable (general is an accepted alias), explorer is read-only, and worker is shell-capable with file mutation only when explicitly enabled. Omit to use the configured default role."},"fork_turns":{"type":"string","description":"Parent context to copy: none, all, or a positive integer string.","pattern":"^(none|all|[1-9][0-9]*)$"},"model":{"type":"string"},"reasoning_effort":{"type":"string","enum":["off","minimal","low","medium","high"]}},"required":["task_name","message"],"additionalProperties":false}`)},
-	"send_message":    {Name: "send_message", Description: "Queue an attributed message to an existing agent without starting a turn.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"},"message":{"type":"string"}},"required":["target","message"],"additionalProperties":false}`)},
-	"followup_task":   {Name: "followup_task", Description: "Queue an attributed task and run or reuse the target when it is idle.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"},"message":{"type":"string"}},"required":["target","message"],"additionalProperties":false}`)},
-	"wait_agent":      {Name: "wait_agent", Description: "Wait for subagents. Use until=all whenever the answer depends on outstanding child work; activity returns after the next mailbox or lifecycle event. Result content arrives through attributed mailbox messages.", Parameters: json.RawMessage(`{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":0},"until":{"type":"string","enum":["activity","all"],"description":"activity waits for one event; all waits until every descendant is terminal or the timeout expires"}},"additionalProperties":false}`)},
-	"interrupt_agent": {Name: "interrupt_agent", Description: "Interrupt a target's current turn while keeping its identity reusable.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"}},"required":["target"],"additionalProperties":false}`)},
-	"list_agents":     {Name: "list_agents", Description: "List stable agent paths and lifecycle states without private task content.", Parameters: json.RawMessage(`{"type":"object","properties":{"path_prefix":{"type":"string"}},"additionalProperties":false}`)},
+	"spawn_agent":          {Name: "spawn_agent", Description: "Start an independent bounded subagent task. The name becomes a canonical /root/... path; hyphens normalize to underscores. Use list_subagent_models for exact provider/model IDs and fork_turns=none for self-contained exploration. The general role can run permission-gated bash for investigation, explorer is read-only, and implementer is shell-capable but write/edit require explicit global and role mutation opt-in.", Parameters: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"One lowercase agent name. It becomes a canonical /root/... agent path; hyphens normalize to underscores.","minLength":1,"maxLength":64,"pattern":"^[a-z][a-z0-9_-]{0,63}$"},"task":{"type":"string","description":"The task for the new agent."},"role":{"type":"string","description":"Optional role: general is shell-capable, explorer is read-only, and implementer is shell-capable with file mutation only when explicitly enabled. Omit to use the configured default role."},"fork_turns":{"type":"string","description":"Parent context to copy: none, all, or a positive integer string.","pattern":"^(none|all|[1-9][0-9]*)$"},"provider":{"type":"string","description":"Optional provider override. Use list_subagent_models for exact IDs."},"model":{"type":"string","description":"Optional model override. Omit to use the role model, configured subagent default model, or provider/parent default."},"reasoning_effort":{"type":"string","enum":["off","minimal","low","medium","high"]}},"required":["name","task"],"additionalProperties":false}`)},
+	"list_subagent_models": {Name: "list_subagent_models", Description: "List exact provider/model pairs available for spawning subagents. Call this before selecting a different provider or when the user names a model family rather than an exact ID.", Parameters: json.RawMessage(`{"type":"object","properties":{"provider":{"type":"string","description":"Optional exact provider ID filter."}},"additionalProperties":false}`)},
+	"send_message":         {Name: "send_message", Description: "Queue an attributed message to an existing agent without starting a turn.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"},"message":{"type":"string"}},"required":["target","message"],"additionalProperties":false}`)},
+	"followup_task":        {Name: "followup_task", Description: "Queue an attributed task and run or reuse the target when it is idle.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"},"message":{"type":"string"}},"required":["target","message"],"additionalProperties":false}`)},
+	"wait_agent":           {Name: "wait_agent", Description: "Wait for subagents. Use until=all whenever the answer depends on outstanding child work; activity returns after the next mailbox or lifecycle event. Result content arrives through attributed mailbox messages.", Parameters: json.RawMessage(`{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":0},"until":{"type":"string","enum":["activity","all"],"description":"activity waits for one event; all waits until every descendant is terminal or the timeout expires"}},"additionalProperties":false}`)},
+	"interrupt_agent":      {Name: "interrupt_agent", Description: "Interrupt a target's current turn while keeping its identity reusable.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"}},"required":["target"],"additionalProperties":false}`)},
+	"list_agents":          {Name: "list_agents", Description: "List stable agent paths and lifecycle states without private task content.", Parameters: json.RawMessage(`{"type":"object","properties":{"path_prefix":{"type":"string"}},"additionalProperties":false}`)},
 }
 
 func ToolDescriptor(t tools.Tool) tools.ToolDescriptor {

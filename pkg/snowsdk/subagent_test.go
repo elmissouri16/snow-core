@@ -26,7 +26,11 @@ func TestSDKSubagentSurface(t *testing.T) {
 	if err := s.ReadySubagents(); err != nil {
 		t.Fatal(err)
 	}
-	state, err := s.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{TaskName: "sdk", Message: "inspect", ForkTurns: "none"})
+	models := s.SubagentModels()
+	if len(models) != 1 || models[0].Provider != "fake" || models[0].ID != "fake-1" {
+		t.Fatalf("subagent models = %+v", models)
+	}
+	state, err := s.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{Name: "sdk", Task: "inspect", ForkTurns: "none"})
 	if err != nil {
 		t.Fatal(err)
 	}

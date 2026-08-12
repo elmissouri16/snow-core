@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,10 +15,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/spf13/cobra"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/session"
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
 	publicplugin "github.com/snow-core/snow/pkg/plugin"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -41,6 +46,48 @@ func TestCLIHelperProcess(t *testing.T) {
 	main()
 }
 
+func TestBuildOptionsReadsSubagentModel(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("provider", "", "")
+	cmd.Flags().String("model", "", "")
+	cmd.Flags().String("api-key", "", "")
+	cmd.Flags().String("permission", "", "")
+	cmd.Flags().String("session", "", "")
+	cmd.Flags().Bool("no-session", false, "")
+	cmd.Flags().String("base-url", "", "")
+	cmd.Flags().String("config", "", "")
+	cmd.Flags().String("auth", "", "")
+	cmd.Flags().String("thinking", "", "")
+	cmd.Flags().StringSlice("tools", nil, "")
+	cmd.Flags().String("collaboration-mode", "", "")
+	cmd.Flags().Bool("no-plugins", false, "")
+	cmd.Flags().Bool("no-mcp", false, "")
+	cmd.Flags().StringArray("skill-dir", nil, "")
+	cmd.Flags().Bool("no-skills", false, "")
+	cmd.Flags().Bool("subagents", false, "")
+	cmd.Flags().Bool("no-subagents", false, "")
+	cmd.Flags().String("subagent-provider", "", "")
+	cmd.Flags().String("subagent-model", "", "")
+	cmd.Flags().Int("subagent-max-concurrency", 0, "")
+	cmd.Flags().Int("subagent-max-agents", 0, "")
+	cmd.Flags().Int("subagent-max-depth", 0, "")
+	cmd.Flags().StringArray("plugin", nil, "")
+	cmd.Flags().StringArray("mcp", nil, "")
+	if err := cmd.Flags().Set("subagent-provider", "opencode-go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("subagent-model", "model-x"); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := buildOptions(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.SubagentProvider != "opencode-go" || opts.SubagentModel != "model-x" {
+		t.Fatalf("subagent selection = %s/%s", opts.SubagentProvider, opts.SubagentModel)
+	}
+}
+
 func TestCLIPrintsCommandErrorsOnce(t *testing.T) {
 	command := exec.Command(os.Args[0], "-test.run=TestCLIHelperProcess")
 	command.Env = append(os.Environ(), "SNOW_CLI_HELPER=1", "SNOW_HOME="+t.TempDir())
@@ -51,6 +98,171 @@ func TestCLIPrintsCommandErrorsOnce(t *testing.T) {
 	text := string(output)
 	if strings.Count(text, "snow: unknown flag") != 1 || strings.Contains(text, "Error: unknown flag") {
 		t.Fatalf("stderr contained duplicate command diagnostics: %q", text)
+	}
+}
+
+func TestCLIResumeLatestSession(t *testing.T) {
+	t.Setenv("SNOW_HOME", t.TempDir())
+	t.Setenv("SNOW_SESSIONS_DIR", t.TempDir())
+	cwd := mustCWD()
+	idx := session.NewFileIndex(session.DefaultSessionsRoot())
+	create := func(sessionCWD, id, text string) string {
+		t.Helper()
+		st, err := idx.Create(sessionCWD)
+		if err != nil {
+			t.Fatal(err)
+		}
+		message := protocol.NewUserMessage(id, "root", text)
+		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+			t.Fatal(err)
+		}
+		path := st.Path()
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	oldPath := create(cwd, "resume-old", "older current session")
+	latestPath := create(cwd, "resume-latest", "latest current session")
+	foreignCWD := t.TempDir()
+	foreignPath := create(foreignCWD, "resume-foreign", "newer foreign session")
+	unrelatedPath := filepath.Join(session.DefaultSessionsRoot(), session.EncodeCWD(cwd), "unrelated.db")
+	unrelatedDB, err := sql.Open("sqlite", unrelatedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := unrelatedDB.Exec(`CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated(value) VALUES ('keep')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := unrelatedDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(unrelatedPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unrelatedBefore, err := os.ReadFile(unrelatedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, timestamp := range map[string]time.Time{
+		oldPath:       time.Unix(1000, 0),
+		latestPath:    time.Unix(2000, 0),
+		foreignPath:   time.Unix(3000, 0),
+		unrelatedPath: time.Unix(4000, 0),
+	} {
+		if err := os.Chtimes(path, timestamp, timestamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	output, err := runCLI(t, "snow", "resume", "--provider", "fake", "--permission", "allow", "--no-plugins", "--no-mcp", "--no-skills", "-p", "continue here")
+	if err != nil {
+		t.Fatalf("snow resume failed: %v; output=%q", err, output)
+	}
+
+	transcript := func(path, sessionCWD string) string {
+		t.Helper()
+		st, err := session.NewSQLiteStore(path, sessionCWD, session.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages, err := st.Messages()
+		if closeErr := st.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var text strings.Builder
+		for _, message := range messages {
+			for _, block := range message.Content {
+				text.WriteString(block.Text)
+				text.WriteByte('\n')
+			}
+		}
+		return text.String()
+	}
+	if text := transcript(latestPath, cwd); !strings.Contains(text, "latest current session") || !strings.Contains(text, "continue here") {
+		t.Fatalf("latest transcript = %q", text)
+	}
+	if text := transcript(oldPath, cwd); strings.Contains(text, "continue here") {
+		t.Fatalf("older session was resumed: %q", text)
+	}
+	if text := transcript(foreignPath, foreignCWD); strings.Contains(text, "continue here") {
+		t.Fatalf("foreign session was resumed: %q", text)
+	}
+	unrelatedAfter, err := os.ReadFile(unrelatedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(unrelatedAfter) != string(unrelatedBefore) {
+		t.Fatal("no-argument resume changed an unrelated indexed database")
+	}
+	info, err := os.Stat(unrelatedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("no-argument resume changed unrelated database mode to %o", info.Mode().Perm())
+	}
+}
+
+func TestCLIResumeRejectsMissingOrConflictingSession(t *testing.T) {
+	t.Setenv("SNOW_HOME", t.TempDir())
+	t.Setenv("SNOW_SESSIONS_DIR", t.TempDir())
+
+	if _, err := runCLI(t, "snow", "resume", "--provider", "fake", "-p", "hello"); err == nil || !strings.Contains(err.Error(), "no saved sessions") {
+		t.Fatalf("empty resume error = %v", err)
+	}
+	missing := filepath.Join(t.TempDir(), "missing.db")
+	if _, err := runCLI(t, "snow", "resume", missing, "--provider", "fake", "-p", "hello"); err == nil || !strings.Contains(err.Error(), "no such file") {
+		t.Fatalf("missing resume error = %v", err)
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("missing resume created a database: %v", err)
+	}
+	if _, err := runCLI(t, "snow", "resume", missing, "--session", missing, "--provider", "fake", "-p", "hello"); err == nil || !strings.Contains(err.Error(), "both as an argument") {
+		t.Fatalf("conflicting resume error = %v", err)
+	}
+
+	unrelated := filepath.Join(t.TempDir(), "unrelated.db")
+	db, err := sql.Open("sqlite", unrelated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated(value) VALUES ('keep')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(unrelated, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(unrelated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCLI(t, "snow", "resume", unrelated, "--provider", "fake", "-p", "hello"); err == nil || !strings.Contains(err.Error(), "invalid sqlite session metadata") {
+		t.Fatalf("unrelated database error = %v", err)
+	}
+	after, err := os.ReadFile(unrelated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("resume changed an unrelated SQLite database")
+	}
+	info, err := os.Stat(unrelated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("resume changed unrelated database mode to %o", info.Mode().Perm())
+	}
+
+	if _, err := runCLI(t, "snow", "resume", "--no-session", "--provider", "fake", "-p", "hello"); err == nil || !strings.Contains(err.Error(), "--no-session") {
+		t.Fatalf("ephemeral resume error = %v", err)
 	}
 }
 
@@ -151,6 +363,45 @@ func TestCLIPrintAndJSONEndToEnd(t *testing.T) {
 				t.Fatalf("events = %+v, want text_delta and turn_done", events)
 			}
 		})
+	}
+}
+
+func TestCLIOpenAICompatiblePrint(t *testing.T) {
+	t.Setenv("SNOW_HOME", t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = fmt.Fprint(w, `{"data":[{"id":"responses-model"}]}`)
+		case "/opencode/models":
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		case "/v1/responses":
+			if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+				t.Errorf("authorization=%q", got)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"responses answer\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	configBody := fmt.Sprintf(`{"providers":{"opencode-go":{"base_url":%q}}}`, server.URL+"/opencode")
+	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldArgs := os.Args
+	os.Args = []string{"snow", "--provider", "openai-compatible", "--model", "responses-model", "--base-url", server.URL + "/v1", "--api-key", "test-key", "--config", configPath, "--permission", "allow", "--no-session", "--mode", "print", "-p", "hello"}
+	t.Cleanup(func() { os.Args = oldArgs })
+	output, err := captureStdout(t, run)
+	if err != nil || output != "responses answer\n" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+
+	os.Args = []string{"snow", "--provider", "openai-compatible", "--model", "responses-model", "--base-url", server.URL + "/v1", "--api-key", "test-key", "--config", configPath, "--permission", "allow", "--no-session", "--mode", "json", "-p", "hello"}
+	output, err = captureStdout(t, run)
+	if err != nil || !strings.Contains(output, `"type":"text_delta"`) || !strings.Contains(output, `"text":"responses answer"`) {
+		t.Fatalf("json output=%q err=%v", output, err)
 	}
 }
 

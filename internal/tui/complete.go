@@ -22,7 +22,7 @@ var commands = []commandSpec{
 	{name: "/deny", desc: "deny a pending permission request"},
 	{name: "/help", desc: "show command help"},
 	{name: "/goal", desc: "show or control a persistent thread goal", argHint: "[objective|edit|pause|resume|clear]"},
-	{name: "/login", desc: "choose a provider and store its API key", argHint: "<provider>"},
+	{name: "/login", desc: "configure a provider endpoint or credentials", argHint: "<provider>"},
 	{name: "/logout", desc: "choose and remove a stored credential", argHint: "[provider]"},
 	{name: "/mcp", desc: "inspect configured MCP server status"},
 	{name: "/model", desc: "pick a model (persisted)", argHint: "<id>"},
@@ -35,7 +35,7 @@ var commands = []commandSpec{
 	{name: "/settings", desc: "configure model and response behavior"},
 	{name: "/skills", desc: "inspect discovered Agent Skills"},
 	{name: "/tree", desc: "navigate branches in this session"},
-	{name: "/thinking", desc: "choose reasoning effort", argHint: "[off|minimal|low|medium|high]"},
+	{name: "/thinking", desc: "choose reasoning effort", argHint: "[off|minimal|low|medium|high|xhigh|max|ultra]"},
 	{name: "/trust", desc: "show or set project trust", argHint: "[allow|deny]"},
 }
 
@@ -126,6 +126,9 @@ func formatCommandListWithKeys(keys tuiKeyMap) string {
 		b.WriteString(c.desc)
 		b.WriteByte('\n')
 	}
+	b.WriteString("\nComposer\n")
+	b.WriteString("  $skill — complete an enabled Agent Skill directive\n")
+	b.WriteString("  @path — complete and attach a project file\n")
 	b.WriteString("\nShortcuts\n")
 	for _, group := range keys.FullHelp() {
 		for _, binding := range group {

@@ -15,7 +15,7 @@ func TestThinkingLevelParsingAndNormalization(t *testing.T) {
 	if got, err := ParseThinkingLevel(""); err != nil || got != ThinkingOff {
 		t.Fatalf("empty level = %q, %v, want off", got, err)
 	}
-	if _, err := ParseThinkingLevel("xhigh"); err == nil || !strings.Contains(err.Error(), "off|minimal|low|medium|high") {
+	if _, err := ParseThinkingLevel("extreme"); err == nil || !strings.Contains(err.Error(), "off|minimal|low|medium|high|xhigh|max|ultra") {
 		t.Fatalf("invalid level error = %v", err)
 	}
 }
@@ -76,10 +76,10 @@ func TestModelThinkingCapabilitiesAreConservative(t *testing.T) {
 	model := Model{
 		ID:               "m",
 		SupportsThinking: true,
-		ThinkingLevels:   []ThinkingLevel{ThinkingLow, ThinkingHigh, ThinkingLow, "future"},
+		ThinkingLevels:   []ThinkingLevel{ThinkingLow, ThinkingHigh, ThinkingXHigh, ThinkingMax, ThinkingUltra, ThinkingLow, "future"},
 	}
 	got := model.SupportedThinkingLevels()
-	want := []ThinkingLevel{ThinkingOff, ThinkingLow, ThinkingHigh}
+	want := []ThinkingLevel{ThinkingOff, ThinkingLow, ThinkingHigh, ThinkingXHigh, ThinkingMax, ThinkingUltra}
 	if len(got) != len(want) {
 		t.Fatalf("supported levels = %v, want %v", got, want)
 	}

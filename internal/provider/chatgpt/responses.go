@@ -1,33 +1,35 @@
 package chatgpt
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/base64"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
+	"unicode"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/snow-core/snow/internal/auth"
 	providerpkg "github.com/snow-core/snow/internal/provider"
+	"github.com/snow-core/snow/internal/provider/responsesapi"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
 const (
-	maxCodexSSELineBytes           = 4 << 20
-	maxCodexSSEEventBytes          = 8 << 20
-	maxCodexSSEEventFragments      = 4096
-	maxCodexToolArgumentBytes      = 1 << 20
-	maxCodexTotalToolArgumentBytes = 4 << 20
-	maxCodexStreamToolCalls        = 128
-	maxCodexIdentityBytes          = 4096
-	maxCodexReasoningBytes         = 4 << 20
-	maxCodexReasoningItems         = 128
+	maxTransientRetries      = 2
+	initialRetryDelay        = time.Second
+	maxRetryDelay            = 30 * time.Second
+	requestCompressMinimum   = 32 << 10
+	maxHTTPErrorReadBytes    = 64 << 10
+	maxHTTPErrorSnippetBytes = 1000
 )
 
 // Chat implements the Codex Responses streaming protocol used by ChatGPT
@@ -45,52 +47,309 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, req protocol
 		return errorStream(ctx, errors.New("chatgpt: OAuth token has no ChatGPT account ID")), nil
 	}
 
-	body, err := buildResponsesBody(req)
+	affinity := normalizeAffinityKey(req.SessionAffinityKey)
+	parallel := true
+	body, err := responsesapi.BuildRequest(req, responsesapi.RequestOptions{
+		ProviderID:                ProviderID,
+		IncludeEncryptedReasoning: true,
+		AllowLegacyVerbosity:      req.Model.Provider != ProviderID,
+		PromptCacheKey:            affinity,
+		ToolChoice:                "auto",
+		ParallelToolCalls:         &parallel,
+		OmitMaxOutputTokens:       true,
+		OmitTemperature:           true,
+	})
 	if err != nil {
 		return errorStream(ctx, fmt.Errorf("chatgpt: build request: %w", err)), nil
 	}
-	var resp *http.Response
-	for attempt := 0; attempt < 2; attempt++ {
-		httpReq, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint(), bytes.NewReader(body))
-		if reqErr != nil {
-			return errorStream(ctx, fmt.Errorf("chatgpt: create request: %w", reqErr)), nil
-		}
-		httpReq.Header.Set("Authorization", "Bearer "+creds.Access)
-		httpReq.Header.Set("chatgpt-account-id", status.AccountID)
-		httpReq.Header.Set("originator", "snow")
-		httpReq.Header.Set("OpenAI-Beta", "responses=experimental")
-		httpReq.Header.Set("Accept", "text/event-stream")
-		httpReq.Header.Set("Content-Type", "application/json")
-		resp, err = redirectSafeClient(p.client).Do(httpReq)
-		if err != nil {
-			return errorStream(ctx, fmt.Errorf("chatgpt: request failed: %w", sanitizeNetworkError(err))), nil
-		}
-		if resp.StatusCode != http.StatusUnauthorized || attempt == 1 {
-			break
-		}
-		resp.Body.Close()
-		creds, err = p.resolve(ctx, creds, true)
-		if err != nil {
-			return errorStream(ctx, err), nil
-		}
-		status, err = CheckAuth(creds)
-		if err != nil {
-			return errorStream(ctx, err), nil
-		}
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		defer resp.Body.Close()
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 1000))
-		redacted := providerpkg.RedactSecrets(strings.TrimSpace(string(snippet)), creds.Access, creds.Refresh)
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusPaymentRequired {
-			return errorStream(ctx, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: redacted}), nil
-		}
-		return errorStream(ctx, responseError(resp.StatusCode, []byte(redacted))), nil
-	}
+	encoded, contentEncoding := compressRequestBody(body)
+	streamCtx, cancel := context.WithCancel(ctx)
+	return &retryingCodexStream{
+		ctx: streamCtx, cancel: cancel, provider: p, creds: creds, status: status,
+		body: encoded, contentEncoding: contentEncoding, affinity: affinity,
+	}, nil
+}
 
-	s := newCodexStream(ctx, resp, creds.Access, creds.Refresh)
-	go s.read()
-	return s, nil
+type retryingCodexStream struct {
+	ctx             context.Context
+	cancel          context.CancelFunc
+	provider        *Provider
+	creds           auth.Credential
+	status          AuthStatus
+	body            []byte
+	contentEncoding string
+	affinity        string
+
+	mu               sync.Mutex
+	current          protocol.EventStream
+	pending          chan codexAttemptResult
+	closed           bool
+	terminal         bool
+	delivered        bool
+	authRetried      bool
+	transientRetries int
+	requestAttempts  int
+}
+
+func (s *retryingCodexStream) Next(ctx context.Context) (protocol.StreamEvent, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return protocol.StreamEvent{}, err
+		}
+		if err := s.ctx.Err(); err != nil {
+			return protocol.StreamEvent{}, err
+		}
+		if s.isTerminal() {
+			return protocol.StreamEvent{}, io.EOF
+		}
+		stream := s.activeStream()
+		if stream == nil {
+			result, waitErr := s.awaitAttempt(ctx)
+			if waitErr != nil {
+				return protocol.StreamEvent{}, waitErr
+			}
+			stream = result.stream
+			err, delay := result.err, result.delay
+			if err != nil {
+				if s.canRetry(err) {
+					s.transientRetries++
+					if delay < 0 {
+						delay = retryBackoff(s.transientRetries)
+					}
+					if waitErr := s.wait(ctx, delay); waitErr != nil {
+						return protocol.StreamEvent{}, waitErr
+					}
+					continue
+				}
+				s.markTerminal()
+				return protocol.StreamEvent{Type: protocol.EvStreamError, Err: withAttemptCount(err, s.requestAttempts)}, nil
+			}
+			s.setActiveStream(stream)
+		}
+
+		event, err := stream.Next(ctx)
+		if err != nil {
+			if ctx.Err() != nil && s.ctx.Err() == nil {
+				return protocol.StreamEvent{}, ctx.Err()
+			}
+			if errors.Is(err, io.EOF) {
+				s.markTerminal()
+				return protocol.StreamEvent{}, io.EOF
+			}
+			if !s.delivered && s.canRetry(err) {
+				s.transientRetries++
+				s.clearActiveStream()
+				if waitErr := s.wait(ctx, retryBackoff(s.transientRetries)); waitErr != nil {
+					return protocol.StreamEvent{}, waitErr
+				}
+				continue
+			}
+			s.markTerminal()
+			return protocol.StreamEvent{}, withAttemptCount(err, s.requestAttempts)
+		}
+		if event.Type == protocol.EvStreamError {
+			if !s.delivered && s.canRetry(event.Err) {
+				s.transientRetries++
+				s.clearActiveStream()
+				if waitErr := s.wait(ctx, retryBackoff(s.transientRetries)); waitErr != nil {
+					return protocol.StreamEvent{}, waitErr
+				}
+				continue
+			}
+			s.markTerminal()
+			event.Err = withAttemptCount(event.Err, s.requestAttempts)
+			return event, nil
+		}
+		s.delivered = true
+		if event.Type == protocol.EvStreamDone {
+			s.markTerminal()
+		}
+		return event, nil
+	}
+}
+
+func (s *retryingCodexStream) Close() error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	stream := s.current
+	s.current = nil
+	s.mu.Unlock()
+	s.cancel()
+	if stream != nil {
+		return stream.Close()
+	}
+	return nil
+}
+
+type codexAttemptResult struct {
+	stream protocol.EventStream
+	err    error
+	delay  time.Duration
+}
+
+func (s *retryingCodexStream) awaitAttempt(ctx context.Context) (codexAttemptResult, error) {
+	s.mu.Lock()
+	pending := s.pending
+	if pending == nil && !s.closed {
+		pending = make(chan codexAttemptResult, 1)
+		s.pending = pending
+		go func(ch chan codexAttemptResult) {
+			stream, err, delay := s.startAttempt()
+			ch <- codexAttemptResult{stream: stream, err: err, delay: delay}
+		}(pending)
+	}
+	s.mu.Unlock()
+	if pending == nil {
+		return codexAttemptResult{}, io.EOF
+	}
+	select {
+	case result := <-pending:
+		s.mu.Lock()
+		if s.pending == pending {
+			s.pending = nil
+		}
+		s.mu.Unlock()
+		return result, nil
+	case <-ctx.Done():
+		return codexAttemptResult{}, ctx.Err()
+	case <-s.ctx.Done():
+		return codexAttemptResult{}, s.ctx.Err()
+	}
+}
+
+func (s *retryingCodexStream) activeStream() protocol.EventStream {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	return s.current
+}
+
+func (s *retryingCodexStream) setActiveStream(stream protocol.EventStream) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		_ = stream.Close()
+		return
+	}
+	s.current = stream
+	s.mu.Unlock()
+}
+
+func (s *retryingCodexStream) clearActiveStream() {
+	s.mu.Lock()
+	stream := s.current
+	s.current = nil
+	s.mu.Unlock()
+	if stream != nil {
+		_ = stream.Close()
+	}
+}
+
+func (s *retryingCodexStream) isTerminal() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed || s.terminal
+}
+
+func (s *retryingCodexStream) markTerminal() {
+	s.mu.Lock()
+	s.terminal = true
+	s.mu.Unlock()
+}
+
+func (s *retryingCodexStream) canRetry(err error) bool {
+	return !s.delivered && s.transientRetries < maxTransientRetries && s.requestAttempts < maxTransientRetries+1 && retryableCodexError(err)
+}
+
+func (s *retryingCodexStream) wait(ctx context.Context, delay time.Duration) error {
+	if delay > maxRetryDelay {
+		delay = maxRetryDelay
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	if s.provider.wait != nil {
+		return s.provider.wait(s.ctx, ctx, delay)
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
+}
+
+func (s *retryingCodexStream) startAttempt() (protocol.EventStream, error, time.Duration) {
+	for {
+		s.requestAttempts++
+		req, err := http.NewRequestWithContext(s.ctx, http.MethodPost, s.provider.endpoint(), bytes.NewReader(s.body))
+		if err != nil {
+			return nil, responsesapi.NewResponseError(ProviderID, 0, "create request failed", "request_build_error", ""), -1
+		}
+		req.Header.Set("Authorization", "Bearer "+s.creds.Access)
+		req.Header.Set("chatgpt-account-id", s.status.AccountID)
+		req.Header.Set("originator", "snow")
+		req.Header.Set("User-Agent", "snow")
+		req.Header.Set("OpenAI-Beta", "responses=experimental")
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Content-Type", "application/json")
+		if s.contentEncoding != "" {
+			req.Header.Set("Content-Encoding", s.contentEncoding)
+		}
+		if s.affinity != "" {
+			req.Header.Set("session-id", s.affinity)
+			req.Header.Set("x-client-request-id", s.affinity)
+		}
+
+		resp, requestErr := redirectSafeClient(s.provider.client).Do(req)
+		if requestErr != nil {
+			return nil, responsesapi.NewResponseError(ProviderID, 0, "network request failed", "network_error", ""), -1
+		}
+		if resp.StatusCode == http.StatusUnauthorized && !s.authRetried && s.requestAttempts < maxTransientRetries+1 {
+			resp.Body.Close()
+			s.authRetried = true
+			fresh, refreshErr := s.provider.resolve(s.ctx, s.creds, true)
+			if refreshErr != nil {
+				return nil, refreshErr, -1
+			}
+			s.creds = fresh
+			s.status, refreshErr = CheckAuth(fresh)
+			if refreshErr != nil {
+				return nil, refreshErr, -1
+			}
+			continue
+		}
+		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+			return responsesapi.NewStream(s.ctx, resp, ProviderID, s.creds.Access, s.creds.Refresh), nil, 0
+		}
+
+		now := time.Now()
+		if s.provider.now != nil {
+			now = s.provider.now()
+		}
+		delay := responseRetryDelay(resp, now)
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxHTTPErrorReadBytes))
+		resp.Body.Close()
+		requestID := responseRequestID(resp.Header, s.creds.Access, s.creds.Refresh)
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusPaymentRequired {
+			message := responsesapi.SanitizeErrorText(string(snippet), maxHTTPErrorSnippetBytes, s.creds.Access, s.creds.Refresh)
+			if requestID != "" {
+				message += " (request ID " + requestID + ")"
+			}
+			return nil, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: message}, -1
+		}
+		return nil, responseError(resp.StatusCode, snippet, requestID, s.creds.Access, s.creds.Refresh), delay
+	}
 }
 
 func (p *Provider) endpoint() string {
@@ -107,956 +366,177 @@ func (p *Provider) endpoint() string {
 	return base + "/codex/responses"
 }
 
-func responseError(status int, body []byte) error {
+func responseError(status int, body []byte, diagnostics ...string) error {
 	message := strings.TrimSpace(string(body))
 	var payload struct {
 		Error struct {
-			Message string `json:"message"`
-			Code    string `json:"code"`
+			Message   string `json:"message"`
+			Code      string `json:"code"`
+			RequestID string `json:"request_id"`
 		} `json:"error"`
+		RequestID string `json:"request_id"`
 	}
-	if json.Unmarshal(body, &payload) == nil && payload.Error.Message != "" {
+	_ = json.Unmarshal(body, &payload)
+	if payload.Error.Message != "" {
 		message = payload.Error.Message
 	}
 	if message == "" {
 		message = http.StatusText(status)
 	}
+	id := payload.Error.RequestID
+	if id == "" {
+		id = payload.RequestID
+	}
+	if id == "" && len(diagnostics) > 0 {
+		id = diagnostics[0]
+	}
 	if status == http.StatusUnauthorized {
-		return errors.New("chatgpt: OAuth credential rejected (HTTP 401)")
+		message = "OAuth credential rejected"
 	}
-	return fmt.Errorf("chatgpt: HTTP %d: %s", status, truncate(message, 500))
+	var secrets []string
+	if len(diagnostics) > 1 {
+		secrets = diagnostics[1:]
+	}
+	return responsesapi.NewResponseError(ProviderID, status, message, payload.Error.Code, id, secrets...)
 }
 
-type responsesRequest struct {
-	Model        string          `json:"model"`
-	Store        bool            `json:"store"`
-	Stream       bool            `json:"stream"`
-	Instructions string          `json:"instructions,omitempty"`
-	Input        []any           `json:"input"`
-	Tools        []responsesTool `json:"tools,omitempty"`
-	Reasoning    *reasoning      `json:"reasoning,omitempty"`
-	Include      []string        `json:"include,omitempty"`
-	Text         *responseText   `json:"text,omitempty"`
-}
-
-type responseText struct {
-	Verbosity string `json:"verbosity"`
-}
-
-type reasoning struct {
-	Effort  string `json:"effort"`
-	Summary string `json:"summary,omitempty"`
-}
-
-type persistedReasoningItem struct {
-	Type             string  `json:"type"`
-	ID               string  `json:"id"`
-	Summary          []any   `json:"summary"`
-	Content          *[]any  `json:"content,omitempty"`
-	EncryptedContent *string `json:"encrypted_content,omitempty"`
-}
-
-type responsesTool struct {
-	Type        string          `json:"type"`
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
-	Strict      bool            `json:"strict"`
-}
-
-func buildResponsesBody(req protocol.ChatRequest) ([]byte, error) {
-	model := req.Model.ID
-	if model == "" {
-		return nil, errors.New("model is required")
-	}
-	level := protocol.NormalizeThinkingLevel(req.Thinking)
-	summary, err := protocol.ParseReasoningSummary(string(req.ReasoningSummary))
-	if err != nil {
-		return nil, err
-	}
-	verbosity, err := protocol.ParseTextVerbosity(string(req.TextVerbosity))
-	if err != nil {
-		return nil, err
-	}
-	if !req.Model.SupportsThinkingLevel(level) {
-		return nil, unsupportedThinkingError(req.Model, model, level)
-	}
-	body := responsesRequest{
-		Model:        model,
-		Store:        false,
-		Stream:       true,
-		Instructions: req.System,
-		Input:        make([]any, 0, len(req.Messages)),
-		Include:      []string{"reasoning.encrypted_content"},
-	}
-	// Legacy/custom request models did not carry this capability bit. Keep the
-	// historical field for those, while respecting an authenticated ChatGPT
-	// catalog record that explicitly does not support verbosity.
-	if req.Model.Provider != ProviderID || req.Model.SupportsVerbosity {
-		body.Text = &responseText{Verbosity: string(verbosity)}
-	}
-	if body.Instructions == "" {
-		body.Instructions = "You are a helpful assistant."
-	}
-	for _, msg := range req.Messages {
-		input, err := responseInput(msg)
-		if err != nil {
-			return nil, err
-		}
-		body.Input = append(body.Input, input...)
-	}
-	for _, fragment := range req.InternalContext {
-		if err := fragment.Validate(); err != nil {
-			return nil, err
-		}
-		body.Input = append(body.Input, map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": renderInternalFragment(fragment)}}})
-	}
-	for _, tool := range req.Tools {
-		params := tool.Parameters
-		if len(params) == 0 {
-			params = json.RawMessage(`{"type":"object","properties":{}}`)
-		}
-		body.Tools = append(body.Tools, responsesTool{
-			Type:        "function",
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  params,
-			Strict:      false,
-		})
-	}
-	if level != protocol.ThinkingOff {
-		if effort, ok := mapThinkingEffort(level); ok {
-			body.Reasoning = &reasoning{Effort: effort}
-			if summary != protocol.ReasoningSummaryOff && (req.Model.SupportsReasoningSummary == nil || *req.Model.SupportsReasoningSummary) {
-				body.Reasoning.Summary = string(summary)
-			}
-		}
-	}
-	return json.Marshal(body)
-}
-
-func mapThinkingEffort(level protocol.ThinkingLevel) (string, bool) {
-	switch level {
-	case protocol.ThinkingMinimal, protocol.ThinkingLow:
-		return "low", true
-	case protocol.ThinkingMedium:
-		return "medium", true
-	case protocol.ThinkingHigh:
-		return "high", true
-	default:
-		return "", false
-	}
-}
-
-func unsupportedThinkingError(model protocol.Model, modelID string, level protocol.ThinkingLevel) error {
-	allowed := model.SupportedThinkingLevels()
-	parts := make([]string, 0, len(allowed))
-	for _, supported := range allowed {
-		parts = append(parts, string(supported))
-	}
-	return fmt.Errorf("chatgpt: model %q does not advertise thinking level %q (supported: %s)", modelID, level, strings.Join(parts, "|"))
-}
-
-func renderInternalFragment(fragment protocol.InternalContextFragment) string {
-	return "<snow_internal_context source=\"" + fragment.Source + "\">\n" + fragment.Text + "\n</snow_internal_context>"
-}
-
-func responseInput(msg protocol.Message) ([]any, error) {
-	text := messageText(msg)
-	switch msg.Role {
-	case protocol.RoleUser, protocol.RoleAgent:
-		content, err := userInputContent(msg.Content)
-		if err != nil {
-			return nil, err
-		}
-		if len(content) == 0 {
-			return nil, nil
-		}
-		return []any{map[string]any{"role": "user", "content": content}}, nil
-	case protocol.RoleAssistant:
-		var out []any
-		for _, block := range msg.Content {
-			switch block.Type {
-			case protocol.BlockProviderData:
-				item, err := replayProviderReasoning(block)
-				if err != nil {
-					return nil, err
-				}
-				out = append(out, item)
-			case protocol.BlockToolCall:
-				args := strings.TrimSpace(string(block.Arguments))
-				if args == "" {
-					args = "{}"
-				}
-				out = append(out, map[string]any{
-					"type":      "function_call",
-					"call_id":   block.ToolCallID,
-					"name":      block.Name,
-					"arguments": args,
-					"status":    "completed",
-				})
-			}
-		}
-		if text != "" {
-			out = append(out, map[string]any{
-				"type": "message", "role": "assistant", "status": "completed",
-				"content": []any{map[string]any{"type": "output_text", "text": text}},
-			})
-		}
-		return out, nil
-	case protocol.RoleTool:
-		output, err := responseToolOutput(msg.Content, text)
-		if err != nil {
-			return nil, err
-		}
-		return []any{map[string]any{
-			"type": "function_call_output", "call_id": msg.ToolCallID, "output": output,
-		}}, nil
-	case protocol.RoleCustom:
-		if text != "" {
-			return []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": text}}}}, nil
-		}
-	}
-	return nil, nil
-}
-
-func replayProviderReasoning(block protocol.ContentBlock) (any, error) {
-	if block.Name == "" || len(block.Data) == 0 {
-		return nil, errors.New("persisted provider reasoning data is malformed")
-	}
-	if !json.Valid(block.Data) {
-		// Backward compatibility for the original persistence format, where Data
-		// held only encrypted_content and Name held the reasoning item ID. Upgrade
-		// it to the current wire shape because summary is required by Responses.
-		return map[string]any{"type": "reasoning", "id": block.Name, "summary": []any{}, "encrypted_content": string(block.Data)}, nil
-	}
-	var item persistedReasoningItem
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(block.Data, &item) != nil || json.Unmarshal(block.Data, &fields) != nil ||
-		item.Type != "reasoning" || item.ID == "" || item.ID != block.Name || item.Summary == nil {
-		return nil, errors.New("persisted provider reasoning data is malformed")
-	}
-	for name := range fields {
-		switch name {
-		case "type", "id", "summary", "content", "encrypted_content":
-		default:
-			return nil, errors.New("persisted provider reasoning data is malformed")
-		}
-	}
-	if _, ok := fields["summary"]; !ok {
-		return nil, errors.New("persisted provider reasoning data is malformed")
-	}
-	if _, valid := sanitizeReasoningParts(item.Summary, "summary_text"); !valid {
-		return nil, errors.New("persisted provider reasoning data is malformed")
-	}
-	if raw, ok := fields["content"]; ok {
-		if item.Content == nil || string(raw) == "null" {
-			return nil, errors.New("persisted provider reasoning data is malformed")
-		}
-		if _, valid := sanitizeReasoningParts(*item.Content, "reasoning_text"); !valid {
-			return nil, errors.New("persisted provider reasoning data is malformed")
-		}
-	}
-	if raw, ok := fields["encrypted_content"]; ok && (item.EncryptedContent == nil || string(raw) == "null") {
-		return nil, errors.New("persisted provider reasoning data is malformed")
-	}
-	return json.RawMessage(append([]byte(nil), block.Data...)), nil
-}
-
-func responseToolOutput(blocks []protocol.ContentBlock, text string) (any, error) {
-	hasImage := false
-	for _, block := range blocks {
-		if block.Type == protocol.BlockImage {
-			hasImage = true
-			break
-		}
-	}
-	if !hasImage {
-		if text == "" {
-			text = "(no tool output)"
-		}
-		return text, nil
-	}
-	return userInputContent(blocks)
-}
-
-func userInputContent(blocks []protocol.ContentBlock) ([]any, error) {
-	var content []any
-	for _, block := range blocks {
-		switch block.Type {
-		case protocol.BlockText:
-			if block.Text != "" {
-				content = append(content, map[string]any{"type": "input_text", "text": block.Text})
-			}
-		case protocol.BlockPlan:
-			text := messageText(protocol.Message{Content: []protocol.ContentBlock{block}})
-			if text != "" {
-				content = append(content, map[string]any{"type": "input_text", "text": text})
-			}
-		case protocol.BlockImage:
-			image, err := responseImageInput(block)
-			if err != nil {
-				return nil, err
-			}
-			content = append(content, image)
-		}
-	}
-	return content, nil
-}
-
-func responseImageInput(block protocol.ContentBlock) (map[string]any, error) {
-	mime := strings.ToLower(strings.TrimSpace(block.MIMEType))
-	switch mime {
-	case "image/png", "image/jpeg", "image/gif", "image/webp":
-	default:
-		return nil, fmt.Errorf("unsupported image MIME type %q", block.MIMEType)
-	}
-	if len(block.Data) == 0 {
-		return nil, errors.New("image content is empty")
-	}
-	if len(block.Data) > 20<<20 {
-		return nil, errors.New("image content exceeds 20 MiB limit")
-	}
-	return map[string]any{
-		"type": "input_image", "image_url": "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(block.Data), "detail": "high",
-	}, nil
-}
-
-func messageText(msg protocol.Message) string {
-	var b strings.Builder
-	for _, block := range msg.Content {
-		switch block.Type {
-		case protocol.BlockText:
-			b.WriteString(block.Text)
-		case protocol.BlockPlan:
-			if !block.PlanComplete {
-				b.WriteString(block.Text)
-				continue
-			}
-			if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
-				b.WriteByte('\n')
-			}
-			b.WriteString("<proposed_plan>\n")
-			b.WriteString(block.Text)
-			if !strings.HasSuffix(block.Text, "\n") {
-				b.WriteByte('\n')
-			}
-			b.WriteString("</proposed_plan>\n")
-		}
-	}
-	return b.String()
-}
-
-type codexStream struct {
-	ch      chan protocol.StreamEvent
-	done    chan struct{}
-	ctx     context.Context
-	body    io.ReadCloser
-	once    sync.Once
-	secrets []string
-}
-
-func newCodexStream(ctx context.Context, resp *http.Response, secrets ...string) *codexStream {
-	return &codexStream{ch: make(chan protocol.StreamEvent, 64), done: make(chan struct{}), ctx: ctx, body: resp.Body, secrets: append([]string(nil), secrets...)}
-}
-
-func (s *codexStream) Next(ctx context.Context) (protocol.StreamEvent, error) {
-	select {
-	case ev, ok := <-s.ch:
-		if !ok {
-			return protocol.StreamEvent{}, io.EOF
-		}
-		return ev, nil
-	case <-ctx.Done():
-		return protocol.StreamEvent{}, ctx.Err()
-	case <-s.ctx.Done():
-		return protocol.StreamEvent{}, s.ctx.Err()
-	case <-s.done:
-		return protocol.StreamEvent{}, io.EOF
-	}
-}
-
-func (s *codexStream) Close() error {
-	s.once.Do(func() {
-		if s.body != nil {
-			_ = s.body.Close()
-		}
-		close(s.done)
-	})
-	return nil
-}
-
-func (s *codexStream) send(ev protocol.StreamEvent) {
-	select {
-	case s.ch <- ev:
-	case <-s.ctx.Done():
-	case <-s.done:
-	}
-}
-
-type toolAccum struct {
-	id   string
-	name string
-	args strings.Builder
-}
-
-type reasoningAccum struct {
-	items            map[string]string
-	totalBytes       int
-	emitted          bool
-	trailingNewlines int
-}
-
-func newReasoningAccum() *reasoningAccum {
-	return &reasoningAccum{items: make(map[string]string)}
-}
-
-// append preserves raw per-item text for completed-snapshot reconciliation but
-// inserts a visible paragraph boundary when the Responses API starts a new
-// reasoning summary item. Without this, independently formatted summaries such
-// as "Planning tasks" and "Designing workers" render as "tasksDesigning".
-func (r *reasoningAccum) append(key, text string) string {
-	if r == nil || text == "" {
-		return text
-	}
-	_, seen := r.items[key]
-	r.items[key] += text
-	r.totalBytes += len(text)
-	out := text
-	if !seen && r.emitted {
-		needed := max(0, 2-r.trailingNewlines)
-		out = strings.Repeat("\n", needed) + strings.TrimLeft(text, "\r\n")
-	}
-	if out != "" {
-		r.emitted = true
-		r.trailingNewlines = trailingNewlineCount(out)
-	}
-	return out
-}
-
-func (r *reasoningAccum) canAppend(key, text string) error {
-	if r == nil || text == "" {
-		return nil
-	}
-	if len(key) > maxCodexIdentityBytes {
-		return errors.New("reasoning identity exceeds size limit")
-	}
-	if _, exists := r.items[key]; !exists && len(r.items) >= maxCodexReasoningItems {
-		return errors.New("reasoning item count exceeds limit")
-	}
-	if len(text) > maxCodexReasoningBytes-r.totalBytes {
-		return errors.New("reasoning text exceeds total size limit")
-	}
-	return nil
-}
-
-func (r *reasoningAccum) text(key string) string {
-	if r == nil {
+func normalizeAffinityKey(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
 		return ""
 	}
-	return r.items[key]
+	if len(value) == 64 {
+		if _, err := hex.DecodeString(value); err == nil && value == strings.ToLower(value) {
+			return value
+		}
+	}
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
-func trailingNewlineCount(value string) int {
-	count := 0
-	for i := len(value) - 1; i >= 0 && value[i] == '\n'; i-- {
-		count++
+func compressRequestBody(body []byte) ([]byte, string) {
+	if len(body) < requestCompressMinimum {
+		return append([]byte(nil), body...), ""
 	}
-	return min(count, 2)
+	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest), zstd.WithEncoderConcurrency(1))
+	if err != nil {
+		return append([]byte(nil), body...), ""
+	}
+	defer encoder.Close()
+	return encoder.EncodeAll(body, make([]byte, 0, len(body)/2)), "zstd"
 }
 
-func (s *codexStream) read() {
-	defer close(s.ch)
-	defer s.body.Close()
-	scanner := bufio.NewScanner(s.body)
-	scanner.Buffer(make([]byte, 4096), maxCodexSSELineBytes)
-	var data []string
-	dataBytes := 0
-	dataFragments := 0
-	calls := make(map[string]*toolAccum)
-	bounds := &codexStreamBounds{}
-	reasoning := newReasoningAccum()
-	var finish protocol.StopReason
-	sawTool := false
-	flush := func() bool {
-		if len(data) == 0 {
-			return false
-		}
-		payload := strings.TrimSpace(strings.Join(data, "\n"))
-		data = nil
-		dataBytes = 0
-		dataFragments = 0
-		if payload == "" || payload == "[DONE]" {
-			return false
-		}
-		var event map[string]any
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("chatgpt: invalid SSE event: %w", err)})
-			return true
-		}
-		return s.processEvent(event, calls, reasoning, bounds, &finish, &sawTool)
+func retryBackoff(retry int) time.Duration {
+	if retry <= 1 {
+		return initialRetryDelay
 	}
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			if flush() {
-				return
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "data:") {
-			fragment := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			// Count a separator byte even for an empty fragment and independently
-			// cap fragment count so slice overhead cannot bypass the byte bound.
-			if dataFragments >= maxCodexSSEEventFragments || len(fragment)+1 > maxCodexSSEEventBytes-dataBytes {
-				s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("chatgpt: SSE event exceeds size limit")})
-				return
-			}
-			dataFragments++
-			dataBytes += len(fragment) + 1
-			data = append(data, fragment)
-		}
+	delay := initialRetryDelay << (retry - 1)
+	if delay > maxRetryDelay {
+		return maxRetryDelay
 	}
-	if flush() {
-		return
-	}
-	if err := scanner.Err(); err != nil && s.ctx.Err() == nil {
-		s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("chatgpt: stream read failed: %w", err)})
-		return
-	}
-	if finish == "" {
-		if sawTool {
-			finish = protocol.StopToolUse
-		} else {
-			finish = protocol.StopStop
-		}
-	}
-	s.send(protocol.StreamEvent{Type: protocol.EvStreamDone, StopReason: finish})
+	return delay
 }
 
-type codexStreamBounds struct {
-	totalToolArgumentBytes  int
-	completedReasoningBytes int
-	completedReasoningItems int
+func responseRetryDelay(resp *http.Response, now time.Time) time.Duration {
+	if value := strings.TrimSpace(resp.Header.Get("retry-after-ms")); value != "" {
+		if ms, err := strconv.ParseInt(value, 10, 64); err == nil && ms >= 0 {
+			if ms >= int64(maxRetryDelay/time.Millisecond) {
+				return maxRetryDelay
+			}
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	value := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if value == "" {
+		return -1
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil && seconds >= 0 {
+		if seconds >= int64(maxRetryDelay/time.Second) {
+			return maxRetryDelay
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		return min(max(time.Duration(0), when.Sub(now)), maxRetryDelay)
+	}
+	return -1
 }
 
-func (s *codexStream) processEvent(event map[string]any, calls map[string]*toolAccum, reasoning *reasoningAccum, bounds *codexStreamBounds, finish *protocol.StopReason, sawTool *bool) bool {
-	typ, _ := event["type"].(string)
-	switch typ {
-	case "response.output_text.delta":
-		if delta, _ := event["delta"].(string); delta != "" {
-			s.send(protocol.StreamEvent{Type: protocol.EvStreamTextDelta, Text: delta})
-		}
-	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
-		if delta, _ := event["delta"].(string); delta != "" {
-			key := reasoningIdentity(event, typ)
-			if err := reasoning.canAppend(key, delta); err != nil {
-				return s.streamLimitError(err.Error())
-			}
-			s.send(protocol.StreamEvent{Type: protocol.EvStreamThinkingDelta, Text: reasoning.append(key, delta)})
-		}
-	case "response.reasoning_summary_text.done", "response.reasoning_summary_part.done", "response.reasoning_text.done":
-		if text := reasoningDoneText(event, typ); text != "" {
-			key := reasoningIdentity(event, typ)
-			if suffix := missingReasoningSuffix(reasoning.text(key), text); suffix != "" {
-				if err := reasoning.canAppend(key, suffix); err != nil {
-					return s.streamLimitError(err.Error())
+func responseRequestID(header http.Header, secrets ...string) string {
+	for _, name := range []string{"x-request-id", "request-id", "openai-request-id"} {
+		if value := strings.TrimSpace(header.Get(name)); value != "" {
+			value = providerpkg.RedactSecrets(value, secrets...)
+			value = strings.Map(func(r rune) rune {
+				if unicode.IsControl(r) {
+					return -1
 				}
-				s.send(protocol.StreamEvent{Type: protocol.EvStreamThinkingDelta, Text: reasoning.append(key, suffix)})
-			}
+				return r
+			}, value)
+			return truncate(value, 200)
 		}
-	case "response.function_call_arguments.delta":
-		*sawTool = true
-		if codexToolIdentityBytes(event) > maxCodexIdentityBytes {
-			return s.streamLimitError("tool-call identity exceeds size limit")
-		}
-		key, id, name, created := toolIdentity(event, calls)
-		if created && len(calls) > maxCodexStreamToolCalls {
-			return s.streamLimitError("tool-call count exceeds limit")
-		}
-		acc := calls[key]
-		if delta, _ := event["delta"].(string); delta != "" {
-			if err := appendCodexToolArguments(acc, delta, bounds); err != nil {
-				return s.streamLimitError(err.Error())
-			}
-			s.send(protocol.StreamEvent{Type: protocol.EvStreamToolCallDelta, ToolCallID: id, ToolName: name, Arguments: json.RawMessage(delta)})
-		}
-	case "response.function_call_arguments.done":
-		*sawTool = true
-		if codexToolIdentityBytes(event) > maxCodexIdentityBytes {
-			return s.streamLimitError("tool-call identity exceeds size limit")
-		}
-		key, id, name, created := toolIdentity(event, calls)
-		if created && len(calls) > maxCodexStreamToolCalls {
-			return s.streamLimitError("tool-call count exceeds limit")
-		}
-		acc := calls[key]
-		args, _ := event["arguments"].(string)
-		if args != "" {
-			if err := acceptCodexToolSnapshot(acc, args, bounds); err != nil {
-				return s.streamLimitError(err.Error())
-			}
-		} else {
-			args = acc.args.String()
-		}
-		if args == "" || !json.Valid([]byte(args)) {
-			args = "{}"
-		}
-		s.send(protocol.StreamEvent{Type: protocol.EvStreamToolCallDone, ToolCallID: id, ToolName: name, Arguments: json.RawMessage(args)})
-	case "response.output_item.added", "response.output_item.done":
-		item, _ := event["item"].(map[string]any)
-		itemType, _ := item["type"].(string)
-		if itemType == "reasoning" && typ == "response.output_item.done" {
-			id, _ := item["id"].(string)
-			if len(id) > maxCodexIdentityBytes {
-				return s.streamLimitError("reasoning identity exceeds size limit")
-			}
-			if block := sanitizeCompletedReasoningItem(item); block != nil {
-				if bounds.completedReasoningItems >= maxCodexReasoningItems || len(block.Data) > maxCodexReasoningBytes-bounds.completedReasoningBytes {
-					return s.streamLimitError("completed reasoning exceeds size limit")
-				}
-				bounds.completedReasoningItems++
-				bounds.completedReasoningBytes += len(block.Data)
-				s.send(protocol.StreamEvent{Type: protocol.EvStreamProviderData, ProviderData: block})
-			}
-		}
-		if itemType == "function_call" {
-			*sawTool = true
-			if codexItemIdentityBytes(item) > maxCodexIdentityBytes {
-				return s.streamLimitError("tool-call identity exceeds size limit")
-			}
-			key, id, name, created := itemIdentity(event, item, calls)
-			if created && len(calls) > maxCodexStreamToolCalls {
-				return s.streamLimitError("tool-call count exceeds limit")
-			}
-			acc := calls[key]
-			if args, _ := item["arguments"].(string); args != "" {
-				wasEmpty := acc.args.Len() == 0
-				if typ == "response.output_item.done" {
-					if err := acceptCodexToolSnapshot(acc, args, bounds); err != nil {
-						return s.streamLimitError(err.Error())
-					}
-				} else if wasEmpty {
-					if err := appendCodexToolArguments(acc, args, bounds); err != nil {
-						return s.streamLimitError(err.Error())
-					}
-				}
-				if wasEmpty {
-					s.send(protocol.StreamEvent{Type: protocol.EvStreamToolCallDelta, ToolCallID: id, ToolName: name, Arguments: json.RawMessage(args)})
-				}
-			}
-			if typ == "response.output_item.done" {
-				args := acc.args.String()
-				if args == "" || !json.Valid([]byte(args)) {
-					args = "{}"
-				}
-				s.send(protocol.StreamEvent{Type: protocol.EvStreamToolCallDone, ToolCallID: id, ToolName: name, Arguments: json.RawMessage(args)})
-			}
-		}
-	case "response.completed", "response.done", "response.incomplete":
-		if usage := responseUsage(event); usage != nil {
-			s.send(protocol.StreamEvent{Type: protocol.EvStreamUsage, Usage: usage})
-		}
-		if *finish == "" {
-			if status, _ := nestedString(event, "response", "status"); status == "incomplete" || typ == "response.incomplete" {
-				*finish = protocol.StopLength
-			} else if *sawTool {
-				*finish = protocol.StopToolUse
-			} else {
-				*finish = protocol.StopStop
-			}
-		}
-	case "response.failed", "error":
-		message := eventMessage(event)
-		if message == "" {
-			message = "Codex response failed"
-		}
-		s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("chatgpt: " + providerpkg.RedactSecrets(message, s.secrets...))})
+	}
+	return ""
+}
+
+func retryableCodexError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var responseErr *responsesapi.ResponseError
+	if !errors.As(err, &responseErr) {
+		return false
+	}
+	switch responseErr.Status {
+	case http.StatusRequestTimeout, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return true
 	}
-	return false
+	code := strings.ToLower(responseErr.Code)
+	if code != "" {
+		return code == "network_error" || code == "stream_truncated" || strings.Contains(code, "overload") || strings.Contains(code, "service_unavailable") || strings.Contains(code, "upstream") || strings.Contains(code, "timeout")
+	}
+	message := strings.ToLower(responseErr.Message)
+	return strings.Contains(message, "overload") || strings.Contains(message, "service unavailable") || strings.Contains(message, "upstream connect") || strings.Contains(message, "temporarily unavailable")
 }
 
-func sanitizeCompletedReasoningItem(item map[string]any) *protocol.ContentBlock {
-	id, _ := item["id"].(string)
-	if id == "" {
-		return nil
+func withAttemptCount(err error, attempts int) error {
+	if err == nil || attempts <= 1 {
+		return err
 	}
-	summary := []any{}
-	if value, ok := item["summary"]; ok {
-		var valid bool
-		summary, valid = sanitizeReasoningParts(value, "summary_text")
-		if !valid {
-			return nil
-		}
+	var responseErr *responsesapi.ResponseError
+	if errors.As(err, &responseErr) {
+		copy := *responseErr
+		copy.Attempts = attempts
+		return &copy
 	}
-	wire := persistedReasoningItem{Type: "reasoning", ID: id, Summary: summary}
-	if value, ok := item["content"]; ok {
-		content, valid := sanitizeReasoningParts(value, "reasoning_text")
-		if !valid {
-			return nil
-		}
-		wire.Content = &content
-	}
-	if value, ok := item["encrypted_content"]; ok {
-		encrypted, valid := value.(string)
-		if !valid {
-			return nil
-		}
-		wire.EncryptedContent = &encrypted
-	}
-	data, err := json.Marshal(wire)
-	if err != nil {
-		return nil
-	}
-	return &protocol.ContentBlock{Type: protocol.BlockProviderData, Name: id, Data: data}
+	return fmt.Errorf("%w (after %d attempts)", err, attempts)
 }
 
-func sanitizeReasoningParts(value any, expectedType string) ([]any, bool) {
-	parts, ok := value.([]any)
-	if !ok {
-		return nil, false
-	}
-	sanitized := make([]any, 0, len(parts))
-	for _, value := range parts {
-		part, ok := value.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		typ, typeOK := part["type"].(string)
-		text, textOK := part["text"].(string)
-		if !typeOK || typ != expectedType || !textOK {
-			return nil, false
-		}
-		sanitized = append(sanitized, map[string]any{"type": typ, "text": text})
-	}
-	return sanitized, true
+// buildResponsesBody remains as a thin compatibility seam for ChatGPT package
+// regression tests. Runtime and tests use the shared Responses encoder.
+func buildResponsesBody(req protocol.ChatRequest) ([]byte, error) {
+	affinity := normalizeAffinityKey(req.SessionAffinityKey)
+	parallel := true
+	return responsesapi.BuildRequest(req, responsesapi.RequestOptions{
+		ProviderID:                ProviderID,
+		IncludeEncryptedReasoning: true,
+		AllowLegacyVerbosity:      req.Model.Provider != ProviderID,
+		PromptCacheKey:            affinity,
+		ToolChoice:                "auto",
+		ParallelToolCalls:         &parallel,
+		OmitMaxOutputTokens:       true,
+		OmitTemperature:           true,
+	})
 }
 
-func reasoningIdentity(event map[string]any, typ string) string {
-	family := "summary"
-	indexField := "summary_index"
-	if strings.Contains(typ, "reasoning_text") && !strings.Contains(typ, "summary") {
-		family = "text"
-		indexField = "content_index"
+// responseInput and messageText are thin compatibility seams for package tests.
+func responseInput(msg protocol.Message) ([]any, error) {
+	if msg.Provider == "" {
+		msg.Provider = ProviderID
 	}
-	itemID, _ := event["item_id"].(string)
-	if itemID == "" {
-		itemID = fmt.Sprintf("output-%d", intNumber(event["output_index"]))
-	}
-	return fmt.Sprintf("%s:%s:%d", family, itemID, intNumber(event[indexField]))
+	return responsesapi.MessageInput(msg, ProviderID)
 }
 
-func reasoningDoneText(event map[string]any, typ string) string {
-	if typ == "response.reasoning_summary_part.done" {
-		part, _ := event["part"].(map[string]any)
-		text, _ := part["text"].(string)
-		return text
-	}
-	text, _ := event["text"].(string)
-	return text
-}
-
-// missingReasoningSuffix merges a completed snapshot into an append-only
-// delta stream. Completed events commonly repeat all text already delivered by
-// deltas; only a genuinely missing suffix is safe to publish. A shorter or
-// divergent snapshot must not overwrite or duplicate visible reasoning.
-func missingReasoningSuffix(streamed, completed string) string {
-	if streamed == "" {
-		return completed
-	}
-	if strings.HasPrefix(completed, streamed) {
-		return strings.TrimPrefix(completed, streamed)
-	}
-	return ""
-}
-
-func codexToolIdentityBytes(event map[string]any) int {
-	total := 0
-	for _, field := range []string{"item_id", "call_id", "name"} {
-		if value, _ := event[field].(string); value != "" {
-			total += len(value)
-		}
-	}
-	return total
-}
-
-func codexItemIdentityBytes(item map[string]any) int {
-	total := 0
-	for _, field := range []string{"id", "call_id", "name"} {
-		if value, _ := item[field].(string); value != "" {
-			total += len(value)
-		}
-	}
-	return total
-}
-
-func toolIdentity(event map[string]any, calls map[string]*toolAccum) (string, string, string, bool) {
-	key, _ := event["item_id"].(string)
-	if key == "" {
-		if n, ok := event["output_index"].(float64); ok {
-			key = fmt.Sprintf("output-%d", int(n))
-		}
-	}
-	id, _ := event["call_id"].(string)
-	name, _ := event["name"].(string)
-	if key == "" {
-		key = id
-	}
-	if key == "" {
-		key = "call-0"
-	}
-	acc := calls[key]
-	created := acc == nil
-	if created {
-		acc = &toolAccum{id: id, name: name}
-		calls[key] = acc
-	}
-	if id == "" {
-		id = acc.id
-	}
-	if name == "" {
-		name = acc.name
-	}
-	if id == "" {
-		id = key
-		acc.id = id
-	}
-	if name != "" {
-		acc.name = name
-	}
-	return key, id, name, created
-}
-
-func itemIdentity(event, item map[string]any, calls map[string]*toolAccum) (string, string, string, bool) {
-	key, _ := item["id"].(string)
-	id, _ := item["call_id"].(string)
-	name, _ := item["name"].(string)
-	if id == "" {
-		id = key
-	}
-	if key == "" {
-		key = id
-	}
-	if key == "" {
-		if n, ok := event["output_index"].(float64); ok {
-			key = fmt.Sprintf("output-%d", int(n))
-		}
-	}
-	if key == "" {
-		// With no protocol identity there is no sound way to correlate items.
-		// Treat each event as a distinct anonymous call so malformed streams
-		// remain count-bounded rather than collapsing forever into call-0.
-		key = fmt.Sprintf("anonymous-%d", len(calls))
-	}
-	if id == "" {
-		id = key
-	}
-	acc := calls[key]
-	created := acc == nil
-	if created {
-		acc = &toolAccum{id: id, name: name}
-		calls[key] = acc
-	}
-	return key, id, name, created
-}
-
-func appendCodexToolArguments(acc *toolAccum, fragment string, bounds *codexStreamBounds) error {
-	if len(fragment) > maxCodexToolArgumentBytes-acc.args.Len() {
-		return errors.New("tool arguments exceed per-call size limit")
-	}
-	if len(fragment) > maxCodexTotalToolArgumentBytes-bounds.totalToolArgumentBytes {
-		return errors.New("tool arguments exceed total size limit")
-	}
-	acc.args.WriteString(fragment)
-	bounds.totalToolArgumentBytes += len(fragment)
-	return nil
-}
-
-func acceptCodexToolSnapshot(acc *toolAccum, arguments string, bounds *codexStreamBounds) error {
-	if len(arguments) > maxCodexToolArgumentBytes {
-		return errors.New("tool arguments exceed per-call size limit")
-	}
-	if acc.args.Len() == 0 {
-		return appendCodexToolArguments(acc, arguments, bounds)
-	}
-	// Deltas are already charged. A completed snapshot may repeat those bytes;
-	// charge only growth beyond the accumulated form so distinct large
-	// snapshots cannot bypass the aggregate bound without double-counting the
-	// normal repeated snapshot.
-	additional := max(0, len(arguments)-acc.args.Len())
-	if additional > maxCodexTotalToolArgumentBytes-bounds.totalToolArgumentBytes {
-		return errors.New("tool arguments exceed total size limit")
-	}
-	bounds.totalToolArgumentBytes += additional
-	// The completed snapshot is authoritative. Preserve it for any later
-	// output_item.done reconciliation instead of re-emitting stale deltas.
-	acc.args.Reset()
-	acc.args.WriteString(arguments)
-	return nil
-}
-
-func (s *codexStream) streamLimitError(message string) bool {
-	s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("chatgpt: " + message)})
-	return true
-}
-
-func responseUsage(event map[string]any) *protocol.Usage {
-	response, _ := event["response"].(map[string]any)
-	usage, _ := response["usage"].(map[string]any)
-	if usage == nil {
-		return nil
-	}
-	out := &protocol.Usage{
-		Input:  intNumber(usage["input_tokens"]),
-		Output: intNumber(usage["output_tokens"]),
-		Total:  intNumber(usage["total_tokens"]),
-	}
-	if details, _ := usage["input_tokens_details"].(map[string]any); details != nil {
-		out.CacheRead = intNumber(details["cached_tokens"])
-		out.CacheWrite = intNumber(details["cache_creation_input_tokens"])
-	}
-	if details, _ := usage["output_tokens_details"].(map[string]any); details != nil {
-		out.Reasoning = intNumber(details["reasoning_tokens"])
-	}
-	if out.Total == 0 {
-		out.Total = out.Input + out.Output
-	}
-	return out
-}
-
-func nestedString(event map[string]any, parent, key string) (string, bool) {
-	obj, _ := event[parent].(map[string]any)
-	value, ok := obj[key].(string)
-	return value, ok
-}
-
-func eventMessage(event map[string]any) string {
-	if message, _ := event["message"].(string); message != "" {
-		return message
-	}
-	if errObj, _ := event["error"].(map[string]any); errObj != nil {
-		message, _ := errObj["message"].(string)
-		return message
-	}
-	if response, _ := event["response"].(map[string]any); response != nil {
-		if errObj, _ := response["error"].(map[string]any); errObj != nil {
-			message, _ := errObj["message"].(string)
-			return message
-		}
-	}
-	return ""
-}
-
-func intNumber(v any) int {
-	switch n := v.(type) {
-	case float64:
-		return int(n)
-	case int:
-		return n
-	}
-	return 0
-}
+func messageText(msg protocol.Message) string { return responsesapi.MessageText(msg) }
 
 func truncate(value string, max int) string {
 	if len(value) <= max {
@@ -1066,8 +546,5 @@ func truncate(value string, max int) string {
 }
 
 func errorStream(ctx context.Context, err error) protocol.EventStream {
-	s := &codexStream{ch: make(chan protocol.StreamEvent, 1), done: make(chan struct{}), ctx: ctx}
-	s.ch <- protocol.StreamEvent{Type: protocol.EvStreamError, Err: err}
-	close(s.ch)
-	return s
+	return responsesapi.ErrorStream(ctx, err)
 }

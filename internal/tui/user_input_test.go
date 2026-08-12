@@ -58,14 +58,16 @@ func TestUserInputChoiceThenFreeForm(t *testing.T) {
 	m := newModel(context.Background(), appOptionsForUserInputTest())
 	buildAppForTest(t, m)
 	m.width, m.height = 100, 30
+	m.inlineTranscript = true
+	m.layout()
 	request := protocol.UserInputRequest{ID: "ask-1", Questions: []protocol.UserInputQuestion{
 		{ID: "format", Header: "Format", Question: "Which format?", Options: []protocol.UserInputOption{{Label: "JSON", Description: "Machine readable"}, {Label: "Text", Description: "Human readable"}}},
 		{ID: "notes", Header: "Notes", Question: "Anything else?"},
 	}}
 	outcome := startPendingUserInput(t, m, request)
 
-	if view := stripANSI(m.renderUserInput()); !strings.Contains(view, "Other") {
-		t.Fatalf("overlay = %q", view)
+	if view := stripANSI(m.View()); !strings.Contains(view, "JSON") || !strings.Contains(view, "Text") || !strings.Contains(view, "Other") {
+		t.Fatalf("inline overlay = %q", view)
 	}
 	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyEnter}) // JSON
 	if m.userInputIndex != 1 || !m.userInputEditing {
@@ -82,6 +84,30 @@ func TestUserInputChoiceThenFreeForm(t *testing.T) {
 	}
 	if m.userInputPending || len(result.response.Answers) != 2 || result.response.Answers[0].Answer != "JSON" || result.response.Answers[1].Answer != "keep comments\nand tests" {
 		t.Fatalf("pending=%v response=%+v", m.userInputPending, result.response)
+	}
+}
+
+func TestInlineUserInputLongQuestionKeepsActionsVisible(t *testing.T) {
+	m := newModel(context.Background(), appOptionsForUserInputTest())
+	buildAppForTest(t, m)
+	m.width, m.height = 120, 30
+	m.inlineTranscript = true
+	m.layout()
+	request := protocol.UserInputRequest{ID: "ask-long", Questions: []protocol.UserInputQuestion{{
+		ID: "choice", Header: "Long question", Question: strings.Repeat("extended context ", 55),
+		Options: []protocol.UserInputOption{{Label: "Alpha"}, {Label: "Beta"}, {Label: "Gamma"}},
+	}}}
+	outcome := startPendingUserInput(t, m, request)
+	m.userInputOption = len(request.Questions[0].Options)
+	view := stripANSI(m.View())
+	for _, want := range []string{"Alpha", "Beta", "Gamma", "Other", "Esc decline", "…"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("long inline question hid %q: %q", want, view)
+		}
+	}
+	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := awaitUserInput(t, outcome); !errors.Is(got.err, userinput.ErrRejected) {
+		t.Fatalf("escape outcome = %+v", got)
 	}
 }
 

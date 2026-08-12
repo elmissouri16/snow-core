@@ -146,7 +146,8 @@ if store creation, role validation, model validation, or `agent.New` fails.
 
 ## 1.4 Roles are config overlays, not subclasses
 
-Codex has built-in `default`, `explorer`, and `worker` roles. A role can change
+Codex uses `default`, `explorer`, and `worker`; Snow exposes the clearer
+`general`, `explorer`, and `implementer` roles. A role can change
 model, reasoning, service tier, developer instructions, and nickname candidates.
 The role loader uses normal config layering and requirements enforcement.
 
@@ -157,7 +158,7 @@ Important rules:
 - Live runtime permission/sandbox/cwd values are reapplied after role loading.
 - Spawn tool descriptions include available role guidance.
 - `explorer` is optimized for narrow codebase questions.
-- `worker` guidance requires explicit file/responsibility ownership and warns
+- `implementer` guidance requires explicit file/responsibility ownership and warns
   that peers may be editing the same workspace.
 
 ### Snow implication
@@ -169,6 +170,7 @@ type Role struct {
     Name          string
     Description   string
     System        string
+    Provider      string
     Model         string
     Thinking      *protocol.ThinkingLevel
     Tools         []string
@@ -180,9 +182,10 @@ Role tool permissions are an intersection with parent/operator permissions,
 never a union. Provider, auth, roots, project trust, and permission mode are not
 role-overridable.
 
-## 1.5 V2 identity uses canonical task paths
+## 1.5 Snow identity uses canonical agent paths
 
-A V2 spawn requires `task_name`. If `/root/task1` spawns `task_3`, the child is
+Snow's public spawn request separates `name`, `task`, and `role`. If
+`/root/task1` spawns a child named `task_3`, the child is
 `/root/task1/task_3`. The parent can use `task_3` or the canonical path; agents in
 other branches use the canonical path.
 
@@ -500,10 +503,10 @@ Snow must state the same limitation more prominently:
 Current authority policy:
 
 - the feature remains disabled by default;
-- `default`/general children receive `read`, `grep`, `glob`, permitted
+- `general` children receive `read`, `grep`, `glob`, permitted
   read-only skill/resource tools, and role-selected `bash`;
 - `explorer` children remain read-only and do not receive `bash`;
-- `worker` children are shell-capable, while `write`/`edit` require both
+- `implementer` children are shell-capable, while `write`/`edit` require both
   `subagents.allow_mutation=true` and role `allow_mutation=true`;
 - network, plugin, MCP, goal, and user-input tools remain excluded from child
   registries;
@@ -820,7 +823,7 @@ Current allow policy:
 
 - include built-in read/search tools;
 - include skill/resource reads only when already trusted and read-only;
-- include `bash` for the shell-capable `default`/general and `worker` roles;
+- include `bash` for the shell-capable `general` and `implementer` roles;
 - keep `explorer` read-only without `bash`;
 - exclude root goal tools;
 - exclude `ask_user`/`request_user_input`;
@@ -969,17 +972,17 @@ Input:
 {
   "type": "object",
   "properties": {
-    "task_name": {
+    "name": {
       "type": "string",
-      "description": "Lowercase task name for the new child."
+      "description": "Lowercase identity name for the new child."
     },
-    "message": {
+    "task": {
       "type": "string",
       "description": "Concrete, bounded initial task."
     },
-    "agent_type": {
+    "role": {
       "type": "string",
-      "description": "Optional configured role."
+      "description": "Optional configured capability role."
     },
     "fork_turns": {
       "type": "string",
@@ -994,7 +997,7 @@ Input:
       "enum": ["off", "minimal", "low", "medium", "high"]
     }
   },
-  "required": ["task_name", "message"],
+  "required": ["name", "task"],
   "additionalProperties": false
 }
 ```
@@ -1002,12 +1005,12 @@ Input:
 Output:
 
 ```json
-{"task_name":"/root/api_review","status":"running"}
+{"name":"/root/api_review","status":"running"}
 ```
 
 Rules:
 
-- validate nonempty/bounded message before reserving;
+- validate nonempty/bounded task before reserving;
 - reject unknown fields;
 - resolve path relative to caller;
 - reject duplicate paths;
@@ -1148,6 +1151,8 @@ type SubagentConfig struct {
     Durable                 bool                  `json:"durable,omitempty"`
     AllowMutation           bool                  `json:"allow_mutation,omitempty"`
     ExposeChildToolEvents   bool                  `json:"expose_child_tool_events,omitempty"`
+    DefaultProvider         string                `json:"default_provider,omitempty"`
+    DefaultModel            string                `json:"default_model,omitempty"`
     DefaultRole             string                `json:"default_role,omitempty"`
     Roles                   map[string]AgentRole  `json:"roles,omitempty"`
 }
@@ -1169,7 +1174,8 @@ max_result_bytes=65536
 durable=true
 allow_mutation=false
 expose_child_tool_events=true
-default_role=default
+default_model=
+default_role=general
 ```
 
 Validation must reject:
@@ -1329,7 +1335,7 @@ Do not make `--subagents` imply mutation or recursive spawning.
   discoverable together.
 - Add collaboration usage guidance to the root and child system prompts.
 - Ensure Plan mode policy is explicit. Recommended first behavior: allow
-  read-only `explorer` spawns in Plan mode, but reject worker/mutating roles.
+  read-only `explorer` spawns in Plan mode, but reject implementer/mutating roles.
 - Add max-depth checks even while recursion is disabled.
 - Add `RiskDelegate` and explicit descriptors: spawn/follow-up are delegation
   risk; message/wait/interrupt/list are read-risk controls. Do not let the
@@ -1523,7 +1529,7 @@ prompts, credentials, or full child transcripts.
   allows.
 - Share the same manager, tree ID, concurrency governor, total task count, and
   budget with all descendants.
-- Enable worker mutation only through explicit config/role policy.
+- Enable implementer mutation only through explicit config/role policy.
 - Add role-specific file ownership guidance and visible shared-workspace warning.
 - Add attributed permission queue and verify no authority broadening.
 - Opt plugin/MCP tools in only after concurrency and cancellation behavior is
@@ -1649,9 +1655,9 @@ After a verified implementation milestone:
 3. Interrupt one child and follow it up with a new task.
 4. Run one child that errors and ensure sibling/root continue.
 5. In ask mode, trigger child permission requests and verify FIFO attribution.
-6. With mutation explicitly enabled, give workers disjoint files and verify each
+6. With mutation explicitly enabled, give implementers disjoint files and verify each
    sees peer edits in the shared cwd.
-7. Deliberately give two workers the same file and confirm the product warns that
+7. Deliberately give two implementers the same file and confirm the product warns that
    there is no isolation/conflict prevention.
 8. Close Snow during a child bash command and confirm process-group cleanup.
 9. Resume a durable root and inspect child topology before calling
@@ -1691,7 +1697,7 @@ Snow should copy the architecture, not every compatibility detail.
 | Namespace tools when backend supports it | Flat stable names initially | Snow protocol has flat `ToolSchema` |
 | V2 default max is four including root | Four child slots; root excluded | User-facing concurrency equals simultaneously running subagents |
 | V2 effectively allows nested spawning | Default depth one, recursion opt-in | Safer rollout and simpler first release |
-| Children normally receive broad tools | Role-filtered registry: shell-capable default/worker, read-only explorer | Shared OS privileges require root permission gating and explicit mutation opt-in |
+| Children normally receive broad tools | Role-filtered registry: shell-capable general/implementer, read-only explorer | Shared OS privileges require root permission gating and explicit mutation opt-in |
 | Shared filesystem | Same, explicitly documented | Snow has no sandbox/worktree core |
 | Separate thread rollouts and graph store | Separate child DBs plus root graph metadata | Avoid current active-branch cursor conflicts |
 | V2 LRU runtime residency | Add only with durability | Unnecessary for ephemeral milestone |

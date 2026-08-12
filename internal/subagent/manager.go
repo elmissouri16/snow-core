@@ -44,6 +44,7 @@ type Role struct {
 	Name          string
 	Description   string
 	System        string
+	Provider      string
 	Model         string
 	Thinking      *protocol.ThinkingLevel
 	Tools         []string
@@ -66,6 +67,8 @@ type Limits struct {
 	Durable               bool
 	AllowMutation         bool
 	ExposeChildToolEvents bool
+	DefaultProvider       string
+	DefaultModel          string
 	DefaultRole           string
 	Roles                 map[string]Role
 }
@@ -129,27 +132,29 @@ type childTask struct {
 }
 
 type Manager struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mu         sync.RWMutex
-	byID       map[string]*runtime
-	byPath     map[protocol.AgentPath]*runtime
-	reserved   map[protocol.AgentPath]struct{}
-	order      []string
-	root       *agent.Agent
-	rootRef    protocol.AgentRef
-	factory    ChildFactory
-	store      session.SubagentTaskStore
-	publish    func(protocol.AgentEvent)
-	limits     Limits
-	slots      chan struct{}
-	activity   chan struct{}
-	generation uint64
-	waitCursor map[string]uint64
-	ready      bool
-	closed     bool
-	closeDone  chan struct{}
-	wg         sync.WaitGroup
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.RWMutex
+	byID           map[string]*runtime
+	byPath         map[protocol.AgentPath]*runtime
+	reserved       map[protocol.AgentPath]struct{}
+	order          []string
+	root           *agent.Agent
+	rootRef        protocol.AgentRef
+	factory        ChildFactory
+	store          session.SubagentTaskStore
+	publish        func(protocol.AgentEvent)
+	limits         Limits
+	slots          chan struct{}
+	activity       chan struct{}
+	generation     uint64
+	waitCursor     map[string]uint64
+	ready          bool
+	closed         bool
+	closeDone      chan struct{}
+	wg             sync.WaitGroup
+	modelCatalog   func() []protocol.Model
+	modelSelection func(provider, model string) (protocol.Model, error)
 }
 
 func New(ctx context.Context, limits Limits) *Manager {
@@ -185,42 +190,22 @@ func New(ctx context.Context, limits Limits) *Manager {
 		limits.MaxResultBytes = 64 * 1024
 	}
 	if limits.DefaultRole == "" {
-		limits.DefaultRole = "default"
+		limits.DefaultRole = "general"
 	}
 	if limits.Roles == nil {
-		limits.Roles = map[string]Role{"default": {Name: "default"}, "explorer": {Name: "explorer"}}
+		limits.Roles = map[string]Role{"general": {Name: "general"}, "explorer": {Name: "explorer"}, "implementer": {Name: "implementer"}}
 	}
 	return &Manager{ctx: root, cancel: cancel, byID: map[string]*runtime{}, byPath: map[protocol.AgentPath]*runtime{}, reserved: map[protocol.AgentPath]struct{}{}, waitCursor: map[string]uint64{}, limits: limits,
 		slots: make(chan struct{}, max(0, limits.MaxConcurrentThreads)), activity: make(chan struct{}), closeDone: make(chan struct{})}
 }
 
 func resolveRole(roles map[string]Role, defaultRole, requested string) (string, Role, bool) {
-	name := strings.TrimSpace(requested)
+	name := strings.ToLower(strings.TrimSpace(requested))
 	if name == "" {
 		name = defaultRole
 	}
-	if role, ok := roles[name]; ok {
-		return name, role, true
-	}
-
-	// The public guidance historically called the built-in default role
-	// "default/general". Accept the natural model spellings as aliases while
-	// preserving an explicitly configured role with the same exact name above.
-	switch strings.ToLower(name) {
-	case "general", "general/default", "default/general":
-		if role, ok := roles["default"]; ok {
-			return "default", role, true
-		}
-		if role, ok := roles[defaultRole]; ok {
-			return defaultRole, role, true
-		}
-	case "default", "explorer", "worker":
-		canonical := strings.ToLower(name)
-		if role, ok := roles[canonical]; ok {
-			return canonical, role, true
-		}
-	}
-	return name, Role{}, false
+	role, ok := roles[name]
+	return name, role, ok
 }
 
 func availableRoleError(roles map[string]Role, defaultRole, requested string) error {
@@ -230,10 +215,7 @@ func availableRoleError(roles map[string]Role, defaultRole, requested string) er
 	}
 	sort.Strings(names)
 	available := strings.Join(names, ", ")
-	if _, ok := roles["default"]; ok {
-		available += " (general aliases default)"
-	}
-	return fmt.Errorf("subagents: unknown role %q (available: %s; omit agent_type to use %q)", strings.TrimSpace(requested), available, defaultRole)
+	return fmt.Errorf("subagents: unknown role %q (available: %s; omit role to use %q)", strings.TrimSpace(requested), available, defaultRole)
 }
 
 func validatePersistedRecord(rec session.SubagentRecord) error {
@@ -615,6 +597,33 @@ func (m *Manager) requireReadyLocked() error {
 	}
 	return nil
 }
+
+// SetModelCatalog provides a secret-free live provider/model catalog to the
+// manager-bound discovery tool.
+func (m *Manager) SetModelCatalog(catalog func() []protocol.Model) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.modelCatalog = catalog
+}
+
+// SetModelSelection validates and resolves provider/model pairs before a child
+// identity is committed. The callback must not call back into Manager.
+func (m *Manager) SetModelSelection(resolve func(provider, model string) (protocol.Model, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.modelSelection = resolve
+}
+
+func (m *Manager) Models() []protocol.Model {
+	m.mu.RLock()
+	catalog := m.modelCatalog
+	m.mu.RUnlock()
+	if catalog == nil {
+		return nil
+	}
+	return catalog()
+}
+
 func (m *Manager) RootCaller() Caller {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -643,10 +652,10 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 	if err := ctx.Err(); err != nil {
 		return protocol.SubagentState{}, err
 	}
-	if strings.TrimSpace(req.Message) == "" || len(req.Message) > protocol.MaxAgentMessageBytes {
-		return protocol.SubagentState{}, errors.New("subagents: initial message is empty or too large")
+	if strings.TrimSpace(req.Task) == "" || len(req.Task) > protocol.MaxAgentMessageBytes {
+		return protocol.SubagentState{}, errors.New("subagents: initial task is empty or too large")
 	}
-	path, err := protocol.ResolveAgentPath(caller.Path, req.TaskName)
+	path, err := protocol.ResolveAgentPath(caller.Path, req.Name)
 	if err != nil {
 		return protocol.SubagentState{}, err
 	}
@@ -689,48 +698,77 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 		m.mu.Unlock()
 		return protocol.SubagentState{}, errors.New("subagents: invalid caller")
 	}
-	roleName, role, ok := resolveRole(m.limits.Roles, m.limits.DefaultRole, req.AgentType)
+	roleName, role, ok := resolveRole(m.limits.Roles, m.limits.DefaultRole, req.Role)
 	if !ok {
 		m.mu.Unlock()
-		return protocol.SubagentState{}, availableRoleError(m.limits.Roles, m.limits.DefaultRole, req.AgentType)
+		return protocol.SubagentState{}, availableRoleError(m.limits.Roles, m.limits.DefaultRole, req.Role)
 	}
 	if caller.Path == protocol.RootAgentPath && m.root.Mode() == protocol.ModePlan && (roleName != "explorer" || role.AllowMutation) {
 		m.mu.Unlock()
 		return protocol.SubagentState{}, errors.New("subagents: Plan mode permits only read-only explorer children")
 	}
+	thinkingExplicit := req.ReasoningEffort != ""
 	thinking := protocol.NormalizeThinkingLevel(req.ReasoningEffort)
 	if req.ReasoningEffort == "" {
+		thinkingExplicit = role.Thinking != nil
 		if role.Thinking != nil {
 			thinking = protocol.NormalizeThinkingLevel(*role.Thinking)
 		} else if parentRef.Path == protocol.RootAgentPath {
 			thinking = m.root.Thinking()
 		}
 	}
-	model, provider := req.Model, ""
+	model, provider := req.Model, req.Provider
+	if provider == "" && role.Provider != "" {
+		provider = role.Provider
+	}
+	if provider == "" && m.limits.DefaultProvider != "" {
+		provider = m.limits.DefaultProvider
+	}
 	if model == "" && role.Model != "" {
 		model = role.Model
 	}
+	if model == "" && m.limits.DefaultModel != "" {
+		model = m.limits.DefaultModel
+	}
 	if parentRef.Path == protocol.RootAgentPath {
 		pm := m.root.Model()
-		provider = pm.Provider
-		if model == "" {
+		if provider == "" {
+			provider = pm.Provider
+		}
+		if model == "" && provider == pm.Provider {
 			model = pm.ID
 		}
 		if req.ReasoningEffort == "" && role.Thinking == nil {
 			thinking = m.root.Thinking()
 		}
-		if !pm.SupportsThinkingLevel(thinking) {
-			m.mu.Unlock()
-			return protocol.SubagentState{}, fmt.Errorf("subagents: unsupported reasoning effort %q", thinking)
-		}
 	} else if parent := m.byPath[caller.Path]; parent != nil {
 		parentState := parent.snapshot()
-		provider = parentState.Provider
-		if model == "" {
+		if provider == "" {
+			provider = parentState.Provider
+		}
+		if model == "" && provider == parentState.Provider {
 			model = parentState.Model
 		}
 		if req.ReasoningEffort == "" && role.Thinking == nil {
 			thinking = parentState.Thinking
+		}
+	}
+	if resolve := m.modelSelection; resolve != nil {
+		resolved, resolveErr := resolve(provider, model)
+		if resolveErr != nil {
+			m.mu.Unlock()
+			return protocol.SubagentState{}, resolveErr
+		}
+		provider, model = resolved.Provider, resolved.ID
+		if !resolved.SupportsThinkingLevel(thinking) {
+			if thinkingExplicit {
+				m.mu.Unlock()
+				return protocol.SubagentState{}, fmt.Errorf("subagents: model %s/%s does not support explicitly requested reasoning effort %q (supported: %v)", provider, model, thinking, resolved.SupportedThinkingLevels())
+			}
+			thinking = protocol.NormalizeThinkingLevel(resolved.DefaultThinking)
+			if !resolved.SupportsThinkingLevel(thinking) {
+				thinking = protocol.ThinkingOff
+			}
 		}
 	}
 	id := newThreadID()
@@ -802,7 +840,7 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 	go m.worker(r, workerStop, workerDone)
 	m.emit(protocol.AgentEvent{Type: protocol.EvSubagentStarted, Agent: state.Agent.Clone(), Subagent: r.snapshot()})
 	m.setStatus(r, protocol.AgentQueued, "", "")
-	r.tasks <- childTask{message: req.Message, initial: true}
+	r.tasks <- childTask{message: req.Task, initial: true}
 	return *r.snapshot(), nil
 }
 
@@ -2025,7 +2063,7 @@ func roleFingerprint(role Role) string {
 	tools := append([]string(nil), role.Tools...)
 	sort.Strings(tools)
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00", rolePolicyFingerprintVersion, role.Name, role.Description, role.System, role.Model, role.AllowMutation)
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00", rolePolicyFingerprintVersion, role.Name, role.Description, role.System, role.Provider, role.Model, role.AllowMutation)
 	if role.Thinking != nil {
 		fmt.Fprintf(h, "%s", *role.Thinking)
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
@@ -22,6 +23,28 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	}
 	if cfg.ReasoningSummary != "auto" || cfg.TextVerbosity != "low" {
 		t.Fatalf("response defaults = summary:%q verbosity:%q", cfg.ReasoningSummary, cfg.TextVerbosity)
+	}
+	if !cfg.TUI.Mouse {
+		t.Fatal("default TUI did not keep wheel scrolling inside Snow")
+	}
+	if _, ok := cfg.Providers["openai-compatible"]; !ok {
+		t.Fatalf("openai-compatible provider missing from defaults: %+v", cfg.Providers)
+	}
+}
+
+func TestMouseAppModeSurvivesSaveAndLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := Default()
+	cfg.TUI.Mouse = true
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.TUI.Mouse {
+		t.Fatal("saved application mouse mode reverted to the native default")
 	}
 }
 
@@ -96,8 +119,11 @@ func TestSubagentDefaultsAndValidation(t *testing.T) {
 	if err := cfg.Subagents.ValidateSubagents(); err != nil {
 		t.Fatal(err)
 	}
-	if !hasTool(cfg.Subagents.Roles["default"].Tools, "bash") {
-		t.Fatal("default role is not shell-capable")
+	if cfg.Subagents.DefaultRole != "general" || cfg.Subagents.DefaultProvider != "" || cfg.Subagents.DefaultModel != "" {
+		t.Fatalf("subagent defaults: role=%q selection=%s/%s", cfg.Subagents.DefaultRole, cfg.Subagents.DefaultProvider, cfg.Subagents.DefaultModel)
+	}
+	if !hasTool(cfg.Subagents.Roles["general"].Tools, "bash") {
+		t.Fatal("general role is not shell-capable")
 	}
 	if hasTool(cfg.Subagents.Roles["explorer"].Tools, "bash") {
 		t.Fatal("explorer role unexpectedly exposes bash")
@@ -128,12 +154,34 @@ func TestSubagentDefaultsAndValidation(t *testing.T) {
 	if err := bad.ValidateSubagents(); err == nil {
 		t.Fatal("accepted unsafe result cap")
 	}
+	bad = cfg.Subagents
+	bad.DefaultProvider = "   "
+	if err := bad.ValidateSubagents(); err == nil {
+		t.Fatal("accepted blank default provider")
+	}
+	bad = cfg.Subagents
+	bad.DefaultModel = "   "
+	if err := bad.ValidateSubagents(); err == nil {
+		t.Fatal("accepted blank default model")
+	}
+	bad = cfg.Subagents
+	bad.DefaultRole = "default"
+	bad.Roles = map[string]AgentRole{"default": {}}
+	if err := bad.ValidateSubagents(); err == nil || !strings.Contains(err.Error(), `use "general"`) {
+		t.Fatalf("renamed default role error = %v", err)
+	}
+	bad = cfg.Subagents
+	bad.DefaultRole = "worker"
+	bad.Roles = map[string]AgentRole{"worker": {}}
+	if err := bad.ValidateSubagents(); err == nil || !strings.Contains(err.Error(), `use "implementer"`) {
+		t.Fatalf("renamed worker role error = %v", err)
+	}
 }
 
 func TestSubagentBashCapabilityIsIndependentFromMutation(t *testing.T) {
 	cfg := Default().Subagents
 	cfg.Roles = map[string]AgentRole{
-		"default": {Tools: []string{"read", "bash"}},
+		"general": {Tools: []string{"read", "bash"}},
 		"shell":   {Tools: []string{"bash"}},
 	}
 	if err := cfg.ValidateSubagents(); err != nil {

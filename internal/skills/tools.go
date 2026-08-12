@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -48,7 +49,7 @@ func (t *ActivateTool) Schema() tools.ToolSchema {
 	return tools.ToolSchema{Name: "activate_skill", Description: "Load the complete instructions for a discovered Agent Skill. Call this before performing a task that matches a skill description.", Parameters: params}
 }
 
-func (t *ActivateTool) Run(_ context.Context, raw json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {
+func (t *ActivateTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {
 	var args struct {
 		Name string `json:"name"`
 	}
@@ -59,21 +60,24 @@ func (t *ActivateTool) Run(_ context.Context, raw json.RawMessage, _ tools.ToolH
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("activate_skill: %w", err)), nil
 	}
-	resources, truncated, err := listResources(skill.Directory, maxListedResources)
+	resources, truncated, err := listResources(ctx, skill, maxListedResources)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("activate_skill: list resources: %w", err)), nil
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "<skill_content name=%q>\n", skill.Name)
-	b.Write(body)
+	b.WriteString(`<skill_content name="`)
+	_ = xml.EscapeText(&b, []byte(skill.Name))
+	b.WriteString(`">`)
+	b.WriteByte('\n')
+	_ = xml.EscapeText(&b, body)
 	b.WriteString("\n\nSkill directory: ")
-	b.WriteString(skill.Directory)
+	_ = xml.EscapeText(&b, []byte(skill.Directory))
 	b.WriteString("\nRelative paths in this skill are relative to the skill directory.")
 	if len(resources) > 0 {
 		b.WriteString("\n<skill_resources>\n")
 		for _, resource := range resources {
 			b.WriteString("  <file>")
-			b.WriteString(resource)
+			_ = xml.EscapeText(&b, []byte(resource))
 			b.WriteString("</file>\n")
 		}
 		if truncated {
@@ -122,19 +126,12 @@ func (t *ReadResourceTool) Run(ctx context.Context, raw json.RawMessage, _ tools
 	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return tools.ErrorResult(fmt.Errorf("read_skill_resource: path must stay inside the skill directory")), nil
 	}
-	root, err := filepath.EvalSymlinks(skill.Directory)
+	root, err := openSkillRoot(skill)
 	if err != nil {
-		return tools.ErrorResult(fmt.Errorf("read_skill_resource: resolve skill: %w", err)), nil
+		return tools.ErrorResult(fmt.Errorf("read_skill_resource: %w", err)), nil
 	}
-	path, err := filepath.EvalSymlinks(filepath.Join(skill.Directory, clean))
-	if err != nil {
-		return tools.ErrorResult(fmt.Errorf("read_skill_resource: resolve resource: %w", err)), nil
-	}
-	rel, err := filepath.Rel(root, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return tools.ErrorResult(fmt.Errorf("read_skill_resource: path resolves outside the skill directory")), nil
-	}
-	data, err := readBounded(path, maxResourceBytes)
+	defer root.Close()
+	data, err := readBoundedRoot(root, clean, maxResourceBytes)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("read_skill_resource: %w", err)), nil
 	}

@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -97,28 +98,139 @@ func rootAgent(t *testing.T, st session.Store) *agent.Agent {
 	return a
 }
 
-func TestResolveRoleAcceptsGeneralCompatibilityAlias(t *testing.T) {
+func TestResolveRoleUsesClearCanonicalNames(t *testing.T) {
 	roles := map[string]Role{
-		"default":  {Name: "default", Description: "general investigation"},
-		"explorer": {Name: "explorer"},
-		"worker":   {Name: "worker"},
+		"general":     {Name: "general"},
+		"explorer":    {Name: "explorer"},
+		"implementer": {Name: "implementer"},
 	}
-	for _, requested := range []string{"general", "general/default", "default/general", "DEFAULT"} {
-		name, role, ok := resolveRole(roles, "default", requested)
-		if !ok || name != "default" || role.Name != "default" {
-			t.Fatalf("resolveRole(%q) = %q %+v %v, want canonical default", requested, name, role, ok)
+	for _, requested := range []string{"", "general", "GENERAL"} {
+		name, role, ok := resolveRole(roles, "general", requested)
+		if !ok || name != "general" || role.Name != "general" {
+			t.Fatalf("resolveRole(%q) = %q %+v %v, want general", requested, name, role, ok)
+		}
+	}
+	for _, removed := range []string{"default", "worker", "general/default"} {
+		if _, _, ok := resolveRole(roles, "general", removed); ok {
+			t.Fatalf("removed role alias %q was accepted", removed)
 		}
 	}
 
-	roles["general"] = Role{Name: "general", Description: "custom exact role"}
-	name, role, ok := resolveRole(roles, "default", "general")
-	if !ok || name != "general" || role.Description != "custom exact role" {
-		t.Fatalf("exact configured general role did not override alias: %q %+v %v", name, role, ok)
-	}
-
-	err := availableRoleError(roles, "default", "missing")
-	if err == nil || !strings.Contains(err.Error(), "available: default, explorer, general, worker") || !strings.Contains(err.Error(), `omit agent_type to use "default"`) {
+	err := availableRoleError(roles, "general", "missing")
+	if err == nil || !strings.Contains(err.Error(), "available: explorer, general, implementer") || !strings.Contains(err.Error(), `omit role to use "general"`) {
 		t.Fatalf("unknown role diagnostic = %v", err)
+	}
+}
+
+func TestSpawnModelPrecedence(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	root := rootAgent(t, st)
+	defer root.Close()
+	m := New(context.Background(), Limits{
+		MaxConcurrentThreads: 1, MaxAgentsPerSession: 4, MaxDepth: 1,
+		TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second,
+		DefaultProvider: "child-provider", DefaultModel: "subagent-default", DefaultRole: "general",
+		Roles: map[string]Role{
+			"general": {Name: "general"},
+			"special": {Name: "special", Provider: "role-provider", Model: "role-model"},
+		},
+	})
+	var active, maxActive atomic.Int32
+	factory := ChildFactoryFunc(func(_ context.Context, spec ChildSpec) (ChildRuntime, error) {
+		return &mockChild{delay: time.Millisecond, active: &active, max: &maxActive}, nil
+	})
+	if err := m.Bind(root, factory, root.Publish, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(context.Background())
+
+	tests := []struct {
+		name, role, provider, model, wantProvider, wantModel string
+	}{
+		{name: "automatic", wantProvider: "child-provider", wantModel: "subagent-default"},
+		{name: "role_override", role: "special", wantProvider: "role-provider", wantModel: "role-model"},
+		{name: "spawn_override", role: "special", provider: "requested-provider", model: "requested-model", wantProvider: "requested-provider", wantModel: "requested-model"},
+	}
+	for _, tt := range tests {
+		state, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: tt.name, Task: "inspect", Role: tt.role, Provider: tt.provider, Model: tt.model, ForkTurns: "none"})
+		if err != nil {
+			t.Fatalf("spawn %s: %v", tt.name, err)
+		}
+		if state.Provider != tt.wantProvider || state.Model != tt.wantModel {
+			t.Fatalf("spawn %s selection = %s/%s, want %s/%s", tt.name, state.Provider, state.Model, tt.wantProvider, tt.wantModel)
+		}
+	}
+}
+
+func TestSpawnAdaptsInheritedThinkingButRejectsExplicitUnsupported(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	root, err := agent.New(agent.Options{Provider: fake.NewRecorded(), Registry: tools.NewRegistry(), Session: st, Permission: permission.NewService(permission.ModeDeny, nil), Model: protocol.Model{Provider: "fake", ID: "root", SupportsTools: true, SupportsThinking: true, ThinkingLevels: []protocol.ThinkingLevel{protocol.ThinkingMinimal}}, Thinking: protocol.ThinkingMinimal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	m := New(context.Background(), Limits{MaxConcurrentThreads: 1, MaxAgentsPerSession: 3, MaxDepth: 1, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}}})
+	var active, maxActive atomic.Int32
+	if err := m.Bind(root, ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
+		return &mockChild{delay: time.Millisecond, active: &active, max: &maxActive}, nil
+	}), root.Publish, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	m.SetModelSelection(func(provider, model string) (protocol.Model, error) {
+		return protocol.Model{Provider: provider, ID: model, SupportsTools: true}, nil
+	})
+	// Role thinking is explicit operator policy and must remain strict.
+	minimal := protocol.ThinkingMinimal
+	m.limits.Roles["strict"] = Role{Name: "strict", Thinking: &minimal}
+	if _, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "strict", Task: "inspect", Role: "strict", Provider: "other", Model: "flash", ForkTurns: "none"}); err == nil || !strings.Contains(err.Error(), "explicitly requested") {
+		t.Fatalf("explicit effort error = %v", err)
+	}
+	// An omitted effort for a different model/provider safely resolves to off.
+	state, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "adaptive", Task: "inspect", Provider: "other", Model: "flash", ForkTurns: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Thinking != protocol.ThinkingOff {
+		t.Fatalf("adaptive thinking = %q", state.Thinking)
+	}
+	if err := m.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSpawnRejectsUnavailableSelectionBeforeFactory(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	root := rootAgent(t, st)
+	defer root.Close()
+	m := New(context.Background(), Limits{MaxConcurrentThreads: 1, MaxAgentsPerSession: 2, MaxDepth: 1, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}}})
+	factoryCalls := 0
+	if err := m.Bind(root, ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
+		factoryCalls++
+		return nil, errors.New("must not run")
+	}), root.Publish, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	m.SetModelSelection(func(provider, model string) (protocol.Model, error) {
+		return protocol.Model{}, fmt.Errorf("unknown selection %s/%s", provider, model)
+	})
+	_, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "bad", Task: "inspect", Provider: "other", Model: "missing", ForkTurns: "none"})
+	if err == nil || !strings.Contains(err.Error(), "unknown selection other/missing") {
+		t.Fatalf("selection error = %v", err)
+	}
+	if factoryCalls != 0 || m.HasAgents() {
+		t.Fatalf("invalid selection committed work: factory=%d agents=%v", factoryCalls, m.HasAgents())
+	}
+	if err := m.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -127,7 +239,7 @@ func TestWaitUntilAllJoinsDescendantsAndExcludesCaller(t *testing.T) {
 	root := rootAgent(t, st)
 	defer root.Close()
 	var active, maxActive atomic.Int32
-	m := New(context.Background(), Limits{MaxConcurrentThreads: 2, MaxAgentsPerSession: 8, MaxDepth: 2, Recursive: true, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: 100 * time.Millisecond, MaxWait: time.Second, DefaultRole: "default", Roles: map[string]Role{"default": {Name: "default"}}})
+	m := New(context.Background(), Limits{MaxConcurrentThreads: 2, MaxAgentsPerSession: 8, MaxDepth: 2, Recursive: true, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: 100 * time.Millisecond, MaxWait: time.Second, DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}}})
 	factory := ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
 		return &mockChild{delay: 10 * time.Millisecond, active: &active, max: &maxActive}, nil
 	})
@@ -137,7 +249,7 @@ func TestWaitUntilAllJoinsDescendantsAndExcludesCaller(t *testing.T) {
 	if err := m.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	parent, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{TaskName: "parent", Message: "parent", ForkTurns: "none"})
+	parent, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "parent", Task: "parent", ForkTurns: "none"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +257,7 @@ func TestWaitUntilAllJoinsDescendantsAndExcludesCaller(t *testing.T) {
 		t.Fatalf("root wait=%+v err=%v", result, err)
 	}
 	childCaller := Caller{ThreadID: parent.Agent.ThreadID, Path: parent.Agent.Path}
-	if _, err := m.Spawn(context.Background(), childCaller, protocol.SpawnSubagentRequest{TaskName: "grandchild", Message: "grandchild", ForkTurns: "none"}); err != nil {
+	if _, err := m.Spawn(context.Background(), childCaller, protocol.SpawnSubagentRequest{Name: "grandchild", Task: "grandchild", ForkTurns: "none"}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := m.WaitUntilAll(context.Background(), childCaller, time.Second)
@@ -162,7 +274,7 @@ func TestManagerExecutionSlotsAndStableList(t *testing.T) {
 	root := rootAgent(t, st)
 	defer root.Close()
 	var active, maxActive atomic.Int32
-	m := New(context.Background(), Limits{MaxConcurrentThreads: 2, MaxAgentsPerSession: 8, MaxDepth: 1, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "default", Roles: map[string]Role{"default": {Name: "default"}}})
+	m := New(context.Background(), Limits{MaxConcurrentThreads: 2, MaxAgentsPerSession: 8, MaxDepth: 1, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}}})
 	factory := ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
 		return &mockChild{delay: 20 * time.Millisecond, active: &active, max: &maxActive}, nil
 	})
@@ -174,7 +286,7 @@ func TestManagerExecutionSlotsAndStableList(t *testing.T) {
 	}
 	caller := m.RootCaller()
 	for _, name := range []string{"one", "two", "three"} {
-		if _, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{TaskName: name, Message: name, ForkTurns: "none"}); err != nil {
+		if _, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{Name: name, Task: name, ForkTurns: "none"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -211,7 +323,7 @@ func TestManagerSessionSwitchRejectsActiveAndRebindsIdle(t *testing.T) {
 	root := rootAgent(t, st)
 	defer root.Close()
 	var active, maxActive atomic.Int32
-	m := New(context.Background(), Limits{MaxConcurrentThreads: 2, MaxAgentsPerSession: 4, MaxDepth: 1, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "default", Roles: map[string]Role{"default": {Name: "default"}}})
+	m := New(context.Background(), Limits{MaxConcurrentThreads: 2, MaxAgentsPerSession: 4, MaxDepth: 1, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}}})
 	factory := ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
 		return &mockChild{delay: time.Second, active: &active, max: &maxActive}, nil
 	})
@@ -222,7 +334,7 @@ func TestManagerSessionSwitchRejectsActiveAndRebindsIdle(t *testing.T) {
 		t.Fatal(err)
 	}
 	caller := m.RootCaller()
-	state, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{TaskName: "active", Message: "work", ForkTurns: "none"})
+	state, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{Name: "active", Task: "work", ForkTurns: "none"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +365,7 @@ func TestManagerReservationRollbackAndInterruptReuse(t *testing.T) {
 	var active, maxActive atomic.Int32
 	fails := atomic.Bool{}
 	fails.Store(true)
-	m := New(context.Background(), Limits{MaxConcurrentThreads: 2, MaxAgentsPerSession: 4, MaxDepth: 1, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "default", Roles: map[string]Role{"default": {Name: "default"}}})
+	m := New(context.Background(), Limits{MaxConcurrentThreads: 2, MaxAgentsPerSession: 4, MaxDepth: 1, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}}})
 	factory := ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
 		if fails.Swap(false) {
 			return nil, errors.New("boom")
@@ -265,7 +377,7 @@ func TestManagerReservationRollbackAndInterruptReuse(t *testing.T) {
 	}
 	_ = m.Ready(context.Background())
 	caller := m.RootCaller()
-	req := protocol.SpawnSubagentRequest{TaskName: "retry", Message: "work", ForkTurns: "none"}
+	req := protocol.SpawnSubagentRequest{Name: "retry", Task: "work", ForkTurns: "none"}
 	if _, err := m.Spawn(context.Background(), caller, req); err == nil {
 		t.Fatal("factory failure hidden")
 	}

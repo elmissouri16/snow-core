@@ -181,10 +181,10 @@ func TestSubsecondRemainderAndManagedCleanupFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	path, _ := managedPath(g.Objective)
-	if _, _, err = c.AccountDuration(g.GoalID, 0, 600*time.Millisecond); err != nil {
+	if _, _, err = c.AccountDuration(g.GoalID, 0, 600*time.Millisecond, nil); err != nil {
 		t.Fatal(err)
 	}
-	got, _, _ := c.AccountDuration(g.GoalID, 0, 600*time.Millisecond)
+	got, _, _ := c.AccountDuration(g.GoalID, 0, 600*time.Millisecond, nil)
 	if got.SecondsUsed != 1 {
 		t.Fatalf("seconds=%d", got.SecondsUsed)
 	}

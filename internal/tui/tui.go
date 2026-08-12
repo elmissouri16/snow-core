@@ -31,6 +31,7 @@ import (
 	"github.com/snow-core/snow/internal/config"
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/provider/chatgpt"
+	"github.com/snow-core/snow/internal/provider/openaicompat"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/trust"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -38,6 +39,16 @@ import (
 
 // Run starts the interactive TUI and blocks until exit.
 func Run(ctx context.Context, opts app.Options) error {
+	return run(ctx, opts, false)
+}
+
+// RunWithSessionPicker starts the TUI with the current-project session picker
+// open as soon as startup completes.
+func RunWithSessionPicker(ctx context.Context, opts app.Options) error {
+	return run(ctx, opts, true)
+}
+
+func run(ctx context.Context, opts app.Options, sessionPicker bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -49,26 +60,32 @@ func Run(ctx context.Context, opts app.Options) error {
 			defer tf.Close()
 		}
 	}
-	// Native terminal selection is the default. Mouse reporting is an explicit
-	// config opt-in because terminals generally cannot drag-select while an
-	// application owns the mouse.
+	// Bubble Tea's supported full-window layout is an alternate-screen frame
+	// composed from a sticky header, a Bubbles viewport, and a footer. Mixing a
+	// terminal-height normal-screen frame with tea.Println history causes old
+	// frames to enter terminal scrollback; scrolling then exposes duplicated
+	// headers and stale chrome. Keep one renderer-owned frame instead.
+	mouseCapture := tuiMouseCaptureEnabled(opts)
 	programOptions := []tea.ProgramOption{
+		// App-owned transcript selection needs pointer-rate feedback. Bubble Tea
+		// coalesces buffered frames, so the 120 FPS ceiling improves drag latency
+		// without making every raw cell-motion event a terminal write.
+		tea.WithFPS(120),
 		tea.WithAltScreen(),
-		// Keep terminal writes bounded at the renderer's responsive default;
-		// transcript updates are also coalesced in Update below.
-		tea.WithFPS(60),
+		tea.WithContext(ctx),
 	}
-	if tuiMouseCaptureEnabled(opts) {
+	if mouseCapture {
+		// Cell-motion mode reports wheel, press, drag, and release events. Snow
+		// uses them for viewport scrolling and application-owned selection/copy.
 		programOptions = append(programOptions, tea.WithMouseCellMotion())
 	}
 	uiCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	model := newModel(uiCtx, opts)
+	model.inlineTranscript = false
 	model.asyncIO = true
-	// Let Bubble Tea own the same cancellation boundary as the app and agent.
-	// Without this option an embedding caller can cancel the agent context while
-	// the terminal program remains blocked in its input loop.
-	programOptions = append(programOptions, tea.WithContext(uiCtx))
+	model.pickSessionOnStart = sessionPicker
+	model.startupResumeRequired = sessionPicker
 	p := tea.NewProgram(model, programOptions...)
 	_, runErr := p.Run()
 	cancel()
@@ -85,15 +102,17 @@ func tuiMouseCaptureEnabled(opts app.Options) bool {
 }
 
 func routeTextareaCmd(target textareaTarget, requestID, questionID string, cmd tea.Cmd) tea.Cmd {
+	return routeTextareaCmdGeneration(target, requestID, questionID, 0, cmd)
+}
+
+func routeTextareaCmdGeneration(target textareaTarget, requestID, questionID string, generation uint64, cmd tea.Cmd) tea.Cmd {
 	if cmd == nil {
 		return nil
 	}
 	return func() tea.Msg {
 		return textareaResultMsg{
-			target:     target,
-			requestID:  requestID,
-			questionID: questionID,
-			msg:        cmd(),
+			target: target, requestID: requestID, questionID: questionID,
+			pasteGeneration: generation, msg: cmd(),
 		}
 	}
 }
@@ -156,6 +175,11 @@ type logoutDoneMsg struct {
 	provider string
 	err      error
 }
+type compatibleLoginDoneMsg struct {
+	generation uint64
+	endpoint   string
+	err        error
+}
 
 type chatGPTAccountChoice struct {
 	AccountID string
@@ -163,11 +187,33 @@ type chatGPTAccountChoice struct {
 }
 
 type compactDoneMsg struct {
-	result protocol.CompactionResult
-	err    error
+	generation uint64
+	result     protocol.CompactionResult
+	err        error
+}
+
+type promptDoneMsg struct {
+	generation  uint64
+	turnID      string
+	admitted    bool
+	text        string
+	attachments []protocol.ContentBlock
+	err         error
 }
 
 type transcriptFlushMsg uint64
+
+type contextUsageSnapshot struct {
+	usage     *protocol.Usage
+	tokens    int
+	estimated bool
+}
+
+type contextUsageRefreshMsg struct {
+	version  uint64
+	snapshot contextUsageSnapshot
+	err      error
+}
 
 type modeSwitchDoneMsg struct {
 	target protocol.CollaborationMode
@@ -182,10 +228,11 @@ const (
 )
 
 type textareaResultMsg struct {
-	target     textareaTarget
-	requestID  string
-	questionID string
-	msg        tea.Msg
+	target          textareaTarget
+	requestID       string
+	questionID      string
+	pasteGeneration uint64
+	msg             tea.Msg
 }
 
 type queueSettledMsg struct {
@@ -210,6 +257,13 @@ type queuedTUIAttempt struct {
 	expanded string
 	epoch    uint64
 }
+
+type inlineHistoryAckMsg struct {
+	generation uint64
+	end        int
+}
+
+type inlineExitMsg struct{}
 
 // clearMetaEnterMsg expires the short Escape/terminal-fragment window used to
 // recover split mouse, Shift+Tab, and Option+Return sequences.
@@ -282,10 +336,11 @@ type Model struct {
 	width   int
 	height  int
 
-	transcript viewport.Model
-	editor     textarea.Model
-	spinner    spinner.Model
-	help       help.Model
+	transcript     viewport.Model
+	editor         textarea.Model
+	spinner        spinner.Model
+	spinnerRunning bool
+	help           help.Model
 
 	lines                 []string // rendered transcript lines
 	assistantBuf          strings.Builder
@@ -305,6 +360,9 @@ type Model struct {
 	subagentViews         map[string]subagentViewState
 	subagentOrder         []string
 	busy                  bool
+	activeTurnID          string
+	runGeneration         uint64
+	compactGeneration     uint64
 	runStartedAt          time.Time
 	now                   func() time.Time
 	done                  bool
@@ -331,53 +389,74 @@ type Model struct {
 	lastUsage             *protocol.Usage
 	contextTokens         int
 	contextEstimated      bool
+	turnUsageSeen         bool
+	contextRefreshNeeded  bool
+	contextRefreshPending bool
+	contextRefreshVersion uint64
 	compacting            bool
 	compactStatus         string
 	events                *agentEventMailbox
 	// Agent callbacks feed a coalescing mailbox. The update loop ingests
 	// bounded logical batches and renders stream deltas on a separate cadence.
-	batchingEvents         bool
-	transcriptDirty        bool
-	transcriptFlushPending bool
-	transcriptFlushSeq     uint64
-	modeSwitchReady        bool
-	modeSwitching          bool
-	pendingMode            *protocol.CollaborationMode
-	transcriptContent      string
-	transcriptBase         string
-	transcriptBaseWidth    int
-	transcriptBaseDirty    bool
-	asker                  *tuiAsker
-	md                     *mdRenderer
-	thinkingMD             *mdRenderer
-	toolRunning            bool
-	pendingInputs          protocol.InputQueue
-	queueEpoch             uint64
-	queueAttempts          []queuedTUIAttempt
-	queueOriginalText      map[string]string
-	queueRendered          map[string]bool
-	queueFallbacks         []queueSubmitMsg
-	queueSettleWaiting     bool
+	batchingEvents          bool
+	transcriptDirty         bool
+	transcriptFlushPending  bool
+	transcriptFlushSeq      uint64
+	modeSwitchReady         bool
+	modeSwitching           bool
+	pendingMode             *protocol.CollaborationMode
+	transcriptContent       string
+	transcriptBase          string
+	transcriptBaseWidth     int
+	transcriptBaseDirty     bool
+	inlineTranscript        bool
+	inlineCommitted         int
+	inlinePrintEnd          int
+	inlinePrintInFlight     bool
+	inlinePrintGeneration   uint64
+	inlineEverCommitted     bool
+	inlineHistoryKey        string
+	inlineCanonicalLines    []string
+	inlineDurableMessageIDs []string
+	inlineHeaderPending     bool
+	inlineExiting           bool
+	asker                   *tuiAsker
+	md                      *mdRenderer
+	thinkingMD              *mdRenderer
+	toolRunning             bool
+	pendingInputs           protocol.InputQueue
+	queueEpoch              uint64
+	queueAttempts           []queuedTUIAttempt
+	queueOriginalText       map[string]string
+	queueRendered           map[string]bool
+	queueFallbacks          []queueSubmitMsg
+	queueSettleWaiting      bool
 
 	// Command palette state.
 	compMatches []string
 	compIndex   int
 	compVisible bool
 
+	// Agent Skill completion state (for leading $skill-name directives).
+	skillMatches []skillCompletionItem
+	skillIndex   int
+	skillVisible bool
+
 	// File mention picker state (for @path references).
-	mentionMatches     []string
-	mentionIndex       int
-	mentionVisible     bool
-	mentionFiles       []string
-	mentionFilesCWD    string
-	mentionFilesLoaded bool
-	mentionLoading     bool
-	mentionGeneration  uint64
-	pickerGeneration   uint64
-	sessionLoading     bool
-	treeLoading        bool
-	modelLoading       bool
-	sessionOpLoading   bool
+	mentionMatches      []string
+	mentionIndex        int
+	mentionVisible      bool
+	mentionFiles        []string
+	mentionFilesCWD     string
+	mentionFilesLoaded  bool
+	mentionLoading      bool
+	mentionGeneration   uint64
+	pickerGeneration    uint64
+	sessionOpGeneration uint64
+	sessionLoading      bool
+	treeLoading         bool
+	modelLoading        bool
+	sessionOpLoading    bool
 
 	// Provider picker state (for /login and /logout).
 	pickProvider   bool
@@ -401,10 +480,12 @@ type Model struct {
 	modelQuery        string
 	modelSearchActive bool
 
-	// Thinking picker state (for /thinking).
-	pickThinking  bool
-	thinkingList  []protocol.ThinkingLevel
-	thinkingIndex int
+	// Thinking picker state (for /thinking and the second stage of /model).
+	pickThinking          bool
+	thinkingList          []protocol.ThinkingLevel
+	thinkingIndex         int
+	thinkingModel         *protocol.Model
+	thinkingReturnToModel bool
 
 	// Interactive permission picker state (allow/deny without typing).
 	permPending bool
@@ -436,9 +517,11 @@ type Model struct {
 	settingsError         string
 
 	// Session picker state.
-	pickSession  bool
-	sessions     []session.SessionInfo
-	sessionIndex int
+	pickSession           bool
+	pickSessionOnStart    bool
+	startupResumeRequired bool
+	sessions              []session.SessionInfo
+	sessionIndex          int
 
 	// Branch tree picker state.
 	pickTree     bool
@@ -456,9 +539,13 @@ type Model struct {
 	infoLoading      bool
 
 	// Masked auth capture state.
-	loginMode     bool
-	loginProvider string
-	secretBuf     strings.Builder
+	loginMode                 bool
+	loginEndpointMode         bool
+	loginProvider             string
+	loginEndpoint             string
+	compatibleLoginGeneration uint64
+	compatibleLoginPending    bool
+	secretBuf                 strings.Builder
 
 	cancelRun context.CancelFunc
 
@@ -467,8 +554,21 @@ type Model struct {
 	terminalInput    terminalInputState
 	replayingInput   bool
 
-	// Tests replace the clipboard command without reading the host clipboard.
-	pasteCmdOverride tea.Cmd
+	// Tests replace clipboard commands without reading or writing the host clipboard.
+	pasteCmdOverride                 tea.Cmd
+	imagePasteCmdOverride            tea.Cmd
+	imagePasteGeneration             uint64
+	promptImages                     []protocol.ContentBlock
+	copySelectionToClipboard         func(string) error
+	transcriptSelection              transcriptSelectionState
+	transcriptSelectionLines         []string
+	transcriptSelectionView          string
+	transcriptSelectionViewRow       int
+	transcriptSelectionViewValid     bool
+	transcriptSelectionRendered      string
+	transcriptSelectionRenderedValid bool
+	transcriptSelectionClipboard     string
+	transcriptSelectionCopyID        uint64
 }
 
 type statusInfoItem struct {
@@ -606,8 +706,9 @@ func (m *Model) releaseStartupApp(candidate *app.App) {
 // Init implements tea.Model.
 func (m *Model) Init() tea.Cmd {
 	// Resolve trust before app.New so an allow decision can load project input
-	// on this launch and a deny decision guarantees it is never read.
-	return tea.Batch(spinner.Tick, m.bootstrapCmd())
+	// on this launch and a deny decision guarantees it is never read. The
+	// spinner pump starts lazily when a state that actually renders it begins.
+	return m.bootstrapCmd()
 }
 
 func (m *Model) bootstrapCmd() tea.Cmd {
@@ -664,30 +765,120 @@ func (m *Model) subscribe() error {
 	return m.app.ReadySubagents()
 }
 
-// Update implements tea.Model.
+// Update implements tea.Model and drains immutable transcript rows into native
+// terminal scrollback after each state transition in inline mode.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	wasSpinnerActive := m.spinnerActive()
+	model, cmd := m.update(msg)
+	updated, ok := model.(*Model)
+	if !ok {
+		return model, cmd
+	}
+	// Bubble Tea renders after every message. Keep the timer chain stopped while
+	// idle so long-lived sessions do not continuously rebuild unchanged frames.
+	if !wasSpinnerActive && updated.spinnerActive() && !updated.spinnerRunning {
+		updated.spinnerRunning = true
+		cmd = tea.Batch(cmd, updated.spinner.Tick)
+	}
+	if historyCmd := updated.commitInlineHistory(); historyCmd != nil {
+		return model, tea.Sequence(historyCmd, cmd)
+	}
+	return model, cmd
+}
+
+func (m *Model) spinnerActive() bool {
+	if m.lastErr != nil {
+		return false
+	}
+	return m.trustSaving || m.compacting || (m.busy && !m.permPending && !m.userInputPending)
+}
+
+func (m *Model) inlineDisplayStart() int {
+	if m.inlinePrintInFlight {
+		return min(m.inlinePrintEnd, len(m.lines))
+	}
+	return min(m.inlineCommitted, len(m.lines))
+}
+
+func (m *Model) commitInlineHistory() tea.Cmd {
+	if !m.inlineTranscript || m.inlinePrintInFlight || (!m.inlineHeaderPending && m.inlineCommitted >= len(m.lines)) {
+		return nil
+	}
+	start, end := m.inlineCommitted, len(m.lines)
+	segments := make([]string, 0, end-start+2)
+	if m.inlineHeaderPending {
+		segments = append(segments,
+			m.renderHeader("idle"),
+			styleSep.Render(strings.Repeat("─", max(1, m.width))),
+		)
+		m.inlineHeaderPending = false
+	}
+	segments = append(segments, m.lines[start:end]...)
+	generation := m.inlinePrintGeneration
+	m.inlinePrintInFlight = true
+	m.inlinePrintEnd = end
+	m.inlineEverCommitted = true
+	m.transcriptBaseDirty = true
+	m.transcriptDirty = true
+	m.refreshTranscriptForced()
+	m.layout()
+	// Bubble Tea executes sequence commands in order and sends each result to
+	// the event loop. The renderer handles printLineMessage before this ack, so
+	// the next history batch cannot overtake the current one.
+	return tea.Sequence(
+		tea.Println(strings.Join(segments, "\n")),
+		func() tea.Msg { return inlineHistoryAckMsg{generation: generation, end: end} },
+	)
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case inlineExitMsg:
+		m.inlineExiting = true
+		return m, tea.Quit
 	case tea.WindowSizeMsg:
+		m.clearTranscriptSelection()
 		m.width = msg.Width
 		m.height = msg.Height
 		m.layout()
 		m.refreshTranscriptForced()
 	case tea.MouseMsg:
-		// Forward decoded mouse input to the transcript viewport. If the user
-		// reaches the bottom of a frozen snapshot, catch up exactly once.
+		// Application-owned drag selection and viewport wheel scrolling share
+		// the same cell-motion mouse stream.
 		cmd := m.applyMouse(msg)
 		return m, cmd
+	case transcriptSelectionAutoScrollMsg:
+		return m, m.handleTranscriptSelectionAutoScroll(uint64(msg))
+	case transcriptSelectionCopiedMsg:
+		if msg.err != nil {
+			m.lastStatus = "copy failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.lastStatus = fmt.Sprintf("copied %d characters", msg.characters)
+		if msg.sequence == "" {
+			return m, nil
+		}
+		m.transcriptSelectionCopyID++
+		id := m.transcriptSelectionCopyID
+		m.transcriptSelectionClipboard = msg.sequence
+		return m, tea.Tick(transcriptSelectionClipboardRenderGrace, func(time.Time) tea.Msg {
+			return transcriptSelectionClipboardClearMsg(id)
+		})
+	case transcriptSelectionClipboardClearMsg:
+		if uint64(msg) == m.transcriptSelectionCopyID {
+			m.transcriptSelectionClipboard = ""
+		}
+		return m, nil
 	case tea.KeyMsg:
-		runStatusWasVisible := m.showRunStatus()
 		if handled, cmd := m.normalizeTerminalKey(msg); handled {
 			m.layout()
 			return m, cmd
 		}
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
 		// transcript when not in a picker.
-		if !m.loginMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.permPending && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.mentionVisible {
+		if !m.loginMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.permPending && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
 			switch {
 			case keyMatches(msg, m.keys.PageUp):
 				m.transcript.PageUp()
@@ -714,12 +905,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		model, cmd := m.handleKey(msg)
 		m.layout()
-		if runStatusWasVisible != m.showRunStatus() {
-			// Apple Terminal can retain the previous sticky footer when the
-			// dynamic run-status row changes frame geometry. Clear once at that
-			// boundary before running the potentially long prompt command.
-			cmd = tea.Sequence(tea.ClearScreen, cmd)
-		}
 		return model, cmd
 	case trustPromptMsg:
 		m.trustPending = true
@@ -786,31 +971,45 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// The sticky header and footer already expose provider, model, cwd,
 			// and commands; do not duplicate startup chrome in the transcript.
 			cmds = append(cmds, waitForEvent(m.events))
+			if m.pickSessionOnStart {
+				m.pickSessionOnStart = false
+				_, pickerCmd := m.startSessionPick()
+				cmds = append(cmds, pickerCmd)
+			}
 		}
 		m.busy = false
 		return m, tea.Batch(cmds...)
 	case spinner.TickMsg:
-		// Standard bubbles spinner pump: advance the frame and re-arm while
-		// there is anything to animate. Streaming responsiveness no longer
-		// depends on these ticks — agent events arrive as tea messages via
-		// waitForEvent.
+		// Standard bubbles spinner pump: advance the frame and re-arm only while
+		// there is something visible to animate. Streaming responsiveness does
+		// not depend on these ticks — agent events arrive via waitForEvent.
+		if !m.spinnerActive() {
+			m.spinnerRunning = false
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		if m.lastErr == nil {
-			cmds = append(cmds, cmd)
-		}
+		m.spinnerRunning = true
+		cmds = append(cmds, cmd)
 		if m.showThinkingPlaceholder() {
 			m.refreshTranscript()
 		}
 	case agentEventMsg:
 		return m.Update(agentEventBatchMsg{events: []protocol.AgentEvent{msg.ev}})
+	case contextUsageRefreshMsg:
+		m.contextRefreshPending = false
+		if msg.err == nil && msg.version == m.contextRefreshVersion {
+			m.applyContextUsageSnapshot(msg.snapshot)
+		}
+		if cmd := m.scheduleContextUsageRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case agentEventBatchMsg:
-		runStatusWasVisible := m.showRunStatus()
 		// Ingest a bounded, already-coalesced logical batch. Streaming deltas
 		// schedule a render separately so input is never queued behind reflow.
 		m.batchingEvents = true
 		immediate := false
-		for _, ev := range msg.events {
+		for _, ev := range coalesceRootSessionUpdates(msg.events) {
 			m.handleAgentEvent(ev)
 			immediate = immediate || eventNeedsImmediateTranscript(ev.Type)
 		}
@@ -822,9 +1021,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if cmd := m.scheduleTranscriptFlush(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-		}
-		if runStatusWasVisible != m.showRunStatus() {
-			cmds = append(cmds, tea.ClearScreen)
 		}
 		if len(m.queueFallbacks) > 0 && !m.busy && m.app != nil {
 			if m.app.Agent.IsRunning() {
@@ -839,12 +1035,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+		if cmd := m.scheduleContextUsageRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		// Re-arm immediately; the mailbox self-signals while more batches wait.
 		cmds = append(cmds, waitForEvent(m.events))
 	case compactDoneMsg:
-		m.busy = false
-		m.compacting = false
-		m.compactStatus = ""
+		if msg.generation != m.compactGeneration {
+			return m, nil
+		}
+		// EvCompactionDone is the authoritative lifecycle transition. This
+		// command result only reports the manual operation's summary/error; it
+		// must not unlock a newer operation or an automatic goal continuation.
+		if m.app != nil && m.app.Agent != nil && !m.app.Agent.IsRunning() {
+			m.setRunIdle()
+		}
 		m.refreshContextUsageFromSession()
 		m.layout()
 		if msg.err != nil {
@@ -857,6 +1062,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.result.UsedFallback {
 				status += " (local fallback)"
 			}
+			if m.goal != nil && m.goal.Status == protocol.GoalActive && m.app != nil && m.app.Agent != nil && !m.app.Agent.IsRunning() {
+				status += " · goal paused; /goal resume to continue"
+			}
 			m.lastStatus = status
 			m.pushLine(styleFooter.Render(status))
 		}
@@ -866,6 +1074,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+	case promptDoneMsg:
+		if msg.generation != m.runGeneration || msg.err == nil {
+			return m, nil
+		}
+		if !msg.admitted {
+			if len(msg.attachments) > 0 {
+				m.promptImages = append(msg.attachments, m.promptImages...)
+			}
+			if msg.text != "" {
+				current := m.editor.Value()
+				if current == "" {
+					m.editor.SetValue(msg.text)
+				} else {
+					m.editor.SetValue(msg.text + "\n" + current)
+				}
+				m.editor.CursorEnd()
+			}
+			m.layout()
+		}
+		// Only errors rejected before admission lack a terminal lifecycle event.
+		// An admitted failed turn remains locked until its correlated turn_done or
+		// aborted event reaches this reducer.
+		if !msg.admitted && m.app != nil && m.app.Agent != nil && !m.app.Agent.IsRunning() && m.activeTurnID == "" {
+			m.setRunIdle()
+		}
+		m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvError, TurnID: msg.turnID, Message: msg.err.Error()})
 	case appendLineMsg:
 		m.pushLine(msg.line)
 	case oauthProgressMsg:
@@ -890,6 +1124,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLine(styleError.Render("logout: " + msg.err.Error()))
 		} else {
 			m.pushLine(styleFooter.Render("logged out " + msg.provider))
+		}
+	case compatibleLoginDoneMsg:
+		if msg.generation != m.compatibleLoginGeneration {
+			break
+		}
+		m.compatibleLoginPending = false
+		m.modelList = uniquePickerModels(m.app.AllModels, m.app.ProviderID)
+		if msg.err != nil {
+			m.pushLine(styleError.Render("openai-compatible configured; model discovery failed: " + msg.err.Error()))
+		} else {
+			m.pushLine(styleFooter.Render("openai-compatible configured for " + msg.endpoint + " · choose /model to switch"))
+		}
+	case inlineHistoryAckMsg:
+		if msg.generation == m.inlinePrintGeneration && m.inlinePrintInFlight && msg.end == m.inlinePrintEnd {
+			m.inlineCommitted = msg.end
+			m.inlinePrintEnd = msg.end
+			m.inlinePrintInFlight = false
+			m.inlineEverCommitted = true
+			m.transcriptBaseDirty = true
+			m.transcriptDirty = true
+			m.refreshTranscriptForced()
+			m.layout()
 		}
 	case transcriptFlushMsg:
 		if uint64(msg) == m.transcriptFlushSeq {
@@ -932,12 +1188,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.pickSession = false
 			m.pushLine(styleError.Render("session list: " + msg.err.Error()))
+			if m.startupResumeRequired {
+				return m, m.quitCmd()
+			}
 			return m, nil
 		}
 		m.sessions = msg.sessions
 		if len(m.sessions) == 0 {
 			m.pickSession = false
-			m.pushLine(styleFooter.Render("no sessions to resume for " + m.app.CWD() + " (use /new to create one)"))
+			m.pushLine(styleFooter.Render(m.noSessionsResumeMessage()))
+			if m.startupResumeRequired {
+				return m, m.quitCmd()
+			}
 			return m, nil
 		}
 		m.sessionIndex = 0
@@ -1057,7 +1319,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastStatus = "selected branch " + msg.branch.Name
 		}
 	case sessionStoreMsg:
-		if msg.generation != m.pickerGeneration {
+		if msg.generation != m.sessionOpGeneration {
 			if msg.store != nil {
 				_ = msg.store.Close()
 			}
@@ -1066,10 +1328,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionOpLoading = false
 		if msg.err != nil {
 			m.pushLine(styleError.Render("session: " + msg.err.Error()))
+			if m.startupResumeRequired {
+				return m.startSessionPick()
+			}
 			return m, nil
 		}
 		if msg.store == nil {
 			m.pushLine(styleError.Render("session: empty store result"))
+			if m.startupResumeRequired {
+				return m.startSessionPick()
+			}
 			return m, nil
 		}
 		if err := m.switchSession(msg.store); err != nil {
@@ -1132,12 +1400,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.editor.Value() == msg.text {
 				m.editor.Reset()
+				m.refreshInputCompletions()
 			}
 		}
 		m.layout()
 		return m, nil
 	case textareaResultMsg:
 		return m.applyTextareaResult(msg)
+	case clipboardImageMsg:
+		if msg.generation != 0 && msg.generation != m.imagePasteGeneration {
+			return m, nil
+		}
+		if msg.err != nil {
+			// A non-image clipboard is expected during ordinary text paste. Other
+			// failures (timeout, oversize, malformed image) must remain visible.
+			if errors.Is(msg.err, errClipboardHasNoImage) {
+				return m, routeTextareaCmdGeneration(textareaTargetComposer, "", "", msg.generation, textarea.Paste)
+			}
+			m.lastErrorText = "paste image: " + msg.err.Error()
+			m.pushLine(styleError.Render(m.lastErrorText))
+			return m, nil
+		}
+		if len(m.promptImages) >= maxPromptImages {
+			m.lastErrorText = fmt.Sprintf("paste: at most %d images per prompt", maxPromptImages)
+			return m, nil
+		}
+		m.promptImages = append(m.promptImages, msg.block)
+		m.lastStatus = fmt.Sprintf("attached image %d", len(m.promptImages))
+		m.layout()
+		return m, nil
 	}
 
 	if m.userInputPending && m.userInputEditing {
@@ -1174,7 +1465,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cmd) {
-	if result.msg == nil {
+	if result.msg == nil || result.target == textareaTargetComposer && result.pasteGeneration != 0 && result.pasteGeneration != m.imagePasteGeneration {
 		return m, nil
 	}
 	switch result.target {
@@ -1250,6 +1541,44 @@ func (m *Model) renderQueuedInput(item protocol.QueuedInput, text string) {
 	m.queueRendered[item.ID] = true
 }
 
+func (m *Model) setRunIdle() {
+	m.busy = false
+	m.activeTurnID = ""
+	m.toolRunning = false
+	m.compacting = false
+	m.compactStatus = ""
+	m.runStartedAt = time.Time{}
+	m.cancelRun = nil
+}
+
+func (m *Model) adoptTurn(ev protocol.AgentEvent) {
+	if ev.Agent != nil || ev.TurnID == "" {
+		return
+	}
+	if ev.TurnID != m.activeTurnID {
+		m.turnUsageSeen = false
+	}
+	m.activeTurnID = ev.TurnID
+	m.busy = true
+	if m.runStartedAt.IsZero() {
+		m.runStartedAt = m.currentTime()
+	}
+}
+
+func (m *Model) staleRootEvent(ev protocol.AgentEvent) bool {
+	if ev.Agent != nil || ev.TurnID == "" {
+		return false
+	}
+	if m.activeTurnID != "" {
+		return ev.TurnID != m.activeTurnID
+	}
+	if m.app != nil && m.app.Agent != nil {
+		_, activeID, running := m.app.Agent.ActiveTurn()
+		return running && activeID != "" && ev.TurnID != activeID
+	}
+	return false
+}
+
 func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 	// Child streams never reuse root scalar buffers or trigger root session
 	// hydration. Bubble Tea's Update goroutine alone mutates this map.
@@ -1258,6 +1587,15 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		if ev.Type != protocol.EvPermissionRequest && ev.Type != protocol.EvUserInputRequest {
 			return
 		}
+	}
+	// Ignore every delayed event from an older turn, not just its terminal
+	// boundary. Command results and mailbox delivery use separate Bubble Tea
+	// paths, so a newer turn can be admitted before an old batch is reduced.
+	if m.staleRootEvent(ev) {
+		return
+	}
+	if ev.Type != protocol.EvTurnDone && ev.Type != protocol.EvAborted {
+		m.adoptTurn(ev)
 	}
 	switch ev.Type {
 	case protocol.EvCompactionStarted:
@@ -1268,19 +1606,27 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.compactStatus = "compacting context"
 		}
 	case protocol.EvCompactionDone:
-		m.busy = false
 		m.compacting = false
 		m.compactStatus = ""
+		m.activeTurnID = ""
+		// Automatic compaction is one phase of a continuing goal worker. Manual
+		// compaction settles only when the core confirms no admitted operation is
+		// still running; never unlock based solely on event ordering.
+		if ev.Compaction == nil || !ev.Compaction.Automatic {
+			if m.app == nil || m.app.Agent == nil || !m.app.Agent.IsRunning() {
+				m.setRunIdle()
+			}
+		}
 		m.refreshContextUsageFromSession()
 	case protocol.EvSessionUpdated:
-		// Assistant persistence happens before turn_done. Rehydrating mid-turn
-		// would either duplicate the still-live streamed reply or (during tool
-		// loops, where persisted messages carry only tool_calls) drop live
-		// tool/progress lines from the rebuilt transcript. Keep the live
-		// transcript for the whole turn and refresh only the context counter.
-		if m.busy || m.assistantBuf.Len() > 0 || m.thinkingBuf.Len() > 0 || m.planBuf.Len() > 0 {
-			m.refreshContextUsageFromSession()
-		} else {
+		// Assistant/tool persistence happens before turn_done. Rehydrating or
+		// rescanning the full SQLite branch here both duplicates live transcript
+		// state and blocks Bubble Tea's input goroutine on every tool cycle.
+		// EvUsage already carries authoritative current-context usage while busy.
+		// Turn-attributed updates are represented by the live event stream even if
+		// an optimistic abort has already unlocked the composer; retain idle
+		// hydration only for externally initiated, unattributed session mutations.
+		if ev.TurnID == "" && !m.busy && m.assistantBuf.Len() == 0 && m.thinkingBuf.Len() == 0 && m.planBuf.Len() == 0 {
 			m.hydrateSession()
 		}
 	case protocol.EvTextDelta:
@@ -1313,16 +1659,23 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		}
 	case protocol.EvThreadGoalUpdated:
 		if ev.GoalContinuing {
-			m.busy = true
-			if m.runStartedAt.IsZero() {
-				m.runStartedAt = m.currentTime()
+			if ev.TurnID != "" && ev.TurnID != m.activeTurnID {
+				m.lastErrorText = ""
 			}
+			m.adoptTurn(ev)
 		}
 		if ev.ThreadGoal != nil {
 			if ev.ThreadGoal.Cleared {
 				m.goal = nil
 			} else {
 				m.goal = ev.ThreadGoal.Goal.Clone()
+			}
+			// Goal workers can stop at a safe boundary (pause, clear, blocked
+			// auto-compaction) without another turn terminal event. A terminal goal
+			// snapshot is therefore also a lifecycle boundary once core is idle.
+			if (m.goal == nil || m.goal.Status != protocol.GoalActive) &&
+				(m.app == nil || m.app.Agent == nil || !m.app.Agent.IsRunning()) {
+				m.setRunIdle()
 			}
 		}
 		m.refreshTranscript()
@@ -1393,6 +1746,9 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.lastUsage = ev.Usage.Clone()
 			m.contextTokens = contextTokensFromUsage(*ev.Usage)
 			m.contextEstimated = false
+			m.turnUsageSeen = true
+			m.contextRefreshNeeded = false
+			m.contextRefreshVersion++
 			// Per-request token accounting remains available in debug mode;
 			// the compact aggregate stays in the sticky footer.
 			if os.Getenv("SNOW_DEBUG") != "" {
@@ -1455,11 +1811,14 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.startUserInput(*ev.UserInput)
 		}
 	case protocol.EvError:
+		// Errors are diagnostics, not lifecycle boundaries. Correlated
+		// turn_done/aborted events settle admitted work; promptDoneMsg handles the
+		// only no-turn case (optimistic admission/preflight failure).
 		m.sawPlanThisTurn = false
 		m.completedPlanThisTurn = false
 		m.planPrompt = false
 		message := strings.TrimSpace(ev.Message)
-		for _, prefix := range []string{"agent: provider chat: ", "agent: provider resolve: ", "agent: "} {
+		for _, prefix := range []string{"agent: provider stream: ", "agent: provider chat: ", "agent: provider resolve: ", "agent: "} {
 			message = strings.TrimPrefix(message, prefix)
 		}
 		if message != "" && message != m.lastErrorText {
@@ -1468,6 +1827,11 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.pushLine(styleError.Render("✖ " + message))
 		}
 	case protocol.EvTurnDone:
+		if !m.turnUsageSeen {
+			m.contextRefreshVersion++
+			m.contextRefreshNeeded = true
+		}
+		m.turnUsageSeen = false
 		m.clearUserInput()
 		m.toolRunning = false
 		if ev.Usage != nil {
@@ -1482,8 +1846,12 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			}
 		}
 		m.busy = ev.GoalContinuing
+		m.activeTurnID = ""
+		m.lastErrorText = ""
 		if !ev.GoalContinuing {
-			m.runStartedAt = time.Time{}
+			m.setRunIdle()
+		} else if m.runStartedAt.IsZero() {
+			m.runStartedAt = m.currentTime()
 		}
 		m.finishAssistant()
 		m.finalizePlan()
@@ -1498,6 +1866,11 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		}
 		m.refreshTranscript()
 	case protocol.EvAborted:
+		if !m.turnUsageSeen {
+			m.contextRefreshVersion++
+			m.contextRefreshNeeded = true
+		}
+		m.turnUsageSeen = false
 		m.sawPlanThisTurn = false
 		m.completedPlanThisTurn = false
 		m.planPrompt = false
@@ -1506,8 +1879,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		m.permPending = false
 		m.permRequest = nil
 		m.permAgent = nil
-		m.busy = false
-		m.runStartedAt = time.Time{}
+		m.setRunIdle()
 		m.finishAssistant()
 		m.pushLine(styleError.Render("aborted"))
 		m.refreshTranscript()
@@ -1525,11 +1897,18 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 // transcript line. It runs when the model starts emitting answer text or a
 // tool call (thinking always precedes those), and again at turn end for
 // thinking-only turns.
+func (m *Model) appendTranscriptLine(line string) {
+	m.lines = append(m.lines, line)
+	if m.inlineTranscript && m.inlineHistoryKey != "" {
+		m.inlineCanonicalLines = append(m.inlineCanonicalLines, line)
+	}
+}
+
 func (m *Model) finalizeThinking() {
 	if m.thinkingBuf.Len() == 0 {
 		return
 	}
-	m.lines = append(m.lines, m.renderThinkingBody(m.thinkingBuf.String()))
+	m.appendTranscriptLine(m.renderThinkingBody(m.thinkingBuf.String()))
 	m.transcriptBaseDirty = true
 	m.thinkingBuf.Reset()
 	m.refreshTranscript()
@@ -1546,7 +1925,7 @@ func (m *Model) finishAssistant() {
 // appending their own lines so the visible transcript remains chronological.
 func (m *Model) finalizeAssistant() {
 	if m.assistantBuf.Len() > 0 {
-		m.lines = append(m.lines, m.renderAssistantBody(m.assistantBuf.String()))
+		m.appendTranscriptLine(m.renderAssistantBody(m.assistantBuf.String()))
 		m.transcriptBaseDirty = true
 		m.assistantBuf.Reset()
 		m.refreshTranscript()
@@ -1571,7 +1950,7 @@ func (m *Model) finalizePlan() {
 	}
 	text := m.planBuf.String()
 	m.latestPlan = text
-	m.lines = append(m.lines, m.renderPlanBody(text))
+	m.appendTranscriptLine(m.renderPlanBody(text))
 	m.transcriptBaseDirty = true
 	m.planBuf.Reset()
 	m.currentPlanID = ""
@@ -1635,7 +2014,7 @@ func looksLikeMarkdown(text string) bool {
 }
 
 func (m *Model) pushLine(s string) {
-	m.lines = append(m.lines, s)
+	m.appendTranscriptLine(s)
 	m.transcriptBaseDirty = true
 	m.transcriptDirty = true
 	if m.batchingEvents {
@@ -1651,7 +2030,9 @@ func (m *Model) pushLine(s string) {
 func (m *Model) liveText() string {
 	var b strings.Builder
 	if m.thinkingBuf.Len() > 0 {
-		b.WriteString(m.renderThinkingBody(m.thinkingBuf.String()))
+		// Streaming deltas stay cheap; finalized thinking is rendered as Markdown
+		// once in finalizeThinking, matching the assistant streaming path.
+		b.WriteString(styleThinking.Render(m.thinkingBuf.String()))
 	} else if m.showThinkingPlaceholder() {
 		b.WriteString(styleThinking.Render(m.spinner.View() + " thinking…"))
 	}
@@ -1690,6 +2071,13 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 		return
 	}
 	width := m.transcript.Width
+	// Selection coordinates belong to an immutable wrapped snapshot. Keep live
+	// stream deltas off-screen until release so a response cannot cancel a drag
+	// or move the text beneath the pointer.
+	if m.transcriptSelection.pressActive && m.transcriptContent != "" {
+		m.transcriptDirty = true
+		return
+	}
 	// Freeze the current snapshot while the user reads away from the tail.
 	// State and source buffers continue to update; reaching the snapshot bottom
 	// or resizing performs one complete catch-up render.
@@ -1698,7 +2086,11 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 		return
 	}
 	if m.transcriptBaseDirty || m.transcriptBaseWidth != width {
-		base := strings.Join(m.lines, "\n")
+		stableLines := m.lines
+		if m.inlineTranscript {
+			stableLines = m.lines[m.inlineDisplayStart():]
+		}
+		base := strings.Join(stableLines, "\n")
 		if width > 0 {
 			// Viewport content is not wrapped automatically. Reflow only the
 			// stable transcript base when lines or terminal width change.
@@ -1721,6 +2113,14 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 	if !m.transcriptDirty && content == m.transcriptContent {
 		return
 	}
+	// Selection points refer to the current wrapped transcript snapshot. A live
+	// stream boundary or width-dependent reflow can replace those rows, so clear
+	// selection before publishing a different source rather than copying text
+	// that no longer matches the highlighted cells.
+	if content != m.transcriptContent {
+		m.clearTranscriptSelection()
+		m.transcriptSelectionLines = splitTranscriptSelectionLines(content)
+	}
 	wasAtBottom := m.transcript.AtBottom()
 	m.transcript.SetContent(content)
 	// Follow new output only when the user was already following the tail.
@@ -1733,19 +2133,22 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 }
 
 const (
-	fixedChromeHeight   = 4 // header, two separators, and footer
-	minComposerHeight   = 3
-	maxComposerHeight   = 6
-	minTranscriptHeight = 1
-	minFullFrameHeight  = fixedChromeHeight + minComposerHeight + minTranscriptHeight
+	fixedChromeHeight       = 4 // header, two separators, and footer
+	inlineFixedChromeHeight = 4 // sticky header, two separators, and footer
+	inlineOverlayMaxHeight  = 10
+	minComposerHeight       = 3
+	maxComposerHeight       = 6
+	minTranscriptHeight     = 1
+	minFullFrameHeight      = fixedChromeHeight + minComposerHeight + minTranscriptHeight
 )
 
 // desiredComposerHeight grows with explicit and soft-wrapped input while
 // keeping the idle composer comfortably usable. The textarea remains internally
 // scrollable after reaching maxComposerHeight.
 func (m *Model) desiredComposerHeight() int {
-	if m.loginMode || m.editor.Value() == "" {
-		return minComposerHeight
+	attachmentRows := min(2, len(m.promptImages))
+	if m.loginMode || m.loginEndpointMode || m.editor.Value() == "" {
+		return min(maxComposerHeight, minComposerHeight+attachmentRows)
 	}
 	width := m.editor.Width()
 	if width < 1 {
@@ -1753,7 +2156,7 @@ func (m *Model) desiredComposerHeight() int {
 	}
 	wrapped := xansi.Wordwrap(m.editor.Value(), width, "")
 	wrapped = xansi.Hardwrap(wrapped, width, true)
-	return min(maxComposerHeight, max(minComposerHeight, lipgloss.Height(wrapped)))
+	return min(maxComposerHeight, max(minComposerHeight, lipgloss.Height(wrapped))+attachmentRows)
 }
 
 func (m *Model) currentTime() time.Time {
@@ -1806,39 +2209,100 @@ func (m *Model) renderRunStatus() string {
 		styleHeaderDim.Render(" ("+detail+")")
 }
 
+func (m *Model) managedFrameHeight() int {
+	// The normal-screen renderer still owns one terminal-height live frame. Its
+	// transcript viewport absorbs unused rows so the composer/footer remain
+	// anchored at the bottom while finalized rows print above into native
+	// scrollback. A short fixed frame would leave the composer stranded near the
+	// last response and can expose stale separator rows when its geometry changes.
+	return m.height
+}
+
+func (m *Model) managedFrameWidth() int {
+	// Leave the terminal's final cell unused. Writing through the right margin
+	// can trigger physical autowrap before Bubble Tea's logical newline, causing
+	// stale rows or apparent flicker when frame geometry changes.
+	return max(1, m.width-1)
+}
+
+// inlineModalOverlay reports pickers that can temporarily own the entire fixed
+// inline frame. Replacing the transcript/composer tail keeps the renderer at a
+// constant height (so native scrollback is untouched) while giving modal lists
+// enough rows to show more than their selected item.
+func (m *Model) inlineModalOverlay() bool {
+	return m.inlineTranscript && (m.pickProvider || m.pickChatGPTAuth || m.pickModel ||
+		m.pickThinking || m.pickSettings || m.pickSession || m.pickTree ||
+		m.pickInfo || m.pickPermissionMode || m.permPending || m.userInputPending ||
+		m.confirmGoalReplace || m.planPrompt)
+}
+
+// Inline completion lists still need the composer for live filtering. They own
+// the rest of the same fixed frame while visible, hiding transcript/footer rows
+// instead of growing the normal-screen renderer.
+func (m *Model) inlineInputOverlay() bool {
+	return m.inlineTranscript && (m.compVisible || m.skillVisible || m.mentionVisible || m.mentionLoading)
+}
+
 // availableOverlayHeight is the maximum picker/palette area that leaves one
-// transcript row visible inside the fixed full-screen frame.
+// transcript row visible inside the fixed managed frame.
 func (m *Model) availableOverlayHeight() int {
-	return max(0, m.height-fixedChromeHeight-m.editor.Height()-m.runStatusHeight()-minTranscriptHeight)
+	if m.inlineModalOverlay() {
+		return min(m.managedFrameHeight(), inlineOverlayMaxHeight)
+	}
+	if m.inlineInputOverlay() {
+		return max(1, min(inlineOverlayMaxHeight, m.managedFrameHeight()-1-m.editor.Height())) // separator + composer
+	}
+	return max(0, m.managedFrameHeight()-m.fixedChromeRows()-m.editor.Height()-m.runStatusHeight()-minTranscriptHeight)
 }
 
 // chromeHeight returns the exact rows outside the transcript viewport.
+func (m *Model) fixedChromeRows() int {
+	if m.inlineTranscript {
+		return inlineFixedChromeHeight
+	}
+	return fixedChromeHeight
+}
+
 func (m *Model) chromeHeight() int {
 	overlayHeight := 0
 	if overlay := m.renderOverlays(); overlay != "" {
 		overlayHeight = lipgloss.Height(overlay)
 	}
-	return fixedChromeHeight + m.editor.Height() + m.runStatusHeight() + overlayHeight
+	return m.fixedChromeRows() + m.editor.Height() + m.runStatusHeight() + overlayHeight
 }
 
 func (m *Model) layout() {
 	if m.width <= 0 || m.height <= 0 {
 		return
 	}
-	m.editor.SetWidth(max(1, m.width-4))
-	m.userInputEditor.SetWidth(max(1, m.width-6))
-	maxEditorHeight := max(minComposerHeight, m.height-fixedChromeHeight-m.runStatusHeight()-minTranscriptHeight)
+	// Dynamic chrome (especially the one-line run status) changes viewport
+	// height at prompt start/end. Preserve tail-following across that resize;
+	// otherwise shrinking a bottomed viewport makes AtBottom false and freezes
+	// reasoning/tool events until the run-status row disappears at turn_done.
+	wasAtBottom := m.transcript.AtBottom()
+	frameWidth := m.managedFrameWidth()
+	m.editor.SetWidth(max(1, frameWidth-4))
+	m.userInputEditor.SetWidth(max(1, frameWidth-6))
+	frameHeight := m.managedFrameHeight()
+	maxEditorHeight := max(minComposerHeight, frameHeight-m.fixedChromeRows()-m.runStatusHeight()-minTranscriptHeight)
 	editorH := min(m.desiredComposerHeight(), min(maxComposerHeight, maxEditorHeight))
 	m.editor.SetHeight(editorH)
-	bodyH := m.height - m.chromeHeight()
-	if bodyH < minTranscriptHeight {
-		bodyH = minTranscriptHeight
-	}
-	if m.transcript.Width != m.width || m.transcript.Height != bodyH {
+	bodyH := max(minTranscriptHeight, frameHeight-m.chromeHeight())
+	if m.transcript.Width != frameWidth || m.transcript.Height != bodyH {
 		m.transcriptDirty = true
 	}
-	m.transcript.Width = m.width
+	m.transcript.Width = frameWidth
 	m.transcript.Height = bodyH
+	if wasAtBottom {
+		m.transcript.GotoBottom()
+	}
+}
+
+func (m *Model) quitCmd() tea.Cmd {
+	if m.inlineTranscript {
+		m.inlineExiting = true
+	}
+	return tea.Quit
 }
 
 // handleKey processes key presses, the command palette, and login capture.
@@ -1851,7 +2315,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyCtrlD {
-			return m, tea.Quit
+			return m, m.quitCmd()
 		}
 		switch msg.Type {
 		case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
@@ -1883,13 +2347,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.app == nil {
 		switch msg.Type {
 		case tea.KeyCtrlC:
-			return m, tea.Quit
+			return m, m.quitCmd()
 		case tea.KeyCtrlD:
 			if m.editor.Value() == "" {
-				return m, tea.Quit
+				return m, m.quitCmd()
 			}
 		}
 		return m, nil
+	}
+
+	// F6 toggles application mouse reporting without restarting. Native terminal
+	// selection is the zero-lag default; application mode adds wheel scrolling,
+	// transcript drag-copy, and edge auto-scroll when explicitly enabled.
+	if msg.Type == tea.KeyF6 {
+		if m.app.Cfg.TUI.Mouse {
+			m.clearTranscriptSelection()
+			m.catchUpTranscriptAfterSelection()
+			m.app.Cfg.TUI.Mouse = false
+			m.lastStatus = "native selection · keyboard viewport scrolling"
+			return m, tea.DisableMouse
+		}
+		m.app.Cfg.TUI.Mouse = true
+		m.lastStatus = "app mouse · wheel scroll + drag copy enabled"
+		return m, tea.EnableMouseCellMotion
 	}
 
 	// Emergency Ctrl+C is resolved before any configurable action so a custom
@@ -1899,7 +2379,25 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.requestAbort()
 			return m, nil
 		}
-		return m, tea.Quit
+		return m, m.quitCmd()
+	}
+
+	// Session creation/opening runs asynchronously in production. Keep that
+	// transition modal so no prompt or command can be admitted against the old
+	// (or startup placeholder) store before the new store is installed.
+	if m.sessionOpLoading {
+		m.lastStatus = "opening session…"
+		return m, nil
+	}
+
+	// Host interaction requests preempt ordinary pickers. They may arrive from
+	// an independent child while another overlay is open; keeping them first
+	// guarantees the visible blocking request also owns the keyboard.
+	if m.permPending {
+		return m.handlePermissionPick(msg)
+	}
+	if m.userInputPending {
+		return m.handleUserInputKey(msg)
 	}
 
 	if m.confirmGoalReplace {
@@ -1916,6 +2414,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.pushLine(styleError.Render(err.Error()))
 			} else {
 				m.goal = g
+				m.busy = true
+				m.runStartedAt = m.currentTime()
 			}
 			return m, nil
 		}
@@ -1933,6 +2433,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyEnter && !m.busy {
 			msg.Alt = true
 		}
+	}
+
+	// --- OpenAI-compatible endpoint capture mode ---
+	if m.loginEndpointMode {
+		if keyMatches(msg, m.keys.Close) {
+			msg = tea.KeyMsg{Type: tea.KeyEsc}
+		} else if keyMatches(msg, m.keys.Accept) {
+			msg = tea.KeyMsg{Type: tea.KeyEnter}
+		} else if keyMatches(msg, m.keys.Paste) {
+			msg = tea.KeyMsg{Type: tea.KeyCtrlV}
+		}
+		return m.handleLoginEndpointKey(msg)
 	}
 
 	// --- Masked login capture mode ---
@@ -1987,16 +2499,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleInfoPick(msg)
 	}
 
-	// --- Interactive permission picker (allow/deny without typing) ---
-	if m.permPending {
-		return m.handlePermissionPick(msg)
-	}
-
-	// --- Model-requested choice/free-form question ---
-	if m.userInputPending {
-		return m.handleUserInputKey(msg)
-	}
-
 	// --- Permission mode picker (/permissions) ---
 	if m.pickPermissionMode {
 		return m.handlePermissionModePick(msg)
@@ -2045,6 +2547,30 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// --- Agent Skill picker: Enter/Tab insert a leading directive. ---
+	if m.skillVisible {
+		msg = normalizePickerKeyWithMap(msg, m.keys)
+		switch msg.Type {
+		case tea.KeyUp, tea.KeyShiftTab:
+			if len(m.skillMatches) > 0 {
+				m.skillIndex = (m.skillIndex - 1 + len(m.skillMatches)) % len(m.skillMatches)
+			}
+			return m, nil
+		case tea.KeyDown:
+			if len(m.skillMatches) > 0 {
+				m.skillIndex = (m.skillIndex + 1) % len(m.skillMatches)
+			}
+			return m, nil
+		case tea.KeyTab, tea.KeyEnter:
+			if len(m.skillMatches) > 0 {
+				return m.insertSkillCompletion(m.skillMatches[m.skillIndex].Name)
+			}
+		case tea.KeyEsc:
+			m.skillVisible = false
+			return m, nil
+		}
+	}
+
 	// --- File mention picker: Enter/Tab insert a path, never submit the prompt ---
 	if m.mentionVisible {
 		msg = normalizePickerKeyWithMap(msg, m.keys)
@@ -2075,6 +2601,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.toggleCollaborationMode()
 	}
 
+	if !m.busy && len(m.promptImages) > 0 && strings.TrimSpace(m.editor.Value()) == "" &&
+		(msg.Type == tea.KeyBackspace || msg.Type == tea.KeyEsc) {
+		m.promptImages = m.promptImages[:len(m.promptImages)-1]
+		m.lastStatus = "removed pasted image"
+		m.layout()
+		return m, nil
+	}
+
 	// Preserve a standalone Escape briefly as a possible macOS Option/Meta
 	// prefix. Modal Escape and active-run interruption have already returned
 	// above, so this applies only to the idle composer. Replayed terminal input
@@ -2097,9 +2631,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	trimmed := strings.TrimSpace(text)
+	if submitKey && m.compatibleLoginPending && m.app != nil && m.app.ProviderID == openaicompat.ProviderID && trimmed != "" && !strings.HasPrefix(trimmed, "/") {
+		m.lastStatus = "waiting for openai-compatible model discovery"
+		return m, nil
+	}
 	goalControl := m.busy && (strings.HasPrefix(trimmed, "/goal pause") || strings.HasPrefix(trimmed, "/goal clear") || strings.HasPrefix(trimmed, "/goal edit"))
 	if keyMatches(msg, m.keys.Abort) && m.busy {
 		m.requestAbort()
+		return m, nil
+	}
+	if (followUpKey || submitKey && m.busy && !goalControl) && len(m.promptImages) > 0 {
+		m.lastErrorText = "image attachments cannot be queued; wait for the current turn"
+		m.lastStatus = m.lastErrorText
 		return m, nil
 	}
 	if followUpKey && m.busy && trimmed != "" && !strings.HasPrefix(trimmed, "/") {
@@ -2109,21 +2652,25 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.submitQueuedInput(text, protocol.QueuedInputSteer)
 	}
 	if submitKey && (!m.busy || goalControl) {
-		if strings.HasPrefix(text, "/") {
+		if strings.HasPrefix(text, "/") && len(m.promptImages) == 0 {
 			return m.runCommand(trimmed)
 		}
-		if trimmed != "" {
-			m.busy = true
-			m.toolRunning = false
-			m.lastErrorText = ""
-			m.pushLine(styleUser.Render("› " + text))
+		if trimmed != "" || len(m.promptImages) > 0 {
+			display := text
+			if display == "" {
+				display = fmt.Sprintf("[%d image(s)]", len(m.promptImages))
+			} else if len(m.promptImages) > 0 {
+				display += fmt.Sprintf(" [%d image(s)]", len(m.promptImages))
+			}
+			m.pushLine(styleUser.Render("› " + display))
+			m.imagePasteGeneration++
 			m.editor.Reset()
 			return m, m.startPrompt(text)
 		}
 	}
 
 	if keyMatches(msg, m.keys.Quit) && !m.busy && (msg.String() != "ctrl+d" || m.editor.Value() == "") {
-		return m, tea.Quit
+		return m, m.quitCmd()
 	}
 
 	// Forward to the editor, then refresh the palette from the new text. Keep
@@ -2146,8 +2693,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editor.Err = nil
 		if m.pasteCmdOverride != nil {
 			cmd = m.pasteCmdOverride
+			return m, tea.Batch(routeTextareaCmd(textareaTargetComposer, "", "", cmd), mentionCmd)
 		}
-		return m, tea.Batch(routeTextareaCmd(textareaTargetComposer, "", "", cmd), mentionCmd)
+		m.imagePasteGeneration++
+		generation := m.imagePasteGeneration
+		imageCmd := m.imagePasteCmdOverride
+		if imageCmd == nil {
+			imageCmd = func() tea.Msg {
+				block, err := readClipboardImageFunc()
+				return clipboardImageMsg{generation: generation, block: block, err: err}
+			}
+		}
+		return m, tea.Batch(imageCmd, mentionCmd)
 	}
 	return m, mentionCmd
 }
@@ -2197,10 +2754,15 @@ func (m *Model) refreshPalette() {
 	}
 }
 
-// refreshInputCompletions keeps slash commands and @ file references
-// mutually exclusive while the editor changes.
+// refreshInputCompletions keeps slash commands, leading $skill directives,
+// and @ file references mutually exclusive while the editor changes.
 func (m *Model) refreshInputCompletions() tea.Cmd {
 	m.refreshPalette()
+	m.refreshSkillCompletions()
+	if m.skillVisible {
+		m.mentionVisible = false
+		return nil
+	}
 	return m.refreshMentions()
 }
 
@@ -2253,11 +2815,52 @@ func (m *Model) insertMention(path string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) handleLoginEndpointKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.loginEndpointMode = false
+		m.loginEndpoint = ""
+		m.loginProvider = ""
+		m.editor.Reset()
+		m.editor.Placeholder = "Type a message…"
+		m.pushLine(styleFooter.Render("login cancelled"))
+		return m, nil
+	case tea.KeyEnter:
+		endpoint := strings.TrimSpace(m.editor.Value())
+		compatible, err := openaicompat.New(openaicompat.Config{BaseURL: endpoint})
+		if err != nil || !compatible.Configured() {
+			if err == nil {
+				err = errors.New("endpoint is required")
+			}
+			m.pushLine(styleError.Render("login: invalid openai-compatible endpoint: " + err.Error()))
+			return m, nil
+		}
+		m.loginEndpoint = endpoint
+		m.loginEndpointMode = false
+		m.editor.Reset()
+		m.editor.Placeholder = "Type a message…"
+		m.beginKeyCapture(openaicompat.ProviderID)
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.editor, cmd = m.editor.Update(msg)
+	if msg.Type == tea.KeyCtrlV {
+		m.editor.Err = nil
+		if m.pasteCmdOverride != nil {
+			cmd = m.pasteCmdOverride
+		}
+		return m, routeTextareaCmd(textareaTargetComposer, "", "", cmd)
+	}
+	return m, cmd
+}
+
 // handleLoginKey captures a masked API key.
 func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.loginMode = false
+		m.loginEndpoint = ""
+		m.loginProvider = ""
 		m.secretBuf.Reset()
 		m.editor.Reset()
 		m.pushLine(styleFooter.Render("login cancelled"))
@@ -2267,6 +2870,9 @@ func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loginMode = false
 		m.secretBuf.Reset()
 		m.editor.Reset()
+		if m.loginProvider == openaicompat.ProviderID {
+			return m.finishCompatibleLogin(secret)
+		}
 		if strings.TrimSpace(secret) == "" {
 			m.pushLine(styleError.Render("login: empty API key"))
 			return m, nil
@@ -2287,6 +2893,8 @@ func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyCtrlC:
 		m.loginMode = false
+		m.loginEndpoint = ""
+		m.loginProvider = ""
 		m.secretBuf.Reset()
 		m.editor.Reset()
 		m.pushLine(styleFooter.Render("login cancelled"))
@@ -2298,6 +2906,80 @@ func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.secretBuf.WriteString(" ")
 	}
 	return m, nil
+}
+
+func (m *Model) finishCompatibleLogin(secret string) (tea.Model, tea.Cmd) {
+	endpoint := strings.TrimSpace(m.loginEndpoint)
+	m.loginEndpoint = ""
+	m.loginProvider = ""
+	if endpoint == "" {
+		m.pushLine(styleError.Render("login: openai-compatible endpoint is required"))
+		return m, nil
+	}
+
+	oldPersisted := m.app.PersistedCfg
+	candidate := oldPersisted
+	candidate.Providers = make(map[string]config.ProviderConfig, len(oldPersisted.Providers)+1)
+	for id, providerConfig := range oldPersisted.Providers {
+		candidate.Providers[id] = providerConfig
+	}
+	providerConfig := candidate.Providers[openaicompat.ProviderID]
+	providerConfig.BaseURL = endpoint
+	candidate.Providers[openaicompat.ProviderID] = providerConfig
+
+	oldCred, hadOldCred := m.app.Auth.Get(openaicompat.ProviderID)
+	credentialChanged := strings.TrimSpace(secret) != ""
+	if credentialChanged {
+		if err := m.app.Auth.Put(openaicompat.ProviderID, auth.Credential{Type: auth.CredentialAPIKey, Key: secret}); err != nil {
+			m.pushLine(styleError.Render("login: " + err.Error()))
+			return m, nil
+		}
+	}
+	rollbackCredential := func() error {
+		if !credentialChanged {
+			return nil
+		}
+		if hadOldCred {
+			return m.app.Auth.Put(openaicompat.ProviderID, oldCred)
+		}
+		return m.app.Auth.Delete(openaicompat.ProviderID)
+	}
+	if m.app.ConfigPath != "" {
+		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
+			err = errors.Join(err, rollbackCredential())
+			m.pushLine(styleError.Render("login: persist endpoint: " + err.Error()))
+			return m, nil
+		}
+	}
+
+	m.app.PersistedCfg = candidate
+	m.app.Cfg.Providers = make(map[string]config.ProviderConfig, len(candidate.Providers))
+	for id, configured := range candidate.Providers {
+		m.app.Cfg.Providers[id] = configured
+	}
+	if err := m.app.ConfigureOpenAICompatible(endpoint); err != nil {
+		m.app.PersistedCfg = oldPersisted
+		m.app.Cfg.Providers = make(map[string]config.ProviderConfig, len(oldPersisted.Providers))
+		for id, configured := range oldPersisted.Providers {
+			m.app.Cfg.Providers[id] = configured
+		}
+		rollbackErr := rollbackCredential()
+		if m.app.ConfigPath != "" {
+			rollbackErr = errors.Join(rollbackErr, config.Save(m.app.ConfigPath, oldPersisted))
+		}
+		m.pushLine(styleError.Render("login: " + errors.Join(err, rollbackErr).Error()))
+		return m, nil
+	}
+
+	m.compatibleLoginGeneration++
+	generation := m.compatibleLoginGeneration
+	m.compatibleLoginPending = true
+	m.pushLine(styleFooter.Render("openai-compatible endpoint saved · discovering models…"))
+	app := m.app
+	ctx := m.ctx
+	return m, func() tea.Msg {
+		return compatibleLoginDoneMsg{generation: generation, endpoint: endpoint, err: app.RefreshProviderModels(ctx, openaicompat.ProviderID)}
+	}
 }
 
 func (m *Model) expandedPrompt(text string) string {
@@ -2362,9 +3044,7 @@ func (m *Model) startQueueFallback() tea.Cmd {
 	// defer any already queued collaboration-mode transition until this prompt's
 	// own turn_done boundary.
 	m.modeSwitchReady = false
-	m.busy = true
-	m.toolRunning = false
-	m.lastErrorText = ""
+	m.beginOptimisticRun()
 	m.planPrompt = false
 	m.pushLine(styleUser.Render("› " + msg.text))
 	if m.editor.Value() == msg.text {
@@ -2375,49 +3055,73 @@ func (m *Model) startQueueFallback() tea.Cmd {
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
-	m.runStartedAt = m.currentTime()
+	generation := m.runGeneration
 	promptCmd := func() tea.Msg {
-		if err := m.app.Agent.Prompt(ctx, msg.expanded); err != nil {
-			return agentEventMsg{ev: protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()}}
-		}
-		return nil
+		_, beforeID, _ := m.app.Agent.ActiveTurn()
+		err := m.app.Agent.Prompt(ctx, msg.expanded)
+		_, turnID, running := m.app.Agent.ActiveTurn()
+		return promptDoneMsg{generation: generation, turnID: turnID, admitted: running || (turnID != "" && turnID != beforeID), err: err}
 	}
-	// This path begins outside the ordinary key handler after the prior Agent
-	// fully settles, so apply the same one-shot geometry repaint explicitly.
-	return tea.Sequence(tea.ClearScreen, promptCmd)
+	return promptCmd
+}
+
+func (m *Model) beginOptimisticRun() uint64 {
+	m.runGeneration++
+	m.activeTurnID = ""
+	m.turnUsageSeen = false
+	m.busy = true
+	m.toolRunning = false
+	m.lastErrorText = ""
+	m.runStartedAt = m.currentTime()
+	return m.runGeneration
+}
+
+func clonePromptImages(images []protocol.ContentBlock) []protocol.ContentBlock {
+	cloned := make([]protocol.ContentBlock, len(images))
+	for i, image := range images {
+		cloned[i] = image
+		cloned[i].Data = append([]byte(nil), image.Data...)
+	}
+	return cloned
+}
+
+func (m *Model) takePromptImages() []protocol.ContentBlock {
+	images := clonePromptImages(m.promptImages)
+	m.promptImages = nil
+	return images
 }
 
 func (m *Model) startPrompt(text string) tea.Cmd {
+	generation := m.beginOptimisticRun()
 	if m.cancelRun != nil {
 		m.cancelRun()
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
-	m.runStartedAt = m.currentTime()
 	prompt := m.expandedPrompt(text)
+	images := m.takePromptImages()
 	return func() tea.Msg {
-		err := m.app.Agent.Prompt(ctx, prompt)
-		if err != nil {
-			return agentEventMsg{ev: protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()}}
-		}
-		return nil
+		err := m.app.Agent.PromptContent(ctx, prompt, images)
+		_, turnID, _ := m.app.Agent.ActiveTurn()
+		admitted := err == nil || !errors.Is(err, agent.ErrPromptRejected)
+		return promptDoneMsg{generation: generation, turnID: turnID, admitted: admitted, text: text, attachments: images, err: err}
 	}
 }
 
 func (m *Model) startPromptWithMode(text string, mode protocol.CollaborationMode) tea.Cmd {
+	generation := m.beginOptimisticRun()
 	if m.cancelRun != nil {
 		m.cancelRun()
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
-	m.runStartedAt = m.currentTime()
 	prompt := m.expandedPrompt(text)
+	images := m.takePromptImages()
 	return func() tea.Msg {
-		err := m.app.Agent.PromptWithMode(ctx, prompt, mode)
-		if err != nil {
-			return agentEventMsg{ev: protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()}}
-		}
-		return nil
+		err := m.app.Agent.PromptContentWithMode(ctx, prompt, images, mode)
+		_, turnID, _ := m.app.Agent.ActiveTurn()
+		admitted := err == nil || !errors.Is(err, agent.ErrPromptRejected)
+		return promptDoneMsg{generation: generation, turnID: turnID, admitted: admitted, text: text, attachments: images, err: err}
 	}
 }
 
@@ -2431,12 +3135,14 @@ func (m *Model) startCompact() tea.Cmd {
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
-	m.busy = true
+	m.beginOptimisticRun()
+	m.compactGeneration++
+	generation := m.compactGeneration
 	m.compacting = true
 	m.compactStatus = "compacting context"
 	return func() tea.Msg {
 		result, err := m.app.Agent.Compact(ctx)
-		return compactDoneMsg{result: result, err: err}
+		return compactDoneMsg{generation: generation, result: result, err: err}
 	}
 }
 
@@ -2450,6 +3156,11 @@ func (m *Model) abort() {
 }
 
 func (m *Model) requestAbort() {
+	// Invalidate optimistic command completions before joining the agent. This
+	// also covers the goal worker's inter-turn delay, where no EvAborted event
+	// exists to release the UI projection.
+	m.runGeneration++
+	m.compactGeneration++
 	// Close queue admission and drain accepted input before cancelling the run.
 	// An enqueue racing this key press is therefore either present in the
 	// returned snapshot or rejected while its unchanged draft stays visible.
@@ -2465,6 +3176,7 @@ func (m *Model) requestAbort() {
 	m.abort()
 	m.pendingInputs = protocol.InputQueue{}
 	m.restoreAbortedInputs(queue, fallbacks, draft)
+	m.setRunIdle()
 	m.pushLine(styleError.Render("aborting…"))
 }
 
@@ -2513,9 +3225,13 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 
 	switch cmd {
 	case "/quit", "/q":
-		return m, tea.Quit
+		return m, m.quitCmd()
 	case "/help":
-		m.pushLine(styleFooter.Render(formatCommandListWithKeys(m.keys) + "\n(while working: submit queues steer, follow-up uses its configured binding)\n(mouse capture is opt-in; drag selection remains native by default)"))
+		mouseHelp := "mouse: native terminal selection · F6 enables wheel + app drag-copy"
+		if m.app.Cfg.TUI.Mouse {
+			mouseHelp = "mouse: wheel + app drag-copy · F6 restores native terminal selection"
+		}
+		m.pushLine(styleFooter.Render(formatCommandListWithKeys(m.keys) + "\n(while working: submit queues steer, follow-up uses its configured binding)\n(" + mouseHelp + ")"))
 	case "/goal":
 		if len(args) == 0 {
 			g, err := m.app.GoalState()
@@ -2525,7 +3241,7 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 				m.pushLine(styleFooter.Render("no thread goal"))
 			} else {
 				m.goal = g
-				m.pushLine(styleFooter.Render(fmt.Sprintf("goal %s · %d tokens · %ds\n%s", g.Status, g.TokensUsed, g.SecondsUsed, g.Objective)))
+				m.pushLine(styleFooter.Render(fmt.Sprintf("goal %s · %s · %ds\n%s", g.Status, formatGoalTokenUsage(g), g.SecondsUsed, g.Objective)))
 			}
 			return m, nil
 		}
@@ -2537,6 +3253,7 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 				m.pushLine(styleError.Render(err.Error()))
 			} else {
 				m.goal = g
+				m.setRunIdle()
 			}
 		case "resume":
 			g, err := m.app.ResumeGoal()
@@ -2544,12 +3261,15 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 				m.pushLine(styleError.Render(err.Error()))
 			} else {
 				m.goal = g
+				m.busy = true
+				m.runStartedAt = m.currentTime()
 			}
 		case "clear":
 			if err := m.app.ClearGoal(); err != nil {
 				m.pushLine(styleError.Render(err.Error()))
 			} else {
 				m.goal = nil
+				m.setRunIdle()
 			}
 		case "replace":
 			objective := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(line, "/goal")), "replace"))
@@ -2562,6 +3282,8 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 				m.pushLine(styleError.Render(err.Error()))
 			} else {
 				m.goal = g
+				m.busy = true
+				m.runStartedAt = m.currentTime()
 			}
 		case "edit":
 			objective := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(line, "/goal")), "edit"))
@@ -2577,6 +3299,10 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 				m.pushLine(styleError.Render(err.Error()))
 			} else {
 				m.goal = g
+				if g != nil && g.Status == protocol.GoalActive {
+					m.busy = true
+					m.runStartedAt = m.currentTime()
+				}
 			}
 		default:
 			objective := strings.TrimSpace(strings.TrimPrefix(line, "/goal"))
@@ -2606,6 +3332,8 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 				}
 			} else {
 				m.goal = g
+				m.busy = true
+				m.runStartedAt = m.currentTime()
 			}
 		}
 		return m, nil
@@ -2622,9 +3350,6 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.busy = true
-		m.toolRunning = false
-		m.lastErrorText = ""
 		m.pushLine(styleUser.Render("› " + message))
 		return m, m.startPromptWithMode(message, protocol.ModePlan)
 	case "/default":
@@ -2740,6 +3465,11 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 		return m.startTreePick()
 
 	case "/model":
+		if m.compatibleLoginPending {
+			m.lastStatus = "waiting for openai-compatible model discovery"
+			m.pushLine(styleFooter.Render(m.lastStatus))
+			return m, nil
+		}
 		if len(args) == 0 {
 			// No arg: open the startup-cached interactive model picker.
 			return m.startModelPick()
@@ -2847,8 +3577,9 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startLogin handles /login. No args: open the interactive provider picker.
-// With a provider arg: enter masked capture mode directly.
+// startLogin handles /login. No args opens the provider picker. A direct
+// openai-compatible login captures endpoint then optional key; other API-key
+// providers enter masked capture directly.
 func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
 	if len(args) == 0 {
 		m.providers = supportedProviders()
@@ -2869,7 +3600,11 @@ func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
 			" (supported: " + strings.Join(supportedProviders(), ", ") + ")"))
 		return m, nil
 	}
-	m.beginKeyCapture(provider)
+	if provider == openaicompat.ProviderID {
+		m.beginCompatibleEndpointCapture()
+	} else {
+		m.beginKeyCapture(provider)
+	}
 	return m, nil
 }
 
@@ -2913,7 +3648,11 @@ func (m *Model) handleProviderPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pushLine(styleError.Render("login: " + provider + " is not supported yet"))
 			return m, nil
 		}
-		m.beginKeyCapture(provider)
+		if provider == openaicompat.ProviderID {
+			m.beginCompatibleEndpointCapture()
+		} else {
+			m.beginKeyCapture(provider)
+		}
 	}
 	return m, nil
 }
@@ -3095,27 +3834,51 @@ func (m *Model) renderChatGPTAuthPicker() string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
+func (m *Model) beginCompatibleEndpointCapture() {
+	m.loginEndpointMode = true
+	m.loginMode = false
+	m.loginProvider = openaicompat.ProviderID
+	m.loginEndpoint = ""
+	m.secretBuf.Reset()
+	m.editor.Reset()
+	if m.app != nil {
+		if configured, ok := m.app.Cfg.Providers[openaicompat.ProviderID]; ok {
+			m.editor.SetValue(configured.BaseURL)
+			m.editor.CursorEnd()
+		}
+	}
+	m.editor.Placeholder = "https://gateway.example/v1"
+	m.compVisible = false
+	m.pickProvider = false
+	m.pushLine(styleFooter.Render("openai-compatible endpoint: enter API root, /responses, or /chat/completions URL · Enter continue · Esc cancel"))
+}
+
 // beginKeyCapture switches the editor into masked API-key capture mode.
 func (m *Model) beginKeyCapture(provider string) {
 	m.loginMode = true
 	m.loginProvider = provider
 	m.secretBuf.Reset()
 	m.editor.Reset()
+	m.editor.Placeholder = "Type a message…"
 	m.compVisible = false
 	m.pickProvider = false
-	m.pushLine(styleFooter.Render("API key for " + provider + " (hidden): type key then Enter · Esc to cancel"))
+	hint := "type key then Enter · Esc to cancel"
+	if provider == openaicompat.ProviderID {
+		hint = "type optional key, or press Enter to keep existing/fallback/keyless · Esc to cancel"
+	}
+	m.pushLine(styleFooter.Render("API key for " + provider + " (hidden): " + hint))
 }
 
 // supportedProviders lists providers shown in the /login picker. ChatGPT is
 // selected to import an existing OAuth login rather than capture an API key.
 func supportedProviders() []string {
-	return []string{"opencode-go", "chatgpt"}
+	return []string{"opencode-go", openaicompat.ProviderID, "chatgpt"}
 }
 
 // isSupportedProvider reports whether the provider can take a key now.
 func isSupportedProvider(p string) bool {
 	switch p {
-	case "opencode-go":
+	case "opencode-go", openaicompat.ProviderID:
 		return true
 	default:
 		return false
@@ -3141,10 +3904,18 @@ func (m *Model) providerStatus(provider string) string {
 	if !isSupportedProvider(provider) {
 		return provider + "  (not supported yet)"
 	}
+	keyStatus := "no key"
 	if cred, ok := m.app.Auth.Get(provider); ok && cred.Valid() {
-		return provider + "  (stored ✓)"
+		keyStatus = "stored ✓"
 	}
-	return provider + "  (no key)"
+	if provider == openaicompat.ProviderID {
+		endpointStatus := "endpoint required"
+		if configured, ok := m.app.PersistedCfg.Providers[provider]; ok && strings.TrimSpace(configured.BaseURL) != "" {
+			endpointStatus = "endpoint configured"
+		}
+		return provider + "  (" + endpointStatus + " · " + keyStatus + ")"
+	}
+	return provider + "  (" + keyStatus + ")"
 }
 
 // renderProviderPicker renders the /login or /logout provider list.
@@ -3222,10 +3993,23 @@ func (m *Model) startThinkingPick() (tea.Model, tea.Cmd) {
 	if m.app == nil {
 		return m, nil
 	}
-	model := m.app.Agent.Model()
+	m.startThinkingPickForModel(m.app.Agent.Model(), false)
+	return m, nil
+}
+
+func (m *Model) startThinkingPickForModel(model protocol.Model, returnToModel bool) {
+	model = model.Clone()
+	m.thinkingModel = &model
+	m.thinkingReturnToModel = returnToModel
 	m.thinkingList = model.SupportedThinkingLevels()
 	m.thinkingIndex = 0
 	current := m.app.Agent.Thinking()
+	if returnToModel && model.DefaultThinking != "" && model.SupportsThinkingLevel(model.DefaultThinking) &&
+		(m.app.Agent.Model().Provider != model.Provider || m.app.Agent.Model().ID != model.ID) {
+		current = model.DefaultThinking
+	} else if !model.SupportsThinkingLevel(current) && model.DefaultThinking != "" && model.SupportsThinkingLevel(model.DefaultThinking) {
+		current = model.DefaultThinking
+	}
 	for i, level := range m.thinkingList {
 		if level == current {
 			m.thinkingIndex = i
@@ -3234,7 +4018,6 @@ func (m *Model) startThinkingPick() (tea.Model, tea.Cmd) {
 	}
 	m.pickThinking = true
 	m.compVisible = false
-	return m, nil
 }
 
 func (m *Model) handleThinkingPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -3250,16 +4033,51 @@ func (m *Model) handleThinkingPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.thinkingIndex = (m.thinkingIndex + 1) % len(m.thinkingList)
 	case tea.KeyEnter:
 		level := m.thinkingList[m.thinkingIndex]
-		m.pickThinking = false
-		m.thinkingList = nil
-		if err := m.applyThinking(level); err != nil {
+		selected := m.thinkingModel
+		returnToModel := m.thinkingReturnToModel
+		returnToSettings := returnToModel && m.settingsReturnToPanel
+		m.clearThinkingPick()
+		if returnToModel && selected != nil {
+			m.clearModelPick()
+			m.settingsReturnToPanel = false
+			err := m.applyModelAndThinking(*selected, level)
+			if returnToSettings {
+				m.pickSettings = true
+				if err != nil {
+					m.settingsError = err.Error()
+					m.settingsStatus = ""
+				} else {
+					m.settingsError = ""
+					m.settingsStatus = "model and thinking effort saved"
+				}
+			} else if err != nil {
+				m.pushLine(styleError.Render(err.Error()))
+			}
+		} else if err := m.applyThinking(level); err != nil {
 			m.pushLine(styleError.Render(err.Error()))
 		}
 	case tea.KeyEsc:
-		m.pickThinking = false
-		m.thinkingList = nil
+		returnToModel := m.thinkingReturnToModel
+		m.clearThinkingPick()
+		if returnToModel {
+			m.pickModel = true
+		}
 	}
 	return m, nil
+}
+
+func (m *Model) clearModelPick() {
+	m.pickModel = false
+	m.modelList = nil
+	m.modelQuery = ""
+	m.modelSearchActive = false
+}
+
+func (m *Model) clearThinkingPick() {
+	m.pickThinking = false
+	m.thinkingList = nil
+	m.thinkingModel = nil
+	m.thinkingReturnToModel = false
 }
 
 func (m *Model) applyThinking(level protocol.ThinkingLevel) error {
@@ -3301,7 +4119,11 @@ func (m *Model) renderThinkingPicker() string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(styleHeaderDim.Render("thinking effort") + "\n")
+	title := "thinking effort"
+	if m.thinkingModel != nil {
+		title += " for " + m.thinkingModel.ID
+	}
+	b.WriteString(styleHeaderDim.Render(title) + "\n")
 	for i, level := range m.thinkingList {
 		line := string(level)
 		if i == m.thinkingIndex {
@@ -3311,7 +4133,11 @@ func (m *Model) renderThinkingPicker() string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString(styleFooter.Render("(↑/↓ choose, Enter apply, Esc cancel)"))
+	hint := "(↑/↓ choose, Enter apply, Esc cancel)"
+	if m.thinkingReturnToModel {
+		hint = "(↑/↓ choose, Enter apply, Esc back)"
+	}
+	b.WriteString(styleFooter.Render(hint))
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
@@ -3319,6 +4145,11 @@ func (m *Model) renderThinkingPicker() string {
 // combined provider catalog. The fallback fetch is only for tests/SDKs without
 // an app catalog snapshot.
 func (m *Model) startModelPick() (tea.Model, tea.Cmd) {
+	if m.compatibleLoginPending {
+		m.lastStatus = "waiting for openai-compatible model discovery"
+		m.pushLine(styleFooter.Render(m.lastStatus))
+		return m, nil
+	}
 	var models []protocol.Model
 	if m.app != nil {
 		models = append([]protocol.Model(nil), m.app.AllModels...)
@@ -3465,10 +4296,7 @@ func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.pickModel = false
-		m.modelList = nil
-		m.modelQuery = ""
-		m.modelSearchActive = false
+		m.clearModelPick()
 		if m.settingsReturnToPanel {
 			m.settingsReturnToPanel = false
 			m.pickSettings = true
@@ -3478,10 +4306,12 @@ func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		model := models[m.modelIndex]
-		m.pickModel = false
-		m.modelList = nil
-		m.modelQuery = ""
-		m.modelSearchActive = false
+		if len(model.SupportedThinkingLevels()) > 1 {
+			m.pickModel = false
+			m.startThinkingPickForModel(model, true)
+			return m, nil
+		}
+		m.clearModelPick()
 		if m.settingsReturnToPanel {
 			m.settingsReturnToPanel = false
 			m.pickSettings = true
@@ -3500,6 +4330,12 @@ func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) modelPickerVisibleModels() int {
+	// An inline modal has ten total rows. Two models leave worst-case room for
+	// separate provider headings, search chrome, scroll markers, details, and
+	// controls while keeping the selected model visible.
+	if m.inlineModalOverlay() {
+		return 2
+	}
 	// Search makes a short list more useful than filling the whole transcript.
 	// Keep enough space for headings, search state, details, and controls.
 	visible := m.availableOverlayHeight() - 9
@@ -3590,7 +4426,7 @@ func (m *Model) renderModelPicker() string {
 		selected := models[m.modelIndex]
 		var details []string
 		if selected.ContextWindow > 0 {
-			details = append(details, "ctx "+formatTokenCount(selected.ContextWindow))
+			details = append(details, "ctx "+formatTokenCount(int64(selected.ContextWindow)))
 		}
 		if levels := selected.SupportedThinkingLevels(); len(levels) > 1 {
 			parts := make([]string, 0, len(levels)-1)
@@ -3634,6 +4470,61 @@ func (m *Model) setModel(selected protocol.Model) {
 	if err := m.applyModel(selected); err != nil {
 		m.pushLine(styleError.Render(err.Error()))
 	}
+}
+
+func (m *Model) applyModelAndThinking(selected protocol.Model, level protocol.ThinkingLevel) error {
+	if m.app == nil {
+		return fmt.Errorf("model: app is not ready")
+	}
+	parsed, err := protocol.ParseThinkingLevel(string(level))
+	if err != nil {
+		return err
+	}
+	if selected.Provider == "" {
+		selected.Provider = m.app.ProviderID
+	}
+	if !selected.SupportsThinkingLevel(parsed) {
+		return fmt.Errorf("model %q does not advertise thinking level %q", selected.ID, parsed)
+	}
+
+	oldProvider := m.app.ProviderID
+	oldModel := m.app.Agent.Model()
+	oldAppModel := m.app.Model
+	oldThinking := m.app.Agent.Thinking()
+	oldCfg := m.app.Cfg
+	oldPersistedCfg := m.app.PersistedCfg
+	rollback := func() error {
+		if err := m.app.SetProviderModelThinking(oldProvider, oldModel, oldThinking); err != nil {
+			return err
+		}
+		m.app.Model = oldAppModel
+		m.app.Cfg = oldCfg
+		m.app.PersistedCfg = oldPersistedCfg
+		return nil
+	}
+
+	if err := m.app.SetProviderModelThinking(selected.Provider, selected, parsed); err != nil {
+		return err
+	}
+
+	candidate := oldPersistedCfg
+	candidate.DefaultProvider = selected.Provider
+	candidate.DefaultModel = selected.ID
+	candidate.Thinking = string(parsed)
+	if m.app.ConfigPath != "" {
+		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
+			if rollbackErr := rollback(); rollbackErr != nil {
+				return fmt.Errorf("persist model and thinking: %w (rollback failed: %v)", err, rollbackErr)
+			}
+			return fmt.Errorf("persist model and thinking: %w", err)
+		}
+	}
+	m.app.Model = selected
+	m.app.PersistedCfg = candidate
+	m.app.Cfg.DefaultProvider = candidate.DefaultProvider
+	m.app.Cfg.DefaultModel = candidate.DefaultModel
+	m.app.Cfg.Thinking = candidate.Thinking
+	return nil
 }
 
 func (m *Model) applyModel(selected protocol.Model) error {
@@ -3692,6 +4583,14 @@ func (m *Model) currentSessions() ([]session.SessionInfo, error) {
 	return session.NewFileIndex(session.DefaultSessionsRoot()).List(m.app.CWD())
 }
 
+func (m *Model) noSessionsResumeMessage() string {
+	hint := "/new"
+	if m.startupResumeRequired {
+		hint = "snow"
+	}
+	return "no sessions to resume for " + m.app.CWD() + " (use " + hint + " to create one)"
+}
+
 func currentSessionID(a *app.App) string {
 	if a == nil || a.Agent == nil {
 		return ""
@@ -3733,12 +4632,18 @@ func (m *Model) startSessionPick() (tea.Model, tea.Cmd) {
 	infos, err := m.currentSessions()
 	if err != nil {
 		m.pushLine(styleError.Render("session list: " + err.Error()))
+		if m.startupResumeRequired {
+			return m, m.quitCmd()
+		}
 		return m, nil
 	}
 	if len(infos) == 0 {
 		m.sessions = nil
 		m.pickSession = false
-		m.pushLine(styleFooter.Render("no sessions to resume for " + m.app.CWD() + " (use /new to create one)"))
+		m.pushLine(styleFooter.Render(m.noSessionsResumeMessage()))
+		if m.startupResumeRequired {
+			return m, m.quitCmd()
+		}
 		return m, nil
 	}
 	m.sessions = infos
@@ -3761,6 +4666,9 @@ func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pickSession = false
 			m.sessionLoading = false
 			m.pickerGeneration++
+			if m.startupResumeRequired {
+				return m, m.quitCmd()
+			}
 		}
 		return m, nil
 	}
@@ -3795,6 +4703,9 @@ func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc:
 		m.pickSession = false
 		m.sessions = nil
+		if m.startupResumeRequired {
+			return m, m.quitCmd()
+		}
 	case tea.KeyEnter:
 		return m.openSession(m.sessions[m.sessionIndex].Path)
 	}
@@ -3808,8 +4719,9 @@ func (m *Model) startNewSession() (tea.Model, tea.Cmd) {
 	}
 	if m.asyncIO {
 		m.sessionOpLoading = true
-		m.pickerGeneration++
-		generation := m.pickerGeneration
+		m.lastStatus = "creating session…"
+		m.sessionOpGeneration++
+		generation := m.sessionOpGeneration
 		return m, func() tea.Msg {
 			st, err := session.NewFileIndex(session.DefaultSessionsRoot()).Create(m.app.CWD())
 			return sessionStoreMsg{generation: generation, path: "new", store: st, err: err}
@@ -3838,8 +4750,9 @@ func (m *Model) openSession(path string) (tea.Model, tea.Cmd) {
 	m.sessions = nil
 	if m.asyncIO {
 		m.sessionOpLoading = true
-		m.pickerGeneration++
-		generation := m.pickerGeneration
+		m.lastStatus = "opening session…"
+		m.sessionOpGeneration++
+		generation := m.sessionOpGeneration
 		return m, func() tea.Msg {
 			st, err := session.NewFileIndex(session.DefaultSessionsRoot()).Open(path)
 			return sessionStoreMsg{generation: generation, path: path, store: st, err: err}
@@ -3863,6 +4776,7 @@ func (m *Model) switchSession(st session.Store) error {
 	if err := m.app.SetSession(st); err != nil {
 		return err
 	}
+	m.startupResumeRequired = false
 	m.pickSession = false
 	m.sessions = nil
 	m.sessionIndex = 0
@@ -3875,11 +4789,13 @@ func (m *Model) switchSession(st session.Store) error {
 	m.thinkingBuf.Reset()
 	m.planBuf.Reset()
 	m.latestPlan = ""
-	goalState, err := m.app.GoalState()
-	if err != nil {
-		return fmt.Errorf("restore goal: %w", err)
+	goalState, goalStateErr := m.app.GoalState()
+	if goalStateErr != nil {
+		m.goal = nil
+		m.pushLine(styleError.Render("restore goal: " + goalStateErr.Error()))
+	} else {
+		m.goal = goalState
 	}
-	m.goal = goalState
 	m.planPrompt = false
 	m.pendingMode = nil
 	m.modeSwitchReady = false
@@ -3889,10 +4805,18 @@ func (m *Model) switchSession(st session.Store) error {
 	m.runStartedAt = time.Time{}
 	m.transcript.GotoBottom()
 	m.transcriptContent = ""
+	m.transcriptSelectionLines = nil
+	m.transcriptSelectionView = ""
+	m.transcriptSelectionViewValid = false
+	m.transcriptSelectionRendered = ""
+	m.transcriptSelectionRenderedValid = false
 	m.transcriptBase = ""
 	m.hydrateSession()
 	if err := m.app.ReadyGoal(); err != nil {
-		return fmt.Errorf("continue restored goal: %w", err)
+		// SetSession has already committed this store across App, Agent, Goal,
+		// permissions, and subagents. Readiness failures are diagnostics; returning
+		// an error would make the caller close the now-active store.
+		m.pushLine(styleError.Render("continue restored goal: " + err.Error()))
 	}
 	if m.goal != nil && (m.goal.Status == protocol.GoalPaused || m.goal.Status == protocol.GoalBlocked || m.goal.Status == protocol.GoalUsageLimited) {
 		m.pushLine(styleFooter.Render(fmt.Sprintf("Resume %s goal? Use /goal resume to continue.", m.goal.Status)))
@@ -3900,12 +4824,53 @@ func (m *Model) switchSession(st session.Store) error {
 	return nil
 }
 
+func (m *Model) inlineSessionKey() string {
+	if m.app == nil || m.app.Session == nil {
+		return ""
+	}
+	key := m.app.Session.ID()
+	if branches, ok := m.app.Session.(session.BranchStore); ok {
+		if list, err := branches.Branches(); err == nil {
+			for _, branch := range list {
+				if branch.Active {
+					return key + "\x00" + branch.ID
+				}
+			}
+		}
+	}
+	return key
+}
+
+func boundedInlineHydration(hydrated []string, common int, switched bool) []string {
+	common = min(max(0, common), len(hydrated))
+	rows := hydrated[common:]
+	const hydrationSegmentLimit = 2000
+	omitted := 0
+	if len(rows) > hydrationSegmentLimit {
+		omitted = len(rows) - hydrationSegmentLimit
+		rows = rows[len(rows)-hydrationSegmentLimit:]
+	}
+	out := make([]string, 0, len(rows)+2)
+	if switched {
+		out = append(out, styleFooter.Render("── switched transcript ──"))
+	}
+	if omitted > 0 {
+		out = append(out, styleFooter.Render(fmt.Sprintf("── %d older transcript segments omitted ──", omitted)))
+	}
+	return append(out, rows...)
+}
+
 func (m *Model) hydrateSession() {
-	m.lines = nil
-	m.latestPlan = ""
-	m.transcriptBaseDirty = true
-	m.transcriptDirty = true
+	m.clearTranscriptSelection()
 	if m.app == nil || m.app.Agent == nil {
+		m.lines = nil
+		m.inlineCommitted = 0
+		m.inlinePrintEnd = 0
+		m.inlinePrintInFlight = false
+		m.inlinePrintGeneration++
+		m.inlineHeaderPending = false
+		m.transcriptBaseDirty = true
+		m.transcriptDirty = true
 		m.refreshTranscript()
 		return
 	}
@@ -3914,35 +4879,95 @@ func (m *Model) hydrateSession() {
 		m.pushLine(styleError.Render("session read: " + err.Error()))
 		return
 	}
+	messageIDs := make([]string, 0, len(messages))
+	for _, message := range messages {
+		messageIDs = append(messageIDs, message.ID)
+	}
+	key := m.inlineSessionKey()
+	if m.inlineTranscript && key != "" && key == m.inlineHistoryKey {
+		// Live events already committed this branch's new rows. Track durable
+		// identity for a future branch switch without replaying history now.
+		m.inlineDurableMessageIDs = messageIDs
+		m.refreshContextUsage(messages)
+		return
+	}
+	hadPrintedHistory := m.inlineTranscript && m.inlineEverCommitted
+	m.inlineCommitted = 0
+	m.inlinePrintEnd = 0
+	m.inlinePrintInFlight = false
+	m.inlinePrintGeneration++
+	m.latestPlan = ""
+	m.transcriptBaseDirty = true
+	m.transcriptDirty = true
 	m.refreshContextUsage(messages)
+	hydrated := make([]string, 0, len(messages))
+	hydratedIDs := make([]string, 0, len(messages))
+	appendHydrated := func(id, row string) {
+		hydrated = append(hydrated, row)
+		hydratedIDs = append(hydratedIDs, id)
+	}
 	for _, msg := range messages {
 		switch msg.Role {
 		case protocol.RoleUser:
-			if text := sessionMessageText(msg); text != "" {
-				m.lines = append(m.lines, styleUser.Render("› "+text))
+			text := sessionMessageText(msg)
+			images := sessionMessageImageCount(msg)
+			if text != "" || images > 0 {
+				if text == "" {
+					text = fmt.Sprintf("[%d image(s)]", images)
+				} else if images > 0 {
+					text += fmt.Sprintf(" [%d image(s)]", images)
+				}
+				appendHydrated(msg.ID, styleUser.Render("› "+text))
 			}
 		case protocol.RoleAssistant:
 			if thinking := sessionMessageThinking(msg); thinking != "" {
-				m.lines = append(m.lines, m.renderThinkingBody(thinking))
+				appendHydrated(msg.ID, m.renderThinkingBody(thinking))
 			}
 			for _, block := range msg.Content {
 				switch block.Type {
 				case protocol.BlockText:
 					if strings.TrimSpace(block.Text) != "" {
-						m.lines = append(m.lines, m.renderAssistantBody(block.Text))
+						appendHydrated(msg.ID, m.renderAssistantBody(block.Text))
 					}
 				case protocol.BlockPlan:
 					if strings.TrimSpace(block.Text) != "" {
 						m.latestPlan = block.Text
-						m.lines = append(m.lines, m.renderPlanBody(block.Text))
+						appendHydrated(msg.ID, m.renderPlanBody(block.Text))
 					}
 				}
 			}
 		case protocol.RoleTool:
-			if msg.ToolName != "" {
-				m.lines = append(m.lines, styleTool.Render("• "+msg.ToolName+" result"))
+			// Live tool cards include transient timing/progress/output previews
+			// that cannot be reconstructed exactly after persistence. Excluding a
+			// synthetic replacement keeps shared branch prefix detection semantic
+			// and prevents the remaining history from replaying after a tool fork.
+		}
+	}
+	m.lines = hydrated
+	if m.inlineTranscript {
+		commonRows := 0
+		if hadPrintedHistory {
+			commonMessages := 0
+			limit := min(len(m.inlineDurableMessageIDs), len(messageIDs))
+			for commonMessages < limit && m.inlineDurableMessageIDs[commonMessages] == messageIDs[commonMessages] {
+				commonMessages++
+			}
+			shared := make(map[string]struct{}, commonMessages)
+			for _, id := range messageIDs[:commonMessages] {
+				shared[id] = struct{}{}
+			}
+			for commonRows < len(hydratedIDs) {
+				if _, ok := shared[hydratedIDs[commonRows]]; !ok {
+					break
+				}
+				commonRows++
 			}
 		}
+		m.inlineHistoryKey = key
+		m.inlineCanonicalLines = append([]string(nil), hydrated...)
+		m.inlineDurableMessageIDs = messageIDs
+		m.inlineHeaderPending = true
+		m.lines = boundedInlineHydration(hydrated, commonRows, hadPrintedHistory)
 	}
 	m.refreshTranscript()
 }
@@ -3957,6 +4982,16 @@ func sessionMessageText(msg protocol.Message) string {
 	return strings.TrimSpace(b.String())
 }
 
+func sessionMessageImageCount(msg protocol.Message) int {
+	count := 0
+	for _, block := range msg.Content {
+		if block.Type == protocol.BlockImage {
+			count++
+		}
+	}
+	return count
+}
+
 func sessionMessageThinking(msg protocol.Message) string {
 	var parts []string
 	for _, block := range msg.Content {
@@ -3969,22 +5004,33 @@ func sessionMessageThinking(msg protocol.Message) string {
 
 func (m *Model) refreshContextUsageFromSession() {
 	if m.app == nil || m.app.Agent == nil {
-		m.contextTokens = 0
-		m.contextEstimated = false
+		m.applyContextUsageSnapshot(contextUsageSnapshot{})
 		return
 	}
-	messages, err := m.app.Agent.Messages()
+	projected, err := m.app.Agent.ContextMessages()
 	if err != nil {
 		return
 	}
-	m.refreshContextUsage(messages)
+	compacted := len(projected) > 0 && projected[0].Role == protocol.RoleCustom
+	m.refreshProjectedContextUsage(projected, compacted)
+}
+
+func (m *Model) scheduleContextUsageRefresh() tea.Cmd {
+	if !m.contextRefreshNeeded || m.contextRefreshPending || m.app == nil || m.app.Agent == nil {
+		return nil
+	}
+	m.contextRefreshNeeded = false
+	m.contextRefreshPending = true
+	version := m.contextRefreshVersion
+	a := m.app.Agent
+	return func() tea.Msg {
+		projected, err := a.ContextMessages()
+		compacted := len(projected) > 0 && projected[0].Role == protocol.RoleCustom
+		return contextUsageRefreshMsg{version: version, snapshot: projectedContextUsage(projected, compacted), err: err}
+	}
 }
 
 func (m *Model) refreshContextUsage(messages []protocol.Message) {
-	m.lastUsage = nil
-	m.contextTokens = 0
-	m.contextEstimated = false
-
 	projected := messages
 	compacted := false
 	if contextStore, ok := m.app.Session.(session.ContextStore); ok {
@@ -3994,27 +5040,39 @@ func (m *Model) refreshContextUsage(messages []protocol.Message) {
 				(len(contextMessages) > 0 && contextMessages[0].Role == protocol.RoleCustom)
 		}
 	}
-	if compacted {
-		m.contextTokens = estimateContextTokens(projected)
-		m.contextEstimated = m.contextTokens > 0
-		return
-	}
+	m.refreshProjectedContextUsage(projected, compacted)
+}
 
-	for i := len(messages) - 1; i >= 0; i-- {
-		usage := messages[i].Usage
+func (m *Model) refreshProjectedContextUsage(projected []protocol.Message, compacted bool) {
+	m.applyContextUsageSnapshot(projectedContextUsage(projected, compacted))
+}
+
+func (m *Model) applyContextUsageSnapshot(snapshot contextUsageSnapshot) {
+	m.lastUsage = snapshot.usage.Clone()
+	m.contextTokens = snapshot.tokens
+	m.contextEstimated = snapshot.estimated
+	m.contextRefreshVersion++
+}
+
+func projectedContextUsage(projected []protocol.Message, compacted bool) contextUsageSnapshot {
+	if compacted {
+		tokens := estimateContextTokens(projected)
+		return contextUsageSnapshot{tokens: tokens, estimated: tokens > 0}
+	}
+	for i := len(projected) - 1; i >= 0; i-- {
+		usage := projected[i].Usage
 		if usage == nil {
 			continue
 		}
-		m.lastUsage = usage.Clone()
-		m.contextTokens = contextTokensFromUsage(*usage)
-		if i+1 < len(messages) {
-			m.contextTokens += estimateContextTokens(messages[i+1:])
-			m.contextEstimated = true
+		snapshot := contextUsageSnapshot{usage: usage.Clone(), tokens: contextTokensFromUsage(*usage)}
+		if i+1 < len(projected) {
+			snapshot.tokens += estimateContextTokens(projected[i+1:])
+			snapshot.estimated = true
 		}
-		return
+		return snapshot
 	}
-	m.contextTokens = estimateContextTokens(projected)
-	m.contextEstimated = m.contextTokens > 0
+	tokens := estimateContextTokens(projected)
+	return contextUsageSnapshot{tokens: tokens, estimated: tokens > 0}
 }
 
 func contextTokensFromUsage(usage protocol.Usage) int {
@@ -4339,6 +5397,9 @@ func (m *Model) inspectAgent(target string) tea.Cmd {
 
 func (m *Model) infoPickerVisibleItems() int {
 	visible := m.height - 14
+	if m.inlineModalOverlay() {
+		visible = m.availableOverlayHeight() - 3 // title, selected detail, hint
+	}
 	if visible < 1 {
 		visible = 1
 	}
@@ -4412,6 +5473,9 @@ func (m *Model) sessionPickerBodyMin() int {
 }
 
 func (m *Model) sessionPickerMaxRows() int {
+	if m.inlineModalOverlay() {
+		return max(3, m.availableOverlayHeight())
+	}
 	rows := m.height - 8 - m.sessionPickerBodyMin()
 	if rows < 3 {
 		return 3
@@ -4729,6 +5793,9 @@ func (m *Model) treePickerVisibleItems() int {
 		return 0
 	}
 	visible := m.height - 12
+	if m.inlineModalOverlay() {
+		visible = m.availableOverlayHeight() - 4 // title, two scroll markers, hint
+	}
 	if visible < 1 {
 		visible = 1
 	}
@@ -5054,6 +6121,10 @@ func (m *Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.settingsStatus = ""
 	case tea.KeyEnter:
 		if m.settingsIndex == settingsModel {
+			if m.compatibleLoginPending {
+				m.settingsStatus = "waiting for openai-compatible model discovery"
+				return m, nil
+			}
 			m.pickSettings = false
 			m.settingsReturnToPanel = true
 			return m.startModelPick()
@@ -5373,8 +6444,34 @@ func (m *Model) renderSettings() string {
 		rows[settingsTextVerbosity] += "  (ChatGPT only)"
 	}
 	var b strings.Builder
-	b.WriteString(styleHeaderDim.Render("settings") + "\n")
-	for i, row := range rows {
+	header := styleHeaderDim.Render("settings")
+	if m.inlineTranscript {
+		header = styleHeaderDim.Render("settings  (↑/↓ row · ←/→ change · Enter select · Esc close)")
+		if m.settingsError != "" {
+			header = styleError.Render("settings: " + m.settingsError)
+		} else if m.settingsStatus != "" {
+			header = styleFooter.Render("settings: " + m.settingsStatus)
+		}
+	}
+	b.WriteString(header + "\n")
+	start, end := 0, len(rows)
+	if m.inlineTranscript {
+		// Header consumes one row; keep a selected-row-centered window for short
+		// terminals rather than clipping the bottom of the fixed list.
+		visible := max(1, m.availableOverlayHeight()-1)
+		if end > visible {
+			start = m.settingsIndex - visible/2
+			if start < 0 {
+				start = 0
+			}
+			if start+visible > end {
+				start = end - visible
+			}
+			end = start + visible
+		}
+	}
+	for i := start; i < end; i++ {
+		row := rows[i]
 		prefix := "  "
 		style := styleCompletion
 		if i == m.settingsIndex {
@@ -5386,11 +6483,13 @@ func (m *Model) renderSettings() string {
 		b.WriteString(style.Render(prefix + row))
 		b.WriteString("\n")
 	}
-	b.WriteString(styleFooter.Render("(↑/↓ row, ←/→ change, Enter select, Esc close)"))
-	if m.settingsError != "" {
-		b.WriteString("\n" + styleError.Render(m.settingsError))
-	} else if m.settingsStatus != "" {
-		b.WriteString("\n" + styleFooter.Render(m.settingsStatus))
+	if !m.inlineTranscript {
+		b.WriteString(styleFooter.Render("(↑/↓ row, ←/→ change, Enter select, Esc close)"))
+		if m.settingsError != "" {
+			b.WriteString("\n" + styleError.Render(m.settingsError))
+		} else if m.settingsStatus != "" {
+			b.WriteString("\n" + styleFooter.Render(m.settingsStatus))
+		}
 	}
 	return strings.TrimSuffix(b.String(), "\n")
 }
@@ -5399,6 +6498,15 @@ func (m *Model) renderSettings() string {
 // composer. Its height is bounded so no overlay can push the frame into the
 // terminal's scrollback buffer.
 func (m *Model) renderOverlays() string {
+	// Blocking host requests are exclusive overlays and mirror keyboard
+	// precedence. Do not let an unrelated picker hide a request that is holding
+	// a root or child agent.
+	if m.permPending {
+		return m.limitOverlay(m.renderPermissionPicker())
+	}
+	if m.userInputPending {
+		return m.limitOverlay(m.renderUserInput())
+	}
 	var overlays []string
 	if m.confirmGoalReplace {
 		overlays = append(overlays, styleHeader.Render("Replace unfinished goal?")+"\n"+styleCompletionSelected.Render("› Enter to replace")+"\n"+styleCompletion.Render("  Esc to cancel"))
@@ -5408,9 +6516,27 @@ func (m *Model) renderOverlays() string {
 		overlays = append(overlays, styleHeaderDim.Render("Tip: use /plan to explore and produce a decision-complete plan"))
 	}
 	if m.compVisible {
-		overlays = append(overlays, renderCompletions(m.compMatches, m.compIndex, m.width))
+		matches := m.compMatches
+		selected := m.compIndex
+		if limit := m.availableOverlayHeight(); len(matches) > limit {
+			start := selected - limit/2
+			if start < 0 {
+				start = 0
+			}
+			if start+limit > len(matches) {
+				start = len(matches) - limit
+			}
+			matches = matches[start : start+limit]
+			selected -= start
+		}
+		overlays = append(overlays, renderCompletions(matches, selected, m.width))
 	}
-	if m.mentionVisible || m.mentionLoading {
+	if m.skillVisible {
+		if r := m.renderSkillCompletionPicker(); r != "" {
+			overlays = append(overlays, r)
+		}
+	}
+	if !m.skillVisible && (m.mentionVisible || m.mentionLoading) {
 		if r := m.renderMentionPicker(); r != "" {
 			overlays = append(overlays, r)
 		}
@@ -5458,16 +6584,6 @@ func (m *Model) renderOverlays() string {
 	if m.compacting {
 		overlays = append(overlays, m.renderCompactionProgress())
 	}
-	if m.permPending {
-		if r := m.renderPermissionPicker(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
-	if m.userInputPending {
-		if r := m.renderUserInput(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
 	if m.pickPermissionMode {
 		if r := m.renderPermissionModePicker(); r != "" {
 			overlays = append(overlays, r)
@@ -5476,12 +6592,15 @@ func (m *Model) renderOverlays() string {
 	if len(overlays) == 0 {
 		return ""
 	}
-	joined := strings.Join(overlays, "\n")
+	return m.limitOverlay(strings.Join(overlays, "\n"))
+}
+
+func (m *Model) limitOverlay(overlay string) string {
 	maxHeight := m.availableOverlayHeight()
-	if maxHeight <= 0 {
+	if maxHeight <= 0 || overlay == "" {
 		return ""
 	}
-	lines := strings.Split(joined, "\n")
+	lines := strings.Split(overlay, "\n")
 	if len(lines) > maxHeight {
 		lines = lines[:maxHeight]
 	}
@@ -5493,29 +6612,29 @@ func (m *Model) planNudgeScope() string {
 		return ""
 	}
 	branchID := "main"
-	if branches, ok := m.app.Session.(session.BranchStore); ok {
-		if list, err := branches.Branches(); err == nil {
-			for _, branch := range list {
-				if branch.Active {
-					branchID = branch.ID
-					break
-				}
-			}
+	// Branches returns rich picker metadata and SQLite computes it by walking
+	// and decoding every branch history. Rendering the composer only needs the
+	// already-cached active identity; never put a history scan on View/layout.
+	if active, ok := m.app.Session.(session.ActiveBranchStore); ok {
+		if id := strings.TrimSpace(active.ActiveBranchID()); id != "" {
+			branchID = id
 		}
 	}
 	return currentSessionID(m.app) + ":" + branchID
 }
 
 func (m *Model) planNudgeVisible() bool {
-	if m.app == nil || m.busy || m.app.Agent.Mode() != protocol.ModeDefault || strings.HasPrefix(strings.TrimSpace(m.editor.Value()), "/") || m.nudgeDismissed[m.planNudgeScope()] {
+	if m.app == nil || m.busy || m.app.Agent.Mode() != protocol.ModeDefault || strings.HasPrefix(strings.TrimSpace(m.editor.Value()), "/") {
 		return false
 	}
+	containsPlan := false
 	for _, word := range strings.FieldsFunc(strings.ToLower(m.editor.Value()), func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') }) {
 		if word == "plan" {
-			return true
+			containsPlan = true
+			break
 		}
 	}
-	return false
+	return containsPlan && !m.nudgeDismissed[m.planNudgeScope()]
 }
 
 func (m *Model) renderPlanImplementationPrompt() string {
@@ -5570,19 +6689,22 @@ func (m *Model) handlePlanImplementationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			}
 			message = "A previous agent produced the plan below. Implement it in a fresh context, re-read files as needed, and carry the work through implementation and verification.\n\n" + planText
 		}
-		m.busy = true
 		m.pushLine(styleUser.Render("› " + message))
 		return m, m.startPromptWithMode(message, protocol.ModeDefault)
 	}
 	return m, nil
 }
 
-// View implements tea.Model. Header, transcript, overlays, composer, and
-// footer always fit the latest WindowSizeMsg; only the transcript scrolls.
+// View implements tea.Model as one full-window frame: sticky header, scrollable
+// transcript viewport, overlays/run status, composer, and footer.
 func (m *Model) View() string {
+	if m.inlineTranscript && m.inlineExiting {
+		return ""
+	}
 	if m.width <= 0 || m.height <= 0 {
 		return "loading snow…"
 	}
+	clipboardSequence := m.transcriptSelectionClipboard
 	if m.height < minFullFrameHeight+m.runStatusHeight() || m.width < 4 {
 		return fitFrame(styleBrand.Render(" snow ")+styleHeaderDim.Render("terminal too small"), m.width, m.height)
 	}
@@ -5614,7 +6736,10 @@ func (m *Model) View() string {
 		if m.sessionOpLoading {
 			status = "session…"
 		}
-		if m.loginMode {
+		if m.compatibleLoginPending {
+			status = "models…"
+		}
+		if m.loginMode || m.loginEndpointMode {
 			status = "login"
 		}
 		if m.pickChatGPTAuth {
@@ -5632,8 +6757,19 @@ func (m *Model) View() string {
 	}
 
 	header := m.renderHeader(status)
-	sep := styleSep.Render(strings.Repeat("─", max(1, m.width)))
+	frameWidth := m.managedFrameWidth()
+	sep := styleSep.Render(strings.Repeat("─", frameWidth))
 	overlay := m.renderOverlays()
+	if m.inlineModalOverlay() && overlay != "" {
+		// Modal pickers replace the live tail but remain bottom-anchored inside the
+		// same terminal-height frame, so closing one restores the composer without
+		// moving terminal-owned history.
+		return clipboardSequence + fitFrameBottom(overlay, frameWidth, m.managedFrameHeight())
+	}
+	if m.inlineInputOverlay() && overlay != "" {
+		frame := lipgloss.JoinVertical(lipgloss.Left, overlay, sep, m.renderEditor())
+		return clipboardSequence + fitFrameBottom(frame, frameWidth, m.managedFrameHeight())
+	}
 	runStatus := m.renderRunStatus()
 
 	editorView := m.renderEditor()
@@ -5644,7 +6780,11 @@ func (m *Model) View() string {
 		footer = m.renderFooter()
 	}
 
-	parts := []string{header, sep, m.transcript.View()}
+	parts := make([]string, 0, 8)
+	// Keep the active provider/model/mode visible in both render modes. Inline
+	// session headers also remain in native scrollback as historical boundaries,
+	// but the current selection must not disappear above the visible window.
+	parts = append(parts, header, sep, m.renderTranscriptView())
 	if overlay != "" {
 		parts = append(parts, overlay)
 	}
@@ -5652,7 +6792,14 @@ func (m *Model) View() string {
 		parts = append(parts, runStatus)
 	}
 	parts = append(parts, sep, editorView, footer)
-	return fitFrame(lipgloss.JoinVertical(lipgloss.Left, parts...), m.width, m.height)
+	frame := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	if m.inlineTranscript {
+		// Keep a constant logical row count. Growing a normal-screen Bubble Tea
+		// frame at the terminal bottom scrolls old chrome into native history;
+		// only tea.Println transcript commits are allowed to move scrollback.
+		return clipboardSequence + fitFrame(frame, frameWidth, m.managedFrameHeight())
+	}
+	return clipboardSequence + fitFrame(frame, frameWidth, m.height)
 }
 
 func (m *Model) renderTrustPrompt() string {
@@ -5703,9 +6850,21 @@ func fitFrame(frame string, width, height int) string {
 		Render(frame)
 }
 
+func fitFrameBottom(frame string, width, height int) string {
+	width = max(1, width)
+	height = max(1, height)
+	return lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		MaxWidth(width).
+		MaxHeight(height).
+		AlignVertical(lipgloss.Bottom).
+		Render(frame)
+}
+
 // renderHeader is the sticky top bar: brand · provider/model · cwd · status.
 func (m *Model) renderHeader(status string) string {
-	w := max(1, m.width)
+	w := m.managedFrameWidth()
 	brand := styleBrand.Render(" snow ")
 	midText := "booting"
 	if m.lastErr != nil {
@@ -5714,10 +6873,7 @@ func (m *Model) renderHeader(status string) string {
 		model := m.app.Agent.Model()
 		goalText := ""
 		if m.goal != nil {
-			goalText = fmt.Sprintf("  ·  goal:%s %dt", m.goal.Status, m.goal.TokensUsed)
-			if m.goal.TokenBudget != nil {
-				goalText += fmt.Sprintf("/%d", *m.goal.TokenBudget)
-			}
+			goalText = fmt.Sprintf("  ·  goal:%s %s", m.goal.Status, formatGoalTokenUsage(m.goal))
 		}
 		midText = m.app.ProviderID + "/" + model.ID
 		if w >= 80 {
@@ -5744,20 +6900,36 @@ func (m *Model) renderHeader(status string) string {
 // renderEditor draws a composer that grows from three to six rows.
 func (m *Model) renderEditor() string {
 	var input string
-	if m.loginMode {
+	if m.loginEndpointMode {
+		input = stylePrompt.Render("URL ") + m.editor.View()
+	} else if m.loginMode {
 		n := m.secretBuf.Len()
 		masked := strings.Repeat("•", n)
 		if n == 0 {
-			masked = styleHeaderDim.Render("(type API key, Enter to save, Esc to cancel)")
+			hint := "type API key, Enter to save, Esc to cancel"
+			if m.loginProvider == openaicompat.ProviderID {
+				hint = "optional API key; Enter keeps existing/fallback or uses keyless"
+			}
+			masked = styleHeaderDim.Render("(" + hint + ")")
 		} else {
 			masked = styleAssistant.Render(masked)
 		}
 		input = stylePrompt.Render("🔑 ") + styleHeaderDim.Render(m.loginProvider+": ") + masked
 	} else {
-		input = stylePrompt.Render("› ") + m.editor.View()
+		if len(m.promptImages) > 0 {
+			labels := make([]string, 0, len(m.promptImages))
+			for i, image := range m.promptImages {
+				labels = append(labels, imageAttachmentLabel(image, i))
+			}
+			barWidth := max(1, m.managedFrameWidth()-4)
+			bar := xansi.Wordwrap(strings.Join(labels, " "), barWidth, "")
+			bar = xansi.Truncate(bar, barWidth*2, "…")
+			input = styleHeaderDim.Render(bar+"  · Backspace removes last") + "\n"
+		}
+		input += stylePrompt.Render("› ") + m.editor.View()
 	}
 	height := max(minComposerHeight, m.editor.Height())
-	width := max(1, m.width)
+	width := m.managedFrameWidth()
 	return styleComposer.
 		Width(width).
 		Height(height).
@@ -5797,19 +6969,23 @@ func (m *Model) renderFooter() string {
 	// ask/allow/deny changes (the labels have different lengths).
 	permissionWidth := lipgloss.Width("permission: unavailable")
 	permissionField := lipgloss.PlaceHorizontal(permissionWidth, lipgloss.Left, permissionText)
-	available := max(8, m.width-2)
+	available := max(8, m.managedFrameWidth()-2)
 	mode := string(protocol.ModeDefault)
 	if m.app != nil && m.app.Agent != nil {
 		mode = m.collaborationModeLabel()
 	}
 	goalText := ""
 	if m.goal != nil {
-		goalText = fmt.Sprintf(" · goal:%s %dt", m.goal.Status, m.goal.TokensUsed)
-		if m.goal.TokenBudget != nil {
-			goalText += fmt.Sprintf("/%d", *m.goal.TokenBudget)
-		}
+		goalText = fmt.Sprintf(" · goal:%s %s", m.goal.Status, formatGoalTokenUsage(m.goal))
 	}
-	right := "· mode:" + mode + goalText + " · " + m.renderContextUsage()
+	contextUsage := m.renderContextUsage()
+	runtimeText := "mode:" + mode
+	if m.inlineTranscript && m.app != nil && m.app.Agent != nil && available >= 72 {
+		model := m.app.Agent.Model()
+		runtimeText = model.Provider + "/" + model.ID + " · " + runtimeText + " · thinking:" + string(m.app.Agent.Thinking())
+	}
+	rightPrefix := "· " + runtimeText + goalText + " · "
+	right := rightPrefix + contextUsage
 	// Add width-aware help only when it fits beside the persistent context
 	// indicator. Narrow terminals keep the footer quiet and leave shortcuts in
 	// /help rather than forcing the usage counter off-screen.
@@ -5817,7 +6993,8 @@ func (m *Model) renderFooter() string {
 	helpText := m.help.ShortHelpView(m.keys.ShortHelp())
 	maxRight := available - lipgloss.Width(" "+permissionField)
 	if lipgloss.Width(helpText)+lipgloss.Width(" · ")+lipgloss.Width(right) <= maxRight {
-		right = helpText + " · " + right
+		rightPrefix = helpText + " · " + rightPrefix
+		right = rightPrefix + contextUsage
 	}
 	// Keep the whole footer inside the terminal: shrink the usage side before
 	// the fixed permission field when the terminal is narrow.
@@ -5825,25 +7002,72 @@ func (m *Model) renderFooter() string {
 		maxRight = 4
 	}
 	if lipgloss.Width(right) > maxRight {
-		right = "· " + truncateRunes(m.renderContextUsage(), maxRight-2)
+		if m.inlineTranscript && m.app != nil && m.app.Agent != nil && maxRight >= 18 {
+			model := m.app.Agent.Model()
+			runtimeText = model.ID + " · " + mode + "/" + string(m.app.Agent.Thinking())
+			rightPrefix = "· " + runtimeText + " · "
+			right = rightPrefix + contextUsage
+		}
+		if lipgloss.Width(right) > maxRight {
+			rightPrefix = "· "
+			contextUsage = truncateRunes(contextUsage, maxRight-2)
+			right = rightPrefix + contextUsage
+		}
 	}
 	line := m.permissionStatusStyle().Render(permissionField)
 	pad := available - lipgloss.Width(" "+permissionField) - lipgloss.Width(right)
 	if pad < 1 {
 		pad = 1
 	}
-	line += strings.Repeat(" ", pad) + styleFooter.Render(right)
+	styledRight := styleFooter.Render(rightPrefix) + m.contextUsageStyle().Render(contextUsage)
+	line += strings.Repeat(" ", pad) + styledRight
 	return styleFooter.Render(" ") + line
 }
 
+func contextUsageBand(current, total int) string {
+	if total <= 0 || current < 0 {
+		return "unknown"
+	}
+	ratio := float64(current) / float64(total)
+	switch {
+	case ratio >= 0.9:
+		return "critical"
+	case ratio >= 0.7:
+		return "warning"
+	case ratio >= 0.5:
+		return "notice"
+	default:
+		return "healthy"
+	}
+}
+
+func (m *Model) contextUsageStyle() lipgloss.Style {
+	total := 0
+	if m.app != nil {
+		total = m.app.Model.ContextWindow
+	}
+	switch contextUsageBand(m.contextTokens, total) {
+	case "healthy":
+		return lipgloss.NewStyle().Foreground(colorOk).Bold(true)
+	case "notice":
+		return lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	case "warning":
+		return lipgloss.NewStyle().Foreground(colorWarn).Bold(true)
+	case "critical":
+		return lipgloss.NewStyle().Foreground(colorErr).Bold(true)
+	default:
+		return styleFooter
+	}
+}
+
 func (m *Model) renderContextUsage() string {
-	current := formatTokenCount(m.contextTokens)
+	current := formatTokenCount(int64(m.contextTokens))
 	if m.contextEstimated && m.contextTokens > 0 {
 		current = "~" + current
 	}
 	total := "?"
 	if m.app != nil && m.app.Model.ContextWindow > 0 {
-		total = formatTokenCount(m.app.Model.ContextWindow)
+		total = formatTokenCount(int64(m.app.Model.ContextWindow))
 	}
 	return fmt.Sprintf("context: %s/%s", current, total)
 }
@@ -5856,7 +7080,48 @@ func (m *Model) renderCompactionProgress() string {
 	return m.spinner.View() + " " + styleHeaderDim.Render(status+"…")
 }
 
-func formatTokenCount(n int) string {
+func formatGoalTokenUsage(goal *protocol.ThreadGoal) string {
+	if goal == nil {
+		return "0 tokens"
+	}
+	usage := formatTokenCount(goal.TokensUsed)
+	if goal.TokenBudget != nil {
+		usage += "/" + formatTokenCount(*goal.TokenBudget)
+	}
+	usage += " tokens"
+	if len(goal.EstimatedCosts) == 0 {
+		return usage
+	}
+	costs := append([]protocol.Cost(nil), goal.EstimatedCosts...)
+	sort.Slice(costs, func(i, j int) bool { return costs[i].Currency < costs[j].Currency })
+	formatted := make([]string, 0, len(costs))
+	for _, cost := range costs {
+		formatted = append(formatted, formatEstimatedCost(cost))
+	}
+	return usage + " · est. " + strings.Join(formatted, " + ")
+}
+
+func formatEstimatedCost(cost protocol.Cost) string {
+	currency := strings.ToUpper(strings.TrimSpace(cost.Currency))
+	prefix := currency + " "
+	if currency == "USD" {
+		prefix = "$"
+	}
+	if cost.Total > 0 && cost.Total < 0.0001 {
+		return "<" + prefix + "0.0001"
+	}
+	precision := 2
+	if cost.Total < 1 {
+		precision = 4
+	}
+	value := strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.*f", precision, cost.Total), "0"), ".")
+	if !strings.Contains(value, ".") {
+		value += ".00"
+	}
+	return prefix + value
+}
+
+func formatTokenCount(n int64) string {
 	if n < 1000 {
 		return fmt.Sprintf("%d", n)
 	}

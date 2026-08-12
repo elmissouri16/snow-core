@@ -24,7 +24,11 @@ func TestStaticCatalogAdvertisesNormalizedThinkingLevels(t *testing.T) {
 			t.Fatalf("bundled model should preserve legacy summary behavior: %+v", model)
 		}
 		levels := model.SupportedThinkingLevels()
-		if len(levels) != 4 || levels[0] != protocol.ThinkingOff || levels[1] != protocol.ThinkingLow || levels[3] != protocol.ThinkingHigh {
+		wantLen := 4
+		if model.ID == "gpt-5.6-sol" {
+			wantLen = 7
+		}
+		if len(levels) != wantLen || levels[0] != protocol.ThinkingOff || levels[1] != protocol.ThinkingLow || levels[3] != protocol.ThinkingHigh {
 			t.Fatalf("model %q levels = %v", model.ID, levels)
 		}
 	}
@@ -40,14 +44,20 @@ func TestBuildResponsesBodyThinkingMapping(t *testing.T) {
 			protocol.ThinkingLow,
 			protocol.ThinkingMedium,
 			protocol.ThinkingHigh,
+			protocol.ThinkingXHigh,
+			protocol.ThinkingMax,
+			protocol.ThinkingUltra,
 		},
 	}
 	want := map[protocol.ThinkingLevel]string{
 		protocol.ThinkingOff:     "",
-		protocol.ThinkingMinimal: "low",
+		protocol.ThinkingMinimal: "minimal",
 		protocol.ThinkingLow:     "low",
 		protocol.ThinkingMedium:  "medium",
 		protocol.ThinkingHigh:    "high",
+		protocol.ThinkingXHigh:   "xhigh",
+		protocol.ThinkingMax:     "max",
+		protocol.ThinkingUltra:   "ultra",
 	}
 	for level, native := range want {
 		body, err := buildResponsesBody(protocol.ChatRequest{Model: model, Thinking: level})

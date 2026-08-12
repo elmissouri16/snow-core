@@ -45,6 +45,7 @@ type Provider struct {
 	cacheRoot     string
 	clientVersion string
 	now           func() time.Time
+	wait          func(context.Context, context.Context, time.Duration) error
 	modelsMu      sync.RWMutex
 	models        []modelRecord
 }

@@ -460,7 +460,7 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		goal, _ := s.app.GoalState()
 		if goal != nil {
-			info["goal"] = map[string]any{"goal_id": goal.GoalID, "status": goal.Status, "tokens_used": goal.TokensUsed, "token_budget": goal.TokenBudget}
+			info["goal"] = map[string]any{"goal_id": goal.GoalID, "status": goal.Status, "tokens_used": goal.TokensUsed, "token_budget": goal.TokenBudget, "estimated_costs": goal.EstimatedCosts}
 		}
 		info["subagents"] = map[string]any{"enabled": s.app.Subagents != nil, "max_concurrent_agents": s.app.Cfg.Subagents.MaxConcurrentThreads, "max_concurrent_threads": s.app.Cfg.Subagents.MaxConcurrentThreads, "max_agents_per_session": s.app.Cfg.Subagents.MaxAgentsPerSession, "max_depth": s.app.Cfg.Subagents.MaxDepth, "durable": s.app.Cfg.Subagents.Durable, "allow_mutation": s.app.Cfg.Subagents.AllowMutation}
 		steering, followUps := s.app.Agent.PendingInputs().Counts()

@@ -20,7 +20,7 @@ import (
 type Options struct {
 	// CWD is the working directory. Empty means the caller's cwd.
 	CWD string
-	// Provider is the provider id (opencode-go | chatgpt | fake). Empty uses config default.
+	// Provider is the provider id (opencode-go | openai-compatible | chatgpt | fake). Empty uses config default.
 	Provider string
 	// Model is the model id. Empty resolves the provider default.
 	Model string
@@ -41,7 +41,7 @@ type Options struct {
 	Tools []string
 	// SystemPrompt overrides the built-in preamble.
 	SystemPrompt string
-	// Thinking is a thinking level (off|minimal|low|medium|high).
+	// Thinking is a thinking level (off|minimal|low|medium|high|xhigh|max|ultra).
 	Thinking string
 	// ReasoningSummary is off|auto|concise|detailed.
 	ReasoningSummary string
@@ -53,7 +53,7 @@ type Options struct {
 	PlanModeReasoningEffort string
 	// APIKey provides an explicit credential (overrides auth.json and env).
 	APIKey string
-	// BaseURL overrides the provider base URL (opencode-go).
+	// BaseURL overrides the active provider base URL. It is required for openai-compatible.
 	BaseURL string
 	// Plugins are explicit argv-based external runtimes.
 	Plugins []publicplugin.PluginSpec
@@ -71,8 +71,11 @@ type Options struct {
 	NoSkills bool
 	// EnableSubagents opts into independent role-scoped child agents. Mutation
 	// and recursion remain controlled only by config.
-	EnableSubagents        bool
-	DisableSubagents       bool
+	EnableSubagents  bool
+	DisableSubagents bool
+	// SubagentProvider and SubagentModel override the configured defaults for children.
+	SubagentProvider       string
+	SubagentModel          string
 	SubagentMaxConcurrency int
 	SubagentMaxAgents      int
 	SubagentMaxDepth       int
@@ -141,6 +144,8 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		NoSkills:                opts.NoSkills,
 		UserInputHandler:        opts.UserInputHandler,
 		Subagents:               subagents,
+		SubagentProvider:        opts.SubagentProvider,
+		SubagentModel:           opts.SubagentModel,
 		SubagentMaxConcurrency:  opts.SubagentMaxConcurrency,
 		SubagentMaxAgents:       opts.SubagentMaxAgents,
 		SubagentMaxDepth:        opts.SubagentMaxDepth,
@@ -290,6 +295,16 @@ func (s *Session) ReadySubagents() error {
 	}
 	return nil
 }
+
+// SubagentModels returns exact provider/model pairs available for child agents.
+func (s *Session) SubagentModels() []protocol.Model {
+	a, err := s.activeApp()
+	if err != nil {
+		return nil
+	}
+	return a.SubagentModels()
+}
+
 func (s *Session) SpawnSubagent(ctx context.Context, req protocol.SpawnSubagentRequest) (protocol.SubagentState, error) {
 	a, e := s.activeApp()
 	if e != nil {
@@ -439,7 +454,8 @@ func (s *Session) Diagnostics() ([]protocol.ConfigDiagnostic, error) {
 	return out, nil
 }
 
-// Compact manually compacts the active branch. It never runs automatically.
+// Compact manually compacts the active branch. Goal continuation may also
+// compact automatically according to the host configuration.
 func (s *Session) Compact(ctx context.Context) (protocol.CompactionResult, error) {
 	a, err := s.activeApp()
 	if err != nil {
@@ -573,6 +589,7 @@ type SkillInfo struct {
 	License       string            `json:"license,omitempty"`
 	Compatibility string            `json:"compatibility,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
+	AllowedTools  string            `json:"allowed_tools,omitempty"`
 	Location      string            `json:"location"`
 	Scope         string            `json:"scope"`
 	Source        string            `json:"source"`
@@ -594,7 +611,7 @@ func (s *Session) Skills() []SkillInfo {
 		for key, value := range skill.Metadata {
 			metadata[key] = value
 		}
-		out = append(out, SkillInfo{Name: skill.Name, Description: skill.Description, License: skill.License, Compatibility: skill.Compatibility, Metadata: metadata, Location: skill.Location, Scope: skill.Scope, Source: skill.Source, Enabled: skill.Enabled, DisabledBy: skill.DisabledBy})
+		out = append(out, SkillInfo{Name: skill.Name, Description: skill.Description, License: skill.License, Compatibility: skill.Compatibility, Metadata: metadata, AllowedTools: skill.AllowedTools, Location: skill.Location, Scope: skill.Scope, Source: skill.Source, Enabled: skill.Enabled, DisabledBy: skill.DisabledBy})
 	}
 	return out
 }
@@ -613,7 +630,7 @@ func (s *Session) SkillInventory() []SkillInfo {
 		for key, value := range skill.Metadata {
 			metadata[key] = value
 		}
-		out = append(out, SkillInfo{Name: skill.Name, Description: skill.Description, License: skill.License, Compatibility: skill.Compatibility, Metadata: metadata, Location: skill.Location, Scope: skill.Scope, Source: skill.Source, Enabled: skill.Enabled, DisabledBy: skill.DisabledBy})
+		out = append(out, SkillInfo{Name: skill.Name, Description: skill.Description, License: skill.License, Compatibility: skill.Compatibility, Metadata: metadata, AllowedTools: skill.AllowedTools, Location: skill.Location, Scope: skill.Scope, Source: skill.Source, Enabled: skill.Enabled, DisabledBy: skill.DisabledBy})
 	}
 	return out
 }

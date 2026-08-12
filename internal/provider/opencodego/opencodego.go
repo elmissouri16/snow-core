@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,6 +81,14 @@ type Config struct {
 	// DiscoveryTimeout bounds startup catalog requests without constraining chat
 	// streams. Zero uses five seconds.
 	DiscoveryTimeout time.Duration
+	// ProviderID overrides diagnostic/event attribution when this internal Chat
+	// Completions codec is reused by another OpenAI-compatible adapter.
+	ProviderID string
+	// AllowAnonymous permits endpoints that do not require a bearer key.
+	AllowAnonymous bool
+	// DisableEnvAPIKey prevents an unrelated OPENCODE_API_KEY from being sent
+	// when the codec is reused for another provider.
+	DisableEnvAPIKey bool
 }
 
 // Provider implements provider.Provider for OpenCode Go.
@@ -90,6 +99,9 @@ type Provider struct {
 	defaultModel     string
 	catalogURL       string
 	discoveryTimeout time.Duration
+	providerID       string
+	allowAnonymous   bool
+	useEnvAPIKey     bool
 }
 
 // New validates and constructs the provider.
@@ -114,11 +126,15 @@ func New(cfg Config) (*Provider, error) {
 	if discoveryTimeout <= 0 {
 		discoveryTimeout = 5 * time.Second
 	}
-	return &Provider{baseURL: base, apiKey: cfg.APIKey, client: client, defaultModel: model, catalogURL: catalogURL, discoveryTimeout: discoveryTimeout}, nil
+	providerID := strings.TrimSpace(cfg.ProviderID)
+	if providerID == "" {
+		providerID = ProviderID
+	}
+	return &Provider{baseURL: base, apiKey: cfg.APIKey, client: client, defaultModel: model, catalogURL: catalogURL, discoveryTimeout: discoveryTimeout, providerID: providerID, allowAnonymous: cfg.AllowAnonymous, useEnvAPIKey: !cfg.DisableEnvAPIKey}, nil
 }
 
 // ID implements provider.Provider.
-func (p *Provider) ID() string { return ProviderID }
+func (p *Provider) ID() string { return p.providerID }
 
 // DefaultModel returns the provider's documented default model (the static
 // catalog entry). The app uses this to pin a stable default instead of taking
@@ -133,8 +149,10 @@ func (p *Provider) resolveKey(creds auth.Credential) string {
 	if creds.Key != "" {
 		return creds.Key
 	}
-	if env := os.Getenv(EnvAPIKey); env != "" {
-		return env
+	if p.useEnvAPIKey {
+		if env := os.Getenv(EnvAPIKey); env != "" {
+			return env
+		}
 	}
 	return p.apiKey
 }
@@ -148,13 +166,16 @@ func (p *Provider) Resolve(_ context.Context, creds auth.Credential) (auth.Crede
 		creds.Key = key
 		return creds, nil
 	}
-	return creds, fmt.Errorf("opencode-go: no API key found: set %s, add a %q entry to the auth file, or pass a credential explicitly", EnvAPIKey, ProviderID)
+	if p.allowAnonymous {
+		return creds, nil
+	}
+	return creds, fmt.Errorf("%s: no API key found: set %s, add a %q entry to the auth file, or pass a credential explicitly", p.providerID, EnvAPIKey, p.providerID)
 }
 
 // staticCatalog returns the guaranteed-available fallback catalog.
 func (p *Provider) staticCatalog() []protocol.Model {
 	return []protocol.Model{{
-		Provider:      ProviderID,
+		Provider:      p.providerID,
 		ID:            p.defaultModel,
 		DisplayName:   "OpenCode Go Default",
 		ContextWindow: 200000,
@@ -493,10 +514,10 @@ func normalizeModelRecord(record openAIModelRecord) (protocol.Model, bool) {
 		model.SupportsThinking = reasoningAdvertised
 	}
 	if reasoningAdvertised && len(parsedLevels) == 0 {
-		// OpenCode documents the standard low/medium/high effort values. Snow's
-		// minimal level is a deliberate low-effort alias in both adapters.
+		// A generic reasoning_effort parameter documents only the standard
+		// low/medium/high values. More specific levels require explicit catalog
+		// advertisement so Snow never sends a guessed native value.
 		parsedLevels = []protocol.ThinkingLevel{
-			protocol.ThinkingMinimal,
 			protocol.ThinkingLow,
 			protocol.ThinkingMedium,
 			protocol.ThinkingHigh,
@@ -534,6 +555,21 @@ func normalizeThinkingLevels(values []string) []protocol.ThinkingLevel {
 				seen[protocol.ThinkingHigh] = true
 				out = append(out, protocol.ThinkingHigh)
 			}
+		case "xhigh":
+			if !seen[protocol.ThinkingXHigh] {
+				seen[protocol.ThinkingXHigh] = true
+				out = append(out, protocol.ThinkingXHigh)
+			}
+		case "max":
+			if !seen[protocol.ThinkingMax] {
+				seen[protocol.ThinkingMax] = true
+				out = append(out, protocol.ThinkingMax)
+			}
+		case "ultra":
+			if !seen[protocol.ThinkingUltra] {
+				seen[protocol.ThinkingUltra] = true
+				out = append(out, protocol.ThinkingUltra)
+			}
 		case "off", "none":
 			// Off is implicit and is never sent as a native effort value.
 		}
@@ -545,42 +581,54 @@ func normalizeThinkingLevels(values []string) []protocol.ThinkingLevel {
 // returns a normalized EventStream.
 func (p *Provider) Chat(ctx context.Context, creds auth.Credential, req protocol.ChatRequest) (protocol.EventStream, error) {
 	key := p.resolveKey(creds)
-	if key == "" {
-		return errorStream(ctx, fmt.Errorf("opencode-go: no API key found: set %s, add a %q entry to the auth file, or pass a credential explicitly", EnvAPIKey, ProviderID)), nil
+	if key == "" && !p.allowAnonymous {
+		return errorStream(ctx, fmt.Errorf("%s: no API key found: set %s, add a %q entry to the auth file, or pass a credential explicitly", p.providerID, EnvAPIKey, p.providerID)), nil
 	}
 
 	body, err := p.buildBody(req)
 	if err != nil {
-		return errorStream(ctx, fmt.Errorf("opencode-go: build request: %w", err)), nil
+		return errorStream(ctx, fmt.Errorf("%s: build request: %w", p.providerID, err)), nil
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return errorStream(ctx, fmt.Errorf("opencode-go: create request: %w", err)), nil
+		return errorStream(ctx, fmt.Errorf("%s: create request: %w", p.providerID, err)), nil
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+key)
+	if key != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+key)
+	}
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return errorStream(ctx, fmt.Errorf("opencode-go: request failed: %w", err)), nil
+		return errorStream(ctx, fmt.Errorf("%s: request failed: %w", p.providerID, err)), nil
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
 		redactedSnippet := providerpkg.RedactSecrets(strings.TrimSpace(string(snippet)), key)
-		msg := fmt.Sprintf("opencode-go: HTTP %d: %s", resp.StatusCode, redactedSnippet)
+		msg := fmt.Sprintf("%s: HTTP %d: %s", p.providerID, resp.StatusCode, redactedSnippet)
 		if resp.StatusCode == http.StatusUnauthorized {
-			msg = "opencode-go: invalid API key (HTTP 401)"
+			msg = p.providerID + ": invalid API key (HTTP 401)"
 		}
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusPaymentRequired {
-			return errorStream(ctx, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: redactedSnippet}), nil
+			return errorStream(ctx, &providerpkg.LimitError{Provider: p.providerID, Status: resp.StatusCode, Message: redactedSnippet}), nil
 		}
 		return errorStream(ctx, errors.New(msg)), nil
 	}
+	mediaType := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
+	if !strings.EqualFold(mediaType, "text/event-stream") {
+		defer resp.Body.Close()
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		message := providerpkg.RedactSecrets(strings.TrimSpace(string(snippet)), key)
+		if message == "" {
+			message = "expected text/event-stream response"
+		}
+		return errorStream(ctx, fmt.Errorf("%s: incompatible response content type %q: %s", p.providerID, mediaType, truncateStr(message, 500))), nil
+	}
 
-	s := newStream(ctx, 64, func() { _ = resp.Body.Close() }, key)
+	s := newStream(ctx, 64, func() { _ = resp.Body.Close() }, p.providerID, key)
 	go s.readSSE(resp)
 	return s, nil
 }
@@ -641,7 +689,7 @@ func (p *Provider) buildBody(req protocol.ChatRequest) ([]byte, error) {
 	}
 	level := protocol.NormalizeThinkingLevel(req.Thinking)
 	if !req.Model.SupportsThinkingLevel(level) {
-		return nil, unsupportedThinkingError(req.Model, model, level)
+		return nil, unsupportedThinkingError(p.providerID, req.Model, model, level)
 	}
 	oreq := openAIChatRequest{
 		Model:         model,
@@ -685,9 +733,8 @@ func (p *Provider) buildBody(req protocol.ChatRequest) ([]byte, error) {
 	if req.Temperature != nil {
 		oreq.Temperature = req.Temperature
 	}
-	// Map snow thinking levels to OpenAI reasoning_effort when set. Snow's
-	// minimal setting is intentionally represented by the provider's low
-	// effort value; off omits the field entirely.
+	// Map Snow thinking levels to the model-advertised OpenAI reasoning_effort
+	// value when set. Off omits the field entirely.
 	if level != protocol.ThinkingOff {
 		if effort, ok := mapThinkingEffort(level); ok {
 			v := effort
@@ -701,19 +748,16 @@ func (p *Provider) buildBody(req protocol.ChatRequest) ([]byte, error) {
 // reasoning_effort values.
 func mapThinkingEffort(l protocol.ThinkingLevel) (string, bool) {
 	switch l {
-	case protocol.ThinkingMinimal, protocol.ThinkingLow:
-		return "low", true
-	case protocol.ThinkingMedium:
-		return "medium", true
-	case protocol.ThinkingHigh:
-		return "high", true
+	case protocol.ThinkingMinimal, protocol.ThinkingLow, protocol.ThinkingMedium,
+		protocol.ThinkingHigh, protocol.ThinkingXHigh, protocol.ThinkingMax, protocol.ThinkingUltra:
+		return string(l), true
 	}
 	return "", false
 }
 
-func unsupportedThinkingError(model protocol.Model, modelID string, level protocol.ThinkingLevel) error {
+func unsupportedThinkingError(providerID string, model protocol.Model, modelID string, level protocol.ThinkingLevel) error {
 	allowed := model.SupportedThinkingLevels()
-	return fmt.Errorf("opencode-go: model %q does not advertise thinking level %q (supported: %s)", modelID, level, joinThinkingLevels(allowed))
+	return fmt.Errorf("%s: model %q does not advertise thinking level %q (supported: %s)", providerID, modelID, level, joinThinkingLevels(allowed))
 }
 
 func joinThinkingLevels(levels []protocol.ThinkingLevel) string {
@@ -733,12 +777,12 @@ func renderInternalFragment(fragment protocol.InternalContextFragment) string {
 func mapMessage(m protocol.Message) (openAIMessage, bool) {
 	switch m.Role {
 	case protocol.RoleUser:
-		return openAIMessage{Role: "user", Content: textContent(m)}, true
+		return openAIMessage{Role: "user", Content: messageContent(m)}, true
 	case protocol.RoleAgent:
 		// OpenAI Chat Completions has no portable agent-message role. The core
 		// stores a sealed, attributed envelope so rendering it as user input does
 		// not lose sender/recipient/type metadata.
-		return openAIMessage{Role: "user", Content: textContent(m)}, true
+		return openAIMessage{Role: "user", Content: messageContent(m)}, true
 	case protocol.RoleAssistant:
 		om := openAIMessage{Role: "assistant", Content: textContent(m)}
 		for _, b := range m.Content {
@@ -769,36 +813,80 @@ func mapMessage(m protocol.Message) (openAIMessage, bool) {
 	}
 }
 
+type openAIContentPart struct {
+	Type     string              `json:"type"`
+	Text     string              `json:"text,omitempty"`
+	ImageURL *openAIImageURLPart `json:"image_url,omitempty"`
+}
+
+type openAIImageURLPart struct {
+	URL string `json:"url"`
+}
+
+func messageContent(m protocol.Message) any {
+	hasImages := false
+	for _, block := range m.Content {
+		if block.Type == protocol.BlockImage {
+			hasImages = true
+			break
+		}
+	}
+	if !hasImages {
+		return textContent(m)
+	}
+	parts := make([]openAIContentPart, 0, len(m.Content))
+	for _, block := range m.Content {
+		switch block.Type {
+		case protocol.BlockText:
+			if block.Text != "" {
+				parts = append(parts, openAIContentPart{Type: "text", Text: block.Text})
+			}
+		case protocol.BlockPlan:
+			if text := planBlockText(block); text != "" {
+				parts = append(parts, openAIContentPart{Type: "text", Text: text})
+			}
+		case protocol.BlockImage:
+			mime := strings.ToLower(strings.TrimSpace(block.MIMEType))
+			if mime == "" {
+				mime = "image/png"
+			}
+			parts = append(parts, openAIContentPart{Type: "image_url", ImageURL: &openAIImageURLPart{URL: "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(block.Data)}})
+		}
+	}
+	return parts
+}
+
 // textContent joins the representable text of a message. Thinking blocks are
-// skipped for OpenCode Go (no reasoning_content support is assumed). Images
-// are not yet supported by this adapter.
+// skipped for OpenAI-compatible Chat Completions.
 func textContent(m protocol.Message) string {
 	var sb strings.Builder
-	for _, b := range m.Content {
-		switch b.Type {
+	for _, block := range m.Content {
+		switch block.Type {
 		case protocol.BlockText:
-			sb.WriteString(b.Text)
+			sb.WriteString(block.Text)
 		case protocol.BlockPlan:
-			if !b.PlanComplete {
-				sb.WriteString(b.Text)
-				continue
-			}
 			if sb.Len() > 0 && !strings.HasSuffix(sb.String(), "\n") {
 				sb.WriteByte('\n')
 			}
-			sb.WriteString("<proposed_plan>\n")
-			sb.WriteString(b.Text)
-			if !strings.HasSuffix(b.Text, "\n") {
-				sb.WriteByte('\n')
-			}
-			sb.WriteString("</proposed_plan>\n")
+			sb.WriteString(planBlockText(block))
 		case protocol.BlockThinking:
 			// Skipped.
 		default:
-			// Tool call blocks contribute no text; images unsupported.
+			// Tool calls and images contribute no plain text.
 		}
 	}
 	return sb.String()
+}
+
+func planBlockText(block protocol.ContentBlock) string {
+	if !block.PlanComplete {
+		return block.Text
+	}
+	text := "<proposed_plan>\n" + block.Text
+	if !strings.HasSuffix(block.Text, "\n") {
+		text += "\n"
+	}
+	return text + "</proposed_plan>\n"
 }
 
 // ---------------------------------------------------------------------------
@@ -882,16 +970,18 @@ type stream struct {
 	closeFn   func()
 	once      sync.Once
 	totalArgs int
+	provider  string
 	secret    string
 }
 
-func newStream(ctx context.Context, buf int, closeFn func(), secret string) *stream {
+func newStream(ctx context.Context, buf int, closeFn func(), provider, secret string) *stream {
 	return &stream{
-		ch:      make(chan protocol.StreamEvent, buf),
-		done:    make(chan struct{}),
-		reqCtx:  ctx,
-		closeFn: closeFn,
-		secret:  secret,
+		ch:       make(chan protocol.StreamEvent, buf),
+		done:     make(chan struct{}),
+		reqCtx:   ctx,
+		closeFn:  closeFn,
+		provider: provider,
+		secret:   secret,
 	}
 }
 
@@ -934,7 +1024,7 @@ func (s *stream) send(ev protocol.StreamEvent) {
 
 // errorStream returns a stream whose first event is EvStreamError, then EOF.
 func errorStream(ctx context.Context, err error) protocol.EventStream {
-	s := newStream(ctx, 1, nil, "")
+	s := newStream(ctx, 1, nil, ProviderID, "")
 	s.ch <- protocol.StreamEvent{Type: protocol.EvStreamError, Err: err}
 	close(s.ch)
 	return s
@@ -949,12 +1039,13 @@ func (s *stream) readSSE(resp *http.Response) {
 
 	r := bufio.NewReader(resp.Body)
 	var (
-		eventName string
-		accums    = make(map[int]*toolCallAccum)
-		order     []int // insertion order of tool call indices
-		finish    protocol.StopReason
-		doneSent  bool
-		errored   bool
+		eventName        string
+		accums           = make(map[int]*toolCallAccum)
+		order            []int // insertion order of tool call indices
+		finish           protocol.StopReason
+		doneSent         bool
+		errored          bool
+		terminalObserved bool
 	)
 	markError := func(ev protocol.StreamEvent) {
 		errored = true
@@ -974,11 +1065,11 @@ func (s *stream) readSSE(resp *http.Response) {
 	for {
 		line, err := readBoundedSSELine(r, maxSSELineBytes)
 		if err != nil && !errors.Is(err, io.EOF) {
-			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("opencode-go: SSE line exceeds limit or is unreadable: %w", err)})
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: SSE line exceeds limit or is unreadable: %w", s.provider, err)})
 			return
 		}
 		if line != "" {
-			stop := s.handleLine(strings.TrimSpace(line), &eventName, accums, &order, &finish, markError)
+			stop := s.handleLine(strings.TrimSpace(line), &eventName, accums, &order, &finish, &terminalObserved, markError)
 			if stop {
 				sendDone()
 				return
@@ -986,7 +1077,11 @@ func (s *stream) readSSE(resp *http.Response) {
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				sendDone()
+				if terminalObserved {
+					sendDone()
+				} else {
+					markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: stream truncated before terminal event", s.provider)})
+				}
 				return
 			}
 			select {
@@ -997,14 +1092,14 @@ func (s *stream) readSSE(resp *http.Response) {
 			if s.reqCtx.Err() != nil {
 				return // cancellation; Next() surfaces ctx.Err()
 			}
-			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("opencode-go: stream read failed: %w", err)})
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: stream read failed: %w", s.provider, err)})
 			return
 		}
 	}
 }
 
 // handleLine returns true when the stream should stop (e.g. after [DONE]).
-func (s *stream) handleLine(line string, eventName *string, accums map[int]*toolCallAccum, order *[]int, finish *protocol.StopReason, markError func(protocol.StreamEvent)) bool {
+func (s *stream) handleLine(line string, eventName *string, accums map[int]*toolCallAccum, order *[]int, finish *protocol.StopReason, terminalObserved *bool, markError func(protocol.StreamEvent)) bool {
 	switch {
 	case strings.HasPrefix(line, "event:"):
 		*eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
@@ -1015,13 +1110,14 @@ func (s *stream) handleLine(line string, eventName *string, accums map[int]*tool
 		}
 		if *eventName == "error" {
 			*eventName = ""
-			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("opencode-go: " + providerpkg.RedactSecrets(data, s.secret))})
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New(s.provider + ": " + providerpkg.RedactSecrets(data, s.secret))})
 			return false
 		}
 		*eventName = ""
 		if data == "[DONE]" {
 			// [DONE] terminates the stream; some servers keep the connection
 			// open afterwards, so signal the caller to stop reading.
+			*terminalObserved = true
 			return true
 		}
 		var chunk openAIChunk
@@ -1032,16 +1128,19 @@ func (s *stream) handleLine(line string, eventName *string, accums map[int]*tool
 				} `json:"error"`
 			}
 			if uerr := json.Unmarshal([]byte(data), &errPayload); uerr == nil && errPayload.Error != nil && errPayload.Error.Message != "" {
-				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New("opencode-go: " + providerpkg.RedactSecrets(errPayload.Error.Message, s.secret))})
+				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New(s.provider + ": " + providerpkg.RedactSecrets(errPayload.Error.Message, s.secret))})
 			} else {
 				// Malformed chunk: surface it rather than silently dropping.
-				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("opencode-go: unparseable SSE data: %s", truncateStr(providerpkg.RedactSecrets(data, s.secret), 500))})
+				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: unparseable SSE data: %s", s.provider, truncateStr(providerpkg.RedactSecrets(data, s.secret), 500))})
 			}
 			return false
 		}
 		if err := s.processChunk(chunk, accums, order, finish); err != nil {
 			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: err})
 			return true
+		}
+		if *finish != "" {
+			*terminalObserved = true
 		}
 	}
 	return false
@@ -1063,7 +1162,7 @@ func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, 
 			acc, ok := accums[tc.Index]
 			if !ok {
 				if len(accums) >= maxStreamToolCalls {
-					return errors.New("opencode-go: too many streamed tool calls")
+					return fmt.Errorf("%s: too many streamed tool calls", s.provider)
 				}
 				acc = &toolCallAccum{index: tc.Index}
 				accums[tc.Index] = acc
@@ -1081,7 +1180,7 @@ func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, 
 			}
 			fragmentBytes := len(tc.Function.Arguments)
 			if acc.argsBuf.Len()+fragmentBytes > maxToolArgumentBytes || s.totalArgs+fragmentBytes > maxTotalToolArgumentBytes {
-				return errors.New("opencode-go: streamed tool arguments exceed limit")
+				return fmt.Errorf("%s: streamed tool arguments exceed limit", s.provider)
 			}
 			// Deltas carry only the fragment; the agent appends fragments.
 			s.send(protocol.StreamEvent{

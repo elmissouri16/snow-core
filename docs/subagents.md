@@ -4,23 +4,27 @@ Snow implements one Codex-V2-style subagent tree around the existing agent loop.
 
 ```sh
 snow --subagents
+snow --subagents --subagent-provider opencode-go --subagent-model model-id
 snow --subagents --subagent-max-concurrency 10 --subagent-max-agents 32 --subagent-max-depth 1
 ```
 
-`--no-subagents` overrides an enabled config. Enabling subagents does not enable recursion or file mutation. The shell-capable built-in role is named `default`; `general` is accepted as a compatibility alias. Bash remains subject to the root permission mode.
+`--no-subagents` overrides an enabled config. Enabling subagents does not enable recursion or file mutation. The built-in roles are `general`, `explorer`, and `implementer`. The former `default` and `worker` role names are rejected with migration guidance rather than retained as aliases. Bash remains subject to the root permission mode.
+
+`--subagent-provider PROVIDER --subagent-model MODEL` sets one automatic provider/model default for every child, so an orchestrator can use ChatGPT while children use OpenCode Go or another configured provider. Role-specific and per-spawn selections take precedence; otherwise children inherit the parent selection. Provider credentials remain isolated and resolve through that provider's normal auth entry.
 
 ## Model tools
 
 When enabled, the complete direct tool set is always exposed together:
 
-- `spawn_agent`: create an independent child at a canonical path such as `/root/api_review`;
+- `spawn_agent`: create an independent child at a canonical path such as `/root/api_review`, optionally with an exact `provider`/`model` pair;
+- `list_subagent_models`: return the exact available provider/model IDs, optionally filtered by provider;
 - `send_message`: queue attributed mail without starting a turn;
 - `followup_task`: queue a task and run/reuse an idle child;
 - `wait_agent`: use `until=activity` for the next lifecycle/mailbox event or `until=all` to join all descendants; it never returns private child content;
 - `interrupt_agent`: cancel only the target's current turn;
 - `list_agents`: list stable paths and states without prompts or full results.
 
-Paths start at `/root`. Segments are lowercase letters, digits, and underscores, begin with a letter, and are at most 64 bytes. For the model-facing `spawn_agent` tool only, a hyphenated task label is normalized to this canonical form (`api-review` becomes `/root/api_review`). SDK and RPC requests remain strict and must supply canonical underscore-only task names. Targeting tools always use the final canonical path. Children cannot supply or forge their sender identity: every tool instance is bound to its caller by the host.
+`spawn_agent` uses distinct fields: `name` is the child's stable identity, `task` is its assignment, `role` selects its capability profile, and optional `provider`/`model` select its runtime. Root guidance tells the orchestrator to call `list_subagent_models` rather than guess IDs. Discovery results include each model's supported reasoning levels and the exact available provider IDs. If an inherited parent effort is unsupported by the selected child model, Snow automatically uses that model's supported default (falling back to `off`); an explicitly requested per-spawn or role effort remains strict and returns a supported-level diagnostic. Paths start at `/root`. Segments are lowercase letters, digits, and underscores, begin with a letter, and are at most 64 bytes. For the model-facing tool only, a hyphenated name is normalized to this canonical form (`api-review` becomes `/root/api_review`). SDK and RPC requests remain strict and require canonical underscore-only names. Targeting tools always use the final canonical path. Children cannot supply or forge their sender identity: every tool instance is bound to its caller by the host.
 
 At the provider boundary, manager-bound model tools also accept a sole `{"_raw":"<JSON object>"}` compatibility envelope produced by some tool-call parsers. `_raw` is not a public tool argument: Snow unwraps it internally, then applies the same strict schema validation. Mixed fields, malformed JSON, non-object values, trailing input, and unknown inner fields are rejected rather than repaired.
 
@@ -64,23 +68,23 @@ Child authority is the intersection of the parent registry, role tools, and oper
 
 | Role | Default child capabilities |
 |---|---|
-| `default`/general | `read`, `grep`, `glob`, skill/resource reads, and permission-gated `bash` |
+| `general` | `read`, `grep`, `glob`, skill/resource reads, and permission-gated `bash` |
 | `explorer` | `read`, `grep`, `glob`, and skill/resource reads; no `bash` |
-| `worker` | The shell-capable surface; `write`/`edit` still require both mutation switches |
+| `implementer` | The shell-capable surface; `write`/`edit` still require both mutation switches |
 
 All child roles exclude goals, user-input tools, network tools, plugins, and MCP. Mutation requires both `subagents.allow_mutation=true` and a role with `allow_mutation=true`; a parent `Tools` allowlist remains an upper bound. Bash is not sandboxed and can mutate the shared workspace or OS, so `ask` prompts through the attributed TUI FIFO broker, `allow` runs it, and `deny` rejects it. Headless ask mode remains deny-by-default. Read-only children may use a deny-all service because read-risk calls are always allowed. Child `ask_user` input stays excluded. Recursion similarly requires `recursive=true` and remaining depth.
 
-To grant a worker file mutation, enable both switches explicitly (and preserve the parent tool allowlist):
+To grant an implementer file mutation, enable both switches explicitly (and preserve the parent tool allowlist):
 
 ```json
 {
   "subagents": {
     "allow_mutation": true,
     "roles": {
-      "default": {
+      "general": {
         "tools": ["read", "grep", "glob", "activate_skill", "read_skill_resource", "bash"]
       },
-      "worker": {
+      "implementer": {
         "allow_mutation": true
       }
     }

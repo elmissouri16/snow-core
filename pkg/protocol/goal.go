@@ -3,6 +3,7 @@ package protocol
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -34,16 +35,17 @@ func (s ThreadGoalStatus) Terminal() bool {
 }
 
 type ThreadGoal struct {
-	SessionID   string           `json:"session_id"`
-	BranchID    string           `json:"branch_id"`
-	GoalID      string           `json:"goal_id"`
-	Objective   string           `json:"objective"`
-	Status      ThreadGoalStatus `json:"status"`
-	TokenBudget *int64           `json:"token_budget,omitempty"`
-	TokensUsed  int64            `json:"tokens_used"`
-	SecondsUsed int64            `json:"seconds_used"`
-	CreatedAt   int64            `json:"created_at"`
-	UpdatedAt   int64            `json:"updated_at"`
+	SessionID      string           `json:"session_id"`
+	BranchID       string           `json:"branch_id"`
+	GoalID         string           `json:"goal_id"`
+	Objective      string           `json:"objective"`
+	Status         ThreadGoalStatus `json:"status"`
+	TokenBudget    *int64           `json:"token_budget,omitempty"`
+	TokensUsed     int64            `json:"tokens_used"`
+	SecondsUsed    int64            `json:"seconds_used"`
+	EstimatedCosts []Cost           `json:"estimated_costs,omitempty"`
+	CreatedAt      int64            `json:"created_at"`
+	UpdatedAt      int64            `json:"updated_at"`
 }
 
 func (g *ThreadGoal) Clone() *ThreadGoal {
@@ -55,6 +57,7 @@ func (g *ThreadGoal) Clone() *ThreadGoal {
 		v := *g.TokenBudget
 		out.TokenBudget = &v
 	}
+	out.EstimatedCosts = append([]Cost(nil), g.EstimatedCosts...)
 	return &out
 }
 
@@ -91,6 +94,22 @@ func (g ThreadGoal) Validate() error {
 	}
 	if g.TokensUsed < 0 || g.SecondsUsed < 0 {
 		return errors.New("protocol: goal usage cannot be negative")
+	}
+	currencies := make(map[string]bool, len(g.EstimatedCosts))
+	for _, cost := range g.EstimatedCosts {
+		currency := strings.ToUpper(strings.TrimSpace(cost.Currency))
+		if currency == "" {
+			return errors.New("protocol: estimated goal cost currency is required")
+		}
+		if currencies[currency] {
+			return fmt.Errorf("protocol: duplicate estimated goal cost currency %q", currency)
+		}
+		currencies[currency] = true
+		for _, value := range []float64{cost.Input, cost.Output, cost.CacheRead, cost.CacheWrite, cost.Total} {
+			if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+				return errors.New("protocol: estimated goal cost must be finite and non-negative")
+			}
+		}
 	}
 	return nil
 }

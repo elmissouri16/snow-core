@@ -1,165 +1,113 @@
-# TUI responsiveness and rendering guide
+# TUI rendering and performance
 
-`snow` uses the Charmbracelet stack pinned in `go.mod`:
+Snow uses Bubble Tea v1.3.10, Bubbles v1.0.0, Lip Gloss, and Glamour. This guide
+records the renderer contract used by `internal/tui`.
 
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) `v1.3.10` — MVU runtime,
-  messages, commands, renderer, terminal resize events.
-- [Bubbles](https://github.com/charmbracelet/bubbles) `v1.0.0` — viewport,
-  textarea, and spinner components.
-- [Lip Gloss](https://github.com/charmbracelet/lipgloss) — styling, sizing, and
-  wrapping.
-- [Glamour](https://github.com/charmbracelet/glamour) — cached Markdown rendering.
+## Upstream pattern
 
-## Official patterns used
+Bubble Tea's pager example composes a header, `viewport.Model`, and footer in one
+`View`, sizes the viewport from `WindowSizeMsg`, enters the alternate screen, and
+optionally enables cell-motion mouse reporting for wheel input. Its chat example
+uses the same app-owned viewport plus a textarea. Snow follows this pattern.
 
-The implementation follows the current upstream examples and component APIs:
+Bubble Tea also provides `tea.Println` for unmanaged normal-screen output, but
+its renderer documentation says those lines print *above* the managed program.
+That is suitable for logs above a small program, not for combining immutable
+history with a terminal-height sticky frame. A terminal-height normal-screen
+frame plus `tea.Println` causes prior frames—including headers and composer
+chrome—to enter terminal scrollback. Snow therefore does not use its historical
+inline/`tea.Println` path at runtime.
 
-- Bubble Tea's [Model lifecycle](https://github.com/charmbracelet/bubbletea/blob/main/tea.go):
-  `Init` starts commands, `Update` owns state transitions, and `View` only
-  describes the current frame.
-- `WindowSizeMsg` is handled centrally before layout is recalculated.
-- External streams use the
-  [command-fed event pattern](https://github.com/charmbracelet/bubbletea/tree/main/examples):
-  a command waits on Snow's coalescing mailbox, delivers one bounded batch, and
-  `Update` immediately re-arms it.
-- `tea.Batch` is used for independent startup/spinner commands. Ordered work
-  should use `tea.Sequence`, not an unordered batch.
-- Bubbles' [viewport](https://github.com/charmbracelet/bubbles/blob/main/viewport/viewport.go)
-  uses `SetContent`, `AtBottom`, and `GotoBottom`; content updates should not
-  force the user back to the tail after they scroll up. Snow uses the current
-  `PageUp`/`PageDown` APIs rather than the deprecated `ViewUp`/`ViewDown` aliases.
-- Bubbles' `help.Model` supplies width-aware footer shortcuts, while the TUI
-  keeps picker navigation in one shared key map (`↑/↓` or `j`/`k`).
+Context7 currently returns Bubble Tea v2 examples as well. Snow remains on v1,
+so `View() string`, `tea.WithAltScreen`, and direct Bubbles width/height fields
+remain correct until an intentional v2 migration.
 
-> Upstream Context7 results also include Bubble Tea v2 examples. This project is
-> on Bubble Tea v1, so keep the v1 `View() string` and direct Bubbles width/height
-> fields until an intentional dependency upgrade is made.
+## Rendering rules
 
-## Snow's rendering rules
+1. **One renderer owns the window.** Runtime always enters the alternate screen.
+   `View` composes sticky header, transcript viewport, overlays/run status,
+   composer, and footer. Scrolling is confined to the transcript viewport and
+   cannot reveal stale rendered frames.
+2. **Mouse mode owns viewport scrolling.** `tui.mouse` defaults to `true` so
+   wheel/trackpad gestures stay inside Snow instead of moving terminal scrollback.
+   Cell-motion reports also drive transcript highlighting/copy and edge auto-scroll.
+   Apple Terminal provides Fn-drag as its terminal-native selection override. F6
+   disables reporting for native selection, but wheel behavior then belongs to the
+   terminal. This mode split reflects the protocol: portable bare native drag and
+   application wheel events cannot coexist.
+3. **Size from `WindowSizeMsg`.** Header/footer/composer/overlay heights are
+   subtracted from terminal height and the remainder is assigned to the Bubbles
+   viewport. The final terminal column is left unused to avoid physical
+   autowrap artifacts.
+4. **Coalesce stream bursts.** Agent callbacks enter an ordered mailbox.
+   Adjacent text/thinking/plan deltas coalesce and updates consume at most 256
+   logical events. Lifecycle events are not dropped or reordered.
+5. **Render on a bounded cadence.** Ordinary live deltas schedule one refresh,
+   adapting from roughly 33 ms below 64 KiB to 300 ms above 1 MiB. Lifecycle
+   boundaries flush immediately.
+6. **Keep expensive formatting cached.** Stable transcript rendering is cached
+   by content and width. Markdown and thinking renderers are reused; streaming
+   text stays cheap and receives final Markdown rendering at a boundary.
+7. **Preserve scroll intent.** New output follows only when the viewport was at
+   bottom. While the user reads earlier content, source state continues updating
+   without replacing the snapshot; returning to bottom catches up once.
+8. **Keep domain work outside `View`.** `Update` mutates state and schedules
+   commands. `View` only composes strings. Provider, file, session, and model
+   discovery work runs asynchronously with generation-tagged results. Composer
+   hints use the cached active branch identity rather than rich branch listings,
+   and the spinner timer is armed only while an animation is visible.
+9. **Keep interaction state explicit.** Correlated root turn IDs prevent delayed
+   events from settling newer runs. Automatic compaction retains goal ownership.
+   Blocking permission/user-input requests exclusively own the overlay and keys.
+10. **Keep output bounded.** Tool progress and previews are sanitized and capped;
+    complete results remain in session/protocol data.
 
-1. **Coalesce stream bursts without blocking producers.** Agent callbacks push
-   into an ordered mailbox rather than a fixed-capacity channel. Adjacent text,
-   thinking, and same-plan deltas coalesce as string parts, materialize once,
-   and reach `Update` in batches of at most 256 logical events. Lifecycle events
-   are never dropped or reordered.
-2. **Render on a separate cadence.** Ingestion updates model state immediately,
-   while ordinary deltas schedule at most one viewport flush. The interval
-   adapts from about 33 ms below 64 KiB live text to 300 ms above 1 MiB;
-   lifecycle boundaries flush immediately when following the tail.
-3. **Refresh only when dirty.** The TUI caches the last rendered transcript and
-   skips `viewport.SetContent` when content and dimensions are unchanged.
-4. **Preserve scroll intent.** New output follows the tail only when the viewport
-   was already at the bottom. While the user is off-tail, Snow freezes the
-   viewport snapshot and accumulates content off-screen; PageDown/End (or the
-   wheel when `tui.mouse` is enabled) performs one catch-up refresh when the old
-   bottom is reached.
-5. **Finalize live text at visible boundaries.** Streaming assistant/thinking
-   text stays in buffers until a tool, permission prompt, error, abort, or turn
-   boundary is reached. The buffer is promoted before the boundary line so the
-   transcript remains chronological; a post-tool response starts a new segment.
-6. **Cache expensive formatting.** Assistant Markdown rendering is conditional;
-   reasoning uses a separate muted Glamour renderer so inline Markdown is styled
-   consistently while streaming and after session hydration. Both renderers are
-   cached by source text and width and run once per coalesced update.
-7. **Bound terminal work.** Tool output previews are bounded and sanitized before
-   entering the transcript. Full results remain in the session/protocol path.
-8. **Avoid render-side effects.** Update handlers mutate state; `View` composes
-   the frame. Layout work belongs to `WindowSizeMsg` or state transitions.
-9. **Keep the composer responsive.** Provider/app construction and agent work run
-   through commands; the Bubble Tea event loop must not perform network, file,
-   or process work directly. Mention discovery, fallback model lookup, session
-   listing/open/create, and branch listing are generation-tagged commands; stale
-   results are ignored after a picker closes or a newer request starts.
-10. **Fit exactly inside the terminal.** Startup and ready states share one frame
-   calculation based on `WindowSizeMsg`. Header, overlays, composer, and footer
-   are subtracted from the transcript viewport, and the final frame is bounded
-   to the reported width and height so output never creates terminal scrollback.
-11. **Grow the composer only when needed.** The composer is three rows while
-    empty, grows with explicit or soft-wrapped input, and caps at six rows.
-    `Ctrl+V` runs Bubbles' clipboard paste command and routes its asynchronous
-    result back to the textarea that requested it. Terminal-managed `Cmd+V`,
-    `Ctrl+Shift+V`, and equivalent shortcuts arrive as literal bracketed paste.
-    `Ctrl+J` inserts newlines while plain Enter submits. `Option+Return` is also
-    accepted when a macOS terminal reports Option as Meta/Alt, including the
-    split Escape-then-Return form. Additional input scrolls inside the textarea
-    instead of shrinking or displacing the transcript unpredictably.
-    Shift+Enter is not a distinct key in Bubble Tea v1's standard terminal key
-    model, so it is not advertised as a binding.
-12. **Keep active-run control visible.** While an agent prompt is running, one
-    measured row above the composer shows elapsed wall time and `esc to
-    interrupt`. The row disappears at `turn_done` or abort, and its height is
-    included in the same exact-frame calculation as other chrome.
-13. **Keep startup failures escapable.** App construction errors switch the
-    header, composer, and footer into a terminal error state. `Ctrl+C` and
-    `Ctrl+D` are handled before app-readiness checks so a failed or still-booting
-    TUI can always leave the alt-screen cleanly.
-14. **Use adaptive semantic themes.** The `tui.theme` setting supports
-    `default`, `dark`, `light`, and `high-contrast`. Default uses Lip Gloss
-    adaptive colors; selected/error/tool states retain text and glyph markers
-    so color is never the only meaning.
-15. **Prefer native selection by default.** The existing `tui.mouse` config
-    defaults to `false`, so Bubble Tea does not claim the mouse and ordinary
-    terminal drag selection/copy remains available. `tui.mouse: true` opts into
-    cell-motion reporting for wheel/trackpad transcript scrolling; terminals
-    may then require Shift or another configured override to select text. If the
-    early preference read fails, Snow leaves mouse capture off and lets normal
-    asynchronous startup display the configuration error.
+## Transcript controls
 
-## Tool event integration
+PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down always update the transcript
+viewport. In the default mouse mode, the wheel scrolls and drag selects
+ANSI/grapheme-aware transcript cells; releasing copies through OSC 52, with detected
+tmux/screen passthrough. Apple Terminal users can Fn-drag for zero-lag native
+selection. Double-click selects a word, triple-click a line, and edge dragging
+continues through off-screen rows. F6 disables reporting for bare native selection.
+The viewport follows new output only while already at bottom, and active application
+selections freeze their source snapshot.
 
-The agent emits `tool_start`, `tool_progress`, and `tool_end` events through the
-same subscription used by SDK, JSON, RPC, and TUI consumers. The TUI displays a
-simple native card:
+Bubble Tea v1 can expose fragmented SGR mouse reports as text in some terminals,
+so Snow retains defensive reconstruction before input reaches the textarea.
+Pasted mouse-looking text remains literal.
 
-```text
-▶ grep
-  ↳ searching text files
-✔ grep (4ms)
-  │ internal/tui/tui.go:330: ...
-```
+## Tool and run presentation
 
-Call IDs remain in protocol/session data for correlation but are intentionally
-hidden from the native transcript. Tool completion does not unlock the composer;
-only `turn_done` does, preventing a second prompt from racing a serial tool loop.
-PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down move only the transcript
-viewport; mouse wheel events do the same when `tui.mouse` is enabled. Bubble Tea
-v1 can expose a split SGR mouse report as text, so Snow retains its defensive
-complete/split report reconstruction (and fragmented Shift+Tab handling) before
-the textarea. Pasted mouse-looking text remains literal, while invalid partial
-reports time out and replay literally. Snow does not draw a scrollbar; a
-transient scrollbar at the edge of the window is terminal-emulator chrome
-rather than part of the TUI.
+`tool_start`, `tool_progress`, and `tool_end` share the same correlated event
+stream used by every surface. Tool completion does not unlock the composer;
+`turn_done`, abort, or a terminal goal boundary does. During active work, a
+measured status row shows elapsed time, queued input count, and the interrupt
+hint.
 
-During an active prompt, `Esc` cancels the run just like `Ctrl+C`. Modal states
-keep their focused behavior: `Esc` closes pickers/login and denies the current
-permission request instead of cancelling through the modal.
-
-## Reasoning stream presentation
-
-ChatGPT Responses reasoning summary/text deltas use the same mailbox-fed event
-path as answer text. Snow keeps their accumulated text append-only, renders it
-as muted Markdown, and retains the completed `think:` block in the transcript
-and resumed sessions. Completed Responses snapshots only fill a missing suffix;
-they never replace or duplicate already displayed deltas.
-
-Provider cadence is not guaranteed. While a model request is active but has not
-emitted reasoning or answer text, the transcript shows an animated `thinking…`
-placeholder. The placeholder is hidden during tools and permissions and returns
-after a tool completes while the follow-up model response is pending.
+Root `session_updated` events are idempotent invalidations. Snow coalesces bursts
+inside each UI batch and never reloads the complete SQLite branch while a turn
+is live; provider `usage` events update the context counter in constant time.
+A usage-less terminal boundary schedules one asynchronous projected-context
+refresh, so SQLite decoding cannot block keyboard handling. Idle hydration
+remains available for external session mutations, while explicit context
+refreshes read the projected branch only once. This keeps long,
+tool-heavy sessions from blocking keyboard handling with repeated full-history
+JSON decoding.
 
 ## Verification
 
+For layout or lifecycle changes run:
+
 ```sh
-gofmt -w internal/tui/*.go
+gofmt -w internal/tui/<changed-files>.go
 go test ./internal/tui -count=1
+go test -race ./internal/tui -count=1
 go test ./...
-go test -race ./internal/...
+go vet ./...
 ```
 
-When changing event batching, viewport behavior, layout, or Markdown rendering,
-add a model-level test under `internal/tui/` and verify both a narrow terminal
-and a normal terminal. Benchmarks cover mailbox ingestion, mention discovery,
-transcript refresh with large histories, and narrow/normal `View` layout. Do not
-benchmark by counting `View` calls alone: Bubble Tea invokes `View` after
-updates; the expensive operation to avoid here is rebuilding/reflowing
-transcript content and resetting viewport state.
+Manual checks should cover wheel and keyboard scrolling, drag/double/triple-click
+selection and clipboard copy, edge auto-scroll, the F6 native-selection fallback,
+streaming while scrolled away, resize, long composer input, modal replacement,
+abort, and clean alternate-screen restoration on exit.

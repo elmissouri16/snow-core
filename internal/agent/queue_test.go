@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/permission"
+	skillspkg "github.com/snow-core/snow/internal/skills"
 	"github.com/snow-core/snow/internal/tools"
 	"github.com/snow-core/snow/pkg/protocol"
 )
@@ -137,6 +140,41 @@ func TestQueuedInputPriorityAndOneAtATime(t *testing.T) {
 	}
 	if err := a.Steer("late"); !errors.Is(err, ErrNotRunning) {
 		t.Fatalf("late steer = %v, want ErrNotRunning", err)
+	}
+}
+
+func TestQueuedSkillMentionActivatesBeforeContinuation(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "review")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: review\ndescription: Review code.\n---\nqueued review instructions\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog := skillspkg.Discover(skillspkg.Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}})
+	defer catalog.Close()
+	registry := tools.NewRegistry()
+	if err := skillspkg.RegisterTools(registry, catalog); err != nil {
+		t.Fatal(err)
+	}
+	p := newQueuedProvider([]protocol.StreamEvent{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}})
+	a, _ := setup(t, p, registry, permission.ModeDeny)
+	done := make(chan error, 1)
+	go func() { done <- a.Prompt(context.Background(), "initial") }()
+	<-p.started
+	if err := a.Steer("$review Use this skill now."); err != nil {
+		t.Fatal(err)
+	}
+	close(p.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	requests := append([]protocol.ChatRequest(nil), p.requests...)
+	p.mu.Unlock()
+	if len(requests) != 2 || strings.Contains(requests[0].System, "queued review instructions") || !strings.Contains(requests[1].System, "queued review instructions") {
+		t.Fatalf("queued activation requests = %+v", requests)
 	}
 }
 

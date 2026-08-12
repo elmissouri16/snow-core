@@ -3,8 +3,10 @@ package snowsdk
 import (
 	"context"
 	"errors"
-	"github.com/snow-core/snow/pkg/protocol"
 	"testing"
+
+	"github.com/snow-core/snow/internal/session"
+	"github.com/snow-core/snow/pkg/protocol"
 )
 
 func TestSDKGoalMethodsStopped(t *testing.T) {
@@ -47,6 +49,17 @@ func TestSDKGoalLifecycleAndAbort(t *testing.T) {
 	g, e := s.CreateGoal("ship", nil, false)
 	if e != nil {
 		t.Fatal(e)
+	}
+	active, err := s.activeApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := active.Session.(session.ThreadGoalStore).AccountGoal(g.GoalID, 10, 1, &protocol.Cost{Currency: "USD", Total: 0.02}); err != nil {
+		t.Fatal(err)
+	}
+	g, err = s.Goal()
+	if err != nil || len(g.EstimatedCosts) != 1 || g.EstimatedCosts[0].Total != 0.02 {
+		t.Fatalf("SDK estimated costs=%+v err=%v", g.EstimatedCosts, err)
 	}
 	s.Abort(context.Background())
 	g, e = s.PauseGoal()

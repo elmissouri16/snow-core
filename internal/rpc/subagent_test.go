@@ -17,7 +17,7 @@ func TestRPCSubagentCommandsAndFraming(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	input := strings.Join([]string{`{"id":"r","type":"subagent_ready"}`, `{"id":"s","type":"subagent_spawn","params":{"task_name":"rpc","message":"inspect","fork_turns":"none"}}`, `{"id":"l","type":"subagent_list"}`}, "\n") + "\n"
+	input := strings.Join([]string{`{"id":"r","type":"subagent_ready"}`, `{"id":"s","type":"subagent_spawn","params":{"name":"rpc","task":"inspect","fork_turns":"none"}}`, `{"id":"l","type":"subagent_list"}`}, "\n") + "\n"
 	var out bytes.Buffer
 	s := New(context.Background(), a, strings.NewReader(input), &out)
 	if err := s.Serve(context.Background()); err != nil {
@@ -55,7 +55,7 @@ func TestRPCSubagentWaitUntilAll(t *testing.T) {
 	s := New(context.Background(), a, strings.NewReader(""), &out)
 	for _, req := range []Request{
 		{ID: "r", Type: "subagent_ready"},
-		{ID: "s", Type: "subagent_spawn", Params: json.RawMessage(`{"task_name":"rpc_wait","message":"inspect","fork_turns":"none"}`)},
+		{ID: "s", Type: "subagent_spawn", Params: json.RawMessage(`{"name":"rpc_wait","task":"inspect","fork_turns":"none"}`)},
 		{ID: "w", Type: "subagent_wait", Params: json.RawMessage(`{"timeout_ms":1000,"until":"all"}`)},
 	} {
 		if err := s.handle(context.Background(), req); err != nil {

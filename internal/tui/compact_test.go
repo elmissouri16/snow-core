@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/snow-core/snow/internal/app"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -23,6 +24,31 @@ func TestModelStartupStaysOutOfTranscript(t *testing.T) {
 		if strings.Contains(transcript, noisy) {
 			t.Fatalf("startup noise %q leaked into transcript: %q", noisy, transcript)
 		}
+	}
+}
+
+func TestIdleSpinnerStopsAndRestarts(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+
+	if _, cmd := m.Update(spinner.TickMsg{}); cmd != nil || m.spinnerRunning {
+		t.Fatalf("idle spinner remained armed: cmd=%v running=%v", cmd != nil, m.spinnerRunning)
+	}
+
+	if _, cmd := m.Update(agentEventBatchMsg{events: []protocol.AgentEvent{{Type: protocol.EvTextDelta, TurnID: "turn-1", Text: "a"}}}); cmd == nil || !m.spinnerRunning {
+		t.Fatalf("busy transition did not start spinner: cmd=%v running=%v", cmd != nil, m.spinnerRunning)
+	}
+	if _, cmd := m.Update(spinner.TickMsg{}); cmd == nil || !m.spinnerRunning {
+		t.Fatalf("busy spinner did not re-arm: cmd=%v running=%v", cmd != nil, m.spinnerRunning)
+	}
+
+	m.setRunIdle()
+	if _, cmd := m.Update(spinner.TickMsg{}); cmd != nil || m.spinnerRunning {
+		t.Fatalf("completed spinner remained armed: cmd=%v running=%v", cmd != nil, m.spinnerRunning)
+	}
+	m.editor.SetValue("/compact")
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil || !m.spinnerRunning || !m.compacting {
+		t.Fatalf("compaction did not restart spinner: cmd=%v running=%v compacting=%v", cmd != nil, m.spinnerRunning, m.compacting)
 	}
 }
 

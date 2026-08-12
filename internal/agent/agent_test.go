@@ -2,12 +2,15 @@ package agent
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +20,7 @@ import (
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/provider"
 	"github.com/snow-core/snow/internal/session"
+	skillspkg "github.com/snow-core/snow/internal/skills"
 	"github.com/snow-core/snow/internal/tools"
 	"github.com/snow-core/snow/internal/tools/builtin"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -26,13 +30,129 @@ import (
 // Scripted provider used in tests
 // ---------------------------------------------------------------------------
 
+func TestMalformedToolArgumentsRemainPersistableInSQLite(t *testing.T) {
+	st, err := session.NewSQLiteStore(filepath.Join(t.TempDir(), "session.db"), t.TempDir(), session.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	malformed, _ := json.Marshal(`{"bad"`)
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "call-1", ToolName: "read", Arguments: malformed}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+		{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}}
+	a, err := New(Options{
+		Provider: p, Registry: tools.NewRegistry(), Session: st,
+		Permission: permission.NewService(permission.ModeDeny, nil),
+		Model:      protocol.Model{Provider: p.ID(), ID: "m", SupportsTools: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "read"); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := st.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, message := range messages {
+		if message.Role == protocol.RoleTool && message.IsError && strings.Contains(messageTextForTest(message), "not valid JSON") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("malformed-argument tool result missing: %+v", messages)
+	}
+}
+
+func TestTurnEventsCarryOneCorrelatedIdentity(t *testing.T) {
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamThinkingDelta, Text: "reason"},
+		{Type: protocol.EvStreamTextDelta, Text: "answer"},
+		{Type: protocol.EvStreamUsage, Usage: &protocol.Usage{Input: 3, Output: 2}},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+	}}}
+	a, err := New(Options{
+		Provider: p, Registry: tools.NewRegistry(), Session: session.NewMemoryStore(session.Options{}),
+		Permission: permission.NewService(permission.ModeAllow, nil),
+		Model: protocol.Model{Provider: p.ID(), ID: "m", SupportsThinking: true,
+			ThinkingLevels: []protocol.ThinkingLevel{protocol.ThinkingOff}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	var events []protocol.AgentEvent
+	a.Subscribe(func(ev protocol.AgentEvent) { events = append(events, ev) })
+	if err := a.Prompt(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	turnID := ""
+	for _, ev := range events {
+		if ev.TurnID == "" {
+			t.Fatalf("turn event %s has no turn ID: %+v", ev.Type, ev)
+		}
+		if turnID == "" {
+			turnID = ev.TurnID
+		}
+		if ev.TurnID != turnID || ev.TurnOrigin != "user" {
+			t.Fatalf("event identity=%q/%q want user/%q for %s", ev.TurnOrigin, ev.TurnID, turnID, ev.Type)
+		}
+	}
+	if turnID == "" {
+		t.Fatal("no turn events")
+	}
+}
+
+func messageTextForTest(message protocol.Message) string {
+	var out strings.Builder
+	for _, block := range message.Content {
+		out.WriteString(block.Text)
+	}
+	return out.String()
+}
+
+func TestRequestAffinityKeyIsStableScopedAndOpaque(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	a := &Agent{opts: Options{Session: st}}
+	turn := a.requestAffinityKey("turn")
+	if len(turn) != 64 {
+		t.Fatalf("turn affinity length=%d", len(turn))
+	}
+	if _, err := hex.DecodeString(turn); err != nil {
+		t.Fatalf("turn affinity is not safe hex: %q", turn)
+	}
+	if turn != a.requestAffinityKey("turn") {
+		t.Fatal("turn affinity changed within one branch")
+	}
+	if strings.Contains(turn, st.ID()) {
+		t.Fatal("raw session id leaked into affinity")
+	}
+	if compact := a.requestAffinityKey("compaction"); compact == turn {
+		t.Fatal("compaction reused ordinary turn affinity")
+	}
+	oldBranch := st.ActiveBranchID()
+	if _, err := st.ForkBranch(st.BranchTip()); err != nil {
+		t.Fatal(err)
+	}
+	if st.ActiveBranchID() == oldBranch {
+		t.Fatal("fork did not change active branch")
+	}
+	if forked := a.requestAffinityKey("turn"); forked == turn || strings.Contains(forked, st.ActiveBranchID()) {
+		t.Fatalf("fork affinity not independently opaque: %q", forked)
+	}
+}
+
 type scriptedProvider struct {
-	mu         sync.Mutex
-	scripts    [][]protocol.StreamEvent // per Chat call
-	call       int
-	resolveErr error
-	models     []protocol.Model
-	requests   []protocol.ChatRequest
+	mu          sync.Mutex
+	scripts     [][]protocol.StreamEvent // per Chat call
+	call        int
+	resolveErr  error
+	models      []protocol.Model
+	requests    []protocol.ChatRequest
+	credentials []auth.Credential
 }
 
 func TestActivatedSkillsRestoredIntoSystemContext(t *testing.T) {
@@ -60,7 +180,224 @@ func TestActivatedSkillsRestoredIntoSystemContext(t *testing.T) {
 	}
 }
 
+func TestRestoredSkillsHonorCurrentPolicy(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	activation := "<skill_content name=\"review\">\nfollow review workflow\n</skill_content>"
+	msg := protocol.NewToolResultMessage("skill-result", "", "call-1", "activate_skill", []protocol.ContentBlock{protocol.NewTextBlock(activation)}, false)
+	if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+		t.Fatal(err)
+	}
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	a, err := New(Options{
+		Provider: p, Registry: tools.NewRegistry(), Session: st,
+		Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{},
+		Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.requests) != 1 || strings.Contains(p.requests[0].System, "follow review workflow") {
+		t.Fatalf("disabled skill leaked into system prompt: %q", p.requests[0].System)
+	}
+}
+
+func TestRestoredSkillUsesCurrentCatalogContent(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "review")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: review\ndescription: Current review skill.\n---\ncurrent trusted instructions\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog := skillspkg.Discover(skillspkg.Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}})
+	defer catalog.Close()
+	registry := tools.NewRegistry()
+	if err := skillspkg.RegisterTools(registry, catalog); err != nil {
+		t.Fatal(err)
+	}
+	st := session.NewMemoryStore(session.Options{})
+	old := "<skill_content name=\"review\">\nstale untrusted project instructions\n</skill_content>"
+	msg := protocol.NewToolResultMessage("skill-result", "", "call-1", "activate_skill", []protocol.ContentBlock{protocol.NewTextBlock(old)}, false)
+	if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+		t.Fatal(err)
+	}
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	a, err := New(Options{Provider: p, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.requests) != 1 || !strings.Contains(p.requests[0].System, "current trusted instructions") || strings.Contains(p.requests[0].System, "stale untrusted") {
+		t.Fatalf("restored current skill system = %q", p.requests[0].System)
+	}
+}
+
+func TestHistoricalMentionWithoutSuccessMarkerDoesNotActivate(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "review")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: review\ndescription: Current review skill.\n---\nmust not activate retroactively\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog := skillspkg.Discover(skillspkg.Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}})
+	defer catalog.Close()
+	registry := tools.NewRegistry()
+	if err := skillspkg.RegisterTools(registry, catalog); err != nil {
+		t.Fatal(err)
+	}
+	st := session.NewMemoryStore(session.Options{})
+	user := protocol.NewUserMessage("historical", "", "$review this predates installation")
+	if err := st.Append(session.Entry{Type: session.EntryMessage, ID: user.ID, Message: &user}); err != nil {
+		t.Fatal(err)
+	}
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	a, err := New(Options{Provider: p, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.requests) != 1 || strings.Contains(p.requests[0].System, "must not activate retroactively") {
+		t.Fatalf("historical mention activated without marker: %q", p.requests[0].System)
+	}
+}
+
+func TestExplicitSkillDirectiveParsing(t *testing.T) {
+	candidates := []string{"review", "docs"}
+	for _, test := range []struct {
+		text string
+		want []string
+	}{
+		{"$review do work", []string{"review"}},
+		{"  $review $docs do work", []string{"review", "docs"}},
+		{"Use $review in pasted prose", nil},
+		{"quoted text\n$review", nil},
+		{"$reviewer", nil},
+		{"$review $review once", []string{"review"}},
+	} {
+		if got := explicitSkillNames(test.text, candidates); !slices.Equal(got, test.want) {
+			t.Errorf("explicitSkillNames(%q) = %v, want %v", test.text, got, test.want)
+		}
+	}
+}
+
+func TestExplicitSkillMentionActivatesAndRestoresWithoutModelToolCall(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, "skills")
+	dir := filepath.Join(root, "review")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: review\ndescription: Review code.\n---\nfollow explicit review workflow\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog := skillspkg.Discover(skillspkg.Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}})
+	defer catalog.Close()
+	registry := tools.NewRegistry()
+	if err := skillspkg.RegisterTools(registry, catalog); err != nil {
+		t.Fatal(err)
+	}
+	st := session.NewMemoryStore(session.Options{})
+	firstProvider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	first, err := New(Options{Provider: firstProvider, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var eventMu sync.Mutex
+	var skillEvents []protocol.AgentEventType
+	first.Subscribe(func(event protocol.AgentEvent) {
+		if event.ToolName == "activate_skill" && (event.Type == protocol.EvToolStart || event.Type == protocol.EvToolEnd) {
+			eventMu.Lock()
+			skillEvents = append(skillEvents, event.Type)
+			eventMu.Unlock()
+		}
+	})
+	if err := first.Prompt(context.Background(), "$review Use this skill for the change."); err != nil {
+		t.Fatal(err)
+	}
+	if len(firstProvider.requests) != 1 || len(firstProvider.requests[0].Messages) != 1 || firstProvider.requests[0].Messages[0].Role != protocol.RoleUser || !strings.Contains(firstProvider.requests[0].System, "follow explicit review workflow") {
+		t.Fatalf("explicit activation system prompt = %q", firstProvider.requests[0].System)
+	}
+	entries, err := st.BranchEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	markerFound := false
+	for _, entry := range entries {
+		markerFound = markerFound || entry.Type == session.EntryMeta && entry.Key == skillActivationMeta && entry.Value == "review"
+	}
+	if !markerFound {
+		t.Fatalf("direct activation marker missing: %+v", entries)
+	}
+	eventMu.Lock()
+	observedEvents := append([]protocol.AgentEventType(nil), skillEvents...)
+	eventMu.Unlock()
+	if !slices.Equal(observedEvents, []protocol.AgentEventType{protocol.EvToolStart, protocol.EvToolEnd}) {
+		t.Fatalf("direct activation lifecycle events = %v", observedEvents)
+	}
+
+	secondProvider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	resumed, err := New(Options{Provider: secondProvider, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resumed.Prompt(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+	if len(secondProvider.requests) != 1 || !strings.Contains(secondProvider.requests[0].System, "follow explicit review workflow") {
+		t.Fatalf("restored explicit activation system prompt = %q", secondProvider.requests[0].System)
+	}
+}
+
 func (p *scriptedProvider) ID() string { return "scripted" }
+
+type namedScriptedProvider struct {
+	*scriptedProvider
+	id string
+}
+
+func (p *namedScriptedProvider) ID() string { return p.id }
+
+func TestExplicitAPIKeyIsBoundToInitialProvider(t *testing.T) {
+	first := &namedScriptedProvider{scriptedProvider: &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}, id: "first"}
+	second := &namedScriptedProvider{scriptedProvider: &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}, id: "second"}
+	store := auth.NewMemoryStoreForTest()
+	if err := store.Put("second", auth.Credential{Type: auth.CredentialAPIKey, Key: "second-key"}); err != nil {
+		t.Fatal(err)
+	}
+	a, err := New(Options{
+		Provider: first, Registry: tools.NewRegistry(), Session: session.NewMemoryStore(session.Options{}),
+		Permission: permission.NewService(permission.ModeDeny, nil), Auth: store,
+		Model: protocol.Model{Provider: "first", ID: "m", SupportsTools: true}, APIKey: "first-key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetProviderAndModel(second, protocol.Model{Provider: "second", ID: "m", SupportsTools: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "second"); err != nil {
+		t.Fatal(err)
+	}
+	if got := first.credentials[0].Key; got != "first-key" {
+		t.Fatalf("first credential = %q", got)
+	}
+	if got := second.credentials[0].Key; got != "second-key" {
+		t.Fatalf("second credential = %q, explicit key crossed provider boundary", got)
+	}
+}
 
 func (p *scriptedProvider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 	return p.models, nil
@@ -83,6 +420,7 @@ func (p *scriptedProvider) Chat(ctx context.Context, creds auth.Credential, req 
 		}
 	}
 	p.requests = append(p.requests, req)
+	p.credentials = append(p.credentials, creds)
 	p.call++
 	return &sliceStream{evs: evs, ctx: ctx}, nil
 }
@@ -607,7 +945,7 @@ func TestChildBashPermissionAndExecution(t *testing.T) {
 				Provider: prov, Registry: reg, Session: st, Permission: perm,
 				ToolHost: &testHost{cwd: cwd, perm: perm},
 				Model:    protocol.Model{Provider: prov.ID(), ID: "m1", SupportsTools: true},
-				Identity: &protocol.AgentRef{ThreadID: "child", ParentThreadID: "root", Path: "/root/child", ParentPath: "/root", Role: "default", Depth: 1},
+				Identity: &protocol.AgentRef{ThreadID: "child", ParentThreadID: "root", Path: "/root/child", ParentPath: "/root", Role: "general", Depth: 1},
 				Auth:     auth.NewMemoryStoreForTest(),
 			})
 			if err != nil {

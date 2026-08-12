@@ -116,6 +116,8 @@ github.com/snow-core/snow
 │   ├── agent                # turn loop, tool dispatch, abort, retries
 │   ├── provider             # Provider/Model/Stream + adapters
 │   │   ├── opencodego       # OpenCode Go adapter
+│   │   ├── openaicompat     # user-configured Responses/Chat Completions adapter
+│   │   ├── responsesapi     # shared bounded Responses wire codec
 │   │   └── chatgpt          # ChatGPT / Codex OAuth adapter
 │   ├── auth                 # credential store, OAuth browser/device flows
 │   ├── tools                # Tool interface, builtins, RPC host
@@ -329,7 +331,7 @@ type ChatRequest struct {
     System       string
     MaxTokens    int
     Temperature  *float64
-    Thinking     ThinkingLevel // off|minimal|low|medium|high
+    Thinking     ThinkingLevel // off|minimal|low|medium|high|xhigh|max|ultra
     // Model.ThinkingLevels is authoritative; unsupported non-off effort is rejected.
     // provider-specific extras isolated in adapter options
 }
@@ -749,6 +751,7 @@ For a provider P:
 | Provider | Env var | auth.json key |
 |----------|---------|---------------|
 | OpenCode Go | `OPENCODE_API_KEY` | `opencode-go` |
+| OpenAI-compatible | `OPENAI_API_KEY` (optional) | `openai-compatible` |
 | ChatGPT Codex | *(none for OAuth)* | `chatgpt` |
 
 > Note: pi stores OpenCode Go under `opencode-go` and also accepts `OPENCODE_API_KEY` shared with OpenCode Zen. snow MVP **only** wires OpenCode Go; do not silently alias Zen models unless added later.
@@ -799,8 +802,10 @@ For a provider P:
 **Current implementation status:** `internal/provider/chatgpt` performs a
 side-effect-free check of OAuth credentials, browser PKCE and device-code login,
 compatible credential imports, guarded automatic refresh, an origin-and-account-scoped
-ETag model cache, and Codex Responses SSE streaming. The TUI/CLI report
-configured, expired, or missing ChatGPT auth without refreshing during checks.
+ETag model cache, and hardened Codex Responses SSE streaming with branch-scoped
+prompt affinity, zstd compression, bounded pre-output transient retries, structured
+error diagnostics, and mandatory terminal events. The TUI/CLI report configured,
+expired, or missing ChatGPT auth without refreshing during checks.
 The implementation and endpoint notes below follow current official Codex behavior.
 
 **Role:** subscription path for users with ChatGPT Plus/Pro via Codex-for-OSS compatible auth.
@@ -824,7 +829,7 @@ The implementation and endpoint notes below follow current official Codex behavi
 
 **Logout:** delete the `chatgpt` credential and reset the in-memory catalog to the bundled fallback.
 
-**Refresh:** before `Chat`, refresh credentials expiring within five minutes under the cross-process auth-store lock. A pre-stream 401 permits one guarded forced refresh and one retry; permanent refresh rejection requests re-login, while transient failures preserve the credential.
+**Refresh and inference resilience:** before `Chat`, refresh credentials expiring within five minutes under the cross-process auth-store lock. A pre-stream 401 permits one guarded forced refresh and one retry; permanent refresh rejection requests re-login, while transient failures preserve the credential. Inference uses a non-secret SHA-256 session/branch/purpose affinity key in the Codex body and headers, zstd-compresses bodies at 32 KiB, and retries network, 408, 500, 502, 503, 504, or immediate pre-output overload/truncation failures twice with capped `Retry-After`-aware backoff. It never retries after normalized stream activity or for usage/client errors. WebSocket continuation remains deferred.
 
 #### Compliance and risk (explicit)
 
@@ -834,16 +839,39 @@ The implementation and endpoint notes below follow current official Codex behavi
 - Document in README: user is responsible for account eligibility (Plus/Pro) and acceptable use.
 - Never log access/refresh tokens.
 
-### 5.5 Provider registry
+### 5.5 OpenAI-compatible Responses and Chat Completions
+
+`internal/provider/openaicompat` is the single user-configured compatible
+provider (`openai-compatible`). It requires an absolute HTTP(S) API root or full
+`/responses`/`/chat/completions` URL, derives sibling `GET /models`, and uses
+optional Bearer auth from explicit options, `auth.json`, or `OPENAI_API_KEY`.
+ID-only model records are tool-capable; optional image/reasoning/summary/verbosity
+fields are emitted only from advertised metadata. Responses is preferred and
+uses the bounded request/SSE codec shared with ChatGPT through
+`internal/provider/responsesapi`. An HTTP 404/405/501 from Responses selects and
+caches a Chat Completions/SSE fallback backed by the bounded OpenCode-compatible
+codec; OAuth, Codex headers, refresh, and catalog behavior remain isolated.
+
+There is no default endpoint. Discovery chooses the first valid model only when
+no explicit/default model exists; otherwise unavailable discovery is nonfatal.
+V1 excludes multiple named compatible endpoints and custom/Azure headers and
+query parameters. The TUI `/login openai-compatible`
+flow transactionally captures the endpoint and optional masked key, rebuilds the
+runtime adapter, and refreshes discovery. Configured endpoints are
+operator-trusted; userinfo/query/fragment URLs and cross-origin redirects are
+rejected, and provider errors redact active keys.
+
+### 5.6 Provider registry
 
 ```go
 registry.Register(opencodego.New(cfg))
+registry.Register(openaicompat.New(cfg))
 registry.Register(chatgpt.New(cfg, oauthRunner))
 ```
 
-CLI `--provider opencode-go --model <id>` and TUI `/model` both resolve through the same registry.
+CLI `--provider <id> --model <id>` and TUI `/model` both resolve through the same registry.
 
-### 5.6 Implementation-time verify checklist (providers)
+### 5.7 Implementation-time verify checklist (providers)
 
 Must be completed in Phase 1–2 coding, results folded into adapter constants/tests:
 
@@ -878,7 +906,7 @@ Must be completed in Phase 1–2 coding, results folded into adapter constants/t
 │ header (optional): version, shortcuts hint               │
 ├──────────────────────────────────────────────────────────┤
 │                                                          │
-│  transcript (viewport)                                   │
+│  finalized transcript (native terminal scrollback)       │
 │   - user bubbles                                         │
 │   - assistant markdown + persistent streamed thinking    │
 │   - tool cards (name, status, truncated output)          │
@@ -905,7 +933,7 @@ Must be completed in Phase 1–2 coding, results folded into adapter constants/t
 | `/new` | 1 | New session |
 | `/resume [path]` | 2 | Pick a current-directory session, or resume an explicit SQLite path |
 | `/permissions` | 2 | ask/allow/deny; interactive Allow/Allow-always/Deny picker on requests (no typing) |
-| `/compact` | 2 | Manual compaction |
+| `/compact` | 2 | Manual compaction; active goals also compact automatically at a configurable context threshold |
 | `/sessions` | 2 | Open a compact picker for persisted sessions in the current directory |
 | `/tree` | 4 | Select or fork a durable branch in the active session |
 | `/quit` | 1 | Exit |
@@ -920,7 +948,10 @@ Must be completed in Phase 1–2 coding, results folded into adapter constants/t
 | `ctrl+c` / `esc` | Abort running turn, clear queues, and restore queued TUI text |
 | `ctrl+d` | Quit on empty editor |
 | `ctrl+l` | `/model` |
-| `pgup/pgdn` | Transcript scroll |
+| wheel/trackpad (`tui.mouse: true`) | Scroll transcript viewport |
+| primary-button drag (`tui.mouse: true`) | Select, highlight, and copy transcript text |
+| `F6` | Toggle app mouse handling/native terminal selection |
+| `pgup/pgdn` | Scroll transcript viewport |
 
 Implemented: versioned YAML overrides load from `$SNOW_HOME/keybindings.yaml`
 and trusted project `.snow/keybindings.yaml`; custom semantic adaptive themes
@@ -943,9 +974,9 @@ precedence, strict validation, diagnostics, and safe emergency bindings.
 | `error` | Error banner |
 
 **Performance:** Bubble Tea renders after every `Update`, so the TUI coalesces
-queued stream events (bounded batch), caches transcript content, avoids redundant
-viewport `SetContent`, preserves scroll position when the user scrolls up, and
-only follows the tail when already at the bottom. See `docs/tui-performance.md`.
+queued stream events (bounded batch), caches stable transcript rendering, and
+composes one alternate-screen frame from a sticky header, Bubbles viewport,
+composer, and footer. `tui.mouse` defaults on so wheel input stays inside Snow; cell-motion mode also provides application-owned drag selection/copy. Runtime F6 toggles native selection mode, and Apple Terminal supports Fn-drag as its native-selection override while mouse mode remains enabled. It does not change renderer ownership. See `docs/tui-performance.md`.
 
 ### 6.6 Themes
 
@@ -1092,7 +1123,7 @@ Primary consumers: non-Go hosts, IDE bridges. Go hosts should prefer `snowsdk`.
   },
   "tui": {
     "theme": "default",
-    "mouse": false
+    "mouse": true
   }
 }
 ```
@@ -1251,12 +1282,16 @@ preserve unrelated and unknown config fields; all inspection output redacts
 credential-bearing values.
 
 `internal/skills` implements the open Agent Skills `SKILL.md` format. Startup
-discovery loads only validated names/descriptions from standard user and
-trust-gated project paths. `activate_skill` loads full instructions and
-`read_skill_resource` confines on-demand resources to the selected directory.
+discovery strictly validates standard metadata and loads only names/descriptions
+from standard user and trust-gated project paths under a 64 KiB catalog budget.
+`activate_skill` loads escaped full instructions, the TUI autocompletes enabled
+leading `$skill-name` directives, and a directive activates before provider
+dispatch while recording branch-scoped state,
+and `read_skill_resource` verifies the discovery-time directory identity before
+using a pinned per-operation `os.Root` for bounded streaming resource access.
 Activated content is reattached on every provider call and reconstructed from
-session history after resume so compaction does not drop it. See
-`docs/skills.md`.
+successful markers/session history after resume so compaction does not drop it;
+current trust/disable/tool policy filters stale activations. See `docs/skills.md`.
 
 Discovery retains a management inventory alongside the enabled catalog.
 Global and trust-gated project `skills.disabled`/`skills.overrides` policy can
@@ -1374,7 +1409,7 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] Provider: **OpenCode Go** streaming chat + tools
 - [x] OpenCode Go startup model discovery with live availability, models.dev
   capability/reasoning enrichment, and a conservative static fallback
-- [x] Normalized model-aware reasoning effort (`off|minimal|low|medium|high`) across provider adapters
+- [x] Normalized model-aware reasoning effort (`off|minimal|low|medium|high|xhigh|max|ultra`) across provider adapters
 - [x] Auth: API key from env + `auth.json`
 - [x] Print mode: `snow -p "..."` 
 - [x] Basic TUI: transcript + editor + footer, always-visible context usage, and `/model` `/new` `/quit`
@@ -1593,7 +1628,7 @@ persistence, and shutdown. Every child is an ordinary `internal/agent.Agent`;
 `agent` does not import `subagent`, and collaboration enters through registered
 tools plus its generic attributed mailbox.
 
-The six direct model tools are `spawn_agent`, `send_message`, `followup_task`,
+The seven direct model tools are `spawn_agent`, `list_subagent_models`, `send_message`, `followup_task`,
 `wait_agent`, `interrupt_agent`, and `list_agents`. Tool instances bind caller
 identity. Spawn/follow-up use `permission.RiskDelegate`; remaining controls use
 read risk. `wait_agent` supports the original next-activity barrier and an
@@ -1602,7 +1637,7 @@ and RPC expose the same bounded join. The native TUI hides successful control
 JSON and renders compact lifecycle/count summaries. The feature defaults off, max concurrency is four simultaneously
 running children (the root does not consume a slot), depth defaults to one, and
 child authority is role-scoped: the
-`default`/general and `worker` roles may use permission-gated `bash`, while
+`general` and `implementer` roles may use permission-gated `bash`, while
 `explorer` remains read/search-only. Recursion and file mutation are independent
 intersections of global and role policy; write/edit require both mutation
 switches.
@@ -1670,7 +1705,8 @@ snow -p "prompt"              # print mode
 snow --mode json -p "..."     # JSONL events
 snow --provider opencode-go --model <id>
 snow --permission ask|allow|deny
-snow --session <path>
+snow resume [path]            # current-project picker, or explicit path
+snow --session <path>         # lower-level explicit session selection
 snow --trust                  # headless trust project
 snow version
 snow login chatgpt            # optional non-TUI helper (phase 2)
@@ -1680,12 +1716,13 @@ snow login chatgpt            # optional non-TUI helper (phase 2)
 
 ## 18. Persistent Thread Goals (implemented)
 
-Saved branches carry an atomic goal row and continuation-deferral state in
-SQLite schema v4. `internal/goal` owns validated status transitions,
+Saved branches carry atomic goal, per-currency estimated-cost, and
+continuation-deferral state in SQLite schema v8. `internal/goal` owns validated status transitions,
 model-facing tools, private user-role steering, three-turn blocked gating,
 sub-second accounting remainder, and confined goal-ID-owned objective files.
-SQLite updates usage atomically across database handles; forks copy managed
-objective resources before either branch may clean them up.
+SQLite updates token/time/cost usage atomically across database handles; forks
+copy accumulated per-currency estimates and managed objective resources before
+either branch may clean them up.
 
 The agent owns automatic serial turns, cancellation/join (including the
 pre-first-turn window), cumulative provider-usage snapshot handling, one

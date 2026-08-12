@@ -275,10 +275,30 @@ func (m *Model) renderUserInput() string {
 	b.WriteString(styleTool.Render(truncateRunes(title, width)) + "\n")
 	wrapped := xansi.Wordwrap(question.Question, width, "")
 	wrapped = xansi.Hardwrap(wrapped, width, true)
+	editorView := ""
+	if m.userInputEditing {
+		editorView = styleComposer.Width(width).Render(m.userInputEditor.View())
+	}
+	if m.inlineModalOverlay() {
+		// Keep every actionable row visible inside the fixed inline frame. A valid
+		// question can be 1,000 characters, so letting prose consume the frame
+		// would hide all choices (or the free-form editor) below the truncation
+		// boundary. Only the descriptive question text is elided.
+		reserved := 2 // title + controls hint
+		if m.userInputError != "" {
+			reserved++
+		}
+		if m.userInputEditing {
+			reserved += lipgloss.Height(editorView)
+		} else {
+			reserved += len(question.Options) + 1 // choices + Other
+		}
+		wrapped = truncateOverlayLines(wrapped, max(1, m.availableOverlayHeight()-reserved))
+	}
 	b.WriteString(styleAssistant.Render(wrapped) + "\n")
 
 	if m.userInputEditing {
-		b.WriteString(styleComposer.Width(width).Render(m.userInputEditor.View()) + "\n")
+		b.WriteString(editorView + "\n")
 		b.WriteString(styleFooter.Render("(Enter accept · Ctrl+V paste · Ctrl+J newline · Tab next · Shift+Tab previous · Esc decline)"))
 	} else {
 		for i, option := range question.Options {
@@ -307,4 +327,15 @@ func (m *Model) renderUserInput() string {
 		b.WriteString("\n" + styleError.Render(truncateRunes(m.userInputError, width)))
 	}
 	return strings.TrimSuffix(lipgloss.NewStyle().MaxWidth(width).Render(b.String()), "\n")
+}
+
+func truncateOverlayLines(value string, limit int) string {
+	lines := strings.Split(value, "\n")
+	if limit <= 0 || len(lines) <= limit {
+		return value
+	}
+	lines = lines[:limit]
+	last := strings.TrimRight(lines[len(lines)-1], " …")
+	lines[len(lines)-1] = last + "…"
+	return strings.Join(lines, "\n")
 }

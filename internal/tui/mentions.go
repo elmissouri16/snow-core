@@ -173,17 +173,19 @@ func (m *Model) renderMentionPicker() string {
 	if !m.mentionVisible || len(m.mentionMatches) == 0 {
 		return ""
 	}
-	start := 0
-	end := len(m.mentionMatches)
-	if end > 8 {
-		end = 8
+	limit := 8
+	if m.inlineInputOverlay() {
+		limit = min(limit, m.availableOverlayHeight())
 	}
+	limit = max(1, limit)
+	start := 0
+	end := min(len(m.mentionMatches), limit)
 	if m.mentionIndex >= end {
-		start = m.mentionIndex - 7
-		end = start + 8
+		start = m.mentionIndex - limit + 1
+		end = start + limit
 		if end > len(m.mentionMatches) {
 			end = len(m.mentionMatches)
-			start = end - 8
+			start = end - limit
 		}
 	}
 	var b strings.Builder

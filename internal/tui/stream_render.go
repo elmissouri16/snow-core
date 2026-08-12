@@ -59,6 +59,9 @@ func (m *Model) catchUpTranscriptAtBottom() {
 }
 
 func (m *Model) applyMouse(msg tea.MouseMsg) tea.Cmd {
+	if handled, cmd := m.applyTranscriptSelectionMouse(msg); handled {
+		return cmd
+	}
 	var cmd tea.Cmd
 	m.transcript, cmd = m.transcript.Update(msg)
 	m.catchUpTranscriptAtBottom()

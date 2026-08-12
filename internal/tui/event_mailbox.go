@@ -21,6 +21,32 @@ type queuedAgentEvent struct {
 	textParts []string
 }
 
+// coalesceRootSessionUpdates keeps only the latest root-session invalidation in
+// one UI batch. Session updates carry no payload: reading the latest store state
+// satisfies every earlier invalidation, while child-session lifecycle events
+// remain independently observable.
+func coalesceRootSessionUpdates(events []protocol.AgentEvent) []protocol.AgentEvent {
+	last := -1
+	count := 0
+	for i, event := range events {
+		if event.Type == protocol.EvSessionUpdated && event.Agent == nil {
+			last = i
+			count++
+		}
+	}
+	if count < 2 {
+		return events
+	}
+	coalesced := make([]protocol.AgentEvent, 0, len(events)-count+1)
+	for i, event := range events {
+		if event.Type == protocol.EvSessionUpdated && event.Agent == nil && i != last {
+			continue
+		}
+		coalesced = append(coalesced, event)
+	}
+	return coalesced
+}
+
 // agentEventMailbox is a lossless, ordered handoff from agent callbacks to the
 // Bubble Tea update loop. Producers never wait for the UI consumer. Adjacent
 // stream deltas are represented as parts and joined only when a batch is

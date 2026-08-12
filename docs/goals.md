@@ -6,15 +6,16 @@ persisted-session error there.
 
 Statuses are `active`, `paused`, `blocked`, `usage_limited`, `budget_limited`,
 and `complete`. `complete` and `budget_limited` are terminal. Pause is valid only
-from active; resume is valid only from paused, blocked, or usage-limited. Editing
-rotates the goal ID, reactivates the objective, preserves its accumulated
-usage/budget, and makes in-flight updates for the old objective stale.
+from active; resume is valid from paused, blocked, usage-limited, or an active
+goal with deferred continuation. Editing rotates the goal ID, reactivates the
+objective, preserves its accumulated usage/budget, and makes in-flight updates
+for the old objective stale.
 
 Active goals continue through private serial turns in Default mode. Plan mode
 cancels and joins automatic goal work, never launches goal turns, and never
-charges planning work. Returning to Default explicitly resumes an active,
-non-deferred goal. User prompts may interrupt automatic work and, if the goal is
-still active afterward, continuation resumes exactly once.
+charges planning work. Returning to Default resumes only an active,
+non-deferred goal. User prompts may temporarily interrupt eligible automatic
+work, but they never clear a persisted continuation deferral.
 
 ## Accounting and stopping
 
@@ -30,7 +31,11 @@ Elapsed usage is in-process monotonic work time, including sub-second remainder
 carried across turns. Process downtime is not charged. Goal IDs are optimistic
 stale-write guards. Objective replacement and status transitions are
 compare-and-swap operations, while SQLite accounting uses one atomic update
-even when the same database is opened by multiple handles.
+even when the same database is opened by multiple handles. When provider or
+catalog pricing is available, the same atomic operation also accumulates the
+per-request estimated cost by currency. Cached input retains its discounted
+class rather than being priced as ordinary input. Missing pricing leaves cost
+absent; Snow never invents a price. These estimates are not provider invoices.
 
 Provider/tool/context/accounting failures immediately stop an active goal as
 `blocked`, or `usage_limited` for provider quota exhaustion. Accounting errors
@@ -39,12 +44,21 @@ distinct from a model declaring an external blocker. Three automatic turns
 with no text or tool progress conservatively pause the goal and emit an error;
 they do not falsely claim that the blocked audit succeeded. Automatic requests
 also yield briefly between turns, preventing an immediate-response provider
-from hot-spinning even while useful text/tool work continues.
+from hot-spinning even while useful text/tool work continues. At the safe
+boundary between complete goal turns, Snow automatically compacts when the
+latest provider-reported request usage reaches the configured percentage of the
+model context window (90% by default). Set
+`compaction.goal_auto_threshold_percent` to `0` to disable it. Compaction errors
+block the active goal rather than issuing another request with unsafe context
+pressure.
 
 `Abort` cancels and joins any admitted turn. If goal work was active—even in the
 small window before its first provider call—it persists a continuation
-deferral. A deferred active goal stays idle across reopen until explicit
-continue/resume or a new user prompt clears that deferral.
+deferral. A deferred active goal stays idle across reopen and ordinary prompts
+until explicit continue/resume clears that deferral. Manual `/compact` pauses
+automatic goal continuation after writing its summary; `/goal resume` continues
+both paused goals and active-but-deferred goals. Threshold-triggered automatic
+compaction resumes on its own.
 
 ## TUI
 
@@ -67,7 +81,13 @@ Resume/session/branch/fork/compaction/shutdown paths cancel and join owned work
 before changing state. Compaction resumes only a goal that was already running;
 it cannot bypass surface readiness, and aborting compaction persists deferral. A fork gets an independent managed objective file, so
 clearing either branch cannot remove the other's objective. Restored paused,
-blocked, and usage-limited goals display resume guidance.
+blocked, and usage-limited goals display resume guidance. The sticky header,
+footer, and `/goal` output show compact cumulative tokens and any available
+estimated cost, for example `2.1m tokens · est. $0.0183`. Costs persist across
+resume/edit/fork and are grouped by currency. On the version-8 migration, Snow
+backfills an older goal only when priced historical messages exactly match its
+persisted token total; ambiguous histories remain cost-free rather than showing
+a misleading estimate.
 
 ## SDK and RPC
 
@@ -80,7 +100,9 @@ snapshot and starts only an active, non-deferred Default-mode goal.
 
 RPC commands are `goal_get`, `goal_set`/`goal_create`, `goal_edit`,
 `goal_pause`, `goal_resume`, `goal_clear`, and `goal_continue`; successful
-responses use `data`. Print/JSON, RPC, and TUI install event observers before
+responses use `data`. `ThreadGoal.estimated_costs` is an optional array of
+currency-bearing `Cost` totals; `session_info.goal` includes the same field.
+Print/JSON, RPC, and TUI install event observers before
 they signal goal readiness.
 
 Agent events are delivered by one ordered dispatcher rather than on provider or

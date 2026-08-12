@@ -40,17 +40,19 @@ type ProviderConfig struct {
 // TUIConfig holds TUI preferences.
 type TUIConfig struct {
 	Theme string `json:"theme,omitempty"`
-	Mouse bool   `json:"mouse,omitempty"`
+	Mouse bool   `json:"mouse"`
 }
 
-// CompactionConfig controls manual context compaction. Zero RetainTokens uses
-// a model-aware automatic target.
+// CompactionConfig controls manual compaction and goal-only automatic
+// compaction. Zero RetainTokens uses a model-aware retention target. A zero
+// GoalAutoThresholdPercent disables automatic compaction.
 type CompactionConfig struct {
-	RetainTokens     int    `json:"retain_tokens,omitempty"`
-	MinRetainedTurns int    `json:"min_retained_turns,omitempty"`
-	SummaryMaxTokens int    `json:"summary_max_tokens,omitempty"`
-	Fallback         string `json:"fallback,omitempty"` // local|error
-	Guidance         string `json:"guidance,omitempty"`
+	RetainTokens             int    `json:"retain_tokens,omitempty"`
+	MinRetainedTurns         int    `json:"min_retained_turns,omitempty"`
+	SummaryMaxTokens         int    `json:"summary_max_tokens,omitempty"`
+	Fallback                 string `json:"fallback,omitempty"` // local|error
+	Guidance                 string `json:"guidance,omitempty"`
+	GoalAutoThresholdPercent int    `json:"goal_auto_threshold_percent"`
 }
 
 // WindowsShellConfig controls the compatibility-named bash tool on Windows.
@@ -61,7 +63,7 @@ type WindowsShellConfig struct {
 }
 
 func DefaultCompaction() CompactionConfig {
-	return CompactionConfig{MinRetainedTurns: 2, SummaryMaxTokens: 2000, Fallback: "local"}
+	return CompactionConfig{MinRetainedTurns: 2, SummaryMaxTokens: 2000, Fallback: "local", GoalAutoThresholdPercent: 90}
 }
 
 func (c CompactionConfig) Validate() error {
@@ -79,6 +81,9 @@ func (c CompactionConfig) Validate() error {
 	}
 	if len(c.Guidance) > 16*1024 {
 		return errors.New("config: compaction guidance exceeds 16 KiB")
+	}
+	if c.GoalAutoThresholdPercent != 0 && (c.GoalAutoThresholdPercent < 50 || c.GoalAutoThresholdPercent > 99) {
+		return errors.New("config: compaction goal_auto_threshold_percent must be 0 or 50..99")
 	}
 	return nil
 }
@@ -143,6 +148,7 @@ type SkillsConfig struct {
 type AgentRole struct {
 	Description   string                  `json:"description,omitempty"`
 	System        string                  `json:"system,omitempty"`
+	Provider      string                  `json:"provider,omitempty"`
 	Model         string                  `json:"model,omitempty"`
 	Thinking      *protocol.ThinkingLevel `json:"thinking,omitempty"`
 	Tools         []string                `json:"tools,omitempty"`
@@ -166,6 +172,8 @@ type SubagentConfig struct {
 	Durable               bool                 `json:"durable,omitempty"`
 	AllowMutation         bool                 `json:"allow_mutation,omitempty"`
 	ExposeChildToolEvents bool                 `json:"expose_child_tool_events,omitempty"`
+	DefaultProvider       string               `json:"default_provider,omitempty"`
+	DefaultModel          string               `json:"default_model,omitempty"`
 	DefaultRole           string               `json:"default_role,omitempty"`
 	Roles                 map[string]AgentRole `json:"roles,omitempty"`
 }
@@ -174,10 +182,10 @@ func DefaultSubagents() SubagentConfig {
 	return SubagentConfig{MaxConcurrentThreads: 4, MaxAgentsPerSession: 32, MaxDepth: 1,
 		MinWaitTimeoutMS: 10_000, DefaultWaitTimeoutMS: 30_000, MaxWaitTimeoutMS: 3_600_000,
 		TaskTimeoutMS: 1_800_000, MaxResultBytes: 65_536, Durable: true, ExposeChildToolEvents: true,
-		DefaultRole: "default", Roles: map[string]AgentRole{
-			"default":  {Description: "General shell-capable investigation (bash remains permission-gated; file mutation is disabled by default)", Tools: []string{"read", "grep", "glob", "activate_skill", "read_skill_resource", "bash"}},
-			"explorer": {Description: "Narrow read-only codebase investigation", Tools: []string{"read", "grep", "glob", "activate_skill", "read_skill_resource"}},
-			"worker":   {Description: "Shell-capable implementation task (write/edit require explicit role and global opt-in)"},
+		DefaultRole: "general", Roles: map[string]AgentRole{
+			"general":     {Description: "General shell-capable investigation (bash remains permission-gated; file mutation is disabled by default)", Tools: []string{"read", "grep", "glob", "activate_skill", "read_skill_resource", "bash"}},
+			"explorer":    {Description: "Narrow read-only codebase investigation", Tools: []string{"read", "grep", "glob", "activate_skill", "read_skill_resource"}},
+			"implementer": {Description: "Shell-capable implementation task (write/edit require explicit role and global opt-in)"},
 		}}
 }
 
@@ -204,6 +212,18 @@ func (c SubagentConfig) ValidateSubagents() error {
 	if c.MaxResultBytes < 1024 || c.MaxResultBytes > protocol.MaxAgentMessageBytes {
 		return errors.New("config: subagent max_result_bytes must be 1024..65536")
 	}
+	if c.DefaultProvider != "" && strings.TrimSpace(c.DefaultProvider) == "" {
+		return errors.New("config: subagent default_provider is blank")
+	}
+	if len(c.DefaultProvider) > protocol.MaxAgentMetadataBytes {
+		return errors.New("config: subagent default_provider is too large")
+	}
+	if c.DefaultModel != "" && strings.TrimSpace(c.DefaultModel) == "" {
+		return errors.New("config: subagent default_model is blank")
+	}
+	if len(c.DefaultModel) > protocol.MaxAgentMetadataBytes {
+		return errors.New("config: subagent default_model is too large")
+	}
 	if c.DefaultRole == "" {
 		return errors.New("config: subagent default_role is empty")
 	}
@@ -212,6 +232,9 @@ func (c SubagentConfig) ValidateSubagents() error {
 	}
 	childTools := map[string]bool{"read": true, "grep": true, "glob": true, "activate_skill": true, "read_skill_resource": true, "write": true, "edit": true, "bash": true}
 	for name, role := range c.Roles {
+		if name == "default" || name == "worker" {
+			return fmt.Errorf("config: subagent role %q was renamed; use %q", name, map[string]string{"default": "general", "worker": "implementer"}[name])
+		}
 		if _, err := protocol.ResolveAgentPath(protocol.RootAgentPath, name); err != nil {
 			return fmt.Errorf("config: invalid subagent role %q", name)
 		}
@@ -225,6 +248,18 @@ func (c SubagentConfig) ValidateSubagents() error {
 			if (tool == "write" || tool == "edit") && !role.AllowMutation {
 				return fmt.Errorf("config: role %q lists mutation tool %q without allow_mutation", name, tool)
 			}
+		}
+		if role.Provider != "" && strings.TrimSpace(role.Provider) == "" {
+			return fmt.Errorf("config: role %q provider is blank", name)
+		}
+		if len(role.Provider) > protocol.MaxAgentMetadataBytes {
+			return fmt.Errorf("config: role %q provider is too large", name)
+		}
+		if role.Model != "" && strings.TrimSpace(role.Model) == "" {
+			return fmt.Errorf("config: role %q model is blank", name)
+		}
+		if len(role.Model) > protocol.MaxAgentMetadataBytes {
+			return fmt.Errorf("config: role %q model is too large", name)
 		}
 		if role.Thinking != nil {
 			if _, err := protocol.ParseThinkingLevel(string(*role.Thinking)); err != nil {
@@ -263,11 +298,11 @@ type Config struct {
 	DefaultModel            string                          `json:"default_model,omitempty"`
 	PermissionMode          string                          `json:"permission_mode,omitempty"`            // ask|allow|deny
 	DefaultProjectTrust     string                          `json:"default_project_trust,omitempty"`      // ask|allow|deny (always|never aliases)
-	Thinking                string                          `json:"thinking,omitempty"`                   // off|minimal|low|medium|high
+	Thinking                string                          `json:"thinking,omitempty"`                   // off|minimal|low|medium|high|xhigh|max|ultra
 	ReasoningSummary        string                          `json:"reasoning_summary,omitempty"`          // off|auto|concise|detailed
 	TextVerbosity           string                          `json:"text_verbosity,omitempty"`             // low|medium|high
 	CollaborationMode       string                          `json:"collaboration_mode,omitempty"`         // default|plan
-	PlanModeReasoningEffort string                          `json:"plan_mode_reasoning_effort,omitempty"` // optional off|minimal|low|medium|high
+	PlanModeReasoningEffort string                          `json:"plan_mode_reasoning_effort,omitempty"` // optional off|minimal|low|medium|high|xhigh|max|ultra
 	ToolOutputBytes         int                             `json:"tool_output_bytes,omitempty"`
 	BashTimeoutMS           int                             `json:"bash_timeout_ms,omitempty"`
 	ContextCapBytes         int                             `json:"context_cap_bytes,omitempty"`
@@ -296,15 +331,16 @@ func Default() Config {
 		BashTimeoutMS:       int(DefaultBashTimeout / time.Millisecond),
 		ContextCapBytes:     DefaultContextCapBytes,
 		Providers: map[string]ProviderConfig{
-			"opencode-go": {},
-			"chatgpt":     {},
+			"opencode-go":       {},
+			"openai-compatible": {},
+			"chatgpt":           {},
 		},
 		MCPServers:   map[string]publicmcp.ServerSpec{},
 		Skills:       SkillsConfig{Overrides: map[string]bool{}},
 		Subagents:    DefaultSubagents(),
 		Compaction:   DefaultCompaction(),
 		WindowsShell: WindowsShellConfig{Kind: "powershell"},
-		TUI:          TUIConfig{Theme: "default", Mouse: false},
+		TUI:          TUIConfig{Theme: "default", Mouse: true},
 	}
 }
 
@@ -360,6 +396,13 @@ func Load(path string) (Config, error) {
 		cfg.TUI.Theme = defaultTUITheme
 	}
 	defaults := DefaultCompaction()
+	var rawConfig struct {
+		Compaction map[string]json.RawMessage `json:"compaction"`
+	}
+	_ = json.Unmarshal(data, &rawConfig)
+	if _, present := rawConfig.Compaction["goal_auto_threshold_percent"]; !present {
+		cfg.Compaction.GoalAutoThresholdPercent = defaults.GoalAutoThresholdPercent
+	}
 	if cfg.Compaction.MinRetainedTurns == 0 {
 		cfg.Compaction.MinRetainedTurns = defaults.MinRetainedTurns
 	}

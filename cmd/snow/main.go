@@ -26,7 +26,9 @@ import (
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/config"
 	"github.com/snow-core/snow/internal/provider/chatgpt"
+	"github.com/snow-core/snow/internal/provider/openaicompat"
 	"github.com/snow-core/snow/internal/rpc"
+	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/tui"
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
 	publicplugin "github.com/snow-core/snow/pkg/plugin"
@@ -56,7 +58,7 @@ func run() error {
 	root.PersistentFlags().StringP("prompt", "p", "", "run in print mode with this prompt")
 	root.PersistentFlags().String("mode", "", "output mode: print|json|rpc")
 	root.PersistentFlags().String("collaboration-mode", "", "collaboration mode: default|plan")
-	root.PersistentFlags().String("provider", "", "provider id (opencode-go|fake|chatgpt)")
+	root.PersistentFlags().String("provider", "", "provider id (opencode-go|openai-compatible|fake|chatgpt)")
 	root.PersistentFlags().String("model", "", "model id")
 	root.PersistentFlags().String("api-key", "", "explicit API key (overrides auth.json and env)")
 	root.PersistentFlags().String("permission", "", "permission mode: ask|allow|deny")
@@ -65,7 +67,7 @@ func run() error {
 	root.PersistentFlags().String("base-url", "", "provider base URL override")
 	root.PersistentFlags().String("config", "", "config file path")
 	root.PersistentFlags().String("auth", "", "auth file path")
-	root.PersistentFlags().String("thinking", "", "thinking level: off|minimal|low|medium|high")
+	root.PersistentFlags().String("thinking", "", "thinking level: off|minimal|low|medium|high|xhigh|max|ultra")
 	root.PersistentFlags().StringSlice("tools", nil, "restrict built-in tools to a comma-separated allowlist")
 	root.PersistentFlags().StringArray("plugin", nil, "load an explicit plugin manifest or executable (repeatable)")
 	root.PersistentFlags().Bool("no-plugins", false, "disable all plugin loading")
@@ -76,11 +78,14 @@ func run() error {
 	root.PersistentFlags().Bool("usage", false, "print token/cache usage after print-mode prompts")
 	root.PersistentFlags().Bool("subagents", false, "enable role-scoped Codex-style subagents")
 	root.PersistentFlags().Bool("no-subagents", false, "disable configured subagents")
+	root.PersistentFlags().String("subagent-provider", "", "default provider for subagents")
+	root.PersistentFlags().String("subagent-model", "", "default model for subagents")
 	root.PersistentFlags().Int("subagent-max-concurrency", 0, "maximum concurrently running subagents")
 	root.PersistentFlags().Int("subagent-max-agents", 0, "maximum subagent identities per session")
 	root.PersistentFlags().Int("subagent-max-depth", 0, "maximum subagent nesting depth")
 
 	root.AddCommand(versionCmd())
+	root.AddCommand(resumeCmd())
 	root.AddCommand(authCmd())
 	root.AddCommand(loginCmd())
 	root.AddCommand(logoutCmd())
@@ -98,6 +103,54 @@ func versionCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Println(version)
+		},
+	}
+}
+
+func resumeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "resume [session-path]",
+		Short: "Pick a session for this directory, or resume an explicit session",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			noSession, _ := cmd.Flags().GetBool("no-session")
+			if noSession {
+				return errors.New("resume: --no-session cannot be used when resuming a session")
+			}
+
+			path, _ := cmd.Flags().GetString("session")
+			if len(args) == 1 {
+				if cmd.Flags().Changed("session") {
+					return errors.New("resume: session path provided both as an argument and with --session")
+				}
+				path = args[0]
+			}
+			if path == "" {
+				cwd := mustCWD()
+				infos, err := session.NewFileIndex(session.DefaultSessionsRoot()).List(cwd)
+				if err != nil {
+					return fmt.Errorf("resume: list sessions for %s: %w", cwd, err)
+				}
+				if len(infos) == 0 {
+					return fmt.Errorf("resume: no saved sessions for %s; run snow to start one", cwd)
+				}
+				mode, _ := cmd.Flags().GetString("mode")
+				prompt, _ := cmd.Flags().GetString("prompt")
+				if mode == "" && prompt == "" {
+					return runInteractiveWithSessionPicker(cmd, nil)
+				}
+				// Headless modes cannot show an interactive picker. Preserve their
+				// useful no-path behavior by resuming the newest indexed session.
+				path = infos[0].Path
+			}
+
+			if err := session.ValidateSQLiteSession(path); err != nil {
+				return fmt.Errorf("resume: session %q: %w", path, err)
+			}
+			if err := cmd.Flags().Set("session", path); err != nil {
+				return fmt.Errorf("resume: select session: %w", err)
+			}
+			return runInteractiveWithExistingSession(cmd, nil)
 		},
 	}
 }
@@ -200,8 +253,8 @@ func loginCmd() *cobra.Command {
 				}
 				return nil
 			}
-			if provider != "opencode-go" {
-				return fmt.Errorf("login: unsupported provider %q (supported: opencode-go, chatgpt)", provider)
+			if provider != "opencode-go" && provider != openaicompat.ProviderID {
+				return fmt.Errorf("login: unsupported provider %q (supported: opencode-go, openai-compatible, chatgpt)", provider)
 			}
 			key, err := promptSecret("API key: ")
 			if err != nil {
@@ -295,6 +348,8 @@ func buildOptions(cmd *cobra.Command) (app.Options, error) {
 		enabled := enableSubagents && !disableSubagents
 		opts.Subagents = &enabled
 	}
+	opts.SubagentProvider, _ = cmd.Flags().GetString("subagent-provider")
+	opts.SubagentModel, _ = cmd.Flags().GetString("subagent-model")
 	opts.SubagentMaxConcurrency, _ = cmd.Flags().GetInt("subagent-max-concurrency")
 	opts.SubagentMaxAgents, _ = cmd.Flags().GetInt("subagent-max-agents")
 	opts.SubagentMaxDepth, _ = cmd.Flags().GetInt("subagent-max-depth")
@@ -455,6 +510,18 @@ func parsePluginSpec(arg string) (publicplugin.PluginSpec, error) {
 }
 
 func runInteractive(cmd *cobra.Command, args []string) error {
+	return runInteractiveOptions(cmd, false, false)
+}
+
+func runInteractiveWithSessionPicker(cmd *cobra.Command, args []string) error {
+	return runInteractiveOptions(cmd, true, false)
+}
+
+func runInteractiveWithExistingSession(cmd *cobra.Command, args []string) error {
+	return runInteractiveOptions(cmd, false, true)
+}
+
+func runInteractiveOptions(cmd *cobra.Command, sessionPicker, requireExistingSession bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -462,6 +529,14 @@ func runInteractive(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if sessionPicker {
+		// The startup picker needs an app for configuration and rendering, but it
+		// must not create a throwaway persisted database that session discovery
+		// could open and delete while still active. Switch this memory placeholder
+		// to the selected durable store before accepting prompts.
+		opts.NoSession = true
+	}
+	opts.RequireExistingSession = requireExistingSession
 	mode, _ := cmd.Flags().GetString("mode")
 	prompt, _ := cmd.Flags().GetString("prompt")
 	if mode != "" && mode != "print" && mode != "json" && mode != "rpc" {
@@ -475,7 +550,7 @@ func runInteractive(cmd *cobra.Command, args []string) error {
 		showUsage, _ := cmd.Flags().GetBool("usage")
 		return runPrint(ctx, opts, prompt, mode == "json", showUsage)
 	}
-	return runTUI(ctx, opts)
+	return runTUI(ctx, opts, sessionPicker)
 }
 
 func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, showUsage bool) (err error) {
@@ -611,7 +686,16 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 	return outputErr
 }
 
-func runTUI(ctx context.Context, opts app.Options) error {
+func runTUI(ctx context.Context, opts app.Options, sessionPicker bool) error {
+	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return errors.New("interactive TUI requires terminal stdin/stdout; use -p, --mode json, or --mode rpc")
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb") {
+		return errors.New("interactive TUI requires cursor-addressable terminal support; TERM=dumb is unsupported")
+	}
+	if sessionPicker {
+		return tui.RunWithSessionPicker(ctx, opts)
+	}
 	return tui.Run(ctx, opts)
 }
 

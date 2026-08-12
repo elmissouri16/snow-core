@@ -25,8 +25,8 @@ func TestManagerToolsDriveLifecycle(t *testing.T) {
 		MinWait:              time.Millisecond,
 		DefaultWait:          20 * time.Millisecond,
 		MaxWait:              200 * time.Millisecond,
-		DefaultRole:          "default",
-		Roles:                map[string]Role{"default": {Name: "default"}},
+		DefaultRole:          "general",
+		Roles:                map[string]Role{"general": {Name: "general"}},
 	})
 	var active, maxActive atomic.Int32
 	factory := ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
@@ -63,13 +63,13 @@ func TestManagerToolsDriveLifecycle(t *testing.T) {
 		return result
 	}
 
-	spawn := run("spawn_agent", map[string]any{"task_name": "inspect", "message": "inspect", "agent_type": "general", "fork_turns": "none"})
+	spawn := run("spawn_agent", map[string]any{"name": "inspect", "task": "inspect", "role": "general", "fork_turns": "none"})
 	if len(spawn.Content) != 1 || spawn.Content[0].Text == "" {
 		t.Fatalf("spawn result=%+v", spawn)
 	}
-	aliased, err := m.Get(context.Background(), "inspect")
-	if err != nil || aliased.Agent.Role != "default" {
-		t.Fatalf("general alias state=%+v err=%v, want canonical default role", aliased, err)
+	spawned, err := m.Get(context.Background(), "inspect")
+	if err != nil || spawned.Agent.Role != "general" {
+		t.Fatalf("spawned state=%+v err=%v, want general role", spawned, err)
 	}
 	run("list_agents", map[string]any{})
 	run("send_message", map[string]any{"target": "inspect", "message": "also check tests"})
@@ -85,7 +85,7 @@ func TestManagerToolsDriveLifecycle(t *testing.T) {
 	awaitToolState(t, m, "inspect", protocol.AgentCompleted)
 
 	// A second task exercises interrupt_agent while its initial turn is active.
-	run("spawn_agent", map[string]any{"task_name": "stop", "message": "long task", "fork_turns": "none"})
+	run("spawn_agent", map[string]any{"name": "stop", "task": "long task", "fork_turns": "none"})
 	awaitToolState(t, m, "stop", protocol.AgentRunning)
 	previous := run("interrupt_agent", map[string]any{"target": "stop"})
 	if len(previous.Content) != 1 || previous.Content[0].Text == "" {
@@ -99,11 +99,11 @@ func TestManagerToolsDriveLifecycle(t *testing.T) {
 
 func TestDecodeStrictAcceptsRawCompatibilityEnvelope(t *testing.T) {
 	var got protocol.SpawnSubagentRequest
-	raw := json.RawMessage(`{"_raw":"{\"task_name\":\"demo-index\",\"message\":\"inspect\",\"fork_turns\":\"none\"}"}`)
+	raw := json.RawMessage(`{"_raw":"{\"name\":\"demo-index\",\"task\":\"inspect\",\"fork_turns\":\"none\"}"}`)
 	if err := decodeStrict(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.TaskName != "demo-index" || got.Message != "inspect" || got.ForkTurns != "none" {
+	if got.Name != "demo-index" || got.Task != "inspect" || got.ForkTurns != "none" {
 		t.Fatalf("decoded request=%+v", got)
 	}
 }
@@ -111,13 +111,13 @@ func TestDecodeStrictAcceptsRawCompatibilityEnvelope(t *testing.T) {
 func TestDecodeStrictRejectsInvalidRawCompatibilityEnvelope(t *testing.T) {
 	tests := map[string]string{
 		"malformed inner":    `{"_raw":"{"}`,
-		"mixed fields":       `{"_raw":"{}","message":"mixed"}`,
-		"unknown inner":      `{"_raw":"{\"task_name\":\"inspect\",\"message\":\"inspect\",\"extra\":true}"}`,
+		"mixed fields":       `{"_raw":"{}","task":"mixed"}`,
+		"unknown inner":      `{"_raw":"{\"name\":\"inspect\",\"task\":\"inspect\",\"extra\":true}"}`,
 		"array inner":        `{"_raw":"[]"}`,
 		"null inner":         `{"_raw":"null"}`,
 		"non-string inner":   `{"_raw":{}}`,
-		"trailing inner":     `{"_raw":"{\"task_name\":\"inspect\",\"message\":\"inspect\"} {}"}`,
-		"trailing top-level": `{"task_name":"inspect","message":"inspect"} {}`,
+		"trailing inner":     `{"_raw":"{\"name\":\"inspect\",\"task\":\"inspect\"} {}"}`,
+		"trailing top-level": `{"name":"inspect","task":"inspect"} {}`,
 	}
 	for name, raw := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -129,7 +129,7 @@ func TestDecodeStrictRejectsInvalidRawCompatibilityEnvelope(t *testing.T) {
 	}
 }
 
-func TestSpawnAgentToolCanonicalizesHyphenatedRawTaskName(t *testing.T) {
+func TestSpawnAgentToolCanonicalizesHyphenatedRawName(t *testing.T) {
 	st := session.NewMemoryStore(session.Options{})
 	root := rootAgent(t, st)
 	defer root.Close()
@@ -141,8 +141,8 @@ func TestSpawnAgentToolCanonicalizesHyphenatedRawTaskName(t *testing.T) {
 		MinWait:              time.Millisecond,
 		DefaultWait:          20 * time.Millisecond,
 		MaxWait:              200 * time.Millisecond,
-		DefaultRole:          "default",
-		Roles:                map[string]Role{"default": {Name: "default"}},
+		DefaultRole:          "general",
+		Roles:                map[string]Role{"general": {Name: "general"}},
 	})
 	var active, maxActive atomic.Int32
 	factory := ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
@@ -170,7 +170,7 @@ func TestSpawnAgentToolCanonicalizesHyphenatedRawTaskName(t *testing.T) {
 	if spawn == nil {
 		t.Fatal("missing spawn_agent tool")
 	}
-	inner := `{"task_name":"demo-index","message":"inspect","fork_turns":"none"}`
+	inner := `{"name":"demo-index","task":"inspect","fork_turns":"none"}`
 	raw, err := json.Marshal(map[string]string{"_raw": inner})
 	if err != nil {
 		t.Fatal(err)
@@ -179,14 +179,14 @@ func TestSpawnAgentToolCanonicalizesHyphenatedRawTaskName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError || len(result.Content) != 1 || !strings.Contains(result.Content[0].Text, `"task_name":"/root/demo_index"`) {
+	if result.IsError || len(result.Content) != 1 || !strings.Contains(result.Content[0].Text, `"name":"/root/demo_index"`) {
 		t.Fatalf("spawn result=%+v", result)
 	}
 	if state, err := m.Get(context.Background(), "demo_index"); err != nil || state.Agent.Path != "/root/demo_index" {
 		t.Fatalf("canonical state=%+v err=%v", state, err)
 	}
 
-	collisionRaw := json.RawMessage(`{"task_name":"demo_index","message":"duplicate","fork_turns":"none"}`)
+	collisionRaw := json.RawMessage(`{"name":"demo_index","task":"duplicate","fork_turns":"none"}`)
 	collision, err := spawn.Run(context.Background(), collisionRaw, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -194,20 +194,49 @@ func TestSpawnAgentToolCanonicalizesHyphenatedRawTaskName(t *testing.T) {
 	if !collision.IsError {
 		t.Fatalf("canonical collision unexpectedly succeeded: %+v", collision)
 	}
-	if _, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{TaskName: "sdk-hyphen", Message: "strict", ForkTurns: "none"}); err == nil || !strings.Contains(err.Error(), "invalid agent path segment") {
+	if _, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "sdk-hyphen", Task: "strict", ForkTurns: "none"}); err == nil || !strings.Contains(err.Error(), "invalid agent path segment") {
 		t.Fatalf("direct manager hyphen error=%v", err)
+	}
+}
+
+func TestListSubagentModelsReturnsExactPairs(t *testing.T) {
+	m := New(context.Background(), Limits{})
+	m.SetModelCatalog(func() []protocol.Model {
+		return []protocol.Model{{Provider: "chatgpt", ID: "gpt-x", DisplayName: "GPT X", SupportsTools: true}, {Provider: "opencode-go", ID: "deepseek-v3"}}
+	})
+	var catalog tools.Tool
+	for _, candidate := range Tools(m, Caller{Path: protocol.RootAgentPath}) {
+		if candidate.Schema().Name == "list_subagent_models" {
+			catalog = candidate
+			break
+		}
+	}
+	if catalog == nil {
+		t.Fatal("missing list_subagent_models tool")
+	}
+	result, err := catalog.Run(context.Background(), json.RawMessage(`{"provider":"opencode-go"}`), nil)
+	if err != nil || result.IsError || len(result.Content) != 1 {
+		t.Fatalf("catalog result=%+v err=%v", result, err)
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, `"provider":"opencode-go"`) || !strings.Contains(text, `"model":"deepseek-v3"`) || !strings.Contains(text, `"thinking_levels":["off"]`) || strings.Contains(text, "gpt-x") {
+		t.Fatalf("filtered catalog = %s", text)
+	}
+	missing, err := catalog.Run(context.Background(), json.RawMessage(`{"provider":"opencode"}`), nil)
+	if err != nil || missing.IsError || len(missing.Content) != 1 || !strings.Contains(missing.Content[0].Text, `"available_providers"`) || !strings.Contains(missing.Content[0].Text, `no models found for exact provider`) {
+		t.Fatalf("missing provider diagnostic=%+v err=%v", missing, err)
 	}
 }
 
 func TestSpawnAgentSchemaExplainsBuiltInRoles(t *testing.T) {
 	schema := toolSchemas["spawn_agent"]
-	for _, want := range []string{"canonical /root/", "hyphens normalize to underscores", "default role", "general is an accepted alias", "explorer", "worker", "permission-gated bash", "write/edit"} {
+	for _, want := range []string{"canonical /root/", "hyphens normalize to underscores", "list_subagent_models", "general role", "explorer", "implementer", "permission-gated bash", "write/edit"} {
 		if !strings.Contains(schema.Description, want) {
 			t.Fatalf("spawn_agent description missing %q: %q", want, schema.Description)
 		}
 	}
 	parameters := string(schema.Parameters)
-	for _, want := range []string{`"maxLength":64`, `"pattern":"^[a-z][a-z0-9_-]{0,63}$"`, `"pattern":"^(none|all|[1-9][0-9]*)$"`, "positive integer string", `"description":"Optional role:`, "general is an accepted alias", "Omit to use the configured default role"} {
+	for _, want := range []string{`"maxLength":64`, `"pattern":"^[a-z][a-z0-9_-]{0,63}$"`, `"pattern":"^(none|all|[1-9][0-9]*)$"`, "positive integer string", `"description":"Optional role:`, `"provider"`, `"required":["name","task"]`, "configured subagent default model", "Omit to use the configured default role"} {
 		if !strings.Contains(parameters, want) {
 			t.Fatalf("spawn_agent schema missing %q: %s", want, schema.Parameters)
 		}

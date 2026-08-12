@@ -26,7 +26,7 @@ out of core packages.
 
 - A single Go `snow` binary for macOS/Linux, with Windows support improved over time.
 - Streaming text, thinking, tool, usage, error, and lifecycle events.
-- OpenCode Go API-key access and ChatGPT/Codex-compatible OAuth credentials.
+- OpenCode Go API-key access, user-configured OpenAI-compatible Responses or Chat Completions endpoints, and ChatGPT/Codex-compatible OAuth credentials.
 - Built-in `read`, `write`, `edit`, `bash`, `grep`, and `glob` tools with permissions and path roots, direct interactive `ask_user`, plus deferred public-web `webfetch`.
 - SQLite-backed sessions with indexed branch IDs, resume, and fork primitives.
 - A stable public surface under `pkg/snowsdk` and `pkg/protocol`.
@@ -71,14 +71,18 @@ behavior in code before relying on a checklist item.
   Both honor hierarchical `.gitignore`/`.ignore`, bounded global/trusted-project
   YAML policy, hidden/generated defaults, and per-call soft-ignore overrides.
 - Provider adapters: OpenCode Go OpenAI-compatible Chat Completions/SSE with live
-  startup availability merged with models.dev capability/reasoning metadata, ChatGPT/Codex
-  Responses/SSE with a static subscription catalog, and deterministic `fake`
-  provider.
+  startup availability merged with models.dev capability/reasoning metadata; a
+  user-configured `openai-compatible` adapter with optional Bearer auth,
+  `/models` discovery, preferred Responses/SSE, and cached Chat Completions/SSE
+  fallback when Responses is unavailable; ChatGPT/Codex Responses/SSE with a static
+  subscription catalog; and deterministic `fake` provider.
 - Auth stores: in-memory and atomic `~/.snow/auth.json` file store with `0600`
   permissions, redacting JSON marshaling, explicit-key/store/environment resolution.
 - ChatGPT browser PKCE and device-code OAuth, side-effect-free status checks,
   JWT metadata extraction, compatible Codex/Pi/OpenCode imports, guarded token
-  refresh with atomic rotation, and account-scoped authenticated model catalogs.
+  refresh with atomic rotation, account-scoped authenticated model catalogs, and
+  hardened Codex SSE with hashed branch affinity, zstd, bounded pre-output retries,
+  structured diagnostics, and strict terminal-event validation.
 - `ask`/`allow`/`deny` permissions, interactive TUI asker, session rules, and
   `/permissions`; canonical project trust persistence, pre-runtime TUI prompting,
   fail-closed headless behavior, and `/trust` are present.
@@ -94,8 +98,9 @@ behavior in code before relying on a checklist item.
   declared external risk/capabilities, preserved private result details,
   explicitly subscribed best-effort events, JSON-RPC v2 stdio runtimes,
   `snow plugin check`, and dependency-free JavaScript/Python examples.
-- Branch-scoped persistent Thread Goals with budgets, cross-handle atomic usage
-  accounting, embedded Markdown continuation/update templates, private idle
+- Branch-scoped persistent Thread Goals with budgets, cross-handle atomic
+  token/time/estimated-cost accounting, embedded Markdown continuation/update
+  templates, private idle
   continuation, model tools, ordered cloned events, confined managed objectives,
   explicit surface readiness, and safe abort/resume/fork/compaction lifecycle
   controls.
@@ -108,7 +113,7 @@ behavior in code before relying on a checklist item.
   `2026-07-28` Streamable HTTP, stdio, legacy negotiation, tools, resources,
   prompts, subscriptions, list-change refresh, and permissioned BM25 routing.
 - Opt-in Codex-V2-style subagents: independent child Agents/stores, canonical
-  paths, attributed safe-boundary mailboxes, six model tools, bounded
+  paths, attributed safe-boundary mailboxes, seven model tools, bounded
   concurrency/depth/time/results, role-scoped permission-gated shell access,
   no file mutation by default, configurable child concurrency, activity/all
   wait modes, compact TUI lifecycle summaries, rich SDK/RPC/TUI observation,
@@ -181,6 +186,8 @@ behavior in code before relying on a checklist item.
 │   ├── provider/             # Provider interface and adapters
 │   │   ├── fake/             # deterministic tests/demo provider
 │   │   ├── opencodego/       # OpenCode Go API-key adapter
+│   │   ├── openaicompat/     # user-configured Responses/Chat Completions adapter
+│   │   ├── responsesapi/     # shared bounded Responses request/SSE codec
 │   │   └── chatgpt/          # Codex OAuth checks/import and Responses adapter
 │   ├── rpc/                  # JSONL stdin/stdout control plane
 │   ├── session/              # SQLite/in-memory stores, topology, and session index
@@ -240,15 +247,16 @@ snow -p "summarize this repo" # streaming print mode
 snow --mode json -p "list files" # JSONL AgentEvent stream
 echo '{"id":"1","type":"prompt","message":"hello"}' | snow --mode rpc
 snow auth check chatgpt
-snow --session ~/.snow/sessions/<cwd>/<session>.db
+snow resume                 # pick a saved session for the current project
+snow resume ~/.snow/sessions/<cwd>/<session>.db
 ```
 
 Important flags: `--provider opencode-go|chatgpt|fake`, `--model`, `--api-key`,
 `--permission ask|allow|deny`, `--session`, `--no-session`, `--base-url`,
-`--config`, `--auth`, `--thinking off|minimal|low|medium|high`,
+`--config`, `--auth`, `--thinking off|minimal|low|medium|high|xhigh|max|ultra`,
 `--collaboration-mode default|plan`, repeated
 `--mcp`/`--skill-dir`, `--no-mcp`/`--no-skills`, `--subagents`/`--no-subagents`,
-and subagent concurrency/depth overrides. `snow plugin check <manifest>`
+`--subagent-provider`/`--subagent-model`, and subagent concurrency/depth overrides. `snow plugin check <manifest>`
 performs a provider-free external runtime handshake. `snow mcp` and
 `snow skills` provide side-effect-free inventories; MCP live negotiation is
 `snow mcp check [name]`. MCP subcommands are `list|get|add|check|enable|disable|remove`;
@@ -260,10 +268,12 @@ follow-up; Ctrl+J remains multiline, and abort clears/restores queued TUI text.
 Queue delivery is bounded, one-at-a-time, after complete serial tool batches.
 Current TUI slash commands are `/allow [always]`, `/default`, `/deny`, `/help`, `/login`,
 `/logout [provider]`, `/model`, `/plan [message]`, `/thinking`, `/new`, `/permissions`, `/resume`,
-`/agent [path]`, `/agent concurrency N`, `/sessions`, `/settings`, `/compact`, `/mcp`, `/skills`, `/tree`, `/quit`, and `/trust [allow|deny]`. Top-level `Shift+Tab` toggles Default/Plan mode (queued to `turn_done` while busy). Native terminal drag selection/copy is the default; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down scroll the transcript. Setting `tui.mouse` to `true` opts into mouse/trackpad scrolling at the cost of terminal-dependent selection overrides. `Ctrl+V` pastes through the active textarea, while platform terminal shortcuts use bracketed paste; `Ctrl+C` remains abort/quit. `@` in the composer discovers
-project files; Enter/Tab inserts a reference without submitting the prompt.
+`/agent [path]`, `/agent concurrency N`, `/sessions`, `/settings`, `/compact`, `/mcp`, `/skills`, `/tree`, `/quit`, and `/trust [allow|deny]`. Top-level `Shift+Tab` toggles Default/Plan mode (queued to `turn_done` while busy). The TUI uses Bubble Tea's alternate-screen, app-owned viewport so scrolling cannot reveal stale frame chrome. `tui.mouse` defaults to `true` so wheel/trackpad gestures stay inside Snow's viewport. Primary drag uses Snow selection/copy; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. F6 disables mouse reporting for native selection but then wheel gestures may move terminal scrollback. Keyboard viewport scrolling remains available. `Ctrl+V` attaches supported clipboard images in the agent composer or falls back to textarea paste; platform terminal shortcuts use bracketed text paste, and `Ctrl+C` remains abort/quit. `@` in the composer discovers
+project files, while a leading `$` autocompletes enabled Agent Skills;
+Enter/Tab inserts either selection without submitting the prompt.
 
-The CLI `login` command accepts an OpenCode Go API key and supports ChatGPT
+The CLI `login` command accepts OpenCode Go or `openai-compatible` API keys, while the TUI
+`/login openai-compatible` flow captures its endpoint plus optional masked key, and ChatGPT supports
 browser PKCE (`snow login chatgpt`) or device code (`--device-code`). The TUI
 also offers both flows and compatible Codex/Pi/OpenCode credential imports.
 
@@ -272,6 +282,7 @@ also offers both flows and compatible Codex/Pi/OpenCode credential imports.
 | Provider | ID | Credential | Endpoint/behavior |
 |---|---|---|---|
 | OpenCode Go | `opencode-go` | API key | `https://opencode.ai/zen/go/v1`, OpenAI-compatible `/models` and `/chat/completions`, default `kimi-k2.6` |
+| OpenAI-compatible | `openai-compatible` | optional API key | user-supplied API root plus sibling `/models`; Responses preferred with Chat Completions fallback; no built-in endpoint |
 | ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | ChatGPT Codex Responses backend; browser/device login, refresh, authenticated cached catalog |
 | Fake | `fake` | none | deterministic scripted provider for tests and demos |
 
@@ -312,7 +323,7 @@ append-only/tree model when adding resume or fork features.
 
 - Snow and every subagent run with the user's OS privileges; bash is not sandboxed.
 - Subagents share cwd/filesystem/process side effects and incur separate model
-  usage. Parallel mutation can conflict; `default` (`general` alias) and `worker` roles may
+  usage. Parallel mutation can conflict; `general` and `implementer` roles may
   use permission-gated bash, while explorer remains read-only. File mutation
   requires both global and role mutation opt-ins.
 - Permission gates write/edit/bash and network tools: `read` remains allowed in

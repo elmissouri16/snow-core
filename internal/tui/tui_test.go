@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -59,6 +60,20 @@ func buildAppForTest(t *testing.T, m *Model) {
 	t.Cleanup(func() { a.Close() })
 }
 
+func TestModelMouseToggleRestoresNativeSelection(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.app.Cfg.TUI.Mouse = false
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyF6})
+	if cmd == nil || !m.app.Cfg.TUI.Mouse || !strings.Contains(m.lastStatus, "wheel scroll") {
+		t.Fatalf("mouse enable: cmd=%v mouse=%v status=%q", cmd != nil, m.app.Cfg.TUI.Mouse, m.lastStatus)
+	}
+	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyF6})
+	if cmd == nil || m.app.Cfg.TUI.Mouse || !strings.Contains(m.lastStatus, "native selection") {
+		t.Fatalf("mouse disable: cmd=%v mouse=%v status=%q", cmd != nil, m.app.Cfg.TUI.Mouse, m.lastStatus)
+	}
+}
+
 // TestModelSlashCommands verifies command parsing without a TTY.
 func TestModelSlashCommands(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
@@ -77,6 +92,36 @@ func TestModelSlashCommands(t *testing.T) {
 	_, quit = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if quit == nil {
 		t.Fatal("quit should return a quit command")
+	}
+}
+
+func TestPromptPreflightFailureReleasesBusyState(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	if err := m.app.Agent.SetModel(protocol.Model{Provider: "fake", ID: "thinking-model", SupportsThinking: true, ThinkingLevels: []protocol.ThinkingLevel{protocol.ThinkingHigh}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.app.Agent.SetThinking(protocol.ThinkingHigh); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.app.Agent.SetModel(protocol.Model{Provider: "openai-compatible", ID: "deepseek-v4-flash", SupportsTools: true}); err != nil {
+		t.Fatal(err)
+	}
+	m.busy = true
+	m.runStartedAt = time.Now()
+	msg := m.startPrompt("hey")()
+	result, ok := msg.(promptDoneMsg)
+	if !ok || result.err == nil || result.admitted {
+		t.Fatalf("prompt result=%T %+v", msg, msg)
+	}
+	_, _ = m.Update(result)
+	if m.busy || !m.runStartedAt.IsZero() || m.cancelRun != nil {
+		t.Fatalf("preflight error left run active: busy=%t started=%v cancel=%v", m.busy, m.runStartedAt, m.cancelRun != nil)
+	}
+	before := len(m.lines)
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if len(m.lines) != before {
+		t.Fatalf("idle escape emitted abort output: %v", m.lines[before:])
 	}
 }
 
@@ -249,6 +294,46 @@ func TestModelThinkingPickerFiltersAndPersists(t *testing.T) {
 }
 
 // TestModelAgentEventUpdates verifies streaming events update the transcript.
+func TestModelPickerSelectsModelThenThinkingEffort(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	thinkingModel := protocol.Model{
+		Provider: "fake", ID: "reasoner", SupportsTools: true, SupportsThinking: true,
+		DefaultThinking: protocol.ThinkingXHigh,
+		ThinkingLevels:  []protocol.ThinkingLevel{protocol.ThinkingLow, protocol.ThinkingHigh, protocol.ThinkingXHigh, protocol.ThinkingMax, protocol.ThinkingUltra},
+	}
+	m.app.AllModels = []protocol.Model{thinkingModel}
+	_, _ = m.startModelPick()
+	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.pickModel || !m.pickThinking || m.thinkingModel == nil || m.thinkingModel.ID != "reasoner" {
+		t.Fatalf("nested picker model=%v thinking=%v selected=%+v", m.pickModel, m.pickThinking, m.thinkingModel)
+	}
+	want := []protocol.ThinkingLevel{protocol.ThinkingOff, protocol.ThinkingLow, protocol.ThinkingHigh, protocol.ThinkingXHigh, protocol.ThinkingMax, protocol.ThinkingUltra}
+	if !slices.Equal(m.thinkingList, want) || m.thinkingList[m.thinkingIndex] != protocol.ThinkingXHigh {
+		t.Fatalf("thinking list=%v index=%d", m.thinkingList, m.thinkingIndex)
+	}
+	view := stripANSI(m.renderThinkingPicker())
+	for _, label := range []string{"reasoner", "xhigh", "max", "ultra"} {
+		if !strings.Contains(view, label) {
+			t.Fatalf("picker missing %q: %q", label, view)
+		}
+	}
+	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyEsc})
+	if !m.pickModel || m.pickThinking {
+		t.Fatalf("Esc did not return to model picker: model=%v thinking=%v", m.pickModel, m.pickThinking)
+	}
+	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEnter})
+	m.thinkingIndex = len(m.thinkingList) - 1
+	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.pickThinking || m.app.Agent.Model().ID != "reasoner" || m.app.Agent.Thinking() != protocol.ThinkingUltra {
+		t.Fatalf("selection model=%q thinking=%q picker=%v", m.app.Agent.Model().ID, m.app.Agent.Thinking(), m.pickThinking)
+	}
+	data, err := os.ReadFile(m.app.ConfigPath)
+	if err != nil || !strings.Contains(string(data), `"default_model": "reasoner"`) || !strings.Contains(string(data), `"thinking": "ultra"`) {
+		t.Fatalf("model/effort were not persisted: err=%v data=%s", err, data)
+	}
+}
+
 func TestModelAgentEventUpdates(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
@@ -402,6 +487,22 @@ func TestModelFinalizesStreamingBeforeInterruptingEvents(t *testing.T) {
 	}
 }
 
+func TestModelDeduplicatesProviderStreamError(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	const message = "chatgpt: servers overloaded"
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvError, Message: message})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvError, Message: "agent: provider stream: " + message})
+
+	if got := strings.Count(stripANSI(strings.Join(m.lines, "\n")), message); got != 1 {
+		t.Fatalf("provider stream error rendered %d times, want once", got)
+	}
+}
+
 func TestModelEditDiffPreview(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
@@ -489,7 +590,7 @@ func TestModelThinkingOnlyTurn(t *testing.T) {
 	}
 }
 
-func TestModelThinkingRendersMarkdownIncrementally(t *testing.T) {
+func TestModelThinkingStreamsCheaplyAndFinalizesMarkdown(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.width = 100
@@ -517,8 +618,13 @@ func TestModelThinkingRendersMarkdownIncrementally(t *testing.T) {
 			t.Fatalf("incremental reasoning missing %q: %q", want, secondPlain)
 		}
 	}
-	if strings.Contains(secondPlain, "**") {
-		t.Fatalf("reasoning exposed Markdown markers: %q", secondPlain)
+	if !strings.Contains(secondPlain, "**") {
+		t.Fatalf("live reasoning unexpectedly performed full Markdown rendering: %q", secondPlain)
+	}
+	m.finalizeThinking()
+	finalized := stripANSI(strings.Join(m.lines, "\n"))
+	if strings.Contains(finalized, "**") || !strings.Contains(finalized, "Inspecting repository") {
+		t.Fatalf("finalized reasoning Markdown = %q", finalized)
 	}
 }
 

@@ -2,7 +2,9 @@ package session
 
 import (
 	"database/sql"
+	"math"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -36,13 +38,16 @@ func exerciseGoals(t *testing.T, st Store) {
 	if _, err := gs.UpdateGoal("stale", nil, &paused, nil); err == nil {
 		t.Fatal("stale update succeeded")
 	}
-	got, cross, err := gs.AccountGoal("stale", 10, 1)
+	got, cross, err := gs.AccountGoal("stale", 10, 1, nil)
 	if err != nil || cross || got.GoalID != "g1" || got.TokensUsed != 0 {
 		t.Fatalf("stale account=%+v %v %v", got, cross, err)
 	}
-	got, cross, err = gs.AccountGoal("g1", 10, 2)
+	got, cross, err = gs.AccountGoal("g1", 10, 2, &protocol.Cost{Currency: "usd", Input: 0.01, Output: 0.02, Total: 0.03})
 	if err != nil || !cross || got.Status != protocol.GoalBudgetLimited || got.TokensUsed != 10 {
 		t.Fatalf("exact budget=%+v %v %v", got, cross, err)
+	}
+	if len(got.EstimatedCosts) != 1 || got.EstimatedCosts[0].Currency != "USD" || got.EstimatedCosts[0].Total != 0.03 {
+		t.Fatalf("estimated costs=%+v", got.EstimatedCosts)
 	}
 	branches := st.(BranchStore)
 	fork, err := branches.ForkBranch("root")
@@ -57,14 +62,18 @@ func exerciseGoals(t *testing.T, st Store) {
 	if _, err := gs.UpdateGoal(forkGoal.GoalID, nil, &status, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := gs.AccountGoal(forkGoal.GoalID, 1, 0); err != nil {
+	if _, _, err := gs.AccountGoal(forkGoal.GoalID, 1, 0, &protocol.Cost{Currency: "EUR", Total: 0.5}); err != nil {
 		t.Fatal(err)
+	}
+	forkGoal, _ = gs.Goal()
+	if len(forkGoal.EstimatedCosts) != 2 {
+		t.Fatalf("fork did not preserve/add per-currency costs: %+v", forkGoal.EstimatedCosts)
 	}
 	if err := branches.SelectBranch("main"); err != nil {
 		t.Fatal(err)
 	}
 	main, _ := gs.Goal()
-	if main.TokensUsed != 10 || main.Status != protocol.GoalBudgetLimited {
+	if main.TokensUsed != 10 || main.Status != protocol.GoalBudgetLimited || len(main.EstimatedCosts) != 1 || main.EstimatedCosts[0].Total != 0.03 {
 		t.Fatalf("main diverged=%+v", main)
 	}
 }
@@ -94,7 +103,7 @@ func TestSQLiteGoalAccountingAtomicAcrossHandles(t *testing.T) {
 			wg.Add(1)
 			go func(st *SQLiteStore) {
 				defer wg.Done()
-				_, _, err := st.AccountGoal(goal.GoalID, 1, 0)
+				_, _, err := st.AccountGoal(goal.GoalID, 1, 0, &protocol.Cost{Currency: "USD", Total: 0.001})
 				errs <- err
 			}(store)
 		}
@@ -112,6 +121,105 @@ func TestSQLiteGoalAccountingAtomicAcrossHandles(t *testing.T) {
 	}
 	if got.TokensUsed != 200 {
 		t.Fatalf("lost concurrent accounting updates: got %d want 200", got.TokensUsed)
+	}
+	if len(got.EstimatedCosts) != 1 || math.Abs(got.EstimatedCosts[0].Total-0.2) > 1e-9 {
+		t.Fatalf("lost concurrent estimated costs: %+v", got.EstimatedCosts)
+	}
+}
+
+func TestGoalCostOverflowRejectedAtomically(t *testing.T) {
+	factories := map[string]func(t *testing.T) Store{
+		"memory": func(t *testing.T) Store { return NewMemoryStore(Options{}) },
+		"sqlite": func(t *testing.T) Store {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "overflow.db"), t.TempDir(), Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			return store
+		},
+	}
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			store := factory(t)
+			goals := store.(ThreadGoalStore)
+			now := time.Now().UnixMilli()
+			goal := protocol.ThreadGoal{GoalID: "overflow", Objective: "check overflow", Status: protocol.GoalActive, CreatedAt: now, UpdatedAt: now}
+			if err := goals.CreateGoal(goal, false); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := goals.AccountGoal(goal.GoalID, 0, 0, &protocol.Cost{Currency: "USD", Total: math.MaxFloat64}); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := goals.AccountGoal(goal.GoalID, 1, 1, &protocol.Cost{Currency: "USD", Total: math.MaxFloat64}); err == nil {
+				t.Fatal("cost overflow accepted")
+			}
+			got, err := goals.Goal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.TokensUsed != 0 || got.SecondsUsed != 0 || len(got.EstimatedCosts) != 1 || got.EstimatedCosts[0].Total != math.MaxFloat64 {
+				t.Fatalf("overflow partially mutated goal: %+v", got)
+			}
+		})
+	}
+}
+
+func TestSQLiteGoalReadsAreAtomicWithCostAccounting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "atomic-read.db")
+	reader, err := NewSQLiteStore(path, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	writer, err := NewSQLiteStore(path, "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	now := time.Now().UnixMilli()
+	goal := protocol.ThreadGoal{GoalID: "atomic-read", Objective: "read atomically", Status: protocol.GoalActive, CreatedAt: now, UpdatedAt: now}
+	if err := reader.CreateGoal(goal, false); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		for i := 0; i < 100; i++ {
+			if _, _, err := writer.AccountGoal(goal.GoalID, 1, 0, &protocol.Cost{Currency: "USD", Total: 0.01}); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	for {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := reader.Goal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.TokensUsed != 100 || len(got.EstimatedCosts) != 1 || math.Abs(got.EstimatedCosts[0].Total-1) > 1e-9 {
+				t.Fatalf("final goal=%+v", got)
+			}
+			return
+		default:
+			got, err := reader.Goal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.TokensUsed == 0 && len(got.EstimatedCosts) == 0 {
+				runtime.Gosched()
+				continue
+			}
+			if len(got.EstimatedCosts) != 1 || math.Abs(got.EstimatedCosts[0].Total-float64(got.TokensUsed)*0.01) > 1e-9 {
+				t.Fatalf("torn goal snapshot: %+v", got)
+			}
+			runtime.Gosched()
+		}
 	}
 }
 
@@ -159,7 +267,7 @@ func TestSQLiteGoalTransitionsAndReplacementAreCompareAndSwap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := second.AccountGoal(current.GoalID, 5, 1); err != nil {
+	if _, _, err := second.AccountGoal(current.GoalID, 5, 1, nil); err != nil {
 		t.Fatal(err)
 	}
 	revised, err := first.ReviseGoal(current.GoalID, "cas-revision", "revised objective")
@@ -186,6 +294,51 @@ func TestSQLiteGoalTransitionsAndReplacementAreCompareAndSwap(t *testing.T) {
 	got, _ := first.Goal()
 	if got.GoalID != replacement.GoalID || got.Objective != replacement.Objective {
 		t.Fatalf("goal=%+v", got)
+	}
+}
+
+func TestSQLiteV7MigrationBackfillsUnambiguousGoalCosts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "goal-cost-migration.db")
+	st, err := NewSQLiteStore(path, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Add(-time.Second).UnixMilli()
+	goal := protocol.ThreadGoal{GoalID: "legacy-cost", Objective: "migrate cost", Status: protocol.GoalActive, CreatedAt: now, UpdatedAt: now}
+	if err := st.CreateGoal(goal, false); err != nil {
+		t.Fatal(err)
+	}
+	usage := &protocol.Usage{Input: 90, Output: 10, Total: 100, Cost: &protocol.Cost{Currency: "USD", Input: 0.01, Output: 0.02, Total: 0.03}}
+	message := protocol.NewAssistantMessage("priced", st.BranchTip(), "opencode-go", "model", []protocol.ContentBlock{protocol.NewTextBlock("done")}, protocol.StopStop, usage)
+	if err := st.Append(Entry{Type: EntryMessage, ID: message.ID, Message: &message}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.AccountGoal(goal.GoalID, 100, 1, usage.Cost); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE thread_goal_costs; UPDATE session_meta SET version=7`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	reopened, err := NewSQLiteStore(path, "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	got, err := reopened.Goal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.EstimatedCosts) != 1 || got.EstimatedCosts[0].Total != 0.03 {
+		t.Fatalf("migrated estimated costs=%+v", got.EstimatedCosts)
 	}
 }
 
@@ -219,5 +372,8 @@ func TestSQLiteGoalsReopenForkAndV3Migration(t *testing.T) {
 	g, err := re.Goal()
 	if err != nil || g == nil || g.GoalID != "g1" {
 		t.Fatalf("reopen=%+v %v", g, err)
+	}
+	if len(g.EstimatedCosts) != 1 || g.EstimatedCosts[0].Currency != "USD" || g.EstimatedCosts[0].Total != 0.03 {
+		t.Fatalf("reopened estimated costs=%+v", g.EstimatedCosts)
 	}
 }

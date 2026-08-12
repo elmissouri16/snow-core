@@ -31,10 +31,13 @@ Follow these steps...
 ```
 
 Snow parses the standard `name`, `description`, `license`, `compatibility`,
-`metadata`, and experimental `allowed-tools` fields. `name` and `description`
-are required. Cosmetic naming violations are diagnosed but loaded leniently
-for cross-client compatibility; missing descriptions or unparseable YAML are
-skipped. `allowed-tools` is metadata only and never bypasses Snow permissions.
+`metadata`, and experimental `allowed-tools` fields. It strictly validates the
+required fields, standard top-level keys, field types, Unicode character limits,
+NFKC-normalized lowercase alphanumeric/hyphen names, and parent-directory
+match. Nonconformant or unparseable files are diagnosed and excluded from the
+runtime catalog. This follows the canonical `skills-ref` Unicode behavior; the
+published prose currently uses ambiguous ASCII examples. `allowed-tools` is
+preserved as metadata only and never bypasses Snow permissions.
 
 ## Discovery and precedence
 
@@ -53,7 +56,10 @@ locations override cross-client locations within the same scope. Collisions,
 malformed files, bounds, and trust-blocked project directories are retained as
 diagnostics. The global discovery limit counts every candidate directory,
 including malformed and duplicate-name skills, and stops all remaining roots
-when reached so shadowing cannot bypass the startup I/O bound.
+when reached so shadowing cannot bypass the startup I/O bound. A separate 64 KiB
+catalog budget admits higher-precedence skills first. Overflow entries remain in
+inventory with an explicit disabled reason instead of being partially disclosed;
+every enabled skill therefore contributes its complete name and description.
 
 ```json
 {
@@ -90,7 +96,9 @@ writes the current project's trust-gated `.snow/config.json`. Project policy
 overrides global policy, named overrides take precedence over scope-wide
 `disabled`, and runtime `--no-skills` remains absolute. Disabled skills appear
 in inventory with their reason but never enter the startup catalog,
-`activate_skill` enum, or resource reader. The interactive TUI's `/skills`
+`activate_skill` enum, resource reader, or restored active-skill context.
+`--no-skills`, trust revocation, and named policy changes therefore also filter
+activations persisted by an older session. The interactive TUI's `/skills`
 picker is read-only; `/settings` persists the global Agent Skills enable/disable
 toggle, applied on the next launch.
 
@@ -100,12 +108,21 @@ Snow follows all three disclosure tiers:
 
 1. Only each skill's name and description enter the startup system catalog.
 2. `activate_skill` loads the current `SKILL.md` body when the model decides a
-   task matches, or when the user explicitly names `$skill-name`.
+   task matches. A prompt, steer, or follow-up beginning with `$skill-name` is
+   treated as an explicit activation directive before the next provider request,
+   without relying on a model tool call. Requiring the directive at the start
+   avoids activating tokens embedded in pasted or quoted untrusted text. In the
+   TUI, typing a leading `$` opens autocomplete over enabled skill names and
+   descriptions; Enter or Tab inserts the selected directive without submitting.
 3. `read_skill_resource` reads one referenced script, reference, or asset on
-   demand and confines the path to that skill directory.
+   demand through a pinned `os.Root`; each operation verifies the directory
+   identity recorded at discovery, preventing traversal, symlink escape, and
+   ancestor-replacement races without retaining one file descriptor per skill.
 
-Activation returns structured `<skill_content>` with the skill directory and a
-bounded resource inventory. Resource files are listed but not eagerly loaded.
+Activation returns structured, XML-escaped `<skill_content>` with the skill
+directory and a bounded resource inventory. Resource files are listed through a
+cancellation-aware streaming walk capped at 200 files and 2,000 directory
+entries, but are not eagerly loaded.
 The dedicated reader avoids broadening the normal `read`/`write` filesystem
 roots merely because a user-level skill exists outside the project.
 
@@ -113,7 +130,16 @@ Activated instructions are tracked by the agent and reattached to every later
 provider request. They are reconstructed from persisted activation results on
 resume, so manual compaction cannot silently remove active behavioral guidance.
 Repeated activation replaces the in-memory copy rather than multiplying it in
-the system context.
+the system context. A successful direct `$skill-name` activation writes a
+branch-scoped, provider-hidden marker and emits ordinary tool lifecycle events;
+resume rehydrates only those markers, never historical text that merely happens
+to contain a matching token.
+
+An explicit `--tools`/SDK tool allowlist is an upper bound for the two skill
+tools as well. If `activate_skill` is omitted, skills remain in inventory with a
+runtime-disabled reason and are excluded from provider context; a resource-only
+allowlist also drops the incoherent names-only reader. If only the resource
+reader is omitted, activation remains available without advertising that reader.
 
 Skill instructions and resources remain untrusted input. Bundled scripts run
 only through normal Snow tools and their permission policy; discovering or

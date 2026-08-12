@@ -151,15 +151,38 @@ Built-in `webfetch`:
 - bounds time, redirects, media types, and response size;
 - converts HTML to Markdown and never executes JavaScript.
 
-These guarantees apply to `webfetch`, not to arbitrary shell commands, plugins,
-MCP servers, or external tools. Streamable HTTP MCP calls remain network-risk
-operations, but an allowed stdio MCP process can independently access the
-network with user privileges.
+These guarantees apply to `webfetch`, not to provider traffic, arbitrary shell
+commands, plugins, MCP servers, or external tools. Streamable HTTP MCP calls
+remain network-risk operations, but an allowed stdio MCP process can
+independently access the network with user privileges.
+
+A user-configured `openai-compatible` endpoint is an operator trust decision.
+Snow sends conversation context, tool schemas/results, images supported by model
+metadata, and an optional Bearer key to that origin. Clipboard images attached
+with TUI Ctrl+V are copied into the durable session database and sent to the
+selected provider; clipboard access is local to the machine running Snow. The TUI
+`/login openai-compatible` flow displays and persists the endpoint in
+`config.json` while capturing the key separately through masked input into
+`auth.json`. URLs must be absolute HTTP(S) without userinfo/query/fragment;
+cross-origin redirects are rejected and
+active keys are redacted from bounded provider errors. HTTP and private/local
+endpoints are allowed deliberately, so transport security and service behavior
+remain the operator's responsibility. Snow does not sandbox or certify the
+endpoint.
+
+ChatGPT/Codex requests send a fixed-width hash derived from Snow's session,
+branch, and request purpose for provider cache/routing affinity. This avoids
+sending raw local identifiers but is pseudonymous metadata, not an anonymity or
+access-control boundary. Large Codex request bodies use zstd before TLS; this
+reduces long-session transport size but does not attempt to hide compressed
+length from the provider or a network observer.
 
 ## Credentials and sensitive data
 
 Provider credentials are stored in `~/.snow/auth.json` (or the configured
-`SNOW_HOME`) with mode `0600` and atomic replacement. ChatGPT refresh uses a
+`SNOW_HOME`) with mode `0600` and atomic replacement. The
+`openai-compatible` key is optional; no `Authorization` header is sent when
+explicit, stored, and `OPENAI_API_KEY` sources are all empty. ChatGPT refresh uses a
 cross-process lock and persists rotated refresh tokens atomically. Trust data is
 also locked and mode `0600`.
 

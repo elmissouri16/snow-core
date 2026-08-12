@@ -28,6 +28,7 @@ Environment overrides:
 | `SNOW_HOME` | Replaces the global `~/.snow` directory for config, auth, trust, caches, goals, themes, keys, and search policy |
 | `SNOW_SESSIONS_DIR` | Replaces only the session database root |
 | `OPENCODE_API_KEY` | Fallback credential for `opencode-go` |
+| `OPENAI_API_KEY` | Optional fallback Bearer credential for `openai-compatible` |
 | `XDG_DATA_HOME` | Included when discovering compatible OpenCode ChatGPT credentials |
 | `SNOW_DEBUG` | File path for TUI debug logs, for example `SNOW_DEBUG=/tmp/snow.log`; intended for development |
 
@@ -54,7 +55,7 @@ Credentials use a separate order:
 
 1. Explicit `--api-key` or `snowsdk.Options.APIKey`
 2. Snow's auth store
-3. A known environment fallback such as `OPENCODE_API_KEY`
+3. A known environment fallback such as `OPENCODE_API_KEY` or `OPENAI_API_KEY`
 
 The SDK intentionally defaults `PermissionMode` to `deny` when omitted, even if
 the global interactive default is `ask`. See [SDK permissions](sdk.md#permissions-and-security).
@@ -83,11 +84,15 @@ A representative configuration:
       "base_url": "https://opencode.ai/zen/go/v1",
       "default_model": "kimi-k2.6"
     },
+    "openai-compatible": {
+      "base_url": "https://gateway.example/v1",
+      "default_model": "model-id"
+    },
     "chatgpt": {}
   },
   "tui": {
     "theme": "default",
-    "mouse": false
+    "mouse": true
   },
   "skills": {
     "disabled": false,
@@ -109,14 +114,17 @@ A representative configuration:
     "durable": true,
     "allow_mutation": false,
     "expose_child_tool_events": true,
-    "default_role": "default"
+    "default_provider": "opencode-go",
+    "default_model": "model-id",
+    "default_role": "general"
   },
   "compaction": {
     "retain_tokens": 0,
     "min_retained_turns": 2,
     "summary_max_tokens": 2000,
     "fallback": "local",
-    "guidance": ""
+    "guidance": "",
+    "goal_auto_threshold_percent": 90
   },
   "windows_shell": {
     "kind": "powershell"
@@ -137,7 +145,7 @@ fills required zero-value defaults before validation.
 | `default_model` | provider default | Active model ID; provider-specific config may also declare a default |
 | `permission_mode` | `ask` | Interactive default: `ask`, `allow`, or `deny`; unknown nonempty values are startup errors |
 | `default_project_trust` | `ask` | `ask`, `allow`, or `deny`; legacy `always`/`never` are aliases |
-| `thinking` | `off` | `off`, `minimal`, `low`, `medium`, or `high` |
+| `thinking` | `off` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` |
 | `reasoning_summary` | `auto` | `off`, `auto`, `concise`, or `detailed` |
 | `text_verbosity` | `low` | `low`, `medium`, or `high` |
 | `collaboration_mode` | `default` | `default` or `plan`; branch persistence may restore a saved mode |
@@ -150,6 +158,14 @@ fills required zero-value defaults before validation.
 Model capabilities remain authoritative. A configured reasoning level that is
 not advertised by the selected model is rejected.
 
+`compaction.goal_auto_threshold_percent` defaults to `90`. During automatic
+Default-mode goal continuation, Snow compacts between complete goal turns when
+the latest provider-reported request usage reaches that percentage of the
+model context window. Set it to `0` to disable; enabled values must be `50..99`.
+This does not auto-compact ordinary prompts or subagents. Existing retention,
+summary, fallback, and guidance fields control both manual and goal-triggered
+compaction. Full history remains append-only.
+
 ### Providers
 
 `providers` maps provider IDs to:
@@ -161,9 +177,26 @@ not advertised by the selected model is rejected.
 }
 ```
 
-`base_url` is mainly for OpenAI-compatible OpenCode Go gateways and tests.
-ChatGPT/Codex uses its dedicated backend and OAuth flow. Do not put API keys or
-OAuth tokens in `config.json`; use login/auth storage or environment variables.
+For `openai-compatible`, `base_url` is required and may be an API root such as
+`https://gateway.example/v1` or a full URL ending in `/responses` or
+`/chat/completions`. Snow tries the sibling `/models` endpoint, prefers
+Responses/SSE, and automatically caches a Chat Completions/SSE fallback when the
+Responses endpoint returns HTTP 404, 405, or 501. When neither
+`default_model`/`--model` nor a valid discovered model is available, startup
+fails with an actionable model-selection error. ID-only model records remain
+tool-capable but do not guess vision, reasoning, verbosity, limits, or pricing.
+
+The compatible provider's Bearer key is optional. Inside the TUI,
+`/login openai-compatible` captures the endpoint and then an optional masked key;
+the endpoint is persisted here while the key is stored separately in
+`auth.json`. The top-level `snow login openai-compatible` command remains
+key-only. You can also pass `--api-key` or set `OPENAI_API_KEY`; keyless local
+gateways receive no `Authorization` header. Do not put API keys or OAuth tokens
+in `config.json`.
+
+`openai-compatible` does not define multiple named endpoints or accept
+custom/Azure headers or query parameters. ChatGPT/Codex retains its dedicated
+backend and OAuth flow.
 
 ### TUI
 
@@ -171,14 +204,15 @@ OAuth tokens in `config.json`; use login/auth storage or environment variables.
 {
   "tui": {
     "theme": "default",
-    "mouse": false
+    "mouse": true
   }
 }
 ```
 
 Built-in themes are `default`, `dark`, `light`, and `high-contrast`. Any other
-valid name refers to a custom theme file. Mouse reporting is off by default so
-native terminal text selection remains available.
+valid name refers to a custom theme file. Snow always uses Bubble Tea's
+alternate-screen, app-owned transcript viewport so scrolling cannot expose stale
+rendered headers or composer chrome. The default `mouse: true` keeps wheel/trackpad gestures inside Snow's transcript viewport and provides highlighted drag selection, edge auto-scroll, and OSC 52 copy. Apple Terminal users can hold Fn while dragging for instant terminal-native selection without disabling wheel handling. F6 (or `mouse: false`) disables reporting for native selection, but wheel gestures may then scroll terminal history; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
 
 ### Compaction
 
@@ -189,8 +223,13 @@ native terminal text selection remains available.
 | `summary_max_tokens` | `128..32768`, default `2000` | Maximum provider summary output |
 | `fallback` | `local` | `local` uses deterministic fallback; `error` fails when provider summary fails |
 | `guidance` | maximum 16 KiB | Additive operator instructions appended to the fixed summary contract |
+| `goal_auto_threshold_percent` | `0` or `50..99`, default `90` | Auto-compact between active goal turns at this context usage; zero disables |
 
-Compaction is manual and preserves the complete append-only history. Project
+Compaction preserves the complete append-only history. Ordinary work compacts
+only when requested with `/compact` or the SDK. Default-mode goal continuation
+also compacts automatically between complete turns at the configured threshold,
+using the latest provider-reported request usage and the active model context
+window. Project configuration cannot change the automatic threshold. Project
 `guidance` is additive; it cannot remove the host's factual continuation
 contract.
 
@@ -236,8 +275,11 @@ its files. See [Agent Skills](skills.md).
 ### Subagents
 
 The complete subagent schema includes execution, identity, depth, wait, task,
-result, durability, mutation, event, default-role, and role-map controls. Key
-bounds are:
+result, durability, mutation, event, default-model, default-role, and role-map
+controls. `subagents.default_provider` and `subagents.default_model`
+automatically select a provider/model pair for children. A role's
+`provider`/`model` overrides those defaults, and a `spawn_agent` selection
+overrides both. If omitted, the child inherits the parent selection. Key bounds are:
 
 - concurrency: `1..256` child agents; root does not consume a slot;
 - identities: `1..4096`, and not below concurrency;

@@ -30,13 +30,13 @@ func TestCloneChildRegistryRoleCapabilities(t *testing.T) {
 	parent := testChildParentRegistry(t)
 	defaults := config.Default().Subagents.Roles
 
-	general := subagent.Role{Name: "default", Tools: append([]string(nil), defaults["default"].Tools...)}
+	general := subagent.Role{Name: "general", Tools: append([]string(nil), defaults["general"].Tools...)}
 	generalReg, generalCaps, err := cloneChildRegistry(parent, general, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !hasRegisteredTool(generalReg, "bash") || !generalCaps.Shell {
-		t.Fatal("default role did not receive bash")
+		t.Fatal("general role did not receive bash")
 	}
 	rootPerm := permission.NewService(permission.ModeAllow, nil)
 	if got := childPermissionService(rootPerm, generalCaps, false); got != rootPerm {
@@ -44,16 +44,16 @@ func TestCloneChildRegistryRoleCapabilities(t *testing.T) {
 	}
 	for _, name := range []string{"read", "grep", "glob", "activate_skill", "read_skill_resource"} {
 		if hasRegisteredTool(parent, name) && !hasRegisteredTool(generalReg, name) {
-			t.Fatalf("default role missing %s", name)
+			t.Fatalf("general role missing %s", name)
 		}
 	}
 	for _, name := range []string{"write", "edit", "ask_user", "request_user_input", "update_plan", "webfetch"} {
 		if hasRegisteredTool(generalReg, name) {
-			t.Fatalf("default role unexpectedly received %s", name)
+			t.Fatalf("general role unexpectedly received %s", name)
 		}
 	}
 	if generalCaps.Mutation {
-		t.Fatal("default role unexpectedly has mutation capability")
+		t.Fatal("general role unexpectedly has mutation capability")
 	}
 
 	explorer := subagent.Role{Name: "explorer", Tools: append([]string(nil), defaults["explorer"].Tools...)}
@@ -68,18 +68,18 @@ func TestCloneChildRegistryRoleCapabilities(t *testing.T) {
 		t.Fatal("read-only explorer unexpectedly inherited root permission service")
 	}
 
-	worker := subagent.Role{Name: "worker"}
-	workerReg, workerCaps, err := cloneChildRegistry(parent, worker, false)
+	implementer := subagent.Role{Name: "implementer"}
+	implementerReg, implementerCaps, err := cloneChildRegistry(parent, implementer, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasRegisteredTool(workerReg, "bash") || !workerCaps.Shell || hasRegisteredTool(workerReg, "write") || hasRegisteredTool(workerReg, "edit") {
-		t.Fatal("worker default policy was not shell-only")
+	if !hasRegisteredTool(implementerReg, "bash") || !implementerCaps.Shell || hasRegisteredTool(implementerReg, "write") || hasRegisteredTool(implementerReg, "edit") {
+		t.Fatal("implementer default policy was not shell-only")
 	}
 
-	mutatingWorker := worker
-	mutatingWorker.AllowMutation = true
-	mutatingReg, mutatingCaps, err := cloneChildRegistry(parent, mutatingWorker, true)
+	mutatingImplementer := implementer
+	mutatingImplementer.AllowMutation = true
+	mutatingReg, mutatingCaps, err := cloneChildRegistry(parent, mutatingImplementer, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestCloneChildRegistryRoleCapabilities(t *testing.T) {
 		t.Fatal("dual mutation opt-in did not expose file mutation")
 	}
 
-	noGlobalMutationReg, noGlobalCaps, err := cloneChildRegistry(parent, mutatingWorker, false)
+	noGlobalMutationReg, noGlobalCaps, err := cloneChildRegistry(parent, mutatingImplementer, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestCloneChildRegistryRoleCapabilities(t *testing.T) {
 }
 
 func TestSubagentPromptExplainsRoleAndPermissionPolicy(t *testing.T) {
-	for _, want := range []string{"default role", "general alias", "explorer role", "worker role", "permission-gated bash", "ask/allow/deny", "not sandboxed", "do not finish while relevant children are queued or running", "wait_agent with until=all", "one concise line per child"} {
+	for _, want := range []string{"list_subagent_models", "never guess model IDs", "name for the child's identity", "task for its assignment", "role for its capability profile", "general role", "explorer role", "implementer role", "permission-gated bash", "ask/allow/deny", "not sandboxed", "do not finish while relevant children are queued or running", "wait_agent with until=all", "one concise line per child"} {
 		if !strings.Contains(subagentPromptGuidance, want) {
 			t.Fatalf("subagent prompt missing %q", want)
 		}
@@ -112,7 +112,7 @@ func TestCloneChildRegistryHonorsParentToolAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	role := subagent.Role{Name: "default", Tools: []string{"read", "bash"}}
+	role := subagent.Role{Name: "general", Tools: []string{"read", "bash"}}
 	child, caps, err := cloneChildRegistry(limited, role, false)
 	if err != nil {
 		t.Fatal(err)

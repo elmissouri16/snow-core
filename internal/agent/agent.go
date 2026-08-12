@@ -4,6 +4,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/snow-core/snow/internal/auth"
@@ -39,11 +42,15 @@ const (
 	maxPendingRootInputs = 64
 	maxQueuedInputBytes  = 64 * 1024
 	automaticTurnDelay   = 25 * time.Millisecond
+	skillActivationMeta  = "agent_skill_activation"
 )
 
 // ErrNotRunning is returned when an operation requires an active,
 // queue-accepting agent run.
-var ErrNotRunning = errors.New("agent: no running turn accepting queued input")
+var (
+	ErrNotRunning     = errors.New("agent: no running turn accepting queued input")
+	ErrPromptRejected = errors.New("agent: prompt rejected before admission")
+)
 
 // Options configures an Agent.
 type Options struct {
@@ -75,22 +82,31 @@ type Options struct {
 	// implemented by providers for known env vars.
 	Auth auth.Store
 	// APIKey is an explicit credential override (CLI --api-key / SDK option).
-	APIKey string
+	// APIKeyProvider binds that secret to one provider so runtime model/provider
+	// switching cannot forward it to a different origin. Empty is initialized
+	// from the initial Model.Provider for backward-compatible embedders.
+	APIKey         string
+	APIKeyProvider string
 	// Identity attributes permission and host-interaction requests for child
 	// agents. Root leaves it nil for backward-compatible events.
 	Identity *protocol.AgentRef
-	// Compaction configures manual compaction only.
+	// SkillNames filters both restored and direct $name activations. Nil keeps
+	// the legacy unrestricted behavior for standalone Agent embedders; an empty
+	// non-nil map disables every persisted skill activation.
+	SkillNames map[string]bool
+	// Compaction configures manual compaction and goal-only automatic compaction.
 	Compaction CompactionOptions
 }
 
 // CompactionOptions is kept in agent to avoid coupling core runtime behavior to
 // persisted configuration packages.
 type CompactionOptions struct {
-	RetainTokens     int
-	MinRetainedTurns int
-	SummaryMaxTokens int
-	Fallback         string
-	Guidance         string
+	RetainTokens             int
+	MinRetainedTurns         int
+	SummaryMaxTokens         int
+	Fallback                 string
+	Guidance                 string
+	GoalAutoThresholdPercent int
 }
 
 // Agent drives turns against a provider and tool registry.
@@ -119,10 +135,11 @@ type Agent struct {
 	pending      map[string]protocol.ContentBlock
 	pendingOrder []string
 	// toolStarts is used to add useful duration metadata to tool_end events.
-	toolStarts   map[string]time.Time
-	turnUsage    protocol.Usage
-	usageSet     bool
-	turnProgress bool
+	toolStarts          map[string]time.Time
+	turnUsage           protocol.Usage
+	usageSet            bool
+	turnProgress        bool
+	latestContextTokens int
 	// Deferred schemas selected for the current user turn. The base selection
 	// is sticky; the latest search_tools result may add at most five more.
 	baseDeferred     []string
@@ -176,6 +193,9 @@ func New(opts Options) (*Agent, error) {
 	if opts.Model.Provider == "" && opts.Provider != nil {
 		opts.Model.Provider = opts.Provider.ID()
 	}
+	if opts.APIKey != "" && opts.APIKeyProvider == "" {
+		opts.APIKeyProvider = opts.Model.Provider
+	}
 	thinking, err := protocol.ParseThinkingLevel(string(opts.Thinking))
 	if err != nil {
 		return nil, err
@@ -214,10 +234,17 @@ func New(opts Options) (*Agent, error) {
 	}
 	opts.Identity = opts.Identity.Clone()
 	opts.Model = opts.Model.Clone()
+	if opts.SkillNames != nil {
+		names := make(map[string]bool, len(opts.SkillNames))
+		for name, allowed := range opts.SkillNames {
+			names[name] = allowed
+		}
+		opts.SkillNames = names
+	}
 	a := &Agent{opts: opts, model: opts.Model, bus: newEventBus(), mode: mode, turnMode: mode, mailboxActivity: make(chan struct{}, 1)}
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.toolStarts = make(map[string]time.Time)
-	a.activeSkills = restoreActiveSkills(opts.Session)
+	a.activeSkills = restoreActiveSkills(opts.Session, opts.Registry, opts.ToolHost, opts.SkillNames)
 	if state, ok := opts.Session.(session.ThreadStateStore); ok {
 		if err := state.SetCollaborationMode(mode); err != nil {
 			return nil, fmt.Errorf("agent: persist collaboration mode: %w", err)
@@ -332,12 +359,15 @@ func (a *Agent) SetMode(mode protocol.CollaborationMode) error {
 	a.mu.Unlock()
 	unlockAdmission()
 	admissionHeld = false
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: parsed, ReasoningEffort: effort}})
+	a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: parsed, ReasoningEffort: effort}})
 	if parsed == protocol.ModeDefault {
+		deferred := false
 		if a.opts.Goal != nil {
-			_ = a.opts.Goal.Defer(false)
+			deferred, _ = a.opts.Goal.Deferred()
 		}
-		a.ContinueGoal()
+		if !deferred {
+			a.ContinueGoal()
+		}
 	}
 	if !reentrantEventCallback {
 		_ = a.bus.Drain(context.Background())
@@ -462,13 +492,14 @@ func (a *Agent) setSessionAdmitted(st session.Store, publish bool) error {
 		return fmt.Errorf("agent: restore collaboration mode: %w", err)
 	}
 	a.opts.Session = st
-	a.activeSkills = restoreActiveSkills(st)
+	a.activeSkills = restoreActiveSkills(st, a.opts.Registry, a.opts.ToolHost, a.opts.SkillNames)
 	a.mode = mode
 	a.turnMode = mode
+	a.latestContextTokens = 0
 	effort := a.effectiveThinkingLocked(mode)
 	a.mu.Unlock()
 	if publish {
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: effort}})
+		a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: effort}})
 	}
 	return nil
 }
@@ -511,7 +542,47 @@ func (a *Agent) SetProviderAndModel(p provider.Provider, m protocol.Model) error
 	a.mu.Unlock()
 	unlock()
 	reentrant := a.bus.InCallback()
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvModelChanged, Model: &m})
+	a.publish(protocol.AgentEvent{Type: protocol.EvModelChanged, Model: &m})
+	if !reentrant {
+		_ = a.bus.Drain(context.Background())
+	}
+	return nil
+}
+
+// SetProviderModelThinking changes provider, model, and reasoning effort as one
+// admitted idle transaction, so prompts cannot observe an intermediate choice.
+func (a *Agent) SetProviderModelThinking(p provider.Provider, m protocol.Model, level protocol.ThinkingLevel) error {
+	if p == nil {
+		return errors.New("agent: provider is nil")
+	}
+	if strings.TrimSpace(m.Provider) == "" {
+		return errors.New("agent: model has no provider")
+	}
+	if strings.TrimSpace(m.ID) == "" {
+		return errors.New("agent: model has no id")
+	}
+	parsed, err := protocol.ParseThinkingLevel(string(level))
+	if err != nil {
+		return err
+	}
+	m = m.Clone()
+	if !m.SupportsThinkingLevel(parsed) {
+		return unsupportedThinkingError(m, parsed)
+	}
+	unlock := a.LockAdmission()
+	a.mu.Lock()
+	if a.running {
+		a.mu.Unlock()
+		unlock()
+		return errors.New("agent: cannot change provider, model, and thinking while running")
+	}
+	a.opts.Provider = p
+	a.model = m
+	a.opts.Thinking = parsed
+	a.mu.Unlock()
+	unlock()
+	reentrant := a.bus.InCallback()
+	a.publish(protocol.AgentEvent{Type: protocol.EvModelChanged, Model: &m})
 	if !reentrant {
 		_ = a.bus.Drain(context.Background())
 	}
@@ -545,7 +616,7 @@ func (a *Agent) SetModel(m protocol.Model) error {
 	a.mu.Unlock()
 	unlock()
 	reentrantEventCallback := a.bus.InCallback()
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvModelChanged, Model: &m})
+	a.publish(protocol.AgentEvent{Type: protocol.EvModelChanged, Model: &m})
 	if !reentrantEventCallback {
 		_ = a.bus.Drain(context.Background())
 	}
@@ -575,9 +646,17 @@ func (a *Agent) WaitIdle(ctx context.Context) error {
 
 // IsRunning reports whether a turn is in flight.
 func (a *Agent) IsRunning() bool {
+	_, _, running := a.ActiveTurn()
+	return running
+}
+
+// ActiveTurn returns the identity of the currently admitted root operation.
+// The identity is intended for UI reconciliation when delayed lifecycle events
+// are delivered after a newer operation has already started.
+func (a *Agent) ActiveTurn() (origin, id string, running bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.running
+	return a.turnOrigin, a.turnID, a.running
 }
 
 // Steer queues text for the next safe boundary of an active run. Steering is
@@ -658,7 +737,7 @@ func (a *Agent) inputQueueLocked() protocol.InputQueue {
 }
 
 func (a *Agent) publishInputQueue(queue protocol.InputQueue) {
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvQueueUpdated, Queue: queue.Clone()})
+	a.publish(protocol.AgentEvent{Type: protocol.EvQueueUpdated, Queue: queue.Clone()})
 }
 
 // closeInputQueue stops admissions and optionally drops pending input. It
@@ -701,7 +780,23 @@ func (a *Agent) StateEvent() protocol.AgentEvent {
 // EmitUserInputRequest publishes a host interaction request through the same
 // normalized stream observed by the TUI, SDK, JSON, RPC, and plugins.
 // Publish emits a trusted host lifecycle event.
-func (a *Agent) Publish(ev protocol.AgentEvent) { a.bus.Publish(ev) }
+func (a *Agent) Publish(ev protocol.AgentEvent) { a.publish(ev) }
+
+// publish attaches the active root turn identity to events emitted while a
+// turn is admitted. Callers may provide an explicit identity for lifecycle
+// snapshots; those values are preserved. This keeps every TUI lifecycle event
+// correlatable without forcing individual provider/tool paths to copy IDs.
+func (a *Agent) publish(ev protocol.AgentEvent) {
+	if ev.Agent == nil && ev.TurnID == "" {
+		a.mu.RLock()
+		if a.running {
+			ev.TurnID = a.turnID
+			ev.TurnOrigin = a.turnOrigin
+		}
+		a.mu.RUnlock()
+	}
+	a.bus.Publish(ev)
+}
 
 func (a *Agent) EmitUserInputRequest(req protocol.UserInputRequest) {
 	copy := req
@@ -710,7 +805,7 @@ func (a *Agent) EmitUserInputRequest(req protocol.UserInputRequest) {
 		copy.Questions[i] = question
 		copy.Questions[i].Options = append([]protocol.UserInputOption(nil), question.Options...)
 	}
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvUserInputRequest, UserInput: &copy})
+	a.publish(protocol.AgentEvent{Type: protocol.EvUserInputRequest, UserInput: &copy})
 }
 
 // Messages returns the linearized session messages.
@@ -857,7 +952,7 @@ func (a *Agent) persistMailboxBatchLocked(batch []protocol.AgentMessage) error {
 			}
 		}
 	}
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	return nil
 }
 func (a *Agent) requeueMailbox(batch []protocol.AgentMessage) {
@@ -1006,9 +1101,10 @@ func (a *Agent) SelectBranchAdmitted(branchID string) error {
 		var restored protocol.CollaborationMode
 		restored, err = loadCollaborationMode(a.opts.Session)
 		if err == nil {
-			a.activeSkills = restoreActiveSkills(a.opts.Session)
+			a.activeSkills = restoreActiveSkills(a.opts.Session, a.opts.Registry, a.opts.ToolHost, a.opts.SkillNames)
 			a.mode = restored
 			a.turnMode = restored
+			a.latestContextTokens = 0
 		} else if oldBranchID != "" {
 			err = errors.Join(err, branches.SelectBranch(oldBranchID))
 		}
@@ -1019,8 +1115,8 @@ func (a *Agent) SelectBranchAdmitted(branchID string) error {
 	if err != nil {
 		return err
 	}
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: effort}})
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: effort}})
+	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	a.publishGoalSnapshot()
 	return nil
 }
@@ -1107,13 +1203,14 @@ func (a *Agent) ForkWithOptionsAdmitted(opts protocol.BranchForkOptions) (protoc
 		a.mu.Unlock()
 		return protocol.SessionBranch{}, errors.Join(err, rollbackErr)
 	}
-	a.activeSkills = restoreActiveSkills(a.opts.Session)
+	a.activeSkills = restoreActiveSkills(a.opts.Session, a.opts.Registry, a.opts.ToolHost, a.opts.SkillNames)
 	a.mode = mode
 	a.turnMode = mode
+	a.latestContextTokens = 0
 	effort := a.effectiveThinkingLocked(mode)
 	a.mu.Unlock()
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: effort}})
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: effort}})
+	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	a.publishGoalSnapshot()
 	return branch, nil
 }
@@ -1136,7 +1233,7 @@ func (a *Agent) RenameBranchAdmitted(branchID, name string) (protocol.SessionBra
 	}
 	branch, err := manager.RenameBranch(branchID, name)
 	if err == nil {
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+		a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	}
 	return branch, err
 }
@@ -1160,7 +1257,7 @@ func (a *Agent) DeleteBranchAdmitted(branchID string) error {
 	if err := manager.DeleteBranch(branchID); err != nil {
 		return err
 	}
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	return nil
 }
 
@@ -1181,7 +1278,8 @@ func rollbackFork(branches session.BranchStore, createdBranchID, oldBranchID str
 	return nil
 }
 
-// Compact manually compacts the active branch. It never runs automatically.
+// Compact manually compacts the active branch. Goal continuation may also run
+// the same compaction operation automatically at a configured context threshold.
 // The active provider is asked for a concise summary; the local summarizer is
 // used when that request fails, provided the context is still live.
 func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, retErr error) {
@@ -1196,13 +1294,21 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 		ctx = context.Background()
 	}
 	a.mu.RLock()
-	resumeAutomaticGoal := a.autoRunning
+	pauseAutomaticGoal := a.autoRunning
 	a.mu.RUnlock()
 	if err := a.stopAutomaticForControl(ctx, "compact"); err != nil {
-		if resumeAutomaticGoal && a.opts.Goal != nil {
+		if pauseAutomaticGoal && a.opts.Goal != nil {
 			_ = a.opts.Goal.Defer(true)
 		}
 		return protocol.CompactionResult{}, err
+	}
+	// Manual compaction is an explicit control boundary. If it interrupted an
+	// automatic goal worker, leave that goal durably paused instead of silently
+	// starting a fresh provider request as soon as the summary completes.
+	if pauseAutomaticGoal && a.opts.Goal != nil {
+		if err := a.opts.Goal.Defer(true); err != nil {
+			return protocol.CompactionResult{}, fmt.Errorf("agent: pause goal after compact: %w", err)
+		}
 	}
 	a.mu.Lock()
 	if a.running {
@@ -1213,7 +1319,7 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 	a.queuedInputs = nil
 	a.queueAccepting = false
 	a.autoStop = false
-	a.turnOrigin = "compact"
+	a.turnOrigin, a.turnID = "compact", newID()
 	a.turnWG.Add(1)
 	runCtx, cancel := context.WithCancel(ctx)
 	a.activeCancel = cancel
@@ -1224,9 +1330,7 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 	defer func() {
 		wasCanceled := runCtx.Err() != nil
 		cancel()
-		var stopped bool
 		retErr = errors.Join(retErr, a.finishTurnMailbox(func() {
-			stopped = a.autoStop
 			a.running = false
 			a.queueAccepting = false
 			a.activeCancel = nil
@@ -1237,15 +1341,140 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 			}
 		}))
 		a.turnWG.Done()
-		if resumeAutomaticGoal && wasCanceled && a.opts.Goal != nil {
+		if pauseAutomaticGoal && wasCanceled && a.opts.Goal != nil {
 			_ = a.opts.Goal.Defer(true)
-		}
-		if resumeAutomaticGoal && !stopped && !wasCanceled && a.Mode() == protocol.ModeDefault {
-			a.ContinueGoal()
 		}
 	}()
 	ctx = runCtx
 
+	return a.compactActiveContext(ctx, false)
+}
+
+func latestPersistedContextTokens(messages []protocol.Message) int {
+	// Usage before a projected compaction summary describes the old full
+	// request. Usage after that marker is valid for the newly grown context.
+	start := 0
+	if len(messages) > 0 && messages[0].Role == protocol.RoleCustom && strings.HasPrefix(messageTextBlocks(messages[0]), "Conversation summary:") {
+		// The projection places retained pre-marker tail messages after the
+		// summary too. Only messages whose parent chain starts at the compaction
+		// marker were requested after compaction and have valid occupancy usage.
+		markerID := strings.TrimPrefix(messages[0].ID, "compaction-")
+		start = len(messages)
+		for i := 1; i < len(messages); i++ {
+			if messages[i].ParentID == markerID {
+				start = i
+				break
+			}
+		}
+	}
+	for i := len(messages) - 1; i >= start; i-- {
+		if messages[i].Usage == nil {
+			continue
+		}
+		usage := *messages[i].Usage
+		if usage.Input > 0 {
+			return usage.Input
+		}
+		if tokens := contextTokensForCompaction(usage); tokens > 0 {
+			return tokens
+		}
+	}
+	return 0
+}
+
+func (a *Agent) goalAutoCompactionDue(messages []protocol.Message) bool {
+	threshold := a.opts.Compaction.GoalAutoThresholdPercent
+	model := a.Model()
+	if threshold == 0 || model.ContextWindow <= 0 {
+		return false
+	}
+	a.mu.Lock()
+	if a.latestContextTokens <= 0 {
+		a.latestContextTokens = latestPersistedContextTokens(messages)
+	}
+	current := a.latestContextTokens
+	stopped := a.autoStop
+	mode := a.mode
+	a.mu.Unlock()
+	return current > 0 && !stopped && mode == protocol.ModeDefault && int64(current)*100 >= int64(model.ContextWindow)*int64(threshold)
+}
+
+// autoCompactAdmittedGoalBoundary compacts at a safe boundary inside an
+// already-admitted goal turn. Goal turns can contain many provider/tool cycles,
+// so checking only between autonomous turns allows context to overrun first.
+func (a *Agent) autoCompactAdmittedGoalBoundary(ctx context.Context, messages []protocol.Message) (bool, error) {
+	a.mu.RLock()
+	admittedGoal := a.goalAtTurn.Clone()
+	a.mu.RUnlock()
+	if admittedGoal == nil || !a.goalAutoCompactionDue(messages) || a.opts.Goal == nil {
+		return false, nil
+	}
+	goal, err := a.opts.Goal.Get()
+	if err != nil || goal == nil || goal.GoalID != admittedGoal.GoalID || goal.Status != protocol.GoalActive {
+		return false, err
+	}
+	result, err := a.compactActiveContext(ctx, true)
+	if err != nil {
+		return true, err
+	}
+	if result.SummarizedMessages > 0 {
+		a.mu.Lock()
+		a.latestContextTokens = 0
+		a.mu.Unlock()
+	}
+	return true, nil
+}
+
+func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
+	if !a.goalAutoCompactionDue(nil) {
+		return false, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	a.mu.Lock()
+	if a.closed || a.running || a.autoStop || a.mode != protocol.ModeDefault {
+		a.mu.Unlock()
+		return false, nil
+	}
+	a.running = true
+	a.queuedInputs = nil
+	a.queueAccepting = false
+	a.turnOrigin, a.turnID = "compact", newID()
+	a.turnWG.Add(1)
+	runCtx, cancel := context.WithCancel(ctx)
+	a.activeCancel = cancel
+	a.activeDone = make(chan struct{})
+	a.mu.Unlock()
+	defer func() {
+		cancel()
+		_ = a.finishTurnMailbox(func() {
+			a.running = false
+			a.queueAccepting = false
+			a.activeCancel = nil
+			a.goalAtTurn = nil
+			if a.activeDone != nil {
+				close(a.activeDone)
+				a.activeDone = nil
+			}
+		})
+		a.turnWG.Done()
+	}()
+
+	result, err := a.compactActiveContext(runCtx, true)
+	if err != nil {
+		return true, err
+	}
+	if result.SummarizedMessages > 0 {
+		a.mu.Lock()
+		a.latestContextTokens = 0
+		a.mu.Unlock()
+	}
+	return true, nil
+}
+
+func (a *Agent) compactActiveContext(ctx context.Context, automatic bool) (protocol.CompactionResult, error) {
 	msgs, err := a.contextMessagesCurrent()
 	if err != nil {
 		return protocol.CompactionResult{}, fmt.Errorf("agent: compact load context: %w", err)
@@ -1269,13 +1498,19 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 		minTurns = 2
 	}
 	plan := compact.PlannerWithOptions(msgs, compact.PlannerOptions{RetainTokens: budget, MinRetainedTurns: minTurns})
-	result = protocol.CompactionResult{
-		SummarizedMessages: len(plan.CompactionCandidates),
-		RetainedMessages:   len(msgs) - len(plan.CompactionCandidates),
+	result := protocol.CompactionResult{SummarizedMessages: len(plan.CompactionCandidates), RetainedMessages: len(msgs) - len(plan.CompactionCandidates), Automatic: automatic}
+	message := fmt.Sprintf("compacting %d messages", result.SummarizedMessages)
+	if automatic {
+		message = fmt.Sprintf("goal context reached %d%%; %s", a.opts.Compaction.GoalAutoThresholdPercent, message)
 	}
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvCompactionStarted, Message: fmt.Sprintf("compacting %d messages", result.SummarizedMessages)})
+	a.publish(protocol.AgentEvent{Type: protocol.EvCompactionStarted, Message: message})
 	if len(plan.CompactionCandidates) == 0 {
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Compaction: &result})
+		if automatic {
+			err := errors.New("context threshold reached but no complete older turns are available to compact")
+			a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: err.Error(), IsError: true, Compaction: &result})
+			return result, err
+		}
+		a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Compaction: &result})
 		return result, nil
 	}
 
@@ -1286,31 +1521,28 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 	}
 	if summaryErr != nil && a.opts.Compaction.Fallback != "error" {
 		if ctx.Err() != nil {
-			a.bus.Publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: ctx.Err().Error(), IsError: true})
+			a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: ctx.Err().Error(), IsError: true, Compaction: &result})
 			return protocol.CompactionResult{}, ctx.Err()
 		}
 		summary, summaryErr = compact.DefaultSummarizer(ctx, plan.CompactionCandidates)
 		usedFallback = summaryErr == nil
 	}
 	if summaryErr != nil {
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: summaryErr.Error(), IsError: true})
+		a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: summaryErr.Error(), IsError: true, Compaction: &result})
 		return protocol.CompactionResult{}, fmt.Errorf("agent: compact summary: %w", summaryErr)
 	}
 	result.Summary = summary
 	result.UsedFallback = usedFallback
-	_, err = compact.Apply(ctx, a.opts.Session, func(context.Context, []protocol.Message) (string, error) {
-		return summary, nil
-	}, plan)
-	if err != nil {
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: err.Error(), IsError: true})
+	if _, err = compact.Apply(ctx, a.opts.Session, func(context.Context, []protocol.Message) (string, error) { return summary, nil }, plan); err != nil {
+		a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: err.Error(), IsError: true, Compaction: &result})
 		return protocol.CompactionResult{}, fmt.Errorf("agent: compact apply: %w", err)
 	}
-	message := ""
+	message = ""
 	if usedFallback {
 		message = "provider summary failed; used local fallback"
 	}
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: message, Compaction: &result})
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: message, Compaction: &result})
+	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	return result, nil
 }
 
@@ -1336,11 +1568,12 @@ func (a *Agent) summarizeForCompaction(ctx context.Context, msgs []protocol.Mess
 		maxTokens = 128
 	}
 	req := protocol.ChatRequest{
-		Model:     model,
-		Messages:  msgs,
-		System:    contract,
-		MaxTokens: maxTokens,
-		Thinking:  protocol.ThinkingOff,
+		Model:              model,
+		Messages:           msgs,
+		System:             contract,
+		MaxTokens:          maxTokens,
+		Thinking:           protocol.ThinkingOff,
+		SessionAffinityKey: a.requestAffinityKey("compaction"),
 	}
 	stream, err := p.Chat(ctx, creds, req)
 	if err != nil {
@@ -1381,12 +1614,26 @@ func (a *Agent) turnCompletionLocked() (string, string, *protocol.Usage) {
 }
 
 func (a *Agent) publishTurnDone(continuing bool, origin, id string, usage *protocol.Usage) {
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvTurnDone, Usage: usage, TurnOrigin: origin, TurnID: id, GoalContinuing: continuing})
+	a.publish(protocol.AgentEvent{Type: protocol.EvTurnDone, Usage: usage, TurnOrigin: origin, TurnID: id, GoalContinuing: continuing})
+}
+
+func (a *Agent) clearCompletedTurnIdentity(id string) {
+	a.mu.Lock()
+	if !a.running && a.turnID == id {
+		a.turnID = ""
+		a.turnOrigin = ""
+	}
+	a.mu.Unlock()
 }
 
 // Prompt runs a full user turn in the active collaboration mode.
 func (a *Agent) Prompt(ctx context.Context, text string) error {
-	return a.prompt(ctx, text, nil)
+	return a.prompt(ctx, text, nil, nil)
+}
+
+// PromptContent runs a full user turn with text and image content blocks.
+func (a *Agent) PromptContent(ctx context.Context, text string, attachments []protocol.ContentBlock) error {
+	return a.prompt(ctx, text, cloneContentBlocks(attachments), nil)
 }
 
 // RunMailbox starts one turn from already-persisted attributed mailbox input.
@@ -1460,6 +1707,7 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 			}
 		}))
 		a.publishTurnDone(false, origin, turnID, usage)
+		a.clearCompletedTurnIdentity(turnID)
 		a.turnWG.Done()
 	}()
 	return a.run(runCtx)
@@ -1472,14 +1720,71 @@ func (a *Agent) PromptWithMode(ctx context.Context, text string, mode protocol.C
 	if err != nil {
 		return err
 	}
-	return a.prompt(ctx, text, &parsed)
+	return a.prompt(ctx, text, nil, &parsed)
+}
+
+// PromptContentWithMode atomically applies a mode and starts a user turn with
+// mixed text/image content.
+func (a *Agent) PromptContentWithMode(ctx context.Context, text string, attachments []protocol.ContentBlock, mode protocol.CollaborationMode) error {
+	parsed, err := protocol.ParseCollaborationMode(string(mode))
+	if err != nil {
+		return err
+	}
+	return a.prompt(ctx, text, cloneContentBlocks(attachments), &parsed)
 }
 
 // TryInternalTurn atomically starts one private goal continuation without a
 // visible or persisted user message.
 func (a *Agent) TryInternalTurn(ctx context.Context) error { return a.internalTurn(ctx, false) }
 
-func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol.CollaborationMode) (retErr error) {
+func cloneContentBlocks(blocks []protocol.ContentBlock) []protocol.ContentBlock {
+	cloned := make([]protocol.ContentBlock, len(blocks))
+	for i, block := range blocks {
+		cloned[i] = block
+		cloned[i].Data = append([]byte(nil), block.Data...)
+		cloned[i].Arguments = append(json.RawMessage(nil), block.Arguments...)
+	}
+	return cloned
+}
+
+const (
+	maxUserImageBytes      = 20 << 20
+	maxUserImageTotalBytes = 40 << 20
+	maxUserImages          = 8
+)
+
+func validateUserAttachments(model protocol.Model, attachments []protocol.ContentBlock) error {
+	if len(attachments) > maxUserImages {
+		return fmt.Errorf("agent: at most %d image attachments are allowed", maxUserImages)
+	}
+	total := 0
+	for _, block := range attachments {
+		if block.Type != protocol.BlockImage {
+			return fmt.Errorf("agent: unsupported user attachment type %q", block.Type)
+		}
+		if !model.SupportsVision {
+			return fmt.Errorf("agent: model %q does not support image input", model.ID)
+		}
+		switch block.MIMEType {
+		case "image/png", "image/jpeg", "image/gif", "image/webp":
+		default:
+			return fmt.Errorf("agent: unsupported image MIME type %q", block.MIMEType)
+		}
+		if len(block.Data) == 0 {
+			return errors.New("agent: image attachment is empty")
+		}
+		if len(block.Data) > maxUserImageBytes {
+			return fmt.Errorf("agent: image attachment exceeds %d MiB limit", maxUserImageBytes>>20)
+		}
+		total += len(block.Data)
+		if total > maxUserImageTotalBytes {
+			return fmt.Errorf("agent: image attachments exceed %d MiB aggregate limit", maxUserImageTotalBytes>>20)
+		}
+	}
+	return nil
+}
+
+func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.ContentBlock, requestedMode *protocol.CollaborationMode) (retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1491,7 +1796,7 @@ func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol
 		}
 	}()
 	reentrantEventCallback := a.bus.InCallback()
-	if strings_trim(text) == "" {
+	if strings_trim(text) == "" && len(attachments) == 0 {
 		return errors.New("agent: empty prompt")
 	}
 
@@ -1507,13 +1812,16 @@ func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol
 	model := a.model
 	a.mu.RUnlock()
 	if closed {
-		return errors.New("agent: closed")
+		return fmt.Errorf("%w: agent closed", ErrPromptRejected)
 	}
 	if running && !wasAutomatic {
-		return errors.New("agent: already running")
+		return fmt.Errorf("%w: agent already running", ErrPromptRejected)
 	}
 	if !model.SupportsThinkingLevel(level) {
-		return unsupportedThinkingError(model, level)
+		return errors.Join(ErrPromptRejected, unsupportedThinkingError(model, level))
+	}
+	if err := validateUserAttachments(model, attachments); err != nil {
+		return errors.Join(ErrPromptRejected, err)
 	}
 	a.stopAutomatic(false)
 
@@ -1548,7 +1856,7 @@ func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol
 		publishMode := modeApplied && rollbackErr != nil
 		a.mu.Unlock()
 		if publishMode {
-			a.bus.Publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: modeAfter, ReasoningEffort: effortAfter}})
+			a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: modeAfter, ReasoningEffort: effortAfter}})
 		}
 		if resumeAutomatic {
 			a.ContinueGoal()
@@ -1562,7 +1870,7 @@ func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol
 				if wasAutomatic {
 					a.ContinueGoal()
 				}
-				return err
+				return errors.Join(ErrPromptRejected, err)
 			}
 		}
 		a.mode = *requestedMode
@@ -1573,11 +1881,9 @@ func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol
 	if !a.model.SupportsThinkingLevel(level) {
 		return rollbackAdmission(unsupportedThinkingError(a.model, level))
 	}
-	if a.opts.Goal != nil {
-		if err := a.opts.Goal.Defer(false); err != nil {
-			return rollbackAdmission(err)
-		}
-	}
+	// A normal prompt may temporarily take admission from automatic goal work,
+	// but it must never clear a durable abort/manual-compaction deferral. Only an
+	// explicit goal continue/resume operation may make deferred work eligible.
 	a.running = true
 	a.queuedInputs = nil
 	a.queueAccepting = true
@@ -1617,7 +1923,7 @@ func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol
 	unlockAdmission()
 	admissionHeld = false
 	if modeChanged {
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: level}})
+		a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: level}})
 	}
 	a.prepareToolRouting(ctx, text)
 
@@ -1645,6 +1951,7 @@ func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol
 		}))
 		// Queue completion before a continuation can overwrite turn metadata.
 		a.publishTurnDone(continuing, origin, turnID, usage)
+		a.clearCompletedTurnIdentity(turnID)
 		a.turnWG.Done()
 		if continuing {
 			a.ContinueGoal()
@@ -1654,7 +1961,12 @@ func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol
 		}
 	}()
 
-	userMsg := protocol.NewUserMessage(newID(), "", text)
+	content := make([]protocol.ContentBlock, 0, 1+len(attachments))
+	if text != "" {
+		content = append(content, protocol.NewTextBlock(text))
+	}
+	content = append(content, attachments...)
+	userMsg := protocol.NewUserContentMessage(newID(), "", content)
 	// A previous turn may have marked itself idle while it is still flushing
 	// final mailbox mail. Serialize this first user append with that flush so
 	// the next provider context cannot outrun attributed completion mail.
@@ -1669,7 +1981,10 @@ func (a *Agent) prompt(ctx context.Context, text string, requestedMode *protocol
 	if appendErr != nil {
 		return fmt.Errorf("agent: append user message: %w", appendErr)
 	}
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	if err := a.activateExplicitSkillMentions(runCtx, text); err != nil {
+		return fmt.Errorf("agent: activate explicit skill: %w", err)
+	}
 
 	retErr = a.run(runCtx)
 	return retErr
@@ -1736,7 +2051,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	a.usageSet = false
 	a.turnProgress = false
 	a.mu.Unlock()
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g.Clone()}, TurnOrigin: "goal", TurnID: a.turnID, GoalContinuing: true})
+	a.publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g.Clone()}, TurnOrigin: "goal", TurnID: a.turnID, GoalContinuing: true})
 	defer func() {
 		a.closeInputQueue(true)
 		cancel()
@@ -1756,6 +2071,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 			}
 		}))
 		a.publishTurnDone(continuing, origin, turnID, usage)
+		a.clearCompletedTurnIdentity(turnID)
 		a.turnWG.Done()
 	}()
 	retErr = a.run(runCtx)
@@ -1790,7 +2106,7 @@ func (a *Agent) stopGoalOnError(turnErr error) {
 func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 	crossed, accountingErr := a.finishGoalAccounting()
 	if accountingErr != nil {
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal accounting: " + accountingErr.Error()})
+		a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal accounting: " + accountingErr.Error()})
 		a.stopGoalOnError(accountingErr)
 	}
 	if turnErr != nil || accountingErr != nil {
@@ -1835,7 +2151,7 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 	if empty >= 3 && g.Status == protocol.GoalActive {
 		// Empty output is not proof of an external blocker. Pause conservatively
 		// rather than falsely claiming the model's three-turn blocked audit.
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal continuation paused after three turns with no text or tool progress"})
+		a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal continuation paused after three turns with no text or tool progress"})
 		_, _ = controller.SetStatus(g.GoalID, protocol.GoalPaused, false)
 		return false, accountingErr
 	}
@@ -1860,7 +2176,7 @@ func (a *Agent) finishGoalAccounting() (bool, error) {
 			tokens = int64(usage.Input + usage.Output)
 		}
 	}
-	updated, crossed, err := a.opts.Goal.AccountDuration(g.GoalID, tokens, time.Since(started))
+	updated, crossed, err := a.opts.Goal.AccountDuration(g.GoalID, tokens, time.Since(started), usage.Cost.Clone())
 	if err != nil {
 		return false, err
 	}
@@ -1931,6 +2247,22 @@ func (a *Agent) ContinueGoal() {
 			g, err := a.opts.Goal.Get()
 			if err != nil || g == nil || g.Status != protocol.GoalActive {
 				break
+			}
+			if compacted, compactErr := a.autoCompactGoalBoundary(context.Background()); compactErr != nil {
+				a.mu.RLock()
+				stopped = a.autoStop
+				a.mu.RUnlock()
+				if stopped || errors.Is(compactErr, context.Canceled) {
+					break
+				}
+				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal auto-compaction: " + compactErr.Error()})
+				_, _ = a.opts.Goal.SetStatus(g.GoalID, protocol.GoalBlocked, false)
+				break
+			} else if compacted {
+				g, err = a.opts.Goal.Get()
+				if err != nil || g == nil || g.Status != protocol.GoalActive {
+					break
+				}
 			}
 			// Yield between autonomous requests even when a provider returns
 			// immediately; productive goals remain unbounded but cannot hot-spin.
@@ -2229,7 +2561,7 @@ func (a *Agent) publishToolRouting(trigger string, ids []string, candidates int,
 	if routeErr != nil {
 		event.Message = boundRoutingMessage(routeErr.Error(), 2048)
 	}
-	a.bus.Publish(event)
+	a.publish(event)
 }
 
 func providerSchemaBytes(schemas []protocol.ToolSchema) int {
@@ -2258,7 +2590,7 @@ func (a *Agent) run(ctx context.Context) error {
 	turn := 0
 	for {
 		if a.opts.MaxTurns > 0 && turn >= a.opts.MaxTurns {
-			a.bus.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: "max turns reached"})
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "max turns reached"})
 			return errors.New("agent: max turns reached")
 		}
 		turn++
@@ -2270,20 +2602,29 @@ func (a *Agent) run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("agent: load context: %w", err)
 		}
+		if compacted, compactErr := a.autoCompactAdmittedGoalBoundary(ctx, msgs); compactErr != nil {
+			return fmt.Errorf("goal auto-compaction: %w", compactErr)
+		} else if compacted {
+			msgs, err = a.contextMessagesCurrent()
+			if err != nil {
+				return fmt.Errorf("agent: reload compacted context: %w", err)
+			}
+		}
 
 		internalContext, err := a.goalInternalContext()
 		if err != nil {
 			return fmt.Errorf("agent: load goal context: %w", err)
 		}
 		req := protocol.ChatRequest{
-			Model:            a.Model(),
-			Messages:         msgs,
-			Tools:            a.requestToolSchemas(),
-			System:           a.requestSystemPrompt(),
-			Thinking:         a.requestThinking(),
-			ReasoningSummary: a.ReasoningSummary(),
-			TextVerbosity:    a.TextVerbosity(),
-			InternalContext:  internalContext,
+			Model:              a.Model(),
+			Messages:           msgs,
+			Tools:              a.requestToolSchemas(),
+			System:             a.requestSystemPrompt(),
+			Thinking:           a.requestThinking(),
+			ReasoningSummary:   a.ReasoningSummary(),
+			TextVerbosity:      a.TextVerbosity(),
+			InternalContext:    internalContext,
+			SessionAffinityKey: a.requestAffinityKey("turn"),
 		}
 
 		// Call the provider (optionally with a merged retry on malformed args).
@@ -2298,7 +2639,7 @@ func (a *Agent) run(ctx context.Context) error {
 			// including cancellation placeholders, before checking the queue.
 			if err := a.executeToolCalls(ctx); err != nil {
 				if ctx.Err() != nil {
-					a.bus.Publish(protocol.AgentEvent{Type: protocol.EvAborted})
+					a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
 				}
 				return err
 			}
@@ -2315,7 +2656,7 @@ func (a *Agent) run(ctx context.Context) error {
 		canContinue := a.opts.MaxTurns == 0 || turn < a.opts.MaxTurns
 		queued, ok, limited := a.takeQueuedInput(naturalStop, canContinue)
 		if limited {
-			a.bus.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: "max turns reached"})
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "max turns reached"})
 			return errors.New("agent: max turns reached")
 		}
 		if ok {
@@ -2436,23 +2777,41 @@ func (a *Agent) deliverQueuedInput(ctx context.Context, item protocol.QueuedInpu
 	// same captured collaboration mode.
 	a.turnPlanSeen = false
 	a.mu.Unlock()
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	if err := a.activateExplicitSkillMentions(ctx, item.Text); err != nil {
+		return fmt.Errorf("agent: activate explicit skill from queued input: %w", err)
+	}
 	a.prepareToolRouting(ctx, item.Text)
 	return nil
 }
 
 // streamTurn calls the provider and persists the assistant message; returns stop reason.
+func (a *Agent) requestAffinityKey(purpose string) string {
+	if a.opts.Session == nil || a.opts.Session.ID() == "" {
+		return ""
+	}
+	branchID := ""
+	if branches, ok := a.opts.Session.(session.ActiveBranchStore); ok {
+		branchID = branches.ActiveBranchID()
+	}
+	sum := sha256.Sum256([]byte(a.opts.Session.ID() + "\x00" + branchID + "\x00" + purpose))
+	return hex.EncodeToString(sum[:])
+}
+
 func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (protocol.StopReason, error) {
+	a.mu.Lock()
+	a.latestContextTokens = 0
+	a.mu.Unlock()
 	provider := a.currentProvider()
 	creds, err := provider.Resolve(ctx, a.resolveCreds(ctx))
 	if err != nil {
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+		a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
 		return protocol.StopError, fmt.Errorf("agent: provider resolve: %w", err)
 	}
 
 	stream, err := provider.Chat(ctx, creds, req)
 	if err != nil {
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+		a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
 		return protocol.StopError, fmt.Errorf("agent: provider chat: %w", err)
 	}
 	defer stream.Close()
@@ -2467,7 +2826,7 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 	a.mu.RLock()
 	planEnabled := a.turnMode == protocol.ModePlan && !a.turnPlanSeen
 	a.mu.RUnlock()
-	collector := newPlanStreamCollector(planEnabled, asstID+"-plan", a.bus.Publish, func() {
+	collector := newPlanStreamCollector(planEnabled, asstID+"-plan", a.publish, func() {
 		a.mu.Lock()
 		a.turnPlanSeen = true
 		a.mu.Unlock()
@@ -2485,7 +2844,7 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 				if perr := a.persistAssistant(asstID, parent, content, stop, usage, ""); perr != nil {
 					return protocol.StopAborted, perr
 				}
-				a.bus.Publish(protocol.AgentEvent{Type: protocol.EvAborted})
+				a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
 				return protocol.StopAborted, nil
 			}
 			// Normal end of stream: io.EOF per the EventStream contract.
@@ -2499,7 +2858,7 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 			if perr := a.persistAssistant(asstID, parent, content, stop, usage, err.Error()); perr != nil {
 				return protocol.StopError, perr
 			}
-			a.bus.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
 			return protocol.StopError, err
 		}
 
@@ -2513,7 +2872,7 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 			collector.Push(ev.Text)
 		case protocol.EvStreamThinkingDelta:
 			thinkingBuf += ev.Text
-			a.bus.Publish(protocol.AgentEvent{Type: protocol.EvThinkingDelta, Text: ev.Text})
+			a.publish(protocol.AgentEvent{Type: protocol.EvThinkingDelta, Text: ev.Text})
 		case protocol.EvStreamProviderData:
 			if ev.ProviderData != nil && ev.ProviderData.Type == protocol.BlockProviderData {
 				block := *ev.ProviderData
@@ -2564,7 +2923,10 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 					normalized.Cost = normalized.CostFor(a.Model().Pricing)
 				}
 				usage = &normalized
-				a.bus.Publish(protocol.AgentEvent{Type: protocol.EvUsage, Usage: normalized.Clone()})
+				a.mu.Lock()
+				a.latestContextTokens = contextTokensForCompaction(normalized)
+				a.mu.Unlock()
+				a.publish(protocol.AgentEvent{Type: protocol.EvUsage, Usage: normalized.Clone()})
 			}
 		case protocol.EvStreamDone:
 			stop = ev.StopReason
@@ -2582,7 +2944,7 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 			if perr := a.persistAssistant(asstID, parent, content, stop, usage, errMsg); perr != nil {
 				return protocol.StopError, perr
 			}
-			a.bus.Publish(protocol.AgentEvent{Type: protocol.EvError, Message: errMsg})
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: errMsg})
 			if ev.Err != nil {
 				return protocol.StopError, fmt.Errorf("agent: provider stream: %w", ev.Err)
 			}
@@ -2628,6 +2990,29 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 	return stop, nil
 }
 
+func messageTextBlocks(message protocol.Message) string {
+	var text strings.Builder
+	for _, block := range message.Content {
+		if block.Type == protocol.BlockText {
+			text.WriteString(block.Text)
+		}
+	}
+	return text.String()
+}
+
+func contextTokensForCompaction(usage protocol.Usage) int {
+	// Input is the provider's actual context occupancy for this request. Total
+	// adds generated output and can cross the threshold even though those output
+	// tokens were not all present in the request being measured.
+	if usage.Input > 0 {
+		return usage.Input
+	}
+	if usage.Total > 0 {
+		return usage.Total
+	}
+	return usage.Output
+}
+
 func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBlock, stop protocol.StopReason, usage *protocol.Usage, errMsg string) error {
 	if usage != nil {
 		a.mu.Lock()
@@ -2647,7 +3032,7 @@ func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBl
 	}); err != nil {
 		return fmt.Errorf("agent: persist assistant: %w", err)
 	}
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	return nil
 }
 
@@ -2747,7 +3132,7 @@ func (a *Agent) appendToolResult(parent string, msg protocol.Message, details ..
 	if msg.IsError {
 		ev.Message = boundEventText(output, 2*1024)
 	}
-	a.bus.Publish(ev)
+	a.publish(ev)
 	return nil
 }
 
@@ -2828,7 +3213,7 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 	a.mu.Lock()
 	a.toolStarts[cb.ToolCallID] = time.Now()
 	a.mu.Unlock()
-	a.bus.Publish(protocol.AgentEvent{
+	a.publish(protocol.AgentEvent{
 		Type:       protocol.EvToolStart,
 		ToolCallID: cb.ToolCallID,
 		ToolName:   cb.Name,
@@ -2870,7 +3255,7 @@ func (a *Agent) applyPlanUpdateDetails(details any) {
 		}
 	}
 	if update != nil {
-		a.bus.Publish(protocol.AgentEvent{Type: protocol.EvPlanUpdate, PlanUpdate: update.Clone()})
+		a.publish(protocol.AgentEvent{Type: protocol.EvPlanUpdate, PlanUpdate: update.Clone()})
 	}
 }
 
@@ -2887,7 +3272,7 @@ func (a *Agent) applySkillActivationDetails(details any) {
 	default:
 		return
 	}
-	if activation.Name == "" || activation.Content == "" {
+	if activation.Name == "" || activation.Content == "" || !skillNameAllowed(a.opts.SkillNames, activation.Name) {
 		return
 	}
 	a.mu.Lock()
@@ -2906,7 +3291,7 @@ func (a *Agent) publishGoalSnapshot() {
 	if err != nil {
 		return
 	}
-	a.bus.Publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g, Cleared: g == nil}})
+	a.publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g, Cleared: g == nil}})
 }
 
 func (a *Agent) goalInternalContext() ([]protocol.InternalContextFragment, error) {
@@ -2972,7 +3357,7 @@ func loadCollaborationMode(st session.Store) (protocol.CollaborationMode, error)
 	return parsed, nil
 }
 
-func restoreActiveSkills(st session.Store) map[string]string {
+func restoreActiveSkills(st session.Store, registry tools.Registry, host tools.ToolHost, allowed map[string]bool) map[string]string {
 	active := make(map[string]string)
 	if st == nil {
 		return active
@@ -2981,6 +3366,7 @@ func restoreActiveSkills(st session.Store) map[string]string {
 	if err != nil {
 		return active
 	}
+	reload := make(map[string]bool)
 	for _, message := range messages {
 		if message.Role != protocol.RoleTool || message.ToolName != "activate_skill" || message.IsError {
 			continue
@@ -2992,12 +3378,156 @@ func restoreActiveSkills(st session.Store) map[string]string {
 			line, _, _ := strings.Cut(block.Text, "\n")
 			value := strings.TrimSuffix(strings.TrimPrefix(line, "<skill_content name="), ">")
 			var name string
-			if err := json.Unmarshal([]byte(value), &name); err == nil && name != "" {
+			if err := json.Unmarshal([]byte(value), &name); err == nil && name != "" && skillNameAllowed(allowed, name) {
 				active[name] = block.Text
+				if allowed != nil {
+					reload[name] = true
+				}
 			}
 		}
 	}
+	if entries, ok := st.(session.BranchEntryStore); ok {
+		if branch, branchErr := entries.BranchEntries(); branchErr == nil {
+			for _, entry := range branch {
+				if entry.Type == session.EntryMeta && entry.Key == skillActivationMeta && skillNameAllowed(allowed, entry.Value) {
+					reload[entry.Value] = true
+				}
+			}
+		}
+	}
+	// Rehydrate current catalog content for direct markers and for app-provided
+	// policy maps. This prevents stale project instructions from surviving a
+	// trust or precedence change while preserving legacy standalone behavior.
+	for name := range reload {
+		activation, activationErr := runSkillActivation(context.Background(), registry, host, name)
+		if activationErr != nil {
+			delete(active, name)
+			continue
+		}
+		active[name] = activation.Content
+	}
 	return active
+}
+
+func (a *Agent) activateExplicitSkillMentions(ctx context.Context, text string) error {
+	names := explicitSkillNames(text, activationSkillNames(a.opts.Registry, a.opts.SkillNames))
+	for _, name := range names {
+		callID := newID()
+		started := time.Now()
+		a.publish(protocol.AgentEvent{Type: protocol.EvToolStart, ToolCallID: callID, ToolName: "activate_skill", Message: "activating explicitly requested skill " + name})
+		activation, err := runSkillActivation(ctx, a.opts.Registry, a.opts.ToolHost, name)
+		if err == nil {
+			a.mailboxPersistMu.Lock()
+			err = a.opts.Session.Append(session.Entry{Type: session.EntryMeta, ID: newID(), Key: skillActivationMeta, Value: name})
+			a.mailboxPersistMu.Unlock()
+		}
+		event := protocol.AgentEvent{Type: protocol.EvToolEnd, ToolCallID: callID, ToolName: "activate_skill", ToolDurationMS: time.Since(started).Milliseconds(), IsError: err != nil}
+		if err != nil {
+			event.Message = boundEventText(err.Error(), 2*1024)
+			event.ToolOutput = event.Message
+			a.publish(event)
+			return err
+		}
+		a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+		event.ToolOutput = "activated skill " + name
+		a.publish(event)
+		a.applySkillActivationDetails(activation)
+	}
+	return nil
+}
+
+func runSkillActivation(ctx context.Context, registry tools.Registry, host tools.ToolHost, name string) (tools.SkillActivationDetails, error) {
+	if registry == nil {
+		return tools.SkillActivationDetails{}, errors.New("skill registry unavailable")
+	}
+	descriptor, ok := registry.Descriptor("activate_skill")
+	if !ok || descriptor.Owner != "skills" || descriptor.Tool == nil {
+		return tools.SkillActivationDetails{}, errors.New("activate_skill is unavailable")
+	}
+	args, _ := json.Marshal(map[string]string{"name": name})
+	result, err := descriptor.Tool.Run(ctx, args, host)
+	if err != nil {
+		return tools.SkillActivationDetails{}, err
+	}
+	if result.IsError {
+		message := "skill activation failed"
+		if len(result.Content) > 0 && result.Content[0].Text != "" {
+			message = result.Content[0].Text
+		}
+		return tools.SkillActivationDetails{}, errors.New(message)
+	}
+	switch value := result.Details.(type) {
+	case tools.SkillActivationDetails:
+		if value.Name != "" && value.Content != "" {
+			return value, nil
+		}
+	case *tools.SkillActivationDetails:
+		if value != nil && value.Name != "" && value.Content != "" {
+			return *value, nil
+		}
+	}
+	return tools.SkillActivationDetails{}, errors.New("activate_skill returned no durable content")
+}
+
+func activationSkillNames(registry tools.Registry, allowed map[string]bool) []string {
+	if registry == nil {
+		return nil
+	}
+	descriptor, ok := registry.Descriptor("activate_skill")
+	if !ok || descriptor.Owner != "skills" || descriptor.Tool == nil {
+		return nil
+	}
+	var schema struct {
+		Properties struct {
+			Name struct {
+				Enum []string `json:"enum"`
+			} `json:"name"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(descriptor.Schema.Parameters, &schema); err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(schema.Properties.Name.Enum))
+	for _, name := range schema.Properties.Name.Enum {
+		if skillNameAllowed(allowed, name) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func skillNameAllowed(allowed map[string]bool, name string) bool {
+	if allowed == nil {
+		return true
+	}
+	return allowed[name]
+}
+
+func explicitSkillNames(text string, candidates []string) []string {
+	available := make(map[string]bool, len(candidates))
+	for _, name := range candidates {
+		available[name] = true
+	}
+	rest := strings.TrimLeftFunc(text, unicode.IsSpace)
+	var names []string
+	seen := make(map[string]bool)
+	for strings.HasPrefix(rest, "$") {
+		end := strings.IndexFunc(rest, unicode.IsSpace)
+		if end < 0 {
+			end = len(rest)
+		}
+		name := strings.TrimPrefix(rest[:end], "$")
+		if !available[name] {
+			break
+		}
+		if !seen[name] {
+			names = append(names, name)
+			seen[name] = true
+		}
+		rest = strings.TrimLeftFunc(rest[end:], unicode.IsSpace)
+	}
+	return names
 }
 
 func (a *Agent) runTool(ctx context.Context, tool tools.Tool, rawArgs json.RawMessage, callID, name string) (tr tools.ToolResult) {
@@ -3048,7 +3578,7 @@ func (h *progressHost) EmitProgress(ev tools.ToolProgressEvent) {
 	if ev.Name == "" {
 		ev.Name = h.name
 	}
-	h.agent.bus.Publish(protocol.AgentEvent{
+	h.agent.publish(protocol.AgentEvent{
 		Type:       protocol.EvToolProgress,
 		ToolCallID: ev.ToolCallID,
 		ToolName:   ev.Name,
@@ -3135,7 +3665,7 @@ func boundEventText(text string, maxBytes int) string {
 // authority on whether that is acceptable (fake/test providers accept empty).
 func (a *Agent) resolveCreds(ctx context.Context) auth.Credential {
 	id := a.Model().Provider
-	if a.opts.APIKey != "" {
+	if a.opts.APIKey != "" && a.opts.APIKeyProvider == id {
 		return auth.Credential{Type: auth.CredentialAPIKey, Key: a.opts.APIKey}
 	}
 	if a.opts.Auth != nil {

@@ -15,30 +15,30 @@ import (
 )
 
 func TestTUIMouseCapturePreference(t *testing.T) {
-	t.Run("default disabled", func(t *testing.T) {
+	t.Run("default keeps wheel inside Snow", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "missing.json")
-		if tuiMouseCaptureEnabled(app.Options{ConfigPath: path}) {
-			t.Fatal("default config enabled mouse capture")
+		if !tuiMouseCaptureEnabled(app.Options{ConfigPath: path}) {
+			t.Fatal("default config did not enable viewport mouse scrolling")
 		}
 	})
 
-	t.Run("explicit opt in", func(t *testing.T) {
+	t.Run("explicit app mode enables mouse capture", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config.json")
 		if err := os.WriteFile(path, []byte(`{"tui":{"mouse":true}}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if !tuiMouseCaptureEnabled(app.Options{ConfigPath: path}) {
-			t.Fatal("tui.mouse=true did not enable mouse capture")
+			t.Fatal("tui.mouse=true did not enable application mouse capture")
 		}
 	})
 
-	t.Run("malformed config fails closed", func(t *testing.T) {
+	t.Run("malformed config does not start", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config.json")
 		if err := os.WriteFile(path, []byte(`{"tui":`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if tuiMouseCaptureEnabled(app.Options{ConfigPath: path}) {
-			t.Fatal("malformed config enabled mouse capture")
+			t.Fatal("malformed config unexpectedly returned a usable preference")
 		}
 		if _, err := app.New(context.Background(), app.Options{ConfigPath: path, Provider: "fake", NoSession: true}); err == nil || !strings.Contains(err.Error(), "config: parse") {
 			t.Fatalf("normal startup error = %v, want config parse error", err)

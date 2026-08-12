@@ -3,7 +3,10 @@ package snowsdk
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +17,32 @@ import (
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/pkg/protocol"
 )
+
+func TestRunPromptOpenAICompatibleProvider(t *testing.T) {
+	t.Setenv("SNOW_HOME", t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = fmt.Fprint(w, `{"data":[{"id":"sdk-model"}]}`)
+		case "/opencode/models":
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		case "/v1/responses":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"sdk answer\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(fmt.Sprintf(`{"providers":{"opencode-go":{"base_url":%q}}}`, server.URL+"/opencode")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := RunPrompt(context.Background(), Options{Provider: "openai-compatible", BaseURL: server.URL + "/v1", Model: "sdk-model", ConfigPath: configPath, NoSession: true, PermissionMode: "deny", NoPlugins: true, NoMCP: true, NoSkills: true}, "hello")
+	if err != nil || out != "sdk answer" {
+		t.Fatalf("out=%q err=%v", out, err)
+	}
+}
 
 func TestRunPromptFakeProvider(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -177,7 +206,7 @@ func TestSkillInventoryIncludesPolicyDisabledSkills(t *testing.T) {
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\ndescription: Review code.\n---\nReview carefully.\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\ndescription: Review code.\nallowed-tools: Bash(git:*) Read\n---\nReview carefully.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(snowHome, "config.json")
@@ -208,7 +237,7 @@ func TestSkillInventoryIncludesPolicyDisabledSkills(t *testing.T) {
 			break
 		}
 	}
-	if review == nil || review.Enabled || review.DisabledBy == "" {
+	if review == nil || review.Enabled || review.DisabledBy == "" || review.AllowedTools != "Bash(git:*) Read" {
 		t.Fatalf("review skill inventory entry = %+v", review)
 	}
 }

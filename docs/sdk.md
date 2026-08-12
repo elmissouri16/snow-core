@@ -115,7 +115,7 @@ separates inheritance from clean-install defaults.
 | Field | Meaning and effective behavior |
 |---|---|
 | `CWD` | Active project root. Empty uses the process working directory. |
-| `Provider` | `opencode-go`, `chatgpt`, or `fake`. Empty inherits config; clean-install default is `opencode-go`. |
+| `Provider` | `opencode-go`, `openai-compatible`, `chatgpt`, or `fake`. Empty inherits config; clean-install default is `opencode-go`. |
 | `Model` | Model ID. Empty resolves configured/provider default. |
 | `SessionPath` | SQLite `.db` path to open or create; an existing database is resumed. Empty creates a new indexed durable session unless `NoSession` is true. |
 | `NoSession` | Use an in-memory conversation. Auth and model caches remain persistent. Goals require a persisted session. |
@@ -131,7 +131,7 @@ separates inheritance from clean-install defaults.
 | `CollaborationMode` | `default` or `plan`. Empty restores branch state or clean-install Default. |
 | `PlanModeReasoningEffort` | Optional override for Plan Mode's reasoning preset. |
 | `APIKey` | Explicit credential with precedence over auth store and environment. |
-| `BaseURL` | Provider endpoint override, primarily for OpenCode-compatible gateways/tests. |
+| `BaseURL` | Active provider endpoint override; required for `openai-compatible` unless configured globally. Accepts an API root or full `/responses` or `/chat/completions` URL. |
 | `Plugins` | Explicit external plugin process declarations. Configured plugins may also load. |
 | `GoPlugins` | Statically linked `pkg/plugin.Plugin` implementations supplied by the host. |
 | `NoPlugins` | Disable configured, explicit, and Go plugins. |
@@ -141,10 +141,30 @@ separates inheritance from clean-install defaults.
 | `NoSkills` | Disable skill discovery and activation tools. |
 | `EnableSubagents` | Force subagents on for this session. Does not enable mutation or recursion. |
 | `DisableSubagents` | Force subagents off. Setting both enable and disable is an error. |
+| `SubagentProvider` / `SubagentModel` | Override the automatic provider/model defaults for child agents. |
 | `SubagentMaxConcurrency` | Zero inherits config; clean-install default 4, maximum 256. Root does not consume a slot. |
 | `SubagentMaxAgents` | Zero inherits config; clean-install default 32, maximum 4096, not below concurrency. |
 | `SubagentMaxDepth` | Zero inherits config; clean-install default 1, maximum 8. |
 | `UserInputHandler` | Answers `ask_user`; nil fails the tool call fast instead of blocking. It is not a permission asker. |
+
+For an OpenAI-compatible gateway (Responses is preferred; HTTP 404/405/501 selects a cached Chat Completions fallback):
+
+```go
+session, err := snowsdk.Open(ctx, snowsdk.Options{
+    Provider:       "openai-compatible",
+    BaseURL:        "https://gateway.example/v1",
+    Model:          "model-id", // optional when GET /models succeeds
+    APIKey:         os.Getenv("OPENAI_API_KEY"), // optional for keyless gateways
+    PermissionMode: "deny",
+})
+```
+
+The endpoint is operator-trusted and receives prompts and tool data. Snow
+prefers Responses streaming and uses Chat Completions streaming when Responses
+is unavailable; arbitrary named compatible providers and Azure/custom headers
+remain unsupported. The TUI can persist the endpoint
+and optional key through `/login openai-compatible`; SDK callers continue to use
+`BaseURL` and `APIKey` explicitly.
 
 Full persistent configuration and project trust rules are in
 [Configuration](configuration.md).
@@ -174,7 +194,7 @@ returned error without discarding accumulated text.
 | `Steer(ctx, text)` | Queue input for the next safe assistant + complete tool-batch boundary |
 | `FollowUp(ctx, text)` | Queue input after natural completion and earlier steering |
 | `PendingInputs()` | Return an independent queue snapshot |
-| `Abort(ctx)` | Cancel admitted work and clear undelivered root queue entries |
+| `Abort(ctx)` | Cancel admitted work, clear undelivered root queue entries, and defer active goal continuation |
 | `IsRunning()` | Report whether a root turn is in flight |
 
 `Steer` and `FollowUp` require an active queue-accepting root turn. Idle calls
@@ -233,7 +253,10 @@ model metadata, stop reason, usage, and tool-result correlation. A
 | `Compact(ctx)` | Manually summarize older projected context while retaining full history |
 
 Forked branches share existing message rows; they do not copy history. Branch
-management is rejected while conflicting root/subagent work is active.
+management is rejected while conflicting root/subagent work is active. Automatic
+Default-mode goal continuation may emit compaction events between goal turns at
+the configured context threshold; this does not change the manual `Compact`
+method contract.
 
 ### Persistent Thread Goals
 
@@ -242,18 +265,23 @@ management is rejected while conflicting root/subagent work is active.
 | `Goal()` | Return active branch goal or nil |
 | `CreateGoal(objective, budget, replace)` | Create a goal; `SetGoal` is an alias |
 | `EditGoal(objective)` | Rotate objective/goal ID while preserving usage and budget |
-| `PauseGoal()` / `ResumeGoal()` | Control eligible automatic continuation |
+| `PauseGoal()` / `ResumeGoal()` | Control eligible automatic continuation; resume also restarts an active abort-deferred goal |
 | `ClearGoal()` | Remove the branch goal |
 | `ContinueGoal()` | Clear continuation deferral and run eligible idle work |
 
-Goals require SQLite persistence. Budgets must be positive. Goal statuses are
+Normal prompts never clear an abort/manual-compaction deferral; call
+`ResumeGoal` or `ContinueGoal` explicitly. Goals require SQLite persistence.
+Budgets must be positive. Goal statuses are
 `active`, `paused`, `blocked`, `usage_limited`, `budget_limited`, and `complete`.
-See [Persistent Thread Goals](goals.md).
+Returned `protocol.ThreadGoal` values include optional per-currency
+`EstimatedCosts`; values come from provider/catalog pricing and are estimates,
+not invoices. See [Persistent Thread Goals](goals.md).
 
 ### Subagents
 
 | Method | Purpose |
 |---|---|
+| `SubagentModels()` | Return exact provider/model pairs available to children |
 | `SpawnSubagent(ctx, request)` | Create a role-scoped child at a canonical path |
 | `SendSubagentMessage(ctx, target, message)` | Queue attributed mail without starting a turn |
 | `FollowupSubagent(ctx, target, message)` | Queue and run/reuse an idle child |
@@ -264,10 +292,11 @@ See [Persistent Thread Goals](goals.md).
 | `Subagent(target)` | Inspect one child by canonical path or supported identifier |
 | `SubagentUsage()` | Aggregate child usage |
 
-`protocol.SpawnSubagentRequest` fields are `TaskName`, `Message`, `AgentType`,
-`ForkTurns`, `Model`, and `ReasoningEffort`. SDK task paths are strict: lowercase
-segments under `/root` with letters, digits, and underscores. Unlike the
-model-facing tool, the SDK does not normalize hyphens.
+`protocol.SpawnSubagentRequest` fields are `Name`, `Task`, `Role`, `ForkTurns`,
+`Provider`, `Model`, and `ReasoningEffort`. `snowsdk.Options.SubagentProvider` and
+`SubagentModel` set the automatic provider/model defaults for children. SDK names are strict lowercase segments under
+`/root` with letters, digits, and underscores. Unlike the model-facing tool,
+the SDK does not normalize hyphens.
 
 Wait results contain aggregate state, not private child content. Results and
 mail arrive through attributed `AgentEvent`/`AgentMessage` values. See
@@ -296,7 +325,7 @@ copies at the public observation boundary.
 | Interaction | `user_input_request`, `queue_updated`; `permission_request` exists in the cross-surface protocol but the public headless SDK has no permission asker that emits it |
 | Lifecycle/state | `session_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
 | Plan | `plan_started`, `plan_delta`, `plan_completed`, `plan_update` |
-| Compaction | `compaction_started`, `compaction_done` |
+| Compaction | `compaction_started`, `compaction_done`; `Compaction.Automatic` distinguishes goal-triggered runs |
 | Goals | `thread_goal_updated` |
 | Subagents | `subagent_started`, `subagent_status`, `subagent_message`, `subagent_activity` |
 

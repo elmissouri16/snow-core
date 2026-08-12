@@ -99,6 +99,6 @@ seam used by persistent goals.
 }
 ```
 
-`plan_mode_reasoning_effort` accepts `off|minimal|low|medium|high`. When it is
+`plan_mode_reasoning_effort` accepts `off|minimal|low|medium|high|xhigh|max|ultra`. When it is
 omitted, Snow uses medium only if supported by the selected model; otherwise
 it preserves a supported configured effort or falls back to off.

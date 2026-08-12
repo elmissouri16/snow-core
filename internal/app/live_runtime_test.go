@@ -8,6 +8,31 @@ import (
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
+func TestLiveRuntimeSelectionCrossProviderDefaultAndCatalog(t *testing.T) {
+	first := fake.NewWithModels([]protocol.Model{{Provider: "first", ID: "root"}})
+	second := fake.NewWithModels([]protocol.Model{{Provider: "second", ID: "child"}})
+	selection := &liveRuntimeSelection{
+		provider: "first", model: protocol.Model{Provider: "first", ID: "root"},
+		providers: map[string]provider.Provider{"first": first, "second": second},
+		catalogs:  map[string][]protocol.Model{"first": {{Provider: "first", ID: "root"}}, "second": {{Provider: "second", ID: "child"}}},
+	}
+	gotProvider, gotModel, err := selection.childSelection("second", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotProvider != second || gotModel.Provider != "second" || gotModel.ID != "child" {
+		t.Fatalf("cross-provider default = %T %+v", gotProvider, gotModel)
+	}
+	models := selection.availableModels()
+	if len(models) != 2 || models[0].Provider != "first" || models[1].Provider != "second" {
+		t.Fatalf("available models = %+v", models)
+	}
+	models[0].ID = "mutated"
+	if selection.catalogs["first"][0].ID != "root" {
+		t.Fatal("availableModels returned aliased metadata")
+	}
+}
+
 func TestLiveRuntimeSelectionFollowsProviderSwitchAndCatalogRefresh(t *testing.T) {
 	first := fake.NewWithModels([]protocol.Model{{Provider: "first", ID: "old"}})
 	second := fake.NewWithModels([]protocol.Model{{Provider: "second", ID: "other"}})
@@ -43,5 +68,16 @@ func TestLiveRuntimeSelectionFollowsProviderSwitchAndCatalogRefresh(t *testing.T
 	}
 	if !refreshed.SupportsVision {
 		t.Fatalf("child used startup catalog capture: %+v", refreshed)
+	}
+
+	selection.mu.Lock()
+	selection.model = protocol.Model{Provider: "second", ID: "explicit-custom", SupportsTools: true}
+	selection.mu.Unlock()
+	_, custom, err := selection.childSelection("", "")
+	if err != nil {
+		t.Fatalf("inherit explicit custom model: %v", err)
+	}
+	if custom.ID != "explicit-custom" || !custom.SupportsTools {
+		t.Fatalf("custom model = %+v", custom)
 	}
 }

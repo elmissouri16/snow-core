@@ -191,12 +191,57 @@ func TestStructuredPlanRenderingAndImplementationPrompt(t *testing.T) {
 func TestPlanKeywordNudge(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
+	probe := &planNudgeSession{Store: m.app.Session, activeID: "feature"}
+	m.app.Session = probe
+
+	m.editor.SetValue("ordinary prompt")
+	if m.planNudgeVisible() {
+		t.Fatal("unexpected plan nudge")
+	}
+	if probe.activeCalls != 0 || probe.branchesCalls != 0 {
+		t.Fatalf("ordinary prompt queried branch state: active=%d branches=%d", probe.activeCalls, probe.branchesCalls)
+	}
+
 	m.editor.SetValue("make a plan first")
 	if !m.planNudgeVisible() {
 		t.Fatal("expected plan nudge")
+	}
+	if probe.branchesCalls != 0 {
+		t.Fatalf("plan nudge loaded rich branch history %d times", probe.branchesCalls)
 	}
 	m.nudgeDismissed[m.planNudgeScope()] = true
 	if m.planNudgeVisible() {
 		t.Fatal("dismissed nudge remained visible")
 	}
+
+	probe.activeID = "other"
+	if !m.planNudgeVisible() {
+		t.Fatal("dismissal leaked to another branch")
+	}
+	if probe.branchesCalls != 0 {
+		t.Fatalf("plan nudge loaded rich branch history %d times", probe.branchesCalls)
+	}
+}
+
+type planNudgeSession struct {
+	session.Store
+	activeID      string
+	activeCalls   int
+	branchesCalls int
+}
+
+func (s *planNudgeSession) ActiveBranchID() string {
+	s.activeCalls++
+	return s.activeID
+}
+
+func (s *planNudgeSession) Branches() ([]protocol.SessionBranch, error) {
+	s.branchesCalls++
+	return []protocol.SessionBranch{{ID: s.activeID, Active: true}}, nil
+}
+
+func (s *planNudgeSession) SelectBranch(string) error { return nil }
+
+func (s *planNudgeSession) ForkBranch(string) (protocol.SessionBranch, error) {
+	return protocol.SessionBranch{}, errors.New("not implemented")
 }

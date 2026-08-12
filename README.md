@@ -8,7 +8,7 @@ tools, sessions, permissions, and events behind every surface.
 > public APIs and file formats may still change before v1.
 
 - Interactive terminal UI, print mode, JSONL events, and JSONL RPC
-- OpenCode Go API-key access and ChatGPT/Codex OAuth
+- OpenCode Go, user-configured OpenAI-compatible Responses or Chat Completions endpoints, and ChatGPT/Codex OAuth
 - SQLite sessions with resume, branches, compaction, and persistent goals
 - Built-in coding tools, MCP, plugins, Agent Skills, and optional subagents
 - Pure-Go SDK under [`pkg/snowsdk`](pkg/snowsdk)
@@ -61,6 +61,22 @@ Or save the key in Snow's credential store:
 snow login opencode-go
 ```
 
+OpenAI-compatible endpoint (Responses preferred; Chat Completions fallback; API key optional):
+
+```sh
+snow --provider openai-compatible \
+  --base-url https://gateway.example/v1 \
+  --model model-id --api-key "$OPENAI_API_KEY" \
+  -p "summarize this repository"
+```
+
+Inside the TUI, `/login openai-compatible` prompts first for the endpoint and
+then for an optional masked API key, persists the endpoint in `config.json`, and
+refreshes `/models`. The top-level `snow login openai-compatible` command stores
+only a key. Leaving the TUI key step blank preserves any existing explicit,
+stored, or `OPENAI_API_KEY` fallback; it is keyless only when none of those
+sources exists. The endpoint itself never belongs in `auth.json`.
+
 ChatGPT/Codex:
 
 ```sh
@@ -70,7 +86,8 @@ snow auth check chatgpt            # inspect without refreshing
 ```
 
 Credentials resolve in this order: explicit `--api-key`/SDK option, Snow's auth
-store, then a known environment fallback such as `OPENCODE_API_KEY`. Secrets are
+store, then a known environment fallback such as `OPENCODE_API_KEY` or
+`OPENAI_API_KEY`. Secrets are
 stored separately from configuration and are never printed by inventory commands.
 See [ChatGPT authentication](docs/chatgpt-auth.md) for OAuth, refresh, imports,
 and account-scoped model catalogs.
@@ -108,13 +125,16 @@ snow --permission deny -p "list the Go packages"
 # Emit one AgentEvent JSON object per line
 snow --mode json --permission deny -p "summarize recent changes"
 
-# Resume a SQLite session
-snow --session ~/.snow/sessions/<encoded-cwd>/<session>.db
+# Pick a saved session for this project, or resume a specific SQLite database
+snow resume
+snow resume ~/.snow/sessions/<encoded-cwd>/<session>.db
 
 # Start a long-lived RPC process; keep stdin open while prompts run
 snow --mode rpc --permission deny
 ```
 
+The TUI uses Bubble Tea's supported full-window pattern: alternate screen,
+sticky header/footer, and a Bubbles transcript viewport. Mouse mode defaults on so wheel/trackpad gestures scroll Snow's transcript viewport instead of terminal scrollback. Primary drag selects and copies transcript text; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. F6 disables mouse reporting when native selection is preferred, with PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down available for viewport scrolling. In the composer, Ctrl+V attaches a PNG/JPEG/GIF/WebP clipboard image for vision-capable models (up to eight images, 20 MiB each); Backspace (or Esc) removes the last image when the text draft is empty.
 Read the [user guide](docs/using-snow.md) for TUI keys, slash commands, queue
 semantics, sessions, and modes. Read the [RPC protocol](docs/rpc.md) before
 building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
@@ -124,13 +144,14 @@ building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
 | Provider | ID | Authentication | Runtime |
 |---|---|---|---|
 | OpenCode Go | `opencode-go` | API key | OpenAI-compatible chat completions/SSE with live model discovery enriched by models.dev metadata |
-| ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | Codex Responses/SSE, browser/device login, guarded refresh, and account-scoped cached catalogs |
+| OpenAI-compatible | `openai-compatible` | Optional Bearer API key | User-supplied API root with sibling `/models`; prefers Responses/SSE and falls back to Chat Completions/SSE when Responses is unavailable |
+| ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | Codex Responses/SSE with browser/device login, guarded refresh, account-scoped catalogs, session affinity, zstd, and bounded pre-output retries |
 | Fake | `fake` | None | Deterministic local provider for tests and examples |
 
 Model metadata controls tool, vision, context, reasoning, summary, verbosity,
-and pricing behavior. Thinking levels are normalized to `off`, `minimal`, `low`,
-`medium`, and `high`; Snow rejects an unsupported explicit level rather than
-silently changing it.
+and pricing behavior. Thinking levels are model-aware: Snow accepts `off`, `minimal`, `low`,
+`medium`, `high`, `xhigh`, `max`, and `ultra`, but exposes only efforts advertised
+by the selected model and rejects unsupported explicit levels.
 
 ## Capabilities
 
@@ -160,7 +181,7 @@ public-address-only, redirect-checked, and never executes JavaScript.
 - Pure-Go SQLite session databases with append-only parent-linked entries
 - Indexed branch tips, named forks, branch selection, rename, and guarded delete
 - Current-directory session picker and explicit path resume
-- Manual, turn-aware compaction that preserves complete history
+- Turn-aware compaction that preserves complete history, manual for ordinary work and automatic for goals at a configurable context threshold
 - Embedded Markdown system preamble with optional global/trusted-project file
   override, plus `AGENTS.md` discovery with a hard byte cap
 - Usage and optional catalog-derived cost persisted with assistant messages
@@ -176,7 +197,8 @@ See [sessions](docs/sessions.md) and [configuration](docs/configuration.md).
   `request_user_input`. It is not a permission or sandbox boundary: ordinary
   write, shell, plugin, and MCP capabilities remain behind their normal gates.
 - **Thread Goals** attach a persisted objective and optional token budget to a
-  session branch and may continue through bounded private turns.
+  session branch, may continue through bounded private turns, and show durable
+  cumulative token usage plus estimated cost when model pricing is available.
 - **Steering and follow-ups** are accepted only during an active root run and
   delivered one at a time at safe assistant/tool boundaries.
 
@@ -194,8 +216,9 @@ See [Plan Mode](docs/plan-mode.md), [Thread Goals](docs/goals.md), and
   runtimes with namespaced tools, declared risk, private result metadata,
   progress, cancellation, and explicitly subscribed observe-only events.
   Dependency-free JavaScript and Python examples are included.
-- **Agent Skills:** open `SKILL.md` discovery with metadata-only startup context,
-  on-demand activation, resource confinement, and trust-aware precedence.
+- **Agent Skills:** strict open `SKILL.md` validation with metadata-only startup
+  context, TUI autocomplete for leading `$skill-name` or model-driven activation,
+  pinned on-demand resource confinement, and trust-aware precedence.
 - **Tool routing:** opt-in, namespace-first Bleve BM25 discovery keeps deferred
   schemas out of ordinary provider requests, retains a global rescue ranking,
   and exposes `search_tools` as a recovery path.
@@ -302,6 +325,9 @@ Snow is a harness, **not a sandbox**:
   can conflict and each provider request incurs separate usage.
 - Auth tokens, API keys, MCP headers, and provider continuity data must never be
   logged.
+- A configured `openai-compatible` endpoint is operator-trusted: Snow sends prompts,
+  tool schemas/results, and any configured Bearer key to that origin. Cross-origin
+  redirects are rejected, but Snow does not certify or sandbox the remote service.
 
 Read the consolidated [security model](docs/security.md) before enabling shell,
 network, extension, subagent mutation, or automatic approval in an embedding.

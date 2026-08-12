@@ -6,6 +6,7 @@ require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/blevesearch/bleve/v2 v2.6.0
+	github.com/aymanbagabas/go-osc52/v2 v2.0.1
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v1.0.0
@@ -13,11 +14,13 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/enetx/http v1.0.29
 	github.com/enetx/surf v1.0.203
+	github.com/klauspost/compress v1.19.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/net v0.56.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
+	golang.org/x/text v0.40.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.56.0
 )
@@ -28,7 +31,6 @@ require (
 	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
-	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
 	github.com/blevesearch/bleve_index_api v1.3.11 // indirect
@@ -69,7 +71,6 @@ require (
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/json-iterator/go v0.0.0-20171115153421-f7279a603ede // indirect
-	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
@@ -99,7 +100,6 @@ require (
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	modernc.org/libc v1.74.4 // indirect

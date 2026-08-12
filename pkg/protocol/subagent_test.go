@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +28,25 @@ func TestAgentPathValidationAndResolution(t *testing.T) {
 	}
 	if parent, ok := AgentPath("/root/reviews/api").Parent(); !ok || parent != "/root/reviews" {
 		t.Fatalf("parent=%q %v", parent, ok)
+	}
+}
+
+func TestSpawnSubagentRequestUsesClearJSONNames(t *testing.T) {
+	req := SpawnSubagentRequest{Name: "api_review", Task: "Review the API", Role: "explorer", Provider: "opencode-go", Model: "model-x"}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	for _, want := range []string{`"name":"api_review"`, `"task":"Review the API"`, `"role":"explorer"`, `"provider":"opencode-go"`, `"model":"model-x"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("request JSON %s missing %s", got, want)
+		}
+	}
+	for _, old := range []string{"task_name", "message", "agent_type"} {
+		if strings.Contains(got, old) {
+			t.Fatalf("request JSON retained old field %q: %s", old, got)
+		}
 	}
 }
 

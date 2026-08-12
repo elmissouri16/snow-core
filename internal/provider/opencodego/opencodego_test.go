@@ -54,6 +54,32 @@ func mustNew(t *testing.T, base, key string) *Provider {
 // TestLiveDefaultsPinned guards against regressions to the verified production
 // constants: these were confirmed live against https://opencode.ai/zen/go/v1
 // (GET /models → 200 OpenAI list; bad key on /chat/completions → 401 JSON).
+func TestChatCompletionsEncodesImageContent(t *testing.T) {
+	p := mustNew(t, "https://example.test/v1", "k")
+	message := protocol.NewUserMessage("u", "", "describe")
+	message.Content = append(message.Content, protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte{1, 2, 3}})
+	body, err := p.buildBody(protocol.ChatRequest{Model: protocol.Model{ID: "m", SupportsVision: true}, Messages: []protocol.Message{message}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Messages []struct {
+			Content []struct {
+				Type     string `json:"type"`
+				ImageURL *struct {
+					URL string `json:"url"`
+				} `json:"image_url"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Messages) != 1 || len(decoded.Messages[0].Content) != 2 || decoded.Messages[0].Content[1].ImageURL == nil || decoded.Messages[0].Content[1].ImageURL.URL != "data:image/png;base64,AQID" {
+		t.Fatalf("messages=%+v body=%s", decoded.Messages, body)
+	}
+}
+
 func TestLiveDefaultsPinned(t *testing.T) {
 	if DefaultBaseURL != "https://opencode.ai/zen/go/v1" {
 		t.Errorf("DefaultBaseURL = %q, want https://opencode.ai/zen/go/v1 (verified live)", DefaultBaseURL)
@@ -667,6 +693,57 @@ func TestErrorEvent(t *testing.T) {
 	}
 	if !strings.Contains(events[0].Err.Error(), "rate limit") {
 		t.Errorf("error = %q, want mention of rate limit", events[0].Err.Error())
+	}
+}
+
+func TestChatRejectsNonSSESuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"choices":[]}`)
+	}))
+	defer srv.Close()
+	p := mustNew(t, srv.URL, "k")
+	stream, err := p.Chat(context.Background(), auth.Credential{Key: "k"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drain(t, stream, context.Background())
+	if len(events) != 1 || events[0].Type != protocol.EvStreamError || !strings.Contains(events[0].Err.Error(), "content type") {
+		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestChatRejectsTruncatedSSEWithoutTerminalSignal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, sseChunk(chunkWith(map[string]any{"content": "partial"}, "", nil)))
+	}))
+	defer srv.Close()
+	p := mustNew(t, srv.URL, "k")
+	stream, err := p.Chat(context.Background(), auth.Credential{Key: "k"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drain(t, stream, context.Background())
+	if len(events) != 2 || events[0].Type != protocol.EvStreamTextDelta || events[1].Type != protocol.EvStreamError || !strings.Contains(events[1].Err.Error(), "truncated") {
+		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestChatAcceptsFinishReasonWithoutDoneSentinel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, sseChunk(chunkWith(map[string]any{"content": "complete"}, "stop", nil)))
+	}))
+	defer srv.Close()
+	p := mustNew(t, srv.URL, "k")
+	stream, err := p.Chat(context.Background(), auth.Credential{Key: "k"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drain(t, stream, context.Background())
+	if len(events) != 2 || events[0].Type != protocol.EvStreamTextDelta || events[1].Type != protocol.EvStreamDone {
+		t.Fatalf("events=%+v", events)
 	}
 }
 

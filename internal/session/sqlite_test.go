@@ -11,6 +11,131 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestValidateSQLiteSessionIsReadOnly(t *testing.T) {
+	validPath := filepath.Join(t.TempDir(), "valid.db")
+	valid, err := NewSQLiteStore(validPath, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := valid.Append(msg("valid", "", "keep")); err != nil {
+		t.Fatal(err)
+	}
+	if err := valid.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSQLiteSession(validPath); err != nil {
+		t.Fatalf("valid session rejected: %v", err)
+	}
+	if err := os.Chmod(validPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := OpenSQLiteStore(validPath, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatalf("valid existing session did not open: %v", err)
+	}
+	if err := opened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	validInfo, err := os.Stat(validPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validInfo.Mode().Perm() != 0o644 {
+		t.Fatalf("existing-only open changed path mode to %o", validInfo.Mode().Perm())
+	}
+	emptyPath := filepath.Join(t.TempDir(), "empty-owned.db")
+	emptyOwner, err := NewSQLiteStore(emptyPath, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyOpened, err := OpenSQLiteStore(emptyPath, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := emptyOpened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(emptyPath); err != nil {
+		t.Fatalf("existing-only close deleted an empty session path: %v", err)
+	}
+	if err := emptyOwner.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	missingPath := filepath.Join(t.TempDir(), "missing.db")
+	if _, err := OpenSQLiteStore(missingPath, t.TempDir(), Options{}); err == nil {
+		t.Fatal("existing-only open created a missing session")
+	}
+	if _, err := os.Stat(missingPath); !os.IsNotExist(err) {
+		t.Fatalf("existing-only open created missing path: %v", err)
+	}
+
+	invalidPath := filepath.Join(t.TempDir(), "unrelated.db")
+	db, err := sql.Open("sqlite", sqliteDSN(invalidPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated(value) VALUES ('keep')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(invalidPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(invalidPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSQLiteSession(invalidPath); err == nil {
+		t.Fatal("unrelated SQLite database accepted as a Snow session")
+	}
+	if _, err := OpenSQLiteStore(invalidPath, t.TempDir(), Options{}); err == nil {
+		t.Fatal("unrelated SQLite database opened as a Snow session")
+	}
+	after, err := os.ReadFile(invalidPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("validation changed unrelated SQLite database contents")
+	}
+	info, err := os.Stat(invalidPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("validation changed unrelated database mode to %o", info.Mode().Perm())
+	}
+
+	lookalikePath := filepath.Join(t.TempDir(), "lookalike.db")
+	lookalike, err := sql.Open("sqlite", lookalikePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lookalike.Exec(`CREATE TABLE session_meta(singleton INTEGER PRIMARY KEY, version INTEGER, session_id TEXT, created_at INTEGER, cwd TEXT, name TEXT, branch_tip TEXT); INSERT INTO session_meta VALUES(1,8,'fake',1,'/tmp','','root')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := lookalike.Close(); err != nil {
+		t.Fatal(err)
+	}
+	lookalikeBefore, err := os.ReadFile(lookalikePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenSQLiteStore(lookalikePath, t.TempDir(), Options{}); err == nil {
+		t.Fatal("metadata-only lookalike opened as a Snow session")
+	}
+	lookalikeAfter, err := os.ReadFile(lookalikePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(lookalikeAfter) != string(lookalikeBefore) {
+		t.Fatal("existing-only open mutated a metadata-only lookalike")
+	}
+}
+
 func TestSQLiteRoundTripAndBranch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.db")
 	st, err := NewSQLiteStore(path, "/tmp/work", Options{Name: "sqlite"})
@@ -442,5 +567,12 @@ func TestSQLiteStoresNonMessageEntries(t *testing.T) {
 	}
 	if len(messages) != 1 || messages[0].Content[0].Text != "hello" {
 		t.Fatalf("messages = %+v", messages)
+	}
+	entries, err := st.BranchEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 || entries[1].Type != EntryMeta || entries[1].Key != "mode" || entries[1].Value != "test" || entries[2].Type != EntryMessage {
+		t.Fatalf("branch entries = %+v", entries)
 	}
 }

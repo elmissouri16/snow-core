@@ -319,14 +319,14 @@ func (c *Controller) Clear(expected string) error {
 	emitUpdate(emit, nil, old != nil)
 	return nil
 }
-func (c *Controller) AccountDuration(expected string, tokens int64, elapsed time.Duration) (*protocol.ThreadGoal, bool, error) {
+func (c *Controller) AccountDuration(expected string, tokens int64, elapsed time.Duration, estimatedCost *protocol.Cost) (*protocol.ThreadGoal, bool, error) {
 	if elapsed < 0 {
 		return nil, false, errors.New("goal: elapsed duration cannot be negative")
 	}
 	c.mu.Lock()
 	total := c.remainders[expected] + elapsed
 	seconds := int64(total / time.Second)
-	g, cross, err := c.goalStore().AccountGoal(expected, tokens, seconds)
+	g, cross, err := c.goalStore().AccountGoal(expected, tokens, seconds, estimatedCost)
 	if err == nil && g != nil && g.GoalID == expected {
 		c.remainders[expected] = total % time.Second
 	}
@@ -339,7 +339,7 @@ func (c *Controller) AccountDuration(expected string, tokens int64, elapsed time
 }
 func (c *Controller) Account(expected string, tokens, seconds int64) (*protocol.ThreadGoal, bool, error) {
 	c.mu.Lock()
-	g, cross, err := c.goalStore().AccountGoal(expected, tokens, seconds)
+	g, cross, err := c.goalStore().AccountGoal(expected, tokens, seconds, nil)
 	emit := c.emit
 	c.mu.Unlock()
 	if err == nil && g != nil && g.GoalID == expected {
