@@ -889,7 +889,7 @@ func TestAppBuildsRouterAndRegistersSearchToolsForDeferredCatalog(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer a.Close()
-	if a.Router == nil || a.Router.DeferredCount() != 2 {
+	if a.Router == nil || a.Router.DeferredCount() != 4 {
 		t.Fatalf("router = %#v", a.Router)
 	}
 	if _, ok := a.Registry.Get("search_tools"); !ok {
@@ -908,12 +908,18 @@ func TestAppRegistersDeferredWebFetchByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	if a.Router == nil || a.Router.DeferredCount() != 1 {
+	if a.Router == nil || a.Router.DeferredCount() != 3 {
 		t.Fatalf("router = %#v", a.Router)
 	}
 	desc, ok := a.Registry.Descriptor("webfetch")
 	if !ok || desc.Risk != permission.RiskNet || desc.Schema.Discovery == nil || desc.Schema.Discovery.Mode != protocol.ToolDiscoveryDeferred {
 		t.Fatalf("webfetch descriptor = %+v", desc)
+	}
+	for _, name := range []string{"session_search", "session_reference"} {
+		desc, ok := a.Registry.Descriptor(name)
+		if !ok || desc.Risk != permission.RiskRead || desc.Schema.Discovery == nil || desc.Schema.Discovery.Mode != protocol.ToolDiscoveryDeferred {
+			t.Fatalf("%s descriptor = %+v", name, desc)
+		}
 	}
 	ask, ok := a.Registry.Descriptor("ask_user")
 	if !ok || ask.Risk != permission.RiskRead || ask.Schema.Discovery != nil {

@@ -89,6 +89,7 @@ type App struct {
 	cwd                    string
 	userInput              *userinput.Broker
 	toolGuard              *builtin.PathGuard
+	sessionHistory         *builtin.SessionBinding
 }
 
 type liveRuntimeSelection struct {
@@ -732,6 +733,21 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			}
 		}
 	}
+	// Session history capabilities are deferred, read-only, and authorized by
+	// FileIndex.List's exact-project filtering. The reference snapshot itself is
+	// persisted as the ordinary tool result on the current branch.
+	sessionQuery := session.NewQueryEngine(session.NewFileIndex(session.DefaultSessionsRoot()), absCWD)
+	sessionHistory := builtin.NewSessionBinding(st)
+	for _, tool := range []tools.Tool{
+		builtin.NewSessionSearch(sessionQuery, sessionHistory),
+		builtin.NewSessionReference(sessionQuery, sessionHistory),
+	} {
+		if allowedGoalTool(tool.Schema().Name) {
+			if err := reg.Register(tool); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Permission service (deny-by-default headless; TUI replaces asker).
 	perm := permission.NewService(permMode, permission.DenyAll{})
@@ -1184,6 +1200,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		cwd:                    absCWD,
 		userInput:              inputBroker,
 		toolGuard:              toolGuard,
+		sessionHistory:         sessionHistory,
 	}
 	if skillCatalog != nil {
 		a.SkillDiagnostics = skillCatalog.Diagnostics()
@@ -1280,6 +1297,7 @@ func (a *App) SetSession(st session.Store) error {
 		}
 	}
 	a.Session = st
+	a.sessionHistory.Set(st)
 	g, _ := a.Goal.Get()
 	a.Agent.Publish(a.Agent.StateEvent())
 	a.Agent.Publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g, Cleared: g == nil}})
