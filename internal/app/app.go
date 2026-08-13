@@ -1359,6 +1359,16 @@ func (a *App) GoalState() (*protocol.ThreadGoal, error) {
 	return a.Goal.Get()
 }
 
+// GoalContinuationDeferred reports whether automatic continuation is durably
+// suppressed for the active branch.
+func (a *App) GoalContinuationDeferred() (bool, error) {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	return a.Goal.Deferred()
+}
+
 func (a *App) requireGoalCapabilities() error {
 	for _, name := range []string{"get_goal", "create_goal", "update_goal"} {
 		if _, ok := a.Registry.Get(name); !ok {

@@ -1087,7 +1087,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				status += " (local fallback)"
 			}
 			if m.goal != nil && m.goal.Status == protocol.GoalActive && m.app != nil && m.app.Agent != nil && !m.app.Agent.IsRunning() {
-				status += " · goal paused; /goal resume to continue"
+				if deferred, err := m.app.GoalContinuationDeferred(); err == nil && deferred {
+					status += " · goal paused; /goal resume to continue"
+				}
 			}
 			m.lastStatus = status
 			m.pushLine(styleFooter.Render(status))

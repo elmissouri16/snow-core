@@ -1397,19 +1397,25 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	a.mu.RLock()
-	pauseAutomaticGoal := a.autoRunning
-	a.mu.RUnlock()
+	deferActiveGoal := false
+	if a.opts.Goal != nil {
+		goal, err := a.opts.Goal.Get()
+		if err != nil {
+			return protocol.CompactionResult{}, fmt.Errorf("agent: inspect goal before compact: %w", err)
+		}
+		deferActiveGoal = goal != nil && goal.Status == protocol.GoalActive
+	}
 	if err := a.stopAutomaticForControl(ctx, "compact"); err != nil {
-		if pauseAutomaticGoal && a.opts.Goal != nil {
+		if deferActiveGoal && a.opts.Goal != nil {
 			_ = a.opts.Goal.Defer(true)
 		}
 		return protocol.CompactionResult{}, err
 	}
-	// Manual compaction is an explicit control boundary. If it interrupted an
-	// automatic goal worker, leave that goal durably paused instead of silently
-	// starting a fresh provider request as soon as the summary completes.
-	if pauseAutomaticGoal && a.opts.Goal != nil {
+	// Manual compaction is an explicit control boundary. Suppress every active
+	// goal, not only one whose automatic worker happened to be running at this
+	// instant; later readiness or mode transitions must not
+	// silently restart work after the summary completes.
+	if deferActiveGoal && a.opts.Goal != nil {
 		if err := a.opts.Goal.Defer(true); err != nil {
 			return protocol.CompactionResult{}, fmt.Errorf("agent: pause goal after compact: %w", err)
 		}
@@ -1445,7 +1451,7 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 			}
 		}))
 		a.turnWG.Done()
-		if pauseAutomaticGoal && wasCanceled && a.opts.Goal != nil {
+		if deferActiveGoal && wasCanceled && a.opts.Goal != nil {
 			_ = a.opts.Goal.Defer(true)
 		}
 	}()

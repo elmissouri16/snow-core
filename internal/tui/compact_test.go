@@ -84,6 +84,35 @@ func TestCompactionShowsAnimatedProgress(t *testing.T) {
 	m.abort()
 }
 
+func TestCompactStatusReportsOnlyDurablyDeferredGoalAsPaused(t *testing.T) {
+	testHome(t)
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	m := newModel(context.Background(), app.Options{})
+	m.app = a
+	goal, err := a.Goal.Create("compact status", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.goal = goal
+	result := protocol.CompactionResult{SummarizedMessages: 2, RetainedMessages: 2}
+
+	_, _ = m.Update(compactDoneMsg{generation: m.compactGeneration, result: result})
+	if strings.Contains(m.lastStatus, "goal paused") {
+		t.Fatalf("nondeferred goal reported paused: %q", m.lastStatus)
+	}
+	if err := a.Goal.Defer(true); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = m.Update(compactDoneMsg{generation: m.compactGeneration, result: result})
+	if !strings.Contains(m.lastStatus, "goal paused; /goal resume to continue") {
+		t.Fatalf("deferred goal missing pause guidance: %q", m.lastStatus)
+	}
+}
+
 func TestModelThinkingPlaceholderTracksProviderWaits(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)

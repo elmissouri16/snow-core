@@ -603,20 +603,34 @@ func TestManualCompactPausesRunningAutomaticGoal(t *testing.T) {
 	}
 }
 
-func TestCompactBeforeReadinessDoesNotStartActiveGoal(t *testing.T) {
+func TestManualCompactDefersIdleActiveGoalAcrossLaterContinuation(t *testing.T) {
 	p := &scriptedProvider{}
 	a, c, _ := goalAgent(t, p)
 	g, err := c.Create("wait for surface readiness", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if deferred, err := c.Deferred(); err != nil || deferred {
+		t.Fatalf("initial deferred=%v err=%v", deferred, err)
+	}
 	if _, err := a.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deferred, err := c.Deferred()
+	if err != nil || !deferred {
+		t.Fatalf("manual compact deferred=%v err=%v", deferred, err)
+	}
+
+	// A later readiness/mode transition may ask the agent to continue. The
+	// durable manual-compaction boundary must still suppress a provider call.
+	a.ContinueGoal()
+	if err := a.WaitGoal(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(3 * automaticTurnDelay)
 	got, _ := c.Get()
-	if p.call != 0 || got.GoalID != g.GoalID || got.Status != protocol.GoalActive {
-		t.Fatalf("provider calls=%d goal=%+v", p.call, got)
+	if p.call != 0 || got.GoalID != g.GoalID || got.Status != protocol.GoalActive || a.IsRunning() {
+		t.Fatalf("provider calls=%d goal=%+v running=%v", p.call, got, a.IsRunning())
 	}
 }
 

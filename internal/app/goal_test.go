@@ -2,13 +2,14 @@ package app
 
 import (
 	"context"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/pkg/protocol"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/snow-core/snow/internal/session"
+	"github.com/snow-core/snow/pkg/protocol"
 )
 
 func TestGoalRequiresSavedSessionAndCapabilities(t *testing.T) {
@@ -123,6 +124,46 @@ func TestPersistedDeferralHonoredUntilReady(t *testing.T) {
 		t.Fatalf("deferred=%v err=%v", deferred, err)
 	}
 	a.Agent.Abort()
+}
+
+func TestManualCompactDeferralSurvivesReadyGoal(t *testing.T) {
+	cwd := t.TempDir()
+	path := filepath.Join(t.TempDir(), "compact-ready.db")
+	st, err := session.NewSQLiteStore(path, cwd, session.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	if err := st.CreateGoal(protocol.ThreadGoal{GoalID: "compact-ready", Objective: "do not resume after compact", Status: protocol.GoalActive, CreatedAt: now, UpdatedAt: now}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := New(context.Background(), Options{Provider: "fake", Permission: "allow", SessionPath: path, CWD: cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if _, err := a.Agent.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deferred, err := a.Goal.Deferred()
+	if err != nil || !deferred {
+		t.Fatalf("manual compact deferred=%v err=%v", deferred, err)
+	}
+	if err := a.ReadyGoal(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if a.Agent.IsRunning() {
+		t.Fatal("ready restarted goal after manual compact")
+	}
+	goal, err := a.GoalState()
+	if err != nil || goal == nil || goal.Status != protocol.GoalActive {
+		t.Fatalf("goal=%+v err=%v", goal, err)
+	}
 }
 
 func TestResumeGoalChecksCapabilitiesBeforeTransition(t *testing.T) {
