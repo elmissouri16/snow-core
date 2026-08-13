@@ -57,7 +57,7 @@ func childPermissionService(root permission.Service, capabilities childToolCapab
 
 func childToolAllowed(name string, mutation bool) bool {
 	switch name {
-	case "read", "grep", "glob", "activate_skill", "read_skill_resource", "bash":
+	case "read", "grep", "glob", "artifact_read", "artifact_grep", "activate_skill", "read_skill_resource", "bash":
 		return true
 	case "write", "edit":
 		return mutation

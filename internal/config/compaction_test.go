@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-func TestCompactionGoalAutoThresholdDefaultsDisablesAndValidates(t *testing.T) {
+func TestCompactionAutoThresholdDefaultsDisablesAndValidates(t *testing.T) {
 	cfg := Default()
-	if cfg.Compaction.GoalAutoThresholdPercent != 90 {
-		t.Fatalf("default threshold=%d, want 90", cfg.Compaction.GoalAutoThresholdPercent)
+	if cfg.Compaction.AutoThresholdPercent != 80 {
+		t.Fatalf("default threshold=%d, want 80", cfg.Compaction.AutoThresholdPercent)
 	}
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"compaction":{"goal_auto_threshold_percent":0}}`), 0o600); err != nil {
@@ -19,12 +19,13 @@ func TestCompactionGoalAutoThresholdDefaultsDisablesAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Compaction.GoalAutoThresholdPercent != 0 {
-		t.Fatalf("explicit disabled threshold=%d", loaded.Compaction.GoalAutoThresholdPercent)
+	if loaded.Compaction.AutoThresholdPercent != 0 {
+		t.Fatalf("explicit disabled threshold=%d", loaded.Compaction.AutoThresholdPercent)
 	}
 	for _, value := range []int{49, 100} {
 		candidate := DefaultCompaction()
-		candidate.GoalAutoThresholdPercent = value
+		candidate.AutoThresholdPercent = value
+		candidate.GoalAutoThresholdPercent = 0
 		if err := candidate.Validate(); err == nil {
 			t.Fatalf("threshold %d was accepted", value)
 		}

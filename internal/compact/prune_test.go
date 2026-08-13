@@ -20,7 +20,7 @@ func TestPruneHistoricalToolResultsPreservesDurableInputAndMetadata(t *testing.T
 		t.Fatalf("metadata changed: %+v", pruned)
 	}
 	got := pruned[0].Content[0].Text
-	if !strings.HasPrefix(got, strings.Repeat("h", 50)) || !strings.Contains(got, "historical tool result middle pruned") || !strings.HasSuffix(got, strings.Repeat("t", 50)) {
+	if !strings.HasPrefix(got, strings.Repeat("h", 50)) || !strings.Contains(got, "200 bytes omitted") || !strings.HasSuffix(got, strings.Repeat("t", 50)) {
 		t.Fatalf("unexpected projection: %q", got)
 	}
 	if len(got) > 160 || len(got) >= len(original) {
@@ -35,7 +35,7 @@ func TestPruneHistoricalToolResultsKeepsUTF8AndSkipsRichBlocks(t *testing.T) {
 		protocol.NewTextBlock(value), {Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte{1}},
 	}, false)
 	out := PruneHistoricalToolResults([]protocol.Message{plain, rich}, 180, 60, 30)
-	if !utf8.ValidString(out[0].Content[0].Text) || !strings.Contains(out[0].Content[0].Text, "middle pruned") {
+	if !utf8.ValidString(out[0].Content[0].Text) || !strings.Contains(out[0].Content[0].Text, "bytes omitted") {
 		t.Fatalf("invalid UTF-8 projection: %q", out[0].Content[0].Text)
 	}
 	if out[1].Content[0].Text != value || len(out[1].Content) != 2 {

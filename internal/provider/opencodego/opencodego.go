@@ -915,12 +915,13 @@ type openAIChunk struct {
 }
 
 type openAIUsage struct {
-	PromptTokens        int `json:"prompt_tokens"`
-	CompletionTokens    int `json:"completion_tokens"`
-	TotalTokens         int `json:"total_tokens"`
-	PromptTokensDetails struct {
-		CachedTokens        int `json:"cached_tokens"`
-		CacheCreationTokens int `json:"cache_creation_input_tokens"`
+	PromptTokens         int  `json:"prompt_tokens"`
+	CompletionTokens     int  `json:"completion_tokens"`
+	TotalTokens          int  `json:"total_tokens"`
+	PromptCacheHitTokens *int `json:"prompt_cache_hit_tokens"`
+	PromptTokensDetails  struct {
+		CachedTokens        *int `json:"cached_tokens"`
+		CacheCreationTokens int  `json:"cache_creation_input_tokens"`
 	} `json:"prompt_tokens_details"`
 	CompletionTokensDetails struct {
 		ReasoningTokens int `json:"reasoning_tokens"`
@@ -932,8 +933,15 @@ func mapUsage(u openAIUsage) *protocol.Usage {
 		Input:      u.PromptTokens,
 		Output:     u.CompletionTokens,
 		Reasoning:  u.CompletionTokensDetails.ReasoningTokens,
-		CacheRead:  u.PromptTokensDetails.CachedTokens,
 		CacheWrite: u.PromptTokensDetails.CacheCreationTokens,
+	}
+	cachedTokens := u.PromptTokensDetails.CachedTokens
+	if cachedTokens == nil {
+		cachedTokens = u.PromptCacheHitTokens
+	}
+	if cachedTokens != nil {
+		out.CacheRead = *cachedTokens
+		out.CacheReadKnown = true
 	}
 	out.Total = u.TotalTokens
 	if out.Total == 0 {

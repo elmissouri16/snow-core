@@ -28,7 +28,7 @@ out of core packages.
 - Streaming text, thinking, tool, usage, error, and lifecycle events.
 - OpenCode Go API-key access, user-configured OpenAI-compatible Responses or Chat Completions endpoints, and ChatGPT/Codex-compatible OAuth credentials.
 - Built-in `read`, `write`, `edit`, `bash`, `grep`, and `glob` tools with permissions and path roots, direct interactive `ask_user`, plus deferred public-web `webfetch`.
-- SQLite-backed sessions with indexed branch IDs, resume, and fork primitives.
+- SQLite-backed sessions with automatic/manual display titles, indexed branch IDs, resume, and fork primitives.
 - A stable public surface under `pkg/snowsdk` and `pkg/protocol`.
 - Safe, explicit behavior: deny mutating tools by default in headless use and never log credentials.
 
@@ -98,8 +98,11 @@ behavior in code before relying on a checklist item.
   declared external risk/capabilities, preserved private result details,
   explicitly subscribed best-effort events, JSON-RPC v2 stdio runtimes,
   `snow plugin check`, and dependency-free JavaScript/Python examples.
+- Pressure-based pruning and automatic compaction across ordinary, goal, Plan,
+  and child turns, with private session-scoped spill artifacts, deferred bounded
+  artifact retrieval, and one context-overflow repair retry.
 - Branch-scoped persistent Thread Goals with budgets, cross-handle atomic
-  token/time/estimated-cost accounting, embedded Markdown continuation/update
+  per-provider-response token/cost and turn-boundary time accounting, embedded Markdown continuation/update
   templates, private idle
   continuation, model tools, ordered cloned events, confined managed objectives,
   explicit surface readiness, and safe abort/resume/fork/compaction lifecycle
@@ -268,7 +271,7 @@ follow-up; Ctrl+J remains multiline, and abort clears/restores queued TUI text.
 Queue delivery is bounded, one-at-a-time, after complete serial tool batches.
 Current TUI slash commands are `/allow [always]`, `/default`, `/deny`, `/help`, `/login`,
 `/logout [provider]`, `/model`, `/plan [message]`, `/thinking`, `/new`, `/permissions`, `/resume`,
-`/agent [path]`, `/agent concurrency N`, `/sessions`, `/settings`, `/compact`, `/mcp`, `/skills`, `/tree`, `/quit`, and `/trust [allow|deny]`. Top-level `Shift+Tab` toggles Default/Plan mode (queued to `turn_done` while busy). The TUI uses Bubble Tea's alternate-screen, app-owned viewport so scrolling cannot reveal stale frame chrome. `tui.mouse` defaults to `true` so wheel/trackpad gestures stay inside Snow's viewport. Primary drag uses Snow selection/copy; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. F6 disables mouse reporting for native selection but then wheel gestures may move terminal scrollback. Keyboard viewport scrolling remains available. `Ctrl+V` attaches supported clipboard images in the agent composer or falls back to textarea paste; platform terminal shortcuts use bracketed text paste, and `Ctrl+C` remains abort/quit. `@` in the composer discovers
+`/agent [path]`, `/agent concurrency N`, `/sessions`, `/settings`, `/compact`, `/mcp`, `/skills`, `/tree`, `/quit`, and `/trust [allow|deny]`. Top-level `Shift+Tab` toggles Default/Plan mode (queued to `turn_done` while busy). The TUI uses Bubble Tea's alternate-screen, app-owned viewport so scrolling cannot reveal stale frame chrome. `tui.mouse` defaults to `true` so wheel/trackpad gestures stay inside Snow's viewport. Primary drag uses Snow selection/copy; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. Right-click switches to native mouse mode for the terminal context menu (repeat when the terminal consumed the reported press), while F6 toggles app/native mode explicitly; native-mode wheel gestures may move terminal scrollback. Keyboard viewport scrolling remains available. `Ctrl+V` attaches supported clipboard images in the agent composer or falls back to textarea paste; platform terminal shortcuts use bracketed text paste, and `Ctrl+C` remains abort/quit. `@` in the composer discovers
 project files, while a leading `$` autocompletes enabled Agent Skills;
 Enter/Tab inserts either selection without submitting the prompt.
 

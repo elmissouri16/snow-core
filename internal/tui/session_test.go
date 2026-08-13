@@ -394,6 +394,36 @@ func TestSessionsPickerListsCurrentDirectoryAndNavigates(t *testing.T) {
 	}
 }
 
+func TestSessionPickerShowsTitleFirstAndRenamesSelectedSession(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width, m.height = 100, 30
+	m.sessions = []session.SessionInfo{{ID: "session-1234567890", Path: "unused.db", Name: "Old title", Messages: 3}}
+	m.pickSession = true
+	m.sessionIndex = 0
+	view := stripANSI(m.renderSessionPicker())
+	if !strings.Contains(view, "Old title  ·  session-1234") || !strings.Contains(view, "r rename") {
+		t.Fatalf("session picker = %q", view)
+	}
+	m.sessions[0].ID = currentSessionID(m.app)
+	_, _ = m.handleSessionPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if !m.sessionRenaming || m.sessionRenameInput != "Old title" {
+		t.Fatalf("rename state = %v %q", m.sessionRenaming, m.sessionRenameInput)
+	}
+	m.sessionRenameInput = "New title"
+	_, cmd := m.handleSessionPick(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("rename returned no command")
+	}
+	_, _ = m.Update(cmd())
+	if m.sessions[0].Name != "New title" || !m.pickSession {
+		t.Fatalf("renamed picker = %+v open=%v", m.sessions[0], m.pickSession)
+	}
+	if got, err := m.app.Agent.SessionTitle(); err != nil || got != "New title" {
+		t.Fatalf("active title = %q err=%v", got, err)
+	}
+}
+
 func TestResumeWithNoSessionsShowsEmptyState(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)

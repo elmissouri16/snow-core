@@ -136,6 +136,66 @@ func TestValidateSQLiteSessionIsReadOnly(t *testing.T) {
 	}
 }
 
+func TestSQLiteSessionTitlePersistsAndKeepsEmptySession(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	idx := NewFileIndex(root)
+	st, err := idx.Create(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := st.Path()
+	titles := st.(TitleStore)
+	if err := titles.RenameSession("  Manual title  "); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("named empty session was removed: %v", err)
+	}
+	infos, err := idx.List(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].Name != "Manual title" || infos[0].Messages != 0 {
+		t.Fatalf("listed session = %+v", infos)
+	}
+	reopened, err := idx.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if got := reopened.Header().Name; got != "Manual title" {
+		t.Fatalf("reopened title = %q", got)
+	}
+}
+
+func TestSQLiteAppendWithInitialTitlePreservesManualRename(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.db")
+	st, err := NewSQLiteStore(path, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.AppendWithInitialTitle(msg("first", "", "first"), "First prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.SessionTitle(); got != "First prompt" {
+		t.Fatalf("initial title = %q", got)
+	}
+	if err := st.RenameSession("Manual"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendWithInitialTitle(msg("second", "", "second"), "Second prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.SessionTitle(); got != "Manual" {
+		t.Fatalf("manual title replaced = %q", got)
+	}
+}
+
 func TestSQLiteRoundTripAndBranch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.db")
 	st, err := NewSQLiteStore(path, "/tmp/work", Options{Name: "sqlite"})

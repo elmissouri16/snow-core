@@ -735,6 +735,28 @@ func (s *Session) SessionID() string {
 	return id
 }
 
+// SessionName returns the optional session display title.
+func (s *Session) SessionName() string {
+	a, err := s.activeApp()
+	if err != nil {
+		return ""
+	}
+	title, err := a.Agent.SessionTitle()
+	if err != nil {
+		return ""
+	}
+	return title
+}
+
+// RenameSession changes the display title without changing the stable ID or path.
+func (s *Session) RenameSession(title string) error {
+	a, err := s.activeApp()
+	if err != nil {
+		return err
+	}
+	return a.RenameSession(title)
+}
+
 // SessionPath returns the session file path ("" for in-memory).
 func (s *Session) SessionPath() string {
 	a, err := s.activeApp()

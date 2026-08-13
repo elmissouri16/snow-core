@@ -100,10 +100,23 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
    stale headers, separators, or prior composer frames.
 3. The footer shows permission mode, context usage, activity, pending queue
    state, and—when width permits—the current provider/model, collaboration mode,
-   and reasoning effort.
+   reasoning effort, and the latest request's prompt-cache hit rate as `CH<n>%`.
 
-Context usage follows the active theme: green below 50%, accent color from
-50–69%, warning/yellow from 70–89%, and red at 90% or above. With the default `tui.mouse: true`, wheel/trackpad gestures scroll Snow's transcript instead of terminal history; primary drag highlights and copies through OSC 52. On Apple Terminal, hold Fn while dragging for instant terminal-native selection. F6 disables reporting for native selection, but wheel gestures may then move terminal scrollback; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
+`CH` appears only when the provider explicitly reports cached-token usage; an
+explicit zero is shown as `CH0.0%`, while an omitted cache metric remains hidden.
+The percentage is `cache_read / input`, because Snow's normalized `input` is the
+total prompt count including cached tokens. Context usage follows the active
+theme: green below 50%, accent color from
+50–69%, warning/yellow from 70–89%, and red at 90% or above. With the default
+`tui.mouse: true`, wheel/trackpad gestures scroll Snow's transcript instead of
+terminal history; primary drag highlights and copies through OSC 52. On Apple
+Terminal, hold Fn while dragging for instant terminal-native selection. A
+right-click received by Snow disables mouse reporting so the terminal owns
+native selection and its context menu; because terminal protocols cannot replay
+the consumed press, repeat the right-click when the menu does not open on
+release. F6 toggles app/native mouse mode. In native mode, wheel gestures may
+move terminal scrollback; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still
+scroll Snow.
 
 In the ordinary agent composer, **Ctrl+V** probes the system clipboard for PNG, JPEG, GIF, or WebP image data before falling back to text paste. Attached images appear above the draft and are sent as image blocks when Enter submits to a vision-capable model. Up to eight images are accepted, each at most 20 MiB (40 MiB aggregate). With an empty text draft, Backspace (or Esc) removes the last attachment. Images cannot be queued as steering/follow-up input while another turn runs. Apple Terminal intercepts Cmd+V as terminal text paste, so use Ctrl+V for image capture. Linux image paste requires `wl-paste` or `xclip`; remote SSH sessions read the remote host clipboard, not the local desktop clipboard.
 
@@ -124,7 +137,9 @@ These are built-in defaults; most can be overridden in
 | `Ctrl+D` | Quit when the composer is empty | — |
 | Wheel/trackpad (`tui.mouse: true`) | Scroll transcript viewport | Same |
 | Primary-button drag (`tui.mouse: true`) | Select and copy transcript text | Same |
-| `F6` | Toggle app mouse handling/native terminal selection | Same |
+| Right-click (`tui.mouse: true`) | Switch to native mouse mode; repeat click if needed for terminal menu | Same |
+| `F6` | Toggle app mouse handling/native terminal selection and context menu | Same |
+| `r` in `/sessions` or `/resume` picker | Rename selected session | Same |
 | `PageUp` / `PageDown` | Scroll transcript viewport | Same |
 | `Home` / `End` | Jump transcript viewport | Same |
 | `Ctrl+Up` / `Ctrl+Down` | Scroll viewport by line | Same |
@@ -234,7 +249,12 @@ rejects missing paths and `--no-session` instead of silently creating an empty
 or ephemeral conversation.
 
 Inside the TUI, `/new`, `/sessions`, and `/resume` operate on the current
-project's session index. `/tree` operates inside the currently open database.
+project's session index. Sessions receive a local, provider-free title from the
+first user prompt. In the `/sessions` or no-path `/resume` picker, press `r` to
+edit the selected title; this works without switching to that session. Titles
+are 1–72 runes after trimming, do not need to be unique, and never change the
+stable session ID or database path. `/tree` operates inside the currently open
+database.
 
 A named fork shares prior append-only entries and diverges from a selected
 entry; it does not copy message rows. Branch selection changes subsequent

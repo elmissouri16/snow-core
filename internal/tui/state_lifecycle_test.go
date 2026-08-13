@@ -12,7 +12,7 @@ import (
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
-func TestAutomaticCompactionKeepsGoalRunLocked(t *testing.T) {
+func TestAutomaticCompactionKeepsOrdinaryRunLockedUntilTurnDone(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.busy = true
@@ -26,9 +26,13 @@ func TestAutomaticCompactionKeepsGoalRunLocked(t *testing.T) {
 	if !m.busy || !m.compacting {
 		t.Fatalf("automatic compaction start unlocked run: busy=%v compacting=%v", m.busy, m.compacting)
 	}
-	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvCompactionDone, TurnID: "compact-turn", TurnOrigin: "compact", Compaction: result})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvCompactionDone, TurnID: "compact-turn", TurnOrigin: "user", Compaction: result})
 	if !m.busy || m.compacting {
 		t.Fatalf("automatic compaction completion state: busy=%v compacting=%v", m.busy, m.compacting)
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: "compact-turn", TurnOrigin: "user"})
+	if m.busy {
+		t.Fatal("ordinary turn remained locked after turn_done")
 	}
 }
 

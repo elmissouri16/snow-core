@@ -200,6 +200,15 @@ possible and use narrow environment injection.
 Provider continuity blocks (`provider_data`) are durable, non-rendered state.
 SDK/RPC/TUI/plugin event consumers must not display or log them.
 
+Oversized plain-text tool results may be spilled beneath
+`$SNOW_HOME/artifacts`. Artifact directories are `0700`, files are immutable
+`0600`, and model-visible references are opaque IDs scoped to the active
+session. Dedicated `artifact_read`/`artifact_grep` tools return bounded text;
+the artifact root is deliberately not added to ordinary `read`, `write`,
+`edit`, `grep`, or `glob` roots. Artifacts may contain sensitive command or file
+output and currently persist with durable sessions, so protect and clean
+`SNOW_HOME` according to the same policy as session databases.
+
 ## Plugins and MCP
 
 Statically linked plugins and external JSON-RPC v2 plugins register namespaced

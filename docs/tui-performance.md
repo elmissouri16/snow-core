@@ -31,10 +31,13 @@ remain correct until an intentional v2 migration.
 2. **Mouse mode owns viewport scrolling.** `tui.mouse` defaults to `true` so
    wheel/trackpad gestures stay inside Snow instead of moving terminal scrollback.
    Cell-motion reports also drive transcript highlighting/copy and edge auto-scroll.
-   Apple Terminal provides Fn-drag as its terminal-native selection override. F6
-   disables reporting for native selection, but wheel behavior then belongs to the
-   terminal. This mode split reflects the protocol: portable bare native drag and
-   application wheel events cannot coexist.
+   Apple Terminal provides Fn-drag as its terminal-native selection override. A
+   reported right-click switches Snow to native mode; terminals that consume the
+   initiating press require one repeated click to open their menu because mouse
+   reports cannot be replayed as host GUI input. F6 toggles explicitly. In native
+   mode wheel behavior belongs to the terminal. This mode split reflects the
+   protocol: portable native drag/context menus and application wheel events
+   cannot coexist.
 3. **Size from `WindowSizeMsg`.** Header/footer/composer/overlay heights are
    subtracted from terminal height and the remainder is assigned to the Bubbles
    viewport. The final terminal column is left unused to avoid physical
@@ -73,7 +76,9 @@ viewport. In the default mouse mode, the wheel scrolls and drag selects
 ANSI/grapheme-aware transcript cells; releasing copies through OSC 52, with detected
 tmux/screen passthrough. Apple Terminal users can Fn-drag for zero-lag native
 selection. Double-click selects a word, triple-click a line, and edge dragging
-continues through off-screen rows. F6 disables reporting for bare native selection.
+continues through off-screen rows. Right-click hands mouse ownership back to the
+terminal for native selection/context menus; repeat it if the initiating press was
+consumed. F6 toggles reporting explicitly.
 The viewport follows new output only while already at bottom, and active application
 selections freeze their source snapshot.
 

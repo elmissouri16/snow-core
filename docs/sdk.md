@@ -233,12 +233,23 @@ Do not infer support from model names or provider branding.
 | `Messages()` | Linearized durable messages on the active branch |
 | `Usage()` | Aggregate token/cache/request/cost data for the active branch |
 | `SessionID()` | Stable session identifier |
+| `SessionName()` | Optional automatic or manually assigned display title |
+| `RenameSession(name)` | Change the display title without changing ID/path/history |
 | `SessionPath()` | SQLite path, or empty for in-memory sessions |
 | `CWD()` | Active project directory |
 
+The first accepted prompt assigns an untitled built-in store a deterministic,
+provider-free title. `RenameSession` trims surrounding whitespace, requires
+1–72 runes, and rejects control characters. Titles need not be unique and do
+not enter provider context.
+
 `protocol.Message` contains parent-linked IDs, typed content blocks, provider and
-model metadata, stop reason, usage, and tool-result correlation. A
-`provider_data` block is persistence-only and must not be rendered or logged.
+model metadata, stop reason, usage, and tool-result correlation. In
+`protocol.Usage`, `Input` is the total prompt count including cached tokens;
+`CacheReadKnown` distinguishes an explicit `CacheRead == 0` miss from a provider
+that omitted cache metrics. On aggregate usage, it remains true only when every
+included request reported the cache-read metric. A `provider_data` block is
+persistence-only and must not be rendered or logged.
 
 ### Branches and compaction
 

@@ -186,6 +186,17 @@ Use `default` or `plan`. Mode changes may be rejected while conflicting work is
 active. Prefer an explicit value even though an omitted value normalizes to the
 Default mode internally.
 
+### `session_rename`
+
+```json
+{"id":"rename-1","type":"session_rename","params":{"name":"API cleanup"}}
+```
+
+Changes the active session display title without changing its stable ID, path,
+branches, or history. The trimmed title must contain 1–72 runes and no control
+characters. The response `data` contains `session_id` and the normalized `name`.
+The command may be rejected while conflicting root/subagent work is active.
+
 ### `session_info`
 
 ```json
@@ -197,6 +208,7 @@ Successful `data` contains:
 ```json
 {
   "session_id": "...",
+  "name": "API cleanup",
   "path": "/path/to/session.db",
   "cwd": "/path/to/project",
   "provider": "opencode-go",
@@ -230,7 +242,9 @@ Successful `data` contains:
 }
 ```
 
-`path` is empty for `--no-session`; `goal` is omitted when none exists.
+`name` is empty until assigned for legacy/untitled stores; built-in stores receive
+a local title with their first accepted prompt. `path` is empty for
+`--no-session`; `goal` is omitted when none exists.
 
 ## Model-requested user input
 
@@ -424,6 +438,13 @@ Correlation rules:
 - `subagent` present: child lifecycle snapshot;
 - `agent_message` present: attributed mailbox event;
 - `tool_output`: bounded preview only; full results remain in session storage.
+
+Usage payloads keep `input` as the total prompt count, including cached tokens.
+`cache_read_known: true` means the provider explicitly reported its cached-token
+field, so `cache_read > 0` is a hit and `cache_read == 0` is a confirmed miss.
+When `cache_read_known` is absent or false, zero is unknown rather than a miss.
+For aggregate usage it is true only when every included provider request reported
+the metric.
 
 Clients should switch on `type` and tolerate new optional fields/event types for
 forward compatibility.

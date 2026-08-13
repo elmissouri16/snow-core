@@ -63,6 +63,24 @@ type ResponseError struct {
 	Attempts  int
 }
 
+func (e *ResponseError) ContextWindowExceeded() bool {
+	if e == nil {
+		return false
+	}
+	code := strings.ToLower(strings.TrimSpace(e.Code))
+	switch code {
+	case "context_length_exceeded", "context_window_exceeded", "prompt_too_long", "input_too_long":
+		return true
+	}
+	message := strings.ToLower(e.Message)
+	for _, phrase := range []string{"maximum context length", "context length exceeded", "context window exceeded", "prompt is too long", "prompt too long", "input is too long", "input too long", "too many tokens in prompt"} {
+		if strings.Contains(message, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *ResponseError) Error() string {
 	if e == nil {
 		return "responses: request failed"
@@ -1090,7 +1108,10 @@ func responseUsage(event map[string]any) *protocol.Usage {
 		Total:  intNumber(usage["total_tokens"]),
 	}
 	if details, _ := usage["input_tokens_details"].(map[string]any); details != nil {
-		out.CacheRead = intNumber(details["cached_tokens"])
+		if cached, ok := intNumberPresent(details["cached_tokens"]); ok {
+			out.CacheRead = cached
+			out.CacheReadKnown = true
+		}
 		out.CacheWrite = intNumber(details["cache_creation_input_tokens"])
 	}
 	if details, _ := usage["output_tokens_details"].(map[string]any); details != nil {
@@ -1167,13 +1188,18 @@ func eventRequestID(event map[string]any) string {
 }
 
 func intNumber(v any) int {
+	n, _ := intNumberPresent(v)
+	return n
+}
+
+func intNumberPresent(v any) (int, bool) {
 	switch n := v.(type) {
 	case float64:
-		return int(n)
+		return int(n), true
 	case int:
-		return n
+		return n, true
 	}
-	return 0
+	return 0, false
 }
 
 func truncateUTF8(value string, maxBytes int) string {

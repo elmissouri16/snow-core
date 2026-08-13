@@ -43,16 +43,22 @@ type TUIConfig struct {
 	Mouse bool   `json:"mouse"`
 }
 
-// CompactionConfig controls manual compaction and goal-only automatic
-// compaction. Zero RetainTokens uses a model-aware retention target. A zero
-// GoalAutoThresholdPercent disables automatic compaction.
+// CompactionConfig controls manual and pressure-based automatic compaction.
+// Zero RetainTokens uses a model-aware retention target. A zero automatic
+// threshold disables pressure compaction and overflow recovery.
 type CompactionConfig struct {
-	RetainTokens             int    `json:"retain_tokens,omitempty"`
-	MinRetainedTurns         int    `json:"min_retained_turns,omitempty"`
-	SummaryMaxTokens         int    `json:"summary_max_tokens,omitempty"`
-	Fallback                 string `json:"fallback,omitempty"` // local|error
-	Guidance                 string `json:"guidance,omitempty"`
-	GoalAutoThresholdPercent int    `json:"goal_auto_threshold_percent"`
+	RetainTokens         int    `json:"retain_tokens,omitempty"`
+	MinRetainedTurns     int    `json:"min_retained_turns,omitempty"`
+	SummaryMaxTokens     int    `json:"summary_max_tokens,omitempty"`
+	Fallback             string `json:"fallback,omitempty"` // local|error
+	Guidance             string `json:"guidance,omitempty"`
+	AutoThresholdPercent int    `json:"auto_threshold_percent"`
+	// GoalAutoThresholdPercent is a deprecated source-compatibility alias. New
+	// JSON is emitted through auto_threshold_percent; legacy JSON is accepted by Load.
+	GoalAutoThresholdPercent      int `json:"-"`
+	ToolResultInlineBytes         int `json:"tool_result_inline_bytes,omitempty"`
+	ArtifactMaxBytes              int `json:"artifact_max_bytes,omitempty"`
+	HistoricalToolResultThreshold int `json:"historical_tool_result_threshold_bytes,omitempty"`
 }
 
 // WindowsShellConfig controls the compatibility-named bash tool on Windows.
@@ -63,10 +69,17 @@ type WindowsShellConfig struct {
 }
 
 func DefaultCompaction() CompactionConfig {
-	return CompactionConfig{MinRetainedTurns: 2, SummaryMaxTokens: 2000, Fallback: "local", GoalAutoThresholdPercent: 90}
+	return CompactionConfig{
+		MinRetainedTurns: 2, SummaryMaxTokens: 2000, Fallback: "local",
+		AutoThresholdPercent: 80, GoalAutoThresholdPercent: 80, ToolResultInlineBytes: 16 << 10,
+		ArtifactMaxBytes: 4 << 20, HistoricalToolResultThreshold: 8 << 10,
+	}
 }
 
 func (c CompactionConfig) Validate() error {
+	if c.AutoThresholdPercent == 0 && c.GoalAutoThresholdPercent != 0 {
+		c.AutoThresholdPercent = c.GoalAutoThresholdPercent
+	}
 	if c.RetainTokens < 0 || c.RetainTokens > 1_000_000 {
 		return errors.New("config: compaction retain_tokens must be 0..1000000")
 	}
@@ -82,8 +95,17 @@ func (c CompactionConfig) Validate() error {
 	if len(c.Guidance) > 16*1024 {
 		return errors.New("config: compaction guidance exceeds 16 KiB")
 	}
-	if c.GoalAutoThresholdPercent != 0 && (c.GoalAutoThresholdPercent < 50 || c.GoalAutoThresholdPercent > 99) {
-		return errors.New("config: compaction goal_auto_threshold_percent must be 0 or 50..99")
+	if c.AutoThresholdPercent != 0 && (c.AutoThresholdPercent < 50 || c.AutoThresholdPercent > 99) {
+		return errors.New("config: compaction auto_threshold_percent must be 0 or 50..99")
+	}
+	if c.ToolResultInlineBytes < 1024 || c.ToolResultInlineBytes > 1<<20 {
+		return errors.New("config: compaction tool_result_inline_bytes must be 1024..1048576")
+	}
+	if c.ArtifactMaxBytes < c.ToolResultInlineBytes || c.ArtifactMaxBytes > 64<<20 {
+		return errors.New("config: compaction artifact_max_bytes must be at least tool_result_inline_bytes and at most 67108864")
+	}
+	if c.HistoricalToolResultThreshold < 1024 || c.HistoricalToolResultThreshold > 1<<20 {
+		return errors.New("config: compaction historical_tool_result_threshold_bytes must be 1024..1048576")
 	}
 	return nil
 }
@@ -183,8 +205,8 @@ func DefaultSubagents() SubagentConfig {
 		MinWaitTimeoutMS: 10_000, DefaultWaitTimeoutMS: 30_000, MaxWaitTimeoutMS: 3_600_000,
 		TaskTimeoutMS: 1_800_000, MaxResultBytes: 65_536, Durable: true, ExposeChildToolEvents: true,
 		DefaultRole: "general", Roles: map[string]AgentRole{
-			"general":     {Description: "General shell-capable investigation (bash remains permission-gated; file mutation is disabled by default)", Tools: []string{"read", "grep", "glob", "activate_skill", "read_skill_resource", "bash"}},
-			"explorer":    {Description: "Narrow read-only codebase investigation", Tools: []string{"read", "grep", "glob", "activate_skill", "read_skill_resource"}},
+			"general":     {Description: "General shell-capable investigation (bash remains permission-gated; file mutation is disabled by default)", Tools: []string{"read", "grep", "glob", "artifact_read", "artifact_grep", "activate_skill", "read_skill_resource", "bash"}},
+			"explorer":    {Description: "Narrow read-only codebase investigation", Tools: []string{"read", "grep", "glob", "artifact_read", "artifact_grep", "activate_skill", "read_skill_resource"}},
 			"implementer": {Description: "Shell-capable implementation task (write/edit require explicit role and global opt-in)"},
 		}}
 }
@@ -230,7 +252,7 @@ func (c SubagentConfig) ValidateSubagents() error {
 	if _, ok := c.Roles[c.DefaultRole]; !ok {
 		return fmt.Errorf("config: unknown subagent default role %q", c.DefaultRole)
 	}
-	childTools := map[string]bool{"read": true, "grep": true, "glob": true, "activate_skill": true, "read_skill_resource": true, "write": true, "edit": true, "bash": true}
+	childTools := map[string]bool{"read": true, "grep": true, "glob": true, "artifact_read": true, "artifact_grep": true, "activate_skill": true, "read_skill_resource": true, "write": true, "edit": true, "bash": true}
 	for name, role := range c.Roles {
 		if name == "default" || name == "worker" {
 			return fmt.Errorf("config: subagent role %q was renamed; use %q", name, map[string]string{"default": "general", "worker": "implementer"}[name])
@@ -400,9 +422,14 @@ func Load(path string) (Config, error) {
 		Compaction map[string]json.RawMessage `json:"compaction"`
 	}
 	_ = json.Unmarshal(data, &rawConfig)
-	if _, present := rawConfig.Compaction["goal_auto_threshold_percent"]; !present {
-		cfg.Compaction.GoalAutoThresholdPercent = defaults.GoalAutoThresholdPercent
+	if _, present := rawConfig.Compaction["auto_threshold_percent"]; !present {
+		if legacy, ok := rawConfig.Compaction["goal_auto_threshold_percent"]; ok {
+			_ = json.Unmarshal(legacy, &cfg.Compaction.AutoThresholdPercent)
+		} else {
+			cfg.Compaction.AutoThresholdPercent = defaults.AutoThresholdPercent
+		}
 	}
+	cfg.Compaction.GoalAutoThresholdPercent = cfg.Compaction.AutoThresholdPercent
 	if cfg.Compaction.MinRetainedTurns == 0 {
 		cfg.Compaction.MinRetainedTurns = defaults.MinRetainedTurns
 	}
@@ -411,6 +438,15 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Compaction.Fallback == "" {
 		cfg.Compaction.Fallback = defaults.Fallback
+	}
+	if cfg.Compaction.ToolResultInlineBytes == 0 {
+		cfg.Compaction.ToolResultInlineBytes = defaults.ToolResultInlineBytes
+	}
+	if cfg.Compaction.ArtifactMaxBytes == 0 {
+		cfg.Compaction.ArtifactMaxBytes = defaults.ArtifactMaxBytes
+	}
+	if cfg.Compaction.HistoricalToolResultThreshold == 0 {
+		cfg.Compaction.HistoricalToolResultThreshold = defaults.HistoricalToolResultThreshold
 	}
 	if cfg.WindowsShell.Kind == "" {
 		cfg.WindowsShell.Kind = "powershell"

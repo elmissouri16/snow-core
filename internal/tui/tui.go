@@ -282,6 +282,13 @@ type sessionListMsg struct {
 	err        error
 }
 
+type sessionRenameMsg struct {
+	generation uint64
+	index      int
+	title      string
+	err        error
+}
+
 type branchListMsg struct {
 	generation uint64
 	branches   []protocol.SessionBranch
@@ -405,6 +412,7 @@ type Model struct {
 	keys                          tuiKeyMap
 	auxDiagnostics                []config.Diagnostic
 	lastUsage                     *protocol.Usage
+	lastRequestUsage              *protocol.Usage
 	contextTokens                 int
 	contextEstimated              bool
 	turnUsageSeen                 bool
@@ -540,6 +548,8 @@ type Model struct {
 	startupResumeRequired bool
 	sessions              []session.SessionInfo
 	sessionIndex          int
+	sessionRenaming       bool
+	sessionRenameInput    string
 
 	// Branch tree picker state.
 	pickTree     bool
@@ -866,6 +876,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		m.refreshTranscriptForced()
 	case tea.MouseMsg:
+		// Native context-menu handoff takes precedence over overlays too. A fleet
+		// panel may ignore app scrolling, but it must not trap right-click forever.
+		if handled, cmd := m.handoffNativeMouseOnRightClick(msg); handled {
+			return m, cmd
+		}
 		if m.subagentFleetOpen {
 			return m, nil
 		}
@@ -1235,6 +1250,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		m.layout()
+	case sessionRenameMsg:
+		if msg.generation != m.pickerGeneration || !m.pickSession {
+			return m, nil
+		}
+		m.sessionLoading = false
+		if msg.err != nil {
+			m.pushLine(styleError.Render("session rename: " + msg.err.Error()))
+			return m, nil
+		}
+		if msg.index >= 0 && msg.index < len(m.sessions) {
+			m.sessions[msg.index].Name = msg.title
+		}
+		m.lastStatus = "renamed session " + msg.title
 		m.layout()
 	case branchListMsg:
 		if msg.generation != m.pickerGeneration || !m.pickTree {
@@ -1663,9 +1692,9 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		m.compacting = false
 		m.compactStatus = ""
 		m.activeTurnID = ""
-		// Automatic compaction is one phase of a continuing goal worker. Manual
-		// compaction settles only when the core confirms no admitted operation is
-		// still running; never unlock based solely on event ordering.
+		// Automatic compaction is one phase of an admitted ordinary or goal turn.
+		// Manual compaction settles only when the core confirms no admitted
+		// operation is still running; never unlock based solely on event ordering.
 		if ev.Compaction == nil || !ev.Compaction.Automatic {
 			if m.app == nil || m.app.Agent == nil || !m.app.Agent.IsRunning() {
 				m.setRunIdle()
@@ -1798,6 +1827,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 	case protocol.EvUsage:
 		if ev.Usage != nil {
 			m.lastUsage = ev.Usage.Clone()
+			m.lastRequestUsage = ev.Usage.Clone()
 			m.contextTokens = contextTokensFromUsage(*ev.Usage)
 			m.contextEstimated = false
 			m.turnUsageSeen = true
@@ -2411,14 +2441,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// F6 toggles application mouse reporting without restarting. Native terminal
-	// selection is the zero-lag default; application mode adds wheel scrolling,
-	// transcript drag-copy, and edge auto-scroll when explicitly enabled.
+	// selection/context menus require reporting to be disabled; application mode
+	// adds wheel scrolling, transcript drag-copy, and edge auto-scroll.
 	if msg.Type == tea.KeyF6 {
 		if m.app.Cfg.TUI.Mouse {
 			m.clearTranscriptSelection()
 			m.catchUpTranscriptAfterSelection()
 			m.app.Cfg.TUI.Mouse = false
-			m.lastStatus = "native selection · keyboard viewport scrolling"
+			m.lastStatus = "native selection + context menu · keyboard viewport scrolling"
 			return m, tea.DisableMouse
 		}
 		m.app.Cfg.TUI.Mouse = true
@@ -4693,6 +4723,24 @@ func (m *Model) startSessionPick() (tea.Model, tea.Cmd) {
 
 func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
+	if m.sessionRenaming {
+		switch {
+		case keyMatches(msg, m.keys.Close):
+			m.sessionRenaming, m.sessionRenameInput = false, ""
+		case keyMatches(msg, m.keys.Accept):
+			return m.executeSessionRename()
+		case msg.Type == tea.KeyBackspace:
+			r := []rune(m.sessionRenameInput)
+			if len(r) > 0 {
+				m.sessionRenameInput = string(r[:len(r)-1])
+			}
+		case msg.Type == tea.KeyRunes:
+			if len([]rune(m.sessionRenameInput))+len(msg.Runes) <= 72 {
+				m.sessionRenameInput += string(msg.Runes)
+			}
+		}
+		return m, nil
+	}
 	if m.sessionLoading {
 		if msg.Type == tea.KeyEsc {
 			m.pickSession = false
@@ -4740,8 +4788,37 @@ func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyEnter:
 		return m.openSession(m.sessions[m.sessionIndex].Path)
+	case tea.KeyRunes:
+		if keyMatches(msg, m.keys.BranchRename) {
+			m.sessionRenaming = true
+			m.sessionRenameInput = m.sessions[m.sessionIndex].Name
+		}
 	}
 	return m, nil
+}
+
+func (m *Model) executeSessionRename() (tea.Model, tea.Cmd) {
+	if m.sessionIndex < 0 || m.sessionIndex >= len(m.sessions) {
+		m.sessionRenaming = false
+		return m, nil
+	}
+	title := strings.TrimSpace(m.sessionRenameInput)
+	m.sessionRenaming, m.sessionRenameInput = false, ""
+	selected := m.sessions[m.sessionIndex]
+	index := m.sessionIndex
+	m.sessionLoading = m.asyncIO
+	m.pickerGeneration++
+	generation := m.pickerGeneration
+	run := func() tea.Msg {
+		var err error
+		if selected.ID == currentSessionID(m.app) {
+			err = m.app.RenameSession(title)
+		} else {
+			err = session.NewFileIndex(session.DefaultSessionsRoot()).Rename(m.app.CWD(), selected.Path, title)
+		}
+		return sessionRenameMsg{generation: generation, index: index, title: title, err: err}
+	}
+	return m, run
 }
 
 func (m *Model) startNewSession() (tea.Model, tea.Cmd) {
@@ -5088,6 +5165,7 @@ func (m *Model) refreshProjectedContextUsage(projected []protocol.Message, compa
 
 func (m *Model) applyContextUsageSnapshot(snapshot contextUsageSnapshot) {
 	m.lastUsage = snapshot.usage.Clone()
+	m.lastRequestUsage = snapshot.usage.Clone()
 	m.contextTokens = snapshot.tokens
 	m.contextEstimated = snapshot.estimated
 	m.contextRefreshVersion++
@@ -5607,18 +5685,22 @@ func (m *Model) renderSessionPicker() string {
 	if showMarkers && end < len(m.sessions) {
 		b.WriteString(styleHeaderDim.Render(truncateRunes("  ↓ more sessions", pickerWidth)) + "\n")
 	}
-	b.WriteString(styleFooter.Render(truncateRunes("(↑/↓ choose · PgUp/PgDn scroll · Enter resume · Esc cancel)", pickerWidth)))
+	hint := "(↑/↓ choose · PgUp/PgDn scroll · Enter resume · r rename · Esc cancel)"
+	if m.sessionRenaming {
+		hint = "Rename session: " + m.sessionRenameInput + "_"
+	}
+	b.WriteString(styleFooter.Render(truncateRunes(hint, pickerWidth)))
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
 func formatSessionPickerInfo(info session.SessionInfo, activeID string) string {
 	label := shortSessionID(info.ID)
-	if info.ID == activeID {
-		label += "  ✓ active"
+	if info.Name != "" {
+		label = info.Name + "  ·  " + label
 	}
 	label += fmt.Sprintf("  ·  %d messages", info.Messages)
-	if info.Name != "" {
-		label += "  ·  " + info.Name
+	if info.ID == activeID {
+		label += "  ✓ active"
 	}
 	return label
 }
@@ -7023,12 +7105,16 @@ func (m *Model) renderFooter() string {
 		goalText = fmt.Sprintf(" · goal:%s %s", m.goal.Status, formatGoalTokenUsage(m.goal))
 	}
 	contextUsage := m.renderContextUsage()
+	cacheHit := m.renderCacheHit()
 	runtimeText := "mode:" + mode
 	if m.inlineTranscript && m.app != nil && m.app.Agent != nil && available >= 72 {
 		model := m.app.Agent.Model()
 		runtimeText = model.Provider + "/" + model.ID + " · " + runtimeText + " · thinking:" + string(m.app.Agent.Thinking())
 	}
 	rightPrefix := "· " + runtimeText + goalText + " · "
+	if cacheHit != "" {
+		rightPrefix += cacheHit + " · "
+	}
 	right := rightPrefix + contextUsage
 	// Add width-aware help only when it fits beside the persistent context
 	// indicator. Narrow terminals keep the footer quiet and leave shortcuts in
@@ -7046,10 +7132,24 @@ func (m *Model) renderFooter() string {
 		maxRight = 4
 	}
 	if lipgloss.Width(right) > maxRight {
+		compactRightPrefix := ""
 		if m.inlineTranscript && m.app != nil && m.app.Agent != nil && maxRight >= 18 {
 			model := m.app.Agent.Model()
 			runtimeText = model.ID + " · " + mode + "/" + string(m.app.Agent.Thinking())
-			rightPrefix = "· " + runtimeText + " · "
+			compactRightPrefix = "· " + runtimeText + " · "
+			rightPrefix = compactRightPrefix
+			if cacheHit != "" {
+				rightPrefix += cacheHit + " · "
+			}
+			right = rightPrefix + contextUsage
+		}
+		if lipgloss.Width(right) > maxRight && cacheHit != "" {
+			cacheHit = ""
+			if compactRightPrefix != "" {
+				rightPrefix = compactRightPrefix
+			} else {
+				rightPrefix = "· " + runtimeText + goalText + " · "
+			}
 			right = rightPrefix + contextUsage
 		}
 		if lipgloss.Width(right) > maxRight {
@@ -7104,6 +7204,16 @@ func (m *Model) contextUsageStyle() lipgloss.Style {
 	}
 }
 
+func (m *Model) renderCacheHit() string {
+	usage := m.lastRequestUsage
+	if usage == nil || (!usage.CacheReadKnown && usage.CacheRead <= 0) || usage.Input <= 0 {
+		return ""
+	}
+	percent := 100 * float64(usage.CacheRead) / float64(usage.Input)
+	percent = min(100, max(0, percent))
+	return fmt.Sprintf("CH%.1f%%", percent)
+}
+
 func (m *Model) renderContextUsage() string {
 	current := formatTokenCount(int64(m.contextTokens))
 	if m.contextEstimated && m.contextTokens > 0 {
@@ -7126,13 +7236,13 @@ func (m *Model) renderCompactionProgress() string {
 
 func formatGoalTokenUsage(goal *protocol.ThreadGoal) string {
 	if goal == nil {
-		return "0 tokens"
+		return "0 tks"
 	}
 	usage := formatTokenCount(goal.TokensUsed)
 	if goal.TokenBudget != nil {
 		usage += "/" + formatTokenCount(*goal.TokenBudget)
 	}
-	usage += " tokens"
+	usage += " tks"
 	if len(goal.EstimatedCosts) == 0 {
 		return usage
 	}

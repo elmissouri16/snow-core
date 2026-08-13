@@ -14,6 +14,46 @@ func msg(id, parent, text string) Entry {
 	return Entry{Type: EntryMessage, ID: id, ParentID: parent, Message: &m}
 }
 
+func TestSuggestedTitleAndMemoryRename(t *testing.T) {
+	long := "  ##   Review\n\tthe session title implementation and " + strings.Repeat("details ", 20)
+	title := SuggestedTitle(long)
+	if !strings.HasPrefix(title, "Review the session title implementation") || len([]rune(title)) > maxSessionTitleRunes || !strings.HasSuffix(title, "…") {
+		t.Fatalf("suggested title = %q", title)
+	}
+	s := NewMemoryStore(Options{})
+	if err := s.RenameSession("  Manual title  "); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.SessionTitle(); got != "Manual title" || s.Header().Name != got {
+		t.Fatalf("memory title = %q header=%q", got, s.Header().Name)
+	}
+	for _, invalid := range []string{"", strings.Repeat("x", maxSessionTitleRunes+1), "bad\nname"} {
+		if err := s.RenameSession(invalid); err == nil {
+			t.Fatalf("RenameSession(%q) succeeded", invalid)
+		}
+	}
+}
+
+func TestMemoryInitialTitleIsAtomicAndManualWins(t *testing.T) {
+	s := NewMemoryStore(Options{})
+	entry := msg("first", "", "first prompt")
+	if err := s.AppendWithInitialTitle(entry, "First prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.SessionTitle(); got != "First prompt" {
+		t.Fatalf("initial title = %q", got)
+	}
+	if err := s.RenameSession("Manual"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendWithInitialTitle(msg("second", "", "second"), "Second"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.SessionTitle(); got != "Manual" {
+		t.Fatalf("manual title replaced = %q", got)
+	}
+}
+
 func TestMemoryAppendAndLinearize(t *testing.T) {
 	s := NewMemoryStore(Options{CWD: "/tmp"})
 	if s.BranchTip() != "root" {

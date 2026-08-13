@@ -71,6 +71,41 @@ func TestInternalGoalTurnNoUserMessageAndAccountsOnce(t *testing.T) {
 		t.Fatalf("requests=%+v", p.requests)
 	}
 }
+func TestGoalUsageUpdatesAfterEachProviderResponse(t *testing.T) {
+	p := &scriptedProvider{}
+	a, c, _ := goalAgent(t, p)
+	g, _ := c.Create("live usage", nil, false)
+	p.scripts = [][]protocol.StreamEvent{
+		{{Type: protocol.EvStreamUsage, Usage: &protocol.Usage{Total: 5}}, {Type: protocol.EvStreamToolCallDone, ToolCallID: "g", ToolName: "get_goal", Arguments: []byte(`{}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+		{{Type: protocol.EvStreamUsage, Usage: &protocol.Usage{Total: 7}}, {Type: protocol.EvStreamToolCallDone, ToolCallID: "u", ToolName: "update_goal", Arguments: []byte(`{"goal_id":"` + g.GoalID + `","status":"complete"}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+		{{Type: protocol.EvStreamUsage, Usage: &protocol.Usage{Total: 3}}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}
+	var usage []int64
+	a.Subscribe(func(ev protocol.AgentEvent) {
+		if ev.Type == protocol.EvThreadGoalUpdated && ev.ThreadGoal != nil && ev.ThreadGoal.Goal != nil {
+			usage = append(usage, ev.ThreadGoal.Goal.TokensUsed)
+		}
+	})
+	if err := a.TryInternalTurn(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DrainEvents(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []int64{5, 12, 15} {
+		found := false
+		for _, got := range usage {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("goal updates=%v missing %d", usage, want)
+		}
+	}
+}
+
 func TestCumulativeUsageSnapshotChargedOnceAndEventOrder(t *testing.T) {
 	p := &scriptedProvider{}
 	a, c, _ := goalAgent(t, p)

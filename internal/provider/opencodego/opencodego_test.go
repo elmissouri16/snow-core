@@ -80,6 +80,37 @@ func TestChatCompletionsEncodesImageContent(t *testing.T) {
 	}
 }
 
+func TestMapUsageDistinguishesExplicitZeroFromOmittedCacheRead(t *testing.T) {
+	var explicit openAIUsage
+	if err := json.Unmarshal([]byte(`{"prompt_tokens":4,"prompt_tokens_details":{"cached_tokens":0}}`), &explicit); err != nil {
+		t.Fatal(err)
+	}
+	if usage := mapUsage(explicit); !usage.CacheReadKnown || usage.CacheRead != 0 {
+		t.Fatalf("explicit usage = %+v", usage)
+	}
+	var fallback openAIUsage
+	if err := json.Unmarshal([]byte(`{"prompt_tokens":4,"prompt_cache_hit_tokens":2}`), &fallback); err != nil {
+		t.Fatal(err)
+	}
+	if usage := mapUsage(fallback); !usage.CacheReadKnown || usage.CacheRead != 2 {
+		t.Fatalf("fallback usage = %+v", usage)
+	}
+	var fallbackZero openAIUsage
+	if err := json.Unmarshal([]byte(`{"prompt_tokens":4,"prompt_cache_hit_tokens":0}`), &fallbackZero); err != nil {
+		t.Fatal(err)
+	}
+	if usage := mapUsage(fallbackZero); !usage.CacheReadKnown || usage.CacheRead != 0 {
+		t.Fatalf("fallback zero usage = %+v", usage)
+	}
+	var omitted openAIUsage
+	if err := json.Unmarshal([]byte(`{"prompt_tokens":4,"prompt_tokens_details":{}}`), &omitted); err != nil {
+		t.Fatal(err)
+	}
+	if usage := mapUsage(omitted); usage.CacheReadKnown {
+		t.Fatalf("omitted usage = %+v", usage)
+	}
+}
+
 func TestLiveDefaultsPinned(t *testing.T) {
 	if DefaultBaseURL != "https://opencode.ai/zen/go/v1" {
 		t.Errorf("DefaultBaseURL = %q, want https://opencode.ai/zen/go/v1 (verified live)", DefaultBaseURL)

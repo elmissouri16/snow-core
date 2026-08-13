@@ -124,7 +124,10 @@ A representative configuration:
     "summary_max_tokens": 2000,
     "fallback": "local",
     "guidance": "",
-    "goal_auto_threshold_percent": 90
+    "auto_threshold_percent": 80,
+    "tool_result_inline_bytes": 16384,
+    "artifact_max_bytes": 4194304,
+    "historical_tool_result_threshold_bytes": 8192
   },
   "windows_shell": {
     "kind": "powershell"
@@ -158,13 +161,15 @@ fills required zero-value defaults before validation.
 Model capabilities remain authoritative. A configured reasoning level that is
 not advertised by the selected model is rejected.
 
-`compaction.goal_auto_threshold_percent` defaults to `90`. During automatic
-Default-mode goal continuation, Snow compacts between complete goal turns when
-the latest provider-reported request usage reaches that percentage of the
-model context window. Set it to `0` to disable; enabled values must be `50..99`.
-This does not auto-compact ordinary prompts or subagents. Existing retention,
-summary, fallback, and guidance fields control both manual and goal-triggered
-compaction. Full history remains append-only.
+`compaction.auto_threshold_percent` defaults to `80`. At safe boundaries between
+complete provider/tool cycles, Snow prunes oversized historical plain-text tool
+results and compacts older complete turns when provider-reported usage plus
+significant newly appended context reaches that percentage of the model context
+window. This applies to ordinary, goal, Plan, and subagent turns. Set it to `0`
+to disable pressure compaction and the one-shot provider context-overflow repair;
+enabled values must be `50..99`. The legacy `goal_auto_threshold_percent` key is
+accepted only when the new key is absent. Full conversation history remains
+append-only.
 
 ### Providers
 
@@ -212,7 +217,7 @@ backend and OAuth flow.
 Built-in themes are `default`, `dark`, `light`, and `high-contrast`. Any other
 valid name refers to a custom theme file. Snow always uses Bubble Tea's
 alternate-screen, app-owned transcript viewport so scrolling cannot expose stale
-rendered headers or composer chrome. The default `mouse: true` keeps wheel/trackpad gestures inside Snow's transcript viewport and provides highlighted drag selection, edge auto-scroll, and OSC 52 copy. Apple Terminal users can hold Fn while dragging for instant terminal-native selection without disabling wheel handling. F6 (or `mouse: false`) disables reporting for native selection, but wheel gestures may then scroll terminal history; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
+rendered headers or composer chrome. The default `mouse: true` keeps wheel/trackpad gestures inside Snow's transcript viewport and provides highlighted drag selection, edge auto-scroll, and OSC 52 copy. Apple Terminal users can hold Fn while dragging for instant terminal-native selection without disabling wheel handling. A reported right-click switches Snow to native mouse mode for terminal selection/context menus; repeat the click when the terminal consumed the initiating press. F6 toggles explicitly, and `mouse: false` starts natively. In native mode wheel gestures may scroll terminal history; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
 
 ### Compaction
 
@@ -223,15 +228,22 @@ rendered headers or composer chrome. The default `mouse: true` keeps wheel/track
 | `summary_max_tokens` | `128..32768`, default `2000` | Maximum provider summary output |
 | `fallback` | `local` | `local` uses deterministic fallback; `error` fails when provider summary fails |
 | `guidance` | maximum 16 KiB | Additive operator instructions appended to the fixed summary contract |
-| `goal_auto_threshold_percent` | `0` or `50..99`, default `90` | Auto-compact between active goal turns at this context usage; zero disables |
+| `auto_threshold_percent` | `0` or `50..99`, default `80` | Prune and auto-compact all turn types at this context pressure; zero also disables overflow repair |
+| `tool_result_inline_bytes` | `1024..1048576`, default `16384` | Plain-text result size retained inline before spilling the full retained result |
+| `artifact_max_bytes` | inline threshold..64 MiB, default `4194304` | Maximum private spill artifact size |
+| `historical_tool_result_threshold_bytes` | `1024..1048576`, default `8192` | Old plain-text result size that triggers ordinary request/summarizer projection pruning |
 
-Compaction preserves the complete append-only history. Ordinary work compacts
-only when requested with `/compact` or the SDK. Default-mode goal continuation
-also compacts automatically between complete turns at the configured threshold,
-using the latest provider-reported request usage and the active model context
-window. Project configuration cannot change the automatic threshold. Project
-`guidance` is additive; it cannot remove the host's factual continuation
-contract.
+Compaction preserves the complete append-only conversation history. Pressure
+checks run only at safe complete-cycle boundaries, never between an assistant
+call and its serial tool-result batch. If a provider explicitly reports that a
+request exceeds its context window, Snow attempts one automatic compaction and
+one retry; it never loops. Oversized new plain-text tool results are saved under
+`$SNOW_HOME/artifacts` with private permissions and replaced in session context
+by a bounded preview plus opaque artifact ID. `artifact_read` and
+`artifact_grep` retrieve bounded fragments without adding that directory to
+ordinary file-tool roots. Project configuration cannot change automatic or
+artifact thresholds. Project `guidance` is additive; it cannot remove the
+host's factual continuation contract.
 
 ### Windows shell
 
@@ -402,7 +414,8 @@ accept close branch_fork branch_rename branch_delete confirm
 Keys may be named keys such as `enter`, `esc`, `tab`, `shift+tab`, arrows,
 `home`, `end`, `pgup`, and `pgdown`; one-rune keys; or supported `ctrl+`/`alt+`
 combinations. Snow rejects collisions inside the same interaction context.
-Emergency `ctrl+c` and modal `esc` bindings are always retained.
+`branch_rename` is reused by both the branch tree and session picker (default
+`r`). Emergency `ctrl+c` and modal `esc` bindings are always retained.
 
 ## Themes
 

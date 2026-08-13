@@ -134,7 +134,7 @@ snow --mode rpc --permission deny
 ```
 
 The TUI uses Bubble Tea's supported full-window pattern: alternate screen,
-sticky header/footer, and a Bubbles transcript viewport. Mouse mode defaults on so wheel/trackpad gestures scroll Snow's transcript viewport instead of terminal scrollback. Primary drag selects and copies transcript text; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. F6 disables mouse reporting when native selection is preferred, with PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down available for viewport scrolling. In the composer, Ctrl+V attaches a PNG/JPEG/GIF/WebP clipboard image for vision-capable models (up to eight images, 20 MiB each); Backspace (or Esc) removes the last image when the text draft is empty.
+sticky header/footer, and a Bubbles transcript viewport. Mouse mode defaults on so wheel/trackpad gestures scroll Snow's transcript viewport instead of terminal scrollback. Primary drag selects and copies transcript text; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. Because terminal mouse reporting captures context-menu clicks too, right-click switches Snow to native mouse mode; repeat the click if the terminal consumed the initiating press. F6 toggles app/native mouse mode, with PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down available for viewport scrolling. In the composer, Ctrl+V attaches a PNG/JPEG/GIF/WebP clipboard image for vision-capable models (up to eight images, 20 MiB each); Backspace (or Esc) removes the last image when the text draft is empty.
 Read the [user guide](docs/using-snow.md) for TUI keys, slash commands, queue
 semantics, sessions, and modes. Read the [RPC protocol](docs/rpc.md) before
 building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
@@ -167,6 +167,7 @@ by the selected model and rejects unsupported explicit levels.
 | `glob` | Pure-Go path matching, including recursive `**` | read |
 | `ask_user` | Ask the host structured questions | read/interaction |
 | `update_plan` | Emit a turn-local Default-mode checklist | read |
+| `artifact_read` / `artifact_grep` | Retrieve bounded fragments from private spilled tool results | read |
 | `webfetch` | Fetch bounded public HTTP(S) content as text/Markdown | network |
 
 File tools enforce configured roots through pinned Go `os.Root` handles, so
@@ -180,8 +181,9 @@ public-address-only, redirect-checked, and never executes JavaScript.
 
 - Pure-Go SQLite session databases with append-only parent-linked entries
 - Indexed branch tips, named forks, branch selection, rename, and guarded delete
-- Current-directory session picker and explicit path resume
-- Turn-aware compaction that preserves complete history, manually for ordinary work and automatically for goals at a configurable context threshold; oversized historical tool results are pruned only in the summarizer projection
+- Current-directory session picker with automatic first-prompt titles, manual rename, and explicit path resume
+- Turn-aware pressure compaction for ordinary, goal, and child turns at a configurable context threshold, plus one bounded recovery retry when a provider rejects an oversized context
+- Oversized plain-text tool results spill to private session-scoped artifacts; provider context keeps bounded head/tail previews, and older full results are pruned before ordinary requests and summaries without rewriting exact history
 - Resume-time repair of interrupted final tool batches with risk-aware unknown-outcome results instead of automatic side-effect retries
 - Advisory detection of identical consecutive tool calls, with bounded reminders at escalating thresholds to break unproductive loops
 - Embedded Markdown system preamble with optional global/trusted-project file

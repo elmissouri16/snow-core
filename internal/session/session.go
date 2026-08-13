@@ -107,6 +107,14 @@ type Store interface {
 // stores implement it for collaboration mailbox delivery.
 type BatchStore interface{ AppendBatch([]Entry) error }
 
+// TitleStore manages the session-wide display title without changing branch
+// tips or appending conversation history. Built-in stores implement it.
+type TitleStore interface {
+	SessionTitle() (string, error)
+	RenameSession(title string) error
+	AppendWithInitialTitle(entry Entry, title string) error
+}
+
 type ContextStore interface {
 	ContextMessages() ([]protocol.Message, error)
 }
@@ -239,6 +247,56 @@ type Options struct {
 // Errors
 // ---------------------------------------------------------------------------
 
+const maxSessionTitleRunes = 72
+
+// SuggestedTitle derives a short, provider-free title from the first prompt.
+// It collapses whitespace, removes control characters and Markdown heading/list
+// prefixes, and truncates at a word boundary when practical.
+func SuggestedTitle(prompt string) string {
+	var b strings.Builder
+	space := false
+	for _, r := range strings.TrimSpace(prompt) {
+		if unicode.IsControl(r) || unicode.IsSpace(r) {
+			if b.Len() > 0 {
+				space = true
+			}
+			continue
+		}
+		if space {
+			b.WriteByte(' ')
+			space = false
+		}
+		b.WriteRune(r)
+	}
+	title := strings.TrimSpace(b.String())
+	title = strings.TrimSpace(strings.TrimLeft(title, "#>*-+ "))
+	runes := []rune(title)
+	if len(runes) <= maxSessionTitleRunes {
+		return title
+	}
+	cut := maxSessionTitleRunes - 1
+	for i := cut; i >= maxSessionTitleRunes/2; i-- {
+		if unicode.IsSpace(runes[i]) {
+			cut = i
+			break
+		}
+	}
+	return strings.TrimSpace(string(runes[:cut])) + "…"
+}
+
+func normalizeSessionTitle(title string) (string, error) {
+	title = strings.TrimSpace(title)
+	if title == "" || len([]rune(title)) > maxSessionTitleRunes {
+		return "", fmt.Errorf("session: title must be 1..%d runes", maxSessionTitleRunes)
+	}
+	for _, r := range title {
+		if unicode.IsControl(r) {
+			return "", errors.New("session: title contains control characters")
+		}
+	}
+	return title, nil
+}
+
 func validateBranchName(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" || len([]rune(name)) > 64 {
@@ -352,7 +410,87 @@ func (s *MemoryStore) ID() string { return s.id }
 func (s *MemoryStore) Path() string { return "" }
 
 // Header implements Store.
-func (s *MemoryStore) Header() Header { return s.header }
+func (s *MemoryStore) Header() Header {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.header
+}
+
+// SessionTitle returns the current session-wide display title.
+func (s *MemoryStore) SessionTitle() (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return "", errors.New("session: store closed")
+	}
+	return s.header.Name, nil
+}
+
+// RenameSession changes the display title without moving the branch tip.
+func (s *MemoryStore) RenameSession(title string) error {
+	title, err := normalizeSessionTitle(title)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("session: store closed")
+	}
+	s.header.Name = title
+	return nil
+}
+
+// AppendWithInitialTitle atomically appends the first user message and assigns
+// its generated title. Existing/manual titles and any prior message win.
+func (s *MemoryStore) AppendWithInitialTitle(entry Entry, title string) error {
+	entry = cloneEntry(entry)
+	if title != "" {
+		var err error
+		title, err = normalizeSessionTitle(title)
+		if err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("session: store closed")
+	}
+	if entry.ID == "" {
+		entry.ID = newID()
+	}
+	if entry.ParentID == "" {
+		entry.ParentID = s.tip
+	}
+	if _, ok := s.byID[entry.ID]; ok {
+		return fmt.Errorf("session: duplicate entry id %q", entry.ID)
+	}
+	if _, ok := s.byID[entry.ParentID]; !ok {
+		return fmt.Errorf("session: unknown parent %q", entry.ParentID)
+	}
+	if title != "" && s.header.Name == "" {
+		hasMessage := false
+		for _, existing := range s.entries {
+			if existing.Type == EntryMessage {
+				hasMessage = true
+				break
+			}
+		}
+		if !hasMessage {
+			s.header.Name = title
+		}
+	}
+	normalizeEntryMessage(&entry)
+	s.entries = append(s.entries, entry)
+	s.byID[entry.ID] = len(s.entries) - 1
+	s.tip = entry.ID
+	branch := s.branches[s.activeBranch]
+	branch.TipID = entry.ID
+	branch.UpdatedAt = time.Now().UnixMilli()
+	s.branches[s.activeBranch] = branch
+	return nil
+}
 
 // CollaborationMode returns the active branch mode.
 func (s *MemoryStore) CollaborationMode() (protocol.CollaborationMode, error) {
@@ -1471,6 +1609,39 @@ func (f *FileIndex) Create(cwd string) (Store, error) {
 // Open implements Index. It never creates a missing session path.
 func (f *FileIndex) Open(path string) (Store, error) {
 	return OpenSQLiteStore(path, "", Options{})
+}
+
+// Rename changes a listed project session's display title without changing its
+// path or ID. The CWD/list membership check prevents arbitrary database paths
+// from being mutated through picker input.
+func (f *FileIndex) Rename(cwd, path, title string) error {
+	infos, err := f.List(cwd)
+	if err != nil {
+		return err
+	}
+	allowed := false
+	cleanPath, cleanErr := filepath.Abs(path)
+	for _, info := range infos {
+		listedPath, listedErr := filepath.Abs(info.Path)
+		if cleanErr == nil && listedErr == nil && filepath.Clean(cleanPath) == filepath.Clean(listedPath) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return ErrNotFound
+	}
+	st, err := f.Open(path)
+	if err != nil {
+		return err
+	}
+	titles, ok := st.(TitleStore)
+	if !ok {
+		_ = st.Close()
+		return errors.New("session: store does not support titles")
+	}
+	renameErr := titles.RenameSession(title)
+	return errors.Join(renameErr, st.Close())
 }
 
 // List implements Index. Returns sessions sorted by most recently updated.

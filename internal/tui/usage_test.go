@@ -30,13 +30,80 @@ func TestFooterAlwaysShowsContextUsageOnRight(t *testing.T) {
 	}
 }
 
+func TestFooterShowsLatestKnownCacheHitRateBesideContext(t *testing.T) {
+	m := &Model{
+		app:   &app.App{Model: protocol.Model{ContextWindow: 128000}},
+		width: 100,
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvUsage, Usage: &protocol.Usage{
+		Input: 1000, Output: 50, CacheRead: 750, CacheReadKnown: true, Total: 1050,
+	}})
+	footer := stripANSI(m.renderFooter())
+	if !strings.Contains(footer, "CH75.0% · context: 1.1k/128k") {
+		t.Fatalf("footer = %q", footer)
+	}
+}
+
+func TestFooterCacheHitUsesLatestRequestNotTurnAggregate(t *testing.T) {
+	m := &Model{
+		app:   &app.App{Model: protocol.Model{ContextWindow: 128000}},
+		width: 100,
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvUsage, Usage: &protocol.Usage{
+		Input: 1000, CacheRead: 250, CacheReadKnown: true, Total: 1000,
+	}})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, Usage: &protocol.Usage{
+		Input: 4000, CacheRead: 3000, CacheReadKnown: true, Total: 4000, Requests: 2,
+	}})
+	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "CH25.0% · context:") {
+		t.Fatalf("footer = %q", footer)
+	}
+}
+
+func TestFooterTreatsPositiveLegacyCacheReadAsKnown(t *testing.T) {
+	m := &Model{
+		app:   &app.App{Model: protocol.Model{ContextWindow: 128000}},
+		width: 100,
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvUsage, Usage: &protocol.Usage{
+		Input: 1000, CacheRead: 500, Total: 1000,
+	}})
+	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "CH50.0% · context:") {
+		t.Fatalf("footer = %q", footer)
+	}
+}
+
+func TestFooterOmitsUnknownCacheHitRate(t *testing.T) {
+	m := &Model{
+		app:   &app.App{Model: protocol.Model{ContextWindow: 128000}},
+		width: 100,
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvUsage, Usage: &protocol.Usage{Input: 1000, Total: 1000}})
+	if footer := stripANSI(m.renderFooter()); strings.Contains(footer, "CH") {
+		t.Fatalf("footer = %q", footer)
+	}
+}
+
+func TestFooterShowsKnownCacheMissAsZeroPercent(t *testing.T) {
+	m := &Model{
+		app:   &app.App{Model: protocol.Model{ContextWindow: 128000}},
+		width: 100,
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvUsage, Usage: &protocol.Usage{
+		Input: 1000, CacheReadKnown: true, Total: 1000,
+	}})
+	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "CH0.0% · context:") {
+		t.Fatalf("footer = %q", footer)
+	}
+}
+
 func TestGoalTokenUsageIsCompactInHeaderAndFooter(t *testing.T) {
 	m := newModel(t.Context(), app.Options{})
 	buildAppForTest(t, m)
 	m.width = 220
 	budget := int64(5_000_000)
 	m.goal = &protocol.ThreadGoal{Status: protocol.GoalComplete, TokensUsed: 2_121_170, TokenBudget: &budget, EstimatedCosts: []protocol.Cost{{Currency: "USD", Total: 0.018279814}}}
-	want := "goal:complete 2.1m/5m tokens · est. $0.0183"
+	want := "goal:complete 2.1m/5m tks · est. $0.0183"
 	for surface, rendered := range map[string]string{
 		"header": stripANSI(m.renderHeader("ready")),
 		"footer": stripANSI(m.renderFooter()),
@@ -50,9 +117,27 @@ func TestGoalTokenUsageIsCompactInHeaderAndFooter(t *testing.T) {
 	}
 }
 
+func TestGoalUpdateRefreshesFooterUsageDuringActiveTurn(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 160
+	m.busy = true
+	m.activeTurnID = "goal-turn"
+	m.goal = &protocol.ThreadGoal{GoalID: "goal", Status: protocol.GoalActive, TokensUsed: 100}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, TurnID: "goal-turn", GoalContinuing: true,
+		ThreadGoal: &protocol.ThreadGoalUpdate{Goal: &protocol.ThreadGoal{GoalID: "goal", Status: protocol.GoalActive, TokensUsed: 2400}}})
+	footer := stripANSI(m.renderFooter())
+	if !strings.Contains(footer, "goal:active 2.4k tks") {
+		t.Fatalf("footer did not refresh live goal usage: %q", footer)
+	}
+	if !m.busy {
+		t.Fatal("live goal update unlocked active turn")
+	}
+}
+
 func TestEstimatedGoalCostFormattingPreservesCurrency(t *testing.T) {
 	goal := &protocol.ThreadGoal{TokensUsed: 10, EstimatedCosts: []protocol.Cost{{Currency: "EUR", Total: 1.25}, {Currency: "USD", Total: 0.00001}}}
-	if got, want := formatGoalTokenUsage(goal), "10 tokens · est. EUR 1.25 + <$0.0001"; got != want {
+	if got, want := formatGoalTokenUsage(goal), "10 tks · est. EUR 1.25 + <$0.0001"; got != want {
 		t.Fatalf("goal usage=%q want %q", got, want)
 	}
 }
@@ -88,6 +173,24 @@ func TestFooterShowsZeroContextBeforeFirstTurn(t *testing.T) {
 	}
 	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "context: 0/400k") {
 		t.Fatalf("footer = %q", footer)
+	}
+}
+
+func TestInlineFooterDropsCacheHitWithoutRestoringLongGoalPrefix(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	buildAppForTest(t, m)
+	m.inlineTranscript = true
+	m.width = 70
+	m.goal = &protocol.ThreadGoal{Status: protocol.GoalActive, TokensUsed: 2400}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvUsage, Usage: &protocol.Usage{
+		Input: 1000, CacheRead: 500, CacheReadKnown: true, Total: 1000,
+	}})
+	footer := stripANSI(m.renderFooter())
+	if strings.Contains(footer, "CH50.0%") {
+		t.Fatalf("narrow footer retained cache hit: %q", footer)
+	}
+	if !strings.Contains(footer, "fake-1 · default/off · context:") {
+		t.Fatalf("narrow footer lost compact runtime prefix: %q", footer)
 	}
 }
 

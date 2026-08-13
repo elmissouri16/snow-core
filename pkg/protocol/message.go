@@ -104,16 +104,20 @@ func (c *Cost) Clone() *Cost {
 
 // Usage tracks token usage for one provider request or an aggregate. Input is
 // the total prompt/input count; CacheRead and CacheWrite are subsets when the
-// provider reports them. Cost uses the non-cached remainder for Input.
+// provider reports them. CacheReadKnown distinguishes an explicit zero-token
+// cache read (a confirmed miss) from an omitted provider metric. For aggregates
+// it is true only when every included request reported cache-read usage. Cost
+// uses the non-cached remainder for Input.
 type Usage struct {
-	Input      int   `json:"input"`
-	Output     int   `json:"output"`
-	Reasoning  int   `json:"reasoning,omitempty"`
-	CacheRead  int   `json:"cache_read"`
-	CacheWrite int   `json:"cache_write"`
-	Total      int   `json:"total_tokens"`
-	Requests   int   `json:"requests,omitempty"`
-	Cost       *Cost `json:"cost,omitempty"`
+	Input          int   `json:"input"`
+	Output         int   `json:"output"`
+	Reasoning      int   `json:"reasoning,omitempty"`
+	CacheRead      int   `json:"cache_read"`
+	CacheReadKnown bool  `json:"cache_read_known,omitempty"`
+	CacheWrite     int   `json:"cache_write"`
+	Total          int   `json:"total_tokens"`
+	Requests       int   `json:"requests,omitempty"`
+	Cost           *Cost `json:"cost,omitempty"`
 }
 
 // Clone returns an independent usage value.
@@ -133,23 +137,33 @@ func (u *Usage) Clone() *Usage {
 // as one request when aggregating a provider usage record.
 func (u Usage) Add(v Usage) Usage {
 	priorRequests := u.Requests
-	if priorRequests == 0 && (u.Input != 0 || u.Output != 0 || u.Reasoning != 0 || u.CacheRead != 0 || u.CacheWrite != 0 || u.Total != 0 || u.Cost != nil) {
+	if priorRequests == 0 && (u.Input != 0 || u.Output != 0 || u.Reasoning != 0 || u.CacheRead != 0 || u.CacheReadKnown || u.CacheWrite != 0 || u.Total != 0 || u.Cost != nil) {
 		priorRequests = 1
+	}
+	vRequests := v.Requests
+	if vRequests == 0 {
+		vRequests = 1
+	}
+	// A positive cache read from a legacy single-request record is inherently
+	// known. Do not apply that compatibility inference to an aggregate whose
+	// false marker may mean one of its requests omitted the metric.
+	priorCacheReadKnown := u.CacheReadKnown || (priorRequests <= 1 && u.CacheRead > 0)
+	vCacheReadKnown := v.CacheReadKnown || (vRequests <= 1 && v.CacheRead > 0)
+	cacheReadKnown := vCacheReadKnown
+	if priorRequests > 0 {
+		cacheReadKnown = priorCacheReadKnown && vCacheReadKnown
 	}
 	u.Input += v.Input
 	u.Output += v.Output
 	u.Reasoning += v.Reasoning
 	u.CacheRead += v.CacheRead
+	u.CacheReadKnown = cacheReadKnown
 	u.CacheWrite += v.CacheWrite
 	vTotal := v.Total
 	if vTotal == 0 {
 		vTotal = v.Input + v.Output
 	}
 	u.Total += vTotal
-	vRequests := v.Requests
-	if vRequests == 0 {
-		vRequests = 1
-	}
 	u.Requests = priorRequests + vRequests
 	// u is a value receiver but its Cost pointer aliases the caller's record;
 	// clone before summing so Add never mutates the caller's data. A missing

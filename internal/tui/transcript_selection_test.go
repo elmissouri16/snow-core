@@ -247,6 +247,46 @@ func TestTranscriptDoubleAndTripleClickSelectWordThenLine(t *testing.T) {
 	}
 }
 
+func TestRightClickDisablesAppMouseForNativeContextMenu(t *testing.T) {
+	m := newTranscriptSelectionTestModel(t, []string{"select me"})
+	m.transcriptSelection.anchor = &transcriptSelectionPoint{row: 0, col: 0}
+	m.transcriptSelection.focus = &transcriptSelectionPoint{row: 0, col: 3}
+	m.transcriptSelection.pressActive = true
+	frozen := m.transcriptContent
+	m.assistantBuf.WriteString("caught up after right-click")
+	m.transcriptDirty = true
+	_, cmd := m.Update(tea.MouseMsg{X: 2, Y: m.transcriptSelectionTop(), Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+	if cmd == nil || m.app.Cfg.TUI.Mouse {
+		t.Fatalf("right-click did not disable app mouse mode: cmd=%v mouse=%v", cmd != nil, m.app.Cfg.TUI.Mouse)
+	}
+	if _, ok := m.transcriptSelectionBounds(); ok {
+		t.Fatal("right-click retained application selection")
+	}
+	if m.transcriptContent == frozen || !strings.Contains(xansi.Strip(m.transcriptContent), "caught up after right-click") {
+		t.Fatal("right-click left stream updates frozen behind the cleared selection")
+	}
+	if !strings.Contains(m.lastStatus, "right-click again") || !strings.Contains(m.lastStatus, "F6") {
+		t.Fatalf("right-click status = %q", m.lastStatus)
+	}
+}
+
+func TestRightClickNativeHandoffWorksOverFleetOverlay(t *testing.T) {
+	m := newTranscriptSelectionTestModel(t, []string{"fleet"})
+	m.subagentFleetOpen = true
+	_, cmd := m.Update(tea.MouseMsg{Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+	if cmd == nil || m.app.Cfg.TUI.Mouse {
+		t.Fatalf("overlay trapped right-click: cmd=%v mouse=%v", cmd != nil, m.app.Cfg.TUI.Mouse)
+	}
+}
+
+func TestNonRightMouseEventsKeepAppMouseEnabled(t *testing.T) {
+	m := newTranscriptSelectionTestModel(t, []string{"wheel"})
+	_, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	if !m.app.Cfg.TUI.Mouse {
+		t.Fatal("wheel unexpectedly disabled app mouse")
+	}
+}
+
 func TestF6ClearsAppSelectionCatchesUpAndRestoresNativeMode(t *testing.T) {
 	m := newTranscriptSelectionTestModel(t, []string{"select me"})
 	m.transcriptSelection.anchor = &transcriptSelectionPoint{row: 0, col: 0}

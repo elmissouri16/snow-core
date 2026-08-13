@@ -82,8 +82,10 @@ before changing state. Compaction resumes only a goal that was already running;
 it cannot bypass surface readiness, and aborting compaction persists deferral. A fork gets an independent managed objective file, so
 clearing either branch cannot remove the other's objective. Restored paused,
 blocked, and usage-limited goals display resume guidance. The sticky header,
-footer, and `/goal` output show compact cumulative tokens and any available
-estimated cost, for example `2.1m tokens · est. $0.0183`. Costs persist across
+footer, and `/goal` output refresh cumulative usage after every provider
+response within the goal, rather than waiting for the admitted goal turn to
+finish. The compact label uses `tks`, for example
+`2.1m tks · est. $0.0183`. Costs persist across
 resume/edit/fork and are grouped by currency. On the version-8 migration, Snow
 backfills an older goal only when priced historical messages exactly match its
 persisted token total; ambiguous histories remain cost-free rather than showing

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/snow-core/snow/internal/agent"
+	"github.com/snow-core/snow/internal/artifact"
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/config"
 	ctxpkg "github.com/snow-core/snow/internal/context"
@@ -90,6 +91,7 @@ type App struct {
 	userInput              *userinput.Broker
 	toolGuard              *builtin.PathGuard
 	sessionHistory         *builtin.SessionBinding
+	artifacts              artifact.Store
 }
 
 type liveRuntimeSelection struct {
@@ -733,14 +735,25 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			}
 		}
 	}
-	// Session history capabilities are deferred, read-only, and authorized by
-	// FileIndex.List's exact-project filtering. The reference snapshot itself is
-	// persisted as the ordinary tool result on the current branch.
+	// Session history and private-artifact capabilities are deferred and read-only.
+	// Artifacts remain outside project roots and are addressable only by opaque IDs
+	// scoped to the currently bound session.
 	sessionQuery := session.NewQueryEngine(session.NewFileIndex(session.DefaultSessionsRoot()), absCWD)
 	sessionHistory := builtin.NewSessionBinding(st)
+	artifactStore, err := artifact.NewLocalStore(filepath.Join(config.GlobalDir(), "artifacts"), cfg.Compaction.ArtifactMaxBytes)
+	if err != nil {
+		return nil, fmt.Errorf("app: artifacts: %w", err)
+	}
+	defer func() {
+		if retErr != nil {
+			retErr = errors.Join(retErr, artifactStore.Close())
+		}
+	}()
 	for _, tool := range []tools.Tool{
 		builtin.NewSessionSearch(sessionQuery, sessionHistory),
 		builtin.NewSessionReference(sessionQuery, sessionHistory),
+		builtin.NewArtifactRead(artifactStore, sessionHistory),
+		builtin.NewArtifactGrep(artifactStore, sessionHistory),
 	} {
 		if allowedGoalTool(tool.Schema().Name) {
 			if err := reg.Register(tool); err != nil {
@@ -1037,9 +1050,11 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		APIKey:            opts.APIKey,
 		APIKeyProvider:    providerID,
 		SkillNames:        skillNames,
+		Artifacts:         artifactStore,
 		Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
 			SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance,
-			GoalAutoThresholdPercent: cfg.Compaction.GoalAutoThresholdPercent},
+			AutoThresholdPercent: cfg.Compaction.AutoThresholdPercent, ToolResultInlineBytes: cfg.Compaction.ToolResultInlineBytes,
+			HistoricalToolResultThreshold: cfg.Compaction.HistoricalToolResultThreshold},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("app: agent: %w", err)
@@ -1141,8 +1156,10 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			child, err := agent.New(agent.Options{Provider: childProvider, Registry: childReg, Session: childStore, Permission: childPerm, ToolHost: childHost,
 				SystemPrompt: childSystem, Model: childModel, Thinking: spec.State.Thinking, ReasoningSummary: reasoningSummary,
 				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Auth: authStore, APIKey: opts.APIKey, APIKeyProvider: providerID, Identity: spec.State.Agent.Clone(),
-				SkillNames: childSkillNames, Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
-					SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance}})
+				SkillNames: childSkillNames, Artifacts: artifactStore, Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
+					SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance,
+					AutoThresholdPercent: cfg.Compaction.AutoThresholdPercent, ToolResultInlineBytes: cfg.Compaction.ToolResultInlineBytes,
+					HistoricalToolResultThreshold: cfg.Compaction.HistoricalToolResultThreshold}})
 			if err != nil {
 				_ = childStore.Close()
 				return nil, err
@@ -1201,6 +1218,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		userInput:              inputBroker,
 		toolGuard:              toolGuard,
 		sessionHistory:         sessionHistory,
+		artifacts:              artifactStore,
 	}
 	if skillCatalog != nil {
 		a.SkillDiagnostics = skillCatalog.Diagnostics()
@@ -1331,6 +1349,15 @@ func (a *App) ForkBranchWithOptions(opts protocol.BranchForkOptions) (protocol.S
 		return protocol.SessionBranch{}, errors.New("app: cannot fork branch while subagents are active")
 	}
 	return a.Agent.ForkWithOptionsAdmitted(opts)
+}
+
+func (a *App) RenameSession(title string) error {
+	unlock := a.Agent.LockAdmission()
+	defer unlock()
+	if a.Subagents != nil && a.Subagents.HasActive() {
+		return errors.New("app: cannot rename session while subagents are active")
+	}
+	return a.Agent.RenameSessionAdmitted(title)
 }
 
 func (a *App) RenameBranch(branchID, name string) (protocol.SessionBranch, error) {
@@ -1963,6 +1990,11 @@ func (a *App) Close() error {
 	}
 	if a.Skills != nil {
 		if err := a.Skills.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if a.artifacts != nil {
+		if err := a.artifacts.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}

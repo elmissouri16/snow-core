@@ -21,6 +21,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/snow-core/snow/internal/artifact"
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/compact"
 	goalpkg "github.com/snow-core/snow/internal/goal"
@@ -99,19 +100,26 @@ type Options struct {
 	// the legacy unrestricted behavior for standalone Agent embedders; an empty
 	// non-nil map disables every persisted skill activation.
 	SkillNames map[string]bool
-	// Compaction configures manual compaction and goal-only automatic compaction.
+	// Compaction configures manual and pressure-based automatic compaction.
 	Compaction CompactionOptions
+	// Artifacts preserves oversized plain-text tool results outside provider
+	// context. The durable session stores only bounded previews and opaque IDs.
+	Artifacts artifact.Store
 }
 
 // CompactionOptions is kept in agent to avoid coupling core runtime behavior to
 // persisted configuration packages.
 type CompactionOptions struct {
-	RetainTokens             int
-	MinRetainedTurns         int
-	SummaryMaxTokens         int
-	Fallback                 string
-	Guidance                 string
-	GoalAutoThresholdPercent int
+	RetainTokens         int
+	MinRetainedTurns     int
+	SummaryMaxTokens     int
+	Fallback             string
+	Guidance             string
+	AutoThresholdPercent int
+	// GoalAutoThresholdPercent is a deprecated source-compatibility alias.
+	GoalAutoThresholdPercent      int
+	ToolResultInlineBytes         int
+	HistoricalToolResultThreshold int
 }
 
 // Agent drives turns against a provider and tool registry.
@@ -150,11 +158,12 @@ type Agent struct {
 	toolStarts map[string]time.Time
 	// repeatedTool tracks identical consecutive calls across provider steps in
 	// one admitted run. It is advisory only and resets for each fresh user turn.
-	repeatedTool        repeatedToolCallState
-	turnUsage           protocol.Usage
-	usageSet            bool
-	turnProgress        bool
-	latestContextTokens int
+	repeatedTool          repeatedToolCallState
+	turnUsage             protocol.Usage
+	usageSet              bool
+	turnProgress          bool
+	latestContextTokens   int
+	latestRequestEstimate int
 	// Deferred schemas selected for the current user turn. The base selection
 	// is sticky; the latest search_tools result may add at most five more.
 	baseDeferred     []string
@@ -1319,6 +1328,48 @@ func (a *Agent) ForkWithOptionsAdmitted(opts protocol.BranchForkOptions) (protoc
 	return branch, nil
 }
 
+// SessionTitle returns the synchronized session-wide display title.
+func (a *Agent) SessionTitle() (string, error) {
+	var title string
+	err := a.withSessionRead(func(store session.Store) error {
+		titles, ok := store.(session.TitleStore)
+		if !ok {
+			return errors.New("agent: session does not support titles")
+		}
+		var err error
+		title, err = titles.SessionTitle()
+		return err
+	})
+	return title, err
+}
+
+// RenameSession changes the display title without changing the session ID,
+// path, branches, or conversation tips.
+func (a *Agent) RenameSession(title string) error {
+	unlock := a.LockAdmission()
+	defer unlock()
+	return a.RenameSessionAdmitted(title)
+}
+
+func (a *Agent) RenameSessionAdmitted(title string) error {
+	a.mu.RLock()
+	running := a.running
+	store := a.opts.Session
+	a.mu.RUnlock()
+	if running {
+		return errors.New("agent: cannot rename session while running")
+	}
+	titles, ok := store.(session.TitleStore)
+	if !ok {
+		return errors.New("agent: session does not support titles")
+	}
+	if err := titles.RenameSession(title); err != nil {
+		return err
+	}
+	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	return nil
+}
+
 func (a *Agent) RenameBranch(branchID, name string) (protocol.SessionBranch, error) {
 	unlock := a.LockAdmission()
 	defer unlock()
@@ -1457,7 +1508,7 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 	}()
 	ctx = runCtx
 
-	return a.compactActiveContext(ctx, false)
+	return a.compactActiveContext(ctx, compactionManual)
 }
 
 func latestPersistedContextTokens(messages []protocol.Message) int {
@@ -1492,38 +1543,60 @@ func latestPersistedContextTokens(messages []protocol.Message) int {
 	return 0
 }
 
-func (a *Agent) goalAutoCompactionDue(messages []protocol.Message) bool {
-	threshold := a.opts.Compaction.GoalAutoThresholdPercent
+func (a *Agent) autoThresholdPercent() int {
+	threshold := a.opts.Compaction.AutoThresholdPercent
+	if threshold == 0 && a.opts.Compaction.GoalAutoThresholdPercent > 0 {
+		threshold = a.opts.Compaction.GoalAutoThresholdPercent
+	}
+	return threshold
+}
+
+func (a *Agent) autoCompactionDue(messages []protocol.Message) bool {
+	threshold := a.autoThresholdPercent()
 	model := a.Model()
 	if threshold == 0 || model.ContextWindow <= 0 {
 		return false
 	}
+	estimated := estimateRequestTokens(messages, a.requestSystemPrompt(), a.requestToolSchemas())
 	a.mu.Lock()
 	if a.latestContextTokens <= 0 {
 		a.latestContextTokens = latestPersistedContextTokens(messages)
 	}
 	current := a.latestContextTokens
+	// Provider usage is authoritative for the prior request. Add only estimated
+	// growth since that request so system/schema overhead is not double-counted.
+	minGrowth := a.opts.Compaction.HistoricalToolResultThreshold / 4
+	if minGrowth <= 0 {
+		minGrowth = compact.HistoricalToolResultThreshold / 4
+	}
+	if growth := estimated - a.latestRequestEstimate; current > 0 && a.latestRequestEstimate > 0 && growth >= minGrowth {
+		current += growth
+	}
 	stopped := a.autoStop
-	mode := a.mode
 	a.mu.Unlock()
-	return current > 0 && !stopped && mode == protocol.ModeDefault && int64(current)*100 >= int64(model.ContextWindow)*int64(threshold)
+	return current > 0 && !stopped && int64(current)*100 >= int64(model.ContextWindow)*int64(threshold)
 }
 
-// autoCompactAdmittedGoalBoundary compacts at a safe boundary inside an
-// already-admitted goal turn. Goal turns can contain many provider/tool cycles,
-// so checking only between autonomous turns allows context to overrun first.
-func (a *Agent) autoCompactAdmittedGoalBoundary(ctx context.Context, messages []protocol.Message) (bool, error) {
+// autoCompactAdmittedBoundary compacts at the safe top-of-cycle boundary of
+// any admitted turn. If the turn captured a goal, the goal snapshot must still
+// be active and matching before its context may be replaced.
+func (a *Agent) autoCompactAdmittedBoundary(ctx context.Context, messages []protocol.Message) (bool, error) {
 	a.mu.RLock()
 	admittedGoal := a.goalAtTurn.Clone()
 	a.mu.RUnlock()
-	if admittedGoal == nil || !a.goalAutoCompactionDue(messages) || a.opts.Goal == nil {
+	if !a.autoCompactionDue(messages) {
 		return false, nil
 	}
-	goal, err := a.opts.Goal.Get()
-	if err != nil || goal == nil || goal.GoalID != admittedGoal.GoalID || goal.Status != protocol.GoalActive {
-		return false, err
+	if admittedGoal != nil {
+		if a.opts.Goal == nil {
+			return false, nil
+		}
+		goal, err := a.opts.Goal.Get()
+		if err != nil || goal == nil || goal.GoalID != admittedGoal.GoalID || goal.Status != protocol.GoalActive {
+			return false, err
+		}
 	}
-	result, err := a.compactActiveContext(ctx, true)
+	result, err := a.compactActiveContext(ctx, compactionPressure)
 	if err != nil {
 		return true, err
 	}
@@ -1535,8 +1608,13 @@ func (a *Agent) autoCompactAdmittedGoalBoundary(ctx context.Context, messages []
 	return true, nil
 }
 
+// Deprecated compatibility wrapper for internal embedders and older tests.
+func (a *Agent) autoCompactAdmittedGoalBoundary(ctx context.Context, messages []protocol.Message) (bool, error) {
+	return a.autoCompactAdmittedBoundary(ctx, messages)
+}
+
 func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
-	if !a.goalAutoCompactionDue(nil) {
+	if !a.autoCompactionDue(nil) {
 		return false, nil
 	}
 	if ctx == nil {
@@ -1572,7 +1650,7 @@ func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
 		a.turnWG.Done()
 	}()
 
-	result, err := a.compactActiveContext(runCtx, true)
+	result, err := a.compactActiveContext(runCtx, compactionPressure)
 	if err != nil {
 		return true, err
 	}
@@ -1584,7 +1662,16 @@ func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-func (a *Agent) compactActiveContext(ctx context.Context, automatic bool) (protocol.CompactionResult, error) {
+type compactionTrigger string
+
+const (
+	compactionManual   compactionTrigger = "manual"
+	compactionPressure compactionTrigger = "pressure"
+	compactionOverflow compactionTrigger = "context-overflow"
+)
+
+func (a *Agent) compactActiveContext(ctx context.Context, trigger compactionTrigger) (protocol.CompactionResult, error) {
+	automatic := trigger != compactionManual
 	msgs, err := a.contextMessagesCurrent()
 	if err != nil {
 		return protocol.CompactionResult{}, fmt.Errorf("agent: compact load context: %w", err)
@@ -1610,8 +1697,10 @@ func (a *Agent) compactActiveContext(ctx context.Context, automatic bool) (proto
 	plan := compact.PlannerWithOptions(msgs, compact.PlannerOptions{RetainTokens: budget, MinRetainedTurns: minTurns})
 	result := protocol.CompactionResult{SummarizedMessages: len(plan.CompactionCandidates), RetainedMessages: len(msgs) - len(plan.CompactionCandidates), Automatic: automatic}
 	message := fmt.Sprintf("compacting %d messages", result.SummarizedMessages)
-	if automatic {
-		message = fmt.Sprintf("goal context reached %d%%; %s", a.opts.Compaction.GoalAutoThresholdPercent, message)
+	if trigger == compactionPressure {
+		message = fmt.Sprintf("context reached %d%%; %s", a.autoThresholdPercent(), message)
+	} else if trigger == compactionOverflow {
+		message = "provider rejected the context as too large; " + message + " before one retry"
 	}
 	a.publish(protocol.AgentEvent{Type: protocol.EvCompactionStarted, Message: message})
 	if len(plan.CompactionCandidates) == 0 {
@@ -1624,8 +1713,7 @@ func (a *Agent) compactActiveContext(ctx context.Context, automatic bool) (proto
 		return result, nil
 	}
 
-	summaryInput := compact.PruneHistoricalToolResults(plan.CompactionCandidates,
-		compact.HistoricalToolResultThreshold, compact.HistoricalToolResultHead, compact.HistoricalToolResultTail)
+	summaryInput := a.pruneHistoricalToolResults(ctx, plan.CompactionCandidates)
 	summary, summaryErr := a.summarizeForCompaction(ctx, summaryInput)
 	usedFallback := false
 	if summaryErr == nil && strings.TrimSpace(summary) == "" {
@@ -2088,12 +2176,22 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	// final mailbox mail. Serialize this first user append with that flush so
 	// the next provider context cannot outrun attributed completion mail.
 	a.mailboxPersistMu.Lock()
-	appendErr := a.opts.Session.Append(session.Entry{
+	userEntry := session.Entry{
 		Type:     session.EntryMessage,
 		ID:       userMsg.ID,
 		ParentID: "",
 		Message:  &userMsg,
-	})
+	}
+	var appendErr error
+	if titles, ok := a.opts.Session.(session.TitleStore); ok {
+		titleSource := text
+		if titleSource == "" && len(attachments) > 0 {
+			titleSource = "Image prompt"
+		}
+		appendErr = titles.AppendWithInitialTitle(userEntry, session.SuggestedTitle(titleSource))
+	} else {
+		appendErr = a.opts.Session.Append(userEntry)
+	}
 	a.mailboxPersistMu.Unlock()
 	if appendErr != nil {
 		return fmt.Errorf("agent: append user message: %w", appendErr)
@@ -2279,25 +2377,44 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 	a.mu.RUnlock()
 	return toolsAvailable && !deferred && (g.Status == protocol.GoalActive || (crossed && g.Status == protocol.GoalBudgetLimited)), accountingErr
 }
+func (a *Agent) accountGoalUsage(usage protocol.Usage) error {
+	a.mu.RLock()
+	g := a.goalAtTurn.Clone()
+	mode := a.turnMode
+	controller := a.opts.Goal
+	a.mu.RUnlock()
+	if g == nil || mode == protocol.ModePlan || controller == nil {
+		return nil
+	}
+	tokens := int64(usage.Total)
+	if tokens == 0 {
+		tokens = int64(usage.Input + usage.Output)
+	}
+	updated, crossed, err := controller.AccountDuration(g.GoalID, tokens, 0, usage.Cost.Clone())
+	if err != nil {
+		return err
+	}
+	if crossed && updated != nil {
+		a.mu.Lock()
+		a.budgetWrap = true
+		a.mu.Unlock()
+	}
+	return nil
+}
+
 func (a *Agent) finishGoalAccounting() (bool, error) {
 	a.mu.RLock()
 	g := a.goalAtTurn.Clone()
-	started, usage, usageSet, mode := a.turnStarted, a.turnUsage, a.usageSet, a.turnMode
+	started, mode, alreadyCrossed := a.turnStarted, a.turnMode, a.budgetWrap
 	a.mu.RUnlock()
 	if g == nil || mode == protocol.ModePlan || a.opts.Goal == nil {
 		return false, nil
 	}
-	tokens := int64(0)
-	if usageSet {
-		tokens = int64(usage.Total)
-		if tokens == 0 {
-			tokens = int64(usage.Input + usage.Output)
-		}
-	}
-	updated, crossed, err := a.opts.Goal.AccountDuration(g.GoalID, tokens, time.Since(started), usage.Cost.Clone())
+	updated, durationCrossed, err := a.opts.Goal.AccountDuration(g.GoalID, 0, time.Since(started), nil)
 	if err != nil {
 		return false, err
 	}
+	crossed := alreadyCrossed || durationCrossed
 	if crossed && updated != nil {
 		a.mu.Lock()
 		a.budgetWrap = true
@@ -2706,6 +2823,7 @@ func boundRoutingMessage(message string, max int) string {
 
 func (a *Agent) run(ctx context.Context) error {
 	turn := 0
+	overflowRecovered := false
 	for {
 		if a.opts.MaxTurns > 0 && turn >= a.opts.MaxTurns {
 			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "max turns reached"})
@@ -2720,14 +2838,22 @@ func (a *Agent) run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("agent: load context: %w", err)
 		}
-		if compacted, compactErr := a.autoCompactAdmittedGoalBoundary(ctx, msgs); compactErr != nil {
-			return fmt.Errorf("goal auto-compaction: %w", compactErr)
+		if compacted, compactErr := a.autoCompactAdmittedBoundary(ctx, msgs); compactErr != nil {
+			a.mu.RLock()
+			goalTurn := a.goalAtTurn != nil
+			a.mu.RUnlock()
+			if goalTurn {
+				return fmt.Errorf("goal auto-compaction: %w", compactErr)
+			}
+			// Pressure compaction is best-effort for direct user work. A provider
+			// request may still fit, and overflow recovery gets one final chance.
 		} else if compacted {
 			msgs, err = a.contextMessagesCurrent()
 			if err != nil {
 				return fmt.Errorf("agent: reload compacted context: %w", err)
 			}
 		}
+		msgs = a.pruneHistoricalToolResults(ctx, msgs)
 
 		internalContext, err := a.goalInternalContext()
 		if err != nil {
@@ -2748,9 +2874,31 @@ func (a *Agent) run(ctx context.Context) error {
 			SessionAffinityKey: a.requestAffinityKey("turn"),
 		}
 
+		requestEstimate := estimateRequestTokens(req.Messages, req.System, req.Tools)
+		a.mu.Lock()
+		a.latestRequestEstimate = requestEstimate
+		a.mu.Unlock()
+
 		// Call the provider (optionally with a merged retry on malformed args).
-		stop, err := a.streamTurn(ctx, req)
+		stop, err := a.streamTurnWithErrors(ctx, req, overflowRecovered)
 		if err != nil {
+			if !overflowRecovered && a.autoThresholdPercent() > 0 && ctx.Err() == nil && provider.IsContextWindowExceeded(err) {
+				result, compactErr := a.compactActiveContext(ctx, compactionOverflow)
+				if compactErr == nil && result.SummarizedMessages > 0 {
+					overflowRecovered = true
+					a.mu.Lock()
+					a.latestContextTokens = 0
+					a.mu.Unlock()
+					continue
+				}
+				if compactErr != nil {
+					a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+					return errors.Join(err, fmt.Errorf("agent: overflow recovery compaction: %w", compactErr))
+				}
+			}
+			if !overflowRecovered {
+				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+			}
 			return err
 		}
 		naturalStop := false
@@ -2921,19 +3069,27 @@ func (a *Agent) requestAffinityKey(purpose string) string {
 }
 
 func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (protocol.StopReason, error) {
+	return a.streamTurnWithErrors(ctx, req, true)
+}
+
+func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatRequest, publishErrors bool) (protocol.StopReason, error) {
 	a.mu.Lock()
 	a.latestContextTokens = 0
 	a.mu.Unlock()
 	provider := a.currentProvider()
 	creds, err := provider.Resolve(ctx, a.resolveCreds(ctx))
 	if err != nil {
-		a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+		if publishErrors {
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+		}
 		return protocol.StopError, fmt.Errorf("agent: provider resolve: %w", err)
 	}
 
 	stream, err := provider.Chat(ctx, creds, req)
 	if err != nil {
-		a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+		if publishErrors {
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+		}
 		return protocol.StopError, fmt.Errorf("agent: provider chat: %w", err)
 	}
 	defer stream.Close()
@@ -2980,7 +3136,9 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 			if perr := a.persistAssistant(asstID, parent, content, stop, usage, err.Error()); perr != nil {
 				return protocol.StopError, perr
 			}
-			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+			if publishErrors {
+				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+			}
 			return protocol.StopError, err
 		}
 
@@ -3038,6 +3196,11 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 		case protocol.EvStreamUsage:
 			if ev.Usage != nil {
 				normalized := *ev.Usage
+				// Positive cache reads are inherently known even for older or custom
+				// providers that predate the explicit presence marker.
+				if normalized.CacheRead > 0 {
+					normalized.CacheReadKnown = true
+				}
 				if normalized.Total == 0 {
 					normalized.Total = normalized.Input + normalized.Output
 				}
@@ -3066,7 +3229,9 @@ func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (proto
 			if perr := a.persistAssistant(asstID, parent, content, stop, usage, errMsg); perr != nil {
 				return protocol.StopError, perr
 			}
-			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: errMsg})
+			if publishErrors {
+				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: errMsg})
+			}
 			if ev.Err != nil {
 				return protocol.StopError, fmt.Errorf("agent: provider stream: %w", ev.Err)
 			}
@@ -3122,6 +3287,17 @@ func messageTextBlocks(message protocol.Message) string {
 	return text.String()
 }
 
+func estimateRequestTokens(messages []protocol.Message, system string, schemas []protocol.ToolSchema) int {
+	bytes := len(system) + providerSchemaBytes(schemas)
+	for _, message := range messages {
+		bytes += len(message.Role) + len(message.ToolName) + len(message.ToolCallID)
+		for _, block := range message.Content {
+			bytes += len(block.Text) + len(block.Arguments) + len(block.Data) + len(block.Name) + len(block.ToolCallID)
+		}
+	}
+	return bytes / 4
+}
+
 func contextTokensForCompaction(usage protocol.Usage) int {
 	// Input is the provider's actual context occupancy for this request. Total
 	// adds generated output and can cross the threshold even though those output
@@ -3136,12 +3312,6 @@ func contextTokensForCompaction(usage protocol.Usage) int {
 }
 
 func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBlock, stop protocol.StopReason, usage *protocol.Usage, errMsg string) error {
-	if usage != nil {
-		a.mu.Lock()
-		a.turnUsage = a.turnUsage.Add(*usage)
-		a.usageSet = true
-		a.mu.Unlock()
-	}
 	msg := protocol.NewAssistantMessage(id, parent, a.Model().Provider, a.Model().ID, content, stop, usage)
 	if errMsg != "" {
 		msg.Error = errMsg
@@ -3153,6 +3323,15 @@ func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBl
 		Message:  &msg,
 	}); err != nil {
 		return fmt.Errorf("agent: persist assistant: %w", err)
+	}
+	if usage != nil {
+		a.mu.Lock()
+		a.turnUsage = a.turnUsage.Add(*usage)
+		a.usageSet = true
+		a.mu.Unlock()
+		if err := a.accountGoalUsage(*usage); err != nil {
+			return fmt.Errorf("agent: account goal usage: %w", err)
+		}
 	}
 	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	return nil
@@ -3415,6 +3594,7 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 	} else {
 		out = tr.Content
 	}
+	out = a.spillToolResult(ctx, cb.Name, cb.ToolCallID, out, tr.Details)
 	msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name, out, tr.IsError)
 	if err := a.appendToolResult(parent, msg, tr.Details); err != nil {
 		return msg, err
@@ -3787,6 +3967,73 @@ func (a *Agent) takeToolStart(callID string) time.Time {
 	started := a.toolStarts[callID]
 	delete(a.toolStarts, callID)
 	return started
+}
+
+func (a *Agent) spillToolResult(ctx context.Context, toolName, callID string, content []protocol.ContentBlock, details any) []protocol.ContentBlock {
+	if a.opts.Artifacts == nil || toolName == "artifact_read" || toolName == "artifact_grep" {
+		return content
+	}
+	if _, private := details.(tools.PrivateDetails); private {
+		return content
+	}
+	if pointer, private := details.(*tools.PrivateDetails); private && pointer != nil {
+		return content
+	}
+	var text strings.Builder
+	for _, block := range content {
+		if block.Type != protocol.BlockText {
+			return content
+		}
+		text.WriteString(block.Text)
+	}
+	value := text.String()
+	threshold := a.opts.Compaction.ToolResultInlineBytes
+	if threshold <= 0 {
+		threshold = 16 << 10
+	}
+	if len(value) <= threshold {
+		return content
+	}
+	a.mu.RLock()
+	sessionID := ""
+	if a.opts.Session != nil {
+		sessionID = a.opts.Session.ID()
+	}
+	a.mu.RUnlock()
+	ref, err := a.opts.Artifacts.SaveText(ctx, sessionID, toolName+"\x00"+callID, value)
+	if err != nil {
+		return content
+	}
+	preview := compact.PruneHistoricalToolResultsWithRefs([]protocol.Message{{Role: protocol.RoleTool, Content: content}}, threshold, threshold*3/4, threshold/4,
+		func(protocol.Message, string) string { return ref.ID })
+	if len(preview) != 1 {
+		return content
+	}
+	return preview[0].Content
+}
+
+func (a *Agent) pruneHistoricalToolResults(ctx context.Context, messages []protocol.Message) []protocol.Message {
+	threshold := a.opts.Compaction.HistoricalToolResultThreshold
+	if threshold <= 0 {
+		threshold = compact.HistoricalToolResultThreshold
+	}
+	return compact.PruneHistoricalToolResultsWithRefs(messages, threshold, compact.HistoricalToolResultHead, compact.HistoricalToolResultTail,
+		func(message protocol.Message, text string) string {
+			if a.opts.Artifacts == nil || message.ToolName == "artifact_read" || message.ToolName == "artifact_grep" {
+				return ""
+			}
+			a.mu.RLock()
+			sessionID := ""
+			if a.opts.Session != nil {
+				sessionID = a.opts.Session.ID()
+			}
+			a.mu.RUnlock()
+			ref, err := a.opts.Artifacts.SaveText(ctx, sessionID, message.ToolName+"\x00"+message.ToolCallID+"\x00"+message.ID, text)
+			if err != nil {
+				return ""
+			}
+			return ref.ID
+		})
 }
 
 func toolResultText(content []protocol.ContentBlock) string {

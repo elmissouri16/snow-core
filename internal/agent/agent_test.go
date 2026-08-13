@@ -30,6 +30,26 @@ import (
 // Scripted provider used in tests
 // ---------------------------------------------------------------------------
 
+func TestFirstPromptCreatesDeterministicSessionTitle(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	a, err := New(Options{
+		Provider: p, Registry: tools.NewRegistry(), Session: st,
+		Permission: permission.NewService(permission.ModeAllow, nil),
+		Model:      protocol.Model{Provider: p.ID(), ID: "m"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if err := a.Prompt(context.Background(), "  ## Review\n session naming behavior  "); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.SessionTitle(); got != "Review session naming behavior" {
+		t.Fatalf("session title = %q", got)
+	}
+}
+
 func TestMalformedToolArgumentsRemainPersistableInSQLite(t *testing.T) {
 	st, err := session.NewSQLiteStore(filepath.Join(t.TempDir(), "session.db"), t.TempDir(), session.Options{})
 	if err != nil {
@@ -64,6 +84,34 @@ func TestMalformedToolArgumentsRemainPersistableInSQLite(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("malformed-argument tool result missing: %+v", messages)
+	}
+}
+
+func TestUsageEventMarksPositiveLegacyCacheReadKnown(t *testing.T) {
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamUsage, Usage: &protocol.Usage{Input: 100, CacheRead: 40}},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+	}}}
+	a, err := New(Options{
+		Provider: p, Registry: tools.NewRegistry(), Session: session.NewMemoryStore(session.Options{}),
+		Permission: permission.NewService(permission.ModeAllow, nil),
+		Model:      protocol.Model{Provider: p.ID(), ID: "m"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	var usage *protocol.Usage
+	a.Subscribe(func(ev protocol.AgentEvent) {
+		if ev.Type == protocol.EvUsage {
+			usage = ev.Usage
+		}
+	})
+	if err := a.Prompt(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if usage == nil || !usage.CacheReadKnown || usage.CacheRead != 40 {
+		t.Fatalf("usage = %+v", usage)
 	}
 }
 

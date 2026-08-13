@@ -175,6 +175,33 @@ func TestRPCPromptAndEvents(t *testing.T) {
 	}
 }
 
+func TestRPCSessionRenameAndInfo(t *testing.T) {
+	var in bytes.Buffer
+	var out bytes.Buffer
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, CWD: t.TempDir(), Permission: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	in.WriteString(`{"id":"r1","type":"session_rename","params":{"name":"RPC title"}}` + "\n")
+	in.WriteString(`{"id":"i1","type":"session_info"}` + "\n")
+	if err := New(context.Background(), a, &in, &out).Serve(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("lines = %q", lines)
+	}
+	var info Response
+	if err := json.Unmarshal([]byte(lines[1]), &info); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := info.Data.(map[string]any)
+	if !info.Success || data["name"] != "RPC title" {
+		t.Fatalf("session info = %+v", info)
+	}
+}
+
 func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 	var in bytes.Buffer
 	var out bytes.Buffer

@@ -77,7 +77,7 @@ Philosophy (pi-aligned, Go-native):
 - MVP auth: **OpenCode Go** + **ChatGPT Codex OAuth**.
 - Default built-in tools: **read, write, edit, bash, grep, glob**, direct **ask_user**, plus deferred **webfetch**.
 - Surfaces: **TUI**, **print/JSON**, **SDK**; RPC mode documented for phase 3.
-- Pure-Go **SQLite** sessions with indexed tree branches (`id` / `parentId`).
+- Pure-Go **SQLite** sessions with provider-free first-prompt titles, manual rename, and indexed tree branches (`id` / `parentId`).
 - Clear permission + project-trust model; honest non-sandbox security story.
 
 ### 1.5 Non-goals (v1)
@@ -219,7 +219,7 @@ sequenceDiagram
 | Single binary | Avoid CGo; keep deps lean; Charm + stdlib HTTP |
 | Stream, don’t buffer | Provider adapters yield deltas; TUI paints incrementally |
 | Durable sessions | Pure-Go SQLite; WAL transactions; indexed branch queries; no full scan on open |
-| Bound tool output | Truncate stdout/stderr and read payloads with clear markers; prune oversized historical plain-text results only in the compaction summarizer projection |
+| Bound tool output | Truncate source output with clear markers; spill oversized final plain-text results to private session artifacts and prune historical results in every provider/summarizer projection |
 | Cancel everywhere | `ctx` on HTTP, bash, file IO timeouts |
 | Segregate packages | UI never blocks provider decode on render lock longer than one frame |
 | Cheap default tools | Use bounded pure-Go `grep`/`glob` before shelling out |
@@ -946,7 +946,7 @@ Must be completed in Phase 1–2 coding, results folded into adapter constants/t
 | `/new` | 1 | New session |
 | `/resume [path]` | 2 | Pick a current-directory session, or resume an explicit SQLite path |
 | `/permissions` | 2 | ask/allow/deny; interactive Allow/Allow-always/Deny picker on requests (no typing) |
-| `/compact` | 2 | Manual compaction; active goals also compact automatically at a configurable context threshold |
+| `/compact` | 2 | Manual compaction; all turn types also compact automatically at a configurable pressure threshold with one overflow-repair retry |
 | `/sessions` | 2 | Open a compact picker for persisted sessions in the current directory |
 | `/tree` | 4 | Select or fork a durable branch in the active session |
 | `/quit` | 1 | Exit |
@@ -1445,7 +1445,7 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] Permission service (`ask`/`allow`/`deny`; TUI `/permissions` command; headless default deny)
 - [x] `/login` `/logout` for API keys; ChatGPT OAuth status is available through `/login` and `snow auth check chatgpt`
 - [x] ChatGPT browser/device OAuth login, guarded token refresh, and authenticated cached model discovery
-- [x] `/sessions`, `/resume`, and `/new` — current-directory listing, resume picker, and new-session flow
+- [x] `/sessions`, `/resume`, and `/new` — titled current-directory listing, picker rename, resume, and new-session flow
 - [x] Durable same-database branches, SDK branch APIs, and TUI `/tree` picker
 - [x] Manual `/compact` — model-backed summary with deterministic fallback and a logical context boundary; full history remains append-only
 - [x] Pre-runtime interactive project trust prompt + canonical `trust.json` parent-walk and `/trust` command

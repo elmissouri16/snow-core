@@ -31,7 +31,7 @@ var commands = []commandSpec{
 	{name: "/plan", desc: "switch to Plan mode", argHint: "[message]"},
 	{name: "/quit", desc: "exit snow"},
 	{name: "/resume", desc: "resume a session for this directory", argHint: "[path]"},
-	{name: "/sessions", desc: "choose a session for this directory"},
+	{name: "/sessions", desc: "choose or rename a session for this directory"},
 	{name: "/settings", desc: "configure model and response behavior"},
 	{name: "/skills", desc: "inspect discovered Agent Skills"},
 	{name: "/tree", desc: "navigate branches in this session"},

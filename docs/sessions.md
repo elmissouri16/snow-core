@@ -19,6 +19,14 @@ a picker is unavailable. The lower-level `--session /path/to/session.db` flag
 and SDK `SessionPath` option also select a session path. The previous JSONL
 format is intentionally not migrated.
 
+Built-in sessions receive a provider-free display title from the first accepted
+user prompt. Whitespace is collapsed and long titles are truncated at 72 runes;
+image-only prompts use `Image prompt`. Manual rename trims surrounding
+whitespace, requires 1–72 runes, and rejects control characters. Titles are
+session-wide metadata: they need not be unique, do not enter model context, and
+do not rename the database or change its stable ID. A manually titled empty
+session is durable and remains visible in the picker.
+
 ## Driver
 
 The project uses [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite),
@@ -76,11 +84,17 @@ active branch currently has zero messages.
 large session does not deserialize every historical branch into memory.
 `ContextMessages()` applies the latest compaction marker logically: providers
 receive one summary plus the retained tail, while `Messages()` continues to
-return the complete historical branch. Before semantic compaction, oversized
-plain-text tool results in the older summarization prefix are projected as a
-bounded head, omission marker, and tail. This model-free pruning reduces
-summarizer input without changing exact durable messages or the ordinary
-`Messages()`/`ContextMessages()` APIs. `Metadata`/`SetMetadata` store append-only
+return the complete historical branch. Before every ordinary provider request
+and semantic compaction, oversized
+plain-text tool results are projected as a bounded head, byte-counted omission
+marker, and tail. Existing exact durable messages remain unchanged. New
+oversized results are instead spilled immediately to immutable private files
+under `~/.snow/artifacts` (or `SNOW_HOME/artifacts`) and the durable tool message
+contains only the preview plus an opaque artifact ID. The deferred read-risk
+`artifact_read` and `artifact_grep` tools authorize IDs against the current
+session and return bounded fragments; artifacts are not added to ordinary
+filesystem roots. This model-free pruning reduces every subsequent provider
+request, not only the summarizer. `Metadata`/`SetMetadata` store append-only
 per-session state such as permission mode and remembered tool rules.
 
 When an existing session is opened, the agent checks the final provider tool

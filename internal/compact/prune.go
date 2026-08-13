@@ -1,6 +1,7 @@
 package compact
 
 import (
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -13,9 +14,8 @@ const (
 	HistoricalToolResultThreshold = 8 * 1024
 	// HistoricalToolResultHead and HistoricalToolResultTail retain useful setup
 	// and terminal diagnostics while removing a usually repetitive middle.
-	HistoricalToolResultHead   = 4 * 1024
-	HistoricalToolResultTail   = 1024
-	historicalToolResultMarker = "\n\n[... historical tool result middle pruned ...]\n\n"
+	HistoricalToolResultHead = 4 * 1024
+	HistoricalToolResultTail = 1024
 )
 
 // PruneHistoricalToolResults returns a defensive projection in which oversized
@@ -23,6 +23,13 @@ const (
 // messages are never modified. Mixed/rich results are left intact because their
 // block ordering may carry provider-specific meaning.
 func PruneHistoricalToolResults(messages []protocol.Message, threshold, head, tail int) []protocol.Message {
+	return PruneHistoricalToolResultsWithRefs(messages, threshold, head, tail, nil)
+}
+
+// PruneHistoricalToolResultsWithRefs optionally adds an opaque private-artifact
+// reference to each shortened result. Resolver failures are represented by an
+// empty reference and never prevent a safe context projection.
+func PruneHistoricalToolResultsWithRefs(messages []protocol.Message, threshold, head, tail int, resolver func(protocol.Message, string) string) []protocol.Message {
 	out := make([]protocol.Message, len(messages))
 	for i, message := range messages {
 		out[i] = message.Clone()
@@ -45,8 +52,15 @@ func PruneHistoricalToolResults(messages []protocol.Message, threshold, head, ta
 		prefix := validUTF8Prefix(value, min(head, len(value)))
 		suffixBudget := min(tail, len(value)-len(prefix))
 		suffix := validUTF8Suffix(value, suffixBudget)
-		pruned := prefix + historicalToolResultMarker + suffix
-		if len(pruned) >= len(value) || len(pruned) > threshold {
+		omitted := len(value) - len(prefix) - len(suffix)
+		marker := fmt.Sprintf("\n\n[… %d bytes omitted …]\n", omitted)
+		if resolver != nil {
+			if ref := strings.TrimSpace(resolver(message, value)); ref != "" {
+				marker += "Full retained tool result: " + ref + "\nUse artifact_read or artifact_grep to inspect it.\n"
+			}
+		}
+		pruned := prefix + marker + "\n" + suffix
+		if len(pruned) >= len(value) {
 			continue
 		}
 		out[i].Content = []protocol.ContentBlock{protocol.NewTextBlock(pruned)}

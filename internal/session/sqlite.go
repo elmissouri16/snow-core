@@ -568,7 +568,131 @@ func (s *SQLiteStore) ID() string { return s.header.ID }
 func (s *SQLiteStore) Path() string { return s.path }
 
 // Header implements Store.
-func (s *SQLiteStore) Header() Header { return s.header }
+func (s *SQLiteStore) Header() Header {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.header
+}
+
+// SessionTitle returns the current session-wide display title.
+func (s *SQLiteStore) SessionTitle() (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return "", errors.New("session: store closed")
+	}
+	return s.header.Name, nil
+}
+
+// RenameSession changes the display title without moving the branch tip.
+func (s *SQLiteStore) RenameSession(title string) error {
+	title, err := normalizeSessionTitle(title)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("session: store closed")
+	}
+	if _, err := s.db.Exec(`UPDATE session_meta SET name = ? WHERE singleton = 1`, title); err != nil {
+		return fmt.Errorf("session: rename: %w", err)
+	}
+	s.header.Name = title
+	return nil
+}
+
+// AppendWithInitialTitle atomically appends the first user message and assigns
+// its generated title. Existing/manual titles and any prior message win.
+func (s *SQLiteStore) AppendWithInitialTitle(entry Entry, title string) error {
+	entry = cloneEntry(entry)
+	if title != "" {
+		var err error
+		title, err = normalizeSessionTitle(title)
+		if err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("session: store closed")
+	}
+	expectedTip := s.tip
+	if entry.ID == "" {
+		entry.ID = newID()
+	}
+	if entry.ParentID == "" {
+		entry.ParentID = expectedTip
+	}
+	var exists int
+	if err := s.db.QueryRow(`SELECT count(*) FROM entries WHERE id = ?`, entry.ID).Scan(&exists); err != nil {
+		return fmt.Errorf("session: sqlite lookup entry: %w", err)
+	}
+	if exists != 0 {
+		return fmt.Errorf("session: duplicate entry id %q", entry.ID)
+	}
+	if err := s.db.QueryRow(`SELECT count(*) FROM entries WHERE id = ?`, entry.ParentID).Scan(&exists); err != nil {
+		return fmt.Errorf("session: sqlite lookup parent: %w", err)
+	}
+	if exists == 0 {
+		return fmt.Errorf("session: unknown parent %q", entry.ParentID)
+	}
+	normalizeEntryMessage(&entry)
+	var raw []byte
+	var err error
+	if entry.Message != nil {
+		raw, err = json.Marshal(entry.Message)
+		if err != nil {
+			return fmt.Errorf("session: marshal message: %w", err)
+		}
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("session: sqlite begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	titleCreated := false
+	if title != "" {
+		result, err := tx.Exec(`UPDATE session_meta SET name = ? WHERE singleton = 1 AND name = '' AND NOT EXISTS (SELECT 1 FROM entries WHERE entry_type = ?)`, title, EntryMessage)
+		if err != nil {
+			return fmt.Errorf("session: title: %w", err)
+		}
+		changed, _ := result.RowsAffected()
+		titleCreated = changed == 1
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO entries(id, parent_id, entry_type, message, summary, compacted_through, meta_key, meta_value)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, entry.ID, entry.ParentID, entry.Type, raw,
+		entry.Summary, entry.CompactedThrough, entry.Key, entry.Value); err != nil {
+		return fmt.Errorf("session: sqlite append: %w", err)
+	}
+	now := time.Now().UnixMilli()
+	if result, err := tx.Exec(`UPDATE session_branches SET tip_id = ?, updated_at = ? WHERE branch_id = ? AND tip_id = ?`, entry.ID, now, s.branchID, expectedTip); err != nil {
+		return fmt.Errorf("session: sqlite branch tip: %w", err)
+	} else if n, _ := result.RowsAffected(); n != 1 {
+		_ = tx.Rollback()
+		s.refreshBranchTipLocked()
+		return fmt.Errorf("%w on branch %q (expected %q)", ErrConflict, s.branchID, expectedTip)
+	}
+	if _, err := tx.Exec(`UPDATE session_meta SET branch_tip = ? WHERE singleton = 1
+		AND EXISTS (SELECT 1 FROM session_branches WHERE branch_id = ? AND active = 1)`, entry.ID, s.branchID); err != nil {
+		return fmt.Errorf("session: sqlite tip: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("session: sqlite commit: %w", err)
+	}
+	s.tip = entry.ID
+	if titleCreated {
+		s.header.Name = title
+	} else if title != "" && s.header.Name == "" {
+		// Another handle may have won a concurrent manual/automatic rename.
+		if err := s.db.QueryRow(`SELECT name FROM session_meta WHERE singleton = 1`).Scan(&s.header.Name); err != nil {
+			return fmt.Errorf("session: refresh title: %w", err)
+		}
+	}
+	return nil
+}
 
 // CollaborationMode returns the active branch mode.
 func (s *SQLiteStore) CollaborationMode() (protocol.CollaborationMode, error) {
@@ -1895,6 +2019,7 @@ func (s *SQLiteStore) durableStateCountLocked() (int, error) {
 	err := s.db.QueryRow(`
 		SELECT
 			(SELECT count(*) FROM entries WHERE id <> 'root') +
+			(SELECT count(*) FROM session_meta WHERE name <> '') +
 			(SELECT count(*) FROM subagent_threads) +
 			(SELECT count(*) FROM thread_goals) +
 			(SELECT count(*) FROM session_branches WHERE branch_id <> 'main') +

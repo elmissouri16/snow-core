@@ -4,6 +4,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -23,6 +24,32 @@ type LimitError struct {
 	Provider string
 	Status   int
 	Message  string
+}
+
+// ContextWindowExceededError marks a request rejected because its input context
+// is too large. Agents may use it for one bounded compaction retry.
+type ContextWindowExceededError interface {
+	error
+	ContextWindowExceeded() bool
+}
+
+// IsContextWindowExceeded conservatively recognizes structured markers and the
+// bounded diagnostics retained by adapters that do not expose provider codes.
+func IsContextWindowExceeded(err error) bool {
+	if err == nil {
+		return false
+	}
+	var marked ContextWindowExceededError
+	if errors.As(err, &marked) && marked.ContextWindowExceeded() {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	for _, phrase := range []string{"maximum context length", "context length exceeded", "context window exceeded", "context_length_exceeded", "context_window_exceeded", "prompt is too long", "prompt too long", "prompt_too_long", "input is too long", "input too long", "input_too_long", "too many tokens in prompt"} {
+		if strings.Contains(message, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *LimitError) Error() string {

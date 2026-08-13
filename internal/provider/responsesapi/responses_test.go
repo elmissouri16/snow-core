@@ -164,6 +164,20 @@ func TestSanitizeErrorTextRedactsCutoffPrefixesAndControls(t *testing.T) {
 	}
 }
 
+func TestResponseErrorMarksContextWindowExceeded(t *testing.T) {
+	for _, candidate := range []*ResponseError{
+		NewResponseError("test", 400, "too large", "context_length_exceeded", ""),
+		NewResponseError("test", 400, "maximum context length exceeded", "", ""),
+	} {
+		if !candidate.ContextWindowExceeded() {
+			t.Fatalf("not marked: %+v", candidate)
+		}
+	}
+	if NewResponseError("test", 400, "max_tokens invalid", "invalid_request", "").ContextWindowExceeded() {
+		t.Fatal("output token configuration misclassified")
+	}
+}
+
 func TestStreamPreservesBoundedErrorMetadata(t *testing.T) {
 	const secret = "secret-token"
 	body := "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"overloaded secret-token\",\"code\":\"server_overloaded\"},\"request_id\":\"req-123\"}}\n\n"
@@ -182,6 +196,21 @@ func TestStreamPreservesBoundedErrorMetadata(t *testing.T) {
 	}
 	if strings.ContainsAny(event.Err.Error(), "\n\r\x1b") {
 		t.Fatalf("control character survived: %q", event.Err.Error())
+	}
+}
+
+func TestResponseUsageDistinguishesExplicitZeroFromOmittedCacheRead(t *testing.T) {
+	explicit := responseUsage(map[string]any{"response": map[string]any{"usage": map[string]any{
+		"input_tokens": float64(4), "input_tokens_details": map[string]any{"cached_tokens": float64(0)},
+	}}})
+	if explicit == nil || !explicit.CacheReadKnown || explicit.CacheRead != 0 {
+		t.Fatalf("explicit usage = %+v", explicit)
+	}
+	omitted := responseUsage(map[string]any{"response": map[string]any{"usage": map[string]any{
+		"input_tokens": float64(4), "input_tokens_details": map[string]any{},
+	}}})
+	if omitted == nil || omitted.CacheReadKnown {
+		t.Fatalf("omitted usage = %+v", omitted)
 	}
 }
 
@@ -212,7 +241,7 @@ func TestStreamNormalizesRefusalUsageAndIncomplete(t *testing.T) {
 			stop = ev.StopReason
 		}
 	}
-	if text != "cannot" || stop != protocol.StopLength || usage == nil || usage.Total != 6 || usage.CacheRead != 1 || usage.Reasoning != 1 {
+	if text != "cannot" || stop != protocol.StopLength || usage == nil || usage.Total != 6 || usage.CacheRead != 1 || !usage.CacheReadKnown || usage.Reasoning != 1 {
 		t.Fatalf("text=%q stop=%q usage=%+v", text, stop, usage)
 	}
 }

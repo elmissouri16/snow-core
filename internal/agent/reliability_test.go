@@ -156,7 +156,7 @@ func TestCompactionSummarizerReceivesPrunedHistoricalToolResult(t *testing.T) {
 	}
 	found := false
 	for _, message := range provider.requests[0].Messages {
-		if message.Role == protocol.RoleTool && strings.Contains(message.Content[0].Text, "historical tool result middle pruned") {
+		if message.Role == protocol.RoleTool && strings.Contains(message.Content[0].Text, "bytes omitted") {
 			found = true
 		}
 	}
@@ -167,7 +167,7 @@ func TestCompactionSummarizerReceivesPrunedHistoricalToolResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(full[2].Content[0].Text, strings.Repeat("head", 3000)) || strings.Contains(full[2].Content[0].Text, "middle pruned") {
+	if !strings.Contains(full[2].Content[0].Text, strings.Repeat("head", 3000)) || strings.Contains(full[2].Content[0].Text, "bytes omitted") {
 		t.Fatal("durable tool result was modified")
 	}
 }

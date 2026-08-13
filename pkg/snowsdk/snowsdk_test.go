@@ -322,6 +322,28 @@ func TestRootQueueAPIErrorsAndSnapshots(t *testing.T) {
 	}
 }
 
+func TestSessionRenameAndName(t *testing.T) {
+	s, err := Open(context.Background(), Options{Provider: "fake", NoSession: true, PermissionMode: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameSession("  SDK title  "); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.SessionName(); got != "SDK title" {
+		t.Fatalf("SessionName = %q", got)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.SessionName(); got != "" {
+		t.Fatalf("closed SessionName = %q", got)
+	}
+	if err := s.RenameSession("again"); !errors.Is(err, ErrStopped) {
+		t.Fatalf("closed RenameSession error = %v", err)
+	}
+}
+
 func TestClosedSessionReturnsErrStopped(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, Options{Provider: "fake", NoSession: true, PermissionMode: "allow"})

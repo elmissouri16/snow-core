@@ -442,14 +442,39 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: "set_thinking", Success: true})
 		return nil
+	case "session_rename":
+		var p struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return err
+		}
+		if err := s.app.RenameSession(p.Name); err != nil {
+			return err
+		}
+		title, err := s.app.Agent.SessionTitle()
+		if err != nil {
+			return err
+		}
+		sessionID, _, err := s.app.Agent.SessionIdentity()
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: map[string]any{"session_id": sessionID, "name": title}})
+		return nil
 	case "session_info":
 		model := s.app.Agent.Model()
 		sessionID, sessionPath, err := s.app.Agent.SessionIdentity()
 		if err != nil {
 			return err
 		}
+		title, err := s.app.Agent.SessionTitle()
+		if err != nil {
+			return err
+		}
 		info := map[string]any{
 			"session_id":         sessionID,
+			"name":               title,
 			"path":               sessionPath,
 			"cwd":                s.app.CWD(),
 			"provider":           s.app.ProviderID,
