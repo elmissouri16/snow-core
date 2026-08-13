@@ -43,6 +43,11 @@ const (
 	maxQueuedInputBytes  = 64 * 1024
 	automaticTurnDelay   = 25 * time.Millisecond
 	skillActivationMeta  = "agent_skill_activation"
+
+	repeatedToolFirstThreshold = 3
+	repeatedToolNextThreshold  = 5
+	repeatedToolLastThreshold  = 8
+	repeatedToolArgsPreview    = 500
 )
 
 // ErrNotRunning is returned when an operation requires an active,
@@ -110,6 +115,13 @@ type CompactionOptions struct {
 }
 
 // Agent drives turns against a provider and tool registry.
+type repeatedToolCallState struct {
+	name          string
+	canonicalArgs string
+	count         int
+	reminders     []string
+}
+
 type Agent struct {
 	mu          sync.RWMutex
 	admissionMu sync.Mutex
@@ -135,7 +147,10 @@ type Agent struct {
 	pending      map[string]protocol.ContentBlock
 	pendingOrder []string
 	// toolStarts is used to add useful duration metadata to tool_end events.
-	toolStarts          map[string]time.Time
+	toolStarts map[string]time.Time
+	// repeatedTool tracks identical consecutive calls across provider steps in
+	// one admitted run. It is advisory only and resets for each fresh user turn.
+	repeatedTool        repeatedToolCallState
 	turnUsage           protocol.Usage
 	usageSet            bool
 	turnProgress        bool
@@ -240,6 +255,9 @@ func New(opts Options) (*Agent, error) {
 			names[name] = allowed
 		}
 		opts.SkillNames = names
+	}
+	if _, err := repairInterruptedToolCalls(opts.Session, opts.Registry); err != nil {
+		return nil, fmt.Errorf("agent: recover interrupted tool calls: %w", err)
 	}
 	a := &Agent{opts: opts, model: opts.Model, bus: newEventBus(), mode: mode, turnMode: mode, mailboxActivity: make(chan struct{}, 1)}
 	a.pending = make(map[string]protocol.ContentBlock)
@@ -490,6 +508,10 @@ func (a *Agent) setSessionAdmitted(st session.Store, publish bool) error {
 	if err != nil {
 		a.mu.Unlock()
 		return fmt.Errorf("agent: restore collaboration mode: %w", err)
+	}
+	if _, err := repairInterruptedToolCalls(st, a.opts.Registry); err != nil {
+		a.mu.Unlock()
+		return fmt.Errorf("agent: recover interrupted tool calls: %w", err)
 	}
 	a.opts.Session = st
 	a.activeSkills = restoreActiveSkills(st, a.opts.Registry, a.opts.ToolHost, a.opts.SkillNames)
@@ -1040,6 +1062,88 @@ func contextMessagesFromStore(store session.Store) ([]protocol.Message, error) {
 	return store.Messages()
 }
 
+// repairInterruptedToolCalls balances only the final incomplete tool batch. A
+// crash can occur after the assistant call is committed but before every tool
+// result is appended; later ordinary messages would make the outcome ambiguous
+// for reasons other than an interrupted dispatch, so older unmatched calls are
+// deliberately left untouched.
+func repairInterruptedToolCalls(store session.Store, registry tools.Registry) (int, error) {
+	if store == nil {
+		return 0, errors.New("session is nil")
+	}
+	messages, err := store.Messages()
+	if err != nil {
+		return 0, err
+	}
+	if len(messages) == 0 {
+		return 0, nil
+	}
+	assistantIndex := len(messages) - 1
+	for assistantIndex >= 0 && messages[assistantIndex].Role == protocol.RoleTool {
+		assistantIndex--
+	}
+	if assistantIndex < 0 || messages[assistantIndex].Role != protocol.RoleAssistant {
+		return 0, nil
+	}
+	assistant := messages[assistantIndex]
+	calls := make([]protocol.ContentBlock, 0)
+	for _, block := range assistant.Content {
+		if block.Type == protocol.BlockToolCall && block.ToolCallID != "" {
+			calls = append(calls, block)
+		}
+	}
+	if len(calls) == 0 {
+		return 0, nil
+	}
+	resolved := make(map[string]bool, len(messages)-assistantIndex-1)
+	for _, message := range messages[assistantIndex+1:] {
+		if message.Role != protocol.RoleTool {
+			return 0, nil
+		}
+		resolved[message.ToolCallID] = true
+	}
+	entries := make([]session.Entry, 0, len(calls))
+	parent := store.BranchTip()
+	for _, call := range calls {
+		if resolved[call.ToolCallID] {
+			continue
+		}
+		risk := riskFor(call.Name)
+		if registry != nil {
+			if descriptor, ok := registry.Descriptor(call.Name); ok && descriptor.Risk != "" {
+				risk = descriptor.Risk
+			}
+		}
+		text := interruptedToolResultText(risk)
+		message := protocol.NewToolResultMessage(newID(), parent, call.ToolCallID, call.Name,
+			[]protocol.ContentBlock{protocol.NewTextBlock(text)}, true)
+		entries = append(entries, session.Entry{Type: session.EntryMessage, ID: message.ID, ParentID: parent, Message: &message})
+		parent = message.ID
+	}
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	if batch, ok := store.(session.BatchStore); ok {
+		if err := batch.AppendBatch(entries); err != nil {
+			return 0, err
+		}
+		return len(entries), nil
+	}
+	for _, entry := range entries {
+		if err := store.Append(entry); err != nil {
+			return 0, err
+		}
+	}
+	return len(entries), nil
+}
+
+func interruptedToolResultText(risk permission.Risk) string {
+	if risk == permission.RiskRead {
+		return "Error: the previous Snow process ended before this tool result was recorded. The operation may be retried."
+	}
+	return "Error: the previous Snow process ended after this tool was dispatched, so its external outcome is unknown. Inspect the current state before retrying; for potentially harmful or costly repetition, ask the user first."
+}
+
 // Branches lists durable branch references for the active session.
 func (a *Agent) Branches() (result []protocol.SessionBranch, err error) {
 	err = a.withSessionRead(func(store session.Store) error {
@@ -1514,7 +1618,9 @@ func (a *Agent) compactActiveContext(ctx context.Context, automatic bool) (proto
 		return result, nil
 	}
 
-	summary, summaryErr := a.summarizeForCompaction(ctx, plan.CompactionCandidates)
+	summaryInput := compact.PruneHistoricalToolResults(plan.CompactionCandidates,
+		compact.HistoricalToolResultThreshold, compact.HistoricalToolResultHead, compact.HistoricalToolResultTail)
+	summary, summaryErr := a.summarizeForCompaction(ctx, summaryInput)
 	usedFallback := false
 	if summaryErr == nil && strings.TrimSpace(summary) == "" {
 		summaryErr = errors.New("provider returned a blank compaction summary")
@@ -1524,7 +1630,7 @@ func (a *Agent) compactActiveContext(ctx context.Context, automatic bool) (proto
 			a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: ctx.Err().Error(), IsError: true, Compaction: &result})
 			return protocol.CompactionResult{}, ctx.Err()
 		}
-		summary, summaryErr = compact.DefaultSummarizer(ctx, plan.CompactionCandidates)
+		summary, summaryErr = compact.DefaultSummarizer(ctx, summaryInput)
 		usedFallback = summaryErr == nil
 	}
 	if summaryErr != nil {
@@ -1670,6 +1776,7 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.pendingOrder = a.pendingOrder[:0]
 	a.toolStarts = make(map[string]time.Time)
+	a.repeatedTool = repeatedToolCallState{}
 	a.turnUsage = protocol.Usage{}
 	a.usageSet = false
 	a.turnProgress = false
@@ -1912,6 +2019,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.pendingOrder = a.pendingOrder[:0]
 	a.toolStarts = make(map[string]time.Time)
+	a.repeatedTool = repeatedToolCallState{}
 	a.turnUsage = protocol.Usage{}
 	a.usageSet = false
 	a.turnProgress = false
@@ -2047,6 +2155,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.pendingOrder = a.pendingOrder[:0]
 	a.toolStarts = make(map[string]time.Time)
+	a.repeatedTool = repeatedToolCallState{}
 	a.turnUsage = protocol.Usage{}
 	a.usageSet = false
 	a.turnProgress = false
@@ -2615,6 +2724,9 @@ func (a *Agent) run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("agent: load goal context: %w", err)
 		}
+		if reminder := a.takeRepeatedToolReminder(); reminder != "" {
+			internalContext = append(internalContext, protocol.InternalContextFragment{Source: "loop-guard", Text: reminder})
+		}
 		req := protocol.ChatRequest{
 			Model:              a.Model(),
 			Messages:           msgs,
@@ -2773,9 +2885,10 @@ func (a *Agent) deliverQueuedInput(ctx context.Context, item protocol.QueuedInpu
 	a.publishInputQueue(snapshot)
 	a.queuePublishMu.Unlock()
 	a.mu.Lock()
-	// A queued Plan-mode instruction starts a fresh plan response inside the
-	// same captured collaboration mode.
+	// A queued input is a fresh user instruction even though it reuses the
+	// admitted run, so it resets both Plan response state and loop detection.
 	a.turnPlanSeen = false
+	a.repeatedTool = repeatedToolCallState{}
 	a.mu.Unlock()
 	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	if err := a.activateExplicitSkillMentions(ctx, item.Text); err != nil {
@@ -3091,11 +3204,74 @@ func (a *Agent) executeToolCalls(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		a.observeRepeatedToolCall(cb.Name, cb.Arguments)
 		// Chain tool results serially so all of them remain on the branch
 		// tip path; otherwise only the last result is visible to Messages().
 		parent = msg.ID
 	}
 	return nil
+}
+
+func (a *Agent) observeRepeatedToolCall(name string, raw json.RawMessage) {
+	canonical := canonicalToolArguments(raw)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if repeatedToolCallExcluded(name) {
+		return
+	}
+	state := &a.repeatedTool
+	if state.name != name || state.canonicalArgs != canonical {
+		*state = repeatedToolCallState{name: name, canonicalArgs: canonical, count: 1}
+		return
+	}
+	state.count++
+	switch state.count {
+	case repeatedToolFirstThreshold:
+		state.reminders = append(state.reminders, "You are repeating the exact same tool call with identical arguments. Carefully analyze the previous result before calling it again: if the task is incomplete, use different arguments or a different approach; otherwise finish the task.")
+	case repeatedToolNextThreshold, repeatedToolLastThreshold:
+		preview := state.canonicalArgs
+		if len(preview) > repeatedToolArgsPreview {
+			omitted := len(preview) - repeatedToolArgsPreview
+			body := []byte(preview)[:repeatedToolArgsPreview]
+			for len(body) > 0 && !utf8.Valid(body) {
+				body = body[:len(body)-1]
+			}
+			preview = string(body) + fmt.Sprintf("… (+%d more bytes)", omitted)
+		}
+		state.reminders = append(state.reminders, fmt.Sprintf("Repeated tool call detected:\n- tool: %s\n- consecutive_calls: %d\n- arguments: %s\nThe repeated calls are not making progress. Do not call this tool with these exact arguments again. Inspect the latest result and choose a different action, different arguments, or finish if enough evidence has been gathered.", name, state.count, preview))
+	}
+}
+
+func (a *Agent) takeRepeatedToolReminder() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	reminder := strings.Join(a.repeatedTool.reminders, "\n\n")
+	a.repeatedTool.reminders = nil
+	return reminder
+}
+
+func repeatedToolCallExcluded(name string) bool {
+	switch name {
+	case "update_plan", "get_goal", "wait_agent":
+		return true
+	default:
+		return false
+	}
+}
+
+func canonicalToolArguments(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return "{}"
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return string(raw)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return string(raw)
+	}
+	return string(encoded)
 }
 
 // appendToolResult persists a tool_result message and emits its events.
