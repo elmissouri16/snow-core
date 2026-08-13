@@ -87,6 +87,23 @@ func BenchmarkPlanNudgeLongSession(b *testing.B) {
 	}
 }
 
+func BenchmarkSubagentFleetView32(b *testing.B) {
+	m := newModel(context.Background(), app.Options{})
+	m.width, m.height = 140, 42
+	m.subagentFleetOpen = true
+	m.subagentFleetList.ConcurrentLimit = 32
+	for i := 0; i < 32; i++ {
+		state := fleetTestState(fmt.Sprintf("agent-%d", i), fmt.Sprintf("/root/agent_%d", i), protocol.AgentRunning)
+		m.subagentFleetList.Agents = append(m.subagentFleetList.Agents, state)
+		m.subagentFleetActivity[state.Agent.ThreadID] = []string{"12:00:00  tool ▶  grep", "12:00:01  thinking  inspecting files"}
+	}
+	m.subagentFleetList.Running = 32
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = m.renderSubagentFleetModal()
+	}
+}
+
 func BenchmarkTranscriptRefresh10K(b *testing.B) {
 	m := newModel(context.Background(), app.Options{})
 	m.width, m.height = 120, 40

@@ -342,60 +342,78 @@ type Model struct {
 	spinnerRunning bool
 	help           help.Model
 
-	lines                 []string // rendered transcript lines
-	assistantBuf          strings.Builder
-	thinkingBuf           strings.Builder
-	planBuf               strings.Builder
-	currentPlanID         string
-	latestPlan            string
-	goal                  *protocol.ThreadGoal
-	confirmGoalReplace    bool
-	pendingGoalObjective  string
-	pendingGoalBudget     *int64
-	sawPlanThisTurn       bool
-	completedPlanThisTurn bool
-	planPrompt            bool
-	planPromptChoice      int
-	nudgeDismissed        map[string]bool
-	subagentViews         map[string]subagentViewState
-	subagentOrder         []string
-	busy                  bool
-	activeTurnID          string
-	runGeneration         uint64
-	compactGeneration     uint64
-	runStartedAt          time.Time
-	now                   func() time.Time
-	done                  bool
-	closeOnce             sync.Once
-	closeErr              error
-	startupMu             sync.Mutex
-	startupWG             sync.WaitGroup
-	startupApps           map[*app.App]struct{}
-	startupClosed         bool
-	startupCloseErr       error
-	lastErr               error
-	lastStatus            string
-	trustPending          bool
-	trustPath             string
-	trustStore            *trust.Store
-	trustChoice           int // 0=continue untrusted, 1=trust project
-	trustError            string
-	trustSaving           bool
-	lastErrorText         string
-	themeName             string
-	customThemes          map[string]config.ThemeFile
-	keys                  tuiKeyMap
-	auxDiagnostics        []config.Diagnostic
-	lastUsage             *protocol.Usage
-	contextTokens         int
-	contextEstimated      bool
-	turnUsageSeen         bool
-	contextRefreshNeeded  bool
-	contextRefreshPending bool
-	contextRefreshVersion uint64
-	compacting            bool
-	compactStatus         string
-	events                *agentEventMailbox
+	lines                         []string // rendered transcript lines
+	assistantBuf                  strings.Builder
+	thinkingBuf                   strings.Builder
+	planBuf                       strings.Builder
+	currentPlanID                 string
+	latestPlan                    string
+	goal                          *protocol.ThreadGoal
+	confirmGoalReplace            bool
+	pendingGoalObjective          string
+	pendingGoalBudget             *int64
+	sawPlanThisTurn               bool
+	completedPlanThisTurn         bool
+	planPrompt                    bool
+	planPromptChoice              int
+	nudgeDismissed                map[string]bool
+	subagentViews                 map[string]subagentViewState
+	subagentOrder                 []string
+	subagentFleetOpen             bool
+	subagentFleetLoading          bool
+	subagentFleetDetailLoading    bool
+	subagentFleetGeneration       uint64
+	subagentFleetDetailGeneration uint64
+	subagentFleetRequested        string
+	subagentFleetList             protocol.SubagentList
+	subagentFleetIndex            int
+	subagentFleetDetailState      protocol.SubagentState
+	subagentFleetMessages         []protocol.Message
+	subagentFleetError            string
+	subagentFleetDetailError      string
+	subagentFleetWarning          string
+	subagentFleetDetailOffset     int
+	subagentFleetDetailEnd        bool
+	subagentFleetActivity         map[string][]string
+	subagentFleetActivityKinds    map[string]protocol.AgentEventType
+	subagentFleetActivitySpace    map[string]bool
+	busy                          bool
+	activeTurnID                  string
+	runGeneration                 uint64
+	compactGeneration             uint64
+	runStartedAt                  time.Time
+	now                           func() time.Time
+	done                          bool
+	closeOnce                     sync.Once
+	closeErr                      error
+	startupMu                     sync.Mutex
+	startupWG                     sync.WaitGroup
+	startupApps                   map[*app.App]struct{}
+	startupClosed                 bool
+	startupCloseErr               error
+	lastErr                       error
+	lastStatus                    string
+	trustPending                  bool
+	trustPath                     string
+	trustStore                    *trust.Store
+	trustChoice                   int // 0=continue untrusted, 1=trust project
+	trustError                    string
+	trustSaving                   bool
+	lastErrorText                 string
+	themeName                     string
+	customThemes                  map[string]config.ThemeFile
+	keys                          tuiKeyMap
+	auxDiagnostics                []config.Diagnostic
+	lastUsage                     *protocol.Usage
+	contextTokens                 int
+	contextEstimated              bool
+	turnUsageSeen                 bool
+	contextRefreshNeeded          bool
+	contextRefreshPending         bool
+	contextRefreshVersion         uint64
+	compacting                    bool
+	compactStatus                 string
+	events                        *agentEventMailbox
 	// Agent callbacks feed a coalescing mailbox. The update loop ingests
 	// bounded logical batches and renders stream deltas on a separate cadence.
 	batchingEvents          bool
@@ -609,26 +627,29 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 	vp.MouseWheelDelta = 3
 
 	m := &Model{
-		ctx:                 ctx,
-		opts:                opts,
-		themeName:           "default",
-		customThemes:        map[string]config.ThemeFile{},
-		keys:                tuiKeys,
-		transcript:          vp,
-		editor:              ta,
-		spinner:             sp,
-		help:                help.New(),
-		userInputEditor:     newUserInputEditor(),
-		events:              newAgentEventMailbox(),
-		md:                  newMarkdownRenderer(),
-		thinkingMD:          newThinkingMarkdownRenderer(),
-		nudgeDismissed:      make(map[string]bool),
-		subagentViews:       make(map[string]subagentViewState),
-		queueOriginalText:   make(map[string]string),
-		queueRendered:       make(map[string]bool),
-		startupApps:         make(map[*app.App]struct{}),
-		transcriptBaseDirty: true,
-		now:                 time.Now,
+		ctx:                        ctx,
+		opts:                       opts,
+		themeName:                  "default",
+		customThemes:               map[string]config.ThemeFile{},
+		keys:                       tuiKeys,
+		transcript:                 vp,
+		editor:                     ta,
+		spinner:                    sp,
+		help:                       help.New(),
+		userInputEditor:            newUserInputEditor(),
+		events:                     newAgentEventMailbox(),
+		md:                         newMarkdownRenderer(),
+		thinkingMD:                 newThinkingMarkdownRenderer(),
+		nudgeDismissed:             make(map[string]bool),
+		subagentViews:              make(map[string]subagentViewState),
+		subagentFleetActivity:      make(map[string][]string),
+		subagentFleetActivityKinds: make(map[string]protocol.AgentEventType),
+		subagentFleetActivitySpace: make(map[string]bool),
+		queueOriginalText:          make(map[string]string),
+		queueRendered:              make(map[string]bool),
+		startupApps:                make(map[*app.App]struct{}),
+		transcriptBaseDirty:        true,
+		now:                        time.Now,
 	}
 	normalizeTextareaStyles(&m.userInputEditor)
 	m.asker = newTUIAsker(m.events)
@@ -845,6 +866,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		m.refreshTranscriptForced()
 	case tea.MouseMsg:
+		if m.subagentFleetOpen {
+			return m, nil
+		}
 		// Application-owned drag selection and viewport wheel scrolling share
 		// the same cell-motion mouse stream.
 		cmd := m.applyMouse(msg)
@@ -878,7 +902,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
 		// transcript when not in a picker.
-		if !m.loginMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.permPending && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
+		if !m.loginMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
 			switch {
 			case keyMatches(msg, m.keys.PageUp):
 				m.transcript.PageUp()
@@ -1260,6 +1284,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.layout()
+	case subagentFleetListMsg:
+		return m, m.applySubagentFleetList(msg)
+	case subagentFleetDetailMsg:
+		m.applySubagentFleetDetail(msg)
+		return m, nil
 	case subagentInspectMsg:
 		if msg.generation != m.pickerGeneration {
 			return m, nil
@@ -1303,6 +1332,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.branches = nil
 		m.subagentViews = make(map[string]subagentViewState)
 		m.subagentOrder = nil
+		m.subagentFleetActivity = make(map[string][]string)
+		m.subagentFleetActivityKinds = make(map[string]protocol.AgentEventType)
+		m.subagentFleetActivitySpace = make(map[string]bool)
+		m.subagentFleetList = protocol.SubagentList{}
+		m.subagentFleetMessages = nil
+		m.subagentFleetDetailState = protocol.SubagentState{}
+		m.closeSubagentFleet()
 		m.hydrateSession()
 		if err := m.app.ReadyGoal(); err != nil {
 			m.pushLine(styleError.Render("tree goal: " + err.Error()))
@@ -1502,6 +1538,7 @@ func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cm
 }
 
 func (m *Model) handleSubagentEvent(ev protocol.AgentEvent) {
+	m.recordSubagentFleetEvent(ev)
 	id := ev.Agent.ThreadID
 	view, exists := m.subagentViews[id]
 	if !exists {
@@ -1513,10 +1550,7 @@ func (m *Model) handleSubagentEvent(ev protocol.AgentEvent) {
 		view.State.Agent = *ev.Agent.Clone()
 	}
 	if ev.Type == protocol.EvTextDelta || ev.Type == protocol.EvThinkingDelta {
-		view.Preview += ev.Text
-		if len(view.Preview) > 4096 {
-			view.Preview = view.Preview[len(view.Preview)-4096:]
-		}
+		view.Preview = boundedUTF8Tail(view.Preview+ev.Text, 4096)
 	}
 	m.subagentViews[id] = view
 	switch ev.Type {
@@ -1580,6 +1614,21 @@ func (m *Model) staleRootEvent(ev protocol.AgentEvent) bool {
 }
 
 func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
+	// Root stream events deliberately have no Agent attribution. Give the fleet
+	// inspector an inspector-only root identity without changing the public event
+	// or allowing it into child handling.
+	if ev.Agent == nil && m.app != nil && m.app.Agent != nil && m.subagentFleetOpen {
+		root := protocol.AgentRef{ThreadID: "root", Path: protocol.RootAgentPath, Role: "root", Depth: 0}
+		for _, state := range m.subagentFleetList.Agents {
+			if state.Agent.Path == protocol.RootAgentPath {
+				root = state.Agent
+				break
+			}
+		}
+		fleetEvent := ev.Clone()
+		fleetEvent.Agent = root.Clone()
+		m.recordSubagentFleetEvent(fleetEvent)
+	}
 	// Child streams never reuse root scalar buffers or trigger root session
 	// hydration. Bubble Tea's Update goroutine alone mutates this map.
 	if ev.Agent != nil {
@@ -2398,6 +2447,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.userInputPending {
 		return m.handleUserInputKey(msg)
+	}
+
+	if m.subagentFleetOpen {
+		return m.handleSubagentFleetKey(msg)
 	}
 
 	if m.confirmGoalReplace {
@@ -3397,39 +3450,13 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if len(args) == 0 {
-			if m.asyncIO {
-				m.pickInfo = true
-				m.infoLoading = true
-				m.infoTitle = "Agents"
-				m.infoItems = nil
-				m.pickerGeneration++
-				generation := m.pickerGeneration
-				return m, func() tea.Msg {
-					list, err := m.app.ListSubagents(m.ctx, "")
-					return subagentListMsg{generation: generation, list: list, err: err}
-				}
-			}
-			list, err := m.app.ListSubagents(m.ctx, "")
-			if err != nil {
-				m.pushLine(styleError.Render(err.Error()))
-				return m, nil
-			}
-			if len(list.Agents) <= 1 {
-				if messages, messageErr := m.app.Agent.Messages(); messageErr == nil {
-					if count := historicalChildMessageCount(messages); count > 0 {
-						m.pushLine(styleFooter.Render(fmt.Sprintf("agent history: %d child completion messages survived, but this older non-durable session has no recoverable child topology/transcripts", count)))
-					}
-				}
-			}
-			items, targets := subagentInfoItems(list, m.app.Cfg.Subagents.Durable, time.Now())
-			m.infoAgentTargets = targets
-			return m.startInfoPicker(subagentInfoTitle(list), items)
+			return m, m.openSubagentFleet("")
 		}
 		if len(args) > 1 {
 			m.pushLine(styleError.Render("usage: /agent [path] | /agent concurrency <n>"))
 			return m, nil
 		}
-		return m, m.inspectAgent(args[0])
+		return m, m.openSubagentFleet(args[0])
 	case "/mcp":
 		if len(args) > 0 {
 			m.pushLine(styleError.Render("/mcp takes no arguments"))
@@ -4785,6 +4812,13 @@ func (m *Model) switchSession(st session.Store) error {
 	// snapshots before restored topology for the new session is delivered.
 	m.subagentViews = make(map[string]subagentViewState)
 	m.subagentOrder = nil
+	m.subagentFleetActivity = make(map[string][]string)
+	m.subagentFleetActivityKinds = make(map[string]protocol.AgentEventType)
+	m.subagentFleetActivitySpace = make(map[string]bool)
+	m.subagentFleetList = protocol.SubagentList{}
+	m.subagentFleetMessages = nil
+	m.subagentFleetDetailState = protocol.SubagentState{}
+	m.closeSubagentFleet()
 	m.assistantBuf.Reset()
 	m.thinkingBuf.Reset()
 	m.planBuf.Reset()
@@ -6710,6 +6744,11 @@ func (m *Model) View() string {
 	}
 	if m.trustPending {
 		return m.renderTrustPrompt()
+	}
+	// The fleet inspector owns the frame, except when a blocking host request
+	// must preempt it. Its renderer consumes only bounded in-memory snapshots.
+	if m.subagentFleetOpen && !m.permPending && !m.userInputPending {
+		return clipboardSequence + fitFrame(m.renderSubagentFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
 	}
 
 	status := "starting…"

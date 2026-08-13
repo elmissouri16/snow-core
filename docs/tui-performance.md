@@ -60,7 +60,11 @@ remain correct until an intentional v2 migration.
    events from settling newer runs. Automatic compaction retains goal ownership.
    Blocking permission/user-input requests exclusively own the overlay and keys.
 10. **Keep output bounded.** Tool progress and previews are sanitized and capped;
-    complete results remain in session/protocol data.
+    complete results remain in session/protocol data. The live subagent fleet
+    inspector retains at most 128 activity rows/32 KiB per observed child and 24
+    recent transcript messages. Authoritative lists and selected transcripts are
+    fetched only by asynchronous, generation-guarded commands; `View` and fleet
+    key navigation consume in-memory snapshots and never access session storage.
 
 ## Transcript controls
 

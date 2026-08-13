@@ -15,7 +15,7 @@ type commandSpec struct {
 
 // commands is the registry shown by the "/" palette and /help.
 var commands = []commandSpec{
-	{name: "/agent", desc: "inspect agents or configure concurrency", argHint: "[path | concurrency N]"},
+	{name: "/agent", desc: "open live fleet inspector or set concurrency", argHint: "[path | concurrency N]"},
 	{name: "/allow", desc: "approve a pending permission request", argHint: "[always]"},
 	{name: "/compact", desc: "compact older conversation context"},
 	{name: "/default", desc: "switch to Default collaboration mode"},
