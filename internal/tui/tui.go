@@ -1645,7 +1645,10 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 	if m.staleRootEvent(ev) {
 		return
 	}
-	if ev.Type != protocol.EvTurnDone && ev.Type != protocol.EvAborted {
+	// Session updates describe persistence, not active provider work. In
+	// particular, a delayed update after a terminal compaction event must not
+	// resurrect the completed turn and restart the idle spinner.
+	if ev.Type != protocol.EvTurnDone && ev.Type != protocol.EvAborted && ev.Type != protocol.EvSessionUpdated {
 		m.adoptTurn(ev)
 	}
 	switch ev.Type {

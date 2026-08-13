@@ -1653,8 +1653,11 @@ func (a *Agent) compactActiveContext(ctx context.Context, automatic bool) (proto
 	if usedFallback {
 		message = "provider summary failed; used local fallback"
 	}
-	a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: message, Compaction: &result})
+	// Persisted session mutation is observable before the terminal compaction
+	// boundary. Keeping EvCompactionDone last prevents consumers from settling
+	// the turn and then being resurrected by a trailing attributed update.
 	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: message, Compaction: &result})
 	return result, nil
 }
 

@@ -84,6 +84,25 @@ func TestCompactionShowsAnimatedProgress(t *testing.T) {
 	m.abort()
 }
 
+func TestTrailingSessionUpdateCannotResurrectCompletedCompaction(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.busy = true
+	m.compacting = true
+	m.activeTurnID = "compact-turn"
+	m.runStartedAt = m.currentTime()
+	result := &protocol.CompactionResult{SummarizedMessages: 4, RetainedMessages: 2}
+
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvCompactionDone, TurnID: "compact-turn", TurnOrigin: "compact", Compaction: result})
+	if m.busy || m.compacting || !m.runStartedAt.IsZero() {
+		t.Fatalf("compaction did not settle: busy=%v compacting=%v started=%v", m.busy, m.compacting, m.runStartedAt)
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvSessionUpdated, TurnID: "compact-turn", TurnOrigin: "compact"})
+	if m.busy || m.compacting || m.activeTurnID != "" || !m.runStartedAt.IsZero() {
+		t.Fatalf("trailing session update resurrected compact turn: busy=%v compacting=%v id=%q started=%v", m.busy, m.compacting, m.activeTurnID, m.runStartedAt)
+	}
+}
+
 func TestCompactStatusReportsOnlyDurablyDeferredGoalAsPaused(t *testing.T) {
 	testHome(t)
 	a, err := app.New(context.Background(), app.Options{Provider: "fake", Permission: "allow", CWD: t.TempDir()})

@@ -588,6 +588,38 @@ func TestManualCompactUsesSummaryAndPreservesHistory(t *testing.T) {
 	}
 }
 
+func TestManualCompactPublishesSessionUpdateBeforeTerminalDone(t *testing.T) {
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamTextDelta, Text: "model summary"},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+	}}}
+	a, st := setup(t, prov, nil, permission.ModeDeny)
+	for i := 0; i < 6; i++ {
+		msg := protocol.NewUserMessage(fmt.Sprintf("ordered-%d", i), "", fmt.Sprintf("message %d", i))
+		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var events []protocol.AgentEvent
+	a.Subscribe(func(event protocol.AgentEvent) {
+		if event.Type == protocol.EvSessionUpdated || event.Type == protocol.EvCompactionDone {
+			events = append(events, event.Clone())
+		}
+	})
+	if _, err := a.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.bus.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].Type != protocol.EvSessionUpdated || events[1].Type != protocol.EvCompactionDone {
+		t.Fatalf("compaction lifecycle order=%+v", events)
+	}
+	if events[0].TurnID == "" || events[0].TurnID != events[1].TurnID || events[1].TurnOrigin != "compact" {
+		t.Fatalf("compaction lifecycle identity=%+v", events)
+	}
+}
+
 func TestManualCompactPersistsMailboxArrivingDuringSummary(t *testing.T) {
 	provider := &blockingSummaryProvider{started: make(chan struct{}), release: make(chan struct{})}
 	a, store := setup(t, provider, nil, permission.ModeDeny)
