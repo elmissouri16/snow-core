@@ -76,10 +76,48 @@ active branch currently has zero messages.
 large session does not deserialize every historical branch into memory.
 `ContextMessages()` applies the latest compaction marker logically: providers
 receive one summary plus the retained tail, while `Messages()` continues to
-return the complete historical branch. `Metadata`/`SetMetadata` store
-append-only per-session state such as permission mode and remembered tool rules.
+return the complete historical branch. Before semantic compaction, oversized
+plain-text tool results in the older summarization prefix are projected as a
+bounded head, omission marker, and tail. This model-free pruning reduces
+summarizer input without changing exact durable messages or the ordinary
+`Messages()`/`ContextMessages()` APIs. `Metadata`/`SetMetadata` store append-only
+per-session state such as permission mode and remembered tool rules.
+
+When an existing session is opened, the agent checks the final provider tool
+batch for calls without results. A hard crash cannot prove whether an external
+operation completed, so Snow appends error results that mark read-risk calls as
+retryable and write/exec/network/delegation calls as having an unknown outcome.
+It never automatically retries an interrupted side effect. Recovery is
+idempotent and uses one atomic batch when the store supports batch appends.
 `FileIndex.List` counts branch messages with SQL rather than loading the full
 transcript.
+
+## Prior-session search and references
+
+Snow exposes two deferred, read-only model tools for reusing prior work:
+
+- `session_search` builds a disposable SQLite FTS5 index from the current
+  project’s durable root sessions and returns one bounded representative hit per
+  matching branch. The durable session databases remain authoritative; the
+  derived index is rebuilt from their current tips and is never a memory store.
+- `session_reference` captures a selected search result as a bounded immutable
+  snapshot. The snapshot is persisted as the ordinary tool-result message on the
+  current branch, so later changes to the source session cannot alter replay.
+
+Authorization is host-enforced using the same exact normalized CWD filtering as
+`FileIndex.List`. The current session and private `.db.agents` child databases
+are excluded. Search and reference projection includes direct user text,
+finalized assistant text/plan blocks, session names, and compaction summaries.
+It excludes tool messages and tool calls, thinking, images, provider-private
+continuity data, agent mail, metadata, permission state, goals, queues, trust,
+credentials, and child ownership.
+
+Search results carry source session, branch, entry, and current tip IDs.
+`session_reference` requires that tip ID and fails if the source branch changed
+between search and capture. Captures default to 65,536 bytes, permit at most
+262,144 bytes, and are limited to three successful references per target
+branch. Historical text is explicitly framed as untrusted information and can
+never grant permissions or override current instructions.
 
 ## Go usage
 

@@ -181,10 +181,14 @@ public-address-only, redirect-checked, and never executes JavaScript.
 - Pure-Go SQLite session databases with append-only parent-linked entries
 - Indexed branch tips, named forks, branch selection, rename, and guarded delete
 - Current-directory session picker and explicit path resume
-- Turn-aware compaction that preserves complete history, manual for ordinary work and automatic for goals at a configurable context threshold
+- Turn-aware compaction that preserves complete history, manually for ordinary work and automatically for goals at a configurable context threshold; oversized historical tool results are pruned only in the summarizer projection
+- Resume-time repair of interrupted final tool batches with risk-aware unknown-outcome results instead of automatic side-effect retries
+- Advisory detection of identical consecutive tool calls, with bounded reminders at escalating thresholds to break unproductive loops
 - Embedded Markdown system preamble with optional global/trusted-project file
   override, plus `AGENTS.md` discovery with a hard byte cap
 - Usage and optional catalog-derived cost persisted with assistant messages
+- Deferred same-project `session_search` and `session_reference` tools with a
+  disposable FTS5 index, tip-pinned bounded snapshots, and private-data exclusions
 
 See [sessions](docs/sessions.md) and [configuration](docs/configuration.md).
 

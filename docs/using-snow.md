@@ -183,8 +183,8 @@ meaningful.
 | `/resume [path]` | Open the session picker or resume an explicit database |
 | `/new` | Create a new persisted session |
 | `/tree` | Inspect and switch named branches; `f`, `r`, `d` fork/rename/delete |
-| `/agent` | Show the subagent tree and aggregate state |
-| `/agent PATH` | Inspect one child's bounded tool-aware transcript |
+| `/agent` | Open the live subagent fleet inspector; select with ↑/↓ or j/k, scroll detail with PageUp/PageDown, refresh with `r`, close with Esc |
+| `/agent PATH` | Open the fleet inspector with one child preselected |
 | `/agent concurrency N` | Persist child concurrency for the next launch |
 | `/mcp` | Inspect configured/connected MCP server status |
 | `/skills` | Inspect discovered Agent Skills |
@@ -242,11 +242,20 @@ prompts, messages, usage, mode, and goal state. Delete is restricted to inactive
 leaf branches and never deletes shared history.
 
 `/compact` summarizes the projected context while retaining complete recent
-turns. When invoked during automatic goal work, manual compaction pauses that
+turns. Oversized plain-text tool results in the older summarization prefix are
+first reduced to a bounded head and tail; exact session history remains
+unchanged. When invoked during automatic goal work, manual compaction pauses that
 goal after the summary; use `/goal resume` to continue. Active goals also compact automatically between complete continuation
 turns at the configured context threshold (90% by default; `0` disables it).
 Ordinary prompts do not auto-compact. The full append-only history remains
-available. See [Sessions](sessions.md).
+available.
+
+Snow also detects identical consecutive tool calls during one admitted run and
+adds advisory reminders after the third, fifth, and eighth repetition. It does
+not block legitimate repeated calls. On session resume, unmatched calls in the
+final interrupted tool batch receive synthetic error results; potentially
+side-effecting calls are reported as having an unknown outcome and are never
+automatically retried. See [Sessions](sessions.md).
 
 ## Model-requested input
 

@@ -207,9 +207,10 @@ sequenceDiagram
 
 1. Every accepted user prompt gets a session entry before the first provider call (crash-safe intent).
 2. Assistant messages are finalized with `stop_reason` before tool execution batch commits (or use explicit `pending` only in-memory, never as durable terminal state).
-3. Tool results always reference `tool_call_id`.
+3. Tool results always reference `tool_call_id`; opening a session atomically repairs an interrupted final tool batch with explicit retryable/unknown-outcome results and never retries side effects automatically.
 4. `context.Context` cancellation aborts provider stream **and** in-flight tools.
 5. Events are the only cross-surface observation channel (TUI/SDK/print/RPC all subscribe).
+6. Identical consecutive tool calls are detected per admitted run using canonical JSON arguments; bounded advisory reminders at counts 3, 5, and 8 do not veto execution.
 
 ### 2.4 Efficiency principles
 
@@ -218,7 +219,7 @@ sequenceDiagram
 | Single binary | Avoid CGo; keep deps lean; Charm + stdlib HTTP |
 | Stream, don’t buffer | Provider adapters yield deltas; TUI paints incrementally |
 | Durable sessions | Pure-Go SQLite; WAL transactions; indexed branch queries; no full scan on open |
-| Bound tool output | Truncate stdout/stderr and read payloads with clear markers |
+| Bound tool output | Truncate stdout/stderr and read payloads with clear markers; prune oversized historical plain-text results only in the compaction summarizer projection |
 | Cancel everywhere | `ctx` on HTTP, bash, file IO timeouts |
 | Segregate packages | UI never blocks provider decode on render lock longer than one frame |
 | Cheap default tools | Use bounded pure-Go `grep`/`glob` before shelling out |
@@ -463,8 +464,17 @@ type SessionIndex interface {
 ~/.snow/sessions/<cwd-encoded>/<timestamp>_<suffix>.db
 ```
 
-`cwd-encoded`: absolute path with `/` → `-` (pi-like). The SQLite schema is
-**snow-owned**; old JSONL sessions are intentionally not migrated.
+Current directories use `cwd-v2-<sha256(normalized-absolute-cwd)>`; the legacy
+flattened encoder remains discoverable with stored-CWD verification. The SQLite
+schema is **snow-owned**; old JSONL sessions are intentionally not migrated.
+
+Prior-session reuse is deliberately narrower than a general memory product.
+`session_search` rebuilds a disposable SQLite FTS5 corpus from same-project root
+session names, direct user/final assistant text, and compaction summaries.
+`session_reference` imports at most three tip-pinned, bounded, untrusted
+snapshots per target branch. Tool content, reasoning, images, provider-private
+data, credentials, permission/trust state, goals, queues, and child databases
+are excluded; references transfer information only and no authority.
 
 ### 3.5 Agent
 
@@ -711,6 +721,9 @@ JSON: `{"answers":[{"id":"...","answer":"..."}]}`.
   deferred/hidden in deny mode; write/edit/bash require permission according to mode.
 - Unknown tool name → `tool_result` error string, not hard crash.
 - Panic in tool → recovered to error result.
+- Exact consecutive repeats are advisory-loop-guarded at escalating thresholds;
+  bookkeeping tools may be transparent, and no reminder changes permission or
+  execution policy.
 
 ---
 
