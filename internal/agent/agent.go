@@ -37,13 +37,15 @@ import (
 const MaxToolRetries = 1
 
 const (
-	defaultDeferredTopK  = 5
-	deferredCandidateK   = 20
-	maxRoutingEventTools = 20
-	maxPendingRootInputs = 64
-	maxQueuedInputBytes  = 64 * 1024
-	automaticTurnDelay   = 25 * time.Millisecond
-	skillActivationMeta  = "agent_skill_activation"
+	defaultDeferredTopK     = 5
+	deferredCandidateK      = 20
+	maxRoutingEventTools    = 20
+	maxPendingRootInputs    = 64
+	maxQueuedInputBytes     = 64 * 1024
+	automaticTurnDelay      = 25 * time.Millisecond
+	goalTransientRetryDelay = 250 * time.Millisecond
+	maxGoalTransientRetries = 1
+	skillActivationMeta     = "agent_skill_activation"
 
 	repeatedToolFirstThreshold = 3
 	repeatedToolNextThreshold  = 5
@@ -2417,17 +2419,19 @@ func (a *Agent) stopGoalOnError(turnErr error) {
 
 func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 	crossed, accountingErr := a.finishGoalAccounting()
+	transient := provider.IsTransientError(turnErr)
 	if accountingErr != nil {
 		a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal accounting: " + accountingErr.Error()})
 		a.stopGoalOnError(accountingErr)
 	}
 	if turnErr != nil || accountingErr != nil {
-		// Accounting always precedes terminal classification, but a failed
-		// request must never launch a budget wrap-up or another autonomous turn.
+		// Accounting always precedes terminal classification. A transient
+		// provider failure may continue once at the goal boundary; all other
+		// failures stop immediately, and budget crossing keeps precedence.
 		a.mu.Lock()
 		a.budgetWrap = false
 		a.mu.Unlock()
-		if accountingErr == nil && !errors.Is(turnErr, context.Canceled) && !crossed {
+		if accountingErr == nil && !errors.Is(turnErr, context.Canceled) && !crossed && !transient {
 			a.stopGoalOnError(turnErr)
 		}
 	}
@@ -2437,7 +2441,7 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 	if a.goalAtTurn != nil {
 		goalID = a.goalAtTurn.GoalID
 	}
-	if !userOrigin && a.turnOrigin == "goal" {
+	if !userOrigin && a.turnOrigin == "goal" && !transient {
 		if a.autoEmptyGoal != goalID {
 			a.autoEmptyGoal = goalID
 			a.autoEmpty = 0
@@ -2453,7 +2457,7 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 	controller := a.opts.Goal
 	mode := a.turnMode
 	a.mu.Unlock()
-	if controller == nil || mode == protocol.ModePlan || stopped || turnErr != nil || accountingErr != nil {
+	if controller == nil || mode == protocol.ModePlan || stopped || accountingErr != nil || (turnErr != nil && !transient) {
 		return false, accountingErr
 	}
 	g, err := controller.Get()
@@ -2528,6 +2532,49 @@ func (a *Agent) ResetGoalAudit() {
 	a.mu.Unlock()
 }
 
+// stopActiveGoalOnError performs terminal classification after a retryable
+// failure exhausts the autonomous retry budget. The admitted turn has already
+// released goalAtTurn by this point, so the durable controller is authoritative.
+func (a *Agent) stopActiveGoalOnError(turnErr error) {
+	controller := a.opts.Goal
+	if controller == nil {
+		return
+	}
+	g, err := controller.Get()
+	if err != nil || g == nil || g.Status != protocol.GoalActive {
+		return
+	}
+	status := protocol.GoalBlocked
+	var limited provider.UsageLimitedError
+	if errors.As(turnErr, &limited) && limited.UsageLimited() {
+		status = protocol.GoalUsageLimited
+	}
+	_, _ = controller.SetStatus(g.GoalID, status, false)
+}
+
+func (a *Agent) waitGoalTransientRetry(delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	ticker := time.NewTicker(automaticTurnDelay)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-timer.C:
+			a.mu.RLock()
+			ready := !a.autoStop && !a.closed
+			a.mu.RUnlock()
+			return ready
+		case <-ticker.C:
+			a.mu.RLock()
+			stopped := a.autoStop || a.closed
+			a.mu.RUnlock()
+			if stopped {
+				return false
+			}
+		}
+	}
+}
+
 func (a *Agent) ContinueGoal() {
 	a.mu.Lock()
 	if a.closed || a.mode == protocol.ModePlan || a.opts.Goal == nil {
@@ -2557,6 +2604,7 @@ func (a *Agent) ContinueGoal() {
 			a.finishAutoWorker(done)
 			return
 		}
+		transientRetries := 0
 		for {
 			a.mu.RLock()
 			stopped = a.autoStop
@@ -2565,8 +2613,25 @@ func (a *Agent) ContinueGoal() {
 				break
 			}
 			if err := a.internalTurn(context.Background(), wrap); err != nil {
+				if provider.IsTransientError(err) && transientRetries < maxGoalTransientRetries {
+					g, goalErr := a.opts.Goal.Get()
+					deferred, deferErr := a.opts.Goal.Deferred()
+					if goalErr == nil && deferErr == nil && g != nil && g.Status == protocol.GoalActive && !deferred {
+						transientRetries++
+						a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: fmt.Sprintf("transient provider failure; retrying active goal (%d/%d)", transientRetries, maxGoalTransientRetries)})
+						if a.waitGoalTransientRetry(goalTransientRetryDelay) {
+							wrap = false
+							continue
+						}
+						break
+					}
+				}
+				if provider.IsTransientError(err) {
+					a.stopActiveGoalOnError(err)
+				}
 				break
 			}
+			transientRetries = 0
 			a.mu.Lock()
 			crossed := a.budgetWrap
 			a.budgetWrap = false

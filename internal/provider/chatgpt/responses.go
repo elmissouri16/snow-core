@@ -486,23 +486,7 @@ func responseRequestID(header http.Header, secrets ...string) string {
 }
 
 func retryableCodexError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var responseErr *responsesapi.ResponseError
-	if !errors.As(err, &responseErr) {
-		return false
-	}
-	switch responseErr.Status {
-	case http.StatusRequestTimeout, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		return true
-	}
-	code := strings.ToLower(responseErr.Code)
-	if code != "" {
-		return code == "network_error" || code == "stream_truncated" || code == "stream_idle" || strings.Contains(code, "overload") || strings.Contains(code, "service_unavailable") || strings.Contains(code, "upstream") || strings.Contains(code, "timeout")
-	}
-	message := strings.ToLower(responseErr.Message)
-	return strings.Contains(message, "overload") || strings.Contains(message, "service unavailable") || strings.Contains(message, "upstream connect") || strings.Contains(message, "temporarily unavailable")
+	return providerpkg.IsTransientError(err)
 }
 
 func withAttemptCount(err error, attempts int) error {

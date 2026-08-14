@@ -37,10 +37,15 @@ per-request estimated cost by currency. Cached input retains its discounted
 class rather than being priced as ordinary input. Missing pricing leaves cost
 absent; Snow never invents a price. These estimates are not provider invoices.
 
-Provider/tool/context/accounting failures immediately stop an active goal as
-`blocked`, or `usage_limited` for provider quota exhaustion. Accounting errors
-are returned to the caller and never permit another autonomous turn. This host error classification is
-distinct from a model declaring an external blocker. Three automatic turns
+Tool, context, persistence, and accounting failures immediately stop an active
+goal as `blocked`; provider quota exhaustion becomes `usage_limited`.
+Structured transient provider failures (for example a ChatGPT network or 5xx
+error) receive one delayed goal-boundary retry while the goal remains active.
+The retry continues from the persisted partial/error response, so the host does
+not automatically replay completed write/exec tools. If that single recovery attempt fails, the
+goal becomes `blocked` rather than looping. Accounting errors are returned to
+the caller and never permit another autonomous turn. This host error
+classification is distinct from a model declaring an external blocker. Three automatic turns
 with no text or tool progress conservatively pause the goal and emit an error;
 they do not falsely claim that the blocked audit succeeded. Automatic requests
 also yield briefly between turns, preventing an immediate-response provider

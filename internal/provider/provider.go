@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 
@@ -31,6 +32,50 @@ type LimitError struct {
 type ContextWindowExceededError interface {
 	error
 	ContextWindowExceeded() bool
+}
+
+// TransientError marks a provider failure that may succeed when the same
+// side-effect-free model request is attempted again. Tool execution is not
+// covered by this marker and remains governed by the agent's unknown-outcome
+// recovery rules.
+type TransientError interface {
+	error
+	Transient() bool
+}
+
+// IsTransientError conservatively recognizes structured provider and network
+// failures. Every member of an errors.Join value must be transient; a retryable
+// provider failure joined with a persistence or accounting error is not safe to
+// retry automatically. Caller cancellation and deadlines are never retried.
+func IsTransientError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !IsTransientError(child) {
+				return false
+			}
+		}
+		return true
+	}
+	if marked, ok := err.(TransientError); ok {
+		return marked.Transient()
+	}
+	if limited, ok := err.(UsageLimitedError); ok && limited.UsageLimited() {
+		return false
+	}
+	if networkErr, ok := err.(net.Error); ok {
+		return networkErr.Timeout() || networkErr.Temporary()
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return IsTransientError(wrapped.Unwrap())
+	}
+	return false
 }
 
 // IsContextWindowExceeded conservatively recognizes structured markers and the

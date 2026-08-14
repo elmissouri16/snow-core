@@ -82,6 +82,29 @@ func (e *ResponseError) ContextWindowExceeded() bool {
 	return false
 }
 
+// Transient reports whether retrying a side-effect-free provider request is
+// appropriate. Quota/rate-limit responses are deliberately excluded; adapters
+// expose those through provider.UsageLimitedError instead.
+func (e *ResponseError) Transient() bool {
+	if e == nil {
+		return false
+	}
+	switch e.Status {
+	case http.StatusRequestTimeout, http.StatusTooEarly, http.StatusInternalServerError,
+		http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	code := strings.ToLower(strings.TrimSpace(e.Code))
+	if code != "" {
+		return code == "network_error" || code == "stream_truncated" || code == "stream_idle" ||
+			strings.Contains(code, "overload") || strings.Contains(code, "service_unavailable") ||
+			strings.Contains(code, "upstream") || strings.Contains(code, "timeout")
+	}
+	message := strings.ToLower(e.Message)
+	return strings.Contains(message, "overload") || strings.Contains(message, "service unavailable") ||
+		strings.Contains(message, "upstream connect") || strings.Contains(message, "temporarily unavailable")
+}
+
 func (e *ResponseError) Error() string {
 	if e == nil {
 		return "responses: request failed"

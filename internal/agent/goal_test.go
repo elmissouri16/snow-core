@@ -15,6 +15,7 @@ import (
 	goalpkg "github.com/snow-core/snow/internal/goal"
 	"github.com/snow-core/snow/internal/permission"
 	providerpkg "github.com/snow-core/snow/internal/provider"
+	"github.com/snow-core/snow/internal/provider/responsesapi"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/tools"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -143,6 +144,71 @@ func TestNoProgressGuardPausesAfterThree(t *testing.T) {
 	g, _ := c.Get()
 	if g.Status != protocol.GoalPaused || p.call != 3 {
 		t.Fatalf("goal=%+v calls=%d", g, p.call)
+	}
+}
+
+func TestAutomaticGoalRecoversFromTransientProviderFailure(t *testing.T) {
+	p := &scriptedProvider{}
+	a, c, _ := goalAgent(t, p)
+	g, err := c.Create("recover automatically", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transient := responsesapi.NewResponseError("chatgpt", 0, "network request failed", "network_error", "")
+	p.scripts = [][]protocol.StreamEvent{
+		{{Type: protocol.EvStreamError, Err: transient}},
+		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "complete", ToolName: "update_goal", Arguments: []byte(`{"goal_id":"` + g.GoalID + `","status":"complete"}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+		{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}
+	retrying := make(chan struct{}, 1)
+	a.Subscribe(func(event protocol.AgentEvent) {
+		if event.Type == protocol.EvError && strings.Contains(event.Message, "retrying active goal") {
+			select {
+			case retrying <- struct{}{}:
+			default:
+			}
+		}
+	})
+	a.ContinueGoal()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := a.WaitGoal(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DrainEvents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != protocol.GoalComplete || p.call != 3 {
+		t.Fatalf("goal=%+v calls=%d", got, p.call)
+	}
+	select {
+	case <-retrying:
+	default:
+		t.Fatal("missing transient retry event")
+	}
+}
+
+func TestAutomaticGoalBlocksAfterTransientRetryExhaustion(t *testing.T) {
+	transient := responsesapi.NewResponseError("chatgpt", 0, "network request failed", "network_error", "")
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamError, Err: transient}}}}
+	a, c, _ := goalAgent(t, p)
+	_, _ = c.Create("stop after bounded retry", nil, false)
+	a.ContinueGoal()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := a.WaitGoal(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != protocol.GoalBlocked || p.call != 2 {
+		t.Fatalf("goal=%+v calls=%d", got, p.call)
 	}
 }
 

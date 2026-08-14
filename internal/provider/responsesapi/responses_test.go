@@ -188,6 +188,27 @@ func TestSanitizeErrorTextRedactsCutoffPrefixesAndControls(t *testing.T) {
 	}
 }
 
+func TestResponseErrorTransientClassification(t *testing.T) {
+	for _, candidate := range []*ResponseError{
+		NewResponseError("test", http.StatusServiceUnavailable, "unavailable", "", ""),
+		NewResponseError("test", 0, "network failed", "network_error", ""),
+		NewResponseError("test", 0, "idle", "stream_idle", ""),
+	} {
+		if !candidate.Transient() {
+			t.Fatalf("not transient: %+v", candidate)
+		}
+	}
+	for _, candidate := range []*ResponseError{
+		NewResponseError("test", http.StatusTooManyRequests, "limited", "rate_limit", ""),
+		NewResponseError("test", http.StatusBadRequest, "invalid", "invalid_request", ""),
+		NewResponseError("test", 0, "permanent failure", "", ""),
+	} {
+		if candidate.Transient() {
+			t.Fatalf("unexpected transient: %+v", candidate)
+		}
+	}
+}
+
 func TestResponseErrorMarksContextWindowExceeded(t *testing.T) {
 	for _, candidate := range []*ResponseError{
 		NewResponseError("test", 400, "too large", "context_length_exceeded", ""),
