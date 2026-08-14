@@ -50,12 +50,21 @@ def run(args: argparse.Namespace) -> int:
         args.provider,
         "--permission",
         "deny",
-        "--no-session",
+        "--thinking",
+        "off",
         "--no-plugins",
         "--no-mcp",
         "--no-skills",
         "--no-subagents",
     ]
+    if args.session:
+        command.extend(("--session", str(Path(args.session).expanduser())))
+    else:
+        command.append("--no-session")
+    if args.model:
+        command.extend(("--model", args.model))
+    if args.base_url:
+        command.extend(("--base-url", args.base_url))
     proc = subprocess.Popen(
         command,
         stdin=subprocess.PIPE,
@@ -72,16 +81,20 @@ def run(args: argparse.Namespace) -> int:
     reader.start()
 
     deadline = time.monotonic() + args.timeout
+    saw_info_response = False
     saw_prompt_ack = False
     saw_text = False
     saw_turn_done = False
 
     try:
+        # Responses may arrive out of request order and are mixed with events.
+        # Use IDs rather than assuming the next output line answers a request.
+        send(proc, {"id": "info-1", "type": "session_info"})
         send(proc, {"id": "prompt-1", "type": "prompt", "message": args.prompt})
-        while not saw_turn_done:
+        while not (saw_info_response and saw_prompt_ack and saw_turn_done):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError("timed out waiting for turn_done")
+                raise TimeoutError("timed out waiting for RPC responses and turn_done")
             try:
                 line = lines.get(timeout=remaining)
             except queue.Empty as exc:
@@ -94,7 +107,13 @@ def run(args: argparse.Namespace) -> int:
             if kind == "response":
                 if not message.get("success"):
                     raise RuntimeError(message.get("error", "RPC command failed"))
-                if message.get("id") == "prompt-1":
+                response_id = message.get("id")
+                if response_id == "info-1":
+                    data = message.get("data")
+                    if not isinstance(data, dict) or "provider" not in data or "model" not in data:
+                        raise RuntimeError("session_info response omitted provider/model")
+                    saw_info_response = True
+                elif response_id == "prompt-1":
                     saw_prompt_ack = True
                 continue
 
@@ -131,7 +150,7 @@ def run(args: argparse.Namespace) -> int:
         if saw_text:
             print()
         else:
-            print("prompt completed (the fake provider emits no text)")
+            print("agent turn completed (the fake provider emits no text)")
     finally:
         if proc.stdin is not None and not proc.stdin.closed:
             try:
@@ -157,7 +176,14 @@ def run(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--snow", default="snow", help="snow binary or path (default: snow on PATH)")
-    parser.add_argument("--provider", default="fake", choices=("fake", "opencode-go", "chatgpt"))
+    parser.add_argument(
+        "--provider",
+        default="fake",
+        choices=("fake", "opencode-go", "openai-compatible", "chatgpt"),
+    )
+    parser.add_argument("--model", default="", help="model id (default: provider default)")
+    parser.add_argument("--base-url", default="", help="API root for openai-compatible")
+    parser.add_argument("--session", default="", help="SQLite session path (default: ephemeral)")
     parser.add_argument("--prompt", default="Summarize this repository.")
     parser.add_argument("--timeout", type=float, default=120, help="seconds to wait for turn_done")
     args = parser.parse_args()

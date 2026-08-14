@@ -35,7 +35,7 @@ shutdown, which cancels active RPC work. Use a persistent subprocess client.
 - **stderr:** startup/configuration diagnostics and process-level errors
 - **framing:** UTF-8 JSON, exactly one object per LF (`\n`) line
 - **maximum input line:** 16 MiB
-- **blank lines:** ignored
+- **empty frames:** a zero-length line is ignored; whitespace-only lines are invalid JSON
 
 Split only on the LF byte. Do not use Unicode line separators as frames.
 Responses and events share one serialized writer, so bytes from different
@@ -69,7 +69,10 @@ at startup. Clients must accept events before their first response.
 | `mode` | Top-level collaboration mode for `set_mode` or prompt-attached mode |
 | `params` | Command-specific JSON object |
 
-Use a unique ID for every request. Events do not carry request IDs.
+Use a unique ID for every request. Events do not carry request IDs. The request
+and response envelopes are documentation-defined wire types implemented by
+`internal/rpc`; `pkg/protocol` exposes event and nested payload DTOs but does not
+currently export RPC command-envelope or typed `session_info` structs.
 
 ## Response envelope
 
@@ -120,9 +123,12 @@ Attach a collaboration mode atomically:
 `message` is required. `mode`, when present, is `default` or `plan`.
 
 The server immediately returns a successful acknowledgement, then runs the root
-prompt asynchronously while continuing to read stdin. Completion is signaled by
-the event stream—normally `turn_done`—not by the acknowledgement. A later runtime
-failure may produce a second `success:false` response with the same prompt ID.
+prompt asynchronously while continuing to read stdin. `turn_done` marks the end
+of the agent turn, not a definitive successful RPC outcome. A runtime or
+persistence failure discovered as the prompt unwinds may produce a second
+`success:false` response with the same prompt ID after `turn_done`; clients must
+keep reading while the process remains active and treat that response as
+terminal failure for the accepted prompt.
 
 Only one root prompt may run. A second `prompt` fails; it never implicitly
 cancels accepted work. Use `steer`, `follow_up`, or `abort`.
@@ -173,8 +179,8 @@ incompatible.
 {"id":"thinking-1","type":"set_thinking","thinking":"medium"}
 ```
 
-Values are `off`, `minimal`, `low`, `medium`, and `high`. The active model's
-advertised capabilities are authoritative.
+Values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and
+`ultra`. The active model's advertised capabilities are authoritative.
 
 ### `set_mode`
 
@@ -244,7 +250,10 @@ Successful `data` contains:
 
 `name` is empty until assigned for legacy/untitled stores; built-in stores receive
 a local title with their first accepted prompt. `path` is empty for
-`--no-session`; `goal` is omitted when none exists.
+`--no-session`; `goal` is omitted when none exists. Inside a present goal,
+`token_budget` is `null` when unlimited and `estimated_costs` can be `null` when
+pricing is unavailable. `max_concurrent_agents` is a compatibility alias of
+`max_concurrent_threads`; both currently carry the same limit.
 
 ## Model-requested user input
 
@@ -433,13 +442,64 @@ turn_id turn_origin turn_sequence root_epoch goal_continuing
 
 Correlation rules:
 
-- `agent` omitted: ordinary root event;
+- `agent` omitted: root-agent event, including ordinary prompts, goal continuation, and root state/lifecycle events;
 - `agent` present: attributed child stream/tool/usage event;
 - `subagent` present: child lifecycle snapshot;
 - `agent_message` present: attributed mailbox event;
 - `turn_sequence`: process-local monotonic admission order for correlated turn events (use `turn_id` as the stable identity; the sequence restarts with the process);
 - `root_epoch`: process-local root session/branch reconciliation generation stamped on every root event, including events outside a turn;
 - `tool_output`: bounded preview only; full results remain in session storage.
+
+`permission_request` is part of the shared `AgentEvent` type, but RPC's
+headless permission asker fails closed and does not emit it. `user_input_request`
+is a separate model-question interaction and is emitted as documented above.
+
+### Event payload quick reference
+
+Fields not listed for an event are omitted unless they are one of the correlation
+fields above. Nested objects use the public `pkg/protocol` JSON tags.
+
+| Events | Primary payload |
+|---|---|
+| `text_delta`, `thinking_delta` | `text` |
+| `tool_start` | `tool_call_id`, `tool_name` |
+| `tool_progress` | `tool_progress: {tool_call_id,name,message?,done,is_error?}` |
+| `tool_end` | `tool_call_id`, `tool_name`, `tool_output?`, `tool_duration_ms?`, `is_error?` |
+| `tool_routing` | `tool_routing: {trigger,tool_ids?,candidate_count,selected_count,exposed_count,schema_bytes,latency_ms,fallback?}` |
+| `usage` | `usage` object described below |
+| `model_changed` | `model` (`id`, `provider`, capability and optional pricing metadata) |
+| `mode_changed` | `mode: {mode,reasoning_effort}` |
+| `plan_started`, `plan_delta`, `plan_completed` | `plan: {id,text?}`; delta text is in `text` where present |
+| `plan_update` | `plan_update: {explanation?,plan:[{step,status}]}`; status is `pending`, `in_progress`, or `completed` |
+| `compaction_started`, `compaction_done` | `compaction: {summarized_messages,retained_messages,summary?,used_fallback?,automatic?}` |
+| `user_input_request` | `user_input` object from the interaction section above |
+| `queue_updated` | `queue: {items:[{id,kind,text,order}]}` where `kind` is `steer` or `follow_up`; items are in submission order |
+| `thread_goal_updated` | `thread_goal: {goal?,cleared?}`; `goal` uses the full shape below |
+| `subagent_started`, `subagent_status` | `subagent` snapshot described below |
+| `subagent_message` | `agent_message: {id,author,recipient,kind,content,trigger_turn?,created_at}` |
+| `subagent_activity` | aggregate activity text in `message`, with related `agent`/`subagent` fields when available |
+| `session_updated`, `turn_done`, `aborted` | correlation/state fields; `message` may provide a human-readable detail |
+| `error` | `message`, normally `is_error:true` |
+
+A `usage` object has `input`, `output`, optional `reasoning`, `cache_read`,
+optional `cache_read_known`, `cache_write`, `total_tokens`, optional `requests`,
+and optional `cost`. Cost is
+`{currency?,input,output,cache_read,cache_write,total}`.
+
+A full goal contains `session_id`, `branch_id`, `goal_id`, `objective`, `status`,
+optional `token_budget`, `tokens_used`, `seconds_used`, optional
+`estimated_costs`, `created_at`, and `updated_at`. Status is `active`, `paused`,
+`blocked`, `usage_limited`, `budget_limited`, or `complete`. A cleared goal event
+uses `thread_goal.cleared:true` with no goal.
+
+A subagent snapshot contains `agent`, `status`, optional provider/model/thinking,
+timestamps, bounded `result`/`error`, optional `usage`, and optional `generation`.
+The nested agent reference contains `thread_id`, optional `parent_thread_id`,
+canonical `path`/`parent_path`, optional role/nickname, and `depth`. Lifecycle
+status is `pending_init`, `queued`, `running`, `interrupted`, `completed`,
+`errored`, `shutdown`, `not_loaded`, or `not_found` where the command/event
+permits it. `subagent_list` additionally returns `running`, `queued`, `terminal`,
+`concurrent_limit`, `agent_limit`, and optional `truncated`.
 
 Usage payloads keep `input` as the total prompt count, including cached tokens.
 `cache_read_known: true` means the provider explicitly reported its cached-token
@@ -465,8 +525,10 @@ turn_done event                        # root turn complete
 
 Important ordering rules:
 
-- Prompt acknowledgement is not completion.
-- A prompt runtime failure can send a later failure response with the same ID.
+- Prompt acknowledgement is admission, not completion.
+- `turn_done` ends the agent turn but does not prove the RPC command succeeded.
+- A prompt runtime/persistence failure can send a later failure response with the
+  same ID, including after `turn_done`; keep the response route alive.
 - `subagent_wait` responses are asynchronous.
 - Different command responses can arrive out of request order.
 - Writes are frame-atomic, so a single JSON line is never mixed with another.
@@ -474,7 +536,7 @@ Important ordering rules:
   before `Serve` returns; cleanup failures are returned to the host.
 - Keep a response table keyed by ID and process events independently.
 
-## Complete Python client
+## Minimal runnable Python client
 
 A dependency-free, directly runnable version lives at
 [`examples/rpc/python/client.py`](../examples/rpc/python/client.py) and is
@@ -558,6 +620,13 @@ proc.stdin.close()  # EOF: orderly RPC shutdown
 raise SystemExit(proc.wait())
 ```
 
+This compact snippet demonstrates framing and events, not a definitive terminal
+success handshake. The current protocol can emit a same-ID prompt failure after
+`turn_done`; a long-lived host must keep its response route active and surface
+such late failures. The checked-in client additionally correlates
+`session_info` and the prompt acknowledgement by ID, but remains a lifecycle
+smoke example rather than a reusable RPC library.
+
 Production clients should also:
 
 - use an asynchronous reader independent from request submission;
@@ -600,6 +669,11 @@ OS privileges. Read the [Security model](security.md).
 
 The current command surface covers prompts, active root input, cancellation,
 model/thinking/mode controls, session inspection, model-requested input, goals,
-and subagents. Branch management, compaction, configuration mutation, MCP/skill
-management, and login are currently CLI/TUI/SDK concerns rather than RPC
-commands.
+and subagents. RPC does not expose provider or subagent model catalogs;
+`session_info` reports only the active model and its supported thinking levels.
+Hosts must select exact provider/model IDs out of band through startup
+configuration/flags before using `set_model` or child model overrides.
+
+Branch management, compaction, reasoning-summary/text-verbosity controls,
+configuration mutation, MCP/skill management, and login are currently
+CLI/TUI/SDK concerns rather than RPC commands.

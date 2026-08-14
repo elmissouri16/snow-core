@@ -53,7 +53,8 @@ type Options struct {
 	PlanModeReasoningEffort string
 	// APIKey provides an explicit credential (overrides auth.json and env).
 	APIKey string
-	// BaseURL overrides the active provider base URL. It is required for openai-compatible.
+	// BaseURL overrides the active provider base URL. OpenAI-compatible requires
+	// either this value or a globally configured endpoint.
 	BaseURL string
 	// Plugins are explicit argv-based external runtimes.
 	Plugins []publicplugin.PluginSpec
@@ -305,6 +306,7 @@ func (s *Session) SubagentModels() []protocol.Model {
 	return a.SubagentModels()
 }
 
+// SpawnSubagent creates a role-scoped child at a canonical path.
 func (s *Session) SpawnSubagent(ctx context.Context, req protocol.SpawnSubagentRequest) (protocol.SubagentState, error) {
 	a, e := s.activeApp()
 	if e != nil {
@@ -312,6 +314,8 @@ func (s *Session) SpawnSubagent(ctx context.Context, req protocol.SpawnSubagentR
 	}
 	return a.SpawnSubagent(ctx, req)
 }
+
+// SendSubagentMessage queues attributed mail without starting a child turn.
 func (s *Session) SendSubagentMessage(ctx context.Context, target, message string) error {
 	a, e := s.activeApp()
 	if e != nil {
@@ -319,6 +323,8 @@ func (s *Session) SendSubagentMessage(ctx context.Context, target, message strin
 	}
 	return a.SendSubagentMessage(ctx, target, message)
 }
+
+// FollowupSubagent queues work and starts or reuses an idle child.
 func (s *Session) FollowupSubagent(ctx context.Context, target, message string) error {
 	a, e := s.activeApp()
 	if e != nil {
@@ -326,6 +332,8 @@ func (s *Session) FollowupSubagent(ctx context.Context, target, message string) 
 	}
 	return a.FollowupSubagent(ctx, target, message)
 }
+
+// WaitSubagents waits for one child activity or lifecycle change, or timeout.
 func (s *Session) WaitSubagents(ctx context.Context, timeout time.Duration) (protocol.WaitSubagentsResult, error) {
 	a, e := s.activeApp()
 	if e != nil {
@@ -344,6 +352,8 @@ func (s *Session) WaitSubagentsUntilAll(ctx context.Context, timeout time.Durati
 	}
 	return a.WaitSubagentsUntilAll(ctx, timeout)
 }
+
+// InterruptSubagent cancels only the target's current turn and returns its previous status.
 func (s *Session) InterruptSubagent(ctx context.Context, target string) (protocol.AgentStatus, error) {
 	a, e := s.activeApp()
 	if e != nil {
@@ -351,6 +361,8 @@ func (s *Session) InterruptSubagent(ctx context.Context, target string) (protoco
 	}
 	return a.InterruptSubagent(ctx, target)
 }
+
+// Subagents returns bounded snapshots for the root and its visible descendants.
 func (s *Session) Subagents() []protocol.SubagentState {
 	a, e := s.activeApp()
 	if e != nil {
@@ -362,6 +374,8 @@ func (s *Session) Subagents() []protocol.SubagentState {
 	}
 	return list.Agents
 }
+
+// Subagent returns one child snapshot by canonical path or supported identifier.
 func (s *Session) Subagent(target string) (protocol.SubagentState, error) {
 	a, e := s.activeApp()
 	if e != nil {
@@ -369,6 +383,8 @@ func (s *Session) Subagent(target string) (protocol.SubagentState, error) {
 	}
 	return a.Subagent(context.Background(), target)
 }
+
+// SubagentUsage returns aggregate usage across visible child agents.
 func (s *Session) SubagentUsage() (protocol.Usage, error) {
 	a, e := s.activeApp()
 	if e != nil {
@@ -377,6 +393,7 @@ func (s *Session) SubagentUsage() (protocol.Usage, error) {
 	return a.SubagentUsage()
 }
 
+// Goal returns the active branch goal, or nil when no goal exists.
 func (s *Session) Goal() (*protocol.ThreadGoal, error) {
 	a, e := s.activeApp()
 	if e != nil {
@@ -384,6 +401,8 @@ func (s *Session) Goal() (*protocol.ThreadGoal, error) {
 	}
 	return a.GoalState()
 }
+
+// CreateGoal creates a persistent Thread Goal on the active branch.
 func (s *Session) CreateGoal(objective string, budget *int64, replace bool) (*protocol.ThreadGoal, error) {
 	a, e := s.activeApp()
 	if e != nil {
@@ -391,9 +410,13 @@ func (s *Session) CreateGoal(objective string, budget *int64, replace bool) (*pr
 	}
 	return a.CreateGoal(objective, budget, replace)
 }
+
+// SetGoal is an alias for CreateGoal.
 func (s *Session) SetGoal(objective string, budget *int64, replace bool) (*protocol.ThreadGoal, error) {
 	return s.CreateGoal(objective, budget, replace)
 }
+
+// EditGoal rotates the goal objective and identity while preserving its budget and usage.
 func (s *Session) EditGoal(objective string) (*protocol.ThreadGoal, error) {
 	a, e := s.activeApp()
 	if e != nil {
@@ -401,6 +424,8 @@ func (s *Session) EditGoal(objective string) (*protocol.ThreadGoal, error) {
 	}
 	return a.EditGoal(objective)
 }
+
+// PauseGoal pauses eligible automatic continuation.
 func (s *Session) PauseGoal() (*protocol.ThreadGoal, error) {
 	a, e := s.activeApp()
 	if e != nil {
@@ -408,6 +433,8 @@ func (s *Session) PauseGoal() (*protocol.ThreadGoal, error) {
 	}
 	return a.PauseGoal()
 }
+
+// ResumeGoal resumes eligible automatic continuation, including abort-deferred work.
 func (s *Session) ResumeGoal() (*protocol.ThreadGoal, error) {
 	a, e := s.activeApp()
 	if e != nil {
@@ -415,6 +442,8 @@ func (s *Session) ResumeGoal() (*protocol.ThreadGoal, error) {
 	}
 	return a.ResumeGoal()
 }
+
+// ClearGoal removes the active branch goal.
 func (s *Session) ClearGoal() error {
 	a, e := s.activeApp()
 	if e != nil {
@@ -422,6 +451,8 @@ func (s *Session) ClearGoal() error {
 	}
 	return a.ClearGoal()
 }
+
+// ContinueGoal clears continuation deferral and starts eligible idle goal work.
 func (s *Session) ContinueGoal() error {
 	a, e := s.activeApp()
 	if e != nil {

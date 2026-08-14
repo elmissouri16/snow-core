@@ -21,7 +21,11 @@ func main() {
 }
 
 func run() (runErr error) {
-	provider := flag.String("provider", "fake", "provider id (fake, opencode-go, or chatgpt)")
+	provider := flag.String("provider", "fake", "provider id (fake, opencode-go, openai-compatible, or chatgpt)")
+	model := flag.String("model", "", "model id (empty uses the provider default)")
+	baseURL := flag.String("base-url", "", "API root for openai-compatible")
+	cwd := flag.String("cwd", "", "project working directory (empty uses the process cwd)")
+	sessionPath := flag.String("session", "", "SQLite session path (empty uses an ephemeral session)")
 	prompt := flag.String("prompt", "Summarize this repository.", "prompt to send")
 	timeout := flag.Duration("timeout", 2*time.Minute, "overall prompt timeout")
 	flag.Parse()
@@ -30,9 +34,14 @@ func run() (runErr error) {
 	defer cancel()
 
 	session, err := snowsdk.Open(ctx, snowsdk.Options{
+		CWD:              *cwd,
 		Provider:         *provider,
-		NoSession:        true,
+		Model:            *model,
+		BaseURL:          *baseURL,
+		SessionPath:      *sessionPath,
+		NoSession:        *sessionPath == "",
 		PermissionMode:   "deny",
+		Thinking:         "off",
 		NoPlugins:        true,
 		NoMCP:            true,
 		NoSkills:         true,

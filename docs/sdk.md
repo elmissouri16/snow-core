@@ -46,28 +46,40 @@ package main
 import (
     "context"
     "fmt"
+    "time"
 
     "github.com/snow-core/snow/pkg/protocol"
     "github.com/snow-core/snow/pkg/snowsdk"
 )
 
 func main() {
-    ctx := context.Background()
+    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+    defer cancel()
+
     session, err := snowsdk.Open(ctx, snowsdk.Options{
-        Provider:       "opencode-go",
-        NoSession:      true,
-        PermissionMode: "deny",
+        Provider:         "opencode-go",
+        NoSession:        true,
+        PermissionMode:   "deny",
+        NoPlugins:        true,
+        NoMCP:            true,
+        NoSkills:         true,
+        DisableSubagents: true,
     })
     if err != nil {
         panic(err)
     }
-    defer session.Close()
+    defer func() {
+        if err := session.Close(); err != nil {
+            panic(err)
+        }
+    }()
 
-    session.Subscribe(func(event protocol.AgentEvent) {
+    unsubscribe := session.Subscribe(func(event protocol.AgentEvent) {
         if event.Agent == nil && event.Type == protocol.EvTextDelta {
             fmt.Print(event.Text)
         }
     })
+    defer unsubscribe()
 
     // Install subscriptions/interaction handlers before readiness. Calling
     // both is safe for new sessions and is the complete resumed-session pattern.
@@ -125,11 +137,11 @@ separates inheritance from clean-install defaults.
 | `AutoApprove` | Forces `allow` and takes precedence over `PermissionMode`. Dangerous outside externally isolated/trusted environments. |
 | `Tools` | Built-in tool allowlist. Empty exposes all registered built-ins. |
 | `SystemPrompt` | Overrides configured system-prompt files and Snow's embedded Markdown preamble. Project context and runtime steering remain separately assembled where applicable. |
-| `Thinking` | `off`, `minimal`, `low`, `medium`, or `high`. Empty inherits config; model metadata may reject a level. |
+| `Thinking` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. Empty inherits config; model metadata may reject a level. |
 | `ReasoningSummary` | `off`, `auto`, `concise`, or `detailed`. Empty inherits config. |
 | `TextVerbosity` | `low`, `medium`, or `high`. Empty inherits config. |
 | `CollaborationMode` | `default` or `plan`. Empty restores branch state or clean-install Default. |
-| `PlanModeReasoningEffort` | Optional override for Plan Mode's reasoning preset. |
+| `PlanModeReasoningEffort` | Optional Plan Mode override using the same eight thinking values; model support remains authoritative. |
 | `APIKey` | Explicit credential with precedence over auth store and environment. |
 | `BaseURL` | Active provider endpoint override; required for `openai-compatible` unless configured globally. Accepts an API root or full `/responses` or `/chat/completions` URL. |
 | `Plugins` | Explicit external plugin process declarations. Configured plugins may also load. |
@@ -199,7 +211,9 @@ returned error without discarding accumulated text.
 
 `Steer` and `FollowUp` require an active queue-accepting root turn. Idle calls
 return `ErrNotRunning`. The queue is bounded and ordered; steering has priority,
-with FIFO order inside each input class.
+with FIFO order inside each input class. The current public SDK prompt methods
+accept text only; the core runtime's image/content-block prompt path is not yet
+exposed through `pkg/snowsdk`.
 
 ### Events and readiness
 
@@ -255,7 +269,7 @@ persistence-only and must not be rendered or logged.
 
 | Method | Purpose |
 |---|---|
-| `Branches()` | List named durable branches and topology |
+| `Branches()` | List named session branches and topology |
 | `SelectBranch(id)` | Switch active branch; affects later messages, usage, mode, goal, and prompts |
 | `Fork(entryID)` | Fork the active branch at an existing entry and activate it |
 | `ForkNamed(sourceBranchID, entryID, name)` | Fork an explicit source branch with an optional name |
@@ -263,7 +277,9 @@ persistence-only and must not be rendered or logged.
 | `DeleteBranch(id)` | Delete an eligible inactive leaf branch reference |
 | `Compact(ctx)` | Manually summarize older projected context while retaining full history |
 
-Forked branches share existing message rows; they do not copy history. Branch
+Forked branches share existing message rows; they do not copy history. Branches
+persist across process restarts only in SQLite-backed sessions; under
+`NoSession` their topology and messages are in-memory and ephemeral. Branch
 management is rejected while conflicting root/subagent work is active. Automatic
 Default-mode goal continuation may emit compaction events between goal turns at
 the configured context threshold; this does not change the manual `Compact`
@@ -299,7 +315,7 @@ not invoices. See [Persistent Thread Goals](goals.md).
 | `WaitSubagents(ctx, timeout)` | Wait for one activity/lifecycle change |
 | `WaitSubagentsUntilAll(ctx, timeout)` | Wait until every root child is terminal or timeout |
 | `InterruptSubagent(ctx, target)` | Cancel only the target's current turn |
-| `Subagents()` | Return child snapshots |
+| `Subagents()` | Return snapshots for the root and its visible descendants |
 | `Subagent(target)` | Inspect one child by canonical path or supported identifier |
 | `SubagentUsage()` | Aggregate child usage |
 
@@ -309,8 +325,13 @@ not invoices. See [Persistent Thread Goals](goals.md).
 `/root` with letters, digits, and underscores. Unlike the model-facing tool,
 the SDK does not normalize hyphens.
 
-Wait results contain aggregate state, not private child content. Results and
-mail arrive through attributed `AgentEvent`/`AgentMessage` values. See
+`Subagents()` includes the root snapshot as well as visible descendants; do not
+interpret its length as the child count. Terminal child snapshots can expose
+bounded `Result`, `Error`, `Usage`, and `Generation` metadata. Wait results
+contain aggregate state, not full private child content. Results and mail arrive
+live through attributed `AgentEvent`/`AgentMessage` values. The SDK does not
+currently expose persisted child message history, so hosts that need complete
+transcripts must retain attributed events while observing the run. See
 [Subagents](subagents.md).
 
 ### Discovery and diagnostics
@@ -322,8 +343,11 @@ mail arrive through attributed `AgentEvent`/`AgentMessage` values. See
 | `SkillInventory()` | Return enabled and policy-disabled discovered skills |
 | `Diagnostics()` | Return non-fatal theme/keybinding/search configuration warnings |
 
-Returned models, events, queues, skills, and MCP capability slices are defensive
-copies at the public observation boundary.
+`Diagnostics()` does not currently include plugin startup failures or detailed
+Agent Skill parse diagnostics; inspect extension inventory/status through the
+relevant extension surface and retain startup errors from `Open`. Returned
+models, events, queues, skills, and MCP capability slices are defensive copies
+at the public observation boundary.
 
 ## Event reference
 
@@ -349,15 +373,22 @@ Common payload fields include:
 - `Plan`, `PlanUpdate`, `Compaction`
 - `Permission`, `UserInput`, `Queue`, `ThreadGoal`
 - `Agent`, `Subagent`, `AgentMessage`
-- `TurnID`, `TurnOrigin`, `GoalContinuing`
+- `TurnID`, `TurnOrigin`, `TurnSequence`, `RootEpoch`, `GoalContinuing`
 
 Correlation rules:
 
-- `event.Agent == nil` denotes root ordinary events.
+- `event.Agent == nil` denotes a root-agent event, including ordinary prompts,
+  goal continuation, and root state/lifecycle events.
 - Attributed child stream/tool/usage events carry `Agent`.
 - Child lifecycle snapshots carry `Subagent`.
 - Mailbox events carry `AgentMessage`.
-- `ToolOutput` is a bounded UI preview; complete tool results remain in
+- `TurnID` is the stable turn identity; `TurnSequence` is a process-local
+  monotonic admission order that restarts with the process.
+- `RootEpoch` is a process-local session/branch reconciliation generation on
+  every root event, including events outside a turn.
+- `TurnOrigin` and `GoalContinuing` distinguish ordinary user prompts from
+  internal goal-continuation turns.
+- `ToolOutput` is a bounded UI preview; complete root tool results remain in
   `Messages()`.
 - Every subscriber receives a deep clone. Mutating one callback's event cannot
   affect another observer.
@@ -394,9 +425,11 @@ func main() {
 ```
 
 For credential-free harness tests, select `Provider: "fake"` and disable
-unneeded plugins/MCP/skills.
+unneeded plugins/MCP/skills. `RunPrompt` collects root `text_delta` events until
+root goal/subagent/event quiescence, so an automatically continued Thread Goal
+can contribute more than one assistant turn to the returned string.
 
-## Resume safely
+## Open or create a known session path
 
 ```go
 session, err := snowsdk.Open(ctx, snowsdk.Options{
@@ -420,6 +453,11 @@ if err := session.ReadySubagents(); err != nil {
 }
 return session.Prompt(ctx, "Continue from the saved state.")
 ```
+
+`SessionPath` is open-or-create: a missing or mistyped path creates a new SQLite
+database. The SDK currently has neither a strict "must already exist" resume
+option nor a saved-session catalog, so hosts that require strict resume must
+validate and select the path before `Open`.
 
 Readiness is especially important for restored automatic goals and durable child
 topology. Restored stale child work is observed as interrupted metadata; it is

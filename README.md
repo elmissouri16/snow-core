@@ -255,28 +255,40 @@ package main
 import (
     "context"
     "fmt"
+    "time"
 
     "github.com/snow-core/snow/pkg/protocol"
     "github.com/snow-core/snow/pkg/snowsdk"
 )
 
 func main() {
-    ctx := context.Background()
+    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+    defer cancel()
+
     session, err := snowsdk.Open(ctx, snowsdk.Options{
-        Provider:       "opencode-go",
-        NoSession:      true,
-        PermissionMode: "deny",
+        Provider:         "opencode-go",
+        NoSession:        true,
+        PermissionMode:   "deny",
+        NoPlugins:        true,
+        NoMCP:            true,
+        NoSkills:         true,
+        DisableSubagents: true,
     })
     if err != nil {
         panic(err)
     }
-    defer session.Close()
+    defer func() {
+        if err := session.Close(); err != nil {
+            panic(err)
+        }
+    }()
 
-    session.Subscribe(func(event protocol.AgentEvent) {
+    unsubscribe := session.Subscribe(func(event protocol.AgentEvent) {
         if event.Agent == nil && event.Type == protocol.EvTextDelta {
             fmt.Print(event.Text)
         }
     })
+    defer unsubscribe()
 
     // Safe to call for both new and resumed sessions after subscriptions exist.
     if err := session.ReadyGoals(); err != nil {
@@ -308,10 +320,12 @@ only objects whose `type` is `response` by `id`.
 {"id":"abort-1","type":"abort"}
 ```
 
-A prompt receives an immediate acknowledgement; completion is signaled by the
-normal event stream, especially `turn_done`. Keep stdin open until work finishes.
-See the [RPC protocol reference](docs/rpc.md) for every command, response and
-event shape, concurrency rules, user-input replies, goals, and subagents.
+A prompt receives an immediate admission acknowledgement. `turn_done` ends the
+agent turn, but a runtime/persistence failure may still arrive afterward as a
+same-ID failure response, so long-lived clients must keep routing responses.
+Keep stdin open until work finishes. See the [RPC protocol reference](docs/rpc.md)
+for every command, response and event shape, concurrency rules, user-input
+replies, goals, and subagents.
 
 ## Security first
 

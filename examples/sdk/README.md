@@ -21,6 +21,24 @@ export OPENCODE_API_KEY=oc-...
 go run . -provider opencode-go -prompt "Summarize this repository."
 ```
 
+Use a custom OpenAI-compatible endpoint (the API key is optional and resolves
+from Snow's auth store or `OPENAI_API_KEY` when omitted):
+
+```sh
+go run . \
+  -provider openai-compatible \
+  -base-url https://gateway.example/v1 \
+  -model model-id \
+  -prompt "Summarize this repository."
+```
+
+By default the example uses the process working directory and an ephemeral
+conversation. Pass `-cwd /path/to/project` to select the project explicitly and
+`-session /path/to/session.db` to create or resume a durable SQLite conversation.
+The example installs event observers before calling `ReadyGoals` and
+`ReadySubagents`, which is required to observe restored goal and child state
+reliably.
+
 When copying this module outside the repository, remove the `replace` line from
 `go.mod` and select a published Snow version:
 
