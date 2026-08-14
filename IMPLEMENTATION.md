@@ -80,18 +80,7 @@ Philosophy (pi-aligned, Go-native):
 - Pure-Go **SQLite** sessions with provider-free first-prompt titles, manual rename, and indexed tree branches (`id` / `parentId`).
 - Clear permission + project-trust model; honest non-sandbox security story.
 
-### 1.5 Non-goals (v1)
-
-- snow-agent / Electron integration.
-- Full pi/OpenCode provider catalog.
-- Built-in OS sandbox or container runtime (document optional backends only).
-- An autonomous multi-agent workflow product. Snow provides only the bounded,
-  opt-in root-scoped subagent tree documented below and in `docs/subagents.md`.
-- Skills marketplace, theme marketplace, WASM extension runtime.
-- Local vector memory DB, notes/tasks product surfaces.
-- Guaranteeing ToS-proof reverse-engineering of undocumented endpoints (isolate adapters; prefer official Codex-for-OSS guidance).
-
-### 1.6 Success criteria (product)
+### 1.5 Success criteria (product)
 
 | Metric | Target |
 |--------|--------|
@@ -1406,7 +1395,7 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] `pkg/protocol` types
 - [x] Interface files compiling with `fake` provider
 - [x] In-memory session store + unit tests
-- [x] README: vision, non-goals, how to run tests
+- [x] README: vision, roadmap, how to run tests
 
 **Exit criteria:** `go test ./...` green; no network.
 
@@ -1627,7 +1616,7 @@ Charmbracelet (Bubble Tea) is the de-facto standard for modern Go CLIs (gh-like 
 | Terminal keybinding variance | Bad editor UX | Document per-terminal newlines; config overrides |
 | Symlink path escapes | File safety bug | Thorough tests; `EvalSymlinks` + prefix check |
 | Model ignores tool schema | Poor loops | Tight tool descriptions; retry once on malformed args |
-| Scope creep from snow-agent features | Never ships | This doc’s non-goals; phase gates |
+| Scope creep from snow-agent features | Delays core work | Goals, roadmap priorities, and phase gates |
 | Parallel tool FS races | Data loss | Serial tools until explicit read-only parallel |
 
 ---

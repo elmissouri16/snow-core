@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -557,7 +558,7 @@ func (m *Model) subagentFleetDetailLines(width int) []string {
 	} else {
 		lines = append(lines, styleHeader.Render(fmt.Sprintf(" Conversation · %d recent messages", len(m.subagentFleetMessages))))
 		for _, message := range m.subagentFleetMessages {
-			lines = append(lines, fleetMessageLines(message)...)
+			lines = append(lines, m.fleetMessageLines(message, width)...)
 		}
 	}
 	activity := m.subagentFleetActivity[state.Agent.ThreadID]
@@ -574,18 +575,93 @@ func (m *Model) subagentFleetDetailLines(width int) []string {
 	return wrapped
 }
 
-func fleetMessageLines(message protocol.Message) []string {
+func (m *Model) fleetMessageLines(message protocol.Message, width int) []string {
+	label, labelStyle := fleetMessageLabel(message)
+	prefix := labelStyle.Render(" " + label + " ")
+	contentWidth := max(10, width-2)
+	var sections []string
+	if text := sessionMessageText(message); text != "" {
+		if !utf8.ValidString(text) {
+			text = strings.ToValidUTF8(text, "�")
+		}
+		text = truncateRunes(text, maxAgentMessagePreviewRunes)
+		if message.Role == protocol.RoleAssistant && m.subagentFleetMD != nil && looksLikeMarkdown(text) {
+			text = strings.TrimSpace(m.subagentFleetMD.render(text, contentWidth))
+		} else {
+			text = strings.TrimSpace(ansi.Wordwrap(text, contentWidth, ""))
+		}
+		if text != "" {
+			sections = append(sections, text)
+		}
+	}
+	for _, block := range message.Content {
+		if block.Type != protocol.BlockToolCall {
+			continue
+		}
+		sections = append(sections, fleetToolCallBlock(block, contentWidth))
+	}
+	if len(sections) == 0 && message.Error != "" {
+		sections = append(sections, ansi.Wordwrap(message.Error, contentWidth, ""))
+	}
+	if len(sections) == 0 {
+		sections = append(sections, styleHeaderDim.Render("(no text content)"))
+	}
+	lines := []string{prefix}
+	for _, section := range sections {
+		for _, line := range strings.Split(section, "\n") {
+			lines = append(lines, "  "+line)
+		}
+	}
+	return append(lines, "")
+}
+
+func fleetMessageLabel(message protocol.Message) (string, lipgloss.Style) {
 	label := string(message.Role)
 	style := styleCompletion
-	if message.Role == protocol.RoleAssistant {
+	switch message.Role {
+	case protocol.RoleAssistant:
 		style = styleAssistant
-	} else if message.Role == protocol.RoleTool {
+	case protocol.RoleTool:
+		label = "tool"
 		style = styleTool
+	case protocol.RoleUser:
+		style = styleUser
+	case protocol.RoleAgent:
+		style = styleHeader
 	}
-	text := agentMessageSummary(message)
-	text = strings.TrimPrefix(text, label+": ")
-	if !utf8.ValidString(text) {
-		text = strings.ToValidUTF8(text, "�")
+	if message.ToolName != "" {
+		label += " · " + message.ToolName
 	}
-	return []string{style.Render(label+"  ") + text}
+	if message.StopReason != "" {
+		label += " · " + string(message.StopReason)
+	}
+	if message.IsError {
+		label += " · error"
+	}
+	return label, style
+}
+
+func fleetToolCallBlock(block protocol.ContentBlock, width int) string {
+	args := strings.TrimSpace(string(block.Arguments))
+	if args != "" {
+		var formatted any
+		if json.Unmarshal(block.Arguments, &formatted) == nil {
+			if encoded, err := json.MarshalIndent(formatted, "", "  "); err == nil {
+				args = string(encoded)
+			}
+		}
+	}
+	label := styleTool.Render("call · " + block.Name)
+	if args == "" {
+		return label
+	}
+	args = sanitizeToolPreview(args, maxAgentMessagePreviewRunes)
+	var lines []string
+	for _, line := range strings.Split(args, "\n") {
+		wrapped := strings.Split(ansi.Wordwrap(line, max(1, width-2), ""), "\n")
+		for _, part := range wrapped {
+			lines = append(lines, styleHeaderDim.Render("│ "+part))
+		}
+	}
+	return label + "\n" + strings.Join(lines, "\n")
 }

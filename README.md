@@ -405,15 +405,9 @@ Repository package boundaries and contributor workflow are documented in
 [`AGENTS.md`](AGENTS.md). The architecture, interfaces, decisions, and phased
 roadmap live in [`IMPLEMENTATION.md`](IMPLEMENTATION.md).
 
-## Current boundaries and non-goals
+## Remaining roadmap
 
-- No Electron or desktop shell
-- No broad pi/OpenCode-style provider catalog beyond OpenCode Go,
-  ChatGPT/Codex, and fake
-- No built-in sandbox/container runtime
-- No autonomous workflow product beyond the bounded root-scoped subagent tree
-- No notes, vector-memory, or marketplace product surface
 - Optional MCP Apps, Tasks, Enterprise Managed Authorization, and interactive
-  MCP OAuth are not yet exposed
-- Namespace-first tool routing remains local BM25; optional semantic/vector
-  routing is deferred pending a suitable downloadable cross-platform model
+  MCP OAuth are not yet exposed.
+- Namespace-first tool routing currently uses local BM25; optional semantic/vector
+  routing is deferred pending a suitable downloadable cross-platform model.

@@ -1209,8 +1209,8 @@ Do not make `--subagents` imply mutation or recursive spawning.
 
 ### Work
 
-- Add this plan to the repository and update the explicit multi-agent non-goal
-  only when implementation begins.
+- Add this plan to the repository and update the explicit multi-agent scope
+  statement only when implementation begins.
 - Capture baseline focused/race tests before changing runtime code.
 - Decide the feature name (`subagents`) once and use it consistently in config,
   package names, docs, events, RPC, and SDK.
@@ -1671,8 +1671,8 @@ After a verified implementation milestone:
 
 Update these only as milestones land:
 
-- `AGENTS.md`: remove multi-agent orchestration from non-goals; add implemented
-  status, package map, commands, storage, security, and tests.
+- `AGENTS.md`: update the multi-agent scope statement; add implemented status,
+  package map, commands, storage, security, and tests.
 - `README.md`: add feature flag, tools, `/agent`, SDK/RPC examples, limits,
   persistence status, usage implications, and shared-workspace warning.
 - `IMPLEMENTATION.md`: add manager architecture, dependency direction, state

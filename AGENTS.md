@@ -20,9 +20,7 @@ manager only orchestrates ordinary agent loops. Keep the agent loop
 understandable, keep providers/tools behind interfaces, and keep UI dependencies
 out of core packages.
 
-## Goals and non-goals
-
-### Goals
+## Goals
 
 - A single Go `snow` binary for macOS/Linux, with Windows support improved over time.
 - Streaming text, thinking, tool, usage, error, and lifecycle events.
@@ -31,14 +29,6 @@ out of core packages.
 - SQLite-backed sessions with automatic/manual display titles, indexed branch IDs, resume, and fork primitives.
 - A stable public surface under `pkg/snowsdk` and `pkg/protocol`.
 - Safe, explicit behavior: deny mutating tools by default in headless use and never log credentials.
-
-### Non-goals for v1
-
-- Electron/snow-agent integration.
-- A complete provider catalog or plugin marketplace.
-- An in-process sandbox/container implementation.
-- An autonomous multi-agent workflow engine, skills/themes marketplace, notes/tasks, or vector memory.
-- Treating project trust as a sandbox. Trust only controls project input loading when wired.
 
 ## Current status
 

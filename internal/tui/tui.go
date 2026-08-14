@@ -449,6 +449,7 @@ type Model struct {
 	asker                   *tuiAsker
 	md                      *mdRenderer
 	thinkingMD              *mdRenderer
+	subagentFleetMD         *mdRenderer
 	toolRunning             bool
 	pendingInputs           protocol.InputQueue
 	queueEpoch              uint64
@@ -650,6 +651,7 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 		events:                     newAgentEventMailbox(),
 		md:                         newMarkdownRenderer(),
 		thinkingMD:                 newThinkingMarkdownRenderer(),
+		subagentFleetMD:            newMarkdownRenderer(),
 		nudgeDismissed:             make(map[string]bool),
 		subagentViews:              make(map[string]subagentViewState),
 		subagentFleetActivity:      make(map[string][]string),

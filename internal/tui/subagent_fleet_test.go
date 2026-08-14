@@ -225,6 +225,27 @@ func TestAgentCommandOpensFleetAndPreservesConcurrency(t *testing.T) {
 	}
 }
 
+func TestSubagentFleetDetailFormatsMessagesAsReadableBlocks(t *testing.T) {
+	m := fleetTestModel(t)
+	messages := []protocol.Message{
+		{Role: protocol.RoleAssistant, StopReason: protocol.StopToolUse, Content: []protocol.ContentBlock{
+			protocol.NewTextBlock("## Summary\n\n- first item\n- second item"),
+			{Type: protocol.BlockToolCall, Name: "bash", Arguments: []byte(`{"command":"go test ./...","timeout_ms":120000}`)},
+		}},
+		{Role: protocol.RoleTool, ToolName: "bash", Content: []protocol.ContentBlock{protocol.NewTextBlock("ok\nnext line")}},
+	}
+	m.subagentFleetMessages = messages
+	plain := stripANSI(strings.Join(m.subagentFleetDetailLines(54), "\n"))
+	for _, want := range []string{"assistant · tool_use", "Summary", "first item", "call · bash", `"command": "go test ./..."`, "tool · bash", "ok", "next line"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("formatted detail missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "assistant  assistant") || strings.Contains(plain, `call bash {"command"`) {
+		t.Fatalf("detail still uses flattened message summaries:\n%s", plain)
+	}
+}
+
 func TestSubagentFleetDetailMessagesStayBounded(t *testing.T) {
 	m := fleetTestModel(t)
 	m.subagentFleetIndex = 0
