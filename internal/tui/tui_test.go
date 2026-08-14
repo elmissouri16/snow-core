@@ -421,6 +421,26 @@ func TestModelToolProgressAndOutputCard(t *testing.T) {
 	}
 }
 
+func TestRenderSkillActivationSummarizesEscapedContent(t *testing.T) {
+	output := `<skill_content name="caveman-commit">Write terse commits.&#xA;&lt;type&gt; must be exact.</skill_content>`
+	preview := stripANSI(renderToolOutput("activate_skill", output, 100))
+	if !strings.Contains(preview, "skill instructions loaded: caveman-commit") {
+		t.Fatalf("skill preview missing activation summary: %q", preview)
+	}
+	for _, unwanted := range []string{"&#xA;", "&lt;", "Write terse commits"} {
+		if strings.Contains(preview, unwanted) {
+			t.Fatalf("skill preview exposed escaped body %q: %q", unwanted, preview)
+		}
+	}
+}
+
+func TestRenderSkillActivationHandlesMalformedOutput(t *testing.T) {
+	preview := stripANSI(renderToolOutput("activate_skill", "truncated skill output", 100))
+	if !strings.Contains(preview, "skill instructions loaded") || strings.Contains(preview, "truncated skill output") {
+		t.Fatalf("malformed skill preview = %q", preview)
+	}
+}
+
 func TestModelKeepsStreamingSegmentsChronological(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)

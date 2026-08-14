@@ -5,6 +5,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"os"
@@ -5259,6 +5260,9 @@ func shortSessionID(id string) string {
 }
 
 func renderToolOutput(toolName, output string, width int) string {
+	if summary, handled := renderSkillToolSummary(toolName, output); handled {
+		return summary
+	}
 	if summary, handled := renderSubagentToolSummary(toolName, output); handled {
 		return summary
 	}
@@ -5266,6 +5270,28 @@ func renderToolOutput(toolName, output string, width int) string {
 		return renderEditDiff(output, width)
 	}
 	return renderToolOutputPreview(output, width)
+}
+
+func renderSkillToolSummary(toolName, output string) (string, bool) {
+	if toolName != "activate_skill" {
+		return "", false
+	}
+	label := "skill instructions loaded"
+	decoder := xml.NewDecoder(strings.NewReader(output))
+	if token, err := decoder.Token(); err == nil {
+		if start, ok := token.(xml.StartElement); ok && start.Name.Local == "skill_content" {
+			for _, attr := range start.Attr {
+				if attr.Name.Local == "name" && strings.TrimSpace(attr.Value) != "" {
+					label += ": " + sanitizeToolPreview(strings.TrimSpace(attr.Value), 100)
+					break
+				}
+			}
+		}
+	}
+	// Skill bodies are XML-escaped to keep their model-facing delimiter safe.
+	// The generic output preview would expose entities such as &#xA; and &lt;
+	// instead of useful transcript information, so show only activation status.
+	return styleHeaderDim.Render("  ↳ " + label), true
 }
 
 func renderSubagentToolSummary(toolName, output string) (string, bool) {
