@@ -37,9 +37,10 @@ headless fallback, including when callback port 1455 is occupied. In the TUI, `/
 first, then unrestricted browser login (with device fallback) and device-code
 login. Local sources are ordered OpenCode, Pi, then Codex:
 
-- OpenCode: `$XDG_DATA_HOME/opencode/auth.json` or
-  `~/.local/share/opencode/auth.json` (`openai` OAuth entry)
-- Pi: `~/.pi/agent/auth.json` (`openai-codex` OAuth entry)
+- OpenCode: `$XDG_DATA_HOME/opencode/auth.json`,
+  `~/.local/share/opencode/auth.json`, or `~/.opencode/auth.json` (`openai`,
+  `openai-codex`, or `chatgpt` OAuth entry)
+- Pi: `~/.pi/agent/auth.json` (`openai-codex` or `chatgpt` OAuth entry)
 - Codex: `~/.codex/auth.json` (`tokens.access_token`, `refresh_token`, `account_id`)
 
 The picker groups duplicate source entries by account ID and displays source
@@ -67,7 +68,7 @@ The request also identifies `User-Agent: snow`, explicitly enables automatic
 and parallel tool selection (execution inside Snow remains serial), and omits
 sampling/output-limit fields unsupported by the subscription path. JSON bodies
 of at least 32 KiB use zstd compression. Snow retries network failures, HTTP
-408/500/502/503/504, and immediate pre-output overload/truncation failures at
+408/425/500/502/503/504, and immediate pre-output overload/truncation failures at
 most twice with context-cancellable, `Retry-After`-aware backoff. It never
 retries 402/429, a second 401, validation errors, or a stream after any normalized
 activity was delivered.
@@ -83,9 +84,11 @@ than a successful partial answer.
 discovery. Raw records are cached for 15 minutes under
 `~/.snow/cache/chatgpt-models/<origin-and-account-hash>.json` with versioned
 origin/account metadata, ETags, and mode `0600`.
-Only `visibility=list` entries are shown; `supported_in_api=false` does not hide
-subscription-only models. Snow maps low/medium/high reasoning and intentionally
-omits xhigh/max/ultra. Authenticated account catalogs are authoritative: a model
+Only records with `visibility=list` or unset visibility are shown;
+`supported_in_api=false` does not hide subscription-only models. Snow maps every
+advertised effort (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and
+`ultra`) into normalized protocol thinking levels; `off` remains the explicit
+no-reasoning selection. Authenticated account catalogs are authoritative: a model
 missing from the selected account is not merged back from the bundled snapshot,
 and an unavailable active model is replaced by a compatible account model.
 Authenticated sessions fall back only to a same-account cache; they never inject

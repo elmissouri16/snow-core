@@ -54,7 +54,9 @@ and does not attempt to classify arbitrary shell commands as read-only.
 The model may ask blocking questions through `request_user_input`, backed by
 the same TUI/SDK/RPC broker as `ask_user`. Default mode keeps the existing
 `ask_user` name for compatibility. `update_plan` is hidden and rejected in
-Plan mode; in Default mode it emits structured checklist updates.
+Plan mode; in Default mode it emits structured checklist updates. A Plan-mode
+root may spawn only read-only `explorer` subagents; other roles or a mutating
+explorer policy are rejected.
 
 A final plan is wrapped by the model in exact line-delimited
 `<proposed_plan>` tags. Snow parses the stream incrementally, suppresses the

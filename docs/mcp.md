@@ -65,7 +65,7 @@ cross-client `mcpServers` map. The public Go configuration is
 The default mutation scope is global `~/.snow/config.json`. Add `--project` to
 write `<cwd>/.snow/config.json`; project declarations remain inactive until the
 project is trusted. Reads show the effective trusted configuration and identify
-its source scope.
+its source scope. `snow mcp list --all` also includes shadowed declarations.
 
 ```sh
 # stdio
@@ -84,12 +84,17 @@ snow mcp add project-tools --project -- ./bin/project-mcp
 snow mcp disable remote --project
 ```
 
+If a project-scope `enable`/`disable` names a declaration that exists only in
+global configuration, Snow copies that declaration into the project config with
+the requested state.
+
 `add` also accepts repeatable `--env NAME`/`--env NAME=VALUE`, `--header
 NAME=VALUE`, `--cwd`, `--discovery deferred|always`, `--disabled`, and
 `--replace`. Duplicate adds fail without `--replace`; remove requires an exact
 name. `list` and `get` never launch a process or make a network request. All
-commands support `--json`; legacy `--mode json` remains accepted by inspection
-commands. Environment values, sensitive headers, credential-like arguments,
+subcommands support `--json`; the bare `snow mcp` list view accepts legacy
+`--mode json` instead. Legacy `--mode json` also remains accepted by inspection
+subcommands. Environment values, sensitive headers, credential-like arguments,
 and URL credentials are redacted from both text and JSON output.
 
 ## Capability bridge

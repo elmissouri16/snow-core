@@ -135,7 +135,10 @@ snow --mode rpc --permission deny
 ```
 
 The TUI uses Bubble Tea's supported full-window pattern: alternate screen,
-sticky header/footer, and a Bubbles transcript viewport. Mouse mode defaults on so wheel/trackpad gestures scroll Snow's transcript viewport instead of terminal scrollback. Primary drag selects and copies transcript text; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. Because terminal mouse reporting captures context-menu clicks too, right-click switches Snow to native mouse mode; repeat the click if the terminal consumed the initiating press. F6 toggles app/native mouse mode, with PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down available for viewport scrolling. In the composer, Ctrl+V attaches a PNG/JPEG/GIF/WebP clipboard image for vision-capable models (up to eight images, 20 MiB each); Backspace (or Esc) removes the last image when the text draft is empty.
+sticky header/footer, and a Bubbles transcript viewport. Mouse mode defaults on so wheel/trackpad gestures scroll Snow's transcript viewport instead of terminal scrollback. Primary drag selects and copies transcript text; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. Because terminal mouse reporting captures context-menu clicks too, right-click switches Snow to native mouse mode; repeat the click if the terminal consumed the initiating press. F6 toggles app/native mouse mode, with PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down available for viewport scrolling. In the composer, Ctrl+V inserts an inline `[Image #N]` attachment token for a
+PNG/JPEG/GIF/WebP clipboard image (up to eight images, 20 MiB each and 40 MiB in
+aggregate) and sends the binary image only to vision-capable models. Backspace
+(or Esc) removes the last image and token when no ordinary text remains.
 Read the [user guide](docs/using-snow.md) for TUI keys, slash commands, queue
 semantics, sessions, and modes. Read the [RPC protocol](docs/rpc.md) before
 building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
@@ -168,7 +171,7 @@ by the selected model and rejects unsupported explicit levels.
 | `glob` | Pure-Go path matching, including recursive `**` | read |
 | `ask_user` | Ask the host structured questions | read/interaction |
 | `update_plan` | Emit a turn-local Default-mode checklist | read |
-| `artifact_read` / `artifact_grep` | Retrieve bounded fragments from private spilled tool results | read |
+| `artifact_read` / `artifact_grep` | Retrieve bounded fragments from private spilled tool results (deferred) | read |
 | `webfetch` | Fetch bounded public HTTP(S) content as text/Markdown | network |
 
 File tools enforce configured roots through pinned Go `os.Root` handles, so

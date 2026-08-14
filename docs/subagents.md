@@ -68,11 +68,11 @@ Child authority is the intersection of the parent registry, role tools, and oper
 
 | Role | Default child capabilities |
 |---|---|
-| `general` | `read`, `grep`, `glob`, skill/resource reads, and permission-gated `bash` |
-| `explorer` | `read`, `grep`, `glob`, and skill/resource reads; no `bash` |
+| `general` | `read`, `grep`, `glob`, bounded `artifact_read`/`artifact_grep`, skill/resource reads, and permission-gated `bash` |
+| `explorer` | `read`, `grep`, `glob`, bounded `artifact_read`/`artifact_grep`, and skill/resource reads; no `bash` |
 | `implementer` | The shell-capable surface; `write`/`edit` still require both mutation switches |
 
-All child roles exclude goals, user-input tools, network tools, plugins, and MCP. Mutation requires both `subagents.allow_mutation=true` and a role with `allow_mutation=true`; a parent `Tools` allowlist remains an upper bound. Bash is not sandboxed and can mutate the shared workspace or OS, so `ask` prompts through the attributed TUI FIFO broker, `allow` runs it, and `deny` rejects it. Headless ask mode remains deny-by-default. Read-only children may use a deny-all service because read-risk calls are always allowed. Child `ask_user` input stays excluded. Recursion similarly requires `recursive=true` and remaining depth.
+All child roles exclude goals, user-input tools, network tools, plugins, and MCP. Mutation requires both `subagents.allow_mutation=true` and a role with `allow_mutation=true`; a parent `Tools` allowlist remains an upper bound. While the root is in Plan Mode, `spawn_agent` permits only an `explorer` role whose policy remains read-only; other roles are rejected. Bash is not sandboxed and can mutate the shared workspace or OS, so `ask` prompts through the attributed TUI FIFO broker, `allow` runs it, and `deny` rejects it. Headless ask mode remains deny-by-default. Read-only children may use a deny-all service because read-risk calls are always allowed. Child `ask_user` input stays excluded. Recursion similarly requires `recursive=true` and remaining depth.
 
 To grant an implementer file mutation, enable both switches explicitly (and preserve the parent tool allowlist):
 
@@ -82,7 +82,7 @@ To grant an implementer file mutation, enable both switches explicitly (and pres
     "allow_mutation": true,
     "roles": {
       "general": {
-        "tools": ["read", "grep", "glob", "activate_skill", "read_skill_resource", "bash"]
+        "tools": ["read", "grep", "glob", "artifact_read", "artifact_grep", "activate_skill", "read_skill_resource", "bash"]
       },
       "implementer": {
         "allow_mutation": true
@@ -104,7 +104,7 @@ With `durable=true`, every child transcript is a separate private SQLite databas
 <root-session>.agents/<thread-id>.db
 ```
 
-The root database stores only bounded topology/status/usage metadata in `subagent_threads`, including an immutable role-policy fingerprint used to fail safe if trusted role configuration changes. Pre-v6 rows without a fingerprint are reloaded with a conservative read-only role, never with newly granted mutation authority. Child databases do not appear in the normal session picker. On cold open Snow restores topology without loading child runtimes, converts stale running/queued work to interrupted metadata, and never restarts work before `ReadySubagents`. Durable terminal children may be unloaded when the residency cap is exceeded; follow-up, messaging, or transcript inspection lazily reloads them. Set `durable=false` only when intentionally choosing process-local child history; `/agent` then warns that transcripts will not survive restart.
+The root database stores only bounded topology/status/usage metadata in `subagent_threads`, including an immutable role-policy fingerprint used to fail safe if trusted role configuration changes. Pre-v6 rows without a fingerprint are reloaded with a conservative read-only role, never with newly granted mutation authority. A stored nonempty fingerprint that no longer matches the trusted role policy is not restored under a different policy; the child enters an errored state instead. Child databases do not appear in the normal session picker. On cold open Snow restores topology without loading child runtimes, converts stale running/queued work to interrupted metadata, and never restarts work before `ReadySubagents`. Durable terminal children may be unloaded when the residency cap is exceeded; follow-up, messaging, or transcript inspection lazily reloads them. Set `durable=false` only when intentionally choosing process-local child history; `/agent` then warns that transcripts will not survive restart.
 
 ## Surfaces
 

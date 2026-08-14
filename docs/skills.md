@@ -45,11 +45,13 @@ The startup scan is bounded and metadata-only. Sources, from lower to higher
 precedence, are:
 
 0. immutable skills embedded in the Snow binary;
-1. `~/.agents/skills/`;
-2. `~/.snow/skills/` (or `$SNOW_HOME/skills/`);
-3. explicit global/CLI skill directories;
-4. `<project>/.agents/skills/` after project trust is allowed;
-5. `<project>/.snow/skills/` after project trust is allowed.
+1. user `.claude/skills/` when `skills.include_claude` is enabled;
+2. `~/.agents/skills/`;
+3. `~/.snow/skills/` (or `$SNOW_HOME/skills/`);
+4. explicit global/CLI skill directories;
+5. project `.claude/skills/` when enabled and project trust is allowed;
+6. `<project>/.agents/skills/` after project trust is allowed;
+7. `<project>/.snow/skills/` after project trust is allowed.
 
 Snow currently embeds `plugin-builder`, a supervised playbook and template set
 for creating external protocol-v2 plugins when a reusable capability is missing.
@@ -131,8 +133,9 @@ Snow follows all three disclosure tiers:
 
 Activation returns structured, XML-escaped `<skill_content>` with the skill
 directory and a bounded resource inventory. Resource files are listed through a
-cancellation-aware streaming walk capped at 200 files and 2,000 directory
-entries, but are not eagerly loaded.
+cancellation-aware streaming walk capped at 200 files, 2,000 directory entries,
+and five levels of depth; `.git` and `node_modules` directories are skipped.
+Resources are not eagerly loaded.
 The dedicated reader avoids broadening the normal `read`/`write` filesystem
 roots merely because a user-level skill exists outside the project.
 

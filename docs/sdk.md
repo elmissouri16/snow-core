@@ -130,7 +130,7 @@ separates inheritance from clean-install defaults.
 | `Provider` | `opencode-go`, `openai-compatible`, `chatgpt`, or `fake`. Empty inherits config; clean-install default is `opencode-go`. |
 | `Model` | Model ID. Empty resolves configured/provider default. |
 | `SessionPath` | SQLite `.db` path to open or create; an existing database is resumed. Empty creates a new indexed durable session unless `NoSession` is true. |
-| `NoSession` | Use an in-memory conversation. Auth and model caches remain persistent. Goals require a persisted session. |
+| `NoSession` | Use an in-memory conversation. Branches and goals work for the process lifetime only; auth and model caches remain persistent. |
 | `AuthPath` | Credential file override. Empty uses `$SNOW_HOME/auth.json`. |
 | `ConfigPath` | Global config override. Empty uses `$SNOW_HOME/config.json`. |
 | `PermissionMode` | `ask`, `allow`, or `deny`. **Omission in the SDK forces `deny`**, rather than inheriting interactive `ask`. |
@@ -297,8 +297,9 @@ method contract.
 | `ContinueGoal()` | Clear continuation deferral and run eligible idle work |
 
 Normal prompts never clear an abort/manual-compaction deferral; call
-`ResumeGoal` or `ContinueGoal` explicitly. Goals require SQLite persistence.
-Budgets must be positive. Goal statuses are
+`ResumeGoal` or `ContinueGoal` explicitly. SQLite persists goals across
+processes; `NoSession` keeps them only for the current process. Budgets must be
+positive. Goal statuses are
 `active`, `paused`, `blocked`, `usage_limited`, `budget_limited`, and `complete`.
 Returned `protocol.ThreadGoal` values include optional per-currency
 `EstimatedCosts`; values come from provider/catalog pricing and are estimates,
@@ -360,9 +361,9 @@ at the public observation boundary.
 | Interaction | `user_input_request`, `queue_updated`; `permission_request` exists in the cross-surface protocol but the public headless SDK has no permission asker that emits it |
 | Lifecycle/state | `session_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
 | Plan | `plan_started`, `plan_delta`, `plan_completed`, `plan_update` |
-| Compaction | `compaction_started`, `compaction_done`; `Compaction.Automatic` distinguishes goal-triggered runs |
+| Compaction | `compaction_started`, `compaction_done`; `Compaction.Automatic` distinguishes non-manual pressure/overflow-repair runs |
 | Goals | `thread_goal_updated` |
-| Subagents | `subagent_started`, `subagent_status`, `subagent_message`, `subagent_activity` |
+| Subagents | `subagent_started`, `subagent_status`, `subagent_message`; `subagent_activity` is reserved but not currently emitted |
 
 Common payload fields include:
 

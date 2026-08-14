@@ -69,8 +69,13 @@ are independent and bounded; slow consumers receive an explicit overflow error.
 Unknown event fields remain available through `AgentEvent.raw`; bounded
 `diagnostics` retain responses with unknown IDs without crashing the reader.
 
-The SDK also exposes `request`, `abort`, `session_info`, `models`,
-`subagent_models`, and model-requested input reply/reject helpers.
+The Python client also exposes `request`, `abort`, `session_info`,
+`session_rename`, `models`, `subagent_models`, `set_model`, `set_thinking`,
+`set_mode`, `steer`, `follow_up`, the `goal_*` and `subagent_*` command families,
+and `reply_user_input`/`reject_user_input`. `prompt` accepts an optional `mode`
+(`default` or `plan`); a timeout aborts the run and consumes its terminal
+completion before raising `SnowTimeoutError`. Event iterator capacity is
+configurable.
 
 ## JavaScript and TypeScript
 
@@ -111,7 +116,13 @@ overflow/listener failures through `onError` plus bounded diagnostics. Every
 subscriber receives an isolated payload copy. `AbortSignal` can stop an iterator,
 request cancellation of an active prompt, or terminate the owned process. The
 public declarations include RPC responses, session/model data, events, user
-input, and the SDK error hierarchy.
+input, and the SDK error hierarchy. The command surface includes `request`,
+`abort`, `sessionInfo`, `sessionRename`, `models`, `subagentModels`, model and
+mode setters, `steer`/`followUp`, the `goal*` and `subagent*` method families,
+and `replyUserInput`/`rejectUserInput`. `prompt` accepts a `mode` option
+(`default` or `plan`); timeout handling aborts and consumes terminal completion before
+raising `SnowTimeoutError`. Iterator and subscription capacities are
+configurable.
 
 ## Protocol v1 contract
 
@@ -122,7 +133,10 @@ Every process starts with a first frame similar to:
   "type": "rpc_ready",
   "protocol_version": "1",
   "snow_version": "0.1.0-dev",
-  "capabilities": ["models_list", "prompt_completion", "session_info"],
+  "capabilities": [
+    "active_input", "goals", "models_list", "prompt_completion",
+    "session_info", "subagent_models", "subagents", "user_input"
+  ],
   "max_input_bytes": 16777216
 }
 ```
@@ -151,9 +165,14 @@ Language clients preserve unknown additive fields for forward compatibility.
 ## Model-requested user input
 
 Both clients can either consume `user_input_request` directly or install an
-async handler. The event is published to observers before the handler runs. A
-successful handler sends `user_input_reply`; failure sends
-`user_input_reject`.
+async handler. Python accepts `user_input_handler=` in `SnowClient.start`;
+JavaScript accepts `userInputHandler` in `Snow.start` and calls it as
+`(request, {signal})`. The handler receives the `user_input` object (`id`,
+optional `tool_call_id`, and `questions`) and must return
+`{"answers":[{"id":"<question-id>","answer":"<string>"}]}` covering exactly
+the requested question IDs with string values. The event is published to
+observers before the handler runs. A valid result sends `user_input_reply`;
+validation or handler failure sends `user_input_reject`.
 
 This channel answers model questions only. It never approves tool permissions.
 RPC permission mode `ask` remains fail-closed.

@@ -114,8 +114,6 @@ A representative configuration:
     "durable": true,
     "allow_mutation": false,
     "expose_child_tool_events": true,
-    "default_provider": "opencode-go",
-    "default_model": "model-id",
     "default_role": "general"
   },
   "compaction": {
@@ -153,7 +151,7 @@ fills required zero-value defaults before validation.
 | `tool_output_bytes` | `262144` | Bound for provider-facing tool results and previews |
 | `bash_timeout_ms` | `120000` | Host cap for shell execution |
 | `context_cap_bytes` | `102400` | Hard cap for loaded project instructions and maximum configured system-prompt file size |
-| `system_prompt_file` | unset | Markdown/text file replacing the embedded base preamble; relative paths resolve from the global config directory and `~` is supported |
+| `system_prompt_file` | unset | Markdown/text file replacing the embedded base preamble; relative paths resolve from the loaded config file's directory (normally the global config directory; `--config`/`ConfigPath` can override it) and `~` is supported |
 
 Model capabilities remain authoritative. A configured reasoning level that is
 not advertised by the selected model is rejected.
@@ -182,8 +180,9 @@ append-only.
 
 `stream_idle_timeout_ms` bounds silence between bytes on a live streaming
 response without imposing a total turn deadline. Omit it or set `0` for the
-conservative 10-minute default; set `-1` to disable the watchdog. Any received
-bytes reset the timer.
+conservative 10-minute default; set `-1` to disable the watchdog. Positive
+values above 86,400,000 ms (24 hours) are rejected. Any received bytes reset
+the timer.
 
 For `openai-compatible`, `base_url` is required and may be an API root such as
 `https://gateway.example/v1` or a full URL ending in `/responses` or
@@ -280,6 +279,8 @@ overrides both. If omitted, the child inherits the parent selection. Key bounds 
 - concurrency: `1..256` child agents; root does not consume a slot;
 - identities: `1..4096`, and not below concurrency;
 - depth: `1..8`;
+- wait timeouts: minimum is nonnegative, default is at least the minimum,
+  maximum is at least the default and no more than 24 hours;
 - task timeout: positive and at most 24 hours;
 - result: `1024..65536` bytes.
 
@@ -428,8 +429,9 @@ colors:
 ```
 
 `extends` is optional and defaults to `default`; when supplied, it must name a
-built-in theme. Custom names cannot replace built-in names. Colors are optional
-semantic overrides using `#RRGGBB` or ANSI `0..255`.
+built-in theme. Custom names cannot replace built-in names, exceed 64 runes,
+contain control characters, or contain `/` or `\\`. Colors are optional semantic
+overrides using `#RRGGBB` or ANSI `0..255`.
 Project themes replace same-named global themes.
 
 ## Diagnostics and failure behavior

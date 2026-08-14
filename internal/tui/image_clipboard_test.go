@@ -32,6 +32,34 @@ func TestClipboardImageMIME(t *testing.T) {
 	}
 }
 
+func TestImageAttachmentTokenRoundTrip(t *testing.T) {
+	text := "cool" + imageAttachmentInsertion("cool", 0, 4, 0) + "shsh"
+	if text != "cool [Image #1] shsh" {
+		t.Fatalf("inline token = %q", text)
+	}
+	if got := stripImageAttachmentTokens(text, 1); got != "cool shsh" {
+		t.Fatalf("provider text = %q", got)
+	}
+	if got := removeImageAttachmentToken("[Image #1] ", 0); got != "" {
+		t.Fatalf("removed token = %q", got)
+	}
+	if got := promptImageBytes([]protocol.ContentBlock{{Data: []byte("one")}, {Data: []byte("two")}}); got != 6 {
+		t.Fatalf("image bytes = %d", got)
+	}
+}
+
+func TestClipboardImageTokenInsertsAtComposerCursor(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	m.editor.SetValue("cool shsh")
+	m.editor.SetCursor(5)
+	_, _ = m.Update(clipboardImageMsg{block: protocol.ContentBlock{
+		Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte("x"),
+	}})
+	if got := m.editor.Value(); got != "cool [Image #1] shsh" {
+		t.Fatalf("cursor insertion = %q", got)
+	}
+}
+
 func TestComposerCtrlVAttachesImageAndSubmitPersistsMixedContent(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
@@ -45,8 +73,16 @@ func TestComposerCtrlVAttachesImageAndSubmitPersistsMixedContent(t *testing.T) {
 		t.Fatal("image paste returned no command")
 	}
 	_, _ = m.Update(cmd())
-	if len(m.promptImages) != 1 || !strings.Contains(stripANSI(m.renderEditor()), "image 1") {
-		t.Fatalf("attachment state/render = %d %q", len(m.promptImages), stripANSI(m.renderEditor()))
+	if len(m.promptImages) != 1 || m.editor.Value() != "describe this [Image #1] " {
+		t.Fatalf("attachment state/editor = %d %q", len(m.promptImages), m.editor.Value())
+	}
+	view := stripANSI(m.renderEditor())
+	if !strings.Contains(view, "describe this [Image #1]") || strings.Contains(view, "Backspace removes last") {
+		t.Fatalf("inline attachment render = %q", view)
+	}
+	m.editor.InsertString("carefully")
+	if got := m.editor.Value(); got != "describe this [Image #1] carefully" {
+		t.Fatalf("continued text after attachment = %q", got)
 	}
 	// The deterministic fake model in this fixture is text-only; opt it into
 	// vision so this test exercises admission and durable mixed content.
@@ -71,7 +107,7 @@ func TestComposerCtrlVAttachesImageAndSubmitPersistsMixedContent(t *testing.T) {
 			break
 		}
 	}
-	if user == nil || len(user.Content) != 2 || user.Content[0].Text != "describe this" || user.Content[1].MIMEType != "image/png" || string(user.Content[1].Data) != string(image.Data) {
+	if user == nil || len(user.Content) != 2 || user.Content[0].Text != "describe this carefully" || user.Content[1].MIMEType != "image/png" || string(user.Content[1].Data) != string(image.Data) {
 		t.Fatalf("mixed user content = %+v", user)
 	}
 	if len(m.promptImages) != 0 {
@@ -96,7 +132,7 @@ func TestRejectedPromptRestoresImages(t *testing.T) {
 	buildAppForTest(t, m)
 	image := protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte("x")}
 	m.promptImages = []protocol.ContentBlock{image}
-	cmd := m.startPrompt("describe")
+	cmd := m.startPrompt("describe [Image #1] ")
 	if len(m.promptImages) != 0 {
 		t.Fatal("start did not transfer attachment ownership")
 	}
@@ -105,7 +141,7 @@ func TestRejectedPromptRestoresImages(t *testing.T) {
 		t.Fatalf("text-only model unexpectedly admitted image: %+v", result)
 	}
 	_, _ = m.Update(result)
-	if len(m.promptImages) != 1 || string(m.promptImages[0].Data) != "x" || m.editor.Value() != "describe" {
+	if len(m.promptImages) != 1 || string(m.promptImages[0].Data) != "x" || m.editor.Value() != "describe [Image #1] " {
 		t.Fatalf("rejected prompt did not restore draft: images=%d text=%q", len(m.promptImages), m.editor.Value())
 	}
 }
@@ -169,8 +205,9 @@ func TestBackspaceRemovesLastImageFromEmptyComposer(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.promptImages = []protocol.ContentBlock{{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte("x")}}
+	m.editor.SetValue("[Image #1] ")
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
-	if len(m.promptImages) != 0 {
-		t.Fatal("Backspace did not remove image")
+	if len(m.promptImages) != 0 || m.editor.Value() != "" {
+		t.Fatalf("Backspace did not remove inline image: images=%d text=%q", len(m.promptImages), m.editor.Value())
 	}
 }

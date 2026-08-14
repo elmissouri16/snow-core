@@ -88,7 +88,8 @@ Defaults:
 | Event notification queue | 64 frames |
 
 `timeout_ms` is optional. A zero value gives calls no plugin-specific deadline,
-although the surrounding agent operation can still be cancelled.
+although the surrounding agent operation can still be cancelled. A positive
+value also bounds the startup `initialize` and `tools/list` requests.
 
 ## `initialize`
 
@@ -101,7 +102,7 @@ Host request:
   "method": "initialize",
   "params": {
     "protocol_version": 2,
-    "host_version": "0.1.0-dev",
+    "host_version": "snow-core",
     "cwd": "/effective/plugin/cwd",
     "session_id": "session-id",
     "host_capabilities": ["tools", "events"],
@@ -109,6 +110,9 @@ Host request:
   }
 }
 ```
+
+`host_version` is an opaque host value: normal app wiring currently sends
+`snow-core`, while `plugin check` may send the binary build version.
 
 Preferred result:
 
@@ -344,7 +348,8 @@ tool_start tool_progress tool_end tool_routing
 permission_request user_input_request usage turn_done
 error aborted model_changed mode_changed
 plan_started plan_delta plan_completed plan_update
-compaction_started compaction_done thread_goal_updated
+compaction_started compaction_done thread_goal_updated queue_updated
+subagent_started subagent_status subagent_message
 ```
 
 Clients should ignore unknown future event types.
@@ -364,10 +369,11 @@ A runtime may emit a bounded protocol log without writing directly to stderr:
 }
 ```
 
-Stderr and protocol logs are retained only up to configured limits and pass
-through best-effort redaction for common credential assignments, JSON fields,
-and authorization headers. Redaction is defense in depth and cannot recognize
-every secret format. Plugins must never intentionally emit credentials.
+Stderr and protocol logs are retained only up to the smaller of the configured
+output limit and the default 256 KiB output limit; each individual protocol log
+message is also bounded. Retained diagnostics pass through best-effort redaction
+for common credential assignments, JSON fields, and authorization headers.
+Redaction is defense in depth and cannot recognize every secret format. Plugins must never intentionally emit credentials.
 
 ## Errors
 
@@ -415,11 +421,14 @@ should flush `sys.stdout.buffer` before returning.
 
 ```sh
 snow plugin check examples/plugins/javascript/manifest.json
+snow plugin check /absolute/path/to/plugin-executable
 snow plugin check examples/plugins/python/manifest.json --json
 ```
 
-The command starts the runtime without creating an agent session, validates the
-manifest and schemas, lists effective plugin/tool capabilities, risks/discovery
+The command accepts a manifest or executable shorthand and has a 10-second
+default overall timeout. It starts the runtime without creating an agent
+session, validates the manifest and schemas, lists effective plugin/tool
+capabilities, risks/discovery
 modes and subscribed events, reports initialization time, prints bounded
 diagnostics with best-effort redaction, then performs graceful shutdown.
 

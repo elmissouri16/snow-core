@@ -48,13 +48,18 @@ Snow classifies tool actions as:
 | Mode | Read | Write/exec/network/delegate |
 |---|---|---|
 | `deny` | Allowed | Denied; deferred unusable tools are hidden |
-| `ask` | Allowed | Prompt if an interactive asker exists; remembered session rules may apply |
+| `ask` | Allowed | Prompt if an interactive asker exists; remembered session rules may apply, and remembered denials hide matching deferred tools |
 | `allow` | Allowed | Allowed |
 
 The TUI supplies an interactive asker and exposes `/allow [always]`, `/deny`,
 and `/permissions`. Print, JSON, and RPC do not provide a permission-reply
 command. Their `ask` mode therefore fails closed. The Go SDK also defaults to
 `deny`; `UserInputHandler` answers model questions and is not a permission asker.
+
+`deny` still permits read-risk tools. In the default registry that includes
+deferred `session_search`/`session_reference` and
+`artifact_read`/`artifact_grep`, which can surface prior same-project session
+text, titles, and spilled tool output to the model.
 
 A tool allowlist is an additional upper bound. `--tools read,grep,glob` or
 `snowsdk.Options.Tools` removes other built-ins entirely, including direct tools
@@ -198,7 +203,8 @@ Oversized plain-text tool results may be spilled beneath
 session. Dedicated `artifact_read`/`artifact_grep` tools return bounded text;
 the artifact root is deliberately not added to ordinary `read`, `write`,
 `edit`, `grep`, or `glob` roots. Artifacts may contain sensitive command or file
-output and currently persist with durable sessions, so protect and clean
+output. Snow does not currently garbage-collect them, and deleting a session
+database does not remove its artifact namespace, so protect and clean
 `SNOW_HOME` according to the same policy as session databases.
 
 ## Plugins and MCP
@@ -297,6 +303,7 @@ automatic continuation.
 ### Read-only repository inspection
 
 ```sh
+# The allowlist excludes cross-session and spill-artifact readers.
 snow --permission deny \
   --tools read,grep,glob \
   --no-plugins --no-mcp --no-skills --no-subagents \

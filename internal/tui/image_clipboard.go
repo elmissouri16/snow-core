@@ -10,13 +10,15 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
 const (
-	maxClipboardImageBytes = 20 << 20
-	maxPromptImages        = 8
+	maxClipboardImageBytes   = 20 << 20
+	maxPromptImageTotalBytes = 40 << 20
+	maxPromptImages          = 8
 )
 
 type clipboardImageMsg struct {
@@ -168,14 +170,52 @@ const types = ['public.png','public.jpeg','com.compuserve.gif','org.webmproject.
 for (const t of types) { const d = p.dataForType(t); if (ObjC.unwrap(d) !== undefined && Number(d.length) > 0) { out.writeData(d); wrote = true; break; } }
 if (!wrote) { const d = p.dataForType('public.tiff'); if (ObjC.unwrap(d) !== undefined) { const image = $.NSImage.alloc.initWithData(d); const tiff = image ? image.TIFFRepresentation : null; const r = tiff ? $.NSBitmapImageRep.imageRepWithData(tiff) : null; if (r) { const png = r.representationUsingTypeProperties(4, $({})); if (png) out.writeData(png); } } }`
 
-func imageAttachmentLabel(block protocol.ContentBlock, index int) string {
-	kind := strings.TrimPrefix(block.MIMEType, "image/")
-	return fmt.Sprintf("[image %d · %s · %s]", index+1, kind, formatImageBytes(len(block.Data)))
+func imageAttachmentToken(index int) string {
+	return fmt.Sprintf("[Image #%d]", index+1)
 }
 
-func formatImageBytes(size int) string {
-	if size >= 1<<20 {
-		return fmt.Sprintf("%.1f MiB", float64(size)/(1<<20))
+func imageAttachmentInsertion(current string, row, column, index int) string {
+	lines := strings.Split(current, "\n")
+	if row < 0 || row >= len(lines) {
+		return imageAttachmentToken(index) + " "
 	}
-	return fmt.Sprintf("%.1f KiB", float64(size)/(1<<10))
+	line := []rune(lines[row])
+	column = max(0, min(column, len(line)))
+	prefix := ""
+	if column > 0 && !unicode.IsSpace(line[column-1]) {
+		prefix = " "
+	}
+	suffix := ""
+	if column == len(line) || !unicode.IsSpace(line[column]) {
+		suffix = " "
+	}
+	return prefix + imageAttachmentToken(index) + suffix
+}
+
+func stripImageAttachmentTokens(text string, count int) string {
+	for i := 0; i < count; i++ {
+		token := imageAttachmentToken(i)
+		if strings.Contains(text, token+" ") {
+			text = strings.Replace(text, token+" ", "", 1)
+			continue
+		}
+		text = strings.Replace(text, token, "", 1)
+	}
+	return text
+}
+
+func removeImageAttachmentToken(text string, index int) string {
+	token := imageAttachmentToken(index)
+	if strings.Contains(text, token+" ") {
+		return strings.Replace(text, token+" ", "", 1)
+	}
+	return strings.Replace(text, token, "", 1)
+}
+
+func promptImageBytes(images []protocol.ContentBlock) int {
+	total := 0
+	for _, image := range images {
+		total += len(image.Data)
+	}
+	return total
 }

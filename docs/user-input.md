@@ -31,9 +31,10 @@ with options must contain two or three mutually exclusive choices.
 }
 ```
 
-The host assigns the tool call ID to both `request_id` and `tool_call_id` in
-the emitted `user_input_request` event. Choice questions automatically include
-an **Other** entry; models must not provide an option named `Other`.
+The host assigns the tool call ID to both `id` and `tool_call_id` in the emitted
+`user_input_request` event. RPC clients echo that `id` as `params.request_id`
+when replying or rejecting. Choice questions automatically include an **Other**
+entry; models must not provide an option named `Other`.
 
 Answers are trimmed, non-empty, and limited to 8 KiB. Choice answers preserve
 the selected label exactly. Responses are normalized to request order and the

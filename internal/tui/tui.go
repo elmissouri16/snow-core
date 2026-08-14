@@ -1495,10 +1495,22 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastErrorText = fmt.Sprintf("paste: at most %d images per prompt", maxPromptImages)
 			return m, nil
 		}
+		if promptImageBytes(m.promptImages)+len(msg.block.Data) > maxPromptImageTotalBytes {
+			m.lastErrorText = fmt.Sprintf("paste: image attachments exceed %d MiB aggregate limit", maxPromptImageTotalBytes>>20)
+			return m, nil
+		}
+		index := len(m.promptImages)
 		m.promptImages = append(m.promptImages, msg.block)
-		m.lastStatus = fmt.Sprintf("attached image %d", len(m.promptImages))
+		lineInfo := m.editor.LineInfo()
+		m.editor.InsertString(imageAttachmentInsertion(
+			m.editor.Value(), m.editor.Line(), lineInfo.StartColumn+lineInfo.ColumnOffset, index,
+		))
+		m.lastStatus = fmt.Sprintf("attached %s", imageAttachmentToken(index))
+		if cmd := m.refreshInputCompletions(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		m.layout()
-		return m, nil
+		return m, tea.Batch(cmds...)
 	}
 
 	if m.userInputPending && m.userInputEditing {
@@ -2309,9 +2321,8 @@ const (
 // keeping the idle composer comfortably usable. The textarea remains internally
 // scrollable after reaching maxComposerHeight.
 func (m *Model) desiredComposerHeight() int {
-	attachmentRows := min(2, len(m.promptImages))
 	if m.loginMode || m.loginEndpointMode || m.editor.Value() == "" {
-		return min(maxComposerHeight, minComposerHeight+attachmentRows)
+		return minComposerHeight
 	}
 	width := m.editor.Width()
 	if width < 1 {
@@ -2319,7 +2330,7 @@ func (m *Model) desiredComposerHeight() int {
 	}
 	wrapped := xansi.Wordwrap(m.editor.Value(), width, "")
 	wrapped = xansi.Hardwrap(wrapped, width, true)
-	return min(maxComposerHeight, max(minComposerHeight, lipgloss.Height(wrapped))+attachmentRows)
+	return min(maxComposerHeight, max(minComposerHeight, lipgloss.Height(wrapped)))
 }
 
 func (m *Model) currentTime() time.Time {
@@ -2768,10 +2779,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.toggleCollaborationMode()
 	}
 
-	if !m.busy && len(m.promptImages) > 0 && strings.TrimSpace(m.editor.Value()) == "" &&
+	if !m.busy && len(m.promptImages) > 0 &&
+		strings.TrimSpace(stripImageAttachmentTokens(m.editor.Value(), len(m.promptImages))) == "" &&
 		(msg.Type == tea.KeyBackspace || msg.Type == tea.KeyEsc) {
-		m.promptImages = m.promptImages[:len(m.promptImages)-1]
-		m.lastStatus = "removed pasted image"
+		index := len(m.promptImages) - 1
+		m.editor.SetValue(removeImageAttachmentToken(m.editor.Value(), index))
+		m.editor.CursorEnd()
+		m.promptImages = m.promptImages[:index]
+		m.lastStatus = "removed " + imageAttachmentToken(index)
+		m.refreshInputCompletions()
 		m.layout()
 		return m, nil
 	}
@@ -2790,7 +2806,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// --- Normal editing / sending ---
-	text := m.editor.Value()
+	displayText := m.editor.Value()
+	text := stripImageAttachmentTokens(displayText, len(m.promptImages))
 	submitKey := keyMatches(msg, m.keys.Submit)
 	followUpKey := keyMatches(msg, m.keys.FollowUp)
 	if submitKey && m.modeSwitching {
@@ -2823,16 +2840,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.runCommand(trimmed)
 		}
 		if trimmed != "" || len(m.promptImages) > 0 {
-			display := text
-			if display == "" {
+			display := displayText
+			if strings.TrimSpace(display) == "" {
 				display = fmt.Sprintf("[%d image(s)]", len(m.promptImages))
-			} else if len(m.promptImages) > 0 {
-				display += fmt.Sprintf(" [%d image(s)]", len(m.promptImages))
 			}
 			m.pushLine(styleUser.Render("› " + display))
 			m.imagePasteGeneration++
 			m.editor.Reset()
-			return m, m.startPrompt(text)
+			return m, m.startPrompt(displayText)
 		}
 	}
 
@@ -3265,7 +3280,7 @@ func (m *Model) startPrompt(text string) tea.Cmd {
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
-	prompt := m.expandedPrompt(text)
+	prompt := m.expandedPrompt(stripImageAttachmentTokens(text, len(m.promptImages)))
 	images := m.takePromptImages()
 	return func() tea.Msg {
 		err := m.app.Agent.PromptContent(ctx, prompt, images)
@@ -3282,7 +3297,7 @@ func (m *Model) startPromptWithMode(text string, mode protocol.CollaborationMode
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
-	prompt := m.expandedPrompt(text)
+	prompt := m.expandedPrompt(stripImageAttachmentTokens(text, len(m.promptImages)))
 	images := m.takePromptImages()
 	return func() tea.Msg {
 		err := m.app.Agent.PromptContentWithMode(ctx, prompt, images, mode)
@@ -7169,17 +7184,12 @@ func (m *Model) renderEditor() string {
 		}
 		input = stylePrompt.Render("🔑 ") + styleHeaderDim.Render(m.loginProvider+": ") + masked
 	} else {
-		if len(m.promptImages) > 0 {
-			labels := make([]string, 0, len(m.promptImages))
-			for i, image := range m.promptImages {
-				labels = append(labels, imageAttachmentLabel(image, i))
-			}
-			barWidth := max(1, m.managedFrameWidth()-4)
-			bar := xansi.Wordwrap(strings.Join(labels, " "), barWidth, "")
-			bar = xansi.Truncate(bar, barWidth*2, "…")
-			input = styleHeaderDim.Render(bar+"  · Backspace removes last") + "\n"
+		editorView := m.editor.View()
+		for i := range m.promptImages {
+			token := imageAttachmentToken(i)
+			editorView = strings.ReplaceAll(editorView, token, stylePrompt.Render(token))
 		}
-		input += stylePrompt.Render("› ") + m.editor.View()
+		input = stylePrompt.Render("› ") + editorView
 	}
 	height := max(minComposerHeight, m.editor.Height())
 	width := m.managedFrameWidth()

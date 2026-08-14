@@ -23,15 +23,20 @@ Built-in sessions receive a provider-free display title from the first accepted
 user prompt. Whitespace is collapsed and long titles are truncated at 72 runes;
 image-only prompts use `Image prompt`. Manual rename trims surrounding
 whitespace, requires 1–72 runes, and rejects control characters. Titles are
-session-wide metadata: they need not be unique, do not enter model context, and
-do not rename the database or change its stable ID. A manually titled empty
-session is durable and remains visible in the picker.
+session-wide metadata: they need not be unique, do not enter ordinary
+conversation context (but `session_search`/`session_reference` results can
+surface them), and do not rename the database or change its stable ID. A
+manually titled empty session is durable and remains visible in the picker.
 
 ## Driver
 
 The project uses [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite),
 a pure-Go, CGo-free SQLite driver that implements Go's `database/sql` API. No
 SQLite shared library or C toolchain is required.
+
+New session databases are created with mode `0600` inside `0755` directories.
+Opening an existing database does not re-chmod it, so a file loosened or created
+outside Snow must be secured separately.
 
 The store opens databases with:
 
@@ -93,8 +98,10 @@ under `~/.snow/artifacts` (or `SNOW_HOME/artifacts`) and the durable tool messag
 contains only the preview plus an opaque artifact ID. The deferred read-risk
 `artifact_read` and `artifact_grep` tools authorize IDs against the current
 session and return bounded fragments; artifacts are not added to ordinary
-filesystem roots. This model-free pruning reduces every subsequent provider
-request, not only the summarizer. `Metadata`/`SetMetadata` store append-only
+filesystem roots. Snow does not currently garbage-collect spilled artifacts,
+and deleting a session database does not remove its artifact namespace. This
+model-free pruning reduces every subsequent provider request, not only the
+summarizer. `Metadata`/`SetMetadata` store append-only
 per-session state such as permission mode and remembered tool rules.
 
 When an existing session is opened, the agent checks the final provider tool
@@ -112,8 +119,9 @@ Snow exposes two deferred, read-only model tools for reusing prior work:
 
 - `session_search` builds a disposable SQLite FTS5 index from the current
   project’s durable root sessions and returns one bounded representative hit per
-  matching branch. The durable session databases remain authoritative; the
-  derived index is rebuilt from their current tips and is never a memory store.
+  matching branch. The durable session databases remain authoritative and are
+  never modified; the derived index is a disposable in-memory FTS5 cache rebuilt
+  when the project's session set changes.
 - `session_reference` captures a selected search result as a bounded immutable
   snapshot. The snapshot is persisted as the ordinary tool-result message on the
   current branch, so later changes to the source session cannot alter replay.

@@ -16,9 +16,9 @@ see [JSONL RPC](rpc.md). For embedding, see the [Go SDK](sdk.md).
 
 `--mode print` can be used explicitly. Explicit print and JSON modes require a
 nonblank `-p`; Snow validates that before constructing sessions or extensions.
-Supplying `-p` selects print behavior unless `--mode json` is set. RPC keeps
-stdin open for asynchronous commands; it is not a one-shot `echo | snow`
-protocol for prompts. Unknown permission modes are startup errors rather than
+Supplying `-p` selects print behavior unless `--mode json` or `--mode rpc` is
+set. RPC keeps stdin open for asynchronous commands; it ignores `-p` and is not
+a one-shot `echo | snow` protocol for prompts. Unknown permission modes are startup errors rather than
 silently falling back.
 
 ## Common flags
@@ -98,9 +98,11 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
 2. Finalized Markdown, reasoning, tools, plans, goals, and subagent rows remain in
    the viewport. Scrolling never enters terminal scrollback, so it cannot expose
    stale headers, separators, or prior composer frames.
-3. The footer shows permission mode, context usage, activity, pending queue
-   state, and—when width permits—the current provider/model, collaboration mode,
-   reasoning effort, and the latest request's prompt-cache hit rate as `CH<n>%`.
+3. The sticky header shows the current provider/model, collaboration mode,
+   reasoning effort, working directory, and status. The run-status row shows
+   activity and queued-input count. The footer shows permission mode, mode/goal
+   state, context usage, and the latest request's prompt-cache hit rate as
+   `CH<n>%`; inline mode may compact provider/model/effort into that footer.
 
 The full-screen viewport keeps a bounded recent render cache (up to 2,000
 entries or 4 MiB of rendered rows) so long-running streams cannot grow terminal
@@ -123,7 +125,17 @@ release. F6 toggles app/native mouse mode. In native mode, wheel gestures may
 move terminal scrollback; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still
 scroll Snow.
 
-In the ordinary agent composer, **Ctrl+V** probes the system clipboard for PNG, JPEG, GIF, or WebP image data before falling back to text paste. Attached images appear above the draft and are sent as image blocks when Enter submits to a vision-capable model. Up to eight images are accepted, each at most 20 MiB (40 MiB aggregate). With an empty text draft, Backspace (or Esc) removes the last attachment. Images cannot be queued as steering/follow-up input while another turn runs. Apple Terminal intercepts Cmd+V as terminal text paste, so use Ctrl+V for image capture. Linux image paste requires `wl-paste` or `xclip`; remote SSH sessions read the remote host clipboard, not the local desktop clipboard.
+In the ordinary agent composer, **Ctrl+V** probes the system clipboard for PNG,
+JPEG, GIF, or WebP image data before falling back to text paste. Each attachment
+appears at the paste cursor as an inline `[Image #N]` token; the token is removed
+from model-visible text when Enter sends the corresponding image block to a
+vision-capable model. Up to eight images are accepted, each at most 20 MiB and
+40 MiB in aggregate. When no ordinary text remains, Backspace (or Esc) removes
+the last attachment and token. Images cannot be queued as steering/follow-up
+input while another turn runs. Apple Terminal intercepts Cmd+V as terminal text
+paste, so use Ctrl+V for image capture. Linux image paste requires `wl-paste` or
+`xclip`; remote SSH sessions read the remote host clipboard, not the local
+desktop clipboard.
 
 ## Composer and transcript keys
 
@@ -195,7 +207,7 @@ meaningful.
 | `/default` | Switch to Default collaboration mode |
 | `/plan [message]` | Switch to Plan Mode and optionally submit a planning prompt |
 | `/goal [--budget N] [objective]` | Show or create a persistent branch goal with an optional token budget |
-| `/goal edit OBJECTIVE` | Replace the active objective while preserving usage/budget |
+| `/goal edit OBJECTIVE` / `/goal replace OBJECTIVE` | Replace the active objective while preserving usage/budget |
 | `/goal pause` / `/goal resume` | Pause or explicitly resume eligible automatic goal work, including an active goal deferred by abort |
 | `/goal clear` | Remove the branch goal |
 | `/compact` | Summarize older complete turns behind a logical context boundary |
@@ -271,8 +283,10 @@ turns. Oversized plain-text tool results in the older summarization prefix are
 first reduced to a bounded head and tail; exact session history remains
 unchanged. When invoked during automatic goal work, manual compaction pauses that
 goal after the summary; use `/goal resume` to continue. Active goals also compact automatically between complete continuation
-turns at the configured context threshold (90% by default; `0` disables it).
-Ordinary prompts do not auto-compact. The full append-only history remains
+turns at the configured context threshold (80% by default; `0` disables it).
+Any admitted turn—including ordinary prompts, steering/follow-ups, and goal
+continuations—may auto-compact at a safe top-of-cycle boundary. The full
+append-only history remains
 available.
 
 Snow also detects identical consecutive tool calls during one admitted run and

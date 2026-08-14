@@ -38,9 +38,9 @@ The Snow design should have these properties:
    tools → persistence loop.
 2. One root-scoped `internal/subagent.Manager` owns identity, topology, limits,
    lifecycle, mailboxes, child construction, and shutdown.
-3. The model controls the manager through six V2-style tools:
-   `spawn_agent`, `send_message`, `followup_task`, `wait_agent`,
-   `interrupt_agent`, and `list_agents`.
+3. The model controls the manager through seven V2-style tools:
+   `spawn_agent`, `list_subagent_models`, `send_message`, `followup_task`,
+   `wait_agent`, `interrupt_agent`, and `list_agents`.
 4. Agents use canonical task paths such as `/root/api_review`; UUID-like thread
    IDs remain host correlation keys but are not the preferred model-facing
    identity.
@@ -73,7 +73,7 @@ At the pinned commit, both feature flags are marked stable:
 | Generation | Feature | Default | Model tools |
 |---|---|---:|---|
 | V1 | `multi_agent` | on | `spawn_agent`, `send_input`, `resume_agent`, `wait_agent`, `close_agent` |
-| V2 | `multi_agent_v2` | off | `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, `list_agents` |
+| V2 | `multi_agent_v2` | off | `spawn_agent`, `list_subagent_models`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, `list_agents` |
 
 V1 remains the compatibility/default surface. V2 is the destination
 architecture: canonical paths, mailboxes, selective context inheritance,
@@ -588,7 +588,7 @@ part of this feature. Instead:
 |---|---|---|
 | Agent runtime | `agent.New(Options)` constructs a reusable loop | Child factory and tree-scoped manager |
 | Turn admission | One `Agent` safely allows one active turn | One independent `Agent` per child |
-| Tool control | Thread-safe registry and model tools | Six manager-bound collaboration tools |
+| Tool control | Thread-safe registry and model tools | Seven manager-bound collaboration tools |
 | Session history | Memory/SQLite stores, context projection, forks | Independent child stores and topology metadata |
 | Messaging | User prompts and tool results only | Attributed mailbox safe points |
 | Events | Ordered cloned cross-surface bus | Child identity, status, activity, filtered forwarding |
@@ -634,7 +634,7 @@ internal/subagent/
 ├── roles.go            # built-in/configured role resolution
 ├── context.go          # none/all/N history projection
 ├── mailbox.go          # message envelopes and activity notifications
-├── tools.go            # six model-facing tools
+├── tools.go            # seven model-facing tools
 ├── persistence.go      # optional session store adapter
 ├── manager_test.go
 ├── lifecycle_test.go
@@ -1328,7 +1328,7 @@ Do not make `--subagents` imply mutation or recursive spawning.
 
 ### Work
 
-- Register six manager-bound tools on the root registry before router indexing.
+- Register seven manager-bound tools on the root registry before router indexing.
 - Bind caller identity in the tool object, not model arguments.
 - Make tools direct/always loaded while the feature is enabled; defer only after
   tool routing has a tested way to keep the complete collaboration set
@@ -1359,7 +1359,7 @@ Do not make `--subagents` imply mutation or recursive spawning.
 
 ### Exit criteria
 
-- All six schemas and edge errors match the documented contract.
+- All seven schemas and edge errors match the documented contract.
 - Spawn returns asynchronously.
 - Wait never returns child content.
 - Results reach parent context exactly once.

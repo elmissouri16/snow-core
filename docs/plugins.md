@@ -75,7 +75,10 @@ but does not wait for a blocked observer, preventing observer-driven deadlocks.
 
 ## External configuration
 
-Global configuration and SDK/CLI options use the same `PluginSpec`:
+Global configuration and SDK/CLI options use the same `PluginSpec`; the
+representative example below is not exhaustive. Fields such as `cwd`, frame and
+input/progress/concurrency limits, `capabilities`, and private `config` are
+specified in [External plugin protocol v2](plugin-protocol.md#configuration):
 
 ```json
 {
@@ -104,18 +107,22 @@ snow --plugin manifest.json
 snow --no-plugins
 ```
 
+`--no-plugins` suppresses all declarations for that launch and records a
+diagnostic for each skipped declaration.
+
 The executable shorthand derives an ID and enables the plugin. A manifest is
 required when an interpreter and script need separate argv entries.
 
 Configuration can be inspected and changed without starting any plugin:
 
 ```sh
-snow plugin list [--all] [--json]
+snow plugin                    # same as list
+snow plugin list [--all] [--json]  # alias: ls
 snow plugin get my-tools [--json]
-snow plugin add manifest.json [--project] [--replace] [--enable]
-snow plugin enable my-tools [--project]
-snow plugin disable my-tools [--project]
-snow plugin remove my-tools [--project]
+snow plugin add manifest.json [--project] [--replace] [--enable] [--json]
+snow plugin enable my-tools [--project] [--json]
+snow plugin disable my-tools [--project] [--json]
+snow plugin remove my-tools [--project] [--json]
 ```
 
 `plugin add` stages a declaration with `enabled: false` by default, regardless
@@ -132,7 +139,9 @@ Global, trusted-project, and repeated explicit `--plugin` declarations merge by
 ID in that order. A higher-precedence disabled declaration still suppresses a
 lower enabled declaration. `plugin list --all` includes lower-precedence entries
 with `shadowed: true`; ordinary list/get report only effective declarations.
-Duplicate IDs inside one persisted scope are rejected.
+Duplicate IDs inside one persisted scope are rejected. The inherited
+`--config PATH` flag selects a nondefault global configuration file for plugin
+subcommands and cannot be combined with `--project` mutations.
 
 Project `.snow/config.json` entries are loaded only after project trust has an
 explicit `allow` decision (or always-trust policy). Denied or unresolved project
@@ -184,11 +193,14 @@ stderr.
 
 ```sh
 snow plugin check manifest.json
+snow plugin check /absolute/path/to/executable
 snow plugin check manifest.json --json
 snow plugin check manifest.json --timeout 20s --cwd /path/to/project
 ```
 
-`plugin check` starts no provider or agent session. It:
+`plugin check` accepts a manifest or executable shorthand. Its overall startup
+and validation timeout defaults to 10 seconds. It starts no provider or agent
+session and:
 
 - starts the configured process;
 - validates the manifest ID/version/protocol and tool schemas;

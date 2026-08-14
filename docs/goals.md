@@ -1,8 +1,8 @@
 # Persistent Thread Goals
 
-Snow can attach one persisted objective to each saved session branch. Goals are
-not available in ephemeral `--no-session` sessions; mutating goal APIs return a
-persisted-session error there.
+Snow can attach one objective to each session branch. SQLite sessions persist
+goals across processes; ephemeral `--no-session` sessions support the same goal
+operations for the process lifetime only.
 
 Statuses are `active`, `paused`, `blocked`, `usage_limited`, `budget_limited`,
 and `complete`. `complete` and `budget_limited` are terminal. Pause is valid only
@@ -52,10 +52,11 @@ also yield briefly between turns, preventing an immediate-response provider
 from hot-spinning even while useful text/tool work continues. At the safe
 boundary between complete goal turns, Snow automatically compacts when the
 latest provider-reported request usage reaches the configured percentage of the
-model context window (90% by default). Set
-`compaction.goal_auto_threshold_percent` to `0` to disable it. Compaction errors
-block the active goal rather than issuing another request with unsafe context
-pressure.
+model context window (80% by default). Set
+`compaction.auto_threshold_percent` to `0` to disable it; the older
+`goal_auto_threshold_percent` name is accepted only as a legacy alias.
+Compaction errors block the active goal rather than issuing another request with
+unsafe context pressure.
 
 `Abort` cancels and joins any admitted turn. If goal work was active—even in the
 small window before its first provider call—it persists a continuation

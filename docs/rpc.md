@@ -377,8 +377,9 @@ See [Model-requested user input](user-input.md).
 
 ## Goal commands
 
-Goals require a persisted SQLite session. Full semantics are documented in
-[Persistent Thread Goals](goals.md).
+Goals require a branch-scoped session store. SQLite makes them durable across
+processes; `--no-session` uses the same commands with process-lifetime in-memory
+state. Full semantics are documented in [Persistent Thread Goals](goals.md).
 
 | Command | `params` | Success `data` |
 |---|---|---|
@@ -495,9 +496,9 @@ After the `rpc_ready` handshake, frames other than `response` and
 | Interaction | `user_input_request`, `queue_updated` |
 | Lifecycle/state | `session_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
 | Plan | `plan_started`, `plan_delta`, `plan_completed`, `plan_update` |
-| Compaction | `compaction_started`, `compaction_done` (`compaction.automatic` marks goal-triggered runs) |
+| Compaction | `compaction_started`, `compaction_done` (`compaction.automatic` marks any non-manual pressure/overflow-repair run) |
 | Goals | `thread_goal_updated` |
-| Subagents | `subagent_started`, `subagent_status`, `subagent_message`, `subagent_activity` |
+| Subagents | `subagent_started`, `subagent_status`, `subagent_message`; `subagent_activity` is reserved but not currently emitted |
 
 Possible payload fields:
 
@@ -551,9 +552,9 @@ fields above. Nested objects use the public `pkg/protocol` JSON tags.
 | `thread_goal_updated` | `thread_goal: {goal?,cleared?}`; `goal` uses the full shape below |
 | `subagent_started`, `subagent_status` | `subagent` snapshot described below |
 | `subagent_message` | `agent_message: {id,author,recipient,kind,content,trigger_turn?,created_at}` |
-| `subagent_activity` | aggregate activity text in `message`, with related `agent`/`subagent` fields when available |
+| `subagent_activity` | reserved wire event type; not currently emitted |
 | `session_updated`, `turn_done`, `aborted` | correlation/state fields; `message` may provide a human-readable detail |
-| `error` | `message`, normally `is_error:true` |
+| `error` | `message`; `is_error` is not currently set on these events (error-path `compaction_done` events do set it) |
 
 A `usage` object has `input`, `output`, optional `reasoning`, `cache_read`,
 optional `cache_read_known`, `cache_write`, `total_tokens`, optional `requests`,
