@@ -7,6 +7,10 @@ import (
 	udiff "github.com/aymanbagabas/go-udiff"
 )
 
+// maxDiffInputBytes bounds each side of a file-change preview. File writes
+// still complete above this threshold; only the optional UI diff is omitted.
+const maxDiffInputBytes = 512 * 1024
+
 // editDiff returns a compact, line-oriented preview of an edit. It keeps the
 // useful context from a unified diff while omitting file headers and hunk
 // metadata so it reads naturally in the terminal transcript.
@@ -41,7 +45,6 @@ func contentDiff(before, after string) string {
 	// Avoid making a full-file overwrite unexpectedly expensive for large
 	// files. The normal write still completes; only the optional preview is
 	// omitted when diffing would be disproportionate.
-	const maxDiffInputBytes = 512 * 1024
 	if len(before) > maxDiffInputBytes || len(after) > maxDiffInputBytes {
 		return ""
 	}

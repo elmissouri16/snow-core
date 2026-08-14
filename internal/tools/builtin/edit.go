@@ -107,6 +107,11 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if count > 1 && !a.ReplaceAll {
 		return tools.ErrorResult(fmt.Errorf("edit: old_str appears %d times in %q; use replace_all to replace all occurrences", count, a.Path)), nil
 	}
+	if a.OldStr == a.NewStr {
+		return tools.ToolResult{
+			Content: []protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("No changes needed for %s", a.Path))},
+		}, nil
+	}
 
 	var updated string
 	if a.ReplaceAll {

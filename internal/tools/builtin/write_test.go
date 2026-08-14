@@ -62,6 +62,87 @@ func TestWrite_Overwrite(t *testing.T) {
 	}
 }
 
+func TestWrite_IdenticalContentDoesNotReplaceFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "same.txt")
+	if err := os.WriteFile(file, []byte("unchanged"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := NewWrite(NewPathGuard([]string{dir}, dir))
+	res, _ := w.Run(context.Background(), argsFor(t, map[string]any{"path": file, "content": "unchanged"}), stubHost{cwd: dir, roots: []string{dir}})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.Content[0].Text)
+	}
+	if !strings.Contains(res.Content[0].Text, "No changes needed") {
+		t.Fatalf("result = %q, want no-change message", res.Content[0].Text)
+	}
+	after, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("identical write replaced the file inode")
+	}
+	if res.Details != nil {
+		t.Fatalf("details = %#v, want nil for identical write", res.Details)
+	}
+}
+
+func TestWrite_LargeOverwriteSkipsPreview(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "large.txt")
+	if err := os.WriteFile(file, []byte(strings.Repeat("x", maxDiffInputBytes+1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	w := NewWrite(NewPathGuard([]string{dir}, dir))
+	res, _ := w.Run(context.Background(), argsFor(t, map[string]any{"path": file, "content": "small"}), stubHost{cwd: dir, roots: []string{dir}})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.Content[0].Text)
+	}
+	if res.Details != nil {
+		t.Fatalf("details = %#v, want nil when existing file exceeds preview limit", res.Details)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "small" {
+		t.Fatalf("content = %q, want small", data)
+	}
+}
+
+func TestWrite_LargeIdenticalContentDoesNotReplaceFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "large-same.txt")
+	content := strings.Repeat("x", maxDiffInputBytes+1)
+	if err := os.WriteFile(file, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := NewWrite(NewPathGuard([]string{dir}, dir))
+	res, _ := w.Run(context.Background(), argsFor(t, map[string]any{"path": file, "content": content}), stubHost{cwd: dir, roots: []string{dir}})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.Content[0].Text)
+	}
+	after, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("identical large write replaced the file inode")
+	}
+}
+
 func TestWrite_MissingPath(t *testing.T) {
 	dir := t.TempDir()
 	w := NewWrite(NewPathGuard([]string{dir}, dir))

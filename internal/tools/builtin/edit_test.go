@@ -43,6 +43,37 @@ func TestEdit_UniqueReplace(t *testing.T) {
 	}
 }
 
+func TestEdit_IdenticalReplacementDoesNotReplaceFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "same.txt")
+	if err := os.WriteFile(file, []byte("keep this text"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	e := NewEdit(NewPathGuard([]string{dir}, dir))
+	res, _ := e.Run(context.Background(), argsFor(t, map[string]any{"path": file, "old_str": "this", "new_str": "this"}), stubHost{cwd: dir, roots: []string{dir}})
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.Content[0].Text)
+	}
+	if !strings.Contains(res.Content[0].Text, "No changes needed") {
+		t.Fatalf("result = %q, want no-change message", res.Content[0].Text)
+	}
+	after, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("identical edit replaced the file inode")
+	}
+	if res.Details != nil {
+		t.Fatalf("details = %#v, want nil for identical edit", res.Details)
+	}
+}
+
 func TestEditDiffUsesContextAndMarkers(t *testing.T) {
 	before := "line 1\nline 2\nline 3\nline 4\nold line\nline 6\nline 7\nline 8\nline 9\nline 10"
 	after := strings.Replace(before, "old line", "new line", 1)

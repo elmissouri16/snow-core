@@ -159,7 +159,7 @@ func binaryProbe(file *os.File, ctx context.Context) (bool, error) {
 
 // readUpTo reads at most max bytes while checking cancellation between
 // chunks. The caller can detect truncation by requesting max+UTFMax bytes.
-func readUpTo(ctx context.Context, file *os.File, max int) ([]byte, error) {
+func readUpTo(ctx context.Context, reader io.Reader, max int) ([]byte, error) {
 	if max <= 0 {
 		return nil, nil
 	}
@@ -177,7 +177,7 @@ func readUpTo(ctx context.Context, file *os.File, max int) ([]byte, error) {
 		if want < len(buf) {
 			buf = buf[:want]
 		}
-		n, err := file.Read(buf)
+		n, err := reader.Read(buf)
 		if n > 0 {
 			data = append(data, buf[:n]...)
 		}
