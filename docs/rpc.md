@@ -428,7 +428,7 @@ usage model mode plan plan_update compaction
 user_input queue thread_goal
 
 agent subagent agent_message
-turn_id turn_origin goal_continuing
+turn_id turn_origin turn_sequence root_epoch goal_continuing
 ```
 
 Correlation rules:
@@ -437,6 +437,8 @@ Correlation rules:
 - `agent` present: attributed child stream/tool/usage event;
 - `subagent` present: child lifecycle snapshot;
 - `agent_message` present: attributed mailbox event;
+- `turn_sequence`: process-local monotonic admission order for correlated turn events (use `turn_id` as the stable identity; the sequence restarts with the process);
+- `root_epoch`: process-local root session/branch reconciliation generation stamped on every root event, including events outside a turn;
 - `tool_output`: bounded preview only; full results remain in session storage.
 
 Usage payloads keep `input` as the total prompt count, including cached tokens.

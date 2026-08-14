@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build darwin || linux
 
 package builtin
 
@@ -7,7 +7,7 @@ import (
 	"os/exec"
 )
 
-func shellCommand(ctx context.Context, command string, _ WindowsShellOptions, _ []string, _ string) (*exec.Cmd, error) {
+func shellCommand(ctx context.Context, command string, _ []string, _ string) (*exec.Cmd, error) {
 	return exec.CommandContext(ctx, "sh", "-c", command), nil
 }
 

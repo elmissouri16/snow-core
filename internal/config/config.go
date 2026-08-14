@@ -61,13 +61,6 @@ type CompactionConfig struct {
 	HistoricalToolResultThreshold int `json:"historical_tool_result_threshold_bytes,omitempty"`
 }
 
-// WindowsShellConfig controls the compatibility-named bash tool on Windows.
-// It is global-only because project configuration must not select executables.
-type WindowsShellConfig struct {
-	Kind       string `json:"kind,omitempty"`       // powershell|cmd|executable
-	Executable string `json:"executable,omitempty"` // absolute when kind=executable
-}
-
 func DefaultCompaction() CompactionConfig {
 	return CompactionConfig{
 		MinRetainedTurns: 2, SummaryMaxTokens: 2000, Fallback: "local",
@@ -106,25 +99,6 @@ func (c CompactionConfig) Validate() error {
 	}
 	if c.HistoricalToolResultThreshold < 1024 || c.HistoricalToolResultThreshold > 1<<20 {
 		return errors.New("config: compaction historical_tool_result_threshold_bytes must be 1024..1048576")
-	}
-	return nil
-}
-
-func (c WindowsShellConfig) Validate() error {
-	if c.Kind == "" {
-		c.Kind = "powershell"
-	}
-	switch c.Kind {
-	case "powershell", "cmd":
-		if c.Executable != "" {
-			return errors.New("config: windows shell executable requires kind=executable")
-		}
-	case "executable":
-		if c.Executable == "" || !filepath.IsAbs(c.Executable) {
-			return errors.New("config: windows shell executable must be absolute")
-		}
-	default:
-		return fmt.Errorf("config: unsupported windows shell kind %q", c.Kind)
 	}
 	return nil
 }
@@ -336,7 +310,6 @@ type Config struct {
 	Skills                  SkillsConfig                    `json:"skills,omitempty"`
 	Subagents               SubagentConfig                  `json:"subagents,omitempty"`
 	Compaction              CompactionConfig                `json:"compaction,omitempty"`
-	WindowsShell            WindowsShellConfig              `json:"windows_shell,omitempty"`
 }
 
 // Default returns the default configuration.
@@ -357,12 +330,11 @@ func Default() Config {
 			"openai-compatible": {},
 			"chatgpt":           {},
 		},
-		MCPServers:   map[string]publicmcp.ServerSpec{},
-		Skills:       SkillsConfig{Overrides: map[string]bool{}},
-		Subagents:    DefaultSubagents(),
-		Compaction:   DefaultCompaction(),
-		WindowsShell: WindowsShellConfig{Kind: "powershell"},
-		TUI:          TUIConfig{Theme: "default", Mouse: true},
+		MCPServers: map[string]publicmcp.ServerSpec{},
+		Skills:     SkillsConfig{Overrides: map[string]bool{}},
+		Subagents:  DefaultSubagents(),
+		Compaction: DefaultCompaction(),
+		TUI:        TUIConfig{Theme: "default", Mouse: true},
 	}
 }
 
@@ -448,9 +420,6 @@ func Load(path string) (Config, error) {
 	if cfg.Compaction.HistoricalToolResultThreshold == 0 {
 		cfg.Compaction.HistoricalToolResultThreshold = defaults.HistoricalToolResultThreshold
 	}
-	if cfg.WindowsShell.Kind == "" {
-		cfg.WindowsShell.Kind = "powershell"
-	}
 	if err := ValidateTUITheme(cfg.TUI.Theme); err != nil {
 		return cfg, err
 	}
@@ -458,9 +427,6 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 	if err := cfg.Compaction.Validate(); err != nil {
-		return cfg, err
-	}
-	if err := cfg.WindowsShell.Validate(); err != nil {
 		return cfg, err
 	}
 	if err := validateSystemPromptFile(cfg.SystemPromptFile, true); err != nil {

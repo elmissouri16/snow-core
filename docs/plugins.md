@@ -95,8 +95,7 @@ directories and has no plugin marketplace.
 ### Environment behavior
 
 Snow intentionally supplies the configured `env`; omitted `env` means an empty
-child environment except for platform-required entries that Go may add (notably
-`SYSTEMROOT` on Windows). This reduces accidental credential inheritance but can
+child environment. This reduces accidental credential inheritance but can
 affect interpreter shebangs, subprocess lookup, locale, and certificate
 configuration.
 
@@ -124,8 +123,8 @@ snow --plugin examples/plugins/python/manifest.json
 ```
 
 The checked-in examples use only Node/Python standard libraries. Their manifests
-use runtime names plus a minimal POSIX `PATH` for readability; production and
-Windows declarations should replace those values with explicit paths.
+use runtime names plus a minimal POSIX `PATH` for readability; production
+declarations should replace those values with explicit paths.
 
 Stdout belongs exclusively to JSON-RPC frames. JavaScript plugins must log with
 `console.error` or stderr; Python plugins must configure logging/printing for

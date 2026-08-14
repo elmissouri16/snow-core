@@ -386,6 +386,9 @@ type Model struct {
 	subagentFleetActivitySpace    map[string]bool
 	busy                          bool
 	activeTurnID                  string
+	rootTurnSequence              uint64
+	rootEventEpoch                uint64
+	rootTurnFence                 bool
 	runGeneration                 uint64
 	compactGeneration             uint64
 	runStartedAt                  time.Time
@@ -884,6 +887,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		if m.subagentFleetOpen {
+			m.handleSubagentFleetMouse(msg)
 			return m, nil
 		}
 		// Application-owned drag selection and viewport wheel scrolling share
@@ -1372,6 +1376,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.subagentFleetMessages = nil
 		m.subagentFleetDetailState = protocol.SubagentState{}
 		m.closeSubagentFleet()
+		if msg.action == "select" || msg.action == "fork" {
+			m.fenceRootTurnProjection()
+		}
 		m.hydrateSession()
 		if err := m.app.ReadyGoal(); err != nil {
 			m.pushLine(styleError.Render("tree goal: " + err.Error()))
@@ -1618,12 +1625,25 @@ func (m *Model) setRunIdle() {
 	m.cancelRun = nil
 }
 
+func (m *Model) fenceRootTurnProjection() {
+	m.setRunIdle()
+	m.rootTurnSequence = 0
+	m.rootEventEpoch = 0
+	if m.app != nil && m.app.Agent != nil {
+		m.rootEventEpoch = m.app.Agent.RootEpoch()
+	}
+	m.rootTurnFence = true
+}
+
 func (m *Model) adoptTurn(ev protocol.AgentEvent) {
 	if ev.Agent != nil || ev.TurnID == "" {
 		return
 	}
 	if ev.TurnID != m.activeTurnID {
 		m.turnUsageSeen = false
+	}
+	if ev.TurnSequence > m.rootTurnSequence {
+		m.rootTurnSequence = ev.TurnSequence
 	}
 	m.activeTurnID = ev.TurnID
 	m.busy = true
@@ -1633,35 +1653,35 @@ func (m *Model) adoptTurn(ev protocol.AgentEvent) {
 }
 
 func (m *Model) staleRootEvent(ev protocol.AgentEvent) bool {
-	if ev.Agent != nil || ev.TurnID == "" {
+	if ev.Agent != nil {
 		return false
 	}
-	if m.activeTurnID != "" {
-		return ev.TurnID != m.activeTurnID
+	if ev.RootEpoch != 0 {
+		if m.rootEventEpoch != 0 && ev.RootEpoch < m.rootEventEpoch {
+			return true
+		}
+	} else if m.rootTurnFence {
+		return true
 	}
-	if m.app != nil && m.app.Agent != nil {
-		_, activeID, running := m.app.Agent.ActiveTurn()
-		return running && activeID != "" && ev.TurnID != activeID
+	if ev.TurnID == "" {
+		return false
 	}
-	return false
+	// Finish the turn currently projected by the UI before adopting a newer
+	// core identity. Ordered terminal events may still be queued when the next
+	// operation has already been admitted.
+	if m.activeTurnID != "" && ev.TurnID == m.activeTurnID {
+		return false
+	}
+	if ev.TurnSequence != 0 {
+		// Admission sequence preserves every queued intermediate turn even when
+		// core has already completed or admitted successors. The high-water mark
+		// rejects older replays within the accepted root epoch.
+		return ev.TurnSequence < m.rootTurnSequence
+	}
+	return m.activeTurnID != "" && ev.TurnID != m.activeTurnID
 }
 
 func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
-	// Root stream events deliberately have no Agent attribution. Give the fleet
-	// inspector an inspector-only root identity without changing the public event
-	// or allowing it into child handling.
-	if ev.Agent == nil && m.app != nil && m.app.Agent != nil && m.subagentFleetOpen {
-		root := protocol.AgentRef{ThreadID: "root", Path: protocol.RootAgentPath, Role: "root", Depth: 0}
-		for _, state := range m.subagentFleetList.Agents {
-			if state.Agent.Path == protocol.RootAgentPath {
-				root = state.Agent
-				break
-			}
-		}
-		fleetEvent := ev.Clone()
-		fleetEvent.Agent = root.Clone()
-		m.recordSubagentFleetEvent(fleetEvent)
-	}
 	// Child streams never reuse root scalar buffers or trigger root session
 	// hydration. Bubble Tea's Update goroutine alone mutates this map.
 	if ev.Agent != nil {
@@ -1675,6 +1695,24 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 	// paths, so a newer turn can be admitted before an old batch is reduced.
 	if m.staleRootEvent(ev) {
 		return
+	}
+	if ev.Agent == nil && ev.RootEpoch > m.rootEventEpoch {
+		m.rootEventEpoch = ev.RootEpoch
+	}
+	// Root stream events deliberately have no Agent attribution. Give the fleet
+	// inspector an inspector-only root identity after stale-event rejection,
+	// without changing the public event or allowing it into child handling.
+	if ev.Agent == nil && m.app != nil && m.app.Agent != nil && m.subagentFleetOpen {
+		root := protocol.AgentRef{ThreadID: "root", Path: protocol.RootAgentPath, Role: "root", Depth: 0}
+		for _, state := range m.subagentFleetList.Agents {
+			if state.Agent.Path == protocol.RootAgentPath {
+				root = state.Agent
+				break
+			}
+		}
+		fleetEvent := ev.Clone()
+		fleetEvent.Agent = root.Clone()
+		m.recordSubagentFleetEvent(fleetEvent)
 	}
 	// Session updates describe persistence, not active provider work. In
 	// particular, a delayed update after a terminal compaction event must not
@@ -3854,8 +3892,6 @@ func openOAuthBrowser(ctx context.Context, target string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		name, args = "open", []string{target}
-	case "windows":
-		name, args = "rundll32", []string{"url.dll,FileProtocolHandler", target}
 	default:
 		name, args = "xdg-open", []string{target}
 	}
@@ -4887,6 +4923,7 @@ func (m *Model) switchSession(st session.Store) error {
 	if err := m.app.SetSession(st); err != nil {
 		return err
 	}
+	m.fenceRootTurnProjection()
 	m.startupResumeRequired = false
 	m.pickSession = false
 	m.sessions = nil
@@ -4918,9 +4955,7 @@ func (m *Model) switchSession(st session.Store) error {
 	m.pendingMode = nil
 	m.modeSwitchReady = false
 	m.modeSwitching = false
-	m.toolRunning = false
-	m.busy = false
-	m.runStartedAt = time.Time{}
+	m.setRunIdle()
 	m.transcript.GotoBottom()
 	m.transcriptContent = ""
 	m.transcriptSelectionLines = nil
@@ -5813,6 +5848,7 @@ func (m *Model) handleTreePick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.pickTree = false
 		m.branches = nil
+		m.fenceRootTurnProjection()
 		m.hydrateSession()
 		m.lastStatus = "selected branch " + branch.Name
 		return m, nil

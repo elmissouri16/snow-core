@@ -27,8 +27,8 @@ enabling shell, network, plugins, MCP, skills, goals, or subagents.
 | Risk | Snow control | Residual boundary |
 |---|---|---|
 | Accidental file mutation | `ask|allow|deny`, tool allowlists, role intersections | `allow` intentionally permits the operation |
-| Path escape | Pinned `os.Root` handles, canonical roots, symlink-aware checks, Windows alias rejection | Bind mounts, device files, and processes already running as the user remain outside this boundary |
-| Unbounded output/processes | Read/search/tool byte caps, shell timeout, cancellation, process-group/job cleanup | Child processes still run as the user before cancellation |
+| Path escape | Pinned `os.Root` handles, canonical roots, and symlink-aware checks | Bind mounts, device files, and processes already running as the user remain outside this boundary |
+| Unbounded output/processes | Read/search/tool byte caps, shell timeout, cancellation, and process-group cleanup | Child processes still run as the user before cancellation |
 | Network access | Network risk classification; public-address-only `webfetch` | Allowed MCP/plugins/shell can implement their own networking |
 | Project-supplied executable config | Canonical trust decision before project config/extension loading | Trust is not code signing or sandboxing |
 | Credential disclosure | Separate `0600` auth store, redacted inventories, no secret status output | Models/tools can expose secrets the user places in readable project files or prompts |
@@ -96,17 +96,15 @@ loaded executable extensions cannot be safely hot-unloaded.
 File tools pin allowed directories with Go's `os.Root` handles when the runtime
 is built. Read, write, edit, and search file opens then operate relative to those
 handles, so replacing a launch alias or racing an ancestor cannot redirect the
-operation outside the configured root. Windows validation also rejects alternate
-names and reserved device aliases.
+operation outside the configured root.
 
 Read/edit/write/grep validate the opened inode rather than trusting a separate
-path stat; Unix-like hosts use nonblocking opens so a raced FIFO cannot hang the
-process. `write` and `edit` stage content inside the rooted destination directory,
-preserve existing modes, sync, and atomically rename the temporary file. On
-Windows replacement also reopens that exact temporary handle with `WRITE_DAC`
-and copies the destination DACL plus its protected/inheritable state before
-rename. `edit` still requires exact matching and refuses ambiguous
-replacements unless explicitly configured for all matches.
+path stat; nonblocking opens ensure a raced FIFO cannot hang the process.
+`write` and `edit` stage content inside the rooted destination directory, sync,
+and atomically rename the temporary file. New files honor the process umask,
+while replacements restore the existing mode. `edit` limits both input and output to 8 MiB, caps
+`replace_all` at 10,000 matches, bounds diff previews, and still refuses
+ambiguous replacements unless explicitly configured for all matches.
 
 `grep` and `glob`:
 
@@ -125,19 +123,13 @@ filesystem boundaries, so Snow still is not a sandbox.
 
 ## Shell and process execution
 
-The model-facing tool is named `bash` on every platform:
-
-- Unix uses `sh -c`, a separate process group, and group cancellation.
-- Windows uses PowerShell by default, creates the shell suspended, assigns it to
-  a kill-on-close Job Object, then resumes it so descendant cleanup is covered.
+The model-facing tool is named `bash`. It uses `sh -c`, a separate process
+group, group cancellation, and a bounded `os/exec` pipe-drain delay.
 
 Commands inherit the user's privileges and environment. Timeouts, cancellation,
 and output caps reduce runaway behavior but do not prevent a command from
 reading secrets, modifying files, starting network connections, or affecting
 other processes before it is stopped.
-
-An explicit Windows executable override is global-only. Project configuration
-cannot choose a shell binary.
 
 ## Network access
 

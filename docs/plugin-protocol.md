@@ -64,8 +64,7 @@ do not prevent Snow's core agent from starting.
 returns a manifest ID, it must match the configured plugin ID.
 
 Snow intentionally supplies `env`; when omitted, the child receives an empty
-environment except for platform-required entries Go may add, notably
-`SYSTEMROOT` on Windows. If `command[0]` has no path separator, Go resolves it
+environment. If `command[0]` has no path separator, Go resolves it
 using Snow's launch environment before assigning the child environment. The configured
 child `PATH` therefore affects plugin behavior and child processes, not selection
 of the already resolved interpreter. Plugin `env` entries are literal and do not

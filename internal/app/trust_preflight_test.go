@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -84,9 +83,6 @@ func TestProjectTrustPreflightAndImmediateResourceLoading(t *testing.T) {
 }
 
 func TestSymlinkProjectTrustCannotAuthorizeRetargetedResources(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation may require elevated privileges")
-	}
 	home := t.TempDir()
 	t.Setenv("SNOW_HOME", home)
 	realA, realB := t.TempDir(), t.TempDir()

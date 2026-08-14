@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build darwin || linux
 
 package builtin
 
@@ -18,7 +18,9 @@ func startManagedProcess(cmd *exec.Cmd) (*managedProcess, error) {
 		}
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
-	cmd.WaitDelay = 2 * time.Second
+	if cmd.WaitDelay <= 0 {
+		cmd.WaitDelay = 2 * time.Second
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

@@ -92,8 +92,8 @@ alive for the Snow session, so startup is amortized.
 These results show that IPC is not a meaningful bottleneck for typical coding
 agent tools, where provider, network, filesystem, compiler, or subprocess work
 usually takes milliseconds to seconds. They are not universal guarantees:
-Windows process startup, antivirus, large imports, large frames, native modules,
-and per-process memory still require supported-platform measurement.
+antivirus, large imports, large frames, native modules, and per-process memory
+still require supported-platform measurement.
 
 The more important performance risks are:
 
@@ -174,8 +174,7 @@ JSON output is available with `--json`.
 
 ### 6. Make interpreter configuration explicit
 
-External plugins receive an empty environment unless `PluginSpec.Env` is set,
-apart from platform-required entries Go may add such as Windows `SYSTEMROOT`.
+External plugins receive an empty environment unless `PluginSpec.Env` is set.
 This reduces accidental credential inheritance but affects `/usr/bin/env`
 shebangs, subprocess lookup, locale, certificate configuration, and some package
 behaviors.
@@ -254,7 +253,7 @@ Before publishing language SDKs:
 - small hot calls remain below 1 ms p95 on supported CI hosts;
 - empty example initialization remains below 250 ms p95 on supported CI hosts;
 - 10,000 small calls show no sustained memory growth;
-- Windows, macOS, and Linux test explicit interpreter launching;
+- macOS and Linux test explicit interpreter launching;
 - `go test ./...`, `go vet ./...`, and focused race tests pass.
 
 ## Deferred work

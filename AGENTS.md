@@ -22,7 +22,7 @@ out of core packages.
 
 ## Goals
 
-- A single Go `snow` binary for macOS/Linux, with Windows support improved over time.
+- A single Go `snow` binary for macOS and Linux.
 - Streaming text, thinking, tool, usage, error, and lifecycle events.
 - OpenCode Go API-key access, user-configured OpenAI-compatible Responses or Chat Completions endpoints, and ChatGPT/Codex-compatible OAuth credentials.
 - Built-in `read`, `write`, `edit`, `bash`, `grep`, and `glob` tools with permissions and path roots, direct interactive `ask_user`, plus deferred public-web `webfetch`.
@@ -48,9 +48,10 @@ behavior in code before relying on a checklist item.
   parent traversal, fork primitive, file index/listing, and resume by database path.
 - Built-in tools in `internal/tools/builtin`: `read`, `write`, `edit`, `bash`,
   `grep`, `glob`, direct read-risk `ask_user`, and deferred network-risk `webfetch`. File/search tools use pinned `os.Root` confinement;
-  output, search lines, and bash time are bounded. Read streams bounded windows,
-  while write and edit use atomic same-directory replacement with mode preservation.
-- `webfetch` uses Surf v1.0.203's Windows Chrome 150 profile with secure TLS,
+  output, search lines, and bash time are bounded. Read streams bounded ranges;
+  write honors umask for new files and preserves replacement modes; edit bounds
+  input, result size, replacement count, and previews before atomic replacement.
+- `webfetch` uses Surf v1.0.203's Chrome 150 profile with secure TLS,
   public-address-only dial/redirect enforcement, bounded text responses, and
   automatic HTML-to-Markdown conversion. It never executes JavaScript.
 - Opt-in deferred tool discovery uses an in-memory Bleve BM25 index over compact
@@ -129,8 +130,7 @@ behavior in code before relying on a checklist item.
    Plugins and stdio MCP servers still execute with OS privileges and are not a
    sandbox, and no built-in sandbox backend is currently planned.
 2. Continue pre-v1 API/file-format stabilization and real-provider/TUI smoke
-   coverage. Hosted CI prioritizes Linux and macOS; native Windows verification
-   remains available through `scripts/test-windows.ps1` but is not a hosted gate.
+   coverage on macOS and Linux.
 
 ## Repository structure
 

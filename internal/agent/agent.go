@@ -176,28 +176,34 @@ type Agent struct {
 	queueAccepting bool
 	// activeSkills are re-appended to the system instructions on every provider
 	// request so manual compaction cannot silently discard activated guidance.
-	activeSkills  map[string]string
-	mode          protocol.CollaborationMode
-	turnMode      protocol.CollaborationMode
-	turnPlanSeen  bool
-	activeCancel  context.CancelFunc
-	activeDone    chan struct{}
-	autoRunning   bool
-	autoStop      bool
-	autoPending   bool
-	autoEmpty     int
-	autoEmptyGoal string
-	autoDone      chan struct{}
-	autoWG        sync.WaitGroup
-	turnWG        sync.WaitGroup
-	closed        bool
-	turnOrigin    string
-	turnID        string
-	goalAtTurn    *protocol.ThreadGoal
-	turnStarted   time.Time
-	goalTurn      int
-	goalTurnID    string
-	budgetWrap    bool
+	activeSkills       map[string]string
+	mode               protocol.CollaborationMode
+	turnMode           protocol.CollaborationMode
+	turnPlanSeen       bool
+	activeCancel       context.CancelFunc
+	activeDone         chan struct{}
+	autoRunning        bool
+	autoStop           bool
+	autoPending        bool
+	autoEmpty          int
+	autoEmptyGoal      string
+	autoDone           chan struct{}
+	autoWG             sync.WaitGroup
+	turnWG             sync.WaitGroup
+	closed             bool
+	turnOrigin         string
+	turnID             string
+	latestTurnOrigin   string
+	latestTurnID       string
+	turnSequence       uint64
+	activeTurnSequence uint64
+	latestTurnSequence uint64
+	rootEpoch          uint64
+	goalAtTurn         *protocol.ThreadGoal
+	turnStarted        time.Time
+	goalTurn           int
+	goalTurnID         string
+	budgetWrap         bool
 }
 
 // New creates an agent.
@@ -268,7 +274,7 @@ func New(opts Options) (*Agent, error) {
 	if _, err := repairInterruptedToolCalls(opts.Session, opts.Registry); err != nil {
 		return nil, fmt.Errorf("agent: recover interrupted tool calls: %w", err)
 	}
-	a := &Agent{opts: opts, model: opts.Model, bus: newEventBus(), mode: mode, turnMode: mode, mailboxActivity: make(chan struct{}, 1)}
+	a := &Agent{opts: opts, model: opts.Model, bus: newEventBus(), mode: mode, turnMode: mode, mailboxActivity: make(chan struct{}, 1), rootEpoch: 1}
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.toolStarts = make(map[string]time.Time)
 	a.activeSkills = restoreActiveSkills(opts.Session, opts.Registry, opts.ToolHost, opts.SkillNames)
@@ -481,18 +487,46 @@ func (a *Agent) LockAdmission() func() {
 func (a *Agent) SetSession(st session.Store) error {
 	unlock := a.LockAdmission()
 	defer unlock()
-	return a.setSessionAdmitted(st, true)
+	if err := a.setSessionAdmitted(st, true); err != nil {
+		return err
+	}
+	a.ResetTurnIdentityAdmitted()
+	return nil
 }
 func (a *Agent) SetSessionQuiet(st session.Store) error {
 	unlock := a.LockAdmission()
 	defer unlock()
-	return a.setSessionAdmitted(st, false)
+	if err := a.setSessionAdmitted(st, false); err != nil {
+		return err
+	}
+	a.ResetTurnIdentityAdmitted()
+	return nil
 }
 
 // SetSessionQuietAdmitted participates in an App transaction that already
 // holds LockAdmission.
 func (a *Agent) SetSessionQuietAdmitted(st session.Store) error {
 	return a.setSessionAdmitted(st, false)
+}
+
+// ResetTurnIdentityAdmitted commits the reconciliation boundary after a
+// compound session transaction succeeds. The caller must hold admission or
+// otherwise guarantee that the agent is idle.
+func (a *Agent) ResetTurnIdentityAdmitted() {
+	a.mu.Lock()
+	a.resetTurnIdentityLocked()
+	a.mu.Unlock()
+}
+
+func (a *Agent) resetTurnIdentityLocked() {
+	a.rootEpoch++
+	if a.rootEpoch == 0 {
+		a.rootEpoch = 1
+	}
+	a.turnOrigin, a.turnID = "", ""
+	a.activeTurnSequence = 0
+	a.latestTurnOrigin, a.latestTurnID = "", ""
+	a.latestTurnSequence = 0
 }
 
 func (a *Agent) setSessionAdmitted(st session.Store, publish bool) error {
@@ -690,6 +724,38 @@ func (a *Agent) ActiveTurn() (origin, id string, running bool) {
 	return a.turnOrigin, a.turnID, a.running
 }
 
+// LatestTurn returns the identity of the most recently admitted root
+// operation, including after it has completed. It is empty until the first
+// operation is admitted and supports delayed UI event reconciliation.
+func (a *Agent) LatestTurn() (origin, id string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.latestTurnOrigin, a.latestTurnID
+}
+
+// TurnSequenceWatermark returns the latest process-local admission sequence.
+// It remains monotonic across session and branch reconciliation boundaries.
+func (a *Agent) TurnSequenceWatermark() uint64 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.turnSequence
+}
+
+// RootEpoch returns the process-local session/branch reconciliation epoch.
+func (a *Agent) RootEpoch() uint64 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.rootEpoch
+}
+
+func (a *Agent) admitTurnIdentityLocked(origin string) {
+	a.turnSequence++
+	a.turnOrigin, a.turnID = origin, newID()
+	a.activeTurnSequence = a.turnSequence
+	a.latestTurnOrigin, a.latestTurnID = a.turnOrigin, a.turnID
+	a.latestTurnSequence = a.turnSequence
+}
+
 // Steer queues text for the next safe boundary of an active run. Steering is
 // delivered after the current assistant response and its complete tool batch.
 func (a *Agent) Steer(text string) error {
@@ -818,11 +884,22 @@ func (a *Agent) Publish(ev protocol.AgentEvent) { a.publish(ev) }
 // snapshots; those values are preserved. This keeps every TUI lifecycle event
 // correlatable without forcing individual provider/tool paths to copy IDs.
 func (a *Agent) publish(ev protocol.AgentEvent) {
-	if ev.Agent == nil && ev.TurnID == "" {
+	if ev.Agent == nil {
 		a.mu.RLock()
-		if a.running {
+		if ev.RootEpoch == 0 {
+			ev.RootEpoch = a.rootEpoch
+		}
+		if ev.TurnID == "" && a.running {
 			ev.TurnID = a.turnID
 			ev.TurnOrigin = a.turnOrigin
+		}
+		if ev.TurnSequence == 0 && ev.TurnID != "" {
+			switch ev.TurnID {
+			case a.turnID:
+				ev.TurnSequence = a.activeTurnSequence
+			case a.latestTurnID:
+				ev.TurnSequence = a.latestTurnSequence
+			}
 		}
 		a.mu.RUnlock()
 	}
@@ -1217,6 +1294,7 @@ func (a *Agent) SelectBranchAdmitted(branchID string) error {
 			a.activeSkills = restoreActiveSkills(a.opts.Session, a.opts.Registry, a.opts.ToolHost, a.opts.SkillNames)
 			a.mode = restored
 			a.turnMode = restored
+			a.resetTurnIdentityLocked()
 			a.latestContextTokens = 0
 		} else if oldBranchID != "" {
 			err = errors.Join(err, branches.SelectBranch(oldBranchID))
@@ -1319,6 +1397,7 @@ func (a *Agent) ForkWithOptionsAdmitted(opts protocol.BranchForkOptions) (protoc
 	a.activeSkills = restoreActiveSkills(a.opts.Session, a.opts.Registry, a.opts.ToolHost, a.opts.SkillNames)
 	a.mode = mode
 	a.turnMode = mode
+	a.resetTurnIdentityLocked()
 	a.latestContextTokens = 0
 	effort := a.effectiveThinkingLocked(mode)
 	a.mu.Unlock()
@@ -1480,7 +1559,7 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 	a.queuedInputs = nil
 	a.queueAccepting = false
 	a.autoStop = false
-	a.turnOrigin, a.turnID = "compact", newID()
+	a.admitTurnIdentityLocked("compact")
 	a.turnWG.Add(1)
 	runCtx, cancel := context.WithCancel(ctx)
 	a.activeCancel = cancel
@@ -1629,7 +1708,7 @@ func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
 	a.running = true
 	a.queuedInputs = nil
 	a.queueAccepting = false
-	a.turnOrigin, a.turnID = "compact", newID()
+	a.admitTurnIdentityLocked("compact")
 	a.turnWG.Add(1)
 	runCtx, cancel := context.WithCancel(ctx)
 	a.activeCancel = cancel
@@ -1825,6 +1904,7 @@ func (a *Agent) clearCompletedTurnIdentity(id string) {
 	if !a.running && a.turnID == id {
 		a.turnID = ""
 		a.turnOrigin = ""
+		a.activeTurnSequence = 0
 	}
 	a.mu.Unlock()
 }
@@ -1867,7 +1947,7 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 	a.queueAccepting = true
 	a.turnWG.Add(1)
 	a.turnMode = a.mode
-	a.turnOrigin, a.turnID = "subagent", newID()
+	a.admitTurnIdentityLocked("subagent")
 	a.turnStarted = time.Now()
 	a.turnPlanSeen = false
 	a.pending = make(map[string]protocol.ContentBlock)
@@ -2098,7 +2178,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	runCtx, cancel := context.WithCancel(ctx)
 	a.activeCancel = cancel
 	a.activeDone = make(chan struct{})
-	a.turnOrigin, a.turnID = "user", newID()
+	a.admitTurnIdentityLocked("user")
 	a.goalAtTurn = nil
 	if a.turnMode != protocol.ModePlan && a.opts.Goal != nil {
 		if g, _ := a.opts.Goal.Get(); g != nil && g.Status == protocol.GoalActive {
@@ -2246,7 +2326,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	a.queueAccepting = true
 	a.turnWG.Add(1)
 	a.turnMode = a.mode
-	a.turnOrigin, a.turnID = "goal", newID()
+	a.admitTurnIdentityLocked("goal")
 	a.goalAtTurn, a.turnStarted = g, time.Now()
 	if a.goalTurnID != g.GoalID {
 		a.goalTurnID = g.GoalID

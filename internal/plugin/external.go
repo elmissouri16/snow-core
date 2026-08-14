@@ -113,9 +113,7 @@ type ExternalHost struct {
 }
 
 // SpawnExternal starts an explicit argv-based plugin process. No shell is
-// involved. Environment is spec.Env when provided and empty otherwise, except
-// that Go's os/exec may add required platform entries such as SYSTEMROOT on
-// Windows.
+// involved. Environment is spec.Env when provided and empty otherwise.
 func SpawnExternal(ctx context.Context, spec plugin.PluginSpec, cwd string) (*ExternalHost, error) {
 	if ctx == nil {
 		ctx = context.Background()

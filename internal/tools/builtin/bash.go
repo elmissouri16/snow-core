@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -12,21 +13,19 @@ import (
 	"github.com/snow-core/snow/internal/tools"
 )
 
-// DefaultBashTimeout is the default command timeout.
-const DefaultBashTimeout = 120 * time.Second
+const (
+	// DefaultBashTimeout is the default command timeout.
+	DefaultBashTimeout = 120 * time.Second
+	// defaultProcessWaitDelay bounds pipe draining after a shell leader exits.
+	defaultProcessWaitDelay = 2 * time.Second
+)
 
 // Bash is the shell command execution tool.
-type WindowsShellOptions struct {
-	Kind       string
-	Executable string
-}
-
 type Bash struct {
 	// MaxOutputBytes caps combined stdout+stderr. Defaults to 262144.
 	MaxOutputBytes int
 	// Timeout caps execution. Defaults to 120s.
-	Timeout      time.Duration
-	WindowsShell WindowsShellOptions
+	Timeout time.Duration
 }
 
 // NewBash returns a Bash tool with defaults.
@@ -100,10 +99,11 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		hostEnv = host.Environ()
 		hostCWD = host.CWD()
 	}
-	cmd, err := shellCommand(runCtx, a.Command, b.WindowsShell, hostEnv, hostCWD)
+	cmd, err := shellCommand(runCtx, a.Command, hostEnv, hostCWD)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("bash: %w", err)), nil
 	}
+	cmd.WaitDelay = boundedProcessWaitDelay(timeout)
 
 	if host != nil {
 		cmd.Dir = host.CWD()
@@ -142,6 +142,9 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 			}
 			return tools.ErrorResult(fmt.Errorf("bash: command timed out after %s", timeout)), nil
 		}
+		if errors.Is(err, exec.ErrWaitDelay) {
+			return tools.ErrorResult(fmt.Errorf("bash: command exited but descendant output remained open for %s", cmd.WaitDelay)), nil
+		}
 		// A non-zero exit code is normal tool feedback, not a tool error.
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			code := exitErr.ExitCode()
@@ -155,6 +158,13 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 
 // sanitizeBoundedUTF8 converts arbitrary process bytes into valid UTF-8 while
 // keeping the returned text within the original byte budget.
+func boundedProcessWaitDelay(timeout time.Duration) time.Duration {
+	if timeout > 0 && timeout < defaultProcessWaitDelay {
+		return timeout
+	}
+	return defaultProcessWaitDelay
+}
+
 func sanitizeBoundedUTF8(data []byte, maxBytes int) string {
 	if maxBytes <= 0 || len(data) == 0 {
 		return ""

@@ -129,9 +129,6 @@ A representative configuration:
     "artifact_max_bytes": 4194304,
     "historical_tool_result_threshold_bytes": 8192
   },
-  "windows_shell": {
-    "kind": "powershell"
-  },
   "plugins": [],
   "mcp_servers": {}
 }
@@ -245,25 +242,6 @@ ordinary file-tool roots. Project configuration cannot change automatic or
 artifact thresholds. Project `guidance` is additive; it cannot remove the
 host's factual continuation contract.
 
-### Windows shell
-
-```json
-{
-  "windows_shell": {
-    "kind": "powershell"
-  }
-}
-```
-
-Supported kinds:
-
-- `powershell` — locate `pwsh.exe`, then `powershell.exe`;
-- `cmd` — use `cmd.exe`;
-- `executable` — use an explicit absolute `executable` path.
-
-This field is global-only. Project configuration cannot choose an executable.
-The compatibility-named `bash` tool still appears as `bash` to models on Windows.
-
 ### Skills
 
 ```json
@@ -310,8 +288,7 @@ See [Subagents](subagents.md) for role examples and the full safety model.
 - `mcp_servers` maps stable names to public `mcp.ServerSpec` declarations.
 
 These processes run with the user's OS privileges. External plugins receive
-their literal configured `env` and otherwise start with an empty environment,
-except for platform-required entries Go may add such as Windows `SYSTEMROOT`;
+their literal configured `env` and otherwise start with an empty environment;
 plugin env values do not expand `${VAR}`. Snow resolves a bare
 `command[0]` using its own launch environment before assigning the child env, so
 prefer absolute interpreter paths and never commit credentials. MCP has separate

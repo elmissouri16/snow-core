@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -548,12 +547,8 @@ func TestAgentEndToEndProviderFailureCases(t *testing.T) {
 }
 
 // TestAgentEndToEndAbortDuringBash verifies cancellation across the complete
-// agent → permission → builtin bash path. Unix process-group cleanup is used
-// here because Windows has a different shell/process implementation.
+// agent → permission → builtin bash path.
 func TestAgentEndToEndAbortDuringBash(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("bash process-group cancellation is Unix-specific")
-	}
 	root := t.TempDir()
 	p := &e2eProvider{scripts: [][]protocol.StreamEvent{
 		{

@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,9 +31,6 @@ func TestInspectExternalPlugin(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "main.go")
 	binary := filepath.Join(dir, "plugin")
-	if runtime.GOOS == "windows" {
-		binary += ".exe"
-	}
 	if err := os.WriteFile(source, []byte(pluginCheckFixture), 0o600); err != nil {
 		t.Fatal(err)
 	}

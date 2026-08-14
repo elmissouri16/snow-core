@@ -3,7 +3,6 @@ package builtin
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -77,9 +76,6 @@ func TestPinnedRootRejectsDescendantSwapAfterResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, sub); err != nil {
-		if runtime.GOOS == "windows" {
-			t.Skipf("symlink unavailable: %v", err)
-		}
 		t.Fatal(err)
 	}
 	if file, err := resolved.root.Open(resolved.name); err == nil {
@@ -136,9 +132,6 @@ func TestNewPathGuard_PrefixComponentBoundary(t *testing.T) {
 }
 
 func TestNewPathGuard_SymlinkEscape(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink tests skipped on windows")
-	}
 	dir := t.TempDir()
 	outside := t.TempDir()
 	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o644); err != nil {
@@ -156,9 +149,6 @@ func TestNewPathGuard_SymlinkEscape(t *testing.T) {
 }
 
 func TestNewPathGuard_SymlinkInsideRoot(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink tests skipped on windows")
-	}
 	dir := t.TempDir()
 	real := filepath.Join(dir, "real")
 	if err := os.MkdirAll(real, 0o755); err != nil {
@@ -184,9 +174,6 @@ func TestNewPathGuard_SymlinkInsideRoot(t *testing.T) {
 }
 
 func TestNewPathGuard_SymlinkedParentForNewFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink tests skipped on windows")
-	}
 	dir := t.TempDir()
 	real := filepath.Join(dir, "real")
 	if err := os.MkdirAll(real, 0o755); err != nil {

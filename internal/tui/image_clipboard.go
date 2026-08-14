@@ -40,8 +40,6 @@ func readClipboardImage() (protocol.ContentBlock, error) {
 		data, err = boundedCommandOutput(ctx, "osascript", "-l", "JavaScript", "-e", macOSClipboardImageScript)
 	case "linux":
 		data, err = readLinuxClipboardImage(ctx)
-	case "windows":
-		data, err = boundedCommandOutput(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-STA", "-Command", windowsClipboardImageScript)
 	default:
 		return protocol.ContentBlock{}, fmt.Errorf("clipboard images are unsupported on %s", runtime.GOOS)
 	}
@@ -169,8 +167,6 @@ let wrote = false;
 const types = ['public.png','public.jpeg','com.compuserve.gif','org.webmproject.webp'];
 for (const t of types) { const d = p.dataForType(t); if (ObjC.unwrap(d) !== undefined && Number(d.length) > 0) { out.writeData(d); wrote = true; break; } }
 if (!wrote) { const d = p.dataForType('public.tiff'); if (ObjC.unwrap(d) !== undefined) { const image = $.NSImage.alloc.initWithData(d); const tiff = image ? image.TIFFRepresentation : null; const r = tiff ? $.NSBitmapImageRep.imageRepWithData(tiff) : null; if (r) { const png = r.representationUsingTypeProperties(4, $({})); if (png) out.writeData(png); } } }`
-
-const windowsClipboardImageScript = `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $i=[Windows.Forms.Clipboard]::GetImage(); if($null -ne $i){$m=New-Object IO.MemoryStream; $i.Save($m,[Drawing.Imaging.ImageFormat]::Png); [Console]::OpenStandardOutput().Write($m.ToArray(),0,$m.Length)}`
 
 func imageAttachmentLabel(block protocol.ContentBlock, index int) string {
 	kind := strings.TrimPrefix(block.MIMEType, "image/")

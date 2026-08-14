@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -47,6 +46,59 @@ func TestFirstPromptCreatesDeterministicSessionTitle(t *testing.T) {
 	}
 	if got, _ := st.SessionTitle(); got != "Review session naming behavior" {
 		t.Fatalf("session title = %q", got)
+	}
+}
+
+func TestQuietSessionTransactionPreservesLatestTurnUntilCommit(t *testing.T) {
+	oldStore := session.NewMemoryStore(session.Options{})
+	newStore := session.NewMemoryStore(session.Options{})
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	a, err := New(Options{
+		Provider: p, Registry: tools.NewRegistry(), Session: oldStore,
+		Permission: permission.NewService(permission.ModeAllow, nil),
+		Model:      protocol.Model{Provider: p.ID(), ID: "m"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if err := a.Prompt(context.Background(), "establish reconciliation identity"); err != nil {
+		t.Fatal(err)
+	}
+	wantOrigin, wantID := a.LatestTurn()
+	if wantID == "" {
+		t.Fatal("prompt did not retain latest turn identity")
+	}
+	wantSequence := a.TurnSequenceWatermark()
+	if wantSequence == 0 {
+		t.Fatal("prompt turn sequence is zero")
+	}
+
+	unlock := a.LockAdmission()
+	if err := a.SetSessionQuietAdmitted(newStore); err != nil {
+		unlock()
+		t.Fatal(err)
+	}
+	if err := a.SetSessionQuietAdmitted(oldStore); err != nil {
+		unlock()
+		t.Fatal(err)
+	}
+	unlock()
+	if origin, id := a.LatestTurn(); origin != wantOrigin || id != wantID {
+		t.Fatalf("rollback identity = %q/%q, want %q/%q", origin, id, wantOrigin, wantID)
+	}
+	if sequence := a.TurnSequenceWatermark(); sequence != wantSequence {
+		t.Fatalf("rollback sequence = %d; want %d", sequence, wantSequence)
+	}
+
+	if err := a.SetSession(newStore); err != nil {
+		t.Fatal(err)
+	}
+	if origin, id := a.LatestTurn(); origin != "" || id != "" {
+		t.Fatalf("committed session retained identity %q/%q", origin, id)
+	}
+	if sequence := a.TurnSequenceWatermark(); sequence != wantSequence {
+		t.Fatalf("session commit changed monotonic sequence to %d; want %d", sequence, wantSequence)
 	}
 }
 
@@ -138,14 +190,17 @@ func TestTurnEventsCarryOneCorrelatedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	turnID := ""
+	var turnSequence, rootEpoch uint64
 	for _, ev := range events {
 		if ev.TurnID == "" {
 			t.Fatalf("turn event %s has no turn ID: %+v", ev.Type, ev)
 		}
 		if turnID == "" {
 			turnID = ev.TurnID
+			turnSequence = ev.TurnSequence
+			rootEpoch = ev.RootEpoch
 		}
-		if ev.TurnID != turnID || ev.TurnOrigin != "user" {
+		if ev.TurnID != turnID || ev.TurnOrigin != "user" || ev.TurnSequence == 0 || ev.TurnSequence != turnSequence || ev.RootEpoch == 0 || ev.RootEpoch != rootEpoch {
 			t.Fatalf("event identity=%q/%q want user/%q for %s", ev.TurnOrigin, ev.TurnID, turnID, ev.Type)
 		}
 	}
@@ -989,9 +1044,6 @@ func TestToolDenied(t *testing.T) {
 // through a child-attributed agent and proves denial happens before process start.
 func TestChildBashPermissionAndExecution(t *testing.T) {
 	command := "printf started > started; sleep 0.02; printf child-shell"
-	if runtime.GOOS == "windows" {
-		command = "echo started>started && echo child-shell"
-	}
 
 	for _, tc := range []struct {
 		name  string

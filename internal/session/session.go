@@ -13,7 +13,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -1728,33 +1727,9 @@ func (f *FileIndex) List(cwd string) ([]SessionInfo, error) {
 // EncodeCWD returns a fixed-size, collision-resistant directory name for an
 // absolute project path. The v2 prefix distinguishes it from legacy slugs.
 func EncodeCWD(cwd string) string {
-	return encodeCleanedCWD(normalizeCWD(cwd), runtime.GOOS)
-}
-
-func encodeCleanedCWD(cleaned, goos string) string {
-	if goos == "windows" {
-		// sameCWD uses Unicode simple case folding on Windows. Hash the canonical
-		// representative of each fold orbit rather than strings.ToLower, which is
-		// not equivalent for runes such as S/s/long-s.
-		cleaned = simpleFoldCanonical(cleaned)
-	}
+	cleaned := normalizeCWD(cwd)
 	sum := sha256.Sum256([]byte(cleaned))
 	return fmt.Sprintf("cwd-v2-%x", sum[:])
-}
-
-func simpleFoldCanonical(value string) string {
-	var out strings.Builder
-	out.Grow(len(value))
-	for _, r := range value {
-		canonical := r
-		for folded := unicode.SimpleFold(r); folded != r; folded = unicode.SimpleFold(folded) {
-			if folded < canonical {
-				canonical = folded
-			}
-		}
-		out.WriteRune(canonical)
-	}
-	return out.String()
 }
 
 func legacyEncodeCWD(cwd string) string {
@@ -1770,8 +1745,8 @@ func legacyEncodeCWD(cwd string) string {
 }
 
 // legacyEncodeCleanedCWD intentionally reproduces the original encoder byte
-// for byte. In particular it removes only one leading hyphen, preserves
-// trailing hyphens, and leaves Windows backslashes untouched.
+// for byte. In particular it removes only one leading hyphen and preserves
+// trailing hyphens.
 func legacyEncodeCleanedCWD(cleaned string) string {
 	if cleaned == "/" {
 		return "root"
@@ -1800,9 +1775,5 @@ func normalizeCWD(cwd string) string {
 }
 
 func sameCWD(left, right string) bool {
-	left, right = normalizeCWD(left), normalizeCWD(right)
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(left, right)
-	}
-	return left == right
+	return normalizeCWD(left) == normalizeCWD(right)
 }

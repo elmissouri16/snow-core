@@ -23,8 +23,7 @@ tools, sessions, permissions, and events behind every surface.
 
 - Go 1.27; `go.mod` currently declares `1.27rc2` because that is the available
   toolchain required by the pinned Surf release.
-- macOS or Linux for the primary supported path. Windows behavior is covered by
-  native path, PowerShell, process-job, and atomic-replacement tests.
+- macOS or Linux.
 
 ### Build or install
 
@@ -160,9 +159,9 @@ by the selected model and rejects unsupported explicit levels.
 | Tool | Purpose | Default risk |
 |---|---|---|
 | `read` | Read a bounded file window | read |
-| `write` | Atomically create or replace a file | write |
-| `edit` | Apply exact, uniqueness-checked replacements | write |
-| `bash` | Run a bounded shell command (`sh` on Unix, PowerShell on Windows) | exec |
+| `write` | Atomically create or replace a file; new files honor the process umask | write |
+| `edit` | Apply exact, uniqueness-checked replacements to files up to 8 MiB | write |
+| `bash` | Run a bounded POSIX `sh` command | exec |
 | `grep` | RE2 text search with globs, ignore files, and output caps | read |
 | `glob` | Pure-Go path matching, including recursive `**` | read |
 | `ask_user` | Ask the host structured questions | read/interaction |
@@ -393,9 +392,6 @@ go test -race ./internal/... ./pkg/snowsdk
 (cd examples/sdk && go test ./... && go run .)
 go build -o ./snow ./cmd/snow
 python3 examples/rpc/python/client.py --snow ./snow
-
-# Optional native Windows validation (not a hosted CI gate)
-powershell -ExecutionPolicy Bypass -File scripts/test-windows.ps1
 ```
 
 Provider integration tests use local mocked HTTP/SSE servers. Real-provider

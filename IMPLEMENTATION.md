@@ -72,7 +72,7 @@ Philosophy (pi-aligned, Go-native):
 
 ### 1.4 Goals
 
-- Single static-ish Go binary (`snow`) for macOS/Linux (Windows best-effort later).
+- Single static-ish Go binary (`snow`) for macOS/Linux.
 - Modular packages with **no UI imports** inside `agent` / `provider` / `session`.
 - MVP auth: **OpenCode Go** + **ChatGPT Codex OAuth**.
 - Default built-in tools: **read, write, edit, bash, grep, glob**, direct **ask_user**, plus deferred **webfetch**.
@@ -551,10 +551,10 @@ type Store interface {
 
 | Tool | Purpose | Permission risk | Notes |
 |------|---------|-----------------|-------|
-| `read` | Read file contents (optional offset/limit) | read | Pinned `os.Root`; binary → short error; streams bounded windows |
-| `write` | Create/overwrite file | write | Rooted parent creation; atomic same-directory replace; preserves existing mode |
-| `edit` | Exact string replace / patch | write | Rooted atomic replacement; fails if `old_str` is not unique unless `replace_all` |
-| `bash` | Run shell command in cwd | exec | Timeout; combined output bound; no implicit network policy |
+| `read` | Read file contents (optional offset/limit) | read | Pinned `os.Root`; binary → short error; streams bounded ranges |
+| `write` | Create/overwrite file | write | Rooted atomic same-directory replace; new files honor umask; replacements preserve mode |
+| `edit` | Exact string replace / patch | write | 8 MiB input/result and 10,000-match caps; bounded preview; fails on ambiguity unless `replace_all` |
+| `bash` | Run shell command in cwd | exec | POSIX `sh`; timeout, process-group cleanup, pipe-drain bounds, and combined output cap |
 | `grep` | Search text files with RE2 and line numbers | read | Pure Go; glob filter, case option, match/output caps |
 | `glob` | Match regular file paths | read | Pure Go; `**` recursive segments and result/output caps |
 | `ask_user` | Request one to three user decisions or free-form answers | read/interaction | Direct schema; TUI prompt, SDK callback, or RPC reply/reject; automatic Other choice |
@@ -564,8 +564,8 @@ type Store interface {
 `grep`, `glob`, `ask_user`, `update_plan`, and `webfetch` are registered in the default builtin registry.
 The file search tools skip
 hidden/generated directories and symlink entries, and all search roots still
-pass through the path guard. These reduce bash round-trips and improve Windows
-behavior. `webfetch` is the first built-in deferred tool, so the normal app also
+pass through the path guard. These reduce bash round-trips. `webfetch` is the
+first built-in deferred tool, so the normal app also
 loads the small direct `search_tools` recovery schema while keeping the full
 `webfetch` schema out of unrelated provider requests.
 
@@ -697,7 +697,7 @@ JSON: `{"answers":[{"id":"...","answer":"..."}]}`.
 3. **Output caps:** default 256 KiB per tool result; read/search stream bounded data and return explicit truncation markers.
 4. **Atomic writes:** write stages content beside the destination, syncs it, and renames it into place; existing file permissions are retained.
 5. **Secrets:** redaction hooks optional later; never echo auth file contents.
-6. **bash:** `Setpgid` / process-group kill on Unix; Windows starts the shell suspended, assigns it to a kill-on-close Job Object, resumes its primary thread, and covers descendant cleanup with native tests.
+6. **bash:** `Setpgid` / process-group kill plus bounded `Cmd.WaitDelay` on supported Unix hosts.
 7. **write/edit:** optional backup sibling `.snow-bak` **off** by default (explicit config).
 8. **webfetch:** allow only public HTTP(S), disable environment proxies, validate every
    redirect, resolve and pin public addresses at dial time, verify TLS certificates,
@@ -1478,11 +1478,11 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] Persistent ChatGPT model catalog refresh/cache (account- and backend-origin-scoped ETag/TTL entries)
 - [x] Durable fork/tree navigation (`/tree` picker)
 - [x] Optional sandbox backend design investigation — no built-in backend planned now; use whole-process container/VM isolation when required
-- [x] Windows path/bash story hardened (suspended Job assignment, PowerShell, path aliases, atomic replacement, native script)
+- [x] Supported platforms narrowed to macOS/Linux with a shared compile-time platform guard
 - [x] Plugin tool appears in schema and executes through the central permission gate
 - [x] Opt-in BM25 tool routing keeps deferred parameter schemas out of normal model context
 - [x] Namespace-first in-memory BM25 routing with deterministic global rescue and bounded summaries
-- [ ] Optional semantic/vector routing remains deferred pending a locally downloadable open-source model with acceptable licensing, macOS/Linux/Windows support, binary size, memory use, and startup time; no mandatory API/service
+- [ ] Optional semantic/vector routing remains deferred pending a locally downloadable open-source model with acceptable licensing, macOS/Linux support, binary size, memory use, and startup time; no mandatory API/service
 
 **Acceptance tests**
 
@@ -1546,8 +1546,7 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - Linux: `go test -race ./internal/... ./pkg/snowsdk`.
 
 The hosted workflow is network-free after dependency download and requires no
-provider credentials. Real-provider checks remain manual; Windows verification
-is available through `scripts/test-windows.ps1` but is not a hosted gate.
+provider credentials. Real-provider checks remain manual.
 
 ---
 

@@ -120,7 +120,7 @@ func (w *Write) Run(ctx context.Context, args json.RawMessage, host tools.ToolHo
 	}
 	emitProgress(host, "writing file", false, false)
 	defer emitProgress(host, "write finished", true, false)
-	if err := atomicReplaceRooted(ctx, rooted, []byte(a.Content), mode); err != nil {
+	if err := atomicReplaceRooted(ctx, rooted, []byte(a.Content), mode, hasExisting); err != nil {
 		return tools.ErrorResult(fmt.Errorf("write: %w", err)), nil
 	}
 	result := tools.ToolResult{

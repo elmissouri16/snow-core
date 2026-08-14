@@ -18,7 +18,6 @@ type Options struct {
 	// BashTimeout caps bash execution. 0 means default.
 	BashTimeout  time.Duration
 	SearchPolicy config.EffectiveSearchPolicy
-	WindowsShell WindowsShellOptions
 	// Roots are the allowed path roots for file tools. If empty, file tools
 	// are created without a guard and use host roots at call time.
 	Roots []string
@@ -44,7 +43,6 @@ func RegisterBuiltins(reg tools.Registry, opts Options) error {
 	write := NewWrite(guard)
 	edit := NewEdit(guard)
 	bash := NewBash()
-	bash.WindowsShell = opts.WindowsShell
 	grep := NewGrep(guard)
 	grep.Policy = opts.SearchPolicy
 	glob := NewGlob(guard)

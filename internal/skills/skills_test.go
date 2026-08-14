@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -121,12 +120,8 @@ func TestPinnedSkillRootRejectsSymlinkEscapeAndDirectoryReplacement(t *testing.T
 	if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	symlinkCreated := true
 	if err := os.Symlink(outside, filepath.Join(directory, "references", "escape.txt")); err != nil {
-		if runtime.GOOS != "windows" {
-			t.Fatal(err)
-		}
-		symlinkCreated = false
+		t.Fatal(err)
 	}
 	catalog := Discover(Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}})
 	defer catalog.Close()
@@ -135,14 +130,9 @@ func TestPinnedSkillRootRejectsSymlinkEscapeAndDirectoryReplacement(t *testing.T
 	if err != nil || normal.IsError || normal.Content[0].Text != "resource guide" {
 		t.Fatalf("normal pinned resource = %+v, err=%v", normal, err)
 	}
-	if symlinkCreated {
-		escape, err := reader.Run(context.Background(), json.RawMessage(`{"name":"pinned","path":"references/escape.txt"}`), nil)
-		if err != nil || !escape.IsError || !strings.Contains(escape.Content[0].Text, "escapes") {
-			t.Fatalf("symlink escape = %+v, err=%v", escape, err)
-		}
-	}
-	if runtime.GOOS == "windows" {
-		return
+	escape, err := reader.Run(context.Background(), json.RawMessage(`{"name":"pinned","path":"references/escape.txt"}`), nil)
+	if err != nil || !escape.IsError || !strings.Contains(escape.Content[0].Text, "escapes") {
+		t.Fatalf("symlink escape = %+v, err=%v", escape, err)
 	}
 
 	moved := directory + "-original"

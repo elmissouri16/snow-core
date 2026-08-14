@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/snow-core/snow/internal/tools"
 )
@@ -162,5 +163,135 @@ func TestEdit_EmptyOldStr(t *testing.T) {
 	res, _ := e.Run(context.Background(), argsFor(t, map[string]any{"path": file, "old_str": "", "new_str": "b"}), stubHost{cwd: dir, roots: []string{dir}})
 	if !res.IsError {
 		t.Fatal("expected error for empty old_str")
+	}
+}
+
+func TestEditRejectsOversizedFileWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "large.txt")
+	if err := os.WriteFile(file, []byte("123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := NewEdit(NewPathGuard([]string{dir}, dir))
+	e.MaxFileBytes = 8
+	res, _ := e.Run(context.Background(), argsFor(t, map[string]any{"path": file, "old_str": "1", "new_str": "x"}), stubHost{cwd: dir, roots: []string{dir}})
+	if !res.IsError || !strings.Contains(res.Content[0].Text, "maximum editable size") {
+		t.Fatalf("oversized edit result = %+v", res)
+	}
+	after, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("rejected oversized edit replaced the file")
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "123456789" {
+		t.Fatalf("rejected edit changed content to %q", data)
+	}
+}
+
+func TestEditRejectsReplacementExpansionBeyondLimit(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "expand.txt")
+	if err := os.WriteFile(file, []byte("aaaaa"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEdit(NewPathGuard([]string{dir}, dir))
+	e.MaxFileBytes = 10
+	res, _ := e.Run(context.Background(), argsFor(t, map[string]any{"path": file, "old_str": "a", "new_str": "bbb", "replace_all": true}), stubHost{cwd: dir, roots: []string{dir}})
+	if !res.IsError || !strings.Contains(res.Content[0].Text, "replacement would exceed") {
+		t.Fatalf("expanding edit result = %+v", res)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "aaaaa" {
+		t.Fatalf("rejected expansion changed content to %q", data)
+	}
+}
+
+func TestEditReplaceAllHonorsReplacementLimit(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "matches.txt")
+	if err := os.WriteFile(file, []byte("a a a a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEdit(NewPathGuard([]string{dir}, dir))
+	e.MaxReplacements = 3
+	res, _ := e.Run(context.Background(), argsFor(t, map[string]any{"path": file, "old_str": "a", "new_str": "b", "replace_all": true}), stubHost{cwd: dir, roots: []string{dir}})
+	if !res.IsError || !strings.Contains(res.Content[0].Text, "maximum is 3") {
+		t.Fatalf("replacement-limit result = %+v", res)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "a a a a" {
+		t.Fatalf("rejected replace_all changed content to %q", data)
+	}
+}
+
+func TestEditReplaceAllAtReplacementLimitSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "matches.txt")
+	if err := os.WriteFile(file, []byte("a a a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEdit(NewPathGuard([]string{dir}, dir))
+	e.MaxReplacements = 3
+	res, _ := e.Run(context.Background(), argsFor(t, map[string]any{"path": file, "old_str": "a", "new_str": "b", "replace_all": true}), stubHost{cwd: dir, roots: []string{dir}})
+	if res.IsError {
+		t.Fatalf("replacement-limit edit failed: %+v", res)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "b b b" {
+		t.Fatalf("content = %q, want b b b", data)
+	}
+}
+
+func TestBoundedEditReadLimitDoesNotOverflow(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	if got := boundedEditReadLimit(maxInt); got != maxInt {
+		t.Fatalf("max-int read limit = %d, want %d", got, maxInt)
+	}
+	if got := boundedEditReadLimit(10); got != 11 {
+		t.Fatalf("ordinary read limit = %d, want 11", got)
+	}
+}
+
+func TestEditDiffBoundsInputMatchesAndOutput(t *testing.T) {
+	tooLarge := strings.Repeat("a", maxDiffInputBytes+1)
+	if got := editDiff(tooLarge, "b", "a", "b", false); got != "" {
+		t.Fatalf("oversized diff preview was not omitted: %d bytes", len(got))
+	}
+
+	many := strings.Repeat("a", maxDiffEdits+1)
+	if got := editDiff(many, strings.Repeat("b", len(many)), "a", "b", true); got != "" {
+		t.Fatalf("high-match diff preview was not omitted: %d bytes", len(got))
+	}
+
+	before := "x" + strings.Repeat("a", 100_000)
+	after := "y" + before[1:]
+	got := editDiff(before, after, "x", "y", false)
+	if len(got) > maxDiffPreviewBytes {
+		t.Fatalf("diff preview = %d bytes, cap is %d", len(got), maxDiffPreviewBytes)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("bounded diff preview is not valid UTF-8")
+	}
+	if !strings.HasSuffix(got, diffTruncationMarker) {
+		t.Fatalf("bounded diff preview missing truncation marker: %q", got[len(got)-min(len(got), 80):])
 	}
 }

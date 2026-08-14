@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	goruntime "runtime"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -111,13 +109,6 @@ func (h *shellHost) EmitProgress(tools.ToolProgressEvent) {}
 func (h *shellHost) Environ() []string                    { return nil }
 
 func shellCommand(long bool) string {
-	if goruntime.GOOS == "windows" {
-		seconds := 3
-		if long {
-			seconds = 20
-		}
-		return "ping -n " + strconv.Itoa(seconds+1) + " 127.0.0.1 >NUL && echo shell"
-	}
 	if long {
 		return "sleep 5; printf shell"
 	}
@@ -125,9 +116,6 @@ func shellCommand(long bool) string {
 }
 
 func TestShellChildrenOverlapAndInterruptCleanup(t *testing.T) {
-	if goruntime.GOOS == "windows" {
-		t.Skip("process-group cleanup has different Windows semantics")
-	}
 	rootStore := session.NewMemoryStore(session.Options{})
 	root := rootAgent(t, rootStore)
 	defer root.Close()

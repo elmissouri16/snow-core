@@ -3,7 +3,7 @@
 This document records the repository-wide bug and fragility audit requested in
 August 2026. Every identified item below was inspected, remediated, covered by
 focused tests where practical, and included in full-suite, race, vet, repeated,
-and Windows compile-time validation. Source and tests remain authoritative.
+and supported-platform validation. Source and tests remain authoritative.
 
 ## Security and filesystem safety
 
@@ -23,9 +23,7 @@ and Windows compile-time validation. Source and tests remain authoritative.
 - [x] **SEC-05 — Bind type validation and search enumeration to rooted opens.**
   Read/edit/write/grep validate the opened inode, using nonblocking opens where
   FIFOs exist. Search recursion and ignore-file reads operate through `os.Root`
-  rather than ambient `WalkDir`/`Open`. Windows atomic replacement reopens the
-  rooted temporary inode with `WRITE_DAC` and copies the destination DACL plus
-  its protected/inheritable state before rename.
+  rather than ambient `WalkDir`/`Open`.
 
 ## Extension and lifecycle correctness
 
@@ -83,10 +81,8 @@ and Windows compile-time validation. Source and tests remain authoritative.
 - [x] **SES-08 — Persist mail arriving during compaction.** Compaction finalizes
   through `finishTurnMailbox` on success/error/cancellation and joins persistence
   errors into its named return.
-- [x] **SES-09 — Preserve every legacy session-directory edge case.** The legacy
-  encoder now reproduces the original one-leading-hyphen trim, trailing hyphens,
-  and Windows backslash behavior exactly. Windows v2 hashes use the same
-  case-insensitive identity relation as listing.
+- [x] **SES-09 — Preserve legacy session-directory edge cases.** The legacy
+  encoder reproduces the original one-leading-hyphen trim and trailing hyphens.
 
 ## Tools and providers
 
@@ -156,7 +152,6 @@ Remediated tree:
 - `go test -race ./internal/... -count=1 -timeout=900s` — passed
 - affected provider/plugin/MCP/session/agent/app/RPC/tool/router/subagent/TUI/SDK/CLI
   packages with repeated runs up to `-count=20` — passed
-- `GOOS=windows GOARCH=amd64 go vet` for tools/providers/session/MCP/plugin/app/TUI/RPC/CLI — passed
 - `git diff --check` — passed
 
 `staticcheck` and `govulncheck` were not installed in the audit environment.

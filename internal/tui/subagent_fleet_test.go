@@ -67,6 +67,74 @@ func TestSubagentFleetOpenRenderNavigateAndClose(t *testing.T) {
 	}
 }
 
+func TestSubagentFleetWheelScrollsVisibleDetail(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		width int
+	}{
+		{name: "wide", width: 120},
+		{name: "narrow", width: 64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := fleetTestModel(t)
+			m.width = tc.width
+			m.app.Cfg.TUI.Mouse = true
+			for i := 0; i < 100; i++ {
+				m.subagentFleetActivity["one"] = append(m.subagentFleetActivity["one"], fmt.Sprintf("activity %03d", i))
+			}
+			m.subagentFleetDetailEnd = true
+			m.lines = make([]string, 80)
+			for i := range m.lines {
+				m.lines[i] = fmt.Sprintf("root history %03d", i)
+			}
+			m.transcriptBaseDirty = true
+			m.transcriptDirty = true
+			m.refreshTranscript()
+			m.transcript.SetYOffset(5)
+			rootOffset := m.transcript.YOffset
+			maxOffset := max(0, m.subagentFleetDetailLineCount()-m.subagentFleetDetailPageSize())
+			if maxOffset == 0 {
+				t.Fatal("test detail is not scrollable")
+			}
+			before := stripANSI(m.renderSubagentFleetModal())
+
+			_, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+			afterUp := stripANSI(m.renderSubagentFleetModal())
+			if m.subagentFleetDetailEnd || m.subagentFleetDetailOffset >= maxOffset {
+				t.Fatalf("wheel up did not leave fleet tail: offset=%d max=%d end=%v", m.subagentFleetDetailOffset, maxOffset, m.subagentFleetDetailEnd)
+			}
+			if afterUp == before {
+				t.Fatal("wheel up changed state without moving visible fleet detail")
+			}
+			if m.transcript.YOffset != rootOffset {
+				t.Fatalf("fleet wheel moved root transcript: got=%d want=%d", m.transcript.YOffset, rootOffset)
+			}
+
+			_, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+			if !m.subagentFleetDetailEnd || m.subagentFleetDetailOffset != maxOffset {
+				t.Fatalf("wheel down did not restore fleet tail: offset=%d max=%d end=%v", m.subagentFleetDetailOffset, maxOffset, m.subagentFleetDetailEnd)
+			}
+			if afterDown := stripANSI(m.renderSubagentFleetModal()); afterDown != before {
+				t.Fatal("wheel down did not restore the visible fleet tail")
+			}
+		})
+	}
+}
+
+func TestSubagentFleetPageDownAtTailStaysAtTail(t *testing.T) {
+	m := fleetTestModel(t)
+	for i := 0; i < 100; i++ {
+		m.subagentFleetActivity["one"] = append(m.subagentFleetActivity["one"], fmt.Sprintf("activity %03d", i))
+	}
+	m.subagentFleetDetailOffset = 0
+	m.subagentFleetDetailEnd = true
+	_, _ = m.handleSubagentFleetKey(tea.KeyMsg{Type: tea.KeyPgDown})
+	want := max(0, m.subagentFleetDetailLineCount()-m.subagentFleetDetailPageSize())
+	if !m.subagentFleetDetailEnd || m.subagentFleetDetailOffset != want {
+		t.Fatalf("PgDown moved tail to stale offset: offset=%d want=%d end=%v", m.subagentFleetDetailOffset, want, m.subagentFleetDetailEnd)
+	}
+}
+
 func TestSubagentFleetBlockingHostOverlayKeepsPrecedence(t *testing.T) {
 	m := fleetTestModel(t)
 	m.handleAgentEvent(permRequestEvent("bash"))

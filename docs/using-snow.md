@@ -198,7 +198,7 @@ meaningful.
 | `/resume [path]` | Open the session picker or resume an explicit database |
 | `/new` | Create a new persisted session |
 | `/tree` | Inspect and switch named branches; `f`, `r`, `d` fork/rename/delete |
-| `/agent` | Open the live subagent fleet inspector; select with ↑/↓ or j/k, scroll detail with PageUp/PageDown, refresh with `r`, close with Esc |
+| `/agent` | Open the live subagent fleet inspector; select with ↑/↓ or j/k, scroll detail with wheel/trackpad or PageUp/PageDown, refresh with `r`, close with Esc |
 | `/agent PATH` | Open the fleet inspector with one child preselected |
 | `/agent concurrency N` | Persist child concurrency for the next launch |
 | `/mcp` | Inspect configured/connected MCP server status |

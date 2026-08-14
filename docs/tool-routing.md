@@ -56,7 +56,7 @@ normal app builds the Bleve index and registers direct `search_tools` even when
 no plugins are installed. An explicit SDK/CLI tool allowlist that excludes
 `webfetch` retains the original direct-only/no-router path.
 
-The tool performs a static GET with Surf v1.0.203's Windows Chrome 150 profile;
+The tool performs a static GET with Surf v1.0.203's Chrome 150 profile;
 it does not execute JavaScript. It converts HTML to Markdown, passes textual
 formats through as UTF-8, and rejects binary content. It is `RiskNet`, so ask
 mode prompts at execution and deny mode filters it before schema exposure.

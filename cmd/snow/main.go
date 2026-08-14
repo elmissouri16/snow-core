@@ -295,8 +295,6 @@ func openBrowser(ctx context.Context, target string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		name, args = "open", []string{target}
-	case "windows":
-		name, args = "rundll32", []string{"url.dll,FileProtocolHandler", target}
 	default:
 		name, args = "xdg-open", []string{target}
 	}

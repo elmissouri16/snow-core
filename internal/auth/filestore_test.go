@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -97,9 +96,6 @@ func TestFileStorePersistsAcrossInstances(t *testing.T) {
 }
 
 func TestFileStorePermissions(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("permission bits not enforced on windows")
-	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "auth.json")
 	fs, _ := NewFileStore(path)

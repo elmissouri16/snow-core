@@ -218,6 +218,32 @@ func (m *Model) subagentFleetSelectedPath() string {
 	return string(m.subagentFleetList.Agents[m.subagentFleetIndex].Agent.Path)
 }
 
+func (m *Model) handleSubagentFleetMouse(msg tea.MouseMsg) {
+	event := tea.MouseEvent(msg)
+	if event.Action != tea.MouseActionPress {
+		return
+	}
+	delta := max(1, m.transcript.MouseWheelDelta)
+	switch event.Button {
+	case tea.MouseButtonWheelUp:
+		m.scrollSubagentFleetDetail(-delta)
+	case tea.MouseButtonWheelDown:
+		m.scrollSubagentFleetDetail(delta)
+	}
+}
+
+func (m *Model) scrollSubagentFleetDetail(delta int) {
+	page := m.subagentFleetDetailPageSize()
+	maxOffset := max(0, m.subagentFleetDetailLineCount()-page)
+	current := min(max(0, m.subagentFleetDetailOffset), maxOffset)
+	if m.subagentFleetDetailEnd {
+		current = maxOffset
+	}
+	next := min(max(0, current+delta), maxOffset)
+	m.subagentFleetDetailOffset = next
+	m.subagentFleetDetailEnd = next >= maxOffset
+}
+
 func (m *Model) handleSubagentFleetKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	count := len(m.subagentFleetList.Agents)
@@ -250,20 +276,14 @@ func (m *Model) handleSubagentFleetKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyDown:
 		m.subagentFleetIndex = (m.subagentFleetIndex + 1) % count
 	case tea.KeyPgUp:
-		page := m.subagentFleetDetailPageSize()
-		if m.subagentFleetDetailEnd {
-			m.subagentFleetDetailOffset = max(0, m.subagentFleetDetailLineCount()-2*page)
-		} else {
-			m.subagentFleetDetailOffset = max(0, m.subagentFleetDetailOffset-page)
-		}
-		m.subagentFleetDetailEnd = false
+		m.scrollSubagentFleetDetail(-m.subagentFleetDetailPageSize())
 	case tea.KeyPgDown:
-		m.subagentFleetDetailOffset += m.subagentFleetDetailPageSize()
-		m.subagentFleetDetailEnd = false
+		m.scrollSubagentFleetDetail(m.subagentFleetDetailPageSize())
 	case tea.KeyHome:
 		m.subagentFleetDetailOffset = 0
 		m.subagentFleetDetailEnd = false
 	case tea.KeyEnd:
+		m.subagentFleetDetailOffset = max(0, m.subagentFleetDetailLineCount()-m.subagentFleetDetailPageSize())
 		m.subagentFleetDetailEnd = true
 	}
 	if m.subagentFleetIndex != previous {
@@ -273,15 +293,11 @@ func (m *Model) handleSubagentFleetKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) subagentFleetDetailPageSize() int {
-	return max(1, m.managedFrameHeight()-12)
+	return m.subagentFleetLayout().detailHeight
 }
 
 func (m *Model) subagentFleetDetailLineCount() int {
-	innerWidth := max(16, m.managedFrameWidth()-6)
-	if innerWidth >= fleetWideMinWidth {
-		innerWidth = max(20, innerWidth-max(30, innerWidth*38/100)-1)
-	}
-	return len(m.subagentFleetDetailLines(innerWidth))
+	return len(m.subagentFleetDetailLines(m.subagentFleetLayout().detailWidth))
 }
 
 func (m *Model) recordSubagentFleetEvent(ev protocol.AgentEvent) {
@@ -424,32 +440,59 @@ func fleetActivityBytes(lines []string) int {
 	return total
 }
 
-func (m *Model) renderSubagentFleetModal() string {
+type subagentFleetLayout struct {
+	innerWidth   int
+	innerHeight  int
+	bodyHeight   int
+	detailWidth  int
+	detailHeight int
+	listWidth    int
+	listHeight   int
+	wide         bool
+}
+
+func (m *Model) subagentFleetLayout() subagentFleetLayout {
 	width := max(20, m.managedFrameWidth()-4)
 	height := max(8, m.managedFrameHeight()-4)
-	innerWidth := max(16, width-2)
-	innerHeight := max(4, height-2)
-	header := m.renderSubagentFleetHeader(innerWidth)
+	layout := subagentFleetLayout{
+		innerWidth:  max(16, width-2),
+		innerHeight: max(4, height-2),
+	}
+	// The header and footer are each constrained to one rendered row.
+	layout.bodyHeight = max(1, layout.innerHeight-2)
+	layout.wide = layout.innerWidth >= fleetWideMinWidth
+	if layout.wide {
+		layout.listWidth = max(30, layout.innerWidth*38/100)
+		layout.detailWidth = max(20, layout.innerWidth-layout.listWidth-1)
+		layout.listHeight = layout.bodyHeight
+		layout.detailHeight = layout.bodyHeight
+	} else {
+		layout.listWidth = layout.innerWidth
+		layout.detailWidth = layout.innerWidth
+		layout.listHeight = max(3, min(len(m.subagentFleetList.Agents)+1, layout.bodyHeight/3))
+		layout.detailHeight = max(1, layout.bodyHeight-layout.listHeight-1)
+	}
+	return layout
+}
+
+func (m *Model) renderSubagentFleetModal() string {
+	layout := m.subagentFleetLayout()
+	header := m.renderSubagentFleetHeader(layout.innerWidth)
 	footer := styleFooter.Render(" ↑/↓ or j/k select · PgUp/PgDn detail · Home/End · r refresh · Esc close ")
-	bodyHeight := max(1, innerHeight-lipgloss.Height(header)-lipgloss.Height(footer))
 	var body string
-	if innerWidth >= fleetWideMinWidth {
-		leftWidth := max(30, innerWidth*38/100)
-		rightWidth := max(20, innerWidth-leftWidth-1)
-		left := lipgloss.NewStyle().Width(leftWidth).Height(bodyHeight).MaxHeight(bodyHeight).Render(m.renderSubagentFleetList(leftWidth, bodyHeight))
-		right := lipgloss.NewStyle().Width(rightWidth).Height(bodyHeight).MaxHeight(bodyHeight).Render(m.renderSubagentFleetDetail(rightWidth, bodyHeight))
-		divider := styleSep.Render(strings.Repeat("│\n", max(0, bodyHeight-1)) + "│")
+	if layout.wide {
+		left := lipgloss.NewStyle().Width(layout.listWidth).Height(layout.listHeight).MaxHeight(layout.listHeight).Render(m.renderSubagentFleetList(layout.listWidth, layout.listHeight))
+		right := lipgloss.NewStyle().Width(layout.detailWidth).Height(layout.detailHeight).MaxHeight(layout.detailHeight).Render(m.renderSubagentFleetDetail(layout.detailWidth, layout.detailHeight))
+		divider := styleSep.Render(strings.Repeat("│\n", max(0, layout.bodyHeight-1)) + "│")
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
 	} else {
-		listHeight := max(3, min(len(m.subagentFleetList.Agents)+1, bodyHeight/3))
-		detailHeight := max(1, bodyHeight-listHeight-1)
-		list := lipgloss.NewStyle().Width(innerWidth).Height(listHeight).MaxHeight(listHeight).Render(m.renderSubagentFleetList(innerWidth, listHeight))
-		sep := styleSep.Render(strings.Repeat("─", innerWidth))
-		detail := lipgloss.NewStyle().Width(innerWidth).Height(detailHeight).MaxHeight(detailHeight).Render(m.renderSubagentFleetDetail(innerWidth, detailHeight))
+		list := lipgloss.NewStyle().Width(layout.listWidth).Height(layout.listHeight).MaxHeight(layout.listHeight).Render(m.renderSubagentFleetList(layout.listWidth, layout.listHeight))
+		sep := styleSep.Render(strings.Repeat("─", layout.innerWidth))
+		detail := lipgloss.NewStyle().Width(layout.detailWidth).Height(layout.detailHeight).MaxHeight(layout.detailHeight).Render(m.renderSubagentFleetDetail(layout.detailWidth, layout.detailHeight))
 		body = lipgloss.JoinVertical(lipgloss.Left, list, sep, detail)
 	}
 	content := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("63")).Width(innerWidth).Height(innerHeight).Render(content)
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("63")).Width(layout.innerWidth).Height(layout.innerHeight).Render(content)
 }
 
 func (m *Model) renderSubagentFleetHeader(width int) string {

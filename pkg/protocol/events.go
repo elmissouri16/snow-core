@@ -91,6 +91,8 @@ type AgentEvent struct {
 	AgentMessage   *AgentMessage  `json:"agent_message,omitempty"`
 	TurnID         string         `json:"turn_id,omitempty"`
 	TurnOrigin     string         `json:"turn_origin,omitempty"`
+	TurnSequence   uint64         `json:"turn_sequence,omitempty"`
+	RootEpoch      uint64         `json:"root_epoch,omitempty"`
 	GoalContinuing bool           `json:"goal_continuing,omitempty"`
 	IsError        bool           `json:"is_error,omitempty"`
 }

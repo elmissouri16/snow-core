@@ -356,18 +356,9 @@ func TestFileIndexLegacyCollisionFiltersByStoredCWD(t *testing.T) {
 	}
 }
 
-func TestLegacyEncodeCWDReproducesOriginalEdgeCases(t *testing.T) {
+func TestLegacyEncodeCWDReproducesTrailingHyphenEdgeCase(t *testing.T) {
 	if got := legacyEncodeCleanedCWD("/tmp/repo-"); got != "tmp-repo-" {
 		t.Fatalf("trailing-hyphen encoding = %q", got)
-	}
-	if got := legacyEncodeCleanedCWD(`C:\Repo`); got != `C-\Repo` {
-		t.Fatalf("Windows legacy encoding = %q", got)
-	}
-	if encodeCleanedCWD(`C:\Repo`, "windows") != encodeCleanedCWD(`c:\repo`, "windows") {
-		t.Fatal("Windows v2 encoding is not ASCII-case-insensitive")
-	}
-	if encodeCleanedCWD(`C:\S`, "windows") != encodeCleanedCWD(`c:\ſ`, "windows") {
-		t.Fatal("Windows v2 encoding does not match Unicode simple folding")
 	}
 }
 

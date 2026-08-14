@@ -133,8 +133,18 @@ func TestSwitchSessionReadinessFailureKeepsCommittedStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := a.Agent.Prompt(context.Background(), "previous session turn"); err != nil {
+		t.Fatal(err)
+	}
+	_, previousTurnID := a.Agent.LatestTurn()
+	previousTurnSequence := a.Agent.TurnSequenceWatermark()
+	previousRootEpoch := a.Agent.RootEpoch()
+	if previousTurnID == "" || previousTurnSequence == 0 {
+		t.Fatal("previous session did not retain its latest turn identity")
+	}
 	m := newModel(context.Background(), app.Options{})
 	m.app = a
+	m.activeTurnID = previousTurnID
 	t.Cleanup(func() { _ = m.Close() })
 	opened, err := session.OpenSQLiteStore(path, cwd, session.Options{})
 	if err != nil {
@@ -145,6 +155,25 @@ func TestSwitchSessionReadinessFailureKeepsCommittedStore(t *testing.T) {
 	}
 	if m.app.Session.ID() != wantID {
 		t.Fatalf("active session = %q, want %q", m.app.Session.ID(), wantID)
+	}
+	if m.activeTurnID != "" || m.busy {
+		t.Fatalf("session switch retained prior lifecycle: busy=%v turn=%q", m.busy, m.activeTurnID)
+	}
+	if _, latestID := m.app.Agent.LatestTurn(); latestID != "" {
+		t.Fatalf("session switch retained prior core turn identity %q", latestID)
+	}
+	m.subagentFleetOpen = true
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTextDelta, TurnID: previousTurnID, TurnSequence: previousTurnSequence, RootEpoch: previousRootEpoch, Text: "late prior-session output"})
+	if m.activeTurnID != "" || strings.Contains(m.assistantBuf.String(), "late prior-session output") {
+		t.Fatalf("prior-session event crossed switch fence: turn=%q text=%q", m.activeTurnID, m.assistantBuf.String())
+	}
+	if activity := strings.Join(m.subagentFleetActivity["root"], "\n"); strings.Contains(activity, "late prior-session output") {
+		t.Fatalf("prior-session event entered root fleet activity: %q", activity)
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, RootEpoch: previousRootEpoch,
+		ThreadGoal: &protocol.ThreadGoalUpdate{Goal: &protocol.ThreadGoal{GoalID: "stale-prior-session", Status: protocol.GoalActive}}})
+	if m.goal != nil && m.goal.GoalID == "stale-prior-session" {
+		t.Fatal("sequenceless prior-session goal snapshot crossed switch epoch")
 	}
 	if _, err := m.app.Session.Messages(); err != nil {
 		t.Fatalf("committed session was closed: %v", err)
@@ -247,6 +276,9 @@ func TestTreePickerSelectsAndForksBranches(t *testing.T) {
 	if err := m.app.Agent.Prompt(context.Background(), "branch base"); err != nil {
 		t.Fatal(err)
 	}
+	_, priorTurnID := m.app.Agent.LatestTurn()
+	priorTurnSequence := m.app.Agent.TurnSequenceWatermark()
+	priorRootEpoch := m.app.Agent.RootEpoch()
 	messages, err := m.app.Agent.Messages()
 	if err != nil || len(messages) == 0 {
 		t.Fatalf("messages = %+v, err=%v", messages, err)
@@ -269,6 +301,19 @@ func TestTreePickerSelectsAndForksBranches(t *testing.T) {
 	}
 	if m.app.Agent.IsRunning() {
 		t.Fatal("branch selection marked agent running")
+	}
+	m.subagentFleetOpen = true
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTextDelta, TurnID: priorTurnID, TurnSequence: priorTurnSequence, RootEpoch: priorRootEpoch, Text: "late prior-branch output"})
+	if m.activeTurnID != "" || strings.Contains(m.assistantBuf.String(), "late prior-branch output") {
+		t.Fatalf("prior-branch event crossed switch fence: turn=%q text=%q", m.activeTurnID, m.assistantBuf.String())
+	}
+	if activity := strings.Join(m.subagentFleetActivity["root"], "\n"); strings.Contains(activity, "late prior-branch output") {
+		t.Fatalf("prior-branch event entered root fleet activity: %q", activity)
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, RootEpoch: priorRootEpoch,
+		ThreadGoal: &protocol.ThreadGoalUpdate{Goal: &protocol.ThreadGoal{GoalID: "stale-prior-branch", Status: protocol.GoalActive}}})
+	if m.goal != nil && m.goal.GoalID == "stale-prior-branch" {
+		t.Fatal("sequenceless prior-branch goal snapshot crossed switch epoch")
 	}
 }
 

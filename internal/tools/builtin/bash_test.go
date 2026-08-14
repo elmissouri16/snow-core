@@ -57,6 +57,15 @@ func TestBash_OutputCap(t *testing.T) {
 	}
 }
 
+func TestBoundedProcessWaitDelay(t *testing.T) {
+	if got := boundedProcessWaitDelay(50 * time.Millisecond); got != 50*time.Millisecond {
+		t.Fatalf("short wait delay = %s, want 50ms", got)
+	}
+	if got := boundedProcessWaitDelay(30 * time.Second); got != defaultProcessWaitDelay {
+		t.Fatalf("long wait delay = %s, want %s", got, defaultProcessWaitDelay)
+	}
+}
+
 func TestSanitizeBoundedUTF8(t *testing.T) {
 	tests := []struct {
 		name string

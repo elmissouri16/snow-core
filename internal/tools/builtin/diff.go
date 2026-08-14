@@ -7,15 +7,27 @@ import (
 	udiff "github.com/aymanbagabas/go-udiff"
 )
 
-// maxDiffInputBytes bounds each side of a file-change preview. File writes
-// still complete above this threshold; only the optional UI diff is omitted.
-const maxDiffInputBytes = 512 * 1024
+const (
+	// maxDiffInputBytes bounds each side of a file-change preview. File writes
+	// still complete above this threshold; only the optional UI diff is omitted.
+	maxDiffInputBytes = 512 * 1024
+	// maxDiffEdits prevents replace_all previews from allocating one diff edit
+	// per match on highly repetitive files.
+	maxDiffEdits = 1_000
+	// maxDiffPreviewBytes bounds private UI metadata before it reaches clients.
+	maxDiffPreviewBytes = 64 * 1024
+)
+
+const diffTruncationMarker = "\n... [diff preview truncated]"
 
 // editDiff returns a compact, line-oriented preview of an edit. It keeps the
 // useful context from a unified diff while omitting file headers and hunk
 // metadata so it reads naturally in the terminal transcript.
 func editDiff(before, after, oldStr, newStr string, replaceAll bool) string {
 	if before == after || oldStr == newStr {
+		return ""
+	}
+	if len(before) > maxDiffInputBytes || len(after) > maxDiffInputBytes {
 		return ""
 	}
 
@@ -25,6 +37,9 @@ func editDiff(before, after, oldStr, newStr string, replaceAll bool) string {
 		rel := strings.Index(before[from:], oldStr)
 		if rel < 0 {
 			break
+		}
+		if len(edits) >= maxDiffEdits {
+			return ""
 		}
 		start := from + rel
 		edits = append(edits, udiff.Edit{Start: start, End: start + len(oldStr), New: newStr})
@@ -52,7 +67,7 @@ func contentDiff(before, after string) string {
 }
 
 func formatDiff(before string, edits []udiff.Edit) string {
-	if len(edits) == 0 {
+	if len(edits) == 0 || len(edits) > maxDiffEdits {
 		return ""
 	}
 	diff, err := udiff.ToUnifiedDiff("", "", before, edits, 3)
@@ -92,7 +107,18 @@ func formatDiff(before string, edits []udiff.Edit) string {
 			b.WriteString("...\n")
 		}
 	}
-	return strings.TrimSuffix(b.String(), "\n")
+	return boundDiffPreview(strings.TrimSuffix(b.String(), "\n"))
+}
+
+func boundDiffPreview(diff string) string {
+	if len(diff) <= maxDiffPreviewBytes {
+		return diff
+	}
+	budget := maxDiffPreviewBytes - len(diffTruncationMarker)
+	if budget <= 0 {
+		return truncateRunes(diffTruncationMarker, maxDiffPreviewBytes)
+	}
+	return truncateRunes(diff, budget) + diffTruncationMarker
 }
 
 func writeDiffLine(b *strings.Builder, marker byte, lineNo int, content string) {

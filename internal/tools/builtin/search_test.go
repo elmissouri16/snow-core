@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -22,9 +21,6 @@ func searchArgs(t *testing.T, value any) json.RawMessage {
 }
 
 func TestWalkSearchFilesUsesPinnedRootAfterLaunchPathReplacement(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation is not reliably available on Windows test hosts")
-	}
 	parent := t.TempDir()
 	launch := filepath.Join(parent, "project")
 	child := filepath.Join(launch, "child")

@@ -473,7 +473,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		CWD:            absCWD,
 		Guard:          toolGuard,
 		SearchPolicy:   searchPolicy,
-		WindowsShell:   builtin.WindowsShellOptions{Kind: cfg.WindowsShell.Kind, Executable: cfg.WindowsShell.Executable},
 	}
 	// Register builtins. The explicit tool allowlist is applied after Agent
 	// Skills register their built-in capabilities so it remains a true upper
@@ -1314,6 +1313,7 @@ func (a *App) SetSession(st session.Store) error {
 			return err
 		}
 	}
+	a.Agent.ResetTurnIdentityAdmitted()
 	a.Session = st
 	a.sessionHistory.Set(st)
 	g, _ := a.Goal.Get()

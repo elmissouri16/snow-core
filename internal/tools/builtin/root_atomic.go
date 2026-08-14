@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-func atomicReplaceRooted(ctx context.Context, target rootedPath, data []byte, mode os.FileMode) error {
+func atomicReplaceRooted(ctx context.Context, target rootedPath, data []byte, mode os.FileMode, preserveMode bool) error {
 	parent := filepath.Dir(target.name)
 	if err := target.root.MkdirAll(parent, 0o755); err != nil {
 		return fmt.Errorf("create parent dirs: %w", err)
@@ -30,8 +30,12 @@ func atomicReplaceRooted(ctx context.Context, target rootedPath, data []byte, mo
 			_ = target.root.Remove(tempName)
 		}
 	}()
-	if err := temp.Chmod(mode.Perm()); err != nil {
-		return fmt.Errorf("set permissions: %w", err)
+	// Creation already applies the process umask. Restore an exact mode only
+	// when replacing an existing file whose permissions must be preserved.
+	if preserveMode {
+		if err := temp.Chmod(mode.Perm()); err != nil {
+			return fmt.Errorf("set permissions: %w", err)
+		}
 	}
 	if err := writeAll(ctx, temp, data); err != nil {
 		return err

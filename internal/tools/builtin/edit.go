@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -12,15 +11,28 @@ import (
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
+const (
+	defaultMaxEditFileBytes    = 8 << 20
+	defaultMaxEditReplacements = 10_000
+)
+
 // Edit is the exact string replace tool.
 type Edit struct {
 	// Guard confines file access; if nil the tool denies all paths.
 	Guard *PathGuard
+	// MaxFileBytes bounds both the existing and resulting file size.
+	MaxFileBytes int
+	// MaxReplacements bounds replace_all match expansion.
+	MaxReplacements int
 }
 
 // NewEdit returns an Edit tool.
 func NewEdit(guard *PathGuard) *Edit {
-	return &Edit{Guard: guard}
+	return &Edit{
+		Guard:           guard,
+		MaxFileBytes:    defaultMaxEditFileBytes,
+		MaxReplacements: defaultMaxEditReplacements,
+	}
 }
 
 // editArgs is the JSON schema payload for edit.
@@ -35,7 +47,7 @@ type editArgs struct {
 func (e *Edit) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "edit",
-		Description: "Replace an exact string occurrence in a file within allowed roots.",
+		Description: "Replace exact text in a bounded file within allowed roots. Existing and resulting files are limited to 8 MiB by default.",
 		Parameters: json.RawMessage(`{
   "type": "object",
   "required": ["path", "old_str", "new_str"],
@@ -61,6 +73,20 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	}
 	if a.OldStr == "" {
 		return tools.ErrorResult(fmt.Errorf("edit: old_str is required")), nil
+	}
+	maxFileBytes := e.MaxFileBytes
+	if maxFileBytes <= 0 {
+		maxFileBytes = defaultMaxEditFileBytes
+	}
+	maxReplacements := e.MaxReplacements
+	if maxReplacements <= 0 {
+		maxReplacements = defaultMaxEditReplacements
+	}
+	if len(a.OldStr) > maxFileBytes {
+		return tools.ErrorResult(fmt.Errorf("edit: old_str exceeds the maximum editable size of %d bytes", maxFileBytes)), nil
+	}
+	if len(a.NewStr) > maxFileBytes {
+		return tools.ErrorResult(fmt.Errorf("edit: new_str exceeds the maximum editable size of %d bytes", maxFileBytes)), nil
 	}
 
 	// Always re-anchor the guard to the host at call time: the registry-built
@@ -88,15 +114,21 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		return tools.ErrorResult(fmt.Errorf("edit: %q is not a regular file: %w", a.Path, err)), nil
 	}
 	defer file.Close()
+	if info.Size() > int64(maxFileBytes) {
+		return tools.ErrorResult(fmt.Errorf("edit: file %q is %d bytes; maximum editable size is %d bytes", a.Path, info.Size(), maxFileBytes)), nil
+	}
 	if err := ctx.Err(); err != nil {
 		return tools.ErrorResult(err), nil
 	}
 	emitProgress(host, "editing file", false, false)
 	defer emitProgress(host, "edit finished", true, false)
 
-	data, err := io.ReadAll(file)
+	data, err := readUpTo(ctx, file, boundedEditReadLimit(maxFileBytes))
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
+	}
+	if len(data) > maxFileBytes {
+		return tools.ErrorResult(fmt.Errorf("edit: file %q exceeds the maximum editable size of %d bytes", a.Path, maxFileBytes)), nil
 	}
 
 	content := string(data)
@@ -112,6 +144,19 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 			Content: []protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("No changes needed for %s", a.Path))},
 		}, nil
 	}
+	if a.ReplaceAll && count > maxReplacements {
+		return tools.ErrorResult(fmt.Errorf("edit: replace_all matches %d occurrences; maximum is %d", count, maxReplacements)), nil
+	}
+	replacements := 1
+	if a.ReplaceAll {
+		replacements = count
+	}
+	if growth := len(a.NewStr) - len(a.OldStr); growth > 0 && replacements > (maxFileBytes-len(content))/growth {
+		return tools.ErrorResult(fmt.Errorf("edit: replacement would exceed the maximum editable size of %d bytes", maxFileBytes)), nil
+	}
+	if err := ctx.Err(); err != nil {
+		return tools.ErrorResult(err), nil
+	}
 
 	var updated string
 	if a.ReplaceAll {
@@ -124,7 +169,7 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if err := ctx.Err(); err != nil {
 		return tools.ErrorResult(err), nil
 	}
-	if err := atomicReplaceRooted(ctx, rooted, []byte(updated), info.Mode().Perm()); err != nil {
+	if err := atomicReplaceRooted(ctx, rooted, []byte(updated), info.Mode().Perm(), true); err != nil {
 		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
 	}
 
@@ -132,4 +177,12 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		Content: []protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("Replaced %d occurrence(s) in %s", count, a.Path))},
 		Details: tools.DiffDetails{Path: a.Path, Diff: diff},
 	}, nil
+}
+
+func boundedEditReadLimit(maxFileBytes int) int {
+	maxInt := int(^uint(0) >> 1)
+	if maxFileBytes < maxInt {
+		return maxFileBytes + 1
+	}
+	return maxFileBytes
 }
