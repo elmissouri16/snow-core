@@ -28,18 +28,23 @@ import (
 )
 
 const (
-	defaultConnectTimeout = 15 * time.Second
-	defaultMaxOutput      = 256 << 10
-	maxPages              = 100
+	defaultConnectTimeout  = 15 * time.Second
+	defaultRefreshTimeout  = 30 * time.Second
+	defaultRefreshDebounce = 100 * time.Millisecond
+	defaultCloseTimeout    = 5 * time.Second
+	defaultMaxOutput       = 256 << 10
+	maxPages               = 100
 )
 
 // Options configure an MCP manager.
 type Options struct {
-	CWD            string
-	Roots          []string
-	HostName       string
-	HostVersion    string
-	MaxOutputBytes int
+	CWD             string
+	Roots           []string
+	HostName        string
+	HostVersion     string
+	MaxOutputBytes  int
+	RefreshTimeout  time.Duration
+	RefreshDebounce time.Duration
 	// ServerStderr optionally receives stderr written by stdio MCP child
 	// processes. It defaults to io.Discard so child diagnostics cannot corrupt
 	// interactive terminal surfaces.
@@ -70,6 +75,13 @@ type serverRuntime struct {
 	closed  bool
 	owner   string
 	used    map[string]string
+
+	refreshMu     sync.Mutex
+	refreshCtx    context.Context
+	refreshCancel context.CancelFunc
+	refreshReq    chan struct{}
+	refreshStop   chan struct{}
+	refreshDone   chan struct{}
 }
 
 // NewManager creates an idle MCP manager.
@@ -82,6 +94,12 @@ func NewManager(registry tools.Registry, opts Options) *Manager {
 	}
 	if opts.MaxOutputBytes <= 0 {
 		opts.MaxOutputBytes = defaultMaxOutput
+	}
+	if opts.RefreshTimeout <= 0 {
+		opts.RefreshTimeout = defaultRefreshTimeout
+	}
+	if opts.RefreshDebounce <= 0 {
+		opts.RefreshDebounce = defaultRefreshDebounce
 	}
 	if opts.ServerStderr == nil {
 		opts.ServerStderr = io.Discard
@@ -139,8 +157,14 @@ func (m *Manager) ConnectAll(ctx context.Context, specs []publicmcp.ServerSpec) 
 			m.setStatus(status)
 			continue
 		}
-		rt := &serverRuntime{manager: m, spec: spec, owner: "mcp:" + spec.ID, used: make(map[string]string)}
+		refreshCtx, refreshCancel := context.WithCancel(context.Background())
+		rt := &serverRuntime{
+			manager: m, spec: spec, owner: "mcp:" + spec.ID, used: make(map[string]string),
+			refreshCtx: refreshCtx, refreshCancel: refreshCancel,
+			refreshReq: make(chan struct{}, 1), refreshStop: make(chan struct{}), refreshDone: make(chan struct{}),
+		}
 		if err := rt.connect(ctx); err != nil {
+			refreshCancel()
 			status.Message = err.Error()
 			m.setStatus(status)
 			continue
@@ -148,18 +172,11 @@ func (m *Manager) ConnectAll(ctx context.Context, specs []publicmcp.ServerSpec) 
 		m.mu.Lock()
 		if m.closed {
 			m.mu.Unlock()
-			rt.mu.Lock()
-			rt.closed = true
-			session := rt.session
-			rt.mu.Unlock()
-			if session != nil {
-				if closeErr := session.Close(); closeErr != nil {
-					m.mu.Lock()
-					m.connectErr = errors.Join(m.connectErr, fmt.Errorf("mcp %s late close: %w", spec.ID, closeErr))
-					m.mu.Unlock()
-				}
+			if closeErr := rt.close(); closeErr != nil {
+				m.mu.Lock()
+				m.connectErr = errors.Join(m.connectErr, fmt.Errorf("mcp %s late close: %w", spec.ID, closeErr))
+				m.mu.Unlock()
 			}
-			m.registry.UnregisterOwner(rt.owner)
 			status.Message = "MCP manager closed during connect"
 			m.setStatus(status)
 			continue
@@ -180,10 +197,8 @@ func (rt *serverRuntime) connect(parent context.Context) error {
 
 	clientOpts := &sdkmcp.ClientOptions{
 		Capabilities: &sdkmcp.ClientCapabilities{RootsV2: &sdkmcp.RootCapabilities{ListChanged: false}},
-		ToolListChangedHandler: func(ctx context.Context, _ *sdkmcp.ToolListChangedRequest) {
-			if err := rt.refresh(ctx); err != nil {
-				rt.manager.setRuntimeMessage(rt.spec.ID, "tools/list_changed refresh: "+err.Error())
-			}
+		ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
+			rt.requestRefresh()
 		},
 		KeepAlive: 30 * time.Second,
 	}
@@ -227,26 +242,90 @@ func (rt *serverRuntime) connect(parent context.Context) error {
 		}
 		return errors.Join(err, closeErr)
 	}
+	go rt.refreshWorker()
 	return nil
 }
 
-func (rt *serverRuntime) refresh(ctx context.Context) error {
+func (rt *serverRuntime) requestRefresh() {
 	rt.mu.Lock()
-	defer rt.mu.Unlock()
 	if rt.closed {
+		rt.mu.Unlock()
+		return
+	}
+	rt.mu.Unlock()
+	select {
+	case rt.refreshReq <- struct{}{}:
+	default:
+	}
+}
+
+func (rt *serverRuntime) refreshWorker() {
+	defer close(rt.refreshDone)
+	for {
+		select {
+		case <-rt.refreshStop:
+			return
+		case <-rt.refreshReq:
+		}
+		timer := time.NewTimer(rt.manager.opts.RefreshDebounce)
+	debounce:
+		for {
+			select {
+			case <-rt.refreshStop:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				return
+			case <-rt.refreshReq:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(rt.manager.opts.RefreshDebounce)
+			case <-timer.C:
+				break debounce
+			}
+		}
+		if err := rt.refresh(rt.refreshCtx); err != nil {
+			rt.mu.Lock()
+			closed := rt.closed
+			rt.mu.Unlock()
+			if !closed && !errors.Is(err, context.Canceled) {
+				rt.manager.setRuntimeMessage(rt.spec.ID, "tools/list_changed refresh: "+err.Error())
+			}
+		}
+	}
+}
+
+func (rt *serverRuntime) refresh(ctx context.Context) error {
+	rt.refreshMu.Lock()
+	defer rt.refreshMu.Unlock()
+
+	rt.mu.Lock()
+	if rt.closed {
+		rt.mu.Unlock()
 		return errors.New("runtime is closed")
 	}
-	if rt.session == nil {
+	session := rt.session
+	rt.mu.Unlock()
+	if session == nil {
 		return errors.New("session is not connected")
 	}
-	init := rt.session.InitializeResult()
+	ctx, cancel := context.WithTimeout(ctx, rt.manager.opts.RefreshTimeout)
+	defer cancel()
+	init := session.InitializeResult()
 	if init == nil || init.Capabilities == nil {
 		return errors.New("server returned no capabilities")
 	}
 	var remoteTools []*sdkmcp.Tool
 	if init.Capabilities.Tools != nil {
 		var err error
-		remoteTools, err = listAllTools(ctx, rt.session)
+		remoteTools, err = listAllTools(ctx, session)
 		if err != nil {
 			return fmt.Errorf("mcp %s list tools: %w", rt.spec.ID, err)
 		}
@@ -292,14 +371,25 @@ func (rt *serverRuntime) refresh(ctx context.Context) error {
 			descriptors = append(descriptors, rt.bridgeDescriptor(adapter, "prompts", used))
 		}
 	}
+
+	rt.mu.Lock()
+	if rt.closed || rt.session != session {
+		rt.mu.Unlock()
+		return errors.New("runtime is closed")
+	}
+	rt.mu.Unlock()
+	if rt.catalogUnchanged(descriptors) {
+		rt.mu.Lock()
+		rt.used = used
+		rt.mu.Unlock()
+		rt.manager.updateConnectedStatus(rt)
+		return nil
+	}
 	replacer, ok := rt.manager.registry.(tools.AtomicOwnerRegistry)
 	if !ok {
 		return errors.New("MCP registry does not support atomic owner replacement")
 	}
 	if err := replacer.ReplaceOwner(rt.owner, descriptors, func(candidate []tools.ToolDescriptor) error {
-		// Resolve the observer inside the registry boundary. Capturing it before
-		// ReplaceOwner could let handler installation reconcile an older catalog
-		// before this replacement commits without a callback.
 		if changed := rt.manager.changedHandler(); changed != nil {
 			return changed(candidate)
 		}
@@ -307,9 +397,49 @@ func (rt *serverRuntime) refresh(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	rt.mu.Lock()
+	if rt.closed || rt.session != session {
+		rt.mu.Unlock()
+		rt.manager.registry.UnregisterOwner(rt.owner)
+		return errors.New("runtime closed during refresh")
+	}
 	rt.used = used
+	rt.mu.Unlock()
 	rt.manager.updateConnectedStatus(rt)
 	return nil
+}
+
+func (rt *serverRuntime) catalogUnchanged(candidate []tools.ToolDescriptor) bool {
+	current := rt.manager.registry.Descriptors()
+	ours := make(map[string]struct{}, len(candidate))
+	for _, descriptor := range candidate {
+		ours[descriptorFingerprint(descriptor)] = struct{}{}
+	}
+	count := 0
+	for _, descriptor := range current {
+		if descriptor.Owner != rt.owner {
+			continue
+		}
+		count++
+		if _, ok := ours[descriptorFingerprint(descriptor)]; !ok {
+			return false
+		}
+	}
+	return count == len(candidate)
+}
+
+func descriptorFingerprint(descriptor tools.ToolDescriptor) string {
+	data, _ := json.Marshal(struct {
+		Schema       tools.ToolSchema `json:"schema"`
+		Source       tools.Source     `json:"source"`
+		Owner        string           `json:"owner"`
+		PluginID     string           `json:"plugin_id"`
+		OriginalName string           `json:"original_name"`
+		Risk         permission.Risk  `json:"risk"`
+		Capabilities []string         `json:"capabilities"`
+		Prompt       string           `json:"prompt"`
+	}{descriptor.Schema, descriptor.Source, descriptor.Owner, descriptor.PluginID, descriptor.OriginalName, descriptor.Risk, descriptor.Capabilities, descriptor.Prompt})
+	return string(data)
 }
 
 func (rt *serverRuntime) toolDescriptor(remote *sdkmcp.Tool, used map[string]string) (tools.ToolDescriptor, error) {
@@ -333,7 +463,7 @@ func (rt *serverRuntime) toolDescriptor(remote *sdkmcp.Tool, used map[string]str
 func (rt *serverRuntime) bridgeDescriptor(adapter tools.Tool, capability string, used map[string]string) tools.ToolDescriptor {
 	schema := adapter.Schema()
 	originalName := schema.Name
-	schema.Name = rt.canonical(originalName, used)
+	schema.Name = rt.canonicalIdentity(originalName, "bridge:"+capability+":"+originalName, used)
 	schema.Discovery = rt.discovery(schema.Name, capability, schema.Description)
 	setSchema(adapter, schema)
 	return tools.ToolDescriptor{
@@ -374,6 +504,10 @@ func (rt *serverRuntime) discovery(values ...string) *protocol.ToolDiscovery {
 }
 
 func (rt *serverRuntime) canonical(remote string, used map[string]string) string {
+	return rt.canonicalIdentity(remote, remote, used)
+}
+
+func (rt *serverRuntime) canonicalIdentity(remote, identity string, used map[string]string) string {
 	base := sanitize(remote)
 	prefix := "mcp_" + rt.spec.ID + "_"
 	max := 127 - len(prefix)
@@ -384,8 +518,8 @@ func (rt *serverRuntime) canonical(remote string, used map[string]string) string
 		base = strings.Trim(base[:max], "_-")
 	}
 	candidate := prefix + base
-	if prior, exists := used[candidate]; !exists || prior == remote {
-		used[candidate] = remote
+	if prior, exists := used[candidate]; !exists || prior == identity {
+		used[candidate] = identity
 		return candidate
 	}
 	for n := 2; ; n++ {
@@ -396,7 +530,7 @@ func (rt *serverRuntime) canonical(remote string, used map[string]string) string
 		}
 		candidate = prefix + trimmed + suffix
 		if _, exists := used[candidate]; !exists {
-			used[candidate] = remote
+			used[candidate] = identity
 			return candidate
 		}
 	}
@@ -555,6 +689,48 @@ func (m *Manager) updateConnectedStatus(rt *serverRuntime) {
 	m.setStatus(status)
 }
 
+func (rt *serverRuntime) close() error {
+	rt.mu.Lock()
+	if rt.closed {
+		rt.mu.Unlock()
+		return nil
+	}
+	rt.closed = true
+	session := rt.session
+	cancel := rt.refreshCancel
+	stop := rt.refreshStop
+	done := rt.refreshDone
+	rt.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if stop != nil {
+		close(stop)
+	}
+	var errs []error
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(defaultCloseTimeout):
+			errs = append(errs, errors.New("refresh worker did not stop within timeout"))
+		}
+	}
+	if session != nil {
+		closed := make(chan error, 1)
+		go func() { closed <- session.Close() }()
+		select {
+		case err := <-closed:
+			if err != nil {
+				errs = append(errs, err)
+			}
+		case <-time.After(defaultCloseTimeout):
+			errs = append(errs, errors.New("session close did not finish within timeout"))
+		}
+	}
+	rt.manager.registry.UnregisterOwner(rt.owner)
+	return errors.Join(errs...)
+}
+
 // Close gracefully terminates every MCP session.
 func (m *Manager) Close() error {
 	m.mu.Lock()
@@ -577,18 +753,9 @@ func (m *Manager) Close() error {
 		errs = append(errs, connectErr)
 	}
 	for _, rt := range runtimes {
-		// Serialize with refresh through rt.mu. Once closed is visible, a list
-		// change callback can no longer republish this owner's descriptors.
-		rt.mu.Lock()
-		rt.closed = true
-		session := rt.session
-		rt.mu.Unlock()
-		if session != nil {
-			if err := session.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("mcp %s close: %w", rt.spec.ID, err))
-			}
+		if err := rt.close(); err != nil {
+			errs = append(errs, fmt.Errorf("mcp %s close: %w", rt.spec.ID, err))
 		}
-		m.registry.UnregisterOwner(rt.owner)
 	}
 	return errors.Join(errs...)
 }

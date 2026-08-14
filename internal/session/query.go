@@ -2,11 +2,13 @@ package session
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -55,70 +57,74 @@ type Reference struct {
 type QueryEngine struct {
 	index *FileIndex
 	cwd   string
+
+	mu       sync.Mutex
+	cacheKey string
+	cacheDB  *sql.DB
+	rebuilds int
 }
 
 func NewQueryEngine(index *FileIndex, cwd string) *QueryEngine {
 	return &QueryEngine{index: index, cwd: normalizeCWD(cwd)}
 }
 
-func (q *QueryEngine) Search(ctx context.Context, query string, limit int, excludeSessionID string) ([]SearchHit, error) {
-	if q == nil || q.index == nil {
-		return nil, errors.New("session search: unavailable")
+// Close releases the derived in-memory search index. Durable sessions remain
+// authoritative and are never changed by the query cache.
+func (q *QueryEngine) Close() error {
+	if q == nil {
+		return nil
 	}
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return nil, errors.New("session search: query is required")
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.cacheDB == nil {
+		return nil
 	}
-	if len(query) > 4096 {
-		return nil, errors.New("session search: query exceeds 4096 bytes")
+	err := q.cacheDB.Close()
+	q.cacheDB = nil
+	q.cacheKey = ""
+	return err
+}
+
+func sessionSearchCacheKey(sessions []SessionInfo) string {
+	h := sha256.New()
+	for _, info := range sessions {
+		fmt.Fprintf(h, "%s\x00%s\x00%s\x00%d\x00%d\x00%s\x00", info.Path, info.ID, info.Name, info.UpdatedAt, info.Messages, info.searchFingerprint)
 	}
-	if limit == 0 {
-		limit = DefaultSessionSearchLimit
-	}
-	if limit < 1 || limit > MaxSessionSearchLimit {
-		return nil, fmt.Errorf("session search: limit must be between 1 and %d", MaxSessionSearchLimit)
-	}
-	terms := searchTerms(query)
-	if len(terms) == 0 {
-		return nil, errors.New("session search: query has no searchable terms")
-	}
-	sessions, err := q.index.List(q.cwd)
-	if err != nil {
-		return nil, err
-	}
-	// The FTS database is derived and disposable: durable sessions remain the
-	// source of truth, while each search reconciles their current branch tips.
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func buildSessionFTS(ctx context.Context, sessions []SessionInfo, cwd string) (*sql.DB, error) {
 	fts, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		return nil, fmt.Errorf("session search: open derived index: %w", err)
 	}
-	defer fts.Close()
 	fts.SetMaxOpenConns(1)
+	fail := func(err error) (*sql.DB, error) {
+		_ = fts.Close()
+		return nil, err
+	}
 	if _, err := fts.ExecContext(ctx, `CREATE VIRTUAL TABLE session_docs USING fts5(
 		session_id UNINDEXED, session_name UNINDEXED, branch_id UNINDEXED, branch_name UNINDEXED,
 		tip_id UNINDEXED, entry_id UNINDEXED, kind UNINDEXED, role UNINDEXED,
 		timestamp UNINDEXED, updated_at UNINDEXED, content, tokenize='unicode61')`); err != nil {
-		return nil, fmt.Errorf("session search: create derived FTS index: %w", err)
+		return fail(fmt.Errorf("session search: create derived FTS index: %w", err))
 	}
 	tx, err := fts.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	insert, err := tx.PrepareContext(ctx, `INSERT INTO session_docs VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, err
+		return fail(err)
 	}
 	for _, info := range sessions {
 		if err := ctx.Err(); err != nil {
 			_ = insert.Close()
 			_ = tx.Rollback()
-			return nil, err
+			return fail(err)
 		}
-		if info.ID == excludeSessionID {
-			continue
-		}
-		branches, readErr := readSessionBranches(ctx, info.Path, q.cwd)
+		branches, readErr := readSessionBranches(ctx, info.Path, cwd)
 		if readErr != nil {
 			continue
 		}
@@ -146,10 +152,58 @@ func (q *QueryEngine) Search(ctx context.Context, query string, limit int, exclu
 	_ = insert.Close()
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, fmt.Errorf("session search: populate derived index: %w", err)
+		return fail(fmt.Errorf("session search: populate derived index: %w", err))
 	}
 	if err := tx.Commit(); err != nil {
+		return fail(err)
+	}
+	return fts, nil
+}
+
+func (q *QueryEngine) Search(ctx context.Context, query string, limit int, excludeSessionID string) ([]SearchHit, error) {
+	if q == nil || q.index == nil {
+		return nil, errors.New("session search: unavailable")
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("session search: query is required")
+	}
+	if len(query) > 4096 {
+		return nil, errors.New("session search: query exceeds 4096 bytes")
+	}
+	if limit == 0 {
+		limit = DefaultSessionSearchLimit
+	}
+	if limit < 1 || limit > MaxSessionSearchLimit {
+		return nil, fmt.Errorf("session search: limit must be between 1 and %d", MaxSessionSearchLimit)
+	}
+	terms := searchTerms(query)
+	if len(terms) == 0 {
+		return nil, errors.New("session search: query has no searchable terms")
+	}
+	sessions, err := q.index.List(q.cwd)
+	if err != nil {
 		return nil, err
+	}
+	// Reuse the derived index until any session file identity changes. This keeps
+	// repeated searches from decoding and re-indexing the complete project history.
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	key := sessionSearchCacheKey(sessions)
+	fts := q.cacheDB
+	if fts == nil || q.cacheKey != key {
+		fresh, buildErr := buildSessionFTS(ctx, sessions, q.cwd)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		old := q.cacheDB
+		q.cacheDB = fresh
+		q.cacheKey = key
+		q.rebuilds++
+		fts = fresh
+		if old != nil {
+			_ = old.Close()
+		}
 	}
 	match := make([]string, len(terms))
 	for i, term := range terms {
@@ -158,7 +212,8 @@ func (q *QueryEngine) Search(ctx context.Context, query string, limit int, exclu
 	rows, err := fts.QueryContext(ctx, `SELECT session_id, session_name, branch_id, branch_name,
 		tip_id, entry_id, kind, role, timestamp, updated_at,
 		snippet(session_docs, 10, '', '', ' … ', 48)
-		FROM session_docs WHERE session_docs MATCH ? ORDER BY bm25(session_docs), updated_at DESC`, strings.Join(match, " AND "))
+		FROM session_docs WHERE session_docs MATCH ? AND session_id <> ?
+		ORDER BY bm25(session_docs), updated_at DESC`, strings.Join(match, " AND "), excludeSessionID)
 	if err != nil {
 		return nil, fmt.Errorf("session search: query derived index: %w", err)
 	}

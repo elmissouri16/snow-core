@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -56,6 +57,88 @@ func ValidateSQLiteSession(path string) error {
 		return fmt.Errorf("session: validate sqlite ping: %w", err)
 	}
 	return validateSQLiteSessionDB(db)
+}
+
+func inspectSQLiteSession(path, cwd string, updatedAt int64) (SessionInfo, bool, error) {
+	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(path))
+	if err != nil {
+		return SessionInfo{}, false, err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		return SessionInfo{}, false, err
+	}
+	if err := validateSQLiteSessionDB(db); err != nil {
+		return SessionInfo{}, false, err
+	}
+	var header Header
+	var tip string
+	if err := db.QueryRow(`SELECT version, session_id, created_at, cwd, name, branch_tip FROM session_meta WHERE singleton=1`).
+		Scan(&header.Version, &header.ID, &header.CreatedAt, &header.CWD, &header.Name, &tip); err != nil {
+		return SessionInfo{}, false, err
+	}
+	if !sameCWD(header.CWD, cwd) {
+		return SessionInfo{}, false, nil
+	}
+	var durable int
+	err = db.QueryRow(`SELECT
+		(SELECT count(*) FROM entries WHERE id <> 'root') +
+		(SELECT count(*) FROM session_meta WHERE name <> '') +
+		(SELECT count(*) FROM subagent_threads) +
+		(SELECT count(*) FROM thread_goals) +
+		(SELECT count(*) FROM session_branches WHERE branch_id <> 'main') +
+		(SELECT count(*) FROM thread_state WHERE collaboration_mode <> 'default') +
+		(SELECT count(*) FROM thread_goal_deferrals WHERE deferred <> 0)`).Scan(&durable)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table") {
+		err = db.QueryRow(`SELECT
+			(SELECT count(*) FROM entries WHERE id <> 'root') +
+			(SELECT count(*) FROM session_meta WHERE name <> '')`).Scan(&durable)
+	}
+	if err != nil {
+		return SessionInfo{}, false, err
+	}
+	if durable == 0 {
+		return SessionInfo{}, false, nil
+	}
+	activeTip := tip
+	if err := db.QueryRow(`SELECT tip_id FROM session_branches WHERE active=1 ORDER BY created_at LIMIT 1`).Scan(&activeTip); err != nil && !strings.Contains(strings.ToLower(err.Error()), "no such table") {
+		return SessionInfo{}, false, err
+	}
+	var fingerprint strings.Builder
+	fmt.Fprintf(&fingerprint, "%s\x00%s\x00", header.ID, header.Name)
+	branchRows, branchErr := db.Query(`SELECT branch_id, branch_name, tip_id, updated_at FROM session_branches ORDER BY branch_id`)
+	if branchErr != nil && strings.Contains(strings.ToLower(branchErr.Error()), "no such table") {
+		fmt.Fprintf(&fingerprint, "main\x00main\x00%s\x00", activeTip)
+	} else if branchErr != nil {
+		return SessionInfo{}, false, branchErr
+	} else {
+		for branchRows.Next() {
+			var id, name, branchTip string
+			var branchUpdated int64
+			if err := branchRows.Scan(&id, &name, &branchTip, &branchUpdated); err != nil {
+				_ = branchRows.Close()
+				return SessionInfo{}, false, err
+			}
+			fmt.Fprintf(&fingerprint, "%s\x00%s\x00%s\x00%d\x00", id, name, branchTip, branchUpdated)
+		}
+		if err := branchRows.Err(); err != nil {
+			_ = branchRows.Close()
+			return SessionInfo{}, false, err
+		}
+		if err := branchRows.Close(); err != nil {
+			return SessionInfo{}, false, err
+		}
+	}
+	var messages int
+	if err := db.QueryRow(`WITH RECURSIVE branch(id, parent_id, entry_type) AS (
+		SELECT id, parent_id, entry_type FROM entries WHERE id = ?
+		UNION ALL
+		SELECT e.id, e.parent_id, e.entry_type FROM entries e JOIN branch b ON e.id = b.parent_id
+	) SELECT count(*) FROM branch WHERE entry_type = ?`, activeTip, EntryMessage).Scan(&messages); err != nil {
+		return SessionInfo{}, false, err
+	}
+	return SessionInfo{Path: path, ID: header.ID, CWD: header.CWD, Name: header.Name, CreatedAt: header.CreatedAt, UpdatedAt: updatedAt, Messages: messages, searchFingerprint: fingerprint.String()}, true, nil
 }
 
 func validateSQLiteSessionDB(db *sql.DB) error {
@@ -1441,7 +1524,7 @@ func (s *SQLiteStore) ContextMessages() ([]protocol.Message, error) {
 	if s.closed {
 		return nil, errors.New("session: store closed")
 	}
-	entries, err := s.branchEntries(s.tip)
+	entries, err := s.contextBranchEntries(s.tip)
 	if err != nil {
 		return nil, err
 	}
@@ -1466,7 +1549,12 @@ func (s *SQLiteStore) Branches() ([]protocol.SessionBranch, error) {
 	if s.closed {
 		return nil, errors.New("session: store closed")
 	}
-	rows, err := s.db.Query(`
+	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("session: sqlite branches snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.Query(`
 		SELECT branch_id, branch_name, parent_branch_id, forked_from_id, tip_id, created_at, updated_at, active
 		FROM session_branches ORDER BY created_at, branch_id`)
 	if err != nil {
@@ -1491,13 +1579,56 @@ func (s *SQLiteStore) Branches() ([]protocol.SessionBranch, error) {
 		return nil, fmt.Errorf("session: sqlite branch close: %w", err)
 	}
 	for i := range out {
-		entries, err := s.branchEntries(out[i].TipID)
+		out[i].Messages, out[i].Preview, err = branchStatsFrom(tx, out[i].TipID)
 		if err != nil {
 			return nil, err
 		}
-		out[i].Messages, out[i].Preview = branchStats(entries)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("session: sqlite branches snapshot commit: %w", err)
 	}
 	return out, nil
+}
+
+func branchStatsFrom(q sqliteQueryer, tip string) (int, string, error) {
+	rows, err := q.Query(`WITH RECURSIVE branch(seq, id, parent_id, entry_type, message) AS (
+		SELECT seq, id, parent_id, entry_type, message FROM entries WHERE id=?
+		UNION ALL
+		SELECT e.seq, e.id, e.parent_id, e.entry_type, e.message
+		FROM entries e JOIN branch b ON e.id=b.parent_id
+	) SELECT message, count(*) OVER() FROM branch
+	WHERE entry_type=? ORDER BY seq DESC`, tip, EntryMessage)
+	if err != nil {
+		return 0, "", err
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw, &count); err != nil {
+			return 0, "", err
+		}
+		var message protocol.Message
+		if err := json.Unmarshal(raw, &message); err != nil {
+			return 0, "", err
+		}
+		var text strings.Builder
+		for _, block := range message.Content {
+			if block.Type == protocol.BlockText {
+				text.WriteString(block.Text)
+			}
+		}
+		if text.Len() == 0 {
+			continue
+		}
+		preview := strings.Join(strings.Fields(text.String()), " ")
+		runes := []rune(preview)
+		if len(runes) > 120 {
+			preview = string(runes[:119]) + "…"
+		}
+		return count, preview, nil
+	}
+	return count, "", rows.Err()
 }
 
 // SelectBranch implements BranchStore.
@@ -1564,11 +1695,6 @@ func (s *SQLiteStore) ForkBranchWithOptions(opts protocol.BranchForkOptions) (pr
 	if exists == 0 {
 		return protocol.SessionBranch{}, ErrNotFound
 	}
-	entries, err := s.branchEntries(fromEntryID)
-	if err != nil {
-		return protocol.SessionBranch{}, err
-	}
-	messages, preview := branchStats(entries)
 	sourceID := opts.SourceBranchID
 	// The no-op write acquires SQLite's writer reservation before source,
 	// ancestry, and uniqueness checks. Other handles therefore cannot delete or
@@ -1603,6 +1729,11 @@ func (s *SQLiteStore) ForkBranchWithOptions(opts protocol.BranchForkOptions) (pr
 	if belongs == 0 {
 		return protocol.SessionBranch{}, errors.New("session: fork entry is not on source branch")
 	}
+	entries, err := branchEntriesFrom(tx, fromEntryID)
+	if err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	messages, preview := branchStats(entries)
 	name := strings.TrimSpace(opts.Name)
 	if name == "" {
 		var count int
@@ -1784,6 +1915,9 @@ func (s *SQLiteStore) DeleteBranchForRollback(branchID string) error {
 	if exists == 0 {
 		return ErrNotFound
 	}
+	if _, err := tx.Exec(`DELETE FROM subagent_threads WHERE parent_branch_id=?`, branchID); err != nil {
+		return err
+	}
 	for _, table := range []string{"thread_goal_deferrals", "thread_goals", "thread_state", "session_branches"} {
 		if _, err := tx.Exec(`DELETE FROM `+table+` WHERE branch_id=?`, branchID); err != nil {
 			return err
@@ -1792,8 +1926,72 @@ func (s *SQLiteStore) DeleteBranchForRollback(branchID string) error {
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) branchEntries(tip string) ([]Entry, error) {
+func (s *SQLiteStore) contextBranchEntries(tip string) ([]Entry, error) {
+	var markerID, boundaryID string
+	err := s.db.QueryRow(`
+		WITH RECURSIVE ancestry(id, parent_id, entry_type, summary, compacted_through) AS (
+			SELECT id, parent_id, entry_type, summary, compacted_through
+			FROM entries WHERE id = ?
+			UNION ALL
+			SELECT e.id, e.parent_id, e.entry_type, e.summary, e.compacted_through
+			FROM entries e JOIN ancestry a ON e.id = a.parent_id
+			WHERE NOT (a.entry_type = ? AND trim(a.summary) <> '')
+		)
+		SELECT id, compacted_through FROM ancestry
+		WHERE entry_type = ? AND trim(summary) <> '' LIMIT 1`, tip, EntryCompaction, EntryCompaction).Scan(&markerID, &boundaryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return s.branchEntries(tip)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("session: sqlite find context boundary: %w", err)
+	}
+	stopID, excludeID := boundaryID, boundaryID
+	if stopID != "" {
+		var onBranch int
+		lineageErr := s.db.QueryRow(`WITH RECURSIVE lineage(id, parent_id) AS (
+			SELECT id, parent_id FROM entries WHERE id=(SELECT parent_id FROM entries WHERE id=?)
+			UNION ALL
+			SELECT e.id, e.parent_id FROM entries e JOIN lineage l ON e.id=l.parent_id
+		) SELECT count(*) FROM lineage WHERE id=?`, markerID, stopID).Scan(&onBranch)
+		if lineageErr != nil {
+			return nil, fmt.Errorf("session: sqlite validate context boundary: %w", lineageErr)
+		}
+		if onBranch == 0 {
+			stopID, excludeID = markerID, ""
+		}
+	}
+	if stopID == "" {
+		stopID, excludeID = markerID, ""
+	}
 	rows, err := s.db.Query(`
+		WITH RECURSIVE branch(seq, id, parent_id, entry_type, message, summary, compacted_through, meta_key, meta_value) AS (
+			SELECT seq, id, parent_id, entry_type, message, summary, compacted_through, meta_key, meta_value
+			FROM entries WHERE id = ?
+			UNION ALL
+			SELECT e.seq, e.id, e.parent_id, e.entry_type, e.message, e.summary, e.compacted_through, e.meta_key, e.meta_value
+			FROM entries e JOIN branch b ON e.id = b.parent_id
+			WHERE b.id <> ?
+		)
+		SELECT id, parent_id, entry_type,
+			CASE WHEN id = ? THEN NULL ELSE message END,
+			summary, compacted_through, meta_key, meta_value
+		FROM branch ORDER BY seq`, tip, stopID, excludeID)
+	if err != nil {
+		return nil, fmt.Errorf("session: sqlite context branch: %w", err)
+	}
+	return scanBranchEntries(rows)
+}
+
+type sqliteQueryer interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func (s *SQLiteStore) branchEntries(tip string) ([]Entry, error) {
+	return branchEntriesFrom(s.db, tip)
+}
+
+func branchEntriesFrom(q sqliteQueryer, tip string) ([]Entry, error) {
+	rows, err := q.Query(`
 		WITH RECURSIVE branch(seq, id, parent_id, entry_type, message, summary, compacted_through, meta_key, meta_value) AS (
 			SELECT seq, id, parent_id, entry_type, message, summary, compacted_through, meta_key, meta_value
 			FROM entries WHERE id = ?
@@ -1806,6 +2004,10 @@ func (s *SQLiteStore) branchEntries(tip string) ([]Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("session: sqlite branch: %w", err)
 	}
+	return scanBranchEntries(rows)
+}
+
+func scanBranchEntries(rows *sql.Rows) ([]Entry, error) {
 	defer rows.Close()
 	var entries []Entry
 	for rows.Next() {
@@ -1982,6 +2184,59 @@ func (s *SQLiteStore) Close() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// AggregateUsage sums persisted usage without decoding complete messages.
+func (s *SQLiteStore) AggregateUsage() (protocol.Usage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return protocol.Usage{}, errors.New("session: store closed")
+	}
+	rows, err := s.db.Query(`WITH RECURSIVE branch(id, parent_id, entry_type, message) AS (
+		SELECT id, parent_id, entry_type, message FROM entries WHERE id=?
+		UNION ALL
+		SELECT e.id, e.parent_id, e.entry_type, e.message FROM entries e JOIN branch b ON e.id=b.parent_id
+	) SELECT json_extract(CAST(message AS TEXT), '$.usage') FROM branch
+	WHERE entry_type=? AND json_type(CAST(message AS TEXT), '$.usage')='object'`, s.tip, EntryMessage)
+	if err != nil {
+		return protocol.Usage{}, err
+	}
+	defer rows.Close()
+	var total protocol.Usage
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return protocol.Usage{}, err
+		}
+		var usage protocol.Usage
+		if err := json.Unmarshal([]byte(raw), &usage); err != nil {
+			return protocol.Usage{}, err
+		}
+		total = total.Add(usage)
+	}
+	return total, rows.Err()
+}
+
+// CountSessionReferences counts durable successful session_reference tool
+// results without materializing the complete conversation.
+func (s *SQLiteStore) CountSessionReferences() (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return 0, errors.New("session: store closed")
+	}
+	var count int
+	err := s.db.QueryRow(`WITH RECURSIVE branch(id, parent_id, entry_type, message) AS (
+		SELECT id, parent_id, entry_type, message FROM entries WHERE id=?
+		UNION ALL
+		SELECT e.id, e.parent_id, e.entry_type, e.message FROM entries e JOIN branch b ON e.id=b.parent_id
+	) SELECT count(*) FROM branch WHERE entry_type=?
+		AND json_extract(CAST(message AS TEXT), '$.role')=?
+		AND json_extract(CAST(message AS TEXT), '$.tool_name')='session_reference'
+		AND coalesce(json_extract(CAST(message AS TEXT), '$.is_error'), 0)=0
+		AND instr(CAST(message AS TEXT), 'source_session_id') > 0`, s.tip, EntryMessage, protocol.RoleTool).Scan(&count)
+	return count, err
 }
 
 func (s *SQLiteStore) messageCount() (int, error) {

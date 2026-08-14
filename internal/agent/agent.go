@@ -56,6 +56,7 @@ const (
 var (
 	ErrNotRunning     = errors.New("agent: no running turn accepting queued input")
 	ErrPromptRejected = errors.New("agent: prompt rejected before admission")
+	ErrReentrantDrain = errors.New("agent: event drain requested from inside a callback")
 )
 
 // Options configures an Agent.
@@ -280,6 +281,8 @@ func New(opts Options) (*Agent, error) {
 	a.activeSkills = restoreActiveSkills(opts.Session, opts.Registry, opts.ToolHost, opts.SkillNames)
 	if state, ok := opts.Session.(session.ThreadStateStore); ok {
 		if err := state.SetCollaborationMode(mode); err != nil {
+			a.bus.Close()
+			a.bus.Wait()
 			return nil, fmt.Errorf("agent: persist collaboration mode: %w", err)
 		}
 	}
@@ -403,7 +406,7 @@ func (a *Agent) SetMode(mode protocol.CollaborationMode) error {
 		}
 	}
 	if !reentrantEventCallback {
-		_ = a.bus.Drain(context.Background())
+		a.drainEventsBestEffort()
 	}
 	return nil
 }
@@ -609,7 +612,7 @@ func (a *Agent) SetProviderAndModel(p provider.Provider, m protocol.Model) error
 	reentrant := a.bus.InCallback()
 	a.publish(protocol.AgentEvent{Type: protocol.EvModelChanged, Model: &m})
 	if !reentrant {
-		_ = a.bus.Drain(context.Background())
+		a.drainEventsBestEffort()
 	}
 	return nil
 }
@@ -649,7 +652,7 @@ func (a *Agent) SetProviderModelThinking(p provider.Provider, m protocol.Model, 
 	reentrant := a.bus.InCallback()
 	a.publish(protocol.AgentEvent{Type: protocol.EvModelChanged, Model: &m})
 	if !reentrant {
-		_ = a.bus.Drain(context.Background())
+		a.drainEventsBestEffort()
 	}
 	return nil
 }
@@ -683,7 +686,7 @@ func (a *Agent) SetModel(m protocol.Model) error {
 	reentrantEventCallback := a.bus.InCallback()
 	a.publish(protocol.AgentEvent{Type: protocol.EvModelChanged, Model: &m})
 	if !reentrantEventCallback {
-		_ = a.bus.Drain(context.Background())
+		a.drainEventsBestEffort()
 	}
 	return nil
 }
@@ -862,6 +865,12 @@ func (a *Agent) closeInputQueue(clear bool) protocol.InputQueue {
 func (a *Agent) Subscribe(fn func(protocol.AgentEvent)) func() { return a.bus.Subscribe(fn) }
 func (a *Agent) DrainEvents(ctx context.Context) error         { return a.bus.Drain(ctx) }
 func (a *Agent) InEventCallback() bool                         { return a.bus.InCallback() }
+
+func (a *Agent) drainEventsBestEffort() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = a.bus.Drain(ctx)
+}
 
 // StateEvent returns an explicit point-in-time state snapshot for surfaces
 // that subscribe after construction. Callers decide when to emit it, avoiding
@@ -1092,6 +1101,13 @@ func (a *Agent) finishTurnMailbox(mark func()) error {
 // Usage returns the aggregate usage for the active session branch.
 func (a *Agent) Usage() (total protocol.Usage, err error) {
 	err = a.withSessionRead(func(store session.Store) error {
+		if aggregate, ok := store.(interface {
+			AggregateUsage() (protocol.Usage, error)
+		}); ok {
+			var aggregateErr error
+			total, aggregateErr = aggregate.AggregateUsage()
+			return aggregateErr
+		}
 		msgs, readErr := store.Messages()
 		if readErr != nil {
 			return readErr
@@ -2242,7 +2258,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 			a.ContinueGoal()
 		}
 		if !reentrantEventCallback {
-			_ = a.bus.Drain(context.Background())
+			a.drainEventsBestEffort()
 		}
 	}()
 
@@ -3180,7 +3196,7 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 	var providerData []protocol.ContentBlock
 	var usage *protocol.Usage
 	var stop protocol.StopReason = protocol.StopPending
-	thinkingBuf := ""
+	var thinkingBuf strings.Builder
 	a.mu.RLock()
 	planEnabled := a.turnMode == protocol.ModePlan && !a.turnPlanSeen
 	a.mu.RUnlock()
@@ -3198,7 +3214,7 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 			if errors.Is(err, context.Canceled) {
 				stop = protocol.StopAborted
 				collector.Interrupt()
-				content = assistantResponseContentWithProviderData(thinkingBuf, providerData, collector.Blocks())
+				content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
 				if perr := a.persistAssistant(asstID, parent, content, stop, usage, ""); perr != nil {
 					return protocol.StopAborted, perr
 				}
@@ -3212,7 +3228,7 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 			// Stream error event
 			stop = protocol.StopError
 			collector.Interrupt()
-			content = assistantResponseContentWithProviderData(thinkingBuf, providerData, collector.Blocks())
+			content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
 			if perr := a.persistAssistant(asstID, parent, content, stop, usage, err.Error()); perr != nil {
 				return protocol.StopError, perr
 			}
@@ -3231,7 +3247,7 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 			}
 			collector.Push(ev.Text)
 		case protocol.EvStreamThinkingDelta:
-			thinkingBuf += ev.Text
+			thinkingBuf.WriteString(ev.Text)
 			a.publish(protocol.AgentEvent{Type: protocol.EvThinkingDelta, Text: ev.Text})
 		case protocol.EvStreamProviderData:
 			if ev.ProviderData != nil && ev.ProviderData.Type == protocol.BlockProviderData {
@@ -3305,7 +3321,7 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 				errMsg = ev.Err.Error()
 			}
 			collector.Interrupt()
-			content = assistantResponseContentWithProviderData(thinkingBuf, providerData, collector.Blocks())
+			content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
 			if perr := a.persistAssistant(asstID, parent, content, stop, usage, errMsg); perr != nil {
 				return protocol.StopError, perr
 			}
@@ -3325,7 +3341,7 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 	} else {
 		collector.Finish()
 	}
-	content = assistantResponseContentWithProviderData(thinkingBuf, providerData, collector.Blocks())
+	content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
 	for _, id := range toolOrder {
 		if cb, ok := toolCalls[id]; ok {
 			content = append(content, cb)
@@ -4253,12 +4269,17 @@ func strings_trim(s string) string { return strings.TrimSpace(s) }
 // Event bus
 // ---------------------------------------------------------------------------
 
+const eventBusMaxItems = 1024
+
 type eventBus struct {
 	mu           sync.Mutex
 	subs         map[int]func(protocol.AgentEvent)
 	next         int
 	wake         chan struct{}
+	space        chan struct{}
+	closingCh    chan struct{}
 	items        []any
+	maxItems     int
 	closing      bool
 	inCallback   bool
 	dispatcherID uint64
@@ -4267,8 +4288,20 @@ type eventBus struct {
 type eventBarrier struct{ done chan struct{} }
 type eventStop struct{}
 
-func newEventBus() *eventBus {
-	b := &eventBus{subs: make(map[int]func(protocol.AgentEvent)), wake: make(chan struct{}, 1), closed: make(chan struct{})}
+func newEventBus() *eventBus { return newEventBusWithCap(eventBusMaxItems) }
+
+func newEventBusWithCap(maxItems int) *eventBus {
+	if maxItems < 1 {
+		maxItems = 1
+	}
+	b := &eventBus{
+		subs:      make(map[int]func(protocol.AgentEvent)),
+		wake:      make(chan struct{}, 1),
+		space:     make(chan struct{}, 1),
+		closingCh: make(chan struct{}),
+		maxItems:  maxItems,
+		closed:    make(chan struct{}),
+	}
 	go b.dispatch()
 	return b
 }
@@ -4289,7 +4322,15 @@ func (b *eventBus) dispatch() {
 				break
 			}
 			item := b.items[0]
+			b.items[0] = nil
 			b.items = b.items[1:]
+			if len(b.items) == 0 {
+				b.items = nil
+			}
+			select {
+			case b.space <- struct{}{}:
+			default:
+			}
 			fns := make([]func(protocol.AgentEvent), 0, len(b.subs))
 			if _, ok := item.(protocol.AgentEvent); ok {
 				ids := make([]int, 0, len(b.subs))
@@ -4351,18 +4392,34 @@ func (b *eventBus) InCallback() bool {
 }
 
 func (b *eventBus) Drain(ctx context.Context) error {
+	if b.InCallback() {
+		return ErrReentrantDrain
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	done := make(chan struct{})
-	b.mu.Lock()
-	if b.closing {
+	for {
+		b.mu.Lock()
+		if b.closing {
+			b.mu.Unlock()
+			return nil
+		}
+		if len(b.items) < b.maxItems {
+			b.items = append(b.items, eventBarrier{done})
+			b.signal()
+			b.mu.Unlock()
+			break
+		}
 		b.mu.Unlock()
-		return nil
+		select {
+		case <-b.space:
+		case <-b.closingCh:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	b.items = append(b.items, eventBarrier{done})
-	b.signal()
-	b.mu.Unlock()
 	select {
 	case <-done:
 		return nil
@@ -4370,12 +4427,20 @@ func (b *eventBus) Drain(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
-func (b *eventBus) Wait() { <-b.closed }
+func (b *eventBus) Wait() {
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-b.closed:
+	case <-timer.C:
+	}
+}
 
 func (b *eventBus) Close() {
 	b.mu.Lock()
 	if !b.closing {
 		b.closing = true
+		close(b.closingCh)
 		// Closing suppresses future callbacks. Release callers already waiting
 		// on a drain barrier before terminating the dispatcher.
 		for _, item := range b.items {
@@ -4409,13 +4474,52 @@ func (b *eventBus) Subscribe(fn func(protocol.AgentEvent)) func() {
 	}
 }
 
-func (b *eventBus) Publish(ev protocol.AgentEvent) {
-	b.mu.Lock()
-	if !b.closing {
-		b.items = append(b.items, ev.Clone())
-		b.signal()
+func coalescibleBusEvent(kind protocol.AgentEventType) bool {
+	switch kind {
+	case protocol.EvTextDelta, protocol.EvThinkingDelta, protocol.EvPlanDelta,
+		protocol.EvToolProgress, protocol.EvUsage, protocol.EvSessionUpdated,
+		protocol.EvQueueUpdated:
+		return true
+	default:
+		return false
 	}
-	b.mu.Unlock()
+}
+
+func (b *eventBus) Publish(ev protocol.AgentEvent) {
+	copyEvent := ev.Clone()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closing {
+		return
+	}
+	if len(b.items) >= b.maxItems {
+		removeAt := -1
+		for i, item := range b.items {
+			queued, ok := item.(protocol.AgentEvent)
+			if ok && coalescibleBusEvent(queued.Type) {
+				removeAt = i
+				break
+			}
+		}
+		if removeAt < 0 && !coalescibleBusEvent(copyEvent.Type) {
+			// Preserve drain barriers and make room for a lifecycle event by
+			// evicting the oldest ordinary event.
+			for i, item := range b.items {
+				if _, ok := item.(protocol.AgentEvent); ok {
+					removeAt = i
+					break
+				}
+			}
+		}
+		if removeAt < 0 {
+			return
+		}
+		copy(b.items[removeAt:], b.items[removeAt+1:])
+		b.items[len(b.items)-1] = nil
+		b.items = b.items[:len(b.items)-1]
+	}
+	b.items = append(b.items, copyEvent)
+	b.signal()
 }
 
 // ---------------------------------------------------------------------------

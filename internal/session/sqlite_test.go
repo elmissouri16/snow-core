@@ -521,6 +521,106 @@ func TestSQLiteCompactionProjectionSurvivesReload(t *testing.T) {
 	}
 }
 
+func TestSQLiteAggregateUsageAndReferenceCount(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "aggregates.db"), t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	usage := protocol.Usage{Input: 3, Output: 4, Total: 7}
+	assistant := protocol.NewAssistantMessage("assistant", "", "p", "m", []protocol.ContentBlock{protocol.NewTextBlock("done")}, protocol.StopStop, &usage)
+	if err := store.Append(Entry{Type: EntryMessage, ID: assistant.ID, Message: &assistant}); err != nil {
+		t.Fatal(err)
+	}
+	tool := protocol.NewToolResultMessage("reference", "", "call", "session_reference", []protocol.ContentBlock{protocol.NewTextBlock(`{"source_session_id":"prior"}`)}, false)
+	if err := store.Append(Entry{Type: EntryMessage, ID: tool.ID, Message: &tool}); err != nil {
+		t.Fatal(err)
+	}
+	gotUsage, err := store.AggregateUsage()
+	if err != nil || gotUsage.Input != 3 || gotUsage.Output != 4 || gotUsage.Total != 7 {
+		t.Fatalf("usage=%+v err=%v", gotUsage, err)
+	}
+	count, err := store.CountSessionReferences()
+	if err != nil || count != 1 {
+		t.Fatalf("reference count=%d err=%v", count, err)
+	}
+}
+
+func TestSQLiteContextProjectionDoesNotDecodeCompactedPrefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "compact-prefix.db")
+	store, err := NewSQLiteStore(path, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, entry := range []Entry{msg("a", "", "old"), msg("b", "", "boundary"), msg("c", "", "keep")} {
+		if err := store.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Append(Entry{Type: EntryCompaction, Summary: "summary", CompactedThrough: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`UPDATE entries SET message='{bad json' WHERE id='a'`); err != nil {
+		t.Fatal(err)
+	}
+	projected, err := store.ContextMessages()
+	if err != nil || len(projected) != 2 || projected[1].ID != "c" {
+		t.Fatalf("projection=%+v err=%v", projected, err)
+	}
+}
+
+func TestSQLiteContextProjectionClampsUnknownBoundary(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "unknown-boundary.db"), t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Append(msg("a", "", "old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(Entry{Type: EntryCompaction, Summary: "safe", CompactedThrough: "missing"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`UPDATE entries SET message='{bad json' WHERE id='a'`); err != nil {
+		t.Fatal(err)
+	}
+	projected, err := store.ContextMessages()
+	if err != nil || len(projected) != 1 || projected[0].Role != protocol.RoleCustom {
+		t.Fatalf("projection=%+v err=%v", projected, err)
+	}
+}
+
+func TestDeleteBranchForRollbackRemovesSubagentRows(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "rollback.db"), t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Append(msg("a", "", "one")); err != nil {
+		t.Fatal(err)
+	}
+	branch, err := store.ForkBranch("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SelectBranch("main"); err != nil {
+		t.Fatal(err)
+	}
+	record := testSubagentRecord()
+	record.ParentBranchID = branch.ID
+	if err := store.PutSubagent(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteBranchForRollback(branch.ID); err != nil {
+		t.Fatal(err)
+	}
+	list, err := store.ListSubagents()
+	if err != nil || len(list) != 0 {
+		t.Fatalf("subagents=%+v err=%v", list, err)
+	}
+}
+
 func TestSQLiteEmptySessionIsNotSaved(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.db")
 	st, err := NewSQLiteStore(path, "/tmp/work", Options{})

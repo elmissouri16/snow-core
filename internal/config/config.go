@@ -35,6 +35,9 @@ const (
 type ProviderConfig struct {
 	BaseURL      string `json:"base_url,omitempty"`
 	DefaultModel string `json:"default_model,omitempty"`
+	// StreamIdleTimeoutMS bounds silence between streamed response bytes.
+	// Zero uses the provider default; -1 disables the watchdog.
+	StreamIdleTimeoutMS int `json:"stream_idle_timeout_ms,omitempty"`
 }
 
 // TUIConfig holds TUI preferences.
@@ -419,6 +422,11 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Compaction.HistoricalToolResultThreshold == 0 {
 		cfg.Compaction.HistoricalToolResultThreshold = defaults.HistoricalToolResultThreshold
+	}
+	for providerID, providerConfig := range cfg.Providers {
+		if providerConfig.StreamIdleTimeoutMS < -1 || providerConfig.StreamIdleTimeoutMS > int((24*time.Hour)/time.Millisecond) {
+			return cfg, fmt.Errorf("config: provider %q stream_idle_timeout_ms must be -1, 0, or at most 86400000", providerID)
+		}
 	}
 	if err := ValidateTUITheme(cfg.TUI.Theme); err != nil {
 		return cfg, err

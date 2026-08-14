@@ -130,6 +130,41 @@ func TestApplyAppendsSummary(t *testing.T) {
 	}
 }
 
+func TestApplyResolvesVirtualCompactionBoundary(t *testing.T) {
+	store := session.NewMemoryStore(session.Options{})
+	for _, id := range []string{"a", "b", "c", "d"} {
+		message := mkMsg(id, "", id)
+		if err := store.Append(session.Entry{Type: session.EntryMessage, ID: id, Message: &message}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages, _ := store.Messages()
+	first := Plan{KeepFrom: 2, TotalMessages: 4, BoundaryID: "b", CompactionCandidates: messages[:2]}
+	if _, err := Apply(context.Background(), store, func(context.Context, []protocol.Message) (string, error) { return "first", nil }, first); err != nil {
+		t.Fatal(err)
+	}
+	projected, err := store.ContextMessages()
+	if err != nil || len(projected) != 3 {
+		t.Fatalf("first projection=%+v err=%v", projected, err)
+	}
+	second := Plan{KeepFrom: 1, TotalMessages: len(projected), BoundaryID: projected[0].ID, CompactionCandidates: projected[:1]}
+	if _, err := Apply(context.Background(), store, func(context.Context, []protocol.Message) (string, error) { return "second", nil }, second); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := store.BranchEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := entries[len(entries)-1]
+	if latest.Type != session.EntryCompaction || latest.CompactedThrough != "b" {
+		t.Fatalf("latest marker=%+v", latest)
+	}
+	projected, err = store.ContextMessages()
+	if err != nil || len(projected) != 3 || projected[1].ID != "c" || projected[2].ID != "d" {
+		t.Fatalf("second projection=%+v err=%v", projected, err)
+	}
+}
+
 func TestDefaultSummarizerBounded(t *testing.T) {
 	var msgs []protocol.Message
 	for i := 0; i < 50; i++ {

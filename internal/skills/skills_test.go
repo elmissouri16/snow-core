@@ -29,6 +29,13 @@ func writeSkill(t *testing.T, root, dir, name, description, body string) string 
 	return skillDir
 }
 
+func TestSplitEmptyFrontmatterAtEOFDoesNotPanic(t *testing.T) {
+	meta, body, err := split([]byte("---\n---"))
+	if err != nil || len(meta) != 0 || len(body) != 0 {
+		t.Fatalf("meta=%q body=%q err=%v", meta, body, err)
+	}
+}
+
 func TestEmbeddedPluginBuilderActivationResourcesAndPrecedence(t *testing.T) {
 	catalog := Discover(Options{Home: t.TempDir(), SnowHome: t.TempDir(), IncludeBuiltins: true})
 	skill, ok := catalog.Get("plugin-builder")

@@ -4,8 +4,10 @@ package compact
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -39,6 +41,8 @@ type Plan struct {
 	BoundaryID string
 	// EstimatedTokens is a rough estimate (chars/4).
 	EstimatedTokens int
+	// TotalMessages is the provider-facing message count used to build the plan.
+	TotalMessages int
 }
 
 // PlannerOptions controls turn-aware tail retention.
@@ -62,24 +66,28 @@ func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
 		opts.RetainTokens = 8 * 1024
 	}
 	if len(msgs) <= 1 {
-		return Plan{EstimatedTokens: estimateTokens(msgs)}
+		return Plan{EstimatedTokens: estimateTokens(msgs), TotalMessages: len(msgs)}
 	}
 	starts := completeTurnStarts(msgs)
+	suffixTokens := make([]int, len(msgs)+1)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		suffixTokens[i] = suffixTokens[i+1] + estimateMessageTokens(msgs[i])
+	}
 	keep := 0
 	if len(starts) > opts.MinRetainedTurns {
 		keep = starts[len(starts)-opts.MinRetainedTurns]
 		for turn := len(starts) - opts.MinRetainedTurns - 1; turn >= 1; turn-- {
 			candidate := starts[turn]
-			if estimateTokens(msgs[candidate:]) > opts.RetainTokens {
+			if suffixTokens[candidate] > opts.RetainTokens {
 				break
 			}
 			keep = candidate
 		}
 	}
 	if keep <= 0 {
-		return Plan{EstimatedTokens: estimateTokens(msgs)}
+		return Plan{EstimatedTokens: estimateTokens(msgs), TotalMessages: len(msgs)}
 	}
-	plan := Plan{KeepFrom: keep, CompactionCandidates: msgs[:keep]}
+	plan := Plan{KeepFrom: keep, CompactionCandidates: msgs[:keep], TotalMessages: len(msgs)}
 	plan.EstimatedTokens = estimateTokens(plan.CompactionCandidates)
 	for i := len(plan.CompactionCandidates) - 1; i >= 0; i-- {
 		id := plan.CompactionCandidates[i].ID
@@ -89,7 +97,7 @@ func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
 		}
 	}
 	if plan.BoundaryID == "" {
-		return Plan{EstimatedTokens: estimateTokens(msgs)}
+		return Plan{EstimatedTokens: estimateTokens(msgs), TotalMessages: len(msgs)}
 	}
 	return plan
 }
@@ -126,14 +134,31 @@ func Apply(ctx context.Context, st session.Store, summarizer Summarizer, plan Pl
 		return Result{}, fmt.Errorf("compact: summarize: %w", err)
 	}
 
-	msgs, err := st.Messages()
-	if err != nil {
-		return Result{}, err
-	}
-
 	boundary := plan.BoundaryID
 	if boundary == "" {
 		boundary = plan.CompactionCandidates[len(plan.CompactionCandidates)-1].ID
+	}
+	if strings.HasPrefix(boundary, "compaction-") {
+		markerID := strings.TrimPrefix(boundary, "compaction-")
+		entriesStore, ok := st.(session.BranchEntryStore)
+		if !ok {
+			return Result{}, errors.New("compact: cannot resolve prior compaction boundary")
+		}
+		entries, entriesErr := entriesStore.BranchEntries()
+		if entriesErr != nil {
+			return Result{}, fmt.Errorf("compact: resolve prior compaction boundary: %w", entriesErr)
+		}
+		resolved := ""
+		for _, candidate := range entries {
+			if candidate.ID == markerID && candidate.Type == session.EntryCompaction {
+				resolved = candidate.CompactedThrough
+				break
+			}
+		}
+		if resolved == "" {
+			return Result{}, errors.New("compact: prior compaction boundary is unavailable")
+		}
+		boundary = resolved
 	}
 	entry := session.Entry{
 		Type:             session.EntryCompaction,
@@ -144,25 +169,32 @@ func Apply(ctx context.Context, st session.Store, summarizer Summarizer, plan Pl
 		return Result{}, err
 	}
 
+	totalMessages := max(plan.TotalMessages, len(plan.CompactionCandidates))
 	return Result{
 		SummarizedMessages: plan.KeepFrom,
-		RetainedMessages:   len(msgs) - plan.KeepFrom,
+		RetainedMessages:   max(0, totalMessages-plan.KeepFrom),
 		Summary:            summary,
-		BeforeEntries:      len(msgs),
+		BeforeEntries:      totalMessages,
 		// The marker entry is appended but is not a message.
-		AfterEntries: len(msgs) + 1,
+		AfterEntries: totalMessages + 1,
 	}, nil
 }
 
 // estimateTokens is a rough chars/4 heuristic; provider-reported usage is
 // authoritative at runtime.
+func estimateMessageTokens(message protocol.Message) int {
+	n := 0
+	for _, content := range message.Content {
+		n += len(content.Text) / 4
+		n += len(content.Arguments) / 4
+	}
+	return n
+}
+
 func estimateTokens(msgs []protocol.Message) int {
 	n := 0
-	for _, m := range msgs {
-		for _, c := range m.Content {
-			n += len(c.Text) / 4
-			n += len(c.Arguments) / 4
-		}
+	for _, message := range msgs {
+		n += estimateMessageTokens(message)
 	}
 	return n
 }
@@ -200,10 +232,15 @@ func DefaultSummarizer(ctx context.Context, msgs []protocol.Message) (string, er
 	}
 	var b strings.Builder
 	b.WriteString("Compacted continuation context (local fallback):\n")
+	runeCount := utf8.RuneCountInString("Compacted continuation context (local fallback):\n")
 	writeRecent := func(title string, values []string, n int) {
-		b.WriteString("\n## " + title + "\n")
+		header := "\n## " + title + "\n"
+		b.WriteString(header)
+		runeCount += utf8.RuneCountInString(header)
 		if len(values) == 0 {
-			b.WriteString("- None recorded.\n")
+			const none = "- None recorded.\n"
+			b.WriteString(none)
+			runeCount += utf8.RuneCountInString(none)
 			return
 		}
 		start := len(values) - n
@@ -212,7 +249,8 @@ func DefaultSummarizer(ctx context.Context, msgs []protocol.Message) (string, er
 		}
 		for _, value := range values[start:] {
 			fmt.Fprintf(&b, "- %s\n", value)
-			if len([]rune(b.String())) >= maxRunes {
+			runeCount += 3 + utf8.RuneCountInString(value)
+			if runeCount >= maxRunes {
 				return
 			}
 		}

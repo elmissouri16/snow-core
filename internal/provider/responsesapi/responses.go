@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -522,7 +523,12 @@ type codexStream struct {
 }
 
 func NewStream(ctx context.Context, resp *http.Response, providerID string, secrets ...string) protocol.EventStream {
-	s := &codexStream{ch: make(chan protocol.StreamEvent, 64), done: make(chan struct{}), ctx: ctx, body: resp.Body, secrets: append([]string(nil), secrets...), provider: providerLabel(providerID)}
+	return NewStreamWithIdleTimeout(ctx, resp, providerID, providerpkg.DefaultStreamIdleTimeout, secrets...)
+}
+
+func NewStreamWithIdleTimeout(ctx context.Context, resp *http.Response, providerID string, idleTimeout time.Duration, secrets ...string) protocol.EventStream {
+	body := providerpkg.WrapIdleReadCloser(resp.Body, idleTimeout)
+	s := &codexStream{ch: make(chan protocol.StreamEvent, 64), done: make(chan struct{}), ctx: ctx, body: body, secrets: append([]string(nil), secrets...), provider: providerLabel(providerID)}
 	go s.read()
 	return s
 }
@@ -702,10 +708,15 @@ func (s *codexStream) read() {
 			data = append(data, fragment)
 		}
 	}
+	scanErr := scanner.Err()
+	if errors.Is(scanErr, providerpkg.ErrStreamIdle) && s.ctx.Err() == nil {
+		s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: NewResponseError(s.provider, 0, "stream idle timeout", "stream_idle", "", s.secrets...)})
+		return
+	}
 	if flush() {
 		return
 	}
-	if err := scanner.Err(); err != nil && s.ctx.Err() == nil {
+	if scanErr != nil && s.ctx.Err() == nil {
 		s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: NewResponseError(s.provider, 0, "stream read failed", "network_error", "", s.secrets...)})
 		return
 	}

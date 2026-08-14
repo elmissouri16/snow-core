@@ -58,6 +58,14 @@ type Store interface {
 	Path() string
 }
 
+// RefreshLockStore optionally serializes provider token refreshes separately
+// from the credential-file read/write lock. Network refresh can then proceed
+// without blocking unrelated credential operations while remaining safe for
+// one-time refresh-token rotation across processes.
+type RefreshLockStore interface {
+	WithRefreshLock(provider string, fn func() error) error
+}
+
 // MarshalJSON redacts secret fields for safe logging.
 func (c Credential) MarshalJSON() ([]byte, error) {
 	type alias Credential

@@ -298,7 +298,12 @@ func openBrowser(ctx context.Context, target string) error {
 	default:
 		name, args = "xdg-open", []string{target}
 	}
-	return exec.CommandContext(ctx, name, args...).Start()
+	cmd := exec.CommandContext(ctx, name, args...)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
 }
 
 // promptSecret reads a line from stdin without echoing (best-effort; falls

@@ -12,6 +12,7 @@ type planStreamCollector struct {
 	parser    planpkg.Parser
 	itemID    string
 	blocks    []protocol.ContentBlock
+	blockText []*strings.Builder
 	planText  strings.Builder
 	started   bool
 	closed    bool
@@ -93,14 +94,20 @@ func (c *planStreamCollector) append(kind protocol.ContentBlockType, text string
 		return
 	}
 	if len(c.blocks) > 0 && c.blocks[len(c.blocks)-1].Type == kind {
-		c.blocks[len(c.blocks)-1].Text += text
+		c.blockText[len(c.blockText)-1].WriteString(text)
 		return
 	}
-	c.blocks = append(c.blocks, protocol.ContentBlock{Type: kind, Text: text})
+	var builder strings.Builder
+	builder.WriteString(text)
+	c.blocks = append(c.blocks, protocol.ContentBlock{Type: kind})
+	c.blockText = append(c.blockText, &builder)
 }
 
 func (c *planStreamCollector) Blocks() []protocol.ContentBlock {
 	out := make([]protocol.ContentBlock, len(c.blocks))
 	copy(out, c.blocks)
+	for i := range out {
+		out[i].Text = c.blockText[i].String()
+	}
 	return out
 }

@@ -100,6 +100,29 @@ func testServer() *sdkmcp.Server {
 	return server
 }
 
+func TestManagerBridgeNameCollisionGetsStableSuffix(t *testing.T) {
+	server := testServer()
+	server.AddTool(&sdkmcp.Tool{Name: "list_resources", Description: "Remote collision.", InputSchema: json.RawMessage(`{"type":"object"}`)}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "remote"}}}, nil
+	})
+	httpServer := httptest.NewServer(sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{Stateless: true}))
+	defer httpServer.Close()
+	registry := tools.NewRegistry()
+	manager := NewManager(registry, Options{CWD: t.TempDir(), HostVersion: "test"})
+	manager.ConnectAll(context.Background(), []publicmcp.ServerSpec{{ID: "demo", Transport: publicmcp.TransportStreamableHTTP, URL: httpServer.URL}})
+	defer manager.Close()
+	statuses := manager.Statuses()
+	if len(statuses) != 1 || !statuses[0].Connected {
+		t.Fatalf("statuses=%+v", statuses)
+	}
+	if _, ok := registry.Get("mcp_demo_list_resources"); !ok {
+		t.Fatal("remote collision tool missing")
+	}
+	if _, ok := registry.Get("mcp_demo_list_resources_2"); !ok {
+		t.Fatalf("resource bridge suffix missing; schemas=%+v", registry.Schemas())
+	}
+}
+
 func TestManagerStreamableHTTPNegotiatesLatestAndBridgesCapabilities(t *testing.T) {
 	ctx := context.Background()
 	server := testServer()

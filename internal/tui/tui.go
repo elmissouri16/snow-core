@@ -330,11 +330,6 @@ type subagentInspectMsg struct {
 	err        error
 }
 
-type subagentViewState struct {
-	State   protocol.SubagentState
-	Preview string
-}
-
 // Model is the TUI state.
 type Model struct {
 	ctx     context.Context
@@ -365,8 +360,6 @@ type Model struct {
 	planPrompt                    bool
 	planPromptChoice              int
 	nudgeDismissed                map[string]bool
-	subagentViews                 map[string]subagentViewState
-	subagentOrder                 []string
 	subagentFleetOpen             bool
 	subagentFleetLoading          bool
 	subagentFleetDetailLoading    bool
@@ -439,6 +432,10 @@ type Model struct {
 	transcriptBase          string
 	transcriptBaseWidth     int
 	transcriptBaseDirty     bool
+	transcriptBaseSynced    int
+	transcriptBaseAppend    bool
+	transcriptDropped       int
+	transcriptBytes         int
 	inlineTranscript        bool
 	inlineCommitted         int
 	inlinePrintEnd          int
@@ -446,7 +443,6 @@ type Model struct {
 	inlinePrintGeneration   uint64
 	inlineEverCommitted     bool
 	inlineHistoryKey        string
-	inlineCanonicalLines    []string
 	inlineDurableMessageIDs []string
 	inlineHeaderPending     bool
 	inlineExiting           bool
@@ -657,7 +653,6 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 		thinkingMD:                 newThinkingMarkdownRenderer(),
 		subagentFleetMD:            newMarkdownRenderer(),
 		nudgeDismissed:             make(map[string]bool),
-		subagentViews:              make(map[string]subagentViewState),
 		subagentFleetActivity:      make(map[string][]string),
 		subagentFleetActivityKinds: make(map[string]protocol.AgentEventType),
 		subagentFleetActivitySpace: make(map[string]bool),
@@ -1368,8 +1363,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.treeLoading = false
 		m.pickTree = false
 		m.branches = nil
-		m.subagentViews = make(map[string]subagentViewState)
-		m.subagentOrder = nil
 		m.subagentFleetActivity = make(map[string][]string)
 		m.subagentFleetActivityKinds = make(map[string]protocol.AgentEventType)
 		m.subagentFleetActivitySpace = make(map[string]bool)
@@ -1580,20 +1573,6 @@ func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cm
 
 func (m *Model) handleSubagentEvent(ev protocol.AgentEvent) {
 	m.recordSubagentFleetEvent(ev)
-	id := ev.Agent.ThreadID
-	view, exists := m.subagentViews[id]
-	if !exists {
-		m.subagentOrder = append(m.subagentOrder, id)
-	}
-	if ev.Subagent != nil {
-		view.State = *ev.Subagent.Clone()
-	} else if !exists {
-		view.State.Agent = *ev.Agent.Clone()
-	}
-	if ev.Type == protocol.EvTextDelta || ev.Type == protocol.EvThinkingDelta {
-		view.Preview = boundedUTF8Tail(view.Preview+ev.Text, 4096)
-	}
-	m.subagentViews[id] = view
 	switch ev.Type {
 	case protocol.EvSubagentStarted:
 		m.pushLine(styleTool.Render(fmt.Sprintf("• agent %s started (%s)", ev.Agent.Path, ev.Agent.Role)))
@@ -2023,10 +2002,54 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 // tool call (thinking always precedes those), and again at turn end for
 // thinking-only turns.
 func (m *Model) appendTranscriptLine(line string) {
-	m.lines = append(m.lines, line)
-	if m.inlineTranscript && m.inlineHistoryKey != "" {
-		m.inlineCanonicalLines = append(m.inlineCanonicalLines, line)
+	if !m.inlineTranscript && len(line) > maxTranscriptBytes-256 {
+		line = styleFooter.Render("── transcript entry truncated ──") + "\n" + boundedUTF8Tail(xansi.Strip(line), maxTranscriptBytes-512)
 	}
+	m.transcriptBaseAppend = true
+	m.lines = append(m.lines, line)
+	if m.inlineTranscript {
+		return
+	}
+	m.transcriptBytes += len(line)
+	for (len(m.lines) > maxTranscriptEntries || m.transcriptBytes > maxTranscriptBytes) && len(m.lines) > 1 {
+		removeAt := 0
+		if m.transcriptDropped > 0 {
+			removeAt = 1 // preserve the existing omission marker
+		}
+		if removeAt >= len(m.lines)-1 {
+			break // retain at least the newest entry even when it alone is oversized
+		}
+		m.transcriptBytes -= len(m.lines[removeAt])
+		copy(m.lines[removeAt:], m.lines[removeAt+1:])
+		m.lines = m.lines[:len(m.lines)-1]
+		m.transcriptDropped++
+		m.transcriptBaseAppend = false
+	}
+	if m.transcriptDropped == 0 {
+		return
+	}
+	hasMarker := len(m.lines) > 0 && strings.Contains(m.lines[0], "older transcript entries omitted")
+	if !hasMarker {
+		// Reserve one bounded slot for the marker on the first trim.
+		for (len(m.lines) >= maxTranscriptEntries || m.transcriptBytes+256 > maxTranscriptBytes) && len(m.lines) > 1 {
+			m.transcriptBytes -= len(m.lines[0])
+			copy(m.lines, m.lines[1:])
+			m.lines = m.lines[:len(m.lines)-1]
+			m.transcriptDropped++
+			m.transcriptBaseAppend = false
+		}
+	}
+	marker := styleFooter.Render(fmt.Sprintf("── %d older transcript entries omitted ──", m.transcriptDropped))
+	if hasMarker {
+		m.transcriptBytes += len(marker) - len(m.lines[0])
+		m.lines[0] = marker
+		return
+	}
+	m.lines = append(m.lines, "")
+	copy(m.lines[1:], m.lines[:len(m.lines)-1])
+	m.lines[0] = marker
+	m.transcriptBytes += len(marker)
+	m.transcriptBaseSynced = 0
 }
 
 func (m *Model) finalizeThinking() {
@@ -2215,15 +2238,26 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 		if m.inlineTranscript {
 			stableLines = m.lines[m.inlineDisplayStart():]
 		}
-		base := strings.Join(stableLines, "\n")
-		if width > 0 {
-			// Viewport content is not wrapped automatically. Reflow only the
-			// stable transcript base when lines or terminal width change.
-			base = lipgloss.NewStyle().Width(width).Render(base)
+		if m.transcriptBaseWidth != width || !m.transcriptBaseAppend || m.transcriptBaseSynced > len(stableLines) {
+			m.transcriptBase = ""
+			m.transcriptBaseSynced = 0
 		}
-		m.transcriptBase = base
+		if delta := stableLines[m.transcriptBaseSynced:]; len(delta) > 0 {
+			wrapped := strings.Join(delta, "\n")
+			if width > 0 {
+				// Wrapping is line-local, so appending the newly stable suffix is
+				// equivalent to reflowing the complete transcript at this width.
+				wrapped = lipgloss.NewStyle().Width(width).Render(wrapped)
+			}
+			if m.transcriptBase != "" {
+				m.transcriptBase += "\n"
+			}
+			m.transcriptBase += wrapped
+		}
+		m.transcriptBaseSynced = len(stableLines)
 		m.transcriptBaseWidth = width
 		m.transcriptBaseDirty = false
+		m.transcriptBaseAppend = false
 	}
 	content := m.transcriptBase
 	if live := m.liveText(); live != "" {
@@ -2244,7 +2278,9 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 	// that no longer matches the highlighted cells.
 	if content != m.transcriptContent {
 		m.clearTranscriptSelection()
-		m.transcriptSelectionLines = splitTranscriptSelectionLines(content)
+		// Selection rows are needed only while the user is interacting. Avoid a
+		// second full transcript split on every streaming refresh.
+		m.transcriptSelectionLines = nil
 	}
 	wasAtBottom := m.transcript.AtBottom()
 	m.transcript.SetContent(content)
@@ -2259,6 +2295,8 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 
 const (
 	fixedChromeHeight       = 4 // header, two separators, and footer
+	maxTranscriptEntries    = 2000
+	maxTranscriptBytes      = 4 << 20
 	inlineFixedChromeHeight = 4 // sticky header, two separators, and footer
 	inlineOverlayMaxHeight  = 10
 	minComposerHeight       = 3
@@ -4932,8 +4970,6 @@ func (m *Model) switchSession(st session.Store) error {
 	// Child runtimes are scoped to the root session. The app manager detaches
 	// terminal children during a successful switch; discard their old UI
 	// snapshots before restored topology for the new session is delivered.
-	m.subagentViews = make(map[string]subagentViewState)
-	m.subagentOrder = nil
 	m.subagentFleetActivity = make(map[string][]string)
 	m.subagentFleetActivityKinds = make(map[string]protocol.AgentEventType)
 	m.subagentFleetActivitySpace = make(map[string]bool)
@@ -4965,6 +5001,9 @@ func (m *Model) switchSession(st session.Store) error {
 	m.transcriptSelectionRendered = ""
 	m.transcriptSelectionRenderedValid = false
 	m.transcriptBase = ""
+	m.transcriptBaseSynced = 0
+	m.transcriptDropped = 0
+	m.transcriptBytes = 0
 	m.hydrateSession()
 	if err := m.app.ReadyGoal(); err != nil {
 		// SetSession has already committed this store across App, Agent, Goal,
@@ -5018,6 +5057,10 @@ func (m *Model) hydrateSession() {
 	m.clearTranscriptSelection()
 	if m.app == nil || m.app.Agent == nil {
 		m.lines = nil
+		m.transcriptBase = ""
+		m.transcriptBaseSynced = 0
+		m.transcriptDropped = 0
+		m.transcriptBytes = 0
 		m.inlineCommitted = 0
 		m.inlinePrintEnd = 0
 		m.inlinePrintInFlight = false
@@ -5054,13 +5097,19 @@ func (m *Model) hydrateSession() {
 	m.transcriptBaseDirty = true
 	m.transcriptDirty = true
 	m.refreshContextUsage(messages)
-	hydrated := make([]string, 0, len(messages))
-	hydratedIDs := make([]string, 0, len(messages))
+	renderMessages := messages
+	hydrationOmitted := 0
+	if !m.inlineTranscript && len(renderMessages) >= maxTranscriptEntries {
+		hydrationOmitted = len(renderMessages) - (maxTranscriptEntries - 1)
+		renderMessages = renderMessages[hydrationOmitted:]
+	}
+	hydrated := make([]string, 0, len(renderMessages))
+	hydratedIDs := make([]string, 0, len(renderMessages))
 	appendHydrated := func(id, row string) {
 		hydrated = append(hydrated, row)
 		hydratedIDs = append(hydratedIDs, id)
 	}
-	for _, msg := range messages {
+	for _, msg := range renderMessages {
 		switch msg.Role {
 		case protocol.RoleUser:
 			text := sessionMessageText(msg)
@@ -5097,8 +5146,13 @@ func (m *Model) hydrateSession() {
 			// and prevents the remaining history from replaying after a tool fork.
 		}
 	}
-	m.lines = hydrated
+	m.lines = nil
+	m.transcriptBase = ""
+	m.transcriptBaseSynced = 0
+	m.transcriptDropped = 0
+	m.transcriptBytes = 0
 	if m.inlineTranscript {
+		m.lines = hydrated
 		commonRows := 0
 		if hadPrintedHistory {
 			commonMessages := 0
@@ -5118,10 +5172,19 @@ func (m *Model) hydrateSession() {
 			}
 		}
 		m.inlineHistoryKey = key
-		m.inlineCanonicalLines = append([]string(nil), hydrated...)
 		m.inlineDurableMessageIDs = messageIDs
 		m.inlineHeaderPending = true
 		m.lines = boundedInlineHydration(hydrated, commonRows, hadPrintedHistory)
+	} else {
+		if hydrationOmitted > 0 {
+			m.transcriptDropped = hydrationOmitted
+			marker := styleFooter.Render(fmt.Sprintf("── %d older transcript entries omitted ──", hydrationOmitted))
+			m.lines = append(m.lines, marker)
+			m.transcriptBytes += len(marker)
+		}
+		for _, row := range hydrated {
+			m.appendTranscriptLine(row)
+		}
 	}
 	m.refreshTranscript()
 }

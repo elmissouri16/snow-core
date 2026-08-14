@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +62,10 @@ const (
 	maxToolArgumentBytes      = 1 << 20
 	maxTotalToolArgumentBytes = 4 << 20
 	maxStreamToolCalls        = 128
+	maxResponseTextBytes      = 16 << 20
+	maxReasoningBytes         = 4 << 20
+	catalogCacheMaxBytes      = 4 << 20
+	catalogCacheFreshness     = 15 * time.Minute
 )
 
 // Config controls the OpenCode Go adapter.
@@ -81,6 +86,12 @@ type Config struct {
 	// DiscoveryTimeout bounds startup catalog requests without constraining chat
 	// streams. Zero uses five seconds.
 	DiscoveryTimeout time.Duration
+	// StreamIdleTimeout bounds silence between response bytes. Zero uses the
+	// shared provider default; a negative value disables the watchdog.
+	StreamIdleTimeout time.Duration
+	// CacheRoot enables an atomic 0600 disk cache for successful model catalogs.
+	// Empty disables disk caching (used by generic compatible endpoints).
+	CacheRoot string
 	// ProviderID overrides diagnostic/event attribution when this internal Chat
 	// Completions codec is reused by another OpenAI-compatible adapter.
 	ProviderID string
@@ -93,15 +104,20 @@ type Config struct {
 
 // Provider implements provider.Provider for OpenCode Go.
 type Provider struct {
-	baseURL          string
-	apiKey           string
-	client           *http.Client
-	defaultModel     string
-	catalogURL       string
-	discoveryTimeout time.Duration
-	providerID       string
-	allowAnonymous   bool
-	useEnvAPIKey     bool
+	baseURL           string
+	apiKey            string
+	client            *http.Client
+	defaultModel      string
+	catalogURL        string
+	discoveryTimeout  time.Duration
+	streamIdleTimeout time.Duration
+	providerID        string
+	allowAnonymous    bool
+	useEnvAPIKey      bool
+	cacheRoot         string
+	catalogMu         sync.Mutex
+	cachedModels      []protocol.Model
+	cachedAt          time.Time
 }
 
 // New validates and constructs the provider.
@@ -126,11 +142,17 @@ func New(cfg Config) (*Provider, error) {
 	if discoveryTimeout <= 0 {
 		discoveryTimeout = 5 * time.Second
 	}
+	streamIdleTimeout := cfg.StreamIdleTimeout
+	if streamIdleTimeout == 0 {
+		streamIdleTimeout = providerpkg.DefaultStreamIdleTimeout
+	} else if streamIdleTimeout < 0 {
+		streamIdleTimeout = 0
+	}
 	providerID := strings.TrimSpace(cfg.ProviderID)
 	if providerID == "" {
 		providerID = ProviderID
 	}
-	return &Provider{baseURL: base, apiKey: cfg.APIKey, client: client, defaultModel: model, catalogURL: catalogURL, discoveryTimeout: discoveryTimeout, providerID: providerID, allowAnonymous: cfg.AllowAnonymous, useEnvAPIKey: !cfg.DisableEnvAPIKey}, nil
+	return &Provider{baseURL: base, apiKey: cfg.APIKey, client: client, defaultModel: model, catalogURL: catalogURL, discoveryTimeout: discoveryTimeout, streamIdleTimeout: streamIdleTimeout, providerID: providerID, allowAnonymous: cfg.AllowAnonymous, useEnvAPIKey: !cfg.DisableEnvAPIKey, cacheRoot: strings.TrimSpace(cfg.CacheRoot)}, nil
 }
 
 // ID implements provider.Provider.
@@ -274,10 +296,93 @@ type modelsDevModalities struct {
 	Input []string `json:"input"`
 }
 
+type catalogCacheFile struct {
+	Version    int              `json:"version"`
+	BaseURL    string           `json:"base_url"`
+	CatalogURL string           `json:"catalog_url"`
+	FetchedAt  int64            `json:"fetched_at"`
+	Models     []protocol.Model `json:"models"`
+}
+
+func cloneModels(models []protocol.Model) []protocol.Model {
+	out := make([]protocol.Model, len(models))
+	for i := range models {
+		out[i] = models[i].Clone()
+	}
+	return out
+}
+
+func (p *Provider) loadCatalogCache(now time.Time) ([]protocol.Model, bool) {
+	if p.cacheRoot == "" {
+		return nil, false
+	}
+	path := filepath.Join(p.cacheRoot, "catalog.json")
+	info, err := os.Stat(path)
+	if err != nil || info.Size() > catalogCacheMaxBytes || !info.Mode().IsRegular() {
+		return nil, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var cached catalogCacheFile
+	if json.Unmarshal(data, &cached) != nil || cached.Version != 1 || cached.BaseURL != p.baseURL || cached.CatalogURL != p.catalogURL || len(cached.Models) == 0 {
+		return nil, false
+	}
+	fetched := time.UnixMilli(cached.FetchedAt)
+	fresh := !fetched.After(now.Add(time.Minute)) && now.Sub(fetched) <= catalogCacheFreshness
+	return cloneModels(cached.Models), fresh
+}
+
+func (p *Provider) saveCatalogCache(models []protocol.Model, now time.Time) {
+	if p.cacheRoot == "" || len(models) == 0 {
+		return
+	}
+	if err := os.MkdirAll(p.cacheRoot, 0o700); err != nil {
+		return
+	}
+	_ = os.Chmod(p.cacheRoot, 0o700)
+	data, err := json.Marshal(catalogCacheFile{Version: 1, BaseURL: p.baseURL, CatalogURL: p.catalogURL, FetchedAt: now.UnixMilli(), Models: cloneModels(models)})
+	if err != nil || len(data) > catalogCacheMaxBytes {
+		return
+	}
+	tmp, err := os.CreateTemp(p.cacheRoot, ".models-*.tmp")
+	if err != nil {
+		return
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	ok := tmp.Chmod(0o600) == nil
+	if ok {
+		_, err = tmp.Write(data)
+		ok = err == nil && tmp.Sync() == nil
+	}
+	if closeErr := tmp.Close(); closeErr != nil {
+		ok = false
+	}
+	if ok {
+		_ = os.Rename(name, filepath.Join(p.cacheRoot, "catalog.json"))
+	}
+}
+
 // ListModels implements provider.Provider. It returns the static catalog when
 // the remote catalog cannot be fetched; it never fails on network errors.
 func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
+	p.catalogMu.Lock()
+	defer p.catalogMu.Unlock()
+	now := time.Now()
+	if len(p.cachedModels) > 0 && now.Sub(p.cachedAt) <= catalogCacheFreshness {
+		return cloneModels(p.cachedModels), nil
+	}
 	static := p.staticCatalog()
+	fallback := static
+	if cached, fresh := p.loadCatalogCache(now); len(cached) > 0 {
+		fallback = cached
+		if fresh {
+			p.cachedModels, p.cachedAt = cloneModels(cached), now
+			return cached, nil
+		}
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -293,22 +398,22 @@ func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 	}
 	req, err := http.NewRequestWithContext(discoveryCtx, http.MethodGet, p.baseURL+"/models", nil)
 	if err != nil {
-		return static, nil
+		return cloneModels(fallback), nil
 	}
 	if key := p.resolveKey(auth.Credential{}); key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return static, nil
+		return cloneModels(fallback), nil
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return static, nil
+		return cloneModels(fallback), nil
 	}
 	var payload openAIModelCatalog
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&payload); err != nil {
-		return static, nil
+		return cloneModels(fallback), nil
 	}
 	var metadata map[string]modelsDevModel
 	if catalog != nil {
@@ -325,9 +430,11 @@ func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 		}
 	}
 	if len(out) == 0 {
-		return static, nil
+		return cloneModels(fallback), nil
 	}
-	return out, nil
+	p.cachedModels, p.cachedAt = cloneModels(out), now
+	p.saveCatalogCache(out, now)
+	return cloneModels(out), nil
 }
 
 func (p *Provider) fetchModelsDev(ctx context.Context) map[string]modelsDevModel {
@@ -628,6 +735,7 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, req protocol
 		return errorStream(ctx, fmt.Errorf("%s: incompatible response content type %q: %s", p.providerID, mediaType, truncateStr(message, 500))), nil
 	}
 
+	resp.Body = providerpkg.WrapIdleReadCloser(resp.Body, p.streamIdleTimeout)
 	s := newStream(ctx, 64, func() { _ = resp.Body.Close() }, p.providerID, key)
 	go s.readSSE(resp)
 	return s, nil
@@ -972,14 +1080,16 @@ func (a *toolCallAccum) finalArgs() json.RawMessage {
 
 // stream is the channel-backed EventStream returned by Chat.
 type stream struct {
-	ch        chan protocol.StreamEvent
-	done      chan struct{}
-	reqCtx    context.Context
-	closeFn   func()
-	once      sync.Once
-	totalArgs int
-	provider  string
-	secret    string
+	ch                 chan protocol.StreamEvent
+	done               chan struct{}
+	reqCtx             context.Context
+	closeFn            func()
+	once               sync.Once
+	totalArgs          int
+	responseTextBytes  int
+	reasoningTextBytes int
+	provider           string
+	secret             string
 }
 
 func newStream(ctx context.Context, buf int, closeFn func(), provider, secret string) *stream {
@@ -1072,7 +1182,7 @@ func (s *stream) readSSE(resp *http.Response) {
 
 	for {
 		line, err := readBoundedSSELine(r, maxSSELineBytes)
-		if err != nil && !errors.Is(err, io.EOF) {
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, providerpkg.ErrStreamIdle) {
 			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: SSE line exceeds limit or is unreadable: %w", s.provider, err)})
 			return
 		}
@@ -1082,6 +1192,10 @@ func (s *stream) readSSE(resp *http.Response) {
 				sendDone()
 				return
 			}
+		}
+		if errors.Is(err, providerpkg.ErrStreamIdle) {
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: stream idle timeout: %w", s.provider, err)})
+			return
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -1161,9 +1275,17 @@ func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, 
 	for _, ch := range chunk.Choices {
 		d := ch.Delta
 		if d.Content != "" {
+			if len(d.Content) > maxResponseTextBytes-s.responseTextBytes {
+				return fmt.Errorf("%s: response text exceeds size limit", s.provider)
+			}
+			s.responseTextBytes += len(d.Content)
 			s.send(protocol.StreamEvent{Type: protocol.EvStreamTextDelta, Text: d.Content})
 		}
 		if d.ReasoningContent != "" {
+			if len(d.ReasoningContent) > maxReasoningBytes-s.reasoningTextBytes {
+				return fmt.Errorf("%s: reasoning text exceeds size limit", s.provider)
+			}
+			s.reasoningTextBytes += len(d.ReasoningContent)
 			s.send(protocol.StreamEvent{Type: protocol.EvStreamThinkingDelta, Text: d.ReasoningContent})
 		}
 		for _, tc := range d.ToolCalls {

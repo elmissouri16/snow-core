@@ -32,6 +32,7 @@ import (
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/skills"
 	"github.com/snow-core/snow/internal/subagent"
+	"github.com/snow-core/snow/internal/tempfile"
 	"github.com/snow-core/snow/internal/tools"
 	"github.com/snow-core/snow/internal/tools/builtin"
 	toolrouter "github.com/snow-core/snow/internal/tools/router"
@@ -91,6 +92,7 @@ type App struct {
 	userInput              *userinput.Broker
 	toolGuard              *builtin.PathGuard
 	sessionHistory         *builtin.SessionBinding
+	sessionQuery           *session.QueryEngine
 	artifacts              artifact.Store
 }
 
@@ -281,6 +283,10 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: abs cwd: %w", err)
 	}
+	globalDir := config.GlobalDir()
+	tempfile.SweepStale(globalDir, []string{".auth-", ".snow-config-", ".snow-trust-"}, 24*time.Hour)
+	tempfile.SweepStale(filepath.Join(globalDir, "cache", "chatgpt-models"), []string{".models-"}, 24*time.Hour)
+	tempfile.SweepStale(filepath.Join(globalDir, "cache", "opencode-models"), []string{".models-"}, 24*time.Hour)
 
 	configPath := opts.ConfigPath
 	if configPath == "" {
@@ -547,7 +553,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		providerID = "opencode-go"
 	}
 	newOpenCode := func() (provider.Provider, error) {
-		ocCfg := opencodego.Config{}
+		ocCfg := opencodego.Config{CacheRoot: filepath.Join(config.GlobalDir(), "cache", "opencode-models")}
 		if providerID == opencodego.ProviderID {
 			ocCfg.APIKey = opts.APIKey
 		}
@@ -563,6 +569,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		if pc, ok := cfg.Providers["opencode-go"]; ok {
 			ocCfg.BaseURL = pc.BaseURL
 			ocCfg.DefaultModel = pc.DefaultModel
+			ocCfg.StreamIdleTimeout = configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS)
 		}
 		if opts.BaseURL != "" && providerID == "opencode-go" {
 			ocCfg.BaseURL = opts.BaseURL
@@ -578,6 +585,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		cgCfg := chatgpt.Config{Store: authStore, CacheRoot: filepath.Join(config.GlobalDir(), "cache", "chatgpt-models")}
 		if pc, ok := cfg.Providers["chatgpt"]; ok {
 			cgCfg.BaseURL = pc.BaseURL
+			cgCfg.StreamIdleTimeout = configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS)
 		}
 		if providerID == "chatgpt" && opts.BaseURL != "" {
 			cgCfg.BaseURL = opts.BaseURL
@@ -590,6 +598,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		if pc, ok := cfg.Providers[openaicompat.ProviderID]; ok {
 			compatibleCfg.BaseURL = pc.BaseURL
 			compatibleCfg.DefaultModel = pc.DefaultModel
+			compatibleCfg.StreamIdleTimeout = configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS)
 		}
 		if providerID == openaicompat.ProviderID {
 			if opts.BaseURL != "" {
@@ -767,10 +776,33 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	// cached/bundled fallbacks; authenticated refreshes replace these snapshots.
 	modelCatalog := make(map[string][]protocol.Model, len(providers))
 	modelCatalogErrors := make(map[string]error, len(providers))
+	// Resolve the active catalog first because default-model validation depends
+	// on it. Independent picker catalogs then refresh concurrently instead of
+	// adding their network timeouts serially to every startup.
+	activeModels, activeListErr := providers[providerID].ListModels(ctx)
+	modelCatalog[providerID] = normalizeProviderModels(providerID, activeModels)
+	modelCatalogErrors[providerID] = activeListErr
+	type catalogResult struct {
+		id     string
+		models []protocol.Model
+		err    error
+	}
+	catalogResults := make(chan catalogResult, max(0, len(providers)-1))
+	pendingCatalogs := 0
 	for id, p := range providers {
-		models, listErr := p.ListModels(ctx)
-		modelCatalog[id] = normalizeProviderModels(id, models)
-		modelCatalogErrors[id] = listErr
+		if id == providerID {
+			continue
+		}
+		pendingCatalogs++
+		go func(id string, p provider.Provider) {
+			listed, listErr := p.ListModels(ctx)
+			catalogResults <- catalogResult{id: id, models: listed, err: listErr}
+		}(id, p)
+	}
+	for range pendingCatalogs {
+		result := <-catalogResults
+		modelCatalog[result.id] = normalizeProviderModels(result.id, result.models)
+		modelCatalogErrors[result.id] = result.err
 	}
 	models := modelCatalog[providerID]
 	if providerID == openaicompat.ProviderID && cfg.DefaultModel == "" && len(models) == 0 {
@@ -1224,6 +1256,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		userInput:              inputBroker,
 		toolGuard:              toolGuard,
 		sessionHistory:         sessionHistory,
+		sessionQuery:           sessionQuery,
 		artifacts:              artifactStore,
 	}
 	if skillCatalog != nil {
@@ -1630,7 +1663,7 @@ func (a *App) ContinueGoal() error {
 // configuration can save endpoint and credential as one user action.
 func (a *App) ConfigureOpenAICompatible(baseURL string) error {
 	pc := a.Cfg.Providers[openaicompat.ProviderID]
-	cfg := openaicompat.Config{BaseURL: baseURL, DefaultModel: pc.DefaultModel}
+	cfg := openaicompat.Config{BaseURL: baseURL, DefaultModel: pc.DefaultModel, StreamIdleTimeout: configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS)}
 	if a.explicitAPIKey != "" && a.explicitAPIKeyProvider == openaicompat.ProviderID {
 		cfg.APIKey = a.explicitAPIKey
 	}
@@ -1725,8 +1758,14 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 			if !model.SupportsThinkingLevel(level) {
 				return fmt.Errorf("app: refreshed metadata for active model %q is incompatible with current settings: thinking level %q is not supported (supported: %v)", model.ID, level, model.SupportedThinkingLevels())
 			}
-			if setErr := a.Agent.SetModel(model); setErr != nil {
+			a.stateMu.Unlock()
+			setErr := a.Agent.SetModel(model)
+			a.stateMu.Lock()
+			if setErr != nil {
 				return fmt.Errorf("app: apply refreshed metadata for active model %q: %w", model.ID, setErr)
+			}
+			if currentProvider, ok := a.Providers[id]; !ok || currentProvider != p {
+				return fmt.Errorf("app: provider %q configuration changed during model refresh", id)
 			}
 			refreshedActive = &model
 			break
@@ -1737,8 +1776,14 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 					continue
 				}
 				fallback := models[i]
-				if setErr := a.Agent.SetModel(fallback); setErr != nil {
+				a.stateMu.Unlock()
+				setErr := a.Agent.SetModel(fallback)
+				a.stateMu.Lock()
+				if setErr != nil {
 					return fmt.Errorf("app: replace unavailable active model %q with %q: %w", current.ID, fallback.ID, setErr)
+				}
+				if currentProvider, ok := a.Providers[id]; !ok || currentProvider != p {
+					return fmt.Errorf("app: provider %q configuration changed during model refresh", id)
 				}
 				refreshedActive = &fallback
 				break
@@ -1786,6 +1831,16 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 func modelCatalogAuthoritative(p provider.Provider) bool {
 	authority, ok := p.(interface{ ModelCatalogAuthoritative() bool })
 	return ok && authority.ModelCatalogAuthoritative()
+}
+
+func configuredStreamIdleTimeout(milliseconds int) time.Duration {
+	if milliseconds < 0 {
+		return -1
+	}
+	if milliseconds == 0 {
+		return 0
+	}
+	return time.Duration(milliseconds) * time.Millisecond
 }
 
 func normalizeProviderModels(providerID string, models []protocol.Model) []protocol.Model {
@@ -2056,6 +2111,11 @@ func (a *App) Close() error {
 	}
 	if a.artifacts != nil {
 		if err := a.artifacts.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if a.sessionQuery != nil {
+		if err := a.sessionQuery.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}

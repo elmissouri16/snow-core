@@ -22,8 +22,9 @@ func TestSubagentEventsStayOutOfRootBuffers(t *testing.T) {
 	if m.assistantBuf.String() != "root" {
 		t.Fatalf("root buffer=%q", m.assistantBuf.String())
 	}
-	if got := m.subagentViews["c"].Preview; got != "child" {
-		t.Fatalf("preview=%q", got)
+	activity := m.subagentFleetActivity["c"]
+	if len(activity) != 1 || !strings.Contains(activity[0], "response  child") {
+		t.Fatalf("activity=%q", activity)
 	}
 	before := len(m.lines)
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvSessionUpdated, Agent: ref})

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -298,6 +299,54 @@ func TestFileIndexCreateOpenList(t *testing.T) {
 	}
 	if list[0].Path != got {
 		t.Fatalf("wrong path in listing: %s vs %s", list[0].Path, got)
+	}
+}
+
+func TestFileIndexListIsReadOnlyAndKeepsRootOnlyFile(t *testing.T) {
+	root := t.TempDir()
+	cwd := filepath.Join(root, "project")
+	path := filepath.Join(root, EncodeCWD(cwd), "root-only.db")
+	store, err := NewSQLiteStore(path, cwd, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.deleteIfEmpty = false
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", sqliteExistingDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`PRAGMA journal_mode=DELETE`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := NewFileIndex(root).List(cwd)
+	if err != nil || len(listed) != 0 {
+		t.Fatalf("listed=%+v err=%v", listed, err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("read-only listing removed root-only database: %v", err)
+	}
+	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("listing mutated database: before=%+v after=%+v", before, after)
+	}
+	ro, err := sql.Open("sqlite", sqliteReadOnlyDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	var mode string
+	if err := ro.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil || strings.ToLower(mode) != "delete" {
+		t.Fatalf("journal mode=%q err=%v", mode, err)
 	}
 }
 

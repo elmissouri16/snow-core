@@ -132,29 +132,31 @@ type childTask struct {
 }
 
 type Manager struct {
-	ctx            context.Context
-	cancel         context.CancelFunc
-	mu             sync.RWMutex
-	byID           map[string]*runtime
-	byPath         map[protocol.AgentPath]*runtime
-	reserved       map[protocol.AgentPath]struct{}
-	order          []string
-	root           *agent.Agent
-	rootRef        protocol.AgentRef
-	factory        ChildFactory
-	store          session.SubagentTaskStore
-	publish        func(protocol.AgentEvent)
-	limits         Limits
-	slots          chan struct{}
-	activity       chan struct{}
-	generation     uint64
-	waitCursor     map[string]uint64
-	ready          bool
-	closed         bool
-	closeDone      chan struct{}
-	wg             sync.WaitGroup
-	modelCatalog   func() []protocol.Model
-	modelSelection func(provider, model string) (protocol.Model, error)
+	ctx               context.Context
+	cancel            context.CancelFunc
+	mu                sync.RWMutex
+	byID              map[string]*runtime
+	byPath            map[protocol.AgentPath]*runtime
+	reserved          map[protocol.AgentPath]struct{}
+	order             []string
+	root              *agent.Agent
+	rootRef           protocol.AgentRef
+	factory           ChildFactory
+	store             session.SubagentTaskStore
+	publish           func(protocol.AgentEvent)
+	limits            Limits
+	slots             chan struct{}
+	activity          chan struct{}
+	generation        uint64
+	waitCursor        map[string]uint64
+	ready             bool
+	closed            bool
+	evictionScheduled bool
+	evictionRequested bool
+	closeDone         chan struct{}
+	wg                sync.WaitGroup
+	modelCatalog      func() []protocol.Model
+	modelSelection    func(provider, model string) (protocol.Model, error)
 }
 
 func New(ctx context.Context, limits Limits) *Manager {
@@ -911,10 +913,13 @@ func (m *Manager) Followup(ctx context.Context, caller Caller, target, message s
 		t.mu.Unlock()
 		return errors.New("subagents: followup queue full")
 	}
+	t.mu.Unlock()
+	// Mailbox persistence may perform SQLite I/O. Root admission keeps this
+	// runtime attached while avoiding a long hold of the runtime mutex.
 	if err := child.EnqueueMailbox(env); err != nil {
-		t.mu.Unlock()
 		return err
 	}
+	t.mu.Lock()
 	if !t.followupQueued {
 		t.tasks <- childTask{onlyIfPending: wasRunning, followup: true}
 		t.followupQueued = true
@@ -1305,10 +1310,22 @@ func (m *Manager) Usage() (protocol.Usage, error) {
 }
 
 func (m *Manager) Close(ctx context.Context) error {
-	unlockRoot := m.lockRootAdmission()
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	m.mu.RLock()
+	alreadyClosed := m.closed
+	closeDone := m.closeDone
+	m.mu.RUnlock()
+	if alreadyClosed {
+		select {
+		case <-closeDone:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	unlockRoot := m.lockRootAdmission()
 	m.mu.Lock()
 	if m.closed {
 		done := m.closeDone
@@ -1489,21 +1506,52 @@ func (m *Manager) worker(r *runtime, stop <-chan struct{}, done chan<- struct{})
 				m.emit(protocol.AgentEvent{Type: protocol.EvError, Agent: terminal.Agent.Clone(), Message: terminal.Error})
 			}
 			m.emitTerminalStatus(r, terminal)
-			go m.evictIdle()
+			m.scheduleEviction()
 		}
 	}
+}
+
+func (m *Manager) scheduleEviction() {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	if m.evictionScheduled {
+		m.evictionRequested = true
+		m.mu.Unlock()
+		return
+	}
+	m.evictionScheduled = true
+	m.wg.Add(1)
+	m.mu.Unlock()
+	go func() {
+		defer m.wg.Done()
+		for {
+			m.evictIdle()
+			m.mu.Lock()
+			if !m.evictionRequested || m.closed {
+				m.evictionScheduled = false
+				m.evictionRequested = false
+				m.mu.Unlock()
+				return
+			}
+			m.evictionRequested = false
+			m.mu.Unlock()
+		}
+	}()
 }
 
 func (m *Manager) evictIdle() {
 	if !m.limits.Durable || m.limits.MaxLoadedChildren < 1 {
 		return
 	}
-	unlockRoot := m.lockRootAdmission()
-	defer unlockRoot()
 	for {
+		unlockRoot := m.lockRootAdmission()
 		m.mu.RLock()
 		if m.closed {
 			m.mu.RUnlock()
+			unlockRoot()
 			return
 		}
 		candidates := make([]*runtime, 0, len(m.order))
@@ -1519,6 +1567,7 @@ func (m *Manager) evictIdle() {
 		}
 		m.mu.RUnlock()
 		if loaded <= m.limits.MaxLoadedChildren {
+			unlockRoot()
 			return
 		}
 		sort.SliceStable(candidates, func(i, j int) bool {
@@ -1545,9 +1594,8 @@ func (m *Manager) evictIdle() {
 				continue
 			}
 			r.mu.Unlock()
-			m.setStatus(r, protocol.AgentNotLoaded, "", "")
 			r.mu.Lock()
-			if r.child != child || r.cancel != nil || r.followupQueued || len(r.tasks) != 0 || r.state.Status != protocol.AgentNotLoaded {
+			if r.child != child || r.cancel != nil || r.followupQueued || len(r.tasks) != 0 || r.state.Status != status {
 				r.mu.Unlock()
 				continue
 			}
@@ -1559,6 +1607,8 @@ func (m *Manager) evictIdle() {
 			r.workerStop = nil
 			r.workerDone = nil
 			r.mu.Unlock()
+			m.setStatus(r, protocol.AgentNotLoaded, "", "")
+			unlockRoot()
 			if workerStop != nil {
 				close(workerStop)
 				if workerDone != nil {
@@ -1573,6 +1623,7 @@ func (m *Manager) evictIdle() {
 			break
 		}
 		if !evicted {
+			unlockRoot()
 			return
 		}
 	}

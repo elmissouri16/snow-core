@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"regexp"
 	"strings"
@@ -38,6 +39,9 @@ type LocalStore struct {
 	root     *os.Root
 	maxBytes int
 	closed   bool
+
+	verifiedMu sync.Mutex
+	verified   map[string]fs.FileInfo
 }
 
 // NewLocalStore opens or creates a private artifact root.
@@ -58,7 +62,7 @@ func NewLocalStore(path string, maxBytes int) (*LocalStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("artifact: open root: %w", err)
 	}
-	return &LocalStore{root: root, maxBytes: maxBytes}, nil
+	return &LocalStore{root: root, maxBytes: maxBytes, verified: make(map[string]fs.FileInfo)}, nil
 }
 
 func namespace(sessionID string) string {
@@ -133,6 +137,22 @@ func openVerifiedNamespace(root *os.Root, name string, create bool) (*os.Root, e
 	return child, nil
 }
 
+func (s *LocalStore) artifactVerified(id string, current fs.FileInfo) bool {
+	s.verifiedMu.Lock()
+	defer s.verifiedMu.Unlock()
+	prior := s.verified[id]
+	return prior != nil && current != nil && prior.Size() == current.Size() && prior.ModTime().Equal(current.ModTime()) && os.SameFile(prior, current)
+}
+
+func (s *LocalStore) markArtifactVerified(id string, info fs.FileInfo) {
+	if info == nil {
+		return
+	}
+	s.verifiedMu.Lock()
+	s.verified[id] = info
+	s.verifiedMu.Unlock()
+}
+
 // SaveText atomically saves text. Repeating the same session/key/content is
 // idempotent and returns the same opaque ID.
 func (s *LocalStore) SaveText(ctx context.Context, sessionID, key, text string) (Ref, error) {
@@ -164,12 +184,30 @@ func (s *LocalStore) SaveText(ctx context.Context, sessionID, key, text string) 
 		if openErr != nil {
 			return Ref{}, openErr
 		}
+		existingInfo, statErr := existing.Stat()
+		if statErr != nil {
+			_ = existing.Close()
+			return Ref{}, statErr
+		}
+		if s.artifactVerified(id, existingInfo) {
+			if closeErr := existing.Close(); closeErr != nil {
+				return Ref{}, closeErr
+			}
+			return Ref{ID: id, Bytes: len(text)}, nil
+		}
 		data, readErr := io.ReadAll(io.LimitReader(existing, int64(s.maxBytes)+1))
 		closeErr := existing.Close()
-		if readErr != nil || closeErr != nil || string(data) != text {
+		if readErr == nil && closeErr == nil && string(data) == text {
+			s.markArtifactVerified(id, existingInfo)
+			return Ref{ID: id, Bytes: len(text)}, nil
+		}
+		// A crash can leave a partial O_EXCL file at the final content address.
+		// Since this call carries the complete hash input, repair that orphan
+		// rather than poisoning the address permanently.
+		if removeErr := dir.Remove(name); removeErr != nil {
 			return Ref{}, errors.New("artifact: existing artifact does not match immutable content")
 		}
-		return Ref{ID: id, Bytes: len(text)}, nil
+		file, err = dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	}
 	if err != nil {
 		return Ref{}, fmt.Errorf("artifact: create: %w", err)
@@ -187,10 +225,15 @@ func (s *LocalStore) SaveText(ctx context.Context, sessionID, key, text string) 
 	if err := file.Sync(); err != nil {
 		return Ref{}, fmt.Errorf("artifact: sync: %w", err)
 	}
+	info, err := file.Stat()
+	if err != nil {
+		return Ref{}, fmt.Errorf("artifact: stat: %w", err)
+	}
 	if err := file.Close(); err != nil {
 		return Ref{}, fmt.Errorf("artifact: close: %w", err)
 	}
 	ok = true
+	s.markArtifactVerified(id, info)
 	return Ref{ID: id, Bytes: len(text)}, nil
 }
 

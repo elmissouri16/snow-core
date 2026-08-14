@@ -70,6 +70,73 @@ func TestQueryEngineSearchScopesAndProjects(t *testing.T) {
 	}
 }
 
+func TestQueryEngineCachesUntilSessionFileChanges(t *testing.T) {
+	root := t.TempDir()
+	idx := NewFileIndex(root)
+	project := filepath.Join(root, "project")
+	prior, err := idx.Create(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendQueryMessage(t, prior, protocol.RoleUser, protocol.NewTextBlock("first cached phrase"))
+	path := prior.Path()
+	if err := prior.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := NewQueryEngine(idx, project)
+	defer engine.Close()
+	for i := 0; i < 2; i++ {
+		hits, err := engine.Search(context.Background(), "cached phrase", 5, "")
+		if err != nil || len(hits) != 1 {
+			t.Fatalf("search %d: hits=%+v err=%v", i, hits, err)
+		}
+	}
+	if engine.rebuilds != 1 {
+		t.Fatalf("rebuilds=%d, want 1 for unchanged sessions", engine.rebuilds)
+	}
+
+	prior, err = OpenSQLiteStore(path, project, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendQueryMessage(t, prior, protocol.RoleUser, protocol.NewTextBlock("new invalidation phrase"))
+	if err := prior.Close(); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := engine.Search(context.Background(), "invalidation phrase", 5, "")
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("invalidated search: hits=%+v err=%v", hits, err)
+	}
+	if engine.rebuilds != 2 {
+		t.Fatalf("rebuilds=%d, want 2 after append", engine.rebuilds)
+	}
+}
+
+func TestQueryEngineInvalidatesWhileWALSessionIsOpen(t *testing.T) {
+	root := t.TempDir()
+	index := NewFileIndex(root)
+	project := filepath.Join(root, "project")
+	store, err := index.Create(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	appendQueryMessage(t, store, protocol.RoleUser, protocol.NewTextBlock("wal first phrase"))
+	engine := NewQueryEngine(index, project)
+	defer engine.Close()
+	if hits, err := engine.Search(context.Background(), "first phrase", 5, ""); err != nil || len(hits) != 1 {
+		t.Fatalf("first search hits=%+v err=%v", hits, err)
+	}
+	appendQueryMessage(t, store, protocol.RoleUser, protocol.NewTextBlock("wal second phrase"))
+	if hits, err := engine.Search(context.Background(), "second phrase", 5, ""); err != nil || len(hits) != 1 {
+		t.Fatalf("second search hits=%+v err=%v", hits, err)
+	}
+	if engine.rebuilds != 2 {
+		t.Fatalf("rebuilds=%d, want 2 for live WAL append", engine.rebuilds)
+	}
+}
+
 func TestQueryEngineReferenceIsBoundedUntrustedAndTipPinned(t *testing.T) {
 	root := t.TempDir()
 	idx := NewFileIndex(root)

@@ -1,12 +1,14 @@
 package auth
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 )
 
 // ErrNoCredential is returned when no credential can be resolved for a
@@ -21,6 +23,11 @@ type FileStore struct {
 	// mu serializes load-modify-save cycles so concurrent Put/Delete from
 	// the same process cannot lose updates.
 	mu sync.Mutex
+	// Get uses a stat-validated snapshot. Mutating operations never consult it:
+	// Update must re-read under the cross-process lock to preserve OAuth rotation.
+	cache      map[string]Credential
+	cacheInfo  os.FileInfo
+	cacheValid bool
 }
 
 // NewFileStore creates a store backed by path. The file is not touched
@@ -57,6 +64,72 @@ func (f *FileStore) load() (map[string]Credential, error) {
 		m = map[string]Credential{}
 	}
 	return m, nil
+}
+
+func (f *FileStore) loadCached() (map[string]Credential, error) {
+	if f.cacheValid {
+		if info, err := os.Stat(f.path); err == nil && f.cacheInfo != nil && os.SameFile(info, f.cacheInfo) && info.ModTime().Equal(f.cacheInfo.ModTime()) && info.Size() == f.cacheInfo.Size() {
+			return f.cache, nil
+		}
+		f.invalidateCache()
+	}
+	m, err := f.load()
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(f.path)
+	if err == nil {
+		f.cache = m
+		f.cacheInfo = info
+		f.cacheValid = true
+	}
+	return m, nil
+}
+
+func (f *FileStore) invalidateCache() {
+	f.cache = nil
+	f.cacheInfo = nil
+	f.cacheValid = false
+}
+
+func cloneCredential(c Credential) Credential {
+	out := c
+	out.Extra = cloneExtra(c.Extra)
+	return out
+}
+
+func cloneExtra(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = cloneExtraValue(value)
+	}
+	return out
+}
+
+func cloneExtraValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		return cloneExtra(value)
+	case map[string]string:
+		out := make(map[string]string, len(value))
+		for key, nested := range value {
+			out[key] = nested
+		}
+		return out
+	case []string:
+		return append([]string(nil), value...)
+	case []any:
+		out := make([]any, len(value))
+		for i := range value {
+			out[i] = cloneExtraValue(value[i])
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 // persistCredential is a defined type without the redacting MarshalJSON
@@ -108,6 +181,15 @@ func (f *FileStore) save(m map[string]Credential) error {
 	if err := os.Chmod(f.path, 0o600); err != nil {
 		return fmt.Errorf("auth: chmod store: %w", err)
 	}
+	directory, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("auth: open parent for sync: %w", err)
+	}
+	syncErr := directory.Sync()
+	closeErr := directory.Close()
+	if syncErr != nil && !errors.Is(syncErr, syscall.EINVAL) || closeErr != nil {
+		return fmt.Errorf("auth: sync parent: %w", errors.Join(syncErr, closeErr))
+	}
 	return nil
 }
 
@@ -116,7 +198,7 @@ func (f *FileStore) save(m map[string]Credential) error {
 func (f *FileStore) Get(provider string) (Credential, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	m, err := f.load()
+	m, err := f.loadCached()
 	if err != nil {
 		return Credential{}, false
 	}
@@ -125,7 +207,7 @@ func (f *FileStore) Get(provider string) (Credential, bool) {
 		return Credential{}, false
 	}
 	c.Provider = provider
-	return c, true
+	return cloneCredential(c), true
 }
 
 // Put implements Store.
@@ -147,7 +229,11 @@ func (f *FileStore) Delete(provider string) error {
 			return nil
 		}
 		delete(m, provider)
-		return f.save(m)
+		if err := f.save(m); err != nil {
+			return err
+		}
+		f.invalidateCache()
+		return nil
 	})
 }
 
@@ -175,9 +261,39 @@ func (f *FileStore) Update(provider string, fn UpdateFunc) (Credential, bool, er
 		next.Provider = provider
 		m[provider] = next
 		out, exists = next, true
-		return f.save(m)
+		if err := f.save(m); err != nil {
+			return err
+		}
+		f.invalidateCache()
+		return nil
 	})
 	return out, exists, err
+}
+
+// WithRefreshLock serializes one provider's refresh across processes without
+// holding the auth store's global read/write lock during network I/O.
+func (f *FileStore) WithRefreshLock(provider string, fn func() error) error {
+	if fn == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(f.path), 0o700); err != nil {
+		return fmt.Errorf("auth: mkdir refresh lock: %w", err)
+	}
+	sum := sha256.Sum256([]byte(provider))
+	lockPath := fmt.Sprintf("%s.%x.refresh.lock", f.path, sum[:8])
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("auth: open refresh lock: %w", err)
+	}
+	defer lock.Close()
+	if err := lock.Chmod(0o600); err != nil {
+		return fmt.Errorf("auth: chmod refresh lock: %w", err)
+	}
+	if err := lockFile(lock); err != nil {
+		return fmt.Errorf("auth: lock refresh: %w", err)
+	}
+	defer unlockFile(lock)
+	return fn()
 }
 
 func (f *FileStore) withExclusiveLock(fn func() error) error {

@@ -319,8 +319,9 @@ session root. Standard paths are:
 Subagent concurrency counts children only (the root does not consume a slot),
 and durable child histories default on so resumed `/agent` inspection works.
 Defaults also include `opencode-go`, permission `ask` in config (headless SDK defaults
-to deny), thinking `off`, 256 KiB tool output, 120 s bash timeout, and 100 KiB
-project-context cap. Project `AGENTS.md` is always loaded nearest-first; it is
+to deny), thinking `off`, 256 KiB tool output, 120 s bash timeout, a 10-minute
+stream-silence watchdog (provider `stream_idle_timeout_ms: -1` disables it), and
+100 KiB project-context cap. Project `AGENTS.md` is always loaded nearest-first; it is
 instructions, not a security boundary.
 
 Sessions are SQLite databases with metadata and indexed entries. Messages carry `id` and

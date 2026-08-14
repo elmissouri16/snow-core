@@ -9,14 +9,41 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/snow-core/snow/internal/auth"
+	providerpkg "github.com/snow-core/snow/internal/provider"
 	"github.com/snow-core/snow/pkg/protocol"
 )
+
+type finalIdleReader struct {
+	data []byte
+}
+
+func (r *finalIdleReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, providerpkg.ErrStreamIdle
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, providerpkg.ErrStreamIdle
+}
+func (*finalIdleReader) Close() error { return nil }
+
+func TestReadSSEProcessesCompleteFinalLineBeforeIdleError(t *testing.T) {
+	stream := newStream(context.Background(), 4, nil, ProviderID, "")
+	go stream.readSSE(&http.Response{Body: &finalIdleReader{data: []byte("data: [DONE]")}})
+	event, err := stream.Next(context.Background())
+	if err != nil || event.Type != protocol.EvStreamDone {
+		t.Fatalf("event=%+v err=%v", event, err)
+	}
+}
 
 // sseChunk builds a "data: {...}" SSE line from a JSON object.
 func sseChunk(v any) string {
@@ -80,6 +107,49 @@ func TestChatCompletionsEncodesImageContent(t *testing.T) {
 	}
 }
 
+func TestStreamRejectsCumulativeTextAndReasoningOverflow(t *testing.T) {
+	tests := []struct {
+		name      string
+		payload   string
+		configure func(*stream)
+		want      string
+	}{
+		{
+			name:    "response text",
+			payload: `{"choices":[{"delta":{"content":"x"}}]}`,
+			configure: func(s *stream) {
+				s.responseTextBytes = maxResponseTextBytes
+			},
+			want: "response text exceeds size limit",
+		},
+		{
+			name:    "reasoning text",
+			payload: `{"choices":[{"delta":{"reasoning_content":"x"}}]}`,
+			configure: func(s *stream) {
+				s.reasoningTextBytes = maxReasoningBytes
+			},
+			want: "reasoning text exceeds size limit",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var chunk openAIChunk
+			if err := json.Unmarshal([]byte(tt.payload), &chunk); err != nil {
+				t.Fatal(err)
+			}
+			s := newStream(context.Background(), 1, nil, ProviderID, "")
+			tt.configure(s)
+			accums := make(map[int]*toolCallAccum)
+			var order []int
+			var finish protocol.StopReason
+			err := s.processChunk(chunk, accums, &order, &finish)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("processChunk error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestMapUsageDistinguishesExplicitZeroFromOmittedCacheRead(t *testing.T) {
 	var explicit openAIUsage
 	if err := json.Unmarshal([]byte(`{"prompt_tokens":4,"prompt_tokens_details":{"cached_tokens":0}}`), &explicit); err != nil {
@@ -108,6 +178,41 @@ func TestMapUsageDistinguishesExplicitZeroFromOmittedCacheRead(t *testing.T) {
 	}
 	if usage := mapUsage(omitted); usage.CacheReadKnown {
 		t.Fatalf("omitted usage = %+v", usage)
+	}
+}
+
+func TestListModelsCachesAcrossProviderInstances(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/catalog" {
+			_, _ = io.WriteString(w, `{"opencode-go":{"models":{"cached-model":{"id":"cached-model","name":"Cached","tool_call":true,"limit":{"context":64000,"output":4096}}}}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":[{"id":"cached-model"}]}`)
+	}))
+	defer server.Close()
+	cacheRoot := t.TempDir()
+	newProvider := func() *Provider {
+		provider, err := New(Config{BaseURL: server.URL, CatalogURL: server.URL + "/catalog", CacheRoot: cacheRoot})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return provider
+	}
+	models, err := newProvider().ListModels(context.Background())
+	if err != nil || len(models) != 1 || models[0].ID != "cached-model" {
+		t.Fatalf("first models=%+v err=%v", models, err)
+	}
+	firstHits := hits.Load()
+	models, err = newProvider().ListModels(context.Background())
+	if err != nil || len(models) != 1 || hits.Load() != firstHits {
+		t.Fatalf("cached models=%+v err=%v hits=%d want=%d", models, err, hits.Load(), firstHits)
+	}
+	info, err := os.Stat(filepath.Join(cacheRoot, "catalog.json"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("cache mode=%v err=%v", info, err)
 	}
 }
 

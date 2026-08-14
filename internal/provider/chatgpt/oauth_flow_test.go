@@ -3,6 +3,7 @@ package chatgpt
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -92,6 +93,30 @@ func TestAllowedWorkspaceRejectsDifferentOAuthAccount(t *testing.T) {
 	}
 	if err := ensureAllowedWorkspace(cred, []string{"actual", "actual", ""}); err != nil {
 		t.Fatalf("matching workspace rejected: %v", err)
+	}
+}
+
+type coordinatedMemoryStore struct{ *auth.MemoryStore }
+
+func (s *coordinatedMemoryStore) WithRefreshLock(_ string, fn func() error) error { return fn() }
+
+func TestCoordinatedRefreshDoesNotResurrectLogout(t *testing.T) {
+	now := time.Now()
+	store := &coordinatedMemoryStore{MemoryStore: auth.NewMemoryStoreForTest()}
+	_ = store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "old", Refresh: "refresh", Expires: now.Add(-time.Minute).Unix(), AccountID: "acct"})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := store.Delete(ProviderID); err != nil {
+			t.Error(err)
+		}
+		_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "new", RefreshToken: "new-refresh", ExpiresIn: 3600})
+	}))
+	defer server.Close()
+	provider := New(Config{Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client(), Now: func() time.Time { return now }})
+	if _, err := provider.Resolve(context.Background(), auth.Credential{}); !errors.Is(err, ErrLoginRequired) {
+		t.Fatalf("Resolve error=%v, want ErrLoginRequired", err)
+	}
+	if _, ok := store.Get(ProviderID); ok {
+		t.Fatal("in-flight refresh resurrected deleted credential")
 	}
 }
 

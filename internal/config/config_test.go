@@ -354,7 +354,7 @@ func TestLoadAndSaveRoundTrip(t *testing.T) {
 	cfg.PermissionMode = "deny"
 	cfg.SystemPromptFile = "system.md"
 	cfg.Providers = map[string]ProviderConfig{
-		"opencode-go": {BaseURL: "https://example.com/v1", DefaultModel: "kimi-k2.6"},
+		"opencode-go": {BaseURL: "https://example.com/v1", DefaultModel: "kimi-k2.6", StreamIdleTimeoutMS: 123000},
 	}
 	if err := Save(path, cfg); err != nil {
 		t.Fatal(err)
@@ -368,7 +368,7 @@ func TestLoadAndSaveRoundTrip(t *testing.T) {
 		t.Fatalf("round trip mismatch: %+v", got)
 	}
 	pc, ok := got.Providers["opencode-go"]
-	if !ok || pc.BaseURL != "https://example.com/v1" || pc.DefaultModel != "kimi-k2.6" {
+	if !ok || pc.BaseURL != "https://example.com/v1" || pc.DefaultModel != "kimi-k2.6" || pc.StreamIdleTimeoutMS != 123000 {
 		t.Fatalf("provider config mismatch: %+v", got.Providers)
 	}
 }

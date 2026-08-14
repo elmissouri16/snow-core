@@ -41,22 +41,24 @@ type Config struct {
 	APIKey string
 	// DiscoveryAPIKey is used only by ListModels. App wiring places auth-store
 	// keys here so deleting a stored key cannot leave a live Chat fallback.
-	DiscoveryAPIKey  string
-	DefaultModel     string
-	HTTPClient       *http.Client
-	DiscoveryTimeout time.Duration
+	DiscoveryAPIKey   string
+	DefaultModel      string
+	HTTPClient        *http.Client
+	DiscoveryTimeout  time.Duration
+	StreamIdleTimeout time.Duration
 }
 
 type Provider struct {
-	responsesURL     string
-	chatURL          string
-	modelsURL        string
-	apiKey           string
-	discoveryAPIKey  string
-	defaultModel     string
-	client           *http.Client
-	discoveryTimeout time.Duration
-	wireMode         atomic.Uint32
+	responsesURL      string
+	chatURL           string
+	modelsURL         string
+	apiKey            string
+	discoveryAPIKey   string
+	defaultModel      string
+	client            *http.Client
+	discoveryTimeout  time.Duration
+	streamIdleTimeout time.Duration
+	wireMode          atomic.Uint32
 }
 
 func New(cfg Config) (*Provider, error) {
@@ -76,7 +78,13 @@ func New(cfg Config) (*Provider, error) {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	return &Provider{responsesURL: responsesURL, chatURL: siblingEndpoint(responsesURL, "chat/completions"), modelsURL: modelsURL, apiKey: cfg.APIKey, discoveryAPIKey: cfg.DiscoveryAPIKey, defaultModel: strings.TrimSpace(cfg.DefaultModel), client: client, discoveryTimeout: timeout}, nil
+	streamIdleTimeout := cfg.StreamIdleTimeout
+	if streamIdleTimeout == 0 {
+		streamIdleTimeout = providerpkg.DefaultStreamIdleTimeout
+	} else if streamIdleTimeout < 0 {
+		streamIdleTimeout = -1
+	}
+	return &Provider{responsesURL: responsesURL, chatURL: siblingEndpoint(responsesURL, "chat/completions"), modelsURL: modelsURL, apiKey: cfg.APIKey, discoveryAPIKey: cfg.DiscoveryAPIKey, defaultModel: strings.TrimSpace(cfg.DefaultModel), client: client, discoveryTimeout: timeout, streamIdleTimeout: streamIdleTimeout}, nil
 }
 
 func normalizeEndpoints(raw string) (string, string, error) {
@@ -443,18 +451,19 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, request prot
 		}
 		return newErrorStream(ctx, fmt.Errorf("openai-compatible: incompatible response content type %q: %s", mediaType, truncate(message, 500))), nil
 	}
-	return responsesapi.NewStream(ctx, resp, ProviderID, key), nil
+	return responsesapi.NewStreamWithIdleTimeout(ctx, resp, ProviderID, p.streamIdleTimeout, key), nil
 }
 
 func (p *Provider) chatCompletions(ctx context.Context, key string, request protocol.ChatRequest) (protocol.EventStream, error) {
 	compatible, err := opencodego.New(opencodego.Config{
-		BaseURL:          strings.TrimSuffix(p.chatURL, "/chat/completions"),
-		APIKey:           key,
-		HTTPClient:       secureClient(p.client),
-		DefaultModel:     request.Model.ID,
-		ProviderID:       ProviderID,
-		AllowAnonymous:   true,
-		DisableEnvAPIKey: true,
+		BaseURL:           strings.TrimSuffix(p.chatURL, "/chat/completions"),
+		APIKey:            key,
+		HTTPClient:        secureClient(p.client),
+		DefaultModel:      request.Model.ID,
+		ProviderID:        ProviderID,
+		AllowAnonymous:    true,
+		DisableEnvAPIKey:  true,
+		StreamIdleTimeout: p.streamIdleTimeout,
 	})
 	if err != nil {
 		return newErrorStream(ctx, fmt.Errorf("openai-compatible: initialize Chat Completions fallback: %w", err)), nil

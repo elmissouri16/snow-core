@@ -5,6 +5,36 @@ August 2026. Every identified item below was inspected, remediated, covered by
 focused tests where practical, and included in full-suite, race, vet, repeated,
 and supported-platform validation. Source and tests remain authoritative.
 
+## Performance and resource-bounds follow-up
+
+- [x] **PERF-01 — Bound event delivery and TUI retention.** The agent event bus
+  keeps a bounded queue, preferentially sheds stream/snapshot events under a
+  pathological slow observer, and rejects reentrant drains; the TUI
+  mailbox has hard item/byte bounds, and full-screen transcript rows use a
+  bounded recent cache with incremental wrapping and lazy selection splitting.
+- [x] **PERF-02 — Bound provider streams.** Chat Completions and Responses cap
+  accumulated text/reasoning, and a configurable reset-on-byte idle watchdog
+  defaults to ten minutes (`-1` disables it).
+- [x] **PERF-03 — Stop decoding compacted SQLite history.** Context projection
+  locates the newest marker and queries only its retained tail, validates
+  corrupt boundaries, and resolves repeated-compaction virtual IDs to real
+  persisted boundaries.
+- [x] **PERF-04 — Make session discovery/search incremental.** Session listing
+  uses query-only SQLite inspection, branch stats avoid full-history decoding,
+  usage/reference counts use focused JSON queries, and the derived FTS index is
+  reused until an exact branch name/tip fingerprint changes (including WAL
+  writes).
+- [x] **PERF-05 — Reduce startup and extension churn.** Provider catalogs load
+  concurrently after the active provider, OpenCode catalogs use a bounded
+  private disk cache, and MCP list-change refresh is debounced, timeout-bounded,
+  lock-short, identical-catalog aware, and collision-safe.
+- [x] **PERF-06 — Close lifecycle and disk-I/O leaks.** OAuth network refresh is
+  serialized by a provider-specific lock without holding the global auth-file
+  lock, auth reads are stat/inode cached, crash-orphaned artifacts are repaired,
+  stale atomic-write files are swept conservatively, browser helper processes
+  are reaped, skill discovery reads frontmatter prefixes, and subagent eviction
+  workers are coalesced and joined.
+
 ## Security and filesystem safety
 
 - [x] **SEC-01 — Reject unknown permission decisions.** `Authorize` now

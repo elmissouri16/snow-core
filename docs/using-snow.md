@@ -102,6 +102,11 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
    state, and—when width permits—the current provider/model, collaboration mode,
    reasoning effort, and the latest request's prompt-cache hit rate as `CH<n>%`.
 
+The full-screen viewport keeps a bounded recent render cache (up to 2,000
+entries or 4 MiB of rendered rows) so long-running streams cannot grow terminal
+memory without limit. An omission marker replaces older rendered rows; durable
+session history remains append-only and is restored from the session database.
+
 `CH` appears only when the provider explicitly reports cached-token usage; an
 explicit zero is shown as `CH0.0%`, while an omitted cache metric remains hidden.
 The percentage is `cache_read / input`, because Snow's normalized `input` is the

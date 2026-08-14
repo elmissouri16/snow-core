@@ -163,7 +163,8 @@ func (p *Provider) fetchCatalog(ctx context.Context, cred auth.Credential, etag 
 	if err != nil {
 		return nil, "", false, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, catalogTimeout)
+	parentCtx := ctx
+	requestCtx, cancel := context.WithTimeout(parentCtx, catalogTimeout)
 	defer cancel()
 	base := strings.TrimRight(p.baseURL, "/")
 	if strings.HasSuffix(base, "/codex/responses") {
@@ -177,7 +178,7 @@ func (p *Provider) fetchCatalog(ctx context.Context, cred auth.Credential, etag 
 	q := u.Query()
 	q.Set("client_version", p.clientVersion)
 	u.RawQuery = q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, "", false, err
 	}
@@ -194,11 +195,11 @@ func (p *Provider) fetchCatalog(ctx context.Context, cred auth.Credential, etag 
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized && allowRefresh {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		fresh, refreshErr := p.resolve(ctx, cred, true)
+		fresh, refreshErr := p.resolve(parentCtx, cred, true)
 		if refreshErr != nil {
 			return nil, "", false, refreshErr
 		}
-		return p.fetchCatalog(ctx, fresh, etag, false)
+		return p.fetchCatalog(parentCtx, fresh, etag, false)
 	}
 	if resp.StatusCode == http.StatusNotModified {
 		return nil, resp.Header.Get("ETag"), true, nil

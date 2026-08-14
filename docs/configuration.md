@@ -175,9 +175,15 @@ append-only.
 ```json
 {
   "base_url": "https://example.invalid/v1",
-  "default_model": "model-id"
+  "default_model": "model-id",
+  "stream_idle_timeout_ms": 600000
 }
 ```
+
+`stream_idle_timeout_ms` bounds silence between bytes on a live streaming
+response without imposing a total turn deadline. Omit it or set `0` for the
+conservative 10-minute default; set `-1` to disable the watchdog. Any received
+bytes reset the timer.
 
 For `openai-compatible`, `base_url` is required and may be an API root such as
 `https://gateway.example/v1` or a full URL ending in `/responses` or

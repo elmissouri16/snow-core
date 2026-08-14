@@ -178,6 +178,9 @@ func countSessionReferences(store session.Store) (int, error) {
 	if store == nil {
 		return 0, nil
 	}
+	if counter, ok := store.(interface{ CountSessionReferences() (int, error) }); ok {
+		return counter.CountSessionReferences()
+	}
 	messages, err := store.Messages()
 	if err != nil {
 		return 0, err

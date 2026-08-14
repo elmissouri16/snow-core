@@ -52,9 +52,11 @@ covered for explicit compatibility use. Snow uses official Codex scopes and the
 same form-encoded token refresh contract used by Codex, Pi, and OpenCode.
 Tokens are never shown in the picker. `snow auth check chatgpt` remains strictly
 side-effect-free; runtime resolution refreshes tokens that expire within five
-minutes under a cross-process auth-store lock and atomically persists rotated
-refresh tokens. A pre-stream HTTP 401 forces one guarded refresh and one retry,
-while reusing a newer credential already rotated by another process. Permanent
+minutes under a provider-specific cross-process refresh lock, while the global
+auth-store lock is held only for the fresh read/CAS write. This keeps unrelated
+credential operations responsive during network I/O and atomically persists
+rotated refresh tokens. A pre-stream HTTP 401 forces one guarded refresh and
+one retry, while reusing a newer credential already rotated by another process. Permanent
 `invalid_grant`-class failures require login; transient/network failures remain
 retryable and secret-free.
 
@@ -89,7 +91,8 @@ and an unavailable active model is replaced by a compatible account model.
 Authenticated sessions fall back only to a same-account cache; they never inject
 a bundled model after account discovery fails. The bundled snapshot is used only
 before a ChatGPT account is configured. The auth store lock is
-`~/.snow/auth.json.lock` and is also `0600`.
+`~/.snow/auth.json.lock`; provider refresh serialization uses a hashed
+`auth.json.<provider-hash>.refresh.lock`. Both are `0600`.
 
 ## Research findings
 

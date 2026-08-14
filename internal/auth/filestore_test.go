@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestFileStoreRoundTrip(t *testing.T) {
@@ -292,5 +294,79 @@ func TestConcurrentPutsNoLostUpdate(t *testing.T) {
 		if got.Key != "key-"+provider {
 			t.Fatalf("provider %q key = %q, want %q", provider, got.Key, "key-"+provider)
 		}
+	}
+}
+
+func TestFileStoreReadCacheInvalidatesAndClones(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	store, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put("p", Credential{Type: CredentialOAuth, Access: "one", Extra: map[string]any{"nested": map[string]any{"value": "original"}}}); err != nil {
+		t.Fatal(err)
+	}
+	first, ok := store.Get("p")
+	if !ok {
+		t.Fatal("missing credential")
+	}
+	first.Extra["nested"].(map[string]any)["value"] = "mutated"
+	second, _ := store.Get("p")
+	if second.Extra["nested"].(map[string]any)["value"] != "original" {
+		t.Fatal("caller mutation escaped cached credential clone")
+	}
+
+	data, err := json.MarshalIndent(map[string]persistCredential{
+		"p": persistCredential(Credential{Type: CredentialOAuth, Access: "two"}),
+	}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+	updated, ok := store.Get("p")
+	if !ok || updated.Access != "two" {
+		t.Fatalf("updated=%+v ok=%v", updated, ok)
+	}
+}
+
+func TestFileStoreRefreshLockDoesNotBlockReads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	store, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put("p", Credential{Type: CredentialAPIKey, Key: "key"}); err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- store.WithRefreshLock("chatgpt", func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	readDone := make(chan struct{})
+	go func() {
+		_, _ = store.Get("p")
+		close(readDone)
+	}()
+	select {
+	case <-readDone:
+	case <-time.After(time.Second):
+		t.Fatal("provider refresh lock blocked unrelated credential read")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

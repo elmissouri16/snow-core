@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"sync"
@@ -10,7 +11,12 @@ import (
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
-const maxAgentEventsPerUpdate = 256
+const (
+	maxAgentEventsPerUpdate = 256
+	maxMailboxQueuedItems   = 4096
+	maxMailboxQueuedBytes   = 32 << 20
+	maxMailboxDeltaBytes    = 8 << 20
+)
 
 type agentEventBatchMsg struct {
 	events []protocol.AgentEvent
@@ -19,6 +25,7 @@ type agentEventBatchMsg struct {
 type queuedAgentEvent struct {
 	event     protocol.AgentEvent
 	textParts []string
+	bytes     int
 }
 
 // coalesceRootSessionUpdates keeps only the latest root-session invalidation in
@@ -52,11 +59,13 @@ func coalesceRootSessionUpdates(events []protocol.AgentEvent) []protocol.AgentEv
 // stream deltas are represented as parts and joined only when a batch is
 // popped, avoiding quadratic concatenation while the UI is busy rendering.
 type agentEventMailbox struct {
-	mu     sync.Mutex
-	items  []queuedAgentEvent
-	wake   chan struct{}
-	done   chan struct{}
-	closed bool
+	mu      sync.Mutex
+	items   []queuedAgentEvent
+	bytes   int
+	dropped int
+	wake    chan struct{}
+	done    chan struct{}
+	closed  bool
 }
 
 func newAgentEventMailbox() *agentEventMailbox {
@@ -68,6 +77,9 @@ func (q *agentEventMailbox) Push(ev protocol.AgentEvent) {
 		return
 	}
 	copy := ev.Clone()
+	if isCoalescibleStreamDelta(copy.Type) && len(copy.Text) > maxMailboxDeltaBytes {
+		copy.Text = boundedUTF8Tail(copy.Text, maxMailboxDeltaBytes)
+	}
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
@@ -75,19 +87,83 @@ func (q *agentEventMailbox) Push(ev protocol.AgentEvent) {
 	}
 	wasEmpty := len(q.items) == 0
 	if len(q.items) > 0 && compatibleStreamDeltas(q.items[len(q.items)-1].event, copy) {
-		q.items[len(q.items)-1].textParts = append(q.items[len(q.items)-1].textParts, copy.Text)
+		item := &q.items[len(q.items)-1]
+		item.textParts = append(item.textParts, copy.Text)
+		item.bytes += len(copy.Text)
+		q.bytes += len(copy.Text)
+		for item.bytes > maxMailboxDeltaBytes && len(item.textParts) > 1 {
+			removed := len(item.textParts[0])
+			item.textParts[0] = ""
+			item.textParts = item.textParts[1:]
+			item.bytes -= removed
+			q.bytes -= removed
+			q.dropped++
+		}
 	} else {
-		item := queuedAgentEvent{event: copy}
+		item := queuedAgentEvent{event: copy, bytes: approximateAgentEventBytes(copy)}
 		if isCoalescibleStreamDelta(copy.Type) {
 			item.textParts = []string{copy.Text}
+			item.bytes = len(copy.Text)
 			item.event.Text = ""
 		}
 		q.items = append(q.items, item)
+		q.bytes += item.bytes
 	}
-	if wasEmpty {
+	q.trimLocked()
+	if wasEmpty && len(q.items) > 0 {
 		q.signalLocked()
 	}
 	q.mu.Unlock()
+}
+
+func approximateAgentEventBytes(ev protocol.AgentEvent) int {
+	if isCoalescibleStreamDelta(ev.Type) {
+		return len(ev.Text)
+	}
+	data, err := json.Marshal(ev)
+	if err != nil {
+		return 1024 + len(ev.Text) + len(ev.Message) + len(ev.ToolOutput)
+	}
+	return len(data)
+}
+
+func mailboxSnapshotEvent(typ protocol.AgentEventType) bool {
+	switch typ {
+	case protocol.EvSessionUpdated, protocol.EvUsage, protocol.EvQueueUpdated, protocol.EvToolProgress:
+		return true
+	default:
+		return false
+	}
+}
+
+func (q *agentEventMailbox) trimLocked() {
+	for len(q.items) > maxMailboxQueuedItems || q.bytes > maxMailboxQueuedBytes {
+		removeAt := -1
+		for i := range q.items {
+			if isCoalescibleStreamDelta(q.items[i].event.Type) {
+				removeAt = i
+				break
+			}
+		}
+		if removeAt < 0 {
+			for i := range q.items {
+				if mailboxSnapshotEvent(q.items[i].event.Type) {
+					removeAt = i
+					break
+				}
+			}
+		}
+		if removeAt < 0 {
+			// A pathological flood of lifecycle events must still have a hard
+			// memory bound. Preserve the newest state when no coalescible item exists.
+			removeAt = 0
+		}
+		q.bytes -= q.items[removeAt].bytes
+		copy(q.items[removeAt:], q.items[removeAt+1:])
+		q.items[len(q.items)-1] = queuedAgentEvent{}
+		q.items = q.items[:len(q.items)-1]
+		q.dropped++
+	}
 }
 
 func (q *agentEventMailbox) signalLocked() {
@@ -108,6 +184,9 @@ func (q *agentEventMailbox) popBatch(limit int) []protocol.AgentEvent {
 		return nil
 	}
 	items := append([]queuedAgentEvent(nil), q.items[:count]...)
+	for i := range q.items[:count] {
+		q.bytes -= q.items[i].bytes
+	}
 	clear(q.items[:count])
 	q.items = q.items[count:]
 	if len(q.items) == 0 {

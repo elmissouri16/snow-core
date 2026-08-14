@@ -283,7 +283,7 @@ scanDirs:
 var errNonconformant = errors.New("Agent Skills frontmatter is nonconformant")
 
 func parseRoot(root *os.Root, location string, maxBytes int64) (Skill, []Diagnostic, error) {
-	data, err := readBoundedRoot(root, "SKILL.md", maxBytes)
+	data, err := readFrontmatterRoot(root, "SKILL.md", maxBytes)
 	if err != nil {
 		return Skill{}, nil, err
 	}
@@ -383,8 +383,7 @@ func split(data []byte) (meta, body []byte, err error) {
 	end := bytes.Index(data[4:], []byte("\n---\n"))
 	if end < 0 {
 		if bytes.HasSuffix(data, []byte("\n---")) {
-			end = len(data[4:]) - len("\n---")
-			end += 4
+			end = max(4, len(data)-len("\n---"))
 			return data[4:end], nil, nil
 		}
 		return nil, nil, errors.New("SKILL.md has no closing frontmatter delimiter")
@@ -428,6 +427,41 @@ func openSkillRoot(skill Skill) (*os.Root, error) {
 		return nil, errors.New("skill directory no longer matches the discovered directory")
 	}
 	return root, nil
+}
+
+func readFrontmatterRoot(root *os.Root, name string, maxBytes int64) ([]byte, error) {
+	if root == nil {
+		return nil, errors.New("skill directory is closed")
+	}
+	file, info, err := builtin.OpenRootedRegular(root, name)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	if info.Size() > maxBytes {
+		return nil, fmt.Errorf("file exceeds %d-byte limit", maxBytes)
+	}
+	var data []byte
+	buf := make([]byte, 32<<10)
+	for int64(len(data)) <= maxBytes {
+		n, readErr := file.Read(buf)
+		data = append(data, buf[:n]...)
+		normalized := bytes.ReplaceAll(bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf}), []byte("\r\n"), []byte("\n"))
+		start := 0
+		if len(normalized) >= 4 {
+			start = 4
+		}
+		if bytes.Index(normalized[start:], []byte("\n---\n")) >= 0 {
+			return data, nil
+		}
+		if readErr == io.EOF {
+			return data, nil
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
+	}
+	return nil, fmt.Errorf("file exceeds %d-byte limit", maxBytes)
 }
 
 func readBoundedRoot(root *os.Root, name string, maxBytes int64) ([]byte, error) {

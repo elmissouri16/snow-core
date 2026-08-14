@@ -104,8 +104,10 @@ Snow maps negotiated MCP capabilities into its existing registry:
   results are preserved in Snow-compatible content blocks or bounded base64
   text when Snow has no native block type;
 - pagination cursors remain available on list tools;
-- `tools/list_changed` refreshes both the registry and the in-memory BM25
-  discovery index without restarting Snow;
+- `tools/list_changed` notifications are debounced and coalesced before an
+  atomic registry/BM25 refresh; refresh network I/O is timeout-bounded, does
+  not hold the runtime lifecycle lock, and identical catalogs skip rebuilding
+  the discovery index;
 - the project directory is supplied as an MCP root for backward-compatible
   servers. Roots, sampling, and logging are deprecated in `2026-07-28`; Snow
   does not advertise sampling or elicitation handlers it cannot safely honor.

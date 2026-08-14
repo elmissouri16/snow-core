@@ -199,6 +199,13 @@ func (s *retryingCodexStream) awaitAttempt(ctx context.Context) (codexAttemptRes
 		s.pending = pending
 		go func(ch chan codexAttemptResult) {
 			stream, err, delay := s.startAttempt()
+			s.mu.Lock()
+			closed := s.closed
+			s.mu.Unlock()
+			if closed && stream != nil {
+				_ = stream.Close()
+				stream = nil
+			}
 			ch <- codexAttemptResult{stream: stream, err: err, delay: delay}
 		}(pending)
 	}
@@ -330,7 +337,7 @@ func (s *retryingCodexStream) startAttempt() (protocol.EventStream, error, time.
 			continue
 		}
 		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
-			return responsesapi.NewStream(s.ctx, resp, ProviderID, s.creds.Access, s.creds.Refresh), nil, 0
+			return responsesapi.NewStreamWithIdleTimeout(s.ctx, resp, ProviderID, s.provider.streamIdleTimeout, s.creds.Access, s.creds.Refresh), nil, 0
 		}
 
 		now := time.Now()
@@ -492,7 +499,7 @@ func retryableCodexError(err error) bool {
 	}
 	code := strings.ToLower(responseErr.Code)
 	if code != "" {
-		return code == "network_error" || code == "stream_truncated" || strings.Contains(code, "overload") || strings.Contains(code, "service_unavailable") || strings.Contains(code, "upstream") || strings.Contains(code, "timeout")
+		return code == "network_error" || code == "stream_truncated" || code == "stream_idle" || strings.Contains(code, "overload") || strings.Contains(code, "service_unavailable") || strings.Contains(code, "upstream") || strings.Contains(code, "timeout")
 	}
 	message := strings.ToLower(responseErr.Message)
 	return strings.Contains(message, "overload") || strings.Contains(message, "service unavailable") || strings.Contains(message, "upstream connect") || strings.Contains(message, "temporarily unavailable")

@@ -8,11 +8,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/snow-core/snow/internal/auth"
+	providerpkg "github.com/snow-core/snow/internal/provider"
 )
 
 const (
@@ -28,26 +30,28 @@ var (
 )
 
 type Config struct {
-	BaseURL       string
-	AuthBaseURL   string
-	HTTPClient    *http.Client
-	Store         auth.Store
-	CacheRoot     string
-	ClientVersion string
-	Now           func() time.Time
+	BaseURL           string
+	AuthBaseURL       string
+	HTTPClient        *http.Client
+	Store             auth.Store
+	CacheRoot         string
+	ClientVersion     string
+	StreamIdleTimeout time.Duration
+	Now               func() time.Time
 }
 
 type Provider struct {
-	baseURL       string
-	authBaseURL   string
-	client        *http.Client
-	store         auth.Store
-	cacheRoot     string
-	clientVersion string
-	now           func() time.Time
-	wait          func(context.Context, context.Context, time.Duration) error
-	modelsMu      sync.RWMutex
-	models        []modelRecord
+	baseURL           string
+	authBaseURL       string
+	client            *http.Client
+	store             auth.Store
+	cacheRoot         string
+	clientVersion     string
+	streamIdleTimeout time.Duration
+	now               func() time.Time
+	wait              func(context.Context, context.Context, time.Duration) error
+	modelsMu          sync.RWMutex
+	models            []modelRecord
 }
 
 func New(configs ...Config) *Provider {
@@ -75,7 +79,13 @@ func New(configs ...Config) *Provider {
 	if now == nil {
 		now = time.Now
 	}
-	return &Provider{baseURL: base, authBaseURL: authBase, client: client, store: cfg.Store, cacheRoot: cfg.CacheRoot, clientVersion: version, now: now}
+	streamIdleTimeout := cfg.StreamIdleTimeout
+	if streamIdleTimeout == 0 {
+		streamIdleTimeout = providerpkg.DefaultStreamIdleTimeout
+	} else if streamIdleTimeout < 0 {
+		streamIdleTimeout = -1
+	}
+	return &Provider{baseURL: base, authBaseURL: authBase, client: client, store: cfg.Store, cacheRoot: cfg.CacheRoot, clientVersion: version, streamIdleTimeout: streamIdleTimeout, now: now}
 }
 
 func (p *Provider) ID() string { return ProviderID }
@@ -94,6 +104,9 @@ func (p *Provider) resolve(ctx context.Context, supplied auth.Credential, force 
 			return supplied, nil
 		}
 		return supplied, fmt.Errorf("%w: OAuth token needs refresh but no persistent credential store is configured", ErrLoginRequired)
+	}
+	if coordinator, ok := p.store.(auth.RefreshLockStore); ok {
+		return p.resolveCoordinated(ctx, supplied, force, coordinator)
 	}
 	resolved, _, err := p.store.Update(ProviderID, func(current auth.Credential, exists bool) (auth.Credential, bool, error) {
 		if !exists {
@@ -123,12 +136,67 @@ func (p *Provider) resolve(ctx context.Context, supplied auth.Credential, force 
 	return resolved, err
 }
 
+func (p *Provider) resolveCoordinated(ctx context.Context, supplied auth.Credential, force bool, coordinator auth.RefreshLockStore) (auth.Credential, error) {
+	var resolved auth.Credential
+	err := coordinator.WithRefreshLock(ProviderID, func() error {
+		current, exists, err := p.store.Update(ProviderID, func(current auth.Credential, exists bool) (auth.Credential, bool, error) {
+			return current, false, nil
+		})
+		if err != nil {
+			return err
+		}
+		if !exists {
+			current = supplied
+		} else if force && credentialRotatedSince(current, supplied) {
+			resolved = current
+			return nil
+		}
+		status, err := CheckAuth(current)
+		if err != nil {
+			return err
+		}
+		if !force && !needsRefresh(status, p.now()) {
+			resolved = current
+			return nil
+		}
+		if strings.TrimSpace(current.Refresh) == "" {
+			return fmt.Errorf("%w: OAuth refresh token is missing; sign in again", ErrLoginRequired)
+		}
+		next, err := p.refresh(ctx, current)
+		if err != nil {
+			return err
+		}
+		var resolvedExists bool
+		resolved, resolvedExists, err = p.store.Update(ProviderID, func(latest auth.Credential, latestExists bool) (auth.Credential, bool, error) {
+			if exists && !latestExists {
+				// Logout won while the refresh was in flight. Never resurrect it.
+				return latest, false, nil
+			}
+			if latestExists && !sameCredential(latest, current) {
+				// A concurrent login/import replaced metadata or tokens while the
+				// refresh was in flight. Preserve and reuse that newer value.
+				return latest, false, nil
+			}
+			return next, true, nil
+		})
+		if err == nil && !resolvedExists {
+			return fmt.Errorf("%w: credential was removed during refresh", ErrLoginRequired)
+		}
+		return err
+	})
+	return resolved, err
+}
+
 func needsRefresh(status AuthStatus, now time.Time) bool {
 	return !status.ExpiresAt.IsZero() && !status.ExpiresAt.After(now.Add(refreshSkew))
 }
 
 func credentialRotatedSince(current, supplied auth.Credential) bool {
 	return supplied.Access != "" && (current.Access != supplied.Access || current.Refresh != supplied.Refresh)
+}
+
+func sameCredential(left, right auth.Credential) bool {
+	return left.Type == right.Type && left.Key == right.Key && left.Access == right.Access && left.Refresh == right.Refresh && left.Expires == right.Expires && left.AccountID == right.AccountID && reflect.DeepEqual(left.Extra, right.Extra)
 }
 
 type tokenResponse struct {

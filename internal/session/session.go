@@ -219,6 +219,8 @@ type SessionInfo struct {
 	CreatedAt int64  `json:"created_at"`
 	UpdatedAt int64  `json:"updated_at"`
 	Messages  int    `json:"messages"`
+	// searchFingerprint tracks branch names/tips for the derived FTS cache.
+	searchFingerprint string
 }
 
 // Index discovers and opens sessions on disk.
@@ -1268,10 +1270,26 @@ func linearize(entries []Entry, byID map[string]int, tip string) ([]protocol.Mes
 // marker. History remains append-only; only the provider-facing projection
 // replaces the compacted prefix with one harness summary message.
 func contextMessagesFromEntries(entries []Entry) []protocol.Message {
+	positions := make(map[string]int, len(entries))
+	for i := range entries {
+		positions[entries[i].ID] = i
+	}
 	lastCompaction := -1
+	boundaryPos := -1
 	for i, entry := range entries {
-		if entry.Type == EntryCompaction && strings.TrimSpace(entry.Summary) != "" {
+		if entry.Type != EntryCompaction || strings.TrimSpace(entry.Summary) == "" {
+			continue
+		}
+		resolved := i - 1
+		if pos, ok := positions[entry.CompactedThrough]; ok && pos < i {
+			resolved = pos
+		}
+		// Prefer the marker that hides the greatest valid prefix. A newer marker
+		// wins ties, while corrupt forward/unknown references are clamped at the
+		// marker so they can never resurface an older prefix.
+		if resolved > boundaryPos || (resolved == boundaryPos && i > lastCompaction) {
 			lastCompaction = i
+			boundaryPos = resolved
 		}
 	}
 
@@ -1286,23 +1304,7 @@ func contextMessagesFromEntries(entries []Entry) []protocol.Message {
 			Content:   []protocol.ContentBlock{protocol.NewTextBlock("Conversation summary:\n" + entry.Summary)},
 			Timestamp: time.Now().UnixMilli(),
 		})
-		if entry.CompactedThrough != "" {
-			found := false
-			for i, candidate := range entries {
-				if candidate.ID == entry.CompactedThrough {
-					start = i + 1
-					found = true
-					break
-				}
-			}
-			// A marker referencing an unknown entry (hand-edited/corrupt data)
-			// must not resurface the compacted prefix below the summary.
-			if !found {
-				start = lastCompaction + 1
-			}
-		} else {
-			start = lastCompaction + 1
-		}
+		start = boundaryPos + 1
 	}
 	for _, entry := range entries[start:] {
 		if entry.Type == EntryMessage && entry.Message != nil {
@@ -1674,46 +1676,14 @@ func (f *FileIndex) List(cwd string) ([]SessionInfo, error) {
 			if !strings.HasSuffix(path, ".db") || seenPaths[path] {
 				return nil
 			}
-			// Listing is discovery, not creation. Existing-only open validates
-			// candidates before migration so unrelated or disappearing .db files
-			// are skipped without being modified or recreated.
-			st, openErr := OpenSQLiteStore(path, cwd, Options{})
-			if openErr != nil {
-				return nil // skip corrupt/partial files
+			// Listing is read-only discovery: validate and inspect through a
+			// query-only connection without journal changes or schema migration.
+			sessionInfo, include, inspectErr := inspectSQLiteSession(path, cwd, info.ModTime().UnixMilli())
+			if inspectErr != nil || !include {
+				return nil // skip corrupt, partial, foreign, and root-only files
 			}
-			h := st.Header()
-			if !sameCWD(h.CWD, cwd) {
-				_ = st.Close()
-				return nil
-			}
-			hasState, hasStateErr := st.hasDurableState()
-			last := info.ModTime().UnixMilli()
-			if hasStateErr != nil {
-				_ = st.Close()
-				return nil
-			}
-			// A root-only database is an unused session, not a session to resume
-			// or display. Close removes it from disk as well.
-			if !hasState {
-				_ = st.Close()
-				return nil
-			}
-			count, countErr := st.messageCount()
-			if countErr != nil {
-				_ = st.Close()
-				return nil
-			}
-			out = append(out, SessionInfo{
-				Path:      path,
-				ID:        h.ID,
-				CWD:       h.CWD,
-				Name:      h.Name,
-				CreatedAt: h.CreatedAt,
-				UpdatedAt: last,
-				Messages:  count,
-			})
+			out = append(out, sessionInfo)
 			seenPaths[path] = true
-			_ = st.Close()
 			return nil
 		})
 		if err != nil && !os.IsNotExist(err) {

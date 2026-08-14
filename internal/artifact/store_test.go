@@ -82,3 +82,35 @@ func TestLocalStoreIsIdempotentAndBounded(t *testing.T) {
 		t.Fatal("oversized artifact accepted")
 	}
 }
+
+func TestSaveTextRepairsCrashOrphanAndSameSizeTamper(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "artifacts")
+	store, err := NewLocalStore(root, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	const sessionID, key, text = "session", "call", "expected"
+	id := artifactID(sessionID, key, text)
+	dir := filepath.Join(root, namespace(sessionID))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, id+".txt")
+	if err := os.WriteFile(path, []byte("part"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveText(context.Background(), sessionID, key, text); err != nil {
+		t.Fatalf("repair partial: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("tampered"), 0o600); err != nil { // same length
+		t.Fatal(err)
+	}
+	if _, err := store.SaveText(context.Background(), sessionID, key, text); err != nil {
+		t.Fatalf("repair same-size tamper: %v", err)
+	}
+	got, err := store.ReadText(context.Background(), sessionID, id)
+	if err != nil || got != text {
+		t.Fatalf("read=%q err=%v", got, err)
+	}
+}

@@ -9,8 +9,32 @@ import (
 	"strings"
 	"testing"
 
+	providerpkg "github.com/snow-core/snow/internal/provider"
 	"github.com/snow-core/snow/pkg/protocol"
 )
+
+type partialIdleReader struct{ sent bool }
+
+func (r *partialIdleReader) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, providerpkg.ErrStreamIdle
+	}
+	r.sent = true
+	return copy(p, []byte(`data: {"type":"response.output_text.delta","delta":"private partial"}`)), providerpkg.ErrStreamIdle
+}
+func (*partialIdleReader) Close() error { return nil }
+
+func TestStreamIdleDoesNotParseOrExposePartialEvent(t *testing.T) {
+	stream := NewStreamWithIdleTimeout(context.Background(), &http.Response{Body: &partialIdleReader{}}, "test", -1)
+	event, err := stream.Next(context.Background())
+	if err != nil || event.Type != protocol.EvStreamError || event.Err == nil {
+		t.Fatalf("event=%+v err=%v", event, err)
+	}
+	var responseErr *ResponseError
+	if !errors.As(event.Err, &responseErr) || responseErr.Code != "stream_idle" || strings.Contains(event.Err.Error(), "private partial") {
+		t.Fatalf("stream error=%v", event.Err)
+	}
+}
 
 func TestBuildRequestCapabilityOptionsAndStandardLimits(t *testing.T) {
 	temperature := 0.2

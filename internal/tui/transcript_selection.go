@@ -91,6 +91,9 @@ func splitTranscriptSelectionLines(content string) []string {
 }
 
 func (m *Model) transcriptSelectionSourceLines() []string {
+	if len(m.transcriptSelectionLines) == 0 && m.transcriptContent != "" {
+		m.transcriptSelectionLines = splitTranscriptSelectionLines(m.transcriptContent)
+	}
 	return m.transcriptSelectionLines
 }
 
