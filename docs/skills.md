@@ -41,14 +41,22 @@ preserved as metadata only and never bypasses Snow permissions.
 
 ## Discovery and precedence
 
-The startup scan is bounded and metadata-only. Default locations, from lower
-to higher precedence, are:
+The startup scan is bounded and metadata-only. Sources, from lower to higher
+precedence, are:
 
-1. `~/.agents/skills/`
-2. `~/.snow/skills/` (or `$SNOW_HOME/skills/`)
-3. explicit global/CLI skill directories
-4. `<project>/.agents/skills/` after project trust is allowed
-5. `<project>/.snow/skills/` after project trust is allowed
+0. immutable skills embedded in the Snow binary;
+1. `~/.agents/skills/`;
+2. `~/.snow/skills/` (or `$SNOW_HOME/skills/`);
+3. explicit global/CLI skill directories;
+4. `<project>/.agents/skills/` after project trust is allowed;
+5. `<project>/.snow/skills/` after project trust is allowed.
+
+Snow currently embeds `plugin-builder`, a supervised playbook and template set
+for creating external protocol-v2 plugins when a reusable capability is missing.
+It can be activated explicitly with `$plugin-builder`. Like every skill, it is
+instructional only: file creation, validation, configuration changes, and shell
+execution remain separate permissioned operations. A valid same-named
+filesystem skill shadows the built-in.
 
 Set `skills.include_claude` to also scan user/project `.claude/skills/`
 locations. Project skills always override same-named user skills. Snow-native
@@ -115,9 +123,11 @@ Snow follows all three disclosure tiers:
    TUI, typing a leading `$` opens autocomplete over enabled skill names and
    descriptions; Enter or Tab inserts the selected directive without submitting.
 3. `read_skill_resource` reads one referenced script, reference, or asset on
-   demand through a pinned `os.Root`; each operation verifies the directory
-   identity recorded at discovery, preventing traversal, symlink escape, and
-   ancestor-replacement races without retaining one file descriptor per skill.
+   demand. Filesystem skills use a pinned `os.Root`; each operation verifies the
+   directory identity recorded at discovery, preventing traversal, symlink
+   escape, and ancestor-replacement races without retaining one file descriptor
+   per skill. Built-in resources use the immutable embedded filesystem and the
+   same path, size, file-count, depth, and cancellation bounds.
 
 Activation returns structured, XML-escaped `<skill_content>` with the skill
 directory and a bounded resource inventory. Resource files are listed through a

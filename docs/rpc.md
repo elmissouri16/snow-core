@@ -31,7 +31,7 @@ shutdown, which cancels active RPC work. Use a persistent subprocess client.
 ## Transport and framing
 
 - **stdin:** client request objects
-- **stdout:** response objects and asynchronous `protocol.AgentEvent` objects
+- **stdout:** `rpc_ready`, response objects, `prompt_completed`, and asynchronous `protocol.AgentEvent` objects
 - **stderr:** startup/configuration diagnostics and process-level errors
 - **framing:** UTF-8 JSON, exactly one object per LF (`\n`) line
 - **maximum input line:** 16 MiB
@@ -42,8 +42,40 @@ Responses and events share one serialized writer, so bytes from different
 objects never interleave. Object ordering is still asynchronous: a later command
 may respond before an earlier prompt or `subagent_wait` completes.
 
-RPC writes an initial collaboration-mode event and restored goal/subagent events
-at startup. Clients must accept events before their first response.
+The first frame is always `rpc_ready`. Snow then writes the initial
+collaboration-mode event and restored goal/subagent events before accepting or
+while processing commands. Clients must accept events before their first
+response.
+
+## Protocol handshake
+
+```json
+{
+  "type": "rpc_ready",
+  "protocol_version": "1",
+  "snow_version": "0.1.0-dev",
+  "capabilities": [
+    "active_input",
+    "goals",
+    "models_list",
+    "prompt_completion",
+    "session_info",
+    "subagent_models",
+    "subagents",
+    "user_input"
+  ],
+  "max_input_bytes": 16777216
+}
+```
+
+Clients must validate `protocol_version` before sending commands and should
+check capabilities before exposing optional high-level methods. Capabilities
+state wire support, not runtime enablement; for example, `subagent_models` is
+advertised even when subagents are disabled for the current process.
+
+Version 1 is additive: clients must tolerate unknown capabilities, event types,
+and optional output fields. Removing or changing existing fields/enums requires
+a new protocol version.
 
 ## Request envelope
 
@@ -69,10 +101,11 @@ at startup. Clients must accept events before their first response.
 | `mode` | Top-level collaboration mode for `set_mode` or prompt-attached mode |
 | `params` | Command-specific JSON object |
 
-Use a unique ID for every request. Events do not carry request IDs. The request
-and response envelopes are documentation-defined wire types implemented by
-`internal/rpc`; `pkg/protocol` exposes event and nested payload DTOs but does not
-currently export RPC command-envelope or typed `session_info` structs.
+Use a unique ID for every request. Ordinary agent events do not carry request
+IDs. Public `protocol.RPCRequest`, `RPCResponse`, `RPCReady`,
+`RPCPromptCompleted`, `RPCSessionInfo`, and model-list DTOs define the stable Go
+wire representation. Canonical JSON schemas live under
+[`pkg/protocol/schema/rpc/v1`](../pkg/protocol/schema/rpc/v1).
 
 ## Response envelope
 
@@ -100,8 +133,9 @@ Failure:
 }
 ```
 
-A client should route `type == "response"` by ID and route every other known
-`type` through its event handler.
+A client should route `type == "response"` by ID, route
+`type == "prompt_completed"` by `request_id`, and send remaining known types to
+its agent-event handler. `rpc_ready` is handled once during startup.
 
 Malformed JSON receives a failure response with `command: "invalid"`. Unknown
 commands and validation/runtime failures use the requested command name.
@@ -122,13 +156,20 @@ Attach a collaboration mode atomically:
 
 `message` is required. `mode`, when present, is `default` or `plan`.
 
-The server immediately returns a successful acknowledgement, then runs the root
-prompt asynchronously while continuing to read stdin. `turn_done` marks the end
-of the agent turn, not a definitive successful RPC outcome. A runtime or
-persistence failure discovered as the prompt unwinds may produce a second
-`success:false` response with the same prompt ID after `turn_done`; clients must
-keep reading while the process remains active and treat that response as
-terminal failure for the accepted prompt.
+The server immediately returns a successful admission acknowledgement, then runs
+the root prompt asynchronously while continuing to read stdin. `turn_done`
+marks the agent lifecycle boundary. The definitive RPC result follows after the
+prompt fully unwinds:
+
+```json
+{"type":"prompt_completed","request_id":"prompt-1","status":"completed"}
+```
+
+Failure and cancellation use `status: "failed"` (with `error`) or
+`status: "canceled"`. For compatibility, a failed prompt also retains the older
+same-ID `success:false` response immediately before `prompt_completed`. New
+clients must resolve prompt futures from exactly one `prompt_completed` frame,
+not from `turn_done` or the admission response.
 
 Only one root prompt may run. A second `prompt` fails; it never implicitly
 cancels accepted work. Use `steer`, `follow_up`, or `abort`.
@@ -162,6 +203,28 @@ Cancels admitted root work and clears undelivered queued input. If goal work was
 active, it remains deferred across ordinary `prompt` commands until an explicit
 `goal_resume` or `goal_continue`. The command is acknowledged even when no
 prompt is active.
+
+### `models_list`
+
+```json
+{"id":"models-1","type":"models_list"}
+```
+
+Returns the active provider, current model ID, and a defensive copy of the
+active provider catalog:
+
+```json
+{
+  "id":"models-1",
+  "type":"response",
+  "command":"models_list",
+  "success":true,
+  "data":{"provider":"fake","current":"fake-1","models":[{"provider":"fake","id":"fake-1","supports_tools":true,"supports_thinking":false,"supports_vision":false}]}
+}
+```
+
+An unavailable/empty discovered catalog is a successful empty list; explicitly
+configured compatible model IDs may still work.
 
 ### `set_model`
 
@@ -348,6 +411,16 @@ not invoices. Goal state also streams through `thread_goal_updated`.
 Enable subagents with `--subagents` or configuration. See [Subagents](subagents.md)
 for role, authority, persistence, and lifecycle details.
 
+### `subagent_models`
+
+```json
+{"id":"child-models-1","type":"subagent_models"}
+```
+
+Returns exact provider/model pairs available to children and an `enabled` flag
+for the current runtime. The catalog is returned even when spawning is disabled,
+so a host can configure a future session without guessing model IDs.
+
 ### `subagent_spawn`
 
 ```json
@@ -412,7 +485,8 @@ wait responses may arrive out of request order. `data` is a
 
 ## Event stream
 
-Every non-response stdout object is a normalized `protocol.AgentEvent`.
+After the `rpc_ready` handshake, frames other than `response` and
+`prompt_completed` are normalized `protocol.AgentEvent` values.
 
 | Category | Event types |
 |---|---|
@@ -516,40 +590,43 @@ forward compatibility.
 A typical sequence is:
 
 ```text
-mode_changed event                     # startup, before requests
-response(id=prompt-1, success=true)    # prompt accepted
+rpc_ready                              # first frame; validate version
+mode_changed event                     # startup state
+response(id=prompt-1, success=true)    # prompt admitted
 text_delta / tool_* / usage events
 queue_updated events                   # if steer/follow-up is admitted/delivered
-turn_done event                        # root turn complete
+turn_done event                        # agent lifecycle boundary
+prompt_completed(request_id=prompt-1) # definitive RPC result
 ```
 
 Important ordering rules:
 
 - Prompt acknowledgement is admission, not completion.
-- `turn_done` ends the agent turn but does not prove the RPC command succeeded.
-- A prompt runtime/persistence failure can send a later failure response with the
-  same ID, including after `turn_done`; keep the response route alive.
+- `turn_done` ends the agent turn; `prompt_completed` is the terminal RPC result.
+- A failed prompt retains a legacy same-ID failure response immediately before
+  its single `prompt_completed(status=failed)` frame.
 - `subagent_wait` responses are asynchronous.
 - Different command responses can arrive out of request order.
 - Writes are frame-atomic, so a single JSON line is never mixed with another.
 - EOF, cancellation, and scanner failures cancel and join prompt/wait workers
   before `Serve` returns; cleanup failures are returned to the host.
-- Keep a response table keyed by ID and process events independently.
+- Keep a response table keyed by ID, a prompt-terminal table keyed by
+  `request_id`, and process agent events independently.
 
-## Minimal runnable Python client
+## Runnable Python and JavaScript clients
 
-A dependency-free, directly runnable version lives at
-[`examples/rpc/python/client.py`](../examples/rpc/python/client.py) and is
-exercised by Linux/macOS CI against the fake provider:
+Typed, zero-runtime-dependency SDKs and runnable examples are exercised by
+Linux/macOS CI against the fake provider:
 
 ```sh
 go build -o ./snow ./cmd/snow
 python3 examples/rpc/python/client.py --snow ./snow
+node examples/rpc/javascript/client.mjs ./snow
 ```
 
-The following equivalent core example starts a persistent RPC process, sends one
-prompt, prints root text, answers model questions, waits for `turn_done`, then
-closes stdin for orderly shutdown.
+See [Python and JavaScript/TypeScript SDKs](language-sdks.md) for the supported
+high-level clients. The following low-level example shows the underlying framing,
+including the distinction between `turn_done` and `prompt_completed`.
 
 ```python
 #!/usr/bin/env python3
@@ -576,21 +653,24 @@ def send(message):
     proc.stdin.flush()
 
 
+ready = json.loads(proc.stdout.readline())
+if ready.get("type") != "rpc_ready" or ready.get("protocol_version") != "1":
+    raise RuntimeError("unsupported Snow RPC protocol")
+
 send({
     "id": "prompt-1",
     "type": "prompt",
     "message": "Summarize this repository.",
 })
 
+legacy_error = None
 for line in proc.stdout:
     message = json.loads(line)
     kind = message.get("type")
 
     if kind == "response":
-        if not message.get("success"):
-            print(message.get("error", "RPC error"), file=sys.stderr)
-            if message.get("id") == "prompt-1":
-                break
+        if not message.get("success") and message.get("id") == "prompt-1":
+            legacy_error = message.get("error", "RPC error")
         continue
 
     if kind == "text_delta" and "agent" not in message:
@@ -614,18 +694,20 @@ for line in proc.stdout:
 
     if kind == "turn_done" and "agent" not in message:
         print()
+
+    if kind == "prompt_completed" and message.get("request_id") == "prompt-1":
+        if message.get("status") != "completed":
+            raise RuntimeError(message.get("error") or legacy_error or message.get("status"))
         break
 
 proc.stdin.close()  # EOF: orderly RPC shutdown
 raise SystemExit(proc.wait())
 ```
 
-This compact snippet demonstrates framing and events, not a definitive terminal
-success handshake. The current protocol can emit a same-ID prompt failure after
-`turn_done`; a long-lived host must keep its response route active and surface
-such late failures. The checked-in client additionally correlates
-`session_info` and the prompt acknowledgement by ID, but remains a lifecycle
-smoke example rather than a reusable RPC library.
+This compact snippet demonstrates raw framing. Applications should normally use
+the checked-in Python or JavaScript SDK, which validates the handshake, routes
+out-of-order responses, bounds frames/queues, and waits for definitive prompt
+completion.
 
 Production clients should also:
 
@@ -636,7 +718,7 @@ Production clients should also:
 - handle stderr separately;
 - redact secrets and provider-sensitive payloads;
 - tolerate events before the first request;
-- decide what to do if the process exits before `turn_done`.
+- reject prompt futures if the process exits before `prompt_completed`.
 
 ## Errors and shutdown
 
@@ -668,11 +750,8 @@ OS privileges. Read the [Security model](security.md).
 ## Current RPC boundary
 
 The current command surface covers prompts, active root input, cancellation,
-model/thinking/mode controls, session inspection, model-requested input, goals,
-and subagents. RPC does not expose provider or subagent model catalogs;
-`session_info` reports only the active model and its supported thinking levels.
-Hosts must select exact provider/model IDs out of band through startup
-configuration/flags before using `set_model` or child model overrides.
+active-provider and subagent model discovery, model/thinking/mode controls,
+session inspection, model-requested input, goals, and subagents.
 
 Branch management, compaction, reasoning-summary/text-verbosity controls,
 configuration mutation, MCP/skill management, and login are currently

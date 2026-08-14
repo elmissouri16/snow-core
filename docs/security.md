@@ -230,6 +230,14 @@ classification but does not constrain what the child process can actually do.
 MCP annotations remain untrusted hints. Plugin/MCP results and instructions are
 external model context and cannot override system or user authority.
 
+The embedded `$plugin-builder` skill is guidance, not an execution capability.
+Generated files still need ordinary write approval. Testing, compiling, and
+`plugin check` need execution approval, and dependency downloads need network
+approval. `plugin check` starts initialization code with user privileges; it is
+not passive validation. `plugin add` therefore persists generated declarations
+disabled by default, enabling is separate and explicit, and activation occurs
+only after restart. Project trust never substitutes for generated-code review.
+
 Use `snow plugin check` to inspect a runtime's declared tools, risks, subscribed
 events, and bounded diagnostics. Diagnostic credential redaction is best effort;
 plugins must never emit secrets. See [Plugins](plugins.md), the external
@@ -314,6 +322,11 @@ Use only inside a container/VM/runner whose OS-level permissions and secrets are
 already constrained. Snow's `allow` mode is not the containment mechanism.
 
 ### Headless SDK/RPC
+
+The Python and JavaScript/TypeScript SDKs start an external Snow binary directly
+without a shell. They do not download binaries or accept API keys as process
+arguments; credentials should come from Snow's auth store or a deliberately
+controlled inherited environment.
 
 - default to `deny`;
 - pass the smallest built-in tool allowlist;

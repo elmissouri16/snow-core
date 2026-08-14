@@ -43,6 +43,19 @@ func (p *rpcQueueProvider) Chat(_ context.Context, _ auth.Credential, _ protocol
 	return &rpcGateStream{}, nil
 }
 
+type rpcErrorProvider struct{}
+
+func (*rpcErrorProvider) ID() string { return "rpc-error" }
+func (*rpcErrorProvider) ListModels(context.Context) ([]protocol.Model, error) {
+	return nil, nil
+}
+func (*rpcErrorProvider) Resolve(_ context.Context, credential auth.Credential) (auth.Credential, error) {
+	return credential, nil
+}
+func (*rpcErrorProvider) Chat(context.Context, auth.Credential, protocol.ChatRequest) (protocol.EventStream, error) {
+	return nil, errors.New("fixture prompt failure")
+}
+
 type rpcGateStream struct {
 	release <-chan struct{}
 	done    bool
@@ -79,6 +92,25 @@ func (r *terminalErrorReader) Read(p []byte) (int, error) {
 }
 
 type shortWriter struct{}
+
+func rpcFrame(t *testing.T, output, kind, id string) []byte {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		var header struct {
+			Type      string `json:"type"`
+			ID        string `json:"id"`
+			RequestID string `json:"request_id"`
+		}
+		if err := json.Unmarshal([]byte(line), &header); err != nil {
+			t.Fatalf("decode RPC frame %q: %v", line, err)
+		}
+		if header.Type == kind && (id == "" || header.ID == id || header.RequestID == id) {
+			return []byte(line)
+		}
+	}
+	t.Fatalf("RPC frame type=%q id=%q not found in %q", kind, id, output)
+	return nil
+}
 
 func (shortWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
@@ -147,8 +179,7 @@ func TestRPCPromptAndEvents(t *testing.T) {
 
 	srv := New(context.Background(), a, &in, &out)
 	srv.app.Agent.Subscribe(func(ev protocol.AgentEvent) {
-		b, _ := json.Marshal(ev)
-		out.Write(append(b, '\n'))
+		_ = srv.write(ev)
 	})
 
 	in.WriteString("{\"id\":\"r1\",\"type\":\"prompt\",\"message\":\"hello\"}\n")
@@ -160,18 +191,30 @@ func TestRPCPromptAndEvents(t *testing.T) {
 	if len(lines) == 0 {
 		t.Fatal("no output")
 	}
-	// First line should be the prompt response.
+	var ready protocol.RPCReady
+	if err := json.Unmarshal([]byte(lines[0]), &ready); err != nil {
+		t.Fatal(err)
+	}
+	if ready.Type != protocol.RPCTypeReady || ready.ProtocolVersion != protocol.RPCProtocolVersion {
+		t.Fatalf("bad first frame: %+v", ready)
+	}
 	var resp Response
-	if err := json.Unmarshal([]byte(lines[0]), &resp); err != nil {
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "r1"), &resp); err != nil {
 		t.Fatal(err)
 	}
 	if resp.Command != "prompt" || !resp.Success {
 		t.Fatalf("bad response: %+v", resp)
 	}
-	// The rest should be events including turn_done.
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "turn_done") {
-		t.Fatalf("expected turn_done event, got:\n%s", joined)
+	if !strings.Contains(joined, "turn_done") || !strings.Contains(joined, protocol.RPCTypePromptCompleted) {
+		t.Fatalf("expected turn_done and prompt completion, got:\n%s", joined)
+	}
+	var completed protocol.RPCPromptCompleted
+	if err := json.Unmarshal(rpcFrame(t, out.String(), protocol.RPCTypePromptCompleted, "r1"), &completed); err != nil {
+		t.Fatal(err)
+	}
+	if completed.RequestID != "r1" || completed.Status != protocol.RPCPromptCanceledStatus {
+		t.Fatalf("completion = %+v", completed)
 	}
 }
 
@@ -189,11 +232,11 @@ func TestRPCSessionRenameAndInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 2 {
+	if len(lines) != 3 {
 		t.Fatalf("lines = %q", lines)
 	}
 	var info Response
-	if err := json.Unmarshal([]byte(lines[1]), &info); err != nil {
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "i1"), &info); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := info.Data.(map[string]any)
@@ -232,18 +275,18 @@ func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 2 {
+	if len(lines) != 3 {
 		t.Fatalf("lines = %q", lines)
 	}
 	var set Response
-	if err := json.Unmarshal([]byte(lines[0]), &set); err != nil {
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "t1"), &set); err != nil {
 		t.Fatal(err)
 	}
 	if set.Command != "set_thinking" || !set.Success {
 		t.Fatalf("set response = %+v", set)
 	}
 	var info Response
-	if err := json.Unmarshal([]byte(lines[1]), &info); err != nil {
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "i1"), &info); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := info.Data.(map[string]any)
@@ -273,6 +316,114 @@ func TestRPCSecondPromptDoesNotCancelActivePrompt(t *testing.T) {
 	}
 	if cancelled {
 		t.Fatal("second prompt implicitly cancelled active work")
+	}
+}
+
+func TestRPCPromptCompletionPreservesMissingID(t *testing.T) {
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "deny", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	var out bytes.Buffer
+	srv := New(context.Background(), a, strings.NewReader(""), &out)
+	if err := srv.handlePrompt(context.Background(), Request{Type: "prompt", Message: "idless"}); err != nil {
+		t.Fatal(err)
+	}
+	srv.mu.Lock()
+	done := srv.promptDone
+	srv.mu.Unlock()
+	<-done
+	var completed protocol.RPCPromptCompleted
+	if err := json.Unmarshal(rpcFrame(t, out.String(), protocol.RPCTypePromptCompleted, ""), &completed); err != nil {
+		t.Fatal(err)
+	}
+	if completed.RequestID != "" || completed.Status != protocol.RPCPromptCompletedStatus {
+		t.Fatalf("completion = %+v", completed)
+	}
+}
+
+func TestRPCPromptFailureKeepsLegacyResponseBeforeTerminalCompletion(t *testing.T) {
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	provider := &rpcErrorProvider{}
+	model := a.Agent.Model()
+	model.Provider = provider.ID()
+	if err := a.Agent.SetProviderAndModel(provider, model); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	srv := New(context.Background(), a, strings.NewReader(""), &out)
+	a.Agent.Subscribe(func(event protocol.AgentEvent) { _ = srv.write(event) })
+	if err := srv.handlePrompt(context.Background(), Request{ID: "p1", Type: "prompt", Message: "fail"}); err != nil {
+		t.Fatal(err)
+	}
+	srv.mu.Lock()
+	done := srv.promptDone
+	srv.mu.Unlock()
+	<-done
+
+	failureIndex := -1
+	completionIndex := -1
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	for i, line := range lines {
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			t.Fatal(err)
+		}
+		if frame["type"] == "response" && frame["id"] == "p1" && frame["success"] == false {
+			failureIndex = i
+		}
+		if frame["type"] == protocol.RPCTypePromptCompleted && frame["request_id"] == "p1" {
+			completionIndex = i
+			if frame["status"] != string(protocol.RPCPromptFailedStatus) || !strings.Contains(fmt.Sprint(frame["error"]), "fixture prompt failure") {
+				t.Fatalf("completion = %+v", frame)
+			}
+		}
+	}
+	if failureIndex < 0 || completionIndex != len(lines)-1 || failureIndex >= completionIndex {
+		t.Fatalf("legacy failure=%d completion=%d frames=%q", failureIndex, completionIndex, lines)
+	}
+}
+
+func TestRPCAbortEmitsTerminalCanceledCompletion(t *testing.T) {
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	provider := &rpcQueueProvider{started: make(chan struct{}), release: make(chan struct{})}
+	model := a.Agent.Model()
+	model.Provider = provider.ID()
+	if err := a.Agent.SetProviderAndModel(provider, model); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	srv := New(context.Background(), a, strings.NewReader(""), &out)
+	a.Agent.Subscribe(func(event protocol.AgentEvent) { _ = srv.write(event) })
+	if err := srv.handlePrompt(context.Background(), Request{ID: "p1", Type: "prompt", Message: "wait"}); err != nil {
+		t.Fatal(err)
+	}
+	<-provider.started
+	if err := srv.handle(context.Background(), Request{ID: "a1", Type: "abort"}); err != nil {
+		t.Fatal(err)
+	}
+	srv.mu.Lock()
+	done := srv.promptDone
+	srv.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	var completed protocol.RPCPromptCompleted
+	if err := json.Unmarshal(rpcFrame(t, out.String(), protocol.RPCTypePromptCompleted, "p1"), &completed); err != nil {
+		t.Fatal(err)
+	}
+	if completed.Type != protocol.RPCTypePromptCompleted || completed.RequestID != "p1" || completed.Status != protocol.RPCPromptCanceledStatus || completed.Error != "" {
+		t.Fatalf("completion = %+v; frames = %q", completed, lines)
 	}
 }
 
@@ -313,7 +464,7 @@ func TestRPCQueueCommandsAcceptActiveRunAndReportCounts(t *testing.T) {
 		t.Fatalf("responses = %q", lines)
 	}
 	var info Response
-	if err := json.Unmarshal([]byte(lines[2]), &info); err != nil {
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "i"), &info); err != nil {
 		t.Fatal(err)
 	}
 	data := info.Data.(map[string]any)
@@ -367,7 +518,7 @@ func TestRPCUnknownCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	var resp Response
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &resp); err != nil {
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "r1"), &resp); err != nil {
 		t.Fatal(err)
 	}
 	if resp.Success || !strings.Contains(resp.Error, "unknown command") {
@@ -458,6 +609,71 @@ func TestRPCUserInputReplyAndReject(t *testing.T) {
 			t.Fatalf("output = %s", out)
 		}
 	})
+}
+
+func TestRPCReadyAnnouncementIsFirstAndUnique(t *testing.T) {
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "deny", NoPlugins: true, NoMCP: true, NoSkills: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	var out bytes.Buffer
+	srv := NewWithOptions(context.Background(), a, strings.NewReader(""), &out, ServerOptions{SnowVersion: "test-version"})
+	if err := srv.announceReady(); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Serve(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("ready frames = %q", lines)
+	}
+	var ready protocol.RPCReady
+	if err := json.Unmarshal([]byte(lines[0]), &ready); err != nil {
+		t.Fatal(err)
+	}
+	if ready.Type != protocol.RPCTypeReady || ready.ProtocolVersion != protocol.RPCProtocolVersion || ready.SnowVersion != "test-version" || ready.MaxInputBytes != protocol.RPCMaxInputBytes {
+		t.Fatalf("ready = %+v", ready)
+	}
+}
+
+func TestRPCModelDiscovery(t *testing.T) {
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "deny", NoPlugins: true, NoMCP: true, NoSkills: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	var out bytes.Buffer
+	srv := New(context.Background(), a, strings.NewReader(""), &out)
+	if err := srv.handle(context.Background(), Request{ID: "m1", Type: "models_list"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.handle(context.Background(), Request{ID: "sm1", Type: "subagent_models"}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("responses = %q", lines)
+	}
+	var active struct {
+		Data protocol.RPCModelList `json:"data"`
+	}
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "m1"), &active); err != nil {
+		t.Fatal(err)
+	}
+	if active.Data.Provider != "fake" || active.Data.Current != "fake-1" || len(active.Data.Models) != 1 || active.Data.Models[0].ID != "fake-1" {
+		t.Fatalf("active models = %+v", active.Data)
+	}
+	var children struct {
+		Data protocol.RPCModelList `json:"data"`
+	}
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "sm1"), &children); err != nil {
+		t.Fatal(err)
+	}
+	if children.Data.Enabled == nil || *children.Data.Enabled || len(children.Data.Models) == 0 {
+		t.Fatalf("subagent models = %+v", children.Data)
+	}
 }
 
 func TestRPCEOFReleasesPendingUserInput(t *testing.T) {

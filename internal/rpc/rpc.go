@@ -20,26 +20,11 @@ import (
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
-// Request is one command line from the client.
-type Request struct {
-	ID       string          `json:"id,omitempty"`
-	Type     string          `json:"type"`
-	Message  string          `json:"message,omitempty"`
-	Model    string          `json:"model,omitempty"`
-	Thinking string          `json:"thinking,omitempty"`
-	Mode     string          `json:"mode,omitempty"`
-	Params   json.RawMessage `json:"params,omitempty"`
-}
+// Request is the public JSONL command envelope.
+type Request = protocol.RPCRequest
 
-// Response acknowledges a command.
-type Response struct {
-	ID      string `json:"id,omitempty"`
-	Type    string `json:"type"`
-	Command string `json:"command,omitempty"`
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
-	Data    any    `json:"data,omitempty"`
-}
+// Response is the public JSONL response envelope.
+type Response = protocol.RPCResponse
 
 // Server serves RPC on stdin/stdout.
 type Server struct {
@@ -50,25 +35,40 @@ type Server struct {
 	writeErr      error
 	writeFailed   chan struct{}
 	writeFailOnce sync.Once
+	readyOnce     sync.Once
+	snowVersion   string
 	// cancel aborts the in-flight prompt.
 	cancel     context.CancelFunc
 	promptDone chan struct{}
 	promptWG   sync.WaitGroup
 }
 
-// New creates an RPC server.
+// ServerOptions configures RPC transport metadata.
+type ServerOptions struct {
+	SnowVersion string
+}
+
+// New creates an RPC server with development-version metadata.
 func New(ctx context.Context, a *app.App, in io.Reader, out io.Writer) *Server {
+	return NewWithOptions(ctx, a, in, out, ServerOptions{SnowVersion: "dev"})
+}
+
+// NewWithOptions creates an RPC server.
+func NewWithOptions(ctx context.Context, a *app.App, in io.Reader, out io.Writer, opts ServerOptions) *Server {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	a.EnableUserInputReplies()
-	return &Server{in: in, out: out, app: a, writeFailed: make(chan struct{})}
+	return &Server{in: in, out: out, app: a, writeFailed: make(chan struct{}), snowVersion: opts.SnowVersion}
 }
 
 // Serve reads commands until EOF.
 func (s *Server) Serve(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := s.announceReady(); err != nil {
+		return err
 	}
 	serveCtx, cancelServe := context.WithCancel(ctx)
 	defer cancelServe()
@@ -82,7 +82,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	defer close(scanStop)
 	go func() {
 		scanner := bufio.NewScanner(s.in)
-		scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+		scanner.Buffer(make([]byte, 0, 64*1024), protocol.RPCMaxInputBytes)
 		for scanner.Scan() {
 			select {
 			case scans <- scanResult{line: scanner.Text()}:
@@ -401,12 +401,22 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: g})
 		return nil
+	case "models_list":
+		providerID, model, models := s.app.ActiveModelsSnapshot()
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: protocol.RPCModelList{Provider: providerID, Current: model.ID, Models: models}})
+		return nil
+	case "subagent_models":
+		models := cloneModels(s.app.SubagentModels())
+		enabled := s.app.Subagents != nil
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: protocol.RPCModelList{Enabled: &enabled, Models: models}})
+		return nil
 	case "set_model":
 		if req.Model == "" {
 			return errors.New("set_model requires model")
 		}
-		m := protocol.Model{Provider: s.app.ProviderID, ID: req.Model, SupportsTools: true}
-		for _, cached := range s.app.Models {
+		providerID, _, catalog := s.app.ActiveModelsSnapshot()
+		m := protocol.Model{Provider: providerID, ID: req.Model, SupportsTools: true}
+		for _, cached := range catalog {
 			if cached.ID == req.Model {
 				m = cached
 				break
@@ -472,24 +482,32 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		if err != nil {
 			return err
 		}
-		info := map[string]any{
-			"session_id":         sessionID,
-			"name":               title,
-			"path":               sessionPath,
-			"cwd":                s.app.CWD(),
-			"provider":           s.app.ProviderID,
-			"model":              model.ID,
-			"thinking":           s.app.Agent.Thinking(),
-			"thinking_levels":    model.SupportedThinkingLevels(),
-			"collaboration_mode": s.app.Agent.Mode(),
+		info := protocol.RPCSessionInfo{
+			SessionID:         sessionID,
+			Name:              title,
+			Path:              sessionPath,
+			CWD:               s.app.CWD(),
+			Provider:          s.app.ProviderID,
+			Model:             model.ID,
+			Thinking:          s.app.Agent.Thinking(),
+			ThinkingLevels:    model.SupportedThinkingLevels(),
+			CollaborationMode: s.app.Agent.Mode(),
+			Subagents: protocol.RPCSubagentLimits{
+				Enabled:              s.app.Subagents != nil,
+				MaxConcurrentAgents:  s.app.Cfg.Subagents.MaxConcurrentThreads,
+				MaxConcurrentThreads: s.app.Cfg.Subagents.MaxConcurrentThreads,
+				MaxAgentsPerSession:  s.app.Cfg.Subagents.MaxAgentsPerSession,
+				MaxDepth:             s.app.Cfg.Subagents.MaxDepth,
+				Durable:              s.app.Cfg.Subagents.Durable,
+				AllowMutation:        s.app.Cfg.Subagents.AllowMutation,
+			},
 		}
 		goal, _ := s.app.GoalState()
 		if goal != nil {
-			info["goal"] = map[string]any{"goal_id": goal.GoalID, "status": goal.Status, "tokens_used": goal.TokensUsed, "token_budget": goal.TokenBudget, "estimated_costs": goal.EstimatedCosts}
+			info.Goal = &protocol.RPCGoalSummary{GoalID: goal.GoalID, Status: goal.Status, TokensUsed: goal.TokensUsed, TokenBudget: goal.TokenBudget, EstimatedCosts: append([]protocol.Cost(nil), goal.EstimatedCosts...)}
 		}
-		info["subagents"] = map[string]any{"enabled": s.app.Subagents != nil, "max_concurrent_agents": s.app.Cfg.Subagents.MaxConcurrentThreads, "max_concurrent_threads": s.app.Cfg.Subagents.MaxConcurrentThreads, "max_agents_per_session": s.app.Cfg.Subagents.MaxAgentsPerSession, "max_depth": s.app.Cfg.Subagents.MaxDepth, "durable": s.app.Cfg.Subagents.Durable, "allow_mutation": s.app.Cfg.Subagents.AllowMutation}
 		steering, followUps := s.app.Agent.PendingInputs().Counts()
-		info["pending_inputs"] = map[string]any{"steering": steering, "follow_up": followUps, "total": steering + followUps}
+		info.PendingInputs = protocol.RPCPendingInputCounts{Steering: steering, FollowUp: followUps, Total: steering + followUps}
 		s.write(Response{ID: req.ID, Type: "response", Command: "session_info", Success: true, Data: info})
 		return nil
 	default:
@@ -541,9 +559,24 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 		} else {
 			err = s.app.Agent.Prompt(promptCtx, req.Message)
 		}
-		if err != nil && !errors.Is(err, context.Canceled) {
+		canceled := promptCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+		if err != nil && !canceled {
 			s.write(Response{ID: req.ID, Type: "response", Command: "prompt", Success: false, Error: err.Error()})
 		}
+		completed := protocol.RPCPromptCompleted{
+			Type:      protocol.RPCTypePromptCompleted,
+			RequestID: req.ID,
+			Status:    protocol.RPCPromptCompletedStatus,
+		}
+		if canceled {
+			completed.Status = protocol.RPCPromptCanceledStatus
+		} else if err != nil {
+			completed.Status = protocol.RPCPromptFailedStatus
+		}
+		if completed.Status == protocol.RPCPromptFailedStatus {
+			completed.Error = err.Error()
+		}
+		s.write(completed)
 		close(done)
 		s.mu.Lock()
 		if s.promptDone == done {
@@ -553,6 +586,23 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 		s.mu.Unlock()
 	}()
 	return nil
+}
+
+func (s *Server) announceReady() error {
+	s.readyOnce.Do(func() {
+		_ = s.write(protocol.NewRPCReady(s.snowVersion))
+	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writeErr
+}
+
+func cloneModels(models []protocol.Model) []protocol.Model {
+	out := make([]protocol.Model, len(models))
+	for i, model := range models {
+		out[i] = model.Clone()
+	}
+	return out
 }
 
 func (s *Server) write(v any) error {
@@ -590,8 +640,13 @@ func (s *Server) recordWriteErr(err error) {
 	}
 }
 
-// Main is the RPC entry point used by cmd/snow --mode rpc.
-func Main(ctx context.Context, opts app.Options) (err error) {
+// Main is the RPC entry point used by embedders that do not supply build metadata.
+func Main(ctx context.Context, opts app.Options) error {
+	return MainWithVersion(ctx, opts, "dev")
+}
+
+// MainWithVersion is the RPC entry point used by cmd/snow --mode rpc.
+func MainWithVersion(ctx context.Context, opts app.Options, snowVersion string) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -606,7 +661,10 @@ func Main(ctx context.Context, opts app.Options) (err error) {
 
 	// Stream agent events to stdout as JSONL through the server's locked
 	// writer so responses and events can never interleave corruptly.
-	srv := New(ctx, a, os.Stdin, os.Stdout)
+	srv := NewWithOptions(ctx, a, os.Stdin, os.Stdout, ServerOptions{SnowVersion: snowVersion})
+	if err := srv.announceReady(); err != nil {
+		return err
+	}
 	a.Agent.Subscribe(func(ev protocol.AgentEvent) {
 		srv.write(ev)
 	})

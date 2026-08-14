@@ -112,8 +112,10 @@ the same provider → tool → session loop.
 | Interactive TUI | `snow` | Daily terminal coding with pickers, approvals, sessions, Plan Mode, goals, and subagent inspection |
 | Print | `snow -p "..."` | Human-readable one-shot automation |
 | JSON events | `snow --mode json -p "..."` | Shell pipelines and event recording |
-| RPC | `snow --mode rpc` | Long-lived foreign-language/IDE control over JSONL stdio |
+| RPC | `snow --mode rpc` | Versioned long-lived foreign-language/IDE control over JSONL stdio |
 | Go SDK | `github.com/snow-core/snow/pkg/snowsdk` | In-process embedding without Cobra or Bubble Tea |
+| Python SDK | [`sdk/python`](sdk/python) | Async typed local client around an external Snow binary |
+| JavaScript/TypeScript SDK | [`sdk/javascript`](sdk/javascript) | Zero-dependency ESM client with TypeScript declarations |
 
 Common examples:
 
@@ -220,10 +222,13 @@ See [Plan Mode](docs/plan-mode.md), [Thread Goals](docs/goals.md), and
 - **Plugins:** statically linked Go extensions or persistent JSON-RPC v2 child
   runtimes with namespaced tools, declared risk, private result metadata,
   progress, cancellation, and explicitly subscribed observe-only events.
-  Dependency-free JavaScript and Python examples are included.
+  Dependency-free JavaScript and Python examples are included. Configuration
+  has side-effect-free list/get plus add/enable/disable/remove management.
 - **Agent Skills:** strict open `SKILL.md` validation with metadata-only startup
   context, TUI autocomplete for leading `$skill-name` or model-driven activation,
-  pinned on-demand resource confinement, and trust-aware precedence.
+  pinned on-demand resource confinement, and trust-aware precedence. The binary
+  embeds `$plugin-builder`, a supervised workflow and template set for staging,
+  validating, reviewing, and explicitly enabling agent-authored plugins.
 - **Tool routing:** opt-in, namespace-first Bleve BM25 discovery keeps deferred
   schemas out of ordinary provider requests, retains a global rescue ranking,
   and exposes `search_tools` as a recovery path.
@@ -231,21 +236,30 @@ See [Plan Mode](docs/plan-mode.md), [Thread Goals](docs/goals.md), and
   role-scoped tools, attributed mailboxes, concurrency/depth limits, and
   SDK/RPC/TUI observation.
 
-Validate an external runtime without starting an agent:
+Build or manage external runtimes without hot-loading them:
 
 ```sh
+# In a Snow prompt, start with: $plugin-builder Build a reusable ...
 snow plugin check examples/plugins/javascript/manifest.json
 snow plugin check examples/plugins/python/manifest.json --json
+snow plugin add ./my-plugin/manifest.json --project # staged disabled
+snow plugin enable my-plugin --project              # next launch; restart required
+snow plugin list --all
 ```
+
+`plugin check` starts the runtime, so it requires the same trust as executing
+other generated code. List/get/add/enable/disable/remove never start it.
 
 See [MCP](docs/mcp.md), [plugins](docs/plugins.md), the complete
 [plugin protocol](docs/plugin-protocol.md), [Agent Skills](docs/skills.md),
 [tool routing](docs/tool-routing.md), and [subagents](docs/subagents.md).
 
 Runnable integration projects live under [`examples/`](examples/): a standalone
-[Go SDK module](examples/sdk), a dependency-free [Python RPC client](examples/rpc/python),
-and JavaScript/Python plugin runtimes. The SDK and RPC examples default to the
-credential-free fake provider and are exercised by CI on Linux and macOS.
+[Go SDK module](examples/sdk), [Python](examples/rpc/python) and
+[JavaScript](examples/rpc/javascript) language-SDK clients, and JavaScript/Python
+plugin runtimes. All SDK/RPC examples default to the credential-free fake
+provider and are exercised by CI on Linux and macOS. See the
+[cross-language SDK guide](docs/language-sdks.md).
 
 ## Embed with Go
 
@@ -309,9 +323,10 @@ complete [Go SDK guide and API map](docs/sdk.md).
 
 ## Automate over RPC
 
-RPC uses LF-delimited JSON objects over stdin/stdout. Responses and asynchronous
-agent events share stdout, so clients must continuously read output and correlate
-only objects whose `type` is `response` by `id`.
+RPC protocol v1 uses LF-delimited JSON objects over stdin/stdout. The first
+frame is `rpc_ready`; responses, `prompt_completed`, and asynchronous agent
+events then share stdout. Clients correlate responses by `id` and terminal
+prompt results by `request_id`.
 
 ```json
 {"id":"info-1","type":"session_info"}
@@ -321,11 +336,11 @@ only objects whose `type` is `response` by `id`.
 ```
 
 A prompt receives an immediate admission acknowledgement. `turn_done` ends the
-agent turn, but a runtime/persistence failure may still arrive afterward as a
-same-ID failure response, so long-lived clients must keep routing responses.
-Keep stdin open until work finishes. See the [RPC protocol reference](docs/rpc.md)
-for every command, response and event shape, concurrency rules, user-input
-replies, goals, and subagents.
+agent turn; exactly one later `prompt_completed` frame reports definitive
+`completed`, `failed`, or `canceled` status. Model discovery is available through
+`models_list` and `subagent_models`. Keep stdin open until work finishes. See the
+[RPC protocol reference](docs/rpc.md) and
+[cross-language SDK guide](docs/language-sdks.md).
 
 ## Security first
 
@@ -382,8 +397,9 @@ Start at the [documentation index](docs/README.md).
 |---|---|
 | Learn the TUI and CLI modes | [Using Snow](docs/using-snow.md) |
 | Configure paths, providers, tools, themes, and search | [Configuration](docs/configuration.md) |
-| Embed Snow in Go | [SDK](docs/sdk.md) · [standalone example](examples/sdk) |
-| Build a JSONL client | [RPC](docs/rpc.md) · [Python example](examples/rpc/python) |
+| Embed Snow in Go | [Go SDK](docs/sdk.md) · [standalone example](examples/sdk) |
+| Embed from Python or JavaScript/TypeScript | [Language SDKs](docs/language-sdks.md) · [Python](sdk/python) · [JavaScript](sdk/javascript) |
+| Build a raw JSONL client | [RPC](docs/rpc.md) · [schemas](pkg/protocol/schema/rpc/v1) |
 | Author JavaScript/Python plugins | [Plugins](docs/plugins.md) · [Protocol v2](docs/plugin-protocol.md) |
 | Review operational boundaries | [Security](docs/security.md) |
 | Authenticate ChatGPT/Codex | [ChatGPT auth](docs/chatgpt-auth.md) |
@@ -405,7 +421,10 @@ go vet ./...
 go test -race ./internal/... ./pkg/snowsdk
 (cd examples/sdk && go test ./... && go run .)
 go build -o ./snow ./cmd/snow
+SNOW_TEST_BINARY="$PWD/snow" PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v
+(cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration)
 python3 examples/rpc/python/client.py --snow ./snow
+node examples/rpc/javascript/client.mjs ./snow
 ```
 
 Provider integration tests use local mocked HTTP/SSE servers. Real-provider

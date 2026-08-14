@@ -208,6 +208,25 @@ func ValidateSpec(s PluginSpec) error {
 	if len(s.Command) == 0 || strings.TrimSpace(s.Command[0]) == "" {
 		return errors.New("plugin: command is required")
 	}
+	for _, arg := range s.Command {
+		if strings.ContainsRune(arg, 0) {
+			return errors.New("plugin: command arguments cannot contain NUL")
+		}
+	}
+	if strings.ContainsRune(s.CWD, 0) {
+		return errors.New("plugin: cwd cannot contain NUL")
+	}
+	seenEnv := make(map[string]bool, len(s.Env))
+	for _, entry := range s.Env {
+		name, _, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(name) == "" || name != strings.TrimSpace(name) || strings.ContainsAny(name, " \t\r\n\x00") {
+			return fmt.Errorf("plugin: invalid environment entry %q (want NAME=VALUE)", entry)
+		}
+		if seenEnv[name] {
+			return fmt.Errorf("plugin: duplicate environment name %q", name)
+		}
+		seenEnv[name] = true
+	}
 	if s.TimeoutMS < 0 || s.MaxFrameBytes < 0 || s.MaxOutputBytes < 0 || s.MaxProgressBytes < 0 || s.MaxInputBytes < 0 || s.MaxConcurrent < 0 {
 		return errors.New("plugin: limits cannot be negative")
 	}

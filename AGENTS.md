@@ -84,11 +84,18 @@ behavior in code before relying on a checklist item.
   pickers, model-aware `/thinking` effort selection, login/logout, permissions,
   sessions, slash completion, and `@` file mentions. Strict bounded YAML custom
   themes/keybindings support global and trusted-project precedence with warnings.
-- `pkg/snowsdk` prompt/event/session API, `pkg/protocol` public DTOs, JSONL RPC,
-  and a capability-oriented Go plugin API/manager with namespaced tools,
+- `pkg/snowsdk` prompt/event/session API, public `pkg/protocol` RPC/event DTOs,
+  protocol-v1 `rpc_ready` capability negotiation, definitive prompt completion,
+  model discovery, and network-free Draft 2020-12 wire schemas.
+- Zero-runtime-dependency Python 3.9+ async and Node.js 22+ ESM/TypeScript SDKs
+  use an explicitly installed external Snow binary, safe defaults, bounded JSONL
+  routing, user-input handlers, and real-binary CI conformance tests.
+- A capability-oriented Go plugin API/manager with namespaced tools,
   declared external risk/capabilities, preserved private result details,
   explicitly subscribed best-effort events, JSON-RPC v2 stdio runtimes,
-  `snow plugin check`, and dependency-free JavaScript/Python examples.
+  provider-free checking, side-effect-free inventory, restart-scoped
+  add/enable/disable/remove management, and dependency-free JavaScript/Python
+  examples.
 - Pressure-based pruning and automatic compaction across ordinary, goal, Plan,
   and child turns, with private session-scoped spill artifacts, deferred bounded
   artifact retrieval, and one context-overflow repair retry.
@@ -112,9 +119,11 @@ behavior in code before relying on a checklist item.
   no file mutation by default, configurable child concurrency, activity/all
   wait modes, compact TUI lifecycle summaries, rich SDK/RPC/TUI observation,
   and durable child databases by default.
-- Open Agent Skills support: standard project/user discovery, trust and
-  precedence, YAML frontmatter diagnostics, tiered disclosure, confined
-  resource reads, and activation persistence across compaction/resume.
+- Open Agent Skills support: immutable rank-zero built-ins plus standard
+  project/user discovery, trust and precedence, YAML frontmatter diagnostics,
+  tiered disclosure, confined resource reads, and activation persistence across
+  compaction/resume. The bundled `plugin-builder` skill provides supervised,
+  restart-required external-plugin authoring guidance and templates.
 - Unit, integration, lifecycle, end-to-end, CLI, provider, TUI, auth, path-safety,
   session, permission, and benchmark tests across the packages.
 - GitHub Actions CI on Linux and macOS, including formatting, vet, ordinary and
@@ -146,7 +155,8 @@ behavior in code before relying on a checklist item.
 │   ├── configuration.md      # config precedence, paths, JSON/YAML references
 │   ├── security.md           # consolidated privilege and threat boundaries
 │   ├── sdk.md                # public Go SDK lifecycle and API reference
-│   ├── rpc.md                # JSONL framing, commands, events, and examples
+│   ├── language-sdks.md      # Python/JavaScript clients and binary policy
+│   ├── rpc.md                # versioned JSONL framing, schemas, commands, events
 │   ├── chatgpt-auth.md       # ChatGPT auth format, imports, research, boundary
 │   ├── sessions.md           # Pure-Go SQLite session storage and schema
 │   ├── plugins.md            # Go/external plugin overview and authoring quickstart
@@ -158,8 +168,11 @@ behavior in code before relying on a checklist item.
 │   └── tui-performance.md    # Bubble Tea/Bubbles integration and render rules
 ├── examples/
 │   ├── sdk/                  # standalone public Go SDK module
-│   ├── rpc/python/           # dependency-free persistent RPC client
+│   ├── rpc/{python,javascript}/ # language-SDK lifecycle examples
 │   └── plugins/              # dependency-free JavaScript/Python v2 runtimes
+├── sdk/
+│   ├── python/               # async Python client package and tests
+│   └── javascript/           # ESM client, TypeScript declarations, and tests
 ├── go.mod / go.sum           # module github.com/snow-core/snow and dependencies
 ├── cmd/snow/
 │   ├── main.go               # Cobra entry point and CLI mode selection
@@ -249,12 +262,14 @@ Important flags: `--provider opencode-go|chatgpt|fake`, `--model`, `--api-key`,
 `--config`, `--auth`, `--thinking off|minimal|low|medium|high|xhigh|max|ultra`,
 `--collaboration-mode default|plan`, repeated
 `--mcp`/`--skill-dir`, `--no-mcp`/`--no-skills`, `--subagents`/`--no-subagents`,
-`--subagent-provider`/`--subagent-model`, and subagent concurrency/depth overrides. `snow plugin check <manifest>`
-performs a provider-free external runtime handshake. `snow mcp` and
-`snow skills` provide side-effect-free inventories; MCP live negotiation is
-`snow mcp check [name]`. MCP subcommands are `list|get|add|check|enable|disable|remove`;
-skills subcommands are `list|get|enable|disable`. Mutations are global by
-default and accept `--project`.
+`--subagent-provider`/`--subagent-model`, and subagent concurrency/depth overrides.
+`snow plugin check <manifest>` performs a provider-free external runtime
+handshake; plugin management is `list|get|add|enable|disable|remove`, stages adds
+disabled by default, and takes effect after restart. `snow mcp` and `snow skills`
+provide side-effect-free inventories; MCP live negotiation is `snow mcp check
+[name]`. MCP subcommands are `list|get|add|check|enable|disable|remove`; skills
+subcommands are `list|get|enable|disable`. Mutations are global by default and
+accept `--project`.
 
 The active TUI composer queues plain Enter as steering and Alt+Enter as a
 follow-up; Ctrl+J remains multiline, and abort clears/restores queued TUI text.
@@ -345,8 +360,10 @@ append-only/tree model when adding resume or fork features.
   credentials, extensions, skills, subagents, and recommended operating profiles.
 - `docs/sdk.md`: public Go SDK options, lifecycle, methods, events, readiness,
   errors, concurrency, permissions, and examples.
-- `docs/rpc.md`: Snow JSONL framing, all commands, responses/events, ordering,
-  user input, goals, subagents, shutdown, and Python example.
+- `docs/language-sdks.md`: Python/JavaScript SDK installation, lifecycle,
+  external-binary policy, compatibility, errors, tests, and security defaults.
+- `docs/rpc.md`: Snow JSONL framing/handshake, public schemas, all commands,
+  responses/control frames/events, ordering, user input, goals, and subagents.
 - `IMPLEMENTATION.md`: detailed design, package map, public interface sketches,
   security model, plugin protocol, phased roadmap, testing plan, research, decisions.
 - `docs/chatgpt-auth.md`: supported OAuth credential shape, source import locations,
@@ -386,7 +403,10 @@ go test -race ./internal/subagent ./internal/agent ./internal/app ./internal/ses
 go test ./internal/agent ./cmd/snow -count=1
 (cd examples/sdk && go test ./... && go run .)
 go build -o ./snow ./cmd/snow
+SNOW_TEST_BINARY="$PWD/snow" PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v
+(cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration && npm run pack:check)
 python3 examples/rpc/python/client.py --snow ./snow
+node examples/rpc/javascript/client.mjs ./snow
 
 # After a verified feature change, refresh the user-local snow binary.
 ./scripts/install-local.sh

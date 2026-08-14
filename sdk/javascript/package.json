@@ -1,0 +1,27 @@
+{
+  "name": "@snow-core/sdk",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "description": "Zero-dependency JavaScript and TypeScript client for the Snow RPC process",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "types": "./src/index.d.ts",
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "node --check src/client.js && node --check src/errors.js && node --check src/index.js",
+    "test": "npm run check && node --test test/client.test.js",
+    "test:integration": "node --test test/integration.test.js",
+    "pack:check": "npm pack --dry-run"
+  }
+}

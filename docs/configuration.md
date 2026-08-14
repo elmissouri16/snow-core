@@ -287,6 +287,13 @@ See [Subagents](subagents.md) for role examples and the full safety model.
 - `plugins` is an array of public `plugin.PluginSpec` declarations.
 - `mcp_servers` maps stable names to public `mcp.ServerSpec` declarations.
 
+Plugin declarations merge by ID with `global < trusted project < explicit
+--plugin` precedence; a disabled higher layer suppresses an enabled lower layer.
+Manage persisted declarations with `snow plugin list|get|add|enable|disable|remove`.
+`add` defaults to disabled, mutations preserve unknown configuration fields, and
+all changes require a restart. Inspection and mutation do not start a plugin;
+`snow plugin check` does.
+
 These processes run with the user's OS privileges. External plugins receive
 their literal configured `env` and otherwise start with an empty environment;
 plugin env values do not expand `${VAR}`. Snow resolves a bare

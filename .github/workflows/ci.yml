@@ -40,6 +40,11 @@ jobs:
             go.sum
             examples/sdk/go.sum
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
       - name: Check formatting
         if: runner.os == 'Linux'
         shell: bash
@@ -68,9 +73,31 @@ jobs:
         working-directory: examples/sdk
         run: go run . -provider fake -prompt "CI lifecycle smoke test"
 
-      - name: Run standalone RPC example
+      - name: Test Python SDK
+        shell: bash
+        env:
+          SNOW_TEST_BINARY: ${{ runner.temp }}/snow
+          PYTHONPATH: sdk/python/src
+        run: |
+          python3 -m compileall -q sdk/python/src sdk/python/tests
+          python3 -m unittest discover -s sdk/python/tests -v
+
+      - name: Test JavaScript SDK
+        working-directory: sdk/javascript
+        env:
+          SNOW_TEST_BINARY: ${{ runner.temp }}/snow
+        run: |
+          npm test
+          npm run test:integration
+          npm run pack:check
+
+      - name: Run Python RPC SDK example
         shell: bash
         run: python3 examples/rpc/python/client.py --snow "$RUNNER_TEMP/snow" --provider fake --prompt "CI lifecycle smoke test"
+
+      - name: Run JavaScript RPC SDK example
+        shell: bash
+        run: node examples/rpc/javascript/client.mjs "$RUNNER_TEMP/snow" "CI lifecycle smoke test"
 
   race:
     name: Race detector (Linux)

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/model.schema.json",
+  "title": "Snow model metadata",
+  "$defs": {
+    "thinkingLevel": {
+      "type": "string",
+      "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+    },
+    "pricing": {
+      "type": "object",
+      "required": ["input_per_million", "output_per_million", "cache_read_per_million", "cache_write_per_million"],
+      "properties": {
+        "currency": {"type": "string"},
+        "input_per_million": {"type": "number", "minimum": 0},
+        "output_per_million": {"type": "number", "minimum": 0},
+        "cache_read_per_million": {"type": "number", "minimum": 0},
+        "cache_write_per_million": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "model": {
+      "type": "object",
+      "required": ["provider", "id", "supports_tools", "supports_thinking", "supports_vision"],
+      "properties": {
+        "provider": {"type": "string"},
+        "id": {"type": "string", "minLength": 1},
+        "display_name": {"type": "string"},
+        "description": {"type": "string"},
+        "context_window": {"type": "integer", "minimum": 0},
+        "max_context_window": {"type": "integer", "minimum": 0},
+        "max_output_tokens": {"type": "integer", "minimum": 0},
+        "supports_tools": {"type": "boolean"},
+        "supports_thinking": {"type": "boolean"},
+        "default_thinking": {"$ref": "#/$defs/thinkingLevel"},
+        "thinking_levels": {"type": "array", "items": {"$ref": "#/$defs/thinkingLevel"}, "uniqueItems": true},
+        "supports_vision": {"type": "boolean"},
+        "supports_verbosity": {"type": "boolean"},
+        "supports_reasoning_summary": {"type": "boolean"},
+        "upgrade": {
+          "type": "object",
+          "required": ["model"],
+          "properties": {"model": {"type": "string"}, "message": {"type": "string"}},
+          "additionalProperties": false
+        },
+        "pricing": {"$ref": "#/$defs/pricing"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "$ref": "#/$defs/model"
+}

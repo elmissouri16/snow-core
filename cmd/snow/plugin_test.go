@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/snow-core/snow/internal/config"
 	publicplugin "github.com/snow-core/snow/pkg/plugin"
 	"github.com/snow-core/snow/pkg/protocol"
 )
@@ -22,6 +24,164 @@ type request struct { ID string ` + "`json:\"id\"`" + `; Method string ` + "`jso
 func send(id string, result any) { data,_:=json.Marshal(map[string]any{"jsonrpc":"2.0","id":id,"result":result}); fmt.Println(string(data)) }
 func main() { fmt.Fprintln(os.Stderr,"{\"token\": \"fixture-secret\", \"status\":\"startup\"}"); scanner:=bufio.NewScanner(os.Stdin); for scanner.Scan() { var req request; if json.Unmarshal(scanner.Bytes(),&req)!=nil { return }; switch req.Method { case "initialize": send(req.ID,map[string]any{"manifest":map[string]any{"id":"check","name":"Check Fixture","version":"1.2.3","protocol_version":2,"capabilities":[]string{"base"}},"capabilities":[]string{"runtime"},"supported_events":[]string{"tool_end"},"limits":map[string]int{"calls":4}}); case "tools/list": send(req.ID,map[string]any{"tools":[]any{map[string]any{"name":"lookup","description":"lookup","parameters":map[string]any{"type":"object"},"risk":"network","capabilities":[]string{"lookup"}}}}); case "shutdown": send(req.ID,map[string]any{}); return } } }
 `
+
+func TestPluginHumanOutputEscapesTerminalControls(t *testing.T) {
+	if got := terminalSafe("ok\x1b[31m\nnext"); got != `ok\x1b[31m\x0anext` {
+		t.Fatalf("terminalSafe = %q", got)
+	}
+}
+
+func TestPluginManagementLifecycleIsDisabledByDefaultAndRedacted(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	manifestPath := filepath.Join(dir, "manifest.json")
+	manifest := `{"id":"managed","command":["python3","plugin.py","--token=command-secret","-H","Authorization: Bearer header-secret","--credential","credential-secret","--cookie=cookie-secret"],"enabled":true,"env":["TOKEN=environment-secret"],"config":{"secret":"runtime-secret"}}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runPluginCommand(configPath, "plugin", "add", manifestPath, "--json")
+	if err != nil {
+		t.Fatalf("add: %v, stderr=%s", err, stderr)
+	}
+	var receipt commandReceipt
+	if err := json.Unmarshal([]byte(stdout), &receipt); err != nil || receipt.Action != "added" || receipt.Name != "managed" {
+		t.Fatalf("add receipt = %+v, err=%v, raw=%q", receipt, err, stdout)
+	}
+	declarations, err := config.LoadPluginDeclarations(configPath)
+	if err != nil || len(declarations) != 1 || declarations[0].Enabled {
+		t.Fatalf("staged declarations = %+v, %v", declarations, err)
+	}
+
+	stdout, stderr, err = runPluginCommand(configPath, "plugin", "list", "--json")
+	if err != nil {
+		t.Fatalf("list: %v, stderr=%s", err, stderr)
+	}
+	for _, secret := range []string{"command-secret", "header-secret", "credential-secret", "cookie-secret", "environment-secret", "runtime-secret"} {
+		if strings.Contains(stdout, secret) {
+			t.Fatalf("list leaked %s: %s", secret, stdout)
+		}
+	}
+	var views []pluginConfigView
+	if err := json.Unmarshal([]byte(stdout), &views); err != nil || len(views) != 1 || views[0].Enabled || views[0].Env[0] != "TOKEN=[redacted]" || !views[0].ConfigPresent {
+		t.Fatalf("list views = %+v, err=%v, raw=%s", views, err, stdout)
+	}
+
+	if _, stderr, err = runPluginCommand(configPath, "plugin", "enable", "managed", "--json"); err != nil {
+		t.Fatalf("enable: %v, stderr=%s", err, stderr)
+	}
+	declarations, _ = config.LoadPluginDeclarations(configPath)
+	if !declarations[0].Enabled {
+		t.Fatal("enable did not persist")
+	}
+	if _, stderr, err = runPluginCommand(configPath, "plugin", "disable", "managed", "--json"); err != nil {
+		t.Fatalf("disable: %v, stderr=%s", err, stderr)
+	}
+	if _, stderr, err = runPluginCommand(configPath, "plugin", "remove", "managed", "--json"); err != nil {
+		t.Fatalf("remove: %v, stderr=%s", err, stderr)
+	}
+	declarations, _ = config.LoadPluginDeclarations(configPath)
+	if len(declarations) != 0 {
+		t.Fatalf("remove left declarations: %+v", declarations)
+	}
+}
+
+func TestProjectPluginEnableRequiresExplicitProjectDeclaration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	project := t.TempDir()
+	t.Chdir(project)
+	globalConfig := filepath.Join(home, "config.json")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	global := `{"plugins":[{"id":"sensitive","command":["runtime","--auth=global-secret"],"enabled":true,"env":["TOKEN=global-secret"],"config":{"secret":"global-secret"}}]}`
+	if err := os.WriteFile(globalConfig, []byte(global), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := runPluginCommand("", "plugin", "enable", "sensitive", "--project", "--json")
+	if err == nil || !strings.Contains(err.Error(), "target scope") {
+		t.Fatalf("project enable error = %v", err)
+	}
+	projectConfig := filepath.Join(project, ".snow", "config.json")
+	if data, readErr := os.ReadFile(projectConfig); readErr == nil && strings.Contains(string(data), "global-secret") {
+		t.Fatalf("project toggle copied global secrets: %s", data)
+	} else if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatal(readErr)
+	}
+}
+
+func TestPluginListShowsGlobalProjectExplicitPrecedence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	project := t.TempDir()
+	t.Chdir(project)
+	configPath := filepath.Join(home, "config.json")
+	global := `{"default_project_trust":"allow","plugins":[{"id":"layered","command":["global"],"enabled":true}]}`
+	if err := os.WriteFile(configPath, []byte(global), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	projectConfig := filepath.Join(project, ".snow", "config.json")
+	if err := os.MkdirAll(filepath.Dir(projectConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projectConfig, []byte(`{"plugins":[{"id":"layered","command":["project"],"enabled":false}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	explicitManifest := filepath.Join(project, "explicit.json")
+	if err := os.WriteFile(explicitManifest, []byte(`{"id":"layered","command":["explicit"],"enabled":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, err := runPluginCommand(configPath, "--plugin", explicitManifest, "plugin", "list", "--all", "--json")
+	if err != nil {
+		t.Fatalf("list: %v, stderr=%s", err, stderr)
+	}
+	var views []pluginConfigView
+	if err := json.Unmarshal([]byte(stdout), &views); err != nil {
+		t.Fatalf("decode views: %v, raw=%s", err, stdout)
+	}
+	if len(views) != 3 || views[0].Scope != "global" || !views[0].Shadowed || views[1].Scope != "project" || !views[1].Shadowed || views[2].Scope != "explicit" || views[2].Shadowed {
+		t.Fatalf("precedence views = %+v", views)
+	}
+}
+
+func TestPluginListDoesNotStartConfiguredProcess(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	sentinel := filepath.Join(dir, "started")
+	spec := publicplugin.PluginSpec{ID: "sentinel", Command: []string{"sh", "-c", "touch " + sentinel}, Enabled: true}
+	if err := config.AddPlugin(configPath, true, spec, false); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, err := runPluginCommand(configPath, "plugin", "list", "--json")
+	if err != nil {
+		t.Fatalf("list: %v, stderr=%s", err, stderr)
+	}
+	if !strings.Contains(stdout, "sentinel") {
+		t.Fatalf("missing configured plugin: %s", stdout)
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Fatalf("plugin list started executable: %v", err)
+	}
+}
+
+func runPluginCommand(configPath string, args ...string) (string, string, error) {
+	root := &cobra.Command{Use: "snow", SilenceUsage: true, SilenceErrors: true}
+	root.PersistentFlags().String("config", "", "")
+	root.PersistentFlags().String("mode", "", "")
+	root.PersistentFlags().StringArray("plugin", nil, "")
+	root.AddCommand(pluginCmd())
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	commandArgs := append([]string(nil), args...)
+	if configPath != "" {
+		commandArgs = append([]string{"--config", configPath}, commandArgs...)
+	}
+	root.SetArgs(commandArgs)
+	err := root.Execute()
+	return stdout.String(), stderr.String(), err
+}
 
 func TestInspectExternalPlugin(t *testing.T) {
 	goBin, err := exec.LookPath("go")

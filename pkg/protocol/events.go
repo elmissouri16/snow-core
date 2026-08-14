@@ -36,6 +36,39 @@ const (
 	EvSubagentActivity  AgentEventType = "subagent_activity"
 )
 
+// KnownAgentEventTypes returns every normalized event type in protocol order.
+func KnownAgentEventTypes() []AgentEventType {
+	return []AgentEventType{
+		EvSessionUpdated,
+		EvTextDelta,
+		EvThinkingDelta,
+		EvToolStart,
+		EvToolProgress,
+		EvToolEnd,
+		EvToolRouting,
+		EvPermissionRequest,
+		EvUserInputRequest,
+		EvUsage,
+		EvQueueUpdated,
+		EvTurnDone,
+		EvError,
+		EvAborted,
+		EvModelChanged,
+		EvModeChanged,
+		EvPlanStarted,
+		EvPlanDelta,
+		EvPlanCompleted,
+		EvPlanUpdate,
+		EvCompactionStarted,
+		EvCompactionDone,
+		EvThreadGoalUpdated,
+		EvSubagentStarted,
+		EvSubagentStatus,
+		EvSubagentMessage,
+		EvSubagentActivity,
+	}
+}
+
 // ToolProgress is emitted by tools running through the agent.
 type ToolProgress struct {
 	ToolCallID string `json:"tool_call_id"`

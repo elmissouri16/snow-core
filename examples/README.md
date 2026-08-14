@@ -1,7 +1,8 @@
 # Snow examples
 
 - [`sdk/`](sdk/) — standalone Go module using the public SDK and protocol packages.
-- [`rpc/python/`](rpc/python/) — dependency-free persistent JSONL RPC client.
+- [`rpc/python/`](rpc/python/) — asynchronous Python SDK client example.
+- [`rpc/javascript/`](rpc/javascript/) — JavaScript/TypeScript SDK client example.
 - [`plugins/javascript/`](plugins/javascript/) and
   [`plugins/python/`](plugins/python/) — external plugin protocol v2 runtimes.
 

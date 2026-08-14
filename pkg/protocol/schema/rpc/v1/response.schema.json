@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/response.schema.json",
+  "title": "Snow RPC response",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["type", "success", "error"],
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"const": "response"},
+        "command": {"type": "string"},
+        "success": {"const": false},
+        "error": {"type": "string", "minLength": 1},
+        "data": {}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "command", "success", "data"],
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"const": "response"},
+        "command": {"const": "session_info"},
+        "success": {"const": true},
+        "data": {"$ref": "session-info.schema.json"}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "command", "success", "data"],
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"const": "response"},
+        "command": {"enum": ["models_list", "subagent_models"]},
+        "success": {"const": true},
+        "data": {
+          "type": "object",
+          "required": ["models"],
+          "properties": {
+            "provider": {"type": "string"},
+            "current": {"type": "string"},
+            "enabled": {"type": "boolean"},
+            "models": {"type": "array", "items": {"$ref": "model.schema.json"}}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "command", "success"],
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"const": "response"},
+        "command": {"type": "string", "not": {"enum": ["session_info", "models_list", "subagent_models"]}},
+        "success": {"const": true},
+        "data": {}
+      },
+      "additionalProperties": false
+    }
+  ]
+}

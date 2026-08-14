@@ -542,7 +542,7 @@ func runInteractiveOptions(cmd *cobra.Command, sessionPicker, requireExistingSes
 	}
 
 	if mode == "rpc" {
-		return rpc.Main(ctx, opts)
+		return rpc.MainWithVersion(ctx, opts, version)
 	}
 	if prompt != "" || mode == "print" || mode == "json" {
 		showUsage, _ := cmd.Flags().GetBool("usage")

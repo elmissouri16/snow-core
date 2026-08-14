@@ -1,0 +1,13 @@
+{
+  "id": "PLUGIN_ID",
+  "command": [
+    "python3",
+    "-u",
+    ".snow/generated-plugins/PLUGIN_ID/plugin.py"
+  ],
+  "enabled": false,
+  "timeout_ms": 30000,
+  "max_output_bytes": 262144,
+  "max_concurrent": 1,
+  "env": []
+}

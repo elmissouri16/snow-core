@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/agent-event.schema.json",
+  "title": "Snow normalized agent event",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["session_updated", "text_delta", "thinking_delta", "tool_start", "tool_progress", "tool_end", "tool_routing", "permission_request", "user_input_request", "usage", "queue_updated", "turn_done", "error", "aborted", "model_changed", "mode_changed", "plan_started", "plan_delta", "plan_completed", "plan_update", "compaction_started", "compaction_done", "thread_goal_updated", "subagent_started", "subagent_status", "subagent_message", "subagent_activity"]
+    },
+    "text": {"type": "string"},
+    "tool_call_id": {"type": "string"},
+    "tool_name": {"type": "string"},
+    "message": {"type": "string"},
+    "tool_output": {"type": "string"},
+    "tool_duration_ms": {"type": "integer", "minimum": 0},
+    "tool_progress": {
+      "type": "object",
+      "required": ["tool_call_id", "name", "done"],
+      "properties": {
+        "tool_call_id": {"type": "string"},
+        "name": {"type": "string"},
+        "message": {"type": "string"},
+        "done": {"type": "boolean"},
+        "is_error": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "tool_routing": {
+      "type": "object",
+      "required": ["trigger", "candidate_count", "selected_count", "exposed_count", "schema_bytes", "latency_ms"],
+      "properties": {
+        "trigger": {"type": "string"},
+        "tool_ids": {"type": "array", "items": {"type": "string"}},
+        "candidate_count": {"type": "integer", "minimum": 0},
+        "selected_count": {"type": "integer", "minimum": 0},
+        "exposed_count": {"type": "integer", "minimum": 0},
+        "schema_bytes": {"type": "integer", "minimum": 0},
+        "latency_ms": {"type": "integer", "minimum": 0},
+        "fallback": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "usage": {"$ref": "common.schema.json#/$defs/usage"},
+    "model": {"$ref": "model.schema.json"},
+    "mode": {
+      "type": "object",
+      "required": ["mode", "reasoning_effort"],
+      "properties": {"mode": {"enum": ["default", "plan"]}, "reasoning_effort": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "plan": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {"id": {"type": "string"}, "text": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "plan_update": {
+      "type": "object",
+      "required": ["plan"],
+      "properties": {
+        "explanation": {"type": "string"},
+        "plan": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["step", "status"],
+            "properties": {"step": {"type": "string"}, "status": {"enum": ["pending", "in_progress", "completed"]}},
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "compaction": {
+      "type": "object",
+      "required": ["summarized_messages", "retained_messages"],
+      "properties": {
+        "summarized_messages": {"type": "integer", "minimum": 0},
+        "retained_messages": {"type": "integer", "minimum": 0},
+        "summary": {"type": "string"},
+        "used_fallback": {"type": "boolean"},
+        "automatic": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "permission": {"type": "object"},
+    "user_input": {"$ref": "common.schema.json#/$defs/userInputRequest"},
+    "queue": {"$ref": "common.schema.json#/$defs/inputQueue"},
+    "thread_goal": {
+      "type": "object",
+      "properties": {"goal": {"$ref": "common.schema.json#/$defs/threadGoal"}, "cleared": {"type": "boolean"}},
+      "additionalProperties": false
+    },
+    "agent": {"$ref": "common.schema.json#/$defs/agentRef"},
+    "subagent": {"$ref": "common.schema.json#/$defs/subagentState"},
+    "agent_message": {
+      "type": "object",
+      "required": ["id", "author", "recipient", "kind", "content", "created_at"],
+      "properties": {
+        "id": {"type": "string"},
+        "author": {"type": "string"},
+        "recipient": {"type": "string"},
+        "kind": {"enum": ["new_task", "message", "final_answer"]},
+        "content": {"type": "string"},
+        "trigger_turn": {"type": "boolean"},
+        "created_at": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "turn_id": {"type": "string"},
+    "turn_origin": {"type": "string"},
+    "turn_sequence": {"type": "integer", "minimum": 0},
+    "root_epoch": {"type": "integer", "minimum": 0},
+    "goal_continuing": {"type": "boolean"},
+    "is_error": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

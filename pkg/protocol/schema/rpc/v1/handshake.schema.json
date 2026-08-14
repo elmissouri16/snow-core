@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/handshake.schema.json",
+  "title": "Snow RPC ready handshake",
+  "type": "object",
+  "required": ["type", "protocol_version", "snow_version", "capabilities", "max_input_bytes"],
+  "properties": {
+    "type": {"const": "rpc_ready"},
+    "protocol_version": {"const": "1"},
+    "snow_version": {"type": "string"},
+    "capabilities": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "max_input_bytes": {"type": "integer", "minimum": 1}
+  },
+  "additionalProperties": false
+}

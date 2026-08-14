@@ -1,12 +1,10 @@
 # Standalone Python RPC example
 
-`client.py` is a dependency-free Python 3 client for Snow's persistent JSONL RPC
-mode. It starts Snow, continuously reads the mixed response/event stream,
-correlates `session_info` and `prompt` responses by ID, answers model-requested
-questions, waits for the root `turn_done` event, and closes stdin for orderly
-shutdown. It is a lifecycle example, not a reusable RPC library: `turn_done`
-ends the agent turn, while a same-ID prompt failure can still arrive later as the
-prompt unwinds. Long-lived hosts must keep routing responses after `turn_done`.
+`client.py` is a directly runnable consumer of Snow's checked-in asynchronous
+[`snow_sdk`](../../../sdk/python) package. The SDK starts the persistent JSONL
+RPC process, validates protocol v1, correlates responses, answers model-requested
+questions, streams events, waits for definitive `prompt_completed`, and closes
+stdin for orderly shutdown.
 
 Build Snow and run a credential-free lifecycle smoke test from the repository
 root:

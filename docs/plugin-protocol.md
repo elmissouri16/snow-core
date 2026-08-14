@@ -64,11 +64,12 @@ do not prevent Snow's core agent from starting.
 returns a manifest ID, it must match the configured plugin ID.
 
 Snow intentionally supplies `env`; when omitted, the child receives an empty
-environment. If `command[0]` has no path separator, Go resolves it
-using Snow's launch environment before assigning the child environment. The configured
-child `PATH` therefore affects plugin behavior and child processes, not selection
-of the already resolved interpreter. Plugin `env` entries are literal and do not
-expand `${VAR}`.
+environment. Entries must be unique literal `NAME=VALUE` assignments; invalid
+or duplicate names are rejected. If `command[0]` has no path separator, Go
+resolves it using Snow's launch environment before assigning the child
+environment. The configured child `PATH` therefore affects plugin behavior and
+child processes, not selection of the already resolved interpreter. Plugin
+`env` entries do not expand `${VAR}`.
 
 Prefer absolute interpreter/script paths. If a plugin needs certificate or
 locale variables or child processes, provide a deliberately minimal environment

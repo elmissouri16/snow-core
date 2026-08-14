@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/prompt-completed.schema.json",
+  "title": "Snow RPC terminal prompt result",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["type", "request_id", "status"],
+      "properties": {
+        "type": {"const": "prompt_completed"},
+        "request_id": {"type": "string"},
+        "status": {"const": "completed"}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "request_id", "status", "error"],
+      "properties": {
+        "type": {"const": "prompt_completed"},
+        "request_id": {"type": "string"},
+        "status": {"const": "failed"},
+        "error": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "request_id", "status"],
+      "properties": {
+        "type": {"const": "prompt_completed"},
+        "request_id": {"type": "string"},
+        "status": {"const": "canceled"}
+      },
+      "additionalProperties": false
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/output.schema.json",
+  "title": "Snow RPC stdout frame",
+  "oneOf": [
+    {"$ref": "handshake.schema.json"},
+    {"$ref": "response.schema.json"},
+    {"$ref": "prompt-completed.schema.json"},
+    {"$ref": "agent-event.schema.json"}
+  ]
+}

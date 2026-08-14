@@ -22,6 +22,26 @@ References:
 - [Tool routing](tool-routing.md)
 - dependency-free examples under `examples/plugins/`
 
+## Supervised agent-built plugins
+
+Snow ships an immutable, progressively disclosed `$plugin-builder` Agent Skill
+inside the binary. It teaches the root agent to decide between an existing tool,
+one-off shell work, MCP, and a Snow-specific plugin; stage dependency-free
+Python or JavaScript source; review the source diff, SHA-256 hashes, exact
+command, and environment; and run the protocol checker. Its templates and
+protocol notes are read through the normal `read_skill_resource` tool.
+
+Start a prompt with `$plugin-builder` to activate it explicitly. The model may
+also activate it when a reusable capability is missing. Generation still uses
+ordinary `write`/`edit`/`bash` tools and their permissions. The workflow never
+gives project trust, tool risk metadata, or skill activation the authority to
+execute or persist generated code silently.
+
+The generated declaration is registered disabled, validation is a separate
+explicit executable operation, enabling is an explicit configuration mutation,
+and the current Snow process must be restarted. Same-session plugin hot loading
+is intentionally unsupported.
+
 ## Go API
 
 A plugin has a stable manifest, registration phase, and idempotent close:
@@ -87,17 +107,47 @@ snow --no-plugins
 The executable shorthand derives an ID and enables the plugin. A manifest is
 required when an interpreter and script need separate argv entries.
 
+Configuration can be inspected and changed without starting any plugin:
+
+```sh
+snow plugin list [--all] [--json]
+snow plugin get my-tools [--json]
+snow plugin add manifest.json [--project] [--replace] [--enable]
+snow plugin enable my-tools [--project]
+snow plugin disable my-tools [--project]
+snow plugin remove my-tools [--project]
+```
+
+`plugin add` stages a declaration with `enabled: false` by default, regardless
+of the source manifest. Use `--enable` only when registration and execution on
+the next launch were reviewed together. `enable`, `disable`, and `remove` also
+take effect on the next launch; no management command hot-loads code. A project
+enable/disable requires an existing project declaration—Snow never copies a
+global command, environment, or private config into the usually commit-visible
+project file. Add and replace preserve unrelated configuration fields, while
+list/get redact child environments, credential-shaped command/header arguments,
+and private runtime configuration.
+
+Global, trusted-project, and repeated explicit `--plugin` declarations merge by
+ID in that order. A higher-precedence disabled declaration still suppresses a
+lower enabled declaration. `plugin list --all` includes lower-precedence entries
+with `shadowed: true`; ordinary list/get report only effective declarations.
+Duplicate IDs inside one persisted scope are rejected.
+
 Project `.snow/config.json` entries are loaded only after project trust has an
-explicit `allow` decision (or always-trust policy). Denied, unresolved, and
-disabled entries are skipped with diagnostics. Snow does not scan executable
-directories and has no plugin marketplace.
+explicit `allow` decision (or always-trust policy). Denied or unresolved project
+entries are not parsed by inspection commands and are reported as trust-blocked.
+Disabled entries are not spawned. An explicit `--project` mutation does not
+change project trust. Snow does not scan executable directories and has no
+plugin marketplace.
 
 ### Environment behavior
 
 Snow intentionally supplies the configured `env`; omitted `env` means an empty
-child environment. This reduces accidental credential inheritance but can
-affect interpreter shebangs, subprocess lookup, locale, and certificate
-configuration.
+child environment. Entries must be unique literal `NAME=VALUE` strings; blank,
+whitespace-bearing, duplicate, or assignment-free names are rejected. This
+reduces accidental credential inheritance but can affect interpreter shebangs,
+subprocess lookup, locale, and certificate configuration.
 
 When `command[0]` has no path separator, Go resolves it using Snow's launch
 environment before applying the configured child `env`. The child's `PATH`

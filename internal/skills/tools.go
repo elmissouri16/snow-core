@@ -126,12 +126,7 @@ func (t *ReadResourceTool) Run(ctx context.Context, raw json.RawMessage, _ tools
 	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return tools.ErrorResult(fmt.Errorf("read_skill_resource: path must stay inside the skill directory")), nil
 	}
-	root, err := openSkillRoot(skill)
-	if err != nil {
-		return tools.ErrorResult(fmt.Errorf("read_skill_resource: %w", err)), nil
-	}
-	defer root.Close()
-	data, err := readBoundedRoot(root, clean, maxResourceBytes)
+	data, err := t.Catalog.readResource(skill, clean, maxResourceBytes)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("read_skill_resource: %w", err)), nil
 	}

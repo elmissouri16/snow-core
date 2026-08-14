@@ -446,7 +446,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		projectMCPServers = extensions.MCPServers
 		projectSkills = extensions.Skills
 		projectSystemPrompt = extensions.SystemPromptFile != nil
-		cfg.Plugins = append(cfg.Plugins, projectPlugins...)
 		if err := config.ApplyProjectPreferences(&cfg, extensions); err != nil {
 			return nil, err
 		}
@@ -505,7 +504,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 		skillCatalog = skills.Discover(skills.Options{
 			CWD: projectInputRoot, SnowHome: config.GlobalDir(), ProjectTrusted: projectAllowed,
-			ExtraDirs: skillDirs, IncludeClaude: cfg.Skills.IncludeClaude,
+			ExtraDirs: skillDirs, IncludeClaude: cfg.Skills.IncludeClaude, IncludeBuiltins: true,
 			Disabled: skillDisabled, DisabledReason: skillDisabledReason,
 			Overrides: skillOverrides, OverrideReasons: skillOverrideReasons,
 		})
@@ -859,13 +858,21 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		CWD: extensionCWD, SessionID: st.ID(), HostVersion: "snow-core", HostCapabilities: []string{"tools", "events"},
 		MaxProgressBytes: cfg.ToolOutputLimit(), MaxOutputBytes: cfg.ToolOutputLimit(),
 	})
+	var allPluginSpecs []publicplugin.PluginSpec
+	if opts.NoPlugins {
+		allPluginSpecs = mergeDisabledPluginSpecs(cfg.Plugins, projectPlugins, opts.Plugins)
+	} else {
+		allPluginSpecs, err = mergePluginSpecs(cfg.Plugins, projectPlugins, opts.Plugins)
+		if err != nil {
+			return nil, fmt.Errorf("app: plugin configuration: %w", err)
+		}
+	}
 	if !opts.NoPlugins {
 		for _, p := range opts.GoPlugins {
 			if err := manager.LoadGo(p); err != nil {
 				return nil, fmt.Errorf("app: plugin: %w", err)
 			}
 		}
-		allPluginSpecs := append(append([]publicplugin.PluginSpec(nil), cfg.Plugins...), opts.Plugins...)
 		for _, spec := range allPluginSpecs {
 			if err := manager.LoadExternal(spec); err != nil {
 				return nil, fmt.Errorf("app: plugin %s: %w", spec.ID, err)
@@ -875,7 +882,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			return nil, fmt.Errorf("app: plugin initialization: %w", err)
 		}
 	} else {
-		for _, spec := range append(append([]publicplugin.PluginSpec(nil), cfg.Plugins...), opts.Plugins...) {
+		for _, spec := range allPluginSpecs {
 			pluginDiagnostics = append(pluginDiagnostics, internalplugin.Diagnostic{PluginID: spec.ID, Status: "disabled", Message: "plugin loading disabled by --no-plugins"})
 		}
 	}
@@ -1926,6 +1933,60 @@ func (a *App) CWD() string { return a.cwd }
 
 func getwd() (string, error) { return os.Getwd() }
 
+func mergePluginSpecs(global, project, explicit []publicplugin.PluginSpec) ([]publicplugin.PluginSpec, error) {
+	merged := make(map[string]publicplugin.PluginSpec, len(global)+len(project)+len(explicit))
+	order := make([]string, 0, len(merged))
+	mergeLayer := func(scope string, specs []publicplugin.PluginSpec, allowDuplicates bool) error {
+		seen := make(map[string]bool, len(specs))
+		for _, spec := range specs {
+			if err := publicplugin.ValidateSpec(spec); err != nil {
+				return fmt.Errorf("%s plugin %q: %w", scope, spec.ID, err)
+			}
+			if seen[spec.ID] && !allowDuplicates {
+				return fmt.Errorf("%s contains duplicate plugin id %q", scope, spec.ID)
+			}
+			seen[spec.ID] = true
+			if _, exists := merged[spec.ID]; !exists {
+				order = append(order, spec.ID)
+			}
+			merged[spec.ID] = spec
+		}
+		return nil
+	}
+	if err := mergeLayer("global configuration", global, false); err != nil {
+		return nil, err
+	}
+	if err := mergeLayer("project configuration", project, false); err != nil {
+		return nil, err
+	}
+	if err := mergeLayer("explicit options", explicit, true); err != nil {
+		return nil, err
+	}
+	out := make([]publicplugin.PluginSpec, 0, len(order))
+	for _, id := range order {
+		out = append(out, merged[id])
+	}
+	return out, nil
+}
+
+func mergeDisabledPluginSpecs(global, project, explicit []publicplugin.PluginSpec) []publicplugin.PluginSpec {
+	merged := make(map[string]publicplugin.PluginSpec, len(global)+len(project)+len(explicit))
+	order := make([]string, 0, len(merged))
+	for _, specs := range [][]publicplugin.PluginSpec{global, project, explicit} {
+		for _, spec := range specs {
+			if _, exists := merged[spec.ID]; !exists {
+				order = append(order, spec.ID)
+			}
+			merged[spec.ID] = spec
+		}
+	}
+	out := make([]publicplugin.PluginSpec, 0, len(order))
+	for _, id := range order {
+		out = append(out, merged[id])
+	}
+	return out
+}
+
 func mergeMCPServers(global, project map[string]publicmcp.ServerSpec, explicit []publicmcp.ServerSpec) []publicmcp.ServerSpec {
 	merged := make(map[string]publicmcp.ServerSpec, len(global)+len(project)+len(explicit))
 	for id, spec := range global {
@@ -2150,6 +2211,38 @@ func (a *App) SubagentMessages(ctx context.Context, target string) ([]protocol.M
 		return nil, errors.New("app: subagents disabled")
 	}
 	return a.Subagents.Messages(ctx, target)
+}
+
+// ActiveModelsSnapshot returns the active provider, current model, and a
+// defensive catalog copy from the same live-selection snapshot.
+func (a *App) ActiveModelsSnapshot() (string, protocol.Model, []protocol.Model) {
+	if a == nil {
+		return "", protocol.Model{}, nil
+	}
+	if a.runtimeSelection != nil {
+		a.runtimeSelection.mu.RLock()
+		defer a.runtimeSelection.mu.RUnlock()
+		providerID := a.runtimeSelection.provider
+		catalog := a.runtimeSelection.catalogs[providerID]
+		out := make([]protocol.Model, len(catalog))
+		for i, model := range catalog {
+			out[i] = model.Clone()
+		}
+		return providerID, a.runtimeSelection.model.Clone(), out
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	out := make([]protocol.Model, len(a.Models))
+	for i, model := range a.Models {
+		out[i] = model.Clone()
+	}
+	return a.ProviderID, a.Model.Clone(), out
+}
+
+// ModelsSnapshot returns a defensive copy of the active provider catalog.
+func (a *App) ModelsSnapshot() []protocol.Model {
+	_, _, models := a.ActiveModelsSnapshot()
+	return models
 }
 
 // SubagentModels returns exact provider/model pairs currently available to children.

@@ -76,7 +76,8 @@ Philosophy (pi-aligned, Go-native):
 - Modular packages with **no UI imports** inside `agent` / `provider` / `session`.
 - MVP auth: **OpenCode Go** + **ChatGPT Codex OAuth**.
 - Default built-in tools: **read, write, edit, bash, grep, glob**, direct **ask_user**, plus deferred **webfetch**.
-- Surfaces: **TUI**, **print/JSON**, **SDK**; RPC mode documented for phase 3.
+- Surfaces: **TUI**, **print/JSON**, in-process **Go SDK**, and versioned
+  **RPC** consumed by the checked-in Python and JavaScript/TypeScript clients.
 - Pure-Go **SQLite** sessions with provider-free first-prompt titles, manual rename, and indexed tree branches (`id` / `parentId`).
 - Clear permission + project-trust model; honest non-sandbox security story.
 
@@ -146,7 +147,7 @@ flowchart LR
   MODE -->|interactive| TUI[internal/tui]
   MODE -->|print / json| PRINT[print sink]
   MODE -->|sdk| SDK[pkg/snowsdk]
-  MODE -->|rpc later| RPC[internal/rpc]
+  MODE -->|rpc| RPC[internal/rpc]
   TUI --> AG[internal/agent]
   PRINT --> AG
   SDK --> AG
@@ -1070,19 +1071,31 @@ JSON event lines mirror `protocol.AgentEvent` for easy piping.
 
 ### 7.5 RPC mode
 
-JSONL over stdin/stdout (pi-inspired):
+Versioned JSONL over stdin/stdout (pi-inspired):
 
-- Commands: `prompt`, `abort`, `user_input_reply`, `user_input_reject`, `set_model`, `set_thinking`, `session_info`, …
-- Events: same as SDK events  
-- Framing: split on `\n` only (not Unicode line separators)
+- First frame: `rpc_ready` with string protocol version, Snow build version,
+  sorted protocol capabilities, and maximum input size.
+- Commands: `prompt`, `abort`, `user_input_reply`, `user_input_reject`,
+  `models_list`, `subagent_models`, `set_model`, `set_thinking`,
+  `session_info`, …
+- Events: same as SDK events; RPC-only control frames are not persisted events.
+- Framing: split on `\n` only (not Unicode line separators).
+- Schemas: network-free Draft 2020-12 contracts under
+  `pkg/protocol/schema/rpc/v1`.
 
 RPC prompts run asynchronously so the command reader remains available while
-the agent waits. `user_input_reply.params` is a `UserInputResponse`;
+the agent waits. Admission remains an immediate response for compatibility;
+exactly one later `prompt_completed` frame reports `completed`, `failed`, or
+`canceled` after all prompt events. Legacy same-ID prompt failure responses are
+retained. `user_input_reply.params` is a `UserInputResponse`;
 `user_input_reject.params` contains `request_id`. EOF closes the interactive
 input broker so pending/future questions fail fast while an ordinary one-shot
 prompt is still allowed to finish.
 
-Primary consumers: non-Go hosts, IDE bridges. Go hosts should prefer `snowsdk`.
+Primary consumers are the checked-in dependency-light Python 3.9+ async and
+Node.js 22+ ESM/TypeScript SDKs, other non-Go hosts, and IDE bridges. They invoke
+an installed/explicit Snow binary and do not download one. Go hosts should
+prefer `snowsdk`.
 
 ---
 
@@ -1260,9 +1273,13 @@ calls are bounded. Commands are argv arrays and never shell strings.
 Project-local plugin declarations are trust-gated. Trust controls input
 loading, not plugin permissions or OS access; untrusted plugins need a
 container/VM/OS sandbox. Persistent JavaScript and Python examples implement
-protocol v2 under `examples/plugins`, and `snow plugin check` performs a
+protocol v2 under `examples/plugins`. `snow plugin check` performs a
 provider-free live handshake with schema/event/risk and bounded-diagnostics
-reporting. MCP and Agent Skills remain separate adapters/resources over the
+reporting, while side-effect-free `list|get` and restart-scoped
+`add|enable|disable|remove` manage global or canonical-project declarations.
+Adds stage disabled by default, targeted raw-JSON updates preserve unknown
+fields, and global/project/explicit declarations merge by ID in increasing
+precedence. MCP and Agent Skills remain separate adapters/resources over the
 registry. The canonical wire contract is `docs/plugin-protocol.md`; runtime
 selection benchmarks and deferrals are in `docs/plugin-js-python-research.md`.
 
@@ -1285,12 +1302,15 @@ credential-bearing values.
 
 `internal/skills` implements the open Agent Skills `SKILL.md` format. Startup
 discovery strictly validates standard metadata and loads only names/descriptions
-from standard user and trust-gated project paths under a 64 KiB catalog budget.
-`activate_skill` loads escaped full instructions, the TUI autocompletes enabled
-leading `$skill-name` directives, and a directive activates before provider
-dispatch while recording branch-scoped state,
-and `read_skill_resource` verifies the discovery-time directory identity before
-using a pinned per-operation `os.Root` for bounded streaming resource access.
+from immutable rank-zero embedded skills plus standard user and trust-gated
+project paths under a 64 KiB catalog budget. The bundled `plugin-builder` skill
+provides supervised, restart-required protocol-v2 authoring instructions and
+templates without extracting files beside the installed binary. `activate_skill`
+loads escaped full instructions, the TUI autocompletes enabled leading
+`$skill-name` directives, and a directive activates before provider dispatch
+while recording branch-scoped state. `read_skill_resource` uses immutable
+bounded `embed.FS` reads for built-ins or verifies the discovery-time directory
+identity before using a pinned per-operation `os.Root` for filesystem resources.
 Activated content is reattached on every provider call and reconstructed from
 successful markers/session history after resume so compaction does not drop it;
 current trust/disable/tool policy filters stale activations. See `docs/skills.md`.
@@ -1455,7 +1475,10 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] Public `pkg/snowsdk` stable enough for external sample
 - [x] `grep` + `glob` builtins
 - [x] `--mode json` event stream
-- [x] RPC JSONL mode skeleton
+- [x] RPC protocol v1 — first-frame capability/version handshake, public DTOs,
+  definitive prompt completion, model discovery, and checked-in schemas
+- [x] Dependency-light Python and JavaScript/TypeScript SDK packages use an
+  external Snow binary with safe defaults and no binary downloader
 - [x] Extensibility core — public Go plugin API, lifecycle manager, descriptor registry, observe-only events, and JSON-RPC v2 stdio host
 - [x] Bounded root steer/follow-up queue across Agent, SDK, RPC, and TUI, with safe tool-batch boundaries and abort restoration
 
@@ -1463,8 +1486,10 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 
 - [x] Standalone `examples/sdk` module builds and runs against `pkg/snowsdk`.
 - [x] JSON mode parses with `jq`.
-- [x] Dependency-free Python RPC client sends `prompt`, consumes events, and
-  waits for `turn_done`.
+- [x] Python and JavaScript/TypeScript clients validate `rpc_ready`, correlate
+  out-of-order responses, consume events, and await `prompt_completed`.
+- [x] Both client packages run network-free unit tests and real-binary fake-
+  provider integration tests on Linux and macOS.
 
 ---
 

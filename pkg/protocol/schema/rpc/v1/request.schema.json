@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/request.schema.json",
+  "title": "Snow RPC request",
+  "$defs": {
+    "id": {"type": "string"},
+    "path": {"type": "string", "pattern": "^/root(?:/[a-z][a-z0-9_]{0,63})*$"},
+    "thinking": {"type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]},
+    "noParams": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"enum": ["abort", "goal_get", "goal_pause", "goal_resume", "goal_clear", "goal_continue", "models_list", "session_info", "subagent_models", "subagent_ready"]}
+      },
+      "additionalProperties": false
+    },
+    "goalCreateParams": {
+      "type": "object",
+      "required": ["objective"],
+      "properties": {
+        "objective": {"type": "string", "minLength": 1, "maxLength": 32768},
+        "token_budget": {"type": "integer", "minimum": 1},
+        "replace": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "targetParams": {
+      "type": "object",
+      "required": ["target"],
+      "properties": {"target": {"$ref": "#/$defs/path"}},
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/noParams"},
+    {
+      "type": "object",
+      "required": ["type", "message"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "prompt"},
+        "message": {"type": "string", "minLength": 1},
+        "mode": {"enum": ["default", "plan"]}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "message"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"enum": ["steer", "follow_up"]},
+        "message": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "model"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "type": {"const": "set_model"}, "model": {"type": "string", "minLength": 1}},
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "thinking"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "type": {"const": "set_thinking"}, "thinking": {"$ref": "#/$defs/thinking"}},
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "mode"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "type": {"const": "set_mode"}, "mode": {"enum": ["default", "plan"]}},
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "params"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "session_rename"},
+        "params": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {"name": {"type": "string", "minLength": 1}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "params"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "type": {"enum": ["goal_create", "goal_set"]}, "params": {"$ref": "#/$defs/goalCreateParams"}},
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "params"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "goal_edit"},
+        "params": {
+          "type": "object",
+          "required": ["objective"],
+          "properties": {"objective": {"type": "string", "minLength": 1, "maxLength": 32768}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "params"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "subagent_spawn"},
+        "params": {
+          "type": "object",
+          "required": ["name", "task"],
+          "properties": {
+            "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+            "task": {"type": "string", "minLength": 1},
+            "role": {"type": "string"},
+            "provider": {"type": "string"},
+            "model": {"type": "string"},
+            "fork_turns": {"type": "string", "pattern": "^(none|all|[1-9][0-9]*)$"},
+            "reasoning_effort": {"$ref": "#/$defs/thinking"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "params"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"enum": ["subagent_send_message", "subagent_followup"]},
+        "params": {
+          "type": "object",
+          "required": ["target", "message"],
+          "properties": {"target": {"$ref": "#/$defs/path"}, "message": {"type": "string", "minLength": 1}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "params"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "type": {"enum": ["subagent_get", "subagent_interrupt"]}, "params": {"$ref": "#/$defs/targetParams"}},
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "subagent_list"},
+        "params": {
+          "type": "object",
+          "properties": {"path_prefix": {"$ref": "#/$defs/path"}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "subagent_wait"},
+        "params": {
+          "type": "object",
+          "properties": {"timeout_ms": {"type": "integer", "minimum": 0}, "until": {"enum": ["activity", "all"]}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "params"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "user_input_reply"},
+        "params": {
+          "type": "object",
+          "required": ["request_id", "answers"],
+          "properties": {
+            "request_id": {"type": "string", "minLength": 1},
+            "answers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "answer"],
+                "properties": {"id": {"type": "string", "minLength": 1}, "answer": {"type": "string"}},
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "params"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "user_input_reject"},
+        "params": {
+          "type": "object",
+          "required": ["request_id"],
+          "properties": {"request_id": {"type": "string", "minLength": 1}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

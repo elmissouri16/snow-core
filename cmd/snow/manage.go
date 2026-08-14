@@ -654,24 +654,68 @@ func newMCPView(name, scope string, spec publicmcp.ServerSpec, shadowed bool) mc
 func redactArgs(values []string) []string {
 	out := append([]string(nil), values...)
 	redactNext := false
+	headerNext := false
 	for i, value := range out {
 		if redactNext {
 			out[i] = "[redacted]"
 			redactNext = false
 			continue
 		}
-		lower := strings.ToLower(value)
-		sensitive := strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "password") || strings.Contains(lower, "api-key") || strings.Contains(lower, "apikey")
-		if !sensitive {
+		if headerNext {
+			out[i] = redactHeaderArgument(value)
+			headerNext = false
 			continue
 		}
-		if key, _, ok := strings.Cut(value, "="); ok {
-			out[i] = key + "=[redacted]"
-		} else if strings.HasPrefix(value, "-") {
+		lower := strings.ToLower(strings.TrimSpace(value))
+		if lower == "-h" || lower == "--header" {
+			headerNext = true
+			continue
+		}
+		if key, val, ok := strings.Cut(value, "="); ok {
+			lowerKey := strings.ToLower(strings.TrimSpace(key))
+			if lowerKey == "-h" || lowerKey == "--header" {
+				if redactHeaderArgument(val) != val {
+					out[i] = key + "=[redacted]"
+				}
+				continue
+			}
+			if sensitiveArgumentName(lowerKey) {
+				out[i] = key + "=[redacted]"
+				continue
+			}
+		}
+		if redactHeaderArgument(value) != value || strings.HasPrefix(lower, "bearer ") {
+			out[i] = "[redacted]"
+			continue
+		}
+		if strings.HasPrefix(value, "-") && sensitiveArgumentName(lower) {
 			redactNext = true
 		}
 	}
 	return out
+}
+
+func sensitiveArgumentName(value string) bool {
+	value = strings.TrimLeft(strings.ToLower(value), "-/")
+	for _, marker := range []string{"token", "secret", "password", "passwd", "api-key", "apikey", "auth", "credential", "cookie", "private-key", "access-key", "client-key", "key-file", "key-path"} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return value == "key"
+}
+
+func redactHeaderArgument(value string) string {
+	name, rest, ok := strings.Cut(value, ":")
+	if !ok {
+		return value
+	}
+	lowerName := strings.ToLower(strings.TrimSpace(name))
+	lowerValue := strings.ToLower(strings.TrimSpace(rest))
+	if sensitiveArgumentName(lowerName) || strings.Contains(lowerName, "authorization") || strings.Contains(lowerName, "cookie") || strings.HasPrefix(lowerValue, "bearer ") {
+		return name + ": [redacted]"
+	}
+	return value
 }
 
 func redactConfigMap(values map[string]string, headers bool) map[string]string {
@@ -769,11 +813,11 @@ func jsonRequested(cmd *cobra.Command) bool {
 
 func printReceipt(cmd *cobra.Command, receipt commandReceipt) error {
 	if jsonRequested(cmd) {
-		return json.NewEncoder(os.Stdout).Encode(receipt)
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(receipt)
 	}
-	fmt.Printf("%s %s %s in %s config (%s)\n", receipt.Action, receipt.Resource, receipt.Name, receipt.Scope, receipt.Path)
+	fmt.Fprintf(cmd.OutOrStdout(), "%s %s %s in %s config (%s)\n", receipt.Action, receipt.Resource, receipt.Name, receipt.Scope, receipt.Path)
 	if receipt.Scope == "project" {
-		fmt.Fprintln(os.Stderr, "project configuration is loaded only after project trust is allowed")
+		fmt.Fprintln(cmd.ErrOrStderr(), "project configuration is loaded only after project trust is allowed")
 	}
 	return nil
 }

@@ -4,9 +4,9 @@ go 1.27rc2
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
+	github.com/aymanbagabas/go-osc52/v2 v2.0.1
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/blevesearch/bleve/v2 v2.6.0
-	github.com/aymanbagabas/go-osc52/v2 v2.0.1
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v1.0.0
@@ -14,6 +14,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/enetx/http v1.0.29
 	github.com/enetx/surf v1.0.203
+	github.com/google/jsonschema-go v0.4.3
 	github.com/klauspost/compress v1.19.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/spf13/cobra v1.10.2
@@ -66,7 +67,6 @@ require (
 	github.com/enetx/iter v0.0.0-20260703211843-75f7a9fffd6d // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/golang/snappy v1.0.0 // indirect
-	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

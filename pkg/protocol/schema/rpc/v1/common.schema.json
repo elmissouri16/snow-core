@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/common.schema.json",
+  "title": "Snow RPC shared wire types",
+  "$defs": {
+    "cost": {
+      "type": "object",
+      "required": ["input", "output", "cache_read", "cache_write", "total"],
+      "properties": {
+        "currency": {"type": "string"},
+        "input": {"type": "number", "minimum": 0},
+        "output": {"type": "number", "minimum": 0},
+        "cache_read": {"type": "number", "minimum": 0},
+        "cache_write": {"type": "number", "minimum": 0},
+        "total": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "usage": {
+      "type": "object",
+      "required": ["input", "output", "cache_read", "cache_write", "total_tokens"],
+      "properties": {
+        "input": {"type": "integer", "minimum": 0},
+        "output": {"type": "integer", "minimum": 0},
+        "reasoning": {"type": "integer", "minimum": 0},
+        "cache_read": {"type": "integer", "minimum": 0},
+        "cache_read_known": {"type": "boolean"},
+        "cache_write": {"type": "integer", "minimum": 0},
+        "total_tokens": {"type": "integer", "minimum": 0},
+        "requests": {"type": "integer", "minimum": 0},
+        "cost": {"$ref": "#/$defs/cost"}
+      },
+      "additionalProperties": false
+    },
+    "agentRef": {
+      "type": "object",
+      "required": ["thread_id", "path", "depth"],
+      "properties": {
+        "thread_id": {"type": "string"},
+        "parent_thread_id": {"type": "string"},
+        "path": {"type": "string", "pattern": "^/root(?:/[a-z][a-z0-9_]{0,63})*$"},
+        "parent_path": {"type": "string"},
+        "role": {"type": "string"},
+        "nickname": {"type": "string"},
+        "depth": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "subagentState": {
+      "type": "object",
+      "required": ["agent", "status", "created_at"],
+      "properties": {
+        "agent": {"$ref": "#/$defs/agentRef"},
+        "status": {"type": "string", "enum": ["pending_init", "queued", "running", "interrupted", "completed", "errored", "shutdown", "not_loaded", "not_found"]},
+        "model": {"type": "string"},
+        "provider": {"type": "string"},
+        "thinking": {"type": "string"},
+        "created_at": {"type": "integer", "minimum": 0},
+        "started_at": {"type": "integer", "minimum": 0},
+        "finished_at": {"type": "integer", "minimum": 0},
+        "result": {"type": "string"},
+        "error": {"type": "string"},
+        "usage": {"$ref": "#/$defs/usage"},
+        "generation": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "threadGoal": {
+      "type": "object",
+      "required": ["session_id", "branch_id", "goal_id", "objective", "status", "tokens_used", "seconds_used", "created_at", "updated_at"],
+      "properties": {
+        "session_id": {"type": "string"},
+        "branch_id": {"type": "string"},
+        "goal_id": {"type": "string"},
+        "objective": {"type": "string"},
+        "status": {"type": "string", "enum": ["active", "paused", "blocked", "usage_limited", "budget_limited", "complete"]},
+        "token_budget": {"type": ["integer", "null"], "minimum": 1},
+        "tokens_used": {"type": "integer", "minimum": 0},
+        "seconds_used": {"type": "integer", "minimum": 0},
+        "estimated_costs": {"type": "array", "items": {"$ref": "#/$defs/cost"}},
+        "created_at": {"type": "integer", "minimum": 0},
+        "updated_at": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "userInputRequest": {
+      "type": "object",
+      "required": ["id", "questions"],
+      "properties": {
+        "id": {"type": "string"},
+        "tool_call_id": {"type": "string"},
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "header", "question"],
+            "properties": {
+              "id": {"type": "string"},
+              "header": {"type": "string"},
+              "question": {"type": "string"},
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["label"],
+                  "properties": {"label": {"type": "string"}, "description": {"type": "string"}},
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "inputQueue": {
+      "type": "object",
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "kind", "text", "order"],
+            "properties": {
+              "id": {"type": "string"},
+              "kind": {"type": "string", "enum": ["steer", "follow_up"]},
+              "text": {"type": "string"},
+              "order": {"type": "integer", "minimum": 0}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

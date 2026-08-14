@@ -331,10 +331,20 @@ snow skills get NAME
 snow skills enable NAME
 snow skills disable NAME
 
+snow plugin list [--all] [--json]
+snow plugin get ID
+snow plugin add MANIFEST_OR_EXECUTABLE [--project] [--replace] [--enable]
+snow plugin enable ID [--project]
+snow plugin disable ID [--project]
+snow plugin remove ID [--project]
 snow plugin check MANIFEST_OR_EXECUTABLE [--json]
 ```
 
-MCP and skill mutations are global by default; add `--project` to target trusted
-project configuration. `plugin check` performs a bounded runtime handshake and
-does not mutate configuration. Full details are in [MCP](mcp.md),
-[Agent Skills](skills.md), and [Plugins](plugins.md).
+MCP, skill, and plugin mutations are global by default; add `--project` to
+target project configuration. Plugin add stages declarations disabled unless
+`--enable` is explicit, every plugin configuration change requires restart, and
+project declarations still require project trust before loading. Plugin
+list/get/add/enable/disable/remove never start a process. `plugin check` performs
+a bounded runtime handshake and therefore executes the plugin, but does not
+mutate configuration. Full details are in [MCP](mcp.md), [Agent Skills](skills.md),
+and [Plugins](plugins.md).

@@ -53,6 +53,7 @@ type Skill struct {
 	DisabledBy    string            `json:"disabled_by,omitempty"`
 	rank          int
 	identity      fs.FileInfo
+	embeddedRoot  fs.FS
 }
 
 // Diagnostic records malformed or shadowed skills without aborting startup.
@@ -71,6 +72,7 @@ type Options struct {
 	ProjectTrusted   bool
 	ExtraDirs        []string
 	IncludeClaude    bool
+	IncludeBuiltins  bool
 	Disabled         bool
 	DisabledReason   string
 	Overrides        map[string]bool
@@ -118,6 +120,13 @@ func Discover(opts Options) *Registry {
 		maxFile = defaultMaxSkillFile
 	}
 	r := &Registry{byName: make(map[string]Skill), allByName: make(map[string]Skill), maxFileSize: maxFile}
+	if opts.IncludeBuiltins {
+		builtins, diagnostics := discoverBuiltins(maxFile)
+		r.diagnostics = append(r.diagnostics, diagnostics...)
+		for _, skill := range builtins {
+			r.allByName[skill.Name] = skill
+		}
+	}
 
 	home := opts.Home
 	if home == "" {
@@ -273,11 +282,15 @@ scanDirs:
 
 var errNonconformant = errors.New("Agent Skills frontmatter is nonconformant")
 
-func parseRoot(root *os.Root, path string, maxBytes int64) (Skill, []Diagnostic, error) {
+func parseRoot(root *os.Root, location string, maxBytes int64) (Skill, []Diagnostic, error) {
 	data, err := readBoundedRoot(root, "SKILL.md", maxBytes)
 	if err != nil {
 		return Skill{}, nil, err
 	}
+	return parseSkillData(data, location, filepath.Dir(location))
+}
+
+func parseSkillData(data []byte, location, directory string) (Skill, []Diagnostic, error) {
 	meta, _, err := split(data)
 	if err != nil {
 		return Skill{}, nil, err
@@ -294,11 +307,10 @@ func parseRoot(root *os.Root, path string, maxBytes int64) (Skill, []Diagnostic,
 	rawCompatibility := fm.Compatibility
 	fm.Name = norm.NFKC.String(strings.TrimSpace(fm.Name))
 	fm.Description = strings.TrimSpace(fm.Description)
-	dir := filepath.Dir(path)
-	skill := Skill{Name: fm.Name, Description: fm.Description, License: strings.TrimSpace(fm.License), Compatibility: strings.TrimSpace(fm.Compatibility), Metadata: fm.Metadata, AllowedTools: strings.TrimSpace(fm.AllowedTools), Location: path, Directory: dir}
+	skill := Skill{Name: fm.Name, Description: fm.Description, License: strings.TrimSpace(fm.License), Compatibility: strings.TrimSpace(fm.Compatibility), Metadata: fm.Metadata, AllowedTools: strings.TrimSpace(fm.AllowedTools), Location: location, Directory: directory}
 	var diagnostics []Diagnostic
 	invalid := func(message string) {
-		diagnostics = append(diagnostics, Diagnostic{Path: path, Skill: skill.Name, Level: "error", Message: message})
+		diagnostics = append(diagnostics, Diagnostic{Path: location, Skill: skill.Name, Level: "error", Message: message})
 	}
 	for _, field := range []string{"name", "description", "license", "compatibility", "allowed-tools"} {
 		if value, present := raw[field]; present {
@@ -324,7 +336,7 @@ func parseRoot(root *os.Root, path string, maxBytes int64) (Skill, []Diagnostic,
 	} else if !validSkillName(skill.Name) {
 		invalid("name does not satisfy the Agent Skills naming constraints")
 	}
-	if norm.NFKC.String(filepath.Base(dir)) != skill.Name {
+	if norm.NFKC.String(pathpkg.Base(filepath.ToSlash(directory))) != skill.Name {
 		invalid("name must match the parent directory")
 	}
 	if skill.Description == "" {
@@ -427,6 +439,29 @@ func readBoundedRoot(root *os.Root, name string, maxBytes int64) ([]byte, error)
 		return nil, err
 	}
 	defer file.Close()
+	return readBoundedFile(file, info, maxBytes)
+}
+
+func readBoundedFS(root fs.FS, name string, maxBytes int64) ([]byte, error) {
+	if root == nil || !fs.ValidPath(name) {
+		return nil, errors.New("invalid embedded skill resource path")
+	}
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("skill resource is not a regular file")
+	}
+	return readBoundedFile(file, info, maxBytes)
+}
+
+func readBoundedFile(file io.Reader, info fs.FileInfo, maxBytes int64) ([]byte, error) {
 	if info.Size() > maxBytes {
 		return nil, fmt.Errorf("file exceeds %d-byte limit", maxBytes)
 	}
@@ -562,12 +597,18 @@ func (r *Registry) load(name string) (Skill, []byte, error) {
 	if !ok {
 		return Skill{}, nil, fmt.Errorf("unknown skill %q", name)
 	}
-	root, err := openSkillRoot(skill)
-	if err != nil {
-		return Skill{}, nil, err
+	var data []byte
+	var err error
+	if skill.embeddedRoot != nil {
+		data, err = readBoundedFS(skill.embeddedRoot, "SKILL.md", r.maxFileSize)
+	} else {
+		var root *os.Root
+		root, err = openSkillRoot(skill)
+		if err == nil {
+			defer root.Close()
+			data, err = readBoundedRoot(root, "SKILL.md", r.maxFileSize)
+		}
 	}
-	defer root.Close()
-	data, err := readBoundedRoot(root, "SKILL.md", r.maxFileSize)
 	if err != nil {
 		return Skill{}, nil, err
 	}
@@ -575,9 +616,24 @@ func (r *Registry) load(name string) (Skill, []byte, error) {
 	return skill, body, err
 }
 
+func (r *Registry) readResource(skill Skill, name string, maxBytes int64) ([]byte, error) {
+	if skill.embeddedRoot != nil {
+		return readBoundedFS(skill.embeddedRoot, filepath.ToSlash(name), maxBytes)
+	}
+	root, err := openSkillRoot(skill)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	return readBoundedRoot(root, name, maxBytes)
+}
+
 func listResources(ctx context.Context, skill Skill, limit int) ([]string, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if skill.embeddedRoot != nil {
+		return listFSResources(ctx, skill.embeddedRoot, limit)
 	}
 	root, err := openSkillRoot(skill)
 	if err != nil {
@@ -647,6 +703,57 @@ func listResources(ctx context.Context, skill Skill, limit int) ([]string, bool,
 		}
 		if err := dir.Close(); err != nil {
 			return nil, false, err
+		}
+	}
+	sort.Strings(resources)
+	return resources, false, nil
+}
+
+func listFSResources(ctx context.Context, root fs.FS, limit int) ([]string, bool, error) {
+	type directory struct {
+		path  string
+		depth int
+	}
+	stack := []directory{{path: "."}}
+	var resources []string
+	entriesSeen := 0
+	for len(stack) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		entries, err := fs.ReadDir(root, current.path)
+		if err != nil {
+			return nil, false, err
+		}
+		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return nil, false, err
+			}
+			entriesSeen++
+			if entriesSeen > 2000 {
+				sort.Strings(resources)
+				return resources, true, nil
+			}
+			resourcePath := entry.Name()
+			if current.path != "." {
+				resourcePath = pathpkg.Join(current.path, entry.Name())
+			}
+			if entry.IsDir() {
+				if current.depth < 5 && entry.Name() != ".git" && entry.Name() != "node_modules" {
+					stack = append(stack, directory{path: resourcePath, depth: current.depth + 1})
+				}
+				continue
+			}
+			if resourcePath == "SKILL.md" {
+				continue
+			}
+			if len(resources) >= limit {
+				sort.Strings(resources)
+				return resources, true, nil
+			}
+			resources = append(resources, resourcePath)
 		}
 	}
 	sort.Strings(resources)

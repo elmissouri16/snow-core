@@ -29,6 +29,72 @@ func writeSkill(t *testing.T, root, dir, name, description, body string) string 
 	return skillDir
 }
 
+func TestEmbeddedPluginBuilderActivationResourcesAndPrecedence(t *testing.T) {
+	catalog := Discover(Options{Home: t.TempDir(), SnowHome: t.TempDir(), IncludeBuiltins: true})
+	skill, ok := catalog.Get("plugin-builder")
+	if !ok || skill.Scope != "builtin" || skill.Source != "snow" || !strings.HasPrefix(skill.Location, "snow-builtin://") {
+		t.Fatalf("embedded plugin-builder = %+v, %v", skill, ok)
+	}
+	registry := tools.NewRegistry()
+	if err := RegisterTools(registry, catalog); err != nil {
+		t.Fatal(err)
+	}
+	activate, _ := registry.Get("activate_skill")
+	result, err := activate.Run(context.Background(), json.RawMessage(`{"name":"plugin-builder"}`), nil)
+	if err != nil || result.IsError || !strings.Contains(result.Content[0].Text, "Never silently execute") || !strings.Contains(result.Content[0].Text, "assets/plugin.py") {
+		t.Fatalf("activation = %+v, err = %v", result, err)
+	}
+	read, _ := registry.Get("read_skill_resource")
+	resource, err := read.Run(context.Background(), json.RawMessage(`{"name":"plugin-builder","path":"assets/manifest-python.json"}`), nil)
+	if err != nil || resource.IsError || !strings.Contains(resource.Content[0].Text, `"enabled": false`) {
+		t.Fatalf("embedded resource = %+v, err = %v", resource, err)
+	}
+	traversal, err := read.Run(context.Background(), json.RawMessage(`{"name":"plugin-builder","path":"../secret"}`), nil)
+	if err != nil || !traversal.IsError || !strings.Contains(traversal.Content[0].Text, "stay inside") {
+		t.Fatalf("embedded traversal = %+v, err = %v", traversal, err)
+	}
+
+	externalRoot := t.TempDir()
+	externalDir := writeSkill(t, externalRoot, "plugin-builder", "plugin-builder", "Custom builder.", "custom body")
+	shadowed := Discover(Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{externalRoot}, IncludeBuiltins: true})
+	got, ok := shadowed.Get("plugin-builder")
+	if !ok || got.Directory != externalDir {
+		t.Fatalf("external override = %+v, %v", got, ok)
+	}
+	foundDiagnostic := false
+	for _, diagnostic := range shadowed.Diagnostics() {
+		if diagnostic.Skill == "plugin-builder" && strings.Contains(diagnostic.Message, "shadowed") {
+			foundDiagnostic = true
+		}
+	}
+	if !foundDiagnostic {
+		t.Fatalf("missing builtin shadow diagnostic: %+v", shadowed.Diagnostics())
+	}
+}
+
+func TestEmbeddedPluginBuilderHonorsPolicyAndCandidateLimit(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "review", "review", "Review code.", "review body")
+	catalog := Discover(Options{
+		Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}, IncludeBuiltins: true,
+		MaxSkills: 1, Disabled: true, DisabledReason: "disabled by test", Overrides: map[string]bool{"plugin-builder": true},
+	})
+	if _, ok := catalog.Get("review"); ok {
+		t.Fatal("globally disabled filesystem skill unexpectedly enabled")
+	}
+	if _, ok := catalog.Get("plugin-builder"); !ok {
+		t.Fatal("named override did not enable embedded plugin-builder")
+	}
+	if len(catalog.Inventory()) != 2 {
+		t.Fatalf("inventory = %+v", catalog.Inventory())
+	}
+
+	disabled := Discover(Options{Home: t.TempDir(), SnowHome: t.TempDir(), IncludeBuiltins: true, Overrides: map[string]bool{"plugin-builder": false}})
+	if _, ok := disabled.Get("plugin-builder"); ok || len(disabled.Inventory()) != 1 || disabled.Inventory()[0].Enabled {
+		t.Fatalf("disabled builtin inventory = %+v", disabled.Inventory())
+	}
+}
+
 func TestDiscoverPrecedenceTrustAndProgressiveDisclosure(t *testing.T) {
 	home := t.TempDir()
 	cwd := t.TempDir()
