@@ -52,5 +52,8 @@ func atomicReplaceRooted(ctx context.Context, target rootedPath, data []byte, mo
 		return fmt.Errorf("replace: %w", err)
 	}
 	cleanup = false
+	if err := syncRootedDirectory(target.root, parent); err != nil {
+		return fmt.Errorf("sync parent directory: %w", err)
+	}
 	return nil
 }

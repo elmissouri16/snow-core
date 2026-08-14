@@ -208,6 +208,55 @@ func TestReadRejectsFIFO(t *testing.T) {
 // TestReadUtf8TruncationBoundary: truncating to the byte cap must never split
 // a multi-byte UTF-8 rune; the result stays valid UTF-8 and carries the
 // truncation marker.
+func TestReadRejectsMalformedUTF8(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "invalid.txt")
+	if err := os.WriteFile(file, []byte{'v', 'a', 'l', 'i', 'd', 0xff, 'x'}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRead(NewPathGuard([]string{dir}, dir))
+	res, _ := r.Run(context.Background(), argsFor(t, map[string]any{"path": file}), stubHost{cwd: dir, roots: []string{dir}})
+	if !res.IsError {
+		t.Fatalf("malformed UTF-8 should be rejected: %+v", res)
+	}
+	if !strings.Contains(res.Content[0].Text, "not valid UTF-8") {
+		t.Fatalf("error should identify malformed UTF-8: %q", res.Content[0].Text)
+	}
+}
+
+func TestReadRejectsMalformedUTF8BeforeTruncationBoundary(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "invalid-large.txt")
+	content := append([]byte(strings.Repeat("a", 64)), 0xff)
+	content = append(content, []byte(strings.Repeat("b", 64))...)
+	if err := os.WriteFile(file, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRead(NewPathGuard([]string{dir}, dir))
+	r.MaxOutputBytes = 96
+	res, _ := r.Run(context.Background(), argsFor(t, map[string]any{"path": file}), stubHost{cwd: dir, roots: []string{dir}})
+	if !res.IsError || !strings.Contains(res.Content[0].Text, "not valid UTF-8") {
+		t.Fatalf("malformed truncated input should be rejected: %+v", res)
+	}
+}
+
+func TestValidUTF8PrefixIsLinearAndRuneSafe(t *testing.T) {
+	data := []byte(strings.Repeat("a", 256*1024))
+	data[len(data)/2] = 0xff
+	if _, valid := validUTF8Prefix(data, len(data)); valid {
+		t.Fatal("malformed prefix accepted")
+	}
+
+	valid := []byte("abéz")
+	prefix, ok := validUTF8Prefix(valid, 3)
+	if !ok {
+		t.Fatal("valid split rune rejected")
+	}
+	if got := string(prefix); got != "ab" {
+		t.Fatalf("prefix = %q, want ab", got)
+	}
+}
+
 func TestReadUtf8TruncationBoundary(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "utf8.txt")

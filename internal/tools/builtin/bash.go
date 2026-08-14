@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/snow-core/snow/internal/tools"
 )
@@ -127,7 +129,7 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		managed.close()
 	}
 
-	output := limited.String()
+	output := sanitizeBoundedUTF8(limited.buf, cap)
 	if limited.truncated {
 		output += "\n... [output truncated]"
 	}
@@ -149,6 +151,19 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	}
 
 	return tools.TextResult(output), nil
+}
+
+// sanitizeBoundedUTF8 converts arbitrary process bytes into valid UTF-8 while
+// keeping the returned text within the original byte budget.
+func sanitizeBoundedUTF8(data []byte, maxBytes int) string {
+	if maxBytes <= 0 || len(data) == 0 {
+		return ""
+	}
+	value := string(data)
+	if !utf8.Valid(data) {
+		value = strings.ToValidUTF8(value, string(utf8.RuneError))
+	}
+	return truncateRunes(value, maxBytes)
 }
 
 // limitedBuffer caps writes at cap bytes, tracking truncation.
@@ -173,6 +188,3 @@ func (l *limitedBuffer) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
-
-// String returns the buffered content.
-func (l *limitedBuffer) String() string { return string(l.buf) }

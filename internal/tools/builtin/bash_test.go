@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/snow-core/snow/internal/tools"
 )
@@ -53,6 +54,28 @@ func TestBash_OutputCap(t *testing.T) {
 	}
 	if !strings.Contains(res.Content[0].Text, "output truncated") {
 		t.Error("truncation marker missing")
+	}
+}
+
+func TestSanitizeBoundedUTF8(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+		cap  int
+	}{
+		{name: "split rune", data: []byte("abcé"), cap: 4},
+		{name: "invalid bytes", data: []byte{'a', 0xff, 'b'}, cap: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeBoundedUTF8(tt.data, tt.cap)
+			if !utf8.ValidString(got) {
+				t.Fatalf("output is not valid UTF-8: %q", got)
+			}
+			if len(got) > tt.cap {
+				t.Fatalf("output is %d bytes, cap is %d: %q", len(got), tt.cap, got)
+			}
+		})
 	}
 }
 

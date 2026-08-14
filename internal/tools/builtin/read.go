@@ -135,7 +135,14 @@ func (r *Read) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		return tools.ErrorResult(fmt.Errorf("read: %w", err)), nil
 	}
 	if truncated {
-		content = append([]byte(truncateRunes(string(content), maxBytes)), truncationMarker...)
+		var valid bool
+		content, valid = validUTF8Prefix(content, maxBytes)
+		if !valid {
+			return tools.ErrorResult(fmt.Errorf("read: %q is not valid UTF-8 text", a.Path)), nil
+		}
+		content = append(content, truncationMarker...)
+	} else if !utf8.Valid(content) {
+		return tools.ErrorResult(fmt.Errorf("read: %q is not valid UTF-8 text", a.Path)), nil
 	}
 	return tools.TextResult(string(content)), nil
 }
@@ -229,7 +236,10 @@ func readLineWindow(ctx context.Context, file *os.File, offset, limit *int, maxB
 			lineSelected = lineNo+1 >= start && (lineLimit < 0 || selected < lineLimit)
 			if lineSelected && selected > 0 {
 				if out.Len() >= maxBytes {
-					return []byte(truncateRunes(out.String(), maxBytes)), true, nil
+					// Keep one byte of lookahead so UTF-8 validation can distinguish
+					// a complete boundary from an incomplete final rune.
+					out.WriteByte('\n')
+					return out.Bytes(), true, nil
 				}
 				out.WriteByte('\n')
 			}
@@ -242,10 +252,11 @@ func readLineWindow(ctx context.Context, file *os.File, offset, limit *int, maxB
 			}
 			remaining := maxBytes - out.Len()
 			if len(body) > remaining {
-				if remaining > 0 {
-					out.Write(body[:remaining])
+				lookahead := min(len(body), max(remaining, 0)+utf8.UTFMax)
+				if lookahead > 0 {
+					out.Write(body[:lookahead])
 				}
-				return []byte(truncateRunes(out.String(), maxBytes)), true, nil
+				return out.Bytes(), true, nil
 			}
 			out.Write(body)
 		}
@@ -275,20 +286,46 @@ func readLineWindow(ctx context.Context, file *os.File, offset, limit *int, maxB
 	return out.Bytes(), false, nil
 }
 
-// truncateRunes truncates to the largest rune-boundary prefix of the given
-// byte budget, so multi-byte UTF-8 runes are never split.
-func truncateRunes(s string, maxBytes int) string {
-	if maxBytes <= 0 || len(s) <= maxBytes {
-		if maxBytes <= 0 {
-			return ""
+// validUTF8Prefix returns the largest complete UTF-8 prefix within maxBytes.
+// It scans once, rejects malformed input, and tolerates only an incomplete rune
+// that starts before the byte limit and completes in the supplied lookahead.
+func validUTF8Prefix(data []byte, maxBytes int) ([]byte, bool) {
+	if maxBytes <= 0 {
+		return nil, true
+	}
+	limit := min(len(data), maxBytes)
+	lastComplete := 0
+	for pos := 0; pos < limit; {
+		r, size := utf8.DecodeRune(data[pos:])
+		if r == utf8.RuneError && size == 1 {
+			if !utf8.FullRune(data[pos:]) {
+				return data[:lastComplete], true
+			}
+			return nil, false
 		}
+		if pos+size > limit {
+			return data[:lastComplete], true
+		}
+		pos += size
+		lastComplete = pos
+	}
+	return data[:lastComplete], true
+}
+
+// truncateRunes truncates valid UTF-8 text to a byte budget without splitting
+// a rune. Malformed input is replaced linearly so every caller gets valid text.
+func truncateRunes(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if !utf8.ValidString(s) {
+		s = strings.ToValidUTF8(s, string(utf8.RuneError))
+	}
+	if len(s) <= maxBytes {
 		return s
 	}
-	b := []byte(s)[:maxBytes]
-	for len(b) > 0 && !utf8.Valid(b) {
-		b = b[:len(b)-1]
-	}
-	return string(b)
+	prefix, _ := validUTF8Prefix([]byte(s), maxBytes)
+	return string(prefix)
 }
 
 // isBinary detects NUL bytes in the first 8KiB of an already-read buffer.
