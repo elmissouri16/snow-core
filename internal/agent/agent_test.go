@@ -29,6 +29,17 @@ import (
 // Scripted provider used in tests
 // ---------------------------------------------------------------------------
 
+func TestToolStartMessageIncludesBashCommand(t *testing.T) {
+	command := `printf '%s\\n' "hello world"`
+	args, err := json.Marshal(map[string]string{"command": command})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := toolStartMessage("bash", args); got != command {
+		t.Fatalf("toolStartMessage() = %q, want %q", got, command)
+	}
+}
+
 func TestFirstPromptCreatesDeterministicSessionTitle(t *testing.T) {
 	st := session.NewMemoryStore(session.Options{})
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
@@ -108,7 +119,7 @@ func TestMalformedToolArgumentsRemainPersistableInSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	malformed, _ := json.Marshal(`{"bad"`)
+	malformed := json.RawMessage(`{"bad"`)
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{
 		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "call-1", ToolName: "read", Arguments: malformed}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
 		{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
@@ -249,13 +260,12 @@ func TestRequestAffinityKeyIsStableScopedAndOpaque(t *testing.T) {
 }
 
 type scriptedProvider struct {
-	mu          sync.Mutex
-	scripts     [][]protocol.StreamEvent // per Chat call
-	call        int
-	resolveErr  error
-	models      []protocol.Model
-	requests    []protocol.ChatRequest
-	credentials []auth.Credential
+	mu         sync.Mutex
+	scripts    [][]protocol.StreamEvent // per Chat call
+	call       int
+	resolveErr error
+	models     []protocol.Model
+	requests   []protocol.ChatRequest
 }
 
 func TestActivatedSkillsRestoredIntoSystemContext(t *testing.T) {
@@ -269,7 +279,7 @@ func TestActivatedSkillsRestoredIntoSystemContext(t *testing.T) {
 	a, err := New(Options{
 		Provider: p, Registry: tools.NewRegistry(), Session: st,
 		Permission:   permission.NewService(permission.ModeDeny, nil),
-		SystemPrompt: "base", Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest(),
+		SystemPrompt: "base", Model: protocol.Model{Provider: "scripted", ID: "m1"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -294,7 +304,7 @@ func TestRestoredSkillsHonorCurrentPolicy(t *testing.T) {
 	a, err := New(Options{
 		Provider: p, Registry: tools.NewRegistry(), Session: st,
 		Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{},
-		Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest(),
+		Model: protocol.Model{Provider: "scripted", ID: "m1"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -329,7 +339,7 @@ func TestRestoredSkillUsesCurrentCatalogContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
-	a, err := New(Options{Provider: p, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest()})
+	a, err := New(Options{Provider: p, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +372,7 @@ func TestHistoricalMentionWithoutSuccessMarkerDoesNotActivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
-	a, err := New(Options{Provider: p, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest()})
+	a, err := New(Options{Provider: p, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +421,7 @@ func TestExplicitSkillMentionActivatesAndRestoresWithoutModelToolCall(t *testing
 	}
 	st := session.NewMemoryStore(session.Options{})
 	firstProvider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
-	first, err := New(Options{Provider: firstProvider, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest()})
+	first, err := New(Options{Provider: firstProvider, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +459,7 @@ func TestExplicitSkillMentionActivatesAndRestoresWithoutModelToolCall(t *testing
 	}
 
 	secondProvider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
-	resumed, err := New(Options{Provider: secondProvider, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}, Auth: auth.NewMemoryStoreForTest()})
+	resumed, err := New(Options{Provider: secondProvider, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base", SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,38 +480,6 @@ type namedScriptedProvider struct {
 
 func (p *namedScriptedProvider) ID() string { return p.id }
 
-func TestExplicitAPIKeyIsBoundToInitialProvider(t *testing.T) {
-	first := &namedScriptedProvider{scriptedProvider: &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}, id: "first"}
-	second := &namedScriptedProvider{scriptedProvider: &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}, id: "second"}
-	store := auth.NewMemoryStoreForTest()
-	if err := store.Put("second", auth.Credential{Type: auth.CredentialAPIKey, Key: "second-key"}); err != nil {
-		t.Fatal(err)
-	}
-	a, err := New(Options{
-		Provider: first, Registry: tools.NewRegistry(), Session: session.NewMemoryStore(session.Options{}),
-		Permission: permission.NewService(permission.ModeDeny, nil), Auth: store,
-		Model: protocol.Model{Provider: "first", ID: "m", SupportsTools: true}, APIKey: "first-key",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := a.Prompt(context.Background(), "first"); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.SetProviderAndModel(second, protocol.Model{Provider: "second", ID: "m", SupportsTools: true}); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.Prompt(context.Background(), "second"); err != nil {
-		t.Fatal(err)
-	}
-	if got := first.credentials[0].Key; got != "first-key" {
-		t.Fatalf("first credential = %q", got)
-	}
-	if got := second.credentials[0].Key; got != "second-key" {
-		t.Fatalf("second credential = %q, explicit key crossed provider boundary", got)
-	}
-}
-
 func (p *scriptedProvider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 	return p.models, nil
 }
@@ -510,7 +488,10 @@ func (p *scriptedProvider) Resolve(ctx context.Context, creds auth.Credential) (
 	return creds, p.resolveErr
 }
 
-func (p *scriptedProvider) Chat(ctx context.Context, creds auth.Credential, req protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *scriptedProvider) Chat(ctx context.Context, req protocol.ChatRequest) (protocol.EventStream, error) {
+	if p.resolveErr != nil {
+		return nil, p.resolveErr
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var evs []protocol.StreamEvent
@@ -523,7 +504,6 @@ func (p *scriptedProvider) Chat(ctx context.Context, creds auth.Credential, req 
 		}
 	}
 	p.requests = append(p.requests, req)
-	p.credentials = append(p.credentials, creds)
 	p.call++
 	return &sliceStream{evs: evs, ctx: ctx}, nil
 }
@@ -546,7 +526,7 @@ func (*blockingSummaryProvider) ListModels(context.Context) ([]protocol.Model, e
 func (*blockingSummaryProvider) Resolve(_ context.Context, credential auth.Credential) (auth.Credential, error) {
 	return credential, nil
 }
-func (p *blockingSummaryProvider) Chat(context.Context, auth.Credential, protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *blockingSummaryProvider) Chat(context.Context, protocol.ChatRequest) (protocol.EventStream, error) {
 	return &blockingSummaryStream{started: p.started, release: p.release}, nil
 }
 
@@ -641,7 +621,6 @@ func setup(t *testing.T, prov provider.Provider, reg *tools.SimpleRegistry, perm
 		ToolHost:     host,
 		SystemPrompt: "test system",
 		Model:        protocol.Model{Provider: prov.ID(), ID: "m1", SupportsTools: true},
-		Auth:         auth.NewMemoryStoreForTest(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -960,6 +939,45 @@ func TestToolEventsExposeOutputProgressAndTiming(t *testing.T) {
 	}
 }
 
+func TestBashToolStartIncludesCommandForUI(t *testing.T) {
+	const command = `printf '%s\\n' "hello world"`
+	tool := &testTool{
+		name:   "bash",
+		schema: protocol.ToolSchema{Name: "bash", Description: "shell", Parameters: json.RawMessage(`{"type":"object"}`)},
+		runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+			return tools.TextResult("hello world")
+		},
+	}
+	reg := tools.NewRegistry()
+	if err := reg.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+	args, err := json.Marshal(map[string]string{"command": command})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{
+			{Type: protocol.EvStreamToolCallDone, ToolCallID: "bash-1", ToolName: "bash", Arguments: args},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+		},
+		{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}}
+	a, _ := setup(t, prov, reg, permission.ModeAllow)
+	var start protocol.AgentEvent
+	a.Subscribe(func(ev protocol.AgentEvent) {
+		if ev.Type == protocol.EvToolStart {
+			start = ev
+		}
+	})
+	if err := a.Prompt(context.Background(), "run it"); err != nil {
+		t.Fatal(err)
+	}
+	if start.Message != command {
+		t.Fatalf("bash tool start message = %q, want %q", start.Message, command)
+	}
+}
+
 func TestToolEditDetailsBecomeUIToolPreview(t *testing.T) {
 	tool := &testTool{
 		name:   "edit",
@@ -1078,7 +1096,6 @@ func TestChildBashPermissionAndExecution(t *testing.T) {
 				ToolHost: &testHost{cwd: cwd, perm: perm},
 				Model:    protocol.Model{Provider: prov.ID(), ID: "m1", SupportsTools: true},
 				Identity: &protocol.AgentRef{ThreadID: "child", ParentThreadID: "root", Path: "/root/child", ParentPath: "/root", Role: "general", Depth: 1},
-				Auth:     auth.NewMemoryStoreForTest(),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1209,7 +1226,6 @@ func TestMaxTurns(t *testing.T) {
 		SystemPrompt: "s",
 		Model:        protocol.Model{Provider: "scripted", ID: "m1"},
 		MaxTurns:     2,
-		Auth:         auth.NewMemoryStoreForTest(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1259,7 +1275,7 @@ func (p *blockingProvider) ListModels(ctx context.Context) ([]protocol.Model, er
 func (p *blockingProvider) Resolve(ctx context.Context, creds auth.Credential) (auth.Credential, error) {
 	return creds, nil
 }
-func (p *blockingProvider) Chat(ctx context.Context, creds auth.Credential, req protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *blockingProvider) Chat(ctx context.Context, req protocol.ChatRequest) (protocol.EventStream, error) {
 	if p.started != nil {
 		select {
 		case <-p.started:
@@ -1437,8 +1453,8 @@ func TestToolLoopCancelStopsRemaining(t *testing.T) {
 	if msgErr != nil {
 		t.Fatal(msgErr)
 	}
-	if len(msgs) != 4 || msgs[3].ToolCallID != "c2" || !msgs[3].IsError {
-		t.Fatalf("cancelled tool calls = %+v, want synthetic error result for c2", msgs)
+	if len(msgs) != 5 || msgs[3].ToolCallID != "c2" || !msgs[3].IsError || msgs[4].StopReason != protocol.StopAborted {
+		t.Fatalf("cancelled tool calls = %+v, want synthetic error result and aborted boundary", msgs)
 	}
 }
 
@@ -1483,7 +1499,6 @@ func TestToolCallLimitEmitsErrorResults(t *testing.T) {
 		SystemPrompt: "s",
 		Model:        protocol.Model{Provider: "scripted", ID: "m1"},
 		CallLimit:    1,
-		Auth:         auth.NewMemoryStoreForTest(),
 	})
 	if err != nil {
 		t.Fatal(err)

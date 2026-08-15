@@ -29,7 +29,7 @@ func TestNoSessionStillUsesConfiguredAuthStore(t *testing.T) {
 	if !ok || cred.Access != "access" {
 		t.Fatalf("credential not loaded: %+v ok=%v", cred, ok)
 	}
-	resolved, err := a.Provider.Resolve(context.Background(), cred)
+	resolved, err := a.AuthService.Resolve(context.Background(), "chatgpt")
 	if err != nil || resolved.Access != "access" {
 		t.Fatalf("resolve=%+v err=%v", resolved, err)
 	}

@@ -58,7 +58,7 @@ func run() error {
 	root.PersistentFlags().StringP("prompt", "p", "", "run in print mode with this prompt")
 	root.PersistentFlags().String("mode", "", "output mode: print|json|rpc")
 	root.PersistentFlags().String("collaboration-mode", "", "collaboration mode: default|plan")
-	root.PersistentFlags().String("provider", "", "provider id (opencode-go|openai-compatible|fake|chatgpt)")
+	root.PersistentFlags().String("provider", "", "provider id or named OpenAI-compatible profile")
 	root.PersistentFlags().String("model", "", "model id")
 	root.PersistentFlags().String("api-key", "", "explicit API key (overrides auth.json and env)")
 	root.PersistentFlags().String("permission", "", "permission mode: ask|allow|deny")
@@ -178,9 +178,6 @@ func authCheckCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			provider := args[0]
-			if provider != chatgpt.ProviderID {
-				return fmt.Errorf("auth check: unsupported provider %q (supported: chatgpt)", provider)
-			}
 			authPath, _ := cmd.Flags().GetString("auth")
 			if authPath == "" {
 				_, authPath, _ = config.DefaultPaths()
@@ -189,15 +186,23 @@ func authCheckCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			status, err := chatgpt.CheckStore(store)
+			cfg, _, err := loadCLIAuthConfig(cmd)
+			if err != nil {
+				return err
+			}
+			service, _, err := newCLIAuthService(store, cfg.Providers)
+			if err != nil {
+				return err
+			}
+			status, err := service.Status(cmd.Context(), provider)
 			if err != nil {
 				return fmt.Errorf("auth check %s: %w", provider, err)
 			}
-			if !status.Authenticated {
+			if !status.Configured() {
 				return fmt.Errorf("auth check %s: not authenticated", provider)
 			}
-			fmt.Printf("%s: %s\n", provider, chatgpt.FormatStatus(status))
-			if status.Expired {
+			fmt.Printf("%s: %s\n", provider, status.Summary)
+			if status.State == auth.StateExpired {
 				return fmt.Errorf("auth check %s: credential expired", provider)
 			}
 			return nil
@@ -221,36 +226,55 @@ func loginCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if provider == chatgpt.ProviderID {
-				device, _ := cmd.Flags().GetBool("device-code")
-				noOpen, _ := cmd.Flags().GetBool("no-open")
-				method := chatgpt.LoginBrowser
-				if device {
-					method = chatgpt.LoginDevice
+			cfg, configPath, err := loadCLIAuthConfig(cmd)
+			if err != nil {
+				return err
+			}
+			profileName, _ := cmd.Flags().GetString("name")
+			profileName = strings.TrimSpace(profileName)
+			if profileName != "" {
+				if provider != openaicompat.ProviderID {
+					return errors.New("login: --name is only valid with openai-compatible")
 				}
-				loginCtx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-				defer cancel()
-				opts := chatgpt.LoginOptions{Method: method, Store: store, Progress: func(p chatgpt.LoginProgress) {
-					if p.URL != "" {
-						fmt.Println(p.Message + ": " + p.URL)
-					}
-					if p.UserCode != "" {
-						fmt.Println("Device code: " + p.UserCode)
-					}
-				}}
-				if !noOpen {
-					opts.OpenBrowser = openBrowser
-				}
-				if method == chatgpt.LoginBrowser {
-					opts.PasteCallback = func(ctx context.Context) (string, error) {
-						return promptLine("Paste the complete callback URL here if the browser cannot return automatically: ")
-					}
-				}
-				status, err := chatgpt.Login(loginCtx, opts)
-				if err != nil {
+				if err := config.ValidateProviderProfileID(profileName); err != nil {
 					return err
 				}
-				fmt.Println("chatgpt: " + chatgpt.FormatStatus(status))
+				baseURL, _ := cmd.Flags().GetString("base-url")
+				profileConfig := cfg.Providers[profileName]
+				if strings.TrimSpace(baseURL) != "" {
+					profileConfig.BaseURL = strings.TrimSpace(baseURL)
+				}
+				if profileConfig.BaseURL == "" {
+					return errors.New("login: named OpenAI-compatible profile requires --base-url on first login")
+				}
+				profileConfig.Type = config.ProviderTypeOpenAICompatible
+				cfg.Providers[profileName] = profileConfig
+				if err := config.Save(configPath, cfg); err != nil {
+					return fmt.Errorf("login: save named profile: %w", err)
+				}
+				provider = profileName
+			}
+			service, _, err := newCLIAuthService(store, cfg.Providers)
+			if err != nil {
+				return err
+			}
+			device, _ := cmd.Flags().GetBool("device-code")
+			noOpen, _ := cmd.Flags().GetBool("no-open")
+			method := "api_key"
+			if provider == chatgpt.ProviderID {
+				method = string(chatgpt.LoginBrowser)
+				if device {
+					method = string(chatgpt.LoginDevice)
+				}
+			}
+			loginCtx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+			status, err := service.Login(loginCtx, provider, auth.LoginRequest{Method: method}, cliAuthInteraction{openBrowser: !noOpen})
+			if err != nil {
+				return err
+			}
+			if provider == chatgpt.ProviderID {
+				fmt.Println(provider + ": " + status.Summary)
 				catalog := chatgpt.New(chatgpt.Config{Store: store, CacheRoot: filepath.Join(config.GlobalDir(), "cache", "chatgpt-models")})
 				if models, catalogErr := catalog.RefreshModels(loginCtx); catalogErr == nil {
 					fmt.Printf("loaded %d ChatGPT models\n", len(models))
@@ -259,23 +283,11 @@ func loginCmd() *cobra.Command {
 				}
 				return nil
 			}
-			if provider != "opencode-go" && provider != openaicompat.ProviderID {
-				return fmt.Errorf("login: unsupported provider %q (supported: opencode-go, openai-compatible, chatgpt)", provider)
-			}
-			key, err := promptSecret("API key: ")
-			if err != nil {
-				return err
-			}
-			if key == "" {
-				return fmt.Errorf("login: empty API key")
-			}
-			if err := store.Put(provider, auth.Credential{Type: auth.CredentialAPIKey, Key: key}); err != nil {
-				return err
-			}
 			fmt.Printf("stored %s API key in %s (0600)\n", provider, authPath)
 			return nil
 		},
 	}
+	cmd.Flags().String("name", "", "save an OpenAI-compatible endpoint as this provider profile")
 	cmd.Flags().Bool("device-code", false, "use ChatGPT device-code login")
 	cmd.Flags().Bool("no-open", false, "do not launch a browser automatically")
 	return cmd
@@ -739,7 +751,15 @@ func logoutCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := store.Delete(provider); err != nil {
+			cfg, _, err := loadCLIAuthConfig(cmd)
+			if err != nil {
+				return err
+			}
+			service, _, err := newCLIAuthService(store, cfg.Providers)
+			if err != nil {
+				return err
+			}
+			if err := service.Logout(cmd.Context(), provider); err != nil {
 				return err
 			}
 			fmt.Printf("removed %s credential from %s\n", provider, authPath)

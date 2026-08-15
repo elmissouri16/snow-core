@@ -3,10 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/tools"
@@ -99,7 +100,7 @@ func TestNewRepairsInterruptedToolCallsWithRiskAwareResults(t *testing.T) {
 	agent, err := New(Options{
 		Provider: provider, Registry: tools.NewRegistry(), Session: store,
 		Permission: permission.NewService(permission.ModeDeny, nil),
-		Model:      protocol.Model{Provider: "scripted", ID: "m"}, Auth: auth.NewMemoryStoreForTest(),
+		Model:      protocol.Model{Provider: "scripted", ID: "m"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -190,5 +191,392 @@ func TestInterruptedRecoveryCompletesPartialFinalBatchOnly(t *testing.T) {
 	messages, _ := store.Messages()
 	if len(messages) != 4 || messages[3].ToolCallID != "missing" || !strings.Contains(messages[3].Content[0].Text, "outcome is unknown") {
 		t.Fatalf("messages=%+v", messages)
+	}
+}
+
+func TestLengthTruncatedToolCallsReceiveErrorsWithoutExecution(t *testing.T) {
+	runs := 0
+	tool := &testTool{
+		name:   "read",
+		schema: protocol.ToolSchema{Name: "read", Parameters: json.RawMessage(`{"type":"object"}`)},
+		runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+			runs++
+			return tools.TextResult("unsafe")
+		},
+	}
+	registry := tools.NewRegistry()
+	if err := registry.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{
+			{Type: protocol.EvStreamToolCallDelta, ToolCallID: "truncated", ToolName: "read", Arguments: json.RawMessage(`{"path":`)},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopLength},
+		},
+		{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}}
+	store, err := session.NewSQLiteStore(t.TempDir()+"/session.db", t.TempDir(), session.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	a, err := New(Options{
+		Provider: provider, Registry: registry, Session: store,
+		Permission: permission.NewService(permission.ModeDeny, nil),
+		Model:      protocol.Model{Provider: provider.ID(), ID: "m1", SupportsTools: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if err := a.Prompt(context.Background(), "read"); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 0 {
+		t.Fatalf("truncated tool executed %d times", runs)
+	}
+	messages, _ := store.Messages()
+	if len(messages) != 4 || messages[1].StopReason != protocol.StopLength || !messages[2].IsError || !strings.Contains(messageTextForTest(messages[2]), "truncated") {
+		t.Fatalf("truncated batch=%+v", messages)
+	}
+}
+
+func TestRepeatedLengthTruncationStopsAfterOneCorrectiveRound(t *testing.T) {
+	runs := 0
+	tool := &testTool{
+		name:   "read",
+		schema: protocol.ToolSchema{Name: "read", Parameters: json.RawMessage(`{"type":"object"}`)},
+		runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+			runs++
+			return tools.TextResult("unexpected")
+		},
+	}
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamToolCallDone, ToolCallID: "truncated", ToolName: "read", Arguments: json.RawMessage(`{}`)},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopLength},
+	}}}
+	registry := tools.NewRegistry()
+	if err := registry.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := setup(t, provider, registry, permission.ModeAllow)
+	err := a.Prompt(context.Background(), "repeat truncation")
+	if err == nil || !strings.Contains(err.Error(), "repeated tool batches produced only synthetic") {
+		t.Fatalf("Prompt error=%v", err)
+	}
+	if provider.call != 2 || runs != 0 {
+		t.Fatalf("provider calls=%d tool runs=%d", provider.call, runs)
+	}
+}
+
+func TestRepeatedCallLimitBatchStopsAfterOneCorrectiveRound(t *testing.T) {
+	runs := 0
+	tool := &testTool{
+		name:   "read",
+		schema: protocol.ToolSchema{Name: "read", Parameters: json.RawMessage(`{"type":"object"}`)},
+		runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+			runs++
+			return tools.TextResult("ok")
+		},
+	}
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "first", ToolName: "read", Arguments: json.RawMessage(`{}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "over-limit", ToolName: "read", Arguments: json.RawMessage(`{}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+	}}
+	registry := tools.NewRegistry()
+	if err := registry.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := setup(t, provider, registry, permission.ModeAllow)
+	a.opts.CallLimit = 1
+	err := a.Prompt(context.Background(), "repeat limit")
+	if err == nil || !strings.Contains(err.Error(), "repeated tool batches produced only synthetic") {
+		t.Fatalf("Prompt error=%v", err)
+	}
+	if provider.call != 3 || runs != 1 {
+		t.Fatalf("provider calls=%d tool runs=%d", provider.call, runs)
+	}
+}
+
+func TestCompleteCallsOverrideIncorrectStopReason(t *testing.T) {
+	runs := 0
+	tool := &testTool{
+		name:   "read",
+		schema: protocol.ToolSchema{Name: "read", Parameters: json.RawMessage(`{"type":"object"}`)},
+		runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+			runs++
+			return tools.TextResult("ok")
+		},
+	}
+	registry := tools.NewRegistry()
+	if err := registry.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{
+			{Type: protocol.EvStreamToolCallDone, ToolCallID: "call", ToolName: "read", Arguments: json.RawMessage(`{}`)},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+		},
+		{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}}
+	a, store := setup(t, provider, registry, permission.ModeDeny)
+	if err := a.Prompt(context.Background(), "read"); err != nil {
+		t.Fatal(err)
+	}
+	messages, _ := store.Messages()
+	if runs != 1 || len(messages) != 4 || messages[1].StopReason != protocol.StopToolUse || messages[2].IsError {
+		t.Fatalf("normalized batch runs=%d messages=%+v", runs, messages)
+	}
+}
+
+func TestEmptyToolUseStopsWithProtocolError(t *testing.T) {
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+	}}}
+	a, store := setup(t, provider, nil, permission.ModeDeny)
+	err := a.Prompt(context.Background(), "loop")
+	if err == nil || !strings.Contains(err.Error(), "without any tool calls") {
+		t.Fatalf("Prompt error=%v", err)
+	}
+	messages, _ := store.Messages()
+	if provider.call != 1 || len(messages) != 2 || messages[1].StopReason != protocol.StopError {
+		t.Fatalf("provider calls=%d messages=%+v", provider.call, messages)
+	}
+}
+
+func TestToolCallsRequireIDAndName(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		id   string
+		tool string
+	}{
+		{name: "missing id", tool: "read"},
+		{name: "missing name", id: "call"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+				{Type: protocol.EvStreamToolCallDone, ToolCallID: tc.id, ToolName: tc.tool, Arguments: json.RawMessage(`{}`)},
+				{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+			}}}
+			a, store := setup(t, provider, nil, permission.ModeDeny)
+			err := a.Prompt(context.Background(), "invalid identity")
+			if err == nil || !strings.Contains(err.Error(), "without both an ID and name") {
+				t.Fatalf("Prompt error=%v", err)
+			}
+			messages, _ := store.Messages()
+			if len(messages) != 2 || messages[1].StopReason != protocol.StopError {
+				t.Fatalf("invalid identity messages=%+v", messages)
+			}
+			for _, block := range messages[1].Content {
+				if block.Type == protocol.BlockToolCall {
+					t.Fatalf("invalid tool call persisted: %+v", messages[1])
+				}
+			}
+		})
+	}
+}
+
+func TestToolCallLimitAppliesAcrossProviderBatches(t *testing.T) {
+	runs := 0
+	tool := &testTool{
+		name:   "read",
+		schema: protocol.ToolSchema{Name: "read", Parameters: json.RawMessage(`{"type":"object"}`)},
+		runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+			runs++
+			return tools.TextResult("ok")
+		},
+	}
+	registry := tools.NewRegistry()
+	if err := registry.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+	call := func(id string) []protocol.StreamEvent {
+		return []protocol.StreamEvent{
+			{Type: protocol.EvStreamToolCallDone, ToolCallID: id, ToolName: "read", Arguments: json.RawMessage(`{}`)},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+		}
+	}
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		call("first"), call("second"), {{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}}
+	a, store := setup(t, provider, registry, permission.ModeDeny)
+	a.opts.CallLimit = 1
+	if err := a.Prompt(context.Background(), "two rounds"); err != nil {
+		t.Fatal(err)
+	}
+	messages, _ := store.Messages()
+	if runs != 1 {
+		t.Fatalf("tool runs=%d, want one across the admitted turn", runs)
+	}
+	foundLimit := false
+	for _, message := range messages {
+		if message.Role == protocol.RoleTool && message.IsError && strings.Contains(messageTextForTest(message), "call limit 1") {
+			foundLimit = true
+		}
+	}
+	if !foundLimit {
+		t.Fatalf("missing cross-batch limit result: %+v", messages)
+	}
+}
+
+type transientStartError struct{}
+
+func (transientStartError) Error() string   { return "temporary startup failure" }
+func (transientStartError) Transient() bool { return true }
+
+type startFailureProvider struct {
+	calls  int
+	first  error
+	cancel context.CancelFunc
+}
+
+func (*startFailureProvider) ID() string { return "start-failure" }
+func (*startFailureProvider) ListModels(context.Context) ([]protocol.Model, error) {
+	return nil, nil
+}
+func (p *startFailureProvider) Chat(ctx context.Context, _ protocol.ChatRequest) (protocol.EventStream, error) {
+	p.calls++
+	if p.cancel != nil {
+		p.cancel()
+		return nil, ctx.Err()
+	}
+	if p.calls == 1 && p.first != nil {
+		return nil, p.first
+	}
+	return &sliceStream{ctx: ctx, evs: []protocol.StreamEvent{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}, nil
+}
+
+func TestSynchronousProviderCancellationPersistsAbortedBoundary(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	provider := &startFailureProvider{cancel: cancel}
+	a, store := setup(t, provider, nil, permission.ModeDeny)
+	if err := a.Prompt(ctx, "cancel during startup"); err != nil {
+		t.Fatal(err)
+	}
+	messages, _ := store.Messages()
+	if len(messages) != 2 || messages[1].StopReason != protocol.StopAborted {
+		t.Fatalf("startup cancellation messages=%+v", messages)
+	}
+}
+
+func TestTransientProviderStartupFailureRetriesOnce(t *testing.T) {
+	provider := &startFailureProvider{first: transientStartError{}}
+	a, _ := setup(t, provider, nil, permission.ModeDeny)
+	a.opts.MaxTurns = 1
+	if err := a.Prompt(context.Background(), "retry startup"); err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider calls=%d, want one bounded retry", provider.calls)
+	}
+}
+
+func TestCancellationDuringProviderStartupBackoffPersistsAbort(t *testing.T) {
+	provider := &startFailureProvider{first: transientStartError{}}
+	a, store := setup(t, provider, nil, permission.ModeDeny)
+	retrying := make(chan struct{}, 1)
+	a.Subscribe(func(event protocol.AgentEvent) {
+		if event.Type == protocol.EvError && strings.Contains(event.Message, "retrying once") {
+			select {
+			case retrying <- struct{}{}:
+			default:
+			}
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.Prompt(ctx, "cancel retry") }()
+	select {
+	case <-retrying:
+		cancel()
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("startup retry did not enter backoff")
+	}
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Prompt error=%v, want context.Canceled", err)
+	}
+	messages, _ := store.Messages()
+	if provider.calls != 1 || len(messages) != 2 || messages[1].StopReason != protocol.StopAborted {
+		t.Fatalf("calls=%d messages=%+v", provider.calls, messages)
+	}
+}
+
+func TestTerminalProviderErrorPersistsFailedBoundary(t *testing.T) {
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamTextDelta, Text: "partial"},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopError},
+	}}}
+	a, store := setup(t, provider, nil, permission.ModeDeny)
+	err := a.Prompt(context.Background(), "fail")
+	if err == nil || !strings.Contains(err.Error(), "provider stopped with error") {
+		t.Fatalf("Prompt error=%v", err)
+	}
+	messages, _ := store.Messages()
+	if len(messages) != 2 || messages[1].StopReason != protocol.StopError || messages[1].Error == "" {
+		t.Fatalf("terminal error messages=%+v", messages)
+	}
+}
+
+func TestTerminalProviderAbortPersistsAbortedBoundary(t *testing.T) {
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamTextDelta, Text: "partial"},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopAborted},
+	}}}
+	a, store := setup(t, provider, nil, permission.ModeDeny)
+	if err := a.Prompt(context.Background(), "abort"); err != nil {
+		t.Fatal(err)
+	}
+	messages, _ := store.Messages()
+	if len(messages) != 2 || messages[1].StopReason != protocol.StopAborted {
+		t.Fatalf("terminal abort messages=%+v", messages)
+	}
+}
+
+func TestInvalidTerminalStopReasonsAreRejected(t *testing.T) {
+	for _, stop := range []protocol.StopReason{protocol.StopPending, protocol.StopReason("future_unknown")} {
+		t.Run(string(stop), func(t *testing.T) {
+			provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+				{Type: protocol.EvStreamToolCallDone, ToolCallID: "call", ToolName: "read", Arguments: json.RawMessage(`{}`)},
+				{Type: protocol.EvStreamDone, StopReason: stop},
+			}}}
+			a, store := setup(t, provider, nil, permission.ModeDeny)
+			err := a.Prompt(context.Background(), "invalid terminal")
+			if err == nil || !strings.Contains(err.Error(), "invalid terminal stop reason") {
+				t.Fatalf("Prompt error=%v", err)
+			}
+			messages, _ := store.Messages()
+			if len(messages) != 2 || messages[1].StopReason != protocol.StopError {
+				t.Fatalf("invalid terminal messages=%+v", messages)
+			}
+			for _, block := range messages[1].Content {
+				if block.Type == protocol.BlockToolCall {
+					t.Fatalf("invalid terminal persisted tool call: %+v", messages[1])
+				}
+			}
+		})
+	}
+}
+
+func TestProviderContextDropsFailedLegacyToolGroup(t *testing.T) {
+	store := session.NewMemoryStore(session.Options{})
+	user := protocol.NewUserMessage("user", "", "start")
+	failed := protocol.NewAssistantMessage("failed", user.ID, "p", "m", []protocol.ContentBlock{{
+		Type: protocol.BlockToolCall, ToolCallID: "legacy-call", Name: "read", Arguments: json.RawMessage(`{}`),
+	}}, protocol.StopError, nil)
+	failed.Error = "legacy failure"
+	result := protocol.NewToolResultMessage("result", failed.ID, "legacy-call", "read", []protocol.ContentBlock{protocol.NewTextBlock("legacy repair")}, true)
+	next := protocol.NewUserMessage("next", result.ID, "continue")
+	for _, message := range []protocol.Message{user, failed, result, next} {
+		if err := store.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, ParentID: message.ParentID, Message: &message}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages, err := contextMessagesFromStore(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].ID != user.ID || messages[1].ID != next.ID {
+		t.Fatalf("provider projection exposed failed legacy group: %+v", messages)
 	}
 }

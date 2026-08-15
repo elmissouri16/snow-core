@@ -52,6 +52,8 @@ type Provider struct {
 	wait              func(context.Context, context.Context, time.Duration) error
 	modelsMu          sync.RWMutex
 	models            []modelRecord
+	authRefreshMu     sync.RWMutex
+	authRefresh       func(context.Context, auth.Credential) (auth.Credential, error)
 }
 
 func New(configs ...Config) *Provider {
@@ -89,6 +91,24 @@ func New(configs ...Config) *Provider {
 }
 
 func (p *Provider) ID() string { return ProviderID }
+
+// SetAuthRefresh binds the generic auth service used by authenticated runtimes.
+// Direct transport tests and compatibility callers may leave it unset.
+func (p *Provider) SetAuthRefresh(refresh func(context.Context, auth.Credential) (auth.Credential, error)) {
+	p.authRefreshMu.Lock()
+	p.authRefresh = refresh
+	p.authRefreshMu.Unlock()
+}
+
+func (p *Provider) refreshRejected(ctx context.Context, rejected auth.Credential) (auth.Credential, error) {
+	p.authRefreshMu.RLock()
+	refresh := p.authRefresh
+	p.authRefreshMu.RUnlock()
+	if refresh != nil {
+		return refresh(ctx, rejected)
+	}
+	return p.resolve(ctx, rejected, true)
+}
 
 func (p *Provider) Resolve(ctx context.Context, supplied auth.Credential) (auth.Credential, error) {
 	return p.resolve(ctx, supplied, false)

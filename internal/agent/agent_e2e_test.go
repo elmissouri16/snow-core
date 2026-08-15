@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -44,7 +45,10 @@ func (p *e2eProvider) Resolve(_ context.Context, c auth.Credential) (auth.Creden
 	return c, p.resolveErr
 }
 
-func (p *e2eProvider) Chat(_ context.Context, _ auth.Credential, req protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *e2eProvider) Chat(_ context.Context, req protocol.ChatRequest) (protocol.EventStream, error) {
+	if p.resolveErr != nil {
+		return nil, fmt.Errorf("provider resolve: %w", p.resolveErr)
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.chatErr != nil {
@@ -134,7 +138,6 @@ func newBuiltinE2EAgent(t *testing.T, root string, p provider.Provider, st sessi
 			SupportsThinking: true,
 			ThinkingLevels:   []protocol.ThinkingLevel{protocol.ThinkingHigh},
 		},
-		Auth: auth.NewMemoryStoreForTest(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +187,6 @@ func TestAgentEndToEndAskUserContinuesWithAnswers(t *testing.T) {
 	a, err := New(Options{
 		Provider: p, Registry: reg, Session: st, Permission: perm, ToolHost: host,
 		Model: protocol.Model{Provider: p.ID(), ID: "e2e-model", SupportsTools: true},
-		Auth:  auth.NewMemoryStoreForTest(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -577,24 +579,24 @@ func TestAgentEndToEndAbortDuringBash(t *testing.T) {
 	}
 }
 
-// TestAgentEndToEndEOFDefaultsToStop verifies the adapter contract's normal
-// EOF path when a provider omits an explicit done event.
-func TestAgentEndToEndEOFDefaultsToStop(t *testing.T) {
+// TestAgentEndToEndEOFRequiresDone verifies that truncated provider streams
+// cannot be mistaken for a successful assistant response.
+func TestAgentEndToEndEOFRequiresDone(t *testing.T) {
 	root := t.TempDir()
 	p := &e2eProvider{scripts: [][]protocol.StreamEvent{{
 		{Type: protocol.EvStreamTextDelta, Text: "implicit stop"},
 	}}}
 	st := session.NewMemoryStore(session.Options{CWD: root})
 	a := newBuiltinE2EAgent(t, root, p, st, permission.ModeAllow, nil)
-	if err := a.Prompt(context.Background(), "eof"); err != nil {
-		t.Fatal(err)
+	if err := a.Prompt(context.Background(), "eof"); err == nil || !strings.Contains(err.Error(), "terminal done event") {
+		t.Fatalf("Prompt error = %v, want missing terminal event", err)
 	}
 	msgs, err := st.Messages()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 2 || msgs[1].StopReason != protocol.StopStop || msgs[1].Content[0].Text != "implicit stop" {
-		t.Fatalf("EOF result = %+v, want normal stopped assistant", msgs)
+	if len(msgs) != 2 || msgs[1].StopReason != protocol.StopError || msgs[1].Error == "" || msgs[1].Content[0].Text != "implicit stop" {
+		t.Fatalf("EOF result = %+v, want durable failed assistant", msgs)
 	}
 }
 

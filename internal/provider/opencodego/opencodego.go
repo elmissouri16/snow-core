@@ -365,9 +365,19 @@ func (p *Provider) saveCatalogCache(models []protocol.Model, now time.Time) {
 	}
 }
 
-// ListModels implements provider.Provider. It returns the static catalog when
-// the remote catalog cannot be fetched; it never fails on network errors.
+// ListModels implements provider.Transport. Direct callers retain adapter
+// fallback behavior; authenticated runtimes use ListModelsWithCredential.
 func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
+	return p.listModels(ctx, auth.Credential{})
+}
+
+func (p *Provider) ListModelsWithCredential(ctx context.Context, credential auth.Credential) ([]protocol.Model, error) {
+	return p.listModels(ctx, credential)
+}
+
+// listModels returns the static catalog when the remote catalog cannot be
+// fetched; it never fails on network errors.
+func (p *Provider) listModels(ctx context.Context, credential auth.Credential) ([]protocol.Model, error) {
 	p.catalogMu.Lock()
 	defer p.catalogMu.Unlock()
 	now := time.Now()
@@ -400,7 +410,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 	if err != nil {
 		return cloneModels(fallback), nil
 	}
-	if key := p.resolveKey(auth.Credential{}); key != "" {
+	if key := p.resolveKey(credential); key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	resp, err := p.client.Do(req)

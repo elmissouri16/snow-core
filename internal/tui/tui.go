@@ -168,6 +168,30 @@ type appendLineMsg struct {
 	line string
 }
 
+type fixedAuthInteraction struct{ value string }
+
+func (i fixedAuthInteraction) Prompt(context.Context, auth.Prompt) (auth.Response, error) {
+	return auth.Response{Value: i.value}, nil
+}
+func (fixedAuthInteraction) OpenURL(context.Context, string) error { return nil }
+func (fixedAuthInteraction) Progress(auth.Progress)                {}
+
+type tuiOAuthInteraction struct{ events chan<- tea.Msg }
+
+func (i tuiOAuthInteraction) Prompt(context.Context, auth.Prompt) (auth.Response, error) {
+	return auth.Response{}, auth.ErrInteractionUnavailable
+}
+func (i tuiOAuthInteraction) OpenURL(ctx context.Context, target string) error {
+	return openOAuthBrowser(ctx, target)
+}
+func (i tuiOAuthInteraction) Progress(progress auth.Progress) {
+	message := oauthProgressMsg{progress: chatgpt.LoginProgress{Kind: progress.Kind, Message: progress.Message, URL: progress.URL, UserCode: progress.UserCode}}
+	select {
+	case i.events <- message:
+	default:
+	}
+}
+
 type oauthProgressMsg struct{ progress chatgpt.LoginProgress }
 type oauthDoneMsg struct {
 	status chatgpt.AuthStatus
@@ -179,6 +203,7 @@ type logoutDoneMsg struct {
 }
 type compatibleLoginDoneMsg struct {
 	generation uint64
+	provider   string
 	endpoint   string
 	err        error
 }
@@ -459,6 +484,8 @@ type Model struct {
 	thinkingMD              *mdRenderer
 	subagentFleetMD         *mdRenderer
 	toolRunning             bool
+	activeToolCallID        string
+	activeBashCommand       string
 	pendingInputs           protocol.InputQueue
 	queueEpoch              uint64
 	queueAttempts           []queuedTUIAttempt
@@ -587,6 +614,7 @@ type Model struct {
 
 	// Masked auth capture state.
 	loginMode                 bool
+	loginProfileMode          bool
 	loginEndpointMode         bool
 	loginProvider             string
 	loginEndpoint             string
@@ -960,7 +988,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
 		// transcript when not in a picker.
-		if !m.loginMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.sandboxSetup && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
+		if !m.loginMode && !m.loginProfileMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.sandboxSetup && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
 			switch {
 			case keyMatches(msg, m.keys.PageUp):
 				m.transcript.PageUp()
@@ -1235,9 +1263,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.compatibleLoginPending = false
 		m.modelList = uniquePickerModels(m.app.AllModels, m.app.ProviderID)
 		if msg.err != nil {
-			m.pushLine(styleError.Render("openai-compatible configured; model discovery failed: " + msg.err.Error()))
+			m.pushLine(styleError.Render(msg.provider + " configured; model discovery failed: " + msg.err.Error()))
 		} else {
-			m.pushLine(styleFooter.Render("openai-compatible configured for " + msg.endpoint + " · choose /model to switch"))
+			m.pushLine(styleFooter.Render(msg.provider + " configured for " + msg.endpoint + " · choose /model to switch"))
 		}
 	case inlineHistoryAckMsg:
 		if msg.generation == m.inlinePrintGeneration && m.inlinePrintInFlight && msg.end == m.inlinePrintEnd {
@@ -1671,6 +1699,8 @@ func (m *Model) setRunIdle() {
 	m.busy = false
 	m.activeTurnID = ""
 	m.toolRunning = false
+	m.activeToolCallID = ""
+	m.activeBashCommand = ""
 	m.compacting = false
 	m.compactStatus = ""
 	m.runStartedAt = time.Time{}
@@ -1863,6 +1893,11 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		m.refreshTranscript()
 	case protocol.EvToolStart:
 		m.toolRunning = true
+		m.activeToolCallID = ev.ToolCallID
+		m.activeBashCommand = ""
+		if ev.ToolName == "bash" {
+			m.activeBashCommand = compactBashCommand(ev.Message)
+		}
 		m.finishAssistant()
 		// Call IDs stay in protocol/session data for correlation, but are
 		// implementation noise in the native transcript. File tools include
@@ -1874,6 +1909,10 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		if ev.ToolName == "spawn_agent" {
 			// EvSubagentStarted supplies the useful path and role a few moments
 			// later; avoid three transcript rows for one successful spawn.
+		} else if ev.ToolName == "bash" {
+			// The sticky run-status row already shows live activity. Keep shell
+			// calls to one durable summary row at tool_end instead of appending a
+			// start row plus routine running/finished progress rows.
 		} else if ev.ToolName == "edit" {
 			m.pushLine(styleTool.Render(label))
 		} else {
@@ -1886,7 +1925,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		if ev.ToolProgress != nil && message == "" {
 			message = strings.TrimSpace(ev.ToolProgress.Message)
 		}
-		if message != "" {
+		if message != "" && ev.ToolName != "bash" {
 			m.pushLine(styleHeaderDim.Render("  ↳ " + sanitizeToolPreview(message, 500)))
 		}
 	case protocol.EvToolEnd:
@@ -1895,17 +1934,31 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		}
 		m.toolRunning = false
 		label := ev.ToolName
+		duration := ""
 		if ev.ToolDurationMS > 0 {
-			label += fmt.Sprintf("  (%dms)", ev.ToolDurationMS)
+			duration = fmt.Sprintf("%dms", ev.ToolDurationMS)
+			if ev.ToolName != "bash" {
+				label += "  (" + duration + ")"
+			}
 		}
 		if ev.IsError {
 			message := strings.TrimSpace(ev.Message)
 			if message == "" {
 				message = "tool failed"
 			}
-			m.pushLine(styleError.Render("✖ " + label + ": " + sanitizeToolPreview(message, 700)))
+			if ev.ToolName == "bash" {
+				m.pushLine(m.renderBashSummary(m.activeBashCommand, duration, message, true))
+			} else {
+				m.pushLine(styleError.Render("✖ " + label + ": " + sanitizeToolPreview(message, 700)))
+			}
+		} else if ev.ToolName == "bash" {
+			m.pushLine(m.renderBashSummary(m.activeBashCommand, duration, "", false))
 		} else if ev.ToolName != "spawn_agent" && !toolHasDiffPreview(ev.ToolName, ev.ToolOutput) {
 			m.pushLine(styleTool.Render("✔ " + label))
+		}
+		if m.activeToolCallID == "" || ev.ToolCallID == "" || m.activeToolCallID == ev.ToolCallID {
+			m.activeToolCallID = ""
+			m.activeBashCommand = ""
 		}
 		if !ev.IsError {
 			if preview := renderToolOutput(ev.ToolName, ev.ToolOutput, m.width); preview != "" {
@@ -2026,6 +2079,14 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		m.lastErrorText = ""
 		if !ev.GoalContinuing {
 			m.setRunIdle()
+			if m.app != nil && m.app.Agent != nil {
+				recovered := m.app.Agent.ClearPendingInputs()
+				if len(recovered.Items) > 0 {
+					m.pendingInputs = protocol.InputQueue{}
+					m.restoreAbortedInputs(recovered, nil, m.editor.Value())
+					m.pushLine(styleFooter.Render(fmt.Sprintf("restored %d undelivered queued input(s)", len(recovered.Items))))
+				}
+			}
 		} else if m.runStartedAt.IsZero() {
 			m.runStartedAt = m.currentTime()
 		}
@@ -2381,7 +2442,7 @@ const (
 // keeping the idle composer comfortably usable. The textarea remains internally
 // scrollable after reaching maxComposerHeight.
 func (m *Model) desiredComposerHeight() int {
-	if m.loginMode || m.loginEndpointMode || m.editor.Value() == "" {
+	if m.loginMode || m.loginProfileMode || m.loginEndpointMode || m.editor.Value() == "" {
 		return minComposerHeight
 	}
 	width := m.editor.Width()
@@ -2681,6 +2742,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			msg = normalizePickerKeyWithMap(msg, m.keys)
 		}
 		return m.handleSandboxSetupKey(msg)
+	}
+
+	// --- OpenAI-compatible profile-name capture mode ---
+	if m.loginProfileMode {
+		if keyMatches(msg, m.keys.Close) {
+			msg = tea.KeyMsg{Type: tea.KeyEsc}
+		} else if keyMatches(msg, m.keys.Accept) {
+			msg = tea.KeyMsg{Type: tea.KeyEnter}
+		} else if keyMatches(msg, m.keys.Paste) {
+			msg = tea.KeyMsg{Type: tea.KeyCtrlV}
+		}
+		return m.handleLoginProfileKey(msg)
 	}
 
 	// --- OpenAI-compatible endpoint capture mode ---
@@ -3067,6 +3140,44 @@ func (m *Model) insertMention(path string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) handleLoginProfileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.loginProfileMode = false
+		m.loginProvider = ""
+		m.editor.Reset()
+		m.editor.Placeholder = "Type a message…"
+		m.pushLine(styleFooter.Render("login cancelled"))
+		return m, nil
+	case tea.KeyEnter:
+		profileID := strings.TrimSpace(m.editor.Value())
+		if profileID == "" {
+			profileID = openaicompat.ProviderID
+		}
+		if err := config.ValidateProviderProfileID(profileID); err != nil {
+			m.pushLine(styleError.Render("login: " + err.Error()))
+			return m, nil
+		}
+		if configured, exists := m.app.PersistedCfg.Providers[profileID]; exists && !config.IsOpenAICompatibleProfile(profileID, configured) {
+			m.pushLine(styleError.Render("login: provider name " + profileID + " is already used by another provider type"))
+			return m, nil
+		}
+		m.loginProfileMode = false
+		m.beginCompatibleEndpointCapture(profileID)
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.editor, cmd = m.editor.Update(msg)
+	if msg.Type == tea.KeyCtrlV {
+		m.editor.Err = nil
+		if m.pasteCmdOverride != nil {
+			cmd = m.pasteCmdOverride
+		}
+		return m, routeTextareaCmd(textareaTargetComposer, "", "", cmd)
+	}
+	return m, cmd
+}
+
 func (m *Model) handleLoginEndpointKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
@@ -3091,7 +3202,7 @@ func (m *Model) handleLoginEndpointKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loginEndpointMode = false
 		m.editor.Reset()
 		m.editor.Placeholder = "Type a message…"
-		m.beginKeyCapture(openaicompat.ProviderID)
+		m.beginKeyCapture(m.loginProvider)
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -3122,15 +3233,14 @@ func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loginMode = false
 		m.secretBuf.Reset()
 		m.editor.Reset()
-		if m.loginProvider == openaicompat.ProviderID {
+		if m.loginEndpoint != "" {
 			return m.finishCompatibleLogin(secret)
 		}
 		if strings.TrimSpace(secret) == "" {
 			m.pushLine(styleError.Render("login: empty API key"))
 			return m, nil
 		}
-		cred := auth.Credential{Type: auth.CredentialAPIKey, Key: secret}
-		if err := m.app.Auth.Put(m.loginProvider, cred); err != nil {
+		if _, err := m.app.Login(m.ctx, m.loginProvider, auth.LoginRequest{Method: "api_key"}, fixedAuthInteraction{value: secret}); err != nil {
 			m.pushLine(styleError.Render("login: " + err.Error()))
 			return m, nil
 		}
@@ -3161,6 +3271,7 @@ func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) finishCompatibleLogin(secret string) (tea.Model, tea.Cmd) {
+	profileID := m.loginProvider
 	endpoint := strings.TrimSpace(m.loginEndpoint)
 	m.loginEndpoint = ""
 	m.loginProvider = ""
@@ -3175,14 +3286,18 @@ func (m *Model) finishCompatibleLogin(secret string) (tea.Model, tea.Cmd) {
 	for id, providerConfig := range oldPersisted.Providers {
 		candidate.Providers[id] = providerConfig
 	}
-	providerConfig := candidate.Providers[openaicompat.ProviderID]
+	providerConfig := candidate.Providers[profileID]
 	providerConfig.BaseURL = endpoint
-	candidate.Providers[openaicompat.ProviderID] = providerConfig
+	if profileID != openaicompat.ProviderID {
+		providerConfig.Type = config.ProviderTypeOpenAICompatible
+	}
+	candidate.Providers[profileID] = providerConfig
 
-	oldCred, hadOldCred := m.app.Auth.Get(openaicompat.ProviderID)
+	authStore := m.app.AuthService.Store()
+	oldCred, hadOldCred := authStore.Get(profileID)
 	credentialChanged := strings.TrimSpace(secret) != ""
 	if credentialChanged {
-		if err := m.app.Auth.Put(openaicompat.ProviderID, auth.Credential{Type: auth.CredentialAPIKey, Key: secret}); err != nil {
+		if err := authStore.Put(profileID, auth.Credential{Type: auth.CredentialAPIKey, Key: secret}); err != nil {
 			m.pushLine(styleError.Render("login: " + err.Error()))
 			return m, nil
 		}
@@ -3192,9 +3307,9 @@ func (m *Model) finishCompatibleLogin(secret string) (tea.Model, tea.Cmd) {
 			return nil
 		}
 		if hadOldCred {
-			return m.app.Auth.Put(openaicompat.ProviderID, oldCred)
+			return authStore.Put(profileID, oldCred)
 		}
-		return m.app.Auth.Delete(openaicompat.ProviderID)
+		return authStore.Delete(profileID)
 	}
 	if m.app.ConfigPath != "" {
 		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
@@ -3209,7 +3324,7 @@ func (m *Model) finishCompatibleLogin(secret string) (tea.Model, tea.Cmd) {
 	for id, configured := range candidate.Providers {
 		m.app.Cfg.Providers[id] = configured
 	}
-	if err := m.app.ConfigureOpenAICompatible(endpoint); err != nil {
+	if err := m.app.ConfigureOpenAICompatibleProfile(profileID, endpoint); err != nil {
 		m.app.PersistedCfg = oldPersisted
 		m.app.Cfg.Providers = make(map[string]config.ProviderConfig, len(oldPersisted.Providers))
 		for id, configured := range oldPersisted.Providers {
@@ -3226,11 +3341,11 @@ func (m *Model) finishCompatibleLogin(secret string) (tea.Model, tea.Cmd) {
 	m.compatibleLoginGeneration++
 	generation := m.compatibleLoginGeneration
 	m.compatibleLoginPending = true
-	m.pushLine(styleFooter.Render("openai-compatible endpoint saved · discovering models…"))
+	m.pushLine(styleFooter.Render(profileID + " endpoint saved · discovering models…"))
 	app := m.app
 	ctx := m.ctx
 	return m, func() tea.Msg {
-		return compatibleLoginDoneMsg{generation: generation, endpoint: endpoint, err: app.RefreshProviderModels(ctx, openaicompat.ProviderID)}
+		return compatibleLoginDoneMsg{generation: generation, provider: profileID, endpoint: endpoint, err: app.RefreshProviderModels(ctx, profileID)}
 	}
 }
 
@@ -4107,7 +4222,7 @@ func formatTUISandboxStatus(status internalsandbox.Status) string {
 // providers enter masked capture directly.
 func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
 	if len(args) == 0 {
-		m.providers = supportedProviders()
+		m.providers = m.supportedProviders()
 		m.provIndex = 0
 		m.providerLogout = false
 		m.pickProvider = true
@@ -4116,17 +4231,32 @@ func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
 		m.pushLine(styleFooter.Render("select a login provider (↑/↓ navigate, Enter to pick, Esc to cancel)"))
 		return m, nil
 	}
+	if len(args) > 2 {
+		m.pushLine(styleError.Render("usage: /login [provider] [profile-name]"))
+		return m, nil
+	}
 	provider := args[0]
 	if provider == chatgpt.ProviderID {
 		return m.startChatGPTAuthPick()
 	}
-	if !isSupportedProvider(provider) {
+	if !m.isSupportedProvider(provider) {
 		m.pushLine(styleError.Render("login: unsupported provider " + provider +
-			" (supported: " + strings.Join(supportedProviders(), ", ") + ")"))
+			" (supported: " + strings.Join(m.supportedProviders(), ", ") + ")"))
 		return m, nil
 	}
 	if provider == openaicompat.ProviderID {
-		m.beginCompatibleEndpointCapture()
+		if len(args) == 2 {
+			profileID := strings.TrimSpace(args[1])
+			if err := config.ValidateProviderProfileID(profileID); err != nil {
+				m.pushLine(styleError.Render("login: " + err.Error()))
+				return m, nil
+			}
+			m.beginCompatibleEndpointCapture(profileID)
+		} else {
+			m.beginCompatibleProfileCapture()
+		}
+	} else if m.isOpenAICompatibleProfile(provider) {
+		m.beginCompatibleEndpointCapture(provider)
 	} else {
 		m.beginKeyCapture(provider)
 	}
@@ -4169,12 +4299,14 @@ func (m *Model) handleProviderPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if provider == chatgpt.ProviderID {
 			return m.startChatGPTAuthPick()
 		}
-		if !isSupportedProvider(provider) {
+		if !m.isSupportedProvider(provider) {
 			m.pushLine(styleError.Render("login: " + provider + " is not supported yet"))
 			return m, nil
 		}
 		if provider == openaicompat.ProviderID {
-			m.beginCompatibleEndpointCapture()
+			m.beginCompatibleProfileCapture()
+		} else if m.isOpenAICompatibleProfile(provider) {
+			m.beginCompatibleEndpointCapture(provider)
 		} else {
 			m.beginKeyCapture(provider)
 		}
@@ -4259,53 +4391,22 @@ func (m *Model) startChatGPTOAuth(method chatgpt.LoginMethod, allowedWorkspaceID
 	events := make(chan tea.Msg, 8)
 	m.oauthLoading, m.oauthCancel, m.oauthEvents = true, cancel, events
 	go func() {
-		status, err := chatgpt.Login(ctx, chatgpt.LoginOptions{Method: method, Store: m.app.Auth, AllowedWorkspaceIDs: allowedWorkspaceIDs, OpenBrowser: openOAuthBrowser, Progress: func(progress chatgpt.LoginProgress) {
-			select {
-			case events <- oauthProgressMsg{progress: progress}:
-			case <-ctx.Done():
-			}
-		}})
-		if err != nil && method == chatgpt.LoginBrowser && strings.Contains(err.Error(), "callback port 1455 is unavailable") && ctx.Err() == nil {
-			status, err = chatgpt.Login(ctx, chatgpt.LoginOptions{Method: chatgpt.LoginDevice, Store: m.app.Auth, AllowedWorkspaceIDs: allowedWorkspaceIDs, OpenBrowser: openOAuthBrowser, Progress: func(progress chatgpt.LoginProgress) {
-				select {
-				case events <- oauthProgressMsg{progress: progress}:
-				case <-ctx.Done():
-				}
-			}})
+		request := auth.LoginRequest{Method: string(method), Params: map[string][]string{"allowed_workspace_id": allowedWorkspaceIDs}}
+		resolved, err := m.app.Login(ctx, chatgpt.ProviderID, request, tuiOAuthInteraction{events: events})
+		if err != nil && method == chatgpt.LoginBrowser && (strings.Contains(err.Error(), "callback port 1455 is unavailable") || errors.Is(err, auth.ErrInteractionUnavailable)) && ctx.Err() == nil {
+			request.Method = string(chatgpt.LoginDevice)
+			resolved, err = m.app.Login(ctx, chatgpt.ProviderID, request, tuiOAuthInteraction{events: events})
 		}
-		if err == nil {
-			if refreshErr := m.app.RefreshProviderModels(ctx, chatgpt.ProviderID); refreshErr != nil && ctx.Err() == nil {
-				events <- oauthProgressMsg{progress: chatgpt.LoginProgress{Kind: "catalog_fallback", Message: "Signed in; using offline model catalog fallback"}}
-			}
-			if checked, checkErr := chatgpt.CheckStore(m.app.Auth); checkErr == nil {
-				status = checked
-			}
-		}
-		// Once Login has persisted the credential, cancellation/fallback of this
+		status := chatGPTStatus(resolved)
+		// Once Login has persisted the credential, cancellation/fallback of the
 		// optional catalog refresh must not turn the committed login into failure.
 		events <- oauthDoneMsg{status: status, err: err}
 	}()
 	return waitOAuthEvent(events)
 }
 
-func (m *Model) startChatGPTCatalogRefresh(status chatgpt.AuthStatus) tea.Cmd {
-	ctx, cancel := context.WithCancel(m.ctx)
-	events := make(chan tea.Msg, 4)
-	m.oauthLoading, m.oauthCancel, m.oauthEvents = true, cancel, events
-	m.oauthProgress = chatgpt.LoginProgress{Kind: "catalog", Message: "Refreshing ChatGPT model catalog…"}
-	go func() {
-		if err := m.app.RefreshProviderModels(ctx, chatgpt.ProviderID); err != nil {
-			select {
-			case events <- oauthProgressMsg{progress: chatgpt.LoginProgress{Kind: "catalog_fallback", Message: "Using offline model catalog fallback"}}:
-			case <-ctx.Done():
-			}
-		}
-		if checked, err := chatgpt.CheckStore(m.app.Auth); err == nil {
-			status = checked
-		}
-		events <- oauthDoneMsg{status: status}
-	}()
-	return waitOAuthEvent(events)
+func chatGPTStatus(status auth.Status) chatgpt.AuthStatus {
+	return chatgpt.AuthStatus{Provider: chatgpt.ProviderID, Authenticated: status.Configured(), Expired: status.State == auth.StateExpired, Refreshable: status.Refreshable, AccountID: status.AccountID, ExpiresAt: status.ExpiresAt}
 }
 
 func waitOAuthEvent(events <-chan tea.Msg) tea.Cmd { return func() tea.Msg { return <-events } }
@@ -4357,15 +4458,30 @@ func (m *Model) renderChatGPTAuthPicker() string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-func (m *Model) beginCompatibleEndpointCapture() {
-	m.loginEndpointMode = true
+func (m *Model) beginCompatibleProfileCapture() {
+	m.loginProfileMode = true
+	m.loginEndpointMode = false
 	m.loginMode = false
 	m.loginProvider = openaicompat.ProviderID
 	m.loginEndpoint = ""
 	m.secretBuf.Reset()
 	m.editor.Reset()
+	m.editor.Placeholder = "x-provider"
+	m.compVisible = false
+	m.pickProvider = false
+	m.pushLine(styleFooter.Render("OpenAI-compatible profile name: lowercase letters, digits, ._- · Enter uses openai-compatible · Esc cancel"))
+}
+
+func (m *Model) beginCompatibleEndpointCapture(profileID string) {
+	m.loginEndpointMode = true
+	m.loginProfileMode = false
+	m.loginMode = false
+	m.loginProvider = profileID
+	m.loginEndpoint = ""
+	m.secretBuf.Reset()
+	m.editor.Reset()
 	if m.app != nil {
-		if configured, ok := m.app.Cfg.Providers[openaicompat.ProviderID]; ok {
+		if configured, ok := m.app.Cfg.Providers[profileID]; ok {
 			m.editor.SetValue(configured.BaseURL)
 			m.editor.CursorEnd()
 		}
@@ -4373,7 +4489,7 @@ func (m *Model) beginCompatibleEndpointCapture() {
 	m.editor.Placeholder = "https://gateway.example/v1"
 	m.compVisible = false
 	m.pickProvider = false
-	m.pushLine(styleFooter.Render("openai-compatible endpoint: enter API root, /responses, or /chat/completions URL · Enter continue · Esc cancel"))
+	m.pushLine(styleFooter.Render(profileID + " endpoint: enter API root, /responses, or /chat/completions URL · Enter continue · Esc cancel"))
 }
 
 // beginKeyCapture switches the editor into masked API-key capture mode.
@@ -4386,59 +4502,90 @@ func (m *Model) beginKeyCapture(provider string) {
 	m.compVisible = false
 	m.pickProvider = false
 	hint := "type key then Enter · Esc to cancel"
-	if provider == openaicompat.ProviderID {
+	if m.isOpenAICompatibleProfile(provider) || m.loginEndpoint != "" {
 		hint = "type optional key, or press Enter to keep existing/fallback/keyless · Esc to cancel"
 	}
 	m.pushLine(styleFooter.Render("API key for " + provider + " (hidden): " + hint))
 }
 
-// supportedProviders lists providers shown in the /login picker. ChatGPT is
-// selected to import an existing OAuth login rather than capture an API key.
-func supportedProviders() []string {
-	return []string{"opencode-go", openaicompat.ProviderID, "chatgpt"}
+// supportedProviders is registry-driven; adding a module with login methods
+// automatically exposes it in the picker.
+func (m *Model) supportedProviders() []string {
+	if m.app == nil {
+		return nil
+	}
+	descriptors := m.app.AuthProviders()
+	providers := make([]string, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if len(descriptor.Methods) > 0 {
+			providers = append(providers, descriptor.ProviderID)
+		}
+	}
+	return providers
 }
 
-// isSupportedProvider reports whether the provider can take a key now.
-func isSupportedProvider(p string) bool {
-	switch p {
-	case "opencode-go", openaicompat.ProviderID:
+func (m *Model) isOpenAICompatibleProfile(providerID string) bool {
+	if providerID == openaicompat.ProviderID {
 		return true
-	default:
+	}
+	if m.app == nil {
 		return false
 	}
+	providerConfig, ok := m.app.Cfg.Providers[providerID]
+	return ok && config.IsOpenAICompatibleProfile(providerID, providerConfig)
 }
 
-// providerStatus renders a provider line for the picker, including chatgpt
-// as a visible-but-unavailable entry for discoverability.
-func (m *Model) providerStatus(provider string) string {
-	if provider == chatgpt.ProviderID {
-		status, err := chatgpt.CheckStore(m.app.Auth)
-		if err != nil {
-			return provider + "  (invalid OAuth: " + err.Error() + ")"
+func (m *Model) isSupportedProvider(providerID string) bool {
+	for _, descriptor := range m.app.AuthProviders() {
+		if descriptor.ProviderID == providerID {
+			return len(descriptor.Methods) > 0
 		}
-		if !status.Authenticated {
-			return provider + "  (OAuth not configured)"
+	}
+	return false
+}
+
+func (m *Model) providerStatus(providerID string) string {
+	if m.app == nil {
+		return providerID + "  (unavailable)"
+	}
+	status, err := m.app.AuthStatus(m.ctx, providerID)
+	if err != nil {
+		return providerID + "  (invalid auth: " + err.Error() + ")"
+	}
+	kind := status.Method
+	for _, descriptor := range m.app.AuthProviders() {
+		if descriptor.ProviderID == providerID && kind == "" && len(descriptor.Kinds) > 0 {
+			kind = descriptor.Kinds[0]
+			break
 		}
-		if status.Expired {
-			return provider + "  (OAuth expired)"
+	}
+	summary := status.Summary
+	if kind == auth.CredentialOAuth {
+		switch status.State {
+		case auth.StateMissing:
+			summary = "OAuth not configured"
+		case auth.StateExpired:
+			summary = "OAuth expired"
 		}
-		return provider + "  (" + chatgpt.FormatStatus(status) + ")"
+	} else if kind == auth.CredentialAPIKey {
+		summary = "no key"
+		if credential, ok := m.app.Auth.Get(providerID); ok && credential.Valid() {
+			summary = "stored ✓"
+		} else if status.State == auth.StateConfigured {
+			summary = "configured"
+		}
 	}
-	if !isSupportedProvider(provider) {
-		return provider + "  (not supported yet)"
+	if summary == "" {
+		summary = string(status.State)
 	}
-	keyStatus := "no key"
-	if cred, ok := m.app.Auth.Get(provider); ok && cred.Valid() {
-		keyStatus = "stored ✓"
-	}
-	if provider == openaicompat.ProviderID {
+	if m.isOpenAICompatibleProfile(providerID) {
 		endpointStatus := "endpoint required"
-		if configured, ok := m.app.PersistedCfg.Providers[provider]; ok && strings.TrimSpace(configured.BaseURL) != "" {
+		if configured, ok := m.app.PersistedCfg.Providers[providerID]; ok && strings.TrimSpace(configured.BaseURL) != "" {
 			endpointStatus = "endpoint configured"
 		}
-		return provider + "  (" + endpointStatus + " · " + keyStatus + ")"
+		summary = endpointStatus + " · " + summary
 	}
-	return provider + "  (" + keyStatus + ")"
+	return providerID + "  (" + summary + ")"
 }
 
 // renderProviderPicker renders the /login or /logout provider list.
@@ -4490,17 +4637,14 @@ func (m *Model) doLogout(args []string) (tea.Model, tea.Cmd) {
 	app := m.app
 	ctx := m.ctx
 	return m, func() tea.Msg {
-		err := app.Auth.Delete(provider)
-		if err == nil && provider == chatgpt.ProviderID {
-			_ = app.RefreshProviderModels(ctx, provider)
-		}
-		return logoutDoneMsg{provider: provider, err: err}
+		return logoutDoneMsg{provider: provider, err: app.Logout(ctx, provider)}
 	}
 }
 
 func (m *Model) storedCredentialProviders() []string {
-	providers := make([]string, 0, len(supportedProviders()))
-	for _, provider := range supportedProviders() {
+	supported := m.supportedProviders()
+	providers := make([]string, 0, len(supported))
+	for _, provider := range supported {
 		if _, ok := m.app.Auth.Get(provider); ok {
 			providers = append(providers, provider)
 		}
@@ -5852,6 +5996,68 @@ func renderToolOutputPreview(output string, width int) string {
 	return styleHeaderDim.Render(strings.Join(lines, "\n"))
 }
 
+func compactBashCommand(command string) string {
+	command = strings.ReplaceAll(command, "\r\n", "\n")
+	command = strings.ReplaceAll(command, "\r", "\n")
+	command = sanitizeToolPreview(command, 2*1024)
+	command = strings.ReplaceAll(command, "\n", " ↵ ")
+	command = strings.ReplaceAll(command, "\t", " ")
+	return strings.TrimSpace(command)
+}
+
+func (m *Model) renderBashSummary(command, duration, message string, isError bool) string {
+	symbol := "✓"
+	symbolStyle := styleDiffAdd
+	if isError {
+		symbol = "✕"
+		symbolStyle = styleError
+	}
+
+	command = compactBashCommand(command)
+	if command == "" {
+		command = "bash"
+	}
+	durationTail := ""
+	if duration != "" {
+		durationTail = " · " + duration
+	}
+	errorTail := ""
+	if isError && message != "" {
+		message = compactBashCommand(message)
+		if message != "" {
+			errorTail = " · " + message
+		}
+	}
+
+	width := m.transcript.Width
+	if width <= 0 {
+		width = m.width
+	}
+	if width > 0 {
+		// Keep the status and elapsed time visible. Error text receives a bounded
+		// share so the model-issued command remains identifiable on the same row.
+		if errorTail != "" {
+			messageBudget := max(12, width/3)
+			message = truncateRunes(message, messageBudget)
+			errorTail = " · " + message
+		}
+		available := width - lipgloss.Width(symbol+" "+durationTail+errorTail) - 1
+		if available <= 0 {
+			available = 1
+		}
+		command = truncateRunes(command, available)
+	}
+
+	line := symbolStyle.Render(symbol) + " " + styleTool.Render(command)
+	if durationTail != "" {
+		line += styleHeaderDim.Render(durationTail)
+	}
+	if errorTail != "" {
+		line += styleError.Render(errorTail)
+	}
+	return line
+}
+
 // sanitizeToolPreview removes terminal controls before tool output is rendered
 // in the TUI. Tool output is untrusted repository/process data.
 func sanitizeToolPreview(value string, maxBytes int) string {
@@ -6049,17 +6255,6 @@ func (m *Model) infoWindow() (start, end int) {
 		start = len(m.infoItems) - visible
 	}
 	return start, start + visible
-}
-
-func (m *Model) infoPickerRows() int {
-	if !m.pickInfo {
-		return 0
-	}
-	if m.infoLoading {
-		return 2
-	}
-	start, end := m.infoWindow()
-	return 3 + end - start
 }
 
 func (m *Model) renderInfoPicker() string {
@@ -7047,14 +7242,6 @@ func (m *Model) setSkillsEnabled(enabled bool) error {
 	return nil
 }
 
-func (m *Model) settingsRows() int {
-	rows := settingsCount + 2 // title + settings + key hint
-	if m.settingsStatus != "" || m.settingsError != "" {
-		rows++
-	}
-	return rows
-}
-
 func (m *Model) renderSettings() string {
 	if !m.pickSettings || m.app == nil {
 		return ""
@@ -7384,7 +7571,7 @@ func (m *Model) View() string {
 		if m.compatibleLoginPending {
 			status = "models…"
 		}
-		if m.loginMode || m.loginEndpointMode {
+		if m.loginMode || m.loginProfileMode || m.loginEndpointMode {
 			status = "login"
 		}
 		if m.pickChatGPTAuth {
@@ -7560,14 +7747,16 @@ func (m *Model) renderHeader(status string) string {
 // renderEditor draws a composer that grows from three to six rows.
 func (m *Model) renderEditor() string {
 	var input string
-	if m.loginEndpointMode {
+	if m.loginProfileMode {
+		input = stylePrompt.Render("NAME ") + m.editor.View()
+	} else if m.loginEndpointMode {
 		input = stylePrompt.Render("URL ") + m.editor.View()
 	} else if m.loginMode {
 		n := m.secretBuf.Len()
 		masked := strings.Repeat("•", n)
 		if n == 0 {
 			hint := "type API key, Enter to save, Esc to cancel"
-			if m.loginProvider == openaicompat.ProviderID {
+			if m.isOpenAICompatibleProfile(m.loginProvider) || m.loginEndpoint != "" {
 				hint = "optional API key; Enter keeps existing/fallback or uses keyless"
 			}
 			masked = styleHeaderDim.Render("(" + hint + ")")
@@ -7608,11 +7797,11 @@ func (m *Model) permissionStatusStyle() lipgloss.Style {
 	}
 	switch m.app.Perm.Mode() {
 	case permission.ModeAllow:
-		return lipgloss.NewStyle().Foreground(colorOk).Bold(true)
+		return lipgloss.NewStyle().Foreground(colorErr).Bold(true)
 	case permission.ModeDeny:
 		return lipgloss.NewStyle().Foreground(colorErr).Bold(true)
 	case permission.ModeAsk:
-		return lipgloss.NewStyle().Foreground(colorWarn).Bold(true)
+		return lipgloss.NewStyle().Foreground(colorOk).Bold(true)
 	default:
 		return styleFooter
 	}

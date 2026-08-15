@@ -442,6 +442,19 @@ func TestTUIThemeValidation(t *testing.T) {
 	}
 }
 
+func TestValidateProviderProfileID(t *testing.T) {
+	for _, valid := range []string{"x-provider", "local_2", "team.gateway"} {
+		if err := ValidateProviderProfileID(valid); err != nil {
+			t.Fatalf("valid %q: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"", "X Provider", "-leading", "chatgpt"} {
+		if err := ValidateProviderProfileID(invalid); err == nil {
+			t.Fatalf("invalid profile %q accepted", invalid)
+		}
+	}
+}
+
 func TestDefaults(t *testing.T) {
 	cfg := Default()
 	if cfg.ToolOutputLimit() != DefaultToolOutputBytes {

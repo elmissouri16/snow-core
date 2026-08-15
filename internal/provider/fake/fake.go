@@ -10,7 +10,6 @@ import (
 	"io"
 	"sync"
 
-	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -99,15 +98,10 @@ func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 	return out, nil
 }
 
-// Resolve implements provider.Provider. Always succeeds for the fake.
-func (p *Provider) Resolve(ctx context.Context, creds auth.Credential) (auth.Credential, error) {
-	return creds, nil
-}
-
 // Chat implements provider.Provider. It replays the script for this call
 // index (all calls share the script from New) as an EventStream, and records
 // the request when the provider is in recorded mode.
-func (p *Provider) Chat(ctx context.Context, creds auth.Credential, req protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *Provider) Chat(ctx context.Context, req protocol.ChatRequest) (protocol.EventStream, error) {
 	p.mu.Lock()
 	p.count++
 	if p.record {
@@ -135,9 +129,6 @@ func (p *Provider) CallCount() int {
 	return p.count
 }
 
-// ErrExhausted is returned by Next after the script has been fully replayed.
-var ErrExhausted = errors.New("fake: stream exhausted")
-
 // stream replays a script as protocol.StreamEvent values.
 type stream struct {
 	ctx   context.Context
@@ -146,8 +137,8 @@ type stream struct {
 	done  bool
 }
 
-// Next implements protocol.EventStream. Per the EventStream contract, the
-// end of the script is signaled with io.EOF.
+// Next implements protocol.EventStream. Scripts that omit an explicit done
+// step receive one deterministic normal terminal event before io.EOF.
 func (s *stream) Next(ctx context.Context) (protocol.StreamEvent, error) {
 	if s.ctx != nil && s.ctx.Err() != nil {
 		return protocol.StreamEvent{}, s.ctx.Err()
@@ -155,12 +146,23 @@ func (s *stream) Next(ctx context.Context) (protocol.StreamEvent, error) {
 	if ctx != nil && ctx.Err() != nil {
 		return protocol.StreamEvent{}, ctx.Err()
 	}
+	if s.done {
+		return protocol.StreamEvent{}, io.EOF
+	}
 	if s.pos >= len(s.steps) {
+		if !s.done {
+			s.done = true
+			return protocol.StreamEvent{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}, nil
+		}
 		return protocol.StreamEvent{}, io.EOF
 	}
 	step := s.steps[s.pos]
 	s.pos++
-	return stepToEvent(step), nil
+	ev := stepToEvent(step)
+	if ev.Type == protocol.EvStreamDone {
+		s.done = true
+	}
+	return ev, nil
 }
 
 // Close implements protocol.EventStream.

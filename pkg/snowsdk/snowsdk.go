@@ -266,6 +266,17 @@ func (s *Session) PendingInputs() (protocol.InputQueue, error) {
 	return a.Agent.PendingInputs(), nil
 }
 
+// ClearPendingInputs closes queue admission and returns every accepted input
+// that has not reached a provider boundary. It is also used to recover text
+// retained after an operational turn failure.
+func (s *Session) ClearPendingInputs() (protocol.InputQueue, error) {
+	a, err := s.activeApp()
+	if err != nil {
+		return protocol.InputQueue{}, err
+	}
+	return a.Agent.ClearPendingInputs(), nil
+}
+
 // Abort cancels any in-flight turn and clears undelivered queued input.
 func (s *Session) Abort(ctx context.Context) error {
 	a, e := s.activeApp()

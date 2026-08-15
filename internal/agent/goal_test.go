@@ -434,7 +434,7 @@ func (p *cancelGoalProvider) ListModels(context.Context) ([]protocol.Model, erro
 func (p *cancelGoalProvider) Resolve(_ context.Context, c auth.Credential) (auth.Credential, error) {
 	return c, nil
 }
-func (p *cancelGoalProvider) Chat(context.Context, auth.Credential, protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *cancelGoalProvider) Chat(context.Context, protocol.ChatRequest) (protocol.EventStream, error) {
 	p.calls++
 	return &cancelGoalStream{started: p.started}, nil
 }
@@ -468,7 +468,7 @@ func (p *resumeAfterPromptProvider) ListModels(context.Context) ([]protocol.Mode
 func (p *resumeAfterPromptProvider) Resolve(_ context.Context, c auth.Credential) (auth.Credential, error) {
 	return c, nil
 }
-func (p *resumeAfterPromptProvider) Chat(_ context.Context, _ auth.Credential, _ protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *resumeAfterPromptProvider) Chat(_ context.Context, _ protocol.ChatRequest) (protocol.EventStream, error) {
 	p.mu.Lock()
 	p.calls++
 	call := p.calls

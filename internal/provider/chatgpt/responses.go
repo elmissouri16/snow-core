@@ -325,7 +325,7 @@ func (s *retryingCodexStream) startAttempt() (protocol.EventStream, error, time.
 		if resp.StatusCode == http.StatusUnauthorized && !s.authRetried && s.requestAttempts < maxTransientRetries+1 {
 			resp.Body.Close()
 			s.authRetried = true
-			fresh, refreshErr := s.provider.resolve(s.ctx, s.creds, true)
+			fresh, refreshErr := s.provider.refreshRejected(s.ctx, s.creds)
 			if refreshErr != nil {
 				return nil, refreshErr, -1
 			}

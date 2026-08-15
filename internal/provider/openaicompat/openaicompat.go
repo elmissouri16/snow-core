@@ -36,7 +36,10 @@ const (
 )
 
 type Config struct {
-	BaseURL string
+	// ProviderID names this endpoint/profile in Snow. Empty uses the legacy
+	// openai-compatible ID.
+	ProviderID string
+	BaseURL    string
 	// APIKey is an explicit adapter fallback usable for discovery and Chat.
 	APIKey string
 	// DiscoveryAPIKey is used only by ListModels. App wiring places auth-store
@@ -46,9 +49,13 @@ type Config struct {
 	HTTPClient        *http.Client
 	DiscoveryTimeout  time.Duration
 	StreamIdleTimeout time.Duration
+	// DisableEnvAPIKey prevents named profiles from silently sharing the legacy
+	// OPENAI_API_KEY fallback.
+	DisableEnvAPIKey bool
 }
 
 type Provider struct {
+	providerID        string
 	responsesURL      string
 	chatURL           string
 	modelsURL         string
@@ -58,10 +65,15 @@ type Provider struct {
 	client            *http.Client
 	discoveryTimeout  time.Duration
 	streamIdleTimeout time.Duration
+	useEnvAPIKey      bool
 	wireMode          atomic.Uint32
 }
 
 func New(cfg Config) (*Provider, error) {
+	providerID := strings.TrimSpace(cfg.ProviderID)
+	if providerID == "" {
+		providerID = ProviderID
+	}
 	var responsesURL, modelsURL string
 	var err error
 	if strings.TrimSpace(cfg.BaseURL) != "" {
@@ -84,7 +96,7 @@ func New(cfg Config) (*Provider, error) {
 	} else if streamIdleTimeout < 0 {
 		streamIdleTimeout = -1
 	}
-	return &Provider{responsesURL: responsesURL, chatURL: siblingEndpoint(responsesURL, "chat/completions"), modelsURL: modelsURL, apiKey: cfg.APIKey, discoveryAPIKey: cfg.DiscoveryAPIKey, defaultModel: strings.TrimSpace(cfg.DefaultModel), client: client, discoveryTimeout: timeout, streamIdleTimeout: streamIdleTimeout}, nil
+	return &Provider{providerID: providerID, responsesURL: responsesURL, chatURL: siblingEndpoint(responsesURL, "chat/completions"), modelsURL: modelsURL, apiKey: cfg.APIKey, discoveryAPIKey: cfg.DiscoveryAPIKey, defaultModel: strings.TrimSpace(cfg.DefaultModel), client: client, discoveryTimeout: timeout, streamIdleTimeout: streamIdleTimeout, useEnvAPIKey: !cfg.DisableEnvAPIKey}, nil
 }
 
 func normalizeEndpoints(raw string) (string, string, error) {
@@ -140,14 +152,14 @@ const (
 	wireModeChatCompletions
 )
 
-func (p *Provider) ID() string       { return ProviderID }
+func (p *Provider) ID() string       { return p.providerID }
 func (p *Provider) Configured() bool { return p.responsesURL != "" }
 
 func (p *Provider) DefaultModel() protocol.Model {
 	if p.defaultModel == "" {
 		return protocol.Model{}
 	}
-	return protocol.Model{Provider: ProviderID, ID: p.defaultModel, SupportsTools: true}
+	return protocol.Model{Provider: p.providerID, ID: p.defaultModel, SupportsTools: true}
 }
 
 func (p *Provider) resolveKey(creds auth.Credential) string {
@@ -157,7 +169,10 @@ func (p *Provider) resolveKey(creds auth.Credential) string {
 	if p.apiKey != "" {
 		return p.apiKey
 	}
-	return os.Getenv(EnvAPIKey)
+	if p.useEnvAPIKey {
+		return os.Getenv(EnvAPIKey)
+	}
+	return ""
 }
 
 func (p *Provider) resolveDiscoveryKey() string {
@@ -167,7 +182,10 @@ func (p *Provider) resolveDiscoveryKey() string {
 	if p.discoveryAPIKey != "" {
 		return p.discoveryAPIKey
 	}
-	return os.Getenv(EnvAPIKey)
+	if p.useEnvAPIKey {
+		return os.Getenv(EnvAPIKey)
+	}
+	return ""
 }
 
 func (p *Provider) Resolve(_ context.Context, creds auth.Credential) (auth.Credential, error) {
@@ -182,7 +200,7 @@ func (p *Provider) staticCatalog() []protocol.Model {
 	if p.defaultModel == "" {
 		return nil
 	}
-	return []protocol.Model{{Provider: ProviderID, ID: p.defaultModel, SupportsTools: true}}
+	return []protocol.Model{{Provider: p.providerID, ID: p.defaultModel, SupportsTools: true}}
 }
 
 type modelList struct {
@@ -225,6 +243,14 @@ type modelArchitecture struct {
 }
 
 func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
+	return p.listModels(ctx, p.resolveDiscoveryKey())
+}
+
+func (p *Provider) ListModelsWithCredential(ctx context.Context, credential auth.Credential) ([]protocol.Model, error) {
+	return p.listModels(ctx, credential.Key)
+}
+
+func (p *Provider) listModels(ctx context.Context, key string) ([]protocol.Model, error) {
 	fallback := p.staticCatalog()
 	if p.modelsURL == "" {
 		return fallback, nil
@@ -238,7 +264,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 	if err != nil {
 		return fallbackOrError(fallback, err)
 	}
-	if key := p.resolveDiscoveryKey(); key != "" {
+	if key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	resp, err := secureClient(p.client).Do(req)
@@ -264,6 +290,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 		if !ok || seen[model.ID] {
 			continue
 		}
+		model.Provider = p.providerID
 		seen[model.ID] = true
 		models = append(models, model)
 	}
@@ -271,7 +298,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 		return fallbackOrError(fallback, errors.New("model discovery returned no valid models"))
 	}
 	if p.defaultModel != "" && !seen[p.defaultModel] {
-		models = append(models, protocol.Model{Provider: ProviderID, ID: p.defaultModel, SupportsTools: true})
+		models = append(models, protocol.Model{Provider: p.providerID, ID: p.defaultModel, SupportsTools: true})
 	}
 	return models, nil
 }
@@ -404,7 +431,7 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, request prot
 	if p.wireMode.Load() == wireModeChatCompletions {
 		return p.chatCompletions(ctx, key, request)
 	}
-	body, err := responsesapi.BuildRequest(request, responsesapi.RequestOptions{ProviderID: ProviderID, IncludeEncryptedReasoning: request.Model.SupportsThinking && protocol.NormalizeThinkingLevel(request.Thinking) != protocol.ThinkingOff})
+	body, err := responsesapi.BuildRequest(request, responsesapi.RequestOptions{ProviderID: p.providerID, IncludeEncryptedReasoning: request.Model.SupportsThinking && protocol.NormalizeThinkingLevel(request.Thinking) != protocol.ThinkingOff})
 	if err != nil {
 		return newErrorStream(ctx, fmt.Errorf("openai-compatible: build request: %w", err)), nil
 	}
@@ -432,7 +459,7 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, request prot
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorResponseBytes))
 		message := providerpkg.RedactSecrets(responseMessage(snippet), key)
 		if resp.StatusCode == http.StatusPaymentRequired || resp.StatusCode == http.StatusTooManyRequests {
-			return newErrorStream(ctx, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: message}), nil
+			return newErrorStream(ctx, &providerpkg.LimitError{Provider: p.providerID, Status: resp.StatusCode, Message: message}), nil
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
 			return newErrorStream(ctx, errors.New("openai-compatible: credential rejected (HTTP 401)")), nil
@@ -451,7 +478,7 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, request prot
 		}
 		return newErrorStream(ctx, fmt.Errorf("openai-compatible: incompatible response content type %q: %s", mediaType, truncate(message, 500))), nil
 	}
-	return responsesapi.NewStreamWithIdleTimeout(ctx, resp, ProviderID, p.streamIdleTimeout, key), nil
+	return responsesapi.NewStreamWithIdleTimeout(ctx, resp, p.providerID, p.streamIdleTimeout, key), nil
 }
 
 func (p *Provider) chatCompletions(ctx context.Context, key string, request protocol.ChatRequest) (protocol.EventStream, error) {
@@ -460,7 +487,7 @@ func (p *Provider) chatCompletions(ctx context.Context, key string, request prot
 		APIKey:            key,
 		HTTPClient:        secureClient(p.client),
 		DefaultModel:      request.Model.ID,
-		ProviderID:        ProviderID,
+		ProviderID:        p.providerID,
 		AllowAnonymous:    true,
 		DisableEnvAPIKey:  true,
 		StreamIdleTimeout: p.streamIdleTimeout,

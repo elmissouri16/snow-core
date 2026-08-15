@@ -7,7 +7,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -22,7 +21,7 @@ func TestReplayOrderMatchesScript(t *testing.T) {
 	}
 	p := New(script)
 	ctx := context.Background()
-	es, err := p.Chat(ctx, auth.Credential{}, protocol.ChatRequest{})
+	es, err := p.Chat(ctx, protocol.ChatRequest{})
 	if err != nil {
 		t.Fatalf("Chat: %v", err)
 	}
@@ -80,7 +79,7 @@ func TestToolCallArgumentsParsed(t *testing.T) {
 		{Kind: StepDone},
 	}
 	p := New(script)
-	es, err := p.Chat(context.Background(), auth.Credential{}, protocol.ChatRequest{})
+	es, err := p.Chat(context.Background(), protocol.ChatRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +105,7 @@ func TestScriptReplaysOnEveryCall(t *testing.T) {
 	p := New(script)
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
-		es, err := p.Chat(ctx, auth.Credential{}, protocol.ChatRequest{})
+		es, err := p.Chat(ctx, protocol.ChatRequest{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,13 +155,6 @@ func TestDefaultModels(t *testing.T) {
 	}
 }
 
-func TestResolveNil(t *testing.T) {
-	p := New(nil)
-	if _, err := p.Resolve(context.Background(), auth.Credential{}); err != nil {
-		t.Fatalf("Resolve should always succeed: %v", err)
-	}
-}
-
 func TestRecordedCalls(t *testing.T) {
 	p := NewRecorded()
 	ctx := context.Background()
@@ -173,12 +165,12 @@ func TestRecordedCalls(t *testing.T) {
 	req1 := protocol.ChatRequest{Model: protocol.Model{ID: "fake-1"}, Messages: msgs, Tools: tools}
 	req2 := protocol.ChatRequest{Model: protocol.Model{ID: "fake-1"}, Messages: msgs}
 
-	es1, err := p.Chat(ctx, auth.Credential{}, req1)
+	es1, err := p.Chat(ctx, req1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	es1.Close()
-	es2, err := p.Chat(ctx, auth.Credential{}, req2)
+	es2, err := p.Chat(ctx, req2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +204,7 @@ func TestNonRecordedHasNoCalls(t *testing.T) {
 func TestStepErrorEvent(t *testing.T) {
 	script := []Step{{Kind: StepError, Err: errors.New("boom")}}
 	p := New(script)
-	es, _ := p.Chat(context.Background(), auth.Credential{}, protocol.ChatRequest{})
+	es, _ := p.Chat(context.Background(), protocol.ChatRequest{})
 	defer es.Close()
 	ev, err := es.Next(context.Background())
 	if err != nil {
@@ -230,7 +222,7 @@ func TestStreamCancel(t *testing.T) {
 	p := New([]Step{{Kind: StepText, Text: "a"}, {Kind: StepText, Text: "b"}})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already cancelled
-	es, _ := p.Chat(context.Background(), auth.Credential{}, protocol.ChatRequest{})
+	es, _ := p.Chat(context.Background(), protocol.ChatRequest{})
 	defer es.Close()
 	if _, err := es.Next(ctx); err == nil {
 		t.Fatal("expected error on cancelled context")

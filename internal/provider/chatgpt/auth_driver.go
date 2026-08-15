@@ -1,0 +1,92 @@
+package chatgpt
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/snow-core/snow/internal/auth"
+)
+
+// AuthDriver adapts ChatGPT OAuth to the provider-independent auth lifecycle.
+// OAuth endpoints, scopes, claims, and workspace checks remain in this package.
+type AuthDriver struct{ provider *Provider }
+
+func NewAuthDriver(provider *Provider) *AuthDriver { return &AuthDriver{provider: provider} }
+
+func (*AuthDriver) Descriptor() auth.Descriptor {
+	return auth.Descriptor{
+		ProviderID: ProviderID, DisplayName: "ChatGPT/Codex", Required: true,
+		Kinds: []auth.CredentialType{auth.CredentialOAuth},
+		Methods: []auth.LoginMethod{
+			{ID: string(LoginBrowser), DisplayName: "Browser OAuth", Kind: auth.CredentialOAuth},
+			{ID: string(LoginDevice), DisplayName: "Device code", Kind: auth.CredentialOAuth},
+		},
+	}
+}
+
+func (*AuthDriver) Inspect(credential auth.Credential) (auth.Status, error) {
+	checked, err := CheckAuth(credential)
+	status := auth.Status{ProviderID: ProviderID, Method: auth.CredentialOAuth, Refreshable: checked.Refreshable, ExpiresAt: checked.ExpiresAt, AccountID: checked.AccountID}
+	if err != nil {
+		status.State = auth.StateInvalid
+		status.Summary = err.Error()
+		return status, err
+	}
+	if checked.Expired {
+		status.State = auth.StateExpired
+	} else {
+		status.State = auth.StateConfigured
+	}
+	status.Summary = FormatStatus(checked)
+	return status, nil
+}
+
+func (*AuthDriver) Validate(credential auth.Credential) error { return Validate(credential) }
+
+func (*AuthDriver) NeedsRefresh(credential auth.Credential, now time.Time) bool {
+	checked, err := CheckAuth(credential)
+	if err != nil || checked.ExpiresAt.IsZero() {
+		return false
+	}
+	return !checked.ExpiresAt.After(now.Add(refreshSkew))
+}
+
+func (d *AuthDriver) Refresh(ctx context.Context, current auth.Credential, _ auth.RefreshReason) (auth.Credential, error) {
+	if d.provider == nil {
+		return auth.Credential{}, fmt.Errorf("chatgpt: OAuth driver is not configured")
+	}
+	if strings.TrimSpace(current.Refresh) == "" {
+		return auth.Credential{}, fmt.Errorf("%w: OAuth refresh token is missing; sign in again", ErrLoginRequired)
+	}
+	return d.provider.refresh(ctx, current)
+}
+
+func (d *AuthDriver) Login(ctx context.Context, request auth.LoginRequest, interaction auth.Interaction) (auth.Credential, error) {
+	if d.provider == nil {
+		return auth.Credential{}, fmt.Errorf("chatgpt: OAuth driver is not configured")
+	}
+	method := LoginMethod(request.Method)
+	if method == "" {
+		method = LoginBrowser
+	}
+	if method != LoginBrowser && method != LoginDevice {
+		return auth.Credential{}, fmt.Errorf("chatgpt: unsupported login method %q", request.Method)
+	}
+	if interaction == nil {
+		interaction = auth.NopInteraction{}
+	}
+	return LoginCredential(ctx, LoginOptions{
+		Method: method, HTTPClient: d.provider.client, AuthBaseURL: d.provider.authBaseURL, Now: d.provider.now,
+		AllowedWorkspaceIDs: append([]string(nil), request.Params["allowed_workspace_id"]...),
+		OpenBrowser:         interaction.OpenURL,
+		PasteCallback: func(ctx context.Context) (string, error) {
+			response, err := interaction.Prompt(ctx, auth.Prompt{ID: "callback_url", Kind: auth.PromptText, Title: "Paste the complete OAuth callback URL", Optional: true})
+			return response.Value, err
+		},
+		Progress: func(progress LoginProgress) {
+			interaction.Progress(auth.Progress{Kind: progress.Kind, Message: progress.Message, URL: progress.URL, UserCode: progress.UserCode})
+		},
+	})
+}

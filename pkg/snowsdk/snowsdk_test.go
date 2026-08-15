@@ -73,7 +73,7 @@ func (p *sdkQueueProvider) ListModels(context.Context) ([]protocol.Model, error)
 func (p *sdkQueueProvider) Resolve(_ context.Context, credential auth.Credential) (auth.Credential, error) {
 	return credential, nil
 }
-func (p *sdkQueueProvider) Chat(_ context.Context, _ auth.Credential, _ protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *sdkQueueProvider) Chat(_ context.Context, _ protocol.ChatRequest) (protocol.EventStream, error) {
 	first := false
 	p.once.Do(func() {
 		first = true
@@ -161,6 +161,37 @@ func TestSDKActiveQueueMethodsAndSnapshots(t *testing.T) {
 	}
 	if strings.Join(users, ",") != "initial,steer,follow" {
 		t.Fatalf("durable users = %q", users)
+	}
+}
+
+func TestSDKClearPendingInputsReturnsUndeliveredText(t *testing.T) {
+	s, err := Open(context.Background(), Options{Provider: "fake", NoSession: true, PermissionMode: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	provider := &sdkQueueProvider{started: make(chan struct{}), release: make(chan struct{})}
+	model := s.Model()
+	model.Provider = provider.ID()
+	if err := s.app.Agent.SetProviderAndModel(provider, model); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.Prompt(context.Background(), "initial") }()
+	<-provider.started
+	if err := s.FollowUp(context.Background(), "recover me"); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := s.ClearPendingInputs()
+	if err != nil || len(recovered.Items) != 1 || recovered.Items[0].Text != "recover me" {
+		t.Fatalf("ClearPendingInputs = %+v, %v", recovered, err)
+	}
+	if pending, err := s.PendingInputs(); err != nil || len(pending.Items) != 0 {
+		t.Fatalf("PendingInputs after clear = %+v, %v", pending, err)
+	}
+	close(provider.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

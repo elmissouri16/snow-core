@@ -35,7 +35,7 @@ func (p *shellSequenceProvider) Resolve(_ context.Context, c auth.Credential) (a
 	return c, nil
 }
 
-func (p *shellSequenceProvider) Chat(ctx context.Context, _ auth.Credential, _ protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *shellSequenceProvider) Chat(ctx context.Context, _ protocol.ChatRequest) (protocol.EventStream, error) {
 	p.mu.Lock()
 	call := p.calls
 	p.calls++

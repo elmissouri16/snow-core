@@ -32,7 +32,12 @@ const (
 )
 
 // ProviderConfig holds per-provider overrides.
+const ProviderTypeOpenAICompatible = "openai-compatible"
+
 type ProviderConfig struct {
+	// Type identifies a named provider profile. Empty retains the built-in
+	// provider implied by the map key for backward compatibility.
+	Type         string `json:"type,omitempty"`
 	BaseURL      string `json:"base_url,omitempty"`
 	DefaultModel string `json:"default_model,omitempty"`
 	// StreamIdleTimeoutMS bounds silence between streamed response bytes.
@@ -41,6 +46,29 @@ type ProviderConfig struct {
 }
 
 // TUIConfig holds TUI preferences.
+// ValidateProviderProfileID keeps profile IDs safe for config/auth map keys and
+// unambiguous in CLI/TUI provider selectors.
+func ValidateProviderProfileID(id string) error {
+	if id == "" || len(id) > 64 {
+		return errors.New("config: provider profile name must be 1..64 characters")
+	}
+	for i, r := range id {
+		valid := r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || i > 0 && (r == '-' || r == '_' || r == '.')
+		if !valid {
+			return fmt.Errorf("config: provider profile name %q must use lowercase letters, digits, and internal ._- characters", id)
+		}
+	}
+	switch id {
+	case "opencode-go", "chatgpt", "fake":
+		return fmt.Errorf("config: provider profile name %q is reserved", id)
+	}
+	return nil
+}
+
+func IsOpenAICompatibleProfile(id string, provider ProviderConfig) bool {
+	return id == ProviderTypeOpenAICompatible || provider.Type == ProviderTypeOpenAICompatible
+}
+
 type TUIConfig struct {
 	Theme string `json:"theme,omitempty"`
 	Mouse bool   `json:"mouse"`
@@ -515,6 +543,14 @@ func Load(path string) (Config, error) {
 		cfg.Compaction.HistoricalToolResultThreshold = defaults.HistoricalToolResultThreshold
 	}
 	for providerID, providerConfig := range cfg.Providers {
+		if providerConfig.Type != "" {
+			if providerConfig.Type != ProviderTypeOpenAICompatible {
+				return cfg, fmt.Errorf("config: provider %q has unsupported type %q", providerID, providerConfig.Type)
+			}
+			if err := ValidateProviderProfileID(providerID); err != nil {
+				return cfg, err
+			}
+		}
 		if providerConfig.StreamIdleTimeoutMS < -1 || providerConfig.StreamIdleTimeoutMS > int((24*time.Hour)/time.Millisecond) {
 			return cfg, fmt.Errorf("config: provider %q stream_idle_timeout_ms must be -1, 0, or at most 86400000", providerID)
 		}

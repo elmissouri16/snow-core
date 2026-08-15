@@ -109,6 +109,7 @@ func TestContextOverflowCompactsAndRetriesOnce(t *testing.T) {
 	}}
 	a, store := setup(t, p, nil, permission.ModeDeny)
 	a.model.ContextWindow = 100
+	a.opts.MaxTurns = 1
 	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 128, Fallback: "local", AutoThresholdPercent: 80}
 	appendCompleteTurns(t, store, 4)
 	var errorsSeen int
@@ -122,6 +123,26 @@ func TestContextOverflowCompactsAndRetriesOnce(t *testing.T) {
 	}
 	if p.call != 3 || p.requests[2].Messages[0].Role != protocol.RoleCustom || errorsSeen != 0 {
 		t.Fatalf("calls=%d errors=%d retry=%+v", p.call, errorsSeen, p.requests)
+	}
+	for requestIndex, request := range p.requests[1:] {
+		for _, message := range request.Messages {
+			if message.Role == protocol.RoleAssistant && message.StopReason == protocol.StopError {
+				t.Fatalf("failed overflow response leaked into request %d: %+v", requestIndex+1, request.Messages)
+			}
+		}
+	}
+	durable, durableErr := store.Messages()
+	if durableErr != nil {
+		t.Fatal(durableErr)
+	}
+	foundFailedAttempt := false
+	for _, message := range durable {
+		if message.Role == protocol.RoleAssistant && message.StopReason == protocol.StopError {
+			foundFailedAttempt = true
+		}
+	}
+	if !foundFailedAttempt {
+		t.Fatalf("overflow failure was not retained durably: %+v", durable)
 	}
 	if !provider.IsContextWindowExceeded(overflow) {
 		t.Fatal("overflow classifier rejected known diagnostic")

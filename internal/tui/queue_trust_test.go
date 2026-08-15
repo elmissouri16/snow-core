@@ -137,6 +137,51 @@ func TestQueueEventRenderingAndAbortRestoration(t *testing.T) {
 	}
 }
 
+type failTUIAssistantStore struct{ *session.MemoryStore }
+
+func (s *failTUIAssistantStore) Append(entry session.Entry) error {
+	if entry.Message != nil && entry.Message.Role == protocol.RoleAssistant {
+		return errors.New("assistant append failed")
+	}
+	return s.MemoryStore.Append(entry)
+}
+
+func TestTurnDoneRestoresQueueRetainedAfterOperationalFailure(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	provider := newBoundaryGoalProvider()
+	model := m.app.Agent.Model()
+	model.Provider = provider.ID()
+	if err := m.app.Agent.SetProviderAndModel(provider, model); err != nil {
+		t.Fatal(err)
+	}
+	store := &failTUIAssistantStore{MemoryStore: session.NewMemoryStore(session.Options{CWD: t.TempDir()})}
+	if err := m.app.Agent.SetSession(store); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- m.app.Agent.Prompt(context.Background(), "initial") }()
+	call := waitBoundaryCall(t, provider, 0)
+	item, err := m.app.Agent.QueueInput(protocol.QueuedInputFollowUp, "expanded queued text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.queueOriginalText[item.ID] = "compact queued text"
+	m.pendingInputs = m.app.Agent.PendingInputs()
+	m.editor.SetValue("draft")
+	provider.release(call)
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "assistant append failed") {
+		t.Fatalf("Prompt error=%v", err)
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: "failed"})
+	if got := m.editor.Value(); got != "compact queued text\n\ndraft" {
+		t.Fatalf("restored composer=%q", got)
+	}
+	if pending := m.app.Agent.PendingInputs(); len(pending.Items) != 0 {
+		t.Fatalf("agent queue not cleared after TUI recovery: %+v", pending)
+	}
+}
+
 func TestAbortRestoresCompactMentionTextFromAcceptedRace(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)

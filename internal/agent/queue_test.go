@@ -14,6 +14,7 @@ import (
 
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/permission"
+	"github.com/snow-core/snow/internal/session"
 	skillspkg "github.com/snow-core/snow/internal/skills"
 	"github.com/snow-core/snow/internal/tools"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -38,7 +39,7 @@ func (p *queuedProvider) ListModels(context.Context) ([]protocol.Model, error) {
 func (p *queuedProvider) Resolve(_ context.Context, c auth.Credential) (auth.Credential, error) {
 	return c, nil
 }
-func (p *queuedProvider) Chat(_ context.Context, _ auth.Credential, req protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *queuedProvider) Chat(_ context.Context, req protocol.ChatRequest) (protocol.EventStream, error) {
 	p.mu.Lock()
 	call := p.calls
 	p.calls++
@@ -375,17 +376,17 @@ func TestAbortDrainAndQueuedDeliveryHaveExactlyOneWinner(t *testing.T) {
 	}
 }
 
-func TestProviderFailureClearsUndeliveredQueue(t *testing.T) {
+func TestProviderFailureDeliversAcceptedQueueBeforeReturning(t *testing.T) {
 	p := newQueuedProvider([]protocol.StreamEvent{{Type: protocol.EvStreamError, Err: errors.New("provider failed")}})
 	a, st := setup(t, p, nil, permission.ModeDeny)
 	done := make(chan error, 1)
 	go func() { done <- a.Prompt(context.Background(), "initial") }()
 	<-p.started
-	if err := a.FollowUp("never delivered"); err != nil {
+	if err := a.FollowUp("deliver after failure"); err != nil {
 		t.Fatal(err)
 	}
 	close(p.release)
-	if err := <-done; err == nil || !strings.Contains(err.Error(), "provider failed") {
+	if err := <-done; err != nil {
 		t.Fatalf("Prompt error = %v", err)
 	}
 	if len(a.PendingInputs().Items) != 0 {
@@ -395,14 +396,75 @@ func TestProviderFailureClearsUndeliveredQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	found := false
 	for _, msg := range messages {
-		if msg.Role == protocol.RoleUser && len(msg.Content) > 0 && msg.Content[0].Text == "never delivered" {
-			t.Fatal("provider failure persisted undelivered follow-up")
+		if msg.Role == protocol.RoleUser && len(msg.Content) > 0 && msg.Content[0].Text == "deliver after failure" {
+			found = true
 		}
+	}
+	if !found {
+		t.Fatalf("accepted follow-up was lost: %+v", messages)
+	}
+	p.mu.Lock()
+	requests := append([]protocol.ChatRequest(nil), p.requests...)
+	p.mu.Unlock()
+	if len(requests) != 2 {
+		t.Fatalf("provider requests=%d, want failed request plus queued retry", len(requests))
 	}
 }
 
-func TestMaxTurnsClearsQueueWithoutPersistingQueuedUser(t *testing.T) {
+func TestInternalPersistenceFailureDoesNotConsumeQueuedInputAsRecovery(t *testing.T) {
+	p := newQueuedProvider([]protocol.StreamEvent{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}})
+	base := session.NewMemoryStore(session.Options{CWD: t.TempDir()})
+	store := &failAssistantAppendStore{MemoryStore: base}
+	a, err := New(Options{
+		Provider: p, Registry: tools.NewRegistry(), Session: store,
+		Permission: permission.NewService(permission.ModeDeny, nil),
+		Model:      protocol.Model{Provider: p.ID(), ID: "m"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	done := make(chan error, 1)
+	go func() { done <- a.Prompt(context.Background(), "initial") }()
+	<-p.started
+	if err := a.FollowUp("must not mask persistence failure"); err != nil {
+		t.Fatal(err)
+	}
+	close(p.release)
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "assistant append failed") {
+		t.Fatalf("Prompt error=%v", err)
+	}
+	p.mu.Lock()
+	requests := len(p.requests)
+	p.mu.Unlock()
+	if requests != 1 {
+		t.Fatalf("provider requests=%d, internal failure triggered queue recovery", requests)
+	}
+	messages, err := base.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range messages {
+		if message.Role == protocol.RoleUser && messageTextForTest(message) == "must not mask persistence failure" {
+			t.Fatalf("queued input consumed after internal failure: %+v", messages)
+		}
+	}
+	pending := a.PendingInputs()
+	if len(pending.Items) != 1 || pending.Items[0].Text != "must not mask persistence failure" {
+		t.Fatalf("queued input was not recoverable: %+v", pending)
+	}
+	if err := a.Prompt(context.Background(), "new prompt"); !errors.Is(err, ErrPromptRejected) || !strings.Contains(err.Error(), "ClearPendingInputs") {
+		t.Fatalf("new prompt with unrecovered queue error=%v", err)
+	}
+	recovered := a.ClearPendingInputs()
+	if len(recovered.Items) != 1 || recovered.Items[0].Text != "must not mask persistence failure" {
+		t.Fatalf("recovered queue=%+v", recovered)
+	}
+}
+
+func TestMaxTurnsPreservesQueueWithoutPersistingQueuedUser(t *testing.T) {
 	p := newQueuedProvider([]protocol.StreamEvent{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}})
 	a, st := setup(t, p, nil, permission.ModeDeny)
 	a.opts.MaxTurns = 1
@@ -429,9 +491,58 @@ func TestMaxTurnsClearsQueueWithoutPersistingQueuedUser(t *testing.T) {
 			}
 		}
 	}
-	if users != 1 || len(a.PendingInputs().Items) != 0 {
-		t.Fatalf("users=%d pending=%+v messages=%+v", users, a.PendingInputs(), messages)
+	pending := a.PendingInputs()
+	if users != 1 || len(pending.Items) != 1 || pending.Items[0].Text != "must not become a ghost" {
+		t.Fatalf("users=%d pending=%+v messages=%+v", users, pending, messages)
 	}
+	if recovered := a.ClearPendingInputs(); len(recovered.Items) != 1 || recovered.Items[0].Text != "must not become a ghost" {
+		t.Fatalf("recovered max-turn queue=%+v", recovered)
+	}
+}
+
+func TestAutomaticPromptQueueClosureIsAtomicWithAdmission(t *testing.T) {
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	a, _ := setup(t, p, nil, permission.ModeDeny)
+	defer a.Close()
+	for i := 0; i < 100; i++ {
+		a.mu.Lock()
+		a.running = true
+		a.autoRunning = true
+		a.queueAccepting = true
+		a.queuedInputs = nil
+		a.mu.Unlock()
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var pending bool
+		var queueErr error
+		go func() {
+			defer wg.Done()
+			<-start
+			pending = a.closeAutomaticQueueForPrompt()
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_, queueErr = a.QueueInput(protocol.QueuedInputSteer, "race")
+		}()
+		close(start)
+		wg.Wait()
+		snapshot := a.PendingInputs()
+		if queueErr == nil {
+			if !pending || len(snapshot.Items) != 1 || snapshot.Items[0].Text != "race" {
+				t.Fatalf("iteration %d: admitted queue was lost: pending=%v snapshot=%+v", i, pending, snapshot)
+			}
+		} else if !errors.Is(queueErr, ErrNotRunning) || pending || len(snapshot.Items) != 0 {
+			t.Fatalf("iteration %d: rejected queue state err=%v pending=%v snapshot=%+v", i, queueErr, pending, snapshot)
+		}
+		a.ClearPendingInputs()
+	}
+	a.mu.Lock()
+	a.running = false
+	a.autoRunning = false
+	a.mu.Unlock()
 }
 
 func TestQueuedInputValidationAndSnapshotIsolation(t *testing.T) {

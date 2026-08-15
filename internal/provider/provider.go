@@ -121,18 +121,19 @@ func RedactSecrets(message string, secrets ...string) string {
 	return message
 }
 
-// Provider is an LLM backend adapter.
-type Provider interface {
-	// ID returns the stable provider identifier, e.g. "opencode-go".
+// Transport is a credential-aware provider adapter. It is intentionally kept
+// below the authenticated runtime boundary so protocol packages can focus on
+// vendor HTTP/SSE behavior while auth.Service owns credential selection.
+type Transport interface {
 	ID() string
-
-	// ListModels returns the model catalog for this provider.
 	ListModels(ctx context.Context) ([]protocol.Model, error)
-
-	// Resolve ensures credentials are valid (including OAuth refresh) and
-	// returns the exact credential Chat must use for this request.
-	Resolve(ctx context.Context, creds auth.Credential) (auth.Credential, error)
-
-	// Chat starts a streaming chat. Callers must Close the returned stream.
 	Chat(ctx context.Context, creds auth.Credential, req protocol.ChatRequest) (protocol.EventStream, error)
+}
+
+// Provider is the credential-free interface consumed by the Snow agent.
+// Implementations are normally produced by NewAuthenticated.
+type Provider interface {
+	ID() string
+	ListModels(ctx context.Context) ([]protocol.Model, error)
+	Chat(ctx context.Context, req protocol.ChatRequest) (protocol.EventStream, error)
 }

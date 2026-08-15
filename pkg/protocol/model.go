@@ -302,8 +302,9 @@ type StreamEvent struct {
 	Err          error
 }
 
-// EventStream yields normalized provider events. Next blocks until the next
-// event or EOF/error. Close releases resources.
+// EventStream yields normalized provider events. A successful stream emits one
+// EvStreamDone before EOF; EOF without that terminal event is truncation. Next
+// blocks until the next event or EOF/error. Close releases resources.
 type EventStream interface {
 	Next(ctx context.Context) (StreamEvent, error)
 	Close() error

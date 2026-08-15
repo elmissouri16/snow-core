@@ -55,6 +55,20 @@ func Login(ctx context.Context, opts LoginOptions) (AuthStatus, error) {
 	if opts.Store == nil {
 		return AuthStatus{}, errors.New("chatgpt: login requires a credential store")
 	}
+	cred, err := LoginCredential(ctx, opts)
+	if err != nil {
+		return AuthStatus{}, err
+	}
+	if err = opts.Store.Put(ProviderID, cred); err != nil {
+		return AuthStatus{}, fmt.Errorf("chatgpt: persist OAuth credential: %w", err)
+	}
+	return CheckAuth(cred)
+}
+
+// LoginCredential runs a ChatGPT OAuth flow without persisting its result.
+// Generic auth.Service callers use this to keep storage and provider wire logic
+// separated; Login remains as a compatibility wrapper for existing embedders.
+func LoginCredential(ctx context.Context, opts LoginOptions) (auth.Credential, error) {
 	base := strings.TrimRight(opts.AuthBaseURL, "/")
 	if base == "" {
 		base = AuthBaseURL
@@ -76,15 +90,12 @@ func Login(ctx context.Context, opts LoginOptions) (AuthStatus, error) {
 		cred, err = c.browser(ctx)
 	}
 	if err != nil {
-		return AuthStatus{}, err
+		return auth.Credential{}, err
 	}
 	if err = ensureAllowedWorkspace(cred, opts.AllowedWorkspaceIDs); err != nil {
-		return AuthStatus{}, err
+		return auth.Credential{}, err
 	}
-	if err = opts.Store.Put(ProviderID, cred); err != nil {
-		return AuthStatus{}, fmt.Errorf("chatgpt: persist OAuth credential: %w", err)
-	}
-	return CheckAuth(cred)
+	return cred, nil
 }
 
 func normalizedWorkspaceIDs(values []string) []string {

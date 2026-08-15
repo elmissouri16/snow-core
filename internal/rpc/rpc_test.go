@@ -31,7 +31,7 @@ func (p *rpcQueueProvider) ListModels(context.Context) ([]protocol.Model, error)
 func (p *rpcQueueProvider) Resolve(_ context.Context, credential auth.Credential) (auth.Credential, error) {
 	return credential, nil
 }
-func (p *rpcQueueProvider) Chat(_ context.Context, _ auth.Credential, _ protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *rpcQueueProvider) Chat(_ context.Context, _ protocol.ChatRequest) (protocol.EventStream, error) {
 	first := false
 	p.once.Do(func() {
 		first = true
@@ -52,7 +52,7 @@ func (*rpcErrorProvider) ListModels(context.Context) ([]protocol.Model, error) {
 func (*rpcErrorProvider) Resolve(_ context.Context, credential auth.Credential) (auth.Credential, error) {
 	return credential, nil
 }
-func (*rpcErrorProvider) Chat(context.Context, auth.Credential, protocol.ChatRequest) (protocol.EventStream, error) {
+func (*rpcErrorProvider) Chat(context.Context, protocol.ChatRequest) (protocol.EventStream, error) {
 	return nil, errors.New("fixture prompt failure")
 }
 

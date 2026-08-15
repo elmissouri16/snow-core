@@ -103,6 +103,13 @@ func TestModelShowsPermissionModeInFooter(t *testing.T) {
 	if got := stripANSI(m.renderFooter()); !strings.Contains(got, "permission: allow") {
 		t.Fatalf("footer = %q, want current permission mode", got)
 	}
+	if got := m.permissionStatusStyle().GetForeground(); got != colorErr {
+		t.Fatalf("allow foreground = %v, want red %v", got, colorErr)
+	}
+	m.app.Perm.SetMode(permission.ModeAsk)
+	if got := m.permissionStatusStyle().GetForeground(); got != colorOk {
+		t.Fatalf("ask foreground = %v, want green %v", got, colorOk)
+	}
 	m.app.Perm.SetMode(permission.ModeDeny)
 	if got := stripANSI(m.renderFooter()); !strings.Contains(got, "permission: deny") {
 		t.Fatalf("footer = %q, want updated permission mode", got)

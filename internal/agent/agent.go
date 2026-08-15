@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"runtime"
 	"sort"
 	"strconv"
@@ -22,7 +21,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/snow-core/snow/internal/artifact"
-	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/compact"
 	goalpkg "github.com/snow-core/snow/internal/goal"
 	"github.com/snow-core/snow/internal/permission"
@@ -32,9 +30,6 @@ import (
 	"github.com/snow-core/snow/internal/tools"
 	"github.com/snow-core/snow/pkg/protocol"
 )
-
-// MaxToolRetries bounds retries for malformed tool arguments.
-const MaxToolRetries = 1
 
 const (
 	defaultDeferredTopK     = 5
@@ -47,10 +42,11 @@ const (
 	maxGoalTransientRetries = 1
 	skillActivationMeta     = "agent_skill_activation"
 
-	repeatedToolFirstThreshold = 3
-	repeatedToolNextThreshold  = 5
-	repeatedToolLastThreshold  = 8
-	repeatedToolArgsPreview    = 500
+	repeatedToolFirstThreshold     = 3
+	repeatedToolNextThreshold      = 5
+	repeatedToolLastThreshold      = 8
+	repeatedToolArgsPreview        = 500
+	maxConsecutiveSyntheticBatches = 1
 )
 
 // ErrNotRunning is returned when an operation requires an active,
@@ -61,19 +57,37 @@ var (
 	ErrReentrantDrain = errors.New("agent: event drain requested from inside a callback")
 )
 
+type providerFailure interface{ providerFailure() }
+
+type providerStartError struct{ err error }
+
+func (e *providerStartError) Error() string    { return "agent: provider chat: " + e.err.Error() }
+func (e *providerStartError) Unwrap() error    { return e.err }
+func (e *providerStartError) providerFailure() {}
+
+type providerTurnError struct{ err error }
+
+func (e *providerTurnError) Error() string    { return e.err.Error() }
+func (e *providerTurnError) Unwrap() error    { return e.err }
+func (e *providerTurnError) providerFailure() {}
+
+func isProviderFailure(err error) bool {
+	var marked providerFailure
+	return errors.As(err, &marked)
+}
+
 // Options configures an Agent.
 type Options struct {
-	Provider      provider.Provider
-	Registry      tools.Registry
-	Session       session.Store
-	Permission    permission.Service
-	ToolHost      tools.ToolHost
-	Router        tools.Router
-	SystemPrompt  string
-	Model         protocol.Model
-	MaxTurns      int // 0 = unlimited
-	CallLimit     int // max tool calls per turn (0 = unlimited)
-	MaxToolOutput int
+	Provider     provider.Provider
+	Registry     tools.Registry
+	Session      session.Store
+	Permission   permission.Service
+	ToolHost     tools.ToolHost
+	Router       tools.Router
+	SystemPrompt string
+	Model        protocol.Model
+	MaxTurns     int // 0 = unlimited
+	CallLimit    int // max tool calls per turn (0 = unlimited)
 	// Thinking level forwarded to providers that support reasoning effort.
 	Thinking protocol.ThinkingLevel
 	// ReasoningSummary and TextVerbosity are forwarded to adapters that support
@@ -87,15 +101,6 @@ type Options struct {
 	// Medium when advertised, otherwise the configured effort/Off.
 	PlanThinking *protocol.ThinkingLevel
 	Goal         *goalpkg.Controller
-	// Auth resolves credentials (auth.json). Optional: env fallback is
-	// implemented by providers for known env vars.
-	Auth auth.Store
-	// APIKey is an explicit credential override (CLI --api-key / SDK option).
-	// APIKeyProvider binds that secret to one provider so runtime model/provider
-	// switching cannot forward it to a different origin. Empty is initialized
-	// from the initial Model.Provider for backward-compatible embedders.
-	APIKey         string
-	APIKeyProvider string
 	// Identity attributes permission and host-interaction requests for child
 	// agents. Root leaves it nil for backward-compatible events.
 	Identity *protocol.AgentRef
@@ -147,21 +152,23 @@ type Agent struct {
 	mailboxPersistMu sync.Mutex
 	mailbox          []protocol.AgentMessage
 	mailboxUnread    bool
-	mailboxActivity  chan struct{}
 	mailboxClosed    bool
 	opts             Options
 	model            protocol.Model
 	bus              *eventBus
 	running          bool
 	// tool results retained between the tool_use assistant message and the
-	// continuation provider call
-	pending      map[string]protocol.ContentBlock
-	pendingOrder []string
+	// continuation provider call. pendingToolError forces synthetic results for
+	// an unsafe batch, such as length-truncated tool arguments.
+	pending          map[string]protocol.ContentBlock
+	pendingOrder     []string
+	pendingToolError string
 	// toolStarts is used to add useful duration metadata to tool_end events.
 	toolStarts map[string]time.Time
 	// repeatedTool tracks identical consecutive calls across provider steps in
 	// one admitted run. It is advisory only and resets for each fresh user turn.
 	repeatedTool          repeatedToolCallState
+	turnToolCalls         int
 	turnUsage             protocol.Usage
 	usageSet              bool
 	turnProgress          bool
@@ -226,9 +233,6 @@ func New(opts Options) (*Agent, error) {
 	if opts.Model.Provider == "" && opts.Provider != nil {
 		opts.Model.Provider = opts.Provider.ID()
 	}
-	if opts.APIKey != "" && opts.APIKeyProvider == "" {
-		opts.APIKeyProvider = opts.Model.Provider
-	}
 	thinking, err := protocol.ParseThinkingLevel(string(opts.Thinking))
 	if err != nil {
 		return nil, err
@@ -277,7 +281,7 @@ func New(opts Options) (*Agent, error) {
 	if _, err := repairInterruptedToolCalls(opts.Session, opts.Registry); err != nil {
 		return nil, fmt.Errorf("agent: recover interrupted tool calls: %w", err)
 	}
-	a := &Agent{opts: opts, model: opts.Model, bus: newEventBus(), mode: mode, turnMode: mode, mailboxActivity: make(chan struct{}, 1), rootEpoch: 1}
+	a := &Agent{opts: opts, model: opts.Model, bus: newEventBus(), mode: mode, turnMode: mode, rootEpoch: 1}
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.toolStarts = make(map[string]time.Time)
 	a.activeSkills = restoreActiveSkills(opts.Session, opts.Registry, opts.ToolHost, opts.SkillNames)
@@ -493,15 +497,6 @@ func (a *Agent) SetSession(st session.Store) error {
 	unlock := a.LockAdmission()
 	defer unlock()
 	if err := a.setSessionAdmitted(st, true); err != nil {
-		return err
-	}
-	a.ResetTurnIdentityAdmitted()
-	return nil
-}
-func (a *Agent) SetSessionQuiet(st session.Store) error {
-	unlock := a.LockAdmission()
-	defer unlock()
-	if err := a.setSessionAdmitted(st, false); err != nil {
 		return err
 	}
 	a.ResetTurnIdentityAdmitted()
@@ -842,6 +837,20 @@ func (a *Agent) publishInputQueue(queue protocol.InputQueue) {
 	a.publish(protocol.AgentEvent{Type: protocol.EvQueueUpdated, Queue: queue.Clone()})
 }
 
+// closeAutomaticQueueForPrompt atomically closes queue admission against a
+// racing QueueInput and reports whether accepted work must finish/recover before
+// an ordinary prompt may preempt the automatic run.
+func (a *Agent) closeAutomaticQueueForPrompt() bool {
+	a.queuePublishMu.Lock()
+	defer a.queuePublishMu.Unlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.autoRunning {
+		a.queueAccepting = false
+	}
+	return len(a.queuedInputs) > 0
+}
+
 // closeInputQueue stops admissions and optionally drops pending input. It
 // publishes only when the visible snapshot changes.
 func (a *Agent) closeInputQueue(clear bool) protocol.InputQueue {
@@ -998,10 +1007,6 @@ func (a *Agent) enqueueMailboxAdmitted(message protocol.AgentMessage) error {
 	}
 	a.mailbox = append(a.mailbox, message)
 	a.mailboxUnread = true
-	select {
-	case a.mailboxActivity <- struct{}{}:
-	default:
-	}
 	if running {
 		a.mailboxMu.Unlock()
 		return nil
@@ -1011,10 +1016,6 @@ func (a *Agent) enqueueMailboxAdmitted(message protocol.AgentMessage) error {
 	a.mailboxMu.Unlock()
 	return a.persistMailboxBatchLocked(batch)
 }
-
-// MailboxActivity is an edge-triggered notification channel. Consumers must
-// check PendingMailbox after waking; notifications do not consume messages.
-func (a *Agent) MailboxActivity() <-chan struct{} { return a.mailboxActivity }
 
 // PendingMailbox reports whether attributed input is waiting for a safe point.
 func (a *Agent) PendingMailbox() bool {
@@ -1160,10 +1161,42 @@ func contextMessagesFromStore(store session.Store) ([]protocol.Message, error) {
 	if store == nil {
 		return nil, errors.New("agent: session is nil")
 	}
+	var (
+		messages []protocol.Message
+		err      error
+	)
 	if projected, ok := store.(session.ContextStore); ok {
-		return projected.ContextMessages()
+		messages, err = projected.ContextMessages()
+	} else {
+		messages, err = store.Messages()
 	}
-	return store.Messages()
+	if err != nil {
+		return nil, err
+	}
+	// Failed provider attempts remain durable for diagnostics but are not valid
+	// conversational input. In particular, an overflow retry must not replay a
+	// partial assistant response or leave the next request ending in assistant.
+	out := make([]protocol.Message, 0, len(messages))
+	skippedToolCalls := make(map[string]bool)
+	for _, message := range messages {
+		if message.Role == protocol.RoleAssistant && message.StopReason == protocol.StopError {
+			for _, block := range message.Content {
+				if block.Type == protocol.BlockToolCall && block.ToolCallID != "" {
+					skippedToolCalls[block.ToolCallID] = true
+				}
+			}
+			continue
+		}
+		if message.Role == protocol.RoleTool {
+			if skippedToolCalls[message.ToolCallID] {
+				continue
+			}
+		} else if len(skippedToolCalls) > 0 {
+			clear(skippedToolCalls)
+		}
+		out = append(out, message)
+	}
+	return out, nil
 }
 
 // repairInterruptedToolCalls balances only the final incomplete tool batch. A
@@ -1339,11 +1372,6 @@ func (a *Agent) ForkWithOptions(opts protocol.BranchForkOptions) (protocol.Sessi
 	unlockAdmission := a.LockAdmission()
 	defer unlockAdmission()
 	return a.ForkWithOptionsAdmitted(opts)
-}
-
-// ForkAdmitted preserves the legacy admitted fork entry point.
-func (a *Agent) ForkAdmitted(fromEntryID string) (protocol.SessionBranch, error) {
-	return a.ForkWithOptionsAdmitted(protocol.BranchForkOptions{FromEntryID: fromEntryID})
 }
 
 // ForkWithOptionsAdmitted creates and activates a branch while admission is held.
@@ -1573,6 +1601,10 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 		a.mu.Unlock()
 		return protocol.CompactionResult{}, errors.New("agent: cannot compact while running")
 	}
+	if len(a.queuedInputs) > 0 {
+		a.mu.Unlock()
+		return protocol.CompactionResult{}, errors.New("agent: undelivered queued input is waiting for recovery; call ClearPendingInputs first")
+	}
 	a.running = true
 	a.queuedInputs = nil
 	a.queueAccepting = false
@@ -1719,7 +1751,7 @@ func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
 	}
 
 	a.mu.Lock()
-	if a.closed || a.running || a.autoStop || a.mode != protocol.ModeDefault {
+	if a.closed || a.running || a.autoStop || a.mode != protocol.ModeDefault || len(a.queuedInputs) > 0 {
 		a.mu.Unlock()
 		return false, nil
 	}
@@ -1848,10 +1880,6 @@ func (a *Agent) compactActiveContext(ctx context.Context, trigger compactionTrig
 
 func (a *Agent) summarizeForCompaction(ctx context.Context, msgs []protocol.Message) (string, error) {
 	p := a.currentProvider()
-	creds, err := p.Resolve(ctx, a.resolveCreds(ctx))
-	if err != nil {
-		return "", err
-	}
 	contract := `Create factual continuation context for a coding agent, not a conversational recap. Use compact sections for: user objective and constraints; decisions with rationale; exact files and symbols changed; commands/tests and outcomes; important tool results; errors and failed approaches; current repository state; and unresolved next steps. Preserve exact identifiers and paths when known. Do not invent facts or call tools.`
 	if guidance := strings.TrimSpace(a.opts.Compaction.Guidance); guidance != "" {
 		contract += "\n\nAdditional operator guidance (additive; the contract above remains mandatory):\n" + guidance
@@ -1875,15 +1903,20 @@ func (a *Agent) summarizeForCompaction(ctx context.Context, msgs []protocol.Mess
 		Thinking:           protocol.ThinkingOff,
 		SessionAffinityKey: a.requestAffinityKey("compaction"),
 	}
-	stream, err := p.Chat(ctx, creds, req)
+	stream, err := p.Chat(ctx, req)
 	if err != nil {
 		return "", err
 	}
 	defer stream.Close()
 	var out strings.Builder
+	sawDone := false
+summaryStream:
 	for {
 		ev, err := stream.Next(ctx)
 		if errors.Is(err, io.EOF) {
+			if !sawDone {
+				return "", errors.New("provider summary stream ended before terminal done event")
+			}
 			break
 		}
 		if err != nil {
@@ -1892,6 +1925,12 @@ func (a *Agent) summarizeForCompaction(ctx context.Context, msgs []protocol.Mess
 		switch ev.Type {
 		case protocol.EvStreamTextDelta:
 			out.WriteString(ev.Text)
+		case protocol.EvStreamDone:
+			if ev.StopReason == protocol.StopError || ev.StopReason == protocol.StopAborted {
+				return "", fmt.Errorf("provider summary stopped with %s", ev.StopReason)
+			}
+			sawDone = true
+			break summaryStream
 		case protocol.EvStreamError:
 			if ev.Err != nil {
 				return "", ev.Err
@@ -1960,6 +1999,10 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 		a.mu.Unlock()
 		return errors.New("agent: already running")
 	}
+	if len(a.queuedInputs) > 0 {
+		a.mu.Unlock()
+		return errors.New("agent: undelivered queued input is waiting for recovery; call ClearPendingInputs first")
+	}
 	a.running = true
 	a.queuedInputs = nil
 	a.queueAccepting = true
@@ -1970,8 +2013,10 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 	a.turnPlanSeen = false
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.pendingOrder = a.pendingOrder[:0]
+	a.pendingToolError = ""
 	a.toolStarts = make(map[string]time.Time)
 	a.repeatedTool = repeatedToolCallState{}
+	a.turnToolCalls = 0
 	a.turnUsage = protocol.Usage{}
 	a.usageSet = false
 	a.turnProgress = false
@@ -1994,7 +2039,7 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 	unlock()
 	admissionHeld = false
 	defer func() {
-		a.closeInputQueue(true)
+		a.closeInputQueue(retErr == nil || ctx.Err() != nil)
 		cancel()
 		retErr = errors.Join(retErr, a.drainMailbox())
 		var origin, turnID string
@@ -2106,6 +2151,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	// unsupported prompt must not stop an automatic goal and leave it idle.
 	a.mu.RLock()
 	closed, running, wasAutomatic := a.closed, a.running, a.autoRunning
+	pendingRecovery := len(a.queuedInputs) > 0
 	prospectiveMode := a.mode
 	if requestedMode != nil {
 		prospectiveMode = *requestedMode
@@ -2119,11 +2165,17 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	if running && !wasAutomatic {
 		return fmt.Errorf("%w: agent already running", ErrPromptRejected)
 	}
+	if pendingRecovery {
+		return fmt.Errorf("%w: undelivered queued input is waiting for recovery; call ClearPendingInputs first", ErrPromptRejected)
+	}
 	if !model.SupportsThinkingLevel(level) {
 		return errors.Join(ErrPromptRejected, unsupportedThinkingError(model, level))
 	}
 	if err := validateUserAttachments(model, attachments); err != nil {
 		return errors.Join(ErrPromptRejected, err)
+	}
+	if wasAutomatic && a.closeAutomaticQueueForPrompt() {
+		return fmt.Errorf("%w: undelivered queued input was accepted before automatic work could be preempted; call ClearPendingInputs first", ErrPromptRejected)
 	}
 	a.stopAutomatic(false)
 
@@ -2137,6 +2189,10 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	if a.running {
 		a.mu.Unlock()
 		return errors.New("agent: already running")
+	}
+	if len(a.queuedInputs) > 0 {
+		a.mu.Unlock()
+		return fmt.Errorf("%w: undelivered queued input was accepted while automatic work stopped; call ClearPendingInputs first", ErrPromptRejected)
 	}
 	previousMode := a.mode
 	modeApplied := false
@@ -2213,8 +2269,10 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	a.turnPlanSeen = false
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.pendingOrder = a.pendingOrder[:0]
+	a.pendingToolError = ""
 	a.toolStarts = make(map[string]time.Time)
 	a.repeatedTool = repeatedToolCallState{}
+	a.turnToolCalls = 0
 	a.turnUsage = protocol.Usage{}
 	a.usageSet = false
 	a.turnProgress = false
@@ -2230,9 +2288,10 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	}
 	a.prepareToolRouting(ctx, text)
 
-	// Ensure we stop running on any exit.
+	// Ensure we stop running on any exit. Operational failures leave accepted
+	// queued input closed but recoverable through PendingInputs/ClearPendingInputs.
 	defer func() {
-		a.closeInputQueue(true)
+		a.closeInputQueue(retErr == nil || ctx.Err() != nil)
 		cancel()
 		// Persist any mail that arrived after the final provider request before
 		// releasing turn admission. This keeps delivery ordered and durable for
@@ -2313,6 +2372,10 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 		a.mu.Unlock()
 		return errors.New("agent: already running")
 	}
+	if len(a.queuedInputs) > 0 {
+		a.mu.Unlock()
+		return errors.New("agent: undelivered queued input is waiting for recovery; call ClearPendingInputs first")
+	}
 	if a.mode == protocol.ModePlan {
 		a.mu.Unlock()
 		return errors.New("agent: automatic turns are not allowed in Plan mode")
@@ -2359,15 +2422,17 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	a.turnPlanSeen = false
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.pendingOrder = a.pendingOrder[:0]
+	a.pendingToolError = ""
 	a.toolStarts = make(map[string]time.Time)
 	a.repeatedTool = repeatedToolCallState{}
+	a.turnToolCalls = 0
 	a.turnUsage = protocol.Usage{}
 	a.usageSet = false
 	a.turnProgress = false
 	a.mu.Unlock()
 	a.publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g.Clone()}, TurnOrigin: "goal", TurnID: a.turnID, GoalContinuing: true})
 	defer func() {
-		a.closeInputQueue(true)
+		a.closeInputQueue(retErr == nil || ctx.Err() != nil)
 		cancel()
 		retErr = errors.Join(retErr, a.drainMailbox())
 		continuing, accountingErr := a.finalizeGoalTurn(retErr, false)
@@ -2552,6 +2617,17 @@ func (a *Agent) stopActiveGoalOnError(turnErr error) {
 	_, _ = controller.SetStatus(g.GoalID, status, false)
 }
 
+func waitForContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func (a *Agent) waitGoalTransientRetry(delay time.Duration) bool {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -2705,6 +2781,9 @@ func (a *Agent) stopWork(ctx context.Context, deferGoal, anyTurn bool) error {
 	}
 	controller := a.opts.Goal
 	a.mu.Unlock()
+	if anyTurn {
+		a.closeInputQueue(true)
+	}
 	if cancel != nil && controlled {
 		cancel()
 	}
@@ -2790,10 +2869,7 @@ func (a *Agent) Close() {
 	a.autoWG.Wait()
 	a.turnWG.Wait()
 	a.mailboxMu.Lock()
-	if !a.mailboxClosed {
-		a.mailboxClosed = true
-		close(a.mailboxActivity)
-	}
+	a.mailboxClosed = true
 	a.mailboxMu.Unlock()
 	a.bus.Close()
 	if !reentrantEventCallback {
@@ -2985,6 +3061,8 @@ func boundRoutingMessage(message string, max int) string {
 func (a *Agent) run(ctx context.Context) error {
 	turn := 0
 	overflowRecovered := false
+	providerStartRetries := 0
+	syntheticOnlyBatches := 0
 	for {
 		if a.opts.MaxTurns > 0 && turn >= a.opts.MaxTurns {
 			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "max turns reached"})
@@ -3040,9 +3118,13 @@ func (a *Agent) run(ctx context.Context) error {
 		a.latestRequestEstimate = requestEstimate
 		a.mu.Unlock()
 
-		// Call the provider (optionally with a merged retry on malformed args).
 		stop, err := a.streamTurnWithErrors(ctx, req, overflowRecovered)
 		if err != nil {
+			var startErr *providerStartError
+			startFailure := errors.As(err, &startErr)
+			if !startFailure {
+				providerStartRetries = 0
+			}
 			if !overflowRecovered && a.autoThresholdPercent() > 0 && ctx.Err() == nil && provider.IsContextWindowExceeded(err) {
 				result, compactErr := a.compactActiveContext(ctx, compactionOverflow)
 				if compactErr == nil && result.SummarizedMessages > 0 {
@@ -3050,6 +3132,7 @@ func (a *Agent) run(ctx context.Context) error {
 					a.mu.Lock()
 					a.latestContextTokens = 0
 					a.mu.Unlock()
+					turn-- // the failed oversized request did not complete a model round
 					continue
 				}
 				if compactErr != nil {
@@ -3057,20 +3140,73 @@ func (a *Agent) run(ctx context.Context) error {
 					return errors.Join(err, fmt.Errorf("agent: overflow recovery compaction: %w", compactErr))
 				}
 			}
+
+			// A provider failure before a stream exists is safe to retry once:
+			// no model output or tool side effect can have escaped that attempt.
+			if ctx.Err() == nil && providerStartRetries < 1 && startFailure && provider.IsTransientError(err) {
+				providerStartRetries++
+				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "transient provider startup failure; retrying once"})
+				if waitErr := waitForContext(ctx, goalTransientRetryDelay); waitErr != nil {
+					waitErr = errors.Join(waitErr, a.persistAbortedBoundary())
+					a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
+					return waitErr
+				}
+				turn-- // a pre-stream transport failure did not complete a model round
+				continue
+			}
+
+			// Accepted steering/follow-up work must not disappear behind an
+			// ordinary provider failure. Persist one eligible item and let it
+			// start a fresh request; repeated failures consume the finite queue.
+			// Internal persistence/accounting errors are never masked this way.
+			if isProviderFailure(err) {
+				canContinue := a.opts.MaxTurns == 0 || turn < a.opts.MaxTurns
+				queued, ok, limited := a.takeQueuedInput(true, canContinue)
+				if limited {
+					a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "max turns reached"})
+					return errors.New("agent: max turns reached")
+				}
+				if ok {
+					if deliverErr := a.deliverQueuedInput(ctx, queued); deliverErr != nil {
+						return errors.Join(err, deliverErr)
+					}
+					providerStartRetries = 0
+					syntheticOnlyBatches = 0
+					continue
+				}
+			}
 			if !overflowRecovered {
 				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
 			}
 			return err
 		}
+		providerStartRetries = 0
 		naturalStop := false
 		switch stop {
 		case protocol.StopToolUse:
 			// Steering never skips tool calls. Finish the complete serial batch,
 			// including cancellation placeholders, before checking the queue.
-			if err := a.executeToolCalls(ctx); err != nil {
+			batch, batchErr := a.executeToolCalls(ctx)
+			if batchErr != nil {
 				if ctx.Err() != nil {
+					batchErr = errors.Join(batchErr, a.persistAbortedBoundary())
 					a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
 				}
+				return batchErr
+			}
+			if batch.Calls > 0 && batch.Dispatched == 0 {
+				syntheticOnlyBatches++
+				if syntheticOnlyBatches > maxConsecutiveSyntheticBatches && (a.opts.MaxTurns == 0 || turn < a.opts.MaxTurns) {
+					err := errors.New("agent: repeated tool batches produced only synthetic error results")
+					a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+					return err
+				}
+			} else {
+				syntheticOnlyBatches = 0
+			}
+			if err := ctx.Err(); err != nil {
+				err = errors.Join(err, a.persistAbortedBoundary())
+				a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
 				return err
 			}
 		case protocol.StopStop, protocol.StopLength:
@@ -3093,6 +3229,7 @@ func (a *Agent) run(ctx context.Context) error {
 			if err := a.deliverQueuedInput(ctx, queued); err != nil {
 				return err
 			}
+			syntheticOnlyBatches = 0
 			continue
 		}
 		if naturalStop {
@@ -3216,7 +3353,6 @@ func (a *Agent) deliverQueuedInput(ctx context.Context, item protocol.QueuedInpu
 	return nil
 }
 
-// streamTurn calls the provider and persists the assistant message; returns stop reason.
 func (a *Agent) requestAffinityKey(purpose string) string {
 	if a.opts.Session == nil || a.opts.Session.ID() == "" {
 		return ""
@@ -3229,34 +3365,29 @@ func (a *Agent) requestAffinityKey(purpose string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (a *Agent) streamTurn(ctx context.Context, req protocol.ChatRequest) (protocol.StopReason, error) {
-	return a.streamTurnWithErrors(ctx, req, true)
-}
-
 func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatRequest, publishErrors bool) (protocol.StopReason, error) {
 	a.mu.Lock()
 	a.latestContextTokens = 0
 	a.mu.Unlock()
 	provider := a.currentProvider()
-	creds, err := provider.Resolve(ctx, a.resolveCreds(ctx))
+	asstID := newID()
+	parent := a.opts.Session.BranchTip()
+	stream, err := provider.Chat(ctx, req)
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			if perr := a.persistAssistant(asstID, parent, nil, protocol.StopAborted, nil, ""); perr != nil {
+				return protocol.StopAborted, perr
+			}
+			a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
+			return protocol.StopAborted, nil
+		}
 		if publishErrors {
 			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
 		}
-		return protocol.StopError, fmt.Errorf("agent: provider resolve: %w", err)
-	}
-
-	stream, err := provider.Chat(ctx, creds, req)
-	if err != nil {
-		if publishErrors {
-			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
-		}
-		return protocol.StopError, fmt.Errorf("agent: provider chat: %w", err)
+		return protocol.StopError, &providerStartError{err: err}
 	}
 	defer stream.Close()
 
-	asstID := newID()
-	parent := a.opts.Session.BranchTip()
 	var content []protocol.ContentBlock
 	var providerData []protocol.ContentBlock
 	var usage *protocol.Usage
@@ -3271,12 +3402,15 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 		a.mu.Unlock()
 	})
 	toolCalls := map[string]protocol.ContentBlock{} // id -> block
+	toolDone := map[string]bool{}                   // id -> final arguments observed
 	toolOrder := []string{}                         // first-seen id order
+	sawDone := false
 
+streamLoop:
 	for {
 		ev, err := stream.Next(ctx)
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 				stop = protocol.StopAborted
 				collector.Interrupt()
 				content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
@@ -3286,11 +3420,9 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 				a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
 				return protocol.StopAborted, nil
 			}
-			// Normal end of stream: io.EOF per the EventStream contract.
-			if errors.Is(err, io.EOF) {
-				break
+			if errors.Is(err, io.EOF) && !sawDone {
+				err = errors.New("provider stream ended before terminal done event")
 			}
-			// Stream error event
 			stop = protocol.StopError
 			collector.Interrupt()
 			content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
@@ -3300,7 +3432,7 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 			if publishErrors {
 				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
 			}
-			return protocol.StopError, err
+			return protocol.StopError, &providerTurnError{err: err}
 		}
 
 		switch ev.Type {
@@ -3338,6 +3470,7 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 			a.mu.Lock()
 			a.turnProgress = true
 			a.mu.Unlock()
+			toolDone[ev.ToolCallID] = true
 			cb, ok := toolCalls[ev.ToolCallID]
 			if !ok {
 				cb = protocol.ContentBlock{
@@ -3379,6 +3512,8 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 			if stop == "" {
 				stop = protocol.StopStop
 			}
+			sawDone = true
+			break streamLoop
 		case protocol.EvStreamError:
 			stop = protocol.StopError
 			errMsg := "provider error"
@@ -3394,38 +3529,123 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: errMsg})
 			}
 			if ev.Err != nil {
-				return protocol.StopError, fmt.Errorf("agent: provider stream: %w", ev.Err)
+				return protocol.StopError, &providerTurnError{err: fmt.Errorf("agent: provider stream: %w", ev.Err)}
 			}
-			return protocol.StopError, fmt.Errorf("agent: %s", errMsg)
+			return protocol.StopError, &providerTurnError{err: fmt.Errorf("agent: %s", errMsg)}
 		}
 	}
 
-	// Assemble final content: thinking first, then ordered text/plan blocks, then tool calls.
+	if !validTerminalStop(stop) {
+		protocolErr := fmt.Errorf("provider emitted invalid terminal stop reason %q", stop)
+		collector.Interrupt()
+		content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
+		if perr := a.persistAssistant(asstID, parent, content, protocol.StopError, usage, protocolErr.Error()); perr != nil {
+			return protocol.StopError, perr
+		}
+		if publishErrors {
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: protocolErr.Error()})
+		}
+		return protocol.StopError, &providerTurnError{err: protocolErr}
+	}
+
+	// Terminal error/abort signals never commit streamed tool calls. They may be
+	// partial, and no execution is safe after the provider has rejected the turn.
 	if stop == protocol.StopAborted || stop == protocol.StopError {
 		collector.Interrupt()
-	} else {
-		collector.Finish()
+		content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
+		errMsg := ""
+		if stop == protocol.StopError {
+			errMsg = "provider stopped with error"
+		}
+		if perr := a.persistAssistant(asstID, parent, content, stop, usage, errMsg); perr != nil {
+			return stop, perr
+		}
+		if stop == protocol.StopAborted {
+			a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
+			return stop, nil
+		}
+		if publishErrors {
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: errMsg})
+		}
+		return stop, &providerTurnError{err: errors.New(errMsg)}
 	}
+
+	// Validate terminal metadata against the actual streamed calls. Content is
+	// authoritative when a provider reports stop despite complete calls. Length
+	// truncation is different: arguments may parse while being silently partial,
+	// so every call receives a synthetic error and none is executed.
+	hasToolCalls := len(toolOrder) > 0
+	allToolCallsDone := true
+	validToolIdentities := true
+	for _, id := range toolOrder {
+		call := toolCalls[id]
+		if strings.TrimSpace(call.ToolCallID) == "" || strings.TrimSpace(call.Name) == "" {
+			validToolIdentities = false
+		}
+		if !toolDone[id] {
+			allToolCallsDone = false
+		}
+	}
+	var protocolErr error
+	switch {
+	case stop == protocol.StopToolUse && !hasToolCalls:
+		protocolErr = errors.New("provider stopped for tool use without any tool calls")
+	case hasToolCalls && !validToolIdentities:
+		protocolErr = errors.New("provider emitted a tool call without both an ID and name")
+	case hasToolCalls && stop != protocol.StopLength && !allToolCallsDone:
+		protocolErr = errors.New("provider ended with an incomplete tool call")
+	}
+	if protocolErr != nil {
+		collector.Interrupt()
+		content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
+		if perr := a.persistAssistant(asstID, parent, content, protocol.StopError, usage, protocolErr.Error()); perr != nil {
+			return protocol.StopError, perr
+		}
+		if publishErrors {
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: protocolErr.Error()})
+		}
+		return protocol.StopError, &providerTurnError{err: protocolErr}
+	}
+
+	persistedStop := stop
+	returnedStop := stop
+	pendingToolError := ""
+	if hasToolCalls {
+		switch stop {
+		case protocol.StopLength:
+			returnedStop = protocol.StopToolUse
+			pendingToolError = "tool call was not executed because model output was truncated; arguments may be incomplete"
+		case protocol.StopStop:
+			persistedStop = protocol.StopToolUse
+			returnedStop = protocol.StopToolUse
+		}
+	}
+
+	collector.Finish()
 	content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
 	for _, id := range toolOrder {
 		if cb, ok := toolCalls[id]; ok {
-			content = append(content, cb)
+			// RawMessage must contain valid JSON for SQLite/JSONL persistence.
+			// Keep the original in pending so executeOne can return a precise
+			// malformed-argument result instead of accidentally running the tool.
+			persisted := cb
+			if len(persisted.Arguments) > 0 && !json.Valid(persisted.Arguments) {
+				persisted.Arguments = json.RawMessage("{}")
+			}
+			content = append(content, persisted)
 		}
 	}
-	if stop == protocol.StopPending {
-		stop = protocol.StopStop
-	}
-
-	if err := a.persistAssistant(asstID, parent, content, stop, usage, ""); err != nil {
-		return stop, err
+	if err := a.persistAssistant(asstID, parent, content, persistedStop, usage, ""); err != nil {
+		return persistedStop, err
 	}
 	collector.PublishCompleted()
 
-	// Stash tool calls for execution (ordered).
-	if stop == protocol.StopToolUse {
+	// Stash tool calls for serial execution or synthetic truncated-call results.
+	if returnedStop == protocol.StopToolUse {
 		a.mu.Lock()
 		a.pending = make(map[string]protocol.ContentBlock)
 		a.pendingOrder = a.pendingOrder[:0]
+		a.pendingToolError = pendingToolError
 		for _, id := range toolOrder {
 			if cb, ok := toolCalls[id]; ok && cb.Type == protocol.BlockToolCall {
 				a.pending[cb.ToolCallID] = cb
@@ -3435,7 +3655,16 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 		a.mu.Unlock()
 	}
 
-	return stop, nil
+	return returnedStop, nil
+}
+
+func validTerminalStop(stop protocol.StopReason) bool {
+	switch stop {
+	case protocol.StopStop, protocol.StopLength, protocol.StopToolUse, protocol.StopError, protocol.StopAborted:
+		return true
+	default:
+		return false
+	}
 }
 
 func messageTextBlocks(message protocol.Message) string {
@@ -3472,6 +3701,11 @@ func contextTokensForCompaction(usage protocol.Usage) int {
 	return usage.Output
 }
 
+func (a *Agent) persistAbortedBoundary() error {
+	parent := a.opts.Session.BranchTip()
+	return a.persistAssistant(newID(), parent, nil, protocol.StopAborted, nil, "")
+}
+
 func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBlock, stop protocol.StopReason, usage *protocol.Usage, errMsg string) error {
 	msg := protocol.NewAssistantMessage(id, parent, a.Model().Provider, a.Model().ID, content, stop, usage)
 	if errMsg != "" {
@@ -3498,24 +3732,32 @@ func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBl
 	return nil
 }
 
+type toolBatchResult struct {
+	Calls      int
+	Dispatched int
+}
+
 // executeToolCalls runs the pending tool calls serially (in stream order)
 // and persists results. Aborts early when ctx is cancelled.
-func (a *Agent) executeToolCalls(ctx context.Context) error {
+func (a *Agent) executeToolCalls(ctx context.Context) (toolBatchResult, error) {
 	a.mu.Lock()
 	pending := a.pending
 	order := append([]string(nil), a.pendingOrder...)
+	forcedError := a.pendingToolError
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.pendingOrder = a.pendingOrder[:0]
+	a.pendingToolError = ""
 	a.mu.Unlock()
 
 	parent := a.opts.Session.BranchTip()
-	callCount := 0
+	result := toolBatchResult{}
 
 	for i, id := range order {
 		cb, ok := pending[id]
 		if !ok {
 			continue
 		}
+		result.Calls++
 		if err := ctx.Err(); err != nil {
 			// Keep the provider-facing conversation valid even when cancellation
 			// lands between serial tool calls: every declared call still gets a
@@ -3528,37 +3770,54 @@ func (a *Agent) executeToolCalls(ctx context.Context) error {
 				msg := protocol.NewToolResultMessage(newID(), parent, remaining.ToolCallID, remaining.Name,
 					[]protocol.ContentBlock{protocol.NewTextBlock("Error: tool call cancelled: " + err.Error())}, true)
 				if appendErr := a.appendToolResult(parent, msg); appendErr != nil {
-					return appendErr
+					return result, appendErr
 				}
 				parent = msg.ID
 			}
-			return err
+			return result, err
 		}
-		if a.opts.CallLimit > 0 && callCount >= a.opts.CallLimit {
+		if forcedError != "" {
+			msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
+				[]protocol.ContentBlock{protocol.NewTextBlock("Error: " + forcedError)}, true)
+			if err := a.appendToolResult(parent, msg); err != nil {
+				return result, err
+			}
+			parent = msg.ID
+			continue
+		}
+		a.mu.Lock()
+		limitReached := a.opts.CallLimit > 0 && a.turnToolCalls >= a.opts.CallLimit
+		if !limitReached {
+			a.turnToolCalls++
+		}
+		a.mu.Unlock()
+		if limitReached {
 			// Emit an error result for skipped calls so the provider never
 			// sees tool_calls without results.
 			msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
 				[]protocol.ContentBlock{protocol.NewTextBlock(
 					fmt.Sprintf("Error: tool call skipped (call limit %d reached)", a.opts.CallLimit))}, true)
 			if err := a.appendToolResult(parent, msg); err != nil {
-				return err
+				return result, err
 			}
 			// Chain: the next result attaches to this one so every tool call
 			// result stays on the root→tip path (no dangling tool_calls).
 			parent = msg.ID
 			continue
 		}
-		callCount++
-		msg, err := a.executeOne(ctx, cb, parent)
+		msg, dispatched, err := a.executeOne(ctx, cb, parent)
+		if dispatched {
+			result.Dispatched++
+		}
 		if err != nil {
-			return err
+			return result, err
 		}
 		a.observeRepeatedToolCall(cb.Name, cb.Arguments)
 		// Chain tool results serially so all of them remain on the branch
 		// tip path; otherwise only the last result is visible to Messages().
 		parent = msg.ID
 	}
-	return nil
+	return result, nil
 }
 
 func (a *Agent) observeRepeatedToolCall(name string, raw json.RawMessage) {
@@ -3661,7 +3920,7 @@ func (a *Agent) appendToolResult(parent string, msg protocol.Message, details ..
 	return nil
 }
 
-func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent string) (protocol.Message, error) {
+func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent string) (protocol.Message, bool, error) {
 	// Validate args JSON.
 	var args map[string]any
 	rawArgs := cb.Arguments
@@ -3674,9 +3933,9 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 			[]protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf(
 				"Error: tool arguments are not valid JSON: %v. Raw: %s", err, string(rawArgs)))}, true)
 		if err := a.appendToolResult(parent, msg); err != nil {
-			return msg, err
+			return msg, false, err
 		}
-		return msg, nil
+		return msg, false, nil
 	}
 
 	mode := a.capturedTurnMode()
@@ -3684,17 +3943,17 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
 			[]protocol.ContentBlock{protocol.NewTextBlock("update_plan is a TODO/checklist tool and is not allowed in Plan mode")}, true)
 		if err := a.appendToolResult(parent, msg); err != nil {
-			return msg, err
+			return msg, false, err
 		}
-		return msg, nil
+		return msg, false, nil
 	}
 	if (mode == protocol.ModePlan && cb.Name == "ask_user") || (mode != protocol.ModePlan && cb.Name == "request_user_input") {
 		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
 			[]protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("Error: %s is unavailable in %s mode", cb.Name, mode))}, true)
 		if err := a.appendToolResult(parent, msg); err != nil {
-			return msg, err
+			return msg, false, err
 		}
-		return msg, nil
+		return msg, false, nil
 	}
 
 	tool, ok := a.opts.Registry.Get(cb.Name)
@@ -3702,9 +3961,9 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
 			[]protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("Error: unknown tool %q", cb.Name))}, true)
 		if err := a.appendToolResult(parent, msg); err != nil {
-			return msg, err
+			return msg, false, err
 		}
-		return msg, nil
+		return msg, false, nil
 	}
 
 	// Permission gate.
@@ -3730,9 +3989,9 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
 			[]protocol.ContentBlock{protocol.NewTextBlock("Permission denied: " + reason)}, true)
 		if err := a.appendToolResult(parent, msg); err != nil {
-			return msg, err
+			return msg, false, err
 		}
-		return msg, nil
+		return msg, false, nil
 	}
 
 	a.mu.Lock()
@@ -3758,14 +4017,14 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 	out = a.spillToolResult(ctx, cb.Name, cb.ToolCallID, out, tr.Details)
 	msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name, out, tr.IsError)
 	if err := a.appendToolResult(parent, msg, tr.Details); err != nil {
-		return msg, err
+		return msg, true, err
 	}
 	if !tr.IsError {
 		a.applyDiscoveryDetails(tr.Details)
 		a.applySkillActivationDetails(tr.Details)
 		a.applyPlanUpdateDetails(tr.Details)
 	}
-	return msg, nil
+	return msg, true, nil
 }
 
 func (a *Agent) applyPlanUpdateDetails(details any) {
@@ -4228,7 +4487,15 @@ func editDiffPreview(details []any) (string, bool) {
 }
 
 func toolStartMessage(name string, rawArgs json.RawMessage) string {
-	if name == "edit" || name == "write" {
+	switch name {
+	case "bash":
+		var input struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal(rawArgs, &input); err == nil && input.Command != "" {
+			return boundEventText(input.Command, 2*1024)
+		}
+	case "edit", "write":
 		var input struct {
 			Path string `json:"path"`
 		}
@@ -4251,28 +4518,6 @@ func boundEventText(text string, maxBytes int) string {
 		body = body[:len(body)-1]
 	}
 	return string(body) + "\n… [tool output preview truncated]"
-}
-
-// resolveCreds resolves provider credentials: explicit API key → auth.json → env.
-// An empty credential is passed through and the provider's Resolve is the
-// authority on whether that is acceptable (fake/test providers accept empty).
-func (a *Agent) resolveCreds(ctx context.Context) auth.Credential {
-	id := a.Model().Provider
-	if a.opts.APIKey != "" && a.opts.APIKeyProvider == id {
-		return auth.Credential{Type: auth.CredentialAPIKey, Key: a.opts.APIKey}
-	}
-	if a.opts.Auth != nil {
-		if cred, ok := a.opts.Auth.Get(id); ok && cred.Valid() {
-			return cred
-		}
-	}
-	// Env fallback for known API-key providers.
-	if id == "opencode-go" {
-		if k := os.Getenv("OPENCODE_API_KEY"); k != "" {
-			return auth.Credential{Type: auth.CredentialAPIKey, Key: k}
-		}
-	}
-	return auth.Credential{}
 }
 
 // riskFor maps tool names to permission risk classes.
@@ -4307,14 +4552,6 @@ func extractPaths(args map[string]any) []string {
 		}
 	}
 	return paths
-}
-
-func textBlock(s string) protocol.ContentBlock {
-	return protocol.NewTextBlock(s)
-}
-
-func assistantResponseContent(thinking string, blocks []protocol.ContentBlock) []protocol.ContentBlock {
-	return assistantResponseContentWithProviderData(thinking, nil, blocks)
 }
 
 func assistantResponseContentWithProviderData(thinking string, providerData, blocks []protocol.ContentBlock) []protocol.ContentBlock {

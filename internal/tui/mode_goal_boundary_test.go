@@ -38,7 +38,7 @@ func (*boundaryGoalProvider) ListModels(context.Context) ([]protocol.Model, erro
 func (*boundaryGoalProvider) Resolve(_ context.Context, c auth.Credential) (auth.Credential, error) {
 	return c, nil
 }
-func (p *boundaryGoalProvider) Chat(context.Context, auth.Credential, protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *boundaryGoalProvider) Chat(context.Context, protocol.ChatRequest) (protocol.EventStream, error) {
 	p.mu.Lock()
 	p.calls++
 	call := p.calls

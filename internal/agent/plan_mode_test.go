@@ -30,7 +30,7 @@ func newPlanAgent(t *testing.T, p *scriptedProvider, reg *tools.SimpleRegistry, 
 		Provider: p, Registry: reg, Session: st, Permission: perm,
 		ToolHost: &testHost{cwd: t.TempDir(), perm: perm}, SystemPrompt: "base",
 		Model:             protocol.Model{Provider: p.ID(), ID: "m", SupportsTools: true, SupportsThinking: true, ThinkingLevels: []protocol.ThinkingLevel{protocol.ThinkingMedium}},
-		CollaborationMode: protocol.ModePlan, Auth: auth.NewMemoryStoreForTest(),
+		CollaborationMode: protocol.ModePlan,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -219,9 +219,12 @@ func TestToolGateUsesCapturedTurnMode(t *testing.T) {
 	a.mode = protocol.ModeDefault
 	a.mu.Unlock()
 	call := protocol.ContentBlock{Type: protocol.BlockToolCall, ToolCallID: "captured", Name: "update_plan", Arguments: []byte(`{}`)}
-	msg, err := a.executeOne(context.Background(), call, "")
+	msg, dispatched, err := a.executeOne(context.Background(), call, "")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if dispatched {
+		t.Fatal("plan-gated tool was reported as dispatched")
 	}
 	if got := sessionMessageTextForTest(msg); got != "update_plan is a TODO/checklist tool and is not allowed in Plan mode" || !msg.IsError {
 		t.Fatalf("result=%q error=%v", got, msg.IsError)
@@ -285,7 +288,7 @@ func (*interruptedPlanProvider) ListModels(context.Context) ([]protocol.Model, e
 func (*interruptedPlanProvider) Resolve(_ context.Context, c auth.Credential) (auth.Credential, error) {
 	return c, nil
 }
-func (*interruptedPlanProvider) Chat(context.Context, auth.Credential, protocol.ChatRequest) (protocol.EventStream, error) {
+func (*interruptedPlanProvider) Chat(context.Context, protocol.ChatRequest) (protocol.EventStream, error) {
 	return &interruptedPlanStream{}, nil
 }
 

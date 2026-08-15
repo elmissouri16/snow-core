@@ -14,7 +14,9 @@ import (
 
 	"github.com/snow-core/snow/internal/app"
 	"github.com/snow-core/snow/internal/auth"
+	"github.com/snow-core/snow/internal/config"
 	"github.com/snow-core/snow/internal/provider/chatgpt"
+	"github.com/snow-core/snow/internal/provider/openaicompat"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -370,6 +372,10 @@ func TestModelLoginPickerDirectArg(t *testing.T) {
 	defer server.Close()
 	m.editor.SetValue("/login openai-compatible")
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.loginProfileMode {
+		t.Fatal("compatible login did not request a profile name")
+	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter}) // blank keeps the legacy name
 	if !m.loginEndpointMode || m.loginProvider != "openai-compatible" {
 		t.Fatalf("compatible endpoint mode=%v provider=%q", m.loginEndpointMode, m.loginProvider)
 	}
@@ -410,6 +416,7 @@ func TestModelLoginPickerDirectArg(t *testing.T) {
 	}
 	m.editor.SetValue("/login openai-compatible")
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.loginEndpointMode || m.editor.Value() != server.URL+"/v1" {
 		t.Fatalf("saved endpoint was not prefilled: mode=%v value=%q", m.loginEndpointMode, m.editor.Value())
 	}
@@ -448,6 +455,7 @@ func TestOpenAICompatibleTUILoginAllowsKeylessAndRejectsInvalidEndpoint(t *testi
 	buildAppForTest(t, m)
 	m.editor.SetValue("/login openai-compatible")
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter}) // legacy profile name
 	m.editor.SetValue("relative/path")
 	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil || !m.loginEndpointMode {
@@ -476,6 +484,61 @@ func TestOpenAICompatibleTUILoginAllowsKeylessAndRejectsInvalidEndpoint(t *testi
 	}
 	if got := m.app.PersistedCfg.Providers["openai-compatible"].BaseURL; got != server.URL {
 		t.Fatalf("keyless endpoint=%q", got)
+	}
+}
+
+func TestOpenAICompatibleTUILoginCreatesNamedProfile(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer x-secret" {
+			t.Errorf("named profile authorization=%q", got)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"x-model"}]}`))
+	}))
+	defer server.Close()
+
+	m.editor.SetValue("/login openai-compatible")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.loginProfileMode {
+		t.Fatal("named login did not enter profile-name capture")
+	}
+	m.editor.SetValue("x-provider")
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.loginEndpointMode || m.loginProvider != "x-provider" {
+		t.Fatalf("endpoint mode=%v provider=%q", m.loginEndpointMode, m.loginProvider)
+	}
+	m.editor.SetValue(server.URL + "/v1")
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	for _, r := range "x-secret" {
+		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("named profile login did not schedule discovery")
+	}
+	m.Update(cmd())
+
+	configured := m.app.PersistedCfg.Providers["x-provider"]
+	if configured.Type != config.ProviderTypeOpenAICompatible || configured.BaseURL != server.URL+"/v1" {
+		t.Fatalf("named profile config=%+v", configured)
+	}
+	credential, ok := m.app.Auth.Get("x-provider")
+	if !ok || credential.Key != "x-secret" {
+		t.Fatalf("named credential=%+v ok=%v", credential, ok)
+	}
+	if _, legacy := m.app.Auth.Get(openaicompat.ProviderID); legacy {
+		t.Fatal("named profile credential leaked into legacy profile")
+	}
+	found := false
+	for _, model := range m.app.AllModels {
+		found = found || model.Provider == "x-provider" && model.ID == "x-model"
+	}
+	if !found {
+		t.Fatalf("named profile models=%+v", m.app.AllModels)
+	}
+	if status := m.providerStatus("x-provider"); !strings.Contains(status, "endpoint configured") || !strings.Contains(status, "stored") {
+		t.Fatalf("named profile status=%q", status)
 	}
 }
 

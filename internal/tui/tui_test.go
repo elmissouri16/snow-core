@@ -421,6 +421,34 @@ func TestModelToolProgressAndOutputCard(t *testing.T) {
 	}
 }
 
+func TestModelBashToolUsesSingleSummaryRow(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolStart, ToolName: "bash", Message: `echo "Hello from Snow!"`})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolProgress, ToolName: "bash", Message: "running command"})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolProgress, ToolName: "bash", Message: "command finished"})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolName: "bash", ToolDurationMS: 374, ToolOutput: "shell output"})
+
+	plain := stripANSI(m.transcriptContent)
+	if got := strings.Count(plain, `echo "Hello from Snow!"`); got != 1 {
+		t.Fatalf("bash command transcript rows = %d, want 1: %q", got, plain)
+	}
+	for _, want := range []string{`✓ echo "Hello from Snow!" · 374ms`, "shell output"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("bash summary missing %q: %q", want, plain)
+		}
+	}
+	for _, unwanted := range []string{"running command", "command finished", "▶ bash"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("bash summary contains redundant status %q: %q", unwanted, plain)
+		}
+	}
+}
+
 func TestRenderSkillActivationSummarizesEscapedContent(t *testing.T) {
 	output := `<skill_content name="caveman-commit">Write terse commits.&#xA;&lt;type&gt; must be exact.</skill_content>`
 	preview := stripANSI(renderToolOutput("activate_skill", output, 100))
@@ -456,7 +484,7 @@ func TestModelKeepsStreamingSegmentsChronological(t *testing.T) {
 
 	plain := stripANSI(m.transcriptContent)
 	before := strings.Index(plain, "Before tool.")
-	tool := strings.Index(plain, "▶ bash")
+	tool := strings.Index(plain, "✓ bash")
 	after := strings.Index(plain, "After tool.")
 	if before < 0 || tool < 0 || after < 0 || !(before < tool && tool < after) {
 		t.Fatalf("transcript order = %q", plain)

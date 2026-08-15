@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/tools"
@@ -35,7 +34,6 @@ func TestAgentThinkingConfiguration(t *testing.T) {
 		Thinking:         protocol.ThinkingLow,
 		ReasoningSummary: protocol.ReasoningSummaryConcise,
 		TextVerbosity:    protocol.TextVerbosityMedium,
-		Auth:             auth.NewMemoryStoreForTest(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +205,6 @@ func TestAgentLifecycleAndConfiguration(t *testing.T) {
 		Permission:   perm,
 		SystemPrompt: "configured",
 		Model:        protocol.Model{Provider: "e2e", ID: "initial"},
-		Auth:         auth.NewMemoryStoreForTest(),
 	})
 	if err != nil {
 		t.Fatal(err)

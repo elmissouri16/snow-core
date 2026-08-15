@@ -98,6 +98,14 @@ func (p *Provider) RefreshModels(ctx context.Context) ([]protocol.Model, error) 
 	return p.listModels(ctx, true)
 }
 
+func (p *Provider) ListModelsWithCredential(ctx context.Context, credential auth.Credential) ([]protocol.Model, error) {
+	return p.listModelsCredential(ctx, credential, false)
+}
+
+func (p *Provider) RefreshModelsWithCredential(ctx context.Context, credential auth.Credential) ([]protocol.Model, error) {
+	return p.listModelsCredential(ctx, credential, true)
+}
+
 func (p *Provider) listModels(ctx context.Context, force bool) ([]protocol.Model, error) {
 	cred, ok := p.storeCredential()
 	if !ok {
@@ -114,7 +122,11 @@ func (p *Provider) listModels(ctx context.Context, force bool) ([]protocol.Model
 		}
 		return nil, err
 	}
-	status, err := CheckAuth(resolved)
+	return p.listModelsCredential(ctx, resolved, force)
+}
+
+func (p *Provider) listModelsCredential(ctx context.Context, credential auth.Credential, force bool) ([]protocol.Model, error) {
+	status, err := CheckAuth(credential)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +142,7 @@ func (p *Provider) listModels(ctx context.Context, force bool) ([]protocol.Model
 	if compatibleCache {
 		requestETag = cache.ETag
 	}
-	records, etag, notModified, err := p.fetchCatalog(ctx, resolved, requestETag, true)
+	records, etag, notModified, err := p.fetchCatalog(ctx, credential, requestETag, true)
 	if err != nil {
 		if compatibleCache {
 			return p.acceptRecords(cache.Models), err
@@ -195,7 +207,7 @@ func (p *Provider) fetchCatalog(ctx context.Context, cred auth.Credential, etag 
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized && allowRefresh {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		fresh, refreshErr := p.resolve(parentCtx, cred, true)
+		fresh, refreshErr := p.refreshRejected(parentCtx, cred)
 		if refreshErr != nil {
 			return nil, "", false, refreshErr
 		}
@@ -378,4 +390,4 @@ func (p *Provider) saveCatalogCache(accountID string, c catalogCache) error {
 	return os.Chmod(p.catalogCachePath(accountID), 0o600)
 }
 
-var _ providerpkg.Provider = (*Provider)(nil)
+var _ providerpkg.Transport = (*Provider)(nil)

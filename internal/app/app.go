@@ -56,49 +56,48 @@ type App struct {
 	ConfigPath   string
 	AuthPath     string
 
-	Auth       auth.Store
-	Registry   *tools.SimpleRegistry
-	Router     tools.Router
-	Provider   provider.Provider
-	ProviderID string
-	Providers  map[string]provider.Provider
+	Auth            auth.Store // compatibility handle for credential inventory
+	AuthService     *auth.Service
+	Registry        *tools.SimpleRegistry
+	Router          tools.Router
+	Provider        provider.Provider
+	ProviderID      string
+	Providers       map[string]provider.Provider
+	ProviderModules *provider.Registry
 	// Models is the active provider catalog; AllModels is the combined live
 	// snapshot used by the TUI picker and replaced on catalog refresh.
-	Models            []protocol.Model
-	AllModels         []protocol.Model
-	Model             protocol.Model
-	Perm              *permission.SimpleService
-	Session           session.Store
-	Agent             *agent.Agent
-	Goal              *goalpkg.Controller
-	Trust             *trust.Store
-	PluginManager     *internalplugin.Manager
-	PluginDiagnostics []internalplugin.Diagnostic
-	MCPManager        *internalmcp.Manager
-	MCPStatuses       []publicmcp.Status
-	Skills            *skills.Registry
-	SkillDiagnostics  []skills.Diagnostic
-	Sandbox           *sandbox.Manager
-	SandboxEnabled    bool
-	Subagents         *subagent.Manager
-	Diagnostics       []config.Diagnostic
-	SearchPolicy      config.EffectiveSearchPolicy
-	ProjectAllowed    bool
-	ProjectInputRoot  string
+	Models           []protocol.Model
+	AllModels        []protocol.Model
+	Model            protocol.Model
+	Perm             *permission.SimpleService
+	Session          session.Store
+	Agent            *agent.Agent
+	Goal             *goalpkg.Controller
+	Trust            *trust.Store
+	PluginManager    *internalplugin.Manager
+	MCPManager       *internalmcp.Manager
+	MCPStatuses      []publicmcp.Status
+	Skills           *skills.Registry
+	SkillDiagnostics []skills.Diagnostic
+	Sandbox          *sandbox.Manager
+	SandboxEnabled   bool
+	Subagents        *subagent.Manager
+	Diagnostics      []config.Diagnostic
+	SearchPolicy     config.EffectiveSearchPolicy
+	ProjectAllowed   bool
+	ProjectInputRoot string
 
-	stateMu                sync.Mutex
-	permissionDefault      permission.Mode
-	permissionOverride     bool
-	explicitAPIKey         string
-	explicitAPIKeyProvider string
-	modelCatalog           map[string][]protocol.Model
-	runtimeSelection       *liveRuntimeSelection
-	cwd                    string
-	userInput              *userinput.Broker
-	toolGuard              *builtin.PathGuard
-	sessionHistory         *builtin.SessionBinding
-	sessionQuery           *session.QueryEngine
-	artifacts              artifact.Store
+	stateMu            sync.Mutex
+	permissionDefault  permission.Mode
+	permissionOverride bool
+	modelCatalog       map[string][]protocol.Model
+	runtimeSelection   *liveRuntimeSelection
+	cwd                string
+	userInput          *userinput.Broker
+	toolGuard          *builtin.PathGuard
+	sessionHistory     *builtin.SessionBinding
+	sessionQuery       *session.QueryEngine
+	artifacts          artifact.Store
 }
 
 type liveRuntimeSelection struct {
@@ -183,7 +182,6 @@ type Options struct {
 	CollaborationMode       string
 	PlanModeReasoningEffort string
 	NoSession               bool   // in-memory session (SDK ephemeral)
-	UseFake                 bool   // force fake provider (demo/tests)
 	BaseURL                 string // active provider base URL override
 	Plugins                 []publicplugin.PluginSpec
 	GoPlugins               []publicplugin.Plugin
@@ -416,6 +414,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		return nil, fmt.Errorf("app: auth store: %w", err)
 	}
 	var authStore auth.Store = fs
+	authService := auth.NewService(authStore)
 
 	// Preserve the operator/global layer before applying any trust-gated project
 	// preferences. CLI/SDK overrides retain their historical persistence behavior
@@ -437,7 +436,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	projectMCPServers := map[string]publicmcp.ServerSpec{}
 	projectSkills := config.ProjectSkillsConfig{Overrides: map[string]bool{}}
 	projectSystemPrompt := false
-	var pluginDiagnostics []internalplugin.Diagnostic
 	trustResolution, err := trust.Resolve(absCWD, cfg.DefaultProjectTrust, tr)
 	if err != nil {
 		return nil, err
@@ -463,8 +461,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		if err := config.ApplyProjectPreferences(&cfg, extensions); err != nil {
 			return nil, err
 		}
-	} else if _, statErr := os.Stat(projectConfigPath); statErr == nil {
-		pluginDiagnostics = append(pluginDiagnostics, internalplugin.Diagnostic{PluginID: ".snow/config.json", Status: "trust-blocked", Message: "project configuration requires an explicit trust allow"})
 	}
 
 	searchPolicy, configDiagnostics := config.LoadSearchPolicy(config.GlobalDir(), projectInputRoot, projectAllowed)
@@ -599,20 +595,8 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	if providerID == "" {
 		providerID = "opencode-go"
 	}
-	newOpenCode := func() (provider.Provider, error) {
+	newOpenCode := func() (provider.Transport, error) {
 		ocCfg := opencodego.Config{CacheRoot: filepath.Join(config.GlobalDir(), "cache", "opencode-models")}
-		if providerID == opencodego.ProviderID {
-			ocCfg.APIKey = opts.APIKey
-		}
-		if ocCfg.APIKey == "" {
-			if stored, ok := authStore.Get(opencodego.ProviderID); ok {
-				// ListModels has no credential argument in the stable provider
-				// interface, so provide the stored API key as the adapter's
-				// lowest-priority fallback for startup discovery. Chat still
-				// receives the original credential through Agent.resolveCreds.
-				ocCfg.APIKey = stored.Key
-			}
-		}
 		if pc, ok := cfg.Providers["opencode-go"]; ok {
 			ocCfg.BaseURL = pc.BaseURL
 			ocCfg.DefaultModel = pc.DefaultModel
@@ -640,73 +624,121 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		return chatgpt.New(cgCfg)
 	}
 
-	newOpenAICompatible := func() (*openaicompat.Provider, error) {
-		compatibleCfg := openaicompat.Config{}
-		if pc, ok := cfg.Providers[openaicompat.ProviderID]; ok {
+	newOpenAICompatible := func(id string) (*openaicompat.Provider, error) {
+		compatibleCfg := openaicompat.Config{ProviderID: id, DisableEnvAPIKey: true}
+		if pc, ok := cfg.Providers[id]; ok {
 			compatibleCfg.BaseURL = pc.BaseURL
 			compatibleCfg.DefaultModel = pc.DefaultModel
 			compatibleCfg.StreamIdleTimeout = configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS)
 		}
-		if providerID == openaicompat.ProviderID {
-			if opts.BaseURL != "" {
-				compatibleCfg.BaseURL = opts.BaseURL
-			}
-			compatibleCfg.APIKey = opts.APIKey
-		}
-		if stored, ok := authStore.Get(openaicompat.ProviderID); ok {
-			// Startup discovery has no credential argument. Keep this key out of
-			// the adapter's runtime fallback so logout takes effect immediately.
-			compatibleCfg.DiscoveryAPIKey = stored.Key
+		if providerID == id && opts.BaseURL != "" {
+			compatibleCfg.BaseURL = opts.BaseURL
 		}
 		return openaicompat.New(compatibleCfg)
 	}
 
-	var prov provider.Provider
-	switch providerID {
-	case "fake":
-		prov = fake.NewWithModels(nil)
-	case "chatgpt":
-		prov = newChatGPT()
-	case "opencode-go":
-		prov, err = newOpenCode()
-		if err != nil {
-			return nil, err
+	type builtInModule struct {
+		id      string
+		order   int
+		build   func() (provider.Transport, error)
+		authFor func(provider.Transport) (auth.Driver, error)
+	}
+	builtIns := []builtInModule{
+		{id: "opencode-go", order: 10, build: newOpenCode, authFor: func(provider.Transport) (auth.Driver, error) {
+			return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: "opencode-go", DisplayName: "OpenCode Go", Required: true, Environment: []string{opencodego.EnvAPIKey}}), nil
+		}},
+		{id: openaicompat.ProviderID, order: 20, build: func() (provider.Transport, error) { return newOpenAICompatible(openaicompat.ProviderID) }, authFor: func(provider.Transport) (auth.Driver, error) {
+			return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: openaicompat.ProviderID, DisplayName: "OpenAI-compatible", Required: false, Environment: []string{openaicompat.EnvAPIKey}}), nil
+		}},
+		{id: chatgpt.ProviderID, order: 30, build: func() (provider.Transport, error) { return newChatGPT(), nil }, authFor: func(raw provider.Transport) (auth.Driver, error) {
+			chatgptTransport, ok := raw.(*chatgpt.Provider)
+			if !ok {
+				return nil, errors.New("app: chatgpt transport has unexpected type")
+			}
+			return chatgpt.NewAuthDriver(chatgptTransport), nil
+		}},
+		{id: "fake", order: 40, build: func() (provider.Transport, error) {
+			return provider.NoAuthTransport{Provider: fake.NewWithModels(nil)}, nil
+		}, authFor: func(provider.Transport) (auth.Driver, error) {
+			return auth.NewNoAuthDriver("fake", "Fake"), nil
+		}},
+	}
+	profileIDs := make([]string, 0)
+	for id, providerConfig := range cfg.Providers {
+		if id != openaicompat.ProviderID && config.IsOpenAICompatibleProfile(id, providerConfig) {
+			profileIDs = append(profileIDs, id)
 		}
-	case openaicompat.ProviderID:
-		compatible, compatibleErr := newOpenAICompatible()
-		if compatibleErr != nil {
-			return nil, fmt.Errorf("app: %s: %w", openaicompat.ProviderID, compatibleErr)
-		}
-		if !compatible.Configured() {
-			return nil, errors.New("app: openai-compatible base URL is required; pass --base-url or configure providers.openai-compatible.base_url")
-		}
-		prov = compatible
-	default:
+	}
+	sort.Strings(profileIDs)
+	for index, profileID := range profileIDs {
+		id := profileID
+		builtIns = append(builtIns, builtInModule{
+			id: id, order: 21 + index,
+			build: func() (provider.Transport, error) { return newOpenAICompatible(id) },
+			authFor: func(provider.Transport) (auth.Driver, error) {
+				return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: id, DisplayName: id, Required: false}), nil
+			},
+		})
+	}
+	knownProvider := false
+	for _, spec := range builtIns {
+		knownProvider = knownProvider || spec.id == providerID
+	}
+	if !knownProvider {
 		return nil, fmt.Errorf("app: unsupported provider %q", providerID)
 	}
 
-	// Keep catalogs/providers for every user-facing provider so the model picker
-	// and subagent runtime can switch without rebuilding the app.
-	providers := map[string]provider.Provider{providerID: prov}
-	if providerID != "fake" {
-		if _, ok := providers["chatgpt"]; !ok {
-			providers["chatgpt"] = newChatGPT()
-		}
-		if _, ok := providers["opencode-go"]; !ok {
-			other, openCodeErr := newOpenCode()
-			if openCodeErr != nil {
-				return nil, openCodeErr
+	providerModules := provider.NewRegistry()
+	for _, spec := range builtIns {
+		selected := (providerID == "fake" && spec.id == "fake") || (providerID != "fake" && spec.id != "fake")
+		var raw provider.Transport
+		if selected {
+			raw, err = spec.build()
+			if err != nil {
+				return nil, fmt.Errorf("app: initialize provider %s: %w", spec.id, err)
 			}
-			providers["opencode-go"] = other
-		}
-		if _, ok := providers[openaicompat.ProviderID]; !ok {
-			compatible, compatibleErr := newOpenAICompatible()
-			if compatibleErr != nil {
-				return nil, fmt.Errorf("app: %s: %w", openaicompat.ProviderID, compatibleErr)
+			if compatible, ok := raw.(*openaicompat.Provider); ok && spec.id == providerID && !compatible.Configured() {
+				if spec.id == openaicompat.ProviderID {
+					return nil, errors.New("app: openai-compatible base URL is required; pass --base-url or configure providers.openai-compatible.base_url")
+				}
+				return nil, fmt.Errorf("app: OpenAI-compatible profile %q requires a base URL; pass --base-url or configure providers.%s.base_url", spec.id, spec.id)
 			}
-			providers[openaicompat.ProviderID] = compatible
+		} else if spec.id == chatgpt.ProviderID {
+			// ChatGPT construction is local and supplies the OAuth driver even when
+			// fake mode deliberately suppresses provider catalogs.
+			raw = newChatGPT()
+		}
+		if raw == nil {
+			driver, driverErr := spec.authFor(nil)
+			if driverErr != nil {
+				return nil, driverErr
+			}
+			if err := authService.Register(driver); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		driver, driverErr := spec.authFor(raw)
+		if driverErr != nil {
+			return nil, driverErr
+		}
+		if err := authService.Register(driver); err != nil {
+			return nil, err
+		}
+		if selected {
+			if err := providerModules.Register(provider.Module{ID: spec.id, Order: spec.order, Transport: raw, Auth: driver}); err != nil {
+				return nil, err
+			}
 		}
 	}
+	if opts.APIKey != "" {
+		authService.SetExplicit(providerID, auth.Credential{Type: auth.CredentialAPIKey, Key: opts.APIKey})
+	}
+	providers, err := providerModules.Build(authService)
+	if err != nil {
+		return nil, err
+	}
+	prov := providers[providerID]
 
 	// Session.
 	var st session.Store
@@ -852,7 +884,8 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		modelCatalogErrors[result.id] = result.err
 	}
 	models := modelCatalog[providerID]
-	if providerID == openaicompat.ProviderID && cfg.DefaultModel == "" && len(models) == 0 {
+	activeProviderConfig := cfg.Providers[providerID]
+	if config.IsOpenAICompatibleProfile(providerID, activeProviderConfig) && cfg.DefaultModel == "" && len(models) == 0 {
 		if listErr := modelCatalogErrors[providerID]; listErr != nil {
 			return nil, fmt.Errorf("app: openai-compatible model discovery failed; pass --model or configure default_model: %w", listErr)
 		}
@@ -860,19 +893,17 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	}
 	var allModels []protocol.Model
 	seenProviders := make(map[string]bool)
-	for _, id := range []string{providerID, "opencode-go", "openai-compatible", "chatgpt", "fake"} {
+	orderedProviderIDs := []string{providerID}
+	for _, module := range providerModules.Modules() {
+		orderedProviderIDs = append(orderedProviderIDs, module.ID)
+	}
+	for _, id := range orderedProviderIDs {
 		if seenProviders[id] {
 			continue
 		}
 		if catalog, ok := modelCatalog[id]; ok {
 			allModels = append(allModels, catalog...)
 			seenProviders[id] = true
-		}
-	}
-	// Include any future/custom providers after built-ins.
-	for id, catalog := range modelCatalog {
-		if !seenProviders[id] {
-			allModels = append(allModels, catalog...)
 		}
 	}
 
@@ -959,10 +990,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 		if err := manager.Initialize(ctx); err != nil {
 			return nil, fmt.Errorf("app: plugin initialization: %w", err)
-		}
-	} else {
-		for _, spec := range allPluginSpecs {
-			pluginDiagnostics = append(pluginDiagnostics, internalplugin.Diagnostic{PluginID: spec.ID, Status: "disabled", Message: "plugin loading disabled by --no-plugins"})
 		}
 	}
 
@@ -1131,9 +1158,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		CollaborationMode: initialMode,
 		PlanThinking:      planThinking,
 		Goal:              goalController,
-		Auth:              authStore,
-		APIKey:            opts.APIKey,
-		APIKeyProvider:    providerID,
 		SkillNames:        skillNames,
 		Artifacts:         artifactStore,
 		Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
@@ -1240,7 +1264,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			childSystem += "</subagent>"
 			child, err := agent.New(agent.Options{Provider: childProvider, Registry: childReg, Session: childStore, Permission: childPerm, ToolHost: childHost,
 				SystemPrompt: childSystem, Model: childModel, Thinking: spec.State.Thinking, ReasoningSummary: reasoningSummary,
-				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Auth: authStore, APIKey: opts.APIKey, APIKeyProvider: providerID, Identity: spec.State.Agent.Clone(),
+				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Identity: spec.State.Agent.Clone(),
 				SkillNames: childSkillNames, Artifacts: artifactStore, Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
 					SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance,
 					AutoThresholdPercent: cfg.Compaction.AutoThresholdPercent, ToolResultInlineBytes: cfg.Compaction.ToolResultInlineBytes,
@@ -1265,48 +1289,47 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	manager.Emit(ag.StateEvent())
 
 	a := &App{
-		Cfg:                    cfg,
-		PersistedCfg:           persistedCfg,
-		ConfigPath:             configPath,
-		AuthPath:               authPath,
-		Auth:                   authStore,
-		Registry:               reg,
-		Router:                 router,
-		Provider:               prov,
-		ProviderID:             providerID,
-		Providers:              providers,
-		Models:                 append([]protocol.Model(nil), models...),
-		AllModels:              allModels,
-		modelCatalog:           modelCatalog,
-		runtimeSelection:       runtimeSelection,
-		Model:                  model,
-		Perm:                   perm,
-		Session:                st,
-		Agent:                  ag,
-		Goal:                   goalController,
-		Trust:                  tr,
-		PluginManager:          manager,
-		PluginDiagnostics:      append(pluginDiagnostics, manager.Diagnostics()...),
-		MCPManager:             mcpManager,
-		MCPStatuses:            append([]publicmcp.Status(nil), mcpStatuses...),
-		Skills:                 skillCatalog,
-		Sandbox:                sandboxManager,
-		SandboxEnabled:         !opts.DisableSandbox,
-		Subagents:              subManager,
-		Diagnostics:            append([]config.Diagnostic(nil), configDiagnostics...),
-		SearchPolicy:           searchPolicy,
-		ProjectAllowed:         projectAllowed,
-		ProjectInputRoot:       projectInputRoot,
-		permissionDefault:      permMode,
-		permissionOverride:     opts.Permission != "",
-		explicitAPIKey:         opts.APIKey,
-		explicitAPIKeyProvider: providerID,
-		cwd:                    absCWD,
-		userInput:              inputBroker,
-		toolGuard:              toolGuard,
-		sessionHistory:         sessionHistory,
-		sessionQuery:           sessionQuery,
-		artifacts:              artifactStore,
+		Cfg:                cfg,
+		PersistedCfg:       persistedCfg,
+		ConfigPath:         configPath,
+		AuthPath:           authPath,
+		Auth:               authStore,
+		AuthService:        authService,
+		Registry:           reg,
+		Router:             router,
+		Provider:           prov,
+		ProviderID:         providerID,
+		Providers:          providers,
+		ProviderModules:    providerModules,
+		Models:             append([]protocol.Model(nil), models...),
+		AllModels:          allModels,
+		modelCatalog:       modelCatalog,
+		runtimeSelection:   runtimeSelection,
+		Model:              model,
+		Perm:               perm,
+		Session:            st,
+		Agent:              ag,
+		Goal:               goalController,
+		Trust:              tr,
+		PluginManager:      manager,
+		MCPManager:         mcpManager,
+		MCPStatuses:        append([]publicmcp.Status(nil), mcpStatuses...),
+		Skills:             skillCatalog,
+		Sandbox:            sandboxManager,
+		SandboxEnabled:     !opts.DisableSandbox,
+		Subagents:          subManager,
+		Diagnostics:        append([]config.Diagnostic(nil), configDiagnostics...),
+		SearchPolicy:       searchPolicy,
+		ProjectAllowed:     projectAllowed,
+		ProjectInputRoot:   projectInputRoot,
+		permissionDefault:  permMode,
+		permissionOverride: opts.Permission != "",
+		cwd:                absCWD,
+		userInput:          inputBroker,
+		toolGuard:          toolGuard,
+		sessionHistory:     sessionHistory,
+		sessionQuery:       sessionQuery,
+		artifacts:          artifactStore,
 	}
 	if skillCatalog != nil {
 		a.SkillDiagnostics = skillCatalog.Diagnostics()
@@ -1711,58 +1734,88 @@ func (a *App) ContinueGoal() error {
 // changes its endpoint. Persistence remains the caller's responsibility so TUI
 // configuration can save endpoint and credential as one user action.
 func (a *App) ConfigureOpenAICompatible(baseURL string) error {
-	pc := a.Cfg.Providers[openaicompat.ProviderID]
-	cfg := openaicompat.Config{BaseURL: baseURL, DefaultModel: pc.DefaultModel, StreamIdleTimeout: configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS)}
-	if a.explicitAPIKey != "" && a.explicitAPIKeyProvider == openaicompat.ProviderID {
-		cfg.APIKey = a.explicitAPIKey
+	return a.ConfigureOpenAICompatibleProfile(openaicompat.ProviderID, baseURL)
+}
+
+// ConfigureOpenAICompatibleProfile creates or replaces one named compatible
+// endpoint. The profile ID is also its config key, auth-store key, model
+// provider ID, CLI selector, and TUI label.
+func (a *App) ConfigureOpenAICompatibleProfile(profileID, baseURL string) error {
+	if err := config.ValidateProviderProfileID(profileID); err != nil {
+		return err
 	}
-	if stored, ok := a.Auth.Get(openaicompat.ProviderID); ok {
-		cfg.DiscoveryAPIKey = stored.Key
+	environment := []string(nil)
+	if profileID == openaicompat.ProviderID {
+		environment = []string{openaicompat.EnvAPIKey}
 	}
+	if !a.AuthService.Registered(profileID) {
+		if err := a.AuthService.Register(auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: profileID, DisplayName: profileID, Required: false, Environment: environment})); err != nil {
+			return err
+		}
+	}
+	pc := a.Cfg.Providers[profileID]
+	cfg := openaicompat.Config{ProviderID: profileID, BaseURL: baseURL, DefaultModel: pc.DefaultModel, StreamIdleTimeout: configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS), DisableEnvAPIKey: true}
 	compatible, err := openaicompat.New(cfg)
 	if err != nil {
-		return fmt.Errorf("app: %s: %w", openaicompat.ProviderID, err)
+		return fmt.Errorf("app: %s: %w", profileID, err)
 	}
 	if !compatible.Configured() {
-		return errors.New("app: openai-compatible base URL is required")
+		return fmt.Errorf("app: OpenAI-compatible profile %q requires a base URL", profileID)
+	}
+	authenticated, err := provider.NewAuthenticated(compatible, a.AuthService)
+	if err != nil {
+		return err
+	}
+	driver := auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: profileID, DisplayName: profileID, Required: false, Environment: environment})
+	module := provider.Module{ID: profileID, Order: 20 + len(a.ProviderModules.Modules()), Transport: compatible, Auth: driver}
+	if _, ok := a.ProviderModules.Module(profileID); ok {
+		module.Order = 0 // Registry.Replace preserves the existing order.
+		if err := a.ProviderModules.Replace(module); err != nil {
+			return err
+		}
+	} else if err := a.ProviderModules.Register(module); err != nil {
+		return err
 	}
 
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
-	if a.ProviderID == openaicompat.ProviderID {
+	if a.ProviderID == profileID {
 		model := a.Agent.Model()
-		if err := a.Agent.SetProviderAndModel(compatible, model); err != nil {
+		if err := a.Agent.SetProviderAndModel(authenticated, model); err != nil {
 			return err
 		}
 	}
-	a.Providers[openaicompat.ProviderID] = compatible
-	a.modelCatalog[openaicompat.ProviderID] = nil
-	if a.ProviderID == openaicompat.ProviderID {
-		a.Provider = compatible
+	a.Providers[profileID] = authenticated
+	a.modelCatalog[profileID] = nil
+	if a.ProviderID == profileID {
+		a.Provider = authenticated
 		a.Models = nil
 	}
 	if a.runtimeSelection != nil {
 		a.runtimeSelection.mu.Lock()
-		a.runtimeSelection.providers[openaicompat.ProviderID] = compatible
-		a.runtimeSelection.catalogs[openaicompat.ProviderID] = nil
+		a.runtimeSelection.providers[profileID] = authenticated
+		a.runtimeSelection.catalogs[profileID] = nil
 		a.runtimeSelection.mu.Unlock()
 	}
+	a.rebuildAllModelsLocked()
+	return nil
+}
+
+func (a *App) rebuildAllModelsLocked() {
 	var all []protocol.Model
 	seen := map[string]bool{}
-	for _, providerID := range []string{a.ProviderID, "opencode-go", openaicompat.ProviderID, "chatgpt", "fake"} {
+	ids := []string{a.ProviderID}
+	for _, module := range a.ProviderModules.Modules() {
+		ids = append(ids, module.ID)
+	}
+	for _, providerID := range ids {
 		if seen[providerID] {
 			continue
 		}
 		seen[providerID] = true
 		all = append(all, a.modelCatalog[providerID]...)
 	}
-	for providerID, catalog := range a.modelCatalog {
-		if !seen[providerID] {
-			all = append(all, catalog...)
-		}
-	}
 	a.AllModels = all
-	return nil
 }
 
 // RefreshProviderModels forces an authenticated catalog refresh when the
@@ -1848,21 +1901,7 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 		a.runtimeSelection.catalogs[id] = append([]protocol.Model(nil), models...)
 		a.runtimeSelection.mu.Unlock()
 	}
-	var all []protocol.Model
-	seen := map[string]bool{}
-	for _, providerID := range []string{a.ProviderID, "opencode-go", "openai-compatible", "chatgpt", "fake"} {
-		if seen[providerID] {
-			continue
-		}
-		seen[providerID] = true
-		all = append(all, a.modelCatalog[providerID]...)
-	}
-	for providerID, catalog := range a.modelCatalog {
-		if !seen[providerID] {
-			all = append(all, catalog...)
-		}
-	}
-	a.AllModels = all
+	a.rebuildAllModelsLocked()
 	if a.ProviderID == id {
 		a.Models = append([]protocol.Model(nil), models...)
 		if refreshedActive != nil {

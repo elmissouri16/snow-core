@@ -166,12 +166,16 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 	case "prompt":
 		return s.handlePrompt(ctx, req)
 	case "abort":
-		s.app.Agent.Abort()
+		// Cancel the RPC prompt context before waiting for Agent.Abort. Abort may
+		// let the agent goroutine settle synchronously; canceling afterward races
+		// prompt_completed and can incorrectly report a completed prompt.
 		s.mu.Lock()
-		if s.cancel != nil {
-			s.cancel()
-		}
+		cancel := s.cancel
 		s.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		s.app.Agent.Abort()
 		s.write(Response{ID: req.ID, Type: "response", Command: "abort", Success: true})
 		return nil
 	case "steer", "follow_up":
