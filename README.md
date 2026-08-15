@@ -69,12 +69,23 @@ snow --provider openai-compatible \
   -p "summarize this repository"
 ```
 
-Inside the TUI, `/login openai-compatible` prompts first for the endpoint and
-then for an optional masked API key, persists the endpoint in `config.json`, and
-refreshes `/models`. The top-level `snow login openai-compatible` command stores
-only a key. Leaving the TUI key step blank preserves any existing explicit,
-stored, or `OPENAI_API_KEY` fallback; it is keyless only when none of those
-sources exists. The endpoint itself never belongs in `auth.json`.
+Inside the TUI, `/login openai-compatible` prompts for a profile name, endpoint,
+and optional masked API key, then refreshes `/models`. Use names such as
+`x-provider` to keep multiple compatible endpoints and credentials distinct;
+the name becomes the provider selector shown in `/login` and `/model` and can be
+used with `--provider x-provider` or `/login x-provider`. A blank name preserves
+the legacy `openai-compatible` profile. The CLI can create the same profile with:
+
+```sh
+snow login openai-compatible --name x-provider \
+  --base-url https://gateway.example/v1
+```
+
+Profile endpoints and type metadata are stored in `config.json`; each profile's
+key is stored separately under the same name in `auth.json`. Leaving the TUI key
+step blank preserves an existing stored key or stays keyless. `OPENAI_API_KEY`
+is only the fallback for the legacy `openai-compatible` profile, so named
+profiles do not silently share one environment credential.
 
 ChatGPT/Codex:
 
@@ -86,8 +97,12 @@ snow auth check chatgpt            # inspect without refreshing
 
 Credentials resolve in this order: explicit `--api-key`/SDK option, Snow's auth
 store, then a known environment fallback such as `OPENCODE_API_KEY` or
-`OPENAI_API_KEY`. Secrets are
-stored separately from configuration and are never printed by inventory commands.
+`OPENAI_API_KEY`. A provider-scoped auth service owns that precedence, local
+status, login, persistence, refresh locking, and logout. The agent consumes a
+credential-free provider runtime, while registered provider modules supply a
+reusable API-key driver or a provider-specific OAuth driver. This keeps new
+built-in providers out of the agent and UI auth logic. Secrets are stored
+separately from configuration and are never printed by inventory commands.
 See [ChatGPT authentication](docs/chatgpt-auth.md) for OAuth, refresh, imports,
 and account-scoped model catalogs.
 
@@ -148,7 +163,7 @@ building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
 | Provider | ID | Authentication | Runtime |
 |---|---|---|---|
 | OpenCode Go | `opencode-go` | API key | OpenAI-compatible chat completions/SSE with live model discovery enriched by models.dev metadata |
-| OpenAI-compatible | `openai-compatible` | Optional Bearer API key | User-supplied API root with sibling `/models`; prefers Responses/SSE and falls back to Chat Completions/SSE when Responses is unavailable |
+| OpenAI-compatible | `openai-compatible` or a named profile | Optional Bearer API key per profile | One or more user-supplied API roots with sibling `/models`; prefers Responses/SSE and falls back to Chat Completions/SSE when Responses is unavailable |
 | ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | Codex Responses/SSE with browser/device login, guarded refresh, account-scoped catalogs, session affinity, zstd, and bounded pre-output retries |
 | Fake | `fake` | None | Deterministic local provider for tests and examples |
 
@@ -186,10 +201,11 @@ public-address-only, redirect-checked, and never executes JavaScript.
 - Pure-Go SQLite session databases with append-only parent-linked entries
 - Indexed branch tips, named forks, branch selection, rename, and guarded delete
 - Current-directory session picker with automatic first-prompt titles, manual rename, and explicit path resume
-- Turn-aware pressure compaction for ordinary, goal, and child turns at a configurable context threshold, plus one bounded recovery retry when a provider rejects an oversized context
+- Turn-aware pressure compaction for ordinary, goal, and child turns at a configurable context threshold, plus one bounded recovery retry that excludes the durable failed attempt when a provider rejects an oversized context
 - Oversized plain-text tool results spill to private session-scoped artifacts; provider context keeps bounded head/tail previews, and older full results are pruned before ordinary requests and summaries without rewriting exact history
+- Strict provider terminal-event validation, stop/content consistency checks, and synthetic errors instead of executing length-truncated tool calls
 - Resume-time repair of interrupted final tool batches with risk-aware unknown-outcome results instead of automatic side-effect retries
-- Advisory detection of identical consecutive tool calls, with bounded reminders at escalating thresholds to break unproductive loops
+- Run-scoped tool-call limits plus advisory detection of identical consecutive calls, with bounded reminders at escalating thresholds to break unproductive loops
 - Embedded Markdown system preamble with optional global/trusted-project file
   override, plus `AGENTS.md` discovery with a hard byte cap
 - Usage and optional catalog-derived cost persisted with assistant messages
@@ -210,7 +226,9 @@ See [sessions](docs/sessions.md) and [configuration](docs/configuration.md).
   session branch, may continue through bounded private turns, and show durable
   cumulative token usage plus estimated cost when model pricing is available.
 - **Steering and follow-ups** are accepted only during an active root run and
-  delivered one at a time at safe assistant/tool boundaries.
+  delivered one at a time at safe assistant/tool boundaries. Provider failures
+  continue with accepted input; internal failures and turn-limit rejection keep
+  undelivered entries recoverable instead of silently dropping them.
 
 Plan and Goal contracts also use embedded Markdown sources under `internal/plan`
 and `internal/goal`; they remain separate from a configurable base preamble.
@@ -270,10 +288,14 @@ Snow can route the model-facing `bash` tool through a persistent, project-scoped
 Linux VM managed by external [smolvm](https://github.com/smol-machines/smolvm) 1.8.x
 (minimum 1.8.1). This is opt-in and deliberately narrow: it contains Bash commands,
 not the Snow process, providers, built-in file tools, plugins, MCP servers, or
-host-side subagent orchestration.
+host-side subagent orchestration. On macOS, install the persistent-disk formatter
+first; Snow detects the standard keg-only Homebrew path and blocks initialization
+or restart when it is unavailable:
 
 ```sh
-# One command: install pinned smolvm 1.8.1 when absent, then create digest-pinned Ubuntu 24.04.
+brew install e2fsprogs              # macOS only
+
+# Install pinned smolvm 1.8.1 when absent, then create digest-pinned Ubuntu 24.04.
 snow sandbox init
 
 # Built-in digest-pinned development profiles (all enable guest networking):

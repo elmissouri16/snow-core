@@ -196,11 +196,16 @@ sequenceDiagram
 **Loop invariants**
 
 1. Every accepted user prompt gets a session entry before the first provider call (crash-safe intent).
-2. Assistant messages are finalized with `stop_reason` before tool execution batch commits (or use explicit `pending` only in-memory, never as durable terminal state).
-3. Tool results always reference `tool_call_id`; opening a session atomically repairs an interrupted final tool batch with explicit retryable/unknown-outcome results and never retries side effects automatically.
-4. `context.Context` cancellation aborts provider stream **and** in-flight tools.
-5. Events are the only cross-surface observation channel (TUI/SDK/print/RPC all subscribe).
-6. Identical consecutive tool calls are detected per admitted run using canonical JSON arguments; bounded advisory reminders at counts 3, 5, and 8 do not veto execution.
+2. Successful provider and compaction streams emit an explicit terminal `done`; EOF before it is persisted as a failed attempt, never normalized into success.
+3. Assistant messages are finalized with `stop_reason` before tool execution batch commits (or use explicit `pending` only in-memory, never as durable terminal state).
+4. Tool results always reference `tool_call_id`; length-truncated calls receive synthetic errors without execution, and opening a session atomically repairs an interrupted final tool batch with explicit retryable/unknown-outcome results without retrying side effects automatically.
+5. Failed provider attempts remain durable for diagnostics but are excluded from subsequent provider and overflow-compaction context.
+6. `context.Context` cancellation aborts provider stream **and** in-flight tools and persists one aborted assistant boundary regardless of which provider boundary observes it.
+7. Events are the only cross-surface observation channel (TUI/SDK/print/RPC all subscribe).
+8. Tool-call limits span the complete admitted run, including multiple provider/tool batches.
+9. Accepted queue entries are consumed after ordinary provider failures; internal failures and turn-limit rejection leave a closed, recoverable queue for host restoration rather than silently dropping input.
+10. Synthetic-only tool batches (truncation, call-limit, validation, or permission results without a dispatched tool) receive one corrective provider round; a repeated synthetic-only batch terminates the admitted run instead of looping without a turn limit.
+11. Identical consecutive tool calls are detected per admitted run using canonical JSON arguments; bounded advisory reminders at counts 3, 5, and 8 do not veto execution.
 
 ### 2.4 Efficiency principles
 
@@ -351,18 +356,28 @@ type StreamEvent struct {
 }
 
 type EventStream interface {
-    // Next blocks until the next event or EOF/error.
+    // Successful streams emit EvStreamDone before EOF. EOF without done is
+    // truncation. Next blocks until the next event or EOF/error.
     Next(ctx context.Context) (StreamEvent, error)
     Close() error
 }
 
+// Transport is implemented by a vendor adapter below the auth boundary.
+type Transport interface {
+    ID() string
+    ListModels(ctx context.Context) ([]Model, error)
+    Chat(ctx context.Context, creds auth.Credential, req ChatRequest) (EventStream, error)
+}
+
+// Provider is the credential-free runtime consumed by agents.
 type Provider interface {
     ID() string
     ListModels(ctx context.Context) ([]Model, error)
-    // Resolve ensures credentials are valid (refresh OAuth if needed).
-    Resolve(ctx context.Context, creds auth.Credential) error
-    Chat(ctx context.Context, creds auth.Credential, req ChatRequest) (EventStream, error)
+    Chat(ctx context.Context, req ChatRequest) (EventStream, error)
 }
+
+// Authenticated combines a registered Transport with auth.Service. It resolves
+// provider-scoped credentials for model discovery and every inference request.
 ```
 
 **Adapter contract:** each provider normalizes vendor SSE/JSON into `StreamEvent`. Tool-call argument streaming may be vendor-specific; adapters must emit a final `tool_call_done` with complete JSON arguments before the agent dispatches tools.
@@ -519,7 +534,7 @@ type Service interface {
 
 Interactive TUI supplies an `Asker`; headless SDK defaults to `deny` for mutating tools unless `Options.PermissionMode` or auto-approve is set.
 
-### 3.7 Auth store
+### 3.7 Auth lifecycle and store
 
 ```go
 type CredentialType string // api_key | oauth
@@ -539,10 +554,27 @@ type Store interface {
     Get(provider string) (Credential, bool)
     Put(provider string, cred Credential) error
     Delete(provider string) error
+    Update(provider string, fn UpdateFunc) (Credential, bool, error)
     // Path for diagnostics (never print secrets).
     Path() string
 }
+
+type Driver interface {
+    Descriptor() Descriptor
+    Inspect(Credential) (Status, error) // local and side-effect-free
+    Login(context.Context, LoginRequest, Interaction) (Credential, error)
+    Validate(Credential) error
+    NeedsRefresh(Credential, time.Time) bool
+    Refresh(context.Context, Credential, RefreshReason) (Credential, error)
+}
 ```
+
+`auth.Service` is the single owner of explicit/store/environment precedence,
+provider isolation, login persistence, refresh coordination, compare-and-swap
+token rotation, status, and logout. Generic API-key drivers cover required and
+optional Bearer credentials. OAuth wire behavior stays in provider-local
+drivers. `provider.Registry` binds each built-in transport to one driver and
+builds the credential-free runtimes used by root and child agents.
 
 ---
 
@@ -749,7 +781,13 @@ For a provider P:
 1. Explicit CLI flag / SDK option (`--api-key`, `Options.Credential`)
 2. `auth.json` entry for P
 3. Environment variable for P
-4. Else: interactive `/login` (TUI) or error (headless)
+4. Else: interactive `/login` (TUI) or a typed login-required error (headless)
+
+The agent does not perform these steps. `auth.Service` resolves the credential,
+then `provider.Authenticated` supplies it to the registered transport for both
+catalog and chat requests. A remote OAuth rejection can request one guarded
+provider-scoped refresh through the same service; API keys remain
+non-refreshable. CLI and TUI status/login/logout use the same registered drivers.
 
 | Provider | Env var | auth.json key |
 |----------|---------|---------------|
@@ -844,10 +882,12 @@ The implementation and endpoint notes below follow current official Codex behavi
 
 ### 5.5 OpenAI-compatible Responses and Chat Completions
 
-`internal/provider/openaicompat` is the single user-configured compatible
-provider (`openai-compatible`). It requires an absolute HTTP(S) API root or full
-`/responses`/`/chat/completions` URL, derives sibling `GET /models`, and uses
-optional Bearer auth from explicit options, `auth.json`, or `OPENAI_API_KEY`.
+`internal/provider/openaicompat` implements the legacy `openai-compatible`
+provider plus any number of user-named compatible profiles. Each profile requires
+an absolute HTTP(S) API root or full `/responses`/`/chat/completions` URL,
+derives sibling `GET /models`, and has an isolated auth/config key. Optional
+Bearer auth comes from explicit options or `auth.json`; `OPENAI_API_KEY` is also
+a fallback for the legacy profile only.
 ID-only model records are tool-capable; optional image/reasoning/summary/verbosity
 fields are emitted only from advertised metadata. Responses is preferred and
 uses the bounded request/SSE codec shared with ChatGPT through
@@ -857,10 +897,12 @@ codec; OAuth, Codex headers, refresh, and catalog behavior remain isolated.
 
 There is no default endpoint. Discovery chooses the first valid model only when
 no explicit/default model exists; otherwise unavailable discovery is nonfatal.
-V1 excludes multiple named compatible endpoints and custom/Azure headers and
-query parameters. The TUI `/login openai-compatible`
-flow transactionally captures the endpoint and optional masked key, rebuilds the
-runtime adapter, and refreshes discovery. Configured endpoints are
+Named profiles are persisted as provider entries with
+`type: "openai-compatible"`; the profile ID is reused for auth storage, model
+identity, CLI selection, and TUI labels. Custom/Azure headers and query
+parameters remain excluded. The TUI `/login openai-compatible` flow
+transactionally captures the profile name, endpoint, and optional masked key,
+rebuilds the runtime adapter, and refreshes discovery. Configured endpoints are
 operator-trusted; userinfo/query/fragment URLs and cross-origin redirects are
 rejected, and provider errors redact active keys.
 
@@ -1507,7 +1549,7 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] Themes + keybindings files (bounded strict YAML, trusted project overrides)
 - [x] Persistent ChatGPT model catalog refresh/cache (account- and backend-origin-scoped ETag/TTL entries)
 - [x] Durable fork/tree navigation (`/tree` picker)
-- [x] Optional sandbox backend design plus first safe slice — external smolvm 1.8.x for persistent exact-project Bash only, with checksum-pinned user-local bootstrap, default Ubuntu image, one project mount, digest-pinned Ubuntu/Go/Node/Python+uv profiles, CLI/TUI CPU-memory-storage-overlay controls, explicit guest network, strict environment allowlist, active fail-closed routing, lifecycle locks, and honest non-whole-process docs
+- [x] Optional sandbox backend design plus first safe slice — external smolvm 1.8.x for persistent exact-project Bash only, with checksum-pinned user-local bootstrap, macOS `mkfs.ext4` persistence preflight and standard Homebrew path discovery, default Ubuntu image, one project mount, digest-pinned Ubuntu/Go/Node/Python+uv profiles, CLI/TUI CPU-memory-storage-overlay controls, explicit guest network, strict environment allowlist, active fail-closed routing, lifecycle locks, and honest non-whole-process docs
 - [x] Supported platforms narrowed to macOS/Linux with a shared compile-time platform guard
 - [x] Plugin tool appears in schema and executes through the central permission gate
 - [x] Opt-in BM25 tool routing keeps deferred parameter schemas out of normal model context
@@ -1644,7 +1686,7 @@ Charmbracelet (Bubble Tea) is the de-facto standard for modern Go CLIs (gh-like 
 | ToS / account policy changes | Legal/product | README compliance; official OSS paths only; easy provider disable |
 | Terminal keybinding variance | Bad editor UX | Document per-terminal newlines; config overrides |
 | Symlink path escapes | File safety bug | Thorough tests; `EvalSymlinks` + prefix check |
-| Model ignores tool schema | Poor loops | Tight tool descriptions; retry once on malformed args |
+| Model ignores tool schema | Poor loops | Tight tool descriptions; return malformed-argument tool errors; enforce run-scoped call limits and bounded repeated-call reminders |
 | Scope creep from snow-agent features | Delays core work | Goals, roadmap priorities, and phase gates |
 | Parallel tool FS races | Data loss | Serial tools until explicit read-only parallel |
 

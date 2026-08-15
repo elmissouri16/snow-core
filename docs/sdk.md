@@ -127,7 +127,7 @@ separates inheritance from clean-install defaults.
 | Field | Meaning and effective behavior |
 |---|---|
 | `CWD` | Active project root. Empty uses the process working directory. |
-| `Provider` | `opencode-go`, `openai-compatible`, `chatgpt`, or `fake`. Empty inherits config; clean-install default is `opencode-go`. |
+| `Provider` | A built-in ID or configured named OpenAI-compatible profile. Empty inherits config; clean-install default is `opencode-go`. |
 | `Model` | Model ID. Empty resolves configured/provider default. |
 | `SessionPath` | SQLite `.db` path to open or create; an existing database is resumed. Empty creates a new indexed durable session unless `NoSession` is true. |
 | `NoSession` | Use an in-memory conversation. Branches and goals work for the process lifetime only; auth and model caches remain persistent. |
@@ -145,7 +145,7 @@ separates inheritance from clean-install defaults.
 | `CollaborationMode` | `default` or `plan`. Empty restores branch state or clean-install Default. |
 | `PlanModeReasoningEffort` | Optional Plan Mode override using the same eight thinking values; model support remains authoritative. |
 | `APIKey` | Explicit credential with precedence over auth store and environment. |
-| `BaseURL` | Active provider endpoint override; required for `openai-compatible` unless configured globally. Accepts an API root or full `/responses` or `/chat/completions` URL. |
+| `BaseURL` | Active provider endpoint override; required for an OpenAI-compatible profile unless configured globally. Accepts an API root or full `/responses` or `/chat/completions` URL. |
 | `Plugins` | Explicit external plugin process declarations. Configured plugins may also load. |
 | `GoPlugins` | Statically linked `pkg/plugin.Plugin` implementations supplied by the host. |
 | `NoPlugins` | Disable configured, explicit, and Go plugins. |
@@ -207,13 +207,18 @@ returned error without discarding accumulated text.
 | `Mode()` / `SetMode(mode)` | Inspect or change collaboration mode while idle |
 | `Steer(ctx, text)` | Queue input for the next safe assistant + complete tool-batch boundary |
 | `FollowUp(ctx, text)` | Queue input after natural completion and earlier steering |
-| `PendingInputs()` | Return an independent queue snapshot |
+| `PendingInputs()` | Return an independent queue snapshot, including entries retained after an operational failure |
+| `ClearPendingInputs()` | Close queue admission and return/remove undelivered entries so a host can restore or resubmit them |
 | `Abort(ctx)` | Cancel admitted work, clear undelivered root queue entries, and defer active goal continuation |
 | `IsRunning()` | Report whether a root turn is in flight |
 
 `Steer` and `FollowUp` require an active queue-accepting root turn. Idle calls
 return `ErrNotRunning`. The queue is bounded and ordered; steering has priority,
-with FIFO order inside each input class. The current public SDK prompt methods
+with FIFO order inside each input class. Ordinary provider failures consume
+accepted input through a fresh request. Internal failures and turn-limit
+rejection retain undelivered entries; inspect `PendingInputs`, then call
+`ClearPendingInputs` to restore or resubmit them before starting another prompt.
+The current public SDK prompt methods
 accept text only; the core runtime's image/content-block prompt path is not yet
 exposed through `pkg/snowsdk`.
 

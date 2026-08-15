@@ -29,7 +29,7 @@ Environment overrides:
 | `SNOW_HOME` | Replaces the global `~/.snow` directory for config, auth, trust, sandbox associations, caches, goals, themes, keys, and search policy |
 | `SNOW_SESSIONS_DIR` | Replaces only the session database root |
 | `OPENCODE_API_KEY` | Fallback credential for `opencode-go` |
-| `OPENAI_API_KEY` | Optional fallback Bearer credential for `openai-compatible` |
+| `OPENAI_API_KEY` | Optional fallback Bearer credential for the legacy `openai-compatible` profile only |
 | `XDG_DATA_HOME` | Included when discovering compatible OpenCode ChatGPT credentials |
 | `SNOW_DEBUG` | File path for TUI debug logs, for example `SNOW_DEBUG=/tmp/snow.log`; intended for development |
 
@@ -57,6 +57,13 @@ Credentials use a separate order:
 1. Explicit `--api-key` or `snowsdk.Options.APIKey`
 2. Snow's auth store
 3. A known environment fallback such as `OPENCODE_API_KEY` or `OPENAI_API_KEY`
+
+This precedence is implemented once by Snow's provider-scoped auth service.
+Provider modules register either the reusable API-key driver or their own OAuth
+driver; the agent and subagents receive credential-free provider runtimes. Model
+discovery and inference therefore use the same resolved provider credential.
+OAuth endpoint, scope, claim, and token-exchange details remain isolated in the
+provider's auth driver.
 
 The SDK intentionally defaults `PermissionMode` to `deny` when omitted, even if
 the global interactive default is `ask`. See [SDK permissions](sdk.md#permissions-and-security).
@@ -98,6 +105,11 @@ A representative configuration:
     "openai-compatible": {
       "base_url": "https://gateway.example/v1",
       "default_model": "model-id"
+    },
+    "x-provider": {
+      "type": "openai-compatible",
+      "base_url": "https://other-gateway.example/v1",
+      "default_model": "other-model"
     },
     "chatgpt": {}
   },
@@ -252,16 +264,25 @@ fails with an actionable model-selection error. ID-only model records remain
 tool-capable but do not guess vision, reasoning, verbosity, limits, or pricing.
 
 The compatible provider's Bearer key is optional. Inside the TUI,
-`/login openai-compatible` captures the endpoint and then an optional masked key;
-the endpoint is persisted here while the key is stored separately in
-`auth.json`. The top-level `snow login openai-compatible` command remains
-key-only. You can also pass `--api-key` or set `OPENAI_API_KEY`; keyless local
-gateways receive no `Authorization` header. Do not put API keys or OAuth tokens
-in `config.json`.
+`/login openai-compatible` captures a profile name, endpoint, and optional
+masked key. A blank profile name updates the legacy `openai-compatible` entry.
+Any other profile is stored as another `providers` map entry with
+`"type": "openai-compatible"`; its name must be 1–64 lowercase letters, digits,
+or internal `.`, `_`, and `-` characters and must not collide with a built-in
+provider. The profile name is also its provider/model selector and `auth.json`
+credential key.
 
-`openai-compatible` does not define multiple named endpoints or accept
-custom/Azure headers or query parameters. ChatGPT/Codex retains its dedicated
-backend and OAuth flow.
+The top-level `snow login openai-compatible` remains key-only for the legacy
+profile. `snow login openai-compatible --name x-provider --base-url URL` creates
+or updates a named profile, after which `snow login x-provider` addresses it
+directly. `--api-key` binds to the selected active profile. `OPENAI_API_KEY` is
+a fallback only for the legacy profile; named profiles do not silently share
+it. Keyless gateways receive no `Authorization` header. Do not put API keys or
+OAuth tokens in `config.json`.
+
+Named profiles support independent endpoints, default models, stream timeouts,
+and Bearer keys. Compatible profiles still do not accept custom/Azure headers
+or query parameters. ChatGPT/Codex retains its dedicated backend and OAuth flow.
 
 ### TUI
 

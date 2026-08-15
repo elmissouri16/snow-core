@@ -57,7 +57,8 @@ behavior in code before relying on a checklist item.
   canonical-project operator store, sole project mount, explicit guest network,
   strict guest environment allowlist, fail-closed execution, bounded lifecycle
   commands, CLI/TUI controls, checksum-pinned user-local smolvm bootstrap,
-  default Ubuntu creation, and explicit host-return confirmation. It isolates
+  macOS persistent-disk formatter preflight/Homebrew path discovery, default
+  Ubuntu creation, and explicit host-return confirmation. It isolates
   Bash only, not Snow, file tools, providers, plugins, MCP, or subagent control.
 - `webfetch` uses Surf v1.0.203's Chrome 150 profile with secure TLS,
   public-address-only dial/redirect enforcement, bounded text responses, and
@@ -71,12 +72,15 @@ behavior in code before relying on a checklist item.
   YAML policy, hidden/generated defaults, and per-call soft-ignore overrides.
 - Provider adapters: OpenCode Go OpenAI-compatible Chat Completions/SSE with live
   startup availability merged with models.dev capability/reasoning metadata; a
-  user-configured `openai-compatible` adapter with optional Bearer auth,
+  user-configured `openai-compatible` adapter with isolated named profiles and optional Bearer auth,
   `/models` discovery, preferred Responses/SSE, and cached Chat Completions/SSE
   fallback when Responses is unavailable; ChatGPT/Codex Responses/SSE with a static
   subscription catalog; and deterministic `fake` provider.
-- Auth stores: in-memory and atomic `~/.snow/auth.json` file store with `0600`
-  permissions, redacting JSON marshaling, explicit-key/store/environment resolution.
+- Modular provider auth: a provider-scoped service owns explicit/store/environment
+  precedence, status/login/logout, persistence, refresh locking/CAS rotation, and
+  reusable API-key or provider-local OAuth drivers. Agents consume credential-free
+  provider runtimes from a deterministic built-in module registry. Auth stores remain
+  in-memory or atomic `~/.snow/auth.json` with `0600` permissions and redacting JSON.
 - ChatGPT browser PKCE and device-code OAuth, side-effect-free status checks,
   JWT metadata extraction, compatible Codex/Pi/OpenCode imports, guarded token
   refresh with atomic rotation, account-scoped authenticated model catalogs, and
@@ -186,8 +190,7 @@ behavior in code before relying on a checklist item.
 ├── go.mod / go.sum           # module github.com/snow-core/snow and dependencies
 ├── cmd/snow/
 │   ├── main.go               # Cobra entry point and CLI mode selection
-│   ├── main_test.go          # CLI print/JSON SSE end-to-end test
-│   └── demo.txt              # placeholder/demo text fixture, not production code
+│   └── main_test.go          # CLI print/JSON SSE end-to-end test
 ├── internal/
 │   ├── app/                  # runtime wiring and provider/model/session catalogs
 │   ├── agent/                # provider → stream → permission → tools turn loop
@@ -295,8 +298,8 @@ Current TUI slash commands are `/allow [always]`, `/default`, `/deny`, `/help`, 
 project files, while a leading `$` autocompletes enabled Agent Skills;
 Enter/Tab inserts either selection without submitting the prompt.
 
-The CLI `login` command accepts OpenCode Go or `openai-compatible` API keys, while the TUI
-`/login openai-compatible` flow captures its endpoint plus optional masked key, and ChatGPT supports
+The CLI `login` command accepts OpenCode Go or OpenAI-compatible profile API keys, while the TUI
+`/login openai-compatible` flow captures a profile name, endpoint, and optional masked key, and ChatGPT supports
 browser PKCE (`snow login chatgpt`) or device code (`--device-code`). The TUI
 also offers both flows and compatible Codex/Pi/OpenCode credential imports.
 
@@ -305,7 +308,7 @@ also offers both flows and compatible Codex/Pi/OpenCode credential imports.
 | Provider | ID | Credential | Endpoint/behavior |
 |---|---|---|---|
 | OpenCode Go | `opencode-go` | API key | `https://opencode.ai/zen/go/v1`, OpenAI-compatible `/models` and `/chat/completions`, default `kimi-k2.6` |
-| OpenAI-compatible | `openai-compatible` | optional API key | user-supplied API root plus sibling `/models`; Responses preferred with Chat Completions fallback; no built-in endpoint |
+| OpenAI-compatible | `openai-compatible` or named profile | optional API key per profile | one or more user-supplied API roots plus sibling `/models`; Responses preferred with Chat Completions fallback; no built-in endpoint |
 | ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | ChatGPT Codex Responses backend; browser/device login, refresh, authenticated cached catalog |
 | Fake | `fake` | none | deterministic scripted provider for tests and demos |
 

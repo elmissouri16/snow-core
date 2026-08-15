@@ -241,14 +241,15 @@ commands, plugins, MCP servers, or external tools. Streamable HTTP MCP calls
 remain network-risk operations, but an allowed stdio MCP process can
 independently access the network with user privileges.
 
-A user-configured `openai-compatible` endpoint is an operator trust decision.
+Every user-configured OpenAI-compatible profile endpoint is an operator trust decision.
 Snow sends conversation context, tool schemas/results, images supported by model
 metadata, and an optional Bearer key to that origin. Clipboard images attached
 with TUI Ctrl+V are copied into the durable session database and sent to the
 selected provider; clipboard access is local to the machine running Snow. The TUI
-`/login openai-compatible` flow displays and persists the endpoint in
-`config.json` while capturing the key separately through masked input into
-`auth.json`. URLs must be absolute HTTP(S) without userinfo/query/fragment;
+`/login openai-compatible` flow displays and persists the profile name and
+endpoint in `config.json` while capturing its key separately through masked
+input into `auth.json`. Profile names isolate credentials; they are labels, not
+security boundaries. URLs must be absolute HTTP(S) without userinfo/query/fragment;
 cross-origin redirects are rejected and
 active keys are redacted from bounded provider errors. HTTP and private/local
 endpoints are allowed deliberately, so transport security and service behavior
@@ -266,10 +267,16 @@ length from the provider or a network observer.
 
 Provider credentials are stored in `~/.snow/auth.json` (or the configured
 `SNOW_HOME`) with mode `0600` and atomic replacement. The
-`openai-compatible` key is optional; no `Authorization` header is sent when
-explicit, stored, and `OPENAI_API_KEY` sources are all empty. ChatGPT refresh uses a
-cross-process lock and persists rotated refresh tokens atomically. Trust data is
-also locked and mode `0600`.
+OpenAI-compatible keys are optional per profile; no `Authorization` header is
+sent when the selected profile has no explicit or stored key. The legacy
+`openai-compatible` profile may additionally use `OPENAI_API_KEY`; named
+profiles do not share that fallback. A provider-scoped
+auth service binds explicit credentials to one provider, centralizes
+explicit/store/environment precedence, and supplies credentials to both model
+discovery and inference. ChatGPT's OAuth driver exchanges tokens through that
+service; refresh uses a provider-specific cross-process lock and atomically
+persists rotated tokens without holding the global store lock during network
+I/O. Trust data is also locked and mode `0600`.
 
 Snow inventories redact:
 

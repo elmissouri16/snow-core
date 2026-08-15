@@ -52,9 +52,10 @@ when a new or different account is intended. The lower-level importer remains
 covered for explicit compatibility use. Snow uses official Codex scopes and the
 same form-encoded token refresh contract used by Codex, Pi, and OpenCode.
 Tokens are never shown in the picker. `snow auth check chatgpt` remains strictly
-side-effect-free; runtime resolution refreshes tokens that expire within five
-minutes under a provider-specific cross-process refresh lock, while the global
-auth-store lock is held only for the fresh read/CAS write. This keeps unrelated
+side-effect-free; runtime resolution goes through Snow's generic auth service,
+which delegates token exchange to the ChatGPT OAuth driver and refreshes tokens
+that expire within five minutes under a provider-specific cross-process refresh
+lock, while the global auth-store lock is held only for the fresh read/CAS write. This keeps unrelated
 credential operations responsive during network I/O and atomically persists
 rotated refresh tokens. A pre-stream HTTP 401 forces one guarded refresh and
 one retry, while reusing a newer credential already rotated by another process. Permanent

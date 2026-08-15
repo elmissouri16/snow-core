@@ -27,7 +27,7 @@ silently falling back.
 |---|---|
 | `-p, --prompt TEXT` | Run a prompt outside the TUI |
 | `--mode print|json|rpc` | Select a non-interactive output/control mode |
-| `--provider ID` | Select `opencode-go`, `openai-compatible`, `chatgpt`, or `fake` |
+| `--provider ID` | Select a built-in provider or a named OpenAI-compatible profile |
 | `--model ID` | Override the provider's configured/default model |
 | `--thinking LEVEL` | Set `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` |
 | `--collaboration-mode MODE` | Start in `default` or `plan` |
@@ -60,6 +60,7 @@ Configuration precedence and persistent equivalents are documented in
 ```sh
 snow login opencode-go
 snow login openai-compatible
+snow login openai-compatible --name x-provider --base-url https://gateway.example/v1
 snow login chatgpt
 snow login chatgpt --device-code
 snow login chatgpt --no-open
@@ -70,16 +71,21 @@ snow auth check chatgpt
 ```
 
 The no-argument TUI `/login` and `/logout` commands open provider pickers.
-Selecting `openai-compatible` in the TUI prompts for its endpoint followed by an
-optional masked API key. Enter accepts an API root or full `/responses` or
+Selecting `openai-compatible` in the TUI first asks for a profile name, then an
+endpoint and optional masked API key. A blank name updates the legacy
+`openai-compatible` profile; a name such as `x-provider` creates a separate
+provider selectable through `/model`, `/login x-provider`, and
+`--provider x-provider`. Enter accepts an API root or full `/responses` or
 `/chat/completions` URL; Snow prefers Responses and falls back to Chat
 Completions when that endpoint is unavailable. An empty key step preserves an
-existing stored/environment fallback (or
-remains keyless when no key source exists), and Snow persists the endpoint
-before refreshing model discovery.
-The top-level `snow login openai-compatible` command remains key-only. An
-optional default model can still be configured through config, CLI flags, or the
-SDK. For a one-shot keyless local gateway:
+existing stored key or remains keyless. The legacy profile may also use
+`OPENAI_API_KEY`; named profiles deliberately do not share that fallback.
+
+The top-level `snow login openai-compatible` remains key-only for the legacy
+profile. Add `--name PROFILE --base-url URL` to create or update a named profile;
+subsequent `snow login PROFILE`, `snow logout PROFILE`, and `snow auth check
+PROFILE` address its separate credential. An optional default model can still
+be configured through config, CLI flags, or the SDK. For a one-shot keyless local gateway:
 
 ```sh
 snow --provider openai-compatible --base-url http://127.0.0.1:8080/v1 \
@@ -105,6 +111,11 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
    activity and queued-input count. The footer shows permission mode, mode/goal
    state, context usage, and the latest request's prompt-cache hit rate as
    `CH<n>%`; inline mode may compact provider/model/effort into that footer.
+
+Bash activity uses the sticky run-status row while executing, then adds one
+compact `✓ <command> · <duration>` transcript summary followed by any command
+output. Long or multiline commands are reduced to one truncated display row;
+routine start and finished progress events do not consume separate rows.
 
 The full-screen viewport keeps a bounded recent render cache (up to 2,000
 entries or 4 MiB of rendered rows) so long-running streams cannot grow terminal
@@ -182,7 +193,12 @@ replace accepted work:
 - **Follow-ups** become eligible after a natural provider stop and after all
   steering eligible at earlier boundaries.
 - Delivery is bounded, one message at a time, with steering priority and FIFO
-  ordering inside each class.
+  ordering inside each class. If an ordinary provider request fails, one already
+  accepted queue item is persisted and starts a fresh request instead of being
+  silently discarded; repeated failures consume only the finite accepted queue.
+  Internal persistence/accounting failures and turn-limit rejection leave the
+  closed queue recoverable through `PendingInputs`/`ClearPendingInputs`; the TUI
+  automatically restores that text to the composer at `turn_done`.
 - Abort clears undelivered queue entries and restores their original compact TUI
   text, including unexpanded `@` mentions. If a goal was active, ordinary prompts
   leave it deferred; use `/goal resume` to restart automatic continuation.
@@ -204,7 +220,7 @@ meaningful.
 | `/permissions [ask|allow|deny]` | Open or directly change permission mode |
 | `/allow [always]` | Resolve a pending tool request; optional session rule |
 | `/deny` | Deny a pending tool request |
-| `/login [provider]` | Open login flow/provider picker |
+| `/login [provider] [profile-name]` | Open login flow/provider picker; compatible profiles can be named |
 | `/logout [provider]` | Open credential picker or remove one provider credential |
 | `/default` | Switch to Default collaboration mode |
 | `/plan [message]` | Switch to Plan Mode and optionally submit a planning prompt |
