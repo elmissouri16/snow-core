@@ -138,10 +138,6 @@ type BranchStore interface {
 // affinity instead.
 type ActiveBranchStore interface{ ActiveBranchID() string }
 
-// BranchDeleteStore is implemented by built-in stores so callers can roll
-// back a newly committed fork if post-fork resource preparation fails.
-type BranchDeleteStore interface{ DeleteBranch(branchID string) error }
-
 // BranchRollbackStore is an internal recovery seam for deleting a just-created
 // inactive fork even when cloned state would block user-facing guarded delete.
 type BranchRollbackStore interface{ DeleteBranchForRollback(branchID string) error }
@@ -330,8 +326,7 @@ func nextBranchName(branches map[string]protocol.SessionBranch) string {
 }
 
 var (
-	ErrNotFound  = errors.New("session: not found")
-	ErrNoParents = errors.New("session: cannot resolve branch tip")
+	ErrNotFound = errors.New("session: not found")
 	// ErrConflict reports an optimistic branch-tip race between store handles.
 	// The failed transaction is rolled back; callers may reload/select and retry.
 	ErrConflict = errors.New("session: branch tip conflict")

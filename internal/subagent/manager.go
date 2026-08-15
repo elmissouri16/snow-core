@@ -2144,10 +2144,3 @@ func bound(s string, n int) string {
 
 // Compile-time assertion for the concrete child used by App.
 var _ ChildRuntime = (*agent.Agent)(nil)
-
-// StableStates is useful to observers that need first-seen ordering.
-func StableStates(list protocol.SubagentList) []protocol.SubagentState {
-	out := append([]protocol.SubagentState(nil), list.Agents...)
-	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
-	return out
-}

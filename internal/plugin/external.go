@@ -68,12 +68,6 @@ type ProgressNotification struct {
 	IsError bool   `json:"is_error,omitempty"`
 }
 
-type eventNotification struct {
-	Version int                 `json:"version,omitempty"`
-	Type    plugin.EventType    `json:"type"`
-	Payload protocol.AgentEvent `json:"payload"`
-}
-
 type logNotification struct {
 	Severity string `json:"severity,omitempty"`
 	Message  string `json:"message,omitempty"`
@@ -200,11 +194,6 @@ func SpawnExternal(ctx context.Context, spec plugin.PluginSpec, cwd string) (*Ex
 		close(h.waitDone)
 	}()
 	return h, nil
-}
-
-// SpawnV2 is an explicit alias for SpawnExternal.
-func SpawnV2(ctx context.Context, spec plugin.PluginSpec, cwd string) (*ExternalHost, error) {
-	return SpawnExternal(ctx, spec, cwd)
 }
 
 // Initialize performs the v2 handshake and refreshes tools/list.

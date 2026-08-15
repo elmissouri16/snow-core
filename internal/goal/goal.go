@@ -245,7 +245,6 @@ func (c *Controller) RecordGoalTurn(goalID string) {
 	c.auditTurns++
 	c.mu.Unlock()
 }
-func (c *Controller) ResetAudit() { c.mu.Lock(); c.auditGoalID = ""; c.auditTurns = 0; c.mu.Unlock() }
 func (c *Controller) SetStatus(expected string, status protocol.ThreadGoalStatus, model bool) (*protocol.ThreadGoal, error) {
 	if model && status != protocol.GoalComplete && status != protocol.GoalBlocked {
 		return nil, errors.New("goal: model may only set complete or blocked")

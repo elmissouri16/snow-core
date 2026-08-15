@@ -171,21 +171,3 @@ func merge(in []Segment) []Segment {
 	}
 	return out
 }
-
-// Extract returns normal text and the first proposed plan from a complete response.
-func Extract(text string) (normal, proposed string, found bool) {
-	var parser Parser
-	segments := append(parser.Push(text), parser.Finish()...)
-	var normalOut, planOut strings.Builder
-	for _, segment := range segments {
-		switch segment.Kind {
-		case Normal:
-			normalOut.WriteString(segment.Text)
-		case ProposedPlanStart:
-			found = true
-		case ProposedPlanDelta:
-			planOut.WriteString(segment.Text)
-		}
-	}
-	return normalOut.String(), planOut.String(), found
-}

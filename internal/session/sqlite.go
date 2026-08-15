@@ -2239,36 +2239,6 @@ func (s *SQLiteStore) CountSessionReferences() (int, error) {
 	return count, err
 }
 
-func (s *SQLiteStore) messageCount() (int, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
-		return 0, errors.New("session: store closed")
-	}
-	var count int
-	err := s.db.QueryRow(`
-		WITH RECURSIVE branch(id, parent_id, entry_type) AS (
-			SELECT id, parent_id, entry_type FROM entries WHERE id = ?
-			UNION ALL
-			SELECT e.id, e.parent_id, e.entry_type
-			FROM entries e JOIN branch b ON e.id = b.parent_id
-		)
-		SELECT count(*) FROM branch WHERE entry_type = ?`, s.tip, EntryMessage).Scan(&count)
-	return count, err
-}
-
-// hasDurableState reports whether the database contains any user-visible or
-// persisted branch state, including state on inactive historical branches.
-func (s *SQLiteStore) hasDurableState() (bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
-		return false, errors.New("session: store closed")
-	}
-	count, err := s.durableStateCountLocked()
-	return count > 0, err
-}
-
 func (s *SQLiteStore) durableStateCountLocked() (int, error) {
 	var count int
 	err := s.db.QueryRow(`

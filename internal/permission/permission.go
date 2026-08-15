@@ -65,12 +65,6 @@ type DenyAll struct{}
 // Ask implements Asker.
 func (DenyAll) Ask(context.Context, Request) (Decision, error) { return DecisionDeny, nil }
 
-// AllowAll is an Asker that always allows (dangerous; CI only).
-type AllowAll struct{}
-
-// Ask implements Asker.
-func (AllowAll) Ask(context.Context, Request) (Decision, error) { return DecisionAllow, nil }
-
 // Service is the permission gate used by the agent loop and tools.
 type Service interface {
 	Mode() Mode

@@ -199,8 +199,6 @@ func keyMatches(msg tea.KeyMsg, binding key.Binding) bool {
 	return key.Matches(msg, binding)
 }
 
-func normalizePickerKey(msg tea.KeyMsg) tea.KeyMsg { return normalizePickerKeyWithMap(msg, tuiKeys) }
-
 func normalizePickerKeyWithMap(msg tea.KeyMsg, keys tuiKeyMap) tea.KeyMsg {
 	switch pickerKeyActionWithMap(msg, keys) {
 	case pickerUp:

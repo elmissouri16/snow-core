@@ -48,12 +48,3 @@ func FindProfile(id string) (Profile, bool) {
 	}
 	return Profile{}, false
 }
-
-func profileForSource(source string) (Profile, bool) {
-	for _, profile := range builtinProfiles {
-		if profile.Source == source {
-			return profile, true
-		}
-	}
-	return Profile{}, false
-}

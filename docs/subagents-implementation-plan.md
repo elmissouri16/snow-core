@@ -294,20 +294,12 @@ are added. Direct concurrent `Store.Append` from a child completion is unsafe:
 `executeToolCalls` captures a parent tip and then serially chains tool results.
 An external append in the middle can fork or hide one chain.
 
-Add to `internal/agent`:
+Implemented in `internal/agent` with protocol-owned messages:
 
 ```go
-type MailboxMessage struct {
-    ID        string
-    Author    protocol.AgentPath
-    Recipient protocol.AgentPath
-    Kind      protocol.AgentMessageKind
-    Content   string
-    CreatedAt int64
-}
-
-func (a *Agent) EnqueueMailbox(MailboxMessage) error
-func (a *Agent) MailboxActivity() <-chan struct{}
+func (a *Agent) EnqueueMailbox(protocol.AgentMessage) error
+func (a *Agent) EnqueueMailboxAdmitted(protocol.AgentMessage) error
+func (a *Agent) PendingMailbox() bool
 ```
 
 Safe delivery rules:
@@ -628,12 +620,11 @@ Add `internal/subagent`:
 
 ```text
 internal/subagent/
-├── manager.go          # registry, topology, state transitions, limits
+├── manager.go          # registry, topology, state transitions, limits, mailbox routing
 ├── runtime.go          # one child Agent/store and its worker lifecycle
 ├── factory.go          # narrow child construction interface
 ├── roles.go            # built-in/configured role resolution
 ├── context.go          # none/all/N history projection
-├── mailbox.go          # message envelopes and activity notifications
 ├── tools.go            # seven model-facing tools
 ├── persistence.go      # optional session store adapter
 ├── manager_test.go
