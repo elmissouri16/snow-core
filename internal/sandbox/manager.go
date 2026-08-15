@@ -49,10 +49,12 @@ type osLauncher struct{}
 
 func (osLauncher) LookPath(name string) (string, error) { return exec.LookPath(name) }
 func (osLauncher) CombinedOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return boundedCombinedOutput(ctx, name, args...)
+	return boundedCombinedOutputEnv(ctx, smolVMProcessEnvironment(), name, args...)
 }
 func (osLauncher) CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = smolVMProcessEnvironment()
+	return cmd
 }
 
 // Options configure one project manager.
@@ -425,6 +427,9 @@ func (m *Manager) Init(ctx context.Context, opts InitOptions) (Status, error) {
 	if err := validateSmolVMVersion(string(versionOutput)); err != nil {
 		return Status{}, err
 	}
+	if err := m.checkPersistentDiskPrerequisite(); err != nil {
+		return Status{}, err
+	}
 	// Materialize the no-argument registry image over host HTTPS and hand smolvm
 	// a local Docker-save archive. The guest therefore never needs bootstrap
 	// network authority, and the persisted source remains the pinned registry ref.
@@ -581,6 +586,11 @@ func (m *Manager) setStopped(ctx context.Context, stopped bool) (Status, error) 
 	if err := m.validateExecutable(ctx, record); err != nil {
 		return Status{}, err
 	}
+	if !stopped {
+		if err := m.checkPersistentDiskPrerequisite(); err != nil {
+			return Status{}, err
+		}
+	}
 	action := "start"
 	rollback := "stop"
 	if stopped {
@@ -682,6 +692,9 @@ func (m *Manager) Command(ctx context.Context, command string, hostEnv []string,
 	if err := m.validateExecutable(ctx, record); err != nil {
 		return nil, true, true, err
 	}
+	if err := m.checkPersistentDiskPrerequisite(); err != nil {
+		return nil, true, true, err
+	}
 	args := []string{"machine", "exec", "--name", record.Machine, "--workdir", record.GuestCWD, "--stream"}
 	for _, value := range allowedEnvironment(hostEnv, record.EnvAllowlist) {
 		args = append(args, "--env", value)
@@ -780,6 +793,14 @@ func (m *Manager) resolveExecutable(name string) (string, error) {
 		}
 	}
 	return filepath.Clean(resolved), nil
+}
+
+func (m *Manager) checkPersistentDiskPrerequisite() error {
+	checker, ok := m.launcher.(persistentDiskPrerequisiteChecker)
+	if !ok {
+		return nil
+	}
+	return checker.checkPersistentDiskPrerequisite()
 }
 
 func (m *Manager) run(ctx context.Context, executable string, args ...string) ([]byte, error) {

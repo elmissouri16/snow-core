@@ -132,8 +132,13 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 
 	if host != nil {
 		cmd.Dir = host.CWD()
-		if env := host.Environ(); env != nil {
-			cmd.Env = env
+		// A command factory may need a backend-specific environment (for
+		// example smolvm's macOS disk formatter path). Preserve it; only apply
+		// the host environment when the factory left Env unset.
+		if cmd.Env == nil {
+			if env := host.Environ(); env != nil {
+				cmd.Env = env
+			}
 		}
 	}
 

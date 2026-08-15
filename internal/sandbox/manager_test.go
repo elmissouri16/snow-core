@@ -116,6 +116,13 @@ type fakeLauncher struct {
 	failMatch string
 }
 
+type prerequisiteLauncher struct {
+	*fakeLauncher
+	err error
+}
+
+func (l *prerequisiteLauncher) checkPersistentDiskPrerequisite() error { return l.err }
+
 func (f *fakeLauncher) LookPath(string) (string, error) {
 	if f.path == "" {
 		return "", exec.ErrNotFound
@@ -497,7 +504,14 @@ func TestConcurrentProjectsShareOneUserLocalInstall(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("PATH", "/usr/bin:/bin")
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, persistentDiskFormatter), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+"/usr/bin:/bin")
 	state := filepath.Join(t.TempDir(), "sandboxes.json")
 	installer := &fileInstaller{home: home}
 	managers := make([]*Manager, 0, 2)
@@ -576,6 +590,54 @@ func TestLifecycleLockHonorsContextCancellation(t *testing.T) {
 	}
 	if time.Since(started) > time.Second {
 		t.Fatalf("canceled lock wait took %s", time.Since(started))
+	}
+}
+
+func TestManagerPersistentDiskPrerequisiteGuardsBootPaths(t *testing.T) {
+	prerequisiteErr := errors.New("mkfs.ext4 unavailable")
+	project := t.TempDir()
+	state := filepath.Join(t.TempDir(), "sandboxes.json")
+	blockedLauncher := &prerequisiteLauncher{
+		fakeLauncher: &fakeLauncher{path: "/opt/smolvm"},
+		err:          prerequisiteErr,
+	}
+	blocked := newTestManager(t, blockedLauncher, project, state)
+	if _, err := blocked.Init(context.Background(), InitOptions{Source: "ubuntu"}); !errors.Is(err, prerequisiteErr) {
+		t.Fatalf("init prerequisite error = %v", err)
+	}
+	if _, ok, err := blocked.Record(); err != nil || ok {
+		t.Fatalf("blocked init record: ok=%v err=%v", ok, err)
+	}
+	if strings.Contains(flattenCalls(blockedLauncher.calls), "machine create") {
+		t.Fatalf("blocked init reached machine creation: %s", flattenCalls(blockedLauncher.calls))
+	}
+
+	launcher := &fakeLauncher{path: "/opt/smolvm"}
+	manager := newTestManager(t, launcher, project, state)
+	if _, err := manager.Init(context.Background(), InitOptions{Source: "ubuntu"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	blocked = newTestManager(t, blockedLauncher, project, state)
+	if _, err := blocked.Start(context.Background()); !errors.Is(err, prerequisiteErr) {
+		t.Fatalf("start prerequisite error = %v", err)
+	}
+	if record, ok, err := blocked.Record(); err != nil || !ok || !record.Stopped {
+		t.Fatalf("blocked start record = %+v, ok=%v err=%v", record, ok, err)
+	}
+
+	if _, err := manager.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	blocked = newTestManager(t, blockedLauncher, project, state)
+	cmd, _, active, err := blocked.Command(context.Background(), "true", nil, time.Second)
+	if !errors.Is(err, prerequisiteErr) || !active || cmd != nil {
+		t.Fatalf("implicit start prerequisite = cmd:%v active:%v err:%v", cmd, active, err)
+	}
+	if _, err := blocked.Stop(context.Background()); err != nil {
+		t.Fatalf("stop should remain available without boot prerequisite: %v", err)
 	}
 }
 

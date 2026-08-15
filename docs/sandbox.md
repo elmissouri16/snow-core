@@ -31,7 +31,19 @@ Snow's wide TUI header continuously displays the Bash routing boundary:
 ## Requirements and installation
 
 Snow supports the audited smolvm 1.8.x CLI line beginning at 1.8.1. macOS needs
-smolvm's supported Hypervisor.framework environment; Linux needs usable KVM.
+smolvm's supported Hypervisor.framework environment and `mkfs.ext4` from
+Homebrew's `e2fsprogs`; Linux needs usable KVM. Install the macOS disk formatter
+before initialization:
+
+```sh
+brew install e2fsprogs
+```
+
+Snow adds the standard Apple Silicon and Intel Homebrew `e2fsprogs` sbin paths
+to smolvm's process environment, including when the keg-only formula is not on
+the shell `PATH`. A custom Homebrew prefix must put its `sbin` directory on
+`PATH`. Snow checks this prerequisite before creating or starting a machine so a
+first boot cannot appear successful with disk state that disappears on restart.
 
 When the default `smolvm` command is absent, an explicit sandbox initialization
 can install Snow's pinned smolvm 1.8.1 release into the user's normal smolvm and
@@ -351,6 +363,34 @@ snow sandbox delete --force --forget
 `--forget` removes Snow's association without requiring backend machine deletion.
 Use it only when the VM was already removed outside Snow or state cleanup is
 otherwise intentional.
+
+### macOS machine cannot restart after stop
+
+smolvm 1.8.1 can complete a first image boot without host `mkfs.ext4`, while its
+warnings report that the persistent storage and overlay disks could not be
+formatted. After stop or host-process exit, the next boot can then fail with
+`start background CMD`, `image not found`, or `connection closed` because the
+image store was not preserved.
+
+Install the formatter before retrying:
+
+```sh
+brew install e2fsprogs
+```
+
+Snow automatically exposes the standard Homebrew formula path to smolvm. If the
+machine was already stopped after an unformatted first boot and still cannot
+start, its missing image/overlay data cannot be reconstructed safely in place.
+Delete and recreate that association:
+
+```sh
+snow sandbox delete --force
+snow sandbox init --profile PROFILE
+```
+
+Files in the host project mount remain intact; guest-only installed packages and
+caches must be recreated. Snow now blocks new boots before this failure mode can
+create another apparently usable but non-persistent machine.
 
 ### Active backend failure
 

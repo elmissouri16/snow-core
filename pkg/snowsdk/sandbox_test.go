@@ -25,6 +25,10 @@ esac
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(home, "mkfs.ext4"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", home+string(os.PathListSeparator)+os.Getenv("PATH"))
 	cfg := config.Default()
 	cfg.Sandbox.Executable = fake
 	configPath := filepath.Join(home, "config.json")

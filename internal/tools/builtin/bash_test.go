@@ -133,6 +133,30 @@ func TestBash_EmptyCommand(t *testing.T) {
 	}
 }
 
+type environmentHost struct {
+	stubHost
+	environ []string
+}
+
+func (h environmentHost) Environ() []string { return h.environ }
+
+func TestBashPreservesBackendEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	b := NewBash()
+	b.CommandFactory = func(ctx context.Context, _ string, _ []string, _ time.Duration) (*exec.Cmd, bool, bool, error) {
+		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", `printf %s "$BACKEND_ENV"`)
+		cmd.Env = []string{"BACKEND_ENV=preserved"}
+		return cmd, false, true, nil
+	}
+	res, _ := b.Run(context.Background(), argsFor(t, map[string]any{"command": "true"}), environmentHost{
+		stubHost: stubHost{cwd: dir, roots: []string{dir}},
+		environ:  []string{"BACKEND_ENV=overwritten"},
+	})
+	if res.IsError || res.Content[0].Text != "preserved" {
+		t.Fatalf("backend environment result = %+v", res)
+	}
+}
+
 func TestBash_BackendRoutesCommandAndFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBash()
