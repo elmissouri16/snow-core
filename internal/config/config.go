@@ -46,6 +46,79 @@ type TUIConfig struct {
 	Mouse bool   `json:"mouse"`
 }
 
+// SandboxConfig controls the optional operator-owned smolvm shell backend.
+// Project configuration cannot override these fields. Per-project machine
+// associations are stored separately in sandboxes.json.
+type SandboxConfig struct {
+	Executable   string   `json:"executable,omitempty"`
+	DefaultImage string   `json:"default_image,omitempty"`
+	CPUs         int      `json:"cpus,omitempty"`
+	MemoryMiB    int      `json:"memory_mib,omitempty"`
+	StorageGiB   int      `json:"storage_gib,omitempty"`
+	OverlayGiB   int      `json:"overlay_gib,omitempty"`
+	GuestCWD     string   `json:"guest_cwd,omitempty"`
+	EnvAllowlist []string `json:"env_allowlist,omitempty"`
+}
+
+const DefaultUbuntuImage = "index.docker.io/library/ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+
+// DefaultSandbox returns the safe one-command bootstrap defaults. Ubuntu is
+// the upstream smolvm example image; guest networking remains disabled unless
+// init explicitly enables it.
+func DefaultSandbox() SandboxConfig {
+	return SandboxConfig{
+		Executable:   "smolvm",
+		DefaultImage: DefaultUbuntuImage,
+		CPUs:         2,
+		MemoryMiB:    2048,
+		GuestCWD:     "/workspace",
+		EnvAllowlist: []string{"LANG", "LC_ALL", "TERM"},
+	}
+}
+
+// Validate rejects sandbox settings that would make lifecycle or environment
+// behavior ambiguous. Network and mount authority are chosen explicitly when a
+// project sandbox is initialized, not inherited from project input.
+func (c SandboxConfig) Validate() error {
+	if strings.TrimSpace(c.Executable) == "" || len(c.Executable) > 4096 {
+		return errors.New("config: sandbox executable must be a non-blank path or command")
+	}
+	if c.DefaultImage != "" && (strings.TrimSpace(c.DefaultImage) == "" || len(c.DefaultImage) > 4096) {
+		return errors.New("config: sandbox default_image must be non-blank and at most 4096 bytes")
+	}
+	if c.CPUs < 1 || c.CPUs > 64 {
+		return errors.New("config: sandbox cpus must be 1..64")
+	}
+	if c.MemoryMiB < 128 || c.MemoryMiB > 262144 {
+		return errors.New("config: sandbox memory_mib must be 128..262144")
+	}
+	if c.StorageGiB < 0 || c.StorageGiB > 1048576 {
+		return errors.New("config: sandbox storage_gib must be 0..1048576 (0 uses smolvm default)")
+	}
+	if c.OverlayGiB < 0 || c.OverlayGiB > 1048576 {
+		return errors.New("config: sandbox overlay_gib must be 0..1048576 (0 uses smolvm default)")
+	}
+	if !filepath.IsAbs(c.GuestCWD) || filepath.Clean(c.GuestCWD) == string(filepath.Separator) {
+		return errors.New("config: sandbox guest_cwd must be an absolute non-root path")
+	}
+	seen := make(map[string]bool, len(c.EnvAllowlist))
+	for _, name := range c.EnvAllowlist {
+		if name == "" || len(name) > 128 {
+			return errors.New("config: sandbox env_allowlist entries must be non-empty and at most 128 bytes")
+		}
+		for i, r := range name {
+			if !(r == '_' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9') {
+				return fmt.Errorf("config: invalid sandbox environment name %q", name)
+			}
+		}
+		if seen[name] {
+			return fmt.Errorf("config: duplicate sandbox environment name %q", name)
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
 // CompactionConfig controls manual and pressure-based automatic compaction.
 // Zero RetainTokens uses a model-aware retention target. A zero automatic
 // threshold disables pressure compaction and overflow recovery.
@@ -308,6 +381,7 @@ type Config struct {
 	SystemPromptFile        string                          `json:"system_prompt_file,omitempty"`
 	Providers               map[string]ProviderConfig       `json:"providers,omitempty"`
 	TUI                     TUIConfig                       `json:"tui,omitempty"`
+	Sandbox                 SandboxConfig                   `json:"sandbox,omitempty"`
 	Plugins                 []plugin.PluginSpec             `json:"plugins,omitempty"`
 	MCPServers              map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
 	Skills                  SkillsConfig                    `json:"skills,omitempty"`
@@ -338,6 +412,7 @@ func Default() Config {
 		Subagents:  DefaultSubagents(),
 		Compaction: DefaultCompaction(),
 		TUI:        TUIConfig{Theme: "default", Mouse: true},
+		Sandbox:    DefaultSandbox(),
 	}
 }
 
@@ -392,6 +467,22 @@ func Load(path string) (Config, error) {
 	if cfg.TUI.Theme == "" {
 		cfg.TUI.Theme = defaultTUITheme
 	}
+	sandboxDefaults := DefaultSandbox()
+	if cfg.Sandbox.Executable == "" {
+		cfg.Sandbox.Executable = sandboxDefaults.Executable
+	}
+	if cfg.Sandbox.CPUs == 0 {
+		cfg.Sandbox.CPUs = sandboxDefaults.CPUs
+	}
+	if cfg.Sandbox.MemoryMiB == 0 {
+		cfg.Sandbox.MemoryMiB = sandboxDefaults.MemoryMiB
+	}
+	if cfg.Sandbox.GuestCWD == "" {
+		cfg.Sandbox.GuestCWD = sandboxDefaults.GuestCWD
+	}
+	if cfg.Sandbox.EnvAllowlist == nil {
+		cfg.Sandbox.EnvAllowlist = append([]string(nil), sandboxDefaults.EnvAllowlist...)
+	}
 	defaults := DefaultCompaction()
 	var rawConfig struct {
 		Compaction map[string]json.RawMessage `json:"compaction"`
@@ -435,6 +526,9 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 	if err := cfg.Compaction.Validate(); err != nil {
+		return cfg, err
+	}
+	if err := cfg.Sandbox.Validate(); err != nil {
 		return cfg, err
 	}
 	if err := validateSystemPromptFile(cfg.SystemPromptFile, true); err != nil {

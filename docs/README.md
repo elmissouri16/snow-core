@@ -13,6 +13,7 @@ and maintainer design material for snow-core.
 | Install Snow and run my first prompt | [Project README](../README.md#quick-start) |
 | Learn the TUI, CLI modes, keys, and slash commands | [Using Snow](using-snow.md) |
 | Configure providers, permissions, sessions, themes, and search | [Configuration](configuration.md) |
+| Set up, operate, switch, or troubleshoot the optional Bash VM | [Sandboxed Bash](sandbox.md) |
 | Understand safety and privilege boundaries | [Security](security.md) |
 | Authenticate with ChatGPT/Codex | [ChatGPT authentication](chatgpt-auth.md) |
 
@@ -85,7 +86,8 @@ To reduce drift, use these documents as the primary references:
 | Python/JavaScript embedding | [`language-sdks.md`](language-sdks.md) |
 | Foreign-process control | [`rpc.md`](rpc.md) |
 | External plugin ABI | [`plugin-protocol.md`](plugin-protocol.md) |
-| Safety model | [`security.md`](security.md) |
+| Optional smolvm Bash setup and operation | [`sandbox.md`](sandbox.md) |
+| Safety model and privilege boundaries | [`security.md`](security.md) |
 | Feature-specific behavior | The matching guide in this directory |
 | Architecture and historical roadmap | [`IMPLEMENTATION.md`](../IMPLEMENTATION.md) |
 | Current implementation details | Source code and tests |

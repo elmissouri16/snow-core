@@ -33,6 +33,7 @@ import (
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/provider/chatgpt"
 	"github.com/snow-core/snow/internal/provider/openaicompat"
+	internalsandbox "github.com/snow-core/snow/internal/sandbox"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/trust"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -190,6 +191,13 @@ type chatGPTAccountChoice struct {
 type compactDoneMsg struct {
 	generation uint64
 	result     protocol.CompactionResult
+	err        error
+}
+
+type sandboxDoneMsg struct {
+	generation uint64
+	action     string
+	status     internalsandbox.Status
 	err        error
 }
 
@@ -470,20 +478,30 @@ type Model struct {
 	skillVisible bool
 
 	// File mention picker state (for @path references).
-	mentionMatches      []string
-	mentionIndex        int
-	mentionVisible      bool
-	mentionFiles        []string
-	mentionFilesCWD     string
-	mentionFilesLoaded  bool
-	mentionLoading      bool
-	mentionGeneration   uint64
-	pickerGeneration    uint64
-	sessionOpGeneration uint64
-	sessionLoading      bool
-	treeLoading         bool
-	modelLoading        bool
-	sessionOpLoading    bool
+	mentionMatches           []string
+	mentionIndex             int
+	mentionVisible           bool
+	mentionFiles             []string
+	mentionFilesCWD          string
+	mentionFilesLoaded       bool
+	mentionLoading           bool
+	mentionGeneration        uint64
+	pickerGeneration         uint64
+	sessionOpGeneration      uint64
+	sessionLoading           bool
+	treeLoading              bool
+	modelLoading             bool
+	sessionOpLoading         bool
+	sandboxLoading           bool
+	sandboxGeneration        uint64
+	sandboxSetup             bool
+	sandboxSetupIndex        int
+	sandboxSetupOpts         internalsandbox.InitOptions
+	sandboxSetupProfileIndex int
+	sandboxSetupCustomOpts   internalsandbox.InitOptions
+	sandboxOpMu              sync.Mutex
+	sandboxOpClosing         bool
+	sandboxOpWG              sync.WaitGroup
 
 	// Provider picker state (for /login and /logout).
 	pickProvider   bool
@@ -691,11 +709,34 @@ func (m *Model) Close() error {
 		m.startupMu.Lock()
 		m.closeErr = errors.Join(m.closeErr, m.startupCloseErr)
 		m.startupMu.Unlock()
+		// Sandbox lifecycle commands run as Bubble Tea workers. The run context
+		// is canceled before Close, so wait for their bounded rollback before the
+		// process exits and could otherwise leave an untracked VM.
+		m.closeSandboxOperations()
 		if m.app != nil {
 			m.closeErr = errors.Join(m.closeErr, m.app.Close())
 		}
 	})
 	return m.closeErr
+}
+
+func (m *Model) beginSandboxOperation() bool {
+	m.sandboxOpMu.Lock()
+	defer m.sandboxOpMu.Unlock()
+	if m.sandboxOpClosing {
+		return false
+	}
+	m.sandboxOpWG.Add(1)
+	return true
+}
+
+func (m *Model) endSandboxOperation() { m.sandboxOpWG.Done() }
+
+func (m *Model) closeSandboxOperations() {
+	m.sandboxOpMu.Lock()
+	m.sandboxOpClosing = true
+	m.sandboxOpMu.Unlock()
+	m.sandboxOpWG.Wait()
 }
 
 func (m *Model) retainStartupApp(candidate *app.App) bool {
@@ -822,7 +863,7 @@ func (m *Model) spinnerActive() bool {
 	if m.lastErr != nil {
 		return false
 	}
-	return m.trustSaving || m.compacting || (m.busy && !m.permPending && !m.userInputPending)
+	return m.trustSaving || m.compacting || m.sandboxLoading || (m.busy && !m.permPending && !m.userInputPending)
 }
 
 func (m *Model) inlineDisplayStart() int {
@@ -919,7 +960,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
 		// transcript when not in a picker.
-		if !m.loginMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
+		if !m.loginMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.sandboxSetup && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
 			switch {
 			case keyMatches(msg, m.keys.PageUp):
 				m.transcript.PageUp()
@@ -1116,6 +1157,25 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.beginPendingModeSwitch(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+		}
+	case sandboxDoneMsg:
+		if msg.generation != m.sandboxGeneration {
+			return m, nil
+		}
+		m.sandboxLoading = false
+		if msg.err != nil {
+			message := msg.err.Error()
+			if !strings.HasPrefix(message, "sandbox:") {
+				message = "sandbox: " + message
+			}
+			m.pushLine(styleError.Render(message))
+		} else {
+			status := formatTUISandboxStatus(msg.status)
+			if msg.action == "delete" {
+				status = "sandbox deleted · future Bash commands run on the host"
+			}
+			m.lastStatus = status
+			m.pushLine(styleFooter.Render(status))
 		}
 	case promptDoneMsg:
 		if msg.generation != m.runGeneration || msg.err == nil {
@@ -2405,7 +2465,7 @@ func (m *Model) managedFrameWidth() int {
 // enough rows to show more than their selected item.
 func (m *Model) inlineModalOverlay() bool {
 	return m.inlineTranscript && (m.pickProvider || m.pickChatGPTAuth || m.pickModel ||
-		m.pickThinking || m.pickSettings || m.pickSession || m.pickTree ||
+		m.pickThinking || m.pickSettings || m.sandboxSetup || m.pickSession || m.pickTree ||
 		m.pickInfo || m.pickPermissionMode || m.permPending || m.userInputPending ||
 		m.confirmGoalReplace || m.planPrompt)
 }
@@ -2611,6 +2671,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyEnter && !m.busy {
 			msg.Alt = true
 		}
+	}
+
+	// --- Sandbox initialization resource form ---
+	if m.sandboxSetup {
+		// Left and right adjust the selected resource in this form, even though
+		// ordinary pickers also bind them to previous/next navigation.
+		if msg.Type != tea.KeyLeft && msg.Type != tea.KeyRight {
+			msg = normalizePickerKeyWithMap(msg, m.keys)
+		}
+		return m.handleSandboxSetupKey(msg)
 	}
 
 	// --- OpenAI-compatible endpoint capture mode ---
@@ -3592,6 +3662,8 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.startMCPInfo()
+	case "/sandbox":
+		return m.startSandboxCommand(args)
 	case "/new":
 		if len(args) > 0 {
 			m.pushLine(styleError.Render("/new takes no arguments"))
@@ -3731,6 +3803,303 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 		m.pushLine(styleError.Render("unknown command: " + cmd + " (try /help)"))
 	}
 	return m, nil
+}
+
+func (m *Model) startSandboxCommand(args []string) (tea.Model, tea.Cmd) {
+	if m.app == nil || m.app.Sandbox == nil {
+		m.pushLine(styleError.Render("sandbox: runtime is unavailable"))
+		return m, nil
+	}
+	if m.sandboxLoading {
+		m.pushLine(styleFooter.Render("sandbox operation already in progress"))
+		return m, nil
+	}
+	action := "status"
+	if len(args) > 0 {
+		action = args[0]
+	}
+	var initOpts internalsandbox.InitOptions
+	switch action {
+	case "status", "start", "stop":
+		if len(args) != 0 && len(args) != 1 {
+			m.pushLine(styleError.Render("usage: /sandbox [status|init [--from] [--read-only] [--network] <source>|start|stop|delete confirm]"))
+			return m, nil
+		}
+	case "init":
+		for _, arg := range args[1:] {
+			switch arg {
+			case "--from":
+				initOpts.SourceKind = internalsandbox.SourcePack
+			case "--read-only":
+				initOpts.ReadOnly = true
+			case "--network":
+				initOpts.Network = true
+			default:
+				if strings.HasPrefix(arg, "--") || initOpts.Source != "" {
+					m.pushLine(styleError.Render("usage: /sandbox init [--from] [--read-only] [--network] <source>"))
+					return m, nil
+				}
+				initOpts.Source = arg
+			}
+		}
+		if initOpts.Source == "" {
+			initOpts.Source = m.app.Cfg.Sandbox.DefaultImage
+		}
+		initOpts.CPUs = m.app.Cfg.Sandbox.CPUs
+		initOpts.MemoryMiB = m.app.Cfg.Sandbox.MemoryMiB
+		initOpts.StorageGiB = m.app.Cfg.Sandbox.StorageGiB
+		initOpts.OverlayGiB = m.app.Cfg.Sandbox.OverlayGiB
+		initOpts.StorageSet = true
+		initOpts.OverlaySet = true
+		initOpts.GuestCWD = m.app.Cfg.Sandbox.GuestCWD
+		m.sandboxSetupProfileIndex = len(internalsandbox.Profiles())
+		m.sandboxSetupCustomOpts = initOpts
+		m.sandboxSetupOpts = initOpts
+		m.sandboxSetupIndex = 0
+		m.sandboxSetup = true
+		return m, nil
+	case "delete":
+		if len(args) != 2 || args[1] != "confirm" {
+			m.pushLine(styleError.Render("usage: /sandbox delete confirm (future Bash calls will run on the host)"))
+			return m, nil
+		}
+	default:
+		m.pushLine(styleError.Render("usage: /sandbox [status|init|start|stop|delete confirm]"))
+		return m, nil
+	}
+	return m.startSandboxOperation(action, initOpts)
+}
+
+func (m *Model) startSandboxOperation(action string, initOpts internalsandbox.InitOptions) (tea.Model, tea.Cmd) {
+	if action == "init" {
+		detail := initOpts.Source
+		if detail == "" {
+			detail = "the configured default image"
+		}
+		m.pushLine(styleFooter.Render("sandbox init: ensuring smolvm " + internalsandbox.MinimumSmolVMVersion + " and creating " + detail + "…"))
+	}
+	m.sandboxLoading = true
+	m.sandboxGeneration++
+	generation := m.sandboxGeneration
+	manager := m.app.Sandbox
+	ctx := m.ctx
+	return m, func() tea.Msg {
+		if !m.beginSandboxOperation() {
+			return sandboxDoneMsg{generation: generation, action: action, err: context.Canceled}
+		}
+		defer m.endSandboxOperation()
+		var status internalsandbox.Status
+		var err error
+		switch action {
+		case "status":
+			status, err = manager.Status(ctx)
+		case "init":
+			status, err = manager.Init(ctx, initOpts)
+		case "start":
+			status, err = manager.Start(ctx)
+		case "stop":
+			status, err = manager.Stop(ctx)
+		case "delete":
+			err = manager.Delete(ctx)
+			status = internalsandbox.Status{Initialized: false}
+		}
+		return sandboxDoneMsg{generation: generation, action: action, status: status, err: err}
+	}
+}
+
+func (m *Model) handleSandboxSetupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	const fields = 7
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.sandboxSetup = false
+		m.pushLine(styleFooter.Render("sandbox init canceled"))
+		return m, nil
+	case tea.KeyUp, tea.KeyShiftTab:
+		m.sandboxSetupIndex = (m.sandboxSetupIndex + fields - 1) % fields
+	case tea.KeyDown, tea.KeyTab:
+		m.sandboxSetupIndex = (m.sandboxSetupIndex + 1) % fields
+	case tea.KeyLeft:
+		m.adjustSandboxSetup(-1)
+	case tea.KeyRight:
+		m.adjustSandboxSetup(1)
+	case tea.KeySpace:
+		if m.sandboxSetupIndex == 5 {
+			m.sandboxSetupOpts.ReadOnly = !m.sandboxSetupOpts.ReadOnly
+		} else if m.sandboxSetupIndex == 6 && m.sandboxSetupOpts.Profile == "" {
+			m.sandboxSetupOpts.Network = !m.sandboxSetupOpts.Network
+		}
+	case tea.KeyEnter:
+		opts := m.sandboxSetupOpts
+		m.sandboxSetup = false
+		return m.startSandboxOperation("init", opts)
+	}
+	return m, nil
+}
+
+func (m *Model) adjustSandboxSetup(direction int) {
+	opts := &m.sandboxSetupOpts
+	switch m.sandboxSetupIndex {
+	case 0:
+		m.selectSandboxProfile(direction)
+	case 1:
+		opts.CPUs = min(64, max(1, opts.CPUs+direction))
+	case 2:
+		opts.MemoryMiB = min(262144, max(128, opts.MemoryMiB+direction*1024))
+	case 3:
+		opts.StorageGiB = adjustSandboxDisk(opts.StorageGiB, direction)
+	case 4:
+		opts.OverlayGiB = adjustSandboxDisk(opts.OverlayGiB, direction)
+	case 5:
+		opts.ReadOnly = !opts.ReadOnly
+	case 6:
+		if opts.Profile == "" {
+			opts.Network = !opts.Network
+		}
+	}
+}
+
+func (m *Model) selectSandboxProfile(direction int) {
+	profiles := internalsandbox.Profiles()
+	choices := len(profiles) + 1 // final choice preserves the configured/custom options
+	if m.sandboxSetupProfileIndex == len(profiles) {
+		m.sandboxSetupCustomOpts = m.sandboxSetupOpts
+	}
+	index := (m.sandboxSetupProfileIndex + direction) % choices
+	if index < 0 {
+		index += choices
+	}
+	m.sandboxSetupProfileIndex = index
+	if index == len(profiles) {
+		m.sandboxSetupOpts = m.sandboxSetupCustomOpts
+		return
+	}
+	profile := profiles[index]
+	m.sandboxSetupOpts.Profile = profile.ID
+	m.sandboxSetupOpts.Source = profile.Source
+	m.sandboxSetupOpts.SourceKind = internalsandbox.SourceImage
+	m.sandboxSetupOpts.Network = profile.Network
+	if profile.CPUs > 0 {
+		m.sandboxSetupOpts.CPUs = profile.CPUs
+	}
+	if profile.MemoryMiB > 0 {
+		m.sandboxSetupOpts.MemoryMiB = profile.MemoryMiB
+	}
+}
+
+func adjustSandboxDisk(value, direction int) int {
+	if direction < 0 {
+		if value <= 5 {
+			return 0
+		}
+		return value - 5
+	}
+	if value == 0 {
+		return 5
+	}
+	return min(1048576, value+5)
+}
+
+func (m *Model) renderSandboxSetup() string {
+	if !m.sandboxSetup {
+		return ""
+	}
+	opts := m.sandboxSetupOpts
+	profiles := internalsandbox.Profiles()
+	profileLabel := "Custom/configured image"
+	profileDescription := "operator-selected source"
+	if m.sandboxSetupProfileIndex >= 0 && m.sandboxSetupProfileIndex < len(profiles) {
+		profile := profiles[m.sandboxSetupProfileIndex]
+		profileLabel = profile.Name
+		profileDescription = profile.Description
+	}
+	source := opts.Source
+	if source == "" {
+		source = "configured default image"
+	}
+	storage := "smolvm default"
+	if opts.StorageGiB > 0 {
+		storage = fmt.Sprintf("%d GiB", opts.StorageGiB)
+	}
+	overlay := "smolvm default"
+	if opts.OverlayGiB > 0 {
+		overlay = fmt.Sprintf("%d GiB", opts.OverlayGiB)
+	}
+	mount := "read-write"
+	if opts.ReadOnly {
+		mount = "read-only"
+	}
+	network := "disabled"
+	if opts.Network {
+		network = "ENABLED (persistent guest egress)"
+	}
+	if opts.Profile != "" {
+		network += " · required by profile"
+	}
+	rows := []string{
+		fmt.Sprintf("Environment      %s", profileLabel),
+		fmt.Sprintf("CPUs             %d", opts.CPUs),
+		fmt.Sprintf("Memory           %d MiB", opts.MemoryMiB),
+		fmt.Sprintf("Storage disk     %s", storage),
+		fmt.Sprintf("Overlay disk     %s", overlay),
+		fmt.Sprintf("Project mount    %s", mount),
+		fmt.Sprintf("Guest network    %s", network),
+	}
+	lines := []string{
+		styleHeader.Render("Sandbox setup"),
+		styleHeaderDim.Render(profileDescription),
+		styleHeaderDim.Render("Image: " + source),
+	}
+	for i, row := range rows {
+		prefix := "  "
+		style := styleCompletion
+		if i == m.sandboxSetupIndex {
+			prefix = "› "
+			style = styleCompletionSelected
+		}
+		lines = append(lines, style.Render(prefix+row))
+	}
+	lines = append(lines, styleHeaderDim.Render("↑/↓ field · ←/→ change · Space toggle · Enter create · Esc cancel"))
+	return strings.Join(lines, "\n")
+}
+
+func formatTUISandboxStatus(status internalsandbox.Status) string {
+	if !status.Initialized {
+		return "sandbox: not initialized · Bash runs on the host"
+	}
+	r := status.Record
+	mount := "rw"
+	if r.ReadOnly {
+		mount = "ro"
+	}
+	network := "net off"
+	if r.Network {
+		network = "net on"
+	}
+	routing := "shell:vm"
+	if r.Stopped {
+		routing = "shell:host (sandbox stopped)"
+	}
+	runtimeStatus := strings.TrimSpace(status.Runtime)
+	if runtimeStatus != "" {
+		runtimeStatus = "\n" + runtimeStatus
+	}
+	diagnostic := strings.TrimSpace(status.Diagnostic)
+	if diagnostic != "" {
+		runtimeStatus += "\nstatus diagnostic: " + diagnostic
+	}
+	profile := ""
+	if r.Profile != "" {
+		profile = " · profile " + r.Profile
+	}
+	resources := fmt.Sprintf("%d CPU · %d MiB", r.CPUs, r.MemoryMiB)
+	if r.StorageGiB > 0 {
+		resources += fmt.Sprintf(" · %d GiB storage", r.StorageGiB)
+	}
+	if r.OverlayGiB > 0 {
+		resources += fmt.Sprintf(" · %d GiB overlay", r.OverlayGiB)
+	}
+	return fmt.Sprintf("sandbox: %s · %s%s · %s · Bash mount %s → %s (%s) · guest %s%s · other tools remain host-side",
+		r.Machine, routing, profile, resources, r.Project, r.GuestCWD, mount, network, runtimeStatus)
 }
 
 // startLogin handles /login. No args opens the provider picker. A direct
@@ -6824,6 +7193,11 @@ func (m *Model) renderOverlays() string {
 			overlays = append(overlays, r)
 		}
 	}
+	if m.sandboxSetup {
+		if r := m.renderSandboxSetup(); r != "" {
+			overlays = append(overlays, r)
+		}
+	}
 	if m.pickSettings {
 		if r := m.renderSettings(); r != "" {
 			overlays = append(overlays, r)
@@ -7004,6 +7378,9 @@ func (m *Model) View() string {
 		if m.sessionOpLoading {
 			status = "session…"
 		}
+		if m.sandboxLoading {
+			status = m.spinner.View() + " sandbox"
+		}
 		if m.compatibleLoginPending {
 			status = "models…"
 		}
@@ -7135,17 +7512,25 @@ func (m *Model) renderHeader(status string) string {
 	w := m.managedFrameWidth()
 	brand := styleBrand.Render(" snow ")
 	midText := "booting"
+	shellBoundary := ""
+	shellVM := false
 	if m.lastErr != nil {
 		midText = "startup failed"
 	} else if m.app != nil {
 		model := m.app.Agent.Model()
 		goalText := ""
+		shellBoundary = "shell:host"
+		if m.app.SandboxStatus().Active {
+			shellBoundary = "shell:vm"
+			shellVM = true
+		}
 		if m.goal != nil {
 			goalText = fmt.Sprintf("  ·  goal:%s %s", m.goal.Status, formatGoalTokenUsage(m.goal))
 		}
 		midText = m.app.ProviderID + "/" + model.ID
 		if w >= 80 {
 			midText += "  ·  mode:" + m.collaborationModeLabel() + goalText +
+				"  ·  " + shellBoundary +
 				"  ·  thinking:" + string(m.app.Agent.Thinking()) +
 				"  ·  " + shortPath(m.app.CWD(), max(12, w/3))
 		} else if w >= 48 {
@@ -7160,6 +7545,13 @@ func (m *Model) renderHeader(status string) string {
 	}
 	midText = truncateRunes(midText, maxMid)
 	mid := styleHeaderDim.Render(midText)
+	if before, after, ok := strings.Cut(midText, shellBoundary); ok && shellBoundary != "" {
+		boundaryStyle := styleTool // warning yellow: Bash executes on the host
+		if shellVM {
+			boundaryStyle = styleDiffAdd // success green: Bash routes through the VM
+		}
+		mid = styleHeaderDim.Render(before) + boundaryStyle.Render(shellBoundary) + styleHeaderDim.Render(after)
+	}
 	used := lipgloss.Width(brand) + lipgloss.Width(mid) + lipgloss.Width(right)
 	pad := max(1, w-used)
 	return brand + mid + strings.Repeat(" ", pad) + right

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -29,6 +30,7 @@ import (
 	"github.com/snow-core/snow/internal/provider/fake"
 	"github.com/snow-core/snow/internal/provider/openaicompat"
 	"github.com/snow-core/snow/internal/provider/opencodego"
+	"github.com/snow-core/snow/internal/sandbox"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/skills"
 	"github.com/snow-core/snow/internal/subagent"
@@ -41,6 +43,7 @@ import (
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
 	publicplugin "github.com/snow-core/snow/pkg/plugin"
 	"github.com/snow-core/snow/pkg/protocol"
+	publicsandbox "github.com/snow-core/snow/pkg/sandbox"
 )
 
 // App is the assembled runtime.
@@ -75,6 +78,8 @@ type App struct {
 	MCPStatuses       []publicmcp.Status
 	Skills            *skills.Registry
 	SkillDiagnostics  []skills.Diagnostic
+	Sandbox           *sandbox.Manager
+	SandboxEnabled    bool
 	Subagents         *subagent.Manager
 	Diagnostics       []config.Diagnostic
 	SearchPolicy      config.EffectiveSearchPolicy
@@ -161,6 +166,9 @@ type Options struct {
 	CWD                     string
 	ConfigPath              string
 	AuthPath                string
+	SandboxStatePath        string // optional operator-state override for tests/internal surfaces
+	DisableSandbox          bool   // explicit host-shell override despite a configured association
+	RequireSandbox          bool   // fail assembly unless the project has an association
 	Provider                string
 	Model                   string
 	APIKey                  string
@@ -461,6 +469,43 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 
 	searchPolicy, configDiagnostics := config.LoadSearchPolicy(config.GlobalDir(), projectInputRoot, projectAllowed)
 
+	// Shell sandbox state is operator-owned and keyed to the canonical project.
+	// It is deliberately independent of trust-gated project configuration.
+	sandboxStatePath := opts.SandboxStatePath
+	if sandboxStatePath == "" {
+		sandboxStatePath = filepath.Join(globalDir, "sandboxes.json")
+	}
+	if opts.DisableSandbox && opts.RequireSandbox {
+		return nil, errors.New("app: DisableSandbox and RequireSandbox conflict")
+	}
+	var sandboxManager *sandbox.Manager
+	var bashCommandFactory func(context.Context, string, []string, time.Duration) (*exec.Cmd, bool, bool, error)
+	var bashSandboxActive func() bool
+	if !opts.DisableSandbox {
+		sandboxManager, err = sandbox.New(sandbox.Options{
+			Context:      ctx,
+			ProjectRoot:  projectInputRoot,
+			StatePath:    sandboxStatePath,
+			Executable:   cfg.Sandbox.Executable,
+			DefaultImage: cfg.Sandbox.DefaultImage,
+			CPUs:         cfg.Sandbox.CPUs,
+			MemoryMiB:    cfg.Sandbox.MemoryMiB,
+			StorageGiB:   cfg.Sandbox.StorageGiB,
+			OverlayGiB:   cfg.Sandbox.OverlayGiB,
+			GuestCWD:     cfg.Sandbox.GuestCWD,
+			EnvAllowlist: cfg.Sandbox.EnvAllowlist,
+			AutoInstall:  true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("app: sandbox: %w", err)
+		}
+		if opts.RequireSandbox && !sandboxManager.Active() {
+			return nil, errors.New("app: sandbox is required but not initialized for this project")
+		}
+		bashCommandFactory = sandboxManager.Command
+		bashSandboxActive = sandboxManager.Active
+	}
+
 	// Tools. Pin the canonical root once so later launch-path replacement cannot
 	// retarget the file capability.
 	reg := tools.NewRegistry()
@@ -472,12 +517,14 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 	}()
 	toolOpts := builtin.Options{
-		MaxOutputBytes: cfg.ToolOutputLimit(),
-		BashTimeout:    cfg.BashTimeout(),
-		Roots:          []string{absCWD},
-		CWD:            absCWD,
-		Guard:          toolGuard,
-		SearchPolicy:   searchPolicy,
+		MaxOutputBytes:     cfg.ToolOutputLimit(),
+		BashTimeout:        cfg.BashTimeout(),
+		BashCommandFactory: bashCommandFactory,
+		BashSandboxActive:  bashSandboxActive,
+		Roots:              []string{absCWD},
+		CWD:                absCWD,
+		Guard:              toolGuard,
+		SearchPolicy:       searchPolicy,
 	}
 	// Register builtins. The explicit tool allowlist is applied after Agent
 	// Skills register their built-in capabilities so it remains a true upper
@@ -1243,6 +1290,8 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		MCPManager:             mcpManager,
 		MCPStatuses:            append([]publicmcp.Status(nil), mcpStatuses...),
 		Skills:                 skillCatalog,
+		Sandbox:                sandboxManager,
+		SandboxEnabled:         !opts.DisableSandbox,
 		Subagents:              subManager,
 		Diagnostics:            append([]config.Diagnostic(nil), configDiagnostics...),
 		SearchPolicy:           searchPolicy,
@@ -1985,6 +2034,34 @@ func (a *App) SetPermissionDefault(mode permission.Mode) error {
 
 // CWD returns the app working directory.
 func (a *App) CWD() string { return a.cwd }
+
+// SandboxStatus returns a secret-free snapshot of the Bash execution boundary.
+func (a *App) SandboxStatus() publicsandbox.Status {
+	status := publicsandbox.Status{Backend: "host"}
+	if a == nil || a.Sandbox == nil {
+		return status
+	}
+	record, configured, err := a.Sandbox.Record()
+	if err != nil {
+		return status
+	}
+	status.Configured = configured
+	status.Active = configured && a.SandboxEnabled && a.Sandbox.Active()
+	if !configured {
+		return status
+	}
+	status.Backend = "smolvm"
+	status.Machine = record.Machine
+	status.Profile = record.Profile
+	status.GuestCWD = record.GuestCWD
+	status.ReadOnly = record.ReadOnly
+	status.Network = record.Network
+	status.CPUs = record.CPUs
+	status.MemoryMiB = record.MemoryMiB
+	status.StorageGiB = record.StorageGiB
+	status.OverlayGiB = record.OverlayGiB
+	return status
+}
 
 func getwd() (string, error) { return os.Getwd() }
 

@@ -57,6 +57,8 @@ func TestBuildOptionsReadsSubagentModel(t *testing.T) {
 	cmd.Flags().String("base-url", "", "")
 	cmd.Flags().String("config", "", "")
 	cmd.Flags().String("auth", "", "")
+	cmd.Flags().Bool("require-sandbox", false, "")
+	cmd.Flags().Bool("no-sandbox", false, "")
 	cmd.Flags().String("thinking", "", "")
 	cmd.Flags().StringSlice("tools", nil, "")
 	cmd.Flags().String("collaboration-mode", "", "")
@@ -85,6 +87,15 @@ func TestBuildOptionsReadsSubagentModel(t *testing.T) {
 	}
 	if opts.SubagentProvider != "opencode-go" || opts.SubagentModel != "model-x" {
 		t.Fatalf("subagent selection = %s/%s", opts.SubagentProvider, opts.SubagentModel)
+	}
+}
+
+func TestBuildOptionsRejectsConflictingSandboxPolicy(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("require-sandbox", true, "")
+	cmd.Flags().Bool("no-sandbox", true, "")
+	if _, err := buildOptions(cmd); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("sandbox policy conflict = %v", err)
 	}
 }
 

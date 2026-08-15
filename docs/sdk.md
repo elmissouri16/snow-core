@@ -133,6 +133,8 @@ separates inheritance from clean-install defaults.
 | `NoSession` | Use an in-memory conversation. Branches and goals work for the process lifetime only; auth and model caches remain persistent. |
 | `AuthPath` | Credential file override. Empty uses `$SNOW_HOME/auth.json`. |
 | `ConfigPath` | Global config override. Empty uses `$SNOW_HOME/config.json`. |
+| `DisableSandbox` | Explicitly keep Bash on the host and skip loading sandbox state, even when the canonical project has an operator-owned association. Existing associations are inherited/validated by default. |
+| `RequireSandbox` | Fail `Open` unless the canonical project has a smolvm association. Conflicts with `DisableSandbox`. |
 | `PermissionMode` | `ask`, `allow`, or `deny`. **Omission in the SDK forces `deny`**, rather than inheriting interactive `ask`. |
 | `AutoApprove` | Forces `allow` and takes precedence over `PermissionMode`. Dangerous outside externally isolated/trusted environments. |
 | `Tools` | Built-in tool allowlist. Empty exposes all registered built-ins. |
@@ -251,6 +253,7 @@ Do not infer support from model names or provider branding.
 | `RenameSession(name)` | Change the display title without changing ID/path/history |
 | `SessionPath()` | SQLite path, or empty for in-memory sessions |
 | `CWD()` | Active project directory |
+| `SandboxStatus()` | Fixed secret-free Bash boundary (`Configured`, `Active`, backend, machine, guest mount/resources/network policy) |
 
 The first accepted prompt assigns an untitled built-in store a deterministic,
 provider-free title. `RenameSession` trims surrounding whitespace, requires
@@ -579,8 +582,12 @@ The SDK has no built-in interactive permission UI. Its omission default is
 `deny`; `ask` uses a deny-by-default asker unless the embedding supplies a lower-
 level interactive host, which `pkg/snowsdk` does not currently expose.
 
-`AutoApprove` is equivalent to `allow`. It does not add a sandbox. Shell,
-plugins, stdio MCP servers, and subagents execute with the user's OS privileges.
+`AutoApprove` is equivalent to `allow`; it does not add containment. Plugins,
+stdio MCP servers, file tools, and subagents execute with their documented host
+privileges. Bash also uses the host unless an inherited exact-project smolvm
+association is active. `SandboxStatus()` makes that fixed per-session boundary
+observable; `RequireSandbox` fails startup instead of accepting host Bash, while
+`DisableSandbox` is an explicit host override. The VM contains only Bash.
 Subagents share filesystem/process side effects. Project trust controls input
 loading, not containment.
 

@@ -2,8 +2,10 @@
 
 Snow is a coding-agent harness that runs with the current user's operating-system
 privileges. It provides permission gates, path confinement, bounded I/O, trust-
-gated project input, and explicit extension controls. It does **not** provide an
-OS sandbox, container, virtual machine, or privilege boundary.
+gated project input, and explicit extension controls. It does **not** sandbox the
+whole Snow process. An optional external smolvm backend can route only the
+model-facing Bash tool through a project-scoped Linux VM; every other capability
+retains its documented host boundary.
 
 Use this document when operating Snow in CI, embedding the SDK/RPC server, or
 enabling shell, network, plugins, MCP, skills, goals, or subagents.
@@ -18,9 +20,12 @@ enabling shell, network, plugins, MCP, skills, goals, or subagents.
    as untrusted model context.
 6. Never place credentials in prompts, static MCP headers committed to source,
    logs, plugin events, or bug reports.
-7. Assume shell, plugins, stdio MCP servers, and subagents can access anything
-   the Snow process can access.
-8. Avoid parallel mutation by subagents unless work ownership is explicit.
+7. Assume plugins, stdio MCP servers, file tools, and subagents can access their
+   documented host resources. Assume Bash can too unless the header/status says
+   its smolvm project association is active.
+8. Treat the optional smolvm backend as Bash-only containment, never as
+   containment for Snow, providers, extensions, webfetch, or file tools.
+9. Avoid parallel mutation by subagents unless work ownership is explicit.
 
 ## Threat and control summary
 
@@ -28,8 +33,8 @@ enabling shell, network, plugins, MCP, skills, goals, or subagents.
 |---|---|---|
 | Accidental file mutation | `ask|allow|deny`, tool allowlists, role intersections | `allow` intentionally permits the operation |
 | Path escape | Pinned `os.Root` handles, canonical roots, and symlink-aware checks | Bind mounts, device files, and processes already running as the user remain outside this boundary |
-| Unbounded output/processes | Read/search/tool byte caps, shell timeout, cancellation, and process-group cleanup | Child processes still run as the user before cancellation |
-| Network access | Network risk classification; public-address-only `webfetch` | Allowed MCP/plugins/shell can implement their own networking |
+| Unbounded output/processes | Read/search/tool byte caps, shell timeout, cancellation, and process-group cleanup | Host children still run as the user; smolvm guest cancellation also depends on its CLI/VM behavior |
+| Network access | Network risk classification; public-address-only `webfetch`; optional smolvm guest network off unless explicit | Provider traffic and allowed MCP/plugins/host shell can implement their own networking; the Bash VM does not contain those paths |
 | Project-supplied executable config | Canonical trust decision before project config/extension loading | Trust is not code signing or sandboxing |
 | Credential disclosure | Separate `0600` auth store, redacted inventories, no secret status output | Models/tools can expose secrets the user places in readable project files or prompts |
 | Prompt injection | System/user authority rules, bounded context, sealed child mail | No model-level prompt-injection defense is absolute |
@@ -89,7 +94,8 @@ not mean:
 
 - the repository is safe;
 - a plugin or stdio server is sandboxed;
-- shell commands are contained;
+- shell commands are contained unless an independent operator-owned smolvm
+  association is active for that exact project;
 - project files cannot contain malicious instructions;
 - path confinement is an OS sandbox for shell, plugins, MCP servers, or other processes.
 
@@ -121,20 +127,102 @@ ambiguous replacements unless explicitly configured for all matches.
 - bound matches/results and output bytes;
 - support per-call soft-policy overrides without disabling hard exclusions.
 
-This confinement applies only to built-in file operations. Shell, plugins,
-stdio MCP servers, and subagents run with the user's OS privileges. Go's rooted
-filesystem API also does not prohibit bind mounts, device files, or traversal of
-filesystem boundaries, so Snow still is not a sandbox.
+This confinement applies only to built-in file operations. Plugins, stdio MCP
+servers, and host-side subagent orchestration run with the user's OS privileges;
+Bash does too unless this exact project has an active operator-owned smolvm
+association. Go's rooted filesystem API also does not prohibit bind mounts,
+device files, or traversal of filesystem boundaries, so Snow still is not a
+whole-process sandbox.
 
 ## Shell and process execution
 
-The model-facing tool is named `bash`. It uses `sh -c`, a separate process
-group, group cancellation, and a bounded `os/exec` pipe-drain delay.
+The model-facing tool is named `bash`. Without a sandbox association it uses
+host `sh -c`, a separate process group, group cancellation, and a bounded
+`os/exec` pipe-drain delay. Commands inherit the user's privileges and
+environment. Timeouts, cancellation, and output caps reduce runaway behavior but
+do not prevent a host command from reading secrets, modifying files, starting
+network connections, or affecting other processes before it is stopped.
 
-Commands inherit the user's privileges and environment. Timeouts, cancellation,
-and output caps reduce runaway behavior but do not prevent a command from
-reading secrets, modifying files, starting network connections, or affecting
-other processes before it is stopped.
+### Optional project-scoped smolvm backend
+
+Operational setup, profile, persistence, lifecycle, and recovery guidance is in
+[Sandboxed Bash with smolvm](sandbox.md). This section is the canonical security
+boundary.
+
+An operator may initialize a persistent smolvm Linux machine for the exact
+canonical project with `snow sandbox init`. The association lives in the
+operator-owned `$SNOW_HOME/sandboxes.json`, not project configuration. It is
+exact-keyed (no parent inheritance), versioned, `0600`, atomically replaced, and
+protected by context-aware interprocess state and per-project lifecycle locks.
+An already running Snow process uses its startup/lifecycle snapshot, so another
+process cannot silently switch its execution backend mid-session.
+
+An explicit init may bootstrap a missing default `smolvm` command. Snow fetches
+the version-tagged upstream 1.8.1 installer and platform release archive over
+HTTPS, enforces hard size caps and embedded SHA-256 values for both, and runs the
+installer with a scrubbed environment against only the already verified local
+archive. Shell-profile changes are disabled, and Snow validates the resulting
+symlink, executable, and version. This is remote code execution with the user's
+host privileges, deliberately authorized by the
+init command—not guest networking or a permission-gated model tool call. It
+writes upstream's `~/.smolvm`, `~/.local/bin`, and platform data locations.
+A user-home installation lock serializes concurrent init calls across projects.
+Snow never auto-installs for a custom configured executable, checksum drift, or
+an existing unsupported binary. The no-argument Ubuntu path also performs an
+anonymous host-side registry download (no Docker credential lookup), verifies
+the digest through the registry client, preflights declared content and bounds
+the archive writer against a 2 GiB cap, and applies a 10-minute deadline. The Docker-save archive is `0600`
+inside a `0700` staging directory under operator-owned Snow state; Snow hashes it
+again immediately before smolvm imports it and deletes it afterward.
+
+For the currently audited smolvm `1.8.x` line (minimum `1.8.1`), Snow creates a
+deterministically named, labeled machine from a digest-pinned Ubuntu 24.04
+multi-platform index by default, with:
+
+- exactly one host volume: canonical project directory to `/workspace` (or the
+  configured absolute guest path), optionally read-only;
+- guest runtime networking off by default; `--network` persists smolvm's `--net`
+  authority until the association is deleted/recreated. CLI init without a
+  profile or `--network` instead downloads the configured digest-pinned image over host HTTPS to a private temporary
+  Docker-save archive, so registry acquisition grants no guest network authority.
+  Selecting a built-in development profile is a separate explicit choice that
+  always persists guest network authority; profile images remain digest-pinned;
+- explicit CPU/memory limits plus optional storage/overlay disk sizes selected
+  by global config, CLI init flags, or the supervised TUI setup form;
+- no host SSH agent, Docker socket, control socket, secret, home, or extra volume;
+- foreground `machine exec --stream` with the existing output/timeout bounds;
+- a strict environment-name allowlist (`LANG`, `LC_ALL`, and `TERM` by default),
+  not wholesale host environment forwarding into the guest.
+
+Snow validates the pinned executable/version when an active runtime is assembled
+and again before status/lifecycle/exec operations. It rejects older and
+unaudited future smolvm minor/major versions instead of assuming their
+flag/default behavior. An optional installed-CLI contract test
+checks the required verbs and flags; ordinary tests use a fake launcher and do
+not claim hypervisor containment. On Linux smolvm also requires usable KVM; on
+macOS it requires its supported Hypervisor.framework setup.
+
+While a published record is active, failure to resolve the pinned CLI, corrupt
+state, VM/start/exec failure, timeout, or cancellation is a Bash error. Snow
+**never falls back to host Bash for that call**. `sandbox stop` is a distinct,
+explicit policy change: after the backend stop succeeds and the stopped state is
+atomically persisted, subsequent Bash routes to the host until `sandbox start`
+restores VM routing. A failed start/stop state update retains or rolls back to
+the previous routing boundary. Guest cancellation sends SIGINT to the
+smolvm process group first, then SIGKILLs the entire launcher group after a
+bounded grace. Because guest-process semantics still depend on smolvm, operators
+should verify cancellation for critical long-running workloads.
+
+`delete --force` deletes the VM before removing the association; failures retain
+the association's current routing policy (active remains fail-closed; stopped
+remains explicit host routing). `delete --force --forget` is an explicit recovery
+path for a VM removed outside Snow or a stale record. Successful deletion or
+forgetting warns that subsequent Bash calls use the host.
+
+This VM boundary applies only to Bash. Snow and its provider traffic, built-in
+file/search tools, webfetch, plugins, MCP servers, credentials, and host-side
+subagent orchestration remain outside it. A project mounted read-only for Bash
+may still be changed by Snow's host `write`/`edit` tools when separately allowed.
 
 ## Network access
 
@@ -213,12 +301,12 @@ Statically linked plugins and external JSON-RPC v2 plugins register namespaced
 tools through the central registry and permission gate. Stdio MCP servers and
 external plugins are ordinary child processes, not sandboxes.
 
-Snow's sandbox design investigation is complete, and no built-in per-extension
-sandbox backend is planned now. When containment is required, run the whole Snow
-process inside an appropriately constrained container or virtual machine. This
-also contains bash and other in-process capabilities; wrapping only one plugin
-or MCP launcher would not. Permissions and project trust remain policy and input-
-loading controls, not OS isolation boundaries.
+No built-in per-extension sandbox backend is planned now. The optional smolvm
+integration routes only the model-facing Bash tool; it does not wrap plugins or
+MCP launchers. When containment for extensions or all Snow capabilities is
+required, run the whole Snow process inside an appropriately constrained
+container or virtual machine. Permissions and project trust remain policy and
+input-loading controls, not OS isolation boundaries.
 
 Before enabling one, review:
 

@@ -1185,7 +1185,10 @@ prompt. Runtime `/trust allow|deny` changes apply on the next launch.
 
 ### 9.1 Boundary statement
 
-snow runs **as the user**. Built-in tools can read/write files and execute commands with the process’s OS permissions. There is **no** in-process sandbox in v1.
+snow runs **as the user**. Built-in file/search tools and extensions retain the
+process's OS permissions. There is no in-process or whole-process sandbox in v1.
+An optional operator-initialized smolvm backend routes only model-facing Bash
+through a persistent project-scoped Linux VM; it does not contain Snow itself.
 
 ### 9.2 Controls we do implement
 
@@ -1197,11 +1200,13 @@ snow runs **as the user**. Built-in tools can read/write files and execute comma
 | auth.json 0600 | Casual local secret read by other users |
 | No secret logging | Token leakage in debug output |
 | Truncation | Context blow-ups from huge tool dumps |
+| Optional smolvm Bash backend | Host filesystem/network authority of approved Bash commands; exact-project mount only, guest network explicit, environment allowlisted |
 
 ### 9.3 Residual risks (accepted)
 
 - Prompt injection via repo files, `AGENTS.md`, tool output.
-- Malicious bash once allowed.
+- Malicious host Bash once allowed, or malicious guest Bash against the mounted
+  project when the optional smolvm association is active.
 - OAuth tokens on disk stolen by malware running as user.
 - Supply-chain risk in dependencies and external plugins.
 
@@ -1502,7 +1507,7 @@ Replace with the real GitHub/Git path at first `go mod init` without redesign.
 - [x] Themes + keybindings files (bounded strict YAML, trusted project overrides)
 - [x] Persistent ChatGPT model catalog refresh/cache (account- and backend-origin-scoped ETag/TTL entries)
 - [x] Durable fork/tree navigation (`/tree` picker)
-- [x] Optional sandbox backend design investigation — no built-in backend planned now; use whole-process container/VM isolation when required
+- [x] Optional sandbox backend design plus first safe slice — external smolvm 1.8.x for persistent exact-project Bash only, with checksum-pinned user-local bootstrap, default Ubuntu image, one project mount, digest-pinned Ubuntu/Go/Node/Python+uv profiles, CLI/TUI CPU-memory-storage-overlay controls, explicit guest network, strict environment allowlist, active fail-closed routing, lifecycle locks, and honest non-whole-process docs
 - [x] Supported platforms narrowed to macOS/Linux with a shared compile-time platform guard
 - [x] Plugin tool appears in schema and executes through the central permission gate
 - [x] Opt-in BM25 tool routing keeps deferred parameter schemas out of normal model context
@@ -1815,7 +1820,7 @@ Default mode in either the current or a fresh session. See
 | Sessions | Snow-owned pure-Go SQLite tree | 2026-08-06 |
 | TUI | Charmbracelet Bubble Tea | 2026-03-22 |
 | SDK | `pkg/snowsdk` same core | 2026-03-22 |
-| Sandbox | None in v1; honest docs | 2026-03-22 |
+| Sandbox | No whole-process/per-extension sandbox; optional persistent external smolvm 1.8.x backend for Bash only | 2026-03-22 |
 | Multi-agent | Out of MVP | 2026-03-22 |
 
 ---

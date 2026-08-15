@@ -13,8 +13,12 @@ var errUnsupportedPlatform = errors.New("snow requires macOS or Linux")
 
 type managedProcess struct{}
 
-func startManagedProcess(*exec.Cmd) (*managedProcess, error) { return nil, errUnsupportedPlatform }
-func (*managedProcess) close()                               {}
+func startManagedProcess(*exec.Cmd, bool) (*managedProcess, error) {
+	return nil, errUnsupportedPlatform
+}
+func (*managedProcess) close()            {}
+func (*managedProcess) forceKill()        {}
+func (*managedProcess) wasCanceled() bool { return false }
 
 func shellCommand(context.Context, string, []string, string) (*exec.Cmd, error) {
 	return nil, errUnsupportedPlatform
