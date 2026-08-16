@@ -204,24 +204,28 @@ func (m *Manager) Initialize(ctx context.Context) error {
 
 // Emit forwards a sanitized, observation-only event to interested plugins.
 func (m *Manager) Emit(ev protocol.AgentEvent) {
-	ev = sanitizeEvent(ev.Clone())
-	e := publicplugin.Event{Version: publicplugin.ProtocolVersion, Type: publicplugin.EventType(ev.Type), Payload: ev}
+	eventType := publicplugin.EventType(ev.Type)
 	m.mu.Lock()
 	if !m.ready || m.closed {
 		m.mu.Unlock()
 		return
 	}
-	fns := make([]publicplugin.EventHandler, 0, len(m.subs[e.Type]))
+	fns := make([]publicplugin.EventHandler, 0, len(m.subs[eventType]))
 	var externals []*ExternalHost
-	for _, fn := range m.subs[e.Type] {
+	for _, fn := range m.subs[eventType] {
 		fns = append(fns, fn)
 	}
 	for _, p := range m.plugins {
-		if p.external != nil && p.external.SupportsEvent(e.Type) {
+		if p.external != nil && p.external.SupportsEvent(eventType) {
 			externals = append(externals, p.external)
 		}
 	}
 	m.mu.Unlock()
+	if len(fns) == 0 && len(externals) == 0 {
+		return
+	}
+	ev = sanitizeEvent(ev.Clone())
+	e := publicplugin.Event{Version: publicplugin.ProtocolVersion, Type: eventType, Payload: ev}
 	for _, fn := range fns {
 		observerEvent := e
 		observerEvent.Payload = e.Payload.Clone()

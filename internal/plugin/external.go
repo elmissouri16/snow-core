@@ -512,7 +512,7 @@ func readFrame(r *bufio.Reader, max int) ([]byte, error) {
 			return nil, errors.New("frame exceeds limit")
 		}
 		if err == nil {
-			return []byte(strings.TrimSuffix(string(out), "\n")), nil
+			return out[:len(out)-1], nil
 		}
 		if !errors.Is(err, bufio.ErrBufferFull) {
 			return nil, err

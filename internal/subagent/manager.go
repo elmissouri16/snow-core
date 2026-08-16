@@ -665,7 +665,6 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 	if err != nil {
 		return protocol.SubagentState{}, err
 	}
-	_ = fork
 	m.mu.Lock()
 	if err = m.requireReadyLocked(); err != nil {
 		m.mu.Unlock()
@@ -795,9 +794,12 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 		discardChildLocator(topologyStore, record.ChildSessionPath, id)
 		return protocol.SubagentState{}, e
 	}
-	parentMessages, err := m.messagesFor(caller)
-	if err != nil {
-		return rollback(err)
+	var parentMessages []protocol.Message
+	if fork != 0 {
+		parentMessages, err = m.messagesFor(caller)
+		if err != nil {
+			return rollback(err)
+		}
 	}
 	child, err := m.factory.NewChild(ctx, ChildSpec{State: state, Role: role, ForkTurns: req.ForkTurns, ParentMessages: parentMessages, SessionPath: record.ChildSessionPath})
 	if err != nil {
@@ -1858,14 +1860,14 @@ func runtimeParentBranch(r *runtime) string {
 }
 
 func (m *Manager) forward(r *runtime, ev protocol.AgentEvent) {
-	s := r.snapshot()
-	ev.Agent = s.Agent.Clone()
 	if ev.Type == protocol.EvSessionUpdated {
 		return
 	}
 	if !m.limits.ExposeChildToolEvents && (ev.Type == protocol.EvTextDelta || ev.Type == protocol.EvThinkingDelta || ev.Type == protocol.EvToolStart || ev.Type == protocol.EvToolProgress || ev.Type == protocol.EvToolEnd) {
 		return
 	}
+	s := r.snapshot()
+	ev.Agent = s.Agent.Clone()
 	m.emit(ev)
 }
 func (m *Manager) emit(ev protocol.AgentEvent) {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -266,6 +267,36 @@ func TestCompressRequestBodyThresholdAndRoundTrip(t *testing.T) {
 	decoded, err := decoder.DecodeAll(encoded, nil)
 	if err != nil || !bytes.Equal(decoded, large) {
 		t.Fatalf("decode err=%v equal=%v", err, bytes.Equal(decoded, large))
+	}
+}
+
+func TestCompressRequestBodyConcurrent(t *testing.T) {
+	body := bytes.Repeat([]byte(`{"message":"concurrent context"}`), 3000)
+	const workers = 16
+	encoded := make([][]byte, workers)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := range workers {
+		go func() {
+			defer wg.Done()
+			var encoding string
+			encoded[i], encoding = compressRequestBody(body)
+			if encoding != "zstd" {
+				t.Errorf("worker %d encoding = %q", i, encoding)
+			}
+		}()
+	}
+	wg.Wait()
+	decoder, err := zstd.NewReader(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoder.Close()
+	for i, compressed := range encoded {
+		decoded, err := decoder.DecodeAll(compressed, nil)
+		if err != nil || !bytes.Equal(decoded, body) {
+			t.Fatalf("worker %d decode err=%v equal=%v", i, err, bytes.Equal(decoded, body))
+		}
 	}
 }
 

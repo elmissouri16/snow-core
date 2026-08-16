@@ -32,6 +32,8 @@ const (
 	maxHTTPErrorSnippetBytes = 1000
 )
 
+var requestEncoderPool sync.Pool
+
 // Chat implements the Codex Responses streaming protocol used by ChatGPT
 // subscription credentials. The access token is only placed in the request
 // header and is never included in errors or stream events.
@@ -425,12 +427,17 @@ func compressRequestBody(body []byte) ([]byte, string) {
 	if len(body) < requestCompressMinimum {
 		return append([]byte(nil), body...), ""
 	}
-	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest), zstd.WithEncoderConcurrency(1))
-	if err != nil {
-		return append([]byte(nil), body...), ""
+	encoder, _ := requestEncoderPool.Get().(*zstd.Encoder)
+	if encoder == nil {
+		var err error
+		encoder, err = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest), zstd.WithEncoderConcurrency(1))
+		if err != nil {
+			return append([]byte(nil), body...), ""
+		}
 	}
-	defer encoder.Close()
-	return encoder.EncodeAll(body, make([]byte, 0, len(body)/2)), "zstd"
+	encoded := encoder.EncodeAll(body, make([]byte, 0, len(body)/2))
+	requestEncoderPool.Put(encoder)
+	return encoded, "zstd"
 }
 
 func retryBackoff(retry int) time.Duration {

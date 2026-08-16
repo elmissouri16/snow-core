@@ -22,6 +22,11 @@ import (
 // in memory while branch references and entries remain in SQLite. Entries are
 // queried when Messages or ContextMessages is requested. modernc.org/sqlite is
 // a pure-Go, CGo-free database/sql driver.
+type contextCacheKey struct {
+	branchID string
+	tip      string
+}
+
 type SQLiteStore struct {
 	mu            sync.RWMutex
 	path          string
@@ -31,6 +36,12 @@ type SQLiteStore struct {
 	db            *sql.DB
 	closed        bool
 	deleteIfEmpty bool
+
+	// Entries are append-only, so the decoded chain under one branch/tip key is
+	// immutable. The cache remains private; ContextMessages still projects fresh
+	// defensive message clones for callers.
+	contextCacheKey     contextCacheKey
+	contextCacheEntries []Entry
 }
 
 // ValidateSQLiteSession verifies that path is an existing Snow session without
@@ -788,6 +799,7 @@ func (s *SQLiteStore) AppendWithInitialTitle(entry Entry, title string) error {
 		return fmt.Errorf("session: sqlite commit: %w", err)
 	}
 	s.tip = entry.ID
+	s.advanceContextCacheLocked(expectedTip, []Entry{entry})
 	if titleCreated {
 		s.header.Name = title
 	} else if title != "" && s.header.Name == "" {
@@ -1289,6 +1301,31 @@ func (s *SQLiteStore) SetMetadata(key, value string) error {
 	return s.Append(Entry{Type: EntryMeta, Key: key, Value: value})
 }
 
+func (s *SQLiteStore) invalidateContextCacheLocked() {
+	s.contextCacheKey = contextCacheKey{}
+	s.contextCacheEntries = nil
+}
+
+// advanceContextCacheLocked extends a warm decoded chain after a successful
+// append. Compaction markers intentionally force one fresh boundary query;
+// ordinary message/meta appends stay on the allocation-only cache-hit path.
+func (s *SQLiteStore) advanceContextCacheLocked(expectedTip string, entries []Entry) {
+	if len(s.contextCacheEntries) == 0 || s.contextCacheKey != (contextCacheKey{branchID: s.branchID, tip: expectedTip}) {
+		s.invalidateContextCacheLocked()
+		return
+	}
+	parent := expectedTip
+	for i := range entries {
+		if entries[i].ParentID != parent || (entries[i].Type == EntryCompaction && strings.TrimSpace(entries[i].Summary) != "") {
+			s.invalidateContextCacheLocked()
+			return
+		}
+		s.contextCacheEntries = append(s.contextCacheEntries, cloneEntry(entries[i]))
+		parent = entries[i].ID
+	}
+	s.contextCacheKey.tip = parent
+}
+
 // Append implements Store. The entry and branch-tip update commit together.
 func (s *SQLiteStore) Append(entry Entry) error {
 	entry = cloneEntry(entry)
@@ -1356,6 +1393,7 @@ func (s *SQLiteStore) Append(entry Entry) error {
 		return fmt.Errorf("session: sqlite commit: %w", err)
 	}
 	s.tip = entry.ID
+	s.advanceContextCacheLocked(expectedTip, []Entry{entry})
 	return nil
 }
 
@@ -1431,6 +1469,7 @@ func (s *SQLiteStore) AppendBatch(batch []Entry) error {
 		return err
 	}
 	s.tip = parent
+	s.advanceContextCacheLocked(expectedTip, batch)
 	return nil
 }
 
@@ -1438,6 +1477,7 @@ func (s *SQLiteStore) refreshBranchTipLocked() {
 	var tip string
 	if err := s.db.QueryRow(`SELECT tip_id FROM session_branches WHERE branch_id=?`, s.branchID).Scan(&tip); err == nil {
 		s.tip = tip
+		s.invalidateContextCacheLocked()
 	}
 }
 
@@ -1489,6 +1529,7 @@ func (s *SQLiteStore) SetBranchTip(id string) error {
 		return fmt.Errorf("session: sqlite commit set tip: %w", err)
 	}
 	s.tip = id
+	s.invalidateContextCacheLocked()
 	return nil
 }
 
@@ -1539,18 +1580,38 @@ func (s *SQLiteStore) Messages() ([]protocol.Message, error) {
 }
 
 // ContextMessages implements ContextStore. It preserves complete history in
-// Messages while hiding entries before the latest compaction marker.
+// Messages while hiding entries before the latest compaction marker. Decoded
+// entries are cached by the immutable active branch/tip chain; returned
+// messages remain defensive clones owned by the caller.
 func (s *SQLiteStore) ContextMessages() ([]protocol.Message, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	if s.closed {
+		s.mu.RUnlock()
+		return nil, errors.New("session: store closed")
+	}
+	key := contextCacheKey{branchID: s.branchID, tip: s.tip}
+	if len(s.contextCacheEntries) != 0 && s.contextCacheKey == key {
+		messages := contextMessagesFromEntries(s.contextCacheEntries)
+		s.mu.RUnlock()
+		return messages, nil
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed {
 		return nil, errors.New("session: store closed")
 	}
-	entries, err := s.contextBranchEntries(s.tip)
-	if err != nil {
-		return nil, err
+	key = contextCacheKey{branchID: s.branchID, tip: s.tip}
+	if len(s.contextCacheEntries) == 0 || s.contextCacheKey != key {
+		entries, err := s.contextBranchEntries(s.tip)
+		if err != nil {
+			return nil, err
+		}
+		s.contextCacheKey = key
+		s.contextCacheEntries = entries
 	}
-	return contextMessagesFromEntries(entries), nil
+	return contextMessagesFromEntries(s.contextCacheEntries), nil
 }
 
 // BranchEntries implements BranchEntryStore.
@@ -1695,6 +1756,7 @@ func (s *SQLiteStore) SelectBranch(branchID string) error {
 	}
 	s.branchID = branchID
 	s.tip = tip
+	s.invalidateContextCacheLocked()
 	return nil
 }
 
@@ -1822,6 +1884,7 @@ func (s *SQLiteStore) ForkBranchWithOptions(opts protocol.BranchForkOptions) (pr
 	}
 	s.branchID = branchID
 	s.tip = fromEntryID
+	s.invalidateContextCacheLocked()
 	return protocol.SessionBranch{ID: branchID, Name: name, ParentID: sourceID, ForkedFromID: fromEntryID, TipID: fromEntryID, Messages: messages, Preview: preview, CreatedAt: now, UpdatedAt: now, Active: true}, nil
 }
 
@@ -2197,6 +2260,7 @@ func (s *SQLiteStore) Close() error {
 	meaningfulCount, countErr := s.durableStateCountLocked()
 	closeErr := s.db.Close()
 	s.closed = true
+	s.invalidateContextCacheLocked()
 	if countErr != nil || closeErr != nil {
 		return errors.Join(countErr, closeErr)
 	}

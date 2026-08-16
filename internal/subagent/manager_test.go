@@ -98,6 +98,40 @@ func rootAgent(t *testing.T, st session.Store) *agent.Agent {
 	return a
 }
 
+func TestSpawnForkNoneSkipsParentContext(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	message := protocol.NewUserMessage("parent-message", "", "large parent context")
+	if err := st.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+		t.Fatal(err)
+	}
+	root := rootAgent(t, st)
+	defer root.Close()
+	m := New(context.Background(), Limits{
+		MaxConcurrentThreads: 1, MaxAgentsPerSession: 2, MaxDepth: 1,
+		TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second,
+		DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}},
+	})
+	var active, maxActive atomic.Int32
+	var gotParentMessages int
+	factory := ChildFactoryFunc(func(_ context.Context, spec ChildSpec) (ChildRuntime, error) {
+		gotParentMessages = len(spec.ParentMessages)
+		return &mockChild{delay: time.Millisecond, active: &active, max: &maxActive}, nil
+	})
+	if err := m.Bind(root, factory, root.Publish, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(context.Background())
+	if _, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "isolated", Task: "inspect", ForkTurns: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	if gotParentMessages != 0 {
+		t.Fatalf("fork_turns=none passed %d parent messages", gotParentMessages)
+	}
+}
+
 func TestResolveRoleUsesClearCanonicalNames(t *testing.T) {
 	roles := map[string]Role{
 		"general":     {Name: "general"},

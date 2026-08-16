@@ -5,8 +5,53 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// BenchmarkSQLiteContextMessages compares the recursive SQL/JSON decode miss
+// with the defensive projection-only cache hit.
+func BenchmarkSQLiteContextMessages(b *testing.B) {
+	store, err := NewSQLiteStore(filepath.Join(b.TempDir(), "context.db"), b.TempDir(), Options{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer store.Close()
+	batch := make([]Entry, 1500)
+	body := strings.Repeat("context ", 128)
+	for i := range batch {
+		batch[i] = msg(fmt.Sprintf("m%d", i), "", body)
+	}
+	if err := store.AppendBatch(batch); err != nil {
+		b.Fatal(err)
+	}
+	if _, err := store.ContextMessages(); err != nil {
+		b.Fatal(err)
+	}
+	b.Run("cold", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			store.mu.Lock()
+			store.invalidateContextCacheLocked()
+			store.mu.Unlock()
+			if _, err := store.ContextMessages(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("warm", func(b *testing.B) {
+		if _, err := store.ContextMessages(); err != nil {
+			b.Fatal(err)
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if _, err := store.ContextMessages(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
 
 // BenchmarkLargeSessionReload loads a session with 10k entries and measures
 // the reload time (target < 500ms per IMPLEMENTATION.md §13.4).

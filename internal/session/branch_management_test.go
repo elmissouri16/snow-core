@@ -163,6 +163,9 @@ func TestSQLiteMultipleHandlesAppendUsesTipCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
+	if messages, err := second.ContextMessages(); err != nil || len(messages) != 0 {
+		t.Fatalf("warm stale context=%+v err=%v", messages, err)
+	}
 
 	one := protocol.NewUserMessage("one", "root", "one")
 	if err := first.Append(Entry{Type: EntryMessage, ID: one.ID, Message: &one}); err != nil {
@@ -171,6 +174,10 @@ func TestSQLiteMultipleHandlesAppendUsesTipCAS(t *testing.T) {
 	stale := protocol.NewUserMessage("stale", "root", "stale")
 	if err := second.Append(Entry{Type: EntryMessage, ID: stale.ID, Message: &stale}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale append error=%v, want ErrConflict", err)
+	}
+	refreshed, err := second.ContextMessages()
+	if err != nil || len(refreshed) != 1 || refreshed[0].ID != "one" {
+		t.Fatalf("context after conflict=%+v err=%v", refreshed, err)
 	}
 	var count int
 	if err := first.db.QueryRow(`SELECT count(*) FROM entries WHERE id='stale'`).Scan(&count); err != nil || count != 0 {

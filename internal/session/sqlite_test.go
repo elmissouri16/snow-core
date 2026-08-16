@@ -521,6 +521,80 @@ func TestSQLiteCompactionProjectionSurvivesReload(t *testing.T) {
 	}
 }
 
+func TestSQLiteContextCacheAdvancesAndPreservesOwnership(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "context-cache.db"), t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, entry := range []Entry{msg("a", "", "one"), msg("b", "", "two")} {
+		if err := store.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := store.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.contextCacheKey.tip != "b" || len(store.contextCacheEntries) == 0 {
+		t.Fatalf("cache key=%+v entries=%d", store.contextCacheKey, len(store.contextCacheEntries))
+	}
+	cachedEntries := len(store.contextCacheEntries)
+	if err := store.Append(msg("c", "", "three")); err != nil {
+		t.Fatal(err)
+	}
+	if store.contextCacheKey.tip != "c" || len(store.contextCacheEntries) != cachedEntries+1 {
+		t.Fatalf("advanced cache key=%+v entries=%d, want tip c and %d entries", store.contextCacheKey, len(store.contextCacheEntries), cachedEntries+1)
+	}
+	first[0].Content[0].Text = "mutated"
+	second, err := store.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 3 || second[0].Content[0].Text != "one" || second[2].Content[0].Text != "three" {
+		t.Fatalf("cached projection was mutated or stale: %+v", second)
+	}
+}
+
+func TestSQLiteContextCacheInvalidatesAtCompactionBoundary(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "context-cache-compact.db"), t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, entry := range []Entry{msg("a", "", "old"), msg("b", "", "boundary"), msg("c", "", "keep")} {
+		if err := store.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.ContextMessages(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(Entry{Type: EntryCompaction, ID: "compact", Summary: "summary", CompactedThrough: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.contextCacheEntries) != 0 {
+		t.Fatalf("compaction retained %d cached entries", len(store.contextCacheEntries))
+	}
+	projected, err := store.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected) != 2 || projected[0].Role != protocol.RoleCustom || projected[1].ID != "c" {
+		t.Fatalf("compacted projection = %+v", projected)
+	}
+	if err := store.Append(msg("d", "", "after")); err != nil {
+		t.Fatal(err)
+	}
+	if store.contextCacheKey.tip != "d" {
+		t.Fatalf("post-compaction cache tip = %q", store.contextCacheKey.tip)
+	}
+	projected, err = store.ContextMessages()
+	if err != nil || len(projected) != 3 || projected[2].ID != "d" {
+		t.Fatalf("post-compaction projection = %+v, err=%v", projected, err)
+	}
+}
+
 func TestSQLiteAggregateUsageAndReferenceCount(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "aggregates.db"), t.TempDir(), Options{})
 	if err != nil {

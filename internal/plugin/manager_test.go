@@ -118,6 +118,18 @@ func TestManagerCloseWaitsForInitialization(t *testing.T) {
 	}
 }
 
+func TestManagerEmitWithoutObserversDoesNotClone(t *testing.T) {
+	manager := NewManager(tools.NewRegistry())
+	if err := manager.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+	ev := protocol.AgentEvent{Type: protocol.EvToolEnd, ToolOutput: strings.Repeat("x", 64<<10)}
+	if allocs := testing.AllocsPerRun(100, func() { manager.Emit(ev) }); allocs != 0 {
+		t.Fatalf("Emit without observers allocated %.1f times per event", allocs)
+	}
+}
+
 func TestManagerCloseDoesNotWaitForInFlightEmit(t *testing.T) {
 	manager := NewManager(tools.NewRegistry())
 	if err := manager.Initialize(context.Background()); err != nil {
