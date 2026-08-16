@@ -1,8 +1,8 @@
 name: CI
 
+# Automatic push and pull-request runs are paused for now. Keep manual runs
+# available so CI can still be invoked explicitly when needed.
 on:
-  push:
-  pull_request:
   workflow_dispatch:
 
 permissions:
