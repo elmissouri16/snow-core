@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,13 @@ func newTranscriptSelectionTestModel(t *testing.T, lines []string) *Model {
 	m.transcriptDirty = true
 	m.refreshTranscriptForced()
 	return m
+}
+
+func TestTranscriptSelectionUsesHostClipboardByDefault(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	if m.copySelectionToClipboard == nil {
+		t.Fatal("runtime transcript selection has no host clipboard writer")
+	}
 }
 
 func TestTranscriptMouseDragSelectsHighlightsAndCopies(t *testing.T) {
@@ -247,35 +255,138 @@ func TestTranscriptDoubleAndTripleClickSelectWordThenLine(t *testing.T) {
 	}
 }
 
-func TestRightClickDisablesAppMouseForNativeContextMenu(t *testing.T) {
-	m := newTranscriptSelectionTestModel(t, []string{"select me"})
+func TestRightClickContextMenuCopiesWithoutDisablingViewportMouse(t *testing.T) {
+	lines := make([]string, 40)
+	lines[0] = "select me"
+	for i := 1; i < len(lines); i++ {
+		lines[i] = "row"
+	}
+	m := newTranscriptSelectionTestModel(t, lines)
+	m.transcript.GotoTop()
 	m.transcriptSelection.anchor = &transcriptSelectionPoint{row: 0, col: 0}
 	m.transcriptSelection.focus = &transcriptSelectionPoint{row: 0, col: 3}
-	m.transcriptSelection.pressActive = true
-	frozen := m.transcriptContent
-	m.assistantBuf.WriteString("caught up after right-click")
-	m.transcriptDirty = true
+	var copied string
+	m.copySelectionToClipboard = func(text string) error {
+		copied = text
+		return nil
+	}
+
 	_, cmd := m.Update(tea.MouseMsg{X: 2, Y: m.transcriptSelectionTop(), Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
-	if cmd == nil || m.app.Cfg.TUI.Mouse {
-		t.Fatalf("right-click did not disable app mouse mode: cmd=%v mouse=%v", cmd != nil, m.app.Cfg.TUI.Mouse)
+	if cmd != nil || !m.transcriptSelectionMenu.open {
+		t.Fatalf("right-click context menu: cmd=%v open=%v", cmd != nil, m.transcriptSelectionMenu.open)
 	}
-	if _, ok := m.transcriptSelectionBounds(); ok {
-		t.Fatal("right-click retained application selection")
+	if want := transcriptSelectionBlockWidth(transcriptSelectionContextMenuView()); m.transcriptSelectionMenu.width != want || want > 24 {
+		t.Fatalf("context menu width=%d want=%d and <=24", m.transcriptSelectionMenu.width, want)
 	}
-	if m.transcriptContent == frozen || !strings.Contains(xansi.Strip(m.transcriptContent), "caught up after right-click") {
-		t.Fatal("right-click left stream updates frozen behind the cleared selection")
+	rendered := m.View()
+	if !strings.Contains(stripANSI(rendered), "Copy selection") {
+		t.Fatal("right-click context menu was not rendered")
 	}
-	if !strings.Contains(m.lastStatus, "right-click again") || !strings.Contains(m.lastStatus, "F6") {
-		t.Fatalf("right-click status = %q", m.lastStatus)
+	for row, line := range strings.Split(rendered, "\n") {
+		if width := xansi.StringWidth(line); width > m.managedFrameWidth() {
+			t.Fatalf("context menu widened frame row %d to %d cells (frame=%d)", row, width, m.managedFrameWidth())
+		}
+	}
+	if !m.app.Cfg.TUI.Mouse {
+		t.Fatal("right-click disabled fixed viewport mouse scrolling")
+	}
+	if _, ok := m.transcriptSelectionBounds(); !ok {
+		t.Fatal("right-click cleared the current transcript selection")
+	}
+	menu := m.transcriptSelectionMenu
+	_, cmd = m.Update(tea.MouseMsg{X: menu.x + 1, Y: menu.y + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if cmd == nil || m.transcriptSelectionMenu.open {
+		t.Fatalf("context-menu copy click: cmd=%v open=%v", cmd != nil, m.transcriptSelectionMenu.open)
+	}
+	_, _ = m.Update(cmd())
+	if copied != "sele" {
+		t.Fatalf("context-menu copied %q, want %q", copied, "sele")
+	}
+	_, _ = m.Update(tea.MouseMsg{X: 2, Y: m.transcriptSelectionTop(), Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+	before := m.transcript.YOffset
+	_, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	if m.transcriptSelectionMenu.open {
+		t.Fatal("wheel did not dismiss the transcript context menu")
+	}
+	if m.transcript.YOffset <= before {
+		t.Fatalf("wheel offset=%d want > %d after right-click copy", m.transcript.YOffset, before)
 	}
 }
 
-func TestRightClickNativeHandoffWorksOverFleetOverlay(t *testing.T) {
+func TestTranscriptContextMenuFitsNarrowFrame(t *testing.T) {
+	m := newTranscriptSelectionTestModel(t, []string{"select me"})
+	m.width = 10
+	m.layout()
+	m.refreshTranscriptForced()
+	m.transcriptSelection.anchor = &transcriptSelectionPoint{row: 0, col: 0}
+	m.transcriptSelection.focus = &transcriptSelectionPoint{row: 0, col: 3}
+
+	_, _ = m.Update(tea.MouseMsg{X: 2, Y: m.transcriptSelectionTop(), Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+	if !m.transcriptSelectionMenu.open {
+		t.Fatal("context menu did not open")
+	}
+	frameWidth := m.managedFrameWidth()
+	if width := m.transcriptSelectionMenu.width; width > frameWidth {
+		t.Fatalf("context menu width=%d exceeds narrow frame=%d", width, frameWidth)
+	}
+	for row, line := range strings.Split(m.View(), "\n") {
+		if width := xansi.StringWidth(line); width > frameWidth {
+			t.Fatalf("context menu widened narrow frame row %d to %d cells (frame=%d)", row, width, frameWidth)
+		}
+	}
+}
+
+func TestTranscriptContextMenuKeyboardCopyAndDismiss(t *testing.T) {
+	m := newTranscriptSelectionTestModel(t, []string{"copy me"})
+	m.transcriptSelection.anchor = &transcriptSelectionPoint{row: 0, col: 0}
+	m.transcriptSelection.focus = &transcriptSelectionPoint{row: 0, col: 3}
+	var copied string
+	m.copySelectionToClipboard = func(text string) error {
+		copied = text
+		return nil
+	}
+
+	open := func() {
+		_, _ = m.Update(tea.MouseMsg{X: 1, Y: m.transcriptSelectionTop(), Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+		if !m.transcriptSelectionMenu.open {
+			t.Fatal("context menu did not open")
+		}
+	}
+	open()
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || m.transcriptSelectionMenu.open {
+		t.Fatalf("Enter copy: cmd=%v open=%v", cmd != nil, m.transcriptSelectionMenu.open)
+	}
+	_, _ = m.Update(cmd())
+	if copied != "copy" {
+		t.Fatalf("Enter copied %q, want %q", copied, "copy")
+	}
+
+	open()
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil || m.transcriptSelectionMenu.open {
+		t.Fatalf("Escape dismiss: cmd=%v open=%v", cmd != nil, m.transcriptSelectionMenu.open)
+	}
+}
+
+func TestTranscriptCopyFallsBackToOSC52WhenHostClipboardFails(t *testing.T) {
+	m := newTranscriptSelectionTestModel(t, []string{"fallback"})
+	m.copySelectionToClipboard = func(string) error { return errors.New("clipboard unavailable") }
+	message, ok := m.copyTranscriptSelectionCmd("fallback")().(transcriptSelectionCopiedMsg)
+	if !ok {
+		t.Fatal("copy command returned the wrong message type")
+	}
+	if message.err != nil || message.sequence == "" {
+		t.Fatalf("clipboard fallback: err=%v sequence=%q", message.err, message.sequence)
+	}
+}
+
+func TestRightClickOverFleetKeepsViewportMouseEnabled(t *testing.T) {
 	m := newTranscriptSelectionTestModel(t, []string{"fleet"})
 	m.subagentFleetOpen = true
 	_, cmd := m.Update(tea.MouseMsg{Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
-	if cmd == nil || m.app.Cfg.TUI.Mouse {
-		t.Fatalf("overlay trapped right-click: cmd=%v mouse=%v", cmd != nil, m.app.Cfg.TUI.Mouse)
+	if cmd != nil || !m.app.Cfg.TUI.Mouse {
+		t.Fatalf("fleet right-click changed mouse mode: cmd=%v mouse=%v", cmd != nil, m.app.Cfg.TUI.Mouse)
 	}
 }
 

@@ -78,10 +78,10 @@ trackpad gestures stay inside Snow instead of moving terminal scrollback.
 Cell-motion reports also drive transcript highlighting/copy and edge
 auto-scroll.
 Apple Terminal provides Fn-drag as its terminal-native selection override. A
-reported right-click switches Snow to native mode; terminals that consume the
-initiating press require one repeated click to open their menu because mouse
-reports cannot be replayed as host GUI input. F6 toggles explicitly. In native
-mode, wheel behavior belongs to the terminal and may move its scrollback. This
+reported right-click opens Snow's bounded **Copy selection** context menu
+without changing mouse reporting, preserving viewport wheel ownership. F6 toggles
+explicitly. In native mode, wheel behavior belongs to the terminal and may move
+its scrollback. This
 split reflects the protocol: portable native drag/context menus and application
 wheel events cannot coexist.
 
@@ -131,12 +131,15 @@ snapshots and never access session storage.
 
 PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down always update the transcript
 viewport. In the default mouse mode, the wheel scrolls and drag selects
-ANSI/grapheme-aware transcript cells; releasing copies through OSC 52 with
-detected tmux/screen passthrough. Apple Terminal users can Fn-drag for zero-lag
+ANSI/grapheme-aware transcript cells; releasing writes the host clipboard with
+OSC 52 fallback and detected tmux/screen passthrough. Apple Terminal users can
+Fn-drag for zero-lag
 native selection. Double-click selects a word, triple-click a line, and edge
-dragging continues through off-screen rows. Right-click hands mouse ownership
-back to the terminal for native selection and context menus; repeat it if the
-initiating press was consumed. F6 toggles reporting explicitly.
+dragging continues through off-screen rows. Right-click opens the in-frame
+**Copy selection** menu; mouse click, Enter, or `c` copies through the host
+clipboard (`pbcopy`/available Linux utility, then OSC 52 fallback), while Esc,
+outside click, or wheel dismisses it. Viewport mouse reporting remains enabled. F6 toggles
+reporting explicitly.
 
 The viewport follows new output only while already at bottom, and active
 application selections freeze their source snapshot. Keyboard viewport scrolling
@@ -145,6 +148,12 @@ remains available in native mouse mode.
 Bubble Tea v1 can expose fragmented SGR mouse reports as text in some terminals,
 so Snow retains defensive reconstruction before input reaches the textarea.
 Pasted mouse-looking text remains literal.
+
+Composer editing has a dedicated hot path: ordinary typing and deletion skip
+submission-only image, queue, goal, and whitespace processing. Once a pasted
+composer value already requires the six-row maximum, a bounded grapheme scan
+avoids re-wrapping the complete value merely to recompute its height. The
+`BenchmarkComposerBackspace` benchmark covers short, 8 KiB, and 64 KiB inputs.
 
 ### Tool and run presentation
 

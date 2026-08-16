@@ -318,9 +318,8 @@ stale rendered headers or composer chrome. The default `mouse: true` keeps
 wheel/trackpad gestures inside Snow's transcript viewport and provides
 highlighted drag selection, edge auto-scroll, and OSC 52 copy. Apple Terminal
 users can hold Fn while dragging for instant terminal-native selection without
-disabling wheel handling. A reported right-click switches Snow to native mouse
-mode for terminal selection/context menus; repeat the click when the terminal
-consumed the initiating press. F6 toggles explicitly, and `mouse: false` starts
+disabling wheel handling. Right-click opens Snow's **Copy selection** context
+menu without changing mouse mode. F6 toggles explicitly, and `mouse: false` starts
 natively. In native mode wheel gestures may scroll terminal history;
 PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
 

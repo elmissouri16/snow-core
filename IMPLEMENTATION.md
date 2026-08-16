@@ -861,8 +861,8 @@ while busy).
 The TUI uses Bubble Tea's alternate-screen, app-owned viewport so scrolling
 cannot reveal stale frame chrome. `tui.mouse` defaults to `true` so wheel and
 trackpad gestures stay inside Snow's viewport; primary drag uses Snow
-selection/copy, F6 toggles app/native mouse mode, and right-click switches to
-native mode for the terminal context menu. `Ctrl+V` attaches supported
+selection/copy, F6 toggles app/native mouse mode, and right-click opens Snow's
+bounded **Copy selection** menu without disabling viewport mouse reporting. `Ctrl+V` attaches supported
 clipboard images in the agent composer or falls back to textarea paste.
 
 ### Slash commands

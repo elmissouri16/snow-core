@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/snow-core/snow/internal/app"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -146,6 +147,33 @@ func BenchmarkMentionMatching(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = matchMentionFiles(files, "file")
+	}
+}
+
+func BenchmarkComposerBackspace(b *testing.B) {
+	for _, size := range []int{256, 8 << 10, 64 << 10} {
+		b.Run(fmt.Sprintf("bytes-%d", size), func(b *testing.B) {
+			m := newModel(context.Background(), app.Options{})
+			m.width, m.height = 120, 40
+			payload := strings.Repeat("word ", size/5+1)[:size]
+			m.editor.SetValue(payload)
+			m.editor.CursorEnd()
+			m.layout()
+			remaining := size
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if remaining == 0 {
+					m.editor.SetValue(payload)
+					m.editor.CursorEnd()
+					remaining = size
+				}
+				_, _ = m.updateComposerEditor(tea.KeyMsg{Type: tea.KeyBackspace})
+				m.layout()
+				_ = m.View()
+				remaining--
+			}
+		})
 	}
 }
 

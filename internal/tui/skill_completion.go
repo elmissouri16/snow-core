@@ -59,13 +59,17 @@ func replaceSkillCompletionToken(text string, start int, name string) string {
 }
 
 func (m *Model) refreshSkillCompletions() {
+	m.refreshSkillCompletionsFor(m.editor.Value())
+}
+
+func (m *Model) refreshSkillCompletionsFor(text string) {
 	m.skillVisible = false
 	m.skillMatches = nil
 	m.skillIndex = 0
 	if m.app == nil || m.app.Skills == nil {
 		return
 	}
-	query, _, selected, ok := skillCompletionQuery(m.editor.Value())
+	query, _, selected, ok := skillCompletionQuery(text)
 	if !ok {
 		return
 	}

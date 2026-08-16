@@ -178,9 +178,11 @@ The TUI uses Bubble Tea's supported full-window pattern: alternate screen,
 sticky header/footer, and a Bubbles transcript viewport. Mouse mode defaults on
 so wheel/trackpad gestures scroll Snow's transcript viewport instead of terminal
 scrollback. Primary drag selects and copies transcript text; on Apple Terminal,
-hold Fn while dragging for terminal-native selection. Right-click switches Snow
-to native mouse mode (repeat the click if the terminal consumed the initiating
-press); F6 toggles app/native mode explicitly, and PageUp/PageDown, Home/End,
+hold Fn while dragging for terminal-native selection. Right-click opens Snow's
+compact context menu for the current selection; choosing **Copy selection**
+writes the host clipboard (`pbcopy` on macOS, standard Linux clipboard tools,
+with OSC 52 fallback) without changing mouse mode, so viewport scrolling stays
+active. F6 toggles app/native mode explicitly, and PageUp/PageDown, Home/End,
 and Ctrl+Up/Ctrl+Down scroll the viewport. In the composer, Ctrl+V inserts an
 inline `[Image #N]` attachment for a PNG/JPEG/GIF/WebP clipboard image (up to
 eight images, 20 MiB each and 40 MiB aggregate), sent only to vision-capable

@@ -244,6 +244,21 @@ func TestRunStatusGeometryKeepsSingleStickyFooter(t *testing.T) {
 	assertFooter("settled")
 }
 
+func TestComposerHardWrapBoundStopsAtRequestedHeight(t *testing.T) {
+	if composerHardWrapReaches("abc", 3, 2) {
+		t.Fatal("exactly full single line was treated as two lines")
+	}
+	if !composerHardWrapReaches("abcd", 3, 2) {
+		t.Fatal("hard-wrapped second line was not detected")
+	}
+	if !composerHardWrapReaches("one\ntwo\nthree", 80, 3) {
+		t.Fatal("explicit newlines did not reach target height")
+	}
+	if !composerHardWrapReaches(strings.Repeat("界", 20), 10, 4) {
+		t.Fatal("wide graphemes did not reach target height")
+	}
+}
+
 func TestComposerAutoGrowsAndShrinks(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
@@ -283,6 +298,20 @@ func TestComposerAutoGrowsAndShrinks(t *testing.T) {
 		t.Fatalf("reset composer height = %d, want 3", got)
 	}
 	assertExactFrame(t, m)
+}
+
+func TestComposerBackspaceUsesOrdinaryEditingFastPath(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.editor.SetValue("/mode")
+	m.editor.CursorEnd()
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	if got := m.editor.Value(); got != "/mod" {
+		t.Fatalf("composer after Backspace = %q, want %q", got, "/mod")
+	}
+	if !m.compVisible {
+		t.Fatal("Backspace fast path did not refresh slash completion state")
+	}
 }
 
 func TestComposerMultilineShortcutsDoNotSubmit(t *testing.T) {

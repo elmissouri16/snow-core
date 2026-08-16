@@ -58,29 +58,7 @@ func (m *Model) catchUpTranscriptAtBottom() {
 	m.flushTranscriptImmediately()
 }
 
-func (m *Model) handoffNativeMouseOnRightClick(msg tea.MouseMsg) (bool, tea.Cmd) {
-	if m.app == nil || !m.app.Cfg.TUI.Mouse {
-		return false, nil
-	}
-	event := tea.MouseEvent(msg)
-	if event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonRight {
-		return false, nil
-	}
-	// While mouse reporting is enabled, the terminal sends right-click to Snow
-	// instead of opening its native context menu. Hand mouse ownership back
-	// immediately. Terminal protocols cannot replay that consumed press, so
-	// terminals that do not open on release need one repeated right-click.
-	m.clearTranscriptSelection()
-	m.catchUpTranscriptAfterSelection()
-	m.app.Cfg.TUI.Mouse = false
-	m.lastStatus = "native mouse enabled · right-click again for terminal menu · F6 restores app mouse"
-	return true, tea.DisableMouse
-}
-
 func (m *Model) applyMouse(msg tea.MouseMsg) tea.Cmd {
-	if handled, cmd := m.handoffNativeMouseOnRightClick(msg); handled {
-		return cmd
-	}
 	if handled, cmd := m.applyTranscriptSelectionMouse(msg); handled {
 		return cmd
 	}

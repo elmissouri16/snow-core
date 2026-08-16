@@ -9,6 +9,7 @@ import (
 
 	osc52 "github.com/aymanbagabas/go-osc52/v2"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -48,6 +49,15 @@ type transcriptSelectionClick struct {
 	wordEnd   int
 }
 
+type transcriptSelectionContextMenu struct {
+	open         bool
+	x            int
+	y            int
+	width        int
+	height       int
+	selectedText string
+}
+
 type transcriptSelectionState struct {
 	anchor          *transcriptSelectionPoint
 	focus           *transcriptSelectionPoint
@@ -77,6 +87,7 @@ type transcriptSelectionClipboardClearMsg uint64
 func (m *Model) clearTranscriptSelection() {
 	nextID := m.transcriptSelection.autoScrollID + 1
 	m.transcriptSelection = transcriptSelectionState{autoScrollID: nextID}
+	m.transcriptSelectionMenu = transcriptSelectionContextMenu{}
 	m.transcriptSelectionView = ""
 	m.transcriptSelectionViewValid = false
 	m.transcriptSelectionRendered = ""
@@ -134,6 +145,20 @@ func (m *Model) applyTranscriptSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) 
 		return false, nil
 	}
 	event := tea.MouseEvent(msg)
+	if m.transcriptSelectionMenu.open {
+		if handled, cmd := m.applyTranscriptSelectionContextMenuMouse(event); handled {
+			return true, cmd
+		}
+	}
+	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonRight {
+		text := m.selectedTranscriptText()
+		if text == "" {
+			m.lastStatus = "drag transcript text to select and copy"
+			return true, nil
+		}
+		m.openTranscriptSelectionContextMenu(event.X, event.Y, text)
+		return true, nil
+	}
 	if event.Action == tea.MouseActionRelease {
 		if !m.transcriptSelection.pressActive {
 			return false, nil
@@ -150,16 +175,7 @@ func (m *Model) applyTranscriptSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) 
 		if text == "" {
 			return true, nil
 		}
-		copyText := m.copySelectionToClipboard
-		return true, func() tea.Msg {
-			message := transcriptSelectionCopiedMsg{characters: utf8.RuneCountInString(text)}
-			if copyText != nil {
-				message.err = copyText(text)
-			} else {
-				message.sequence = transcriptSelectionClipboardSequence(text)
-			}
-			return message
-		}
+		return true, m.copyTranscriptSelectionCmd(text)
 	}
 
 	if event.Action == tea.MouseActionMotion {
@@ -217,6 +233,145 @@ func (m *Model) applyTranscriptSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) 
 	m.transcriptSelection.dragged = false
 	m.cacheTranscriptSelectionView()
 	return true, nil
+}
+
+func (m *Model) copyTranscriptSelectionCmd(text string) tea.Cmd {
+	copyText := m.copySelectionToClipboard
+	return func() tea.Msg {
+		message := transcriptSelectionCopiedMsg{characters: utf8.RuneCountInString(text)}
+		if copyText != nil {
+			if err := copyText(text); err == nil {
+				return message
+			}
+		}
+		// OSC 52 remains a portable fallback when a host clipboard utility is
+		// unavailable (for example, a minimal Linux environment).
+		message.sequence = transcriptSelectionClipboardSequence(text)
+		return message
+	}
+}
+
+func transcriptSelectionContextMenuView() string {
+	item := lipgloss.NewStyle().
+		Foreground(colorAccent).
+		Bold(true).
+		Padding(0, 1).
+		Render("› Copy selection")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorMuted).
+		Render(item)
+}
+
+func transcriptSelectionBlockWidth(block string) int {
+	width := 0
+	for _, line := range strings.Split(block, "\n") {
+		width = max(width, xansi.StringWidth(line))
+	}
+	return width
+}
+
+func (m *Model) openTranscriptSelectionContextMenu(x, y int, text string) {
+	view := transcriptSelectionContextMenuView()
+	frameWidth := m.managedFrameWidth()
+	width := min(transcriptSelectionBlockWidth(view), frameWidth)
+	height := lipgloss.Height(view)
+	x = min(max(0, x), max(0, frameWidth-width))
+	y = min(max(0, y+1), max(0, m.height-height))
+	m.transcriptSelectionMenu = transcriptSelectionContextMenu{
+		open: true, x: x, y: y, width: width, height: height, selectedText: text,
+	}
+}
+
+func (m *Model) closeTranscriptSelectionContextMenu() {
+	m.transcriptSelectionMenu = transcriptSelectionContextMenu{}
+}
+
+func (m *Model) applyTranscriptSelectionContextMenuMouse(event tea.MouseEvent) (bool, tea.Cmd) {
+	menu := m.transcriptSelectionMenu
+	if !menu.open {
+		return false, nil
+	}
+	if event.Button == tea.MouseButtonWheelUp || event.Button == tea.MouseButtonWheelDown ||
+		event.Button == tea.MouseButtonWheelLeft || event.Button == tea.MouseButtonWheelRight {
+		m.closeTranscriptSelectionContextMenu()
+		return false, nil
+	}
+	if event.Action == tea.MouseActionMotion || event.Action == tea.MouseActionRelease {
+		return true, nil
+	}
+	if event.Action != tea.MouseActionPress {
+		return true, nil
+	}
+	inside := event.X >= menu.x && event.X < menu.x+menu.width &&
+		event.Y >= menu.y && event.Y < menu.y+menu.height
+	if event.Button == tea.MouseButtonLeft && inside {
+		m.closeTranscriptSelectionContextMenu()
+		return true, m.copyTranscriptSelectionCmd(menu.selectedText)
+	}
+	if event.Button == tea.MouseButtonRight {
+		m.openTranscriptSelectionContextMenu(event.X, event.Y, menu.selectedText)
+		return true, nil
+	}
+	m.closeTranscriptSelectionContextMenu()
+	return true, nil
+}
+
+func (m *Model) applyTranscriptSelectionContextMenuKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+	if !m.transcriptSelectionMenu.open {
+		return false, nil
+	}
+	switch msg.Type {
+	case tea.KeyEnter:
+		text := m.transcriptSelectionMenu.selectedText
+		m.closeTranscriptSelectionContextMenu()
+		return true, m.copyTranscriptSelectionCmd(text)
+	case tea.KeyEsc:
+		m.closeTranscriptSelectionContextMenu()
+		return true, nil
+	}
+	if msg.Type == tea.KeyRunes && strings.EqualFold(string(msg.Runes), "c") {
+		text := m.transcriptSelectionMenu.selectedText
+		m.closeTranscriptSelectionContextMenu()
+		return true, m.copyTranscriptSelectionCmd(text)
+	}
+	m.closeTranscriptSelectionContextMenu()
+	return false, nil
+}
+
+func overlayTranscriptSelectionContextMenu(frame string, menu transcriptSelectionContextMenu) string {
+	if !menu.open || menu.width <= 0 || frame == "" {
+		return frame
+	}
+	popup := transcriptSelectionContextMenuView()
+	baseLines := strings.Split(frame, "\n")
+	popupLines := strings.Split(popup, "\n")
+	for index, popupLine := range popupLines {
+		row := menu.y + index
+		if row < 0 || row >= len(baseLines) {
+			continue
+		}
+		line := baseLines[row]
+		lineWidth := xansi.StringWidth(line)
+		needed := menu.x + menu.width
+		if lineWidth < needed {
+			line += strings.Repeat(" ", needed-lineWidth)
+			lineWidth = needed
+		}
+		popupWidth := xansi.StringWidth(popupLine)
+		if popupWidth < menu.width {
+			popupLine += strings.Repeat(" ", menu.width-popupWidth)
+		} else if popupWidth > menu.width {
+			popupLine = xansi.Cut(popupLine, 0, menu.width)
+		}
+		before := xansi.Cut(line, 0, menu.x)
+		after := xansi.Cut(line, min(lineWidth, menu.x+menu.width), lineWidth)
+		// The underlying transcript may be in reverse-video selection mode.
+		// Reset around each popup row so that style cannot bleed across the frame;
+		// xansi.Cut restores the source style at the start of after.
+		baseLines[row] = before + "\x1b[0m" + popupLine + "\x1b[0m" + after
+	}
+	return strings.Join(baseLines, "\n")
 }
 
 func (m *Model) catchUpTranscriptAfterSelection() {

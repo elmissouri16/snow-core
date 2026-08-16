@@ -155,11 +155,13 @@ the active theme: green below 50%, accent color from 50-69%, warning/yellow
 from 70-89%, and red at 90% or above. With the default `tui.mouse: true`,
 wheel/trackpad gestures scroll Snow's transcript instead of terminal history;
 primary drag highlights and copies through OSC 52. On Apple Terminal, hold Fn
-while dragging for instant terminal-native selection. A right-click received by
-Snow disables mouse reporting so the terminal owns native selection and its
-context menu; because terminal protocols cannot replay the consumed press,
-repeat the right-click when the menu does not open on release. F6 toggles
-app/native mouse mode. In native mode, wheel gestures may move terminal
+while dragging for instant terminal-native selection. Right-click opens Snow's
+compact context menu for the current selection. Choose **Copy selection** with
+a mouse click, Enter, or `c`; Esc, an outside click, or the wheel dismisses it.
+Copy writes the host clipboard through `pbcopy` on macOS or an available Linux
+clipboard utility, with OSC 52 as fallback. The menu never disables application
+mouse reporting, so the wheel remains attached to the transcript viewport. F6 is the explicit
+app/native mouse-mode toggle. In native mode, wheel gestures may move terminal
 scrollback; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
 
 ## Composer and transcript keys
@@ -179,7 +181,7 @@ described in [Configuration](configuration.md).
 | `Ctrl+D` | Quit when the composer is empty | — |
 | Wheel/trackpad (`tui.mouse: true`) | Scroll transcript viewport | Same |
 | Primary-button drag (`tui.mouse: true`) | Select and copy transcript text | Same |
-| Right-click (`tui.mouse: true`) | Switch to native mouse mode; repeat click if needed for terminal menu | Same |
+| Right-click (`tui.mouse: true`) | Open Snow context menu for the current selection; Copy selection preserves viewport mouse mode | Same |
 | `F6` | Toggle app mouse handling/native terminal selection and context menu | Same |
 | `r` in `/sessions` or `/resume` picker | Rename selected session | Same |
 | `PageUp` / `PageDown` | Scroll transcript viewport | Same |

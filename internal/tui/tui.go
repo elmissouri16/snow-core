@@ -647,6 +647,7 @@ type Model struct {
 	promptImages                     []protocol.ContentBlock
 	copySelectionToClipboard         func(string) error
 	transcriptSelection              transcriptSelectionState
+	transcriptSelectionMenu          transcriptSelectionContextMenu
 	transcriptSelectionLines         []string
 	transcriptSelectionView          string
 	transcriptSelectionViewRow       int
@@ -660,6 +661,54 @@ type Model struct {
 type statusInfoItem struct {
 	Label  string
 	Detail string
+}
+
+const transcriptClipboardTimeout = 2 * time.Second
+
+func writeTranscriptClipboard(text string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), transcriptClipboardTimeout)
+	defer cancel()
+
+	type clipboardCommand struct {
+		name string
+		args []string
+	}
+	var candidates []clipboardCommand
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = []clipboardCommand{{name: "pbcopy"}}
+	case "linux":
+		candidates = []clipboardCommand{
+			{name: "wl-copy"},
+			{name: "xclip", args: []string{"-selection", "clipboard"}},
+			{name: "xsel", args: []string{"--clipboard", "--input"}},
+		}
+	default:
+		return fmt.Errorf("host clipboard unsupported on %s", runtime.GOOS)
+	}
+
+	failures := make([]error, 0, len(candidates))
+	for _, candidate := range candidates {
+		path, err := exec.LookPath(candidate.name)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", candidate.name, err))
+			continue
+		}
+		cmd := exec.CommandContext(ctx, path, candidate.args...)
+		cmd.Stdin = strings.NewReader(text)
+		if err := cmd.Run(); err == nil {
+			return nil
+		} else {
+			failures = append(failures, fmt.Errorf("%s: %w", candidate.name, err))
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		failures = append(failures, fmt.Errorf("clipboard deadline: %w", err))
+	}
+	return errors.Join(failures...)
 }
 
 func newModel(ctx context.Context, opts app.Options) *Model {
@@ -716,6 +765,7 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 		queueOriginalText:          make(map[string]string),
 		queueRendered:              make(map[string]bool),
 		startupApps:                make(map[*app.App]struct{}),
+		copySelectionToClipboard:   writeTranscriptClipboard,
 		transcriptBaseDirty:        true,
 		now:                        time.Now,
 	}
@@ -957,11 +1007,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		m.refreshTranscriptForced()
 	case tea.MouseMsg:
-		// Native context-menu handoff takes precedence over overlays too. A fleet
-		// panel may ignore app scrolling, but it must not trap right-click forever.
-		if handled, cmd := m.handoffNativeMouseOnRightClick(msg); handled {
-			return m, cmd
-		}
 		if m.subagentFleetOpen {
 			m.handleSubagentFleetMouse(msg)
 			return m, nil
@@ -993,6 +1038,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
+		if handled, cmd := m.applyTranscriptSelectionContextMenuKey(msg); handled {
+			return m, cmd
+		}
 		if handled, cmd := m.normalizeTerminalKey(msg); handled {
 			m.layout()
 			return m, cmd
@@ -2478,16 +2526,56 @@ const (
 // keeping the idle composer comfortably usable. The textarea remains internally
 // scrollable after reaching maxComposerHeight.
 func (m *Model) desiredComposerHeight() int {
-	if m.loginMode || m.loginProfileMode || m.loginEndpointMode || m.editor.Value() == "" {
+	text := m.editor.Value()
+	if m.loginMode || m.loginProfileMode || m.loginEndpointMode || text == "" {
 		return minComposerHeight
 	}
 	width := m.editor.Width()
 	if width < 1 {
 		width = max(1, m.width-4)
 	}
-	wrapped := xansi.Wordwrap(m.editor.Value(), width, "")
+	// The composer stops growing after maxComposerHeight. Avoid wrapping an
+	// entire large paste on every edit once a bounded prefix already proves the
+	// editor must be at that cap. Word wrapping can add breaks compared with
+	// hard wrapping, but cannot reduce this lower-bound line count.
+	if composerHardWrapReaches(text, width, maxComposerHeight) {
+		return maxComposerHeight
+	}
+	wrapped := xansi.Wordwrap(text, width, "")
 	wrapped = xansi.Hardwrap(wrapped, width, true)
 	return min(maxComposerHeight, max(minComposerHeight, lipgloss.Height(wrapped)))
+}
+
+func composerHardWrapReaches(text string, width, target int) bool {
+	if width < 1 || target <= 1 {
+		return true
+	}
+	lines, columns := 1, 0
+	for text != "" {
+		if text[0] == '\n' {
+			lines++
+			columns = 0
+			text = text[1:]
+			if lines >= target {
+				return true
+			}
+			continue
+		}
+		cluster, cellWidth := xansi.FirstGraphemeCluster(text, xansi.GraphemeWidth)
+		if cluster == "" {
+			break
+		}
+		text = text[len(cluster):]
+		if columns > 0 && columns+cellWidth > width {
+			lines++
+			columns = 0
+			if lines >= target {
+				return true
+			}
+		}
+		columns += max(0, cellWidth)
+	}
+	return false
 }
 
 func (m *Model) currentTime() time.Time {
@@ -2990,10 +3078,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// --- Normal editing / sending ---
-	displayText := m.editor.Value()
-	text := stripImageAttachmentTokens(displayText, len(m.promptImages))
 	submitKey := keyMatches(msg, m.keys.Submit)
 	followUpKey := keyMatches(msg, m.keys.FollowUp)
+	abortKey := keyMatches(msg, m.keys.Abort)
+	quitKey := keyMatches(msg, m.keys.Quit)
+	// Ordinary typing, navigation, and deletion do not need submission-time
+	// image stripping, whitespace scans, or queue/goal checks. Keeping this hot
+	// path short is especially important while Backspace repeats over a paste.
+	if !submitKey && !followUpKey && !abortKey && !quitKey {
+		return m.updateComposerEditor(msg)
+	}
+
+	displayText := m.editor.Value()
+	text := stripImageAttachmentTokens(displayText, len(m.promptImages))
 	if submitKey && m.modeSwitching {
 		m.lastStatus = "waiting for mode switch"
 		return m, nil
@@ -3004,7 +3101,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	goalControl := m.busy && (strings.HasPrefix(trimmed, "/goal pause") || strings.HasPrefix(trimmed, "/goal clear") || strings.HasPrefix(trimmed, "/goal edit"))
-	if keyMatches(msg, m.keys.Abort) && m.busy {
+	if abortKey && m.busy {
 		m.requestAbort()
 		return m, nil
 	}
@@ -3035,16 +3132,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if keyMatches(msg, m.keys.Quit) && !m.busy && (msg.String() != "ctrl+d" || m.editor.Value() == "") {
+	if quitKey && !m.busy && (msg.String() != "ctrl+d" || displayText == "") {
 		return m, m.quitCmd()
 	}
 
+	return m.updateComposerEditor(msg)
+}
+
+func (m *Model) updateComposerEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Forward to the editor, then refresh the palette from the new text. Keep
 	// the returned command: textarea uses it to read the clipboard for paste.
 	if keyMatches(msg, m.keys.Paste) {
 		msg = tea.KeyMsg{Type: tea.KeyCtrlV}
 	}
-	prev := m.editor.Value()
+	textMayChange := composerEditorKeyMayChange(msg, m.editor.KeyMap)
 	var cmd tea.Cmd
 	m.editor, cmd = m.editor.Update(msg)
 	if msg.Type == tea.KeyEsc {
@@ -3052,8 +3153,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	var mentionCmd tea.Cmd
-	if m.editor.Value() != prev {
-		mentionCmd = m.refreshInputCompletions()
+	if textMayChange {
+		mentionCmd = m.refreshInputCompletionsFor(m.editor.Value())
 	}
 	if msg.Type == tea.KeyCtrlV {
 		m.editor.Err = nil
@@ -3073,6 +3174,23 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(imageCmd, mentionCmd)
 	}
 	return m, mentionCmd
+}
+
+func composerEditorKeyMayChange(msg tea.KeyMsg, keyMap textarea.KeyMap) bool {
+	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+		return true
+	}
+	return key.Matches(msg, keyMap.DeleteAfterCursor) ||
+		key.Matches(msg, keyMap.DeleteBeforeCursor) ||
+		key.Matches(msg, keyMap.DeleteCharacterBackward) ||
+		key.Matches(msg, keyMap.DeleteCharacterForward) ||
+		key.Matches(msg, keyMap.DeleteWordBackward) ||
+		key.Matches(msg, keyMap.DeleteWordForward) ||
+		key.Matches(msg, keyMap.InsertNewline) ||
+		key.Matches(msg, keyMap.UppercaseWordForward) ||
+		key.Matches(msg, keyMap.LowercaseWordForward) ||
+		key.Matches(msg, keyMap.CapitalizeWordForward) ||
+		key.Matches(msg, keyMap.TransposeCharacterBackward)
 }
 
 // pickCompletion selects a palette entry: commands needing args are inserted
@@ -3103,7 +3221,10 @@ func (m *Model) pickCompletion(name string) (tea.Model, tea.Cmd) {
 // refreshPalette recomputes completion candidates from the editor's first
 // token, opening or closing the palette accordingly.
 func (m *Model) refreshPalette() {
-	text := m.editor.Value()
+	m.refreshPaletteFor(m.editor.Value())
+}
+
+func (m *Model) refreshPaletteFor(text string) {
 	if isCommandPrefix(text) {
 		m.compMatches = completeCommand(text[1:])
 		if len(m.compMatches) > 10 {
@@ -3123,13 +3244,17 @@ func (m *Model) refreshPalette() {
 // refreshInputCompletions keeps slash commands, leading $skill directives,
 // and @ file references mutually exclusive while the editor changes.
 func (m *Model) refreshInputCompletions() tea.Cmd {
-	m.refreshPalette()
-	m.refreshSkillCompletions()
+	return m.refreshInputCompletionsFor(m.editor.Value())
+}
+
+func (m *Model) refreshInputCompletionsFor(text string) tea.Cmd {
+	m.refreshPaletteFor(text)
+	m.refreshSkillCompletionsFor(text)
 	if m.skillVisible {
 		m.mentionVisible = false
 		return nil
 	}
-	return m.refreshMentions()
+	return m.refreshMentionsFor(text)
 }
 
 // refreshMentions never walks the repository from Bubble Tea's Update loop.
@@ -3137,13 +3262,17 @@ func (m *Model) refreshInputCompletions() tea.Cmd {
 // only match the cached list. Generation checks in mentionFilesMsg prevent a
 // slow result from reopening a picker for an obsolete editor state.
 func (m *Model) refreshMentions() tea.Cmd {
+	return m.refreshMentionsFor(m.editor.Value())
+}
+
+func (m *Model) refreshMentionsFor(text string) tea.Cmd {
 	m.mentionVisible = false
 	m.mentionMatches = nil
 	m.mentionIndex = 0
 	if m.app == nil {
 		return nil
 	}
-	query, _, ok := mentionQuery(m.editor.Value())
+	query, _, ok := mentionQuery(text)
 	if !ok {
 		return nil
 	}
@@ -7786,7 +7915,8 @@ func (m *Model) View() string {
 		// only tea.Println transcript commits are allowed to move scrollback.
 		return clipboardSequence + fitFrame(frame, frameWidth, m.managedFrameHeight())
 	}
-	return clipboardSequence + fitFrame(frame, frameWidth, m.height)
+	frame = fitFrame(frame, frameWidth, m.height)
+	return clipboardSequence + overlayTranscriptSelectionContextMenu(frame, m.transcriptSelectionMenu)
 }
 
 func (m *Model) renderTrustPrompt() string {
