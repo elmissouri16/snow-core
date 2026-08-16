@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/message.schema.json",
+  "title": "Snow durable session message",
+  "$defs": {
+    "contentBlock": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {"enum": ["text", "image", "thinking", "tool_call", "plan"]},
+        "text": {"type": "string"},
+        "plan_complete": {"type": "boolean"},
+        "mime_type": {"type": "string"},
+        "data": {"type": "string", "contentEncoding": "base64"},
+        "tool_call_id": {"type": "string"},
+        "name": {"type": "string"},
+        "arguments": {}
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "required": ["id", "role", "content", "ts"],
+  "properties": {
+    "id": {"type": "string"},
+    "parent_id": {"type": "string"},
+    "role": {"enum": ["user", "assistant", "tool_result", "system", "custom", "agent"]},
+    "content": {"type": "array", "items": {"$ref": "#/$defs/contentBlock"}},
+    "ts": {"type": "integer"},
+    "provider": {"type": "string"},
+    "model": {"type": "string"},
+    "stop_reason": {"enum": ["stop", "length", "tool_use", "error", "aborted", "pending"]},
+    "error": {"type": "string"},
+    "usage": {"$ref": "common.schema.json#/$defs/usage"},
+    "tool_call_id": {"type": "string"},
+    "tool_name": {"type": "string"},
+    "is_error": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

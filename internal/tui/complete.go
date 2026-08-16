@@ -37,6 +37,7 @@ var commands = []commandSpec{
 	{name: "/settings", desc: "configure model and response behavior"},
 	{name: "/skills", desc: "inspect discovered Agent Skills"},
 	{name: "/tree", desc: "navigate branches in this session"},
+	{name: "/worktrees", desc: "open the human-controlled worktree agent supervisor"},
 	{name: "/thinking", desc: "choose reasoning effort", argHint: "[off|minimal|low|medium|high|xhigh|max|ultra]"},
 	{name: "/trust", desc: "show or set project trust", argHint: "[allow|deny]"},
 }

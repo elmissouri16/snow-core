@@ -11,7 +11,7 @@ emit({
   type: "rpc_ready",
   protocol_version: scenario === "bad_version_type" ? 1 : (scenario === "bad_version" ? "2" : "1"),
   snow_version: scenario === "bad_snow_type" ? 1 : "fixture",
-  capabilities: scenario === "bad_caps_type" ? [1] : ["models_list", "prompt_completion", "session_info", "subagent_models", "user_input"],
+  capabilities: scenario === "bad_caps_type" ? [1] : ["models_list", "permission_input", "prompt_completion", "session_info", "session_messages", "subagent_models", "user_input"],
   max_input_bytes: scenario === "bad_max_type" ? "128" : (scenario === "small_limit" ? 128 : 16777216),
 });
 emit({ type: "mode_changed", mode: { mode: "default", reasoning_effort: "off" } });
@@ -52,6 +52,9 @@ for await (const line of lines) {
       break;
     case "session_info":
       emit({ id, type: "response", command: request.type, success: true, data: { provider: "fake", model: "fake-1" } });
+      break;
+    case "session_messages":
+      emit({ id, type: "response", command: request.type, success: true, data: { messages: [{ id: "u-1", role: "user", content: [], ts: 1 }] } });
       break;
     case "models_list":
     case "subagent_models":

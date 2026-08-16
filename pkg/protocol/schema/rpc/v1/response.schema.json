@@ -77,11 +77,28 @@
     },
     {
       "type": "object",
+      "required": ["type", "command", "success", "data"],
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"const": "response"},
+        "command": {"const": "session_messages"},
+        "success": {"const": true},
+        "data": {
+          "type": "object",
+          "required": ["messages"],
+          "properties": {"messages": {"type": "array", "maxItems": 24, "items": {"$ref": "message.schema.json"}}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
       "required": ["type", "command", "success"],
       "properties": {
         "id": {"type": "string"},
         "type": {"const": "response"},
-        "command": {"type": "string", "not": {"enum": ["branch_fork", "session_fork", "session_info", "session_worktree_fork", "models_list", "subagent_models"]}},
+        "command": {"type": "string", "not": {"enum": ["branch_fork", "session_fork", "session_info", "session_messages", "session_worktree_fork", "models_list", "subagent_models"]}},
         "success": {"const": true},
         "data": {}
       },

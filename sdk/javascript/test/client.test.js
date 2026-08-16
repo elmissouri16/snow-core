@@ -37,6 +37,9 @@ test("handshake, discovery, and definitive prompt completion", async () => {
     assert.equal(snow.ready.protocol_version, "1");
     assert(snow.ready.capabilities.includes("prompt_completion"));
     assert.equal((await snow.sessionInfo()).data.model, "fake-1");
+    assert.equal((await snow.sessionMessages(12)).data.messages[0].id, "u-1");
+    assert.equal((await snow.replyPermission("perm-1", "allow")).success, true);
+    assert.equal((await snow.rejectPermission("perm-2")).success, true);
     assert.equal(snow.diagnostics[0].kind, "unknown_response");
     assert.equal((await snow.models()).data.models[0].id, "fake-1");
 

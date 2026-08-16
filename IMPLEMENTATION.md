@@ -78,7 +78,7 @@ Philosophy (pi-aligned, Go-native):
 - Default built-in tools: **read, write, edit, bash, grep, glob**, direct **ask_user**, plus deferred **webfetch**.
 - Surfaces: **TUI**, **print/JSON**, in-process **Go SDK**, and versioned
   **RPC** consumed by the checked-in Python and JavaScript/TypeScript clients.
-- Pure-Go **SQLite** sessions with provider-free first-prompt titles, manual rename, indexed tree branches, physically independent exact-entry forks with provenance, and detached clean Git-worktree forks.
+- Pure-Go **SQLite** sessions with provider-free first-prompt titles, manual rename, indexed tree branches, physically independent exact-entry forks with provenance, detached clean Git-worktree forks, and an internal human-only TUI supervisor for exact-session RPC workers in linked worktrees.
 - Clear permission + project-trust model; honest non-sandbox security story.
 
 ### 1.5 Success criteria (product)
@@ -1118,9 +1118,9 @@ Versioned JSONL over stdin/stdout (pi-inspired):
 
 - First frame: `rpc_ready` with string protocol version, Snow build version,
   sorted protocol capabilities, and maximum input size.
-- Commands: `prompt`, `abort`, `user_input_reply`, `user_input_reject`,
-  `models_list`, `subagent_models`, `set_model`, `set_thinking`,
-  `session_info`, …
+- Commands: `prompt`, `abort`, `permission_reply`, `permission_reject`,
+  `user_input_reply`, `user_input_reject`, `models_list`, `subagent_models`,
+  `set_model`, `set_thinking`, `session_info`, `session_messages`, …
 - Events: same as SDK events; RPC-only control frames are not persisted events.
 - Framing: split on `\n` only (not Unicode line separators).
 - Schemas: network-free Draft 2020-12 contracts under
@@ -1133,7 +1133,36 @@ exactly one later `prompt_completed` frame reports `completed`, `failed`, or
 retained. `user_input_reply.params` is a `UserInputResponse`;
 `user_input_reject.params` contains `request_id`. EOF closes the interactive
 input broker so pending/future questions fail fast while an ordinary one-shot
-prompt is still allowed to finish.
+prompt is still allowed to finish. Permission mode `ask` uses a separate FIFO
+manual broker: events carry opaque IDs and agent attribution; replies accept
+only allow, session allow, or deny; stale/out-of-order IDs fail; EOF denies
+pending work. `session_messages` defensively clones at most 24 active-branch
+messages, and `session_info` reports effective permission mode.
+
+### 7.6 Worktree worker supervisor
+
+`internal/worktree.List` derives bounded linked-worktree identity from direct
+`rev-parse` and NUL `worktree list --porcelain -z`, then runs bounded-concurrency
+read-only dirty checks. `internal/app.WorktreeWorkspaces` joins this with
+query-only exact-CWD session summaries; the absence of a supervisor-owned handle
+is reported only as `not attached`, never inferred liveness.
+
+`internal/supervisor` owns independent `snow resume SESSION --mode rpc
+--permission ask --no-subagents` process groups. Admission is explicit and
+human-only. Launch verifies protocol/capabilities plus exact session ID/path,
+canonical CWD, effective permission mode, and bounded transcript hydration.
+Each process has serialized writes, continuous bounded stdout/stderr drains,
+definitive prompt completion, generation-fenced events, and bounded
+EOF/TERM/KILL shutdown. Unexpected exits after readiness become `crashed`; an
+exit during active work additionally records `outcome unknown` and is never
+auto-retried. No PID/session/branch heuristic grants process authority.
+
+The on-demand TUI dashboard owns a clean full-screen list/detail frame with
+stable selection, independent detail scroll/activity, manual-only inventory
+refresh, Chat/Activity/Workspace/Diff views, attributed worker permission/input
+overlays, and composer routing for prompt/steer/follow-up. It never permanently
+shrinks the root conversation. It does not add model tools or
+public `snowsdk` supervisor APIs.
 
 Primary consumers are the checked-in dependency-light Python 3.9+ async and
 Node.js 22+ ESM/TypeScript SDKs, other non-Go hosts, and IDE bridges. They invoke

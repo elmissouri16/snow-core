@@ -9,11 +9,21 @@ export interface RPCReady {
   max_input_bytes: number;
 }
 
+export interface PermissionRequest {
+  id: string;
+  tool: string;
+  args: unknown;
+  paths?: string[];
+  risk: "read" | "write" | "exec" | "network" | "delegate";
+  reason?: string;
+}
+
 export interface AgentEvent {
   type: string;
   text?: string;
   message?: string;
   agent?: AgentRef;
+  permission?: {request: PermissionRequest};
   user_input?: UserInputRequest;
   [key: string]: unknown;
 }
@@ -90,6 +100,7 @@ export interface SessionInfo {
   cwd: string;
   provider: string;
   model: string;
+  permission_mode: "ask" | "allow" | "deny";
   thinking: ThinkingLevel;
   thinking_levels: ThinkingLevel[];
   collaboration_mode: CollaborationMode;
@@ -184,6 +195,7 @@ export declare class Snow {
   prompt(message: string, options?: {mode?: CollaborationMode; timeoutMs?: number; signal?: AbortSignal}): Promise<PromptResult>;
   abort(): Promise<RPCResponse>;
   sessionInfo(): Promise<RPCResponse<SessionInfo>>;
+  sessionMessages(limit?: number): Promise<RPCResponse<{messages: Array<Record<string, unknown>>}>>;
   sessionRename(name: string): Promise<RPCResponse>;
   branchFork(params?: BranchForkParams): Promise<RPCResponse<SessionBranch>>;
   sessionFork(params?: SessionForkParams): Promise<RPCResponse<SessionForkResult>>;
@@ -210,6 +222,8 @@ export declare class Snow {
   subagentList(pathPrefix?: string): Promise<RPCResponse>;
   subagentGet(target: string): Promise<RPCResponse>;
   subagentReady(): Promise<RPCResponse>;
+  replyPermission(requestId: string, decision: "allow" | "deny" | "allow_session"): Promise<RPCResponse>;
+  rejectPermission(requestId: string): Promise<RPCResponse>;
   replyUserInput(requestId: string, answers: UserInputAnswer[]): Promise<RPCResponse>;
   rejectUserInput(requestId: string): Promise<RPCResponse>;
   close(): Promise<void>;

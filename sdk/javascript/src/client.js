@@ -355,6 +355,7 @@ export class Snow {
 
   abort() { return this.request("abort"); }
   sessionInfo() { return this.request("session_info"); }
+  sessionMessages(limit = 24) { return this.request("session_messages", { params: { limit } }); }
   sessionRename(name) { return this.request("session_rename", { params: { name } }); }
   branchFork(params = {}) { return this.request("branch_fork", { params }); }
   sessionFork(params = {}) { return this.request("session_fork", { params }); }
@@ -383,6 +384,8 @@ export class Snow {
   subagentList(pathPrefix = "") { return this.request("subagent_list", pathPrefix ? { params: { path_prefix: pathPrefix } } : {}); }
   subagentGet(target) { return this.request("subagent_get", { params: { target } }); }
   subagentReady() { return this.request("subagent_ready"); }
+  replyPermission(requestId, decision) { return this.request("permission_reply", { params: { request_id: requestId, decision } }); }
+  rejectPermission(requestId) { return this.request("permission_reject", { params: { request_id: requestId } }); }
   replyUserInput(requestId, answers) { return this.request("user_input_reply", { params: { request_id: requestId, answers } }); }
   rejectUserInput(requestId) { return this.request("user_input_reject", { params: { request_id: requestId } }); }
 

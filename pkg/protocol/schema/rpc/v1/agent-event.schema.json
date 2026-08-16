@@ -85,7 +85,26 @@
       },
       "additionalProperties": false
     },
-    "permission": {"type": "object"},
+    "permission": {
+      "type": "object",
+      "required": ["request"],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": ["id", "tool", "args", "risk"],
+          "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "tool": {"type": "string", "minLength": 1},
+            "args": {},
+            "paths": {"type": "array", "items": {"type": "string"}},
+            "risk": {"enum": ["read", "write", "exec", "network", "delegate"]},
+            "reason": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "user_input": {"$ref": "common.schema.json#/$defs/userInputRequest"},
     "queue": {"$ref": "common.schema.json#/$defs/inputQueue"},
     "thread_goal": {

@@ -84,6 +84,7 @@ func TestRPCSchemasResolveWithoutNetwork(t *testing.T) {
 	for _, name := range []string{
 		"agent-event.schema.json",
 		"handshake.schema.json",
+		"message.schema.json",
 		"model.schema.json",
 		"output.schema.json",
 		"prompt-completed.schema.json",
@@ -110,7 +111,8 @@ func TestRepresentativeRPCValuesConformToSchemas(t *testing.T) {
 		AgentEvent{Type: EvSubagentStatus, Subagent: &SubagentState{Agent: AgentRef{ThreadID: "child", ParentThreadID: "root", Path: "/root/child", ParentPath: "/root", Depth: 1}, Status: AgentRunning, CreatedAt: 1}},
 		RPCResponse{ID: "m1", Type: "response", Command: "models_list", Success: true, Data: RPCModelList{Provider: "fake", Current: "fake-1", Models: []Model{{Provider: "fake", ID: "fake-1", SupportsTools: true}}}},
 		RPCResponse{ID: "sm1", Type: "response", Command: "subagent_models", Success: true, Data: RPCModelList{Enabled: &enabled, Models: []Model{}}},
-		RPCResponse{ID: "i1", Type: "response", Command: "session_info", Success: true, Data: RPCSessionInfo{SessionID: "s", Name: "", Path: "", CWD: "/tmp", Provider: "fake", Model: "fake-1", Thinking: ThinkingOff, ThinkingLevels: []ThinkingLevel{ThinkingOff}, CollaborationMode: ModeDefault, Subagents: RPCSubagentLimits{}, PendingInputs: RPCPendingInputCounts{}}},
+		RPCResponse{ID: "msgs1", Type: "response", Command: "session_messages", Success: true, Data: RPCSessionMessages{Messages: []Message{NewUserMessage("u1", "", "hello")}}},
+		RPCResponse{ID: "i1", Type: "response", Command: "session_info", Success: true, Data: RPCSessionInfo{SessionID: "s", Name: "", Path: "", CWD: "/tmp", Provider: "fake", Model: "fake-1", PermissionMode: "ask", Thinking: ThinkingOff, ThinkingLevels: []ThinkingLevel{ThinkingOff}, CollaborationMode: ModeDefault, Subagents: RPCSubagentLimits{}, PendingInputs: RPCPendingInputCounts{}}},
 	}
 	for _, value := range values {
 		if err := output.Validate(jsonValue(t, value)); err != nil {
@@ -207,6 +209,10 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 			value.Params = json.RawMessage(`{"objective":"ship"}`)
 		case "goal_edit":
 			value.Params = json.RawMessage(`{"objective":"ship safely"}`)
+		case "permission_reject":
+			value.Params = json.RawMessage(`{"request_id":"perm-1"}`)
+		case "permission_reply":
+			value.Params = json.RawMessage(`{"request_id":"perm-1","decision":"allow"}`)
 		case "session_rename":
 			value.Params = json.RawMessage(`{"name":"renamed"}`)
 		case "subagent_followup", "subagent_send_message":

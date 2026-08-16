@@ -251,7 +251,7 @@ func LoadThemes(globalDir, projectRoot string, projectAllowed bool) (map[string]
 
 func defaultAuxBindings() map[string][]string {
 	return map[string][]string{
-		"submit": {"enter"}, "follow_up": {"alt+enter"}, "newline": {"ctrl+j", "alt+enter"}, "paste": {"ctrl+v"}, "abort": {"ctrl+c", "esc"}, "quit": {"ctrl+c", "ctrl+d"}, "toggle_mode": {"shift+tab"},
+		"submit": {"enter"}, "follow_up": {"alt+enter"}, "newline": {"ctrl+j", "alt+enter"}, "paste": {"ctrl+v"}, "abort": {"ctrl+c", "esc"}, "quit": {"ctrl+c", "ctrl+d"}, "toggle_mode": {"shift+tab"}, "toggle_worktrees": {"ctrl+b"},
 		"picker_up": {"up", "left", "k"}, "picker_down": {"down", "right", "j"}, "picker_previous": {"shift+tab"}, "picker_next": {"tab"}, "picker_page_up": {"pgup"}, "picker_page_down": {"pgdown"}, "picker_top": {"home"}, "picker_bottom": {"end"},
 		"accept": {"enter"}, "close": {"esc"}, "branch_fork": {"f"}, "branch_rename": {"r"}, "branch_delete": {"d"}, "confirm": {"y"},
 	}
@@ -276,7 +276,7 @@ func appendUnique(values []string, value string) []string {
 
 func validateEffectiveAuxBindings(bindings map[string][]string) error {
 	for _, context := range [][]string{
-		{"submit", "newline", "paste", "toggle_mode", "abort"},
+		{"submit", "newline", "paste", "toggle_mode", "toggle_worktrees", "abort"},
 		{"submit", "follow_up", "abort"},
 		{"picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm"},
 	} {
@@ -296,7 +296,7 @@ func validateEffectiveAuxBindings(bindings map[string][]string) error {
 
 func validateKeybindingFile(file KeybindingsFile) error {
 	allowed := map[string]bool{}
-	for _, name := range []string{"submit", "follow_up", "newline", "paste", "abort", "quit", "toggle_mode", "page_up", "page_down", "top", "bottom", "line_up", "line_down", "picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm"} {
+	for _, name := range []string{"submit", "follow_up", "newline", "paste", "abort", "quit", "toggle_mode", "toggle_worktrees", "page_up", "page_down", "top", "bottom", "line_up", "line_down", "picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm"} {
 		allowed[name] = true
 	}
 	clean := map[string][]string{}
@@ -316,7 +316,7 @@ func validateKeybindingFile(file KeybindingsFile) error {
 		}
 	}
 	for _, context := range [][]string{
-		{"submit", "newline", "paste", "toggle_mode", "abort"},
+		{"submit", "newline", "paste", "toggle_mode", "toggle_worktrees", "abort"},
 		{"submit", "follow_up", "abort"},
 		{"picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm"},
 	} {

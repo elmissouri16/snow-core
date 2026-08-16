@@ -187,6 +187,10 @@ func (e AgentEvent) Clone() AgentEvent {
 
 // PermissionRequest is embedded in permission_request events.
 type PermissionRequest struct {
+	// ID correlates an interactive permission decision with the process-local
+	// request that emitted it. It is opaque to clients and must be echoed by
+	// permission_reply or permission_reject.
+	ID     string          `json:"id"`
 	Tool   string          `json:"tool"`
 	Args   json.RawMessage `json:"args"`
 	Paths  []string        `json:"paths,omitempty"`

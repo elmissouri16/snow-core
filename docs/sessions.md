@@ -19,6 +19,17 @@ a picker is unavailable. The lower-level `--session /path/to/session.db` flag
 and SDK `SessionPath` option also select a session path. The previous JSONL
 format is intentionally not migrated.
 
+The TUI worktree supervisor lists only sessions whose validated stored CWD
+exactly matches a linked worktree. Inventory opens databases through the
+read-only/query-only inspection path; it does not migrate schemas, change mtimes,
+or treat database/WAL locks as process liveness. At most eight recent summaries
+are retained per worktree in the view. When a human starts a worker, Snow passes
+one exact session path to a fresh RPC process and verifies returned session ID,
+path, and CWD before considering it managed. `session_messages` then hydrates at
+most 24 active-branch messages. Only one supervisor-owned live worker may use a
+given session database or canonical worktree; unrelated external processes cannot be detected and
+remain outside that ownership claim.
+
 Built-in sessions receive a provider-free display title from the first accepted
 user prompt. Whitespace is collapsed and long titles are truncated at 72 runes;
 image-only prompts use `Image prompt`. Manual rename trims surrounding

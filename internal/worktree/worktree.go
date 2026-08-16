@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,8 +25,9 @@ var (
 )
 
 const (
-	defaultTimeout = 30 * time.Second
-	maxGitOutput   = 32 * 1024
+	defaultTimeout       = 30 * time.Second
+	maxGitOutput         = 256 * 1024
+	gitTruncatedSentinel = "\n… output truncated"
 )
 
 // Request describes one new Git worktree. Empty target and branch values are
@@ -53,15 +55,45 @@ type runner interface {
 
 type gitRunner struct{}
 
+type boundedGitOutput struct {
+	mu        sync.Mutex
+	data      []byte
+	truncated bool
+}
+
+func (w *boundedGitOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	remaining := maxGitOutput - len(w.data)
+	if remaining > 0 {
+		w.data = append(w.data, p[:min(len(p), remaining)]...)
+	}
+	if len(p) > remaining {
+		w.truncated = true
+	}
+	return len(p), nil
+}
+
+func (w *boundedGitOutput) Bytes() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	output := append([]byte(nil), w.data...)
+	if w.truncated {
+		output = append(output, []byte(gitTruncatedSentinel)...)
+	}
+	return output
+}
+
 func (gitRunner) Run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
-	output, err := cmd.CombinedOutput()
-	if len(output) > maxGitOutput {
-		output = append(output[:maxGitOutput], []byte("\n… output truncated")...)
-	}
+	var bounded boundedGitOutput
+	cmd.Stdout = &bounded
+	cmd.Stderr = &bounded
+	err := cmd.Run()
+	output := bounded.Bytes()
 	if err != nil {
 		if ctx.Err() != nil {
 			return output, ctx.Err()
