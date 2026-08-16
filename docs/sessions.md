@@ -52,7 +52,8 @@ The store opens databases with:
 Each database contains:
 
 - `session_meta`: one metadata row with schema version, session identity, CWD,
-  display name, and the compatibility active branch tip;
+  display name, compatibility active branch tip, and optional immutable
+  `parent_session_id`/`parent_branch_id`/`fork_entry_id` provenance;
 - `session_branches`: durable branch references with stable ID, unique display
   name, parent branch/fork point, tip entry, timestamps, and active state;
 - `entries`: append-ordered parent-linked entries with a unique ID, type,
@@ -74,7 +75,30 @@ Schema version 7 adds names and parent/fork metadata; legacy non-main branches
 retain their IDs as names and attach to `main` when ancestry is unavailable.
 Schema version 8 adds atomic per-currency goal cost totals. Migration backfills
 priced historical goal usage only when its exact token sum matches the persisted
-goal counter.
+goal counter. Schema version 9 adds empty-by-default session-fork provenance
+columns. An independent child retains that provenance even if its parent is
+moved or deleted.
+
+### Independent session forks
+
+Independent forks are physical snapshots, not additional `session_branches`
+rows. Snow validates that the selected entry belongs to the requested branch
+and that its root-to-entry chain does not end with an incomplete assistant
+response or unresolved tool calls. It creates a temporary SQLite database in
+the destination directory, copies the exact entry chain (including metadata and
+compaction markers while preserving entry and parent IDs), creates one local
+`main` branch, writes a new session ID and parent provenance, closes the
+database, publishes it without replacement, and reopens it before reporting
+success. Private spill artifacts referenced by Snow's retained-result markers
+are copied into the child session namespace with the same opaque IDs. Existing
+destinations are never overwritten.
+
+The source remains unchanged and parent/child databases diverge independently.
+A current-tip fork copies collaboration mode. A historical fork uses Default
+mode because mutable thread state is not versioned per entry; active goals,
+goal accounting/deferrals, subagent topology, and private child databases are
+not copied. Same-database branch forks retain their branch-scoped mode/goal
+cloning semantics.
 
 An append inserts the entry and updates the active branch tip in one transaction.
 Entry ID/parent columns are authoritative and normalize embedded message

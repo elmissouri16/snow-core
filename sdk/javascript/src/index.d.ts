@@ -54,6 +54,7 @@ export interface RPCResponse<T = unknown> {
   command?: string;
   success: boolean;
   error?: string;
+  error_code?: "canceled" | "conflict" | "destination_exists" | "git_dirty" | "git_failure" | "invalid" | "not_found" | "not_git_repository" | "session_busy" | "subagents_active" | "unsupported";
   data?: T;
 }
 
@@ -93,6 +94,46 @@ export interface SessionInfo {
   thinking_levels: ThinkingLevel[];
   collaboration_mode: CollaborationMode;
   [key: string]: unknown;
+}
+
+export interface SessionBranch {
+  id: string;
+  name?: string;
+  parent_branch_id?: string;
+  forked_from_id?: string;
+  tip_id: string;
+  messages: number;
+  preview?: string;
+  created_at: number;
+  updated_at: number;
+  active: boolean;
+}
+
+export interface BranchForkParams {
+  source_branch_id?: string;
+  from_entry_id?: string;
+  name?: string;
+}
+
+export interface SessionForkParams extends BranchForkParams {
+  destination_path?: string;
+}
+
+export interface SessionWorktreeForkParams extends SessionForkParams {
+  worktree_path?: string;
+  git_branch?: string;
+}
+
+export interface SessionForkResult {
+  source_session_id: string;
+  source_branch_id: string;
+  source_entry_id: string;
+  session_id: string;
+  session_path: string;
+  cwd: string;
+  name?: string;
+  branch: SessionBranch;
+  worktree?: {path: string; branch: string; commit?: string};
 }
 
 export interface SnowOptions {
@@ -144,6 +185,9 @@ export declare class Snow {
   abort(): Promise<RPCResponse>;
   sessionInfo(): Promise<RPCResponse<SessionInfo>>;
   sessionRename(name: string): Promise<RPCResponse>;
+  branchFork(params?: BranchForkParams): Promise<RPCResponse<SessionBranch>>;
+  sessionFork(params?: SessionForkParams): Promise<RPCResponse<SessionForkResult>>;
+  sessionWorktreeFork(params?: SessionWorktreeForkParams): Promise<RPCResponse<SessionForkResult>>;
   models(): Promise<RPCResponse<ModelList>>;
   subagentModels(): Promise<RPCResponse<ModelList>>;
   setModel(model: string): Promise<RPCResponse>;

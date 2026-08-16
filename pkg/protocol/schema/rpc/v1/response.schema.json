@@ -12,6 +12,7 @@
         "command": {"type": "string"},
         "success": {"const": false},
         "error": {"type": "string", "minLength": 1},
+        "error_code": {"type": "string", "enum": ["canceled", "conflict", "destination_exists", "git_dirty", "git_failure", "invalid", "not_found", "not_git_repository", "session_busy", "subagents_active", "unsupported"]},
         "data": {}
       },
       "additionalProperties": false
@@ -52,11 +53,35 @@
     },
     {
       "type": "object",
+      "required": ["type", "command", "success", "data"],
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"const": "response"},
+        "command": {"const": "branch_fork"},
+        "success": {"const": true},
+        "data": {"$ref": "session-branch.schema.json"}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "command", "success", "data"],
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"const": "response"},
+        "command": {"enum": ["session_fork", "session_worktree_fork"]},
+        "success": {"const": true},
+        "data": {"$ref": "session-fork.schema.json"}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
       "required": ["type", "command", "success"],
       "properties": {
         "id": {"type": "string"},
         "type": {"const": "response"},
-        "command": {"type": "string", "not": {"enum": ["session_info", "models_list", "subagent_models"]}},
+        "command": {"type": "string", "not": {"enum": ["branch_fork", "session_fork", "session_info", "session_worktree_fork", "models_list", "subagent_models"]}},
         "success": {"const": true},
         "data": {}
       },

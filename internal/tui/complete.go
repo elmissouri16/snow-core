@@ -20,6 +20,7 @@ var commands = []commandSpec{
 	{name: "/compact", desc: "compact older conversation context"},
 	{name: "/default", desc: "switch to Default collaboration mode"},
 	{name: "/deny", desc: "deny a pending permission request"},
+	{name: "/fork", desc: "fork into this workspace or a Git worktree"},
 	{name: "/help", desc: "show command help"},
 	{name: "/goal", desc: "show or control a persistent thread goal", argHint: "[objective|edit|pause|resume|clear]"},
 	{name: "/login", desc: "configure a provider endpoint or credentials", argHint: "<provider>"},

@@ -970,6 +970,31 @@ func (a *Agent) withSessionRead(read func(session.Store) error) error {
 	return read(store)
 }
 
+// IdleSessionAdmitted returns the active store while the caller holds the
+// admission lock. It stops automatic goal continuation and rejects ordinary
+// running turns, allowing a host to take an immutable cross-session snapshot
+// without racing a prompt or session switch.
+func (a *Agent) IdleSessionAdmitted(operation string) (session.Store, error) {
+	if strings.TrimSpace(operation) == "" {
+		operation = "inspect session"
+	}
+	if err := a.stopAutomaticForControl(context.Background(), operation); err != nil {
+		return nil, err
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.closed {
+		return nil, errors.New("agent: closed")
+	}
+	if a.running {
+		return nil, fmt.Errorf("agent: cannot %s while running", operation)
+	}
+	if a.opts.Session == nil {
+		return nil, errors.New("agent: session is nil")
+	}
+	return a.opts.Session, nil
+}
+
 // EnqueueMailbox queues an attributed message without allowing an external
 // goroutine to mutate the session cursor. When idle, admission is acquired and
 // the envelope is persisted immediately; while running, run drains it before

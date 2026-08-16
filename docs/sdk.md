@@ -273,23 +273,39 @@ that omitted cache metrics. On aggregate usage, it remains true only when every
 included request reported the cache-read metric. A `provider_data` block is
 persistence-only and must not be rendered or logged.
 
-### Branches and compaction
+### Branches, independent forks, and compaction
 
 | Method | Purpose |
 |---|---|
 | `Branches()` | List named session branches and topology |
 | `SelectBranch(id)` | Switch active branch; affects later messages, usage, mode, goal, and prompts |
-| `Fork(entryID)` | Fork the active branch at an existing entry and activate it |
-| `ForkNamed(sourceBranchID, entryID, name)` | Fork an explicit source branch with an optional name |
+| `Branch(opts)` | Explicitly create and activate a same-database branch |
+| `Fork(entryID)` | Compatibility alias that branches the active session |
+| `ForkNamed(sourceBranchID, entryID, name)` | Compatibility alias for an explicitly sourced branch |
+| `ForkSession(ctx, opts)` | Create a detached independent SQLite session in the same workspace |
+| `ForkWorktree(ctx, opts)` | Create a detached clean Git worktree plus independent session |
 | `RenameBranch(id, name)` | Change display name without changing stable ID |
 | `DeleteBranch(id)` | Delete an eligible inactive leaf branch reference |
 | `Compact(ctx)` | Manually summarize older projected context while retaining full history |
 
-Forked branches share existing message rows; they do not copy history. Branches
+Branch forks share existing message rows; they do not copy history. Branches
 persist across process restarts only in SQLite-backed sessions; under
-`NoSession` their topology and messages are in-memory and ephemeral. Branch
-management is rejected while conflicting root/subagent work is active. Automatic
-Default-mode goal continuation may emit compaction events between goal turns at
+`NoSession` their topology and messages are in-memory and ephemeral.
+`ForkSession` and `ForkWorktree` instead return a `SessionForkResult` for a new,
+reopenable database and deliberately leave the SDK receiver bound to its source.
+Open `result.SessionPath` explicitly to continue in the child. This detached
+contract prevents an in-place worktree operation from reusing stale project
+trust, sandbox, search, or file-root bindings.
+
+Independent forks preserve the exact stable root-to-entry chain and immutable
+parent provenance. They reject unresolved tool-call boundaries, never overwrite
+an explicit destination, do not copy subagent topology, and inherit
+collaboration mode only at the current branch tip. Callers can classify common
+failures with `ErrForkDestinationExists`, `ErrWorktreeDestinationExists`,
+`ErrInvalidForkBoundary`, `ErrNotGitRepository`, `ErrGitDirty`, and
+`ErrUnsafeWorktreeDestination` through
+`errors.Is`. Branch/fork management is rejected while conflicting root/subagent
+work is active. Automatic Default-mode goal continuation may emit compaction events between goal turns at
 the configured context threshold; this does not change the manual `Compact`
 method contract.
 

@@ -10,6 +10,8 @@ see [JSONL RPC](rpc.md). For embedding, see the [Go SDK](sdk.md).
 |---|---|---|
 | TUI | `snow` | Full-screen interactive terminal with transcript, composer, pickers, permissions, sessions, and settings |
 | Resume | `snow resume [session-path]` | Opens a current-project session picker, or resumes an explicit SQLite database |
+| Session fork | `snow fork SESSION [flags]` | Materializes an independent SQLite child session |
+| Worktree fork | `snow fork-worktree SESSION [flags]` | Creates a clean Git worktree plus an independent child session |
 | Print | `snow -p "prompt"` | Streams root text and concise lifecycle/tool status to stdout/stderr |
 | JSON | `snow --mode json -p "prompt"` | Emits one normalized `AgentEvent` JSON object per line |
 | RPC | `snow --mode rpc` | Long-lived Snow-specific JSONL request/response/event protocol over stdio |
@@ -232,6 +234,7 @@ meaningful.
 | `/sessions` | Pick a persisted session for the current directory |
 | `/resume [path]` | Open the session picker or resume an explicit database |
 | `/new` | Create a new persisted session |
+| `/fork` | Choose a same-session branch, independent local session, or detached Git worktree fork |
 | `/tree` | Inspect and switch named branches; `f`, `r`, `d` fork/rename/delete |
 | `/agent` | Open the live subagent fleet inspector; select with ↑/↓ or j/k, scroll detail with wheel/trackpad or PageUp/PageDown, refresh with `r`, close with Esc |
 | `/agent PATH` | Open the fleet inspector with one child preselected |
@@ -292,10 +295,39 @@ are 1–72 runes after trimming, do not need to be unique, and never change the
 stable session ID or database path. `/tree` operates inside the currently open
 database.
 
-A named fork shares prior append-only entries and diverges from a selected
+A named branch fork shares prior append-only entries and diverges from a selected
 entry; it does not copy message rows. Branch selection changes subsequent
 prompts, messages, usage, mode, and goal state. Delete is restricted to inactive
 leaf branches and never deletes shared history.
+
+`/fork` makes the distinction explicit:
+
+- **current session** uses the same-database branch behavior above and activates
+  the new branch;
+- **independent session here** physically copies the exact root-to-selected-entry
+  chain into a new SQLite database, records parent session/branch/entry
+  provenance, and switches the TUI only after the child is reopenable;
+- **Git worktree** requires a clean non-bare Git worktree, creates a new branch
+  and non-existing destination with direct `git` arguments, then creates a
+  detached child session rooted there. The current TUI stays in the source and
+  prints a `snow resume` command for opening the child in a fresh runtime.
+
+The non-interactive independent-fork equivalents are `snow fork` and
+`snow fork-worktree`. Each accepts an optional session path (or selects the
+newest current-project session), `--from-entry`, `--source-branch`, and `--name`.
+Same-database branch management remains on the active-runtime TUI, Go SDK, and
+RPC surfaces so a detached CLI process cannot race the database's active-branch
+cursor.
+Session forks also accept `--destination`; worktree forks accept `--worktree`
+and `--git-branch`. Explicit failures never silently fall back to a less
+isolated fork.
+
+A historical independent fork copies conversation entries and metadata only
+through the selected entry. Current collaboration mode is inherited only when
+forking the source tip; historical forks start in Default mode because mode and
+goal tables do not retain entry-by-entry history. Subagent topology is never
+copied. A fork ending inside an unresolved tool batch is rejected instead of
+being repaired or silently advanced.
 
 `/compact` summarizes the projected context while retaining complete recent
 turns. Oversized plain-text tool results in the older summarization prefix are

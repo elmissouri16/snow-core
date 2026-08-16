@@ -246,6 +246,18 @@ class SnowClient:
     async def session_rename(self, name: str) -> JSONDict:
         return await self.request("session_rename", params={"name": name})
 
+    async def branch_fork(self, **params: Any) -> JSONDict:
+        """Create and activate a branch in the current session."""
+        return await self.request("branch_fork", params=params)
+
+    async def session_fork(self, **params: Any) -> JSONDict:
+        """Create a detached independent session in the current workspace."""
+        return await self.request("session_fork", params=params)
+
+    async def session_worktree_fork(self, **params: Any) -> JSONDict:
+        """Create a detached Git worktree and independent session."""
+        return await self.request("session_worktree_fork", params=params)
+
     async def models(self) -> JSONDict:
         return await self.request("models_list")
 

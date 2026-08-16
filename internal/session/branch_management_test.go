@@ -15,7 +15,9 @@ func exerciseBranchManagement(t *testing.T, st Store) {
 	if err := st.Append(Entry{Type: EntryMessage, ID: m.ID, ParentID: "root", Message: &m}); err != nil {
 		t.Fatal(err)
 	}
-	fork, err := manager.ForkBranchWithOptions(protocol.BranchForkOptions{SourceBranchID: "main", FromEntryID: "a", Name: "Feature"})
+	// Empty FromEntryID resolves to the source tip inside the same branch
+	// transaction, avoiding a stale preflight/read race.
+	fork, err := manager.ForkBranchWithOptions(protocol.BranchForkOptions{SourceBranchID: "main", Name: "Feature"})
 	if err != nil {
 		t.Fatal(err)
 	}

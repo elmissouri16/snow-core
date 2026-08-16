@@ -13,10 +13,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/subagent"
+	"github.com/snow-core/snow/internal/worktree"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -131,7 +134,7 @@ func (s *Server) Serve(ctx context.Context) error {
 			continue
 		}
 		if err := s.handle(serveCtx, req); err != nil {
-			_ = s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error()})
+			_ = s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error(), ErrorCode: rpcErrorCode(err)})
 		}
 	}
 finish:
@@ -156,6 +159,38 @@ finish:
 		return terminalErr
 	}
 	return errors.Join(terminalErr, writeErr)
+}
+
+func rpcErrorCode(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return "canceled"
+	case errors.Is(err, session.ErrDestinationExists), errors.Is(err, worktree.ErrDestinationExists):
+		return "destination_exists"
+	case errors.Is(err, worktree.ErrNotRepository):
+		return "not_git_repository"
+	case errors.Is(err, worktree.ErrDirty):
+		return "git_dirty"
+	case errors.Is(err, worktree.ErrUnsafeDestination), errors.Is(err, session.ErrInvalidForkBoundary):
+		return "invalid"
+	case errors.Is(err, session.ErrNotFound):
+		return "not_found"
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "subagents are active"):
+		return "subagents_active"
+	case strings.Contains(message, "while running"):
+		return "session_busy"
+	case strings.Contains(message, "does not support"):
+		return "unsupported"
+	case strings.Contains(message, "already exists"), strings.Contains(message, "conflict"):
+		return "conflict"
+	case strings.HasPrefix(message, "worktree:"), strings.Contains(message, "git "):
+		return "git_failure"
+	default:
+		return "invalid"
+	}
 }
 
 func (s *Server) handle(ctx context.Context, req Request) error {
@@ -455,6 +490,45 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 			return err
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: "set_thinking", Success: true})
+		return nil
+	case "branch_fork":
+		var p protocol.BranchForkOptions
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				return fmt.Errorf("branch_fork params: %w", err)
+			}
+		}
+		branch, err := s.app.ForkBranchWithOptions(p)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: branch})
+		return nil
+	case "session_fork":
+		var p protocol.SessionForkOptions
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				return fmt.Errorf("session_fork params: %w", err)
+			}
+		}
+		result, err := s.app.ForkSession(ctx, p)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: result})
+		return nil
+	case "session_worktree_fork":
+		var p protocol.SessionWorktreeForkOptions
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				return fmt.Errorf("session_worktree_fork params: %w", err)
+			}
+		}
+		result, err := s.app.ForkWorktree(ctx, p)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: result})
 		return nil
 	case "session_rename":
 		var p struct {

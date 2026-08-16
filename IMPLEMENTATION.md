@@ -78,7 +78,7 @@ Philosophy (pi-aligned, Go-native):
 - Default built-in tools: **read, write, edit, bash, grep, glob**, direct **ask_user**, plus deferred **webfetch**.
 - Surfaces: **TUI**, **print/JSON**, in-process **Go SDK**, and versioned
   **RPC** consumed by the checked-in Python and JavaScript/TypeScript clients.
-- Pure-Go **SQLite** sessions with provider-free first-prompt titles, manual rename, and indexed tree branches (`id` / `parentId`).
+- Pure-Go **SQLite** sessions with provider-free first-prompt titles, manual rename, indexed tree branches, physically independent exact-entry forks with provenance, and detached clean Git-worktree forks.
 - Clear permission + project-trust model; honest non-sandbox security story.
 
 ### 1.5 Success criteria (product)
@@ -981,6 +981,7 @@ Must be completed in Phase 1–2 coding, results folded into adapter constants/t
 | `/compact` | 2 | Manual compaction; all turn types also compact automatically at a configurable pressure threshold with one overflow-repair retry |
 | `/sessions` | 2 | Open a compact picker for persisted sessions in the current directory |
 | `/tree` | 4 | Select or fork a durable branch in the active session |
+| `/fork` | 4 | Choose a same-session branch, independent local session, or detached Git worktree fork |
 | `/quit` | 1 | Exit |
 
 ### 6.4 Keybindings (defaults)

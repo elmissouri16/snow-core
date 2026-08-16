@@ -356,6 +356,9 @@ export class Snow {
   abort() { return this.request("abort"); }
   sessionInfo() { return this.request("session_info"); }
   sessionRename(name) { return this.request("session_rename", { params: { name } }); }
+  branchFork(params = {}) { return this.request("branch_fork", { params }); }
+  sessionFork(params = {}) { return this.request("session_fork", { params }); }
+  sessionWorktreeFork(params = {}) { return this.request("session_worktree_fork", { params }); }
   models() { return this.request("models_list"); }
   subagentModels() { return this.request("subagent_models"); }
   setModel(model) { return this.request("set_model", { model }); }

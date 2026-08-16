@@ -56,9 +56,11 @@ response.
   "snow_version": "0.1.0-dev",
   "capabilities": [
     "active_input",
+    "branch_management",
     "goals",
     "models_list",
     "prompt_completion",
+    "session_forks",
     "session_info",
     "subagent_models",
     "subagents",
@@ -129,9 +131,16 @@ Failure:
   "type": "response",
   "command": "set_model",
   "success": false,
-  "error": "..."
+  "error": "...",
+  "error_code": "invalid"
 }
 ```
+
+`error_code` is optional for compatibility and, when present, is one of
+`canceled`, `conflict`, `destination_exists`, `git_dirty`, `git_failure`,
+`invalid`, `not_found`, `not_git_repository`, `session_busy`,
+`subagents_active`, or `unsupported`. Clients should branch on this stable code
+and display the human-readable `error` only as diagnostics.
 
 A client should route `type == "response"` by ID, route
 `type == "prompt_completed"` by `request_id`, and send remaining known types to
@@ -265,6 +274,43 @@ Changes the active session display title without changing its stable ID, path,
 branches, or history. The trimmed title must contain 1–72 runes and no control
 characters. The response `data` contains `session_id` and the normalized `name`.
 The command may be rejected while conflicting root/subagent work is active.
+
+### `branch_fork`
+
+```json
+{"id":"branch-1","type":"branch_fork","params":{"source_branch_id":"main","from_entry_id":"entry-123","name":"experiment"}}
+```
+
+Creates and activates a same-database branch. Empty `source_branch_id` selects
+the active branch. `from_entry_id` may be omitted to use its tip. Success `data`
+is a `SessionBranch`. The source database and shared entry rows retain the
+existing branch semantics.
+
+### `session_fork`
+
+```json
+{"id":"fork-1","type":"session_fork","params":{"from_entry_id":"entry-123","name":"independent"}}
+```
+
+Creates a detached, independent SQLite child and leaves the RPC process on the
+source. Optional `destination_path` must end in `.db` and must not exist. Success
+`data` is `SessionForkResult`, including source session/branch/entry identity,
+child ID/path/CWD, its local `main` branch, and optional worktree information.
+The response is sent only after the child database is durable and reopenable.
+
+### `session_worktree_fork`
+
+```json
+{"id":"worktree-1","type":"session_worktree_fork","params":{"from_entry_id":"entry-123","worktree_path":"../snow-experiment","git_branch":"snow/experiment","name":"experiment"}}
+```
+
+Requires a clean Git source and creates a new worktree/branch plus a detached
+child session. Omitted worktree and branch values are generated safely. Relative
+worktree paths resolve from the source Git root (a sibling is normally
+`../name`); a relative `destination_path` resolves inside the new worktree and
+cannot traverse out. Failure never falls back to
+a same-workspace branch. The running RPC process retains its source project
+bindings.
 
 ### `session_info`
 

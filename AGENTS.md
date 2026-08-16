@@ -46,7 +46,9 @@ behavior in code before relying on a checklist item.
   session persistence, branch-persisted Default/Plan collaboration modes, and a
   bounded safe-boundary root steer/follow-up queue exposed across SDK/RPC/TUI.
 - `internal/session`: in-memory and SQLite stores, indexed branch tips,
-  parent traversal, fork primitive, file index/listing, and resume by database path.
+  parent traversal, same-database branches, physical exact-entry session forks
+  with provenance, file index/listing, and resume by database path; detached
+  clean Git-worktree forks use a bounded direct-argument Git utility.
 - Built-in tools in `internal/tools/builtin`: `read`, `write`, `edit`, `bash`,
   `grep`, `glob`, direct read-risk `ask_user`, and deferred network-risk `webfetch`.
   File/search tools use pinned `os.Root` confinement; output, search lines, and
@@ -270,6 +272,8 @@ echo '{"id":"1","type":"prompt","message":"hello"}' | snow --mode rpc
 snow auth check chatgpt
 snow resume                 # pick a saved session for the current project
 snow resume ~/.snow/sessions/<cwd>/<session>.db
+snow fork <session.db> --from-entry <entry> --name independent
+snow fork-worktree <session.db> --worktree ../snow-experiment --git-branch snow/experiment
 snow sandbox init --from ./dev.smolmachine # persistent Bash-only VM for this project
 snow sandbox status
 ```
@@ -292,7 +296,7 @@ accept `--project`.
 The active TUI composer queues plain Enter as steering and Alt+Enter as a
 follow-up; Ctrl+J remains multiline, and abort clears/restores queued TUI text.
 Queue delivery is bounded, one-at-a-time, after complete serial tool batches.
-Current TUI slash commands are `/allow [always]`, `/default`, `/deny`, `/help`, `/login`,
+Current TUI slash commands are `/allow [always]`, `/default`, `/deny`, `/fork`, `/help`, `/login`,
 `/logout [provider]`, `/model`, `/plan [message]`, `/thinking`, `/new`, `/permissions`, `/resume`,
 `/agent [path]`, `/agent concurrency N`, `/sessions`, `/settings`, `/compact`, `/mcp`, `/sandbox`, `/skills`, `/tree`, `/quit`, and `/trust [allow|deny]`. Top-level `Shift+Tab` toggles Default/Plan mode (queued to `turn_done` while busy). The TUI uses Bubble Tea's alternate-screen, app-owned viewport so scrolling cannot reveal stale frame chrome. `tui.mouse` defaults to `true` so wheel/trackpad gestures stay inside Snow's viewport. Primary drag uses Snow selection/copy; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. Right-click switches to native mouse mode for the terminal context menu (repeat when the terminal consumed the reported press), while F6 toggles app/native mode explicitly; native-mode wheel gestures may move terminal scrollback. Keyboard viewport scrolling remains available. `Ctrl+V` attaches supported clipboard images in the agent composer or falls back to textarea paste; platform terminal shortcuts use bracketed text paste, and `Ctrl+C` remains abort/quit. `@` in the composer discovers
 project files, while a leading `$` autocompletes enabled Agent Skills;

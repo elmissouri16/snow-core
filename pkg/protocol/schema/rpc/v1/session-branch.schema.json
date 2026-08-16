@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/session-branch.schema.json",
+  "title": "Snow session branch",
+  "type": "object",
+  "required": ["id", "tip_id", "messages", "created_at", "updated_at", "active"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "name": {"type": "string"},
+    "parent_branch_id": {"type": "string"},
+    "forked_from_id": {"type": "string"},
+    "tip_id": {"type": "string", "minLength": 1},
+    "messages": {"type": "integer", "minimum": 0},
+    "preview": {"type": "string"},
+    "created_at": {"type": "integer"},
+    "updated_at": {"type": "integer"},
+    "active": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

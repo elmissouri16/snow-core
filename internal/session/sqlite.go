@@ -272,11 +272,14 @@ func newSQLiteStore(path, cwd string, opts Options, existingOnly bool) (*SQLiteS
 			return closeDB(errors.New("session: existing sqlite database has no session metadata"))
 		}
 		s.header = Header{
-			Version:   SessionVersion,
-			ID:        id,
-			CreatedAt: time.Now().UnixMilli(),
-			CWD:       cwd,
-			Name:      opts.Name,
+			Version:         SessionVersion,
+			ID:              id,
+			CreatedAt:       time.Now().UnixMilli(),
+			CWD:             cwd,
+			Name:            opts.Name,
+			ParentSessionID: opts.ParentSessionID,
+			ParentBranchID:  opts.ParentBranchID,
+			ForkEntryID:     opts.ForkEntryID,
 		}
 		s.tip = "root"
 		tx, err := db.Begin()
@@ -284,9 +287,9 @@ func newSQLiteStore(path, cwd string, opts Options, existingOnly bool) (*SQLiteS
 			return closeDB(fmt.Errorf("session: sqlite begin: %w", err))
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO session_meta(singleton, version, session_id, created_at, cwd, name, branch_tip)
-			VALUES(1, ?, ?, ?, ?, ?, ?)`, s.header.Version, s.header.ID, s.header.CreatedAt,
-			s.header.CWD, s.header.Name, s.tip); err != nil {
+			INSERT INTO session_meta(singleton, version, session_id, created_at, cwd, name, branch_tip, parent_session_id, parent_branch_id, fork_entry_id)
+			VALUES(1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, s.header.Version, s.header.ID, s.header.CreatedAt,
+			s.header.CWD, s.header.Name, s.tip, s.header.ParentSessionID, s.header.ParentBranchID, s.header.ForkEntryID); err != nil {
 			_ = tx.Rollback()
 			return closeDB(fmt.Errorf("session: sqlite metadata: %w", err))
 		}
@@ -323,6 +326,10 @@ func newSQLiteStore(path, cwd string, opts Options, existingOnly bool) (*SQLiteS
 	}
 	if err := ensureBranches(db, s.tip, s.header.CreatedAt, s.header.Version); err != nil {
 		return closeDB(err)
+	}
+	if err := db.QueryRow(`SELECT parent_session_id, parent_branch_id, fork_entry_id FROM session_meta WHERE singleton = 1`).Scan(
+		&s.header.ParentSessionID, &s.header.ParentBranchID, &s.header.ForkEntryID); err != nil {
+		return closeDB(fmt.Errorf("session: sqlite fork provenance: %w", err))
 	}
 	if s.header.Version < SessionVersion {
 		s.header.Version = SessionVersion
@@ -391,7 +398,10 @@ func createSQLiteSchema(db *sql.DB) error {
 			created_at INTEGER NOT NULL,
 			cwd TEXT NOT NULL,
 			name TEXT NOT NULL DEFAULT '',
-			branch_tip TEXT NOT NULL
+			branch_tip TEXT NOT NULL,
+			parent_session_id TEXT NOT NULL DEFAULT '',
+			parent_branch_id TEXT NOT NULL DEFAULT '',
+			fork_entry_id TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE IF NOT EXISTS entries (
 			seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -549,6 +559,18 @@ func ensureBranches(db *sql.DB, tip string, createdAt int64, version int) error 
 		if err := backfillGoalCosts(tx); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("session: goal cost migration: %w", err)
+		}
+	}
+	if version < 9 {
+		for _, statement := range []string{
+			`ALTER TABLE session_meta ADD COLUMN parent_session_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE session_meta ADD COLUMN parent_branch_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE session_meta ADD COLUMN fork_entry_id TEXT NOT NULL DEFAULT ''`,
+		} {
+			if _, err := tx.Exec(statement); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+				_ = tx.Rollback()
+				return fmt.Errorf("session: fork provenance migration: %w", err)
+			}
 		}
 	}
 	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS session_branches_name_idx ON session_branches(branch_name COLLATE NOCASE)`); err != nil {
@@ -1688,13 +1710,6 @@ func (s *SQLiteStore) ForkBranchWithOptions(opts protocol.BranchForkOptions) (pr
 	if s.closed {
 		return protocol.SessionBranch{}, errors.New("session: store closed")
 	}
-	var exists int
-	if err := s.db.QueryRow(`SELECT count(*) FROM entries WHERE id = ?`, fromEntryID).Scan(&exists); err != nil {
-		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork lookup: %w", err)
-	}
-	if exists == 0 {
-		return protocol.SessionBranch{}, ErrNotFound
-	}
 	sourceID := opts.SourceBranchID
 	// The no-op write acquires SQLite's writer reservation before source,
 	// ancestry, and uniqueness checks. Other handles therefore cannot delete or
@@ -1717,6 +1732,18 @@ func (s *SQLiteStore) ForkBranchWithOptions(opts protocol.BranchForkOptions) (pr
 		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite lock fork source: %w", err)
 	}
 	if n, _ := locked.RowsAffected(); n != 1 {
+		return protocol.SessionBranch{}, ErrNotFound
+	}
+	if fromEntryID == "" {
+		if err := tx.QueryRow(`SELECT tip_id FROM session_branches WHERE branch_id=?`, sourceID).Scan(&fromEntryID); err != nil {
+			return protocol.SessionBranch{}, err
+		}
+	}
+	var exists int
+	if err := tx.QueryRow(`SELECT count(*) FROM entries WHERE id=?`, fromEntryID).Scan(&exists); err != nil {
+		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork lookup: %w", err)
+	}
+	if exists == 0 {
 		return protocol.SessionBranch{}, ErrNotFound
 	}
 	var belongs int

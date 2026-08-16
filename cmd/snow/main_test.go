@@ -529,6 +529,39 @@ func TestMCPCheckReportsLiveNegotiation(t *testing.T) {
 	}
 }
 
+func TestForkCommand(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	cwd := t.TempDir()
+	path := filepath.Join(t.TempDir(), "source.db")
+	store, err := session.NewSQLiteStore(path, cwd, session.Options{Name: "source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := protocol.NewUserMessage("u1", "root", "hello")
+	if err := store.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	forkJSON, err := runCLI(t, "snow", "fork", path, "--source-branch", "main", "--from-entry", "u1", "--name", "independent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result protocol.SessionForkResult
+	if err := json.Unmarshal([]byte(forkJSON), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.SourceSessionID == result.SessionID || result.Name != "independent" {
+		t.Fatalf("result=%+v", result)
+	}
+	if err := session.ValidateSQLiteSession(result.SessionPath); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSkillPolicyCommands(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SNOW_HOME", home)

@@ -26,6 +26,12 @@ func TestLocalStoreScopesArtifactsAndRejectsTraversal(t *testing.T) {
 	if _, err := store.ReadText(context.Background(), "session-b", ref.ID); err == nil {
 		t.Fatal("cross-session read succeeded")
 	}
+	if err := store.CopyText(context.Background(), "session-a", "session-b", ref.ID); err != nil {
+		t.Fatal(err)
+	}
+	if copied, err := store.ReadText(context.Background(), "session-b", ref.ID); err != nil || copied != "full output" {
+		t.Fatalf("copied=%q err=%v", copied, err)
+	}
 	for _, id := range []string{"../x", "/tmp/x", "artifact-nope"} {
 		if _, err := store.ReadText(context.Background(), "session-a", id); err == nil {
 			t.Fatalf("invalid ID %q accepted", id)
@@ -36,7 +42,7 @@ func TestLocalStoreScopesArtifactsAndRejectsTraversal(t *testing.T) {
 		t.Fatalf("root mode=%v err=%v", info.Mode().Perm(), err)
 	}
 	files, err := filepath.Glob(filepath.Join(root, "session-*", "*.txt"))
-	if err != nil || len(files) != 1 {
+	if err != nil || len(files) != 2 {
 		t.Fatalf("files=%v err=%v", files, err)
 	}
 	fileInfo, err := os.Stat(files[0])

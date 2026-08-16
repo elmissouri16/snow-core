@@ -14,6 +14,7 @@ const (
 
 var rpcCommands = []string{
 	"abort",
+	"branch_fork",
 	"follow_up",
 	"goal_clear",
 	"goal_continue",
@@ -25,8 +26,10 @@ var rpcCommands = []string{
 	"goal_set",
 	"models_list",
 	"prompt",
+	"session_fork",
 	"session_info",
 	"session_rename",
+	"session_worktree_fork",
 	"set_mode",
 	"set_model",
 	"set_thinking",
@@ -51,9 +54,11 @@ func KnownRPCCommands() []string {
 
 var rpcCapabilities = []string{
 	"active_input",
+	"branch_management",
 	"goals",
 	"models_list",
 	"prompt_completion",
+	"session_forks",
 	"session_info",
 	"subagent_models",
 	"subagents",
@@ -79,12 +84,13 @@ type RPCRequest struct {
 
 // RPCResponse acknowledges or rejects an RPC command.
 type RPCResponse struct {
-	ID      string `json:"id,omitempty"`
-	Type    string `json:"type"`
-	Command string `json:"command,omitempty"`
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
-	Data    any    `json:"data,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Type      string `json:"type"`
+	Command   string `json:"command,omitempty"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
+	Data      any    `json:"data,omitempty"`
 }
 
 // RPCReady is the first frame emitted by the CLI RPC surface.

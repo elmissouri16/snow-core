@@ -102,6 +102,26 @@ not mean:
 Runtime `/trust allow|deny` changes apply on the next launch because already
 loaded executable extensions cannot be safely hot-unloaded.
 
+### Git worktree forks
+
+A worktree fork is an explicit host-side repository mutation. Snow invokes Git
+with argument arrays and `GIT_TERMINAL_PROMPT=0`, requires a clean non-bare
+source with a valid commit, validates the new branch with Git, and refuses an
+existing, symlink-colliding, or source-overlapping destination. A bounded
+context/timeout applies to each Git command. If child-session creation fails,
+Snow asks Git to remove only the exact worktree it created and then deletes only
+the newly created branch; cleanup failures are joined with the primary error.
+Snow never uses `os.RemoveAll` for rollback.
+
+A worktree is a distinct canonical project path. It does **not** inherit the
+source path's exact trust decision or smolvm association. Worktree forks are
+therefore detached from the running App and must be resumed in a fresh runtime,
+which resolves trust, project extensions, file roots, search policy, and sandbox
+routing for the destination. Until separately initialized, Bash runs on the
+host unless launch policy requires a sandbox and fails closed. Git worktrees
+contain metadata that refers to the source repository outside Snow's file-tool
+root; that does not broaden file-tool confinement.
+
 ## File and search confinement
 
 File tools pin allowed directories with Go's `os.Root` handles when the runtime

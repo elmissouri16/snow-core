@@ -245,6 +245,42 @@ func TestRPCSessionRenameAndInfo(t *testing.T) {
 	}
 }
 
+func TestRPCBranchAndDetachedSessionFork(t *testing.T) {
+	t.Setenv("SNOW_HOME", t.TempDir())
+	var in bytes.Buffer
+	var out bytes.Buffer
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, CWD: t.TempDir(), Permission: "allow", NoPlugins: true, NoMCP: true, NoSkills: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	in.WriteString(`{"id":"b1","type":"branch_fork","params":{"from_entry_id":"root","name":"branch child"}}` + "\n")
+	in.WriteString(`{"id":"s1","type":"session_fork","params":{"from_entry_id":"root","name":"session child"}}` + "\n")
+	if err := New(context.Background(), a, &in, &out).Serve(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var branch Response
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "b1"), &branch); err != nil {
+		t.Fatal(err)
+	}
+	branchData, _ := branch.Data.(map[string]any)
+	if !branch.Success || branchData["name"] != "branch child" {
+		t.Fatalf("branch response = %+v", branch)
+	}
+	var fork Response
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "s1"), &fork); err != nil {
+		t.Fatal(err)
+	}
+	forkData, _ := fork.Data.(map[string]any)
+	path, _ := forkData["session_path"].(string)
+	if !fork.Success || forkData["name"] != "session child" || path == "" {
+		t.Fatalf("session fork response = %+v", fork)
+	}
+	if err := session.ValidateSQLiteSession(path); err != nil {
+		t.Fatalf("forked session is invalid: %v", err)
+	}
+}
+
 func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 	var in bytes.Buffer
 	var out bytes.Buffer
@@ -521,8 +557,8 @@ func TestRPCUnknownCommand(t *testing.T) {
 	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "r1"), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.Success || !strings.Contains(resp.Error, "unknown command") {
-		t.Fatalf("expected failure response, got %+v", resp)
+	if resp.Success || !strings.Contains(resp.Error, "unknown command") || resp.ErrorCode != "invalid" {
+		t.Fatalf("expected classified failure response, got %+v", resp)
 	}
 }
 

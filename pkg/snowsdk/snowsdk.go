@@ -11,6 +11,8 @@ import (
 	"github.com/snow-core/snow/internal/agent"
 	"github.com/snow-core/snow/internal/app"
 	"github.com/snow-core/snow/internal/config"
+	internalsession "github.com/snow-core/snow/internal/session"
+	"github.com/snow-core/snow/internal/worktree"
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
 	publicplugin "github.com/snow-core/snow/pkg/plugin"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -536,8 +538,18 @@ func (s *Session) SelectBranch(branchID string) error {
 	return a.SelectBranch(branchID)
 }
 
+// Branch creates and activates a durable branch in the current session.
+func (s *Session) Branch(opts protocol.BranchForkOptions) (protocol.SessionBranch, error) {
+	a, err := s.activeApp()
+	if err != nil {
+		return protocol.SessionBranch{}, err
+	}
+	return a.ForkBranchWithOptions(opts)
+}
+
 // Fork creates and activates a durable branch at an existing entry ID. The
-// next Prompt appends the first divergent child to that branch.
+// next Prompt appends the first divergent child to that branch. It is retained
+// as a compatibility alias for Branch.
 func (s *Session) Fork(fromEntryID string) (protocol.SessionBranch, error) {
 	a, err := s.activeApp()
 	if err != nil {
@@ -548,11 +560,29 @@ func (s *Session) Fork(fromEntryID string) (protocol.SessionBranch, error) {
 
 // ForkNamed creates a durable branch from an explicit source with an optional display name.
 func (s *Session) ForkNamed(sourceBranchID, fromEntryID, name string) (protocol.SessionBranch, error) {
+	return s.Branch(protocol.BranchForkOptions{SourceBranchID: sourceBranchID, FromEntryID: fromEntryID, Name: name})
+}
+
+// ForkSession creates an independent durable session in the current workspace.
+// The receiver remains bound to the source; open result.SessionPath explicitly
+// to continue in the child.
+func (s *Session) ForkSession(ctx context.Context, opts protocol.SessionForkOptions) (protocol.SessionForkResult, error) {
 	a, err := s.activeApp()
 	if err != nil {
-		return protocol.SessionBranch{}, err
+		return protocol.SessionForkResult{}, err
 	}
-	return a.ForkBranchWithOptions(protocol.BranchForkOptions{SourceBranchID: sourceBranchID, FromEntryID: fromEntryID, Name: name})
+	return a.ForkSession(ctx, opts)
+}
+
+// ForkWorktree creates a clean Git worktree and an independent durable session
+// rooted there. The receiver remains bound to the source so project-specific
+// trust, sandbox, and tool roots are never retargeted in place.
+func (s *Session) ForkWorktree(ctx context.Context, opts protocol.SessionWorktreeForkOptions) (protocol.SessionForkResult, error) {
+	a, err := s.activeApp()
+	if err != nil {
+		return protocol.SessionForkResult{}, err
+	}
+	return a.ForkWorktree(ctx, opts)
 }
 
 // RenameBranch updates a branch display name without changing its stable ID.
@@ -914,4 +944,16 @@ var (
 	ErrNotRunning = errors.New("snowsdk: no running turn")
 	// ErrStopped is returned after Close.
 	ErrStopped = errors.New("snowsdk: session closed")
+	// ErrForkDestinationExists reports a destination Snow will not overwrite.
+	ErrForkDestinationExists = internalsession.ErrDestinationExists
+	// ErrWorktreeDestinationExists reports a Git destination Snow will not reuse.
+	ErrWorktreeDestinationExists = worktree.ErrDestinationExists
+	// ErrInvalidForkBoundary reports an incomplete assistant/tool boundary.
+	ErrInvalidForkBoundary = internalsession.ErrInvalidForkBoundary
+	// ErrNotGitRepository reports a source that cannot create a worktree.
+	ErrNotGitRepository = worktree.ErrNotRepository
+	// ErrGitDirty reports uncommitted tracked or untracked source state.
+	ErrGitDirty = worktree.ErrDirty
+	// ErrUnsafeWorktreeDestination reports an overlapping or otherwise unsafe path.
+	ErrUnsafeWorktreeDestination = worktree.ErrUnsafeDestination
 )

@@ -33,6 +33,13 @@ type Store interface {
 	Close() error
 }
 
+// Copier preserves an existing opaque artifact ID in another session
+// namespace. Session forks use it so durable compaction references remain
+// valid without exposing filesystem paths or weakening session isolation.
+type Copier interface {
+	CopyText(context.Context, string, string, string) error
+}
+
 // LocalStore stores artifacts beneath a pinned private root.
 type LocalStore struct {
 	mu       sync.RWMutex
@@ -277,6 +284,86 @@ func (s *LocalStore) ReadText(ctx context.Context, sessionID, id string) (string
 		return "", errors.New("artifact: stored artifact exceeds limit")
 	}
 	return strings.ToValidUTF8(string(data), "�"), nil
+}
+
+// CopyText copies one immutable source artifact into another session namespace
+// while preserving its opaque ID. Existing identical copies are accepted;
+// mismatched content is never replaced.
+func (s *LocalStore) CopyText(ctx context.Context, sourceSessionID, targetSessionID, id string) error {
+	if sourceSessionID == "" || targetSessionID == "" {
+		return errors.New("artifact: source and target session IDs are required")
+	}
+	if err := validateID(id); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed || s.root == nil {
+		return errors.New("artifact: store is closed")
+	}
+	source, err := openVerifiedNamespace(s.root, namespace(sourceSessionID), false)
+	if err != nil {
+		return fmt.Errorf("artifact: open source namespace: %w", err)
+	}
+	sourceFile, err := openVerifiedArtifact(source, id+".txt", s.maxBytes)
+	if err != nil {
+		_ = source.Close()
+		return fmt.Errorf("artifact: open source: %w", err)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(sourceFile, int64(s.maxBytes)+1))
+	closeFileErr := sourceFile.Close()
+	closeSourceErr := source.Close()
+	if readErr != nil || closeFileErr != nil || closeSourceErr != nil || len(data) > s.maxBytes {
+		return errors.Join(readErr, closeFileErr, closeSourceErr, errors.New("artifact: could not read immutable source"))
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	dir, err := openVerifiedNamespace(s.root, namespace(targetSessionID), true)
+	if err != nil {
+		return fmt.Errorf("artifact: create target namespace: %w", err)
+	}
+	defer dir.Close()
+	name := id + ".txt"
+	file, err := dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		existing, openErr := openVerifiedArtifact(dir, name, s.maxBytes)
+		if openErr != nil {
+			return openErr
+		}
+		existingData, existingReadErr := io.ReadAll(io.LimitReader(existing, int64(s.maxBytes)+1))
+		closeErr := existing.Close()
+		if existingReadErr != nil || closeErr != nil || string(existingData) != string(data) {
+			return errors.New("artifact: target artifact does not match immutable source")
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("artifact: create target: %w", err)
+	}
+	ok := false
+	defer func() {
+		_ = file.Close()
+		if !ok {
+			_ = dir.Remove(name)
+		}
+	}()
+	if _, err := file.Write(data); err != nil {
+		return fmt.Errorf("artifact: copy: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("artifact: sync copy: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("artifact: close copy: %w", err)
+	}
+	ok = true
+	return nil
 }
 
 func (s *LocalStore) Close() error {

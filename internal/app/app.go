@@ -40,6 +40,7 @@ import (
 	toolrouter "github.com/snow-core/snow/internal/tools/router"
 	"github.com/snow-core/snow/internal/trust"
 	"github.com/snow-core/snow/internal/userinput"
+	"github.com/snow-core/snow/internal/worktree"
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
 	publicplugin "github.com/snow-core/snow/pkg/plugin"
 	"github.com/snow-core/snow/pkg/protocol"
@@ -1461,6 +1462,121 @@ func (a *App) ForkBranchWithOptions(opts protocol.BranchForkOptions) (protocol.S
 		return protocol.SessionBranch{}, errors.New("app: cannot fork branch while subagents are active")
 	}
 	return a.Agent.ForkWithOptionsAdmitted(opts)
+}
+
+// ForkSession creates an independent durable session in the current workspace.
+// It leaves the active App/session unchanged; callers may explicitly open or
+// switch to the returned path after this operation succeeds.
+func (a *App) ForkSession(ctx context.Context, opts protocol.SessionForkOptions) (protocol.SessionForkResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	if a.Subagents != nil && a.Subagents.HasActive() {
+		return protocol.SessionForkResult{}, errors.New("app: cannot fork session while subagents are active")
+	}
+	source, err := a.Agent.IdleSessionAdmitted("fork session")
+	if err != nil {
+		return protocol.SessionForkResult{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.SessionForkResult{}, err
+	}
+	index := session.NewFileIndex(session.DefaultSessionsRoot())
+	child, result, err := index.CreateFork(a.cwd, source, opts)
+	if err != nil {
+		return protocol.SessionForkResult{}, err
+	}
+	if err := copyForkArtifacts(ctx, a.artifacts, child, result); err != nil {
+		_ = child.Close()
+		removeSessionFiles(result.SessionPath)
+		return protocol.SessionForkResult{}, err
+	}
+	if err := child.Close(); err != nil {
+		removeSessionFiles(result.SessionPath)
+		return protocol.SessionForkResult{}, fmt.Errorf("app: close forked session: %w", err)
+	}
+	return result, nil
+}
+
+// ForkWorktree creates a clean Git worktree plus an independent durable
+// session rooted there. It is detached: the current App keeps its immutable
+// trust, sandbox, and tool-root bindings.
+func (a *App) ForkWorktree(ctx context.Context, opts protocol.SessionWorktreeForkOptions) (protocol.SessionForkResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	unlockAdmission := a.Agent.LockAdmission()
+	defer unlockAdmission()
+	if a.Subagents != nil && a.Subagents.HasActive() {
+		return protocol.SessionForkResult{}, errors.New("app: cannot fork worktree while subagents are active")
+	}
+	source, err := a.Agent.IdleSessionAdmitted("fork worktree")
+	if err != nil {
+		return protocol.SessionForkResult{}, err
+	}
+	created, err := worktree.Create(ctx, worktree.Request{
+		SourceDir: a.cwd,
+		TargetDir: opts.WorktreePath,
+		Branch:    opts.GitBranch,
+		Name:      opts.Name,
+	})
+	if err != nil {
+		return protocol.SessionForkResult{}, err
+	}
+	forkOpts := protocol.SessionForkOptions{
+		SourceBranchID:  opts.SourceBranchID,
+		FromEntryID:     opts.FromEntryID,
+		Name:            opts.Name,
+		DestinationPath: opts.DestinationPath,
+	}
+	forkOpts.DestinationPath, err = worktree.ResolveSessionPath(created.TargetDir, forkOpts.DestinationPath)
+	if err != nil {
+		return protocol.SessionForkResult{}, errors.Join(err, worktree.Remove(context.Background(), created))
+	}
+	index := session.NewFileIndex(session.DefaultSessionsRoot())
+	child, result, err := index.CreateFork(created.TargetDir, source, forkOpts)
+	if err != nil {
+		return protocol.SessionForkResult{}, errors.Join(err, worktree.Remove(context.Background(), created))
+	}
+	if err := copyForkArtifacts(ctx, a.artifacts, child, result); err != nil {
+		_ = child.Close()
+		removeSessionFiles(result.SessionPath)
+		return protocol.SessionForkResult{}, errors.Join(err, worktree.Remove(context.Background(), created))
+	}
+	if err := child.Close(); err != nil {
+		removeSessionFiles(result.SessionPath)
+		return protocol.SessionForkResult{}, errors.Join(fmt.Errorf("app: close worktree session: %w", err), worktree.Remove(context.Background(), created))
+	}
+	result.Worktree = &protocol.WorktreeInfo{Path: created.TargetDir, Branch: created.Branch, Commit: created.Commit}
+	return result, nil
+}
+
+func copyForkArtifacts(ctx context.Context, store artifact.Store, child session.Store, result protocol.SessionForkResult) error {
+	ids, err := session.ForkArtifactIDs(child)
+	if err != nil {
+		return fmt.Errorf("app: inspect fork artifacts: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	copier, ok := store.(artifact.Copier)
+	if !ok {
+		return errors.New("app: artifact store cannot copy session artifacts")
+	}
+	for _, id := range ids {
+		if err := copier.CopyText(ctx, result.SourceSessionID, result.SessionID, id); err != nil {
+			return fmt.Errorf("app: copy fork artifact %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+func removeSessionFiles(path string) {
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		_ = os.Remove(path + suffix)
+	}
 }
 
 func (a *App) RenameSession(title string) error {

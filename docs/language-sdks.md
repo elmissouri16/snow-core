@@ -70,7 +70,8 @@ Unknown event fields remain available through `AgentEvent.raw`; bounded
 `diagnostics` retain responses with unknown IDs without crashing the reader.
 
 The Python client also exposes `request`, `abort`, `session_info`,
-`session_rename`, `models`, `subagent_models`, `set_model`, `set_thinking`,
+`session_rename`, `branch_fork`, `session_fork`, `session_worktree_fork`,
+`models`, `subagent_models`, `set_model`, `set_thinking`,
 `set_mode`, `steer`, `follow_up`, the `goal_*` and `subagent_*` command families,
 and `reply_user_input`/`reject_user_input`. `prompt` accepts an optional `mode`
 (`default` or `plan`); a timeout aborts the run and consumes its terminal
@@ -117,7 +118,8 @@ subscriber receives an isolated payload copy. `AbortSignal` can stop an iterator
 request cancellation of an active prompt, or terminate the owned process. The
 public declarations include RPC responses, session/model data, events, user
 input, and the SDK error hierarchy. The command surface includes `request`,
-`abort`, `sessionInfo`, `sessionRename`, `models`, `subagentModels`, model and
+`abort`, `sessionInfo`, `sessionRename`, `branchFork`, `sessionFork`,
+`sessionWorktreeFork`, `models`, `subagentModels`, model and
 mode setters, `steer`/`followUp`, the `goal*` and `subagent*` method families,
 and `replyUserInput`/`rejectUserInput`. `prompt` accepts a `mode` option
 (`default` or `plan`); timeout handling aborts and consumes terminal completion before
@@ -135,7 +137,7 @@ Every process starts with a first frame similar to:
   "snow_version": "0.1.0-dev",
   "capabilities": [
     "active_input", "goals", "models_list", "prompt_completion",
-    "session_info", "subagent_models", "subagents", "user_input"
+    "branch_management", "session_forks", "session_info", "subagent_models", "subagents", "user_input"
   ],
   "max_input_bytes": 16777216
 }

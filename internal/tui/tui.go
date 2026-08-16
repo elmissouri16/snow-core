@@ -349,6 +349,12 @@ type branchActionMsg struct {
 	err        error
 }
 
+type worktreeForkMsg struct {
+	generation uint64
+	result     protocol.SessionForkResult
+	err        error
+}
+
 type subagentListMsg struct {
 	generation uint64
 	list       protocol.SubagentList
@@ -603,6 +609,11 @@ type Model struct {
 	branchIndex  int
 	branchAction string // fork|rename|delete
 	branchInput  string
+
+	// Conversation fork destination picker state.
+	pickFork    bool
+	forkIndex   int
+	forkLoading bool
 
 	// Read-only /mcp and /skills inventory picker state.
 	pickInfo         bool
@@ -1445,10 +1456,17 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.treeLoading = false
-			m.pushLine(styleError.Render("tree: " + msg.err.Error()))
+			m.forkLoading = false
+			prefix := "tree: "
+			if m.pickFork {
+				prefix = "fork: "
+			}
+			m.pushLine(styleError.Render(prefix + msg.err.Error()))
 			return m, nil
 		}
 		m.treeLoading = false
+		m.forkLoading = false
+		m.pickFork = false
 		m.pickTree = false
 		m.branches = nil
 		m.subagentFleetActivity = make(map[string][]string)
@@ -1476,6 +1494,22 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.lastStatus = "selected branch " + msg.branch.Name
 		}
+	case worktreeForkMsg:
+		if msg.generation != m.pickerGeneration {
+			return m, nil
+		}
+		m.forkLoading = false
+		if msg.err != nil {
+			m.pushLine(styleError.Render("fork worktree: " + msg.err.Error()))
+			return m, nil
+		}
+		m.pickFork = false
+		if msg.result.Worktree == nil {
+			m.pushLine(styleError.Render("fork worktree: missing worktree result"))
+			return m, nil
+		}
+		m.lastStatus = "created worktree " + msg.result.Worktree.Path
+		m.pushLine(styleFooter.Render(fmt.Sprintf("worktree fork created\n  path: %s\n  branch: %s\n  session: %s\nRun `snow resume %q` in a new process. Trust and sandbox settings are independent for the new project path.", msg.result.Worktree.Path, msg.result.Worktree.Branch, msg.result.SessionPath, msg.result.SessionPath)))
 	case sessionStoreMsg:
 		if msg.generation != m.sessionOpGeneration {
 			if msg.store != nil {
@@ -1505,6 +1539,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.path == "new" {
 			m.lastStatus = "new session"
+		} else if msg.path == "fork" {
+			m.lastStatus = "forked independent session " + shortSessionID(msg.store.ID())
 		} else {
 			m.lastStatus = "resumed " + shortSessionID(msg.store.ID())
 		}
@@ -2805,6 +2841,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleThinkingPick(msg)
 	}
 
+	// --- Fork destination picker ---
+	if m.pickFork {
+		return m.handleForkPick(msg)
+	}
+
 	// --- Session picker ---
 	if m.pickSession {
 		return m.handleSessionPick(msg)
@@ -3779,6 +3820,12 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 		return m.startMCPInfo()
 	case "/sandbox":
 		return m.startSandboxCommand(args)
+	case "/fork":
+		if len(args) > 0 {
+			m.pushLine(styleError.Render("/fork takes no arguments"))
+			return m, nil
+		}
+		return m.startForkPick()
 	case "/new":
 		if len(args) > 0 {
 			m.pushLine(styleError.Render("/new takes no arguments"))
@@ -5243,8 +5290,111 @@ func (m *Model) applyModel(selected protocol.Model) error {
 }
 
 // ---------------------------------------------------------------------------
-// Session picker and switching
+// Fork destination, session picker, and switching
 // ---------------------------------------------------------------------------
+
+var forkChoices = []string{
+	"Fork branch in current session",
+	"Fork to an independent session here",
+	"Create a Git worktree and independent session",
+}
+
+func (m *Model) startForkPick() (tea.Model, tea.Cmd) {
+	if m.busy || m.app == nil || m.app.Agent.IsRunning() {
+		m.pushLine(styleError.Render("fork: wait for the current turn to finish"))
+		return m, nil
+	}
+	m.pickFork = true
+	m.forkIndex = 0
+	m.forkLoading = false
+	m.compVisible = false
+	m.pickerGeneration++
+	return m, nil
+}
+
+func (m *Model) handleForkPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	msg = normalizePickerKeyWithMap(msg, m.keys)
+	if m.forkLoading {
+		return m, nil
+	}
+	if next, handled := movePicker(m.forkIndex, len(forkChoices), pickerKeyAction(msg), len(forkChoices)); handled {
+		m.forkIndex = next
+		return m, nil
+	}
+	switch msg.Type {
+	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
+		m.forkIndex = (m.forkIndex - 1 + len(forkChoices)) % len(forkChoices)
+	case tea.KeyDown, tea.KeyRight, tea.KeyTab:
+		m.forkIndex = (m.forkIndex + 1) % len(forkChoices)
+	case tea.KeyEsc:
+		m.pickFork = false
+	case tea.KeyEnter:
+		switch m.forkIndex {
+		case 0:
+			m.forkLoading = true
+			generation := m.pickerGeneration
+			application := m.app
+			return m, func() tea.Msg {
+				created, err := application.ForkBranchWithOptions(protocol.BranchForkOptions{})
+				return branchActionMsg{generation: generation, branch: created, action: "fork", err: err}
+			}
+		case 1:
+			m.pickFork = false
+			m.sessionOpLoading = true
+			m.sessionOpGeneration++
+			generation := m.sessionOpGeneration
+			application := m.app
+			ctx := m.ctx
+			return m, func() tea.Msg {
+				result, err := application.ForkSession(ctx, protocol.SessionForkOptions{})
+				if err != nil {
+					return sessionStoreMsg{generation: generation, path: "fork", err: err}
+				}
+				store, err := session.NewFileIndex(session.DefaultSessionsRoot()).Open(result.SessionPath)
+				if err != nil {
+					err = fmt.Errorf("open created fork %s: %w", result.SessionPath, err)
+				}
+				return sessionStoreMsg{generation: generation, path: "fork", store: store, err: err}
+			}
+		case 2:
+			m.forkLoading = true
+			generation := m.pickerGeneration
+			application := m.app
+			ctx := m.ctx
+			return m, func() tea.Msg {
+				result, err := application.ForkWorktree(ctx, protocol.SessionWorktreeForkOptions{})
+				return worktreeForkMsg{generation: generation, result: result, err: err}
+			}
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) renderForkPicker() string {
+	if !m.pickFork {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(styleHeaderDim.Render("Fork conversation") + "\n")
+	if m.forkLoading {
+		b.WriteString(styleCompletion.Render("  validating and creating fork…") + "\n")
+	} else {
+		for i, choice := range forkChoices {
+			if i == m.forkIndex {
+				b.WriteString(styleCompletionSelected.Render("› " + choice))
+			} else {
+				b.WriteString(styleCompletion.Render("  " + choice))
+			}
+			b.WriteString("\n")
+		}
+	}
+	hint := "(↑/↓ choose · Enter confirm · Esc cancel)"
+	if m.forkLoading {
+		hint = "creating safely; the current workspace remains active"
+	}
+	b.WriteString(styleFooter.Render(hint))
+	return b.String()
+}
 
 func (m *Model) currentSessions() ([]session.SessionInfo, error) {
 	return session.NewFileIndex(session.DefaultSessionsRoot()).List(m.app.CWD())
@@ -7387,6 +7537,11 @@ func (m *Model) renderOverlays() string {
 	}
 	if m.pickSettings {
 		if r := m.renderSettings(); r != "" {
+			overlays = append(overlays, r)
+		}
+	}
+	if m.pickFork {
+		if r := m.renderForkPicker(); r != "" {
 			overlays = append(overlays, r)
 		}
 	}

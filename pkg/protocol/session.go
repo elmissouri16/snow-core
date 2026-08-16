@@ -19,8 +19,51 @@ type SessionBranch struct {
 // BranchForkOptions requests a named fork from an explicit source branch.
 type BranchForkOptions struct {
 	SourceBranchID string `json:"source_branch_id,omitempty"`
-	FromEntryID    string `json:"from_entry_id"`
+	FromEntryID    string `json:"from_entry_id,omitempty"`
 	Name           string `json:"name,omitempty"`
+}
+
+// SessionForkOptions requests an independent durable session snapshot. The
+// source session remains unchanged; DestinationPath is optional and must not
+// already exist when supplied.
+type SessionForkOptions struct {
+	SourceBranchID  string `json:"source_branch_id,omitempty"`
+	FromEntryID     string `json:"from_entry_id,omitempty"`
+	Name            string `json:"name,omitempty"`
+	DestinationPath string `json:"destination_path,omitempty"`
+}
+
+// SessionWorktreeForkOptions requests an independent session rooted in a new
+// Git worktree. WorktreePath may be empty for a collision-resistant generated
+// sibling path. GitBranch may be empty for a generated snow/* branch.
+type SessionWorktreeForkOptions struct {
+	SourceBranchID  string `json:"source_branch_id,omitempty"`
+	FromEntryID     string `json:"from_entry_id,omitempty"`
+	Name            string `json:"name,omitempty"`
+	DestinationPath string `json:"destination_path,omitempty"`
+	WorktreePath    string `json:"worktree_path,omitempty"`
+	GitBranch       string `json:"git_branch,omitempty"`
+}
+
+// WorktreeInfo describes the Git workspace created for a session fork.
+type WorktreeInfo struct {
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
+	Commit string `json:"commit,omitempty"`
+}
+
+// SessionForkResult identifies an independent child session and its immutable
+// provenance. The destination always starts on its local main branch.
+type SessionForkResult struct {
+	SourceSessionID string        `json:"source_session_id"`
+	SourceBranchID  string        `json:"source_branch_id"`
+	SourceEntryID   string        `json:"source_entry_id"`
+	SessionID       string        `json:"session_id"`
+	SessionPath     string        `json:"session_path"`
+	CWD             string        `json:"cwd"`
+	Name            string        `json:"name,omitempty"`
+	Branch          SessionBranch `json:"branch"`
+	Worktree        *WorktreeInfo `json:"worktree,omitempty"`
 }
 
 // CompactionResult describes a completed context compaction.

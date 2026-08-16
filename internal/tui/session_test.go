@@ -270,6 +270,42 @@ func TestSessionPickerResumeAndNew(t *testing.T) {
 	}
 }
 
+func TestForkPickerBranchesOrSwitchesToIndependentSession(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	if err := m.app.Agent.Prompt(context.Background(), "fork base"); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = m.startForkPick()
+	if !m.pickFork || !strings.Contains(stripANSI(m.renderForkPicker()), "Fork branch in current session") || !strings.Contains(stripANSI(m.renderForkPicker()), "Git worktree") {
+		t.Fatalf("fork picker = %q", stripANSI(m.renderForkPicker()))
+	}
+	_, cmd := m.handleForkPick(teaKeyEnter())
+	if cmd == nil {
+		t.Fatal("missing branch fork command")
+	}
+	m.Update(cmd())
+	branches, err := m.app.Agent.Branches()
+	if err != nil || len(branches) != 2 {
+		t.Fatalf("branches=%+v err=%v", branches, err)
+	}
+
+	oldID := currentSessionID(m.app)
+	_, _ = m.startForkPick()
+	m.forkIndex = 1
+	_, cmd = m.handleForkPick(teaKeyEnter())
+	if cmd == nil {
+		t.Fatal("missing session fork command")
+	}
+	m.Update(cmd())
+	if got := currentSessionID(m.app); got == oldID || currentSessionPath(m.app) == "" {
+		t.Fatalf("session fork did not switch: old=%q got=%q path=%q", oldID, got, currentSessionPath(m.app))
+	}
+	if !strings.Contains(m.lastStatus, "forked independent session") {
+		t.Fatalf("status=%q", m.lastStatus)
+	}
+}
+
 func TestTreePickerSelectsAndForksBranches(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)

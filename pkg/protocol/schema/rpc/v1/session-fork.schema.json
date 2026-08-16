@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/session-fork.schema.json",
+  "title": "Snow independent session fork",
+  "type": "object",
+  "required": ["source_session_id", "source_branch_id", "source_entry_id", "session_id", "session_path", "cwd", "branch"],
+  "properties": {
+    "source_session_id": {"type": "string", "minLength": 1},
+    "source_branch_id": {"type": "string", "minLength": 1},
+    "source_entry_id": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "session_path": {"type": "string", "minLength": 1},
+    "cwd": {"type": "string", "minLength": 1},
+    "name": {"type": "string"},
+    "branch": {"$ref": "session-branch.schema.json"},
+    "worktree": {"$ref": "worktree.schema.json"}
+  },
+  "additionalProperties": false
+}

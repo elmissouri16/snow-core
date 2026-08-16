@@ -321,6 +321,43 @@ func TestBranchesAndFork(t *testing.T) {
 	}
 }
 
+func TestForkSessionCreatesDetachedDurableChild(t *testing.T) {
+	t.Setenv("SNOW_HOME", t.TempDir())
+	ctx := context.Background()
+	cwd := t.TempDir()
+	source, err := Open(ctx, Options{Provider: "fake", NoSession: true, PermissionMode: "allow", CWD: cwd, NoPlugins: true, NoMCP: true, NoSkills: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	if err := source.Prompt(ctx, "hello child"); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := source.Messages()
+	if err != nil || len(messages) == 0 {
+		t.Fatalf("messages=%+v err=%v", messages, err)
+	}
+	result, err := source.ForkSession(ctx, protocol.SessionForkOptions{FromEntryID: messages[len(messages)-1].ID, Name: "child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SourceSessionID != source.SessionID() || result.SessionID == source.SessionID() || result.CWD != cwd {
+		t.Fatalf("result=%+v", result)
+	}
+	if source.SessionPath() != "" {
+		t.Fatalf("source was replaced: path=%q", source.SessionPath())
+	}
+	child, err := Open(ctx, Options{Provider: "fake", SessionPath: result.SessionPath, PermissionMode: "deny", CWD: cwd, NoPlugins: true, NoMCP: true, NoSkills: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer child.Close()
+	childMessages, err := child.Messages()
+	if err != nil || len(childMessages) != len(messages) {
+		t.Fatalf("child messages=%d err=%v", len(childMessages), err)
+	}
+}
+
 func TestRootQueueAPIErrorsAndSnapshots(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, Options{Provider: "fake", NoSession: true, PermissionMode: "allow", CWD: t.TempDir()})

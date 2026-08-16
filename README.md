@@ -141,9 +141,11 @@ snow --permission deny -p "list the Go packages"
 # Emit one AgentEvent JSON object per line
 snow --mode json --permission deny -p "summarize recent changes"
 
-# Pick a saved session for this project, or resume a specific SQLite database
+# Pick a saved session, branch it, or create an independent fork
 snow resume
 snow resume ~/.snow/sessions/<encoded-cwd>/<session>.db
+snow fork SESSION.db --from-entry ENTRY --name independent
+snow fork-worktree SESSION.db --worktree ../project-experiment --git-branch snow/experiment
 
 # Start a long-lived RPC process; keep stdin open while prompts run
 snow --mode rpc --permission deny
@@ -199,8 +201,10 @@ public-address-only, redirect-checked, and never executes JavaScript.
 ### Sessions and context
 
 - Pure-Go SQLite session databases with append-only parent-linked entries
-- Indexed branch tips, named forks, branch selection, rename, and guarded delete
-- Current-directory session picker with automatic first-prompt titles, manual rename, and explicit path resume
+- Indexed branch tips, named same-database forks, branch selection, rename, and guarded delete
+- Independent durable session snapshots with immutable parent provenance and exact stable-entry boundaries
+- Clean Git-worktree forks with direct argument-based Git execution, rollback, and independent project trust/sandbox identity
+- Current-directory session picker with automatic first-prompt titles, manual rename, explicit path resume, and a three-way `/fork` picker
 - Turn-aware pressure compaction for ordinary, goal, and child turns at a configurable context threshold, plus one bounded recovery retry that excludes the durable failed attempt when a provider rejects an oversized context
 - Oversized plain-text tool results spill to private session-scoped artifacts; provider context keeps bounded head/tail previews, and older full results are pruned before ordinary requests and summaries without rewriting exact history
 - Strict provider terminal-event validation, stop/content consistency checks, and synthetic errors instead of executing length-truncated tool calls

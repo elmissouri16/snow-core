@@ -88,6 +88,8 @@ func run() error {
 
 	root.AddCommand(versionCmd())
 	root.AddCommand(resumeCmd())
+	root.AddCommand(forkCmd())
+	root.AddCommand(forkWorktreeCmd())
 	root.AddCommand(authCmd())
 	root.AddCommand(loginCmd())
 	root.AddCommand(logoutCmd())

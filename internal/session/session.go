@@ -23,15 +23,18 @@ import (
 )
 
 // SessionVersion is the current on-disk schema version.
-const SessionVersion = 8
+const SessionVersion = 9
 
 // Header is the first line of every session file.
 type Header struct {
-	Version   int    `json:"v"`
-	ID        string `json:"id"`
-	CreatedAt int64  `json:"created_at"`
-	CWD       string `json:"cwd"`
-	Name      string `json:"name,omitempty"`
+	Version         int    `json:"v"`
+	ID              string `json:"id"`
+	CreatedAt       int64  `json:"created_at"`
+	CWD             string `json:"cwd"`
+	Name            string `json:"name,omitempty"`
+	ParentSessionID string `json:"parent_session_id,omitempty"`
+	ParentBranchID  string `json:"parent_branch_id,omitempty"`
+	ForkEntryID     string `json:"fork_entry_id,omitempty"`
 }
 
 // EntryType enumerates session file entry kinds.
@@ -238,6 +241,11 @@ type Options struct {
 	Name string
 	// ID overrides the auto-generated id (tests).
 	ID string
+	// ParentSessionID, ParentBranchID, and ForkEntryID record immutable
+	// provenance for independently materialized session forks.
+	ParentSessionID string
+	ParentBranchID  string
+	ForkEntryID     string
 }
 
 // ---------------------------------------------------------------------------
@@ -379,7 +387,7 @@ func NewMemoryStore(opts Options) *MemoryStore {
 		id = newID()
 	}
 	now := time.Now().UnixMilli()
-	h := Header{Version: SessionVersion, ID: id, CreatedAt: now, CWD: opts.CWD, Name: opts.Name}
+	h := Header{Version: SessionVersion, ID: id, CreatedAt: now, CWD: opts.CWD, Name: opts.Name, ParentSessionID: opts.ParentSessionID, ParentBranchID: opts.ParentBranchID, ForkEntryID: opts.ForkEntryID}
 	s := &MemoryStore{
 		id:           id,
 		header:       h,
@@ -972,15 +980,18 @@ func (s *MemoryStore) ForkBranchWithOptions(opts protocol.BranchForkOptions) (pr
 	if s.closed {
 		return protocol.SessionBranch{}, errors.New("session: store closed")
 	}
-	if _, ok := s.byID[fromEntryID]; !ok {
-		return protocol.SessionBranch{}, ErrNotFound
-	}
 	sourceID := opts.SourceBranchID
 	if sourceID == "" {
 		sourceID = s.activeBranch
 	}
 	source, ok := s.branches[sourceID]
 	if !ok {
+		return protocol.SessionBranch{}, ErrNotFound
+	}
+	if fromEntryID == "" {
+		fromEntryID = source.TipID
+	}
+	if _, ok := s.byID[fromEntryID]; !ok {
 		return protocol.SessionBranch{}, ErrNotFound
 	}
 	belongs := false
@@ -1342,7 +1353,7 @@ func NewJSONLStore(path, cwd string, opts Options) (*JSONLStore, error) {
 	s := &JSONLStore{path: path, byID: make(map[string]int)}
 	info, err := f.Stat()
 	if err == nil && info.Size() == 0 {
-		s.header = Header{Version: SessionVersion, ID: id, CreatedAt: time.Now().UnixMilli(), CWD: cwd, Name: opts.Name}
+		s.header = Header{Version: SessionVersion, ID: id, CreatedAt: time.Now().UnixMilli(), CWD: cwd, Name: opts.Name, ParentSessionID: opts.ParentSessionID, ParentBranchID: opts.ParentBranchID, ForkEntryID: opts.ForkEntryID}
 		line, err := json.Marshal(map[string]any{"header": s.header})
 		if err != nil {
 			f.Close()

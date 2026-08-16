@@ -11,7 +11,7 @@
       "required": ["type"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
-        "type": {"enum": ["abort", "goal_get", "goal_pause", "goal_resume", "goal_clear", "goal_continue", "models_list", "session_info", "subagent_models", "subagent_ready"]}
+        "type": {"enum": ["abort", "branch_fork", "goal_get", "goal_pause", "goal_resume", "goal_clear", "goal_continue", "models_list", "session_fork", "session_info", "session_worktree_fork", "subagent_models", "subagent_ready"]}
       },
       "additionalProperties": false
     },
@@ -29,6 +29,15 @@
       "type": "object",
       "required": ["target"],
       "properties": {"target": {"$ref": "#/$defs/path"}},
+      "additionalProperties": false
+    },
+    "forkSourceParams": {
+      "type": "object",
+      "properties": {
+        "source_branch_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "from_entry_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "name": {"type": "string", "minLength": 1, "maxLength": 72}
+      },
       "additionalProperties": false
     }
   },
@@ -83,6 +92,56 @@
           "type": "object",
           "required": ["name"],
           "properties": {"name": {"type": "string", "minLength": 1}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "params"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "branch_fork"},
+        "params": {"$ref": "#/$defs/forkSourceParams"}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "params"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "session_fork"},
+        "params": {
+          "type": "object",
+          "properties": {
+            "source_branch_id": {"type": "string", "minLength": 1, "maxLength": 256},
+            "from_entry_id": {"type": "string", "minLength": 1, "maxLength": 256},
+            "name": {"type": "string", "minLength": 1, "maxLength": 72},
+            "destination_path": {"type": "string", "minLength": 1, "maxLength": 4096}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "params"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "session_worktree_fork"},
+        "params": {
+          "type": "object",
+          "properties": {
+            "source_branch_id": {"type": "string", "minLength": 1, "maxLength": 256},
+            "from_entry_id": {"type": "string", "minLength": 1, "maxLength": 256},
+            "name": {"type": "string", "minLength": 1, "maxLength": 72},
+            "destination_path": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "worktree_path": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "git_branch": {"type": "string", "minLength": 1, "maxLength": 256}
+          },
           "additionalProperties": false
         }
       },
