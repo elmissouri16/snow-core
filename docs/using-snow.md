@@ -1,8 +1,31 @@
 # Using Snow
 
-This guide covers Snow's terminal surfaces: interactive TUI, print output, JSON
-events, and the command-line controls shared by all modes. For machine control,
-see [JSONL RPC](rpc.md). For embedding, see the [Go SDK](sdk.md).
+This guide covers Snow's terminal surfaces: the interactive TUI, print output,
+JSON events, and the command-line controls shared by all modes. For machine
+control, see [JSONL RPC](rpc.md). For embedding, see the [Go SDK](sdk.md).
+
+> **Note:** Snow is pre-alpha. The generated command reference from
+> `snow --help` is authoritative for your build, and behavior described here is
+> verified against source.
+
+## On this page
+
+- [Runtime modes](#runtime-modes)
+- [Common flags](#common-flags)
+- [Authentication commands](#authentication-commands)
+- [TUI layout](#tui-layout)
+- [Composer and transcript keys](#composer-and-transcript-keys)
+- [Steering and follow-ups](#steering-and-follow-ups)
+- [Slash commands](#slash-commands)
+- [Composer completions](#composer-completions)
+- [Plan Mode and goals](#plan-mode-and-goals)
+- [Sessions, branches, and compaction](#sessions-branches-and-compaction)
+- [Model-requested input](#model-requested-input)
+- [Print and JSON behavior](#print-and-json-behavior)
+- [Agent Skills activation](#agent-skills-activation)
+- [Management commands](#management-commands)
+- [Persistent smolvm Bash guest](#persistent-smolvm-bash-guest)
+- [Related documents](#related-documents)
 
 ## Runtime modes
 
@@ -20,8 +43,8 @@ see [JSONL RPC](rpc.md). For embedding, see the [Go SDK](sdk.md).
 nonblank `-p`; Snow validates that before constructing sessions or extensions.
 Supplying `-p` selects print behavior unless `--mode json` or `--mode rpc` is
 set. RPC keeps stdin open for asynchronous commands; it ignores `-p` and is not
-a one-shot `echo | snow` protocol for prompts. Unknown permission modes are startup errors rather than
-silently falling back.
+a one-shot `echo | snow` protocol for prompts. Unknown permission modes are
+startup errors rather than silently falling back.
 
 ## Common flags
 
@@ -53,9 +76,9 @@ silently falling back.
 | `--subagent-max-depth N` | Override child nesting depth |
 | `--usage` | Print normalized usage after a print-mode prompt |
 
-Run `snow --help` or `snow <command> --help` for the generated command reference.
-Configuration precedence and persistent equivalents are documented in
-[Configuration](configuration.md).
+Run `snow --help` or `snow <command> --help` for the generated command
+reference. Configuration precedence and persistent equivalents are documented
+in [Configuration](configuration.md).
 
 ## Authentication commands
 
@@ -84,19 +107,19 @@ existing stored key or remains keyless. The legacy profile may also use
 `OPENAI_API_KEY`; named profiles deliberately do not share that fallback.
 
 The top-level `snow login openai-compatible` remains key-only for the legacy
-profile. Add `--name PROFILE --base-url URL` to create or update a named profile;
-subsequent `snow login PROFILE`, `snow logout PROFILE`, and `snow auth check
-PROFILE` address its separate credential. An optional default model can still
-be configured through config, CLI flags, or the SDK. For a one-shot keyless local gateway:
+profile. Add `--name PROFILE --base-url URL` to create or update a named
+profile; subsequent `snow login PROFILE`, `snow logout PROFILE`, and
+`snow auth check PROFILE` address its separate credential. An optional default
+model can still be configured through config, CLI flags, or the SDK. For a
+one-shot keyless local gateway:
 
 ```sh
 snow --provider openai-compatible --base-url http://127.0.0.1:8080/v1 \
   --model local-model -p "summarize this project"
 ```
 
-See
-[ChatGPT authentication](chatgpt-auth.md) for browser callbacks, device login,
-local-account discovery, refresh, and model-cache behavior.
+See [ChatGPT authentication](chatgpt-auth.md) for browser callbacks, device
+login, local-account discovery, refresh, and model-cache behavior.
 
 ## TUI layout
 
@@ -105,9 +128,9 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
 1. The program uses the alternate screen and composes a sticky provider/model
    header, a Bubbles transcript viewport, overlays/run status, composer, and
    footer in one renderer-owned frame.
-2. Finalized Markdown, reasoning, tools, plans, goals, and subagent rows remain in
-   the viewport. Scrolling never enters terminal scrollback, so it cannot expose
-   stale headers, separators, or prior composer frames.
+2. Finalized Markdown, reasoning, tools, plans, goals, and subagent rows remain
+   in the viewport. Scrolling never enters terminal scrollback, so it cannot
+   expose stale headers, separators, or prior composer frames.
 3. The sticky header shows the current provider/model, collaboration mode,
    reasoning effort, working directory, and status. The run-status row shows
    activity and queued-input count. The footer shows permission mode, mode/goal
@@ -125,37 +148,24 @@ memory without limit. An omission marker replaces older rendered rows; durable
 session history remains append-only and is restored from the session database.
 
 `CH` appears only when the provider explicitly reports cached-token usage; an
-explicit zero is shown as `CH0.0%`, while an omitted cache metric remains hidden.
-The percentage is `cache_read / input`, because Snow's normalized `input` is the
-total prompt count including cached tokens. Context usage follows the active
-theme: green below 50%, accent color from
-50–69%, warning/yellow from 70–89%, and red at 90% or above. With the default
-`tui.mouse: true`, wheel/trackpad gestures scroll Snow's transcript instead of
-terminal history; primary drag highlights and copies through OSC 52. On Apple
-Terminal, hold Fn while dragging for instant terminal-native selection. A
-right-click received by Snow disables mouse reporting so the terminal owns
-native selection and its context menu; because terminal protocols cannot replay
-the consumed press, repeat the right-click when the menu does not open on
-release. F6 toggles app/native mouse mode. In native mode, wheel gestures may
-move terminal scrollback; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still
-scroll Snow.
-
-In the ordinary agent composer, **Ctrl+V** probes the system clipboard for PNG,
-JPEG, GIF, or WebP image data before falling back to text paste. Each attachment
-appears at the paste cursor as an inline `[Image #N]` token; the token is removed
-from model-visible text when Enter sends the corresponding image block to a
-vision-capable model. Up to eight images are accepted, each at most 20 MiB and
-40 MiB in aggregate. When no ordinary text remains, Backspace (or Esc) removes
-the last attachment and token. Images cannot be queued as steering/follow-up
-input while another turn runs. Apple Terminal intercepts Cmd+V as terminal text
-paste, so use Ctrl+V for image capture. Linux image paste requires `wl-paste` or
-`xclip`; remote SSH sessions read the remote host clipboard, not the local
-desktop clipboard.
+explicit zero is shown as `CH0.0%`, while an omitted cache metric remains
+hidden. The percentage is `cache_read / input`, because Snow's normalized
+`input` is the total prompt count including cached tokens. Context usage follows
+the active theme: green below 50%, accent color from 50-69%, warning/yellow
+from 70-89%, and red at 90% or above. With the default `tui.mouse: true`,
+wheel/trackpad gestures scroll Snow's transcript instead of terminal history;
+primary drag highlights and copies through OSC 52. On Apple Terminal, hold Fn
+while dragging for instant terminal-native selection. A right-click received by
+Snow disables mouse reporting so the terminal owns native selection and its
+context menu; because terminal protocols cannot replay the consumed press,
+repeat the right-click when the menu does not open on release. F6 toggles
+app/native mouse mode. In native mode, wheel gestures may move terminal
+scrollback; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
 
 ## Composer and transcript keys
 
-These are built-in defaults; most can be overridden in
-`keybindings.yaml` as described in [Configuration](configuration.md).
+These are built-in defaults; most can be overridden in `keybindings.yaml` as
+described in [Configuration](configuration.md).
 
 | Key | Idle behavior | Busy behavior |
 |---|---|---|
@@ -180,11 +190,25 @@ Choice pickers accept arrows, `j`/`k`, Tab/Shift+Tab, Home/End, and Enter. The
 model picker also accepts `/` to search provider IDs, model IDs, display names,
 and descriptions. Selecting a reasoning-capable model opens a second picker
 with that model's advertised effort levels, including `off`, before applying
-and persisting both. Blocking permission and model-requested input overlays take
-keyboard and visual precedence over ordinary pickers, including requests from
-subagents.
+and persisting both. Blocking permission and model-requested input overlays
+take keyboard and visual precedence over ordinary pickers, including requests
+from subagents.
 
-### Steering and follow-ups
+### Image paste
+
+In the ordinary agent composer, Ctrl+V probes the system clipboard for PNG,
+JPEG, GIF, or WebP image data before falling back to text paste. Each
+attachment appears at the paste cursor as an inline `[Image #N]` token; the
+token is removed from model-visible text when Enter sends the corresponding
+image block to a vision-capable model. Up to eight images are accepted, each at
+most 20 MiB and 40 MiB in aggregate. When no ordinary text remains, Backspace
+(or Esc) removes the last attachment and token. Images cannot be queued as
+steering/follow-up input while another turn runs. Apple Terminal intercepts
+Cmd+V as terminal text paste, so use Ctrl+V for image capture. Linux image
+paste requires `wl-paste` or `xclip`; remote SSH sessions read the remote host
+clipboard, not the local desktop clipboard.
+
+## Steering and follow-ups
 
 While the root agent is running, new composer submissions do not cancel or
 replace accepted work:
@@ -202,8 +226,9 @@ replace accepted work:
   closed queue recoverable through `PendingInputs`/`ClearPendingInputs`; the TUI
   automatically restores that text to the composer at `turn_done`.
 - Abort clears undelivered queue entries and restores their original compact TUI
-  text, including unexpanded `@` mentions. If a goal was active, ordinary prompts
-  leave it deferred; use `/goal resume` to restart automatic continuation.
+  text, including unexpanded `@` mentions. If a goal was active, ordinary
+  prompts leave it deferred; use `/goal resume` to restart automatic
+  continuation.
 
 SDK and RPC callers get the same behavior through `Steer`/`FollowUp` and
 `steer`/`follow_up`.
@@ -257,8 +282,8 @@ inserts `$skill-name ` without submitting. It also completes another leading
 skill after an existing directive, such as `$review $docs `. Non-leading tokens
 in ordinary or pasted prose do not open the picker or activate a skill.
 
-Project `AGENTS.md` files are loaded nearest-first into bounded context. They are
-always treated as instructions, independently from project-extension trust.
+Project `AGENTS.md` files are loaded nearest-first into bounded context. They
+are always treated as instructions, independently from project-extension trust.
 
 ## Plan Mode and goals
 
@@ -279,34 +304,35 @@ state and lifecycle semantics.
 
 ## Sessions, branches, and compaction
 
-Snow creates SQLite sessions by default. From an interactive shell, `snow
-resume` opens a picker of resumable sessions for the current project and starts
-the selected conversation. `snow resume PATH` opens an explicit existing SQLite
-database immediately. Headless modes cannot show a picker, so `snow resume -p
-"continue"` resumes the most recently updated indexed session. The command
-rejects missing paths and `--no-session` instead of silently creating an empty
-or ephemeral conversation.
+Snow creates SQLite sessions by default. From an interactive shell,
+`snow resume` opens a picker of resumable sessions for the current project and
+starts the selected conversation. `snow resume PATH` opens an explicit existing
+SQLite database immediately. Headless modes cannot show a picker, so
+`snow resume -p "continue"` resumes the most recently updated indexed session.
+The command rejects missing paths and `--no-session` instead of silently
+creating an empty or ephemeral conversation.
 
 Inside the TUI, `/new`, `/sessions`, and `/resume` operate on the current
 project's session index. Sessions receive a local, provider-free title from the
 first user prompt. In the `/sessions` or no-path `/resume` picker, press `r` to
 edit the selected title; this works without switching to that session. Titles
-are 1–72 runes after trimming, do not need to be unique, and never change the
+are 1-72 runes after trimming, do not need to be unique, and never change the
 stable session ID or database path. `/tree` operates inside the currently open
 database.
 
-A named branch fork shares prior append-only entries and diverges from a selected
-entry; it does not copy message rows. Branch selection changes subsequent
-prompts, messages, usage, mode, and goal state. Delete is restricted to inactive
-leaf branches and never deletes shared history.
+A named branch fork shares prior append-only entries and diverges from a
+selected entry; it does not copy message rows. Branch selection changes
+subsequent prompts, messages, usage, mode, and goal state. Delete is restricted
+to inactive leaf branches and never deletes shared history.
 
 `/fork` makes the distinction explicit:
 
-- **current session** uses the same-database branch behavior above and activates
-  the new branch;
-- **independent session here** physically copies the exact root-to-selected-entry
-  chain into a new SQLite database, records parent session/branch/entry
-  provenance, and switches the TUI only after the child is reopenable;
+- **current session** uses the same-database branch behavior above and
+  activates the new branch;
+- **independent session here** physically copies the exact
+  root-to-selected-entry chain into a new SQLite database, records parent
+  session/branch/entry provenance, and switches the TUI only after the child is
+  reopenable;
 - **Git worktree** requires a clean non-bare Git worktree, creates a new branch
   and non-existing destination with direct `git` arguments, then creates a
   detached child session rooted there. The current TUI stays in the source and
@@ -314,13 +340,12 @@ leaf branches and never deletes shared history.
 
 The non-interactive independent-fork equivalents are `snow fork` and
 `snow fork-worktree`. Each accepts an optional session path (or selects the
-newest current-project session), `--from-entry`, `--source-branch`, and `--name`.
-Same-database branch management remains on the active-runtime TUI, Go SDK, and
-RPC surfaces so a detached CLI process cannot race the database's active-branch
-cursor.
-Session forks also accept `--destination`; worktree forks accept `--worktree`
-and `--git-branch`. Explicit failures never silently fall back to a less
-isolated fork.
+newest current-project session), `--from-entry`, `--source-branch`, and
+`--name`. Same-database branch management remains on the active-runtime TUI, Go
+SDK, and RPC surfaces so a detached CLI process cannot race the database's
+active-branch cursor. Session forks also accept `--destination`; worktree forks
+accept `--worktree` and `--git-branch`. Explicit failures never silently fall
+back to a less isolated fork.
 
 A historical independent fork copies conversation entries and metadata only
 through the selected entry. Current collaboration mode is inherited only when
@@ -332,13 +357,13 @@ being repaired or silently advanced.
 `/compact` summarizes the projected context while retaining complete recent
 turns. Oversized plain-text tool results in the older summarization prefix are
 first reduced to a bounded head and tail; exact session history remains
-unchanged. When invoked during automatic goal work, manual compaction pauses that
-goal after the summary; use `/goal resume` to continue. Active goals also compact automatically between complete continuation
-turns at the configured context threshold (80% by default; `0` disables it).
-Any admitted turn—including ordinary prompts, steering/follow-ups, and goal
-continuations—may auto-compact at a safe top-of-cycle boundary. The full
-append-only history remains
-available.
+unchanged. When invoked during automatic goal work, manual compaction pauses
+that goal after the summary; use `/goal resume` to continue. Active goals also
+compact automatically between complete continuation turns at the configured
+context threshold (80% by default; `0` disables it). Any admitted turn,
+including ordinary prompts, steering/follow-ups, and goal continuations, may
+auto-compact at a safe top-of-cycle boundary. The full append-only history
+remains available.
 
 Snow also detects identical consecutive tool calls during one admitted run and
 adds advisory reminders after the third, fifth, and eighth repetition. It does
@@ -359,21 +384,24 @@ the TUI displays it inline:
 - Esc rejects the tool call;
 - Ctrl+C aborts the complete turn.
 
-See [Model-requested user input](user-input.md) for the schema and SDK/RPC reply
-contracts.
+See [Model-requested user input](user-input.md) for the schema and SDK/RPC
+reply contracts.
 
 ## Print and JSON behavior
 
-Print mode renders root assistant text, plan text, selected tool/subagent status,
-errors, and optional usage. Child token streams are not mixed into root text.
+Print mode renders root assistant text, plan text, selected tool/subagent
+status, errors, and optional usage. Child token streams are not mixed into root
+text.
 
-JSON mode writes the same `protocol.AgentEvent` objects used by the SDK and RPC,
-one per line. It is an observation stream only; it cannot answer `ask_user`,
-permission prompts, steering, or follow-ups. Use RPC for bidirectional control.
+JSON mode writes the same `protocol.AgentEvent` objects used by the SDK and
+RPC, one per line. It is an observation stream only; it cannot answer
+`ask_user`, permission prompts, steering, or follow-ups. Use RPC for
+bidirectional control.
 
-Headless `ask` has no interactive permission asker and fails closed. Prefer an
-explicit `--permission deny` for inspection or `--permission allow` only in a
-trusted environment whose tool authority is intentional.
+> **Warning:** Headless `ask` has no interactive permission asker and fails
+> closed. Prefer an explicit `--permission deny` for inspection or
+> `--permission allow` only in a trusted environment whose tool authority is
+> intentional.
 
 ## Agent Skills activation
 
@@ -411,7 +439,7 @@ snow plugin check MANIFEST_OR_EXECUTABLE [--json]
 
 snow sandbox [status] [--json]
 snow sandbox init [IMAGE_OR_PACK] [--profile ubuntu|go|node|python] [--from]
-                  [--cpus N] [--memory MIB]
+                  [--cpus N] [--memory MiB]
                   [--storage GIB] [--overlay GIB] [--guest-cwd PATH]
                   [--read-only] [--network]
 snow sandbox start
@@ -419,69 +447,74 @@ snow sandbox stop
 snow sandbox delete --force [--forget]
 ```
 
-### Persistent smolvm Bash guest
+## Persistent smolvm Bash guest
 
 For a consolidated profile, persistence, project-scoping, process, and recovery
 guide, see [Sandboxed Bash with smolvm](sandbox.md).
 
 `snow sandbox init` is the one-command default: it ensures pinned smolvm 1.8.1,
-creates a deterministic digest-pinned Ubuntu 24.04 machine for the exact canonical current project,
-starts it, then atomically publishes the association. Supply another image,
-configure global `sandbox.default_image`, or use `--from` with an existing local
-`.smolmachine` artifact to override Ubuntu.
+creates a deterministic digest-pinned Ubuntu 24.04 machine for the exact
+canonical current project, starts it, then atomically publishes the
+association. Supply another image, configure global `sandbox.default_image`, or
+use `--from` with an existing local `.smolmachine` artifact to override Ubuntu.
 
 If the default `smolvm` command is absent, init downloads the version-tagged
 official installer script and platform release archive over HTTPS, checks
-Snow-pinned SHA-256 values for both, and executes the installer against only that
-already verified local archive with `--version 1.8.1 --no-modify-path`. The
-upstream installer writes user-local `~/.smolvm`, `~/.local/bin/smolvm`, and
+Snow-pinned SHA-256 values for both, and executes the installer against only
+that already verified local archive with `--version 1.8.1 --no-modify-path`.
+The upstream installer writes user-local `~/.smolvm`, `~/.local/bin/smolvm`, and
 platform smolvm data files. It does not modify shell profiles. A custom
-`sandbox.executable` is operator policy: if that
-path/command is absent, Snow fails instead of installing or replacing it.
+`sandbox.executable` is operator policy: if that path/command is absent, Snow
+fails instead of installing or replacing it.
 
 The create operation mounts only the canonical project directory, at
-`/workspace` by default. `--read-only` changes that Bash guest mount.
-Guest runtime networking is off in the supported smolvm line unless `--network`
-is explicit. That flag persists full guest network authority for later Bash
-calls. No-argument init downloads the digest-pinned registry image over host
-HTTPS into a private temporary Docker-save archive, then gives smolvm that local
+`/workspace` by default. `--read-only` changes that Bash guest mount. Guest
+runtime networking is off in the supported smolvm line unless `--network` is
+explicit. That flag persists full guest network authority for later Bash calls.
+No-argument init downloads the digest-pinned registry image over host HTTPS
+into a private temporary Docker-save archive, then gives smolvm that local
 archive; no guest bootstrap network is enabled. Use a local pack when bootstrap
-itself must be offline. `snow sandbox stop` explicitly persists host routing while
-preserving the machine; `snow sandbox start` restores VM routing. Active backend
-failures never silently fall back to the host. Bash commands use foreground `machine exec --stream`, keep
-the existing Snow output/timeout bounds, and forward only the global environment
-name allowlist. A timeout/cancel first sends SIGINT so smolvm can cancel the
-guest command, then kills the launcher process group after a short grace.
+itself must be offline. `snow sandbox stop` explicitly persists host routing
+while preserving the machine; `snow sandbox start` restores VM routing. Active
+backend failures never silently fall back to the host. Bash commands use
+foreground `machine exec --stream`, keep the existing Snow output/timeout
+bounds, and forward only the global environment name allowlist. A timeout/cancel
+first sends SIGINT so smolvm can cancel the guest command, then kills the
+launcher process group after a short grace.
 
 Once initialized, an active association enables sandboxed Bash for each newly
 assembled CLI/TUI/RPC runtime in that project. While active, corrupt state, a
 missing pinned executable, unavailable machinery, and exec errors are returned
-as Bash errors—never retried on the host. `stop` is an explicit routing-policy
+as Bash errors, never retried on the host. `stop` is an explicit routing-policy
 change: after the VM stops and state commits, it preserves VM storage but sends
 future Bash calls to the host; no Bash call auto-starts it. `start` restores VM
 routing. `delete --force` deletes the VM and removes the association. If the VM
-was removed outside Snow or association cleanup must be repaired, `delete
---force --forget` removes only the operator record and leaves Bash on the host.
+was removed outside Snow or association cleanup must be repaired,
+`delete --force --forget` removes only the operator record and leaves Bash on
+the host.
 
 In the TUI use `/sandbox` or `/sandbox status`; `/sandbox init` opens an
 interactive setup form for the environment profile, CPUs, memory MiB, storage
 GiB, overlay GiB, project mount mode, and guest networking. Built-in choices are
-digest-pinned Minimal Ubuntu, Go 1.27rc2, Node.js 22, and Python 3.12 with uv 0.12.5.
-The form starts on the configured/custom image with its existing network choice;
-a deliberate environment-row change selects a profile. The Go profile recommends
-4 CPUs and 6144 MiB RAM by default so snow-core's heavier dependencies compile;
-resource fields and CLI flags can still override those values. Every built-in profile
-explicitly enables persistent guest networking so apt, go, npm, and uv can reach
-their registries; custom/configured images retain the separately selected network choice. Choosing `smolvm default` for either disk explicitly clears a nonzero
-global disk default. An optional source still accepts `--from`, `--read-only`, and
-`--network` as initial form choices. Use arrows to select/change values, Space
-to toggle authority choices, Enter to create, and Esc to cancel. Deletion requires the explicit
+digest-pinned Minimal Ubuntu, Go 1.27rc2, Node.js 22, and Python 3.12 with
+uv 0.12.5. The form starts on the configured/custom image with its existing
+network choice; a deliberate environment-row change selects a profile. The Go
+profile recommends 4 CPUs and 6144 MiB RAM by default so snow-core's heavier
+dependencies compile; resource fields and CLI flags can still override those
+values. Every built-in profile explicitly enables persistent guest networking
+so apt, go, npm, and uv can reach their registries; custom/configured images
+retain the separately selected network choice. Choosing `smolvm default` for
+either disk explicitly clears a nonzero global disk default. An optional source
+still accepts `--from`, `--read-only`, and `--network` as initial form choices.
+Use arrows to select/change values, Space to toggle authority choices, Enter to
+create, and Esc to cancel. Deletion requires the explicit
 `/sandbox delete confirm` spelling. CLI `--profile` is mutually exclusive with
 an explicit image/pack source. On the CLI, omitting `--storage`/`--overlay`
-uses global defaults while an explicit zero requests smolvm's own default. A wide header continuously labels the Bash
-boundary as green `shell:vm` or warning-yellow `shell:host`.
+uses global defaults while an explicit zero requests smolvm's own default. A
+wide header continuously labels the Bash boundary as green `shell:vm` or
+warning-yellow `shell:host`.
 
-This boundary applies **only** to the model-facing Bash tool. Snow itself,
+This boundary applies only to the model-facing Bash tool. Snow itself,
 `read`/`write`/`edit`, webfetch/provider traffic, plugins, MCP servers, and
 host-side subagent orchestration retain their documented host authority.
 
@@ -489,7 +522,15 @@ MCP, skill, and plugin mutations are global by default; add `--project` to
 target project configuration. Plugin add stages declarations disabled unless
 `--enable` is explicit, every plugin configuration change requires restart, and
 project declarations still require project trust before loading. Plugin
-list/get/add/enable/disable/remove never start a process. `plugin check` performs
-a bounded runtime handshake and therefore executes the plugin, but does not
-mutate configuration. Full details are in [MCP](mcp.md), [Agent Skills](skills.md),
-and [Plugins](plugins.md).
+list/get/add/enable/disable/remove never start a process. `plugin check`
+performs a bounded runtime handshake and therefore executes the plugin, but does
+not mutate configuration. Full details are in [MCP](mcp.md),
+[Agent Skills](skills.md), and [Plugins](plugins.md).
+
+## Related documents
+
+- [Configuration](configuration.md)
+- [JSONL RPC](rpc.md)
+- [Go SDK](sdk.md)
+- [Sessions](sessions.md)
+- [Sandboxed Bash with smolvm](sandbox.md)

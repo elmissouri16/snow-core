@@ -1,154 +1,246 @@
 # SQLite session storage
 
-Snow stores persisted conversations in one SQLite database per session:
+Snow persists each conversation as a single SQLite database. This document
+covers the on-disk layout, schema and pragmas, the append-only entry and branch
+model, resume and fork workflows, the session index, and the embedding API in
+`internal/session`. Provider, TUI, and SDK surfaces are described in their own
+guides.
+
+## On this page
+
+- [Storage layout and discovery](#storage-layout-and-discovery)
+- [Titles and identity](#titles-and-identity)
+- [Driver and pragmas](#driver-and-pragmas)
+- [Schema](#schema)
+- [Branches and compaction projection](#branches-and-compaction-projection)
+- [Independent session forks](#independent-session-forks)
+- [Git worktree forks](#git-worktree-forks)
+- [Prior-session search and references](#prior-session-search-and-references)
+- [Go usage and embedding](#go-usage-and-embedding)
+- [Subagent topology and child databases](#subagent-topology-and-child-databases)
+- [Related documents](#related-documents)
+
+## Storage layout and discovery
+
+Sessions live under one database per conversation:
 
 ```text
 ~/.snow/sessions/<encoded-working-directory>/<timestamp>_<suffix>.db
 ```
 
-Set `SNOW_SESSIONS_DIR` to move the root. New directory names use
-`cwd-v2-<full-sha256>` over the normalized absolute working directory, avoiding
-the collisions and path-length growth of the legacy flattened format.
+Set `SNOW_SESSIONS_DIR` to move the sessions root. New directory names use
+`cwd-v2-<full-sha256>` over the normalized absolute working directory, which
+avoids the collisions and path-length growth of the legacy flattened format.
 `FileIndex.List` also searches the legacy directory and filters every database
-by its stored CWD, so old sessions remain discoverable without cross-project
-mixing. `--no-session`/`NoSession` keeps the session in memory. Interactive
-`snow resume` opens a current-working-directory session picker; `snow resume
-/path/to/session.db` requires and opens that explicit database. In headless
-print/JSON/RPC use, no-argument resume selects the newest indexed session because
-a picker is unavailable. The lower-level `--session /path/to/session.db` flag
-and SDK `SessionPath` option also select a session path. The previous JSONL
-format is intentionally not migrated.
+by its stored CWD, so old sessions stay discoverable without cross-project
+mixing.
+
+`--no-session` (or the SDK `NoSession` option) keeps the session in memory.
+Interactive `snow resume` opens a current-working-directory picker;
+`snow resume /path/to/session.db` opens that explicit database. Headless
+print/JSON/RPC use selects the newest indexed session when no argument is
+given, because a picker is unavailable. The lower-level
+`--session /path/to/session.db` flag and the SDK `SessionPath` option also
+select a path. The previous JSONL format is intentionally not migrated.
+
+## Titles and identity
 
 Built-in sessions receive a provider-free display title from the first accepted
 user prompt. Whitespace is collapsed and long titles are truncated at 72 runes;
 image-only prompts use `Image prompt`. Manual rename trims surrounding
-whitespace, requires 1–72 runes, and rejects control characters. Titles are
-session-wide metadata: they need not be unique, do not enter ordinary
-conversation context (but `session_search`/`session_reference` results can
-surface them), and do not rename the database or change its stable ID. A
-manually titled empty session is durable and remains visible in the picker.
+whitespace, requires 1-72 runes, and rejects control characters.
 
-## Driver
+Titles are session-wide metadata: they need not be unique, do not enter
+ordinary conversation context (although `session_search` and
+`session_reference` results can surface them), and do not rename the database
+or change its stable ID. A manually titled empty session is durable and remains
+visible in the picker.
 
-The project uses [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite),
-a pure-Go, CGo-free SQLite driver that implements Go's `database/sql` API. No
+## Driver and pragmas
+
+Snow uses [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite), a
+pure-Go, CGo-free SQLite driver that implements Go's `database/sql` API. No
 SQLite shared library or C toolchain is required.
 
 New session databases are created with mode `0600` inside `0755` directories.
-Opening an existing database does not re-chmod it, so a file loosened or created
-outside Snow must be secured separately.
+Opening an existing database does not re-chmod it, so a file loosened or
+created outside Snow must be secured separately.
 
-The store opens databases with:
+The store opens each database with:
 
-- WAL journaling for concurrent read/write behavior;
-- `synchronous=NORMAL` to avoid an `fsync` for every individual entry while
-  retaining SQLite transaction recovery;
+- write-ahead logging (WAL) journaling for concurrent read/write behavior;
+- `synchronous=NORMAL`, which avoids an `fsync` for every individual entry
+  while retaining SQLite transaction recovery;
 - foreign keys enabled;
-- a 5-second busy timeout;
-- one database connection, avoiding connection-local pragma surprises.
+- a 5-second busy timeout (see the
+  [SQLite WAL documentation](https://sqlite.org/wal.html));
+- one database connection, avoiding connection-local pragma surprises while
+  WAL still permits readers to proceed during a writer commit.
 
 ## Schema
 
-Each database contains:
+Each database contains the following tables:
 
-- `session_meta`: one metadata row with schema version, session identity, CWD,
-  display name, compatibility active branch tip, and optional immutable
-  `parent_session_id`/`parent_branch_id`/`fork_entry_id` provenance;
-- `session_branches`: durable branch references with stable ID, unique display
-  name, parent branch/fork point, tip entry, timestamps, and active state;
-- `entries`: append-ordered parent-linked entries with a unique ID, type,
-  optional JSON-encoded protocol message, and optional compaction boundary;
-- `thread_goals` and `thread_goal_costs`: branch-scoped objective, token/time
-  accounting, and optional per-currency estimated pricing totals;
-- indexes on `entries.parent_id`, `entries.entry_type`, and active branches.
+| Table | Purpose | Columns |
+|---|---|---|
+| `session_meta` | One metadata row per session | `singleton`, `version`, `session_id`, `created_at`, `cwd`, `name`, `branch_tip`, `parent_session_id`, `parent_branch_id`, `fork_entry_id` |
+| `entries` | Append-ordered, parent-linked entries | `seq`, `id`, `parent_id`, `entry_type`, `message`, `summary`, `compacted_through`, `meta_key`, `meta_value` |
+| `session_branches` | Durable branch references | `branch_id`, `branch_name`, `parent_branch_id`, `forked_from_id`, `tip_id`, `created_at`, `updated_at`, `active` |
+| `thread_state` | Branch-scoped collaboration mode | `branch_id`, `collaboration_mode` |
+| `thread_goals` | Branch-scoped goal state | `branch_id`, `goal_id`, `objective`, `status`, `token_budget`, `tokens_used`, `seconds_used`, `created_at`, `updated_at` |
+| `thread_goal_costs` | Per-currency estimated goal cost totals | `branch_id`, `currency`, `input_cost`, `output_cost`, `cache_read_cost`, `cache_write_cost`, `total_cost` |
+| `thread_goal_deferrals` | Goal continuation deferral | `branch_id`, `deferred` |
+| `subagent_threads` | Root-scoped subagent topology | `thread_id`, `parent_thread_id`, `parent_branch_id`, `agent_path`, `parent_path`, `role`, `role_fingerprint`, `nickname`, `depth`, `status`, `child_session_path`, `model_provider`, `model_id`, `thinking`, `created_at`, `started_at`, `finished_at`, `result`, `error`, `usage_json`, `generation` |
 
-User image attachments are stored as `image` content blocks in the message JSON;
-Go's JSON encoding represents their bytes as base64. Clipboard images therefore
-increase the session database size and remain available when a branch is resumed.
+Snow creates these indexes:
+
+- `entries_parent_idx` on `entries(parent_id)`;
+- `entries_type_idx` on `entries(entry_type)`;
+- `session_branches_active_idx` on `session_branches(active)`;
+- `subagent_threads_parent_idx` on
+  `subagent_threads(parent_thread_id, created_at)`;
+- `subagent_threads_branch_idx` on
+  `subagent_threads(parent_branch_id, created_at)`;
+- a unique `session_branches_name_idx` on
+  `session_branches(branch_name COLLATE NOCASE)`.
+
+User image attachments are stored as `image` content blocks in the message
+JSON; Go's JSON encoding represents their bytes as base64. Clipboard images
+therefore increase the session database size and remain available when a
+branch is resumed.
+
+### Schema versions
 
 Version-1 databases are upgraded on open by creating a `main` branch pointing
 at the existing `branch_tip`. Forking creates another reference in the same
 SQLite tree; message rows are not copied. Selecting a branch changes the active
 tip used by subsequent appends, `Messages`, `Usage`, and prompts. `Branches`
-returns branch topology, previews, and message counts for the TUI/SDK tree picker.
-Schema version 7 adds names and parent/fork metadata; legacy non-main branches
-retain their IDs as names and attach to `main` when ancestry is unavailable.
-Schema version 8 adds atomic per-currency goal cost totals. Migration backfills
-priced historical goal usage only when its exact token sum matches the persisted
-goal counter. Schema version 9 adds empty-by-default session-fork provenance
-columns. An independent child retains that provenance even if its parent is
-moved or deleted.
+returns branch topology, previews, and message counts for the TUI/SDK tree
+picker.
 
-### Independent session forks
+Later versions add columns and backfill conservatively:
+
+- version 2 adds the `compacted_through` compaction boundary column;
+- version 5 introduces `subagent_threads`;
+- version 6 adds the immutable `role_fingerprint` column;
+- version 7 adds branch names and parent/fork metadata; legacy non-main
+  branches retain their IDs as names and attach to `main` when ancestry is
+  unavailable;
+- version 8 adds atomic per-currency goal cost totals; migration backfills
+  priced historical goal usage only when its exact token sum matches the
+  persisted goal counter;
+- version 9 adds empty-by-default session-fork provenance columns.
+
+## Branches and compaction projection
+
+`id` and `parent_id` are authoritative; Snow normalizes embedded message
+identity from those columns on write and read. The active `BranchTip`
+linearizes one branch, and an append inserts the entry and updates the active
+branch tip in a single transaction. Branch-tip moves use transactional
+optimistic compare-and-swap, so a stale handle returns a conflict instead of
+overwriting a newer tip.
+
+`Messages()` uses a recursive common table expression (CTE) to walk only
+the active branch, so opening a large session does not deserialize every
+historical branch into memory.
+`ContextMessages()` applies the latest compaction marker logically: providers
+receive one summary plus the retained tail, while `Messages()` continues to
+return the complete historical branch.
+
+Before every ordinary provider request and semantic compaction, oversized
+plain-text tool results are projected as a bounded head, a byte-counted
+omission marker, and a tail. Existing exact durable messages remain unchanged.
+New oversized results are spilled immediately to immutable private files under
+`~/.snow/artifacts` (or `SNOW_HOME/artifacts`); the durable tool message keeps
+only the preview plus an opaque artifact ID. The deferred read-risk
+`artifact_read` and `artifact_grep` tools authorize IDs against the current
+session and return bounded fragments; artifacts are not added to ordinary
+filesystem roots. Snow does not currently garbage-collect spilled artifacts,
+and deleting a session database does not remove its artifact namespace.
+This model-free pruning reduces every subsequent provider request, not only
+the summarizer. `Metadata` and `SetMetadata` store append-only per-session
+state such as permission mode and remembered tool rules.
+
+On open, the agent checks the final provider tool batch for calls without
+results. A hard crash cannot prove whether an external operation completed, so
+Snow appends error results that mark read-risk calls as retryable and
+write/exec/network/delegation calls as having an unknown outcome. It never
+automatically retries an interrupted side effect. Recovery is idempotent and
+uses one atomic batch when the store supports batch appends. `FileIndex.List`
+counts branch messages with SQL rather than loading the full transcript.
+
+Root-only databases are removed on close and omitted from `FileIndex.List`.
+Messages, goals, additional branches, non-default thread state, remembered
+metadata, or subagent topology make a session durable and listable even when
+its active branch currently has zero messages.
+
+## Independent session forks
 
 Independent forks are physical snapshots, not additional `session_branches`
 rows. Snow validates that the selected entry belongs to the requested branch
 and that its root-to-entry chain does not end with an incomplete assistant
-response or unresolved tool calls. It creates a temporary SQLite database in
-the destination directory, copies the exact entry chain (including metadata and
-compaction markers while preserving entry and parent IDs), creates one local
-`main` branch, writes a new session ID and parent provenance, closes the
-database, publishes it without replacement, and reopens it before reporting
-success. Private spill artifacts referenced by Snow's retained-result markers
-are copied into the child session namespace with the same opaque IDs. Existing
+response or unresolved tool calls. It then:
+
+1. creates a temporary SQLite database in the destination directory;
+2. copies the exact entry chain, including metadata and compaction markers
+   while preserving entry and parent IDs;
+3. creates one local `main` branch and writes a new session ID plus parent
+   provenance;
+4. closes the database, publishes it without replacement, and reopens it
+   before reporting success.
+
+Private spill artifacts referenced by Snow's retained-result markers are
+copied into the child session namespace with the same opaque IDs. Existing
 destinations are never overwritten.
 
 The source remains unchanged and parent/child databases diverge independently.
-A current-tip fork copies collaboration mode. A historical fork uses Default
-mode because mutable thread state is not versioned per entry; active goals,
-goal accounting/deferrals, subagent topology, and private child databases are
-not copied. Same-database branch forks retain their branch-scoped mode/goal
-cloning semantics.
+An independent child retains its fork provenance even if its parent session is
+later moved or deleted. A current-tip fork copies collaboration mode. A
+historical fork uses Default mode because mutable thread state is not
+versioned per entry; active goals, goal accounting/deferrals, subagent
+topology, and private child databases are not copied. Same-database branch
+forks retain their branch-scoped mode and goal cloning semantics.
 
-An append inserts the entry and updates the active branch tip in one transaction.
-Entry ID/parent columns are authoritative and normalize embedded message
-identity on write and read. Branch-tip moves also use transactional optimistic
-compare-and-swap, so stale handles return a conflict instead of overwriting a
-newer tip.
-Root-only databases are removed on close and omitted from `FileIndex.List`.
-Messages, goals, additional branches, non-default thread state, remembered
-metadata, or subagent topology make a session durable and listable even when its
-active branch currently has zero messages.
-`Messages()` uses a recursive CTE to walk only the active branch, so opening a
-large session does not deserialize every historical branch into memory.
-`ContextMessages()` applies the latest compaction marker logically: providers
-receive one summary plus the retained tail, while `Messages()` continues to
-return the complete historical branch. Before every ordinary provider request
-and semantic compaction, oversized
-plain-text tool results are projected as a bounded head, byte-counted omission
-marker, and tail. Existing exact durable messages remain unchanged. New
-oversized results are instead spilled immediately to immutable private files
-under `~/.snow/artifacts` (or `SNOW_HOME/artifacts`) and the durable tool message
-contains only the preview plus an opaque artifact ID. The deferred read-risk
-`artifact_read` and `artifact_grep` tools authorize IDs against the current
-session and return bounded fragments; artifacts are not added to ordinary
-filesystem roots. Snow does not currently garbage-collect spilled artifacts,
-and deleting a session database does not remove its artifact namespace. This
-model-free pruning reduces every subsequent provider request, not only the
-summarizer. `Metadata`/`SetMetadata` store append-only
-per-session state such as permission mode and remembered tool rules.
+The CLI equivalent is `snow fork [session-path]` with `--from-entry`,
+`--source-branch`, `--name`, and `--destination`.
 
-When an existing session is opened, the agent checks the final provider tool
-batch for calls without results. A hard crash cannot prove whether an external
-operation completed, so Snow appends error results that mark read-risk calls as
-retryable and write/exec/network/delegation calls as having an unknown outcome.
-It never automatically retries an interrupted side effect. Recovery is
-idempotent and uses one atomic batch when the store supports batch appends.
-`FileIndex.List` counts branch messages with SQL rather than loading the full
-transcript.
+## Git worktree forks
+
+`snow fork-worktree` creates a detached child session inside a clean Git
+worktree:
+
+```sh
+snow fork-worktree [session-path] --worktree ../snow-experiment \
+  --git-branch snow/experiment --name experiment
+```
+
+It requires a clean, non-bare Git repository: uncommitted state is rejected
+because Git does not transfer it to a new worktree. Snow invokes Git directly
+with a 30-second timeout and bounded output, creates a new branch (default
+`snow/<slug>-<suffix>`), and never reuses an existing path or branch. A
+relative `--destination` resolves inside the new worktree; absolute paths are
+explicit operator choices, and traversal outside the worktree is rejected.
+
+On failure Snow rolls back the exact worktree and unchanged branch with
+compare-and-swap and never silently falls back to a less isolated fork. The
+TUI `/fork` Git worktree option keeps the current TUI in the source and prints
+a `snow resume` command for opening the child; the CLI `snow fork-worktree`
+command returns a JSON `SessionForkResult` with `Worktree` information.
 
 ## Prior-session search and references
 
 Snow exposes two deferred, read-only model tools for reusing prior work:
 
-- `session_search` builds a disposable SQLite FTS5 index from the current
-  project’s durable root sessions and returns one bounded representative hit per
-  matching branch. The durable session databases remain authoritative and are
-  never modified; the derived index is a disposable in-memory FTS5 cache rebuilt
-  when the project's session set changes.
+- `session_search` builds a disposable SQLite full-text search 5 (FTS5)
+  index from the current project's durable root sessions and returns one
+  bounded representative hit per matching branch. The durable session
+  databases remain authoritative and are never modified; the derived index
+  is a disposable in-memory FTS5 cache rebuilt when the project's session
+  set changes.
 - `session_reference` captures a selected search result as a bounded immutable
-  snapshot. The snapshot is persisted as the ordinary tool-result message on the
-  current branch, so later changes to the source session cannot alter replay.
+  snapshot. The snapshot is persisted as the ordinary tool-result message on
+  the current branch, so later changes to the source session cannot alter
+  replay.
 
 Authorization is host-enforced using the same exact normalized CWD filtering as
 `FileIndex.List`. The current session and private `.db.agents` child databases
@@ -165,7 +257,7 @@ between search and capture. Captures default to 65,536 bytes, permit at most
 branch. Historical text is explicitly framed as untrusted information and can
 never grant permissions or override current instructions.
 
-## Go usage
+## Go usage and embedding
 
 The normal app wiring uses `session.NewSQLiteStore` and `FileIndex`. Direct
 embedding can open a store through the session interface:
@@ -184,7 +276,7 @@ if err := st.Append(session.Entry{
 }); err != nil {
     return err
 }
-messages, err := st.Messages() // complete history
+messages, err := st.Messages()          // complete history
 contextMessages, err := st.ContextMessages() // provider-facing projection
 ```
 
@@ -200,26 +292,27 @@ import (
 db, err := sql.Open("sqlite", "file:/tmp/example.db?_pragma=journal_mode(WAL)")
 ```
 
-Use transactions for related writes. Do not write directly to `entries` from
-outside `SQLiteStore`; the store validates parent IDs and keeps branch tips
+Use [Go `database/sql` transactions](https://pkg.go.dev/database/sql#Tx) for
+related writes. Do not write directly to `entries` from outside
+`SQLiteStore`; the store validates parent IDs and keeps branch tips
 atomically consistent.
 
 ## Subagent topology and child databases
 
-Schema version 5 introduced `subagent_threads`, a root-session topology table with
-thread/parent identity, originating branch, canonical path, role, bounded
+The `subagent_threads` table stores root-session topology: thread/parent
+identity, originating branch, canonical path, role, bounded
 status/result/error/usage, child locator, and a generation used for atomic
-compare-and-swap transitions. Version 6 adds an immutable role fingerprint so a
-trusted config edit cannot silently change a durable child's authority. The table
-does not store the child transcript. Pre-v6 rows have no fingerprint and are
+compare-and-swap transitions. An immutable role fingerprint prevents a trusted
+config edit from silently changing a durable child's authority. The table does
+not store the child transcript. Pre-v6 rows have no fingerprint and are
 reloaded with a conservative read-only role; they never regain mutation
 authority from the current configuration.
 
 When `subagents.durable` is enabled, each child uses an independent private
 database under `<root-session>.agents/<thread-id>.db`. The directory is `0700`
 and files are `0600`. `FileIndex.List` skips every `.db.agents` subtree, so a
-child never appears as a resumable root session. Child appends cannot change the
-root active branch or tip.
+child never appears as a resumable root session. Child appends cannot change
+the root active branch or tip.
 
 Cold open restores only topology. Stale pending/running/queued records are
 reconciled to interrupted metadata and no work starts before the surface calls
@@ -234,8 +327,10 @@ Deleting a root session manually should also delete its adjacent, same-basename
 directory during normal construction, and the normal session picker does not
 traverse it.
 
-## References
+## Related documents
 
-- [modernc.org/sqlite package docs](https://pkg.go.dev/modernc.org/sqlite)
-- [SQLite WAL documentation](https://sqlite.org/wal.html)
-- [Go `database/sql` transactions](https://pkg.go.dev/database/sql#Tx)
+- [Configuration](configuration.md)
+- [Thread Goals](goals.md)
+- [Subagents](subagents.md)
+- [SDK](sdk.md)
+- [Using Snow](using-snow.md)

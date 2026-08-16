@@ -1,9 +1,18 @@
 # Agent Skills
 
 Snow implements the open [Agent Skills specification](https://agentskills.io)
-as a resource/progressive-disclosure layer, not as an executable plugin type.
-A skill is a directory with a required `SKILL.md`, optional `scripts/`,
+as a resource and progressive-disclosure layer, not as an executable plugin
+type. A skill is a directory with a required `SKILL.md`, optional `scripts/`,
 `references/`, and `assets/`, and YAML frontmatter followed by Markdown.
+
+## On this page
+
+- [Skill format](#skill-format)
+- [Discovery and precedence](#discovery-and-precedence)
+- [Manage skills](#manage-skills)
+- [Progressive disclosure](#progressive-disclosure)
+
+## Skill format
 
 ```text
 .agents/skills/pdf-processing/
@@ -35,23 +44,22 @@ Snow parses the standard `name`, `description`, `license`, `compatibility`,
 required fields, standard top-level keys, field types, Unicode character limits,
 NFKC-normalized lowercase alphanumeric/hyphen names, and parent-directory
 match. Nonconformant or unparseable files are diagnosed and excluded from the
-runtime catalog. This follows the canonical `skills-ref` Unicode behavior; the
-published prose currently uses ambiguous ASCII examples. `allowed-tools` is
-preserved as metadata only and never bypasses Snow permissions.
+runtime catalog. `allowed-tools` is preserved as metadata only and never
+bypasses Snow permissions.
 
 ## Discovery and precedence
 
 The startup scan is bounded and metadata-only. Sources, from lower to higher
 precedence, are:
 
-0. immutable skills embedded in the Snow binary;
-1. user `.claude/skills/` when `skills.include_claude` is enabled;
-2. `~/.agents/skills/`;
-3. `~/.snow/skills/` (or `$SNOW_HOME/skills/`);
-4. explicit global/CLI skill directories;
-5. project `.claude/skills/` when enabled and project trust is allowed;
-6. `<project>/.agents/skills/` after project trust is allowed;
-7. `<project>/.snow/skills/` after project trust is allowed.
+1. immutable skills embedded in the Snow binary;
+2. user `.claude/skills/` when `skills.include_claude` is enabled;
+3. `~/.agents/skills/`;
+4. `~/.snow/skills/` (or `$SNOW_HOME/skills/`);
+5. explicit global/CLI skill directories;
+6. project `.claude/skills/` when enabled and project trust is allowed;
+7. `<project>/.agents/skills/` after project trust is allowed;
+8. `<project>/.snow/skills/` after project trust is allowed.
 
 Snow currently embeds `plugin-builder`, a supervised playbook and template set
 for creating external protocol-v2 plugins when a reusable capability is missing.
@@ -83,6 +91,8 @@ every enabled skill therefore contributes its complete name and description.
 }
 ```
 
+## Manage skills
+
 ```sh
 snow --skill-dir /opt/company-agent-skills
 snow --no-skills
@@ -96,9 +106,9 @@ snow skills disable pdf-processing --project
 snow skills list --json
 ```
 
-SDK callers use `snowsdk.Options.SkillDirs`, `NoSkills`, and
-`Session.Skills()` for active entries. `Session.SkillInventory()` also returns
-policy-disabled entries for management/status surfaces.
+SDK callers use `snowsdk.Options.SkillDirs`, `NoSkills`, and `Session.Skills()`
+for active entries. `Session.SkillInventory()` also returns policy-disabled
+entries for management/status surfaces.
 
 `enable` and `disable` update policy only; they never modify or delete skill
 files. Mutations target global configuration by default, while `--project`
@@ -119,25 +129,27 @@ Snow follows all three disclosure tiers:
 1. Only each skill's name and description enter the startup system catalog.
 2. `activate_skill` loads the current `SKILL.md` body when the model decides a
    task matches. A prompt, steer, or follow-up beginning with `$skill-name` is
-   treated as an explicit activation directive before the next provider request,
-   without relying on a model tool call. Requiring the directive at the start
-   avoids activating tokens embedded in pasted or quoted untrusted text. In the
-   TUI, typing a leading `$` opens autocomplete over enabled skill names and
-   descriptions; Enter or Tab inserts the selected directive without submitting.
+   treated as an explicit activation directive before the next provider
+   request, without relying on a model tool call. Requiring the directive at
+   the start avoids activating tokens embedded in pasted or quoted untrusted
+   text. In the TUI, typing a leading `$` opens autocomplete over enabled skill
+   names and descriptions; Enter or Tab inserts the selected directive without
+   submitting.
 3. `read_skill_resource` reads one referenced script, reference, or asset on
-   demand. Filesystem skills use a pinned `os.Root`; each operation verifies the
-   directory identity recorded at discovery, preventing traversal, symlink
-   escape, and ancestor-replacement races without retaining one file descriptor
-   per skill. Built-in resources use the immutable embedded filesystem and the
-   same path, size, file-count, depth, and cancellation bounds.
+   demand. Filesystem skills use a pinned `os.Root`; each operation verifies
+   the directory identity recorded at discovery, preventing traversal, symlink
+   escape, and ancestor-replacement races without retaining one file
+   descriptor per skill. Built-in resources use the immutable embedded
+   filesystem and the same path, size, file-count, depth, and cancellation
+   bounds.
 
 Activation returns structured, XML-escaped `<skill_content>` with the skill
 directory and a bounded resource inventory. Resource files are listed through a
 cancellation-aware streaming walk capped at 200 files, 2,000 directory entries,
 and five levels of depth; `.git` and `node_modules` directories are skipped.
-Resources are not eagerly loaded.
-The dedicated reader avoids broadening the normal `read`/`write` filesystem
-roots merely because a user-level skill exists outside the project.
+Resources are not eagerly loaded. The dedicated reader avoids broadening the
+normal `read`/`write` filesystem roots merely because a user-level skill exists
+outside the project.
 
 Activated instructions are tracked by the agent and reattached to every later
 provider request. They are reconstructed from persisted activation results on
@@ -152,8 +164,17 @@ An explicit `--tools`/SDK tool allowlist is an upper bound for the two skill
 tools as well. If `activate_skill` is omitted, skills remain in inventory with a
 runtime-disabled reason and are excluded from provider context; a resource-only
 allowlist also drops the incoherent names-only reader. If only the resource
-reader is omitted, activation remains available without advertising that reader.
+reader is omitted, activation remains available without advertising that
+reader.
 
 Skill instructions and resources remain untrusted input. Bundled scripts run
 only through normal Snow tools and their permission policy; discovering or
 activating a skill never executes a script automatically.
+
+## Related documents
+
+- [Plugins](plugins.md)
+- [MCP](mcp.md)
+- [Tool routing](tool-routing.md)
+- [Configuration](configuration.md)
+- [Security](security.md)

@@ -1,14 +1,28 @@
 # Go SDK
 
-`pkg/snowsdk` embeds Snow's production agent runtime in a Go process. It uses the
-same providers, tools, permissions, SQLite sessions, events, goals, MCP, skills,
-plugins, and subagent manager as the CLI; it does not import Cobra or Bubble Tea.
+`pkg/snowsdk` embeds Snow's production agent runtime in a Go process. It uses
+the same providers, tools, permissions, SQLite sessions, events, goals, MCP,
+skills, plugins, and subagent manager as the CLI, and it does not import Cobra
+or Bubble Tea.
 
-Public integration data lives in `pkg/protocol`, a standard-library-only package
-shared by SDK, JSON, RPC, plugins, sessions, and the TUI.
+Public integration data lives in `pkg/protocol`, a standard-library-only
+package shared by the SDK, JSON, RPC, plugins, sessions, and the TUI.
 
-> **Stability:** snow-core is pre-alpha. `pkg/snowsdk` and `pkg/protocol` are the
+> **Note:** Snow is pre-alpha. `pkg/snowsdk` and `pkg/protocol` are the
 > intended public surfaces, but compatibility is not guaranteed until v1.
+
+## On this page
+
+- [Install](#install)
+- [Minimal streaming session](#minimal-streaming-session)
+- [Options and lifecycle](#options-and-lifecycle)
+- [Events](#events)
+- [Sessions](#sessions)
+- [Permissions and security](#permissions-and-security)
+- [Readiness and capabilities](#readiness-and-capabilities)
+- [Concurrency and errors](#concurrency-and-errors)
+- [Limitations](#limitations)
+- [Related documents](#related-documents)
 
 ## Install
 
@@ -17,12 +31,12 @@ go get github.com/snow-core/snow/pkg/snowsdk
 ```
 
 A separate checked-in module under [`examples/sdk`](../examples/sdk) exercises
-only the public packages and is run by Linux/macOS CI. From this checkout:
+only the public packages and is run by Linux and macOS CI. From this checkout:
 
 ```sh
 cd examples/sdk
-go run .                         # credential-free fake-provider lifecycle
-go run . -provider opencode-go  # real streaming provider
+go run .                          # credential-free fake-provider lifecycle
+go run . -provider opencode-go    # real streaming provider
 ```
 
 Import both packages:
@@ -36,9 +50,10 @@ import (
 
 ## Minimal streaming session
 
-This example requires an OpenCode Go credential from `OPENCODE_API_KEY` or
-`snow login opencode-go`. Replace the provider with `fake` for a credential-free
-compile/lifecycle smoke test (the built-in fake has no scripted text response).
+The example below uses `opencode-go`, which requires a credential from
+`OPENCODE_API_KEY` or `snow login opencode-go`. Change `Provider` to `fake`
+for a credential-free lifecycle smoke test; the built-in fake provider emits
+`turn_done` but has no scripted text response.
 
 ```go
 package main
@@ -81,8 +96,9 @@ func main() {
     })
     defer unsubscribe()
 
-    // Install subscriptions/interaction handlers before readiness. Calling
-    // both is safe for new sessions and is the complete resumed-session pattern.
+    // Install subscriptions and interaction handlers before readiness. Calling
+    // both methods is safe for new sessions and is the complete resumed-session
+    // pattern.
     if err := session.ReadyGoals(); err != nil {
         panic(err)
     }
@@ -96,30 +112,26 @@ func main() {
 }
 ```
 
+The credential-free variant differs only in the provider selection:
+
+```go
+session, err := snowsdk.Open(ctx, snowsdk.Options{
+    Provider:         "fake",
+    NoSession:        true,
+    PermissionMode:   "deny",
+    NoPlugins:        true,
+    NoMCP:            true,
+    NoSkills:         true,
+    DisableSubagents: true,
+})
+```
+
 `Prompt` blocks until the root turn finishes. Text, thinking, tools, usage,
 plans, goals, and child activity stream through subscriptions while it runs.
 
-## Lifecycle
+## Options and lifecycle
 
-Recommended host sequence:
-
-1. Build a context with the cancellation/deadline policy for the embedding.
-2. Call `snowsdk.Open`.
-3. Install `Subscribe` callbacks and `UserInputHandler` in `Options`.
-4. Read `StateEvent()` if the host needs the initial collaboration-mode state.
-5. Call `ReadyGoals()` and `ReadySubagents()` after observers exist.
-6. Call `Prompt`/`PromptWithMode`, or use the control methods while a turn runs.
-7. Call `Close` on every exit path.
-
-`Open(nil, ...)` uses `context.Background()`. Construction deliberately does not
-restart restored goal work or publish restored subagent topology before the host
-can observe it. CLI surfaces perform readiness automatically; SDK hosts own it.
-
-`Close` marks the session stopped before releasing runtime resources. Calls after
-close, a nil session, and repeated `Close` return `snowsdk.ErrStopped` where a
-method can return an error.
-
-## Options reference
+### Options reference
 
 Empty fields usually inherit the selected global configuration. The table
 separates inheritance from clean-install defaults.
@@ -128,15 +140,15 @@ separates inheritance from clean-install defaults.
 |---|---|
 | `CWD` | Active project root. Empty uses the process working directory. |
 | `Provider` | A built-in ID or configured named OpenAI-compatible profile. Empty inherits config; clean-install default is `opencode-go`. |
-| `Model` | Model ID. Empty resolves configured/provider default. |
+| `Model` | Model ID. Empty resolves the configured or provider default. |
 | `SessionPath` | SQLite `.db` path to open or create; an existing database is resumed. Empty creates a new indexed durable session unless `NoSession` is true. |
 | `NoSession` | Use an in-memory conversation. Branches and goals work for the process lifetime only; auth and model caches remain persistent. |
 | `AuthPath` | Credential file override. Empty uses `$SNOW_HOME/auth.json`. |
 | `ConfigPath` | Global config override. Empty uses `$SNOW_HOME/config.json`. |
-| `DisableSandbox` | Explicitly keep Bash on the host and skip loading sandbox state, even when the canonical project has an operator-owned association. Existing associations are inherited/validated by default. |
+| `DisableSandbox` | Explicitly keep Bash on the host and skip loading sandbox state, even when the canonical project has an operator-owned association. Existing associations are inherited and validated by default. |
 | `RequireSandbox` | Fail `Open` unless the canonical project has a smolvm association. Conflicts with `DisableSandbox`. |
-| `PermissionMode` | `ask`, `allow`, or `deny`. **Omission in the SDK forces `deny`**, rather than inheriting interactive `ask`. |
-| `AutoApprove` | Forces `allow` and takes precedence over `PermissionMode`. Dangerous outside externally isolated/trusted environments. |
+| `PermissionMode` | `ask`, `allow`, or `deny`. Omission in the SDK forces `deny` rather than inheriting interactive `ask`. |
+| `AutoApprove` | Forces `allow` and takes precedence over `PermissionMode`. Dangerous outside externally isolated or trusted environments. |
 | `Tools` | Built-in tool allowlist. Empty exposes all registered built-ins. |
 | `SystemPrompt` | Overrides configured system-prompt files and Snow's embedded Markdown preamble. Project context and runtime steering remain separately assembled where applicable. |
 | `Thinking` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. Empty inherits config; model metadata may reject a level. |
@@ -144,8 +156,8 @@ separates inheritance from clean-install defaults.
 | `TextVerbosity` | `low`, `medium`, or `high`. Empty inherits config. |
 | `CollaborationMode` | `default` or `plan`. Empty restores branch state or clean-install Default. |
 | `PlanModeReasoningEffort` | Optional Plan Mode override using the same eight thinking values; model support remains authoritative. |
-| `APIKey` | Explicit credential with precedence over auth store and environment. |
-| `BaseURL` | Active provider endpoint override; required for an OpenAI-compatible profile unless configured globally. Accepts an API root or full `/responses` or `/chat/completions` URL. |
+| `APIKey` | Explicit credential with precedence over the auth store and environment. |
+| `BaseURL` | Active provider endpoint override; required for an OpenAI-compatible profile unless configured globally. Accepts an API root or a full `/responses` or `/chat/completions` URL. |
 | `Plugins` | Explicit external plugin process declarations. Configured plugins may also load. |
 | `GoPlugins` | Statically linked `pkg/plugin.Plugin` implementations supplied by the host. |
 | `NoPlugins` | Disable configured, explicit, and Go plugins. |
@@ -155,13 +167,16 @@ separates inheritance from clean-install defaults.
 | `NoSkills` | Disable skill discovery and activation tools. |
 | `EnableSubagents` | Force subagents on for this session. Does not enable mutation or recursion. |
 | `DisableSubagents` | Force subagents off. Setting both enable and disable is an error. |
-| `SubagentProvider` / `SubagentModel` | Override the automatic provider/model defaults for child agents. |
-| `SubagentMaxConcurrency` | Zero inherits config; clean-install default 4, maximum 256. Root does not consume a slot. |
+| `SubagentProvider` / `SubagentModel` | Override the automatic provider and model defaults for child agents. |
+| `SubagentMaxConcurrency` | Zero inherits config; clean-install default 4, maximum 256. The root does not consume a slot. |
 | `SubagentMaxAgents` | Zero inherits config; clean-install default 32, maximum 4096, not below concurrency. |
 | `SubagentMaxDepth` | Zero inherits config; clean-install default 1, maximum 8. |
 | `UserInputHandler` | Answers `ask_user`; nil fails the tool call fast instead of blocking. It is not a permission asker. |
 
-For an OpenAI-compatible gateway (Responses is preferred; HTTP 404/405/501 selects a cached Chat Completions fallback):
+### OpenAI-compatible gateways
+
+Responses is preferred; HTTP 404, 405, or 501 selects a cached Chat
+Completions fallback.
 
 ```go
 session, err := snowsdk.Open(ctx, snowsdk.Options{
@@ -175,15 +190,35 @@ session, err := snowsdk.Open(ctx, snowsdk.Options{
 
 The endpoint is operator-trusted and receives prompts and tool data. Snow
 prefers Responses streaming and uses Chat Completions streaming when Responses
-is unavailable; arbitrary named compatible providers and Azure/custom headers
-remain unsupported. The TUI can persist the endpoint
-and optional key through `/login openai-compatible`; SDK callers continue to use
-`BaseURL` and `APIKey` explicitly.
+is unavailable. Arbitrary named compatible providers and Azure or custom
+headers remain unsupported. The TUI can persist the endpoint and optional key
+through `/login openai-compatible`; SDK callers continue to use `BaseURL` and
+`APIKey` explicitly.
 
 Full persistent configuration and project trust rules are in
 [Configuration](configuration.md).
 
-## API map
+### Lifecycle sequence
+
+Recommended host sequence:
+
+1. Build a context with the cancellation and deadline policy for the embedding.
+2. Call `snowsdk.Open`.
+3. Install `Subscribe` callbacks and `UserInputHandler` in `Options`.
+4. Read `StateEvent()` if the host needs the initial collaboration-mode state.
+5. Call `ReadyGoals()` and `ReadySubagents()` after observers exist.
+6. Call `Prompt` or `PromptWithMode`, or use the control methods while a turn
+   runs.
+7. Call `Close` on every exit path.
+
+`Open(nil, ...)` uses `context.Background()`. Construction deliberately does
+not restart restored goal work or publish restored subagent topology before the
+host can observe it. CLI surfaces perform readiness automatically; SDK hosts
+own it.
+
+`Close` marks the session stopped before releasing runtime resources. Calls
+after close, a nil session, and repeated `Close` return `snowsdk.ErrStopped`
+where a method can return an error.
 
 ### Constructors and helpers
 
@@ -191,240 +226,12 @@ Full persistent configuration and project trust rules are in
 |---|---|
 | `Open(ctx, options)` | Open or create a session and assemble the runtime |
 | `MustOpen(ctx, options)` | Panic-on-error helper for tests and tiny programs |
-| `RunPrompt(ctx, options, prompt)` | Open, collect root text, prompt, wait for goal/subagent/event quiescence, close |
+| `RunPrompt(ctx, options, prompt)` | Open, collect root text, prompt, wait for goal, subagent, and event quiescence, then close |
 
-`RunPrompt` returns only root `text_delta` content. Attributed child text remains
-available only through a normal subscribed session. The helper closes the
-runtime before returning and joins any plugin/session cleanup failure into its
-returned error without discarding accumulated text.
-
-### Turns, modes, and active input
-
-| Method | Purpose |
-|---|---|
-| `Prompt(ctx, text)` | Run one root user turn to completion |
-| `PromptWithMode(ctx, text, mode)` | Atomically select `default`/`plan` and start the prompt |
-| `Mode()` / `SetMode(mode)` | Inspect or change collaboration mode while idle |
-| `Steer(ctx, text)` | Queue input for the next safe assistant + complete tool-batch boundary |
-| `FollowUp(ctx, text)` | Queue input after natural completion and earlier steering |
-| `PendingInputs()` | Return an independent queue snapshot, including entries retained after an operational failure |
-| `ClearPendingInputs()` | Close queue admission and return/remove undelivered entries so a host can restore or resubmit them |
-| `Abort(ctx)` | Cancel admitted work, clear undelivered root queue entries, and defer active goal continuation |
-| `IsRunning()` | Report whether a root turn is in flight |
-
-`Steer` and `FollowUp` require an active queue-accepting root turn. Idle calls
-return `ErrNotRunning`. The queue is bounded and ordered; steering has priority,
-with FIFO order inside each input class. Ordinary provider failures consume
-accepted input through a fresh request. Internal failures and turn-limit
-rejection retain undelivered entries; inspect `PendingInputs`, then call
-`ClearPendingInputs` to restore or resubmit them before starting another prompt.
-The current public SDK prompt methods
-accept text only; the core runtime's image/content-block prompt path is not yet
-exposed through `pkg/snowsdk`.
-
-### Events and readiness
-
-| Method | Purpose |
-|---|---|
-| `Subscribe(callback)` | Observe isolated copies of normalized agent events; returns unsubscribe |
-| `StateEvent()` | Return the current collaboration-mode snapshot for initial host state |
-| `ReadyGoals()` | Publish restored goal state and permit eligible automatic continuation |
-| `ReadySubagents()` | Publish restored child topology without restarting stale work |
-
-Call readiness after subscriptions. Both methods drain initial events when safe;
-they also avoid deadlock when invoked from event callback context.
-
-### Models and response controls
-
-| Method | Purpose |
-|---|---|
-| `Model()` / `Models()` | Current model and defensive copy of active-provider catalog |
-| `SetModel(model)` | Select a model for later turns |
-| `Thinking()` / `SetThinking(level)` | Inspect/change normalized effort |
-| `ReasoningSummary()` / `SetReasoningSummary(value)` | Inspect/change provider reasoning-summary request |
-| `TextVerbosity()` / `SetTextVerbosity(value)` | Inspect/change provider response detail |
-
-Use `model.SupportedThinkingLevels()` and `model.SupportsThinkingLevel(level)`.
-Do not infer support from model names or provider branding.
-
-### Messages, usage, and identity
-
-| Method | Purpose |
-|---|---|
-| `Messages()` | Linearized durable messages on the active branch |
-| `Usage()` | Aggregate token/cache/request/cost data for the active branch |
-| `SessionID()` | Stable session identifier |
-| `SessionName()` | Optional automatic or manually assigned display title |
-| `RenameSession(name)` | Change the display title without changing ID/path/history |
-| `SessionPath()` | SQLite path, or empty for in-memory sessions |
-| `CWD()` | Active project directory |
-| `SandboxStatus()` | Fixed secret-free Bash boundary (`Configured`, `Active`, backend, machine, guest mount/resources/network policy) |
-
-The first accepted prompt assigns an untitled built-in store a deterministic,
-provider-free title. `RenameSession` trims surrounding whitespace, requires
-1–72 runes, and rejects control characters. Titles need not be unique and do
-not enter provider context.
-
-`protocol.Message` contains parent-linked IDs, typed content blocks, provider and
-model metadata, stop reason, usage, and tool-result correlation. In
-`protocol.Usage`, `Input` is the total prompt count including cached tokens;
-`CacheReadKnown` distinguishes an explicit `CacheRead == 0` miss from a provider
-that omitted cache metrics. On aggregate usage, it remains true only when every
-included request reported the cache-read metric. A `provider_data` block is
-persistence-only and must not be rendered or logged.
-
-### Branches, independent forks, and compaction
-
-| Method | Purpose |
-|---|---|
-| `Branches()` | List named session branches and topology |
-| `SelectBranch(id)` | Switch active branch; affects later messages, usage, mode, goal, and prompts |
-| `Branch(opts)` | Explicitly create and activate a same-database branch |
-| `Fork(entryID)` | Compatibility alias that branches the active session |
-| `ForkNamed(sourceBranchID, entryID, name)` | Compatibility alias for an explicitly sourced branch |
-| `ForkSession(ctx, opts)` | Create a detached independent SQLite session in the same workspace |
-| `ForkWorktree(ctx, opts)` | Create a detached clean Git worktree plus independent session |
-| `RenameBranch(id, name)` | Change display name without changing stable ID |
-| `DeleteBranch(id)` | Delete an eligible inactive leaf branch reference |
-| `Compact(ctx)` | Manually summarize older projected context while retaining full history |
-
-Branch forks share existing message rows; they do not copy history. Branches
-persist across process restarts only in SQLite-backed sessions; under
-`NoSession` their topology and messages are in-memory and ephemeral.
-`ForkSession` and `ForkWorktree` instead return a `SessionForkResult` for a new,
-reopenable database and deliberately leave the SDK receiver bound to its source.
-Open `result.SessionPath` explicitly to continue in the child. This detached
-contract prevents an in-place worktree operation from reusing stale project
-trust, sandbox, search, or file-root bindings.
-
-Independent forks preserve the exact stable root-to-entry chain and immutable
-parent provenance. They reject unresolved tool-call boundaries, never overwrite
-an explicit destination, do not copy subagent topology, and inherit
-collaboration mode only at the current branch tip. Callers can classify common
-failures with `ErrForkDestinationExists`, `ErrWorktreeDestinationExists`,
-`ErrInvalidForkBoundary`, `ErrNotGitRepository`, `ErrGitDirty`, and
-`ErrUnsafeWorktreeDestination` through
-`errors.Is`. Branch/fork management is rejected while conflicting root/subagent
-work is active. Automatic Default-mode goal continuation may emit compaction events between goal turns at
-the configured context threshold; this does not change the manual `Compact`
-method contract.
-
-### Persistent Thread Goals
-
-| Method | Purpose |
-|---|---|
-| `Goal()` | Return active branch goal or nil |
-| `CreateGoal(objective, budget, replace)` | Create a goal; `SetGoal` is an alias |
-| `EditGoal(objective)` | Rotate objective/goal ID while preserving usage and budget |
-| `PauseGoal()` / `ResumeGoal()` | Control eligible automatic continuation; resume also restarts an active abort-deferred goal |
-| `ClearGoal()` | Remove the branch goal |
-| `ContinueGoal()` | Clear continuation deferral and run eligible idle work |
-
-Normal prompts never clear an abort/manual-compaction deferral; call
-`ResumeGoal` or `ContinueGoal` explicitly. SQLite persists goals across
-processes; `NoSession` keeps them only for the current process. Budgets must be
-positive. Goal statuses are
-`active`, `paused`, `blocked`, `usage_limited`, `budget_limited`, and `complete`.
-Returned `protocol.ThreadGoal` values include optional per-currency
-`EstimatedCosts`; values come from provider/catalog pricing and are estimates,
-not invoices. See [Persistent Thread Goals](goals.md).
-
-### Subagents
-
-| Method | Purpose |
-|---|---|
-| `SubagentModels()` | Return exact provider/model pairs available to children |
-| `SpawnSubagent(ctx, request)` | Create a role-scoped child at a canonical path |
-| `SendSubagentMessage(ctx, target, message)` | Queue attributed mail without starting a turn |
-| `FollowupSubagent(ctx, target, message)` | Queue and run/reuse an idle child |
-| `WaitSubagents(ctx, timeout)` | Wait for one activity/lifecycle change |
-| `WaitSubagentsUntilAll(ctx, timeout)` | Wait until every root child is terminal or timeout |
-| `InterruptSubagent(ctx, target)` | Cancel only the target's current turn |
-| `Subagents()` | Return snapshots for the root and its visible descendants |
-| `Subagent(target)` | Inspect one child by canonical path or supported identifier |
-| `SubagentUsage()` | Aggregate child usage |
-
-`protocol.SpawnSubagentRequest` fields are `Name`, `Task`, `Role`, `ForkTurns`,
-`Provider`, `Model`, and `ReasoningEffort`. `snowsdk.Options.SubagentProvider` and
-`SubagentModel` set the automatic provider/model defaults for children. SDK names are strict lowercase segments under
-`/root` with letters, digits, and underscores. Unlike the model-facing tool,
-the SDK does not normalize hyphens.
-
-`Subagents()` includes the root snapshot as well as visible descendants; do not
-interpret its length as the child count. Terminal child snapshots can expose
-bounded `Result`, `Error`, `Usage`, and `Generation` metadata. Wait results
-contain aggregate state, not full private child content. Results and mail arrive
-live through attributed `AgentEvent`/`AgentMessage` values. The SDK does not
-currently expose persisted child message history, so hosts that need complete
-transcripts must retain attributed events while observing the run. See
-[Subagents](subagents.md).
-
-### Discovery and diagnostics
-
-| Method | Purpose |
-|---|---|
-| `MCPServers()` | Return secret-free negotiated MCP status |
-| `Skills()` | Return enabled skill metadata exposed to provider context |
-| `SkillInventory()` | Return enabled and policy-disabled discovered skills |
-| `Diagnostics()` | Return non-fatal theme/keybinding/search configuration warnings |
-
-`Diagnostics()` does not currently include plugin startup failures or detailed
-Agent Skill parse diagnostics; inspect extension inventory/status through the
-relevant extension surface and retain startup errors from `Open`. Returned
-models, events, queues, skills, and MCP capability slices are defensive copies
-at the public observation boundary.
-
-## Event reference
-
-`protocol.AgentEvent.Type` selects the relevant optional payload fields.
-
-| Category | Event types |
-|---|---|
-| Streaming | `text_delta`, `thinking_delta`, `usage` |
-| Tools | `tool_start`, `tool_progress`, `tool_end`, `tool_routing` |
-| Interaction | `user_input_request`, `queue_updated`; `permission_request` exists in the cross-surface protocol but the public headless SDK has no permission asker that emits it |
-| Lifecycle/state | `session_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
-| Plan | `plan_started`, `plan_delta`, `plan_completed`, `plan_update` |
-| Compaction | `compaction_started`, `compaction_done`; `Compaction.Automatic` distinguishes non-manual pressure/overflow-repair runs |
-| Goals | `thread_goal_updated` |
-| Subagents | `subagent_started`, `subagent_status`, `subagent_message`; `subagent_activity` is reserved but not currently emitted |
-
-Common payload fields include:
-
-- `Text`, `Message`, `IsError`
-- `ToolCallID`, `ToolName`, bounded `ToolOutput`, `ToolDurationMS`,
-  `ToolProgress`, `ToolRouting`
-- `Usage`, `Model`, `Mode`
-- `Plan`, `PlanUpdate`, `Compaction`
-- `Permission`, `UserInput`, `Queue`, `ThreadGoal`
-- `Agent`, `Subagent`, `AgentMessage`
-- `TurnID`, `TurnOrigin`, `TurnSequence`, `RootEpoch`, `GoalContinuing`
-
-Correlation rules:
-
-- `event.Agent == nil` denotes a root-agent event, including ordinary prompts,
-  goal continuation, and root state/lifecycle events.
-- Attributed child stream/tool/usage events carry `Agent`.
-- Child lifecycle snapshots carry `Subagent`.
-- Mailbox events carry `AgentMessage`.
-- `TurnID` is the stable turn identity; `TurnSequence` is a process-local
-  monotonic admission order that restarts with the process.
-- `RootEpoch` is a process-local session/branch reconciliation generation on
-  every root event, including events outside a turn.
-- `TurnOrigin` and `GoalContinuing` distinguish ordinary user prompts from
-  internal goal-continuation turns.
-- `ToolOutput` is a bounded UI preview; complete root tool results remain in
-  `Messages()`.
-- Every subscriber receives a deep clone. Mutating one callback's event cannot
-  affect another observer.
-
-Callbacks are dispatched in order. Keep them short: a blocking callback delays
-later event delivery. Control calls are designed not to hold event-dispatch
-locks, but starting long blocking work inside a callback still serializes
-observation, and a dispatcher-reentrant prompt cannot wait on an RPC-style input
-reply that the same dispatcher would need to publish.
-
-## One-shot helper
+`RunPrompt` returns only root `text_delta` content. Attributed child text
+remains available only through a normal subscribed session. The helper closes
+the runtime before returning and joins any plugin or session cleanup failure
+into its returned error without discarding accumulated text.
 
 ```go
 package main
@@ -450,11 +257,193 @@ func main() {
 ```
 
 For credential-free harness tests, select `Provider: "fake"` and disable
-unneeded plugins/MCP/skills. `RunPrompt` collects root `text_delta` events until
-root goal/subagent/event quiescence, so an automatically continued Thread Goal
-can contribute more than one assistant turn to the returned string.
+unneeded plugins, MCP, and skills. `RunPrompt` collects root `text_delta`
+events until root goal, subagent, and event quiescence, so an automatically
+continued Thread Goal can contribute more than one assistant turn to the
+returned string.
 
-## Open or create a known session path
+
+### Turns, modes, and active input
+
+| Method | Purpose |
+|---|---|
+| `Prompt(ctx, text)` | Run one root user turn to completion |
+| `PromptWithMode(ctx, text, mode)` | Atomically select `default` or `plan` and start the prompt |
+| `Mode()` / `SetMode(mode)` | Inspect or change collaboration mode while idle |
+| `Steer(ctx, text)` | Queue input for the next safe assistant plus complete tool-batch boundary |
+| `FollowUp(ctx, text)` | Queue input after natural completion and earlier steering |
+| `PendingInputs()` | Return an independent queue snapshot, including entries retained after an operational failure |
+| `ClearPendingInputs()` | Close queue admission and return or remove undelivered entries so a host can restore or resubmit them |
+| `Abort(ctx)` | Cancel admitted work, clear undelivered root queue entries, and defer active goal continuation |
+| `IsRunning()` | Report whether a root turn is in flight |
+
+`Steer` and `FollowUp` require an active queue-accepting root turn. Idle calls
+return `ErrNotRunning`. The queue is bounded and ordered; steering has priority,
+with FIFO order inside each input class. Ordinary provider failures consume
+accepted input through a fresh request. Internal failures and turn-limit
+rejection retain undelivered entries; inspect `PendingInputs`, then call
+`ClearPendingInputs` to restore or resubmit them before starting another
+prompt.
+
+The current public SDK prompt methods accept text only; the core runtime's
+image and content-block prompt path is not yet exposed through `pkg/snowsdk`.
+
+Run the blocking prompt in a goroutine and use events or host state to decide
+when steering is useful:
+
+```go
+result := make(chan error, 1)
+go func() {
+    result <- session.Prompt(ctx, "Review the repository.")
+}()
+
+// A real host normally reacts to an event or UI action here.
+if session.IsRunning() {
+    if err := session.Steer(ctx, "Focus on the public API and RPC contracts."); err != nil &&
+        !errors.Is(err, snowsdk.ErrNotRunning) {
+        return err
+    }
+}
+
+if err := <-result; err != nil {
+    return err
+}
+```
+
+`IsRunning` is only a snapshot; the turn may finish before `Steer`. Always
+handle `ErrNotRunning` as a normal race.
+
+### Model-requested input
+
+```go
+session, err := snowsdk.Open(ctx, snowsdk.Options{
+    Provider:       "opencode-go",
+    PermissionMode: "deny",
+    UserInputHandler: func(ctx context.Context, req protocol.UserInputRequest) (protocol.UserInputResponse, error) {
+        answers := make([]protocol.UserInputAnswer, 0, len(req.Questions))
+        for _, question := range req.Questions {
+            answers = append(answers, protocol.UserInputAnswer{
+                QuestionID: question.ID,
+                Answer:     chooseAnswer(question),
+            })
+        }
+        return protocol.UserInputResponse{
+            RequestID: req.ID,
+            Answers:   answers,
+        }, nil
+    },
+})
+```
+
+The handler must answer every question exactly once. It may omit `RequestID`
+and Snow will fill it. The `user_input_request` event is published before the
+callback runs. Handler errors fail the tool interaction rather than hanging.
+See [Model-requested user input](user-input.md).
+
+
+### Models and response controls
+
+| Method | Purpose |
+|---|---|
+| `Model()` / `Models()` | Current model and defensive copy of the active-provider catalog |
+| `SetModel(model)` | Select a model for later turns |
+| `Thinking()` / `SetThinking(level)` | Inspect or change normalized effort |
+| `ReasoningSummary()` / `SetReasoningSummary(value)` | Inspect or change the provider reasoning-summary request |
+| `TextVerbosity()` / `SetTextVerbosity(value)` | Inspect or change provider response detail |
+
+Use `model.SupportedThinkingLevels()` and
+`model.SupportsThinkingLevel(level)`. Do not infer support from model names or
+provider branding.
+
+### Subagents
+
+| Method | Purpose |
+|---|---|
+| `SubagentModels()` | Return exact provider and model pairs available to children |
+| `SpawnSubagent(ctx, request)` | Create a role-scoped child at a canonical path |
+| `SendSubagentMessage(ctx, target, message)` | Queue attributed mail without starting a turn |
+| `FollowupSubagent(ctx, target, message)` | Queue and run or reuse an idle child |
+| `WaitSubagents(ctx, timeout)` | Wait for one activity or lifecycle change |
+| `WaitSubagentsUntilAll(ctx, timeout)` | Wait until every root child is terminal or the timeout expires |
+| `InterruptSubagent(ctx, target)` | Cancel only the target's current turn |
+| `Subagents()` | Return snapshots for the root and its visible descendants |
+| `Subagent(target)` | Inspect one child by canonical path or supported identifier |
+| `SubagentUsage()` | Aggregate child usage |
+
+`protocol.SpawnSubagentRequest` fields are `Name`, `Task`, `Role`, `ForkTurns`,
+`Provider`, `Model`, and `ReasoningEffort`. `snowsdk.Options.SubagentProvider`
+and `SubagentModel` set the automatic provider and model defaults for children.
+SDK names are strict lowercase segments under `/root` with letters, digits, and
+underscores. Unlike the model-facing tool, the SDK does not normalize hyphens.
+
+`Subagents()` includes the root snapshot as well as visible descendants; do not
+interpret its length as the child count. Terminal child snapshots can expose
+bounded `Result`, `Error`, `Usage`, and `Generation` metadata. Wait results
+contain aggregate state, not full private child content. Results and mail
+arrive live through attributed `AgentEvent` and `AgentMessage` values. The SDK
+does not currently expose persisted child message history, so hosts that need
+complete transcripts must retain attributed events while observing the run.
+See [Subagents](subagents.md).
+
+## Events
+
+`Subscribe(callback)` observes isolated copies of normalized agent events and
+returns an unsubscribe function. `StateEvent()` returns the current
+collaboration-mode snapshot for initial host state.
+
+### Event reference
+
+`protocol.AgentEvent.Type` selects the relevant optional payload fields.
+
+| Category | Event types |
+|---|---|
+| Streaming | `text_delta`, `thinking_delta`, `usage` |
+| Tools | `tool_start`, `tool_progress`, `tool_end`, `tool_routing` |
+| Interaction | `user_input_request`, `queue_updated`; `permission_request` exists in the cross-surface protocol but the public headless SDK has no permission asker that emits it |
+| Lifecycle and state | `session_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
+| Plan | `plan_started`, `plan_delta`, `plan_completed`, `plan_update` |
+| Compaction | `compaction_started`, `compaction_done`; `Compaction.Automatic` distinguishes non-manual pressure and overflow-repair runs |
+| Goals | `thread_goal_updated` |
+| Subagents | `subagent_started`, `subagent_status`, `subagent_message`; `subagent_activity` is reserved but not currently emitted |
+
+Common payload fields include:
+
+- `Text`, `Message`, `IsError`
+- `ToolCallID`, `ToolName`, bounded `ToolOutput`, `ToolDurationMS`,
+  `ToolProgress`, `ToolRouting`
+- `Usage`, `Model`, `Mode`
+- `Plan`, `PlanUpdate`, `Compaction`
+- `Permission`, `UserInput`, `Queue`, `ThreadGoal`
+- `Agent`, `Subagent`, `AgentMessage`
+- `TurnID`, `TurnOrigin`, `TurnSequence`, `RootEpoch`, `GoalContinuing`
+
+### Correlation and payload fields
+
+- `event.Agent == nil` denotes a root-agent event, including ordinary prompts,
+  goal continuation, and root state and lifecycle events.
+- Attributed child stream, tool, and usage events carry `Agent`.
+- Child lifecycle snapshots carry `Subagent`.
+- Mailbox events carry `AgentMessage`.
+- `TurnID` is the stable turn identity; `TurnSequence` is a process-local
+  monotonic admission order that restarts with the process.
+- `RootEpoch` is a process-local session and branch reconciliation generation
+  on every root event, including events outside a turn.
+- `TurnOrigin` and `GoalContinuing` distinguish ordinary user prompts from
+  internal goal-continuation turns.
+- `ToolOutput` is a bounded UI preview; complete root tool results remain in
+  `Messages()`.
+- Every subscriber receives a deep clone. Mutating one callback's event cannot
+  affect another observer.
+
+Callbacks are dispatched in order. Keep them short: a blocking callback delays
+later event delivery. Control calls are designed not to hold event-dispatch
+locks, but starting long blocking work inside a callback still serializes
+observation, and a dispatcher-reentrant prompt cannot wait on an RPC-style
+input reply that the same dispatcher would need to publish.
+
+## Sessions
+
+### Open or resume a session
 
 ```go
 session, err := snowsdk.Open(ctx, snowsdk.Options{
@@ -479,70 +468,76 @@ if err := session.ReadySubagents(); err != nil {
 return session.Prompt(ctx, "Continue from the saved state.")
 ```
 
-`SessionPath` is open-or-create: a missing or mistyped path creates a new SQLite
-database. The SDK currently has neither a strict "must already exist" resume
-option nor a saved-session catalog, so hosts that require strict resume must
-validate and select the path before `Open`.
+`SessionPath` is open-or-create: a missing or mistyped path creates a new
+SQLite database. The SDK currently has neither a strict "must already exist"
+resume option nor a saved-session catalog, so hosts that require strict resume
+must validate and select the path before `Open`. Readiness is especially
+important for restored automatic goals and durable child topology; restored
+stale child work is observed as interrupted metadata, not silently restarted.
 
-Readiness is especially important for restored automatic goals and durable child
-topology. Restored stale child work is observed as interrupted metadata; it is
-not silently restarted.
+### Session identity and state
 
-## Model-requested input
+| Method | Purpose |
+|---|---|
+| `Messages()` | Linearized durable messages on the active branch |
+| `Usage()` | Aggregate token, cache, request, and cost data for the active branch |
+| `SessionID()` | Stable session identifier |
+| `SessionName()` | Optional automatic or manually assigned display title |
+| `RenameSession(name)` | Change the display title without changing ID, path, or history |
+| `SessionPath()` | SQLite path, or empty for in-memory sessions |
+| `CWD()` | Active project directory |
+| `SandboxStatus()` | Fixed secret-free Bash boundary (`Configured`, `Active`, backend, machine, guest mount, resources, and network policy) |
 
-```go
-session, err := snowsdk.Open(ctx, snowsdk.Options{
-    Provider:       "opencode-go",
-    PermissionMode: "deny",
-    UserInputHandler: func(ctx context.Context, req protocol.UserInputRequest) (protocol.UserInputResponse, error) {
-        answers := make([]protocol.UserInputAnswer, 0, len(req.Questions))
-        for _, question := range req.Questions {
-            answers = append(answers, protocol.UserInputAnswer{
-                QuestionID: question.ID,
-                Answer:     chooseAnswer(question),
-            })
-        }
-        return protocol.UserInputResponse{
-            RequestID: req.ID,
-            Answers:   answers,
-        }, nil
-    },
-})
-```
+The first accepted prompt assigns an untitled built-in store a deterministic,
+provider-free title. `RenameSession` trims surrounding whitespace, requires
+1–72 runes, and rejects control characters. Titles need not be unique and do
+not enter provider context.
 
-The handler must answer every question exactly once. It may omit `RequestID` and
-Snow will fill it. The `user_input_request` event is published before the
-callback runs. Handler errors fail the tool interaction rather than hanging.
-See [Model-requested user input](user-input.md).
+`protocol.Message` contains parent-linked IDs, typed content blocks, provider
+and model metadata, stop reason, usage, and tool-result correlation. In
+`protocol.Usage`, `Input` is the total prompt count including cached tokens;
+`CacheReadKnown` distinguishes an explicit `CacheRead == 0` miss from a
+provider that omitted cache metrics. On aggregate usage, it remains true only
+when every included request reported the cache-read metric. A `provider_data`
+block is persistence-only and must not be rendered or logged.
 
-## Steering an active prompt
+### Branches, forks, and compaction
 
-Run the blocking prompt in a goroutine and use events or host state to decide
-when steering is useful:
+| Method | Purpose |
+|---|---|
+| `Branches()` | List named session branches and topology |
+| `SelectBranch(id)` | Switch active branch; affects later messages, usage, mode, goal, and prompts |
+| `Branch(opts)` | Explicitly create and activate a same-database branch |
+| `Fork(entryID)` | Compatibility alias that branches the active session |
+| `ForkNamed(sourceBranchID, entryID, name)` | Compatibility alias for an explicitly sourced branch |
+| `ForkSession(ctx, opts)` | Create a detached independent SQLite session in the same workspace |
+| `ForkWorktree(ctx, opts)` | Create a detached clean Git worktree plus an independent session |
+| `RenameBranch(id, name)` | Change display name without changing the stable ID |
+| `DeleteBranch(id)` | Delete an eligible inactive leaf branch reference |
+| `Compact(ctx)` | Manually summarize older projected context while retaining full history |
 
-```go
-result := make(chan error, 1)
-go func() {
-    result <- session.Prompt(ctx, "Review the repository.")
-}()
+Branch forks share existing message rows; they do not copy history. Branches
+persist across process restarts only in SQLite-backed sessions; under
+`NoSession` their topology and messages are in-memory and ephemeral.
+`ForkSession` and `ForkWorktree` instead return a `SessionForkResult` for a
+new, reopenable database and deliberately leave the SDK receiver bound to its
+source. Open `result.SessionPath` explicitly to continue in the child. This
+detached contract prevents an in-place worktree operation from reusing stale
+project trust, sandbox, search, or file-root bindings.
 
-// A real host normally reacts to an event/UI action here.
-if session.IsRunning() {
-    if err := session.Steer(ctx, "Focus on the public API and RPC contracts."); err != nil &&
-        !errors.Is(err, snowsdk.ErrNotRunning) {
-        return err
-    }
-}
+Independent forks preserve the exact stable root-to-entry chain and immutable
+parent provenance. They reject unresolved tool-call boundaries, never overwrite
+an explicit destination, do not copy subagent topology, and inherit
+collaboration mode only at the current branch tip. Callers can classify common
+failures with `ErrForkDestinationExists`, `ErrWorktreeDestinationExists`,
+`ErrInvalidForkBoundary`, `ErrNotGitRepository`, `ErrGitDirty`, and
+`ErrUnsafeWorktreeDestination` through `errors.Is`. Branch and fork management
+is rejected while conflicting root or subagent work is active. Automatic
+Default-mode goal continuation may emit compaction events between goal turns at
+the configured context threshold; this does not change the manual `Compact`
+method contract.
 
-if err := <-result; err != nil {
-    return err
-}
-```
-
-`IsRunning` is only a snapshot; the turn may finish before `Steer`. Always handle
-`ErrNotRunning` as a normal race.
-
-## Plan Mode and branches
+Plan Mode and branches:
 
 ```go
 if err := session.PromptWithMode(ctx, "Design the migration.", protocol.ModePlan); err != nil {
@@ -564,14 +559,98 @@ fmt.Println("active fork:", fork.ID)
 Consume `plan_started`, `plan_delta`, and `plan_completed` rather than scraping
 transport tags. `plan_update` is the separate Default-mode checklist event.
 
-## Errors and cancellation
+### Persistent Thread Goals
+
+| Method | Purpose |
+|---|---|
+| `Goal()` | Return the active branch goal or nil |
+| `CreateGoal(objective, budget, replace)` | Create a goal; `SetGoal` is an alias |
+| `EditGoal(objective)` | Rotate objective and goal ID while preserving usage and budget |
+| `PauseGoal()` / `ResumeGoal()` | Control eligible automatic continuation; resume also restarts an active abort-deferred goal |
+| `ClearGoal()` | Remove the branch goal |
+| `ContinueGoal()` | Clear continuation deferral and run eligible idle work |
+
+Normal prompts never clear an abort or manual-compaction deferral; call
+`ResumeGoal` or `ContinueGoal` explicitly. SQLite persists goals across
+processes; `NoSession` keeps them only for the current process. Budgets must be
+positive. Goal statuses are `active`, `paused`, `blocked`, `usage_limited`,
+`budget_limited`, and `complete`. Returned `protocol.ThreadGoal` values include
+optional per-currency `EstimatedCosts`; values come from provider or catalog
+pricing and are estimates, not invoices. See
+[Persistent Thread Goals](goals.md).
+
+## Permissions and security
+
+The SDK has no built-in interactive permission UI. Its omission default is
+`deny`; `ask` uses a deny-by-default asker unless the embedding supplies a
+lower-level interactive host, which `pkg/snowsdk` does not currently expose.
+
+`AutoApprove` is equivalent to `allow`; it does not add containment. Plugins,
+stdio MCP servers, file tools, and subagents execute with their documented host
+privileges. Bash also uses the host unless an inherited exact-project smolvm
+association is active. `SandboxStatus()` makes that fixed per-session boundary
+observable; `RequireSandbox` fails startup instead of accepting host Bash,
+while `DisableSandbox` is an explicit host override. The VM contains only Bash.
+Subagents share filesystem and process side effects. Project trust controls
+input loading, not containment.
+
+For a narrow inspection embedding:
+
+```go
+snowsdk.Options{
+    PermissionMode:    "deny",
+    Tools:             []string{"read", "grep", "glob"},
+    NoPlugins:         true,
+    NoMCP:             true,
+    NoSkills:          true,
+    DisableSubagents:  true,
+}
+```
+
+Read the complete [Security model](security.md) before granting mutation,
+execution, network, delegation, or automatic continuation authority.
+
+## Readiness and capabilities
+
+The Go SDK has no JSONL wire handshake; RPC version and capability negotiation
+belongs to the [JSONL RPC](rpc.md) surface and the
+[language SDKs](language-sdks.md). Embeddings instead observe session readiness
+through the methods below.
+
+### Readiness methods
+
+| Method | Purpose |
+|---|---|
+| `StateEvent()` | Return the current collaboration-mode snapshot for initial host state |
+| `ReadyGoals()` | Publish restored goal state and permit eligible automatic continuation |
+| `ReadySubagents()` | Publish restored child topology without restarting stale work |
+
+Call readiness after subscriptions. Both methods drain initial events when
+safe; they also avoid deadlock when invoked from event callback context.
+
+### Discovery and diagnostics
+
+| Method | Purpose |
+|---|---|
+| `MCPServers()` | Return secret-free negotiated MCP status |
+| `Skills()` | Return enabled skill metadata exposed to provider context |
+| `SkillInventory()` | Return enabled and policy-disabled discovered skills |
+| `Diagnostics()` | Return non-fatal theme, keybinding, and search configuration warnings |
+
+`Diagnostics()` does not currently include plugin startup failures or detailed
+Agent Skill parse diagnostics; inspect extension inventory and status through
+the relevant extension surface and retain startup errors from `Open`. Returned
+models, events, queues, skills, and MCP capability slices are defensive copies
+at the public observation boundary.
+
+## Concurrency and errors
 
 Exported sentinel errors:
 
 ```go
 var (
     snowsdk.ErrNotRunning // active-input operation requires a running turn
-    snowsdk.ErrStopped    // nil/closed session or repeated close
+    snowsdk.ErrStopped    // nil or closed session, or repeated close
 )
 ```
 
@@ -580,50 +659,46 @@ failures are ordinary wrapped errors. Context cancellation propagates through
 provider requests, tools, prompts, waits, and abort paths.
 
 A method error and an `error` event serve different consumers; hosts should
-check both returned errors and the event stream. `Abort` clears undelivered root
-input. Closing joins owned child work and releases plugins/MCP/session resources.
+check both returned errors and the event stream. `Abort` clears undelivered
+root input. Closing joins owned child work and releases plugin, MCP, and
+session resources.
 
-## Concurrency guidance
+Concurrency guidance:
 
-- One root prompt is admitted at a time. Do not use concurrent `Prompt` calls as
-  a queue; use `Steer`/`FollowUp` during a run or serialize prompts in the host.
+- One root prompt is admitted at a time. Do not use concurrent `Prompt` calls
+  as a queue; use `Steer` and `FollowUp` during a run or serialize prompts in
+  the host.
 - `Steer` and `FollowUp` are concurrency-safe bounded admissions while the root
   runs.
 - Tool calls in one agent are serial. Different subagents may run concurrently.
 - Subscription callbacks are ordered observation boundaries with cloned data.
-- `WaitSubagentsUntilAll` is a join-style status wait; child results still arrive
-  asynchronously as attributed events/mail.
-- Mode/model/branch/compaction operations may reject while conflicting work is
-  active.
+- `WaitSubagentsUntilAll` is a join-style status wait; child results still
+  arrive asynchronously as attributed events and mail.
+- Mode, model, branch, and compaction operations may reject while conflicting
+  work is active.
 - Give every long operation a context deadline appropriate to the embedding.
 
-## Permissions and security
+## Limitations
 
-The SDK has no built-in interactive permission UI. Its omission default is
-`deny`; `ask` uses a deny-by-default asker unless the embedding supplies a lower-
-level interactive host, which `pkg/snowsdk` does not currently expose.
+- The SDK does not expose an interactive permission asker; `ask` mode is
+  fail-closed by default.
+- Prompt methods accept text only; image and content-block prompt paths are not
+  yet public.
+- `SessionPath` is open-or-create. There is no strict "must already exist"
+  resume option and no saved-session catalog; hosts that require strict resume
+  must validate and select the path before `Open`.
+- Persisted child message history is not exposed through the SDK; hosts must
+  retain attributed events to keep complete child transcripts.
+- `RunPrompt` returns root text only; attributed child text requires a normal
+  subscribed session.
+- `Diagnostics()` omits plugin startup failures and detailed skill parse
+  diagnostics.
+- The package is pre-alpha; public compatibility is not guaranteed until v1.
 
-`AutoApprove` is equivalent to `allow`; it does not add containment. Plugins,
-stdio MCP servers, file tools, and subagents execute with their documented host
-privileges. Bash also uses the host unless an inherited exact-project smolvm
-association is active. `SandboxStatus()` makes that fixed per-session boundary
-observable; `RequireSandbox` fails startup instead of accepting host Bash, while
-`DisableSandbox` is an explicit host override. The VM contains only Bash.
-Subagents share filesystem/process side effects. Project trust controls input
-loading, not containment.
+## Related documents
 
-For a narrow inspection embedding:
-
-```go
-snowsdk.Options{
-    PermissionMode: "deny",
-    Tools:          []string{"read", "grep", "glob"},
-    NoPlugins:      true,
-    NoMCP:          true,
-    NoSkills:       true,
-    DisableSubagents: true,
-}
-```
-
-Read the complete [Security model](security.md) before granting mutation,
-execution, network, delegation, or automatic continuation authority.
+- [Configuration](configuration.md)
+- [JSONL RPC](rpc.md)
+- [Security model](security.md)
+- [Sessions](sessions.md)
+- [Subagents](subagents.md)

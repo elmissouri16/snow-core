@@ -1,20 +1,76 @@
 # JSONL RPC
 
-Snow RPC is a long-lived, bidirectional control plane for IDEs, editor plugins,
-foreign-language hosts, and subprocess integrations.
+Snow RPC is a long-lived, bidirectional JSON-lines control plane for IDEs,
+editor plugins, foreign-language hosts, and subprocess integrations. This
+reference defines the wire framing, handshake, command surface, event stream,
+ordering guarantees, error model, and shutdown semantics. Companion material
+for model-requested input and the Python and JavaScript SDKs lives in
+[Model-requested user input](user-input.md) and
+[Python and JavaScript/TypeScript SDKs](language-sdks.md).
 
-It is **not JSON-RPC 2.0**. Snow's external plugin protocol uses JSON-RPC 2.0;
-the CLI control plane documented here is a separate Snow-specific protocol with
-one JSON object per line.
+> **Note:** This is not JSON-RPC 2.0. Snow's external plugin protocol uses
+> JSON-RPC 2.0; the CLI control plane documented here is a separate
+> Snow-specific protocol with one JSON object per line.
 
-## Start the server
+## On this page
+
+- [Overview and framing](#overview-and-framing)
+- [Run the server](#run-the-server)
+- [Protocol handshake](#protocol-handshake)
+- [Request and response envelopes](#request-and-response-envelopes)
+- [Prompt commands](#prompt-commands)
+- [Model and mode commands](#model-and-mode-commands)
+- [Session commands](#session-commands)
+- [User input commands](#user-input-commands)
+- [Goal commands](#goal-commands)
+- [Subagent commands](#subagent-commands)
+- [Event stream](#event-stream)
+- [Event payload reference](#event-payload-reference)
+- [Prompt and response ordering](#prompt-and-response-ordering)
+- [Example clients](#example-clients)
+- [Errors and shutdown](#errors-and-shutdown)
+- [Permission model](#permission-model)
+- [Current RPC boundary](#current-rpc-boundary)
+- [Related documents](#related-documents)
+
+## Overview and framing
+
+The server runs inside the `snow` process with the current user's OS
+privileges. It reads command objects from stdin and writes a single
+newline-delimited stream to stdout.
+
+| Stream | Content |
+|---|---|
+| stdin | Client request objects |
+| stdout | `rpc_ready`, response objects, `prompt_completed`, and `protocol.AgentEvent` objects |
+| stderr | Startup/configuration diagnostics and process-level errors |
+
+### Framing rules
+
+- Frames are UTF-8 JSON, exactly one object per LF (`\n`) line.
+- The maximum input line is 16 MiB.
+- A zero-length line is ignored; a whitespace-only line is invalid JSON.
+- Split only on the LF byte. Unicode line separators are not frame
+  boundaries.
+- Responses and events share one serialized writer, so bytes from different
+  objects never interleave. Object ordering is still asynchronous: a later
+  command may respond before an earlier prompt or `subagent_wait` completes.
+
+The first frame is always `rpc_ready`. Snow then writes the initial
+collaboration-mode event and restored goal and subagent events before
+accepting commands or while processing them. Clients must accept events
+before their first response.
+
+## Run the server
+
+Start the server from the repository root or from an installed binary:
 
 ```sh
 snow --mode rpc --permission deny --no-session
 ```
 
-Use the normal runtime flags to select provider, model, tools, session,
-extensions, skills, or subagents:
+Select provider, model, tools, session, extensions, skills, or subagents with
+the normal runtime flags:
 
 ```sh
 snow --mode rpc \
@@ -24,28 +80,10 @@ snow --mode rpc \
   --subagents
 ```
 
-Keep stdin open until asynchronous prompts and waits finish. Sending a prompt
-through `echo ... | snow --mode rpc` immediately closes stdin and begins orderly
-shutdown, which cancels active RPC work. Use a persistent subprocess client.
-
-## Transport and framing
-
-- **stdin:** client request objects
-- **stdout:** `rpc_ready`, response objects, `prompt_completed`, and asynchronous `protocol.AgentEvent` objects
-- **stderr:** startup/configuration diagnostics and process-level errors
-- **framing:** UTF-8 JSON, exactly one object per LF (`\n`) line
-- **maximum input line:** 16 MiB
-- **empty frames:** a zero-length line is ignored; whitespace-only lines are invalid JSON
-
-Split only on the LF byte. Do not use Unicode line separators as frames.
-Responses and events share one serialized writer, so bytes from different
-objects never interleave. Object ordering is still asynchronous: a later command
-may respond before an earlier prompt or `subagent_wait` completes.
-
-The first frame is always `rpc_ready`. Snow then writes the initial
-collaboration-mode event and restored goal/subagent events before accepting or
-while processing commands. Clients must accept events before their first
-response.
+Keep stdin open until asynchronous prompts and waits finish. Piping a single
+prompt with `echo ... | snow --mode rpc` closes stdin immediately and begins
+orderly shutdown, which cancels active RPC work. Use a persistent subprocess
+client for interactive use.
 
 ## Protocol handshake
 
@@ -75,11 +113,13 @@ check capabilities before exposing optional high-level methods. Capabilities
 state wire support, not runtime enablement; for example, `subagent_models` is
 advertised even when subagents are disabled for the current process.
 
-Version 1 is additive: clients must tolerate unknown capabilities, event types,
-and optional output fields. Removing or changing existing fields/enums requires
-a new protocol version.
+Version 1 is additive: clients must tolerate unknown capabilities, event
+types, and optional output fields. Removing or changing existing fields or
+enums requires a new protocol version.
 
-## Request envelope
+## Request and response envelopes
+
+### Request envelope
 
 ```json
 {
@@ -93,23 +133,24 @@ a new protocol version.
 }
 ```
 
-| Field | Use |
-|---|---|
-| `id` | Optional to the server, strongly recommended; copied only to responses |
-| `type` | Required command name |
-| `message` | Top-level text for `prompt`, `steer`, and `follow_up` |
-| `model` | Top-level model ID for `set_model` |
-| `thinking` | Top-level effort for `set_thinking` |
-| `mode` | Top-level collaboration mode for `set_mode` or prompt-attached mode |
-| `params` | Command-specific JSON object |
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID; strongly recommended and copied only to responses |
+| `type` | string | Yes | Command name |
+| `message` | string | No | Top-level text for `prompt`, `steer`, and `follow_up` |
+| `model` | string | No | Top-level model ID for `set_model` |
+| `thinking` | string | No | Top-level effort for `set_thinking` |
+| `mode` | string | No | Top-level collaboration mode for `set_mode` or a prompt-attached mode |
+| `params` | object | No | Command-specific JSON object |
 
 Use a unique ID for every request. Ordinary agent events do not carry request
-IDs. Public `protocol.RPCRequest`, `RPCResponse`, `RPCReady`,
-`RPCPromptCompleted`, `RPCSessionInfo`, and model-list DTOs define the stable Go
-wire representation. Canonical JSON schemas live under
+IDs. The public `protocol.RPCRequest`, `protocol.RPCResponse`,
+`protocol.RPCReady`, `protocol.RPCPromptCompleted`, `protocol.RPCSessionInfo`,
+and model-list DTOs define the stable Go wire representation. Canonical JSON
+schemas live under
 [`pkg/protocol/schema/rpc/v1`](../pkg/protocol/schema/rpc/v1).
 
-## Response envelope
+### Response envelope
 
 Success:
 
@@ -131,7 +172,7 @@ Failure:
   "type": "response",
   "command": "set_model",
   "success": false,
-  "error": "...",
+  "error": "invalid model id",
   "error_code": "invalid"
 }
 ```
@@ -139,84 +180,156 @@ Failure:
 `error_code` is optional for compatibility and, when present, is one of
 `canceled`, `conflict`, `destination_exists`, `git_dirty`, `git_failure`,
 `invalid`, `not_found`, `not_git_repository`, `session_busy`,
-`subagents_active`, or `unsupported`. Clients should branch on this stable code
-and display the human-readable `error` only as diagnostics.
+`subagents_active`, or `unsupported`. Branch on this stable code and display
+the human-readable `error` only as diagnostics.
 
 A client should route `type == "response"` by ID, route
-`type == "prompt_completed"` by `request_id`, and send remaining known types to
-its agent-event handler. `rpc_ready` is handled once during startup.
+`type == "prompt_completed"` by `request_id`, and send remaining known types
+to its agent-event handler. `rpc_ready` is handled once during startup.
 
 Malformed JSON receives a failure response with `command: "invalid"`. Unknown
-commands and validation/runtime failures use the requested command name.
+commands and validation or runtime failures use the requested command name.
 
-## Core commands
+## Prompt commands
 
 ### `prompt`
 
 ```json
-{"id":"prompt-1","type":"prompt","message":"Review the public API"}
+{
+  "id": "prompt-1",
+  "type": "prompt",
+  "message": "Review the public API"
+}
 ```
 
 Attach a collaboration mode atomically:
 
 ```json
-{"id":"prompt-2","type":"prompt","mode":"plan","message":"Design the migration"}
+{
+  "id": "prompt-2",
+  "type": "prompt",
+  "mode": "plan",
+  "message": "Design the migration"
+}
 ```
 
-`message` is required. `mode`, when present, is `default` or `plan`.
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID copied to the admission response and `prompt_completed.request_id` |
+| `type` | string | Yes | Must be `prompt` |
+| `message` | string | Yes | Non-empty top-level prompt text |
+| `mode` | string | No | `default` or `plan`; attaches a collaboration mode to the prompt |
 
-The server immediately returns a successful admission acknowledgement, then runs
-the root prompt asynchronously while continuing to read stdin. `turn_done`
-marks the agent lifecycle boundary. The definitive RPC result follows after the
-prompt fully unwinds:
+The server immediately returns a successful admission acknowledgement, then
+runs the root prompt asynchronously while continuing to read stdin. The
+admission response:
 
 ```json
-{"type":"prompt_completed","request_id":"prompt-1","status":"completed"}
+{
+  "id": "prompt-1",
+  "type": "response",
+  "command": "prompt",
+  "success": true
+}
+```
+
+`turn_done` marks the agent lifecycle boundary. The definitive RPC result
+follows after the prompt fully unwinds:
+
+```json
+{
+  "type": "prompt_completed",
+  "request_id": "prompt-1",
+  "status": "completed"
+}
 ```
 
 Failure and cancellation use `status: "failed"` (with `error`) or
-`status: "canceled"`. For compatibility, a failed prompt also retains the older
-same-ID `success:false` response immediately before `prompt_completed`. New
-clients must resolve prompt futures from exactly one `prompt_completed` frame,
-not from `turn_done` or the admission response.
+`status: "canceled"`. For compatibility, a failed prompt also retains the
+older same-ID `success: false` response immediately before
+`prompt_completed`. New clients must resolve prompt futures from exactly one
+`prompt_completed` frame, not from `turn_done` or the admission response.
 
 Only one root prompt may run. A second `prompt` fails; it never implicitly
 cancels accepted work. Use `steer`, `follow_up`, or `abort`.
 
-### `steer`
+### `steer` and `follow_up`
 
 ```json
-{"id":"steer-1","type":"steer","message":"Focus on API compatibility"}
+{
+  "id": "steer-1",
+  "type": "steer",
+  "message": "Focus on API compatibility"
+}
 ```
-
-Requires a non-empty message and an active root turn. The input becomes eligible
-at the next safe boundary after the current assistant response and complete
-serial tool batch.
-
-### `follow_up`
 
 ```json
-{"id":"follow-1","type":"follow_up","message":"Then propose tests"}
+{
+  "id": "follow-1",
+  "type": "follow_up",
+  "message": "Then propose tests"
+}
 ```
 
-Requires an active root turn. It becomes eligible only after a natural provider
-stop and after earlier steering. Queue updates arrive as `queue_updated` events.
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | `steer` or `follow_up` |
+| `message` | string | Yes | Non-empty input text |
+
+Both commands require an active root turn. `steer` becomes eligible at the
+next safe boundary after the current assistant response and complete serial
+tool batch. `follow_up` becomes eligible only after a natural provider stop
+and after earlier steering. Queue updates arrive as `queue_updated` events.
+
+Success response:
+
+```json
+{
+  "id": "steer-1",
+  "type": "response",
+  "command": "steer",
+  "success": true
+}
+```
 
 ### `abort`
 
 ```json
-{"id":"abort-1","type":"abort"}
+{
+  "id": "abort-1",
+  "type": "abort"
+}
 ```
 
-Cancels admitted root work and clears undelivered queued input. If goal work was
-active, it remains deferred across ordinary `prompt` commands until an explicit
-`goal_resume` or `goal_continue`. The command is acknowledged even when no
-prompt is active.
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `abort` |
+
+Cancels admitted root work and clears undelivered queued input. If goal work
+was active, it remains deferred across ordinary `prompt` commands until an
+explicit `goal_resume` or `goal_continue`. The command is acknowledged even
+when no prompt is active.
+
+```json
+{
+  "id": "abort-1",
+  "type": "response",
+  "command": "abort",
+  "success": true
+}
+```
+
+## Model and mode commands
 
 ### `models_list`
 
 ```json
-{"id":"models-1","type":"models_list"}
+{
+  "id": "models-1",
+  "type": "models_list"
+}
 ```
 
 Returns the active provider, current model ID, and a defensive copy of the
@@ -224,32 +337,63 @@ active provider catalog:
 
 ```json
 {
-  "id":"models-1",
-  "type":"response",
-  "command":"models_list",
-  "success":true,
-  "data":{"provider":"fake","current":"fake-1","models":[{"provider":"fake","id":"fake-1","supports_tools":true,"supports_thinking":false,"supports_vision":false}]}
+  "id": "models-1",
+  "type": "response",
+  "command": "models_list",
+  "success": true,
+  "data": {
+    "provider": "fake",
+    "current": "fake-1",
+    "models": [
+      {
+        "provider": "fake",
+        "id": "fake-1",
+        "supports_tools": true,
+        "supports_thinking": false,
+        "supports_vision": false
+      }
+    ]
+  }
 }
 ```
 
-An unavailable/empty discovered catalog is a successful empty list; explicitly
-configured compatible model IDs may still work.
+An unavailable or empty discovered catalog is a successful empty list;
+explicitly configured compatible model IDs may still work.
 
 ### `set_model`
 
 ```json
-{"id":"model-1","type":"set_model","model":"kimi-k2.6"}
+{
+  "id": "model-1",
+  "type": "set_model",
+  "model": "kimi-k2.6"
+}
 ```
 
-`model` is required. Snow uses matching catalog metadata when available. A
-change may be rejected while work is active or when current settings are
-incompatible.
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `set_model` |
+| `model` | string | Yes | Model ID to activate |
+
+Snow uses matching catalog metadata when available. A change may be rejected
+while work is active or when current settings are incompatible.
 
 ### `set_thinking`
 
 ```json
-{"id":"thinking-1","type":"set_thinking","thinking":"medium"}
+{
+  "id": "thinking-1",
+  "type": "set_thinking",
+  "thinking": "medium"
+}
 ```
+
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `set_thinking` |
+| `thinking` | string | Yes | Reasoning effort level |
 
 Values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and
 `ultra`. The active model's advertised capabilities are authoritative.
@@ -257,65 +401,143 @@ Values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and
 ### `set_mode`
 
 ```json
-{"id":"mode-1","type":"set_mode","mode":"plan"}
+{
+  "id": "mode-1",
+  "type": "set_mode",
+  "mode": "plan"
+}
 ```
 
-Use `default` or `plan`. Mode changes may be rejected while conflicting work is
-active. Prefer an explicit value even though an omitted value normalizes to the
-Default mode internally.
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `set_mode` |
+| `mode` | string | Yes | `default` or `plan` |
+
+Mode changes may be rejected while conflicting work is active. Prefer an
+explicit value even though an omitted value normalizes to the Default mode
+internally.
+
+## Session commands
 
 ### `session_rename`
 
 ```json
-{"id":"rename-1","type":"session_rename","params":{"name":"API cleanup"}}
+{
+  "id": "rename-1",
+  "type": "session_rename",
+  "params": {
+    "name": "API cleanup"
+  }
+}
 ```
 
-Changes the active session display title without changing its stable ID, path,
-branches, or history. The trimmed title must contain 1–72 runes and no control
-characters. The response `data` contains `session_id` and the normalized `name`.
-The command may be rejected while conflicting root/subagent work is active.
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `session_rename` |
+| `params.name` | string | Yes | New display title, 1-72 runes and no control characters |
+
+Changes the active session display title without changing its stable ID,
+path, branches, or history. The response `data` contains `session_id` and the
+normalized `name`. The command may be rejected while conflicting
+root/subagent work is active.
 
 ### `branch_fork`
 
 ```json
-{"id":"branch-1","type":"branch_fork","params":{"source_branch_id":"main","from_entry_id":"entry-123","name":"experiment"}}
+{
+  "id": "branch-1",
+  "type": "branch_fork",
+  "params": {
+    "source_branch_id": "main",
+    "from_entry_id": "entry-123",
+    "name": "experiment"
+  }
+}
 ```
 
-Creates and activates a same-database branch. Empty `source_branch_id` selects
-the active branch. `from_entry_id` may be omitted to use its tip. Success `data`
-is a `SessionBranch`. The source database and shared entry rows retain the
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `branch_fork` |
+| `params.source_branch_id` | string | No | Source branch; empty selects the active branch |
+| `params.from_entry_id` | string | No | Entry to fork from; omitted uses the branch tip |
+| `params.name` | string | No | New branch name |
+
+Creates and activates a same-database branch. Success `data` is a
+`SessionBranch`. The source database and shared entry rows retain the
 existing branch semantics.
 
 ### `session_fork`
 
 ```json
-{"id":"fork-1","type":"session_fork","params":{"from_entry_id":"entry-123","name":"independent"}}
+{
+  "id": "fork-1",
+  "type": "session_fork",
+  "params": {
+    "from_entry_id": "entry-123",
+    "name": "independent"
+  }
+}
 ```
 
-Creates a detached, independent SQLite child and leaves the RPC process on the
-source. Optional `destination_path` must end in `.db` and must not exist. Success
-`data` is `SessionForkResult`, including source session/branch/entry identity,
-child ID/path/CWD, its local `main` branch, and optional worktree information.
-The response is sent only after the child database is durable and reopenable.
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `session_fork` |
+| `params.source_branch_id` | string | No | Source branch |
+| `params.from_entry_id` | string | No | Entry to fork from |
+| `params.name` | string | No | Child session display name |
+| `params.destination_path` | string | No | Must end in `.db` and must not exist |
+
+Creates a detached, independent SQLite child and leaves the RPC process on
+the source. Success `data` is `SessionForkResult`, including source
+session/branch/entry identity, child ID, path, CWD, its local `main` branch,
+and optional worktree information. The response is sent only after the child
+database is durable and reopenable.
 
 ### `session_worktree_fork`
 
 ```json
-{"id":"worktree-1","type":"session_worktree_fork","params":{"from_entry_id":"entry-123","worktree_path":"../snow-experiment","git_branch":"snow/experiment","name":"experiment"}}
+{
+  "id": "worktree-1",
+  "type": "session_worktree_fork",
+  "params": {
+    "from_entry_id": "entry-123",
+    "worktree_path": "../snow-experiment",
+    "git_branch": "snow/experiment",
+    "name": "experiment"
+  }
+}
 ```
 
-Requires a clean Git source and creates a new worktree/branch plus a detached
-child session. Omitted worktree and branch values are generated safely. Relative
-worktree paths resolve from the source Git root (a sibling is normally
-`../name`); a relative `destination_path` resolves inside the new worktree and
-cannot traverse out. Failure never falls back to
-a same-workspace branch. The running RPC process retains its source project
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `session_worktree_fork` |
+| `params.source_branch_id` | string | No | Source branch |
+| `params.from_entry_id` | string | No | Entry to fork from |
+| `params.name` | string | No | Child session display name |
+| `params.destination_path` | string | No | Child session path inside the new worktree |
+| `params.worktree_path` | string | No | Git worktree path |
+| `params.git_branch` | string | No | Git branch name |
+
+Requires a clean Git source and creates a new worktree and branch plus a
+detached child session. Omitted worktree and branch values are generated
+safely. Relative worktree paths resolve from the source Git root, so a
+sibling is normally `../name`; a relative `destination_path` resolves inside
+the new worktree and cannot traverse out. Failure never falls back to a
+same-workspace branch. The running RPC process retains its source project
 bindings.
 
 ### `session_info`
 
 ```json
-{"id":"info-1","type":"session_info"}
+{
+  "id": "info-1",
+  "type": "session_info"
+}
 ```
 
 Successful `data` contains:
@@ -337,7 +559,14 @@ Successful `data` contains:
     "tokens_used": 1200,
     "token_budget": 20000,
     "estimated_costs": [
-      {"currency":"USD","input":0.004,"output":0.002,"cache_read":0.0001,"cache_write":0,"total":0.0061}
+      {
+        "currency": "USD",
+        "input": 0.004,
+        "output": 0.002,
+        "cache_read": 0.0001,
+        "cache_write": 0,
+        "total": 0.0061
+      }
     ]
   },
   "subagents": {
@@ -357,14 +586,29 @@ Successful `data` contains:
 }
 ```
 
-`name` is empty until assigned for legacy/untitled stores; built-in stores receive
-a local title with their first accepted prompt. `path` is empty for
-`--no-session`; `goal` is omitted when none exists. Inside a present goal,
-`token_budget` is `null` when unlimited and `estimated_costs` can be `null` when
-pricing is unavailable. `max_concurrent_agents` is a compatibility alias of
-`max_concurrent_threads`; both currently carry the same limit.
+| Field | Type | Notes |
+|---|---|---|
+| `session_id` | string | Stable session identity |
+| `name` | string | Display title |
+| `path` | string | Session database path; empty for `--no-session` |
+| `cwd` | string | Working directory of the session |
+| `provider` | string | Active provider ID |
+| `model` | string | Active model ID |
+| `thinking` | string | Active reasoning effort |
+| `thinking_levels` | array | Levels advertised by the active model |
+| `collaboration_mode` | string | `default` or `plan` |
+| `goal` | object | Present only when a goal exists |
+| `subagents` | object | Effective child-agent availability and bounds |
+| `pending_inputs` | object | Admitted steering and follow-up waiting for delivery |
 
-## Model-requested user input
+`name` is empty until assigned for legacy/untitled stores; built-in stores
+receive a local title with their first accepted prompt. Inside a present
+goal, `token_budget` is `null` when unlimited and `estimated_costs` can be
+`null` when pricing is unavailable. `max_concurrent_agents` is a
+compatibility alias of `max_concurrent_threads`; both currently carry the
+same limit.
+
+## User input commands
 
 A blocked `ask_user` call emits:
 
@@ -380,8 +624,14 @@ A blocked `ask_user` call emits:
         "header": "Format",
         "question": "Which format should I use?",
         "options": [
-          {"label": "JSON", "description": "Machine-readable"},
-          {"label": "Text", "description": "Human-readable"}
+          {
+            "label": "JSON",
+            "description": "Machine-readable"
+          },
+          {
+            "label": "Text",
+            "description": "Human-readable"
+          }
         ]
       }
     ]
@@ -389,7 +639,7 @@ A blocked `ask_user` call emits:
 }
 ```
 
-Reply to every question exactly once by stable question ID:
+### `user_input_reply`
 
 ```json
 {
@@ -398,34 +648,54 @@ Reply to every question exactly once by stable question ID:
   "params": {
     "request_id": "call-1",
     "answers": [
-      {"id": "format", "answer": "JSON"}
+      {
+        "id": "format",
+        "answer": "JSON"
+      }
     ]
   }
 }
 ```
 
-Or reject only the pending tool interaction:
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `user_input_reply` |
+| `params.request_id` | string | Yes | Pending request ID from the `user_input_request` event |
+| `params.answers` | array | Yes | One answer per question, keyed by stable question ID |
+| `params.answers[].id` | string | Yes | Question ID |
+| `params.answers[].answer` | string | Yes | Answer text or selected option label |
+
+### `user_input_reject`
 
 ```json
 {
   "id": "reject-1",
   "type": "user_input_reject",
-  "params": {"request_id": "call-1"}
+  "params": {
+    "request_id": "call-1"
+  }
 }
 ```
 
-Answers are trimmed, non-empty, limited to 8 KiB, and normalized to request
-order. Invalid, incomplete, duplicate, oversized, or stale replies fail without
-clearing the pending request, so the client may correct and retry. Only one input
-request is pending because Snow executes each agent's tool calls serially.
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `user_input_reject` |
+| `params.request_id` | string | Yes | Pending request ID to reject |
 
-See [Model-requested user input](user-input.md).
+Answers are trimmed, non-empty, limited to 8 KiB, and normalized to request
+order. Invalid, incomplete, duplicate, oversized, or stale replies fail
+without clearing the pending request, so the client may correct and retry.
+Only one input request is pending because Snow executes each agent's tool
+calls serially. See [Model-requested user input](user-input.md).
 
 ## Goal commands
 
 Goals require a branch-scoped session store. SQLite makes them durable across
-processes; `--no-session` uses the same commands with process-lifetime in-memory
-state. Full semantics are documented in [Persistent Thread Goals](goals.md).
+processes; `--no-session` uses the same commands with process-lifetime
+in-memory state. Full semantics are documented in
+[Persistent Thread Goals](goals.md).
 
 | Command | `params` | Success `data` |
 |---|---|---|
@@ -438,35 +708,82 @@ state. Full semantics are documented in [Persistent Thread Goals](goals.md).
 | `goal_clear` | none | `{"cleared":true|false}` |
 | `goal_continue` | none | Eligible continued goal state |
 
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | One of the goal command names above |
+| `params.objective` | string | Yes | Goal objective, at most 32 Ki Unicode characters |
+| `params.token_budget` | integer | No | Positive token budget |
+| `params.replace` | boolean | No | Replace an existing goal |
+
 Examples:
 
 ```json
-{"id":"goal-1","type":"goal_create","params":{"objective":"Ship and verify the parser","token_budget":20000}}
-{"id":"goal-2","type":"goal_pause"}
-{"id":"goal-3","type":"goal_resume"}
-{"id":"goal-4","type":"goal_edit","params":{"objective":"Ship, benchmark, and verify the parser"}}
-{"id":"goal-5","type":"goal_clear"}
+{
+  "id": "goal-1",
+  "type": "goal_create",
+  "params": {
+    "objective": "Ship and verify the parser",
+    "token_budget": 20000
+  }
+}
 ```
 
-Objectives are required and limited to 32 Ki Unicode characters. Token budgets
-must be positive. When pricing is available, goal DTOs include optional
-`estimated_costs` grouped by currency; these are catalog/provider estimates,
-not invoices. Goal state also streams through `thread_goal_updated`.
+```json
+{
+  "id": "goal-2",
+  "type": "goal_pause"
+}
+```
+
+```json
+{
+  "id": "goal-3",
+  "type": "goal_resume"
+}
+```
+
+```json
+{
+  "id": "goal-4",
+  "type": "goal_edit",
+  "params": {
+    "objective": "Ship, benchmark, and verify the parser"
+  }
+}
+```
+
+```json
+{
+  "id": "goal-5",
+  "type": "goal_clear"
+}
+```
+
+Token budgets must be positive. When pricing is available, goal DTOs include
+optional `estimated_costs` grouped by currency; these are catalog/provider
+estimates, not invoices. Goal state also streams through
+`thread_goal_updated`.
 
 ## Subagent commands
 
-Enable subagents with `--subagents` or configuration. See [Subagents](subagents.md)
-for role, authority, persistence, and lifecycle details.
+Enable subagents with `--subagents` or configuration. See
+[Subagents](subagents.md) for role, authority, persistence, and lifecycle
+details.
 
 ### `subagent_models`
 
 ```json
-{"id":"child-models-1","type":"subagent_models"}
+{
+  "id": "child-models-1",
+  "type": "subagent_models"
+}
 ```
 
-Returns exact provider/model pairs available to children and an `enabled` flag
-for the current runtime. The catalog is returned even when spawning is disabled,
-so a host can configure a future session without guessing model IDs.
+Returns exact provider/model pairs available to children and an `enabled`
+flag for the current runtime. The catalog is returned even when spawning is
+disabled, so a host can configure a future session without guessing model
+IDs.
 
 ### `subagent_spawn`
 
@@ -486,49 +803,141 @@ so a host can configure a future session without guessing model IDs.
 }
 ```
 
-Required: `name`, `task`. Optional: `role`, `fork_turns`, `provider`, `model`,
-`reasoning_effort`. RPC names are strict lowercase canonical segments; hyphens
-are not normalized. Success returns `SubagentState`.
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `subagent_spawn` |
+| `params.name` | string | Yes | Child name; strict lowercase canonical segment |
+| `params.task` | string | Yes | Child assignment |
+| `params.role` | string | No | Capability profile |
+| `params.provider` | string | No | Child provider override |
+| `params.model` | string | No | Child model override |
+| `params.fork_turns` | string | No | `none`, `all`, or a positive integer |
+| `params.reasoning_effort` | string | No | Child reasoning effort level |
+
+RPC names are strict lowercase canonical segments; hyphens are not
+normalized. Success returns `SubagentState`.
 
 ### Messaging and follow-up
 
 ```json
-{"id":"mail-1","type":"subagent_send_message","params":{"target":"/root/api_review","message":"Check events too."}}
-{"id":"task-2","type":"subagent_followup","params":{"target":"/root/api_review","message":"Now inspect tests."}}
+{
+  "id": "mail-1",
+  "type": "subagent_send_message",
+  "params": {
+    "target": "/root/api_review",
+    "message": "Check events too."
+  }
+}
 ```
-
-`send_message` queues attributed mail without starting a child turn.
-`subagent_followup` queues and starts/reuses eligible child work.
-
-### Wait
 
 ```json
-{"id":"wait-1","type":"subagent_wait","params":{"timeout_ms":30000,"until":"activity"}}
-{"id":"wait-2","type":"subagent_wait","params":{"timeout_ms":60000,"until":"all"}}
+{
+  "id": "task-2",
+  "type": "subagent_followup",
+  "params": {
+    "target": "/root/api_review",
+    "message": "Now inspect tests."
+  }
+}
 ```
 
-The default/empty `until` is `activity`. `all` waits until every descendant is
-terminal or the bounded timeout expires. `timeout_ms` must be nonnegative; zero
-uses the configured default, and values that cannot be represented safely are
-rejected before a wait worker starts. Wait handling is asynchronous; several
-wait responses may arrive out of request order. `data` is a
-`WaitSubagentsResult` aggregate and never contains private child result text.
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | `subagent_send_message` or `subagent_followup` |
+| `params.target` | string | Yes | Canonical child path |
+| `params.message` | string | Yes | Non-empty message text |
+
+`subagent_send_message` queues attributed mail without starting a child turn.
+`subagent_followup` queues and starts or reuses eligible child work.
+
+### `subagent_wait`
+
+```json
+{
+  "id": "wait-1",
+  "type": "subagent_wait",
+  "params": {
+    "timeout_ms": 30000,
+    "until": "activity"
+  }
+}
+```
+
+```json
+{
+  "id": "wait-2",
+  "type": "subagent_wait",
+  "params": {
+    "timeout_ms": 60000,
+    "until": "all"
+  }
+}
+```
+
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | Must be `subagent_wait` |
+| `params.timeout_ms` | integer | Yes | Nonnegative wait timeout; zero uses the configured default |
+| `params.until` | string | No | `activity` (default) or `all` |
+
+The default/empty `until` is `activity`. `all` waits until every descendant
+is terminal or the bounded timeout expires. Values that cannot be represented
+safely are rejected before a wait worker starts. Wait handling is
+asynchronous; several wait responses may arrive out of request order. `data`
+is a `WaitSubagentsResult` aggregate and never contains private child result
+text.
 
 ### Inspect and interrupt
 
 ```json
-{"id":"list-1","type":"subagent_list","params":{"path_prefix":"/root"}}
-{"id":"get-1","type":"subagent_get","params":{"target":"/root/api_review"}}
-{"id":"stop-1","type":"subagent_interrupt","params":{"target":"/root/api_review"}}
+{
+  "id": "list-1",
+  "type": "subagent_list",
+  "params": {
+    "path_prefix": "/root"
+  }
+}
 ```
 
-- `subagent_list` returns a `SubagentList` with snapshots and limits.
-- `subagent_get` returns one `SubagentState`.
-- `subagent_interrupt` returns `{"previous_status":"..."}` and leaves the child
-  reusable.
+```json
+{
+  "id": "get-1",
+  "type": "subagent_get",
+  "params": {
+    "target": "/root/api_review"
+  }
+}
+```
+
+```json
+{
+  "id": "stop-1",
+  "type": "subagent_interrupt",
+  "params": {
+    "target": "/root/api_review"
+  }
+}
+```
+
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `id` | string | No | Correlation ID |
+| `type` | string | Yes | `subagent_list`, `subagent_get`, or `subagent_interrupt` |
+| `params.path_prefix` | string | No | Path prefix filter for `subagent_list` |
+| `params.target` | string | Yes | Canonical child path for `subagent_get` and `subagent_interrupt` |
+
+`subagent_list` returns a `SubagentList` with snapshots and limits.
+`subagent_get` returns one `SubagentState`. `subagent_interrupt` returns
+`{"previous_status":"..."}` and leaves the child reusable.
+
+### `subagent_ready`
 
 `subagent_ready` exposes the explicit readiness seam used by embedders, but
-`snow --mode rpc` already readies restored topology before accepting commands.
+`snow --mode rpc` already readies restored topology before accepting
+commands.
 
 ## Event stream
 
@@ -542,95 +951,161 @@ After the `rpc_ready` handshake, frames other than `response` and
 | Interaction | `user_input_request`, `queue_updated` |
 | Lifecycle/state | `session_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
 | Plan | `plan_started`, `plan_delta`, `plan_completed`, `plan_update` |
-| Compaction | `compaction_started`, `compaction_done` (`compaction.automatic` marks any non-manual pressure/overflow-repair run) |
+| Compaction | `compaction_started`, `compaction_done` |
 | Goals | `thread_goal_updated` |
-| Subagents | `subagent_started`, `subagent_status`, `subagent_message`; `subagent_activity` is reserved but not currently emitted |
+| Subagents | `subagent_started`, `subagent_status`, `subagent_message`, `subagent_activity` |
 
-Possible payload fields:
+`compaction.automatic` marks any non-manual pressure or overflow-repair run.
+`subagent_activity` is a reserved wire event type that is not currently
+emitted.
 
-```text
-text message is_error
+### Correlation rules
 
-tool_call_id tool_name tool_output tool_duration_ms
-tool_progress tool_routing
-
-usage model mode plan plan_update compaction
-user_input queue thread_goal
-
-agent subagent agent_message
-turn_id turn_origin turn_sequence root_epoch goal_continuing
-```
-
-Correlation rules:
-
-- `agent` omitted: root-agent event, including ordinary prompts, goal continuation, and root state/lifecycle events;
-- `agent` present: attributed child stream/tool/usage event;
-- `subagent` present: child lifecycle snapshot;
-- `agent_message` present: attributed mailbox event;
-- `turn_sequence`: process-local monotonic admission order for correlated turn events (use `turn_id` as the stable identity; the sequence restarts with the process);
-- `root_epoch`: process-local root session/branch reconciliation generation stamped on every root event, including events outside a turn;
-- `tool_output`: bounded preview only; full results remain in session storage.
+- `agent` omitted: root-agent event, including ordinary prompts, goal
+  continuation, and root state/lifecycle events.
+- `agent` present: attributed child stream, tool, or usage event.
+- `subagent` present: child lifecycle snapshot.
+- `agent_message` present: attributed mailbox event.
+- `turn_sequence`: process-local monotonic admission order for correlated
+  turn events. Use `turn_id` as the stable identity; the sequence restarts
+  with the process.
+- `root_epoch`: process-local root session/branch reconciliation generation
+  stamped on every root event, including events outside a turn.
+- `tool_output`: bounded preview only; full results remain in session
+  storage.
 
 `permission_request` is part of the shared `AgentEvent` type, but RPC's
-headless permission asker fails closed and does not emit it. `user_input_request`
-is a separate model-question interaction and is emitted as documented above.
+headless permission asker fails closed and does not emit it.
+`user_input_request` is a separate model-question interaction and is emitted
+as documented above.
 
-### Event payload quick reference
+## Event payload reference
 
-Fields not listed for an event are omitted unless they are one of the correlation
-fields above. Nested objects use the public `pkg/protocol` JSON tags.
+Fields not listed for an event are omitted unless they are one of the
+correlation fields above. Nested objects use the public `pkg/protocol` JSON
+tags.
 
-| Events | Primary payload |
-|---|---|
-| `text_delta`, `thinking_delta` | `text` |
-| `tool_start` | `tool_call_id`, `tool_name` |
-| `tool_progress` | `tool_progress: {tool_call_id,name,message?,done,is_error?}` |
-| `tool_end` | `tool_call_id`, `tool_name`, `tool_output?`, `tool_duration_ms?`, `is_error?` |
-| `tool_routing` | `tool_routing: {trigger,tool_ids?,candidate_count,selected_count,exposed_count,schema_bytes,latency_ms,fallback?}` |
-| `usage` | `usage` object described below |
-| `model_changed` | `model` (`id`, `provider`, capability and optional pricing metadata) |
-| `mode_changed` | `mode: {mode,reasoning_effort}` |
-| `plan_started`, `plan_delta`, `plan_completed` | `plan: {id,text?}`; delta text is in `text` where present |
-| `plan_update` | `plan_update: {explanation?,plan:[{step,status}]}`; status is `pending`, `in_progress`, or `completed` |
-| `compaction_started`, `compaction_done` | `compaction: {summarized_messages,retained_messages,summary?,used_fallback?,automatic?}` |
-| `user_input_request` | `user_input` object from the interaction section above |
-| `queue_updated` | `queue: {items:[{id,kind,text,order}]}` where `kind` is `steer` or `follow_up`; items are in submission order |
-| `thread_goal_updated` | `thread_goal: {goal?,cleared?}`; `goal` uses the full shape below |
-| `subagent_started`, `subagent_status` | `subagent` snapshot described below |
-| `subagent_message` | `agent_message: {id,author,recipient,kind,content,trigger_turn?,created_at}` |
-| `subagent_activity` | reserved wire event type; not currently emitted |
-| `session_updated`, `turn_done`, `aborted` | correlation/state fields; `message` may provide a human-readable detail |
-| `error` | `message`; `is_error` is not currently set on these events (error-path `compaction_done` events do set it) |
+### Streaming events
+
+| Event type | Payload fields | Ordering |
+|---|---|---|
+| `text_delta` | `text` | In provider stream order |
+| `thinking_delta` | `text` | In provider stream order |
+| `usage` | `usage` | Per provider usage record, including at turn completion |
+
+### Tool events
+
+| Event type | Payload fields | Ordering |
+|---|---|---|
+| `tool_start` | `tool_call_id`, `tool_name` | Before tool execution |
+| `tool_progress` | `tool_progress` | During long-running tool execution |
+| `tool_end` | `tool_call_id`, `tool_name`, `tool_output?`, `tool_duration_ms?`, `is_error?` | After tool completion |
+| `tool_routing` | `tool_routing` | When deferred-tool discovery selects tools |
+
+### Interaction events
+
+| Event type | Payload fields | Ordering |
+|---|---|---|
+| `user_input_request` | `user_input` | While an `ask_user` call blocks for host input |
+| `queue_updated` | `queue` | When steer/follow-up input is admitted or delivered |
+
+### Lifecycle and state events
+
+| Event type | Payload fields | Ordering |
+|---|---|---|
+| `session_updated` | correlation/state fields; `message` may hold detail | On session metadata changes |
+| `turn_done` | correlation/state fields; `usage` may be present | At the end of an agent turn |
+| `error` | `message` | On recoverable and non-fatal errors |
+| `aborted` | correlation/state fields; `message` may hold detail | On cancellation of active work |
+| `model_changed` | `model` | When the active model changes |
+| `mode_changed` | `mode` | When collaboration mode or reasoning effort changes |
+
+`error` events carry `message` only; `is_error` is not currently set on them.
+Error-path `compaction_done` events do set `is_error: true`.
+
+### Plan events
+
+| Event type | Payload fields | Ordering |
+|---|---|---|
+| `plan_started` | `plan` | Plan presentation begins |
+| `plan_delta` | `plan`, `text` | Incremental plan text |
+| `plan_completed` | `plan` | Plan presentation ends |
+| `plan_update` | `plan_update` | Checklist state changes |
+
+### Compaction events
+
+| Event type | Payload fields | Ordering |
+|---|---|---|
+| `compaction_started` | `compaction` | Compaction begins |
+| `compaction_done` | `compaction`, `message?`, `is_error?` | Compaction ends; error-path events set `is_error: true` |
+
+### Goal events
+
+| Event type | Payload fields | Ordering |
+|---|---|---|
+| `thread_goal_updated` | `thread_goal` | On goal create, edit, pause, resume, clear, or continue |
+
+### Subagent events
+
+| Event type | Payload fields | Ordering |
+|---|---|---|
+| `subagent_started` | `subagent` | Child lifecycle snapshot on start |
+| `subagent_status` | `subagent` | Child lifecycle or status change |
+| `subagent_message` | `agent_message` | Attributed mailbox delivery |
+| `subagent_activity` | reserved | Not currently emitted |
+
+### Nested payload shapes
+
+A `tool_progress` object has `tool_call_id`, `name`, optional `message`,
+`done`, and optional `is_error`.
+
+A `tool_routing` object has `trigger`, optional `tool_ids`,
+`candidate_count`, `selected_count`, `exposed_count`, `schema_bytes`,
+`latency_ms`, and optional `fallback`.
+
+A `plan` object has `id` and optional `text`; delta text is in `text` where
+present. A `plan_update` object has optional `explanation` and a `plan` array
+of `{step,status}` entries where status is `pending`, `in_progress`, or
+`completed`.
+
+A `compaction` object has `summarized_messages`, `retained_messages`,
+optional `summary`, optional `used_fallback`, and optional `automatic`.
+
+A `queue` object has `items`, an array of `{id,kind,text,order}` entries in
+submission order where `kind` is `steer` or `follow_up`.
+
+A `thread_goal` object has optional `goal` and optional `cleared`. A cleared
+goal event uses `thread_goal.cleared: true` with no goal.
 
 A `usage` object has `input`, `output`, optional `reasoning`, `cache_read`,
-optional `cache_read_known`, `cache_write`, `total_tokens`, optional `requests`,
-and optional `cost`. Cost is
+optional `cache_read_known`, `cache_write`, `total_tokens`, optional
+`requests`, and optional `cost`. Cost is
 `{currency?,input,output,cache_read,cache_write,total}`.
 
-A full goal contains `session_id`, `branch_id`, `goal_id`, `objective`, `status`,
-optional `token_budget`, `tokens_used`, `seconds_used`, optional
-`estimated_costs`, `created_at`, and `updated_at`. Status is `active`, `paused`,
-`blocked`, `usage_limited`, `budget_limited`, or `complete`. A cleared goal event
-uses `thread_goal.cleared:true` with no goal.
+A full goal contains `session_id`, `branch_id`, `goal_id`, `objective`,
+`status`, optional `token_budget`, `tokens_used`, `seconds_used`, optional
+`estimated_costs`, `created_at`, and `updated_at`. Status is `active`,
+`paused`, `blocked`, `usage_limited`, `budget_limited`, or `complete`.
 
-A subagent snapshot contains `agent`, `status`, optional provider/model/thinking,
-timestamps, bounded `result`/`error`, optional `usage`, and optional `generation`.
-The nested agent reference contains `thread_id`, optional `parent_thread_id`,
-canonical `path`/`parent_path`, optional role/nickname, and `depth`. Lifecycle
-status is `pending_init`, `queued`, `running`, `interrupted`, `completed`,
-`errored`, `shutdown`, `not_loaded`, or `not_found` where the command/event
-permits it. `subagent_list` additionally returns `running`, `queued`, `terminal`,
+A subagent snapshot contains `agent`, `status`, optional provider, model, and
+thinking metadata, timestamps, bounded `result` and `error`, optional
+`usage`, and optional `generation`. The nested agent reference contains
+`thread_id`, optional `parent_thread_id`, canonical `path` and
+`parent_path`, optional role and nickname, and `depth`. Lifecycle status is
+`pending_init`, `queued`, `running`, `interrupted`, `completed`, `errored`,
+`shutdown`, `not_loaded`, or `not_found` where the command or event permits
+it. `subagent_list` additionally returns `running`, `queued`, `terminal`,
 `concurrent_limit`, `agent_limit`, and optional `truncated`.
 
-Usage payloads keep `input` as the total prompt count, including cached tokens.
-`cache_read_known: true` means the provider explicitly reported its cached-token
-field, so `cache_read > 0` is a hit and `cache_read == 0` is a confirmed miss.
-When `cache_read_known` is absent or false, zero is unknown rather than a miss.
-For aggregate usage it is true only when every included provider request reported
-the metric.
+Usage payloads keep `input` as the total prompt count, including cached
+tokens. `cache_read_known: true` means the provider explicitly reported its
+cached-token field, so `cache_read > 0` is a hit and `cache_read == 0` is a
+confirmed miss. When `cache_read_known` is absent or false, zero is unknown
+rather than a miss. For aggregate usage it is true only when every included
+provider request reported the metric.
 
-Clients should switch on `type` and tolerate new optional fields/event types for
-forward compatibility.
+Clients should switch on `type` and tolerate new optional fields and event
+types for forward compatibility.
 
 ## Prompt and response ordering
 
@@ -643,24 +1118,25 @@ response(id=prompt-1, success=true)    # prompt admitted
 text_delta / tool_* / usage events
 queue_updated events                   # if steer/follow-up is admitted/delivered
 turn_done event                        # agent lifecycle boundary
-prompt_completed(request_id=prompt-1) # definitive RPC result
+prompt_completed(request_id=prompt-1)  # definitive RPC result
 ```
 
 Important ordering rules:
 
 - Prompt acknowledgement is admission, not completion.
-- `turn_done` ends the agent turn; `prompt_completed` is the terminal RPC result.
-- A failed prompt retains a legacy same-ID failure response immediately before
-  its single `prompt_completed(status=failed)` frame.
+- `turn_done` ends the agent turn; `prompt_completed` is the terminal RPC
+  result.
+- A failed prompt retains a legacy same-ID failure response immediately
+  before its single `prompt_completed(status=failed)` frame.
 - `subagent_wait` responses are asynchronous.
 - Different command responses can arrive out of request order.
 - Writes are frame-atomic, so a single JSON line is never mixed with another.
-- EOF, cancellation, and scanner failures cancel and join prompt/wait workers
-  before `Serve` returns; cleanup failures are returned to the host.
+- EOF, cancellation, and scanner failures cancel and join prompt and wait
+  workers before `Serve` returns; cleanup failures are returned to the host.
 - Keep a response table keyed by ID, a prompt-terminal table keyed by
   `request_id`, and process agent events independently.
 
-## Runnable Python and JavaScript clients
+## Example clients
 
 Typed, zero-runtime-dependency SDKs and runnable examples are exercised by
 Linux/macOS CI against the fake provider:
@@ -671,9 +1147,10 @@ python3 examples/rpc/python/client.py --snow ./snow
 node examples/rpc/javascript/client.mjs ./snow
 ```
 
-See [Python and JavaScript/TypeScript SDKs](language-sdks.md) for the supported
-high-level clients. The following low-level example shows the underlying framing,
-including the distinction between `turn_done` and `prompt_completed`.
+See [Python and JavaScript/TypeScript SDKs](language-sdks.md) for the
+supported high-level clients. The following low-level example shows the
+underlying framing, including the distinction between `turn_done` and
+`prompt_completed`.
 
 ```python
 #!/usr/bin/env python3
@@ -744,24 +1221,26 @@ for line in proc.stdout:
 
     if kind == "prompt_completed" and message.get("request_id") == "prompt-1":
         if message.get("status") != "completed":
-            raise RuntimeError(message.get("error") or legacy_error or message.get("status"))
+            raise RuntimeError(
+                message.get("error") or legacy_error or message.get("status")
+            )
         break
 
 proc.stdin.close()  # EOF: orderly RPC shutdown
 raise SystemExit(proc.wait())
 ```
 
-This compact snippet demonstrates raw framing. Applications should normally use
-the checked-in Python or JavaScript SDK, which validates the handshake, routes
-out-of-order responses, bounds frames/queues, and waits for definitive prompt
-completion.
+This compact snippet demonstrates raw framing. Applications should normally
+use the checked-in Python or JavaScript SDK, which validates the handshake,
+routes out-of-order responses, bounds frames and queues, and waits for
+definitive prompt completion.
 
 Production clients should also:
 
 - use an asynchronous reader independent from request submission;
 - maintain ID-indexed promises/futures;
 - bound client-side frames and logs;
-- apply process/request deadlines;
+- apply process and request deadlines;
 - handle stderr separately;
 - redact secrets and provider-sensitive payloads;
 - tolerate events before the first request;
@@ -772,27 +1251,27 @@ Production clients should also:
 - Empty lines produce no output.
 - Invalid JSON returns a failure response when stdout remains writable.
 - Unknown command and validation errors do not terminate the server.
-- Scanner errors, broken/short stdout writes, startup failures, or parent context
-  cancellation terminate serving.
-- EOF stops command admission, cancels RPC work/waits, releases user-input
-  waiters, joins the active prompt and goroutines, then exits.
-- There is no `shutdown` command. Close stdin, signal the process, or cancel the
-  embedding context.
+- Scanner errors, broken or short stdout writes, startup failures, or parent
+  context cancellation terminate serving.
+- EOF stops command admission, cancels RPC work and waits, releases
+  user-input waiters, joins the active prompt and goroutines, then exits.
+- There is no `shutdown` command. Close stdin, signal the process, or cancel
+  the embedding context.
 
-## Permission limitation
+## Permission model
 
-RPC has no permission request/reply handshake. In `ask` mode its headless asker
-denies without emitting an interactive permission event. Use an explicit
-headless policy:
+RPC has no permission request/reply handshake. In `ask` mode its headless
+asker denies without emitting an interactive permission event. Use an
+explicit headless policy:
 
 - `--permission deny` for read-oriented operation;
-- `--permission allow` only in an externally trusted/isolated environment.
+- `--permission allow` only in an externally trusted or isolated environment.
 
-`ask` fails closed in RPC. `user_input_reply` answers model questions and does
-not authorize OS/tool access.
+`ask` fails closed in RPC. `user_input_reply` answers model questions and
+does not authorize OS or tool access.
 
-RPC, shell, plugins, stdio MCP servers, and subagents run with the current user's
-OS privileges. Read the [Security model](security.md).
+RPC, shell, plugins, stdio MCP servers, and subagents run with the current
+user's OS privileges. Read the [Security model](security.md).
 
 ## Current RPC boundary
 
@@ -800,6 +1279,14 @@ The current command surface covers prompts, active root input, cancellation,
 active-provider and subagent model discovery, model/thinking/mode controls,
 session inspection, model-requested input, goals, and subagents.
 
-Branch management, compaction, reasoning-summary/text-verbosity controls,
+Branch management, compaction, reasoning-summary and text-verbosity controls,
 configuration mutation, MCP/skill management, and login are currently
 CLI/TUI/SDK concerns rather than RPC commands.
+
+## Related documents
+
+- [Model-requested user input](user-input.md)
+- [Python and JavaScript/TypeScript SDKs](language-sdks.md)
+- [Persistent Thread Goals](goals.md)
+- [Subagents](subagents.md)
+- [Security model](security.md)

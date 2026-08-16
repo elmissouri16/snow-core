@@ -1,10 +1,13 @@
 # Snow documentation
 
 This directory contains user guides, integration references, extension guides,
-and maintainer design material for snow-core.
+and maintainer design material for snow-core. Start with the table below, or use
+the canonical-ownership map at the end when you need the authoritative reference
+for a subject.
 
-> Snow is pre-alpha. Source code and tests are the behavioral authority when an
-> older research or roadmap document differs from a current feature guide.
+> **Note:** Snow is pre-alpha. Source code and tests are the behavioral
+> authority when an older research or roadmap document differs from a current
+> feature guide.
 
 ## Start here
 
@@ -23,10 +26,10 @@ and maintainer design material for snow-core.
   readiness, permissions, and a [standalone Go module](../examples/sdk).
 - [JSONL RPC](rpc.md) — versioned framing, every command, responses/events,
   ordering, interactive input, goals, subagents, shutdown, and schemas.
-- [Python and JavaScript/TypeScript SDKs](language-sdks.md) — typed local clients,
-  lifecycle, secure defaults, external-binary policy, and runnable
-  [Python](../examples/rpc/python) and [JavaScript](../examples/rpc/javascript)
-  examples.
+- [Python and JavaScript/TypeScript SDKs](language-sdks.md) — typed local
+  clients, lifecycle, secure defaults, external-binary policy, and runnable
+  [Python](../examples/rpc/python) and
+  [JavaScript](../examples/rpc/javascript) examples.
 - [Model-requested user input](user-input.md) — `ask_user` request/response
   schema across TUI, SDK, RPC, print, and JSON surfaces.
 - [SQLite sessions](sessions.md) — session storage, branches, resume, and the
@@ -49,8 +52,9 @@ and maintainer design material for snow-core.
   JavaScript/Python/other external runtimes.
 - [External plugin protocol v2](plugin-protocol.md) — complete JSON-RPC JSONL
   framing, lifecycle, tools, risk, progress, events, errors, and shutdown.
-- [JavaScript/Python plugin research](plugin-js-python-research.md) — benchmarked
-  architecture decision, alternatives, implementation sequence, and deferrals.
+- [JavaScript/Python plugin research](plugin-js-python-research.md) —
+  benchmarked architecture decision, alternatives, implementation sequence, and
+  deferrals.
 - [Agent Skills](skills.md) — `SKILL.md` discovery, trust, precedence,
   progressive disclosure, and resource confinement.
 - [Tool routing](tool-routing.md) — deferred schemas, BM25 retrieval,
@@ -62,6 +66,8 @@ and maintainer design material for snow-core.
   interfaces, decisions, phased roadmap, verification, and open risks.
 - [Agent working guide](../AGENTS.md) — repository-specific coding rules,
   security constraints, and verification commands.
+- [Documentation style guide](style-guide.md) — writing and formatting
+  conventions for documentation contributors.
 - [TUI responsiveness](tui-performance.md) — Bubble Tea rendering and
   performance implementation guidance.
 - [Code audit and remediation record](code-audit.md) — repository-wide 2026 bug,
@@ -91,3 +97,12 @@ To reduce drift, use these documents as the primary references:
 | Feature-specific behavior | The matching guide in this directory |
 | Architecture and historical roadmap | [`IMPLEMENTATION.md`](../IMPLEMENTATION.md) |
 | Current implementation details | Source code and tests |
+
+## Related documents
+
+- [Project README](../README.md) — first run and product overview.
+- [Documentation style guide](style-guide.md) — conventions used across this
+  directory.
+- [Architecture and roadmap](../IMPLEMENTATION.md) — design decisions and open
+  risks.
+- [Agent working guide](../AGENTS.md) — repository rules for contributors.

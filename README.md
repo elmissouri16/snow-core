@@ -1,38 +1,56 @@
-# snow-core
+# Snow
 
-**snow** is a small, streaming coding-agent harness written in Go. It ships as
-one terminal application and as an embeddable Go SDK, with the same agent loop,
-tools, sessions, permissions, and events behind every surface.
+Snow (`snow-core`) is a small, streaming coding-agent harness written in Go. One
+agent loop powers an interactive terminal UI, print/JSON/RPC command-line modes,
+and an embeddable pure-Go SDK, with the same tools, sessions, permissions, and
+events behind every surface.
 
-> **Project status:** pre-alpha. The core runtime is functional and tested, but
+[![Go 1.27rc2](https://img.shields.io/badge/Go-1.27rc2-00ADD8)](https://go.dev/doc/install)
+[![CI](https://github.com/elmissouri16/snow-core/actions/workflows/ci.yml/badge.svg)](https://github.com/elmissouri16/snow-core/actions/workflows/ci.yml)
+
+> **Note:** Snow is pre-alpha. The core runtime is functional and tested, but
 > public APIs and file formats may still change before v1.
 
 - Interactive terminal UI, print mode, JSONL events, and JSONL RPC
-- OpenCode Go, user-configured OpenAI-compatible Responses or Chat Completions endpoints, and ChatGPT/Codex OAuth
+- OpenCode Go, user-configured OpenAI-compatible endpoints, and ChatGPT/Codex
+  OAuth
 - SQLite sessions with resume, branches, compaction, and persistent goals
 - Built-in coding tools, MCP, plugins, Agent Skills, and optional subagents
 - Pure-Go SDK under [`pkg/snowsdk`](pkg/snowsdk)
 
-[Quick start](#quick-start) · [Surfaces](#choose-a-surface) ·
-[Capabilities](#capabilities) · [Security](#security-first) ·
-[Documentation](#documentation) · [Roadmap](IMPLEMENTATION.md)
+## On this page
+
+- [Quick start](#quick-start)
+- [Choose a surface](#choose-a-surface)
+- [Providers](#providers)
+- [Capabilities](#capabilities)
+- [Optional smolvm shell sandbox](#optional-smolvm-shell-sandbox)
+- [Embed with Go](#embed-with-go)
+- [Automate over RPC](#automate-over-rpc)
+- [Security first](#security-first)
+- [Configuration and storage](#configuration-and-storage)
+- [Documentation](#documentation)
+- [Development](#development)
+- [Remaining roadmap](#remaining-roadmap)
+- [Further reading](#further-reading)
 
 ## Quick start
 
 ### Requirements
 
-- Go 1.27; `go.mod` currently declares `1.27rc2` because that is the available
-  toolchain required by the pinned Surf release.
+- Go 1.27; `go.mod` declares `1.27rc2` because that is the available toolchain
+  required by the pinned Surf release.
 - macOS or Linux.
 
 ### Build or install
+
+From the repository root:
 
 ```sh
 git clone https://github.com/elmissouri16/snow-core.git
 cd snow-core
 
 # Build a repository-local binary
-
 go build -o snow ./cmd/snow
 ./snow --version
 
@@ -42,25 +60,32 @@ export PATH="$HOME/.local/bin:$PATH"
 ```
 
 Choose either build path. Override the install directory with
-`SNOW_INSTALL_DIR=/path/to/bin`. Snow uses the directory where it is launched as
-the active project.
+`SNOW_INSTALL_DIR=/path/to/bin`. Snow treats the directory where it is launched
+as the active project.
+
+### Try it without credentials
+
+Smoke-test the harness with the deterministic `fake` provider, which needs no
+API key and no network access:
+
+```sh
+./snow --provider fake --no-session -p "hello"
+```
 
 ### Authenticate
 
-OpenCode Go:
+OpenCode Go — export a key or store it with Snow:
 
 ```sh
 export OPENCODE_API_KEY=oc-...
 snow -p "summarize this repository"
-```
 
-Or save the key in Snow's credential store:
-
-```sh
+# or persist the key in Snow's credential store
 snow login opencode-go
 ```
 
-OpenAI-compatible endpoint (Responses preferred; Chat Completions fallback; API key optional):
+OpenAI-compatible endpoint (Responses preferred; Chat Completions fallback; API
+key optional):
 
 ```sh
 snow --provider openai-compatible \
@@ -71,10 +96,10 @@ snow --provider openai-compatible \
 
 Inside the TUI, `/login openai-compatible` prompts for a profile name, endpoint,
 and optional masked API key, then refreshes `/models`. Use names such as
-`x-provider` to keep multiple compatible endpoints and credentials distinct;
-the name becomes the provider selector shown in `/login` and `/model` and can be
-used with `--provider x-provider` or `/login x-provider`. A blank name preserves
-the legacy `openai-compatible` profile. The CLI can create the same profile with:
+`x-provider` to keep multiple endpoints and credentials distinct; the name
+becomes the provider selector shown in `/login` and `/model` and works as
+`--provider x-provider` or `/login x-provider`. A blank name preserves the
+legacy `openai-compatible` profile. Create the same profile from the CLI with:
 
 ```sh
 snow login openai-compatible --name x-provider \
@@ -84,8 +109,8 @@ snow login openai-compatible --name x-provider \
 Profile endpoints and type metadata are stored in `config.json`; each profile's
 key is stored separately under the same name in `auth.json`. Leaving the TUI key
 step blank preserves an existing stored key or stays keyless. `OPENAI_API_KEY`
-is only the fallback for the legacy `openai-compatible` profile, so named
-profiles do not silently share one environment credential.
+only falls back for the legacy `openai-compatible` profile, so named profiles do
+not silently share one environment credential.
 
 ChatGPT/Codex:
 
@@ -97,14 +122,12 @@ snow auth check chatgpt            # inspect without refreshing
 
 Credentials resolve in this order: explicit `--api-key`/SDK option, Snow's auth
 store, then a known environment fallback such as `OPENCODE_API_KEY` or
-`OPENAI_API_KEY`. A provider-scoped auth service owns that precedence, local
-status, login, persistence, refresh locking, and logout. The agent consumes a
-credential-free provider runtime, while registered provider modules supply a
-reusable API-key driver or a provider-specific OAuth driver. This keeps new
-built-in providers out of the agent and UI auth logic. Secrets are stored
-separately from configuration and are never printed by inventory commands.
-See [ChatGPT authentication](docs/chatgpt-auth.md) for OAuth, refresh, imports,
-and account-scoped model catalogs.
+`OPENAI_API_KEY`. A provider-scoped auth service owns precedence, status, login,
+persistence, refresh locking, and logout; the agent consumes a credential-free
+provider runtime, so new built-in providers stay out of agent and UI auth logic.
+Secrets are stored separately from configuration and are never printed by
+inventory commands. See [ChatGPT authentication](docs/chatgpt-auth.md) for
+OAuth, refresh, imports, and account-scoped catalogs.
 
 ### Start the TUI
 
@@ -127,7 +150,7 @@ the same provider → tool → session loop.
 | Interactive TUI | `snow` | Daily terminal coding with pickers, approvals, sessions, Plan Mode, goals, and subagent inspection |
 | Print | `snow -p "..."` | Human-readable one-shot automation |
 | JSON events | `snow --mode json -p "..."` | Shell pipelines and event recording |
-| RPC | `snow --mode rpc` | Versioned long-lived foreign-language/IDE control over JSONL stdio |
+| RPC | `snow --mode rpc` | Versioned, long-lived foreign-language/IDE control over JSONL stdio |
 | Go SDK | `github.com/snow-core/snow/pkg/snowsdk` | In-process embedding without Cobra or Bubble Tea |
 | Python SDK | [`sdk/python`](sdk/python) | Async typed local client around an external Snow binary |
 | JavaScript/TypeScript SDK | [`sdk/javascript`](sdk/javascript) | Zero-dependency ESM client with TypeScript declarations |
@@ -152,10 +175,18 @@ snow --mode rpc --permission deny
 ```
 
 The TUI uses Bubble Tea's supported full-window pattern: alternate screen,
-sticky header/footer, and a Bubbles transcript viewport. Mouse mode defaults on so wheel/trackpad gestures scroll Snow's transcript viewport instead of terminal scrollback. Primary drag selects and copies transcript text; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. Because terminal mouse reporting captures context-menu clicks too, right-click switches Snow to native mouse mode; repeat the click if the terminal consumed the initiating press. F6 toggles app/native mouse mode, with PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down available for viewport scrolling. In the composer, Ctrl+V inserts an inline `[Image #N]` attachment token for a
-PNG/JPEG/GIF/WebP clipboard image (up to eight images, 20 MiB each and 40 MiB in
-aggregate) and sends the binary image only to vision-capable models. Backspace
-(or Esc) removes the last image and token when no ordinary text remains.
+sticky header/footer, and a Bubbles transcript viewport. Mouse mode defaults on
+so wheel/trackpad gestures scroll Snow's transcript viewport instead of terminal
+scrollback. Primary drag selects and copies transcript text; on Apple Terminal,
+hold Fn while dragging for terminal-native selection. Right-click switches Snow
+to native mouse mode (repeat the click if the terminal consumed the initiating
+press); F6 toggles app/native mode explicitly, and PageUp/PageDown, Home/End,
+and Ctrl+Up/Ctrl+Down scroll the viewport. In the composer, Ctrl+V inserts an
+inline `[Image #N]` attachment for a PNG/JPEG/GIF/WebP clipboard image (up to
+eight images, 20 MiB each and 40 MiB aggregate), sent only to vision-capable
+models; Backspace or Esc removes the last image and token when no ordinary text
+remains.
+
 Read the [user guide](docs/using-snow.md) for TUI keys, slash commands, queue
 semantics, sessions, and modes. Read the [RPC protocol](docs/rpc.md) before
 building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
@@ -165,14 +196,15 @@ building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
 | Provider | ID | Authentication | Runtime |
 |---|---|---|---|
 | OpenCode Go | `opencode-go` | API key | OpenAI-compatible chat completions/SSE with live model discovery enriched by models.dev metadata |
-| OpenAI-compatible | `openai-compatible` or a named profile | Optional Bearer API key per profile | One or more user-supplied API roots with sibling `/models`; prefers Responses/SSE and falls back to Chat Completions/SSE when Responses is unavailable |
+| OpenAI-compatible | `openai-compatible` or a named profile | Optional Bearer API key per profile | One or more user-supplied API roots with sibling `/models`; prefers Responses/SSE and falls back to Chat Completions/SSE |
 | ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | Codex Responses/SSE with browser/device login, guarded refresh, account-scoped catalogs, session affinity, zstd, and bounded pre-output retries |
 | Fake | `fake` | None | Deterministic local provider for tests and examples |
 
 Model metadata controls tool, vision, context, reasoning, summary, verbosity,
-and pricing behavior. Thinking levels are model-aware: Snow accepts `off`, `minimal`, `low`,
-`medium`, `high`, `xhigh`, `max`, and `ultra`, but exposes only efforts advertised
-by the selected model and rejects unsupported explicit levels.
+and pricing behavior. Thinking levels are model-aware: Snow accepts `off`,
+`minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`, but exposes
+only efforts advertised by the selected model and rejects unsupported explicit
+levels.
 
 ## Capabilities
 
@@ -193,28 +225,41 @@ by the selected model and rejects unsupported explicit levels.
 
 File tools enforce configured roots through pinned Go `os.Root` handles, so
 launch-path replacement and ancestor-swap races cannot redirect built-in file
-operations outside the root. Search honors
-hierarchical `.gitignore` and `.ignore`, global/trusted-project search policy,
-hidden/generated defaults, and per-call exclusions. `webfetch` is deferred,
-public-address-only, redirect-checked, and never executes JavaScript.
+operations outside the root. Search honors hierarchical `.gitignore` and
+`.ignore`, global/trusted-project search policy, hidden/generated defaults, and
+per-call exclusions. `webfetch` is deferred, public-address-only,
+redirect-checked, and never executes JavaScript.
 
 ### Sessions and context
 
 - Pure-Go SQLite session databases with append-only parent-linked entries
-- Indexed branch tips, named same-database forks, branch selection, rename, and guarded delete
-- Independent durable session snapshots with immutable parent provenance and exact stable-entry boundaries
-- Clean Git-worktree forks with direct argument-based Git execution, rollback, and independent project trust/sandbox identity
-- Current-directory session picker with automatic first-prompt titles, manual rename, explicit path resume, and a three-way `/fork` picker
-- Turn-aware pressure compaction for ordinary, goal, and child turns at a configurable context threshold, plus one bounded recovery retry that excludes the durable failed attempt when a provider rejects an oversized context
-- Oversized plain-text tool results spill to private session-scoped artifacts; provider context keeps bounded head/tail previews, and older full results are pruned before ordinary requests and summaries without rewriting exact history
-- Strict provider terminal-event validation, stop/content consistency checks, and synthetic errors instead of executing length-truncated tool calls
-- Resume-time repair of interrupted final tool batches with risk-aware unknown-outcome results instead of automatic side-effect retries
-- Run-scoped tool-call limits plus advisory detection of identical consecutive calls, with bounded reminders at escalating thresholds to break unproductive loops
+- Indexed branch tips, named same-database forks, branch selection, rename, and
+  guarded delete
+- Independent durable session snapshots with immutable parent provenance and
+  exact stable-entry boundaries
+- Clean Git-worktree forks with direct argument-based Git execution, rollback,
+  and independent project trust/sandbox identity
+- Current-directory session picker with automatic first-prompt titles, manual
+  rename, explicit path resume, and a three-way `/fork` picker
+- Turn-aware pressure compaction for ordinary, goal, and child turns at a
+  configurable context threshold, plus one bounded recovery retry that excludes
+  the durable failed attempt when a provider rejects an oversized context
+- Oversized plain-text tool results spill to private session-scoped artifacts;
+  provider context keeps bounded head/tail previews, and older full results are
+  pruned before ordinary requests and summaries without rewriting exact history
+- Strict provider terminal-event validation, stop/content consistency checks,
+  and synthetic errors instead of executing length-truncated tool calls
+- Resume-time repair of interrupted final tool batches with risk-aware
+  unknown-outcome results instead of automatic side-effect retries
+- Run-scoped tool-call limits plus advisory detection of identical consecutive
+  calls, with bounded reminders at escalating thresholds to break unproductive
+  loops
 - Embedded Markdown system preamble with optional global/trusted-project file
   override, plus `AGENTS.md` discovery with a hard byte cap
 - Usage and optional catalog-derived cost persisted with assistant messages
 - Deferred same-project `session_search` and `session_reference` tools with a
-  disposable FTS5 index, tip-pinned bounded snapshots, and private-data exclusions
+  disposable FTS5 index, tip-pinned bounded snapshots, and private-data
+  exclusions
 
 See [sessions](docs/sessions.md) and [configuration](docs/configuration.md).
 
@@ -224,7 +269,7 @@ See [sessions](docs/sessions.md) and [configuration](docs/configuration.md).
   `update_plan` checklists.
 - **Plan Mode** is a branch-persisted collaboration instruction that asks the
   model not to mutate and emits structured proposed-plan events plus
-  `request_user_input`. It is not a permission or sandbox boundary: ordinary
+  `request_user_input`. It is not a permission or sandbox boundary:
   write, shell, plugin, and MCP capabilities remain behind their normal gates.
 - **Thread Goals** attach a persisted objective and optional token budget to a
   session branch, may continue through bounded private turns, and show durable
@@ -234,24 +279,25 @@ See [sessions](docs/sessions.md) and [configuration](docs/configuration.md).
   continue with accepted input; internal failures and turn-limit rejection keep
   undelivered entries recoverable instead of silently dropping them.
 
-Plan and Goal contracts also use embedded Markdown sources under `internal/plan`
-and `internal/goal`; they remain separate from a configurable base preamble.
-See [Plan Mode](docs/plan-mode.md), [Thread Goals](docs/goals.md), and
+Plan and Goal contracts use embedded Markdown sources under `internal/plan` and
+`internal/goal`, separate from a configurable base preamble. See
+[Plan Mode](docs/plan-mode.md), [Thread Goals](docs/goals.md), and
 [model-requested user input](docs/user-input.md).
 
 ### Extensibility
 
-- **MCP:** official Go SDK client for current stateless Streamable HTTP and stdio,
-  with legacy negotiation, tools, resources, prompts, subscriptions, and live
-  tool-catalog refresh.
+- **MCP:** official Go SDK client for current stateless Streamable HTTP and
+  stdio, with legacy negotiation, tools, resources, prompts, subscriptions, and
+  live tool-catalog refresh.
 - **Plugins:** statically linked Go extensions or persistent JSON-RPC v2 child
   runtimes with namespaced tools, declared risk, private result metadata,
   progress, cancellation, and explicitly subscribed observe-only events.
-  Dependency-free JavaScript and Python examples are included. Configuration
-  has side-effect-free list/get plus add/enable/disable/remove management.
+  Dependency-free JavaScript and Python examples are included; configuration has
+  side-effect-free list/get plus add/enable/disable/remove management.
 - **Agent Skills:** strict open `SKILL.md` validation with metadata-only startup
-  context, TUI autocomplete for leading `$skill-name` or model-driven activation,
-  pinned on-demand resource confinement, and trust-aware precedence. The binary
+  context, TUI autocomplete for leading `$skill-name` or model-driven
+  activation, pinned on-demand resource confinement, and trust-aware precedence.
+  The binary
   embeds `$plugin-builder`, a supervised workflow and template set for staging,
   validating, reviewing, and explicitly enabling agent-authored plugins.
 - **Tool routing:** opt-in, namespace-first Bleve BM25 discovery keeps deferred
@@ -273,7 +319,7 @@ snow plugin list --all
 ```
 
 `plugin check` starts the runtime, so it requires the same trust as executing
-other generated code. List/get/add/enable/disable/remove never start it.
+other generated code. list/get/add/enable/disable/remove never start it.
 
 See [MCP](docs/mcp.md), [plugins](docs/plugins.md), the complete
 [plugin protocol](docs/plugin-protocol.md), [Agent Skills](docs/skills.md),
@@ -281,20 +327,20 @@ See [MCP](docs/mcp.md), [plugins](docs/plugins.md), the complete
 
 Runnable integration projects live under [`examples/`](examples/): a standalone
 [Go SDK module](examples/sdk), [Python](examples/rpc/python) and
-[JavaScript](examples/rpc/javascript) language-SDK clients, and JavaScript/Python
-plugin runtimes. All SDK/RPC examples default to the credential-free fake
-provider and are exercised by CI on Linux and macOS. See the
-[cross-language SDK guide](docs/language-sdks.md).
+[JavaScript](examples/rpc/javascript) language-SDK clients, and
+JavaScript/Python plugin runtimes. All SDK/RPC examples default to the
+credential-free fake provider and are exercised by CI on Linux and macOS. See
+the [cross-language SDK guide](docs/language-sdks.md).
 
 ## Optional smolvm shell sandbox
 
 Snow can route the model-facing `bash` tool through a persistent, project-scoped
-Linux VM managed by external [smolvm](https://github.com/smol-machines/smolvm) 1.8.x
-(minimum 1.8.1). This is opt-in and deliberately narrow: it contains Bash commands,
-not the Snow process, providers, built-in file tools, plugins, MCP servers, or
-host-side subagent orchestration. On macOS, install the persistent-disk formatter
-first; Snow detects the standard keg-only Homebrew path and blocks initialization
-or restart when it is unavailable:
+Linux VM managed by external [smolvm](https://github.com/smol-machines/smolvm)
+1.8.x (minimum 1.8.1). This is opt-in and deliberately narrow: it contains Bash
+commands, not the Snow process, providers, built-in file tools, plugins, MCP
+servers, or host-side subagent orchestration. On macOS, install the
+persistent-disk formatter first; Snow detects the standard keg-only Homebrew
+path and blocks initialization or restart when it is unavailable:
 
 ```sh
 brew install e2fsprogs              # macOS only
@@ -303,9 +349,9 @@ brew install e2fsprogs              # macOS only
 snow sandbox init
 
 # Built-in digest-pinned development profiles (all enable guest networking):
-snow sandbox init --profile go # defaults to 4 CPUs and 6144 MiB RAM
+snow sandbox init --profile go      # defaults to 4 CPUs and 6144 MiB RAM
 snow sandbox init --profile node
-snow sandbox init --profile python # Python 3.12 + uv
+snow sandbox init --profile python  # Python 3.12 + uv
 
 # Explicit VM resources (storage/overlay are GiB):
 snow sandbox init --cpus 4 --memory 8192 --storage 40 --overlay 20
@@ -321,31 +367,35 @@ snow sandbox delete --force       # delete the VM and keep Bash on the host
 ```
 
 When the default `smolvm` command is absent, explicit initialization downloads
-both the official version-tagged installer and platform release archive,
-verifies Snow-pinned SHA-256 values for both, runs the installer only against
-the already verified local archive, and validates the installed binary before
-creating the VM. Shell profiles are not modified. This host bootstrap requires HTTPS access and
-writes the upstream user-local `~/.smolvm`, `~/.local/bin`, and smolvm data paths.
-A custom configured executable is never auto-installed.
+the official version-tagged installer and platform release archive, verifies
+Snow-pinned SHA-256 values for both, runs the installer only against the already
+verified local archive, and validates the installed binary before creating the
+VM. Shell profiles are not modified. This host bootstrap requires HTTPS access
+and writes the upstream user-local `~/.smolvm`, `~/.local/bin`, and smolvm data
+paths. A custom configured executable is never auto-installed.
 
 Initialization mounts exactly the canonical project directory at `/workspace`.
-Guest runtime networking is disabled unless `--network` or a built-in development
-profile is explicitly selected. CLI init without a profile downloads the
-digest-pinned configured image over host HTTPS to a private temporary Docker-save
-archive, so guest bootstrap networking is not needed. Only the configured environment-name allowlist crosses into guest commands.
+Guest runtime networking is disabled unless `--network` or a built-in
+development profile is explicitly selected. CLI init without a profile downloads
+the digest-pinned configured image over host HTTPS to a private temporary
+Docker-save archive, so guest bootstrap networking is not needed. Only the
+configured environment-name allowlist crosses into guest commands.
+
 The project-to-machine association is operator-owned state in
 `$SNOW_HOME/sandboxes.json`; project configuration cannot enable or weaken it.
-While an association is active, unavailable/corrupt smolvm state fails closed—Snow
-never silently retries that Bash command on the host. An explicit `sandbox stop`
-persists a stopped state and routes later Bash to the host until `sandbox start`.
-The TUI exposes the same
-core lifecycle through `/sandbox`; `/sandbox init` opens a setup form for a
-built-in environment profile, CPU, memory, storage, overlay, mount mode, and
-guest networking. The Ubuntu, Go, Node.js, and Python+uv profiles are
-version/digest-pinned and deliberately enable persistent guest networking. It shows `shell:host` or `shell:vm` in its
-wide header. See the dedicated [sandbox guide](docs/sandbox.md),
-[security](docs/security.md), and [configuration](docs/configuration.md) for
-lifecycle, persistence, troubleshooting, the exact boundary, and all options.
+While an association is active, unavailable/corrupt smolvm state fails closed:
+Snow never silently retries that Bash command on the host. An explicit
+`sandbox stop` persists a stopped state and routes later Bash to the host until
+`sandbox start`. The TUI exposes the same lifecycle through `/sandbox`;
+`/sandbox init` opens a setup form for a built-in environment profile, CPU,
+memory, storage, overlay, mount mode, and guest networking. The Ubuntu, Go,
+Node.js, and Python+uv profiles are version/digest-pinned and deliberately
+enable persistent guest networking. The wide header shows `shell:host` or
+`shell:vm`.
+
+See the [sandbox guide](docs/sandbox.md), [security](docs/security.md), and
+[configuration](docs/configuration.md) for lifecycle, persistence,
+troubleshooting, the exact boundary, and all options.
 
 ## Embed with Go
 
@@ -423,32 +473,34 @@ prompt results by `request_id`.
 
 A prompt receives an immediate admission acknowledgement. `turn_done` ends the
 agent turn; exactly one later `prompt_completed` frame reports definitive
-`completed`, `failed`, or `canceled` status. Model discovery is available through
-`models_list` and `subagent_models`. Keep stdin open until work finishes. See the
-[RPC protocol reference](docs/rpc.md) and
+`completed`, `failed`, or `canceled` status. Model discovery is available
+through `models_list` and `subagent_models`. Keep stdin open until work
+finishes. See the [RPC protocol reference](docs/rpc.md) and
 [cross-language SDK guide](docs/language-sdks.md).
 
 ## Security first
 
 Snow is a harness, **not a whole-process sandbox**:
 
-- By default Snow, `bash`, plugins, stdio MCP servers, and subagents run with the
-  user's OS privileges. An initialized smolvm project association isolates only
-  model-facing `bash`; every other Snow capability remains host-side.
+- By default Snow, `bash`, plugins, stdio MCP servers, and subagents run with
+  the user's OS privileges. An initialized smolvm project association isolates
+  only model-facing `bash`; every other Snow capability remains host-side.
 - Headless SDK/RPC/print callers should normally use `deny`; `ask` has no
-  interactive permission reply channel outside the TUI and therefore fails closed.
+  interactive permission reply channel outside the TUI and therefore fails
+  closed.
 - Project trust permits loading project-local configuration and extensions. It
   does not constrain what an enabled process can do.
 - Plan Mode is a collaboration contract, not an OS enforcement boundary.
-- Repository text, tool output, extensions, skills, and child results may contain
-  prompt injection.
+- Repository text, tool output, extensions, skills, and child results may
+  contain prompt injection.
 - Subagents share the working tree and process side effects; parallel mutation
   can conflict and each provider request incurs separate usage.
 - Auth tokens, API keys, MCP headers, and provider continuity data must never be
   logged.
-- A configured `openai-compatible` endpoint is operator-trusted: Snow sends prompts,
-  tool schemas/results, and any configured Bearer key to that origin. Cross-origin
-  redirects are rejected, but Snow does not certify or sandbox the remote service.
+- A configured `openai-compatible` endpoint is operator-trusted: Snow sends
+  prompts, tool schemas/results, and any configured Bearer key to that origin.
+  Cross-origin redirects are rejected, but Snow does not certify or sandbox the
+  remote service.
 
 Read the consolidated [security model](docs/security.md) before enabling shell,
 network, extension, subagent mutation, or automatic approval in an embedding.
@@ -468,14 +520,14 @@ Default global paths:
 ~/.snow/search.yaml       grep/glob policy
 ```
 
-`SNOW_HOME` relocates global configuration/auth/trust/sandbox/auxiliary files and
-`SNOW_SESSIONS_DIR` relocates session databases. Global or trusted-project
+`SNOW_HOME` relocates global configuration/auth/trust/sandbox/auxiliary files
+and `SNOW_SESSIONS_DIR` relocates session databases. Global or trusted-project
 configuration may select a Markdown `system_prompt_file`; explicit SDK
 `SystemPrompt` remains highest precedence. Trusted projects may also define a
 restricted `.snow/config.json`, `.snow/keybindings.yaml`, `.snow/search.yaml`,
-and `.snow/themes/*.yaml`. See the [configuration reference](docs/configuration.md)
-for precedence, every global field, project scope, environment variables, and
-YAML examples.
+and `.snow/themes/*.yaml`. See the
+[configuration reference](docs/configuration.md) for precedence, every global
+field, project scope, environment variables, and YAML examples.
 
 ## Documentation
 
@@ -526,5 +578,18 @@ roadmap live in [`IMPLEMENTATION.md`](IMPLEMENTATION.md).
 
 - Optional MCP Apps, Tasks, Enterprise Managed Authorization, and interactive
   MCP OAuth are not yet exposed.
-- Namespace-first tool routing currently uses local BM25; optional semantic/vector
-  routing is deferred pending a suitable downloadable cross-platform model.
+- Namespace-first tool routing currently uses local BM25; optional
+  semantic/vector routing is deferred pending a suitable downloadable
+  cross-platform model.
+
+## Further reading
+
+- [Documentation index](docs/README.md) — every user, integration, extension,
+  and maintainer guide in one place.
+- [Security model](docs/security.md) — consolidated safety and privilege
+  boundaries.
+- [Using Snow](docs/using-snow.md) — TUI/CLI modes, keys, commands, and
+  workflows.
+- [Agent working guide](AGENTS.md) — repository rules for contributors.
+- [Architecture and roadmap](IMPLEMENTATION.md) — design decisions and open
+  risks.

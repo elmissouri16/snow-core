@@ -1,9 +1,16 @@
-# Tool routing
+# Tool Routing
 
 Snow keeps existing tools directly available and lets future tools opt into
 local progressive disclosure. Deferred tools remain fully registered and
 executable, but their JSON parameter schemas are sent to the model only when a
 Bleve BM25 search selects them.
+
+## On this page
+
+- [Registration](#registration)
+- [Built-in deferred web fetch](#built-in-deferred-web-fetch)
+- [Runtime behavior](#runtime-behavior)
+- [Observability and limits](#observability-and-limits)
 
 ## Registration
 
@@ -47,7 +54,7 @@ External JSON-RPC v2 runtimes use the same optional `discovery` object in each
 Omit `discovery`, leave its mode empty, or set the mode to `always` for normal
 direct exposure.
 
-### Built-in deferred web fetch
+## Built-in deferred web fetch
 
 `webfetch` is Snow's first built-in deferred tool. It uses the `web` namespace
 and retrieval terms for URLs, pages, links, fetching, reading, visiting,
@@ -56,10 +63,10 @@ normal app builds the Bleve index and registers direct `search_tools` even when
 no plugins are installed. An explicit SDK/CLI tool allowlist that excludes
 `webfetch` retains the original direct-only/no-router path.
 
-The tool performs a static GET with Surf v1.0.203's Chrome 150 profile;
-it does not execute JavaScript. It converts HTML to Markdown, passes textual
-formats through as UTF-8, and rejects binary content. It is `RiskNet`, so ask
-mode prompts at execution and deny mode filters it before schema exposure.
+The tool performs a static GET with Surf v1.0.203's Chrome 150 profile; it does
+not execute JavaScript. It converts HTML to Markdown, passes textual formats
+through as UTF-8, and rejects binary content. It is `RiskNet`, so ask mode
+prompts at execution and deny mode filters it before schema exposure.
 
 Only public HTTP(S) destinations are accepted. The transport disables
 environment proxies, validates redirects, rejects private/reserved address
@@ -88,9 +95,9 @@ For each user prompt Snow:
 3. Searches again within the selected namespaces.
 4. Fuses global and namespace-scoped ranks with deterministic reciprocal-rank
    fusion (weights 1.0 and 1.15, constant 60).
-5. Requests the complete deferred ranking before permission filtering, so denied
-   high-ranked tools cannot hide a permitted lower-ranked result, then adds the
-   top five permitted schemas after the direct schemas.
+5. Requests the complete deferred ranking before permission filtering, so
+   denied high-ranked tools cannot hide a permitted lower-ranked result, then
+   adds the top five permitted schemas after the direct schemas.
 6. Keeps that selection for all provider continuations in the turn and runs the
    existing execution-time permission gate for every tool call.
 
@@ -106,15 +113,16 @@ from the authoritative registry for every process and are closed with the app.
 Plugin and MCP catalog refreshes build a complete replacement pair and swap it
 atomically, so removed tools cannot survive in stale namespace summaries. If a
 dynamic replacement cannot be built, the last valid pair remains active until a
-later refresh succeeds; startup and search failures still use fail-open exposure.
+later refresh succeeds; startup and search failures still use fail-open
+exposure.
 
 When deferred tools exist, Snow also registers the direct, read-only
 `search_tools` meta-tool. A model may search again with a more precise query;
 up to five returned schemas become available on the next provider continuation.
 The original automatic selection plus the latest explicit search are capped at
 ten deferred schemas. If the startup pair cannot build or the active tool index
-cannot search, Snow fails open for functionality by exposing every permission-
-eligible deferred schema for that turn.
+cannot search, Snow fails open for functionality by exposing every
+permission-eligible deferred schema for that turn.
 
 ## Observability and limits
 
@@ -124,8 +132,8 @@ provider-schema bytes, latency, and fallback state. The query itself is never
 copied into the event, and the normal TUI remains quiet.
 
 BM25 fields use boosts of 4 for tool names, 3 for namespaces, 2 for keywords,
-and 1 for descriptions. Dots, underscores, and hyphens in names are also
-indexed as spaces for technical-identifier matching.
+and 1 for descriptions. Dots, underscores, and hyphens in names are also indexed
+as spaces for technical-identifier matching.
 
 Routing remains local and network-free. It uses no embeddings, remote routing
 API, downloaded model, persistent vector index, or embedding cache. Optional
@@ -136,3 +144,11 @@ requirements without making a service mandatory.
 MCP tools use this router, while Agent Skills use their own metadata catalog and
 activation tool. Other backends can reuse it by registering ordinary tool
 descriptors; routing never depends on the execution transport.
+
+## Related documents
+
+- [Plugins](plugins.md)
+- [External plugin protocol v2](plugin-protocol.md)
+- [MCP](mcp.md)
+- [Agent Skills](skills.md)
+- [Configuration](configuration.md)

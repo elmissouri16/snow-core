@@ -1,11 +1,37 @@
 # Model Context Protocol
 
-Snow is an MCP host/client built on the official
+Snow is a Model Context Protocol (MCP) host built on the official
 [`modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk).
-The pinned v1.7.0 SDK negotiates the current `2026-07-28` protocol and supports
-the SDK's legacy revisions back through `2024-11-05`. The modern Streamable
-HTTP path is stateless (`server/discover` and request `_meta`); older servers
-automatically fall back to the legacy initialization lifecycle.
+The pinned v1.7.0 SDK negotiates the current stateless `2026-07-28` Streamable
+HTTP transport and falls back across its supported legacy protocol revisions.
+This guide covers server configuration, management commands, capability
+bridging, permissions, and the current boundary. For Snow-specific plugins and
+instructional skills, see [Plugins](plugins.md) and [Agent Skills](skills.md).
+
+## On this page
+
+- [Transports and protocol](#transports-and-protocol)
+- [Configure servers](#configure-servers)
+- [Connect servers on the command line](#connect-servers-on-the-command-line)
+- [Manage configuration](#manage-configuration)
+- [Capability bridge](#capability-bridge)
+- [Permissions and process safety](#permissions-and-process-safety)
+- [Current boundary](#current-boundary)
+
+## Transports and protocol
+
+Snow supports two server transports through the official Go SDK:
+
+| Transport | Meaning |
+|---|---|
+| `stdio` | The server runs as an executable child process on the user's machine. |
+| `streamable-http` | The server is reached over HTTP using the `2026-07-28` protocol. |
+
+The modern Streamable HTTP path is stateless (`server/discover` and request
+`_meta`); older servers automatically fall back to the SDK's legacy
+initialization lifecycle. The public configuration type
+is `pkg/mcp.ServerSpec`; embedders pass values through
+`snowsdk.Options.MCPServers` and inspect them with `Session.MCPServers()`.
 
 ## Configure servers
 
@@ -42,6 +68,8 @@ values expand `$NAME` and `${NAME}` from Snow's environment at connection time.
 Interactive MCP OAuth is not yet a Snow surface; an existing bearer token can
 be supplied through an expanded header.
 
+## Connect servers on the command line
+
 Explicit CLI servers can be added repeatedly:
 
 ```sh
@@ -49,16 +77,15 @@ snow --mcp ./mcp.json
 snow --mcp https://mcp.example.com/mcp
 snow --mcp /absolute/path/to/stdio-server
 snow --no-mcp
-snow mcp                    # configured servers; does not start them
+snow mcp
 snow mcp list --json
 snow mcp get chrome-devtools
-snow mcp check [name]       # live protocol/capability status
+snow mcp check [name]
 ```
 
 `--mcp` accepts a single `ServerSpec`, Snow's `mcp_servers` map, or the common
-cross-client `mcpServers` map. The public Go configuration is
-`pkg/mcp.ServerSpec`; embedders pass values through
-`snowsdk.Options.MCPServers` and inspect `Session.MCPServers()`.
+cross-client `mcpServers` map. `snow mcp` lists configured servers without
+starting them. `snow mcp check` performs a live protocol/capability handshake.
 
 ## Manage configuration
 
@@ -124,15 +151,16 @@ must be sent on every turn. `search_tools` remains the recovery path.
 ## Permissions and process safety
 
 MCP never bypasses Snow's permission service. Streamable HTTP calls are
-classified as network risk; stdio calls are classified as execution risk.
-They are hidden in deny mode, prompt in ask mode, and execute in allow mode.
-Server annotations are untrusted hints and do not reduce that classification.
+classified as network risk; stdio calls are classified as execution risk. They
+are hidden in deny mode, prompt in ask mode, and execute in allow mode. Server
+annotations are untrusted hints and do not reduce that classification.
 
 A configured stdio server is an executable child process with the user's OS
 privileges. Project declarations are trust-gated, but trust is not a sandbox.
 Snow discards unsolicited stdio-server stderr by default so startup notices and
 diagnostic banners cannot corrupt the interactive TUI; connection failures
 remain visible through MCP status and `snow mcp check`.
+
 MCP results and server-provided instructions are external context and cannot
 override system or user instructions. Tool results are bounded by
 `tool_output_bytes`, static headers are never included in status output, and
@@ -146,3 +174,11 @@ are supported through the official SDK. Optional extension-specific product
 surfaces such as MCP Apps, Tasks, Enterprise Managed Authorization, and an
 interactive OAuth callback UI are not yet exposed by Snow. Static bearer
 headers and stdio environment credentials work today.
+
+## Related documents
+
+- [Plugins](plugins.md)
+- [Agent Skills](skills.md)
+- [Tool routing](tool-routing.md)
+- [Configuration](configuration.md)
+- [Security](security.md)

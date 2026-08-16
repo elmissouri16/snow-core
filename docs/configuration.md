@@ -4,6 +4,29 @@ Snow separates runtime preferences, credentials, project trust, sessions, and
 auxiliary TUI/search files. This document describes scope, precedence, paths,
 and the supported global/project fields.
 
+> **Note:** Global `config.json` is merged onto built-in defaults and validated
+> at startup. Auxiliary YAML files are warn-and-fallback, as described in
+> [Diagnostics and failure behavior](#diagnostics-and-failure-behavior).
+
+## On this page
+
+- [Paths](#paths)
+- [Precedence](#precedence)
+- [Global config.json](#global-configjson)
+- [SmolVM Bash sandbox defaults](#smolvm-bash-sandbox-defaults)
+- [Providers](#providers)
+- [TUI](#tui)
+- [Compaction](#compaction)
+- [Skills](#skills)
+- [Subagents](#subagents)
+- [Plugins and MCP](#plugins-and-mcp)
+- [Trusted project configuration](#trusted-project-configuration)
+- [Search policy](#search-policy)
+- [Keybindings](#keybindings)
+- [Themes](#themes)
+- [Diagnostics and failure behavior](#diagnostics-and-failure-behavior)
+- [Related documents](#related-documents)
+
 ## Paths
 
 | Path | Purpose | Notes |
@@ -47,10 +70,10 @@ The base system preamble has a more specific precedence: explicit SDK
 `AGENTS.md` files and runtime mode/skill guidance are appended separately.
 
 Trusted project configuration is a separate, deliberately narrow overlay. It
-may add plugins, MCP servers, and skill policy, select a confined project system
-preamble, and override only the project TUI theme and compaction preferences
-described below. It cannot select provider credentials, permission mode, shell
-executable, model, or global tool authority.
+may add plugins, MCP servers, and skill policy, select a confined project
+system preamble, and override only the project TUI theme and compaction
+preferences described below. It cannot select provider credentials, permission
+mode, shell executable, model, or global tool authority.
 
 Credentials use a separate order:
 
@@ -60,15 +83,16 @@ Credentials use a separate order:
 
 This precedence is implemented once by Snow's provider-scoped auth service.
 Provider modules register either the reusable API-key driver or their own OAuth
-driver; the agent and subagents receive credential-free provider runtimes. Model
-discovery and inference therefore use the same resolved provider credential.
-OAuth endpoint, scope, claim, and token-exchange details remain isolated in the
-provider's auth driver.
+driver; the agent and subagents receive credential-free provider runtimes.
+Model discovery and inference therefore use the same resolved provider
+credential. OAuth endpoint, scope, claim, and token-exchange details remain
+isolated in the provider's auth driver.
 
 The SDK intentionally defaults `PermissionMode` to `deny` when omitted, even if
-the global interactive default is `ask`. See [SDK permissions](sdk.md#permissions-and-security).
+the global interactive default is `ask`. See
+[SDK permissions](sdk.md#permissions-and-security).
 
-## Global `config.json`
+## Global config.json
 
 A representative configuration:
 
@@ -179,14 +203,14 @@ fills required zero-value defaults before validation.
 Model capabilities remain authoritative. A configured reasoning level that is
 not advertised by the selected model is rejected.
 
-### smolvm Bash sandbox defaults
+## SmolVM Bash sandbox defaults
 
-See [Sandboxed Bash with smolvm](sandbox.md) for profiles, lifecycle, persistence,
-and troubleshooting.
+See [Sandboxed Bash with smolvm](sandbox.md) for profiles, lifecycle,
+persistence, and troubleshooting.
 
-The global `sandbox` object configures defaults for the optional external smolvm
-backend. Only operator-owned global config is read for this policy; trusted
-project `.snow/config.json` cannot add or weaken it.
+The global `sandbox` object configures defaults for the optional external
+smolvm backend. Only operator-owned global config is read for this policy;
+trusted project `.snow/config.json` cannot add or weaken it.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -210,15 +234,15 @@ silently change that process's Bash routing.
 Snow currently supports the audited smolvm `1.8.x` CLI beginning at `1.8.1`.
 When `executable` is the default `smolvm` and it is missing, an explicit init
 bootstraps pinned 1.8.1 through the checksum-pinned upstream installer. Custom
-command/path values fail normally and are never replaced or auto-installed.
-For that line, networking is disabled by omission and `--net` is the explicit
+command/path values fail normally and are never replaced or auto-installed. For
+that line, networking is disabled by omission and `--net` is the explicit
 opt-in. Future minor/major versions are rejected until their flags/defaults are
 reviewed. `--network` is persisted guest runtime authority for the lifetime of
-the association. For no-argument initialization, Snow downloads the digest-pinned
-registry image over host HTTPS into a private temporary Docker-save archive and
-passes that local archive to smolvm; the guest therefore needs no bootstrap
-network authority. Use a local `.smolmachine` pack with `--from` when
-initialization itself must remain offline.
+the association. For no-argument initialization, Snow downloads the
+digest-pinned registry image over host HTTPS into a private temporary
+Docker-save archive and passes that local archive to smolvm; the guest
+therefore needs no bootstrap network authority. Use a local `.smolmachine`
+pack with `--from` when initialization itself must remain offline.
 
 The SDK inherits an existing association by default, exposes a secret-free
 `SandboxStatus`, and provides explicit `DisableSandbox` and `RequireSandbox`
@@ -226,17 +250,7 @@ options. Disabling is an explicit host-shell override that skips sandbox-state
 loading (including corrupt stale state); requiring fails `Open` when the
 canonical project has no association.
 
-`compaction.auto_threshold_percent` defaults to `80`. At safe boundaries between
-complete provider/tool cycles, Snow prunes oversized historical plain-text tool
-results and compacts older complete turns when provider-reported usage plus
-significant newly appended context reaches that percentage of the model context
-window. This applies to ordinary, goal, Plan, and subagent turns. Set it to `0`
-to disable pressure compaction and the one-shot provider context-overflow repair;
-enabled values must be `50..99`. The legacy `goal_auto_threshold_percent` key is
-accepted only when the new key is absent. Full conversation history remains
-append-only.
-
-### Providers
+## Providers
 
 `providers` maps provider IDs to:
 
@@ -257,8 +271,8 @@ the timer.
 For `openai-compatible`, `base_url` is required and may be an API root such as
 `https://gateway.example/v1` or a full URL ending in `/responses` or
 `/chat/completions`. Snow tries the sibling `/models` endpoint, prefers
-Responses/SSE, and automatically caches a Chat Completions/SSE fallback when the
-Responses endpoint returns HTTP 404, 405, or 501. When neither
+Responses/SSE, and automatically caches a Chat Completions/SSE fallback when
+the Responses endpoint returns HTTP 404, 405, or 501. When neither
 `default_model`/`--model` nor a valid discovered model is available, startup
 fails with an actionable model-selection error. ID-only model records remain
 tool-capable but do not guess vision, reasoning, verbosity, limits, or pricing.
@@ -267,24 +281,26 @@ The compatible provider's Bearer key is optional. Inside the TUI,
 `/login openai-compatible` captures a profile name, endpoint, and optional
 masked key. A blank profile name updates the legacy `openai-compatible` entry.
 Any other profile is stored as another `providers` map entry with
-`"type": "openai-compatible"`; its name must be 1–64 lowercase letters, digits,
+`"type": "openai-compatible"`; its name must be 1-64 lowercase letters, digits,
 or internal `.`, `_`, and `-` characters and must not collide with a built-in
 provider. The profile name is also its provider/model selector and `auth.json`
 credential key.
 
 The top-level `snow login openai-compatible` remains key-only for the legacy
-profile. `snow login openai-compatible --name x-provider --base-url URL` creates
-or updates a named profile, after which `snow login x-provider` addresses it
-directly. `--api-key` binds to the selected active profile. `OPENAI_API_KEY` is
-a fallback only for the legacy profile; named profiles do not silently share
-it. Keyless gateways receive no `Authorization` header. Do not put API keys or
-OAuth tokens in `config.json`.
+profile. `snow login openai-compatible --name x-provider --base-url URL`
+creates or updates a named profile, after which `snow login x-provider`
+addresses it directly. `--api-key` binds to the selected active profile.
+`OPENAI_API_KEY` is a fallback only for the legacy profile; named profiles do
+not silently share it. Keyless gateways receive no `Authorization` header.
+
+> **Warning:** Do not put API keys or OAuth tokens in `config.json`. Credentials
+> belong in `~/.snow/auth.json`.
 
 Named profiles support independent endpoints, default models, stream timeouts,
 and Bearer keys. Compatible profiles still do not accept custom/Azure headers
 or query parameters. ChatGPT/Codex retains its dedicated backend and OAuth flow.
 
-### TUI
+## TUI
 
 ```json
 {
@@ -297,10 +313,18 @@ or query parameters. ChatGPT/Codex retains its dedicated backend and OAuth flow.
 
 Built-in themes are `default`, `dark`, `light`, and `high-contrast`. Any other
 valid name refers to a custom theme file. Snow always uses Bubble Tea's
-alternate-screen, app-owned transcript viewport so scrolling cannot expose stale
-rendered headers or composer chrome. The default `mouse: true` keeps wheel/trackpad gestures inside Snow's transcript viewport and provides highlighted drag selection, edge auto-scroll, and OSC 52 copy. Apple Terminal users can hold Fn while dragging for instant terminal-native selection without disabling wheel handling. A reported right-click switches Snow to native mouse mode for terminal selection/context menus; repeat the click when the terminal consumed the initiating press. F6 toggles explicitly, and `mouse: false` starts natively. In native mode wheel gestures may scroll terminal history; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
+alternate-screen, app-owned transcript viewport so scrolling cannot expose
+stale rendered headers or composer chrome. The default `mouse: true` keeps
+wheel/trackpad gestures inside Snow's transcript viewport and provides
+highlighted drag selection, edge auto-scroll, and OSC 52 copy. Apple Terminal
+users can hold Fn while dragging for instant terminal-native selection without
+disabling wheel handling. A reported right-click switches Snow to native mouse
+mode for terminal selection/context menus; repeat the click when the terminal
+consumed the initiating press. F6 toggles explicitly, and `mouse: false` starts
+natively. In native mode wheel gestures may scroll terminal history;
+PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
 
-### Compaction
+## Compaction
 
 | Field | Range/default | Meaning |
 |---|---|---|
@@ -314,19 +338,29 @@ rendered headers or composer chrome. The default `mouse: true` keeps wheel/track
 | `artifact_max_bytes` | inline threshold..64 MiB, default `4194304` | Maximum private spill artifact size |
 | `historical_tool_result_threshold_bytes` | `1024..1048576`, default `8192` | Old plain-text result size that triggers ordinary request/summarizer projection pruning |
 
+`auto_threshold_percent` defaults to `80`. At safe boundaries between complete
+provider/tool cycles, Snow prunes oversized historical plain-text tool results
+and compacts older complete turns when provider-reported usage plus significant
+newly appended context reaches that percentage of the model context window.
+This applies to ordinary, goal, Plan, and subagent turns. Set it to `0` to
+disable pressure compaction and the one-shot provider context-overflow repair;
+enabled values must be `50..99`. The legacy `goal_auto_threshold_percent` key
+is accepted only when the new key is absent. Full conversation history remains
+append-only.
+
 Compaction preserves the complete append-only conversation history. Pressure
 checks run only at safe complete-cycle boundaries, never between an assistant
 call and its serial tool-result batch. If a provider explicitly reports that a
 request exceeds its context window, Snow attempts one automatic compaction and
-one retry; it never loops. Oversized new plain-text tool results are saved under
-`$SNOW_HOME/artifacts` with private permissions and replaced in session context
-by a bounded preview plus opaque artifact ID. `artifact_read` and
+one retry; it never loops. Oversized new plain-text tool results are saved
+under `$SNOW_HOME/artifacts` with private permissions and replaced in session
+context by a bounded preview plus opaque artifact ID. `artifact_read` and
 `artifact_grep` retrieve bounded fragments without adding that directory to
 ordinary file-tool roots. Project configuration cannot change automatic or
 artifact thresholds. Project `guidance` is additive; it cannot remove the
 host's factual continuation contract.
 
-### Skills
+## Skills
 
 ```json
 {
@@ -343,17 +377,18 @@ host's factual continuation contract.
 ```
 
 Standard user/project discovery remains enabled unless `disabled` is true.
-Per-name overrides can re-enable or suppress a discovered skill without changing
-its files. See [Agent Skills](skills.md).
+Per-name overrides can re-enable or suppress a discovered skill without
+changing its files. See [Agent Skills](skills.md).
 
-### Subagents
+## Subagents
 
 The complete subagent schema includes execution, identity, depth, wait, task,
 result, durability, mutation, event, default-model, default-role, and role-map
 controls. `subagents.default_provider` and `subagents.default_model`
 automatically select a provider/model pair for children. A role's
 `provider`/`model` overrides those defaults, and a `spawn_agent` selection
-overrides both. If omitted, the child inherits the parent selection. Key bounds are:
+overrides both. If omitted, the child inherits the parent selection. Key bounds
+are:
 
 - concurrency: `1..256` child agents; root does not consume a slot;
 - identities: `1..4096`, and not below concurrency;
@@ -363,30 +398,33 @@ overrides both. If omitted, the child inherits the parent selection. Key bounds 
 - task timeout: positive and at most 24 hours;
 - result: `1024..65536` bytes.
 
-Enabling subagents does not enable recursion or mutation. File mutation requires
-both `subagents.allow_mutation=true` and a selected role with
+Enabling subagents does not enable recursion or mutation. File mutation
+requires both `subagents.allow_mutation=true` and a selected role with
 `allow_mutation=true`, while the parent tool allowlist remains an upper bound.
 See [Subagents](subagents.md) for role examples and the full safety model.
 
-### Plugins and MCP
+## Plugins and MCP
 
 - `plugins` is an array of public `plugin.PluginSpec` declarations.
 - `mcp_servers` maps stable names to public `mcp.ServerSpec` declarations.
 
 Plugin declarations merge by ID with `global < trusted project < explicit
---plugin` precedence; a disabled higher layer suppresses an enabled lower layer.
-Manage persisted declarations with `snow plugin list|get|add|enable|disable|remove`.
-`add` defaults to disabled, mutations preserve unknown configuration fields, and
-all changes require a restart. Inspection and mutation do not start a plugin;
-`snow plugin check` does.
+--plugin` precedence; a disabled higher layer suppresses an enabled lower
+layer. Manage persisted declarations with
+`snow plugin list|get|add|enable|disable|remove`. `add` defaults to disabled,
+mutations preserve unknown configuration fields, and all changes require a
+restart. Inspection and mutation do not start a plugin; `snow plugin check`
+does.
 
-These processes run with the user's OS privileges. External plugins receive
-their literal configured `env` and otherwise start with an empty environment;
-plugin env values do not expand `${VAR}`. Snow resolves a bare
-`command[0]` using its own launch environment before assigning the child env, so
-prefer absolute interpreter paths and never commit credentials. MCP has separate
-environment/header expansion rules. See [Plugins](plugins.md) and [MCP](mcp.md)
-for schemas and management commands.
+> **Warning:** These processes run with the user's OS privileges. External
+> plugins receive their literal configured `env` and otherwise start with an
+> empty environment; plugin env values do not expand `${VAR}`. Snow resolves a
+> bare `command[0]` using its own launch environment before assigning the child
+> env, so prefer absolute interpreter paths and never commit credentials. MCP
+> has separate environment/header expansion rules.
+
+See [Plugins](plugins.md) and [MCP](mcp.md) for schemas and management
+commands.
 
 ## Trusted project configuration
 
@@ -420,12 +458,12 @@ inherited parent decision. Runtime `/trust` changes apply on the next launch
 because loaded extensions cannot be safely hot-unloaded.
 
 Project input loading is pinned to the authorized canonical root. A project
-`system_prompt_file` replaces the global/embedded base preamble only after trust
-is allowed; relative paths resolve from the project root. The file must stay
-under that root, cannot contain symlink components, and is bounded by
-`context_cap_bytes`. Project `AGENTS.md` and runtime guidance are still appended.
-Project auxiliary paths must likewise stay under the root and cannot contain
-symlink components.
+`system_prompt_file` replaces the global/embedded base preamble only after
+trust is allowed; relative paths resolve from the project root. The file must
+stay under that root, cannot contain symlink components, and is bounded by
+`context_cap_bytes`. Project `AGENTS.md` and runtime guidance are still
+appended. Project auxiliary paths must likewise stay under the root and cannot
+contain symlink components.
 
 ## Search policy
 
@@ -509,16 +547,25 @@ colors:
 
 `extends` is optional and defaults to `default`; when supplied, it must name a
 built-in theme. Custom names cannot replace built-in names, exceed 64 runes,
-contain control characters, or contain `/` or `\\`. Colors are optional semantic
-overrides using `#RRGGBB` or ANSI `0..255`.
-Project themes replace same-named global themes.
+contain control characters, or contain `/` or `\\`. Colors are optional
+semantic overrides using `#RRGGBB` or ANSI `0..255`. Project themes replace
+same-named global themes.
 
 ## Diagnostics and failure behavior
 
 Global `config.json` validation errors fail startup. Auxiliary YAML is
 warn-and-fallback: invalid files produce diagnostics, valid scopes continue to
 load, and the runtime remains usable. Print/RPC modes write configuration
-warnings to stderr; the TUI displays them; SDK callers use `Session.Diagnostics()`.
+warnings to stderr; the TUI displays them; SDK callers use
+`Session.Diagnostics()`.
 
-Auxiliary files are strictly decoded, single-document, regular non-symlink files
-bounded to 64 KiB. Theme discovery is capped at 64 files per scope.
+Auxiliary files are strictly decoded, single-document, regular non-symlink
+files bounded to 64 KiB. Theme discovery is capped at 64 files per scope.
+
+## Related documents
+
+- [Using Snow](using-snow.md)
+- [Security model](security.md)
+- [Sandboxed Bash with smolvm](sandbox.md)
+- [Sessions](sessions.md)
+- [SDK](sdk.md)

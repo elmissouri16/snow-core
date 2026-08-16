@@ -1,12 +1,23 @@
 # Plan Mode
 
 Snow implements Codex-style Plan Mode as a persisted collaboration mode. It is
-separate from the `update_plan` TODO/checklist tool.
+separate from the `update_plan` TODO/checklist tool. This document covers mode
+selection, the three-phase contract, the proposed-plan event stream, mode
+persistence, and the handoff into implementation.
 
-## Use
+## On this page
+
+- [Selecting Plan Mode](#selecting-plan-mode)
+- [Behavior contract](#behavior-contract)
+- [Proposed-plan events](#proposed-plan-events)
+- [Implementation handoff](#implementation-handoff)
+- [Configuration](#configuration)
+- [Related documents](#related-documents)
+
+## Selecting Plan Mode
 
 ```text
-Shift+Tab                              # toggle Default ↔ Plan in the TUI
+Shift+Tab                          toggle Default ↔ Plan in the TUI
 /plan
 /plan design a branch-aware retry system
 /default
@@ -14,12 +25,12 @@ Shift+Tab                              # toggle Default ↔ Plan in the TUI
 
 At the top-level composer, `Shift+Tab` changes mode immediately while idle. If
 a prompt or automatic goal turn is active, Snow shows the pending transition as
-`mode:<current>→<target>` and applies it after `turn_done`; pressing the shortcut
-again can cancel that pending transition. Modal pickers, completion lists,
-model-requested questions, and the implementation prompt keep their existing
-Shift+Tab navigation behavior.
+`mode:<current>→<target>` and applies it after `turn_done`; pressing the
+shortcut again cancels that pending transition. Modal pickers, completion
+lists, model-requested questions, and the implementation prompt keep their
+existing `Shift+Tab` navigation behavior.
 
-The CLI/SDK/RPC equivalents are:
+The CLI, SDK, and RPC equivalents are:
 
 ```sh
 snow --collaboration-mode plan -p "design the change"
@@ -38,10 +49,9 @@ session.PromptWithMode(ctx, "design the change", protocol.ModePlan)
 Mode is stored per session branch, copied on fork, restored on resume, and
 shown in the TUI header/footer. JSON/RPC and plugins receive an explicit mode
 snapshot at surface startup; SDK hosts can read the same snapshot with
-`Session.StateEvent()` after subscribing. Plan mode uses medium reasoning when the model
-advertises it; `plan_mode_reasoning_effort` can override that preset.
+`Session.StateEvent()` after subscribing.
 
-## Behavior
+## Behavior contract
 
 Every Plan-mode provider request receives the three-phase planning contract:
 non-mutating repository exploration first, intent clarification second, and a
@@ -58,9 +68,11 @@ Plan mode; in Default mode it emits structured checklist updates. A Plan-mode
 root may spawn only read-only `explorer` subagents; other roles or a mutating
 explorer policy are rejected.
 
-A final plan is wrapped by the model in exact line-delimited
-`<proposed_plan>` tags. Snow parses the stream incrementally, suppresses the
-raw tags, and emits:
+## Proposed-plan events
+
+A final plan is wrapped by the model in exact line-delimited `<proposed_plan>`
+tags. Snow parses the stream incrementally, suppresses the raw tags, and
+emits:
 
 - `plan_started`
 - `plan_delta`
@@ -70,27 +82,31 @@ The durable assistant message stores plan Markdown as a `plan` content block.
 `plan_completed` is emitted only after that assistant message append succeeds,
 so surfaces never receive an authoritative completion for a plan that was not
 stored. Provider adapters reconstruct the tagged block when sending history
-back to the model, while TUI/print/JSON/RPC/SDK consumers receive clean structured
-output. Split tags, CRLF, plan-only responses, unterminated blocks, and a
-second block are handled deterministically. Only a bounded possible tag prefix
-at line start is withheld, so ordinary text and long lines stream immediately.
-Interrupted plans remain visible and durable but do not emit `plan_completed`
-or open the implementation prompt.
+back to the model, while TUI/print/JSON/RPC/SDK consumers receive clean
+structured output.
+
+Split tags, CRLF, plan-only responses, unterminated blocks, and a second block
+are handled deterministically. Only a bounded possible tag prefix at line start
+is withheld, so ordinary text and long lines stream immediately. Interrupted
+plans remain visible and durable but do not emit `plan_completed` or open the
+implementation prompt.
 
 Committed plans survive terminal resize and are reflowed with the transcript.
 The current TUI retains committed rows as rendered strings rather than a typed
 Markdown source tree, so resize preserves content and wrapping but does not
 rerun Glamour from the original plan source.
 
-After a completed plan, the TUI offers:
+## Implementation handoff
+
+After a completed plan, the TUI offers to:
 
 1. switch to Default and submit `Implement the plan.`;
 2. create a fresh session, include the complete plan, and implement there;
 3. remain in Plan mode.
 
 The mode switch and implementation prompt are submitted atomically. Automatic
-internal turns are rejected while Plan mode is active, which is the safety
-seam used by persistent goals.
+internal turns are rejected while Plan mode is active, which is the safety seam
+used by persistent goals.
 
 ## Configuration
 
@@ -101,6 +117,16 @@ seam used by persistent goals.
 }
 ```
 
-`plan_mode_reasoning_effort` accepts `off|minimal|low|medium|high|xhigh|max|ultra`. When it is
-omitted, Snow uses medium only if supported by the selected model; otherwise
-it preserves a supported configured effort or falls back to off.
+Plan mode uses medium reasoning when the model advertises it;
+`plan_mode_reasoning_effort` can override that preset. The value accepts
+`off|minimal|low|medium|high|xhigh|max|ultra`. When it is omitted, Snow uses
+medium only if supported by the selected model; otherwise it preserves a
+supported configured effort or falls back to off.
+
+## Related documents
+
+- [Thread Goals](goals.md)
+- [Sessions](sessions.md)
+- [Using Snow](using-snow.md)
+- [Configuration](configuration.md)
+- [SDK](sdk.md)

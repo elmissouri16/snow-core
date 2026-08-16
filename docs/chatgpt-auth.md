@@ -1,9 +1,31 @@
-# ChatGPT authentication research
+# ChatGPT authentication
 
-## What snow supports
+Snow authenticates ChatGPT/Codex subscriptions through OAuth, not an OpenAI API
+key. This document describes the supported credential shape, local import
+sources, login flows, token refresh, status checks, the authenticated model
+catalog, and the hardened Codex inference boundary.
 
-`snow` recognizes ChatGPT/Codex subscription credentials stored under the
-`chatgpt` key in `auth.json`:
+> **Note:** These are the OAuth client and product-backend routes exercised by
+> official Codex. They can change; constants, wire records, cache parsing, and
+> the bundled fallback remain isolated in `internal/provider/chatgpt`.
+
+## On this page
+
+- [Supported credential shape](#supported-credential-shape)
+- [Source import locations](#source-import-locations)
+- [Login](#login)
+- [Refresh, locking, and rotation](#refresh-locking-and-rotation)
+- [Status checks and JWT metadata](#status-checks-and-jwt-metadata)
+- [Authenticated model catalog](#authenticated-model-catalog)
+- [Codex inference and SSE](#codex-inference-and-sse)
+- [Research notes](#research-notes)
+- [Compatibility boundary](#compatibility-boundary)
+- [Related documents](#related-documents)
+
+## Supported credential shape
+
+Snow recognizes ChatGPT/Codex subscription credentials stored under the
+`chatgpt` key in `~/.snow/auth.json`:
 
 ```json
 {
@@ -17,114 +39,181 @@
 }
 ```
 
+`type` must be `oauth`, and `access` must be present. `refresh`, `expires`
+(Unix epoch seconds), and `accountId` are optional but expected for refreshable
+and account-scoped sessions.
+
+## Source import locations
+
+The TUI picker discovers compatible local credentials in this order: OpenCode,
+Pi, then Codex.
+
+| Source | Paths | Entry keys |
+|---|---|---|
+| OpenCode | `$XDG_DATA_HOME/opencode/auth.json`, `~/.local/share/opencode/auth.json`, or `~/.opencode/auth.json` | `openai`, `openai-codex`, or `chatgpt` OAuth entry |
+| Pi | `~/.pi/agent/auth.json` | `openai-codex` or `chatgpt` OAuth entry |
+| Codex | `~/.codex/auth.json` | `tokens.access_token`, `refresh_token`, `account_id` |
+
+Snow does not import an OpenAI API-key-only Codex login as ChatGPT OAuth; the
+Codex source must be a `chatgpt` auth mode. The lower-level importer remains
+available for explicit compatibility use.
+
+## Login
+
+### Browser PKCE login
+
+Run:
+
+```sh
+snow login chatgpt
+```
+
+This starts a loopback browser PKCE flow. The browser flow validates state and
+PKCE and accepts a complete pasted callback URL as a headless fallback,
+including when callback port 1455 is occupied. Use `--no-open` to print the
+browser URL without launching it:
+
+```sh
+snow login chatgpt --no-open
+```
+
+### Device-code login
+
+Run:
+
+```sh
+snow login chatgpt --device-code
+```
+
+The device flow uses the official Codex device-auth endpoints with a 15-minute
+polling window.
+
+### TUI picker
+
+In the TUI, `/login` then `chatgpt` offers known local account/workspace IDs
+first, then unrestricted browser login (with device fallback) and device-code
+login.
+
+The picker groups duplicate source entries by account ID and displays source
+names without tokens. Selecting a known account starts a fresh Snow browser
+OAuth flow with the official Codex `allowed_workspace_id` restriction and
+validates the returned token claim before saving it. Snow never copies
+OpenCode, Pi, or Codex token material in this TUI flow. Unrestricted
+browser/device login remains available when a new or different account is
+intended.
+
+Snow uses official Codex scopes and the same form-encoded token refresh
+contract used by Codex, Pi, and OpenCode. Tokens are never shown in the picker.
+
+## Refresh, locking, and rotation
+
+Runtime resolution goes through Snow's generic auth service, which delegates
+token exchange to the ChatGPT OAuth driver. Tokens that expire within five
+minutes are refreshed under a provider-specific cross-process refresh lock,
+while the global auth-store lock is held only for the fresh read and
+compare-and-swap write. This keeps unrelated credential operations responsive
+during network I/O and atomically persists rotated refresh tokens.
+
+A pre-stream HTTP 401 forces one guarded refresh and one retry, while reusing a
+newer credential already rotated by another process. Permanent
+`invalid_grant`-class failures require login; transient and network failures
+remain retryable and secret-free.
+
+The auth store lock is `~/.snow/auth.json.lock`; provider refresh serialization
+uses a hashed `auth.json.<provider-hash>.refresh.lock`. Both are mode `0600`.
+
+## Status checks and JWT metadata
+
 The side-effect-free check is available from Go as
 `internal/provider/chatgpt.CheckAuth` and from the CLI:
 
-```bash
+```sh
 snow auth check chatgpt
 ```
 
 The check never sends or prints token material. It verifies that the stored
 credential is OAuth with an access token, reports expiration, and extracts the
-ChatGPT account and optional plan claims. Token exchange may derive missing
-metadata from `id_token`, but Snow never persists the raw ID token.
+ChatGPT account and optional plan claims from the access-token JWT. Token
+exchange may derive missing metadata from `id_token`, but Snow never persists
+the raw ID token.
 
-Use `snow login chatgpt` for loopback browser PKCE login,
-`snow login chatgpt --device-code` for the 15-minute device flow, or
-`--no-open` to print the browser URL without launching it. The browser flow
-validates state and PKCE and accepts a complete pasted callback URL as a
-headless fallback, including when callback port 1455 is occupied. In the TUI, `/login` → `chatgpt` offers known local account/workspace IDs
-first, then unrestricted browser login (with device fallback) and device-code
-login. Local sources are ordered OpenCode, Pi, then Codex:
+## Authenticated model catalog
 
-- OpenCode: `$XDG_DATA_HOME/opencode/auth.json`,
-  `~/.local/share/opencode/auth.json`, or `~/.opencode/auth.json` (`openai`,
-  `openai-codex`, or `chatgpt` OAuth entry)
-- Pi: `~/.pi/agent/auth.json` (`openai-codex` or `chatgpt` OAuth entry)
-- Codex: `~/.codex/auth.json` (`tokens.access_token`, `refresh_token`, `account_id`)
-
-The picker groups duplicate source entries by account ID and displays source
-names without tokens. Selecting a known account starts a fresh Snow browser OAuth
-flow with the official Codex `allowed_workspace_id` restriction and validates the
-returned token claim before saving it. Snow never copies OpenCode/Pi/Codex token
-material in this TUI flow. Unrestricted browser/device login remains available
-when a new or different account is intended. The lower-level importer remains
-covered for explicit compatibility use. Snow uses official Codex scopes and the
-same form-encoded token refresh contract used by Codex, Pi, and OpenCode.
-Tokens are never shown in the picker. `snow auth check chatgpt` remains strictly
-side-effect-free; runtime resolution goes through Snow's generic auth service,
-which delegates token exchange to the ChatGPT OAuth driver and refreshes tokens
-that expire within five minutes under a provider-specific cross-process refresh
-lock, while the global auth-store lock is held only for the fresh read/CAS write. This keeps unrelated
-credential operations responsive during network I/O and atomically persists
-rotated refresh tokens. A pre-stream HTTP 401 forces one guarded refresh and
-one retry, while reusing a newer credential already rotated by another process. Permanent
-`invalid_grant`-class failures require login; transient/network failures remain
-retryable and secret-free.
-
-Codex inference requests attach one SHA-256 affinity value derived from the Snow
-session, active branch, and request purpose as `prompt_cache_key`, `session-id`,
-and `x-client-request-id`; raw session and branch IDs never leave the process.
-The request also identifies `User-Agent: snow`, explicitly enables automatic
-and parallel tool selection (execution inside Snow remains serial), and omits
-sampling/output-limit fields unsupported by the subscription path. JSON bodies
-of at least 32 KiB use zstd compression. Snow retries network failures, HTTP
-408/425/500/502/503/504, and immediate pre-output overload/truncation failures at
-most twice with context-cancellable, `Retry-After`-aware backoff. It never
-retries 402/429, a second 401, validation errors, or a stream after any normalized
-activity was delivered.
-
-Responses/SSE parsing bounds individual and aggregate events, tool-call
-count/identities/arguments, retained reasoning, error codes, and request IDs. A
-limit violation emits one normalized stream error and stops parsing. A stream
-must terminate with `response.completed`, `response.done`,
-`response.incomplete`, or `[DONE]`; clean EOF without one is an error rather
-than a successful partial answer.
-
-`/model` uses authenticated `GET /backend-api/codex/models?client_version=0.147.0`
-discovery. Raw records are cached for 15 minutes under
+`/model` uses authenticated
+`GET /backend-api/codex/models?client_version=0.147.0` discovery. Raw records
+are cached for 15 minutes under
 `~/.snow/cache/chatgpt-models/<origin-and-account-hash>.json` with versioned
 origin/account metadata, ETags, and mode `0600`.
+
 Only records with `visibility=list` or unset visibility are shown;
 `supported_in_api=false` does not hide subscription-only models. Snow maps every
 advertised effort (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and
 `ultra`) into normalized protocol thinking levels; `off` remains the explicit
-no-reasoning selection. Authenticated account catalogs are authoritative: a model
-missing from the selected account is not merged back from the bundled snapshot,
-and an unavailable active model is replaced by a compatible account model.
+no-reasoning selection.
+
+Authenticated account catalogs are authoritative: a model missing from the
+selected account is not merged back from the bundled snapshot, and an
+unavailable active model is replaced by a compatible account model.
 Authenticated sessions fall back only to a same-account cache; they never inject
 a bundled model after account discovery fails. The bundled snapshot is used only
-before a ChatGPT account is configured. The auth store lock is
-`~/.snow/auth.json.lock`; provider refresh serialization uses a hashed
-`auth.json.<provider-hash>.refresh.lock`. Both are `0600`.
+before a ChatGPT account is configured.
 
-## Research findings
+## Codex inference and SSE
 
-### pi
+Codex inference requests attach one SHA-256 affinity value derived from the Snow
+session, active branch, and request purpose as `prompt_cache_key`, `session-id`,
+and `x-client-request-id`; raw session and branch IDs never leave the process.
+
+The request identifies `User-Agent: snow`, explicitly enables automatic and
+parallel tool selection (execution inside Snow remains serial), and omits
+sampling/output-limit fields unsupported by the subscription path. JSON bodies
+of at least 32 KiB use zstd compression.
+
+Snow retries network failures, HTTP 408/425/500/502/503/504, and immediate
+pre-output overload/truncation failures at most twice with context-cancellable,
+`Retry-After`-aware backoff. It never retries 402/429, a second 401, validation
+errors, or a stream after any normalized activity was delivered.
+
+Responses/SSE parsing bounds individual and aggregate events, tool-call
+count/identities/arguments, retained reasoning, error codes, and request IDs.
+A limit violation emits one normalized stream error and stops parsing. A stream
+must terminate with `response.completed`, `response.done`,
+`response.incomplete`, or `[DONE]`; clean EOF without one is an error rather
+than a successful partial answer.
+
+Vision-capable catalog records are backed by validated image data-URI encoding.
+Completed encrypted reasoning items are persisted only as non-rendered opaque
+continuity blocks and replayed before function calls/outputs; encrypted
+payloads are never emitted as UI or log events.
+
+## Research notes
+
+### Pi
 
 Pi models ChatGPT Plus/Pro as the `openai-codex` OAuth provider:
 
 - Provider registration: [`packages/ai/src/providers/openai-codex.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/providers/openai-codex.ts)
 - OAuth flow and token refresh: [`packages/ai/src/auth/oauth/openai-codex.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/auth/oauth/openai-codex.ts)
-- Side-effect-free auth availability check and later refresh: [`packages/ai/src/models.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.ts)
+- Side-effect-free auth availability check: [`packages/ai/src/models.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.ts)
 - Auth format and provider documentation: [`packages/coding-agent/docs/providers.md`](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md)
 
-The important separation is `checkAuth` versus runtime resolution: pi considers
-an OAuth entry configured without refreshing it during the check; resolution
-refreshes expired credentials while holding the credential-store lock.
+Pi separates `checkAuth` from runtime resolution: the check considers an OAuth
+entry configured without refreshing it, while resolution refreshes expired
+credentials while holding the credential-store lock.
 
-Pi's current Codex flow uses (the client ID is public configuration, not a
-secret, but may change):
+Pi's current Codex flow uses the following endpoints and values (the client ID
+is public configuration, not a secret, but may change):
 
-- client ID `app_EMoamEEZ73f0CkXaXp7hrann`
-- issuer `https://auth.openai.com`
-- PKCE browser login at `/oauth/authorize`
-- token exchange and refresh at `/oauth/token`
+- client ID `app_EMoamEEZ73f0CkXaXp7hrann`;
+- issuer `https://auth.openai.com`;
+- PKCE browser login at `/oauth/authorize`;
+- token exchange and refresh at `/oauth/token`;
 - optional device flow at `/api/accounts/deviceauth/usercode` and
-  `/api/accounts/deviceauth/token`
-- access-token namespace `https://api.openai.com/auth`, field `chatgpt_account_id`
+  `/api/accounts/deviceauth/token`;
+- access-token namespace `https://api.openai.com/auth`, field
+  `chatgpt_account_id`;
 - ChatGPT Codex requests at `https://chatgpt.com/backend-api/codex/responses`
-  with `Authorization`, `chatgpt-account-id`, and `originator` headers
+  with `Authorization`, `chatgpt-account-id`, and `originator` headers.
 
 ### Official OpenAI Codex
 
@@ -144,25 +233,30 @@ for every refresh error.
 Current OpenCode (`anomalyco/opencode`) implements ChatGPT Plus/Pro OAuth in
 [`packages/opencode/src/plugin/openai/codex.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/openai/codex.ts).
 It stores the credential under `openai`, extracts `accountId` from OAuth tokens,
-refreshes with a form-encoded `/oauth/token` request, rewrites Responses calls to
-`https://chatgpt.com/backend-api/codex/responses`, and sends bearer,
+refreshes with a form-encoded `/oauth/token` request, rewrites Responses calls
+to `https://chatgpt.com/backend-api/codex/responses`, and sends bearer,
 `ChatGPT-Account-Id`, `originator`, user-agent, and session headers. Its OAuth
-model filter explicitly allows `gpt-5.3-codex-spark`. The backend still applies
-account entitlements: a Spark-capable OpenCode account and a different browser-
-selected Snow account are not interchangeable merely because both report a
-ChatGPT Plus plan. Snow therefore uses the discovered account ID only as an
-official OAuth workspace restriction, obtains its own token, and rejects a login
-whose returned claim belongs to a different account.
+model filter explicitly allows `gpt-5.3-codex-spark`.
+
+The backend still applies account entitlements: a Spark-capable OpenCode account
+and a different browser-selected Snow account are not interchangeable merely
+because both report a ChatGPT Plus plan. Snow therefore uses the discovered
+account ID only as an official OAuth workspace restriction, obtains its own
+token, and rejects a login whose returned claim belongs to a different account.
 
 ## Compatibility boundary
 
 ChatGPT subscription OAuth remains separate from OpenAI API-key authentication.
 Snow uses the OAuth client and product-backend routes exercised by official
-Codex, not the public API-key `/v1/models` contract. Those routes can change;
-constants, wire records, cache parsing, and the bundled fallback remain isolated
-in `internal/provider/chatgpt`. Authenticated requests accept redirects only when scheme and host are exactly
+Codex, not the public API-key `/v1/models` contract.
+
+Authenticated requests accept redirects only when scheme and host are exactly
 unchanged, reject URL userinfo, and therefore block HTTPS downgrade and
-cross-origin bearer forwarding. Vision-capable catalog records are backed by
-validated image data-URI encoding. Completed encrypted reasoning items are
-persisted only as non-rendered opaque continuity blocks and replayed before
-function calls/outputs; encrypted payloads are never emitted as UI/log events.
+cross-origin bearer forwarding.
+
+## Related documents
+
+- [Security](security.md) — credential handling and network boundaries
+- [Configuration](configuration.md) — provider and auth storage paths
+- [Using Snow](using-snow.md) — login, provider, and model workflows
+- [README](../README.md) — quick start and provider overview

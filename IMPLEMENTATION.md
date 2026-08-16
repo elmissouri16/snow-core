@@ -1,311 +1,352 @@
-# snow-core — Implementation Research & Technical Design
+# Architecture and roadmap
 
-> **Status:** Active pre-alpha implementation. The design remains the architecture/roadmap reference; verify current behavior in source and tests.
-> **Binary:** `snow`  
-> **Module:** `github.com/snow-core/snow`
-> **Language:** Go
-> **Surfaces:** Interactive TUI · print/JSON stream · embeddable SDK · JSONL RPC
-> **Auth MVP:** OpenCode Go (API key) · ChatGPT/Codex browser/device OAuth, guarded refresh, and authenticated catalog runtime
+This document is the architecture reference for snow-core: a small, modular Go
+coding-agent harness that provides one streaming agent loop behind an
+interactive terminal UI, print/JSONL/RPC command-line modes, and an embeddable
+pure-Go SDK. It records design goals, the package and dependency map, the core
+loop, providers, tools, sessions, extensions, the security model, the testing
+strategy, the phased roadmap, and condensed research decisions. User-facing
+behavior is documented under `docs/`; day-to-day operating guidance lives in
+`AGENTS.md`.
 
-This document is the architecture, design-history, and roadmap reference for **snow-core**: a standalone, modular, efficient coding-agent harness inspired by pi, OpenCode, and Codex—written in Go with a TUI and SDK. Current source and tests are the behavioral authority.
+> **Note:** snow-core is pre-alpha. Source code and tests are the behavioral
+> authority; this document is the architecture and roadmap reference and does
+> not substitute for checking current source and tests.
 
----
+## On this page
 
-## Table of contents
+- [Overview and design goals](#overview-and-design-goals)
+- [Repository and package map](#repository-and-package-map)
+- [Dependency direction and runtime data flow](#dependency-direction-and-runtime-data-flow)
+- [Core agent loop](#core-agent-loop)
+- [Providers and auth](#providers-and-auth)
+- [Tools and permissions](#tools-and-permissions)
+- [Config and project context](#config-and-project-context)
+- [Sessions and storage](#sessions-and-storage)
+- [Plugins](#plugins)
+- [MCP](#mcp)
+- [Agent Skills](#agent-skills)
+- [Tool routing](#tool-routing)
+- [Subagents](#subagents)
+- [Sandbox](#sandbox)
+- [TUI and surfaces](#tui-and-surfaces)
+- [Public API surface](#public-api-surface)
+- [Security model](#security-model)
+- [Testing and verification](#testing-and-verification)
+- [Roadmap](#roadmap)
+- [Research and decisions](#research-and-decisions)
+- [Open risks and known gaps](#open-risks-and-known-gaps)
+- [Related documents](#related-documents)
 
-1. [Overview](#1-overview)
-2. [Architecture](#2-architecture)
-3. [Public interfaces](#3-public-interfaces)
-4. [Built-in tools](#4-built-in-tools)
-5. [Auth and providers](#5-auth-and-providers)
-6. [TUI](#6-tui)
-7. [SDK](#7-sdk)
-8. [Config and project context](#8-config-and-project-context)
-9. [Security model](#9-security-model)
-10. [Plugin and modularity model](#10-plugin-and-modularity-model)
-11. [Repo bootstrap](#11-repo-bootstrap)
-12. [Phased roadmap](#12-phased-roadmap)
-13. [Testing and verification](#13-testing-and-verification)
-14. [Research appendix](#14-research-appendix)
-15. [Open risks and mitigations](#15-open-risks-and-mitigations)
-16. [Glossary](#16-glossary)
+## Overview and design goals
 
----
+Snow is a minimal terminal coding harness and library. One agent loop powers
+every surface, so TUI, CLI, RPC, and SDK consumers observe the same streamed
+events rather than reimplementing turn logic.
 
-## 1. Overview
+### Mission
 
-### 1.1 Problem
+The core is intentionally not a desktop product, a whole-process sandbox, a
+memory database, or an autonomous multi-agent workflow product. The optional
+smolvm backend isolates only model-facing Bash. The optional root-scoped
+subagent manager only orchestrates ordinary agent loops. The design keeps the
+agent loop understandable, keeps providers and tools behind interfaces, and
+keeps UI dependencies out of core packages.
 
-Coding-agent harnesses today tend to fall into one of three traps:
+### Goals
 
-| Trap | Examples of pressure | Cost |
-|------|----------------------|------|
-| **Heavy product surface** | Large Electron shells, many product modes | Slow iteration, hard to embed, high memory |
-| **Hard to embed** | CLI-only with no stable library API | Every host reimplements the agent loop |
-| **JS/TS-centric runtime** | Node agent cores | Higher baseline RAM/CPU; weaker single-binary story |
+- A single Go `snow` binary for macOS and Linux.
+- Streaming text, thinking, tool, usage, error, and lifecycle events.
+- OpenCode Go API-key access, user-configured OpenAI-compatible Responses or
+  Chat Completions endpoints, and ChatGPT/Codex-compatible OAuth credentials.
+- Built-in `read`, `write`, `edit`, `bash`, `grep`, `glob`, direct interactive
+  `ask_user`, plus deferred public-web `webfetch`.
+- SQLite-backed sessions with automatic/manual display titles, indexed branch
+  IDs, resume, and fork primitives.
+- A stable public surface under `pkg/snowsdk`, `pkg/protocol`, and
+  dependency-light status/config packages such as `pkg/sandbox`.
+- Safe, explicit behavior: deny mutating tools by default in headless use and
+  never log credentials.
 
-Builders who want a **small, fast, embeddable** harness with **subscription + API-key auth** often have to fork a large project or glue provider SDKs by hand.
+### Non-goals
 
-### 1.2 Vision
+- No desktop product surface or Electron/IPC contract; Snow is a standalone
+  harness, not a backend for another IDE.
+- No whole-process or per-extension built-in sandbox. External plugin and
+  stdio MCP servers execute with OS privileges; only optional model-facing Bash
+  can be routed through smolvm.
+- No general memory database. Prior-session reference is deliberately narrower
+  than a general memory product.
+- No autonomous multi-agent workflow engine. Subagent orchestration is optional,
+  root-scoped, and built from the ordinary agent loop.
 
-**snow** is a minimal terminal coding harness and library:
+## Repository and package map
 
-- **Small Go core** — agent loop, sessions, tools, providers, permissions.
-- **Streaming-first** — tokens and tool events flow to TUI/SDK without buffering full turns.
-- **Pluggable edges** — providers and tools behind interfaces; optional JSON-RPC subprocess plugins.
-- **Charm-style TUI** — interactive default UX.
-- **Pure-Go SDK** — same core as the CLI; no duplicated loop.
-- **Auth that matches real usage** — OpenCode Go API key and ChatGPT Plus/Pro (Codex) OAuth in MVP.
+> **Note:** `AGENTS.md` is the authority for repository structure. The tree
+> below matches the checked-out source at the time of writing.
 
-Philosophy (pi-aligned, Go-native):
-
-> Ship powerful defaults. Keep the core small. Extend at the edges. Keep optional subagent orchestration root-scoped and built from the ordinary agent loop rather than a second runtime.
-
-### 1.3 Competitive map
-
-| System | Take | Reject / defer |
-|--------|------|----------------|
-| **pi** | Minimal core; JSONL tree sessions; SDK = same loop as CLI; project trust ≠ sandbox; four core tools; slash commands; event subscribe model | TypeScript extension VM; huge provider catalog day one; package ecosystem |
-| **OpenCode** | Event-rich runtime ideas; permission ask/allow/deny; provider/model listing patterns; OpenCode Go as a first-class paid route | Becoming an OpenCode client; Electron; full plugin marketplace |
-| **Codex / ChatGPT sub** | OAuth subscription path for Plus/Pro; “Codex for OSS” posture; browser login + headless paste fallback | Depending on closed CLI internals; coupling UI to OpenAI’s product chrome |
-| **snow-agent (sibling)** | Brand/UX taste for power users (optional later) | Any Electron/IPC contract in v1; snow-core is **standalone**, not snow-agent backend yet |
-
-### 1.4 Goals
-
-- Single static-ish Go binary (`snow`) for macOS/Linux.
-- Modular packages with **no UI imports** inside `agent` / `provider` / `session`.
-- MVP auth: **OpenCode Go** + **ChatGPT Codex OAuth**.
-- Default built-in tools: **read, write, edit, bash, grep, glob**, direct **ask_user**, plus deferred **webfetch**.
-- Surfaces: **TUI**, **print/JSON**, in-process **Go SDK**, and versioned
-  **RPC** consumed by the checked-in Python and JavaScript/TypeScript clients.
-- Pure-Go **SQLite** sessions with provider-free first-prompt titles, manual rename, indexed tree branches, physically independent exact-entry forks with provenance, and detached clean Git-worktree forks.
-- Clear permission + project-trust model; honest non-sandbox security story.
-
-### 1.5 Success criteria (product)
-
-| Metric | Target |
-|--------|--------|
-| TUI cold start to editable prompt | **&lt; 100ms** on warm machine (no network) |
-| Binary | One primary CLI; SDK is a library import |
-| Auth | Both MVP providers complete a real multi-turn tool loop |
-| Tools | read / write / edit / bash with path + permission gates |
-| Embed | `pkg/snowsdk` can run headless prompt + event subscribe without TUI |
-| Core size | Agent loop understandable in one package; extensions optional |
-
----
-
-## 2. Architecture
-
-### 2.1 Package map
-
-```
-github.com/snow-core/snow
-├── cmd/snow                 # CLI entry (cobra)
+```text
+.
+├── cmd/snow/                # Cobra entry point and CLI mode selection
 ├── internal/
-│   ├── app                  # wire-up: config, auth, session, agent, mode select
-│   ├── agent                # turn loop, tool dispatch, abort, retries
-│   ├── provider             # Provider/Model/Stream + adapters
-│   │   ├── opencodego       # OpenCode Go adapter
-│   │   ├── openaicompat     # user-configured Responses/Chat Completions adapter
-│   │   ├── responsesapi     # shared bounded Responses wire codec
-│   │   └── chatgpt          # ChatGPT / Codex OAuth adapter
-│   ├── auth                 # credential store, OAuth browser/device flows
-│   ├── tools                # Tool interface, builtins, RPC host
-│   │   └── builtin          # read, write, edit, bash, grep, glob, deferred webfetch
-│   ├── session              # SQLite tree store, fork/resume/list
-│   ├── context              # AGENTS.md discovery, system prompt assembly
-│   ├── compact              # context compaction
-│   ├── permission           # ask / allow / deny
-│   ├── config               # global + project settings
-│   ├── event                # typed events for TUI/SDK/RPC
-│   ├── tui                  # bubbletea app
-│   └── rpc                  # JSONL stdin/stdout mode (phase 3+)
-└── pkg/
-    ├── snowsdk              # public embed API (stable surface)
-    └── protocol             # shared message/event DTOs if needed outside internal
+│   ├── agent/               # provider → stream → permission → tools turn loop
+│   ├── app/                 # runtime wiring and provider/model/session catalogs
+│   ├── artifact/            # immutable session-scoped tool-result spill artifacts
+│   ├── auth/                # credential model and memory/file stores
+│   ├── compact/             # context compaction planner and apply implementation
+│   ├── config/              # global config defaults, load/save, path helpers
+│   ├── context/             # preamble + AGENTS.md system-prompt assembly
+│   ├── goal/                # branch-scoped persistent Thread Goals
+│   ├── mcp/                 # official-SDK MCP manager and tool/resource bridges
+│   ├── permission/          # ask/allow/deny service and remembered rules
+│   ├── plan/                # Plan collaboration-mode contract and parser
+│   ├── plugin/              # lifecycle manager and Go/external adapters
+│   ├── provider/            # Provider interface and adapters
+│   │   ├── fake/            # deterministic scripted provider for tests/demos
+│   │   ├── opencodego/      # OpenCode Go API-key adapter
+│   │   ├── openaicompat/    # user-configured Responses/Chat Completions adapter
+│   │   ├── responsesapi/    # shared bounded Responses request/SSE codec
+│   │   └── chatgpt/         # Codex OAuth checks/import and Responses adapter
+│   ├── rpc/                 # JSONL stdin/stdout control plane
+│   ├── sandbox/             # persistent project-scoped smolvm Bash lifecycle/state
+│   ├── session/             # SQLite/in-memory stores, topology, session index
+│   ├── skills/              # Agent Skills parser, catalog, and activation tools
+│   │   └── builtin/         # immutable rank-zero built-in skills
+│   ├── subagent/            # root manager, context projection, roles, V2 tools
+│   ├── tempfile/            # crash-orphaned atomic-write cleanup
+│   ├── tools/               # Tool/Registry/ToolHost interfaces + BM25 router
+│   │   ├── builtin/         # file, shell, search, and deferred web tools
+│   │   └── router/          # deferred-tool BM25 routing index
+│   ├── trust/               # ~/.snow/trust.json project decisions
+│   ├── userinput/           # model-requested host-question coordination
+│   ├── worktree/            # detached clean Git-worktree fork utility
+│   └── tui/                 # Bubble Tea UI, markdown, mentions, askers
+├── pkg/
+│   ├── mcp/                 # dependency-light public MCP server config/status
+│   ├── plugin/              # dependency-light public extension contract
+│   ├── protocol/            # dependency-light public messages/events/models
+│   │   └── schema/          # network-free Draft 2020-12 wire schemas
+│   ├── sandbox/             # dependency-light public Bash boundary status
+│   └── snowsdk/             # public embeddable API; no TUI dependency
+├── examples/                # standalone SDK, RPC, and plugin examples
+├── sdk/                     # Python and JavaScript/TypeScript language clients
+└── docs/                    # user guides and per-topic references
 ```
 
-**Import rules**
+| Package | Responsibility |
+|---|---|
+| `cmd/snow` | Cobra entry point and CLI mode selection |
+| `internal/app` | Runtime wiring and provider/model/session catalogs |
+| `internal/agent` | Provider → stream → permission → tools turn loop |
+| `internal/auth` | Credential model and memory/file stores |
+| `internal/compact` | Context compaction planner and apply implementation |
+| `internal/config` | Global config defaults, load/save, path helpers |
+| `internal/context` | Preamble and `AGENTS.md` system-prompt assembly |
+| `internal/permission` | Ask/allow/deny service and remembered rules |
+| `internal/plugin` | Lifecycle manager and Go/external adapters |
+| `internal/mcp` | Official-SDK MCP manager and tool/resource bridges |
+| `internal/skills` | Agent Skills parser, catalog, and activation tools |
+| `internal/provider` | `Provider` interface, registry, and adapters |
+| `internal/rpc` | JSONL stdin/stdout control plane |
+| `internal/sandbox` | Persistent project-scoped smolvm Bash lifecycle/state |
+| `internal/session` | SQLite/in-memory stores, topology, and session index |
+| `internal/subagent` | Root manager, context projection, roles, V2 tools |
+| `internal/tools` | `Tool`/`Registry`/`ToolHost` interfaces and BM25 router |
+| `internal/trust` | `~/.snow/trust.json` project decisions |
+| `internal/tui` | Bubble Tea UI, markdown, mentions, askers |
+| `internal/artifact` | Immutable session-scoped tool-result spill artifacts |
+| `internal/goal` | Branch-scoped persistent Thread Goals lifecycle |
+| `internal/plan` | Plan collaboration-mode contract and parser |
+| `internal/tempfile` | Crash-orphaned atomic-write cleanup |
+| `internal/userinput` | Model-requested host-question coordination |
+| `internal/worktree` | Detached clean Git-worktree fork utility |
+| `pkg/plugin` | Dependency-light public extension contract |
+| `pkg/mcp` | Dependency-light public MCP server config/status |
+| `pkg/protocol` | Dependency-light public messages/events/models |
+| `pkg/protocol/schema` | Network-free Draft 2020-12 wire schemas |
+| `pkg/sandbox` | Dependency-light public Bash boundary status |
+| `pkg/snowsdk` | Public embeddable API; no TUI dependency |
 
-| Package | May import | Must not import |
-|---------|------------|-----------------|
-| `agent` | provider, tools, session, permission, event, context, compact | `tui`, `cmd`, `rpc` UI |
-| `provider/*` | auth, config, protocol | tools, tui, agent |
-| `tools` | permission, config | provider, tui |
-| `tui` | event, app facades, config | provider HTTP details |
-| `snowsdk` | internal via thin facades **or** duplicated stable types in `pkg/protocol` | bubbletea |
-| `cmd/snow` | everything for wire-up | — |
+## Dependency direction and runtime data flow
 
-Prefer **`pkg/protocol` + `pkg/snowsdk`** as the only stable external API. Everything under `internal/` can move freely.
-
-### 2.2 Runtime modes
-
-```mermaid
-flowchart LR
-  CLI[cmd/snow] --> APP[internal/app]
-  APP --> MODE{mode}
-  MODE -->|interactive| TUI[internal/tui]
-  MODE -->|print / json| PRINT[print sink]
-  MODE -->|sdk| SDK[pkg/snowsdk]
-  MODE -->|rpc| RPC[internal/rpc]
-  TUI --> AG[internal/agent]
-  PRINT --> AG
-  SDK --> AG
-  RPC --> AG
-  AG --> PROV[internal/provider]
-  AG --> TOOLS[internal/tools]
-  AG --> SESS[internal/session]
-  AG --> PERM[internal/permission]
-  PROV --> AUTH[internal/auth]
+```text
+cmd/snow → app → {tui | print | rpc}
+app → agent → {provider, tools, session, permission, context, compact}
+provider adapters → auth + protocol
+tui → app facades + protocol
+snowsdk → app + protocol; never bubbletea
 ```
 
-### 2.3 Core turn loop
+`agent`, `provider`, `session`, `tools`, and `pkg/protocol` never import the
+TUI or Cobra. `pkg/protocol` is standard-library-only. `internal/` is not a
+stable external API; the public surface is `pkg/snowsdk`, `pkg/protocol`, and
+the dependency-light `pkg/*` contracts such as `pkg/sandbox`. `go.mod` and
+`README.md` both declare the Go 1.27 line (currently `1.27rc2`).
 
-```mermaid
-sequenceDiagram
-  participant U as User/SDK
-  participant A as Agent
-  participant S as SessionStore
-  participant P as Provider
-  participant G as Permission
-  participant T as Tools
+### Runtime data flow
 
-  U->>A: Prompt(text)
-  A->>S: Append user message
-  A->>P: Chat(stream, messages, tools)
-  loop stream events
-    P-->>A: text/thinking/tool_call/usage deltas
-    A-->>U: Event
-    A->>S: Persist partial/final assistant as needed
-  end
-  alt stop_reason = tool_use
-    loop each tool_call
-      A->>G: Authorize(tool, args)
-      G-->>A: allow / deny / ask
-      A->>T: Run(ctx, call)
-      T-->>A: result
-      A->>S: Append tool_result
-      A-->>U: tool events
-    end
-    A->>P: Chat(... continued ...)
-  else stop / error / abort
-    A-->>U: done / error
-  end
-```
+1. `cmd/snow` parses flags and builds `app.Options`.
+2. `internal/app.New` loads config/auth/trust, builds the tool registry,
+   fetches startup model catalogs, creates a session, permission service,
+   provider, and agent.
+3. `agent.Prompt` appends the user message, resolves credentials, starts a
+   provider stream, publishes normalized events, persists the assistant
+   message, then runs serial tool calls behind the permission service.
+4. Tool results are appended to the session and the provider is called again
+   until the model stops, errors, or the context is cancelled.
+5. TUI, print, JSON, RPC, and SDK consumers observe the same
+   `protocol.AgentEvent` stream; they do not duplicate loop logic. The TUI
+   footer continuously shows current/model context usage and `/compact` has
+   animated progress.
 
-**Loop invariants**
+## Core agent loop
 
-1. Every accepted user prompt gets a session entry before the first provider call (crash-safe intent).
-2. Successful provider and compaction streams emit an explicit terminal `done`; EOF before it is persisted as a failed attempt, never normalized into success.
-3. Assistant messages are finalized with `stop_reason` before tool execution batch commits (or use explicit `pending` only in-memory, never as durable terminal state).
-4. Tool results always reference `tool_call_id`; length-truncated calls receive synthetic errors without execution, and opening a session atomically repairs an interrupted final tool batch with explicit retryable/unknown-outcome results without retrying side effects automatically.
-5. Failed provider attempts remain durable for diagnostics but are excluded from subsequent provider and overflow-compaction context.
-6. `context.Context` cancellation aborts provider stream **and** in-flight tools and persists one aborted assistant boundary regardless of which provider boundary observes it.
-7. Events are the only cross-surface observation channel (TUI/SDK/print/RPC all subscribe).
-8. Tool-call limits span the complete admitted run, including multiple provider/tool batches.
-9. Accepted queue entries are consumed after ordinary provider failures; internal failures and turn-limit rejection leave a closed, recoverable queue for host restoration rather than silently dropping input.
-10. Synthetic-only tool batches (truncation, call-limit, validation, or permission results without a dispatched tool) receive one corrective provider round; a repeated synthetic-only batch terminates the admitted run instead of looping without a turn limit.
-11. Identical consecutive tool calls are detected per admitted run using canonical JSON arguments; bounded advisory reminders at counts 3, 5, and 8 do not veto execution.
+`internal/agent` owns the turn loop and is the only component that appends
+messages, resolves credentials, and dispatches tools. Consumers subscribe to
+events and never drive the loop themselves.
 
-### 2.4 Efficiency principles
+### Loop invariants
 
-| Principle | Practice |
-|-----------|----------|
-| Single binary | Avoid CGo; keep deps lean; Charm + stdlib HTTP |
-| Stream, don’t buffer | Provider adapters yield deltas; TUI paints incrementally |
-| Durable sessions | Pure-Go SQLite; WAL transactions; indexed branch queries; no full scan on open |
-| Bound tool output | Truncate source output with clear markers; spill oversized final plain-text results to private session artifacts and prune historical results in every provider/summarizer projection |
-| Cancel everywhere | `ctx` on HTTP, bash, file IO timeouts |
-| Segregate packages | UI never blocks provider decode on render lock longer than one frame |
-| Cheap default tools | Use bounded pure-Go `grep`/`glob` before shelling out |
-| Plugins are cold | Subprocess plugins opt-in; document startup cost |
-| Usage from provider | MVP trusts provider token usage; no local tokenizer required |
+1. Every accepted user prompt gets a session entry before the first provider
+   call (crash-safe intent).
+2. Successful provider and compaction streams emit an explicit terminal
+   `done`; EOF before it is persisted as a failed attempt, never normalized
+   into success.
+3. Assistant messages are finalized with `stop_reason` before a tool batch
+   commits (or use an explicit `pending` state only in memory, never as
+   durable terminal state).
+4. Tool results always reference `tool_call_id`; length-truncated calls receive
+   synthetic errors without execution. Opening a session atomically repairs an
+   interrupted final tool batch with explicit retryable/unknown-outcome
+   results without retrying side effects automatically.
+5. Failed provider attempts remain durable for diagnostics but are excluded
+   from subsequent provider and overflow-compaction context.
+6. `context.Context` cancellation aborts the provider stream and in-flight
+   tools, and persists one aborted assistant boundary regardless of which
+   provider boundary observes it.
+7. Events are the only cross-surface observation channel (TUI, SDK, print,
+   RPC, and plugins all subscribe).
+8. Tool-call limits span the complete admitted run, including multiple
+   provider/tool batches.
+9. Accepted queue entries are consumed after ordinary provider failures;
+   internal failures and turn-limit rejection leave a closed, recoverable
+   queue for host restoration rather than silently dropping input.
+10. Synthetic-only tool batches (truncation, call-limit, validation, or
+    permission results without a dispatched tool) receive one corrective
+    provider round; a repeated synthetic-only batch terminates the admitted
+    run instead of looping without a turn limit.
+11. Identical consecutive tool calls are detected per admitted run using
+    canonical JSON arguments; bounded advisory reminders at counts 3, 5, and 8
+    do not veto execution.
 
-### 2.5 Dependency direction (summary)
+### Streaming events
 
-```
-cmd → app → {tui | print | rpc}
-app → agent → {provider, tools, session, permission, context, compact, event}
-provider → auth
-snowsdk → app/agent facades + protocol
-```
+The core publishes normalized `protocol.AgentEvent` values. Core types are
+`session_updated`, `text_delta`, `thinking_delta`, `tool_start`,
+`tool_progress`, `tool_end`, `tool_routing`, `permission_request`,
+`user_input_request`, `usage`, `queue_updated`, `turn_done`, `error`,
+`aborted`, and `model_changed`. Plan, compaction, goal, and subagent
+lifecycle events (`plan_started`, `compaction_started`, `thread_goal_updated`,
+`subagent_started`, and friends) extend the same stream.
 
----
-
-## 3. Public interfaces
-
-Signatures below are **decision-complete sketches** (names may shift slightly at implement time; responsibilities must not).
-
-### 3.1 Messages and content blocks
+### Agent interface sketch
 
 ```go
-// pkg/protocol/message.go (conceptual)
+type Agent interface {
+    Prompt(ctx context.Context, text string, opts ...PromptOption) error
+    Steer(text string) error     // active-run queue; next safe assistant+tool boundary
+    FollowUp(text string) error  // active-run queue; after natural stop and all steering
+    PendingInputs() protocol.InputQueue
+    Abort(ctx context.Context) error
+    Subscribe(func(AgentEvent)) (unsubscribe func)
 
-type Role string
-
-const (
-    RoleUser      Role = "user"
-    RoleAssistant Role = "assistant"
-    RoleTool      Role = "tool_result"
-    RoleSystem    Role = "system"  // rare; prefer context assembly
-    RoleCustom    Role = "custom"  // extensions / harness notes
-)
-
-type ContentBlock struct {
-    Type string `json:"type"` // text | image | thinking | tool_call
-
-    // text / thinking
-    Text string `json:"text,omitempty"`
-
-    // image
-    MIMEType string `json:"mime_type,omitempty"`
-    Data     []byte `json:"data,omitempty"` // base64 in JSONL on disk
-
-    // tool_call
-    ToolCallID string          `json:"tool_call_id,omitempty"`
-    Name       string          `json:"name,omitempty"`
-    Arguments  json.RawMessage `json:"arguments,omitempty"`
-}
-
-type Message struct {
-    ID        string         `json:"id"`
-    ParentID  string         `json:"parent_id,omitempty"`
-    Role      Role           `json:"role"`
-    Content   []ContentBlock `json:"content"`
-    Timestamp int64          `json:"ts"` // unix ms
-
-    // assistant metadata
-    Provider   string      `json:"provider,omitempty"`
-    Model      string      `json:"model,omitempty"`
-    StopReason string      `json:"stop_reason,omitempty"` // stop|length|tool_use|error|aborted
-    Error      string      `json:"error,omitempty"`
-    Usage      *Usage      `json:"usage,omitempty"`
-
-    // tool_result metadata
-    ToolCallID string `json:"tool_call_id,omitempty"`
-    ToolName   string `json:"tool_name,omitempty"`
-    IsError    bool   `json:"is_error,omitempty"`
-}
-
-type Usage struct {
-    Input      int `json:"input"`
-    Output     int `json:"output"`
-    CacheRead  int `json:"cache_read"`
-    CacheWrite int `json:"cache_write"`
-    Total      int `json:"total_tokens"`
-    Cost       *Cost `json:"cost,omitempty"`
-}
-
-type Cost struct {
-    Input      float64 `json:"input"`
-    Output     float64 `json:"output"`
-    CacheRead  float64 `json:"cache_read"`
-    CacheWrite float64 `json:"cache_write"`
-    Total      float64 `json:"total"`
+    SetModel(model Model) error
+    SetThinking(level ThinkingLevel)
+    Model() Model
+    Messages() []Message
+    IsRunning() bool
 }
 ```
 
-### 3.2 Provider stream
+Tool calls are serial within a turn: a complete tool batch is authorized and
+executed, results are appended, and the provider is called again. This keeps
+permission and filesystem behavior predictable and avoids parallel-tool write
+races.
+
+## Providers and auth
+
+Providers are implemented behind the `internal/provider` interface and are
+selected through a deterministic built-in module registry. Agents consume
+credential-free provider runtimes; the auth service owns credential resolution
+and lifecycle.
+
+| Provider | ID | Credential | Endpoint and behavior |
+|---|---|---|---|
+| OpenCode Go | `opencode-go` | API key | `https://opencode.ai/zen/go/v1`, OpenAI-compatible `/models` and `/chat/completions`, default `kimi-k2.6` |
+| OpenAI-compatible | `openai-compatible` or named profile | optional API key per profile | one or more user-supplied API roots plus sibling `/models`; Responses preferred with Chat Completions fallback; no built-in endpoint |
+| ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | ChatGPT Codex Responses backend; browser/device login, refresh, authenticated cached catalog |
+| Fake | `fake` | none | deterministic scripted provider for tests and demos |
+
+### Credential precedence
+
+For a provider, the first match wins:
+
+1. Explicit API key or SDK option (`--api-key`, `Options.Credential`).
+2. The `auth.json` entry for that provider.
+3. A known environment fallback (`OPENCODE_API_KEY`).
+4. Otherwise, interactive `/login` (TUI) or a typed login-required error
+   (headless).
+
+The agent does not resolve credentials. `auth.Service` resolves the
+credential, then the authenticated provider runtime supplies it to the
+registered transport for both model discovery and inference. A remote OAuth
+rejection can request one guarded provider-scoped refresh; API keys are not
+refreshable. Never print `Key`, `Access`, or `Refresh` values.
+
+### Auth service and store
+
+`auth.Service` is the single owner of explicit/store/environment precedence,
+provider isolation, status, login/logout, persistence, refresh locking and
+compare-and-swap token rotation, and reusable API-key or provider-local OAuth
+drivers. Auth stores are in-memory or atomic `~/.snow/auth.json` with `0600`
+permissions and redacting JSON.
+
+```go
+type CredentialType string // api_key | oauth
+
+type Credential struct {
+    Provider  string         `json:"-"`
+    Type      CredentialType `json:"type"`
+    Key       string         `json:"key,omitempty"`
+    Access    string         `json:"access,omitempty"`
+    Refresh   string         `json:"refresh,omitempty"`
+    Expires   int64          `json:"expires,omitempty"` // unix seconds
+    AccountID string         `json:"accountId,omitempty"`
+    Extra     map[string]any `json:"extra,omitempty"`
+}
+
+type Store interface {
+    Get(provider string) (Credential, bool)
+    Put(provider string, cred Credential) error
+    Delete(provider string) error
+    Update(provider string, fn UpdateFunc) (Credential, bool, error)
+    Path() string // for diagnostics; never print secrets
+}
+
+type Driver interface {
+    Descriptor() Descriptor
+    Inspect(Credential) (Status, error) // local and side-effect-free
+    Login(context.Context, LoginRequest, Interaction) (Credential, error)
+    Validate(Credential) error
+    NeedsRefresh(Credential, time.Time) bool
+    Refresh(context.Context, Credential, RefreshReason) (Credential, error)
+}
+```
+
+`provider.Registry` binds each built-in transport to one driver and builds the
+credential-free runtimes used by root and child agents.
+
+### Provider stream contract
 
 ```go
 type Model struct {
@@ -321,28 +362,14 @@ type Model struct {
 }
 
 type ChatRequest struct {
-    Model        Model
-    Messages     []Message
-    Tools        []ToolSchema
-    System       string
-    MaxTokens    int
-    Temperature  *float64
-    Thinking     ThinkingLevel // off|minimal|low|medium|high|xhigh|max|ultra
-    // Model.ThinkingLevels is authoritative; unsupported non-off effort is rejected.
-    // provider-specific extras isolated in adapter options
+    Model       Model
+    Messages    []Message
+    Tools       []ToolSchema
+    System      string
+    MaxTokens   int
+    Temperature *float64
+    Thinking    ThinkingLevel // off|minimal|low|medium|high|xhigh|max|ultra
 }
-
-type StreamEventType string
-
-const (
-    EvStreamTextDelta     StreamEventType = "text_delta"
-    EvStreamThinkingDelta StreamEventType = "thinking_delta"
-    EvStreamToolCallDelta StreamEventType = "tool_call_delta"
-    EvStreamToolCallDone  StreamEventType = "tool_call_done"
-    EvStreamUsage         StreamEventType = "usage"
-    EvStreamDone          StreamEventType = "done"
-    EvStreamError         StreamEventType = "error"
-)
 
 type StreamEvent struct {
     Type       StreamEventType
@@ -356,33 +383,113 @@ type StreamEvent struct {
 }
 
 type EventStream interface {
-    // Successful streams emit EvStreamDone before EOF. EOF without done is
-    // truncation. Next blocks until the next event or EOF/error.
     Next(ctx context.Context) (StreamEvent, error)
     Close() error
 }
 
-// Transport is implemented by a vendor adapter below the auth boundary.
 type Transport interface {
     ID() string
     ListModels(ctx context.Context) ([]Model, error)
     Chat(ctx context.Context, creds auth.Credential, req ChatRequest) (EventStream, error)
 }
 
-// Provider is the credential-free runtime consumed by agents.
 type Provider interface {
     ID() string
     ListModels(ctx context.Context) ([]Model, error)
     Chat(ctx context.Context, req ChatRequest) (EventStream, error)
 }
-
-// Authenticated combines a registered Transport with auth.Service. It resolves
-// provider-scoped credentials for model discovery and every inference request.
 ```
 
-**Adapter contract:** each provider normalizes vendor SSE/JSON into `StreamEvent`. Tool-call argument streaming may be vendor-specific; adapters must emit a final `tool_call_done` with complete JSON arguments before the agent dispatches tools.
+Successful streams emit a terminal `done` before EOF; EOF without `done` is
+truncation. Each adapter normalizes vendor SSE/JSON into `StreamEvent`.
+Tool-call argument streaming may be vendor-specific; adapters must emit a final
+`tool_call_done` with complete JSON arguments before the agent dispatches
+tools.
 
-### 3.3 Tools
+### OpenCode Go
+
+The primary API-key adapter. It attaches `Authorization: Bearer <key>`, maps
+Chat Completions SSE chunks and finish reasons into Snow events, surfaces
+rate-limit and quota errors as structured errors, and maps normalized thinking
+effort to OpenAI `reasoning_effort` while rejecting levels the selected model
+does not advertise. Startup model discovery fetches `GET /models` and merges
+matching IDs with OpenCode's public `models.dev` catalog for capability,
+reasoning, and pricing metadata; the API key is never sent to the metadata
+host and direct gateway fields win. Discovery falls back to the pinned static
+default without failing startup or logging keys.
+
+### OpenAI-compatible
+
+`internal/provider/openaicompat` implements the legacy `openai-compatible`
+provider plus any number of user-named profiles. Each profile requires an
+absolute HTTP(S) API root or full `/responses`/`/chat/completions` URL,
+derives sibling `GET /models`, and has an isolated auth/config key. Optional
+Bearer auth comes from explicit options or `auth.json`; `OPENAI_API_KEY` is a
+fallback for the legacy profile only. Responses is preferred and uses the
+bounded request/SSE codec shared with ChatGPT through
+`internal/provider/responsesapi`. An HTTP 404/405/501 from Responses selects
+and caches a Chat Completions/SSE fallback. OAuth, Codex headers, refresh, and
+catalog behavior remain isolated. There is no default endpoint; discovery is
+nonfatal when unavailable. Custom/Azure headers and query parameters are
+excluded, and provider errors redact active keys.
+
+### ChatGPT/Codex OAuth
+
+`internal/provider/chatgpt` performs a side-effect-free credential check,
+browser PKCE and device-code login, compatible Codex/Pi/OpenCode credential
+imports, guarded automatic refresh, an origin-and-account-scoped ETag model
+cache, and hardened Codex Responses SSE streaming with branch-scoped prompt
+affinity, zstd compression, bounded pre-output transient retries, structured
+error diagnostics, and mandatory terminal events. The TUI/CLI report
+configured, expired, or missing ChatGPT auth without refreshing during checks.
+
+Login opens the system browser (or prints the URL with `--no-open`) and
+receives the code on `localhost:1455/auth/callback`, or accepts the full
+callback URL when the port is occupied or the browser is remote. The code is
+exchanged for access/refresh tokens, `auth.json` is written atomically with
+mode `0600`, JWT/account metadata is validated without persisting the ID
+token, and the authenticated catalog is refreshed with a bundled offline
+fallback on outage. Before `Chat`, credentials expiring within five minutes
+are refreshed under the cross-process auth-store lock; a pre-stream 401
+permits one guarded forced refresh and retry. WebSocket continuation remains
+deferred.
+
+### Fake
+
+`internal/provider/fake` is a deterministic scripted provider for tests,
+examples, and demos. It requires no credentials and drives multi-turn
+tool-call round trips through the real agent loop.
+
+## Tools and permissions
+
+### Built-in tools
+
+| Tool | Purpose | Risk | Notes |
+|---|---|---|---|
+| `read` | Read file contents (optional offset/limit) | read | Pinned `os.Root`; binary files produce a short error; streams bounded ranges |
+| `write` | Create or overwrite a file | write | Rooted atomic same-directory replace; new files honor umask; replacements preserve mode |
+| `edit` | Exact string replace or patch | write | 8 MiB input/result and 10,000-match caps; bounded preview; fails on ambiguity unless `replace_all` |
+| `bash` | Run a shell command in cwd | exec | POSIX `sh`; timeout, process-group cleanup, pipe-drain bounds, combined output cap |
+| `grep` | Search text files with RE2 and line numbers | read | Pure Go; glob filter, case option, match/output caps |
+| `glob` | Match regular file paths | read | Pure Go; recursive `**` segments and result/output caps |
+| `ask_user` | Request one to three user decisions or free-form answers | read/interaction | TUI prompt, SDK callback, or RPC reply/reject; automatic Other choice |
+| `update_plan` | Emit a turn-local implementation checklist | read | Direct Default-mode schema; unavailable/rejected in Plan mode; not persisted |
+| `search_tools` | Find deferred tools by capability | read | Always-loaded recovery schema; returns top matching schemas |
+| `session_search` | Search prior same-project sessions | read | Disposable SQLite FTS5 corpus over names, user/assistant text, and summaries |
+| `session_reference` | Import a bounded snapshot of a prior branch | read | At most three tip-pinned, untrusted snapshots per branch |
+| `webfetch` | Fetch a public HTTP(S) resource | network | Deferred schema; Surf Chrome 150; secure TLS; HTML to Markdown; SSRF, timeout, redirect, media-type, and output bounds |
+
+`grep`, `glob`, `ask_user`, `update_plan`, `search_tools`, and session-history
+tools are registered in the default builtin registry. `webfetch` is the first
+built-in deferred tool, so the normal app also loads the small direct
+`search_tools` recovery schema while keeping the full `webfetch` schema out of
+unrelated provider requests. `ask_user` has no discovery metadata: its full
+schema is sent with the other direct built-ins on every tool-capable request,
+and the explicit SDK/CLI `Tools` allowlist remains authoritative. A choice
+returns its exact label; Other and free-form responses return trimmed text.
+The model-facing result is ordered JSON.
+
+### Tool interfaces
 
 ```go
 type ToolSchema struct {
@@ -394,14 +501,14 @@ type ToolSchema struct {
 type ToolResult struct {
     Content []ContentBlock
     IsError bool
-    // Details is tool-private metadata for TUI (e.g. diff stats); not sent to the model unless mirrored into Content.
+    // Details is tool-private metadata for the TUI (for example diff stats);
+    // it is not sent to the model unless mirrored into Content.
     Details any
 }
 
 type ToolHost interface {
     CWD() string
-    // Roots returns path roots the tool may touch (cwd + explicit allows).
-    Roots() []string
+    Roots() []string // path roots the tool may touch (cwd + explicit allows)
     Permission() permission.Service
     EmitProgress(event ToolProgressEvent)
     Environ() []string
@@ -420,95 +527,34 @@ type Registry interface {
 }
 ```
 
-### 3.4 Session store
+### Path confinement and bounds
 
-```go
-type SessionHeader struct {
-    Version   int    `json:"v"` // current: 2
-    ID        string `json:"id"`
-    CreatedAt int64  `json:"created_at"`
-    CWD       string `json:"cwd"`
-    Name      string `json:"name,omitempty"`
-}
+File and search tools use pinned `os.Root` confinement: they resolve symlinks
+and require the final path under `Roots()` (cwd plus configured allows).
+Escapes via `..` or symlinks return `IsError` without panicking. Tool output
+defaults to a 256 KiB cap; read/search stream bounded data with explicit
+truncation markers; bash has a 120 s default timeout and a 10-minute
+stream-silence watchdog (`stream_idle_timeout_ms: -1` disables it). Writes
+stage content beside the destination, sync, and rename into place, preserving
+replacement modes. `webfetch` allows only public HTTP(S), disables environment
+proxies, validates every redirect, pins public addresses at dial time,
+verifies TLS certificates, rejects binary bodies, and labels returned content
+as untrusted external data.
 
-// SQLite stores the header in session_meta and entries in indexed rows.
-type Entry struct {
-    Type     string  `json:"type"` // message | compaction | meta
-    ID       string  `json:"id"`
-    ParentID string  `json:"parent_id,omitempty"`
-    Message  *Message `json:"message,omitempty"`
-    // compaction fields...
-}
+Search tools skip hidden/generated directories and symlink entries, honor
+hierarchical `.gitignore`/`.ignore`, bounded global/trusted-project YAML
+policy, hidden/generated defaults, and per-call soft-ignore overrides. Grep
+supports RE2, line numbers, case-insensitive search, path globs, and
+match/output caps. Glob supports ordinary path patterns plus recursive `**`.
 
-type SessionStore interface {
-    ID() string
-    Path() string // empty if in-memory
-    Header() SessionHeader
+### Permissions and trust
 
-    Append(entry Entry) error
-    // BranchTip returns the active leaf id.
-    BranchTip() string
-    // SetBranchTip moves the active cursor (tree navigation).
-    SetBranchTip(id string) error
-    // Messages returns linearized messages from root → tip.
-    Messages() ([]Message, error)
-    Fork(fromID string) (SessionStore, error)
-    Close() error
-}
-
-type SessionIndex interface {
-    List(cwd string) ([]SessionInfo, error)
-    Open(path string) (SessionStore, error)
-    Create(cwd string) (SessionStore, error)
-}
-```
-
-**On-disk layout**
-
-```
-~/.snow/sessions/<cwd-encoded>/<timestamp>_<suffix>.db
-```
-
-Current directories use `cwd-v2-<sha256(normalized-absolute-cwd)>`; the legacy
-flattened encoder remains discoverable with stored-CWD verification. The SQLite
-schema is **snow-owned**; old JSONL sessions are intentionally not migrated.
-
-Prior-session reuse is deliberately narrower than a general memory product.
-`session_search` rebuilds a disposable SQLite FTS5 corpus from same-project root
-session names, direct user/final assistant text, and compaction summaries.
-`session_reference` imports at most three tip-pinned, bounded, untrusted
-snapshots per target branch. Tool content, reasoning, images, provider-private
-data, credentials, permission/trust state, goals, queues, and child databases
-are excluded; references transfer information only and no authority.
-
-### 3.5 Agent
-
-```go
-type Agent interface {
-    Prompt(ctx context.Context, text string, opts ...PromptOption) error
-    Steer(text string) error     // active-run queue; next safe assistant+tool boundary
-    FollowUp(text string) error  // active-run queue; after natural stop and all steering
-    PendingInputs() protocol.InputQueue
-    Abort(ctx context.Context) error
-    Subscribe(func(AgentEvent)) (unsubscribe func)
-
-    SetModel(model Model) error
-    SetThinking(level ThinkingLevel)
-    Model() Model
-    Messages() []Message
-    IsRunning() bool
-}
-
-type AgentEvent struct {
-    Type string // session_updated | text_delta | thinking_delta | tool_start |
-                // tool_progress | tool_end | permission_request |
-                // user_input_request | usage |
-                // turn_done | error | aborted
-    // payload fields omitted — see pkg/protocol/events.go
-}
-```
-
-### 3.6 Permission
+Permission modes are `ask`, `allow`, and `deny`. Write/edit/bash and network
+tools are permission-gated; `read` remains allowed in deny/ask modes, while
+deferred `webfetch` is filtered in deny mode. Unknown tool names return a
+`tool_result` error string, panics are recovered to error results, and exact
+consecutive repeats are advisory-loop-guarded without changing permission or
+execution policy.
 
 ```go
 type Mode string // ask | allow | deny
@@ -526,525 +572,343 @@ type Decision string // allow | deny | allow_session | allow_always
 type Service interface {
     Mode() Mode
     SetMode(Mode)
-    // Authorize blocks when mode=ask and no cached rule matches.
     Authorize(ctx context.Context, req Request) (Decision, error)
     Remember(req Request, d Decision) // session or persistent scope
 }
 ```
 
-Interactive TUI supplies an `Asker`; headless SDK defaults to `deny` for mutating tools unless `Options.PermissionMode` or auto-approve is set.
+The interactive TUI supplies an `Asker`; headless SDK defaults to `deny` for
+mutating tools unless the caller deliberately opts into `allow`/`AutoApprove`
+in a trusted environment. Project trust is resolved on canonical paths before
+TUI runtime construction; every undecided interactive project prompts, while
+headless `ask` remains fail-closed. Runtime `/trust` changes apply on the next
+launch. Trust controls input loading (project config, configured system-prompt
+files, plugins, MCP declarations, skills) and is not a sandbox.
 
-### 3.7 Auth lifecycle and store
+## Config and project context
 
-```go
-type CredentialType string // api_key | oauth
+Global configuration lives in `~/.snow/config.json`; secrets in
+`~/.snow/auth.json`; trust decisions in `~/.snow/trust.json`; sessions under
+`~/.snow/sessions/`; and TUI bindings/themes under `~/.snow/keybindings.yaml`
+and `~/.snow/themes/*.yaml`. Project-scoped overrides use
+`<project>/.snow/config.json` and are trust-gated. See
+`docs/configuration.md`.
 
-type Credential struct {
-    Provider string          `json:"-"`
-    Type     CredentialType  `json:"type"`
-    Key      string          `json:"key,omitempty"`
-    Access   string          `json:"access,omitempty"`
-    Refresh   string          `json:"refresh,omitempty"`
-    Expires   int64           `json:"expires,omitempty"` // unix seconds
-    AccountID string          `json:"accountId,omitempty"` // pi/Codex OAuth compatibility
-    Extra     map[string]any  `json:"extra,omitempty"`
-}
+Defaults include provider `opencode-go`, permission `ask` (headless SDK
+defaults to deny), thinking `off`, 256 KiB tool output, a 120 s bash timeout,
+a 10-minute stream-silence watchdog, and a 100 KiB project-context cap.
 
-type Store interface {
-    Get(provider string) (Credential, bool)
-    Put(provider string, cred Credential) error
-    Delete(provider string) error
-    Update(provider string, fn UpdateFunc) (Credential, bool, error)
-    // Path for diagnostics (never print secrets).
-    Path() string
-}
+### Context assembly
 
-type Driver interface {
-    Descriptor() Descriptor
-    Inspect(Credential) (Status, error) // local and side-effect-free
-    Login(context.Context, LoginRequest, Interaction) (Credential, error)
-    Validate(Credential) error
-    NeedsRefresh(Credential, time.Time) bool
-    Refresh(context.Context, Credential, RefreshReason) (Credential, error)
-}
-```
+1. Base preamble: explicit SDK `SystemPrompt`, trusted-project configured
+   file, global configured file, or embedded `internal/context/system.md`.
+2. `AGENTS.md` walk from cwd upward (bounded by depth and total bytes);
+   nearest-first, always loaded, and documented as a residual prompt-injection
+   risk.
+3. Optional `CLAUDE.md` compatibility read (off by default in current app
+   wiring).
+4. Startup skill metadata, MCP instructions, and subagent guidance when
+   enabled.
+5. Per-request collaboration-mode instructions from embedded
+   `internal/plan/system.md` and activated-skill instructions.
+6. Goal-bearing turns receive separate trailing internal context rendered from
+   embedded templates under `internal/goal/`; this is not system context.
 
-`auth.Service` is the single owner of explicit/store/environment precedence,
-provider isolation, login persistence, refresh coordination, compare-and-swap
-token rotation, status, and logout. Generic API-key drivers cover required and
-optional Bearer credentials. OAuth wire behavior stays in provider-local
-drivers. `provider.Registry` binds each built-in transport to one driver and
-builds the credential-free runtimes used by root and child agents.
+Configured prompt files are bounded by `context_cap_bytes`; project prompt
+paths are trust-gated, confined to the canonical project root, and reject
+symlink components. `AGENTS.md` content uses the same byte budget and adds a
+truncation notice when needed.
 
----
+## Sessions and storage
 
-## 4. Built-in tools
-
-### 4.1 MVP set
-
-| Tool | Purpose | Permission risk | Notes |
-|------|---------|-----------------|-------|
-| `read` | Read file contents (optional offset/limit) | read | Pinned `os.Root`; binary → short error; streams bounded ranges |
-| `write` | Create/overwrite file | write | Rooted atomic same-directory replace; new files honor umask; replacements preserve mode |
-| `edit` | Exact string replace / patch | write | 8 MiB input/result and 10,000-match caps; bounded preview; fails on ambiguity unless `replace_all` |
-| `bash` | Run shell command in cwd | exec | POSIX `sh`; timeout, process-group cleanup, pipe-drain bounds, and combined output cap |
-| `grep` | Search text files with RE2 and line numbers | read | Pure Go; glob filter, case option, match/output caps |
-| `glob` | Match regular file paths | read | Pure Go; `**` recursive segments and result/output caps |
-| `ask_user` | Request one to three user decisions or free-form answers | read/interaction | Direct schema; TUI prompt, SDK callback, or RPC reply/reject; automatic Other choice |
-| `update_plan` | Emit a turn-local implementation checklist | read | Direct Default-mode schema; structured cloned event; unavailable/rejected in Plan Mode; not persisted |
-| `webfetch` | Fetch a public HTTP(S) resource | network | Deferred schema; Surf Chrome 150; secure TLS; HTML → Markdown; SSRF, timeout, redirect, media-type, and output bounds |
-
-`grep`, `glob`, `ask_user`, `update_plan`, and `webfetch` are registered in the default builtin registry.
-The file search tools skip
-hidden/generated directories and symlink entries, and all search roots still
-pass through the path guard. These reduce bash round-trips. `webfetch` is the
-first built-in deferred tool, so the normal app also
-loads the small direct `search_tools` recovery schema while keeping the full
-`webfetch` schema out of unrelated provider requests.
-
-### 4.3 Schemas (conceptual)
-
-**read**
-
-```json
-{
-  "name": "read",
-  "description": "Read a UTF-8 text file within allowed roots.",
-  "parameters": {
-    "type": "object",
-    "required": ["path"],
-    "properties": {
-      "path": { "type": "string" },
-      "offset": { "type": "integer", "description": "1-based start line" },
-      "limit": { "type": "integer", "description": "max lines" }
-    }
-  }
-}
-```
-
-**write**
-
-```json
-{
-  "name": "write",
-  "parameters": {
-    "type": "object",
-    "required": ["path", "content"],
-    "properties": {
-      "path": { "type": "string" },
-      "content": { "type": "string" }
-    }
-  }
-}
-```
-
-**edit**
-
-```json
-{
-  "name": "edit",
-  "parameters": {
-    "type": "object",
-    "required": ["path", "old_str", "new_str"],
-    "properties": {
-      "path": { "type": "string" },
-      "old_str": { "type": "string" },
-      "new_str": { "type": "string" },
-      "replace_all": { "type": "boolean", "default": false }
-    }
-  }
-}
-```
-
-**bash**
-
-```json
-{
-  "name": "bash",
-  "parameters": {
-    "type": "object",
-    "required": ["command"],
-    "properties": {
-      "command": { "type": "string" },
-      "timeout_ms": { "type": "integer", "default": 120000 }
-    }
-  }
-}
-```
-
-**webfetch**
-
-```json
-{
-  "name": "webfetch",
-  "discovery": {"mode": "deferred", "namespace": "web"},
-  "parameters": {
-    "type": "object",
-    "required": ["url"],
-    "properties": {
-      "url": {"type": "string"},
-      "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 30000}
-    }
-  }
-}
-```
-
-**ask_user**
-
-```json
-{
-  "name": "ask_user",
-  "parameters": {
-    "type": "object",
-    "required": ["questions"],
-    "properties": {
-      "questions": {
-        "type": "array",
-        "minItems": 1,
-        "maxItems": 3,
-        "items": {
-          "required": ["id", "header", "question"],
-          "properties": {
-            "id": {"type": "string"},
-            "header": {"type": "string"},
-            "question": {"type": "string"},
-            "options": {"type": "array", "minItems": 2, "maxItems": 3}
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-`ask_user` has no discovery metadata: its full schema is sent with the other
-direct built-ins on every tool-capable request. The explicit SDK/CLI `Tools`
-allowlist remains authoritative. A choice returns its exact label; Other and
-free-form responses return trimmed text. The model-facing result is ordered
-JSON: `{"answers":[{"id":"...","answer":"..."}]}`.
-
-### 4.4 Safety behaviors (all tools)
-
-1. **Path confinement:** resolve symlinks; require final path under `Roots()` (cwd + configured allows).
-2. **Deny escape:** `..` and symlink escapes return `IsError` without throwing panics.
-3. **Output caps:** default 256 KiB per tool result; read/search stream bounded data and return explicit truncation markers.
-4. **Atomic writes:** write stages content beside the destination, syncs it, and renames it into place; existing file permissions are retained.
-5. **Secrets:** redaction hooks optional later; never echo auth file contents.
-6. **bash:** `Setpgid` / process-group kill plus bounded `Cmd.WaitDelay` on supported Unix hosts.
-7. **write/edit:** optional backup sibling `.snow-bak` **off** by default (explicit config).
-8. **webfetch:** allow only public HTTP(S), disable environment proxies, validate every
-   redirect, resolve and pin public addresses at dial time, verify TLS certificates,
-   reject binary bodies, and label returned content as untrusted external data.
-
-### 4.5 Tool dispatch policy
-
-- Parallel tool calls: **serial in MVP** (simpler permissions + FS races); parallel opt-in later for read-only tools.
-- `read`, `grep`, `glob`, and `ask_user` are `RiskRead`; `webfetch` is `RiskNet` and remains
-  deferred/hidden in deny mode; write/edit/bash require permission according to mode.
-- Unknown tool name → `tool_result` error string, not hard crash.
-- Panic in tool → recovered to error result.
-- Exact consecutive repeats are advisory-loop-guarded at escalating thresholds;
-  bookkeeping tools may be transparent, and no reminder changes permission or
-  execution policy.
-
----
-
-## 5. Auth and providers
-
-### 5.1 Credential file
-
-**Path:** `~/.snow/auth.json`  
-**Permissions:** `0600` (create/truncate with user-only mode)
-
-```json
-{
-  "opencode-go": {
-    "type": "api_key",
-    "key": "oc-..."
-  },
-  "chatgpt": {
-    "type": "oauth",
-    "access": "...",
-    "refresh": "...",
-    "expires": 1730000000,
-    "extra": {
-      "account_id": "optional"
-    }
-  }
-}
-```
-
-### 5.2 Resolution order
-
-For a provider P:
-
-1. Explicit CLI flag / SDK option (`--api-key`, `Options.Credential`)
-2. `auth.json` entry for P
-3. Environment variable for P
-4. Else: interactive `/login` (TUI) or a typed login-required error (headless)
-
-The agent does not perform these steps. `auth.Service` resolves the credential,
-then `provider.Authenticated` supplies it to the registered transport for both
-catalog and chat requests. A remote OAuth rejection can request one guarded
-provider-scoped refresh through the same service; API keys remain
-non-refreshable. CLI and TUI status/login/logout use the same registered drivers.
-
-| Provider | Env var | auth.json key |
-|----------|---------|---------------|
-| OpenCode Go | `OPENCODE_API_KEY` | `opencode-go` |
-| OpenAI-compatible | `OPENAI_API_KEY` (optional) | `openai-compatible` |
-| ChatGPT Codex | *(none for OAuth)* | `chatgpt` |
-
-> Note: pi stores OpenCode Go under `opencode-go` and also accepts `OPENCODE_API_KEY` shared with OpenCode Zen. snow MVP **only** wires OpenCode Go; do not silently alias Zen models unless added later.
-
-### 5.3 OpenCode Go (API key)
-
-**Role:** primary API-key provider for MVP.
-
-| Item | Decision |
-|------|----------|
-| Provider ID | `opencode-go` |
-| Auth | Bearer API key |
-| Wire protocol | Verified OpenAI-compatible Chat Completions with SSE |
-| Base URL | `https://opencode.ai/zen/go/v1`; overridable with `base_url` |
-| Default model | `kimi-k2.6`, pinned while the live catalog is refreshed |
-| Streaming | SSE `text/event-stream` |
-| Tools | OpenAI-style `tools` / `tool_calls` normalized to snow events |
-
-**Adapter responsibilities**
-
-- Attach `Authorization: Bearer <key>`.
-- Map stream chunks → `StreamEvent`.
-- Map finish reasons → `stop|length|tool_use|error`.
-- Surface rate-limit / quota errors as structured `EvStreamError`.
-- Fetch live `GET /models` availability at startup and enrich matching IDs from
-  OpenCode's public `https://models.dev/api.json` catalog; never send the API key
-  to the metadata host, and let direct gateway fields win.
-- Normalize display, context, output, pricing, tool/vision, and reasoning metadata.
-- Fall back to the pinned static default without failing startup or logging keys.
-- Map normalized effort to OpenAI `reasoning_effort`; reject levels not advertised by the selected model.
-
-**Config knobs**
-
-```json
-{
-  "providers": {
-    "opencode-go": {
-      "base_url": "https://opencode.ai/zen/go/v1",
-      "default_model": "kimi-k2.6",
-      "api_key_env": "OPENCODE_API_KEY"
-    }
-  }
-}
-```
-
-### 5.4 ChatGPT Plus/Pro (Codex OAuth)
-
-**Current implementation status:** `internal/provider/chatgpt` performs a
-side-effect-free check of OAuth credentials, browser PKCE and device-code login,
-compatible credential imports, guarded automatic refresh, an origin-and-account-scoped
-ETag model cache, and hardened Codex Responses SSE streaming with branch-scoped
-prompt affinity, zstd compression, bounded pre-output transient retries, structured
-error diagnostics, and mandatory terminal events. The TUI/CLI report configured,
-expired, or missing ChatGPT auth without refreshing during checks.
-The implementation and endpoint notes below follow current official Codex behavior.
-
-**Role:** subscription path for users with ChatGPT Plus/Pro via Codex-for-OSS compatible auth.
-
-| Item | Decision |
-|------|----------|
-| Provider ID | `chatgpt` |
-| Auth | OAuth2 authorization code + PKCE (browser) with **paste-redirect fallback** for SSH |
-| Token storage | `auth.json` oauth fields; auto-refresh on 401/expiry |
-| API | Codex / ChatGPT harness endpoints as documented for OSS clients — **adapter-isolated** |
-| Models | Authenticated `/backend-api/codex/models` discovery with client-version query, versioned origin-and-account-scoped ETag/TTL cache, and bundled offline fallback |
-
-**Login UX (`/login chatgpt`)**
-
-1. Generate PKCE verifier/challenge + state.
-2. Open the system browser to the authorization URL, or print it with `--no-open`.
-3. The loopback server on `localhost:1455/auth/callback` receives the code; the CLI can instead accept the complete callback URL when the port is occupied or the browser is remote.
-4. Exchange the code for access/refresh tokens and atomically write `auth.json` with mode `0600`.
-5. Validate JWT/account metadata without persisting the ID token.
-6. Force an authenticated model-catalog refresh while retaining the bundled fallback on outage.
-
-**Logout:** delete the `chatgpt` credential and reset the in-memory catalog to the bundled fallback.
-
-**Refresh and inference resilience:** before `Chat`, refresh credentials expiring within five minutes under the cross-process auth-store lock. A pre-stream 401 permits one guarded forced refresh and one retry; permanent refresh rejection requests re-login, while transient failures preserve the credential. Inference uses a non-secret SHA-256 session/branch/purpose affinity key in the Codex body and headers, zstd-compresses bodies at 32 KiB, and retries network, 408, 500, 502, 503, 504, or immediate pre-output overload/truncation failures twice with capped `Retry-After`-aware backoff. It never retries after normalized stream activity or for usage/client errors. WebSocket continuation remains deferred.
-
-#### Compliance and risk (explicit)
-
-- Follow **OpenAI Codex for OSS** guidance; this harness is a third-party client.
-- Do not scrape undocumented web chat APIs if an official OSS path exists.
-- Subscription benefits, rate limits, and ToS can change; isolate all HTTP paths in `internal/provider/chatgpt`.
-- Document in README: user is responsible for account eligibility (Plus/Pro) and acceptable use.
-- Never log access/refresh tokens.
-
-### 5.5 OpenAI-compatible Responses and Chat Completions
-
-`internal/provider/openaicompat` implements the legacy `openai-compatible`
-provider plus any number of user-named compatible profiles. Each profile requires
-an absolute HTTP(S) API root or full `/responses`/`/chat/completions` URL,
-derives sibling `GET /models`, and has an isolated auth/config key. Optional
-Bearer auth comes from explicit options or `auth.json`; `OPENAI_API_KEY` is also
-a fallback for the legacy profile only.
-ID-only model records are tool-capable; optional image/reasoning/summary/verbosity
-fields are emitted only from advertised metadata. Responses is preferred and
-uses the bounded request/SSE codec shared with ChatGPT through
-`internal/provider/responsesapi`. An HTTP 404/405/501 from Responses selects and
-caches a Chat Completions/SSE fallback backed by the bounded OpenCode-compatible
-codec; OAuth, Codex headers, refresh, and catalog behavior remain isolated.
-
-There is no default endpoint. Discovery chooses the first valid model only when
-no explicit/default model exists; otherwise unavailable discovery is nonfatal.
-Named profiles are persisted as provider entries with
-`type: "openai-compatible"`; the profile ID is reused for auth storage, model
-identity, CLI selection, and TUI labels. Custom/Azure headers and query
-parameters remain excluded. The TUI `/login openai-compatible` flow
-transactionally captures the profile name, endpoint, and optional masked key,
-rebuilds the runtime adapter, and refreshes discovery. Configured endpoints are
-operator-trusted; userinfo/query/fragment URLs and cross-origin redirects are
-rejected, and provider errors redact active keys.
-
-### 5.6 Provider registry
+Sessions are SQLite databases with metadata and indexed entries. Messages
+carry `id` and `parent_id`; `BranchTip` determines the linearized
+conversation. The model is append-only and tree-shaped: preserve it when adding
+resume or fork features.
 
 ```go
-registry.Register(opencodego.New(cfg))
-registry.Register(openaicompat.New(cfg))
-registry.Register(chatgpt.New(cfg, oauthRunner))
+type SessionStore interface {
+    ID() string
+    Path() string // empty if in-memory
+    Header() SessionHeader
+
+    Append(entry Entry) error
+    BranchTip() string
+    SetBranchTip(id string) error
+    Messages() ([]Message, error) // linearized root → tip
+    Fork(fromID string) (SessionStore, error)
+    Close() error
+}
+
+type SessionIndex interface {
+    List(cwd string) ([]SessionInfo, error)
+    Open(path string) (SessionStore, error)
+    Create(cwd string) (SessionStore, error)
+}
 ```
 
-CLI `--provider <id> --model <id>` and TUI `/model` both resolve through the same registry.
+The current on-disk schema version is 9. Tables include `session_meta`
+(header, title, provenance), `entries` (append-only messages and compaction
+entries), `session_branches` (branch tips and lineage), `thread_state`
+(collaboration mode per branch), `thread_goals` and related cost/deferral
+tables (persistent Thread Goals), and `subagent_threads` (child topology).
+Forks copy branch state, goal estimates, managed objective resources, and
+subagent topology where applicable. WAL transactions and indexed branch
+queries keep open and reload bounded; opening never performs a full scan.
 
-### 5.7 Implementation-time verify checklist (providers)
+### On-disk layout
 
-Must be completed in Phase 1–2 coding, results folded into adapter constants/tests:
-
-- [x] OpenCode Go base URL(s) and auth header scheme — https://opencode.ai/zen/go/v1, `Authorization: Bearer <key>` (verified live: GET /models → 200; bad key on /chat/completions → 401 JSON)
-- [x] OpenCode Go streaming endpoint path (chat completions vs responses) — OpenAI-compatible `POST /chat/completions` (SDK `@ai-sdk/openai-compatible`; no `responses` API)
-- [x] OpenCode Go tool-call streaming shape — OpenAI `delta.tool_calls` with index/id/function fragments
-- [x] OpenCode Go default + available model IDs — live catalog has 25 models incl. kimi-k2.6 (default), kimi-k3, deepseek-v4-pro/flash, qwen3.7-max/plus, glm-5.2, minimax-m3, gpt-5.6-luna, grok-4.5
-- [x] ChatGPT/Codex OAuth authorize/token URLs and client id requirements researched against pi and official Codex
-- [x] ChatGPT/Codex required headers researched (`Authorization`, `chatgpt-account-id`, `originator`)
-- [x] ChatGPT/Codex models loaded from the authenticated backend catalog with a small bundled offline compatibility fallback
-- [x] Error body shapes for quota/auth failures — normalized without exposing credentials
-- [x] Cache token fields mapped from Codex Responses usage when present
-
----
-
-## 6. TUI
-
-### 6.1 Stack
-
-| Library | Use |
-|---------|-----|
-| [`charmbracelet/bubbletea`](https://github.com/charmbracelet/bubbletea) | Elm-architecture TUI runtime |
-| [`charmbracelet/lipgloss`](https://github.com/charmbracelet/lipgloss) | Style / layout |
-| [`charmbracelet/bubbles`](https://github.com/charmbracelet/bubbles) | Textarea, viewport, spinner, list |
-| [`charmbracelet/glamour`](https://github.com/charmbracelet/glamour) | Markdown render (assistant messages) |
-| [`charmbracelet/huh`](https://github.com/charmbracelet/huh) optional | Forms for login/permissions |
-
-### 6.2 Layout
-
-```
-┌──────────────────────────────────────────────────────────┐
-│ header (optional): version, shortcuts hint               │
-├──────────────────────────────────────────────────────────┤
-│                                                          │
-│  finalized transcript (native terminal scrollback)       │
-│   - user bubbles                                         │
-│   - assistant markdown + persistent streamed thinking    │
-│   - tool cards (name, status, truncated output)          │
-│   - errors / notifications                               │
-│                                                          │
-├──────────────────────────────────────────────────────────┤
-│  permission modal / model picker (overlays when active)  │
-├──────────────────────────────────────────────────────────┤
-│  editor (textarea)                                       │
-│  multi-line; paste; @ file path completion (phase 2)     │
-├──────────────────────────────────────────────────────────┤
-│  footer: cwd · session · provider/model · tokens · state │
-└──────────────────────────────────────────────────────────┘
+```text
+~/.snow/sessions/<cwd-encoded>/<timestamp>_<suffix>.db
+<session>.db.agents/   # optional private child databases; excluded from picker
 ```
 
-### 6.3 Slash commands (MVP → phase 2)
+Current directories use `cwd-v2-<sha256(normalized-absolute-cwd)>`; the legacy
+flattened encoder remains discoverable with stored-CWD verification. The
+schema is Snow-owned; old JSONL sessions are intentionally not migrated.
 
-| Command | Phase | Behavior |
-|---------|-------|----------|
-| `/login` | 1–2 | Provider picker; API key prompt or OAuth |
-| `/logout` | 2 | Clear provider creds |
-| `/model` | 1 | Interactive model picker; selection persists to `~/.snow/config.json` |
-| `/settings` | 2 | Persistent model, thinking, ChatGPT reasoning-summary/text-verbosity, and permission panel |
-| `/new` | 1 | New session |
-| `/resume [path]` | 2 | Pick a current-directory session, or resume an explicit SQLite path |
-| `/permissions` | 2 | ask/allow/deny; interactive Allow/Allow-always/Deny picker on requests (no typing) |
-| `/compact` | 2 | Manual compaction; all turn types also compact automatically at a configurable pressure threshold with one overflow-repair retry |
-| `/sessions` | 2 | Open a compact picker for persisted sessions in the current directory |
-| `/tree` | 4 | Select or fork a durable branch in the active session |
-| `/fork` | 4 | Choose a same-session branch, independent local session, or detached Git worktree fork |
-| `/quit` | 1 | Exit |
+### Forks
 
-### 6.4 Keybindings (defaults)
+- Same-database branches share one file and diverge at a `BranchTip`.
+- Physical exact-entry forks create an independent session with provenance.
+- Detached clean Git-worktree forks use a bounded direct-argument Git utility.
+- Prior-session reference is deliberately narrower than a general memory
+  product: `session_search` rebuilds a disposable SQLite FTS5 corpus, and
+  `session_reference` imports at most three tip-pinned, bounded, untrusted
+  snapshots per target branch. Tool content, reasoning, images,
+  provider-private data, credentials, permission/trust state, goals, queues,
+  and child databases are excluded; references transfer information only and
+  no authority.
 
-| Key | Action |
-|-----|--------|
-| `enter` | Send while idle; queue one steering message while busy |
-| `alt+enter` | Newline while idle; queue one follow-up while busy |
-| `ctrl+j` | Reliable newline while idle or busy |
-| `ctrl+c` / `esc` | Abort running turn, clear queues, and restore queued TUI text |
-| `ctrl+d` | Quit on empty editor |
-| `ctrl+l` | `/model` |
-| wheel/trackpad (`tui.mouse: true`) | Scroll transcript viewport |
-| primary-button drag (`tui.mouse: true`) | Select, highlight, and copy transcript text |
-| `F6` | Toggle app mouse handling/native terminal selection |
-| `pgup/pgdn` | Scroll transcript viewport |
+## Plugins
 
-Implemented: versioned YAML overrides load from `$SNOW_HOME/keybindings.yaml`
-and trusted project `.snow/keybindings.yaml`; custom semantic adaptive themes
-load from bounded `themes/*.yaml` directories with project-over-global
-precedence, strict validation, diagnostics, and safe emergency bindings.
+The extensibility core is implemented in `pkg/plugin`, `internal/tools`, and
+`internal/plugin`. Static Go plugins use `Manifest`, `Register`, and `Close`;
+no Go shared-object loading is used. The manager owns registration, namespaced
+tool descriptors, event subscriptions, diagnostics, and reverse-order
+lifecycle.
 
-### 6.5 Event → UI mapping
+External runtimes use JSON-RPC 2.0 JSONL on stdin/stdout, with stderr reserved
+for bounded diagnostics. Request IDs are strings and one reader multiplexer
+supports concurrent calls. The host sends `initialize`, `tools/list`,
+`tools/call`, and `shutdown`; progress, explicitly subscribed sanitized
+observation events, cancellation, and bounded logs are notifications. Empty
+`supported_events` means no event fanout; delivery is best effort and cannot
+block the agent loop.
 
-| AgentEvent | UI |
-|------------|----|
-| `text_delta` | Append to live assistant buffer |
-| `thinking_delta` | Append to persistent muted Markdown thinking region; show animated wait state before the first delta |
-| `tool_start` | Open native tool card (correlation id remains protocol-only) |
-| `tool_progress` | Append bounded progress line |
+External tool risk is optional (`read|write|exec|network`) and fails closed to
+`exec`; per-tool capabilities and private raw-JSON result details survive
+registry adaptation. Frames, input/output, progress, stderr, timeouts,
+cancellation, and concurrent calls are bounded. Commands are argv arrays and
+never shell strings.
+
+Project-local plugin declarations are trust-gated. Trust controls input
+loading, not plugin permissions or OS access; untrusted plugins need a
+container/VM/OS sandbox. Persistent JavaScript and Python examples implement
+protocol v2 under `examples/plugins`. `snow plugin check` performs a
+provider-free live handshake with schema/event/risk and bounded-diagnostics
+reporting, while side-effect-free `list|get` and restart-scoped
+`add|enable|disable|remove` manage global or canonical-project declarations.
+Adds stage disabled by default, targeted raw-JSON updates preserve unknown
+fields, and global/project/explicit declarations merge by ID in increasing
+precedence. The canonical wire contract is `docs/plugin-protocol.md`; runtime
+selection benchmarks and deferrals are in
+`docs/plugin-js-python-research.md`.
+
+## MCP
+
+`internal/mcp` uses the official `modelcontextprotocol/go-sdk` v1.7.0. It
+negotiates the current stateless `2026-07-28` protocol and the SDK's supported
+legacy revisions across stdio and Streamable HTTP. Server tools become
+permissioned `mcp_<server>_<tool>` descriptors. Resources, templates,
+subscriptions, and prompts use generic namespaced bridges; tool-list changes
+atomically refresh the registry and BM25 index. Static HTTP headers and stdio
+environment values support environment expansion without entering
+diagnostics. Project server config is trust-gated. See `docs/mcp.md`.
+
+The CLI separates side-effect-free configuration inspection (`mcp list|get`)
+from live connection checks (`mcp check`) and atomically manages global or
+project declarations through `add|enable|disable|remove`. Targeted JSON
+updates preserve unrelated and unknown config fields; all inspection output
+redacts credential-bearing values. Optional MCP extension product surfaces
+(Apps, Tasks, Enterprise Managed Authorization) and interactive OAuth
+callback/token persistence remain deferred.
+
+## Agent Skills
+
+`internal/skills` implements the open Agent Skills `SKILL.md` format. Startup
+discovery strictly validates standard metadata and loads only names and
+descriptions from immutable rank-zero embedded skills plus standard user and
+trust-gated project paths under a 64 KiB catalog budget. The bundled
+`plugin-builder` skill provides supervised, restart-required protocol-v2
+authoring instructions and templates without extracting files beside the
+installed binary.
+
+`activate_skill` loads escaped full instructions, the TUI autocompletes
+enabled leading `$skill-name` directives, and a directive activates before
+provider dispatch while recording branch-scoped state.
+`read_skill_resource` uses immutable bounded `embed.FS` reads for built-ins or
+verifies the discovery-time directory identity before using a pinned
+per-operation `os.Root` for filesystem resources. Activated content is
+reattached on every provider call and reconstructed from successful markers
+and session history after resume so compaction does not drop it; current
+trust/disable/tool policy filters stale activations. See `docs/skills.md`.
+
+Global and trust-gated project `skills.disabled`/`skills.overrides` policy can
+hide entries from prompts and activation without deleting their files. CLI
+`skills list|get|enable|disable`, SDK `SkillInventory`, and read-only TUI
+`/skills` expose that inventory.
+
+## Tool routing
+
+Existing tools and zero-value discovery metadata remain always loaded.
+Native, Go-plugin, external-plugin, SDK, and MCP registrations may opt into
+`deferred` discovery per tool. Snow builds an in-memory Bleve BM25 index after
+startup registration, indexes only name/namespace/description/keywords, and
+loads the top five permitted full schemas from the authoritative registry.
+`search_tools` provides an explicit recovery pass, while index/search failures
+fall back to direct exposure for that turn. Routing emits structured metrics
+but does not make an extra LLM call. Optional semantic/vector routing remains
+deferred pending a locally downloadable open-source model with acceptable
+licensing, platform support, binary size, memory use, and startup time. See
+`docs/tool-routing.md`.
+
+## Subagents
+
+Snow implements a Codex-V2-style subagent tree directly. `internal/subagent`
+owns canonical path identity, parent edges, reservation/commit, validated
+state transitions, execution slots, limits, mail routing, child construction,
+persistence, and shutdown. Every child is an ordinary `internal/agent.Agent`;
+`agent` does not import `subagent`, and collaboration enters through
+registered tools plus a generic attributed mailbox.
+
+The seven direct model tools are `spawn_agent`, `list_subagent_models`,
+`send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and
+`list_agents`. Tool instances bind caller identity. Spawn and follow-up use
+`permission.RiskDelegate`; remaining controls use read risk. `wait_agent`
+supports the original next-activity barrier and an `until=all` descendant join
+with aggregate running/queued/terminal counts; SDK and RPC expose the same
+bounded join.
+
+The feature defaults off. Child concurrency is configurable and defaults to
+four simultaneously running children (bounded up to 256); the root does not
+consume a slot. Depth defaults to one and is bounded up to eight. Child
+authority is role-scoped: the `general` and `implementer` roles may use
+permission-gated `bash`, while `explorer` remains read/search-only. Recursion
+and file mutation are independent intersections of global and role policy;
+write/edit require both mutation switches.
+
+Parent and child transcripts never share a mutable cursor. Context forks use
+`ContextMessages`, strip unsafe or incomplete protocol artifacts, and repair
+IDs. Mailbox producers only enqueue; the admitted receiving loop drains before
+provider requests and atomically marks final mail unread at turn finalization,
+so external delivery cannot fork a serial tool-result chain.
+
+`protocol.AgentPath`, `AgentRef`, `SubagentState`, and `AgentMessage` are
+public DTOs. Ordinary child events carry `agent`; lifecycle and mail add
+`subagent` and `agent_message`; root events omit correlation for
+compatibility. SDK, RPC, print/JSON, TUI, and plugin observers consume one
+cloned event bus.
+
+Durable child histories default on, use private
+`<root>.db.agents/<thread>.db` databases, stay out of the session index, and
+load lazily. Cold open never restarts work; surfaces subscribe and call
+`ReadySubagents` before restored topology is published. Shutdown joins the
+manager before closing the root event bus and shared resources. Active
+children block root-session switching; after all children reach a terminal
+state, switching sessions detaches the old in-memory runtimes and restores the
+target session's topology.
+
+The shared cwd and OS authority are not a sandbox. Parallel edits can
+conflict, provider usage is independent, and child/repository output is
+untrusted. The TUI serializes root/child permission requests through an
+attributed FIFO broker; headless ask mode remains fail-closed. Child
+`ask_user` stays excluded, preventing ambiguous input routing. See
+`docs/subagents.md`.
+
+## Sandbox
+
+The optional smolvm backend isolates Bash only, not Snow, file tools,
+providers, plugins, MCP, or subagent control. It is persistent and
+project-scoped: an exact canonical-project operator store, sole project mount,
+explicit guest network, strict guest environment allowlist, fail-closed
+execution, and bounded lifecycle commands.
+
+CLI/TUI controls cover initialization, status, and CPU/memory/storage/overlay
+settings. The checksum-pinned user-local smolvm 1.8.1 bootstrap installs only
+the official default command; custom executable paths are never auto-installed
+or replaced. macOS persistent-disk formatter preflight and standard Homebrew
+path discovery are included, with a default Ubuntu image, digest-pinned
+Ubuntu/Go/Node/Python+uv profiles, and explicit host-return confirmation.
+Bash runs with the user's OS privileges unless an exact-project smolvm
+association is active. See `docs/sandbox.md`.
+
+## TUI and surfaces
+
+The Bubble Tea TUI is the interactive default. It renders a transcript with
+markdown, streaming updates, model/provider pickers, model-aware `/thinking`
+effort selection, login/logout, permissions, sessions, slash completion, and
+`@` file mentions. A leading `$` autocompletes enabled Agent Skills. Strict
+bounded YAML custom themes and keybindings support global and trusted-project
+precedence with warnings.
+
+The active composer queues plain Enter as steering and Alt+Enter as a
+follow-up; Ctrl+J remains multiline, and abort clears/restores queued TUI
+text. Queue delivery is bounded, one-at-a-time, after complete serial tool
+batches. Top-level Shift+Tab toggles Default/Plan mode (queued to `turn_done`
+while busy).
+
+The TUI uses Bubble Tea's alternate-screen, app-owned viewport so scrolling
+cannot reveal stale frame chrome. `tui.mouse` defaults to `true` so wheel and
+trackpad gestures stay inside Snow's viewport; primary drag uses Snow
+selection/copy, F6 toggles app/native mouse mode, and right-click switches to
+native mode for the terminal context menu. `Ctrl+V` attaches supported
+clipboard images in the agent composer or falls back to textarea paste.
+
+### Slash commands
+
+`/allow [always]`, `/default`, `/deny`, `/fork`, `/help`, `/login`,
+`/logout [provider]`, `/model`, `/plan [message]`, `/thinking`, `/new`,
+`/permissions`, `/resume`, `/agent [path]`, `/agent concurrency N`,
+`/sessions`, `/settings`, `/compact`, `/mcp`, `/sandbox`, `/skills`, `/tree`,
+`/quit`, and `/trust [allow|deny]`.
+
+### Event to UI mapping
+
+| AgentEvent | UI behavior |
+|---|---|
+| `text_delta` | Append to the live assistant buffer |
+| `thinking_delta` | Append to persistent muted Markdown thinking region; animated wait before first delta |
+| `tool_start` | Open a native tool card |
+| `tool_progress` | Append a bounded progress line |
 | `tool_end` | Finalize card with duration, status, and bounded output preview |
-| `permission_request` | Modal; block tool until decision |
-| `user_input_request` | Inline choice/free-form interaction; Esc rejects the tool and Ctrl+C aborts the turn |
+| `permission_request` | Modal; block the tool until decided |
+| `user_input_request` | Inline choice/free-form interaction; Esc rejects, Ctrl+C aborts the turn |
 | `usage` | Always-visible current/model context counter in the footer |
-| `turn_done` | Unlock editor; finalize bubbles |
+| `turn_done` | Unlock the editor; finalize bubbles |
 | `error` | Error banner |
 
-**Performance:** Bubble Tea renders after every `Update`, so the TUI coalesces
-queued stream events (bounded batch), caches stable transcript rendering, and
-composes one alternate-screen frame from a sticky header, Bubbles viewport,
-composer, and footer. `tui.mouse` defaults on so wheel input stays inside Snow; cell-motion mode also provides application-owned drag selection/copy. Runtime F6 toggles native selection mode, and Apple Terminal supports Fn-drag as its native-selection override while mouse mode remains enabled. It does not change renderer ownership. See `docs/tui-performance.md`.
+Bubble Tea renders after every `Update`, so the TUI coalesces queued stream
+events (bounded batch), caches stable transcript rendering, and composes one
+alternate-screen frame from a sticky header, Bubbles viewport, composer, and
+footer. See `docs/tui-performance.md`.
 
-### 6.6 Themes
+### Other surfaces
 
-Built-in adaptive, dark, light, and high-contrast palettes are joined by bounded
-YAML semantic token maps under `~/.snow/themes/*.yaml` and trusted project
-`.snow/themes/*.yaml`.
+- Print mode: `snow -p "prompt"` streams text to stdout.
+- JSON mode: `snow --mode json -p "..."` emits JSONL `protocol.AgentEvent`
+  lines for piping.
+- RPC mode: versioned JSONL over stdin/stdout (see the next section).
+- SDK: in-process `pkg/snowsdk`.
 
----
+## Public API surface
 
-## 7. SDK
+The stable public surface is `pkg/snowsdk`, `pkg/protocol`, and
+dependency-light `pkg/*` contracts such as `pkg/sandbox`.
 
-### 7.1 Goals
-
-- Embed the **same** agent loop as the CLI.
-- No bubbletea dependency in the hot path of library consumers.
-- Stable event types versioned in `pkg/protocol`.
-
-### 7.2 Surface
+### Go SDK
 
 ```go
-package snowsdk
-
 type Options struct {
     CWD             string
     Provider        string
@@ -1059,7 +923,6 @@ type Options struct {
     SystemPrompt    string
     Thinking        string
     UserInputHandler func(context.Context, protocol.UserInputRequest) (protocol.UserInputResponse, error)
-    // Credential overrides...
 }
 
 type Session struct { /* opaque */ }
@@ -1081,791 +944,192 @@ func (s *Session) Messages() ([]protocol.Message, error)
 func (s *Session) Close() error
 ```
 
-### 7.3 Example
+`pkg/snowsdk` embeds the same agent loop as the CLI and never imports
+bubbletea. See `docs/sdk.md`.
 
-```go
-s, err := snowsdk.Open(ctx, snowsdk.Options{
-    CWD:            ".",
-    Provider:       "opencode-go",
-    PermissionMode: "allow", // careful
-})
-if err != nil { log.Fatal(err) }
-defer s.Close()
+### RPC protocol
 
-s.Subscribe(func(ev protocol.AgentEvent) {
-    if ev.Type == "text_delta" {
-        fmt.Print(ev.Text)
-    }
-})
-
-if err := s.Prompt(ctx, "List Go files and summarize main packages."); err != nil {
-    log.Fatal(err)
-}
-```
-
-### 7.4 Print / JSON CLI mode
-
-```bash
-snow -p "fix the build" --provider opencode-go
-snow --mode json -p "..."    # JSONL events to stdout
-```
-
-JSON event lines mirror `protocol.AgentEvent` for easy piping.
-
-### 7.5 RPC mode
-
-Versioned JSONL over stdin/stdout (pi-inspired):
+Versioned JSONL over stdin/stdout:
 
 - First frame: `rpc_ready` with string protocol version, Snow build version,
   sorted protocol capabilities, and maximum input size.
 - Commands: `prompt`, `abort`, `user_input_reply`, `user_input_reject`,
   `models_list`, `subagent_models`, `set_model`, `set_thinking`,
-  `session_info`, …
-- Events: same as SDK events; RPC-only control frames are not persisted events.
-- Framing: split on `\n` only (not Unicode line separators).
-- Schemas: network-free Draft 2020-12 contracts under
+  `session_info`, and others.
+- Events mirror SDK events; RPC-only control frames are not persisted events.
+- Framing splits on `\n` only (not Unicode line separators).
+- Schemas are network-free Draft 2020-12 contracts under
   `pkg/protocol/schema/rpc/v1`.
 
 RPC prompts run asynchronously so the command reader remains available while
-the agent waits. Admission remains an immediate response for compatibility;
-exactly one later `prompt_completed` frame reports `completed`, `failed`, or
-`canceled` after all prompt events. Legacy same-ID prompt failure responses are
-retained. `user_input_reply.params` is a `UserInputResponse`;
+the agent waits. Admission returns an immediate response; exactly one later
+`prompt_completed` frame reports `completed`, `failed`, or `canceled` after
+all prompt events, and legacy same-ID prompt failure responses are retained.
+`user_input_reply.params` is a `UserInputResponse`;
 `user_input_reject.params` contains `request_id`. EOF closes the interactive
 input broker so pending/future questions fail fast while an ordinary one-shot
 prompt is still allowed to finish.
 
 Primary consumers are the checked-in dependency-light Python 3.9+ async and
-Node.js 22+ ESM/TypeScript SDKs, other non-Go hosts, and IDE bridges. They invoke
-an installed/explicit Snow binary and do not download one. Go hosts should
-prefer `snowsdk`.
+Node.js 22+ ESM/TypeScript SDKs, other non-Go hosts, and IDE bridges. They
+invoke an installed/explicit Snow binary and do not download one. Go hosts
+should prefer `pkg/snowsdk`. See `docs/rpc.md` and `docs/language-sdks.md`.
 
----
+### Language SDKs
 
-## 8. Config and project context
+Zero-runtime-dependency Python 3.9+ async and Node.js 22+ ESM/TypeScript
+packages use an explicitly installed external Snow binary, safe defaults,
+bounded JSONL routing, user-input handlers, and real-binary CI conformance
+tests. They never download a binary.
 
-### 8.1 Paths
+## Security model
 
-| Path | Purpose |
-|------|---------|
-| `~/.snow/config.json` | Global settings |
-| `~/.snow/system.md` | Suggested optional configured system preamble |
-| `~/.snow/auth.json` | Secrets |
-| `~/.snow/trust.json` | Project trust decisions |
-| `~/.snow/sessions/` | Pure-Go SQLite session databases |
-| `~/.snow/models-cache.json` | Reserved for future persistent catalog caching; current discovery is startup-only |
-| `~/.snow/keybindings.yaml` | Versioned global TUI binding overrides |
-| `~/.snow/themes/*.yaml` | Versioned custom semantic themes |
-| `~/.snow/search.yaml` | Git-aware grep/glob search policy |
-| `<project>/AGENTS.md` | Always-on project instructions (if present) |
-| `<project>/.snow/config.json` | Project settings (trust-gated) |
-| `<project>/.snow/plugins/*` | Phase 4 plugin manifests (trust-gated) |
+Snow and every subagent run with the user's OS privileges. Bash does too
+unless an exact-project smolvm association is active; that optional VM covers
+Bash only, not Snow, file tools, providers, plugins, MCP, or subagent
+control. Explicit sandbox init may run the checksum-pinned official smolvm
+1.8.1 installer as the user when the default command is absent; custom
+executable paths are never auto-installed or replaced.
 
-### 8.2 Global config shape (MVP)
+Subagents share cwd, filesystem, and process side effects and incur separate
+model usage. Parallel mutation can conflict; `general` and `implementer` roles
+may use permission-gated bash, while `explorer` remains read-only. File
+mutation requires both global and role mutation opt-ins.
 
-```json
-{
-  "default_provider": "opencode-go",
-  "default_model": "",
-  "permission_mode": "ask",
-  "default_project_trust": "ask",
-  "thinking": "off",
-  "reasoning_summary": "auto",
-  "text_verbosity": "low",
-  "system_prompt_file": "system.md",
-  "tool_output_bytes": 262144,
-  "bash_timeout_ms": 120000,
-  "providers": {
-    "opencode-go": { "base_url": "", "default_model": "" },
-    "chatgpt": { "default_model": "" }
-  },
-  "tui": {
-    "theme": "default",
-    "mouse": true
-  }
-}
+Permission gates cover write/edit/bash and network tools: `read` remains
+allowed in deny/ask modes, while deferred `webfetch` is filtered in deny mode.
+External plugin tool risk defaults to `exec`; less restrictive declarations
+are trusted metadata and do not constrain the child process.
+
+File tools resolve symlinks and enforce allowed roots; do not weaken this
+guard. Auth writes are atomic and `0600`; never log secrets or include them in
+errors. Tool output and command duration are bounded, and `context.Context`
+passes through network, process, file, and tool operations.
+
+SDK and headless code should use deny mode unless the caller deliberately opts
+into `allow`/`AutoApprove` in a trusted environment. Repository text,
+`AGENTS.md`, tool output, and external plugins are potentially prompt-injected
+and must not override the user's request or this guide. See `docs/security.md`.
+
+## Testing and verification
+
+The normal suite is network-free. Provider integration tests use local
+SSE/mocked servers; real provider checks require credentials and are manual.
+Run these commands from the repository root:
+
+```sh
+gofmt -w <changed-go-files>
+go test ./...
+go vet ./...
+go test -race ./internal/...
+go test -race ./internal/subagent ./internal/agent ./internal/app ./internal/session ./internal/rpc ./pkg/snowsdk
+go test ./internal/agent ./cmd/snow -count=1
+(cd examples/sdk && go test ./... && go run .)
+go build -o ./snow ./cmd/snow
+SNOW_TEST_BINARY="$PWD/snow" PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v
+(cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration && npm run pack:check)
+python3 examples/rpc/python/client.py --snow ./snow
+node examples/rpc/javascript/client.mjs ./snow
 ```
 
-### 8.3 Context assembly order
-
-1. Base preamble: explicit SDK `SystemPrompt`, trusted-project configured file,
-   global configured file, or embedded `internal/context/system.md`.
-2. `AGENTS.md` walk: cwd → parents (cap depth / total bytes).
-3. Optional `CLAUDE.md` compatibility read (**off** in current app wiring).
-4. Startup skill metadata, MCP instructions, and subagent guidance when enabled.
-5. Per-request collaboration-mode instructions from embedded
-   `internal/plan/system.md` and activated-skill instructions.
-6. Goal-bearing turns receive separate trailing internal context rendered from
-   embedded templates under `internal/goal/`; this is not system context.
-
-Configured prompt files are bounded by `context_cap_bytes`; project prompt paths
-are trust-gated, confined to the canonical project root, and reject symlink
-components. `AGENTS.md` content uses the same byte budget and adds a truncation
-notice when needed.
-
-### 8.4 Project trust
-
-Mirrors pi’s *input-loading guard*, **not** a sandbox.
-
-**When prompted:** every previously undecided project in the interactive TUI,
-before runtime construction. This intentionally covers trust-sensitive resources
-added after the first launch.
-
-**Decisions:** store canonical exact path → `allow` | `deny` in
-`~/.snow/trust.json`; nearest ancestor decisions apply until an exact child
-override exists. Decisions load or block project config, configured
-system-prompt files, plugins, MCP declarations, and skills on the same launch.
-
-**Headless:** `default_project_trust: ask` behaves as **deny**. Global policy is
-`ask|allow|deny`; legacy `always|never` remain aliases. Headless surfaces never
-prompt. Runtime `/trust allow|deny` changes apply on the next launch.
-
-**Always loaded without trust:** `AGENTS.md` (documented residual prompt-injection risk).
-
----
-
-## 9. Security model
-
-### 9.1 Boundary statement
-
-snow runs **as the user**. Built-in file/search tools and extensions retain the
-process's OS permissions. There is no in-process or whole-process sandbox in v1.
-An optional operator-initialized smolvm backend routes only model-facing Bash
-through a persistent project-scoped Linux VM; it does not contain Snow itself.
-
-### 9.2 Controls we do implement
-
-| Control | Protects against |
-|---------|------------------|
-| Project trust | Silent malicious project config/plugins |
-| Permission mode | Unreviewed write/exec tool calls |
-| Path roots | Casual path escape from tools |
-| auth.json 0600 | Casual local secret read by other users |
-| No secret logging | Token leakage in debug output |
-| Truncation | Context blow-ups from huge tool dumps |
-| Optional smolvm Bash backend | Host filesystem/network authority of approved Bash commands; exact-project mount only, guest network explicit, environment allowlisted |
-
-### 9.3 Residual risks (accepted)
-
-- Prompt injection via repo files, `AGENTS.md`, tool output.
-- Malicious host Bash once allowed, or malicious guest Bash against the mounted
-  project when the optional smolvm association is active.
-- OAuth tokens on disk stolen by malware running as user.
-- Supply-chain risk in dependencies and external plugins.
-
-### 9.4 Recommendations (docs/README)
-
-- Use disposable credentials when possible.
-- Run untrusted repos in a VM/container.
-- Prefer `permission_mode: ask` interactively.
-- Never set `AutoApprove` in SDK on untrusted input.
-
-### 9.5 Future isolation backends (not MVP)
-
-- Tool execution via Docker/bubblewrap supervisor.
-- Network-less bash profile.
-- Separate subprocess FS worker with seccomp (Linux).
-
----
-
-## 10. Plugin and modularity model
-
-### 10.1 Locked decision
-
-| Layer | Mechanism |
-|-------|-----------|
-| Core builtins | Go `Tool` / `Provider` interfaces, in-process |
-| Optional external capabilities | **JSON-RPC over stdio** subprocess plugins |
-| Deferred tool discovery | In-memory Bleve BM25 over opt-in metadata; schemas stay in the registry |
-| Explicitly avoided as primary | `plugin.Open` Go `.so` shared libraries (portability/pain) |
-| Skills (phase 4) | Markdown playbooks, not executable code |
-
-### 10.2 In-process registration
-
-```go
-func RegisterBuiltins(r tools.Registry) {
-    r.Register(builtin.NewRead())
-    r.Register(builtin.NewWrite())
-    r.Register(builtin.NewEdit())
-    r.Register(builtin.NewBash())
-}
-```
-
-Build tags may exclude heavy adapters for minimal binaries later (`//go:build chatgpt`).
-
-### 10.3 Extensibility core and subprocess protocol v2
-
-The extensibility core is implemented in `pkg/plugin`, `internal/tools`, and
-`internal/plugin`. Static Go plugins use `Manifest`, `Register`, and `Close`; no
-Go shared-object loading is used. The manager owns registration, namespaced tool
-descriptors, event subscriptions, diagnostics, and reverse-order lifecycle.
-
-External runtimes use JSON-RPC 2.0 JSONL on stdin/stdout, with stderr reserved
-for bounded diagnostics. Request IDs are strings and one reader multiplexer
-supports concurrent calls:
-
-```json
-{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocol_version":2,"cwd":"...","session_id":"..."}}
-{"jsonrpc":"2.0","id":"1","result":{"manifest":{"id":"my-tools","name":"My tools","version":"0.1.0","protocol_version":2},"tools":[...]}}
-```
-
-The host sends `initialize`, `tools/list`, `tools/call`, and `shutdown`.
-Progress, explicitly subscribed sanitized observation events, cancellation, and
-bounded logs are notifications. Empty `supported_events` means no event fanout;
-delivery is best effort and cannot block the agent loop. External tool risk is
-optional (`read|write|exec|network`) and fails closed to `exec`; per-tool
-capabilities and private raw-JSON result details survive registry adaptation.
-Frames, input/output, progress, stderr, timeouts, cancellation, and concurrent
-calls are bounded. Commands are argv arrays and never shell strings.
-
-Project-local plugin declarations are trust-gated. Trust controls input
-loading, not plugin permissions or OS access; untrusted plugins need a
-container/VM/OS sandbox. Persistent JavaScript and Python examples implement
-protocol v2 under `examples/plugins`. `snow plugin check` performs a
-provider-free live handshake with schema/event/risk and bounded-diagnostics
-reporting, while side-effect-free `list|get` and restart-scoped
-`add|enable|disable|remove` manage global or canonical-project declarations.
-Adds stage disabled by default, targeted raw-JSON updates preserve unknown
-fields, and global/project/explicit declarations merge by ID in increasing
-precedence. MCP and Agent Skills remain separate adapters/resources over the
-registry. The canonical wire contract is `docs/plugin-protocol.md`; runtime
-selection benchmarks and deferrals are in `docs/plugin-js-python-research.md`.
-
-### 10.4 MCP and Agent Skills
-
-`internal/mcp` uses the official `modelcontextprotocol/go-sdk` v1.7.0. It
-negotiates the current stateless `2026-07-28` protocol and the SDK's supported
-legacy revisions across stdio and Streamable HTTP. Server tools become
-permissioned `mcp_<server>_<tool>` descriptors. Resources, templates,
-subscriptions, and prompts use generic namespaced bridges; tool-list changes
-atomically refresh the registry and BM25 index. Static HTTP headers and stdio
-environment values support environment expansion without entering diagnostics.
-Project server config is trust-gated. See `docs/mcp.md`.
-
-The CLI separates side-effect-free configuration inspection (`mcp list|get`)
-from live connection checks (`mcp check`) and atomically manages global or
-project declarations through `add|enable|disable|remove`. Targeted JSON updates
-preserve unrelated and unknown config fields; all inspection output redacts
-credential-bearing values.
-
-`internal/skills` implements the open Agent Skills `SKILL.md` format. Startup
-discovery strictly validates standard metadata and loads only names/descriptions
-from immutable rank-zero embedded skills plus standard user and trust-gated
-project paths under a 64 KiB catalog budget. The bundled `plugin-builder` skill
-provides supervised, restart-required protocol-v2 authoring instructions and
-templates without extracting files beside the installed binary. `activate_skill`
-loads escaped full instructions, the TUI autocompletes enabled leading
-`$skill-name` directives, and a directive activates before provider dispatch
-while recording branch-scoped state. `read_skill_resource` uses immutable
-bounded `embed.FS` reads for built-ins or verifies the discovery-time directory
-identity before using a pinned per-operation `os.Root` for filesystem resources.
-Activated content is reattached on every provider call and reconstructed from
-successful markers/session history after resume so compaction does not drop it;
-current trust/disable/tool policy filters stale activations. See `docs/skills.md`.
-
-Discovery retains a management inventory alongside the enabled catalog.
-Global and trust-gated project `skills.disabled`/`skills.overrides` policy can
-hide entries from prompts and activation without deleting their files. CLI
-`skills list|get|enable|disable`, SDK `SkillInventory`, and read-only TUI
-`/skills` expose that inventory; `/mcp` similarly exposes current server state.
-
-### 10.5 Tool schema routing
-
-Existing tools and zero-value discovery metadata remain always loaded. Native,
-Go-plugin, external-plugin, SDK, and MCP registrations may opt into
-`deferred` discovery per tool. Snow builds an in-memory Bleve BM25 index after
-startup registration, indexes only name/namespace/description/keywords, and
-loads the top five permitted full schemas from the authoritative registry.
-`search_tools` provides an explicit recovery pass, while index/search failures
-fall back to direct exposure for that turn. Routing emits structured metrics but
-does not make an extra LLM call. See `docs/tool-routing.md`.
-
-### 10.6 What is not a plugin
-
-- Themes, keybindings, model lists → config.
-- Skills/prompts → resource discovery and markdown activation.
-- Compaction strategies → internal interfaces first.
-
----
-
-## 11. Repo bootstrap
-
-### 11.1 Target tree (when coding starts)
-
-```
-snow-core/
-  IMPLEMENTATION.md          # this file
-  README.md
-  go.mod
-  go.sum
-  cmd/snow/main.go
-  internal/app/
-  internal/agent/
-  internal/provider/
-  internal/provider/opencodego/
-  internal/provider/chatgpt/
-  internal/auth/
-  internal/tools/
-  internal/tools/builtin/
-  internal/session/
-  internal/context/
-  internal/compact/
-  internal/permission/
-  internal/config/
-  internal/event/
-  internal/tui/
-  internal/rpc/              # phase 3
-  pkg/snowsdk/
-  pkg/protocol/
-  testdata/
-  scripts/
-  .gitignore
-```
-
-### 11.2 Suggested dependencies
-
-| Dep | Why |
-|-----|-----|
-| `github.com/spf13/cobra` | CLI |
-| `github.com/charmbracelet/bubbletea` | TUI |
-| `github.com/charmbracelet/lipgloss` | Style |
-| `github.com/charmbracelet/bubbles` | Components |
-| `github.com/charmbracelet/glamour` | Markdown |
-| `github.com/enetx/surf` | Chrome-profile public web fetching |
-| `github.com/JohannesKaufmann/html-to-markdown/v2` | Bounded HTML-to-Markdown conversion |
-| `golang.org/x/oauth2` | OAuth helpers |
-| `github.com/google/uuid` | IDs |
-| `github.com/tidwall/gjson` / `sjson` optional | Fast JSON surgery for streams |
-
-Avoid: heavy ORMs, full cloud SDKs when raw HTTP + SSE suffices.
-
-### 11.3 Go version
-
-- Minimum language/toolchain line: **Go 1.27**. `go.mod` currently uses
-  **1.27rc2**, the available toolchain required by Surf v1.0.203.
-- Hosted Linux/macOS CI runs `go test ./...`; Linux also runs the race detector.
-
-### 11.4 Module path
-
-Placeholder: `github.com/snow-core/snow`  
-Replace with the real GitHub/Git path at first `go mod init` without redesign.
-
----
-
-## 12. Phased roadmap
-
-### Phase 0 — Spec and skeleton
-
-**Deliverables**
-
-- [x] `IMPLEMENTATION.md` (this document)
-- [x] `go.mod`, `cmd/snow` stub printing version
-- [x] `pkg/protocol` types
-- [x] Interface files compiling with `fake` provider
-- [x] In-memory session store + unit tests
-- [x] README: vision, roadmap, how to run tests
-
-**Exit criteria:** `go test ./...` green; no network.
-
----
-
-### Phase 1 — Vertical slice
-
-**Deliverables**
-
-- [x] Agent loop with serial tool dispatch
-- [x] SQLite session persistence (create/load indexed branch tip)
-- [x] Tools: `read`, `bash` (write/edit can stub deny)
-- [x] Provider: **OpenCode Go** streaming chat + tools
-- [x] OpenCode Go startup model discovery with live availability, models.dev
-  capability/reasoning enrichment, and a conservative static fallback
-- [x] Normalized model-aware reasoning effort (`off|minimal|low|medium|high|xhigh|max|ultra`) across provider adapters
-- [x] Auth: API key from env + `auth.json`
-- [x] Print mode: `snow -p "..."` 
-- [x] Basic TUI: transcript + editor + footer, always-visible context usage, and `/model` `/new` `/quit`
-- [x] System prompt + `AGENTS.md` load
-- [x] Context cancel / ctrl+c abort
-
-**Acceptance tests**
-
-- Fake provider scripted tool-call round-trip unit test.
-- Manual: OpenCode Go key lists files via model+`bash`/`read` in a sample repo.
-- Session file reloads and continues tip.
-
----
-
-### Phase 2 — ChatGPT OAuth, mutations, permissions
-
-**Deliverables**
-
-- [x] Tools: `write`, `edit` with path gates
-- [x] Permission service (`ask`/`allow`/`deny`; TUI `/permissions` command; headless default deny)
-- [x] `/login` `/logout` for API keys; ChatGPT OAuth status is available through `/login` and `snow auth check chatgpt`
-- [x] ChatGPT browser/device OAuth login, guarded token refresh, and authenticated cached model discovery
-- [x] `/sessions`, `/resume`, and `/new` — titled current-directory listing, picker rename, resume, and new-session flow
-- [x] Durable same-database branches, SDK branch APIs, and TUI `/tree` picker
-- [x] Manual `/compact` — model-backed summary with deterministic fallback and a logical context boundary; full history remains append-only
-- [x] Pre-runtime interactive project trust prompt + canonical `trust.json` parent-walk and `/trust` command
-- [x] Permission `ask` mode — TUI interactive asker via `/allow` `/deny` (/allow always); headless defaults to deny
-
-**Acceptance tests**
-
-- OAuth login succeeds on Plus/Pro test account; second run uses refresh without browser.
-- Write tool blocked in `deny`; prompted in `ask`; silent in `allow`.
-- Compaction reduces message count; model still answers with summary context.
-
----
-
-### Phase 3 — SDK polish, search tools, RPC
-
-**Deliverables**
-
-- [x] Public `pkg/snowsdk` stable enough for external sample
-- [x] `grep` + `glob` builtins
-- [x] `--mode json` event stream
-- [x] RPC protocol v1 — first-frame capability/version handshake, public DTOs,
-  definitive prompt completion, model discovery, and checked-in schemas
-- [x] Dependency-light Python and JavaScript/TypeScript SDK packages use an
-  external Snow binary with safe defaults and no binary downloader
-- [x] Extensibility core — public Go plugin API, lifecycle manager, descriptor registry, observe-only events, and JSON-RPC v2 stdio host
-- [x] Bounded root steer/follow-up queue across Agent, SDK, RPC, and TUI, with safe tool-batch boundaries and abort restoration
-
-**Acceptance tests**
-
-- [x] Standalone `examples/sdk` module builds and runs against `pkg/snowsdk`.
-- [x] JSON mode parses with `jq`.
-- [x] Python and JavaScript/TypeScript clients validate `rpc_ready`, correlate
-  out-of-order responses, consume events, and await `prompt_completed`.
-- [x] Both client packages run network-free unit tests and real-binary fake-
-  provider integration tests on Linux and macOS.
-
----
-
-### Phase 4 — Extensibility and UX depth
-
-**Deliverables**
-
-- [x] Agent Skills `SKILL.md` format — separate resource/progressive-disclosure layer
-- [x] MCP client — official Go SDK, 2026-07-28/legacy negotiation, stdio/Streamable HTTP, tools/resources/prompts
-- [x] Themes + keybindings files (bounded strict YAML, trusted project overrides)
-- [x] Persistent ChatGPT model catalog refresh/cache (account- and backend-origin-scoped ETag/TTL entries)
-- [x] Durable fork/tree navigation (`/tree` picker)
-- [x] Optional sandbox backend design plus first safe slice — external smolvm 1.8.x for persistent exact-project Bash only, with checksum-pinned user-local bootstrap, macOS `mkfs.ext4` persistence preflight and standard Homebrew path discovery, default Ubuntu image, one project mount, digest-pinned Ubuntu/Go/Node/Python+uv profiles, CLI/TUI CPU-memory-storage-overlay controls, explicit guest network, strict environment allowlist, active fail-closed routing, lifecycle locks, and honest non-whole-process docs
-- [x] Supported platforms narrowed to macOS/Linux with a shared compile-time platform guard
-- [x] Plugin tool appears in schema and executes through the central permission gate
-- [x] Opt-in BM25 tool routing keeps deferred parameter schemas out of normal model context
-- [x] Namespace-first in-memory BM25 routing with deterministic global rescue and bounded summaries
-- [ ] Optional semantic/vector routing remains deferred pending a locally downloadable open-source model with acceptable licensing, macOS/Linux support, binary size, memory use, and startup time; no mandatory API/service
-
-**Acceptance tests**
-
-- Custom theme/keybindings load with safe fallback; skill activates through `$name`/`activate_skill` and survives compaction.
-- MCP stateless HTTP and stdio servers negotiate the expected protocol and execute through permissions.
-- Plugin tool appears in schema and executes through the manager/registry path.
-
----
-
-## 13. Testing and verification
-
-### 13.1 Unit
-
-| Area | Cases |
-|------|-------|
-| Session tree | append, branch tip, fork, reload SQLite |
-| Path safety | symlink escape, outside root, unicode paths |
-| Edit tool | unique/non-unique `old_str`, replace_all |
-| Auth store | 0600 permissions, round-trip, delete |
-| OAuth refresh | mock clock expiry |
-| Event order | tool_start before tool_end; turn_done last |
-| Permission | mode matrix + remember rules |
-| Model/reasoning | provider catalog metadata, conservative effort filtering, wire mappings, and unsupported-level rejection |
-
-### 13.2 Integration
-
-- `fake` provider with deterministic script:
-  1. assistant tool_call read
-  2. consume tool_result
-  3. final text
-- Agent end-to-end tests (`internal/agent/agent_e2e_test.go`) run the real
-  read/write/edit/bash/grep/glob registry through streamed multi-tool turns, exercise the
-  deny/allow/ask permission matrix, verify ordered tool results, cover provider
-  resolve/chat/stream/EOF failures, and reopen SQLite sessions for continuation.
-- CLI end-to-end tests (`cmd/snow/main_test.go`) drive Cobra print and JSON modes
-  against a local OpenAI-compatible SSE server; no credentials or network are
-  required.
-- Temp dir workspace fixtures under `testdata/workspaces/`.
-
-### 13.3 Manual
-
-- TUI smoke on Terminal.app / iTerm / Ghostty / VS Code terminal.
-- Real OpenCode Go key multi-turn edit.
-- Real ChatGPT OAuth on local + SSH paste path.
-- Abort mid-stream and mid-bash.
-
-### 13.4 Benchmarks (phase 1+)
-
-| Bench | Goal |
-|-------|------|
-| `TestTUIStartup` | &lt; 100ms to first frame (fake deps) |
-| Stream lag | UI shows first delta &lt; 50ms after recv |
-| Large session reload | 10k entries load &lt; 500ms |
-
-### 13.5 CI
-
-`.github/workflows/ci.yml` runs on pushes, pull requests, and manual dispatches:
-
-- Linux and macOS: formatting (Linux), vet, `go test ./...`, production build,
-  and credential-free standalone SDK/RPC example execution.
-- Linux: `go test -race ./internal/... ./pkg/snowsdk`.
-
-The hosted workflow is network-free after dependency download and requires no
-provider credentials. Real-provider checks remain manual.
-
----
-
-## 14. Research appendix
-
-### 14.1 pi patterns worth copying
-
-| Pattern | Why |
-|---------|-----|
-| Minimal core tools (read/write/edit/bash) plus bounded search | Forces good agent behavior; easy to reason about |
-| SQLite session with tree `id`/`parentId` | Indexed branch/resume without a server |
-| SDK session = CLI core | No dual maintenance |
-| Project trust ≠ sandbox | Honest security story |
-| Event subscribe model | TUI/RPC/SDK share one bus |
-| auth.json 0600 + env fallback | Simple operator UX |
-| OpenCode Go as `OPENCODE_API_KEY` / `opencode-go` | Known user demand |
-
-References (local install / upstream docs):
-
-- pi README — modes: interactive, print/JSON, RPC, SDK
-- `docs/sessions.md` — SQLite schema, indexed branch queries, pragmas, and usage
-- `docs/providers.md` — subscriptions vs API keys; OpenCode Go row
-- `docs/sdk.md` — `createAgentSession`, subscribe, prompt
-- `docs/security.md` — trust vs sandbox
-- `docs/rpc.md` — JSONL framing pitfalls
-
-### 14.2 OpenCode / snow-agent lessons
-
-From the sibling **snow-agent** Electron app (OpenCode-hosted):
-
-- Event coalescing matters for UI performance.
-- Permission snapshots and ask/allow/deny are user-visible safety.
-- Rich product features (memory DB, goal mode, research mode) explode scope — **keep out of snow-core v1**.
-- snow-core should remain a **harness**, not a full IDE product.
-
-### 14.3 Codex / ChatGPT subscription
-
-- OpenAI publicly discusses **Codex for OSS** harness integration with ChatGPT subscription auth.
-- pi implements ChatGPT Plus/Pro (Codex) via `/login` OAuth and stores tokens in auth.json.
-- Implementation must track **current** official endpoints and client requirements; treat any community reverse-engineering as unstable.
-- Mitigation: single adapter package + verify checklist + feature flag to disable chatgpt builds.
-
-### 14.4 Go TUI ecosystem
-
-Charmbracelet (Bubble Tea) is the de-facto standard for modern Go CLIs (gh-like UX). It fits streaming agent UIs via `Program.Send` from agent goroutines.
-
-### 14.5 What “efficient” means here
-
-| Axis | Choice |
-|------|--------|
-| Memory | Go single binary; stream processing; SQLite queries only materialize the active branch |
-| CPU | Coalesced UI updates; serial tools MVP; compiled pure-Go search matchers |
-| Disk | Append-only logs; bounded tool output |
-| Network | HTTP/2 keep-alive client per provider; cancelable streams |
-| Extensibility tax | Pay subprocess cost only when plugins enabled |
-
----
-
-## 15. Open risks and mitigations
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| OpenCode Go API shape differs from OpenAI-compatible assumptions | Phase 1 blocked | Probe first day; isolate adapter; golden stream fixtures |
-| ChatGPT OAuth / Codex endpoint churn | Login breaks | Adapter isolation; version pin notes; paste fallback; CI smoke with secret |
-| ToS / account policy changes | Legal/product | README compliance; official OSS paths only; easy provider disable |
-| Terminal keybinding variance | Bad editor UX | Document per-terminal newlines; config overrides |
-| Symlink path escapes | File safety bug | Thorough tests; `EvalSymlinks` + prefix check |
-| Model ignores tool schema | Poor loops | Tight tool descriptions; return malformed-argument tool errors; enforce run-scoped call limits and bounded repeated-call reminders |
-| Scope creep from snow-agent features | Delays core work | Goals, roadmap priorities, and phase gates |
-| Parallel tool FS races | Data loss | Serial tools until explicit read-only parallel |
-
----
-
-## 19. Codex-style subagent tree (implemented)
-
-Snow implements the Codex V2 architecture directly. `internal/subagent.Manager`
-owns canonical path identity, parent edges, reservation/commit, validated state
-transitions, execution slots, limits, mail routing, child construction,
-persistence, and shutdown. Every child is an ordinary `internal/agent.Agent`;
-`agent` does not import `subagent`, and collaboration enters through registered
-tools plus its generic attributed mailbox.
-
-The seven direct model tools are `spawn_agent`, `list_subagent_models`, `send_message`, `followup_task`,
-`wait_agent`, `interrupt_agent`, and `list_agents`. Tool instances bind caller
-identity. Spawn/follow-up use `permission.RiskDelegate`; remaining controls use
-read risk. `wait_agent` supports the original next-activity barrier and an
-`until=all` descendant join with aggregate running/queued/terminal counts; SDK
-and RPC expose the same bounded join. The native TUI hides successful control
-JSON and renders compact lifecycle/count summaries. The feature defaults off, max concurrency is four simultaneously
-running children (the root does not consume a slot), depth defaults to one, and
-child authority is role-scoped: the
-`general` and `implementer` roles may use permission-gated `bash`, while
-`explorer` remains read/search-only. Recursion and file mutation are independent
-intersections of global and role policy; write/edit require both mutation
-switches.
-
-Parent and child transcripts never share a mutable cursor. Context forks use
-`ContextMessages`, strip unsafe or incomplete protocol artifacts, and repair
-IDs. Mailbox producers only enqueue. The admitted receiving loop drains before
-provider requests and atomically marks final mail unread at turn finalization,
-so external delivery cannot fork a serial tool-result chain.
-
-`protocol.AgentPath`, `AgentRef`, `SubagentState`, and `AgentMessage` are public
-DTOs. Ordinary child events carry `agent`; lifecycle and mail add `subagent` and
-`agent_message`. Root events omit correlation for compatibility. SDK, RPC,
-print/JSON, TUI, and plugin observers consume one cloned event bus.
-
-Schema version 5 stores topology in `subagent_threads`. Durable child histories
-default on, use private `<root>.db.agents/<thread>.db` databases, stay out of the session
-index, and load lazily. Cold open never restarts work; surfaces subscribe and
-call `ReadySubagents` before restored topology is published. Shutdown joins the
-manager before closing the root event bus and shared resources. Active children
-block root-session switching; after all children reach a terminal state,
-switching sessions detaches the old in-memory runtimes and restores the target
-session's topology.
-
-The shared cwd and OS authority are not a sandbox. Parallel edits can conflict,
-provider usage is independent, and child/repository output is untrusted.
-The TUI serializes root/child permission requests through an attributed FIFO
-broker; headless ask mode remains fail-closed. Child `ask_user` stays excluded,
-preventing ambiguous input routing.
-
-## 16. Glossary
-
-| Term | Meaning |
-|------|---------|
-| **Harness** | Runtime that hosts model ↔ tool loops for coding agents |
-| **Provider** | LLM backend adapter (HTTP + auth + stream normalize) |
-| **Tool** | Model-invoked capability with JSON schema |
-| **Session** | Durable conversation tree (pure-Go SQLite) |
-| **Compaction** | Summarize/replace older turns to free context |
-| **Project trust** | Permission to load project-local config, plugins, MCP declarations, and skills |
-| **Permission mode** | ask/allow/deny for mutating/exec tools |
-| **SDK** | In-process Go API (`pkg/snowsdk`) |
-| **RPC mode** | Subprocess JSONL control plane for foreign hosts |
-| **Plugin** | Out-of-process JSON-RPC tool provider |
-
----
-
-## Appendix A — Default system preamble (draft)
-
-> You are snow, a coding agent in the user's repository.  
-> Use tools to inspect and modify the codebase. Prefer `read` / `grep` / `glob` before `bash`.  
-> Prefer `edit` for small changes and `write` for new files.  
-> Keep commands non-interactive. Explain briefly when done.  
-> Respect permission denials; do not attempt to bypass path roots.
-
-(Final text tuned during Phase 1.)
-
----
-
-## Appendix B — CLI sketch
-
-```bash
-snow [flags]                  # interactive TUI in cwd
-snow -p "prompt"              # print mode
-snow --mode json -p "..."     # JSONL events
-snow --provider opencode-go --model <id>
-snow --permission ask|allow|deny
-snow resume [path]            # current-project picker, or explicit path
-snow --session <path>         # lower-level explicit session selection
-snow --trust                  # headless trust project
-snow version
-snow login chatgpt            # optional non-TUI helper (phase 2)
-```
-
----
-
-## 18. Persistent Thread Goals (implemented)
-
-Saved branches carry atomic goal, per-currency estimated-cost, and
-continuation-deferral state in SQLite schema v8. `internal/goal` owns validated status transitions,
-model-facing tools, private user-role steering, three-turn blocked gating,
-sub-second accounting remainder, and confined goal-ID-owned objective files.
-SQLite updates token/time/cost usage atomically across database handles; forks
-copy accumulated per-currency estimates and managed objective resources before
-either branch may clean them up.
-
-The agent owns automatic serial turns, cancellation/join (including the
-pre-first-turn window), cumulative provider-usage snapshot handling, one
-budget wrap-up, terminal-error classification, semantic no-progress pausing,
-and Plan exclusion. Events use a dedicated ordered dispatcher with cloned
-payloads so callbacks never execute under goal locks or provider/tool workers.
-Constructors do not start restored work: TUI/CLI/RPC signal readiness after
-subscribing, and SDK hosts call `ReadyGoals`. See `docs/goals.md`.
-
-## 17. Plan collaboration mode (implemented)
-
-Snow has a branch-persisted `default|plan` collaboration mode. The public
-protocol includes mode state, durable plan content blocks, and
-`plan_started`/`plan_delta`/`plan_completed`/`plan_update` events. The agent
-snapshots mode at turn start, injects the complete three-phase Plan contract on
-every provider request, applies the supported Plan reasoning preset, and parses
-line-delimited `<proposed_plan>` output before any surface sees raw tags.
-
-Mode state lives in the branch-keyed `thread_state` SQLite table (introduced in schema v3; current schema v4),
-not append-only session metadata; forks copy it and branch/session selection
-restores it. `update_plan` remains a Default-mode TODO tool. Default retains
-`ask_user`; Plan exposes `request_user_input` through the same broker. Mutation
-avoidance is instruction-enforced, matching Codex, and is not represented as a
-sandbox.
-
-Surfaces share the normalized implementation: `/plan [message]` and `/default`
-in the TUI, `--collaboration-mode` in CLI modes, attached/set mode in RPC, and
-Mode/SetMode/PromptWithMode in the SDK. The TUI renders streamed and resumed
-plan blocks independently and atomically transitions a completed plan to
-Default mode in either the current or a fresh session. See
-`docs/plan-mode.md` and the research reference
-`docs/codex-plan-mode-and-goals.md`.
-
----
-
-## Appendix C — First coding tasks (ordered)
-
-1. `go mod init github.com/snow-core/snow`
-2. `pkg/protocol` types + JSON golden tests
-3. `internal/session` memory + SQLite
-4. `internal/tools/builtin` read + bash + path guard tests
-5. `internal/provider/fake` scripted stream
-6. `internal/agent` loop tests with fake
-7. `internal/provider/opencodego` against live API (manual)
-8. `internal/auth` file store
-9. `cmd/snow` print mode
-10. `internal/tui` minimal transcript/editor
-11. ChatGPT OAuth adapter
-12. write/edit + permissions
-13. `pkg/snowsdk` export
-14. compaction, resume, rpc, plugins
-
----
-
-## Appendix D — Decision log (locked)
-
-| Decision | Choice | Date |
-|----------|--------|------|
-| Product role | Standalone harness (not snow-agent backend) | 2026-03-22 |
-| Deliverable | Single `IMPLEMENTATION.md` full architecture | 2026-03-22 |
-| Binary name | `snow` | 2026-03-22 |
-| Modularity | Interfaces + in-process builtins; JSON-RPC subprocess plugins | 2026-03-22 |
-| Auth MVP | OpenCode Go API key + ChatGPT Codex OAuth only | 2026-03-22 |
-| Sessions | Snow-owned pure-Go SQLite tree | 2026-08-06 |
-| TUI | Charmbracelet Bubble Tea | 2026-03-22 |
-| SDK | `pkg/snowsdk` same core | 2026-03-22 |
-| Sandbox | No whole-process/per-extension sandbox; optional persistent external smolvm 1.8.x backend for Bash only | 2026-03-22 |
-| Multi-agent | Out of MVP | 2026-03-22 |
-
----
-
-*End of document. Implement from Phase 0 skeleton next; update the verify checklist as live provider details are confirmed.*
+After a verified feature change, refresh the user-local binary with
+`./scripts/install-local.sh`.
+
+### Coverage
+
+- Unit tests cover the session tree, path safety, the edit tool, auth store
+  permissions, OAuth refresh with a mock clock, event ordering, the permission
+  mode matrix, and model/reasoning metadata and effort filtering.
+- Agent end-to-end tests run the real read/write/edit/bash/grep/glob registry
+  through streamed multi-tool turns, exercise the deny/allow/ask permission
+  matrix, verify ordered tool results, cover provider resolve/chat/stream/EOF
+  failures, and reopen SQLite sessions for continuation.
+- CLI end-to-end tests drive Cobra print and JSON modes against a local
+  OpenAI-compatible SSE server with no credentials or network.
+- Language SDK tests run network-free unit tests and real-binary fake-provider
+  integration tests on Linux and macOS.
+- Benchmarks cover TUI startup, stream lag, and large-session reload.
+
+### CI
+
+`.github/workflows/ci.yml` runs on pushes, pull requests, and manual
+dispatches: Linux and macOS run formatting (Linux), vet, `go test ./...`,
+production builds, and credential-free standalone SDK/RPC example execution;
+Linux also runs `go test -race ./internal/... ./pkg/snowsdk`. Real-provider
+checks remain manual.
+
+## Roadmap
+
+Phases 0 through 4 are complete and shipped. The list below records what each
+phase delivered; the current work queue is "Known gaps / next work" under the
+next heading.
+
+| Phase | Delivered |
+|---|---|
+| 0 — Spec and skeleton | `go.mod`, `cmd/snow` stub, `pkg/protocol` types, interface files compiling with the `fake` provider, in-memory session store, README |
+| 1 — Vertical slice | Agent loop with serial tool dispatch, SQLite session persistence, `read`/`bash`, OpenCode Go streaming chat and startup model discovery, API-key auth, print mode, basic TUI, system prompt and `AGENTS.md` load, cancellation |
+| 2 — OAuth, mutations, permissions | `write`/`edit` with path gates, ask/allow/deny permissions, login/logout, ChatGPT browser/device OAuth with guarded refresh, sessions/resume/new, durable branches and `/tree`, manual `/compact`, project trust, interactive asker |
+| 3 — SDK, search, RPC | Public `pkg/snowsdk`, `grep`/`glob`, JSON mode, RPC protocol v1, Python/JavaScript SDKs, extensibility core and JSON-RPC v2 stdio host, bounded steer/follow-up queue |
+| 4 — Extensibility and UX | Agent Skills, MCP client, themes and keybindings, persistent ChatGPT catalog cache, fork/tree navigation, optional smolvm Bash backend, macOS/Linux platform guard, plugin permission gate, opt-in BM25 tool routing |
+
+## Research and decisions
+
+This section condenses the recorded research and locked decisions. Rationale
+that is fully covered elsewhere is referenced rather than repeated.
+
+### Locked decisions
+
+| Decision | Choice |
+|---|---|
+| Product role | Standalone harness, not an IDE backend |
+| Binary name and module | `snow`, `github.com/snow-core/snow` |
+| Modularity | In-process interfaces plus JSON-RPC stdio subprocess plugins; no Go `.so` loading |
+| Auth | OpenCode Go API key, user-configured OpenAI-compatible endpoints, and ChatGPT/Codex OAuth |
+| Sessions | Snow-owned pure-Go SQLite tree (schema version 9) |
+| TUI | Charmbracelet Bubble Tea |
+| SDK | `pkg/snowsdk` running the same core as the CLI |
+| Sandbox | No whole-process/per-extension sandbox; optional persistent external smolvm 1.8.x backend for Bash only |
+| Subagents | Optional, root-scoped, Codex-V2-style, built from the ordinary agent loop |
+
+### Research notes
+
+- pi patterns worth copying: minimal core tools plus bounded search, SQLite
+  tree sessions, SDK equals CLI core, project trust is not a sandbox, event
+  subscribe model, `auth.json` with `0600` plus environment fallback.
+- OpenCode/snow-agent lessons: event coalescing matters for UI performance,
+  permission snapshots are user-visible safety, and memory databases, goal
+  mode, and research mode explode scope; Snow stays a harness, not a full IDE.
+- Codex/ChatGPT subscription: track current official Codex-for-OSS endpoints
+  and client requirements; community reverse-engineering is unstable. The
+  mitigation is a single adapter package, a verify checklist, and the ability
+  to disable ChatGPT builds.
+- Go TUI ecosystem: Charmbracelet (Bubble Tea) is the de-facto standard and
+  fits streaming agent UIs via `Program.Send` from agent goroutines.
+- Efficiency: Go single binary, stream processing, SQLite queries that only
+  materialize the active branch, coalesced UI updates, serial tools in MVP,
+  pure-Go search matchers, append-only logs, bounded tool output, cancelable
+  HTTP streams, and subprocess plugin cost paid only when plugins are enabled.
+
+## Open risks and known gaps
+
+| Risk or gap | Impact | Mitigation or status |
+|---|---|---|
+| OpenCode Go API shape diverges from OpenAI-compatible assumptions | Adapter breaks | Isolate adapter; golden stream fixtures; verified live endpoints |
+| ChatGPT OAuth or Codex endpoint churn | Login breaks | Adapter isolation; paste fallback; manual CI smoke with credentials |
+| ToS or account policy changes | Legal/product | README compliance; official OSS paths only; easy provider disable |
+| Terminal keybinding variance | Editor UX | Document per-terminal newlines; config overrides |
+| Symlink path escapes | File safety bug | `EvalSymlinks` plus prefix check; thorough tests |
+| Model ignores tool schema | Poor loops | Tight descriptions; malformed-argument errors; run-scoped call limits and repeated-call reminders |
+| Parallel tool filesystem races | Data loss | Serial tools; no parallel mutation |
+| Plugin/MCP/subagent OS authority | Not covered by smolvm | Documented boundary; external container/VM required for hostile code |
+| Pre-v1 API and file-format drift | Breaking changes | Stabilize `pkg/snowsdk`, `pkg/protocol`, and the session schema before v1 |
+| Optional MCP extension surfaces | Deferred features | Apps, Tasks, Enterprise Managed Authorization, and interactive OAuth callback remain unbuilt |
+| Semantic/vector tool routing | Deferred | Await a locally downloadable open-source model with acceptable licensing and startup cost |
+
+## Related documents
+
+- [Using Snow](docs/using-snow.md) — TUI/CLI modes, flags, keys, commands, queues, and workflows
+- [Security model](docs/security.md) — consolidated privilege and threat boundaries
+- [SDK](docs/sdk.md) — public Go SDK lifecycle and API reference
+- [Sessions](docs/sessions.md) — pure-Go SQLite session storage and schema
+- [RPC](docs/rpc.md) — versioned JSONL framing, schemas, commands, and events

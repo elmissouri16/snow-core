@@ -1,14 +1,31 @@
-# JavaScript and Python plugin research
+# JavaScript and Python Plugin Research
 
-> **Decision:** Keep Snow's persistent JSON-RPC v2 subprocess architecture as
-> the JavaScript/Python plugin ABI. Improve its developer experience and
-> conformance rather than embedding language runtimes in the Go binary.
->
-> **Status:** Host hardening, the complete wire reference, `snow plugin check`,
-> and dependency-free JavaScript/Python examples are implemented. Published
-> npm/PyPI helper packages remain deferred until the protocol fixtures stabilize.
+This record explains why Snow keeps a persistent JSON-RPC v2 subprocess
+architecture as the JavaScript/Python plugin ABI instead of embedding language
+runtimes in the Go binary. It captures the alternatives considered, the local
+benchmarks, the hardening already implemented, and the work still deferred.
 
-## Problem
+## On this page
+
+- [Summary](#summary)
+- [Context](#context)
+- [Decision](#decision)
+- [Alternatives considered](#alternatives-considered)
+- [Results](#results)
+- [Risks and deferrals](#risks-and-deferrals)
+- [Sources](#sources)
+
+## Summary
+
+Keep Snow's persistent JSON-RPC v2 subprocess architecture as the
+JavaScript/Python plugin ABI. Improve its developer experience and conformance
+rather than embedding language runtimes in the Go binary.
+
+Host hardening, the complete wire reference, `snow plugin check`, and
+dependency-free JavaScript/Python examples are implemented. Published npm/PyPI
+helper packages remain deferred until the protocol fixtures stabilize.
+
+## Context
 
 Snow needs an easy way to author plugins in JavaScript or Python without:
 
@@ -21,17 +38,25 @@ Snow needs an easy way to author plugins in JavaScript or Python without:
 Snow already has a language-neutral external plugin host under
 `internal/plugin`. It starts an explicit argv process, performs a JSON-RPC 2.0
 handshake, registers namespaced tools, multiplexes calls, forwards bounded
-progress and subscribed agent events, handles cancellation, captures diagnostics,
-and shuts the process down in reverse load order.
+progress and subscribed agent events, handles cancellation, captures
+diagnostics, and shuts the process down in reverse load order.
 
 The main gap was author ergonomics and protocol completeness, not runtime
 architecture.
 
-## Options considered
+## Decision
+
+Use persistent JSONL subprocess runtimes as the default plugin ABI. Snow keeps
+one resident runtime per plugin package and copies JSON over pipes. This
+preserves full Node/npm and Python environments at low implementation cost
+because the external host already exists. Embedded runtimes, WASM, and MCP
+remain alternatives for specific cases, not the default.
+
+## Alternatives considered
 
 | Approach | Runtime cost | Implementation/release cost | Ecosystem compatibility | Decision |
 |---|---|---|---|---|
-| Persistent JSONL subprocess | One resident runtime plus JSON/pipe copies | Low; host already exists | Full Node/npm and Python environments | **Default** |
+| Persistent JSONL subprocess | One resident runtime plus JSON/pipe copies | Low; host already exists | Full Node/npm and Python environments | Default |
 | Embedded goja | No process or IPC | Snow must provide modules, event loop, filesystem/network APIs, cancellation, limits, and concurrency policy | JavaScript but not Node/npm | Defer; constrained scripts only |
 | Embedded QuickJS | No IPC | Native/cgo bindings and per-platform testing; still no Node APIs | Modern JavaScript subset | Reject as default |
 | Embedded CPython | No IPC | Native linking, interpreter/stdlib distribution, reference management, GIL/lifecycle, extension compatibility | Full Python only if packaged correctly | Reject |
@@ -54,7 +79,7 @@ JavaScript plugin authors.
 ### Why not embed Python?
 
 CPython's official embedding API requires interpreter initialization, native
-headers/libraries, data conversion and reference handling. Official guidance
+headers/libraries, data conversion, and reference handling. Official guidance
 notes that locating the correct compile/link flags is not necessarily trivial,
 and extension modules add operating-system, architecture, libc, and Python
 version compatibility. Eliminating a small pipe/JSON cost does not justify that
@@ -68,7 +93,9 @@ lifecycle, private configuration, bounded progress, and observation-only agent
 events. A stdio MCP server has similar process and JSON costs; choose between
 them by interoperability, not performance.
 
-## Local performance probe
+## Results
+
+### Local performance probe
 
 A temporary probe exercised Snow's real `ExternalHost` with persistent Node and
 Python echo runtimes on Darwin arm64:
@@ -101,89 +128,58 @@ The more important performance risks are:
 2. exposing too many direct tool schemas to the model instead of deferred
    discovery;
 3. forwarding high-frequency text/thinking events to uninterested plugins;
-4. plugins that block stdout, ignore cancellation, or emit unbounded diagnostics.
+4. plugins that block stdout, ignore cancellation, or emit unbounded
+   diagnostics.
 
-Related tools should share one process. Do not create one interpreter process per
-tool.
+Related tools should share one process. Do not create one interpreter process
+per tool.
 
-## Required host hardening
+### Required host hardening
 
 The first implementation slice addressed these items before describing
 JavaScript/Python plugins as first-class:
 
-### 1. Honor `supported_events`
+1. **Honor `supported_events`.** The initialize response is an explicit
+   subscription. Snow forwards only listed event types; omitted or empty lists
+   receive no events. Delivery remains bounded and best effort so a slow plugin
+   cannot block the agent loop. This removes unnecessary serialization, pipe
+   traffic, and queue pressure from text/thinking deltas.
+2. **Preserve result `details`.** External `tools/call` results already decoded
+   `details`, but the registry adapter dropped them. The adapter now preserves a
+   cloned raw JSON value as private host metadata. Details remain excluded from
+   the provider-facing conversation.
+3. **Support optional tool risk metadata.** External tool descriptors may
+   declare `read`, `write`, `exec`, or `network`. Omitted risk defaults to
+   `exec`; invalid values fail initialization. Per-tool capabilities are also
+   retained and combined with plugin-level capabilities. Risk is trusted
+   metadata used by the central permission service, not containment inside the
+   subprocess. A malicious plugin labeled `read` still has the current user's OS
+   privileges. Only trusted plugins should receive a less restrictive
+   classification.
+4. **Publish the complete protocol contract.**
+   [`plugin-protocol.md`](plugin-protocol.md) is the canonical wire reference
+   for
+   LF framing and stdout/stderr rules,
+   initialization and validation, tool schemas/discovery/risk/capabilities,
+   calls and content/details results, progress and logging, cancellation and
+   local deadlines, subscribed best-effort agent events, errors, output limits,
+   EOF, and shutdown.
+5. **Improve diagnostics.** `snow plugin check <manifest-or-executable>` starts
+   only the plugin runtime and reports manifest/protocol validity,
+   initialization time and effective cwd, negotiated tools and effective
+   plugin/tool capabilities, risks, discovery modes, subscribed event types,
+   informational runtime limits, bounded stderr/protocol diagnostics with
+   best-effort common-credential redaction, and graceful shutdown failures.
+   JSON output is available with `--json`.
+6. **Make interpreter configuration explicit.** External plugins receive an
+   empty environment unless `PluginSpec.Env` is set. This reduces accidental
+   credential inheritance but affects `/usr/bin/env` shebangs, subprocess
+   lookup, locale, certificate configuration, and some package behaviors.
+   Reference manifests therefore show an argv command plus a deliberately
+   minimal `PATH`. Production declarations should prefer absolute interpreter
+   and script paths, such as a Python virtual environment's interpreter.
 
-The initialize response is now an explicit subscription. Snow forwards only
-listed event types; omitted or empty lists receive no events. Delivery remains
-bounded and best effort so a slow plugin cannot block the agent loop.
-
-This removes unnecessary serialization, pipe traffic, and queue pressure from
-text/thinking deltas.
-
-### 2. Preserve result `details`
-
-External `tools/call` results already decoded `details`, but the registry adapter
-dropped them. The adapter now preserves a cloned raw JSON value as private host
-metadata. Details remain excluded from the provider-facing conversation.
-
-### 3. Support optional tool risk metadata
-
-External tool descriptors may declare:
-
-```text
-read | write | exec | network
-```
-
-Omitted risk defaults to `exec`; invalid values fail initialization. Per-tool
-capabilities are also retained and combined with plugin-level capabilities.
-
-Risk is trusted metadata used by the central permission service, not containment
-inside the subprocess. A malicious plugin labeled `read` still has the current
-user's OS privileges. Only trusted plugins should receive a less restrictive
-classification.
-
-### 4. Publish the complete protocol contract
-
-[`plugin-protocol.md`](plugin-protocol.md) is the canonical wire reference for:
-
-- LF framing and stdout/stderr rules;
-- initialization and validation;
-- tool schemas, discovery, risk, and capabilities;
-- calls and content/details results;
-- progress and logging;
-- cancellation and local deadlines;
-- subscribed best-effort agent events;
-- errors, output limits, EOF, and shutdown.
-
-### 5. Improve diagnostics
-
-`snow plugin check <manifest-or-executable>` starts only the plugin runtime and
-reports:
-
-- manifest/protocol validity;
-- initialization time and effective cwd;
-- negotiated tools, effective plugin/tool capabilities, risks, and discovery
-  modes;
-- subscribed event types;
-- informational runtime limits;
-- bounded stderr/protocol diagnostics with best-effort common-credential
-  redaction (never a substitute for not logging secrets);
-- graceful shutdown failures.
-
-JSON output is available with `--json`.
-
-### 6. Make interpreter configuration explicit
-
-External plugins receive an empty environment unless `PluginSpec.Env` is set.
-This reduces accidental credential inheritance but affects `/usr/bin/env`
-shebangs, subprocess lookup, locale, certificate configuration, and some package
-behaviors.
-
-Reference manifests therefore show an argv command plus a deliberately minimal
-`PATH`. Production declarations should prefer absolute interpreter and script
-paths, such as a Python virtual environment's interpreter.
-
-## Reference runtime design
+### Reference runtime design
 
 Dependency-free examples live under:
 
@@ -208,10 +204,10 @@ Both implementations provide:
 
 The examples are executable documentation and integration fixtures. They avoid a
 third-party generic JSON-RPC dependency because such packages do not normally
-encode Snow's JSONL framing, progress, call IDs, cancellation, output discipline,
-or shutdown semantics.
+encode Snow's JSONL framing, progress, call IDs, cancellation, output
+discipline, or shutdown semantics.
 
-## Future SDK ergonomics
+### Future SDK ergonomics
 
 After the examples and conformance tests remain stable, they can be extracted
 into:
@@ -234,11 +230,26 @@ ToolContext
 Both SDKs should have no runtime dependencies. TypeScript tooling may remain a
 development dependency; Python can use `asyncio`, `json`, and standard streams.
 
+## Risks and deferrals
+
+### Deferred work
+
+Do not add until a demonstrated requirement outweighs its cost:
+
+- embedded goja, QuickJS, or CPython;
+- a WASM plugin ABI;
+- runtime downloading or bundling;
+- executable directory scans or a plugin marketplace;
+- hot reload;
+- reliable event replay;
+- parallel plugin startup before sequential startup is measured as material;
+- npm/PyPI publication before protocol conformance is stable.
+
 Publishing is deliberately deferred because package release/version support is
 an ongoing maintenance commitment. The wire behavior should be stabilized by
 cross-language conformance fixtures first.
 
-## Acceptance criteria
+### Acceptance criteria
 
 Before publishing language SDKs:
 
@@ -256,20 +267,7 @@ Before publishing language SDKs:
 - macOS and Linux test explicit interpreter launching;
 - `go test ./...`, `go vet ./...`, and focused race tests pass.
 
-## Deferred work
-
-Do not add until a demonstrated requirement outweighs its cost:
-
-- embedded goja, QuickJS, or CPython;
-- a WASM plugin ABI;
-- runtime downloading or bundling;
-- executable directory scans or a plugin marketplace;
-- hot reload;
-- reliable event replay;
-- parallel plugin startup before sequential startup is measured as material;
-- npm/PyPI publication before protocol conformance is stable.
-
-## Security boundary
+### Security boundary
 
 Process separation provides crash isolation and a termination boundary, not a
 sandbox. JavaScript/Python plugins, stdio MCP servers, and Go plugins execute
@@ -284,13 +282,24 @@ I/O, deadlines, and containers/VMs/OS sandboxing for untrusted code.
 - [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification)
 - [Node.js readline](https://nodejs.org/api/readline.html)
 - [Node.js stream backpressure](https://nodejs.org/api/stream.html)
-- [Python embedding documentation](https://docs.python.org/3/extending/embedding.html)
-- [Python asyncio platform support](https://docs.python.org/3/library/asyncio-platforms.html)
+- [Python embedding documentation][python-embedding]
+- [Python asyncio platform support][python-asyncio]
 - [goja](https://github.com/dop251/goja)
 - [QuickJS](https://bellard.org/quickjs/quickjs.html)
 - [Go cgo documentation](https://pkg.go.dev/cmd/cgo)
 - [wazero](https://github.com/tetratelabs/wazero)
-- [MCP architecture](https://modelcontextprotocol.io/specification/latest/architecture)
+- [MCP architecture][mcp-arch]
 - `pkg/plugin/plugin.go`
 - `internal/plugin/external.go`
 - `internal/plugin/manager.go`
+
+[python-embedding]: https://docs.python.org/3/extending/embedding.html
+[python-asyncio]: https://docs.python.org/3/library/asyncio-platforms.html
+[mcp-arch]: https://modelcontextprotocol.io/specification/latest/architecture
+
+## Related documents
+
+- [Plugins](plugins.md)
+- [External plugin protocol v2](plugin-protocol.md)
+- [Tool routing](tool-routing.md)
+- [MCP](mcp.md)

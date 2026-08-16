@@ -1,32 +1,34 @@
 # Plugins
 
 Snow's extensibility core has two adapters sharing one permissioned capability
-registry:
-
-- statically linked Go plugins implement `pkg/plugin.Plugin`;
-- external runtimes implement Snow's JSON-RPC 2.0 JSONL protocol v2.
-
-External runtimes are the supported JavaScript/Python plugin ABI. Snow keeps one
-process alive per plugin package, so interpreter startup is paid once while
-several related tools share the same runtime.
+registry. Statically linked Go plugins implement `pkg/plugin.Plugin`; external
+runtimes implement Snow's JSON-RPC 2.0 JSONL protocol v2. External runtimes are
+the supported JavaScript/Python plugin ABI. Snow keeps one process alive per
+plugin package, so interpreter startup is paid once while several related tools
+share the same runtime.
 
 MCP and skills are intentionally separate. Use [MCP](mcp.md) for interoperable
 tools, resources, and prompts; use Snow plugins for Snow-specific lifecycle,
 private configuration, progress, and observation-only agent events. Skills are
 an instructional resource layer with dedicated activation tools.
 
-References:
+## On this page
 
-- [Complete external protocol v2](plugin-protocol.md)
-- [JavaScript/Python architecture research](plugin-js-python-research.md)
-- [Tool routing](tool-routing.md)
-- dependency-free examples under `examples/plugins/`
+- [Supervised agent-built plugins](#supervised-agent-built-plugins)
+- [Go plugin API](#go-plugin-api)
+- [External configuration](#external-configuration)
+- [Manage plugins](#manage-plugins)
+- [Environment behavior](#environment-behavior)
+- [JavaScript and Python quickstart](#javascript-and-python-quickstart)
+- [Validate a runtime](#validate-a-runtime)
+- [Protocol v2 summary](#protocol-v2-summary)
+- [Security](#security)
 
 ## Supervised agent-built plugins
 
 Snow ships an immutable, progressively disclosed `$plugin-builder` Agent Skill
-inside the binary. It teaches the root agent to decide between an existing tool,
-one-off shell work, MCP, and a Snow-specific plugin; stage dependency-free
+inside the binary. It teaches the root agent to decide between an existing
+tool, one-off shell work, MCP, and a Snow-specific plugin; stage dependency-free
 Python or JavaScript source; review the source diff, SHA-256 hashes, exact
 command, and environment; and run the protocol checker. Its templates and
 protocol notes are read through the normal `read_skill_resource` tool.
@@ -42,7 +44,7 @@ explicit executable operation, enabling is an explicit configuration mutation,
 and the current Snow process must be restarted. Same-session plugin hot loading
 is intentionally unsupported.
 
-## Go API
+## Go plugin API
 
 A plugin has a stable manifest, registration phase, and idempotent close:
 
@@ -66,7 +68,8 @@ session/cwd/call identity, and a bounded progress callback.
 
 Tools may set optional `protocol.ToolDiscovery` metadata. The default is direct
 exposure; `mode: deferred` keeps the full schema in the registry and lets the
-local router select it per prompt. Routing never bypasses execution permissions.
+local router select it per prompt. Routing never bypasses execution
+permissions.
 
 Go plugins may subscribe to versioned agent events. Handlers are
 observation-only: they cannot mutate, veto, or reorder the loop, and panics are
@@ -108,15 +111,16 @@ snow --no-plugins
 ```
 
 `--no-plugins` suppresses all declarations for that launch and records a
-diagnostic for each skipped declaration.
+diagnostic for each skipped declaration. The executable shorthand derives an ID
+and enables the plugin. A manifest is required when an interpreter and script
+need separate argv entries.
 
-The executable shorthand derives an ID and enables the plugin. A manifest is
-required when an interpreter and script need separate argv entries.
+## Manage plugins
 
 Configuration can be inspected and changed without starting any plugin:
 
 ```sh
-snow plugin                    # same as list
+snow plugin
 snow plugin list [--all] [--json]  # alias: ls
 snow plugin get my-tools [--json]
 snow plugin add manifest.json [--project] [--replace] [--enable] [--json]
@@ -129,7 +133,7 @@ snow plugin remove my-tools [--project] [--json]
 of the source manifest. Use `--enable` only when registration and execution on
 the next launch were reviewed together. `enable`, `disable`, and `remove` also
 take effect on the next launch; no management command hot-loads code. A project
-enable/disable requires an existing project declaration—Snow never copies a
+enable/disable requires an existing project declaration. Snow never copies a
 global command, environment, or private config into the usually commit-visible
 project file. Add and replace preserve unrelated configuration fields, while
 list/get redact child environments, credential-shaped command/header arguments,
@@ -145,12 +149,12 @@ subcommands and cannot be combined with `--project` mutations.
 
 Project `.snow/config.json` entries are loaded only after project trust has an
 explicit `allow` decision (or always-trust policy). Denied or unresolved project
-entries are not parsed by inspection commands and are reported as trust-blocked.
-Disabled entries are not spawned. An explicit `--project` mutation does not
-change project trust. Snow does not scan executable directories and has no
-plugin marketplace.
+entries are not parsed by inspection commands and are reported as
+trust-blocked. Disabled entries are not spawned. An explicit `--project`
+mutation does not change project trust. Snow does not scan executable
+directories and has no plugin marketplace.
 
-### Environment behavior
+## Environment behavior
 
 Snow intentionally supplies the configured `env`; omitted `env` means an empty
 child environment. Entries must be unique literal `NAME=VALUE` strings; blank,
@@ -212,8 +216,8 @@ session and:
   assignments/headers;
 - verifies graceful shutdown.
 
-Redaction is defense in depth, not a secret-handling API. Plugins must never emit
-credentials to stderr, protocol logs, results, progress, or errors.
+Redaction is defense in depth, not a secret-handling API. Plugins must never
+emit credentials to stderr, protocol logs, results, progress, or errors.
 
 An explicit check runs even when the declaration has `enabled: false`; it does
 not modify stored configuration.
@@ -262,10 +266,11 @@ crash/termination boundary, not a sandbox. Trust controls whether project input
 is loaded; it does not confine an already loaded plugin.
 
 Tool risk is plugin-declared metadata used by the central permission service;
-capabilities are retained descriptor/discovery metadata and do not independently
-authorize a call. Neither field stops the process from accessing files, network,
-or subprocesses directly. Only trusted plugins should receive `read`, `write`,
-or `network` classifications instead of the safe `exec` default.
+capabilities are retained descriptor/discovery metadata and do not
+independently authorize a call. Neither field stops the process from accessing
+files, network, or subprocesses directly. Only trusted plugins should receive
+`read`, `write`, or `network` classifications instead of the safe `exec`
+default.
 
 Use containers, a VM, or an OS sandbox for untrusted code. Snow avoids implicit
 environment inheritance, does not intentionally log credentials, applies
@@ -274,3 +279,11 @@ best-effort common-credential redaction to diagnostics, and bounds plugin I/O.
 Snow's lifecycle draws inspiration from Pi's extension/progressive-disclosure
 model and OpenCode's explicit permission-aware plugins, but does not promise API
 compatibility with either.
+
+## Related documents
+
+- [External plugin protocol v2](plugin-protocol.md)
+- [JavaScript and Python plugin research](plugin-js-python-research.md)
+- [Tool routing](tool-routing.md)
+- [MCP](mcp.md)
+- [Agent Skills](skills.md)

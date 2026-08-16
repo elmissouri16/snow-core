@@ -182,6 +182,7 @@ behavior in code before relying on a checklist item.
 │   ├── skills.md             # Agent Skills discovery and disclosure behavior
 │   ├── tool-routing.md       # Opt-in Bleve BM25 schema discovery and recovery
 │   └── tui-performance.md    # Bubble Tea/Bubbles integration and render rules
+│   └── style-guide.md        # documentation structure and formatting conventions
 ├── examples/
 │   ├── sdk/                  # standalone public Go SDK module
 │   ├── rpc/{python,javascript}/ # language-SDK lifecycle examples
@@ -413,6 +414,8 @@ append-only/tree model when adding resume or fork features.
   resource confinement, compaction persistence, and SDK/CLI surfaces.
 - `docs/tui-performance.md`: pinned Charmbracelet versions, upstream examples,
   responsive rendering rules, tool event integration, and TUI verification.
+- `docs/style-guide.md`: repository-wide documentation structure, heading,
+  table, code, link, and terminology conventions for contributors.
 - `AGENTS.md`: operational guidance and code reality for future agents.
 
 When docs disagree with code, update the relevant docs as part of the feature,

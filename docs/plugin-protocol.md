@@ -1,12 +1,30 @@
-# External plugin protocol v2
+# External Plugin Protocol v2
 
 Snow's external plugin protocol is the language-neutral ABI for JavaScript,
 Python, and other subprocess runtimes. It uses JSON-RPC 2.0 objects framed as
 one UTF-8 JSON object per LF-terminated line on stdin/stdout.
 
-This is separate from Snow's user-facing JSONL RPC mode and from MCP. Use MCP
-for interoperable tools/resources/prompts; use this protocol for Snow-specific
-tool registration, lifecycle, progress, and observation-only agent events.
+> **Note:** This protocol is separate from Snow's user-facing JSONL RPC mode
+> and from MCP. Use MCP for interoperable tools, resources, and prompts; use
+> this protocol for Snow-specific tool registration, lifecycle, progress, and
+> observation-only agent events.
+
+## On this page
+
+- [Process contract](#process-contract)
+- [Lifecycle](#lifecycle)
+- [Message reference](#message-reference)
+- [Configuration](#configuration)
+- [Initialize request](#initialize-request)
+- [Tool listing](#tool-listing)
+- [Tool calls](#tool-calls)
+- [Progress](#progress)
+- [Cancellation](#cancellation)
+- [Agent events](#agent-events)
+- [Plugin diagnostics](#plugin-diagnostics)
+- [Errors](#errors)
+- [Shutdown](#shutdown)
+- [Validate a plugin](#validate-a-plugin)
 
 ## Process contract
 
@@ -39,6 +57,19 @@ spawn process
 
 External startup failures are isolated and reported as plugin diagnostics. They
 do not prevent Snow's core agent from starting.
+
+## Message reference
+
+| Direction | Method | Purpose |
+|---|---|---|
+| Host to plugin | `initialize` | Negotiate protocol, host capabilities, and config. |
+| Host to plugin | `tools/list` | Fetch the authoritative tool catalog. |
+| Host to plugin | `tools/call` | Invoke one tool. |
+| Host to plugin | `shutdown` | Request graceful close. |
+| Host to plugin | `notifications/event` | Deliver one subscribed, sanitized agent event. |
+| Host to plugin | `notifications/cancelled` | Best-effort cancellation of one call. |
+| Plugin to host | `notifications/progress` | Report bounded progress for a call. |
+| Plugin to host | `notifications/log` | Report bounded diagnostics. |
 
 ## Configuration
 
@@ -91,7 +122,7 @@ Defaults:
 although the surrounding agent operation can still be cancelled. A positive
 value also bounds the startup `initialize` and `tools/list` requests.
 
-## `initialize`
+## Initialize request
 
 Host request:
 
@@ -150,7 +181,7 @@ bounded, and best effort; it must never be used as a reliable transaction log.
 The returned `limits` map is informational and appears in `snow plugin check`.
 Host-enforced limits come from the plugin declaration.
 
-## `tools/list`
+## Tool listing
 
 Snow calls `tools/list` immediately after successful initialization:
 
@@ -211,7 +242,7 @@ in the registry and are selected by Snow's local tool router.
 
 Omitted risk defaults to `exec`. Invalid values reject plugin initialization.
 Risk feeds Snow's central permission classification, but it is plugin-declared
-metadata—not an OS-level restriction on the subprocess. Only trusted plugins
+metadata, not an OS-level restriction on the subprocess. Only trusted plugins
 should receive a less restrictive classification.
 
 Per-tool `capabilities` are retained descriptor/discovery metadata rather than
@@ -222,7 +253,7 @@ For compatibility, `initialize` may also return `tools`. Snow uses that catalog
 only when `tools/list.tools` is null or omitted; an explicitly empty array means
 no tools.
 
-## `tools/call`
+## Tool calls
 
 ```json
 {
@@ -239,12 +270,15 @@ no tools.
 }
 ```
 
-- `name` is the original unqualified tool name.
-- `call_id` identifies progress and agent events.
-- `arguments` is the model-generated JSON value.
-- `timeout_ms` is the remaining host deadline in milliseconds, or zero when no
-  deadline exists.
-- Calls can overlap up to the configured concurrency limit.
+| Field | Meaning |
+|---|---|
+| `name` | The original unqualified tool name. |
+| `call_id` | Identifies progress and agent events. |
+| `arguments` | The model-generated JSON value. |
+| `timeout_ms` | Remaining host deadline in milliseconds, or zero when no deadline exists. |
+| `cancellation` | Host cancellation support hint. |
+
+Calls can overlap up to the configured concurrency limit.
 
 Successful tool result:
 
@@ -312,8 +346,8 @@ sends a best-effort notification:
 The runtime should cancel work by both request and call ID. Cancellation is
 cooperative: synchronous CPU work or a blocking native call may not stop until
 the process exits. A late result is ignored by Snow. Language helpers should
-also enforce `tools/call.params.timeout_ms` locally because cancellation delivery
-uses a bounded queue.
+also enforce `tools/call.params.timeout_ms` locally because cancellation
+delivery uses a bounded queue.
 
 ## Agent events
 
@@ -340,16 +374,16 @@ Payloads are cloned, sanitized, and bounded. Event delivery has a bounded queue
 and may be dropped when a plugin is slow. Event handlers cannot mutate, veto, or
 reorder Snow's agent loop.
 
-Common event names include:
+Known event types:
 
 ```text
 session_updated text_delta thinking_delta
 tool_start tool_progress tool_end tool_routing
-permission_request user_input_request usage turn_done
-error aborted model_changed mode_changed
+permission_request user_input_request usage queue_updated
+turn_done error aborted model_changed mode_changed
 plan_started plan_delta plan_completed plan_update
-compaction_started compaction_done thread_goal_updated queue_updated
-subagent_started subagent_status subagent_message
+compaction_started compaction_done thread_goal_updated
+subagent_started subagent_status subagent_message subagent_activity
 ```
 
 Clients should ignore unknown future event types.
@@ -373,7 +407,8 @@ Stderr and protocol logs are retained only up to the smaller of the configured
 output limit and the default 256 KiB output limit; each individual protocol log
 message is also bounded. Retained diagnostics pass through best-effort redaction
 for common credential assignments, JSON fields, and authorization headers.
-Redaction is defense in depth and cannot recognize every secret format. Plugins must never intentionally emit credentials.
+Redaction is defense in depth and cannot recognize every secret format. Plugins
+must never intentionally emit credentials.
 
 ## Errors
 
@@ -404,7 +439,7 @@ Recommended codes:
 Do not include secrets, tracebacks, or unbounded third-party output in error
 messages. Notifications never receive error responses.
 
-## `shutdown`
+## Shutdown
 
 ```json
 {"jsonrpc":"2.0","id":"4","method":"shutdown","params":{}}
@@ -428,9 +463,16 @@ snow plugin check examples/plugins/python/manifest.json --json
 The command accepts a manifest or executable shorthand and has a 10-second
 default overall timeout. It starts the runtime without creating an agent
 session, validates the manifest and schemas, lists effective plugin/tool
-capabilities, risks/discovery
-modes and subscribed events, reports initialization time, prints bounded
-diagnostics with best-effort redaction, then performs graceful shutdown.
+capabilities, risks/discovery modes and subscribed events, reports
+initialization time, prints bounded diagnostics with best-effort redaction, then
+performs graceful shutdown.
 
 See the dependency-free reference runtimes under `examples/plugins/` and the
 [plugin overview](plugins.md).
+
+## Related documents
+
+- [Plugins](plugins.md)
+- [JavaScript and Python plugin research](plugin-js-python-research.md)
+- [Tool routing](tool-routing.md)
+- [MCP](mcp.md)

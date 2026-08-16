@@ -1,17 +1,36 @@
 # Sandboxed Bash with smolvm
 
 Snow can route the model-facing `bash` tool through a persistent Linux virtual
-machine managed by [smolvm](https://github.com/smol-machines/smolvm). The machine
-is scoped to one exact canonical project directory and is optional.
+machine managed by [smolvm](https://github.com/smol-machines/smolvm). The
+machine is scoped to one exact canonical project directory and is optional.
 
 This guide covers setup, environment profiles, lifecycle, persistence, resource
 controls, project scoping, and recovery. See [Security](security.md) for the
 complete threat model and [Configuration](configuration.md) for every global
 setting.
 
-## Boundary at a glance
+> **Note:** The VM covers Bash only. It does not sandbox Snow itself, the file
+> tools, providers, plugins, MCP servers, webfetch, or subagent orchestration.
 
-The VM covers **only model-facing Bash commands**.
+## On this page
+
+- [Overview](#overview)
+- [Requirements and installation](#requirements-and-installation)
+- [Environment profiles](#environment-profiles)
+- [Lifecycle commands](#lifecycle-commands)
+- [Project scoping and operator store](#project-scoping-and-operator-store)
+- [Guest environment](#guest-environment)
+- [Process behavior](#process-behavior)
+- [Persistence and recovery](#persistence-and-recovery)
+- [Troubleshooting](#troubleshooting)
+- [Configuration](#configuration)
+- [Related documents](#related-documents)
+
+## Overview
+
+### Bash-only boundary
+
+The VM covers only model-facing Bash commands.
 
 | Runs in the VM while active | Remains on the host |
 |---|---|
@@ -20,8 +39,11 @@ The VM covers **only model-facing Bash commands**.
 | Guest package managers and their network traffic | Plugins and MCP servers |
 | Guest files outside the project mount | `webfetch` and host-side subagent orchestration |
 
-The VM is not a whole-process sandbox. A read-only Bash mount does not prevent a
-separately approved host-side `write` or `edit` tool from changing the project.
+> **Caution:** The VM is not a whole-process sandbox. A read-only Bash mount
+> does not prevent a separately approved host-side `write` or `edit` tool from
+> changing the project.
+
+### Routing indicator
 
 Snow's wide TUI header continuously displays the Bash routing boundary:
 
@@ -30,10 +52,10 @@ Snow's wide TUI header continuously displays the Bash routing boundary:
 
 ## Requirements and installation
 
-Snow supports the audited smolvm 1.8.x CLI line beginning at 1.8.1. macOS needs
-smolvm's supported Hypervisor.framework environment and `mkfs.ext4` from
-Homebrew's `e2fsprogs`; Linux needs usable KVM. Install the macOS disk formatter
-before initialization:
+Snow supports the audited smolvm 1.8.x CLI line beginning at 1.8.1. macOS
+needs smolvm's supported Hypervisor.framework environment and `mkfs.ext4` from
+Homebrew's `e2fsprogs`; Linux needs usable KVM. Install the macOS disk
+formatter before initialization:
 
 ```sh
 brew install e2fsprogs
@@ -42,8 +64,9 @@ brew install e2fsprogs
 Snow adds the standard Apple Silicon and Intel Homebrew `e2fsprogs` sbin paths
 to smolvm's process environment, including when the keg-only formula is not on
 the shell `PATH`. A custom Homebrew prefix must put its `sbin` directory on
-`PATH`. Snow checks this prerequisite before creating or starting a machine so a
-first boot cannot appear successful with disk state that disappears on restart.
+`PATH`. Snow checks this prerequisite before creating or starting a machine so
+a first boot cannot appear successful with disk state that disappears on
+restart.
 
 When the default `smolvm` command is absent, an explicit sandbox initialization
 can install Snow's pinned smolvm 1.8.1 release into the user's normal smolvm and
@@ -56,11 +79,36 @@ The default no-profile path stages the configured digest-pinned image over host
 HTTPS before creating the machine. A local `.smolmachine` pack can be used when
 registry bootstrap must remain offline.
 
-## Initialize a sandbox
+## Environment profiles
 
-### Interactive TUI
+Built-in profiles provide supervised, digest-pinned development environments:
 
-Run:
+| Profile ID | Environment |
+|---|---|
+| `ubuntu` | Minimal Ubuntu base with core system tools and apt |
+| `go` | Official Go development environment |
+| `node` | Official Node.js environment with npm |
+| `python` | Official Python environment with the uv package manager |
+
+Profiles are treated uniformly:
+
+- every image is pinned by version and multi-platform image digest;
+- every profile deliberately enables persistent guest networking so its package
+  manager can reach registries;
+- a profile may provide resource recommendations, which remain editable in the
+  form and can be overridden with CLI flags;
+- selecting another profile requires replacing the existing VM;
+- profile identity, image, resources, mount policy, and network authority are
+  persisted in the project association.
+
+Custom and configured images are not profiles. They retain their separately
+chosen network policy and global resource defaults.
+
+## Lifecycle commands
+
+### Initialize
+
+Run the interactive TUI form with:
 
 ```text
 /sandbox init
@@ -90,7 +138,7 @@ The form starts on the custom/configured image and preserves its configured
 network choice. Moving the Environment field to a built-in profile is an
 explicit profile and network-authority selection.
 
-### CLI
+From the CLI:
 
 ```sh
 # Configured default image, guest networking off.
@@ -119,35 +167,14 @@ snow sandbox init --read-only --network
 
 `--profile` and an explicit image/pack source are mutually exclusive. Omitting a
 resource flag uses the applicable profile or global default. An explicit
-`--storage 0` or `--overlay 0` asks smolvm to use its own disk default, even when
-the global Snow configuration contains a nonzero value.
+`--storage 0` or `--overlay 0` asks smolvm to use its own disk default, even
+when the global Snow configuration contains a nonzero value.
 
-## Environment profiles
+Other init flags: `--guest-cwd` sets the guest project mount path (default from
+global config), and `--from` treats the positional source as a local
+`.smolmachine` pack rather than an image reference.
 
-Built-in profiles provide supervised, digest-pinned development environments:
-
-| Profile ID | Environment |
-|---|---|
-| `ubuntu` | Minimal Ubuntu base with core system tools and apt |
-| `go` | Official Go development environment |
-| `node` | Official Node.js environment with npm |
-| `python` | Official Python environment with the uv package manager |
-
-Profiles are treated uniformly:
-
-- every image is pinned by version and multi-platform image digest;
-- every profile deliberately enables persistent guest networking so its package
-  manager can reach registries;
-- a profile may provide resource recommendations, which remain editable in the
-  form and can be overridden with CLI flags;
-- selecting another profile requires replacing the existing VM;
-- profile identity, image, resources, mount policy, and network authority are
-  persisted in the project association.
-
-Custom/configured images are not profiles. They retain their separately chosen
-network policy and global resource defaults.
-
-## Lifecycle
+### Status
 
 Inspect the current project's association:
 
@@ -213,14 +240,14 @@ or:
 snow sandbox delete --force
 ```
 
-Deletion removes the guest VM, overlay, installed packages, and guest caches. It
-does not delete the host project mounted at `/workspace`.
+> **Caution:** Deletion removes the guest VM, overlay, installed packages, and
+> guest caches. It does not delete the host project mounted at `/workspace`.
 
-Plain `/sandbox delete` only displays the confirmation syntax; it does not remove
-anything. Wait for the deletion-completed message before initializing another
-machine.
+Plain `/sandbox delete` only displays the confirmation syntax; it does not
+remove anything. Wait for the deletion-completed message before initializing
+another machine.
 
-## Switch profiles
+### Switch profiles
 
 Profiles cannot be hot-swapped because the image is the VM's filesystem base.
 Switch profiles in the same TUI session with:
@@ -245,74 +272,17 @@ snow sandbox delete --force
 snow sandbox init --profile PROFILE
 ```
 
-## Persistence and files
+### Headless and SDK use
 
-A sandbox combines a persistent guest filesystem with one host mount.
+Headless callers can require an existing association with `--require-sandbox` or
+explicitly bypass association loading with `--no-sandbox`. The Go SDK exposes
+the corresponding `RequireSandbox` and `DisableSandbox` options plus a
+secret-free `SandboxStatus()` snapshot.
 
-### Preserved across stop/start
+These options select or validate routing; they do not expand the VM boundary
+beyond Bash. See [Go SDK](sdk.md) for lifecycle and readiness behavior.
 
-- guest-installed packages;
-- language and package-manager caches;
-- compiler/build caches;
-- files under the guest root filesystem;
-- guest configuration;
-- storage and overlay disk contents.
-
-Temporary-directory cleanup remains guest operating-system policy, so do not use
-`/tmp` as the only copy of an important artifact.
-
-### Host project mount
-
-Snow mounts exactly the canonical project directory into the guest, at
-`/workspace` by default. Files changed there are host files and survive sandbox
-deletion. The mount can be made read-only for guest Bash.
-
-Snow does not add a separate host-home, SSH-agent, Docker-socket, smolvm-control,
-or credential-store mount. If the selected project root is the home directory,
-the exact project mount naturally includes that directory. Host and guest user IDs may differ, so
-software that distrusts repositories owned by another numeric user may require
-an explicit per-tool trust configuration.
-
-## Networking
-
-Guest network authority is fixed when the association is created:
-
-- built-in profiles always enable persistent guest networking;
-- a custom/configured source enables it only when explicitly selected;
-- networking stays enabled across stop/start;
-- changing it requires deleting and recreating the association.
-
-Guest network access is full outbound access provided by smolvm, not a
-package-manager-only exception. It is independent of Snow's provider and
-`webfetch` traffic, which remain host-side.
-
-For no-profile initialization without guest networking, Snow downloads the
-configured digest-pinned registry image on the host, writes a private bounded
-Docker-save archive, imports it into smolvm, and deletes the temporary archive.
-
-## Resources
-
-CPU, memory, storage, and overlay values are creation-time settings. Use the TUI
-form or CLI flags to override profile/global recommendations. Changing resources
-currently requires deleting and recreating the VM.
-
-If a guest build is killed without a language-level error, inspect memory before
-assuming the source failed:
-
-```sh
-free -h
-```
-
-Increase the profile's memory in the next initialization or reduce the build's
-parallelism. Interrupted downloads or out-of-memory compilation can also leave a
-language cache incomplete; use that language's normal cache-cleaning command
-before retrying.
-
-Storage and overlay files are commonly sparse: their configured logical size can
-be much larger than current host disk usage. Deleting the VM releases those guest
-disks.
-
-## Exact project scoping
+## Project scoping and operator store
 
 Associations are keyed by exact canonical project path in:
 
@@ -321,12 +291,12 @@ $SNOW_HOME/sandboxes.json
 ```
 
 The file is operator-owned, atomically replaced, interprocess locked, and mode
-`0600`. Parent associations do not apply to child projects. Running `sandbox
-init` from a home directory and from a repository therefore creates two separate
-machines.
+`0600`. Parent associations do not apply to child projects. Running
+`sandbox init` from a home directory and from a repository therefore creates two
+separate machines.
 
-A stopped current-project sandbox does not imply every smolvm machine is stopped.
-List all machines with:
+A stopped current-project sandbox does not imply every smolvm machine is
+stopped. List all machines with:
 
 ```sh
 smolvm machine ls --json
@@ -341,16 +311,113 @@ project directory:
 ```
 
 An active smolvm `_boot-vm` process in Activity Monitor or `ps` belongs to a
-running machine. A properly stopped machine has no VM PID. Stopping preserves its
-disks; deleting removes them.
+running machine. A properly stopped machine has no VM PID. Stopping preserves
+its disks; deleting removes them.
 
-## Failure and recovery
+## Guest environment
 
-### “sandbox is already initialized”
+CPU, memory, storage, and overlay values are creation-time settings. Use the TUI
+form or CLI flags to override profile or global recommendations. Changing
+resources currently requires deleting and recreating the VM.
 
-An association already exists. Stop/start it, or delete it with explicit
-confirmation before initializing another profile. In the TUI, `/sandbox delete`
-without `confirm` is intentionally a no-op.
+Snow validates the limits before creating a machine: virtual CPUs must be in
+`1..64`, memory in `128..262144` MiB, and storage/overlay disks in
+`0..1048576` GiB.
+
+Snow mounts exactly the canonical project directory into the guest at
+`/workspace` by default (or the configured `guest_cwd`). Files changed there are
+host files and survive sandbox deletion. The mount can be made read-only for
+guest Bash.
+
+Snow forwards only a strict environment-name allowlist into the guest:
+`LANG`, `LC_ALL`, and `TERM` by default. It never forwards the wholesale host
+environment, and it does not add a separate host-home, SSH-agent, Docker-socket,
+smolvm-control, or credential-store mount. If the selected project root is the
+home directory, the exact project mount naturally includes that directory. Host
+and guest user IDs may differ, so software that distrusts repositories owned by
+another numeric user may require an explicit per-tool trust configuration.
+
+### Networking
+
+Guest network authority is fixed when the association is created:
+
+- built-in profiles always enable persistent guest networking;
+- a custom or configured source enables it only when explicitly selected;
+- networking stays enabled across stop/start;
+- changing it requires deleting and recreating the association.
+
+Guest network access is full outbound access provided by smolvm, not a
+package-manager-only exception. It is independent of Snow's provider and
+`webfetch` traffic, which remain host-side.
+
+For no-profile initialization without guest networking, Snow downloads the
+configured digest-pinned registry image on the host, writes a private bounded
+Docker-save archive, imports it into smolvm, and deletes the temporary archive.
+
+### Build failures and memory
+
+If a guest build is killed without a language-level error, inspect memory before
+assuming the source failed:
+
+```sh
+free -h
+```
+
+Increase the profile's memory in the next initialization or reduce the build's
+parallelism. Interrupted downloads or out-of-memory compilation can also leave a
+language cache incomplete; use that language's normal cache-cleaning command
+before retrying.
+
+Storage and overlay files are commonly sparse: their configured logical size can
+be much larger than current host disk usage. Deleting the VM releases those
+guest disks.
+
+## Process behavior
+
+Snow validates the pinned executable and version when an active runtime is
+assembled and again before status, lifecycle, and exec operations. It rejects
+older and unaudited future smolvm minor/major versions instead of assuming their
+flag or default behavior. On Linux smolvm also requires usable KVM; on macOS it
+requires its supported Hypervisor.framework setup.
+
+While a published record is active, failure to resolve the pinned CLI, corrupt
+state, VM or exec failure, timeout, or cancellation is a Bash error. Snow never
+falls back to host Bash for that call.
+
+`stop` and `start` are explicit policy changes:
+
+- after a successful `sandbox stop`, Snow atomically persists the stopped state
+  and routes subsequent Bash to the host until `sandbox start` restores VM
+  routing;
+- a failed start/stop state update retains or rolls back to the previous
+  routing boundary.
+
+Guest cancellation sends SIGINT to the smolvm process group first, then
+SIGKILLs the entire launcher group after a bounded grace. Because guest-process
+semantics still depend on smolvm, verify cancellation for critical long-running
+workloads.
+
+`delete --force` deletes the VM before removing the association; failures retain
+the association's current routing policy (active remains fail-closed; stopped
+remains explicit host routing). `delete --force --forget` is an explicit
+recovery path for a VM removed outside Snow or a stale record. Successful
+deletion or forgetting warns that subsequent Bash calls use the host.
+
+## Persistence and recovery
+
+A sandbox combines a persistent guest filesystem with one host mount.
+
+### Preserved across stop/start
+
+- guest-installed packages;
+- language and package-manager caches;
+- compiler and build caches;
+- files under the guest root filesystem;
+- guest configuration;
+- storage and overlay disk contents.
+
+Temporary-directory cleanup remains guest operating-system policy, so do not use
+`/tmp` as the only copy of an important artifact.
 
 ### Stale association or externally removed VM
 
@@ -360,14 +427,24 @@ Use the explicit operator recovery path:
 snow sandbox delete --force --forget
 ```
 
-`--forget` removes Snow's association without requiring backend machine deletion.
-Use it only when the VM was already removed outside Snow or state cleanup is
-otherwise intentional.
+`--forget` removes Snow's association without requiring backend machine
+deletion. Use it only when the VM was already removed outside Snow or state
+cleanup is otherwise intentional.
 
-### macOS machine cannot restart after stop
+## Troubleshooting
 
-smolvm 1.8.1 can complete a first image boot without host `mkfs.ext4`, while its
-warnings report that the persistent storage and overlay disks could not be
+| Symptom | Cause | Resolution |
+|---|---|---|
+| "sandbox is already initialized" | An association already exists | Stop/start it, or delete with explicit confirmation before reinitializing |
+| Stale association or externally removed VM | The VM was removed outside Snow | Run `snow sandbox delete --force --forget` |
+| macOS machine cannot restart after stop | First boot completed without host `mkfs.ext4`, so persistent disks were not formatted | Install `e2fsprogs`, then delete and recreate the association |
+| Active backend failure | smolvm, the machine, its record, or guest execution failed | The Bash call errors (fail closed); check status, then stop or delete explicitly |
+| Updated binary is not applied | A running Snow process cannot load newly installed code | Quit and restart the TUI |
+
+### macOS restart failure details
+
+smolvm 1.8.1 can complete a first image boot without host `mkfs.ext4`, while
+its warnings report that the persistent storage and overlay disks could not be
 formatted. After stop or host-process exit, the next boot can then fail with
 `start background CMD`, `image not found`, or `connection closed` because the
 image store was not preserved.
@@ -391,22 +468,6 @@ snow sandbox init --profile PROFILE
 Files in the host project mount remain intact; guest-only installed packages and
 caches must be recreated. Snow now blocks new boots before this failure mode can
 create another apparently usable but non-persistent machine.
-
-### Active backend failure
-
-An active association fails closed. If smolvm, the machine, its record, or guest
-execution fails, that Bash call returns an error; Snow never silently retries the
-same command on the host.
-
-`sandbox stop` is different: it is an explicit operator decision to persist host
-routing. A failed lifecycle operation retains or rolls back to the previous
-boundary.
-
-### Binary updated while the TUI is open
-
-A running Snow process cannot load newly installed code. After updating the Snow
-binary, quit and restart the TUI. Stopping or restarting Snow does not delete a
-sandbox association.
 
 ## Configuration
 
@@ -432,20 +493,10 @@ cannot create or weaken a sandbox association. See
 [Configuration](configuration.md#smolvm-bash-sandbox-defaults) for defaults,
 ranges, and precedence.
 
-## Headless and SDK use
+## Related documents
 
-Headless callers can require an existing association with `--require-sandbox` or
-explicitly bypass association loading with `--no-sandbox`. The Go SDK exposes the
-corresponding `RequireSandbox` and `DisableSandbox` options plus a secret-free
-`SandboxStatus()` snapshot.
-
-These options select or validate routing; they do not expand the VM boundary
-beyond Bash. See [Go SDK](sdk.md) for lifecycle and readiness behavior.
-
-## Related documentation
-
-- [Using Snow](using-snow.md) — all CLI/TUI commands and workflows
-- [Configuration](configuration.md) — sandbox fields and storage paths
 - [Security](security.md) — complete privilege and threat boundaries
+- [Configuration](configuration.md) — sandbox fields and storage paths
+- [Using Snow](using-snow.md) — all CLI and TUI commands and workflows
 - [Go SDK](sdk.md) — embedding options and status API
 - [Project README](../README.md#optional-smolvm-shell-sandbox) — quick start
