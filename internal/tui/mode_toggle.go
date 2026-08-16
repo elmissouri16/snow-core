@@ -92,6 +92,12 @@ func (m *Model) finishModeSwitch(msg modeSwitchDoneMsg) {
 		m.pushLine(styleError.Render(fmt.Sprintf("mode: persisted %s, wanted %s", actual, msg.target)))
 		return
 	}
+	if actual == protocol.ModeDefault {
+		// A plan completion and its queued boundary switch travel through
+		// separate Bubble Tea message paths. Never leave the implementation
+		// picker modal after the switch has made it inapplicable.
+		m.planPrompt = false
+	}
 	if actual == protocol.ModePlan {
 		// A goal turn can advertise continuation just before the queued mode
 		// command stops the automatic worker. SetMode joins that worker, so no

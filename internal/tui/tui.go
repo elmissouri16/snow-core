@@ -2176,7 +2176,12 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		}
 		m.finishAssistant()
 		m.finalizePlan()
-		if m.completedPlanThisTurn && strings.TrimSpace(m.latestPlan) != "" && m.app != nil && m.app.Agent.Mode() == protocol.ModePlan {
+		// Do not open the implementation picker when the user already queued a
+		// switch out of Plan mode for this boundary. The mode command runs on a
+		// separate Bubble Tea path, so opening it here would leave a stale modal
+		// in front of the now-Default composer.
+		leavingPlan := m.pendingMode != nil && *m.pendingMode == protocol.ModeDefault
+		if m.completedPlanThisTurn && strings.TrimSpace(m.latestPlan) != "" && m.app != nil && m.app.Agent.Mode() == protocol.ModePlan && !leavingPlan {
 			m.planPrompt = true
 			m.planPromptChoice = 0
 		}

@@ -102,6 +102,45 @@ func TestShiftTabQueuesUntilTurnBoundaryAndCanCancel(t *testing.T) {
 	}
 }
 
+func TestQueuedDefaultSwitchDoesNotLeavePlanImplementationPicker(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	if err := m.app.Agent.SetMode(protocol.ModePlan); err != nil {
+		t.Fatal(err)
+	}
+	m.busy = true
+	if _, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab}); cmd != nil {
+		t.Fatal("busy mode toggle ran before plan turn boundary")
+	}
+	if m.pendingMode == nil || *m.pendingMode != protocol.ModeDefault {
+		t.Fatalf("pending mode=%v want default", m.pendingMode)
+	}
+
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvPlanStarted, Plan: &protocol.PlanItem{ID: "p"}})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvPlanCompleted, Plan: &protocol.PlanItem{ID: "p", Text: "# Ship\n- test\n"}})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
+	if m.planPrompt {
+		t.Fatal("queued switch to Default opened a stale implementation picker")
+	}
+	applyModeToggleCommand(t, m, m.beginPendingModeSwitch())
+	if m.app.Agent.Mode() != protocol.ModeDefault || m.planPrompt {
+		t.Fatalf("mode=%q planPrompt=%v", m.app.Agent.Mode(), m.planPrompt)
+	}
+}
+
+func TestDefaultModeCompletionDismissesStalePlanImplementationPicker(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	if err := m.app.Agent.SetMode(protocol.ModePlan); err != nil {
+		t.Fatal(err)
+	}
+	m.planPrompt = true
+	applyModeToggleCommand(t, m, m.toggleCollaborationMode())
+	if m.app.Agent.Mode() != protocol.ModeDefault || m.planPrompt {
+		t.Fatalf("mode=%q planPrompt=%v", m.app.Agent.Mode(), m.planPrompt)
+	}
+}
+
 type failingTUIModeStore struct{ session.Store }
 
 func (*failingTUIModeStore) CollaborationMode() (protocol.CollaborationMode, error) {
