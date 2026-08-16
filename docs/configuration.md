@@ -117,10 +117,6 @@ A representative configuration:
     "theme": "default",
     "mouse": true
   },
-  "worktree_workers": {
-    "max_concurrent": 4,
-    "shutdown_timeout_ms": 5000
-  },
   "skills": {
     "disabled": false,
     "dirs": [],
@@ -299,32 +295,10 @@ or query parameters. ChatGPT/Codex retains its dedicated backend and OAuth flow.
 }
 ```
 
-The human-only worktree dashboard is intentionally on-demand: use `Ctrl+B` or
-`/worktrees`. It owns a clean full-screen list/detail frame instead of shrinking
-the conversation, and inventory refresh occurs only when it opens or when the
-human presses `r`. The legacy pre-alpha `tui.worktree_sidebar` field is accepted
-for compatibility but no longer opens UI at startup.
-
 Built-in themes are `default`, `dark`, `light`, and `high-contrast`. Any other
 valid name refers to a custom theme file. Snow always uses Bubble Tea's
 alternate-screen, app-owned transcript viewport so scrolling cannot expose stale
 rendered headers or composer chrome. The default `mouse: true` keeps wheel/trackpad gestures inside Snow's transcript viewport and provides highlighted drag selection, edge auto-scroll, and OSC 52 copy. Apple Terminal users can hold Fn while dragging for instant terminal-native selection without disabling wheel handling. A reported right-click switches Snow to native mouse mode for terminal selection/context menus; repeat the click when the terminal consumed the initiating press. F6 toggles explicitly, and `mouse: false` starts natively. In native mode wheel gestures may scroll terminal history; PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
-
-### Worktree workers
-
-The global, operator-owned `worktree_workers` object bounds independent RPC
-workers launched from the TUI supervisor:
-
-| Field | Range/default | Meaning |
-|---|---|---|
-| `max_concurrent` | `1..8`, default `4` | Maximum simultaneously starting/ready/stopping worktree worker processes; the root App is not counted |
-| `shutdown_timeout_ms` | `100..60000`, default `5000` | Per-stage bound for graceful EOF, process-group terminate, and kill escalation |
-
-Project `.snow/config.json` cannot override these fields. Workers inherit the
-selected provider/model/thinking choice and explicit global config/auth paths,
-but API keys are never placed on argv. Each child receives `--permission ask`
-and `--no-subagents`; its own exact worktree trust and sandbox lookup still
-apply.
 
 ### Compaction
 
@@ -493,7 +467,6 @@ bindings:
   newline: [ctrl+j]
   follow_up: [alt+enter]
   toggle_mode: [shift+tab]
-  toggle_worktrees: [ctrl+b]
   picker_up: [up, k]
   picker_down: [down, j]
 ```
@@ -501,7 +474,7 @@ bindings:
 Supported actions:
 
 ```text
-submit follow_up newline paste abort quit toggle_mode toggle_worktrees
+submit follow_up newline paste abort quit toggle_mode
 page_up page_down top bottom line_up line_down
 picker_up picker_down picker_previous picker_next
 picker_page_up picker_page_down picker_top picker_bottom

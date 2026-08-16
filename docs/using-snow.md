@@ -164,7 +164,6 @@ These are built-in defaults; most can be overridden in
 | `Ctrl+J` | Insert a reliable newline | Insert a reliable newline |
 | `Ctrl+V` | Paste through the active textarea | Paste through the active textarea |
 | `Shift+Tab` | Toggle Default/Plan mode | Queue mode change until `turn_done` |
-| `Ctrl+B` | Open/close the full-screen worktree-agent dashboard | Same; it never becomes model-accessible |
 | `Ctrl+C` | Quit | Abort, clear queued work, restore queued composer text, and defer active goal continuation |
 | `Esc` | Close modal/picker | Abort active work and defer active goal continuation, or reject the active input modal |
 | `Ctrl+D` | Quit when the composer is empty | — |
@@ -240,64 +239,11 @@ meaningful.
 | `/agent` | Open the live subagent fleet inspector; select with ↑/↓ or j/k, scroll detail with wheel/trackpad or PageUp/PageDown, refresh with `r`, close with Esc |
 | `/agent PATH` | Open the fleet inspector with one child preselected |
 | `/agent concurrency N` | Persist child concurrency for the next launch |
-| `/worktrees` | Open/focus the human-controlled linked-worktree worker supervisor; equivalent to `Ctrl+B` |
 | `/mcp` | Inspect configured/connected MCP server status |
 | `/sandbox [status|init|start|stop|delete confirm]` | Inspect or control the persistent smolvm Bash guest; init accepts `--from`, `--read-only`, and `--network` |
 | `/skills` | Inspect discovered Agent Skills |
 | `/trust [allow|deny]` | Show or persist exact-project trust for the next launch |
 | `/quit` | Exit Snow |
-
-## Worktree-agent supervisor
-
-The on-demand worktree dashboard is a human UI above independent Snow RPC
-processes; it is not the model-facing subagent system. `Ctrl+B` toggles it and
-`/worktrees` opens it. It owns a clean full-screen frame with a compact agent
-list, tabbed details, a status bar, and one fixed key guide; it never squeezes
-the active conversation into a narrow pane. Inventory is loaded when the
-dashboard opens and only refreshed manually with `r`—there is no timer-driven
-refresh. Blocking root permission/input requests still take precedence.
-
-The list is derived from `git worktree list --porcelain -z` and exact-CWD Snow
-session metadata. A row can truthfully be `current`, `managed`, `not attached`,
-`permission`, `input needed`, `crashed`, or `outcome unknown`. “Not attached”
-means only that this supervisor does not own a child handle; Snow does not infer
-liveness from branches, database timestamps, lock files, or persisted PIDs.
-After supervisor restart, previously external workers remain not attached.
-
-Controls while the list has focus:
-
-| Key | Action |
-|---|---|
-| ↑/↓ or j/k | Select a linked worktree |
-| Enter | Return focus to the composer; a managed remote worker becomes the target |
-| Left/Right or h/l/Tab | Switch Chat, Activity, Workspace, and bounded Diff views |
-| `n` | Create a clean worktree/session through the existing fork flow, then review its worker launch |
-| `s` | Review trust, sandbox, exact session, provider/model, and permission mode before starting/restarting |
-| `r` | Manually refresh linked-worktree and exact-CWD session inventory |
-| `x` | Interrupt active work owned by the selected worker |
-| `d` | Load read-only bounded `git status --short --branch` and `git diff --stat` |
-| Esc | Close the dashboard and return to the root conversation |
-
-A remote managed worker uses the ordinary composer: idle Enter starts a prompt,
-running Enter sends steering, Alt+Enter queues a follow-up, and Esc interrupts.
-The worker transcript is hydrated with at most 24 recent messages, while live
-text/thinking/activity is separately bounded. Permission and `ask_user` events
-preempt the frame, identify the worker/branch/path, and require an attributed
-human reply. Remote permission choices are allow once, allow for that worker
-session, or deny; there is no remote global allow-always operation.
-
-Every launch runs the current Snow executable with direct arguments, the
-worktree as `cmd.Dir`, an exact existing session, explicit `--permission ask`,
-and `--no-subagents`. Snow validates `rpc_ready`, protocol capabilities,
-`session_info` identity/CWD/permission mode, and bounded transcript hydration
-before reporting the worker ready. One supervisor-owned live worker is allowed
-per canonical worktree (and per session), avoiding ambiguous composer and
-permission targets. The destination resolves trust and exact-path
-smolvm state independently; the confirmation can continue with project input
-untrusted or explicitly trust that destination. Closing the controlling App
-aborts work, closes RPC stdin, waits, then terminates/kills the owned process
-group on a bound. Worktrees, branches, and session databases are never removed
-by worker stop or shutdown.
 
 ## Composer completions
 
@@ -363,9 +309,8 @@ leaf branches and never deletes shared history.
   provenance, and switches the TUI only after the child is reopenable;
 - **Git worktree** requires a clean non-bare Git worktree, creates a new branch
   and non-existing destination with direct `git` arguments, then creates a
-  detached child session rooted there. The current TUI stays in the source,
-  refreshes the worktree supervisor, and opens the destination's explicit
-  trust/sandbox/session launch review; manual `snow resume` remains available.
+  detached child session rooted there. The current TUI stays in the source and
+  prints a `snow resume` command for opening the child in a fresh runtime.
 
 The non-interactive independent-fork equivalents are `snow fork` and
 `snow fork-worktree`. Each accepts an optional session path (or selects the

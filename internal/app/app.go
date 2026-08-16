@@ -34,7 +34,6 @@ import (
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/skills"
 	"github.com/snow-core/snow/internal/subagent"
-	"github.com/snow-core/snow/internal/supervisor"
 	"github.com/snow-core/snow/internal/tempfile"
 	"github.com/snow-core/snow/internal/tools"
 	"github.com/snow-core/snow/internal/tools/builtin"
@@ -84,7 +83,6 @@ type App struct {
 	Sandbox          *sandbox.Manager
 	SandboxEnabled   bool
 	Subagents        *subagent.Manager
-	Supervisor       *supervisor.Manager
 	Diagnostics      []config.Diagnostic
 	SearchPolicy     config.EffectiveSearchPolicy
 	ProjectAllowed   bool
@@ -101,9 +99,6 @@ type App struct {
 	sessionHistory     *builtin.SessionBinding
 	sessionQuery       *session.QueryEngine
 	artifacts          artifact.Store
-	sandboxStatePath   string
-	requireSandbox     bool
-	disableSandbox     bool
 }
 
 type liveRuntimeSelection struct {
@@ -1294,14 +1289,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	ag.Subscribe(manager.Emit)
 	manager.Emit(ag.StateEvent())
 
-	worktreeSupervisor, err := supervisor.New(ctx, supervisor.Options{
-		MaxConcurrent:   cfg.WorktreeWorkers.MaxConcurrent,
-		ShutdownTimeout: time.Duration(cfg.WorktreeWorkers.ShutdownTimeoutMS) * time.Millisecond,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("app: worktree supervisor: %w", err)
-	}
-
 	a := &App{
 		Cfg:                cfg,
 		PersistedCfg:       persistedCfg,
@@ -1332,7 +1319,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		Sandbox:            sandboxManager,
 		SandboxEnabled:     !opts.DisableSandbox,
 		Subagents:          subManager,
-		Supervisor:         worktreeSupervisor,
 		Diagnostics:        append([]config.Diagnostic(nil), configDiagnostics...),
 		SearchPolicy:       searchPolicy,
 		ProjectAllowed:     projectAllowed,
@@ -1345,17 +1331,11 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		sessionHistory:     sessionHistory,
 		sessionQuery:       sessionQuery,
 		artifacts:          artifactStore,
-		sandboxStatePath:   sandboxStatePath,
-		requireSandbox:     opts.RequireSandbox,
-		disableSandbox:     opts.DisableSandbox,
 	}
 	if skillCatalog != nil {
 		a.SkillDiagnostics = skillCatalog.Diagnostics()
 	}
 	if err := a.bindPermissionSession(st); err != nil {
-		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = worktreeSupervisor.Close(closeCtx)
-		cancel()
 		return nil, fmt.Errorf("app: permission state: %w", err)
 	}
 	committed = true
@@ -2328,13 +2308,6 @@ func mergeMCPServers(global, project map[string]publicmcp.ServerSpec, explicit [
 // Close releases plugin and router resources before the session store.
 func (a *App) Close() error {
 	var errs []error
-	if a.Supervisor != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.Cfg.WorktreeWorkers.ShutdownTimeoutMS*2)*time.Millisecond)
-		if err := a.Supervisor.Close(ctx); err != nil {
-			errs = append(errs, err)
-		}
-		cancel()
-	}
 	if a.Subagents != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if err := a.Subagents.Close(ctx); err != nil {

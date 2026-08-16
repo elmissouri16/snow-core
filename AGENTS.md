@@ -121,14 +121,7 @@ behavior in code before relying on a checklist item.
   controls.
 - `ask_user` host interaction across all surfaces: inline TUI choices/free-form
   input, SDK callback, asynchronous RPC reply/reject, and fail-fast print/JSON
-  behavior when no interactive input provider exists. RPC also supports FIFO
-  attributed permission reply/reject plus bounded active-session transcript
-  hydration.
-- An on-demand full-screen TUI worktree-agent dashboard discovers linked Git
-  worktrees and exact-CWD sessions, launches human-confirmed independent
-  `snow resume --mode rpc` workers with fresh trust/sandbox resolution, routes
-  attributed permission/input events, and owns bounded process-group shutdown;
-  it is internal UI infrastructure, not a model tool or public SDK workflow. Plan Mode uses an
+  behavior when no interactive input provider exists. Plan Mode uses an
   embedded Markdown contract and exposes the compatible `request_user_input`
   alias plus structured proposed-plan events.
 - MCP client integration through the official Go SDK v1.7.0: current stateless
@@ -305,7 +298,7 @@ follow-up; Ctrl+J remains multiline, and abort clears/restores queued TUI text.
 Queue delivery is bounded, one-at-a-time, after complete serial tool batches.
 Current TUI slash commands are `/allow [always]`, `/default`, `/deny`, `/fork`, `/help`, `/login`,
 `/logout [provider]`, `/model`, `/plan [message]`, `/thinking`, `/new`, `/permissions`, `/resume`,
-`/agent [path]`, `/agent concurrency N`, `/worktrees`, `/sessions`, `/settings`, `/compact`, `/mcp`, `/sandbox`, `/skills`, `/tree`, `/quit`, and `/trust [allow|deny]`. Top-level `Shift+Tab` toggles Default/Plan mode, while `Ctrl+B` opens/closes the full-screen worktree-agent dashboard (queued to `turn_done` while busy). The TUI uses Bubble Tea's alternate-screen, app-owned viewport so scrolling cannot reveal stale frame chrome. `tui.mouse` defaults to `true` so wheel/trackpad gestures stay inside Snow's viewport. Primary drag uses Snow selection/copy; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. Right-click switches to native mouse mode for the terminal context menu (repeat when the terminal consumed the reported press), while F6 toggles app/native mode explicitly; native-mode wheel gestures may move terminal scrollback. Keyboard viewport scrolling remains available. `Ctrl+V` attaches supported clipboard images in the agent composer or falls back to textarea paste; platform terminal shortcuts use bracketed text paste, and `Ctrl+C` remains abort/quit. `@` in the composer discovers
+`/agent [path]`, `/agent concurrency N`, `/sessions`, `/settings`, `/compact`, `/mcp`, `/sandbox`, `/skills`, `/tree`, `/quit`, and `/trust [allow|deny]`. Top-level `Shift+Tab` toggles Default/Plan mode (queued to `turn_done` while busy). The TUI uses Bubble Tea's alternate-screen, app-owned viewport so scrolling cannot reveal stale frame chrome. `tui.mouse` defaults to `true` so wheel/trackpad gestures stay inside Snow's viewport. Primary drag uses Snow selection/copy; on Apple Terminal, hold Fn while dragging for instant terminal-native selection. Right-click switches to native mouse mode for the terminal context menu (repeat when the terminal consumed the reported press), while F6 toggles app/native mode explicitly; native-mode wheel gestures may move terminal scrollback. Keyboard viewport scrolling remains available. `Ctrl+V` attaches supported clipboard images in the agent composer or falls back to textarea paste; platform terminal shortcuts use bracketed text paste, and `Ctrl+C` remains abort/quit. `@` in the composer discovers
 project files, while a leading `$` autocompletes enabled Agent Skills;
 Enter/Tab inserts either selection without submitting the prompt.
 

@@ -72,30 +72,6 @@ func IsOpenAICompatibleProfile(id string, provider ProviderConfig) bool {
 type TUIConfig struct {
 	Theme string `json:"theme,omitempty"`
 	Mouse bool   `json:"mouse"`
-	// WorktreeSidebar is a legacy pre-alpha split-pane preference. The clean
-	// worktree dashboard is now always opened explicitly with Ctrl+B or /worktrees.
-	WorktreeSidebar bool `json:"worktree_sidebar,omitempty"`
-}
-
-// WorktreeWorkersConfig bounds human-controlled RPC workers. These settings
-// are operator-owned and cannot be increased by project configuration.
-type WorktreeWorkersConfig struct {
-	MaxConcurrent     int `json:"max_concurrent,omitempty"`
-	ShutdownTimeoutMS int `json:"shutdown_timeout_ms,omitempty"`
-}
-
-func DefaultWorktreeWorkers() WorktreeWorkersConfig {
-	return WorktreeWorkersConfig{MaxConcurrent: 4, ShutdownTimeoutMS: 5000}
-}
-
-func (c WorktreeWorkersConfig) Validate() error {
-	if c.MaxConcurrent < 1 || c.MaxConcurrent > 8 {
-		return errors.New("config: worktree_workers.max_concurrent must be 1..8")
-	}
-	if c.ShutdownTimeoutMS < 100 || c.ShutdownTimeoutMS > 60000 {
-		return errors.New("config: worktree_workers.shutdown_timeout_ms must be 100..60000")
-	}
-	return nil
 }
 
 // SandboxConfig controls the optional operator-owned smolvm shell backend.
@@ -433,7 +409,6 @@ type Config struct {
 	SystemPromptFile        string                          `json:"system_prompt_file,omitempty"`
 	Providers               map[string]ProviderConfig       `json:"providers,omitempty"`
 	TUI                     TUIConfig                       `json:"tui,omitempty"`
-	WorktreeWorkers         WorktreeWorkersConfig           `json:"worktree_workers,omitempty"`
 	Sandbox                 SandboxConfig                   `json:"sandbox,omitempty"`
 	Plugins                 []plugin.PluginSpec             `json:"plugins,omitempty"`
 	MCPServers              map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
@@ -460,13 +435,12 @@ func Default() Config {
 			"openai-compatible": {},
 			"chatgpt":           {},
 		},
-		MCPServers:      map[string]publicmcp.ServerSpec{},
-		Skills:          SkillsConfig{Overrides: map[string]bool{}},
-		Subagents:       DefaultSubagents(),
-		Compaction:      DefaultCompaction(),
-		TUI:             TUIConfig{Theme: "default", Mouse: true, WorktreeSidebar: false},
-		WorktreeWorkers: DefaultWorktreeWorkers(),
-		Sandbox:         DefaultSandbox(),
+		MCPServers: map[string]publicmcp.ServerSpec{},
+		Skills:     SkillsConfig{Overrides: map[string]bool{}},
+		Subagents:  DefaultSubagents(),
+		Compaction: DefaultCompaction(),
+		TUI:        TUIConfig{Theme: "default", Mouse: true},
+		Sandbox:    DefaultSandbox(),
 	}
 }
 
@@ -520,13 +494,6 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.TUI.Theme == "" {
 		cfg.TUI.Theme = defaultTUITheme
-	}
-	workerDefaults := DefaultWorktreeWorkers()
-	if cfg.WorktreeWorkers.MaxConcurrent == 0 {
-		cfg.WorktreeWorkers.MaxConcurrent = workerDefaults.MaxConcurrent
-	}
-	if cfg.WorktreeWorkers.ShutdownTimeoutMS == 0 {
-		cfg.WorktreeWorkers.ShutdownTimeoutMS = workerDefaults.ShutdownTimeoutMS
 	}
 	sandboxDefaults := DefaultSandbox()
 	if cfg.Sandbox.Executable == "" {
@@ -598,9 +565,6 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 	if err := cfg.Sandbox.Validate(); err != nil {
-		return cfg, err
-	}
-	if err := cfg.WorktreeWorkers.Validate(); err != nil {
 		return cfg, err
 	}
 	if err := validateSystemPromptFile(cfg.SystemPromptFile, true); err != nil {

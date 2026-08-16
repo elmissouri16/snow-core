@@ -19,7 +19,7 @@ emit(
         "type": "rpc_ready",
         "protocol_version": 1 if scenario == "bad_version_type" else ("2" if scenario == "bad_version" else "1"),
         "snow_version": 1 if scenario == "bad_snow_type" else "fixture",
-        "capabilities": [1] if scenario == "bad_caps_type" else ["models_list", "permission_input", "prompt_completion", "session_info", "session_messages", "subagent_models", "user_input"],
+        "capabilities": [1] if scenario == "bad_caps_type" else ["models_list", "prompt_completion", "session_info", "subagent_models", "user_input"],
         "max_input_bytes": "128" if scenario == "bad_max_type" else (128 if scenario == "small_limit" else 16777216),
     }
 )
@@ -70,17 +70,6 @@ for line in sys.stdin:
                 "command": command,
                 "success": True,
                 "data": {"provider": "fake", "model": "fake-1"},
-            }
-        )
-        continue
-    if command == "session_messages":
-        emit(
-            {
-                "id": request_id,
-                "type": "response",
-                "command": command,
-                "success": True,
-                "data": {"messages": [{"id": "u-1", "role": "user", "content": [], "ts": 1}]},
             }
         )
         continue

@@ -243,9 +243,6 @@ class SnowClient:
     async def session_info(self) -> JSONDict:
         return await self.request("session_info")
 
-    async def session_messages(self, limit: int = 24) -> JSONDict:
-        return await self.request("session_messages", params={"limit": limit})
-
     async def session_rename(self, name: str) -> JSONDict:
         return await self.request("session_rename", params={"name": name})
 
@@ -334,15 +331,6 @@ class SnowClient:
 
     async def subagent_ready(self) -> JSONDict:
         return await self.request("subagent_ready")
-
-    async def reply_permission(self, request_id: str, decision: str) -> JSONDict:
-        return await self.request(
-            "permission_reply",
-            params={"request_id": request_id, "decision": decision},
-        )
-
-    async def reject_permission(self, request_id: str) -> JSONDict:
-        return await self.request("permission_reject", params={"request_id": request_id})
 
     async def reply_user_input(self, request_id: str, answers: Any) -> JSONDict:
         return await self.request(

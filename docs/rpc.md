@@ -59,11 +59,9 @@ response.
     "branch_management",
     "goals",
     "models_list",
-    "permission_input",
     "prompt_completion",
     "session_forks",
     "session_info",
-    "session_messages",
     "subagent_models",
     "subagents",
     "user_input"
@@ -330,7 +328,6 @@ Successful `data` contains:
   "cwd": "/path/to/project",
   "provider": "opencode-go",
   "model": "kimi-k2.6",
-  "permission_mode": "ask",
   "thinking": "off",
   "thinking_levels": ["off", "low", "medium", "high"],
   "collaboration_mode": "default",
@@ -366,62 +363,6 @@ a local title with their first accepted prompt. `path` is empty for
 `token_budget` is `null` when unlimited and `estimated_costs` can be `null` when
 pricing is unavailable. `max_concurrent_agents` is a compatibility alias of
 `max_concurrent_threads`; both currently carry the same limit.
-`permission_mode` is the effective runtime permission policy after explicit
-flags and persisted session state; process supervisors should verify it instead
-of trusting their launch arguments alone.
-
-### `session_messages`
-
-```json
-{"id":"messages-1","type":"session_messages","params":{"limit":24}}
-```
-
-Returns `{"messages":[...]}` from the active branch in chronological order.
-`limit` defaults to and cannot exceed 24. Returned messages are defensive,
-public observer projections: provider-private continuation blocks and binary
-image payloads are omitted, large text/arguments are truncated, and the encoded
-snapshot has an 8 MiB aggregate bound. This bounded hydration command is intended for
-observers attaching after `rpc_ready`; clients must continue consuming live
-agent events after the snapshot.
-
-## Interactive permission input
-
-With effective permission mode `ask`, a blocked non-read tool emits an ordinary
-attributed event:
-
-```json
-{
-  "type":"permission_request",
-  "permission": {
-    "request": {
-      "id":"perm-opaque-id",
-      "tool":"bash",
-      "args":{"command":"go test ./..."},
-      "risk":"exec",
-      "reason":"run verification"
-    }
-  }
-}
-```
-
-Only the currently published FIFO request may be resolved. Echo its opaque ID:
-
-```json
-{"id":"perm-reply-1","type":"permission_reply","params":{"request_id":"perm-opaque-id","decision":"allow"}}
-```
-
-`decision` is `allow`, `deny`, or `allow_session`. The last option creates only
-a process/session-scoped remembered rule. RPC deliberately has no global
-allow-always decision. `permission_reject` is the explicit deny shorthand:
-
-```json
-{"id":"perm-reject-1","type":"permission_reject","params":{"request_id":"perm-opaque-id"}}
-```
-
-Replies with unknown, stale, duplicate, or out-of-order IDs fail without
-resolving another request. Concurrent root/child requests are serialized FIFO
-and retain their `agent` attribution. EOF/cancellation denies all pending
-permission interactions before the active prompt is joined.
 
 ## Model-requested user input
 
@@ -838,19 +779,18 @@ Production clients should also:
 - There is no `shutdown` command. Close stdin, signal the process, or cancel the
   embedding context.
 
-## Permission boundary
+## Permission limitation
 
-RPC supports attributed `permission_request` events and explicit
-`permission_reply`/`permission_reject` commands when the embedding client is a
-real interactive host. A client that does not implement `permission_input`
-should still choose an explicit headless policy:
+RPC has no permission request/reply handshake. In `ask` mode its headless asker
+denies without emitting an interactive permission event. Use an explicit
+headless policy:
 
-- `--permission deny` for read-oriented unattended operation;
-- `--permission ask` only while continuously consuming events and binding every
-  human decision to the emitted request ID;
+- `--permission deny` for read-oriented operation;
 - `--permission allow` only in an externally trusted/isolated environment.
 
-`user_input_reply` answers model questions and does not authorize OS/tool access.
+`ask` fails closed in RPC. `user_input_reply` answers model questions and does
+not authorize OS/tool access.
+
 RPC, shell, plugins, stdio MCP servers, and subagents run with the current user's
 OS privileges. Read the [Security model](security.md).
 
@@ -858,7 +798,7 @@ OS privileges. Read the [Security model](security.md).
 
 The current command surface covers prompts, active root input, cancellation,
 active-provider and subagent model discovery, model/thinking/mode controls,
-session inspection and bounded transcript hydration, attributed permission and model-requested input, goals, and subagents.
+session inspection, model-requested input, goals, and subagents.
 
 Branch management, compaction, reasoning-summary/text-verbosity controls,
 configuration mutation, MCP/skill management, and login are currently

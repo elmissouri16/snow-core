@@ -13,7 +13,7 @@ enabling shell, network, plugins, MCP, skills, goals, or subagents.
 ## Quick safety rules
 
 1. Use `deny` for read-oriented headless work.
-2. Use `ask` only where a real interactive permission asker exists—the TUI or an RPC host that consumes attributed permission events and replies by request ID.
+2. Use `ask` only where a real interactive permission asker exists—the TUI.
 3. Use `allow`/SDK `AutoApprove` only inside a deliberately trusted environment.
 4. Treat project trust as permission to load project input, not as containment.
 5. Treat repository text, tool output, skills, extensions, and child-agent output
@@ -57,13 +57,9 @@ Snow classifies tool actions as:
 | `allow` | Allowed | Allowed |
 
 The TUI supplies an interactive asker and exposes `/allow [always]`, `/deny`,
-and `/permissions`. RPC mode supplies a FIFO attributed permission broker:
-`permission_request` carries an opaque request ID and optional worker/agent
-identity, while `permission_reply` accepts only `allow`, `allow_session`, or
-`deny`; `permission_reject` is explicit deny. Stale, duplicate, and out-of-order
-IDs fail, EOF denies pending requests, and RPC cannot create global allow-always
-rules. Print/JSON still fail closed in `ask` mode. The Go SDK defaults to `deny`;
-`UserInputHandler` answers model questions and is not a permission asker.
+and `/permissions`. Print, JSON, and RPC do not provide a permission-reply
+command. Their `ask` mode therefore fails closed. The Go SDK also defaults to
+`deny`; `UserInputHandler` answers model questions and is not a permission asker.
 
 `deny` still permits read-risk tools. In the default registry that includes
 deferred `session_search`/`session_reference` and
@@ -117,30 +113,14 @@ Snow asks Git to remove only the exact worktree it created and then deletes only
 the newly created branch; cleanup failures are joined with the primary error.
 Snow never uses `os.RemoveAll` for rollback.
 
-A worktree is a distinct canonical project path. It does **not** copy the source
-path's exact trust decision or smolvm association. Detached forks can still be
-resumed manually, and the TUI worktree supervisor can launch a fresh
-`Snow resume --mode rpc` process only after a human reviews canonical path,
-branch, exact session, provider/model, permission mode, trust, and shell
-boundary. Each child rebuilds project extensions, file roots, search policy,
-and exact-path sandbox routing for the destination. Until separately
-initialized, Bash runs on the host unless launch policy requires a sandbox and
-fails closed. Git worktrees contain metadata that refers to the source
-repository outside Snow's file-tool root; that does not broaden file-tool
-confinement.
-
-The supervisor is internal UI infrastructure, never a model tool. It owns only
-processes it launched in the current runtime, caps concurrency, verifies the RPC
-handshake/session/CWD/effective `ask` mode, and uses opaque permission IDs.
-`managed` is never inferred from a branch name, session existence, database
-mtime/lock, PID file, or an unrelated Snow process; `not attached` means only
-“not owned by this supervisor.” No persisted PID is signaled after restart.
-An unexpected exit during a turn is surfaced as `outcome unknown` and is never
-automatically retried. Shutdown aborts active work, closes stdin, waits with a
-bound, then terminates/kills the owned process group. It preserves worktrees,
-branches, and session databases. These processes and file/provider/extension
-capabilities still run with the user's OS privileges; only the model-facing Bash
-tool may route through the exact worktree's active smolvm association.
+A worktree is a distinct canonical project path. It does **not** inherit the
+source path's exact trust decision or smolvm association. Worktree forks are
+therefore detached from the running App and must be resumed in a fresh runtime,
+which resolves trust, project extensions, file roots, search policy, and sandbox
+routing for the destination. Until separately initialized, Bash runs on the
+host unless launch policy requires a sandbox and fails closed. Git worktrees
+contain metadata that refers to the source repository outside Snow's file-tool
+root; that does not broaden file-tool confinement.
 
 ## File and search confinement
 
@@ -475,7 +455,6 @@ controlled inherited environment.
 - disable unused plugins, MCP, skills, and subagents;
 - set context deadlines;
 - consume error/usage/tool events;
-- use RPC `ask` only when a human interaction loop handles every attributed `permission_request` and rejects pending requests on UI shutdown;
 - close sessions/processes cleanly;
 - move to `allow` only when the embedding host supplies external isolation and
   intends the resulting authority.

@@ -11,7 +11,7 @@
       "required": ["type"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
-        "type": {"enum": ["abort", "branch_fork", "goal_get", "goal_pause", "goal_resume", "goal_clear", "goal_continue", "models_list", "session_fork", "session_info", "session_messages", "session_worktree_fork", "subagent_models", "subagent_ready"]}
+        "type": {"enum": ["abort", "branch_fork", "goal_get", "goal_pause", "goal_resume", "goal_clear", "goal_continue", "models_list", "session_fork", "session_info", "session_worktree_fork", "subagent_models", "subagent_ready"]}
       },
       "additionalProperties": false
     },
@@ -235,53 +235,6 @@
         "params": {
           "type": "object",
           "properties": {"timeout_ms": {"type": "integer", "minimum": 0}, "until": {"enum": ["activity", "all"]}},
-          "additionalProperties": false
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": ["type", "params"],
-      "properties": {
-        "id": {"$ref": "#/$defs/id"},
-        "type": {"const": "permission_reply"},
-        "params": {
-          "type": "object",
-          "required": ["request_id", "decision"],
-          "properties": {
-            "request_id": {"type": "string", "minLength": 1},
-            "decision": {"enum": ["allow", "deny", "allow_session"]}
-          },
-          "additionalProperties": false
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": ["type", "params"],
-      "properties": {
-        "id": {"$ref": "#/$defs/id"},
-        "type": {"const": "permission_reject"},
-        "params": {
-          "type": "object",
-          "required": ["request_id"],
-          "properties": {"request_id": {"type": "string", "minLength": 1}},
-          "additionalProperties": false
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": ["type", "params"],
-      "properties": {
-        "id": {"$ref": "#/$defs/id"},
-        "type": {"const": "session_messages"},
-        "params": {
-          "type": "object",
-          "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 24}},
           "additionalProperties": false
         }
       },

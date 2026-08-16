@@ -13,7 +13,7 @@ import (
 // permission requests are serialized and every response channel remains bound
 // to the request that created it.
 type pendingPermission struct {
-	id       string
+	id       uint64
 	request  permission.Request
 	response chan permission.Decision
 }
@@ -22,6 +22,7 @@ type tuiAsker struct {
 	mu      sync.Mutex
 	events  *agentEventMailbox
 	publish func(protocol.AgentEvent)
+	nextID  uint64
 	queue   []*pendingPermission
 	pending *pendingPermission // current FIFO head
 }
@@ -38,7 +39,8 @@ func (a *tuiAsker) Ask(ctx context.Context, req permission.Request) (permission.
 		ctx = context.Background()
 	}
 	a.mu.Lock()
-	pending := &pendingPermission{id: permission.NewRequestID(), request: req, response: make(chan permission.Decision, 1)}
+	a.nextID++
+	pending := &pendingPermission{id: a.nextID, request: req, response: make(chan permission.Decision, 1)}
 	a.queue = append(a.queue, pending)
 	head := len(a.queue) == 1
 	if head {
@@ -77,7 +79,7 @@ func (a *tuiAsker) Ask(ctx context.Context, req permission.Request) (permission.
 
 func (a *tuiAsker) publishPending(p *pendingPermission) {
 	req := p.request
-	public := protocol.PermissionRequest{ID: p.id, Tool: req.Tool, Args: append([]byte(nil), req.Args...), Paths: append([]string(nil), req.Paths...), Risk: string(req.Risk), Reason: req.Reason}
+	public := protocol.PermissionRequest{Tool: req.Tool, Args: append([]byte(nil), req.Args...), Paths: append([]string(nil), req.Paths...), Risk: string(req.Risk), Reason: req.Reason}
 	event := protocol.AgentEvent{Type: protocol.EvPermissionRequest, Agent: req.Agent.Clone(), Permission: &protocol.Permission{Request: public}}
 	a.mu.Lock()
 	publish := a.publish

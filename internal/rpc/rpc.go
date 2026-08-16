@@ -17,7 +17,6 @@ import (
 	"sync"
 
 	"github.com/snow-core/snow/internal/app"
-	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/subagent"
 	"github.com/snow-core/snow/internal/worktree"
@@ -32,16 +31,15 @@ type Response = protocol.RPCResponse
 
 // Server serves RPC on stdin/stdout.
 type Server struct {
-	in              io.Reader
-	out             io.Writer
-	app             *app.App
-	mu              sync.Mutex
-	writeErr        error
-	writeFailed     chan struct{}
-	writeFailOnce   sync.Once
-	readyOnce       sync.Once
-	snowVersion     string
-	permissionInput *permission.ManualAsker
+	in            io.Reader
+	out           io.Writer
+	app           *app.App
+	mu            sync.Mutex
+	writeErr      error
+	writeFailed   chan struct{}
+	writeFailOnce sync.Once
+	readyOnce     sync.Once
+	snowVersion   string
 	// cancel aborts the in-flight prompt.
 	cancel     context.CancelFunc
 	promptDone chan struct{}
@@ -64,15 +62,7 @@ func NewWithOptions(ctx context.Context, a *app.App, in io.Reader, out io.Writer
 		ctx = context.Background()
 	}
 	a.EnableUserInputReplies()
-	permissionInput := permission.NewManualAsker(func(event protocol.AgentEvent) {
-		if a != nil && a.Agent != nil {
-			a.Agent.Publish(event)
-		}
-	})
-	if a != nil && a.Perm != nil {
-		a.Perm.SetAsker(permissionInput)
-	}
-	return &Server{in: in, out: out, app: a, writeFailed: make(chan struct{}), snowVersion: opts.SnowVersion, permissionInput: permissionInput}
+	return &Server{in: in, out: out, app: a, writeFailed: make(chan struct{}), snowVersion: opts.SnowVersion}
 }
 
 // Serve reads commands until EOF.
@@ -152,9 +142,6 @@ finish:
 	// and wait commands. Ordinary prompts retain their own documented join path.
 	cancelServe()
 	s.app.CloseUserInput()
-	if s.permissionInput != nil {
-		s.permissionInput.Close()
-	}
 	s.mu.Lock()
 	done := s.promptDone
 	s.mu.Unlock()
@@ -237,45 +224,6 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 			err = s.app.Agent.FollowUp(req.Message)
 		}
 		if err != nil {
-			return err
-		}
-		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true})
-		return nil
-	case "permission_reply":
-		if s.permissionInput == nil {
-			return errors.New("permission input is unavailable")
-		}
-		var payload protocol.RPCPermissionReply
-		if len(req.Params) == 0 {
-			return errors.New("permission_reply requires params")
-		}
-		if err := json.Unmarshal(req.Params, &payload); err != nil {
-			return fmt.Errorf("permission_reply params: %w", err)
-		}
-		if payload.RequestID == "" {
-			return errors.New("permission_reply requires request_id")
-		}
-		decision := permission.Decision(payload.Decision)
-		if err := s.permissionInput.Reply(payload.RequestID, decision); err != nil {
-			return err
-		}
-		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true})
-		return nil
-	case "permission_reject":
-		if s.permissionInput == nil {
-			return errors.New("permission input is unavailable")
-		}
-		var payload protocol.RPCPermissionReject
-		if len(req.Params) == 0 {
-			return errors.New("permission_reject requires params")
-		}
-		if err := json.Unmarshal(req.Params, &payload); err != nil {
-			return fmt.Errorf("permission_reject params: %w", err)
-		}
-		if payload.RequestID == "" {
-			return errors.New("permission_reject requires request_id")
-		}
-		if err := s.permissionInput.Reject(payload.RequestID); err != nil {
 			return err
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true})
@@ -602,26 +550,6 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: map[string]any{"session_id": sessionID, "name": title}})
 		return nil
-	case "session_messages":
-		payload := protocol.RPCSessionMessagesRequest{Limit: protocol.RPCSessionMessagesMax}
-		if len(req.Params) > 0 {
-			if err := json.Unmarshal(req.Params, &payload); err != nil {
-				return fmt.Errorf("session_messages params: %w", err)
-			}
-		}
-		if payload.Limit == 0 {
-			payload.Limit = protocol.RPCSessionMessagesMax
-		}
-		if payload.Limit < 1 || payload.Limit > protocol.RPCSessionMessagesMax {
-			return fmt.Errorf("session_messages limit must be between 1 and %d", protocol.RPCSessionMessagesMax)
-		}
-		messages, err := s.app.Session.Messages()
-		if err != nil {
-			return err
-		}
-		projected := projectSessionMessages(messages, payload.Limit)
-		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: protocol.RPCSessionMessages{Messages: projected}})
-		return nil
 	case "session_info":
 		model := s.app.Agent.Model()
 		sessionID, sessionPath, err := s.app.Agent.SessionIdentity()
@@ -639,7 +567,6 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 			CWD:               s.app.CWD(),
 			Provider:          s.app.ProviderID,
 			Model:             model.ID,
-			PermissionMode:    string(s.app.Perm.Mode()),
 			Thinking:          s.app.Agent.Thinking(),
 			ThinkingLevels:    model.SupportedThinkingLevels(),
 			CollaborationMode: s.app.Agent.Mode(),

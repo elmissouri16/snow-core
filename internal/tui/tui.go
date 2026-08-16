@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -36,7 +35,6 @@ import (
 	"github.com/snow-core/snow/internal/provider/openaicompat"
 	internalsandbox "github.com/snow-core/snow/internal/sandbox"
 	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/supervisor"
 	"github.com/snow-core/snow/internal/trust"
 	"github.com/snow-core/snow/pkg/protocol"
 )
@@ -371,34 +369,6 @@ type subagentInspectMsg struct {
 	err        error
 }
 
-type worktreeInventoryMsg struct {
-	generation uint64
-	workspaces []app.WorktreeWorkspace
-	err        error
-}
-
-type worktreeSupervisorMsg struct{ event supervisor.Event }
-type worktreePreflightMsg struct {
-	generation uint64
-	workspace  string
-	preflight  app.WorktreeWorkerPreflight
-	err        error
-}
-
-type worktreeControlMsg struct {
-	generation uint64
-	workspace  string
-	action     string
-	err        error
-}
-
-type worktreeDiffMsg struct {
-	generation uint64
-	workspace  string
-	text       string
-	err        error
-}
-
 // Model is the TUI state.
 type Model struct {
 	ctx     context.Context
@@ -447,80 +417,47 @@ type Model struct {
 	subagentFleetActivity         map[string][]string
 	subagentFleetActivityKinds    map[string]protocol.AgentEventType
 	subagentFleetActivitySpace    map[string]bool
-
-	// Human-controlled worktree worker supervisor. Requested visibility is kept
-	// separate from effective wide-terminal rendering so resize never destroys
-	// selection or worker state.
-	worktreeSidebarRequested   bool
-	worktreeInspectorOpen      bool
-	worktreeSidebarFocus       bool
-	worktreeLoading            bool
-	worktreeGeneration         uint64
-	worktreeControlGeneration  uint64
-	worktreeWorkspaces         []app.WorktreeWorkspace
-	worktreeIndex              int
-	worktreeWorkers            map[supervisor.WorkerID]supervisor.WorkerState
-	worktreeActivity           map[supervisor.WorkerID][]string
-	worktreeLiveText           map[supervisor.WorkerID]string
-	worktreeLiveThinking       map[supervisor.WorkerID]string
-	worktreeTab                int
-	worktreeDetailOffset       int
-	worktreeError              string
-	worktreeStatus             string
-	worktreeDiff               string
-	worktreeStartConfirm       bool
-	worktreeStartSession       int
-	worktreeTrustDestination   bool
-	worktreePreflight          *app.WorktreeWorkerPreflight
-	worktreeSelectAfterRefresh string
-	worktreeStartAfterRefresh  bool
-	worktreeInputIndex         int
-	worktreeInputOption        int
-	worktreeInputAnswers       map[string]string
-	worktreeInputEditor        textarea.Model
-	worktreeInputWorker        supervisor.WorkerID
-	worktreeInputRequest       string
-	busy                       bool
-	activeTurnID               string
-	rootTurnSequence           uint64
-	rootEventEpoch             uint64
-	rootTurnFence              bool
-	runGeneration              uint64
-	compactGeneration          uint64
-	runStartedAt               time.Time
-	now                        func() time.Time
-	done                       bool
-	closeOnce                  sync.Once
-	closeErr                   error
-	startupMu                  sync.Mutex
-	startupWG                  sync.WaitGroup
-	startupApps                map[*app.App]struct{}
-	startupClosed              bool
-	startupCloseErr            error
-	lastErr                    error
-	lastStatus                 string
-	trustPending               bool
-	trustPath                  string
-	trustStore                 *trust.Store
-	trustChoice                int // 0=continue untrusted, 1=trust project
-	trustError                 string
-	trustSaving                bool
-	lastErrorText              string
-	themeName                  string
-	customThemes               map[string]config.ThemeFile
-	keys                       tuiKeyMap
-	auxDiagnostics             []config.Diagnostic
-	lastUsage                  *protocol.Usage
-	lastRequestUsage           *protocol.Usage
-	contextTokens              int
-	contextEstimated           bool
-	turnUsageSeen              bool
-	contextRefreshNeeded       bool
-	contextRefreshPending      bool
-	contextRefreshVersion      uint64
-	compacting                 bool
-	compactStatus              string
-	events                     *agentEventMailbox
+	busy                          bool
+	activeTurnID                  string
+	rootTurnSequence              uint64
+	rootEventEpoch                uint64
+	rootTurnFence                 bool
+	runGeneration                 uint64
+	compactGeneration             uint64
+	runStartedAt                  time.Time
+	now                           func() time.Time
+	done                          bool
+	closeOnce                     sync.Once
+	closeErr                      error
+	startupMu                     sync.Mutex
+	startupWG                     sync.WaitGroup
+	startupApps                   map[*app.App]struct{}
+	startupClosed                 bool
+	startupCloseErr               error
+	lastErr                       error
+	lastStatus                    string
+	trustPending                  bool
+	trustPath                     string
+	trustStore                    *trust.Store
+	trustChoice                   int // 0=continue untrusted, 1=trust project
+	trustError                    string
+	trustSaving                   bool
+	lastErrorText                 string
+	themeName                     string
+	customThemes                  map[string]config.ThemeFile
+	keys                          tuiKeyMap
+	auxDiagnostics                []config.Diagnostic
+	lastUsage                     *protocol.Usage
+	lastRequestUsage              *protocol.Usage
+	contextTokens                 int
+	contextEstimated              bool
+	turnUsageSeen                 bool
+	contextRefreshNeeded          bool
+	contextRefreshPending         bool
+	contextRefreshVersion         uint64
+	compacting                    bool
+	compactStatus                 string
+	events                        *agentEventMailbox
 	// Agent callbacks feed a coalescing mailbox. The update loop ingests
 	// bounded logical batches and renders stream deltas on a separate cadence.
 	batchingEvents          bool
@@ -776,12 +713,6 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 		subagentFleetActivity:      make(map[string][]string),
 		subagentFleetActivityKinds: make(map[string]protocol.AgentEventType),
 		subagentFleetActivitySpace: make(map[string]bool),
-		worktreeWorkers:            make(map[supervisor.WorkerID]supervisor.WorkerState),
-		worktreeActivity:           make(map[supervisor.WorkerID][]string),
-		worktreeLiveText:           make(map[supervisor.WorkerID]string),
-		worktreeLiveThinking:       make(map[supervisor.WorkerID]string),
-		worktreeInputAnswers:       make(map[string]string),
-		worktreeInputEditor:        newUserInputEditor(),
 		queueOriginalText:          make(map[string]string),
 		queueRendered:              make(map[string]bool),
 		startupApps:                make(map[*app.App]struct{}),
@@ -789,7 +720,6 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 		now:                        time.Now,
 	}
 	normalizeTextareaStyles(&m.userInputEditor)
-	normalizeTextareaStyles(&m.worktreeInputEditor)
 	m.asker = newTUIAsker(m.events)
 	// No outer border on the transcript — a full-screen box looks broken and
 	// forces the whole terminal to scroll. The viewport itself scrolls.
@@ -1036,31 +966,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handleSubagentFleetMouse(msg)
 			return m, nil
 		}
-		if m.worktreeInteractionPending() {
-			return m, nil
-		}
-		if m.worktreeInspectorOpen {
-			if !m.handleWorktreeSidebarMouse(msg, true) {
-				m.handleWorktreeDetailMouse(msg)
-			}
-			return m, nil
-		}
-		if m.worktreeSidebarVisible() {
-			if m.handleWorktreeSidebarMouse(msg, false) {
-				return m, nil
-			}
-			event := tea.MouseEvent(msg)
-			event.X -= m.worktreeSidebarWidth() + 1
-			msg = tea.MouseMsg(event)
-			if workspace := m.selectedWorkspace(); workspace != nil && !workspace.Current {
-				m.handleWorktreeDetailMouse(msg)
-				return m, nil
-			}
-		}
-		if workspace := m.selectedWorkspace(); workspace != nil && !workspace.Current {
-			m.handleWorktreeDetailMouse(msg)
-			return m, nil
-		}
 		// Application-owned drag selection and viewport wheel scrolling share
 		// the same cell-motion mouse stream.
 		cmd := m.applyMouse(msg)
@@ -1089,17 +994,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		if handled, cmd := m.normalizeTerminalKey(msg); handled {
-			m.layout()
-			return m, cmd
-		}
-		if keyMatches(msg, m.keys.ToggleWorktrees) && !m.trustPending && !m.permPending && !m.userInputPending {
-			cmd := m.toggleWorktreeSidebar()
-			m.clearTranscriptSelection()
-			m.layout()
-			m.refreshTranscriptForced()
-			return m, cmd
-		}
-		if handled, cmd := m.handleWorktreeKey(msg); handled {
 			m.layout()
 			return m, cmd
 		}
@@ -1184,12 +1078,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.app.EnableUserInputReplies()
-			// Worktree management is intentionally on-demand. Older configs may
-			// contain tui.worktree_sidebar=true from the split-pane prototype;
-			// never reopen that UI automatically.
-			m.worktreeInspectorOpen = false
-			m.worktreeSidebarRequested = false
-			m.worktreeSidebarFocus = false
 			m.modelList = uniquePickerModels(m.app.AllModels, m.app.ProviderID)
 			m.asker.SetPublisher(m.app.Agent.Publish)
 			m.app.Perm.SetAsker(m.asker)
@@ -1204,9 +1092,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// The sticky header and footer already expose provider, model, cwd,
 			// and commands; do not duplicate startup chrome in the transcript.
 			cmds = append(cmds, waitForEvent(m.events))
-			if m.app.Supervisor != nil {
-				cmds = append(cmds, waitForWorktreeSupervisor(m.ctx, m.app.Supervisor.Events()))
-			}
 			if m.pickSessionOnStart {
 				m.pickSessionOnStart = false
 				_, pickerCmd := m.startSessionPick()
@@ -1565,35 +1450,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLine(styleFooter.Render("agents: none"))
 		}
 		m.layout()
-	case worktreeInventoryMsg:
-		m.applyWorktreeInventory(msg)
-		if msg.err == nil && msg.generation == m.worktreeGeneration && m.worktreeSelectAfterRefresh != "" {
-			target := filepath.Clean(m.worktreeSelectAfterRefresh)
-			for i := range m.worktreeWorkspaces {
-				if filepath.Clean(m.worktreeWorkspaces[i].Path) == target {
-					m.worktreeIndex = i
-					break
-				}
-			}
-			m.worktreeSelectAfterRefresh = ""
-			if m.worktreeStartAfterRefresh {
-				m.worktreeStartAfterRefresh = false
-				if cmd := m.startSelectedWorktreePreflight(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			}
-		}
-	case worktreeSupervisorMsg:
-		m.applyWorktreeSupervisorEvent(msg.event)
-		if m.app != nil && m.app.Supervisor != nil {
-			cmds = append(cmds, waitForWorktreeSupervisor(m.ctx, m.app.Supervisor.Events()))
-		}
-	case worktreePreflightMsg:
-		m.applyWorktreePreflight(msg)
-	case worktreeControlMsg:
-		m.applyWorktreeControl(msg)
-	case worktreeDiffMsg:
-		m.applyWorktreeDiff(msg)
 	case branchActionMsg:
 		if msg.generation != m.pickerGeneration {
 			return m, nil
@@ -1653,15 +1509,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.lastStatus = "created worktree " + msg.result.Worktree.Path
-		m.worktreeSidebarRequested = true
-		m.worktreeInspectorOpen = true
-		m.worktreeSidebarFocus = true
-		m.worktreeSelectAfterRefresh = msg.result.Worktree.Path
-		m.worktreeStartAfterRefresh = true
-		m.pushLine(styleFooter.Render(fmt.Sprintf("worktree fork created\n  path: %s\n  branch: %s\n  session: %s\nOpen /worktrees, select it, then press s to review and launch a managed worker. Trust and sandbox settings are independent for the new project path.", msg.result.Worktree.Path, msg.result.Worktree.Branch, msg.result.SessionPath)))
-		if cmd := m.startWorktreeInventory(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		m.pushLine(styleFooter.Render(fmt.Sprintf("worktree fork created\n  path: %s\n  branch: %s\n  session: %s\nRun `snow resume %q` in a new process. Trust and sandbox settings are independent for the new project path.", msg.result.Worktree.Path, msg.result.Worktree.Branch, msg.result.SessionPath, msg.result.SessionPath)))
 	case sessionStoreMsg:
 		if msg.generation != m.sessionOpGeneration {
 			if msg.store != nil {
@@ -2763,10 +2611,9 @@ func (m *Model) layout() {
 	// otherwise shrinking a bottomed viewport makes AtBottom false and freezes
 	// reasoning/tool events until the run-status row disappears at turn_done.
 	wasAtBottom := m.transcript.AtBottom()
-	frameWidth := m.primaryFrameWidth()
+	frameWidth := m.managedFrameWidth()
 	m.editor.SetWidth(max(1, frameWidth-4))
 	m.userInputEditor.SetWidth(max(1, frameWidth-6))
-	m.worktreeInputEditor.SetWidth(max(1, frameWidth-6))
 	frameHeight := m.managedFrameHeight()
 	maxEditorHeight := max(minComposerHeight, frameHeight-m.fixedChromeRows()-m.runStatusHeight()-minTranscriptHeight)
 	editorH := min(m.desiredComposerHeight(), min(maxComposerHeight, maxEditorHeight))
@@ -3965,12 +3812,6 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.openSubagentFleet(args[0])
-	case "/worktrees":
-		if len(args) > 0 {
-			m.pushLine(styleError.Render("/worktrees takes no arguments"))
-			return m, nil
-		}
-		return m, m.openWorktreeSupervisor()
 	case "/mcp":
 		if len(args) > 0 {
 			m.pushLine(styleError.Render("/mcp takes no arguments"))
@@ -7854,12 +7695,6 @@ func (m *Model) View() string {
 	if m.subagentFleetOpen && !m.permPending && !m.userInputPending {
 		return clipboardSequence + fitFrame(m.renderSubagentFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
 	}
-	if interaction := m.renderWorktreeInteraction(); interaction != "" && !m.permPending && !m.userInputPending {
-		return clipboardSequence + interaction
-	}
-	if m.worktreeInspectorOpen && !m.permPending && !m.userInputPending {
-		return clipboardSequence + fitFrame(m.renderWorktreeInspectorModal(), m.managedFrameWidth(), m.managedFrameHeight())
-	}
 
 	status := "starting…"
 	if m.lastErr != nil {
@@ -7909,7 +7744,7 @@ func (m *Model) View() string {
 	}
 
 	header := m.renderHeader(status)
-	frameWidth := m.primaryFrameWidth()
+	frameWidth := m.managedFrameWidth()
 	sep := styleSep.Render(strings.Repeat("─", frameWidth))
 	overlay := m.renderOverlays()
 	if m.inlineModalOverlay() && overlay != "" {
@@ -7936,11 +7771,7 @@ func (m *Model) View() string {
 	// Keep the active provider/model/mode visible in both render modes. Inline
 	// session headers also remain in native scrollback as historical boundaries,
 	// but the current selection must not disappear above the visible window.
-	transcriptView := m.renderTranscriptView()
-	if workspace := m.selectedWorkspace(); workspace != nil && !workspace.Current {
-		transcriptView = m.renderSelectedWorktreeDetail(frameWidth, m.transcript.Height)
-	}
-	parts = append(parts, header, sep, transcriptView)
+	parts = append(parts, header, sep, m.renderTranscriptView())
 	if overlay != "" {
 		parts = append(parts, overlay)
 	}
@@ -7955,8 +7786,7 @@ func (m *Model) View() string {
 		// only tea.Println transcript commits are allowed to move scrollback.
 		return clipboardSequence + fitFrame(frame, frameWidth, m.managedFrameHeight())
 	}
-	primary := fitFrame(frame, frameWidth, m.height)
-	return clipboardSequence + m.composeWorktreeSidebar(primary)
+	return clipboardSequence + fitFrame(frame, frameWidth, m.height)
 }
 
 func (m *Model) renderTrustPrompt() string {
@@ -8021,7 +7851,7 @@ func fitFrameBottom(frame string, width, height int) string {
 
 // renderHeader is the sticky top bar: brand · provider/model · cwd · status.
 func (m *Model) renderHeader(status string) string {
-	w := m.primaryFrameWidth()
+	w := m.managedFrameWidth()
 	brand := styleBrand.Render(" snow ")
 	midText := "booting"
 	shellBoundary := ""
@@ -8040,9 +7870,6 @@ func (m *Model) renderHeader(status string) string {
 			goalText = fmt.Sprintf("  ·  goal:%s %s", m.goal.Status, formatGoalTokenUsage(m.goal))
 		}
 		midText = m.app.ProviderID + "/" + model.ID
-		if workers, tokens := m.worktreeAggregateUsage(); workers > 0 {
-			midText += fmt.Sprintf(" · %d/%d workers · %d tok", workers, m.app.Cfg.WorktreeWorkers.MaxConcurrent, tokens)
-		}
 		if w >= 80 {
 			midText += "  ·  mode:" + m.collaborationModeLabel() + goalText +
 				"  ·  " + shellBoundary +
@@ -8098,14 +7925,10 @@ func (m *Model) renderEditor() string {
 			token := imageAttachmentToken(i)
 			editorView = strings.ReplaceAll(editorView, token, stylePrompt.Render(token))
 		}
-		prompt := "› "
-		if workspace := m.selectedWorkspace(); workspace != nil && !workspace.Current {
-			prompt = "→ " + workspace.Name + ": "
-		}
-		input = stylePrompt.Render(prompt) + editorView
+		input = stylePrompt.Render("› ") + editorView
 	}
 	height := max(minComposerHeight, m.editor.Height())
-	width := m.primaryFrameWidth()
+	width := m.managedFrameWidth()
 	return styleComposer.
 		Width(width).
 		Height(height).
@@ -8145,7 +7968,7 @@ func (m *Model) renderFooter() string {
 	// ask/allow/deny changes (the labels have different lengths).
 	permissionWidth := lipgloss.Width("permission: unavailable")
 	permissionField := lipgloss.PlaceHorizontal(permissionWidth, lipgloss.Left, permissionText)
-	available := max(8, m.primaryFrameWidth()-2)
+	available := max(8, m.managedFrameWidth()-2)
 	mode := string(protocol.ModeDefault)
 	if m.app != nil && m.app.Agent != nil {
 		mode = m.collaborationModeLabel()

@@ -9,60 +9,6 @@ import (
 	"testing"
 )
 
-func TestListLinkedWorktreesPorcelainAndDirtyState(t *testing.T) {
-	repo := newRepository(t)
-	target := filepath.Join(filepath.Dir(repo), "linked worktree with spaces")
-	command := exec.Command("git", "-C", repo, "worktree", "add", "-b", "snow/list-test", target)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git worktree add: %v: %s", err, output)
-	}
-	t.Cleanup(func() { _ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", target).Run() })
-	if err := os.WriteFile(filepath.Join(target, "dirty.txt"), []byte("dirty"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if output, err := exec.Command("git", "-C", repo, "worktree", "lock", "--reason", "test lock", target).CombinedOutput(); err != nil {
-		t.Fatalf("git worktree lock: %v: %s", err, output)
-	}
-
-	inventory, err := List(context.Background(), repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inventory.CommonDir == "" || len(inventory.Worktrees) != 2 || !inventory.Worktrees[0].Current {
-		t.Fatalf("inventory = %+v", inventory)
-	}
-	var linked *Linked
-	for i := range inventory.Worktrees {
-		if inventory.Worktrees[i].Branch == "snow/list-test" {
-			linked = &inventory.Worktrees[i]
-		}
-	}
-	if linked == nil {
-		t.Fatalf("missing linked branch: %+v", inventory.Worktrees)
-	}
-	canonicalTarget, canonicalErr := filepath.EvalSymlinks(target)
-	if canonicalErr != nil {
-		t.Fatal(canonicalErr)
-	}
-	if linked.ID == "" || linked.Path != canonicalTarget || !linked.Dirty || !linked.Locked || linked.LockReason != "test lock" {
-		t.Fatalf("linked = %+v", *linked)
-	}
-}
-
-func TestParsePorcelainZPreservesPathsAndFlags(t *testing.T) {
-	output := []byte("worktree /tmp/a b\nline\x00HEAD deadbeef\x00detached\x00locked reason here\x00\x00worktree /tmp/c\x00HEAD cafe\x00branch refs/heads/snow/c\x00prunable missing\x00\x00")
-	entries, err := parsePorcelainZ(output)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 2 || entries[0].Path != "/tmp/a b\nline" || !entries[0].Detached || entries[0].LockReason != "reason here" {
-		t.Fatalf("entries = %+v", entries)
-	}
-	if entries[1].Branch != "snow/c" || !entries[1].Prunable || entries[1].PrunableReason != "missing" {
-		t.Fatalf("second = %+v", entries[1])
-	}
-}
-
 func TestCreateAndRemove(t *testing.T) {
 	repo := newRepository(t)
 	target := filepath.Join(filepath.Dir(repo), "isolated worktree")

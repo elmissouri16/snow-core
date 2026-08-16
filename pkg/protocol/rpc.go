@@ -25,12 +25,9 @@ var rpcCommands = []string{
 	"goal_resume",
 	"goal_set",
 	"models_list",
-	"permission_reject",
-	"permission_reply",
 	"prompt",
 	"session_fork",
 	"session_info",
-	"session_messages",
 	"session_rename",
 	"session_worktree_fork",
 	"set_mode",
@@ -60,11 +57,9 @@ var rpcCapabilities = []string{
 	"branch_management",
 	"goals",
 	"models_list",
-	"permission_input",
 	"prompt_completion",
 	"session_forks",
 	"session_info",
-	"session_messages",
 	"subagent_models",
 	"subagents",
 	"user_input",
@@ -174,33 +169,6 @@ type RPCPendingInputCounts struct {
 	Total    int `json:"total"`
 }
 
-// RPCPermissionReply resolves one process-local permission request. Decision is
-// one of allow, deny, or allow_session. Global allow-always persistence is not
-// available over RPC.
-type RPCPermissionReply struct {
-	RequestID string `json:"request_id"`
-	Decision  string `json:"decision"`
-}
-
-// RPCPermissionReject declines one process-local permission request.
-type RPCPermissionReject struct {
-	RequestID string `json:"request_id"`
-}
-
-const RPCSessionMessagesMax = 24
-
-// RPCSessionMessagesRequest bounds active-branch transcript hydration. Limit
-// defaults to RPCSessionMessagesMax and must be between 1 and that maximum.
-type RPCSessionMessagesRequest struct {
-	Limit int `json:"limit,omitempty"`
-}
-
-// RPCSessionMessages is the bounded chronological transcript returned by
-// session_messages.
-type RPCSessionMessages struct {
-	Messages []Message `json:"messages"`
-}
-
 // RPCSessionInfo is the stable response data for session_info.
 type RPCSessionInfo struct {
 	SessionID         string                `json:"session_id"`
@@ -209,7 +177,6 @@ type RPCSessionInfo struct {
 	CWD               string                `json:"cwd"`
 	Provider          string                `json:"provider"`
 	Model             string                `json:"model"`
-	PermissionMode    string                `json:"permission_mode"`
 	Thinking          ThinkingLevel         `json:"thinking"`
 	ThinkingLevels    []ThinkingLevel       `json:"thinking_levels"`
 	CollaborationMode CollaborationMode     `json:"collaboration_mode"`

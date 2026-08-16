@@ -3,7 +3,7 @@
   "$id": "https://snow-core.dev/schemas/rpc/v1/session-info.schema.json",
   "title": "Snow RPC session_info data",
   "type": "object",
-  "required": ["session_id", "name", "path", "cwd", "provider", "model", "permission_mode", "thinking", "thinking_levels", "collaboration_mode", "subagents", "pending_inputs"],
+  "required": ["session_id", "name", "path", "cwd", "provider", "model", "thinking", "thinking_levels", "collaboration_mode", "subagents", "pending_inputs"],
   "properties": {
     "session_id": {"type": "string"},
     "name": {"type": "string"},
@@ -11,7 +11,6 @@
     "cwd": {"type": "string"},
     "provider": {"type": "string"},
     "model": {"type": "string"},
-    "permission_mode": {"enum": ["ask", "allow", "deny"]},
     "thinking": {"type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]},
     "thinking_levels": {"type": "array", "items": {"type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]}},
     "collaboration_mode": {"type": "string", "enum": ["default", "plan"]},

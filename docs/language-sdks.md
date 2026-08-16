@@ -69,11 +69,11 @@ are independent and bounded; slow consumers receive an explicit overflow error.
 Unknown event fields remain available through `AgentEvent.raw`; bounded
 `diagnostics` retain responses with unknown IDs without crashing the reader.
 
-The Python client also exposes `request`, `abort`, `session_info`, `session_messages`,
+The Python client also exposes `request`, `abort`, `session_info`,
 `session_rename`, `branch_fork`, `session_fork`, `session_worktree_fork`,
 `models`, `subagent_models`, `set_model`, `set_thinking`,
 `set_mode`, `steer`, `follow_up`, the `goal_*` and `subagent_*` command families,
-`reply_permission`/`reject_permission`, and `reply_user_input`/`reject_user_input`. `prompt` accepts an optional `mode`
+and `reply_user_input`/`reject_user_input`. `prompt` accepts an optional `mode`
 (`default` or `plan`); a timeout aborts the run and consumes its terminal
 completion before raising `SnowTimeoutError`. Event iterator capacity is
 configurable.
@@ -118,21 +118,13 @@ subscriber receives an isolated payload copy. `AbortSignal` can stop an iterator
 request cancellation of an active prompt, or terminate the owned process. The
 public declarations include RPC responses, session/model data, events, user
 input, and the SDK error hierarchy. The command surface includes `request`,
-`abort`, `sessionInfo`, `sessionMessages`, `sessionRename`, `branchFork`, `sessionFork`,
+`abort`, `sessionInfo`, `sessionRename`, `branchFork`, `sessionFork`,
 `sessionWorktreeFork`, `models`, `subagentModels`, model and
 mode setters, `steer`/`followUp`, the `goal*` and `subagent*` method families,
-and `replyPermission`/`rejectPermission` plus `replyUserInput`/`rejectUserInput`. `prompt` accepts a `mode` option
+and `replyUserInput`/`rejectUserInput`. `prompt` accepts a `mode` option
 (`default` or `plan`); timeout handling aborts and consumes terminal completion before
 raising `SnowTimeoutError`. Iterator and subscription capacities are
 configurable.
-
-Permission helpers do not auto-approve events. Interactive hosts must inspect the
-`permission.request.id`, present the attributed request to a human, and call the
-reply/reject helper with that exact ID. `allow_session` is the strongest remote
-remembered decision; global allow-always remains unavailable. `sessionMessages`
-/`session_messages` returns at most 24 active-branch public projections under an
-8 MiB aggregate bound; provider-private blocks and binary attachment bytes are
-omitted.
 
 ## Protocol v1 contract
 
@@ -145,7 +137,7 @@ Every process starts with a first frame similar to:
   "snow_version": "0.1.0-dev",
   "capabilities": [
     "active_input", "goals", "models_list", "prompt_completion",
-    "branch_management", "permission_input", "session_forks", "session_info", "session_messages", "subagent_models", "subagents", "user_input"
+    "branch_management", "session_forks", "session_info", "subagent_models", "subagents", "user_input"
   ],
   "max_input_bytes": 16777216
 }
@@ -185,10 +177,7 @@ observers before the handler runs. A valid result sends `user_input_reply`;
 validation or handler failure sends `user_input_reject`.
 
 This channel answers model questions only. It never approves tool permissions.
-Tool approval is a separate manual host flow: consume `permission_request`, show
-its attribution to a human, then call the permission reply/reject helper with
-the opaque ID. Clients do not install an automatic permission handler, so
-unattended code should continue to launch Snow with `permission: "deny"`.
+RPC permission mode `ask` remains fail-closed.
 
 ## Process and error behavior
 

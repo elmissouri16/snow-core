@@ -73,7 +73,7 @@ func TestRPCPublicDTOJSONRoundTrips(t *testing.T) {
 		},
 		func(t *testing.T) { assertJSONRoundTrip(t, RPCPendingInputCounts{Steering: 1, FollowUp: 2, Total: 3}) },
 		func(t *testing.T) {
-			assertJSONRoundTrip(t, RPCSessionInfo{SessionID: "s", Name: "n", Path: "p", CWD: "c", Provider: "fake", Model: "fake-1", PermissionMode: "ask", Thinking: ThinkingOff, ThinkingLevels: []ThinkingLevel{ThinkingOff}, CollaborationMode: ModeDefault, Goal: &RPCGoalSummary{GoalID: "g", Status: GoalActive, TokenBudget: &budget, EstimatedCosts: []Cost{}}, Subagents: RPCSubagentLimits{}, PendingInputs: RPCPendingInputCounts{}})
+			assertJSONRoundTrip(t, RPCSessionInfo{SessionID: "s", Name: "n", Path: "p", CWD: "c", Provider: "fake", Model: "fake-1", Thinking: ThinkingOff, ThinkingLevels: []ThinkingLevel{ThinkingOff}, CollaborationMode: ModeDefault, Goal: &RPCGoalSummary{GoalID: "g", Status: GoalActive, TokenBudget: &budget, EstimatedCosts: []Cost{}}, Subagents: RPCSubagentLimits{}, PendingInputs: RPCPendingInputCounts{}})
 		},
 	}
 	for i, test := range values {
