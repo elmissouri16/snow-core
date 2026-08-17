@@ -10,11 +10,66 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/config"
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/pkg/protocol"
 )
+
+func TestCompatibleLoginConfigureFailureDoesNotOverwriteCredential(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	store := m.app.AuthService.Store()
+	if err := store.Put("openai-compatible", auth.Credential{Type: auth.CredentialAPIKey, Key: "concurrent-key"}); err != nil {
+		t.Fatal(err)
+	}
+	m.loginProvider = "openai-compatible"
+	m.loginEndpoint = "not-an-absolute-url"
+	_, cmd := m.finishCompatibleLogin("attempt-key")
+	if cmd != nil {
+		t.Fatal("invalid endpoint unexpectedly scheduled discovery")
+	}
+	credential, ok := store.Get("openai-compatible")
+	if !ok || credential.Key != "concurrent-key" {
+		t.Fatalf("existing credential was overwritten: found=%v expected-key=%v", ok, credential.Key == "concurrent-key")
+	}
+}
+
+func TestSubagentSettingPreservesRuntimeOnlyOverrides(t *testing.T) {
+	home := testHome(t)
+	enabled := true
+	project := t.TempDir()
+	a, err := app.New(context.Background(), app.Options{
+		Provider:               "fake",
+		NoSession:              true,
+		Permission:             "allow",
+		CWD:                    project,
+		ConfigPath:             filepath.Join(home, "config.json"),
+		Subagents:              &enabled,
+		SubagentMaxConcurrency: 9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	m := newModel(context.Background(), app.Options{})
+	m.app = a
+
+	if err := m.setSubagentsEnabled(false); err != nil {
+		t.Fatal(err)
+	}
+	if m.app.Cfg.Subagents.Enabled || m.app.Cfg.Subagents.MaxConcurrentThreads != 9 {
+		t.Fatalf("runtime subagent overlay was discarded: %+v", m.app.Cfg.Subagents)
+	}
+	persisted, err := config.Load(m.app.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Subagents.Enabled || persisted.Subagents.MaxConcurrentThreads != config.DefaultSubagents().MaxConcurrentThreads {
+		t.Fatalf("persisted subagent config = %+v", persisted.Subagents)
+	}
+}
 
 func TestSettingsPanelNavigationModelReturnAndPermissionPersistence(t *testing.T) {
 	home := testHome(t)

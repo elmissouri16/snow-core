@@ -119,15 +119,15 @@ func routeTextareaCmdGeneration(target textareaTarget, requestID, questionID str
 	}
 }
 
-// Styles — tuned for a dark terminal, matching the look of modern agent TUIs
-// (fixed header / scrollable body / fixed input, no giant outer box).
+// Styles use the adaptive default palette until a model applies the selected
+// built-in or custom theme.
 var (
-	colorAccent lipgloss.TerminalColor = lipgloss.Color("39")  // blue
-	colorMuted  lipgloss.TerminalColor = lipgloss.Color("245") // gray
-	colorSoft   lipgloss.TerminalColor = lipgloss.Color("252") // near-white
-	colorWarn   lipgloss.TerminalColor = lipgloss.Color("214") // orange
-	colorErr    lipgloss.TerminalColor = lipgloss.Color("196") // red
-	colorOk     lipgloss.TerminalColor = lipgloss.Color("42")  // green
+	colorAccent lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#0969da", Dark: "#58a6ff"}
+	colorMuted  lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#57606a", Dark: "#8b949e"}
+	colorSoft   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#24292f", Dark: "#f0f6fc"}
+	colorWarn   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9a6700", Dark: "#e3b341"}
+	colorErr    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#cf222e", Dark: "#ff7b72"}
+	colorOk     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#1a7f37", Dark: "#7ee787"}
 
 	styleUser      = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleAssistant = lipgloss.NewStyle().Foreground(colorSoft)
@@ -140,9 +140,9 @@ var (
 	styleDiffAdd   = lipgloss.NewStyle().Foreground(colorOk)
 	styleDiffDel   = lipgloss.NewStyle().Foreground(colorErr)
 	styleBrand     = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	styleSep       = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	styleSep       = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#8c959f", Dark: "#6e7681"})
 	stylePrompt    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	styleComposer  = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+	styleComposer  = lipgloss.NewStyle()
 
 	styleCompletion         = lipgloss.NewStyle().Foreground(colorMuted)
 	styleCompletionSelected = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
@@ -247,6 +247,12 @@ type contextUsageRefreshMsg struct {
 	version  uint64
 	snapshot contextUsageSnapshot
 	err      error
+}
+
+type contextReportMsg struct {
+	epoch  uint64
+	report agent.ContextReport
+	err    error
 }
 
 type modeSwitchDoneMsg struct {
@@ -718,7 +724,7 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 	_ = applyTUITheme("default")
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	sp.Style = lipgloss.NewStyle().Foreground(colorAccent)
 
 	ta := textarea.New()
 	normalizeTextareaStyles(&ta)
@@ -1172,6 +1178,15 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if cmd := m.scheduleContextUsageRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
+		}
+	case contextReportMsg:
+		if m.app == nil || m.app.Agent == nil || msg.epoch != m.app.Agent.RootEpoch() {
+			break
+		}
+		if msg.err != nil {
+			m.pushLine(styleError.Render("context report: " + msg.err.Error()))
+		} else {
+			m.pushLine(styleFooter.Render(formatContextReport(msg.report, m.contextTokens, m.contextEstimated)))
 		}
 	case agentEventBatchMsg:
 		// Ingest a bounded, already-coalesced logical batch. Streaming deltas
@@ -3050,8 +3065,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// At the top-level composer Shift+Tab cycles collaboration mode. Every
-	// modal/completion path above retains its existing navigation semantics.
+	// Top-level shortcuts open the thinking picker or cycle collaboration mode.
+	// Every modal/completion path above retains its existing navigation semantics.
+	if keyMatches(msg, m.keys.Thinking) {
+		return m.startThinkingPick()
+	}
 	if keyMatches(msg, m.keys.Mode) {
 		return m, m.toggleCollaborationMode()
 	}
@@ -3456,61 +3474,67 @@ func (m *Model) finishCompatibleLogin(secret string) (tea.Model, tea.Cmd) {
 	}
 
 	oldPersisted := m.app.PersistedCfg
-	candidate := oldPersisted
-	candidate.Providers = make(map[string]config.ProviderConfig, len(oldPersisted.Providers)+1)
-	for id, providerConfig := range oldPersisted.Providers {
-		candidate.Providers[id] = providerConfig
-	}
-	providerConfig := candidate.Providers[profileID]
-	providerConfig.BaseURL = endpoint
-	if profileID != openaicompat.ProviderID {
-		providerConfig.Type = config.ProviderTypeOpenAICompatible
-	}
-	candidate.Providers[profileID] = providerConfig
-
 	authStore := m.app.AuthService.Store()
-	oldCred, hadOldCred := authStore.Get(profileID)
 	credentialChanged := strings.TrimSpace(secret) != ""
-	if credentialChanged {
-		if err := authStore.Put(profileID, auth.Credential{Type: auth.CredentialAPIKey, Key: secret}); err != nil {
-			m.pushLine(styleError.Render("login: " + err.Error()))
-			return m, nil
+	var previousProviderConfig config.ProviderConfig
+	var hadPreviousProvider bool
+	var writtenProviderConfig config.ProviderConfig
+	candidate, err := m.persistConfig(func(latest *config.Config) error {
+		if latest.Providers == nil {
+			latest.Providers = map[string]config.ProviderConfig{}
 		}
-	}
-	rollbackCredential := func() error {
-		if !credentialChanged {
-			return nil
+		previousProviderConfig, hadPreviousProvider = latest.Providers[profileID]
+		writtenProviderConfig = previousProviderConfig
+		writtenProviderConfig.BaseURL = endpoint
+		if profileID != openaicompat.ProviderID {
+			writtenProviderConfig.Type = config.ProviderTypeOpenAICompatible
 		}
-		if hadOldCred {
-			return authStore.Put(profileID, oldCred)
-		}
-		return authStore.Delete(profileID)
-	}
-	if m.app.ConfigPath != "" {
-		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-			err = errors.Join(err, rollbackCredential())
-			m.pushLine(styleError.Render("login: persist endpoint: " + err.Error()))
-			return m, nil
-		}
+		latest.Providers[profileID] = writtenProviderConfig
+		return nil
+	})
+	if err != nil {
+		m.pushLine(styleError.Render("login: persist endpoint: " + err.Error()))
+		return m, nil
 	}
 
 	m.app.PersistedCfg = candidate
-	m.app.Cfg.Providers = make(map[string]config.ProviderConfig, len(candidate.Providers))
-	for id, configured := range candidate.Providers {
-		m.app.Cfg.Providers[id] = configured
+	oldRuntimeProviderConfig, hadOldRuntimeProvider := m.app.Cfg.Providers[profileID]
+	if m.app.Cfg.Providers == nil {
+		m.app.Cfg.Providers = map[string]config.ProviderConfig{}
 	}
+	m.app.Cfg.Providers[profileID] = candidate.Providers[profileID]
 	if err := m.app.ConfigureOpenAICompatibleProfile(profileID, endpoint); err != nil {
-		m.app.PersistedCfg = oldPersisted
-		m.app.Cfg.Providers = make(map[string]config.ProviderConfig, len(oldPersisted.Providers))
-		for id, configured := range oldPersisted.Providers {
-			m.app.Cfg.Providers[id] = configured
+		rolledBack := oldPersisted
+		updated, rollbackErr := m.persistConfig(func(latest *config.Config) error {
+			current, exists := latest.Providers[profileID]
+			if !exists || current != writtenProviderConfig {
+				return nil // a concurrent writer now owns this profile
+			}
+			if hadPreviousProvider {
+				latest.Providers[profileID] = previousProviderConfig
+			} else {
+				delete(latest.Providers, profileID)
+			}
+			return nil
+		})
+		if rollbackErr == nil {
+			rolledBack = updated
 		}
-		rollbackErr := rollbackCredential()
-		if m.app.ConfigPath != "" {
-			rollbackErr = errors.Join(rollbackErr, config.Save(m.app.ConfigPath, oldPersisted))
+		m.app.PersistedCfg = rolledBack
+		if hadOldRuntimeProvider {
+			m.app.Cfg.Providers[profileID] = oldRuntimeProviderConfig
+		} else {
+			delete(m.app.Cfg.Providers, profileID)
 		}
 		m.pushLine(styleError.Render("login: " + errors.Join(err, rollbackErr).Error()))
 		return m, nil
+	}
+
+	if credentialChanged {
+		if err := authStore.Put(profileID, auth.Credential{Type: auth.CredentialAPIKey, Key: secret}); err != nil {
+			m.pushLine(styleError.Render("login: endpoint saved but credential persistence failed: " + err.Error()))
+			return m, nil
+		}
 	}
 
 	m.compatibleLoginGeneration++
@@ -3908,6 +3932,17 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.startCompact()
+	case "/context":
+		if len(args) > 0 {
+			m.pushLine(styleError.Render("/context takes no arguments"))
+			return m, nil
+		}
+		a := m.app.Agent
+		epoch := a.RootEpoch()
+		return m, func() tea.Msg {
+			report, err := a.ContextReport()
+			return contextReportMsg{epoch: epoch, report: report, err: err}
+		}
 	case "/login":
 		return m.startLogin(args)
 	case "/logout":
@@ -4932,6 +4967,28 @@ func (m *Model) applyThinking(level protocol.ThinkingLevel) error {
 	return m.setThinking(level, true)
 }
 
+func (m *Model) persistConfig(mutate func(*config.Config) error) (config.Config, error) {
+	if m.app.ConfigPath != "" {
+		return config.Update(m.app.ConfigPath, mutate)
+	}
+	candidate := m.app.PersistedCfg
+	if err := mutate(&candidate); err != nil {
+		return config.Config{}, err
+	}
+	return candidate, nil
+}
+
+func (m *Model) persistProjectSelection(selection config.ProjectSelection) (config.Config, error) {
+	return m.persistConfig(func(latest *config.Config) error {
+		candidate, err := config.WithProjectSelection(*latest, m.app.CWD(), selection)
+		if err != nil {
+			return err
+		}
+		*latest = candidate
+		return nil
+	})
+}
+
 func (m *Model) setThinking(level protocol.ThinkingLevel, announce bool) error {
 	if m.app == nil {
 		return fmt.Errorf("thinking: app is not ready")
@@ -4940,22 +4997,19 @@ func (m *Model) setThinking(level protocol.ThinkingLevel, announce bool) error {
 	if err := m.app.Agent.SetThinking(level); err != nil {
 		return err
 	}
-	candidate := m.app.PersistedCfg
-	candidate.Thinking = string(m.app.Agent.Thinking())
-	// A model switch with an incompatible existing effort is runtime-only;
-	// once the user selects a valid effort, persist the complete active choice.
-	candidate.DefaultProvider = m.app.ProviderID
-	candidate.DefaultModel = m.app.Agent.Model().ID
-	if m.app.ConfigPath != "" {
-		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-			_ = m.app.Agent.SetThinking(old)
-			return fmt.Errorf("persist thinking: %w", err)
-		}
+	candidate, err := m.persistProjectSelection(config.ProjectSelection{
+		Provider: m.app.ProviderID,
+		Model:    m.app.Agent.Model().ID,
+		Thinking: string(m.app.Agent.Thinking()),
+	})
+	if err != nil {
+		_ = m.app.Agent.SetThinking(old)
+		return fmt.Errorf("persist thinking: %w", err)
 	}
 	m.app.PersistedCfg = candidate
-	m.app.Cfg.Thinking = candidate.Thinking
-	m.app.Cfg.DefaultProvider = candidate.DefaultProvider
-	m.app.Cfg.DefaultModel = candidate.DefaultModel
+	m.app.Cfg.Thinking = string(m.app.Agent.Thinking())
+	m.app.Cfg.DefaultProvider = m.app.ProviderID
+	m.app.Cfg.DefaultModel = m.app.Agent.Model().ID
 	if announce {
 		m.pushLine(styleFooter.Render("thinking: " + string(m.app.Agent.Thinking())))
 	}
@@ -5163,12 +5217,16 @@ func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.settingsReturnToPanel {
 			m.settingsReturnToPanel = false
 			m.pickSettings = true
+			resetThinking := m.app != nil && !model.SupportsThinkingLevel(m.app.Agent.Thinking())
 			if err := m.applyModel(model); err != nil {
 				m.settingsError = err.Error()
 				m.settingsStatus = ""
 			} else {
 				m.settingsError = ""
 				m.settingsStatus = "model saved"
+				if resetThinking {
+					m.settingsStatus = "model saved; thinking reset to off"
+				}
 			}
 		} else {
 			m.setModel(model)
@@ -5292,31 +5350,23 @@ func (m *Model) renderModelPicker() string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// setModel switches the active provider/model and persists the choice so it
-// survives restarts (config.json default_provider/default_model).
+// setModel switches the active provider/model and persists the complete choice
+// for the current project so another working directory keeps its own selection.
 func (m *Model) setModel(selected protocol.Model) {
-	if m.app != nil {
-		if selected.Provider == "" {
-			selected.Provider = m.app.ProviderID
-		}
-		currentThinking := m.app.Agent.Thinking()
-		if currentThinking != protocol.ThinkingOff && !selected.SupportsThinkingLevel(currentThinking) {
-			if selected.Provider != m.app.ProviderID {
-				if err := m.app.SetProvider(selected.Provider); err != nil {
-					m.pushLine(styleError.Render(err.Error()))
-					return
-				}
-			}
-			if err := m.app.SetModel(selected); err != nil {
-				m.pushLine(styleError.Render(err.Error()))
-				return
-			}
-			m.pushLine(styleTool.Render("model does not advertise thinking level " + string(currentThinking) + "; choose /thinking before the next prompt"))
-			return
-		}
+	if m.app == nil {
+		return
 	}
+	if selected.Provider == "" {
+		selected.Provider = m.app.ProviderID
+	}
+	currentThinking := m.app.Agent.Thinking()
+	resetThinking := !selected.SupportsThinkingLevel(currentThinking)
 	if err := m.applyModel(selected); err != nil {
 		m.pushLine(styleError.Render(err.Error()))
+		return
+	}
+	if resetThinking {
+		m.pushLine(styleTool.Render("thinking changed from " + string(currentThinking) + " to off because model " + strconv.Quote(selected.ID) + " does not advertise that effort"))
 	}
 }
 
@@ -5355,23 +5405,22 @@ func (m *Model) applyModelAndThinking(selected protocol.Model, level protocol.Th
 		return err
 	}
 
-	candidate := oldPersistedCfg
-	candidate.DefaultProvider = selected.Provider
-	candidate.DefaultModel = selected.ID
-	candidate.Thinking = string(parsed)
-	if m.app.ConfigPath != "" {
-		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-			if rollbackErr := rollback(); rollbackErr != nil {
-				return fmt.Errorf("persist model and thinking: %w (rollback failed: %v)", err, rollbackErr)
-			}
-			return fmt.Errorf("persist model and thinking: %w", err)
+	candidate, err := m.persistProjectSelection(config.ProjectSelection{
+		Provider: selected.Provider,
+		Model:    selected.ID,
+		Thinking: string(parsed),
+	})
+	if err != nil {
+		if rollbackErr := rollback(); rollbackErr != nil {
+			return fmt.Errorf("persist model and thinking: %w (rollback failed: %v)", err, rollbackErr)
 		}
+		return fmt.Errorf("persist model and thinking: %w", err)
 	}
 	m.app.Model = selected
 	m.app.PersistedCfg = candidate
-	m.app.Cfg.DefaultProvider = candidate.DefaultProvider
-	m.app.Cfg.DefaultModel = candidate.DefaultModel
-	m.app.Cfg.Thinking = candidate.Thinking
+	m.app.Cfg.DefaultProvider = selected.Provider
+	m.app.Cfg.DefaultModel = selected.ID
+	m.app.Cfg.Thinking = string(parsed)
 	return nil
 }
 
@@ -5383,14 +5432,16 @@ func (m *Model) applyModel(selected protocol.Model) error {
 	if selected.Provider == "" {
 		selected.Provider = m.app.ProviderID
 	}
-	if currentThinking != protocol.ThinkingOff && !selected.SupportsThinkingLevel(currentThinking) {
-		return fmt.Errorf("model %q does not advertise thinking level %q; choose a supported effort first", selected.ID, currentThinking)
+	if !selected.SupportsThinkingLevel(currentThinking) {
+		// Model discovery endpoints commonly return ID-only records. Keep their
+		// conservative capability metadata, but never leave the TUI in an invalid
+		// model/effort combination that rejects the next prompt.
+		return m.applyModelAndThinking(selected, protocol.ThinkingOff)
 	}
 	oldProvider := m.app.ProviderID
 	oldModel := m.app.Agent.Model()
 	oldAppModel := m.app.Model
 	oldCfg := m.app.Cfg
-	oldPersistedCfg := m.app.PersistedCfg
 	if selected.Provider != m.app.ProviderID {
 		if err := m.app.SetProvider(selected.Provider); err != nil {
 			return err
@@ -5402,24 +5453,24 @@ func (m *Model) applyModel(selected protocol.Model) error {
 		}
 		return err
 	}
-	candidate := oldPersistedCfg
-	candidate.DefaultProvider = selected.Provider
-	candidate.DefaultModel = selected.ID
-	if m.app.ConfigPath != "" {
-		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-			if oldProvider != m.app.ProviderID {
-				_ = m.app.SetProvider(oldProvider)
-			}
-			_ = m.app.SetModel(oldModel)
-			m.app.Model = oldAppModel
-			m.app.Cfg = oldCfg
-			return fmt.Errorf("persist model: %w", err)
+	candidate, err := m.persistProjectSelection(config.ProjectSelection{
+		Provider: selected.Provider,
+		Model:    selected.ID,
+		Thinking: string(m.app.Agent.Thinking()),
+	})
+	if err != nil {
+		if oldProvider != m.app.ProviderID {
+			_ = m.app.SetProvider(oldProvider)
 		}
+		_ = m.app.SetModel(oldModel)
+		m.app.Model = oldAppModel
+		m.app.Cfg = oldCfg
+		return fmt.Errorf("persist model: %w", err)
 	}
 	m.app.Model = selected
 	m.app.PersistedCfg = candidate
-	m.app.Cfg.DefaultProvider = candidate.DefaultProvider
-	m.app.Cfg.DefaultModel = candidate.DefaultModel
+	m.app.Cfg.DefaultProvider = selected.Provider
+	m.app.Cfg.DefaultModel = selected.ID
 	return nil
 }
 
@@ -6125,6 +6176,123 @@ func estimateContextTokens(messages []protocol.Message) int {
 		return 0
 	}
 	return (chars + 3) / 4
+}
+
+type contextDisplayCategory struct {
+	name   string
+	tokens int
+	items  int
+}
+
+func formatContextReport(report agent.ContextReport, currentTokens int, currentEstimated bool) string {
+	rawInput := report.EstimatedInputTokens
+	calibrated := currentTokens > 0 || (report.Usage != nil && report.Usage.Input > 0)
+	if currentTokens <= 0 {
+		switch {
+		case report.Usage != nil && report.Usage.Input > 0 && report.Usage.Total > 0:
+			currentTokens = report.Usage.Total
+		case report.Usage != nil && report.Usage.Input > 0:
+			currentTokens = report.Usage.Input + report.Usage.Output
+		default:
+			currentTokens = rawInput
+			currentEstimated = currentTokens > 0
+		}
+	}
+
+	inputTarget := currentTokens
+	generatedTokens := 0
+	if report.LatestRequest && report.Usage != nil && report.Usage.Input > 0 {
+		inputTarget = report.Usage.Input
+		if currentTokens < inputTarget {
+			currentTokens = inputTarget
+		}
+		generatedTokens = currentTokens - inputTarget
+	}
+	categories := calibrateContextCategories(report.Categories, rawInput, inputTarget)
+
+	scope := "stored context preflight"
+	if report.LatestRequest {
+		scope = "latest provider request + generated content"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Context report · %s\n", scope)
+	marker := ""
+	if currentEstimated {
+		marker = "~"
+	}
+	fmt.Fprintf(&b, "  Current context         %s%s", marker, formatTokenCount(int64(currentTokens)))
+	if report.ContextWindow > 0 {
+		percent := 100 * float64(currentTokens) / float64(report.ContextWindow)
+		fmt.Fprintf(&b, " / %s (%.1f%%)", formatTokenCount(int64(report.ContextWindow)), percent)
+	}
+	b.WriteByte('\n')
+	if report.LatestRequest && report.Usage != nil && report.Usage.Input > 0 {
+		fmt.Fprintf(&b, "  Latest provider input   %s\n", formatTokenCount(int64(report.Usage.Input)))
+	}
+	fmt.Fprintf(&b, "  Snapshot                %d messages · %d tools\n", report.MessageCount, report.ToolCount)
+
+	if calibrated {
+		b.WriteString("\nEstimated composition (provider-calibrated)\n")
+	} else {
+		b.WriteString("\nEstimated composition (raw local estimate)\n")
+	}
+	for _, category := range categories {
+		percent := 0.0
+		if currentTokens > 0 {
+			percent = 100 * float64(category.tokens) / float64(currentTokens)
+		}
+		name := category.name
+		if category.name == "Images" && category.items > 0 {
+			name = fmt.Sprintf("Images (%d)", category.items)
+		}
+		fmt.Fprintf(&b, "  %-22s ~%8s  %5.1f%%\n", name, formatTokenCount(int64(category.tokens)), percent)
+	}
+	if generatedTokens > 0 {
+		percent := 100 * float64(generatedTokens) / float64(currentTokens)
+		fmt.Fprintf(&b, "  %-22s %9s  %5.1f%%\n", "Generated since input", formatTokenCount(int64(generatedTokens)), percent)
+	}
+	fmt.Fprintf(&b, "  %-22s %9s\n", "Context total", marker+formatTokenCount(int64(currentTokens)))
+	if rawInput > 0 && rawInput != inputTarget {
+		fmt.Fprintf(&b, "  %-22s ~%8s  (before calibration)\n", "Raw local estimate", formatTokenCount(int64(rawInput)))
+	}
+	if report.Usage != nil && (report.Usage.Output > 0 || report.Usage.Reasoning > 0) {
+		fmt.Fprintf(&b, "\nLatest generation usage  %s output", formatTokenCount(int64(report.Usage.Output)))
+		if report.Usage.Reasoning > 0 {
+			fmt.Fprintf(&b, " · %s reasoning", formatTokenCount(int64(report.Usage.Reasoning)))
+		}
+		b.WriteByte('\n')
+	}
+	if calibrated {
+		b.WriteString("\nCategory shares are byte-based estimates calibrated to current/provider totals; opaque and multimodal attribution remains approximate.")
+	} else {
+		b.WriteString("\nCategory shares use UTF-8 bytes/4 for text and a bounded dimension-based image estimate until provider context usage is available; opaque and multimodal attribution remains approximate.")
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func calibrateContextCategories(categories []agent.ContextCategory, rawTotal, target int) []contextDisplayCategory {
+	out := make([]contextDisplayCategory, 0, len(categories))
+	if rawTotal <= 0 || target <= 0 {
+		for _, category := range categories {
+			out = append(out, contextDisplayCategory{name: category.Name, tokens: category.EstimatedTokens, items: category.Items})
+		}
+		return out
+	}
+
+	sum := 0
+	largest := -1
+	for _, category := range categories {
+		tokens := int(float64(category.EstimatedTokens)*float64(target)/float64(rawTotal) + 0.5)
+		out = append(out, contextDisplayCategory{name: category.Name, tokens: tokens, items: category.Items})
+		sum += tokens
+		if largest < 0 || tokens > out[largest].tokens {
+			largest = len(out) - 1
+		}
+	}
+	if largest >= 0 {
+		out[largest].tokens += target - sum
+	}
+	return out
 }
 
 func shortSessionID(id string) string {
@@ -7148,12 +7316,12 @@ func (m *Model) setPermissionMode(mode permission.Mode, announce bool) error {
 	if mode != permission.ModeAsk && mode != permission.ModeAllow && mode != permission.ModeDeny {
 		return fmt.Errorf("invalid permission mode %q", mode)
 	}
-	candidate := m.app.PersistedCfg
-	candidate.PermissionMode = string(mode)
-	if m.app.ConfigPath != "" {
-		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-			return fmt.Errorf("persist permissions: %w", err)
-		}
+	candidate, err := m.persistConfig(func(latest *config.Config) error {
+		latest.PermissionMode = string(mode)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("persist permissions: %w", err)
 	}
 	if err := m.app.SetPermissionDefault(mode); err != nil {
 		return err
@@ -7395,6 +7563,12 @@ func (m *Model) setTheme(name string, announce bool) error {
 	return m.applyThemeSelection(name, announce, true)
 }
 
+func (m *Model) refreshThemeStyles() {
+	normalizeTextareaStyles(&m.editor)
+	normalizeTextareaStyles(&m.userInputEditor)
+	m.spinner.Style = lipgloss.NewStyle().Foreground(colorAccent)
+}
+
 func (m *Model) applyThemeSelection(name string, announce, persist bool) error {
 	if _, custom := m.customThemes[name]; !custom {
 		if err := config.ValidateTUITheme(name); err != nil {
@@ -7414,20 +7588,20 @@ func (m *Model) applyThemeSelection(name string, announce, persist bool) error {
 	if applyErr != nil {
 		return applyErr
 	}
-	normalizeTextareaStyles(&m.editor)
-	normalizeTextareaStyles(&m.userInputEditor)
+	m.refreshThemeStyles()
 	if m.app != nil && persist {
-		candidate := m.app.PersistedCfg
-		candidate.TUI.Theme = name
-		if m.app.ConfigPath != "" {
-			if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-				if custom, ok := m.customThemes[old]; ok {
-					_ = applyCustomTUITheme(custom)
-				} else {
-					_ = applyTUITheme(old)
-				}
-				return fmt.Errorf("persist theme: %w", err)
+		candidate, err := m.persistConfig(func(latest *config.Config) error {
+			latest.TUI.Theme = name
+			return nil
+		})
+		if err != nil {
+			if custom, ok := m.customThemes[old]; ok {
+				_ = applyCustomTUITheme(custom)
+			} else {
+				_ = applyTUITheme(old)
 			}
+			m.refreshThemeStyles()
+			return fmt.Errorf("persist theme: %w", err)
 		}
 		m.app.PersistedCfg = candidate
 		m.app.Cfg.TUI.Theme = name
@@ -7444,13 +7618,13 @@ func (m *Model) setReasoningSummary(summary protocol.ReasoningSummary) error {
 	if err := m.app.Agent.SetReasoningSummary(summary); err != nil {
 		return err
 	}
-	candidate := m.app.PersistedCfg
-	candidate.ReasoningSummary = string(m.app.Agent.ReasoningSummary())
-	if m.app.ConfigPath != "" {
-		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-			_ = m.app.Agent.SetReasoningSummary(old)
-			return fmt.Errorf("persist reasoning summary: %w", err)
-		}
+	candidate, err := m.persistConfig(func(latest *config.Config) error {
+		latest.ReasoningSummary = string(m.app.Agent.ReasoningSummary())
+		return nil
+	})
+	if err != nil {
+		_ = m.app.Agent.SetReasoningSummary(old)
+		return fmt.Errorf("persist reasoning summary: %w", err)
 	}
 	m.app.PersistedCfg = candidate
 	m.app.Cfg.ReasoningSummary = candidate.ReasoningSummary
@@ -7462,13 +7636,13 @@ func (m *Model) setTextVerbosity(verbosity protocol.TextVerbosity) error {
 	if err := m.app.Agent.SetTextVerbosity(verbosity); err != nil {
 		return err
 	}
-	candidate := m.app.PersistedCfg
-	candidate.TextVerbosity = string(m.app.Agent.TextVerbosity())
-	if m.app.ConfigPath != "" {
-		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-			_ = m.app.Agent.SetTextVerbosity(old)
-			return fmt.Errorf("persist text verbosity: %w", err)
-		}
+	candidate, err := m.persistConfig(func(latest *config.Config) error {
+		latest.TextVerbosity = string(m.app.Agent.TextVerbosity())
+		return nil
+	})
+	if err != nil {
+		_ = m.app.Agent.SetTextVerbosity(old)
+		return fmt.Errorf("persist text verbosity: %w", err)
 	}
 	m.app.PersistedCfg = candidate
 	m.app.Cfg.TextVerbosity = candidate.TextVerbosity
@@ -7476,18 +7650,15 @@ func (m *Model) setTextVerbosity(verbosity protocol.TextVerbosity) error {
 }
 
 func (m *Model) setSubagentsEnabled(enabled bool) error {
-	candidate := m.app.PersistedCfg
-	candidate.Subagents.Enabled = enabled
-	if err := candidate.Subagents.ValidateSubagents(); err != nil {
-		return err
-	}
-	if m.app.ConfigPath != "" {
-		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-			return fmt.Errorf("persist subagent setting: %w", err)
-		}
+	candidate, err := m.persistConfig(func(latest *config.Config) error {
+		latest.Subagents.Enabled = enabled
+		return latest.Subagents.ValidateSubagents()
+	})
+	if err != nil {
+		return fmt.Errorf("persist subagent setting: %w", err)
 	}
 	m.app.PersistedCfg = candidate
-	m.app.Cfg.Subagents = candidate.Subagents
+	m.app.Cfg.Subagents.Enabled = enabled
 	return nil
 }
 
@@ -7495,31 +7666,31 @@ func (m *Model) setSubagentConcurrency(limit int) error {
 	if limit < 1 {
 		return errors.New("subagent concurrency must be positive")
 	}
-	candidate := m.app.PersistedCfg
-	candidate.Subagents.MaxConcurrentThreads = limit
-	if candidate.Subagents.MaxAgentsPerSession < limit {
-		candidate.Subagents.MaxAgentsPerSession = limit
-	}
-	if err := candidate.Subagents.ValidateSubagents(); err != nil {
-		return err
-	}
-	if m.app.ConfigPath != "" {
-		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-			return fmt.Errorf("persist subagent concurrency: %w", err)
+	candidate, err := m.persistConfig(func(latest *config.Config) error {
+		latest.Subagents.MaxConcurrentThreads = limit
+		if latest.Subagents.MaxAgentsPerSession < limit {
+			latest.Subagents.MaxAgentsPerSession = limit
 		}
+		return latest.Subagents.ValidateSubagents()
+	})
+	if err != nil {
+		return fmt.Errorf("persist subagent concurrency: %w", err)
 	}
 	m.app.PersistedCfg = candidate
-	m.app.Cfg.Subagents = candidate.Subagents
+	m.app.Cfg.Subagents.MaxConcurrentThreads = limit
+	if m.app.Cfg.Subagents.MaxAgentsPerSession < limit {
+		m.app.Cfg.Subagents.MaxAgentsPerSession = limit
+	}
 	return nil
 }
 
 func (m *Model) setSkillsEnabled(enabled bool) error {
-	candidate := m.app.PersistedCfg
-	candidate.Skills.Disabled = !enabled
-	if m.app.ConfigPath != "" {
-		if err := config.Save(m.app.ConfigPath, candidate); err != nil {
-			return fmt.Errorf("persist skills setting: %w", err)
-		}
+	candidate, err := m.persistConfig(func(latest *config.Config) error {
+		latest.Skills.Disabled = !enabled
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("persist skills setting: %w", err)
 	}
 	m.app.PersistedCfg = candidate
 	m.app.Cfg.Skills.Disabled = candidate.Skills.Disabled
@@ -7984,7 +8155,7 @@ func fitFrameBottom(frame string, width, height int) string {
 		Render(frame)
 }
 
-// renderHeader is the sticky top bar: brand · provider/model · cwd · status.
+// renderHeader is the sticky top bar: brand · provider/model · thinking · runtime · cwd · status.
 func (m *Model) renderHeader(status string) string {
 	w := m.managedFrameWidth()
 	brand := styleBrand.Render(" snow ")
@@ -8006,9 +8177,9 @@ func (m *Model) renderHeader(status string) string {
 		}
 		midText = m.app.ProviderID + "/" + model.ID
 		if w >= 80 {
-			midText += "  ·  mode:" + m.collaborationModeLabel() + goalText +
+			midText += "  ·  thinking:" + string(m.app.Agent.Thinking()) +
+				"  ·  mode:" + m.collaborationModeLabel() + goalText +
 				"  ·  " + shellBoundary +
-				"  ·  thinking:" + string(m.app.Agent.Thinking()) +
 				"  ·  " + shortPath(m.app.CWD(), max(12, w/3))
 		} else if w >= 48 {
 			midText += "  ·  mode:" + m.collaborationModeLabel() + "  ·  " + shortPath(m.app.CWD(), max(10, w/4))

@@ -74,6 +74,26 @@ func TestCustomPickerBindingDrivesRuntimeModelPicker(t *testing.T) {
 	}
 }
 
+func TestCustomThinkingBindingDrivesRuntimePicker(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	model := m.app.Agent.Model()
+	model.SupportsThinking = true
+	model.ThinkingLevels = []protocol.ThinkingLevel{protocol.ThinkingLow}
+	if err := m.app.Agent.SetModel(model); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := applyKeybindingOverrides(tuiKeys, map[string][]string{"thinking": {"ctrl+y"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.keys = keys
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
+	if !m.pickThinking {
+		t.Fatal("custom thinking shortcut did not open picker")
+	}
+}
+
 func TestEmergencyKeysCannotBeShadowed(t *testing.T) {
 	for name, overrides := range map[string]map[string][]string{
 		"submit ctrl+c":    {"submit": {"ctrl+c"}},

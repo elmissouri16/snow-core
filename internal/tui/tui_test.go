@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/config"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/internal/skills"
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
@@ -245,6 +246,34 @@ func TestModelPermissionCommand(t *testing.T) {
 	}
 }
 
+func TestThinkingShortcutOpensPickerAndAppliesSelection(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	model := m.app.Agent.Model()
+	model.SupportsThinking = true
+	model.ThinkingLevels = []protocol.ThinkingLevel{protocol.ThinkingLow, protocol.ThinkingHigh}
+	if err := m.app.Agent.SetModel(model); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.app.Agent.SetThinking(protocol.ThinkingLow); err != nil {
+		t.Fatal(err)
+	}
+	m.editor.SetValue("draft prompt")
+
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlT})
+	if !m.pickThinking || m.thinkingList[m.thinkingIndex] != protocol.ThinkingLow {
+		t.Fatalf("thinking shortcut picker = open:%v levels:%v index:%d", m.pickThinking, m.thinkingList, m.thinkingIndex)
+	}
+	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := m.app.Agent.Thinking(); got != protocol.ThinkingHigh {
+		t.Fatalf("thinking = %q, want high", got)
+	}
+	if got := m.editor.Value(); got != "draft prompt" {
+		t.Fatalf("shortcut changed composer text to %q", got)
+	}
+}
+
 func TestModelThinkingPickerFiltersAndPersists(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
@@ -269,9 +298,10 @@ func TestModelThinkingPickerFiltersAndPersists(t *testing.T) {
 	if got := m.app.Agent.Thinking(); got != protocol.ThinkingLow {
 		t.Fatalf("thinking = %q, want low", got)
 	}
-	data, err := os.ReadFile(m.app.ConfigPath)
-	if err != nil || !strings.Contains(string(data), `"thinking": "low"`) {
-		t.Fatalf("thinking was not persisted: err=%v data=%s", err, data)
+	persisted, err := config.Load(m.app.ConfigPath)
+	selection := persisted.ProjectSelections[m.app.CWD()]
+	if err != nil || selection.Provider != "fake" || selection.Model != model.ID || selection.Thinking != "low" {
+		t.Fatalf("project thinking was not persisted: err=%v selection=%+v", err, selection)
 	}
 
 	m.editor.SetValue("/thinking high")
@@ -283,13 +313,17 @@ func TestModelThinkingPickerFiltersAndPersists(t *testing.T) {
 	if err := m.app.Agent.SetThinking(protocol.ThinkingLow); err != nil {
 		t.Fatal(err)
 	}
-	previousModel := m.app.Cfg.DefaultModel
 	m.setModel(protocol.Model{Provider: "fake", ID: "plain", SupportsTools: true})
-	if m.app.Agent.Model().ID != "plain" || m.app.Cfg.DefaultModel != previousModel {
-		t.Fatalf("invalid model switch was not kept runtime-only: model=%+v config=%q", m.app.Agent.Model(), m.app.Cfg.DefaultModel)
+	if m.app.Agent.Model().ID != "plain" || m.app.Agent.Thinking() != protocol.ThinkingOff || m.app.Cfg.DefaultModel != "plain" || m.app.Cfg.Thinking != "off" {
+		t.Fatalf("model switch did not atomically reset unsupported thinking: model=%+v thinking=%q config_model=%q config_thinking=%q", m.app.Agent.Model(), m.app.Agent.Thinking(), m.app.Cfg.DefaultModel, m.app.Cfg.Thinking)
 	}
-	if !strings.Contains(stripANSI(m.lines[len(m.lines)-1]), "does not advertise") {
-		t.Fatalf("model switch warning missing: %v", m.lines)
+	if !strings.Contains(stripANSI(m.lines[len(m.lines)-1]), "thinking changed from low to off") {
+		t.Fatalf("model switch adjustment notice missing: %v", m.lines)
+	}
+	persisted, err = config.Load(m.app.ConfigPath)
+	selection = persisted.ProjectSelections[m.app.CWD()]
+	if err != nil || selection.Provider != "fake" || selection.Model != "plain" || selection.Thinking != "off" {
+		t.Fatalf("adjusted project model and thinking were not persisted: err=%v selection=%+v", err, selection)
 	}
 }
 
@@ -328,9 +362,10 @@ func TestModelPickerSelectsModelThenThinkingEffort(t *testing.T) {
 	if m.pickThinking || m.app.Agent.Model().ID != "reasoner" || m.app.Agent.Thinking() != protocol.ThinkingUltra {
 		t.Fatalf("selection model=%q thinking=%q picker=%v", m.app.Agent.Model().ID, m.app.Agent.Thinking(), m.pickThinking)
 	}
-	data, err := os.ReadFile(m.app.ConfigPath)
-	if err != nil || !strings.Contains(string(data), `"default_model": "reasoner"`) || !strings.Contains(string(data), `"thinking": "ultra"`) {
-		t.Fatalf("model/effort were not persisted: err=%v data=%s", err, data)
+	persisted, err := config.Load(m.app.ConfigPath)
+	selection := persisted.ProjectSelections[m.app.CWD()]
+	if err != nil || selection.Provider != "fake" || selection.Model != "reasoner" || selection.Thinking != "ultra" {
+		t.Fatalf("project model/effort were not persisted: err=%v selection=%+v", err, selection)
 	}
 }
 

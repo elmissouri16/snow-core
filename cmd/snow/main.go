@@ -242,16 +242,23 @@ func loginCmd() *cobra.Command {
 					return err
 				}
 				baseURL, _ := cmd.Flags().GetString("base-url")
-				profileConfig := cfg.Providers[profileName]
-				if strings.TrimSpace(baseURL) != "" {
-					profileConfig.BaseURL = strings.TrimSpace(baseURL)
-				}
-				if profileConfig.BaseURL == "" {
-					return errors.New("login: named OpenAI-compatible profile requires --base-url on first login")
-				}
-				profileConfig.Type = config.ProviderTypeOpenAICompatible
-				cfg.Providers[profileName] = profileConfig
-				if err := config.Save(configPath, cfg); err != nil {
+				baseURL = strings.TrimSpace(baseURL)
+				cfg, err = config.Update(configPath, func(latest *config.Config) error {
+					if latest.Providers == nil {
+						latest.Providers = map[string]config.ProviderConfig{}
+					}
+					profileConfig := latest.Providers[profileName]
+					if baseURL != "" {
+						profileConfig.BaseURL = baseURL
+					}
+					if profileConfig.BaseURL == "" {
+						return errors.New("login: named OpenAI-compatible profile requires --base-url on first login")
+					}
+					profileConfig.Type = config.ProviderTypeOpenAICompatible
+					latest.Providers[profileName] = profileConfig
+					return nil
+				})
+				if err != nil {
 					return fmt.Errorf("login: save named profile: %w", err)
 				}
 				provider = profileName

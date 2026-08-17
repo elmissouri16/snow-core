@@ -68,7 +68,7 @@ func TestCommandRegistryIsCanonical(t *testing.T) {
 		}
 		seen[command.name] = true
 	}
-	for _, name := range []string{"/compact", "/mcp", "/sessions", "/resume", "/new", "/permissions", "/settings", "/skills", "/tree", "/thinking"} {
+	for _, name := range []string{"/compact", "/context", "/mcp", "/sessions", "/resume", "/new", "/permissions", "/settings", "/skills", "/tree", "/thinking"} {
 		if _, ok := commandByExact(name); !ok {
 			t.Errorf("missing canonical command %s", name)
 		}

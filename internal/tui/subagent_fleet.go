@@ -492,7 +492,7 @@ func (m *Model) renderSubagentFleetModal() string {
 		body = lipgloss.JoinVertical(lipgloss.Left, list, sep, detail)
 	}
 	content := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("63")).Width(layout.innerWidth).Height(layout.innerHeight).Render(content)
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Width(layout.innerWidth).Height(layout.innerHeight).Render(content)
 }
 
 func (m *Model) renderSubagentFleetHeader(width int) string {

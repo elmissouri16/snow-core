@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/snow-core/snow/internal/app"
+	"github.com/snow-core/snow/internal/config"
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/pkg/protocol"
 )
@@ -701,19 +701,23 @@ func TestModelSetModelPersists(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 
-	// Direct /model <id> sets and persists to config.json.
+	// Direct /model <id> persists only for the active project.
 	m.editor.SetValue("/model some-other-model")
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.app.Model.ID != "some-other-model" {
 		t.Fatalf("model = %q, want some-other-model", m.app.Model.ID)
 	}
 
-	data, err := os.ReadFile(filepath.Join(home, "config.json"))
+	persisted, err := config.Load(filepath.Join(home, "config.json"))
 	if err != nil {
 		t.Fatalf("config.json not persisted: %v", err)
 	}
-	if !strings.Contains(string(data), `"default_model": "some-other-model"`) {
-		t.Fatalf("config.json = %s, want default_model persisted", data)
+	selection, ok := persisted.ProjectSelections[m.app.CWD()]
+	if !ok || selection.Provider != "fake" || selection.Model != "some-other-model" || selection.Thinking != "off" {
+		t.Fatalf("project selection = %+v found=%v", selection, ok)
+	}
+	if persisted.DefaultProvider != "opencode-go" || persisted.DefaultModel != "" || persisted.Thinking != "off" {
+		t.Fatalf("global defaults changed = %s/%s thinking:%s", persisted.DefaultProvider, persisted.DefaultModel, persisted.Thinking)
 	}
 }
 

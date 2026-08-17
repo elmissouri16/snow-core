@@ -97,6 +97,18 @@ func TestFooterShowsKnownCacheMissAsZeroPercent(t *testing.T) {
 	}
 }
 
+func TestHeaderShowsThinkingImmediatelyAfterModel(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 160
+
+	model := m.app.Agent.Model()
+	want := m.app.ProviderID + "/" + model.ID + "  ·  thinking:" + string(m.app.Agent.Thinking())
+	if header := stripANSI(m.renderHeader("ready")); !strings.Contains(header, want) {
+		t.Fatalf("header does not place thinking after model; want %q in %q", want, header)
+	}
+}
+
 func TestGoalTokenUsageIsCompactInHeaderAndFooter(t *testing.T) {
 	m := newModel(t.Context(), app.Options{})
 	buildAppForTest(t, m)
