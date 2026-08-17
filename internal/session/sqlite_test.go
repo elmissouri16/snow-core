@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/snow-core/snow/pkg/protocol"
@@ -516,9 +517,69 @@ func TestSQLiteCompactionProjectionSurvivesReload(t *testing.T) {
 	}
 	defer st.Close()
 	projected, err = st.ContextMessages()
-	if err != nil || len(projected) != 3 || projected[0].Content[0].Text != "Conversation summary:\nold conversation summary" {
+	if err != nil || len(projected) != 3 || projected[0].Content[0].Text != "Working-state checkpoint for compacted history:\nold conversation summary" {
 		t.Fatalf("reloaded projected = %+v, err=%v", projected, err)
 	}
+}
+
+func TestSQLiteRepeatedCompactionProjectionSurvivesReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "repeated-compact.db")
+	store, err := NewSQLiteStore(path, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []Entry{msg("old-a", "", "old a"), msg("old-b", "", "old b"), msg("tail-a", "", "tail a")} {
+		if err := store.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Append(Entry{Type: EntryCompaction, ID: "compact-one", Summary: "first checkpoint sentinel", CompactedThrough: "old-b"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ContextMessages(); err != nil { // warm the projection cache
+		t.Fatal(err)
+	}
+	if err := store.Append(msg("tail-b", "", "tail b")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(Entry{Type: EntryCompaction, ID: "compact-two", Summary: "latest checkpoint sentinel", CompactedThrough: "tail-a"}); err != nil {
+		t.Fatal(err)
+	}
+	assertLatest := func(projected []protocol.Message) {
+		t.Helper()
+		custom := 0
+		for _, message := range projected {
+			if message.Role != protocol.RoleCustom {
+				continue
+			}
+			custom++
+			text := message.Content[0].Text
+			if !strings.Contains(text, "latest checkpoint sentinel") || strings.Contains(text, "first checkpoint sentinel") {
+				t.Fatalf("wrong active checkpoint: %q", text)
+			}
+		}
+		if custom != 1 || len(projected) == 0 || projected[0].ID != "compaction-compact-two" {
+			t.Fatalf("projected=%+v", projected)
+		}
+	}
+	projected, err := store.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLatest(projected)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = NewSQLiteStore(path, "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	projected, err = store.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLatest(projected)
 }
 
 func TestSQLiteContextCacheAdvancesAndPreservesOwnership(t *testing.T) {

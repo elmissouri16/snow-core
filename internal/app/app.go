@@ -300,13 +300,22 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		c, _, _ := config.DefaultPaths()
 		configPath = c
 	}
-	cfg, err := config.Load(configPath)
+	loadedCfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, err
 	}
-	// Apply CLI/SDK overrides. A provider override should not carry a model
-	// selected for a different configured provider; that otherwise turns a
-	// valid global effort/model pair into an accidental unsupported pair.
+	persistedCfg := loadedCfg
+	cfg, err := config.Clone(loadedCfg)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := config.ApplyProjectSelection(&cfg, absCWD); err != nil {
+		return nil, fmt.Errorf("app: project model selection: %w", err)
+	}
+	// Apply CLI/SDK overrides after the remembered project selection. A provider
+	// override should not carry a model selected for a different provider; that
+	// otherwise turns a valid project effort/model pair into an accidental
+	// unsupported pair.
 	if opts.Provider != "" {
 		if cfg.DefaultProvider != "" && cfg.DefaultProvider != opts.Provider && opts.Model == "" {
 			cfg.DefaultModel = ""
@@ -417,10 +426,9 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	var authStore auth.Store = fs
 	authService := auth.NewService(authStore)
 
-	// Preserve the operator/global layer before applying any trust-gated project
-	// preferences. CLI/SDK overrides retain their historical persistence behavior
-	// when the interactive settings panel later saves a value.
-	persistedCfg := cfg
+	// persistedCfg was captured before project and CLI/SDK overlays. Interactive
+	// writes mutate the latest operator config transactionally rather than
+	// leaking runtime-only overrides into it.
 
 	// Project trust store. Decisions persist to ~/.snow/trust.json.
 	// NOTE: DefaultPaths returns (configPath, authPath, trustPath); the trust
@@ -1163,8 +1171,8 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		Artifacts:         artifactStore,
 		Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
 			SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance,
-			AutoThresholdPercent: cfg.Compaction.AutoThresholdPercent, ToolResultInlineBytes: cfg.Compaction.ToolResultInlineBytes,
-			HistoricalToolResultThreshold: cfg.Compaction.HistoricalToolResultThreshold},
+			AutoThresholdPercent: cfg.Compaction.AutoThresholdPercent, ToolHistoryBudgetPercent: cfg.Compaction.ToolHistoryBudgetPercent,
+			ToolResultInlineBytes: cfg.Compaction.ToolResultInlineBytes, HistoricalToolResultThreshold: cfg.Compaction.HistoricalToolResultThreshold},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("app: agent: %w", err)
@@ -1268,8 +1276,8 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Identity: spec.State.Agent.Clone(),
 				SkillNames: childSkillNames, Artifacts: artifactStore, Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
 					SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance,
-					AutoThresholdPercent: cfg.Compaction.AutoThresholdPercent, ToolResultInlineBytes: cfg.Compaction.ToolResultInlineBytes,
-					HistoricalToolResultThreshold: cfg.Compaction.HistoricalToolResultThreshold}})
+					AutoThresholdPercent: cfg.Compaction.AutoThresholdPercent, ToolHistoryBudgetPercent: cfg.Compaction.ToolHistoryBudgetPercent,
+					ToolResultInlineBytes: cfg.Compaction.ToolResultInlineBytes, HistoricalToolResultThreshold: cfg.Compaction.HistoricalToolResultThreshold}})
 			if err != nil {
 				_ = childStore.Close()
 				return nil, err
@@ -1553,6 +1561,8 @@ func (a *App) ForkWorktree(ctx context.Context, opts protocol.SessionWorktreeFor
 	return result, nil
 }
 
+const maxForkArtifactCopies = 1024
+
 func copyForkArtifacts(ctx context.Context, store artifact.Store, child session.Store, result protocol.SessionForkResult) error {
 	ids, err := session.ForkArtifactIDs(child)
 	if err != nil {
@@ -1561,11 +1571,34 @@ func copyForkArtifacts(ctx context.Context, store artifact.Store, child session.
 	if len(ids) == 0 {
 		return nil
 	}
+	ownedIDs, err := store.ListIDs(ctx, result.SourceSessionID)
+	if err != nil {
+		return fmt.Errorf("app: enumerate source artifacts: %w", err)
+	}
+	owned := make(map[string]bool, len(ownedIDs))
+	for _, id := range ownedIDs {
+		owned[id] = true
+	}
+	verified := make([]string, 0, min(len(ids), len(ownedIDs)))
+	for _, id := range ids {
+		if owned[id] {
+			verified = append(verified, id)
+		}
+	}
+	if len(verified) == 0 {
+		return nil
+	}
+	if len(verified) > maxForkArtifactCopies {
+		// Never create a physically exact fork with silently partial retrieval.
+		// Enforce the cap only after intersecting untrusted text markers with the
+		// source session's structurally enumerated private artifacts.
+		return fmt.Errorf("app: fork owns %d referenced artifacts; maximum is %d", len(verified), maxForkArtifactCopies)
+	}
 	copier, ok := store.(artifact.Copier)
 	if !ok {
 		return errors.New("app: artifact store cannot copy session artifacts")
 	}
-	for _, id := range ids {
+	for _, id := range verified {
 		if err := copier.CopyText(ctx, result.SourceSessionID, result.SessionID, id); err != nil {
 			return fmt.Errorf("app: copy fork artifact %s: %w", id, err)
 		}

@@ -1307,7 +1307,7 @@ func contextMessagesFromEntries(entries []Entry) []protocol.Message {
 			ID:        "compaction-" + entry.ID,
 			ParentID:  entry.ParentID,
 			Role:      protocol.RoleCustom,
-			Content:   []protocol.ContentBlock{protocol.NewTextBlock("Conversation summary:\n" + entry.Summary)},
+			Content:   []protocol.ContentBlock{protocol.NewTextBlock("Working-state checkpoint for compacted history:\n" + entry.Summary)},
 			Timestamp: time.Now().UnixMilli(),
 		})
 		start = boundaryPos + 1

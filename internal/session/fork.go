@@ -216,7 +216,11 @@ func ForkArtifactIDs(store Store) ([]string, error) {
 			ids = append(ids, match[1])
 		}
 	}
-	for _, entry := range branch {
+	// Scan newest-first so repeated carried references are attributed to their
+	// latest trusted marker. Reverse once at the end for stable chronological
+	// copy order; callers may then take a bounded newest suffix.
+	for i := len(branch) - 1; i >= 0; i-- {
+		entry := branch[i]
 		collect(entry.Summary)
 		collect(entry.Value)
 		if entry.Message == nil {
@@ -226,6 +230,9 @@ func ForkArtifactIDs(store Store) ([]string, error) {
 		for _, block := range entry.Message.Content {
 			collect(block.Text)
 		}
+	}
+	for left, right := 0, len(ids)-1; left < right; left, right = left+1, right-1 {
+		ids[left], ids[right] = ids[right], ids[left]
 	}
 	return ids, nil
 }

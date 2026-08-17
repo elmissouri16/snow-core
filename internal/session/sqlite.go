@@ -2019,16 +2019,17 @@ func (s *SQLiteStore) DeleteBranchForRollback(branchID string) error {
 func (s *SQLiteStore) contextBranchEntries(tip string) ([]Entry, error) {
 	var markerID, boundaryID string
 	err := s.db.QueryRow(`
-		WITH RECURSIVE ancestry(id, parent_id, entry_type, summary, compacted_through) AS (
-			SELECT id, parent_id, entry_type, summary, compacted_through
+		WITH RECURSIVE ancestry(id, parent_id, entry_type, summary, compacted_through, depth) AS (
+			SELECT id, parent_id, entry_type, summary, compacted_through, 0
 			FROM entries WHERE id = ?
 			UNION ALL
-			SELECT e.id, e.parent_id, e.entry_type, e.summary, e.compacted_through
+			SELECT e.id, e.parent_id, e.entry_type, e.summary, e.compacted_through, a.depth + 1
 			FROM entries e JOIN ancestry a ON e.id = a.parent_id
 			WHERE NOT (a.entry_type = ? AND trim(a.summary) <> '')
 		)
 		SELECT id, compacted_through FROM ancestry
-		WHERE entry_type = ? AND trim(summary) <> '' LIMIT 1`, tip, EntryCompaction, EntryCompaction).Scan(&markerID, &boundaryID)
+		WHERE entry_type = ? AND trim(summary) <> ''
+		ORDER BY depth ASC LIMIT 1`, tip, EntryCompaction, EntryCompaction).Scan(&markerID, &boundaryID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return s.branchEntries(tip)
 	}

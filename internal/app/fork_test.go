@@ -2,14 +2,108 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/snow-core/snow/internal/artifact"
 	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/pkg/protocol"
 )
+
+func TestCopyForkArtifactsCopiesOwnedAndIgnoresForgedMissingMarker(t *testing.T) {
+	store, err := artifact.NewLocalStore(t.TempDir(), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	const sourceID = "source"
+	valid, err := store.SaveText(context.Background(), sourceID, "valid", "retained evidence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := session.NewMemoryStore(session.Options{})
+	forged := "artifact-ffffffffffffffffffffffffffffffff"
+	summary := "Full retained tool result: " + forged + "\nFull retained tool result: " + valid.ID
+	if err := child.Append(session.Entry{Type: session.EntryCompaction, ID: "checkpoint", Summary: summary, CompactedThrough: "root"}); err != nil {
+		t.Fatal(err)
+	}
+	result := protocol.SessionForkResult{SourceSessionID: sourceID, SessionID: child.ID()}
+	if err := copyForkArtifacts(context.Background(), store, child, result); err != nil {
+		t.Fatalf("artifact copy failed: %v", err)
+	}
+	copied, err := store.ReadText(context.Background(), child.ID(), valid.ID)
+	if err != nil || copied != "retained evidence" {
+		t.Fatalf("copied artifact=%q err=%v", copied, err)
+	}
+}
+
+func TestCopyForkArtifactsIgnoresUnboundedForgedMarkerSet(t *testing.T) {
+	store, err := artifact.NewLocalStore(t.TempDir(), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	child := session.NewMemoryStore(session.Options{})
+	var summary strings.Builder
+	for i := 0; i < maxForkArtifactCopies+1; i++ {
+		fmt.Fprintf(&summary, "Full retained tool result: artifact-%032x\n", i)
+	}
+	if err := child.Append(session.Entry{Type: session.EntryCompaction, ID: "checkpoint", Summary: summary.String(), CompactedThrough: "root"}); err != nil {
+		t.Fatal(err)
+	}
+	result := protocol.SessionForkResult{SourceSessionID: "source", SessionID: child.ID()}
+	if err := copyForkArtifacts(context.Background(), store, child, result); err != nil {
+		t.Fatalf("forged marker set blocked fork artifact copy: %v", err)
+	}
+}
+
+type listedForkArtifactStore struct {
+	ids    []string
+	copies int
+}
+
+func (s *listedForkArtifactStore) SaveText(context.Context, string, string, string) (artifact.Ref, error) {
+	return artifact.Ref{}, nil
+}
+func (s *listedForkArtifactStore) ReadText(context.Context, string, string) (string, error) {
+	return "", nil
+}
+func (s *listedForkArtifactStore) Exists(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+func (s *listedForkArtifactStore) ListIDs(context.Context, string) ([]string, error) {
+	return append([]string(nil), s.ids...), nil
+}
+func (s *listedForkArtifactStore) CopyText(context.Context, string, string, string) error {
+	s.copies++
+	return nil
+}
+func (s *listedForkArtifactStore) Close() error { return nil }
+
+func TestCopyForkArtifactsRejectsTooManyVerifiedArtifactsWithoutPartialCopy(t *testing.T) {
+	store := &listedForkArtifactStore{}
+	child := session.NewMemoryStore(session.Options{})
+	var summary strings.Builder
+	for i := 0; i < maxForkArtifactCopies+1; i++ {
+		id := fmt.Sprintf("artifact-%032x", i)
+		store.ids = append(store.ids, id)
+		fmt.Fprintf(&summary, "Full retained tool result: %s\n", id)
+	}
+	if err := child.Append(session.Entry{Type: session.EntryCompaction, ID: "checkpoint", Summary: summary.String(), CompactedThrough: "root"}); err != nil {
+		t.Fatal(err)
+	}
+	result := protocol.SessionForkResult{SourceSessionID: "source", SessionID: child.ID()}
+	if err := copyForkArtifacts(context.Background(), store, child, result); err == nil || !strings.Contains(err.Error(), "maximum") {
+		t.Fatalf("verified artifact cap error=%v", err)
+	}
+	if store.copies != 0 {
+		t.Fatalf("partial artifacts copied before cap failure: %d", store.copies)
+	}
+}
 
 func TestForkWorktreeCreatesDetachedProjectSession(t *testing.T) {
 	git, err := exec.LookPath("git")

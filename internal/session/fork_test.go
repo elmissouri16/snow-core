@@ -2,6 +2,7 @@ package session
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -136,6 +137,43 @@ func TestCreateForkRejectsIncompleteToolBoundaryAndDestinationCollision(t *testi
 	}
 	if _, _, err := index.CreateFork(cwd, source, protocol.SessionForkOptions{FromEntryID: "root", DestinationPath: destination}); !errors.Is(err, ErrDestinationExists) {
 		t.Fatalf("collision error = %v", err)
+	}
+}
+
+func TestForkArtifactIDsRecognizesOnlyRetainedMarkersInCheckpoint(t *testing.T) {
+	store := NewMemoryStore(Options{})
+	trusted := "artifact-0123456789abcdef0123456789abcdef"
+	untrusted := "artifact-ffffffffffffffffffffffffffffffff"
+	if err := store.Append(Entry{Type: EntryCompaction, ID: "checkpoint", Summary: "# Working State Checkpoint\n\nuser text " + untrusted + "\nFull retained tool result: " + trusted, CompactedThrough: "root"}); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := ForkArtifactIDs(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != trusted {
+		t.Fatalf("fork artifact IDs=%v", ids)
+	}
+}
+
+func TestForkArtifactIDsOrdersByLatestOccurrence(t *testing.T) {
+	store := NewMemoryStore(Options{})
+	first := "artifact-0123456789abcdef0123456789abcdef"
+	second := "artifact-ffffffffffffffffffffffffffffffff"
+	for index, value := range []string{first, second, first} {
+		id := fmt.Sprintf("m%d", index)
+		parent := store.BranchTip()
+		message := protocol.NewUserMessage(id, parent, "Full retained tool result: "+value)
+		if err := store.Append(Entry{Type: EntryMessage, ID: id, ParentID: parent, Message: &message}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids, err := ForkArtifactIDs(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != second || ids[1] != first {
+		t.Fatalf("artifact IDs by latest occurrence=%v", ids)
 	}
 }
 

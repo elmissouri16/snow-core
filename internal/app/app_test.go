@@ -14,6 +14,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/snow-core/snow/internal/config"
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/provider/fake"
 	"github.com/snow-core/snow/internal/session"
@@ -315,6 +316,71 @@ func TestAppRejectsBlankStartupModelID(t *testing.T) {
 	_, err := New(context.Background(), Options{Provider: "fake", Model: "   ", NoSession: true, Permission: "allow", CWD: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "model id must not be blank") {
 		t.Fatalf("blank startup model error = %v", err)
+	}
+}
+
+func TestAppRestoresIndependentProjectModelSelections(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	projectA := filepath.Join(t.TempDir(), "project-a")
+	projectB := filepath.Join(t.TempDir(), "project-b")
+	if err := os.MkdirAll(projectA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(projectB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.DefaultProvider = "fake"
+	cfg.DefaultModel = "global-model"
+	var err error
+	cfg, err = config.WithProjectSelection(cfg, projectA, config.ProjectSelection{Provider: "fake", Model: "model-a", Thinking: "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = config.WithProjectSelection(cfg, projectB, config.ProjectSelection{Provider: "fake", Model: "model-b", Thinking: "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(home, "config.json")
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	open := func(project string, opts Options) *App {
+		t.Helper()
+		opts.CWD = project
+		opts.ConfigPath = configPath
+		opts.NoSession = true
+		opts.Permission = "allow"
+		a, err := New(context.Background(), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = a.Close() })
+		return a
+	}
+	a := open(projectA, Options{})
+	b := open(projectB, Options{})
+	if a.ProviderID != "fake" || a.Model.ID != "model-a" || a.Agent.Thinking() != protocol.ThinkingOff {
+		t.Fatalf("project A runtime = %s/%s thinking:%s", a.ProviderID, a.Model.ID, a.Agent.Thinking())
+	}
+	if b.ProviderID != "fake" || b.Model.ID != "model-b" || b.Agent.Thinking() != protocol.ThinkingOff {
+		t.Fatalf("project B runtime = %s/%s thinking:%s", b.ProviderID, b.Model.ID, b.Agent.Thinking())
+	}
+	if a.PersistedCfg.DefaultModel != "global-model" || b.PersistedCfg.DefaultModel != "global-model" {
+		t.Fatalf("global model default was replaced: A=%q B=%q", a.PersistedCfg.DefaultModel, b.PersistedCfg.DefaultModel)
+	}
+	if a.Cfg.PermissionMode != "allow" || a.PersistedCfg.PermissionMode != "ask" {
+		t.Fatalf("runtime permission leaked into persisted config: runtime=%q persisted=%q", a.Cfg.PermissionMode, a.PersistedCfg.PermissionMode)
+	}
+
+	overridden := open(projectA, Options{Provider: "fake", Model: "cli-model", Thinking: "off", BaseURL: "https://runtime.example"})
+	if overridden.Model.ID != "cli-model" {
+		t.Fatalf("CLI model = %q, want cli-model", overridden.Model.ID)
+	}
+	if overridden.Cfg.Providers["fake"].BaseURL != "https://runtime.example" || overridden.PersistedCfg.Providers["fake"].BaseURL != "" {
+		t.Fatalf("runtime endpoint leaked into persisted config: runtime=%q persisted=%q", overridden.Cfg.Providers["fake"].BaseURL, overridden.PersistedCfg.Providers["fake"].BaseURL)
 	}
 }
 
