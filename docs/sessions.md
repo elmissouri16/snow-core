@@ -144,8 +144,29 @@ overwriting a newer tip.
 the active branch, so opening a large session does not deserialize every
 historical branch into memory.
 `ContextMessages()` applies the latest compaction marker logically: providers
-receive one summary plus the retained tail, while `Messages()` continues to
-return the complete historical branch.
+receive one structured working-state checkpoint plus the retained tail, while
+`Messages()` continues to return the complete historical branch. Checkpoints
+carry objectives, decisions, files, verification, failures, collaboration
+updates, retrieval references, and pending work. Compaction boundaries preserve
+complete tool call/result pairs; provider-private continuity leaves projected
+context only with its complete old turn.
+
+Besides total context pressure, safely compactable old tool history has an
+independent model-window budget. Minimum-retained recent work does not count
+toward that trigger. During one long active turn, completed assistant-call/tool-
+result cycles become safe boundaries when prefix-only projection can do so
+without consuming the exact recent-turn floor; Snow may checkpoint older
+complete cycles while retaining the current and recent cycles exactly. It never cuts
+between a tool call and its result or detaches provider-private continuity from
+its owning assistant message. Compacted tool prefixes gain one bounded private
+text/metadata transcript reference. Up to 24 references verified against the
+current session are carried across repeated compaction and physical forks;
+raw markers are intersected with a single structural enumeration of the source
+session's private artifact namespace, so forged or stale IDs do not cause
+per-marker filesystem opens and cannot block a fork. To avoid a partially
+retrievable exact fork, physical forking fails and rolls back only when more
+than 1,024 verified owned artifacts are referenced. Image payloads remain
+available in append-only session history rather than the text artifact.
 
 Before every ordinary provider request and semantic compaction, oversized
 plain-text tool results are projected as a bounded head, a byte-counted

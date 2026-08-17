@@ -243,12 +243,18 @@ redirect-checked, and never executes JavaScript.
   and independent project trust/sandbox identity
 - Current-directory session picker with automatic first-prompt titles, manual
   rename, explicit path resume, and a three-way `/fork` picker
-- Turn-aware pressure compaction for ordinary, goal, and child turns at a
-  configurable context threshold, plus one bounded recovery retry that excludes
-  the durable failed attempt when a provider rejects an oversized context
+- Turn-aware compaction for ordinary, goal, and child turns at configurable
+  total-context and aggregate old-tool-history thresholds; completed tool cycles
+  inside one long active turn are safe checkpoint boundaries, and oversized
+  provider requests receive at most one bounded recovery retry
+- Durable structured working-state checkpoints preserve objectives, decisions,
+  files, deterministic verification/failure evidence, collaboration updates,
+  retrieval references, and pending work while complete old turns—including
+  provider continuity—leave only the model-facing projection
 - Oversized plain-text tool results spill to private session-scoped artifacts;
-  provider context keeps bounded head/tail previews, and older full results are
-  pruned before ordinary requests and summaries without rewriting exact history
+  provider context keeps bounded previews, and compacted tool prefixes gain a
+  bounded verified text/metadata transcript reference without rewriting
+  append-only history
 - Strict provider terminal-event validation, stop/content consistency checks,
   and synthetic errors instead of executing length-truncated tool calls
 - Resume-time repair of interrupted final tool batches with risk-aware
@@ -523,7 +529,9 @@ Default global paths:
 ```
 
 `SNOW_HOME` relocates global configuration/auth/trust/sandbox/auxiliary files
-and `SNOW_SESSIONS_DIR` relocates session databases. Global or trusted-project
+and `SNOW_SESSIONS_DIR` relocates session databases. Interactive provider,
+model, and thinking selections are remembered independently for each absolute
+project directory in the operator-owned global config. Global or trusted-project
 configuration may select a Markdown `system_prompt_file`; explicit SDK
 `SystemPrompt` remains highest precedence. Trusted projects may also define a
 restricted `.snow/config.json`, `.snow/keybindings.yaml`, `.snow/search.yaml`,
@@ -554,7 +562,9 @@ Start at the [documentation index](docs/README.md).
 
 [GitHub Actions CI](.github/workflows/ci.yml) runs the network-free suite on
 Linux and macOS, builds the binary, executes the standalone SDK/RPC examples,
-and runs the race detector on Linux. The same core checks can be run locally:
+and runs the race detector on Linux. This local list is the common baseline;
+the affected-area matrix in [`IMPLEMENTATION.md`](IMPLEMENTATION.md#testing-and-verification)
+is the complete maintainer reference:
 
 ```sh
 gofmt -w <changed-go-files>
@@ -564,7 +574,7 @@ go test -race ./internal/... ./pkg/snowsdk
 (cd examples/sdk && go test ./... && go run .)
 go build -o ./snow ./cmd/snow
 SNOW_TEST_BINARY="$PWD/snow" PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v
-(cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration)
+(cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration && npm run pack:check)
 python3 examples/rpc/python/client.py --snow ./snow
 node examples/rpc/javascript/client.mjs ./snow
 ```

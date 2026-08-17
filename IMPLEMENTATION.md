@@ -82,8 +82,9 @@ keeps UI dependencies out of core packages.
 
 ## Repository and package map
 
-> **Note:** `AGENTS.md` is the authority for repository structure. The tree
-> below matches the checked-out source at the time of writing.
+> **Note:** Checked-out source is authoritative for repository structure. This
+> document owns the maintained package map; `AGENTS.md` intentionally keeps only
+> the architecture constraints that must be loaded on every agent turn.
 
 ```text
 .
@@ -655,6 +656,31 @@ tables (persistent Thread Goals), and `subagent_threads` (child topology).
 Forks copy branch state, goal estimates, managed objective resources, and
 subagent topology where applicable. WAL transactions and indexed branch
 queries keep open and reload bounded; opening never performs a full scan.
+
+### Provider-facing compaction
+
+Compaction appends a logical boundary rather than rewriting entries. The
+provider projection replaces an old complete-turn prefix with a structured
+working-state checkpoint and retains at least the configured recent turns.
+Planning fails closed if a boundary would split an assistant tool call from its
+result. Opaque provider continuity leaves context only with its complete owning
+turn. Completed assistant-call/tool-result cycles inside one long active turn
+are also safe boundaries when prefix projection does not consume the retained
+prior-turn floor, so old cycles may compact while current and recent cycles
+remain exact. Besides the global pressure trigger, aggregate tool
+calls/results in the safely compactable old prefix have an independent model-
+window budget. Large individual results are measured through their bounded
+provider projection. The OpenCode Go chat-completions adapter renders the
+harness-owned checkpoint as authoritative user input, matching the Responses
+adapter rather than presenting it as stale assistant output.
+
+When compacted history contains tools, the agent saves one bounded private
+transcript of tool calls and model-facing text/metadata, omitting image payloads,
+private reasoning, and provider continuity. Verified artifact references are
+carried forward with a fixed cap of 24 across repeated compaction and physical
+forks; stale or forged markers are ignored. Transcript persistence failures emit
+a lifecycle warning, while full append-only session history remains the
+authority for replay.
 
 ### On-disk layout
 

@@ -95,7 +95,8 @@ To reduce drift, use these documents as the primary references:
 | Optional smolvm Bash setup and operation | [`sandbox.md`](sandbox.md) |
 | Safety model and privilege boundaries | [`security.md`](security.md) |
 | Feature-specific behavior | The matching guide in this directory |
-| Architecture and historical roadmap | [`IMPLEMENTATION.md`](../IMPLEMENTATION.md) |
+| Contributor workflow and must-load repository rules | [`AGENTS.md`](../AGENTS.md) |
+| Package architecture, dependency direction, and roadmap | [`IMPLEMENTATION.md`](../IMPLEMENTATION.md) |
 | Current implementation details | Source code and tests |
 
 ## Related documents

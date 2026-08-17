@@ -103,6 +103,13 @@ A representative configuration:
   "permission_mode": "ask",
   "default_project_trust": "ask",
   "thinking": "off",
+  "project_selections": {
+    "/home/user/code/project-a": {
+      "provider": "openai-compatible",
+      "model": "model-id",
+      "thinking": "off"
+    }
+  },
   "reasoning_summary": "auto",
   "text_verbosity": "low",
   "collaboration_mode": "default",
@@ -170,6 +177,7 @@ A representative configuration:
     "fallback": "local",
     "guidance": "",
     "auto_threshold_percent": 80,
+    "tool_history_budget_percent": 20,
     "tool_result_inline_bytes": 16384,
     "artifact_max_bytes": 4194304,
     "historical_tool_result_threshold_bytes": 8192
@@ -186,11 +194,12 @@ fills required zero-value defaults before validation.
 
 | JSON field | Values / default | Meaning |
 |---|---|---|
-| `default_provider` | `opencode-go` | Active provider ID |
-| `default_model` | provider default | Active model ID; provider-specific config may also declare a default |
+| `default_provider` | `opencode-go` | Global fallback provider ID for projects without a remembered selection |
+| `default_model` | provider default | Global fallback model ID; provider-specific config may also declare a default |
 | `permission_mode` | `ask` | Interactive default: `ask`, `allow`, or `deny`; unknown nonempty values are startup errors |
 | `default_project_trust` | `ask` | `ask`, `allow`, or `deny`; legacy `always`/`never` are aliases |
-| `thinking` | `off` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` |
+| `thinking` | `off` | Global fallback effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` |
+| `project_selections` | `{}` | Operator-owned absolute working-directory map populated by interactive model/thinking changes; each entry stores `provider`, `model`, and `thinking` |
 | `reasoning_summary` | `auto` | `off`, `auto`, `concise`, or `detailed` |
 | `text_verbosity` | `low` | `low`, `medium`, or `high` |
 | `collaboration_mode` | `default` | `default` or `plan`; branch persistence may restore a saved mode |
@@ -200,8 +209,22 @@ fills required zero-value defaults before validation.
 | `context_cap_bytes` | `102400` | Hard cap for loaded project instructions and maximum configured system-prompt file size |
 | `system_prompt_file` | unset | Markdown/text file replacing the embedded base preamble; relative paths resolve from the loaded config file's directory (normally the global config directory; `--config`/`ConfigPath` can override it) and `~` is supported |
 
-Model capabilities remain authoritative. A configured reasoning level that is
-not advertised by the selected model is rejected.
+Model capabilities remain authoritative. An explicit reasoning level that is
+not advertised by the selected model is rejected. In the TUI, selecting a model
+that does not support the current level atomically resets thinking to `off`,
+persists the provider/model/effort tuple for the active working directory, and
+reports the adjustment instead of leaving the next prompt in an invalid state.
+A different project directory retains its own tuple across restarts. The global
+`default_provider`, `default_model`, and `thinking` values remain fallbacks and
+are not rewritten by `/model`, `/thinking`, or the settings picker. Explicit
+CLI/SDK options override the remembered project tuple for that process.
+
+`project_selections` is stored in the operator-owned global config rather than
+trusted project `.snow/config.json`; repository content therefore cannot choose
+a provider or reasoning effort. Snow writes normalized absolute directory keys
+and preserves unrelated project entries with a locked atomic read-modify-write,
+so concurrent Snow instances in different folders do not replace each other's
+selection.
 
 ## SmolVM Bash sandbox defaults
 
@@ -276,6 +299,10 @@ the Responses endpoint returns HTTP 404, 405, or 501. When neither
 `default_model`/`--model` nor a valid discovered model is available, startup
 fails with an actionable model-selection error. ID-only model records remain
 tool-capable but do not guess vision, reasoning, verbosity, limits, or pricing.
+Because standard compatible `/models` responses do not reliably advertise
+reasoning efforts, switching from a reasoning-capable model to an ID-only model
+in the TUI resets the current effort to `off`; use `/thinking` only when the
+selected model advertises additional levels.
 
 The compatible provider's Bearer key is optional. Inside the TUI,
 `/login openai-compatible` captures a profile name, endpoint, and optional
@@ -311,7 +338,10 @@ or query parameters. ChatGPT/Codex retains its dedicated backend and OAuth flow.
 }
 ```
 
-Built-in themes are `default`, `dark`, `light`, and `high-contrast`. Any other
+Built-in themes are `default`, `dark`, `light`, `high-contrast`, `nord`,
+`dracula`, and `gruvbox`. `default` and `high-contrast` adapt to the terminal's
+reported light/dark background; `dark`, `nord`, `dracula`, and `gruvbox` target
+dark terminal backgrounds, while `light` targets a light background. Any other
 valid name refers to a custom theme file. Snow always uses Bubble Tea's
 alternate-screen, app-owned transcript viewport so scrolling cannot expose
 stale rendered headers or composer chrome. The default `mouse: true` keeps
@@ -330,34 +360,65 @@ PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
 | `retain_tokens` | `0..1000000`, default `0` | Token target retained after compaction; zero selects a model-aware target |
 | `min_retained_turns` | `1..100`, default `2` | Minimum complete recent turns to preserve |
 | `summary_max_tokens` | `128..32768`, default `2000` | Maximum provider summary output |
-| `fallback` | `local` | `local` uses deterministic fallback; `error` fails when provider summary fails |
+| `fallback` | `local` | `local` uses deterministic fallback; `error` fails when provider summary generation or quality validation fails |
 | `guidance` | maximum 16 KiB | Additive operator instructions appended to the fixed summary contract |
 | `auto_threshold_percent` | `0` or `50..99`, default `80` | Prune and auto-compact all turn types at this context pressure; zero also disables overflow repair |
+| `tool_history_budget_percent` | `0` or `5..50`, default `20` | Auto-compact when safely compactable completed tool calls/results exceed this share of the model window; zero disables this independent trigger |
 | `tool_result_inline_bytes` | `1024..1048576`, default `16384` | Plain-text result size retained inline before spilling the full retained result |
 | `artifact_max_bytes` | inline threshold..64 MiB, default `4194304` | Maximum private spill artifact size |
 | `historical_tool_result_threshold_bytes` | `1024..1048576`, default `8192` | Old plain-text result size that triggers ordinary request/summarizer projection pruning |
 
 `auto_threshold_percent` defaults to `80`. At safe boundaries between complete
-provider/tool cycles, Snow prunes oversized historical plain-text tool results
-and compacts older complete turns when provider-reported usage plus significant
-newly appended context reaches that percentage of the model context window.
-This applies to ordinary, goal, Plan, and subagent turns. Set it to `0` to
-disable pressure compaction and the one-shot provider context-overflow repair;
-enabled values must be `50..99`. The legacy `goal_auto_threshold_percent` key
+provider/tool cycles, Snow compacts older complete turns when provider-reported
+usage plus significant newly appended context reaches that percentage of the
+model context window. `tool_history_budget_percent` independently triggers the
+same safe whole-turn compaction when tool calls and bounded tool-result
+projections in the eligible old prefix exceed 20% of the model window. Minimum-
+retained recent work never counts toward that aggregate trigger. In a single
+long active turn, completed assistant-call/tool-result cycles may form safe
+checkpoint boundaries when no exact retained prior turn would be consumed,
+allowing old complete cycles to compact while the current and recent cycles
+remain exact. A large unresolved current batch still
+cannot cause unrelated history to be compacted. Each trigger applies to
+ordinary, goal, Plan, and subagent turns; set either to `0`
+to disable it. Disabling `auto_threshold_percent` also disables one-shot
+provider context-overflow repair. For upgrade compatibility, an existing file
+that explicitly disables `auto_threshold_percent` (or the legacy goal key) and
+omits `tool_history_budget_percent` keeps both automatic triggers disabled; set
+the new key explicitly to opt in. The legacy `goal_auto_threshold_percent` key
 is accepted only when the new key is absent. Full conversation history remains
 append-only.
 
-Compaction preserves the complete append-only conversation history. Pressure
-checks run only at safe complete-cycle boundaries, never between an assistant
-call and its serial tool-result batch. If a provider explicitly reports that a
-request exceeds its context window, Snow attempts one automatic compaction and
-one retry; it never loops. Oversized new plain-text tool results are saved
-under `$SNOW_HOME/artifacts` with private permissions and replaced in session
-context by a bounded preview plus opaque artifact ID. `artifact_read` and
+Compaction preserves the complete append-only conversation history. Checks run
+only at safe complete-cycle boundaries, never between an assistant call and its
+serial tool-result batch. A pairing validator fails closed if a candidate cut
+would separate a tool call and result. The old prefix becomes a durable,
+structured working-state checkpoint covering objectives, decisions, files,
+verification, failures, agent updates, retrieval references, pending work, and
+active-batch state. Snow always merges deterministic objective, prior-checkpoint,
+command/result, and failure evidence from the exact compacted prefix, so
+provider prose cannot erase an old constraint or a recorded failed check.
+Raw provider tool-protocol markup is rejected in favor of the bounded local
+fallback and is sanitized from carried prior-checkpoint text. Complete
+provider-private continuity disappears from model context
+only with its owning old turns; opaque state is never truncated alone.
+
+If compacted history contains tools, Snow also saves one private transcript of
+exact text, arguments, result metadata, and image metadata (excluding image
+payloads, private reasoning, and provider continuity) and inserts its verified
+artifact reference deterministically in the checkpoint. Image payloads remain
+in append-only session history. Retrieval manifests are capped at 24 verified
+references across repeated compactions. If transcript persistence fails or
+exceeds `artifact_max_bytes`, compaction still preserves durable history and
+emits a lifecycle warning instead of advertising unavailable retrieval.
+Oversized new plain-text results continue to spill individually under
+`$SNOW_HOME/artifacts` with bounded previews. `artifact_read` and
 `artifact_grep` retrieve bounded fragments without adding that directory to
-ordinary file-tool roots. Project configuration cannot change automatic or
+ordinary file-tool roots. If a provider explicitly reports that a request
+exceeds its context window, Snow attempts one automatic compaction and one
+retry; it never loops. Project configuration cannot change automatic or
 artifact thresholds. Project `guidance` is additive; it cannot remove the
-host's factual continuation contract.
+host's factual checkpoint contract.
 
 ## Skills
 
@@ -504,6 +565,7 @@ bindings:
   newline: [ctrl+j]
   follow_up: [alt+enter]
   toggle_mode: [shift+tab]
+  thinking: [ctrl+t]
   picker_up: [up, k]
   picker_down: [down, j]
 ```
@@ -511,7 +573,7 @@ bindings:
 Supported actions:
 
 ```text
-submit follow_up newline paste abort quit toggle_mode
+submit follow_up newline paste abort quit toggle_mode thinking
 page_up page_down top bottom line_up line_down
 picker_up picker_down picker_previous picker_next
 picker_page_up picker_page_down picker_top picker_bottom
@@ -544,10 +606,10 @@ colors:
   separator: {light: "250", dark: "238"}
 ```
 
-`extends` is optional and defaults to `default`; when supplied, it must name a
-built-in theme. Custom names cannot replace built-in names, exceed 64 runes,
-contain control characters, or contain `/` or `\\`. Colors are optional
-semantic overrides using `#RRGGBB` or ANSI `0..255`. Project themes replace
+`extends` is optional and defaults to `default`; when supplied, it must name one
+of the built-ins listed above. Custom names cannot replace built-in names,
+exceed 64 runes, contain control characters, or contain `/` or `\\`. Colors are
+optional semantic overrides using `#RRGGBB` or ANSI `0..255`. Project themes replace
 same-named global themes.
 
 ## Diagnostics and failure behavior

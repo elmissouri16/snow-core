@@ -176,6 +176,7 @@ described in [Configuration](configuration.md).
 | `Ctrl+J` | Insert a reliable newline | Insert a reliable newline |
 | `Ctrl+V` | Paste through the active textarea | Paste through the active textarea |
 | `Shift+Tab` | Toggle Default/Plan mode | Queue mode change until `turn_done` |
+| `Ctrl+T` | Open the active model's thinking-effort picker | Open the picker; the selected effort applies to subsequent provider requests |
 | `Ctrl+C` | Quit | Abort, clear queued work, restore queued composer text, and defer active goal continuation |
 | `Esc` | Close modal/picker | Abort active work and defer active goal continuation, or reject the active input modal |
 | `Ctrl+D` | Quit when the composer is empty | — |
@@ -238,13 +239,16 @@ SDK and RPC callers get the same behavior through `Steer`/`FollowUp` and
 ## Slash commands
 
 Type `/` to open completion. Enter runs commands whose no-argument form is
-meaningful.
+meaningful. Interactive provider/model/thinking changes are remembered by
+absolute working directory, so restarting Snow in project A restores project
+A's tuple without changing project B. Global defaults apply only when a project
+has no remembered tuple; explicit startup flags override it for that process.
 
 | Command | Purpose |
 |---|---|
 | `/help` | Show commands and active keybindings |
-| `/model [id]` | Open the model picker or select a model; selection persists |
-| `/thinking [level]` | Choose model-supported reasoning effort |
+| `/model [id]` | Open the model picker or select a model; provider/model/effort persist for the current project folder |
+| `/thinking [level]` | Choose and persist a model-supported effort for the current project folder |
 | `/settings` | Configure model, theme, response controls, permission mode, subagents, and skills |
 | `/permissions [ask|allow|deny]` | Open or directly change permission mode |
 | `/allow [always]` | Resolve a pending tool request; optional session rule |
@@ -258,6 +262,7 @@ meaningful.
 | `/goal pause` / `/goal resume` | Pause or explicitly resume eligible automatic goal work, including an active goal deferred by abort |
 | `/goal clear` | Remove the branch goal |
 | `/compact` | Summarize older complete turns behind a logical context boundary |
+| `/context` | Report the estimated system, tool, message, and tool-result share of model context |
 | `/sessions` | Pick a persisted session for the current directory |
 | `/resume [path]` | Open the session picker or resume an explicit database |
 | `/new` | Create a new persisted session |
@@ -356,16 +361,42 @@ goal tables do not retain entry-by-entry history. Subagent topology is never
 copied. A fork ending inside an unresolved tool batch is rejected instead of
 being repaired or silently advanced.
 
-`/compact` summarizes the projected context while retaining complete recent
-turns. Oversized plain-text tool results in the older summarization prefix are
-first reduced to a bounded head and tail; exact session history remains
-unchanged. When invoked during automatic goal work, manual compaction pauses
-that goal after the summary; use `/goal resume` to continue. Active goals also
-compact automatically between complete continuation turns at the configured
-context threshold (80% by default; `0` disables it). Any admitted turn,
-including ordinary prompts, steering/follow-ups, and goal continuations, may
-auto-compact at a safe top-of-cycle boundary. The full append-only history
-remains available.
+`/context` reports the normalized content used for the latest provider request:
+system instructions, exposed tool schemas, internal steering, user and agent
+messages, assistant text, tool calls, tool results, images, and replayable
+provider continuity state. Raw stored thinking blocks are omitted because
+providers do not replay them as input. Before the current runtime has sent a
+request on the active branch, the command shows a stored-context preflight;
+prompt-time routing, tool-result pruning, automatic compaction, and internal
+steering may change the eventual request. Category shares begin with a
+provider-neutral UTF-8 bytes/4 estimate for text plus a bounded, dimension-based
+vision-patch estimate for images; compressed PNG/JPEG/GIF file size is never
+used as an image token count. The shares are then rescaled to the same
+provider-calibrated current-context total shown in the footer. When calibration
+changes the total, `/context` also shows the raw local estimate as a diagnostic.
+The provider aggregate remains authoritative; individual category attribution,
+especially opaque continuity and images, remains approximate. Latest generation
+usage is shown separately because only its persisted content is added to a
+following request.
+
+`/compact` replaces an older complete-turn prefix with a structured working-state
+checkpoint while retaining complete recent turns. The checkpoint preserves
+objectives, constraints, decisions, files and symbols, verification outcomes,
+failures, attributed agent updates, retrieval references, and unresolved work.
+Oversized plain-text tool results in the prefix are reduced before summary, and
+a bounded private transcript of compacted tool text, arguments, and result/image
+metadata is linked for `artifact_read`/`artifact_grep`; image payloads and full
+history remain in the append-only session. Up to 24 verified retrieval
+references survive repeated compaction, and a lifecycle warning reports any
+transcript persistence failure instead of advertising a missing artifact.
+
+When invoked during automatic goal work, manual compaction pauses that goal
+after the checkpoint; use `/goal resume` to continue. Every admitted turn may
+auto-compact at a safe top-of-cycle boundary when either total context reaches
+80% by default or safely compactable old tool history reaches 20% of the model
+window. Active and minimum-retained recent tool batches remain exact. Tool calls
+and results are validated as pairs, and opaque provider state is removed only
+with its complete old turn.
 
 Snow also detects identical consecutive tool calls during one admitted run and
 adds advisory reminders after the third, fifth, and eighth repetition. It does
