@@ -43,6 +43,29 @@ given, because a picker is unavailable. The lower-level
 `--session /path/to/session.db` flag and the SDK `SessionPath` option also
 select a path. The previous JSONL format is intentionally not migrated.
 
+The `/sessions` picker supports permanent deletion with `d` followed by an
+explicit Enter confirmation. Deletion removes the selected database, SQLite
+sidecars, its colocated `.db.agents` subagent histories, managed goal files, and
+private artifact namespaces; it does not use the system Trash and cannot be
+undone. The active session cannot be deleted: resume or create another session
+first. A cross-process lifetime lease also rejects deletion while another Snow
+process has that database open. Picker deletion remains scoped to sessions
+listed for the exact current working directory and binds confirmation to the
+session ID shown before the operation.
+
+The interactive TUI rebuilds resumed history from the active branch's durable
+messages. Tool-result messages include bounded, surface-safe `tool_display`
+metadata (start detail, progress rows, completion duration, and the same output
+or private diff preview published live); harness activity without a provider tool
+result, such as explicit skill activation, uses provider-excluded branch metadata.
+Presentation metadata is stripped at every provider request boundary. Completed
+and interrupted tool-heavy turns therefore retain their native transcript cards,
+terminal error rows, and aborted boundaries after resume. Sessions created before
+this metadata existed receive a best-effort reconstruction from tool-call
+arguments and result content. Full-screen transcript limits are applied to
+rendered rows rather than raw messages, so non-rendered compatibility entries do
+not evict useful user or assistant text.
+
 ## Titles and identity
 
 Built-in sessions receive a provider-free display title from the first accepted
@@ -75,7 +98,14 @@ The store opens each database with:
 - a 5-second busy timeout (see the
   [SQLite WAL documentation](https://sqlite.org/wal.html));
 - one database connection, avoiding connection-local pragma surprises while
-  WAL still permits readers to proceed during a writer commit.
+  WAL still permits readers to proceed during a writer commit;
+- a shared lifetime lease on the adjacent `.db.lock` file for every open Snow
+  store; permanent deletion requires an exclusive non-blocking lease, so it
+  fails instead of unlinking a root or child database used by another Snow
+  process. Lock files are ignored by session discovery and removed with deleted
+  or discarded-empty sessions. Session databases and child databases must be
+  regular single-link files; symlink and hard-link aliases are rejected so they
+  cannot bypass the per-path lifetime lease.
 
 ## Schema
 

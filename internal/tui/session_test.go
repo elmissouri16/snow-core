@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -502,6 +503,56 @@ func TestSessionPickerShowsTitleFirstAndRenamesSelectedSession(t *testing.T) {
 	}
 	if got, err := m.app.Agent.SessionTitle(); err != nil || got != "New title" {
 		t.Fatalf("active title = %q err=%v", got, err)
+	}
+}
+
+func TestSessionPickerDeletesSelectedSessionAfterConfirmation(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width, m.height = 100, 30
+	idx := session.NewFileIndex(session.DefaultSessionsRoot())
+	store, err := idx.Create(m.app.CWD())
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := protocol.NewUserMessage("delete-me", store.BranchTip(), "delete me")
+	if err := store.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+		t.Fatal(err)
+	}
+	path := store.Path()
+	id := store.ID()
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	m.sessions = []session.SessionInfo{{ID: id, Path: path, Name: "Disposable", Messages: 1}}
+	m.pickSession = true
+
+	_, _ = m.handleSessionPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if !m.sessionDeleting {
+		t.Fatal("delete key did not open confirmation")
+	}
+	if view := stripANSI(m.renderSessionPicker()); !strings.Contains(view, `Permanently delete "Disposable"`) || !strings.Contains(view, "Enter confirm") {
+		t.Fatalf("delete confirmation = %q", view)
+	}
+	_, _ = m.handleSessionPick(teaKeyEsc())
+	if m.sessionDeleting {
+		t.Fatal("Esc did not cancel session deletion")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("cancel removed session: %v", err)
+	}
+
+	_, _ = m.handleSessionPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	_, cmd := m.handleSessionPick(teaKeyEnter())
+	if cmd == nil {
+		t.Fatal("confirmed delete returned no command")
+	}
+	_, _ = m.Update(cmd())
+	if m.pickSession || len(m.sessions) != 0 || !strings.Contains(m.lastStatus, "deleted session Disposable") {
+		t.Fatalf("picker after delete: open=%v sessions=%+v status=%q", m.pickSession, m.sessions, m.lastStatus)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("session database still exists after delete: %v", err)
 	}
 }
 

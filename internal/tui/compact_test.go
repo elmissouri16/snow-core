@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -49,6 +50,36 @@ func TestIdleSpinnerStopsAndRestarts(t *testing.T) {
 	m.editor.SetValue("/compact")
 	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil || !m.spinnerRunning || !m.compacting {
 		t.Fatalf("compaction did not restart spinner: cmd=%v running=%v compacting=%v", cmd != nil, m.spinnerRunning, m.compacting)
+	}
+}
+
+func TestThinkingAndWorkingUseIndependentAnimations(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.busy = true
+	m.runStartedAt = time.Now()
+
+	if strings.Join(m.spinner.Spinner.Frames, "|") == strings.Join(m.thinkingSpinner.Spinner.Frames, "|") {
+		t.Fatal("thinking and working animations use the same frames")
+	}
+	workingBefore := stripANSI(m.renderRunStatus())
+	thinkingBefore := stripANSI(m.liveText())
+
+	_, _ = m.Update(m.spinner.Tick())
+	workingAfter := stripANSI(m.renderRunStatus())
+	if workingAfter == workingBefore {
+		t.Fatalf("working animation did not advance: %q", workingAfter)
+	}
+	if thinkingAfterWorkingTick := stripANSI(m.liveText()); thinkingAfterWorkingTick != thinkingBefore {
+		t.Fatalf("working tick advanced thinking animation: before=%q after=%q", thinkingBefore, thinkingAfterWorkingTick)
+	}
+
+	_, _ = m.Update(m.thinkingSpinner.Tick())
+	if thinkingAfter := stripANSI(m.liveText()); thinkingAfter == thinkingBefore {
+		t.Fatalf("thinking animation did not advance: %q", thinkingAfter)
+	}
+	if workingAfterThinkingTick := stripANSI(m.renderRunStatus()); workingAfterThinkingTick != workingAfter {
+		t.Fatalf("thinking tick advanced working animation: before=%q after=%q", workingAfter, workingAfterThinkingTick)
 	}
 }
 

@@ -12,6 +12,29 @@ import (
 	"time"
 )
 
+func TestDeleteSessionDataRemovesOnlyManagedSessionDirectory(t *testing.T) {
+	home := t.TempDir()
+	owned := filepath.Join(home, "goals", "session-a", "goal-a", managedObjectiveName)
+	kept := filepath.Join(home, "goals", "session-b", "goal-b", managedObjectiveName)
+	for _, path := range []string{owned, kept} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("objective"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := DeleteSessionData(home, "session-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "goals", "session-a")); !os.IsNotExist(err) {
+		t.Fatalf("deleted goal directory still exists: %v", err)
+	}
+	if _, err := os.Stat(kept); err != nil {
+		t.Fatalf("unrelated goal file was removed: %v", err)
+	}
+}
+
 func persisted(t *testing.T) *session.SQLiteStore {
 	t.Helper()
 	s, e := session.NewSQLiteStore(filepath.Join(t.TempDir(), "s.db"), t.TempDir(), session.Options{})

@@ -25,6 +25,21 @@ func TestCustomThemeInheritanceAndReservedPalette(t *testing.T) {
 	}
 }
 
+func TestThemeRefreshUpdatesThinkingAndWorkingAnimations(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	if err := applyTUITheme("dracula"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = applyTUITheme("default") })
+	m.refreshThemeStyles()
+	if got := m.spinner.Style.GetForeground(); got != colorAccent {
+		t.Fatalf("working animation color = %v, want theme accent %v", got, colorAccent)
+	}
+	if got := m.thinkingSpinner.Style.GetForeground(); got != colorAccent {
+		t.Fatalf("thinking animation color = %v, want theme accent %v", got, colorAccent)
+	}
+}
+
 func TestStartupThemeApplicationDoesNotPersistEffectiveProjectConfig(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)

@@ -139,6 +139,12 @@ type repeatedToolCallState struct {
 	reminders     []string
 }
 
+type toolDisplayState struct {
+	startMessage string
+	progress     []string
+	progressSize int
+}
+
 type Agent struct {
 	mu          sync.RWMutex
 	admissionMu sync.Mutex
@@ -164,8 +170,10 @@ type Agent struct {
 	pending          map[string]protocol.ContentBlock
 	pendingOrder     []string
 	pendingToolError string
-	// toolStarts is used to add useful duration metadata to tool_end events.
-	toolStarts map[string]time.Time
+	// toolStarts and toolDisplays retain bounded, surface-safe presentation data
+	// until the corresponding tool result can persist it for transcript resume.
+	toolStarts   map[string]time.Time
+	toolDisplays map[string]toolDisplayState
 	// repeatedTool tracks identical consecutive calls across provider steps in
 	// one admitted run. It is advisory only and resets for each fresh user turn.
 	repeatedTool          repeatedToolCallState
@@ -286,6 +294,7 @@ func New(opts Options) (*Agent, error) {
 	a := &Agent{opts: opts, model: opts.Model, bus: newEventBus(), mode: mode, turnMode: mode, rootEpoch: 1}
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.toolStarts = make(map[string]time.Time)
+	a.toolDisplays = make(map[string]toolDisplayState)
 	a.activeSkills = restoreActiveSkills(opts.Session, opts.Registry, opts.ToolHost, opts.SkillNames)
 	if state, ok := opts.Session.(session.ThreadStateStore); ok {
 		if err := state.SetCollaborationMode(mode); err != nil {
@@ -955,6 +964,21 @@ func (a *Agent) SessionIdentity() (id, path string, err error) {
 		return nil
 	})
 	return id, path, err
+}
+
+// SessionIdentityAdmitted returns the active identity while the caller holds
+// the admission lock. Unlike IdleSessionAdmitted it does not alter automatic
+// goal continuation state.
+func (a *Agent) SessionIdentityAdmitted() (id, path string, running bool, err error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.closed {
+		return "", "", false, errors.New("agent: closed")
+	}
+	if a.opts.Session == nil {
+		return "", "", a.running, errors.New("agent: session is nil")
+	}
+	return a.opts.Session.ID(), a.opts.Session.Path(), a.running, nil
 }
 
 func (a *Agent) withSessionRead(read func(session.Store) error) error {
@@ -2072,7 +2096,7 @@ Preserve exact identifiers, paths, artifact IDs, commands, test outcomes, failur
 	}
 	req := protocol.ChatRequest{
 		Model:              model,
-		Messages:           msgs,
+		Messages:           providerMessages(msgs),
 		System:             contract,
 		MaxTokens:          maxTokens,
 		Thinking:           protocol.ThinkingOff,
@@ -2190,6 +2214,7 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 	a.pendingOrder = a.pendingOrder[:0]
 	a.pendingToolError = ""
 	a.toolStarts = make(map[string]time.Time)
+	a.toolDisplays = make(map[string]toolDisplayState)
 	a.repeatedTool = repeatedToolCallState{}
 	a.turnToolCalls = 0
 	a.turnUsage = protocol.Usage{}
@@ -2446,6 +2471,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	a.pendingOrder = a.pendingOrder[:0]
 	a.pendingToolError = ""
 	a.toolStarts = make(map[string]time.Time)
+	a.toolDisplays = make(map[string]toolDisplayState)
 	a.repeatedTool = repeatedToolCallState{}
 	a.turnToolCalls = 0
 	a.turnUsage = protocol.Usage{}
@@ -2599,6 +2625,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	a.pendingOrder = a.pendingOrder[:0]
 	a.pendingToolError = ""
 	a.toolStarts = make(map[string]time.Time)
+	a.toolDisplays = make(map[string]toolDisplayState)
 	a.repeatedTool = repeatedToolCallState{}
 	a.turnToolCalls = 0
 	a.turnUsage = protocol.Usage{}
@@ -3278,7 +3305,7 @@ func (a *Agent) run(ctx context.Context) error {
 		}
 		req := protocol.ChatRequest{
 			Model:              a.Model(),
-			Messages:           msgs,
+			Messages:           providerMessages(msgs),
 			Tools:              a.requestToolSchemas(),
 			System:             a.requestSystemPrompt(),
 			Thinking:           a.requestThinking(),
@@ -4065,6 +4092,33 @@ func canonicalToolArguments(raw json.RawMessage) string {
 // appendToolResult persists a tool_result message and emits its events.
 // Details are private tool metadata used only for UI-facing previews.
 func (a *Agent) appendToolResult(parent string, msg protocol.Message, details ...any) error {
+	started, display := a.takeToolDisplay(msg.ToolCallID)
+	output := toolResultText(msg.Content)
+	for _, detail := range details {
+		switch value := detail.(type) {
+		case tools.PrivateDetails:
+			output = "(private goal state updated)"
+		case *tools.PrivateDetails:
+			if value != nil {
+				output = "(private goal state updated)"
+			}
+		}
+	}
+	if diff, ok := editDiffPreview(details); ok {
+		output = diff
+	}
+	preview := boundEventText(output, 8*1024)
+	durationMS := int64(0)
+	if !started.IsZero() {
+		durationMS = time.Since(started).Milliseconds()
+	}
+	msg.ToolDisplay = &protocol.ToolDisplay{
+		Started:      !started.IsZero(),
+		StartMessage: display.startMessage,
+		Progress:     display.progress,
+		Output:       preview,
+		DurationMS:   durationMS,
+	}
 	if err := a.opts.Session.Append(session.Entry{
 		Type:     session.EntryMessage,
 		ID:       msg.ID,
@@ -4073,25 +4127,13 @@ func (a *Agent) appendToolResult(parent string, msg protocol.Message, details ..
 	}); err != nil {
 		return fmt.Errorf("agent: append tool result: %w", err)
 	}
-	started := a.takeToolStart(msg.ToolCallID)
-	output := toolResultText(msg.Content)
-	for _, detail := range details {
-		if _, private := detail.(tools.PrivateDetails); private {
-			output = "(private goal state updated)"
-		}
-	}
-	if diff, ok := editDiffPreview(details); ok {
-		output = diff
-	}
 	ev := protocol.AgentEvent{
-		Type:       protocol.EvToolEnd,
-		ToolCallID: msg.ToolCallID,
-		ToolName:   msg.ToolName,
-		IsError:    msg.IsError,
-		ToolOutput: boundEventText(output, 8*1024),
-	}
-	if !started.IsZero() {
-		ev.ToolDurationMS = time.Since(started).Milliseconds()
+		Type:           protocol.EvToolEnd,
+		ToolCallID:     msg.ToolCallID,
+		ToolName:       msg.ToolName,
+		IsError:        msg.IsError,
+		ToolOutput:     preview,
+		ToolDurationMS: durationMS,
 	}
 	if msg.IsError {
 		ev.Message = boundEventText(output, 2*1024)
@@ -4174,14 +4216,16 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		return msg, false, nil
 	}
 
+	startMessage := toolStartMessage(cb.Name, rawArgs)
 	a.mu.Lock()
 	a.toolStarts[cb.ToolCallID] = time.Now()
+	a.toolDisplays[cb.ToolCallID] = toolDisplayState{startMessage: startMessage}
 	a.mu.Unlock()
 	a.publish(protocol.AgentEvent{
 		Type:       protocol.EvToolStart,
 		ToolCallID: cb.ToolCallID,
 		ToolName:   cb.Name,
-		Message:    toolStartMessage(cb.Name, rawArgs),
+		Message:    startMessage,
 	})
 
 	// Run the tool with panic recovery and bridge progress into the agent
@@ -4379,22 +4423,59 @@ func (a *Agent) activateExplicitSkillMentions(ctx context.Context, text string) 
 	for _, name := range names {
 		callID := newID()
 		started := time.Now()
-		a.publish(protocol.AgentEvent{Type: protocol.EvToolStart, ToolCallID: callID, ToolName: "activate_skill", Message: "activating explicitly requested skill " + name})
-		activation, err := runSkillActivation(ctx, a.opts.Registry, a.opts.ToolHost, name)
-		if err == nil {
+		startMessage := "activating explicitly requested skill " + name
+		a.publish(protocol.AgentEvent{Type: protocol.EvToolStart, ToolCallID: callID, ToolName: "activate_skill", Message: startMessage})
+		activation, activationErr := runSkillActivation(ctx, a.opts.Registry, a.opts.ToolHost, name)
+		durationMS := time.Since(started).Milliseconds()
+		output := "activated skill " + name
+		if activationErr != nil {
+			output = boundEventText(activationErr.Error(), 8*1024)
+		}
+		transcript, marshalErr := json.Marshal(protocol.ToolTranscript{
+			ToolName: "activate_skill",
+			IsError:  activationErr != nil,
+			Display: protocol.ToolDisplay{
+				Started:      true,
+				StartMessage: startMessage,
+				Output:       output,
+				DurationMS:   durationMS,
+			},
+		})
+		var persistErr error
+		if marshalErr != nil {
+			persistErr = marshalErr
+		} else {
+			entries := make([]session.Entry, 0, 2)
+			if activationErr == nil {
+				entries = append(entries, session.Entry{Type: session.EntryMeta, ID: newID(), Key: skillActivationMeta, Value: name})
+			}
+			entries = append(entries, session.Entry{Type: session.EntryMeta, ID: newID(), Key: session.MetaToolTranscript, Value: string(transcript)})
 			a.mailboxPersistMu.Lock()
-			err = a.opts.Session.Append(session.Entry{Type: session.EntryMeta, ID: newID(), Key: skillActivationMeta, Value: name})
+			if batch, ok := a.opts.Session.(session.BatchStore); ok {
+				persistErr = batch.AppendBatch(entries)
+			} else {
+				for _, entry := range entries {
+					if persistErr = a.opts.Session.Append(entry); persistErr != nil {
+						break
+					}
+				}
+			}
 			a.mailboxPersistMu.Unlock()
 		}
-		event := protocol.AgentEvent{Type: protocol.EvToolEnd, ToolCallID: callID, ToolName: "activate_skill", ToolDurationMS: time.Since(started).Milliseconds(), IsError: err != nil}
+		if persistErr == nil {
+			a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+		}
+		err := errors.Join(activationErr, persistErr)
+		eventOutput := output
+		if activationErr == nil && persistErr != nil {
+			eventOutput = boundEventText(persistErr.Error(), 8*1024)
+		}
+		event := protocol.AgentEvent{Type: protocol.EvToolEnd, ToolCallID: callID, ToolName: "activate_skill", ToolDurationMS: durationMS, ToolOutput: eventOutput, IsError: err != nil}
 		if err != nil {
-			event.Message = boundEventText(err.Error(), 2*1024)
-			event.ToolOutput = event.Message
+			event.Message = boundEventText(eventOutput, 2*1024)
 			a.publish(event)
 			return err
 		}
-		a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
-		event.ToolOutput = "activated skill " + name
 		a.publish(event)
 		a.applySkillActivationDetails(activation)
 	}
@@ -4537,12 +4618,13 @@ func (h *progressHost) RequestUserInput(ctx context.Context, req protocol.UserIn
 }
 
 func (h *progressHost) EmitProgress(ev tools.ToolProgressEvent) {
-	if ev.ToolCallID == "" {
-		ev.ToolCallID = h.callID
-	}
-	if ev.Name == "" {
-		ev.Name = h.name
-	}
+	// The host owns correlation identity. A tool may provide convenience fields,
+	// but allowing it to spoof another call would make live and resumed rows
+	// disagree and could misattribute progress to a concurrent surface.
+	ev.ToolCallID = h.callID
+	ev.Name = h.name
+	ev.Message = boundEventText(ev.Message, 2*1024)
+	h.agent.recordToolProgress(h.callID, ev.Message)
 	h.agent.publish(protocol.AgentEvent{
 		Type:       protocol.EvToolProgress,
 		ToolCallID: ev.ToolCallID,
@@ -4561,12 +4643,39 @@ func (h *progressHost) EmitProgress(ev tools.ToolProgressEvent) {
 	h.ToolHost.EmitProgress(ev)
 }
 
-func (a *Agent) takeToolStart(callID string) time.Time {
+const (
+	maxPersistedToolProgressRows  = 2000
+	maxPersistedToolProgressBytes = 1 << 20
+)
+
+func (a *Agent) recordToolProgress(callID, message string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	state, ok := a.toolDisplays[callID]
+	if !ok {
+		return
+	}
+	state.progress = append(state.progress, message)
+	state.progressSize += len(message)
+	for len(state.progress) > 1 && (len(state.progress) > maxPersistedToolProgressRows || state.progressSize > maxPersistedToolProgressBytes) {
+		state.progressSize -= len(state.progress[0])
+		state.progress = state.progress[1:]
+	}
+	a.toolDisplays[callID] = state
+}
+
+func (a *Agent) takeToolDisplay(callID string) (time.Time, toolDisplayState) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	started := a.toolStarts[callID]
+	display := a.toolDisplays[callID]
 	delete(a.toolStarts, callID)
-	return started
+	delete(a.toolDisplays, callID)
+	display.progress = append([]string(nil), display.progress...)
+	return started, display
 }
 
 func (a *Agent) spillToolResult(ctx context.Context, toolName, callID string, content []protocol.ContentBlock, details any) []protocol.ContentBlock {
@@ -4872,6 +4981,18 @@ func (a *Agent) pruneHistoricalToolResults(ctx context.Context, messages []proto
 		})
 }
 
+// providerMessages removes surface-only transcript metadata before crossing a
+// provider boundary. In particular, ToolDisplay may contain a private edit diff
+// that is intentionally visible to the local UI but absent from model context.
+func providerMessages(messages []protocol.Message) []protocol.Message {
+	out := make([]protocol.Message, len(messages))
+	copy(out, messages)
+	for i := range out {
+		out[i].ToolDisplay = nil
+	}
+	return out
+}
+
 func toolResultText(content []protocol.ContentBlock) string {
 	var b strings.Builder
 	for _, block := range content {
@@ -4916,7 +5037,7 @@ func toolStartMessage(name string, rawArgs json.RawMessage) string {
 			Path string `json:"path"`
 		}
 		if err := json.Unmarshal(rawArgs, &input); err == nil && input.Path != "" {
-			return input.Path
+			return boundEventText(input.Path, 2*1024)
 		}
 	}
 	return "running"

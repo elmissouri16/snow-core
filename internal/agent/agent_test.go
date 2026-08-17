@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/compact"
@@ -38,6 +39,18 @@ func TestToolStartMessageIncludesBashCommand(t *testing.T) {
 	}
 	if got := toolStartMessage("bash", args); got != command {
 		t.Fatalf("toolStartMessage() = %q, want %q", got, command)
+	}
+}
+
+func TestToolStartMessageBoundsFilePath(t *testing.T) {
+	path := strings.Repeat("é", 3000)
+	args, err := json.Marshal(map[string]string{"path": path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := toolStartMessage("edit", args)
+	if len(got) > 2*1024+len("\n… [tool output preview truncated]") || !strings.HasSuffix(got, "… [tool output preview truncated]") || !utf8.ValidString(got) {
+		t.Fatalf("bounded tool path bytes=%d valid=%t suffix=%q", len(got), utf8.ValidString(got), got[max(0, len(got)-50):])
 	}
 }
 
@@ -385,6 +398,44 @@ func TestHistoricalMentionWithoutSuccessMarkerDoesNotActivate(t *testing.T) {
 	}
 }
 
+func TestFailedExplicitSkillActivationPersistsTranscript(t *testing.T) {
+	registry := tools.NewRegistry()
+	schema := protocol.ToolSchema{
+		Name:        "activate_skill",
+		Description: "activate",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","enum":["review"]}},"required":["name"]}`),
+	}
+	tool := &testTool{name: "activate_skill", schema: schema, runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+		return tools.ErrorResult(errors.New("skill activation failed"))
+	}}
+	if err := registry.RegisterDescriptor(tools.ToolDescriptor{Schema: schema, Tool: tool, Source: tools.SourceBuiltin, Owner: "skills", Risk: permission.RiskRead}); err != nil {
+		t.Fatal(err)
+	}
+	st := session.NewMemoryStore(session.Options{})
+	provider := &scriptedProvider{}
+	a, err := New(Options{Provider: provider, Registry: registry, Session: st, Permission: permission.NewService(permission.ModeDeny, nil), SkillNames: map[string]bool{"review": true}, Model: protocol.Model{Provider: "scripted", ID: "m1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "$review inspect this"); err == nil || !strings.Contains(err.Error(), "skill activation failed") {
+		t.Fatalf("Prompt error = %v, want activation failure", err)
+	}
+	entries, err := st.BranchEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Type != session.EntryMeta || entry.Key != session.MetaToolTranscript {
+			continue
+		}
+		var transcript protocol.ToolTranscript
+		if json.Unmarshal([]byte(entry.Value), &transcript) == nil && transcript.ToolName == "activate_skill" && transcript.IsError && transcript.Display.Started && strings.Contains(transcript.Display.Output, "skill activation failed") {
+			return
+		}
+	}
+	t.Fatalf("failed activation transcript missing: %+v", entries)
+}
+
 func TestExplicitSkillDirectiveParsing(t *testing.T) {
 	candidates := []string{"review", "docs"}
 	for _, test := range []struct {
@@ -446,11 +497,18 @@ func TestExplicitSkillMentionActivatesAndRestoresWithoutModelToolCall(t *testing
 		t.Fatal(err)
 	}
 	markerFound := false
+	transcriptFound := false
 	for _, entry := range entries {
 		markerFound = markerFound || entry.Type == session.EntryMeta && entry.Key == skillActivationMeta && entry.Value == "review"
+		if entry.Type == session.EntryMeta && entry.Key == session.MetaToolTranscript {
+			var transcript protocol.ToolTranscript
+			if json.Unmarshal([]byte(entry.Value), &transcript) == nil && transcript.ToolName == "activate_skill" && transcript.Display.Started && transcript.Display.Output == "activated skill review" {
+				transcriptFound = true
+			}
+		}
 	}
-	if !markerFound {
-		t.Fatalf("direct activation marker missing: %+v", entries)
+	if !markerFound || !transcriptFound {
+		t.Fatalf("direct activation metadata missing: marker=%t transcript=%t entries=%+v", markerFound, transcriptFound, entries)
 	}
 	eventMu.Lock()
 	observedEvents := append([]protocol.AgentEventType(nil), skillEvents...)
@@ -988,7 +1046,7 @@ func TestToolEventsExposeOutputProgressAndTiming(t *testing.T) {
 		name:   "progress_tool",
 		schema: protocol.ToolSchema{Name: "progress_tool", Description: "progress", Parameters: json.RawMessage(`{}`)},
 		runFunc: func(ctx context.Context, args json.RawMessage, host tools.ToolHost) tools.ToolResult {
-			host.EmitProgress(tools.ToolProgressEvent{Message: "halfway"})
+			host.EmitProgress(tools.ToolProgressEvent{ToolCallID: "spoofed-call", Name: "spoofed-tool", Message: "halfway"})
 			return tools.TextResult("tool output")
 		},
 	}
@@ -1006,7 +1064,7 @@ func TestToolEventsExposeOutputProgressAndTiming(t *testing.T) {
 			{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
 		},
 	}}
-	a, _ := setup(t, prov, reg, permission.ModeAllow)
+	a, st := setup(t, prov, reg, permission.ModeAllow)
 	var progress, end protocol.AgentEvent
 	a.Subscribe(func(ev protocol.AgentEvent) {
 		switch ev.Type {
@@ -1019,11 +1077,22 @@ func TestToolEventsExposeOutputProgressAndTiming(t *testing.T) {
 	if err := a.Prompt(context.Background(), "run tool"); err != nil {
 		t.Fatal(err)
 	}
-	if progress.ToolProgress == nil || progress.ToolProgress.Message != "halfway" {
+	if progress.ToolProgress == nil || progress.ToolProgress.Message != "halfway" || progress.ToolCallID != "progress-1" || progress.ToolName != "progress_tool" || progress.ToolProgress.ToolCallID != "progress-1" || progress.ToolProgress.Name != "progress_tool" {
 		t.Fatalf("progress event = %+v", progress)
 	}
 	if end.ToolOutput != "tool output" || end.ToolDurationMS < 0 {
 		t.Fatalf("tool end = %+v", end)
+	}
+	messages, err := st.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) < 3 || messages[2].Role != protocol.RoleTool || messages[2].ToolDisplay == nil {
+		t.Fatalf("persisted tool result missing display metadata: %+v", messages)
+	}
+	display := messages[2].ToolDisplay
+	if !display.Started || !slices.Equal(display.Progress, []string{"halfway"}) || display.Output != end.ToolOutput || display.DurationMS != end.ToolDurationMS {
+		t.Fatalf("persisted display=%+v, event=%+v", display, end)
 	}
 }
 
@@ -1091,7 +1160,7 @@ func TestToolEditDetailsBecomeUIToolPreview(t *testing.T) {
 			{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
 		},
 	}}
-	a, _ := setup(t, prov, reg, permission.ModeAllow)
+	a, st := setup(t, prov, reg, permission.ModeAllow)
 	var start, end protocol.AgentEvent
 	a.Subscribe(func(ev protocol.AgentEvent) {
 		if ev.Type == protocol.EvToolStart {
@@ -1109,6 +1178,20 @@ func TestToolEditDetailsBecomeUIToolPreview(t *testing.T) {
 	}
 	if end.ToolOutput != "-1 old\n+1 new" {
 		t.Fatalf("tool output = %q, want private diff preview", end.ToolOutput)
+	}
+	messages, err := st.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) < 3 || messages[2].ToolDisplay == nil || messages[2].ToolDisplay.Output != end.ToolOutput || messages[2].ToolDisplay.StartMessage != start.Message {
+		t.Fatalf("persisted edit display does not match live events: %+v", messages)
+	}
+	for requestIndex, request := range prov.requests {
+		for messageIndex, message := range request.Messages {
+			if message.ToolDisplay != nil {
+				t.Fatalf("private tool display reached provider request %d message %d: %+v", requestIndex, messageIndex, message.ToolDisplay)
+			}
+		}
 	}
 }
 

@@ -133,7 +133,9 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
    expose stale headers, separators, or prior composer frames.
 3. The sticky header shows the current provider/model, collaboration mode,
    reasoning effort, working directory, and status. The run-status row shows
-   activity and queued-input count. The footer shows permission mode, mode/goal
+   activity and queued-input count. Provider waits use a pulsing-points thinking
+   animation distinct from the rotating working indicator in the run-status row.
+   The footer shows permission mode, mode/goal
    state, context usage, and the latest request's prompt-cache hit rate as
    `CH<n>%`; inline mode may compact provider/model/effort into that footer.
 
@@ -322,10 +324,15 @@ creating an empty or ephemeral conversation.
 Inside the TUI, `/new`, `/sessions`, and `/resume` operate on the current
 project's session index. Sessions receive a local, provider-free title from the
 first user prompt. In the `/sessions` or no-path `/resume` picker, press `r` to
-edit the selected title; this works without switching to that session. Titles
-are 1-72 runes after trimming, do not need to be unique, and never change the
-stable session ID or database path. `/tree` operates inside the currently open
-database.
+edit the selected title; this works without switching to that session. Press
+`d`, then Enter, to permanently delete an inactive selected session together
+with its SQLite sidecars, subagent histories, private artifacts, and managed
+goal files. Deletion bypasses the system Trash and cannot be undone; switch to
+another session before deleting the active one. Snow also refuses deletion while
+another Snow process has that database open. Titles are 1-72 runes after
+trimming, do not need to be unique, and never
+change the stable session ID or database path. `/tree` operates inside the
+currently open database.
 
 A named branch fork shares prior append-only entries and diverges from a
 selected entry; it does not copy message rows. Branch selection changes

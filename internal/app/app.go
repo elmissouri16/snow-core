@@ -101,6 +101,15 @@ type App struct {
 	artifacts          artifact.Store
 }
 
+// SessionDeleteCleanupError reports that the durable session was deleted but
+// one or more secondary managed-state cleanup operations failed.
+type SessionDeleteCleanupError struct{ Err error }
+
+func (e *SessionDeleteCleanupError) Error() string {
+	return "session deleted; cleanup warning: " + e.Err.Error()
+}
+func (e *SessionDeleteCleanupError) Unwrap() error { return e.Err }
+
 type liveRuntimeSelection struct {
 	mu        sync.RWMutex
 	provider  string
@@ -1619,6 +1628,80 @@ func (a *App) RenameSession(title string) error {
 		return errors.New("app: cannot rename session while subagents are active")
 	}
 	return a.Agent.RenameSessionAdmitted(title)
+}
+
+// DeleteSession permanently removes an inactive session belonging to the
+// app's working directory. The active database remains owned by the running
+// app and must be switched away from before it can be deleted.
+func (a *App) DeleteSession(path, expectedID string) error {
+	unlock := a.Agent.LockAdmission()
+	defer unlock()
+	activeID, activePath, running, err := a.Agent.SessionIdentityAdmitted()
+	if err != nil {
+		return err
+	}
+	if running {
+		return errors.New("app: cannot delete a session while a turn is running")
+	}
+	if a.Subagents != nil && a.Subagents.HasActive() {
+		return errors.New("app: cannot delete a session while subagents are active")
+	}
+	activeAlias := false
+	if path != "" && activePath != "" {
+		selectedInfo, selectedErr := os.Stat(path)
+		activeInfo, activeErr := os.Stat(activePath)
+		activeAlias = selectedErr == nil && activeErr == nil && os.SameFile(selectedInfo, activeInfo)
+	}
+	if expectedID == activeID || activeAlias {
+		return errors.New("app: cannot delete the active session; resume or create another session first")
+	}
+	index := session.NewFileIndex(session.DefaultSessionsRoot())
+	path, err = indexedSessionPath(index, a.cwd, path, expectedID)
+	if err != nil {
+		return err
+	}
+	ownedIDs, err := index.DeleteWithIDs(a.cwd, path, expectedID)
+	if err != nil && len(ownedIDs) == 0 {
+		return err
+	}
+	var cleanupErrs []error
+	if err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if deleter, ok := a.artifacts.(artifact.SessionDeleter); ok {
+		for _, id := range ownedIDs {
+			if err := deleter.DeleteSession(context.Background(), id); err != nil {
+				cleanupErrs = append(cleanupErrs, err)
+			}
+		}
+	}
+	for _, id := range ownedIDs {
+		if err := goalpkg.DeleteSessionData(config.GlobalDir(), id); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
+	}
+	if cleanupErr := errors.Join(cleanupErrs...); cleanupErr != nil {
+		return &SessionDeleteCleanupError{Err: cleanupErr}
+	}
+	return nil
+}
+
+func indexedSessionPath(index *session.FileIndex, cwd, path, expectedID string) (string, error) {
+	requested, err := filepath.Abs(path)
+	if err != nil {
+		return "", session.ErrNotFound
+	}
+	infos, err := index.List(cwd)
+	if err != nil {
+		return "", err
+	}
+	for _, info := range infos {
+		listed, listedErr := filepath.Abs(info.Path)
+		if listedErr == nil && filepath.Clean(requested) == filepath.Clean(listed) && info.ID == expectedID {
+			return listed, nil
+		}
+	}
+	return "", session.ErrNotFound
 }
 
 func (a *App) RenameBranch(branchID, name string) (protocol.SessionBranch, error) {

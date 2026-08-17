@@ -197,6 +197,45 @@ func TestSQLiteAppendWithInitialTitlePreservesManualRename(t *testing.T) {
 	}
 }
 
+func TestSQLitePersistsToolDisplayMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.db")
+	st, err := NewSQLiteStore(path, "/tmp/work", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := protocol.NewToolResultMessage("result", "", "call-1", "grep", []protocol.ContentBlock{protocol.NewTextBlock("complete output")}, false)
+	result.ToolDisplay = &protocol.ToolDisplay{
+		Started:      true,
+		StartMessage: "running",
+		Progress:     []string{"scanning"},
+		Output:       "bounded preview",
+		DurationMS:   17,
+	}
+	if err := st.Append(Entry{Type: EntryMessage, ID: result.ID, Message: &result}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err = NewSQLiteStore(path, "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	messages, err := st.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].ToolDisplay == nil {
+		t.Fatalf("tool display did not round trip: %+v", messages)
+	}
+	display := messages[0].ToolDisplay
+	if !display.Started || display.StartMessage != "running" || len(display.Progress) != 1 || display.Progress[0] != "scanning" || display.Output != "bounded preview" || display.DurationMS != 17 {
+		t.Fatalf("tool display = %+v", display)
+	}
+}
+
 func TestSQLiteRoundTripAndBranch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.db")
 	st, err := NewSQLiteStore(path, "/tmp/work", Options{Name: "sqlite"})

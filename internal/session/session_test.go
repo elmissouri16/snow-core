@@ -302,6 +302,178 @@ func TestFileIndexCreateOpenList(t *testing.T) {
 	}
 }
 
+func TestFileIndexDeleteRemovesOnlyListedSessionAndSubagentHistories(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	idx := NewFileIndex(root)
+	create := func(id string) (string, string) {
+		t.Helper()
+		store, err := idx.Create(cwd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Append(msg(id, "", id)); err != nil {
+			t.Fatal(err)
+		}
+		path, sessionID := store.Path(), store.ID()
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return path, sessionID
+	}
+	target, targetID := create("target")
+	sibling, _ := create("sibling")
+	agents := target + ".agents"
+	if err := os.MkdirAll(agents, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	child, err := NewSQLiteStore(filepath.Join(agents, "child.db"), cwd, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Append(msg("child", "", "child")); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Close(); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	outsideMarker := filepath.Join(outside, "keep")
+	if err := os.WriteFile(outsideMarker, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(agents, "outside-link")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := idx.Delete(t.TempDir(), target, targetID); err != ErrNotFound {
+		t.Fatalf("foreign-CWD delete error = %v, want ErrNotFound", err)
+	}
+	if err := idx.Delete(cwd, target, targetID); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{target, target + "-wal", target + "-shm", target + "-journal", target + ".lock", agents} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("deleted session path still exists: %s (err=%v)", path, err)
+		}
+	}
+	if _, err := os.Stat(outsideMarker); err != nil {
+		t.Fatalf("subagent symlink target was removed: %v", err)
+	}
+	if _, err := os.Stat(sibling); err != nil {
+		t.Fatalf("sibling session was removed: %v", err)
+	}
+	listed, err := idx.List(cwd)
+	if err != nil || len(listed) != 1 || listed[0].Path != sibling {
+		t.Fatalf("sessions after delete = %+v, err=%v", listed, err)
+	}
+}
+
+func TestFileIndexDeleteRejectsOpenSessionAndChangedIdentity(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	idx := NewFileIndex(root)
+	store, err := idx.Create(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(msg("open", "", "open")); err != nil {
+		t.Fatal(err)
+	}
+	path, id := store.Path(), store.ID()
+	if err := idx.Delete(cwd, path, id); err != errSessionInUse {
+		t.Fatalf("Delete(open session) error = %v, want %v", err, errSessionInUse)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("open session was removed: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Delete(cwd, path, "different-session-id"); err != ErrNotFound {
+		t.Fatalf("Delete(changed identity) error = %v, want ErrNotFound", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("identity mismatch removed session: %v", err)
+	}
+	if err := idx.Delete(cwd, path, id); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSQLiteStoreRejectsSymlinkAndHardLinkAliases(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	store, err := NewFileIndex(root).Create(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(msg("alias", "", "alias")); err != nil {
+		t.Fatal(err)
+	}
+	path := store.Path()
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	symlink := filepath.Join(filepath.Dir(path), "symlink.db")
+	if err := os.Symlink(path, symlink); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenSQLiteStore(symlink, cwd, Options{}); err == nil {
+		t.Fatal("opened session through symlink alias")
+	}
+	if err := os.Remove(symlink); err != nil {
+		t.Fatal(err)
+	}
+	hardlink := filepath.Join(filepath.Dir(path), "hardlink.db")
+	if err := os.Link(path, hardlink); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenSQLiteStore(hardlink, cwd, Options{}); err == nil {
+		t.Fatal("opened session through hard-link alias")
+	}
+	if err := os.Remove(hardlink); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFileIndexDeleteRejectsIndependentlyOpenChildSession(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	idx := NewFileIndex(root)
+	parent, err := idx.Create(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := parent.Append(msg("parent", "", "parent")); err != nil {
+		t.Fatal(err)
+	}
+	parentPath, parentID := parent.Path(), parent.ID()
+	if err := parent.Close(); err != nil {
+		t.Fatal(err)
+	}
+	childPath := filepath.Join(parentPath+".agents", "child.db")
+	child, err := NewSQLiteStore(childPath, cwd, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Append(msg("child", "", "child")); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Delete(cwd, parentPath, parentID); err != errSessionInUse {
+		t.Fatalf("Delete(parent with open child) error = %v, want %v", err, errSessionInUse)
+	}
+	if _, err := os.Stat(parentPath); err != nil {
+		t.Fatalf("parent removed while child open: %v", err)
+	}
+	if err := child.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Delete(cwd, parentPath, parentID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFileIndexListIsReadOnlyAndKeepsRootOnlyFile(t *testing.T) {
 	root := t.TempDir()
 	cwd := filepath.Join(root, "project")

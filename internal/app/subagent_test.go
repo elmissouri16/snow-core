@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -174,8 +176,12 @@ func TestDefaultDurableSubagentColdResumeDoesNotRestart(t *testing.T) {
 	_ = state // model-facing identity is intentionally not a filesystem locator
 	childDir := rootPath + ".agents"
 	entries, err := os.ReadDir(childDir)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("child dir=%v entries=%d", err, len(entries))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries = slices.DeleteFunc(entries, func(entry os.DirEntry) bool { return !strings.HasSuffix(entry.Name(), ".db") })
+	if len(entries) != 1 {
+		t.Fatalf("child database entries=%d", len(entries))
 	}
 	if mode, err := os.Stat(childDir); err != nil || mode.Mode().Perm() != 0o700 {
 		t.Fatalf("dir mode=%v err=%v", mode, err)

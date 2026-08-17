@@ -34,6 +34,7 @@ type SQLiteStore struct {
 	tip           string
 	branchID      string
 	db            *sql.DB
+	lease         *os.File
 	closed        bool
 	deleteIfEmpty bool
 
@@ -152,6 +153,33 @@ func inspectSQLiteSession(path, cwd string, updatedAt int64) (SessionInfo, bool,
 	return SessionInfo{Path: path, ID: header.ID, CWD: header.CWD, Name: header.Name, CreatedAt: header.CreatedAt, UpdatedAt: updatedAt, Messages: messages, searchFingerprint: fingerprint.String()}, true, nil
 }
 
+func subagentChildSessionPaths(path string) (map[string]bool, error) {
+	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(path))
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT child_session_path FROM subagent_threads WHERE child_session_path <> ''`)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no such table") {
+			return map[string]bool{}, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+	paths := make(map[string]bool)
+	for rows.Next() {
+		var childPath string
+		if err := rows.Scan(&childPath); err != nil {
+			return nil, err
+		}
+		if absolute, err := filepath.Abs(childPath); err == nil {
+			paths[filepath.Clean(absolute)] = true
+		}
+	}
+	return paths, rows.Err()
+}
+
 func validateSQLiteSessionDB(db *sql.DB) error {
 	var version, count int
 	var id, cwd, name, tip string
@@ -215,16 +243,46 @@ func newSQLiteStore(path, cwd string, opts Options, existingOnly bool) (*SQLiteS
 		}
 	}
 	existing := false
-	if info, err := os.Stat(path); err == nil {
+	if info, err := os.Lstat(path); err == nil {
 		existing = true
-		if !info.Mode().IsRegular() {
-			return nil, errors.New("session: sqlite path is not a regular file")
+		if !info.Mode().IsRegular() || !singleLink(info) {
+			return nil, errors.New("session: sqlite path must be a regular, non-aliased file")
 		}
 		if info.Size() == 0 {
 			return nil, errors.New("session: existing sqlite database is empty")
 		}
 	} else if existingOnly || !os.IsNotExist(err) {
 		return nil, fmt.Errorf("session: stat: %w", err)
+	}
+	lease, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("session: open lifetime lease: %w", err)
+	}
+	closeLease := func() {
+		unlockSessionFile(lease)
+		_ = lease.Close()
+	}
+	if err := lockSessionShared(lease); err != nil {
+		closeLease()
+		return nil, fmt.Errorf("session: lock lifetime lease: %w", err)
+	}
+	// Recheck after acquiring the path-stable lease. A deleter may have moved
+	// the database while this opener waited for its shared lock.
+	if info, statErr := os.Lstat(path); statErr == nil {
+		existing = true
+		if !info.Mode().IsRegular() || !singleLink(info) {
+			closeLease()
+			return nil, errors.New("session: sqlite path must be a regular, non-aliased file")
+		}
+		if info.Size() == 0 {
+			closeLease()
+			return nil, errors.New("session: existing sqlite database is empty")
+		}
+	} else if existingOnly || !os.IsNotExist(statErr) {
+		closeLease()
+		return nil, fmt.Errorf("session: stat after lifetime lease: %w", statErr)
+	} else {
+		existing = false
 	}
 	id := opts.ID
 	if id == "" {
@@ -236,6 +294,7 @@ func newSQLiteStore(path, cwd string, opts Options, existingOnly bool) (*SQLiteS
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
+		closeLease()
 		return nil, fmt.Errorf("session: sqlite open: %w", err)
 	}
 	// One connection avoids SQLite connection-local state surprises while WAL
@@ -244,6 +303,7 @@ func newSQLiteStore(path, cwd string, opts Options, existingOnly bool) (*SQLiteS
 	db.SetMaxIdleConns(1)
 	closeDB := func(e error) (*SQLiteStore, error) {
 		_ = db.Close()
+		closeLease()
 		return nil, e
 	}
 	if err := db.Ping(); err != nil {
@@ -273,7 +333,7 @@ func newSQLiteStore(path, cwd string, opts Options, existingOnly bool) (*SQLiteS
 		return closeDB(err)
 	}
 
-	s := &SQLiteStore{path: path, db: db, branchID: "main", deleteIfEmpty: !existingOnly}
+	s := &SQLiteStore{path: path, db: db, lease: lease, branchID: "main", deleteIfEmpty: !existingOnly}
 	var count int
 	if err := db.QueryRow(`SELECT count(*) FROM session_meta`).Scan(&count); err != nil {
 		return closeDB(fmt.Errorf("session: sqlite metadata count: %w", err))
@@ -2262,18 +2322,26 @@ func (s *SQLiteStore) Close() error {
 	closeErr := s.db.Close()
 	s.closed = true
 	s.invalidateContextCacheLocked()
-	if countErr != nil || closeErr != nil {
-		return errors.Join(countErr, closeErr)
-	}
-	if meaningfulCount > 0 || !s.deleteIfEmpty {
-		return nil
-	}
-
 	var errs []error
-	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
-		if err := os.Remove(s.path + suffix); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, fmt.Errorf("session: remove empty database %q: %w", s.path+suffix, err))
+	if countErr != nil || closeErr != nil {
+		errs = append(errs, countErr, closeErr)
+	} else if meaningfulCount == 0 && s.deleteIfEmpty && s.lease != nil {
+		if err := tryLockSessionExclusive(s.lease); err == nil {
+			for _, suffix := range []string{"", "-wal", "-shm", "-journal", ".lock"} {
+				if err := os.Remove(s.path + suffix); err != nil && !os.IsNotExist(err) {
+					errs = append(errs, fmt.Errorf("session: remove empty database %q: %w", s.path+suffix, err))
+				}
+			}
+		} else if !errors.Is(err, errSessionInUse) {
+			errs = append(errs, fmt.Errorf("session: lock empty database cleanup: %w", err))
 		}
+	}
+	if s.lease != nil {
+		unlockSessionFile(s.lease)
+		if err := s.lease.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		s.lease = nil
 	}
 	return errors.Join(errs...)
 }

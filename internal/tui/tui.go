@@ -329,6 +329,13 @@ type sessionRenameMsg struct {
 	err        error
 }
 
+type sessionDeleteMsg struct {
+	generation uint64
+	path       string
+	name       string
+	err        error
+}
+
 type branchListMsg struct {
 	generation uint64
 	branches   []protocol.SessionBranch
@@ -384,11 +391,12 @@ type Model struct {
 	width   int
 	height  int
 
-	transcript     viewport.Model
-	editor         textarea.Model
-	spinner        spinner.Model
-	spinnerRunning bool
-	help           help.Model
+	transcript      viewport.Model
+	editor          textarea.Model
+	spinner         spinner.Model
+	thinkingSpinner spinner.Model
+	spinnerRunning  bool
+	help            help.Model
 
 	lines                         []string // rendered transcript lines
 	assistantBuf                  strings.Builder
@@ -425,6 +433,7 @@ type Model struct {
 	subagentFleetActivitySpace    map[string]bool
 	busy                          bool
 	activeTurnID                  string
+	abortNoticePending            bool
 	rootTurnSequence              uint64
 	rootEventEpoch                uint64
 	rootTurnFence                 bool
@@ -608,6 +617,8 @@ type Model struct {
 	sessionIndex          int
 	sessionRenaming       bool
 	sessionRenameInput    string
+	sessionDeleting       bool
+	sessionDeleteInFlight bool
 
 	// Branch tree picker state.
 	pickTree     bool
@@ -725,6 +736,9 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(colorAccent)
+	thinkingSpinner := spinner.New()
+	thinkingSpinner.Spinner = spinner.Points
+	thinkingSpinner.Style = lipgloss.NewStyle().Foreground(colorAccent)
 
 	ta := textarea.New()
 	normalizeTextareaStyles(&ta)
@@ -758,6 +772,7 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 		transcript:                 vp,
 		editor:                     ta,
 		spinner:                    sp,
+		thinkingSpinner:            thinkingSpinner,
 		help:                       help.New(),
 		userInputEditor:            newUserInputEditor(),
 		events:                     newAgentEventMailbox(),
@@ -946,7 +961,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// idle so long-lived sessions do not continuously rebuild unchanged frames.
 	if !wasSpinnerActive && updated.spinnerActive() && !updated.spinnerRunning {
 		updated.spinnerRunning = true
-		cmd = tea.Batch(cmd, updated.spinner.Tick)
+		cmd = tea.Batch(cmd, updated.spinner.Tick, updated.thinkingSpinner.Tick)
 	}
 	if historyCmd := updated.commitInlineHistory(); historyCmd != nil {
 		return model, tea.Sequence(historyCmd, cmd)
@@ -1162,12 +1177,19 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.spinnerRunning = false
 			return m, nil
 		}
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
 		m.spinnerRunning = true
-		cmds = append(cmds, cmd)
-		if m.showThinkingPlaceholder() {
-			m.refreshTranscript()
+		if msg.ID == 0 || msg.ID == m.spinner.ID() {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		if msg.ID == 0 || msg.ID == m.thinkingSpinner.ID() {
+			var cmd tea.Cmd
+			m.thinkingSpinner, cmd = m.thinkingSpinner.Update(msg)
+			cmds = append(cmds, cmd)
+			if m.showThinkingPlaceholder() {
+				m.refreshTranscript()
+			}
 		}
 	case agentEventMsg:
 		return m.Update(agentEventBatchMsg{events: []protocol.AgentEvent{msg.ev}})
@@ -1428,6 +1450,37 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessions[msg.index].Name = msg.title
 		}
 		m.lastStatus = "renamed session " + msg.title
+		m.layout()
+	case sessionDeleteMsg:
+		if msg.generation != m.pickerGeneration || !m.pickSession {
+			return m, nil
+		}
+		m.sessionLoading = false
+		m.sessionDeleteInFlight = false
+		var cleanupWarning *app.SessionDeleteCleanupError
+		if msg.err != nil && !errors.As(msg.err, &cleanupWarning) {
+			m.pushLine(styleError.Render("session delete: " + msg.err.Error()))
+			return m, nil
+		}
+		if cleanupWarning != nil {
+			m.pushLine(styleTool.Render(cleanupWarning.Error()))
+		}
+		for i := range m.sessions {
+			if m.sessions[i].Path == msg.path {
+				m.sessions = append(m.sessions[:i], m.sessions[i+1:]...)
+				if m.sessionIndex >= len(m.sessions) {
+					m.sessionIndex = max(0, len(m.sessions)-1)
+				}
+				break
+			}
+		}
+		m.lastStatus = "deleted session " + msg.name
+		if len(m.sessions) == 0 {
+			m.pickSession = false
+			if m.startupResumeRequired {
+				return m, m.quitCmd()
+			}
+		}
 		m.layout()
 	case branchListMsg:
 		if msg.generation != m.pickerGeneration || !m.pickTree {
@@ -1998,24 +2051,8 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.activeBashCommand = compactBashCommand(ev.Message)
 		}
 		m.finishAssistant()
-		// Call IDs stay in protocol/session data for correlation, but are
-		// implementation noise in the native transcript. File tools include
-		// their path so edits read like a compact terminal diff card.
-		label := ev.ToolName
-		if path := strings.TrimSpace(ev.Message); path != "" && path != "running" {
-			label += " " + sanitizeToolPreview(path, 500)
-		}
-		if ev.ToolName == "spawn_agent" {
-			// EvSubagentStarted supplies the useful path and role a few moments
-			// later; avoid three transcript rows for one successful spawn.
-		} else if ev.ToolName == "bash" {
-			// The sticky run-status row already shows live activity. Keep shell
-			// calls to one durable summary row at tool_end instead of appending a
-			// start row plus routine running/finished progress rows.
-		} else if ev.ToolName == "edit" {
-			m.pushLine(styleTool.Render(label))
-		} else {
-			m.pushLine(styleTool.Render("▶ " + label))
+		for _, row := range toolStartTranscriptRows(ev.ToolName, ev.Message) {
+			m.pushLine(row)
 		}
 		m.busy = true
 	case protocol.EvToolProgress:
@@ -2024,45 +2061,20 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		if ev.ToolProgress != nil && message == "" {
 			message = strings.TrimSpace(ev.ToolProgress.Message)
 		}
-		if message != "" && ev.ToolName != "bash" {
-			m.pushLine(styleHeaderDim.Render("  ↳ " + sanitizeToolPreview(message, 500)))
+		if row := toolProgressTranscriptRow(ev.ToolName, message); row != "" {
+			m.pushLine(row)
 		}
 	case protocol.EvToolEnd:
 		if ev.ToolName == "ask_user" && m.userInputPending {
 			m.clearUserInput()
 		}
 		m.toolRunning = false
-		label := ev.ToolName
-		duration := ""
-		if ev.ToolDurationMS > 0 {
-			duration = fmt.Sprintf("%dms", ev.ToolDurationMS)
-			if ev.ToolName != "bash" {
-				label += "  (" + duration + ")"
-			}
-		}
-		if ev.IsError {
-			message := strings.TrimSpace(ev.Message)
-			if message == "" {
-				message = "tool failed"
-			}
-			if ev.ToolName == "bash" {
-				m.pushLine(m.renderBashSummary(m.activeBashCommand, duration, message, true))
-			} else {
-				m.pushLine(styleError.Render("✖ " + label + ": " + sanitizeToolPreview(message, 700)))
-			}
-		} else if ev.ToolName == "bash" {
-			m.pushLine(m.renderBashSummary(m.activeBashCommand, duration, "", false))
-		} else if ev.ToolName != "spawn_agent" && !toolHasDiffPreview(ev.ToolName, ev.ToolOutput) {
-			m.pushLine(styleTool.Render("✔ " + label))
+		for _, row := range m.toolEndTranscriptRows(ev.ToolName, m.activeBashCommand, ev.ToolDurationMS, ev.Message, ev.ToolOutput, ev.IsError) {
+			m.pushLine(row)
 		}
 		if m.activeToolCallID == "" || ev.ToolCallID == "" || m.activeToolCallID == ev.ToolCallID {
 			m.activeToolCallID = ""
 			m.activeBashCommand = ""
-		}
-		if !ev.IsError {
-			if preview := renderToolOutput(ev.ToolName, ev.ToolOutput, m.width); preview != "" {
-				m.pushLine(preview)
-			}
 		}
 		// Keep the composer locked until turn_done. Tool calls are serial but
 		// their end/start events can be separated by scheduling, so unlocking
@@ -2222,7 +2234,10 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		m.permAgent = nil
 		m.setRunIdle()
 		m.finishAssistant()
-		m.pushLine(styleError.Render("aborted"))
+		if !m.abortNoticePending {
+			m.pushLine(styleError.Render("aborted"))
+		}
+		m.abortNoticePending = false
 		m.refreshTranscript()
 	case protocol.EvModelChanged:
 		if ev.Model != nil {
@@ -2419,7 +2434,7 @@ func (m *Model) liveText() string {
 		// once in finalizeThinking, matching the assistant streaming path.
 		b.WriteString(styleThinking.Render(m.thinkingBuf.String()))
 	} else if m.showThinkingPlaceholder() {
-		b.WriteString(styleThinking.Render(m.spinner.View() + " thinking…"))
+		b.WriteString(styleThinking.Render(m.thinkingSpinner.View() + " thinking…"))
 	}
 	if m.assistantBuf.Len() > 0 {
 		if b.Len() > 0 {
@@ -3634,6 +3649,7 @@ func (m *Model) startQueueFallback() tea.Cmd {
 func (m *Model) beginOptimisticRun() uint64 {
 	m.runGeneration++
 	m.activeTurnID = ""
+	m.abortNoticePending = false
 	m.turnUsageSeen = false
 	m.busy = true
 	m.toolRunning = false
@@ -3743,7 +3759,8 @@ func (m *Model) requestAbort() {
 	m.pendingInputs = protocol.InputQueue{}
 	m.restoreAbortedInputs(queue, fallbacks, draft)
 	m.setRunIdle()
-	m.pushLine(styleError.Render("aborting…"))
+	m.abortNoticePending = true
+	m.pushLine(styleError.Render("aborted"))
 }
 
 func (m *Model) restoreAbortedInputs(queue protocol.InputQueue, fallbacks []queueSubmitMsg, draft string) {
@@ -5620,6 +5637,10 @@ func (m *Model) startSessionPick() (tea.Model, tea.Cmd) {
 		m.pushLine(styleError.Render("session: wait for the current turn to finish"))
 		return m, nil
 	}
+	m.sessionRenaming = false
+	m.sessionRenameInput = ""
+	m.sessionDeleting = false
+	m.sessionDeleteInFlight = false
 	if m.asyncIO {
 		m.pickSession = true
 		m.sessionLoading = true
@@ -5663,6 +5684,16 @@ func (m *Model) startSessionPick() (tea.Model, tea.Cmd) {
 
 func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
+	if m.sessionDeleting {
+		if keyMatches(msg, m.keys.Close) {
+			m.sessionDeleting = false
+			return m, nil
+		}
+		if keyMatches(msg, m.keys.Accept) || keyMatches(msg, m.keys.Confirm) {
+			return m.executeSessionDelete()
+		}
+		return m, nil
+	}
 	if m.sessionRenaming {
 		switch {
 		case keyMatches(msg, m.keys.Close):
@@ -5682,6 +5713,9 @@ func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.sessionLoading {
+		if m.sessionDeleteInFlight {
+			return m, nil
+		}
 		if msg.Type == tea.KeyEsc {
 			m.pickSession = false
 			m.sessionLoading = false
@@ -5729,12 +5763,36 @@ func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		return m.openSession(m.sessions[m.sessionIndex].Path)
 	case tea.KeyRunes:
-		if keyMatches(msg, m.keys.BranchRename) {
+		switch {
+		case keyMatches(msg, m.keys.BranchRename):
 			m.sessionRenaming = true
 			m.sessionRenameInput = m.sessions[m.sessionIndex].Name
+		case keyMatches(msg, m.keys.BranchDelete):
+			m.sessionDeleting = true
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) executeSessionDelete() (tea.Model, tea.Cmd) {
+	if m.sessionIndex < 0 || m.sessionIndex >= len(m.sessions) {
+		m.sessionDeleting = false
+		return m, nil
+	}
+	selected := m.sessions[m.sessionIndex]
+	name := selected.Name
+	if name == "" {
+		name = shortSessionID(selected.ID)
+	}
+	m.sessionDeleting = false
+	m.sessionDeleteInFlight = m.asyncIO
+	m.sessionLoading = m.asyncIO
+	m.pickerGeneration++
+	generation := m.pickerGeneration
+	return m, func() tea.Msg {
+		err := m.app.DeleteSession(selected.Path, selected.ID)
+		return sessionDeleteMsg{generation: generation, path: selected.Path, name: name, err: err}
+	}
 }
 
 func (m *Model) executeSessionRename() (tea.Model, tea.Cmd) {
@@ -5939,15 +5997,40 @@ func (m *Model) hydrateSession() {
 		m.pushLine(styleError.Render("session read: " + err.Error()))
 		return
 	}
-	messageIDs := make([]string, 0, len(messages))
+	renderMessages := messages
+	durableIDs := make([]string, 0, len(messages))
 	for _, message := range messages {
-		messageIDs = append(messageIDs, message.ID)
+		durableIDs = append(durableIDs, message.ID)
+	}
+	if entries, ok := m.app.Session.(session.BranchEntryStore); ok {
+		if branch, branchErr := entries.BranchEntries(); branchErr == nil {
+			renderMessages = make([]protocol.Message, 0, len(messages))
+			durableIDs = make([]string, 0, len(branch))
+			for _, entry := range branch {
+				durableIDs = append(durableIDs, entry.ID)
+				switch {
+				case entry.Type == session.EntryMessage && entry.Message != nil:
+					renderMessages = append(renderMessages, entry.Message.Clone())
+				case entry.Type == session.EntryMeta && entry.Key == session.MetaToolTranscript:
+					var transcript protocol.ToolTranscript
+					if json.Unmarshal([]byte(entry.Value), &transcript) == nil && transcript.ToolName != "" {
+						renderMessages = append(renderMessages, protocol.Message{
+							ID:          entry.ID,
+							Role:        protocol.RoleTool,
+							ToolName:    transcript.ToolName,
+							IsError:     transcript.IsError,
+							ToolDisplay: transcript.Display.Clone(),
+						})
+					}
+				}
+			}
+		}
 	}
 	key := m.inlineSessionKey()
 	if m.inlineTranscript && key != "" && key == m.inlineHistoryKey {
 		// Live events already committed this branch's new rows. Track durable
 		// identity for a future branch switch without replaying history now.
-		m.inlineDurableMessageIDs = messageIDs
+		m.inlineDurableMessageIDs = durableIDs
 		m.refreshContextUsage(messages)
 		return
 	}
@@ -5960,18 +6043,13 @@ func (m *Model) hydrateSession() {
 	m.transcriptBaseDirty = true
 	m.transcriptDirty = true
 	m.refreshContextUsage(messages)
-	renderMessages := messages
-	hydrationOmitted := 0
-	if !m.inlineTranscript && len(renderMessages) >= maxTranscriptEntries {
-		hydrationOmitted = len(renderMessages) - (maxTranscriptEntries - 1)
-		renderMessages = renderMessages[hydrationOmitted:]
-	}
-	hydrated := make([]string, 0, len(renderMessages))
-	hydratedIDs := make([]string, 0, len(renderMessages))
+	hydrated := make([]string, 0, min(len(messages), maxTranscriptEntries))
+	hydratedIDs := make([]string, 0, min(len(messages), maxTranscriptEntries))
 	appendHydrated := func(id, row string) {
 		hydrated = append(hydrated, row)
 		hydratedIDs = append(hydratedIDs, id)
 	}
+	toolCalls := make(map[string]protocol.ContentBlock)
 	for _, msg := range renderMessages {
 		switch msg.Role {
 		case protocol.RoleUser:
@@ -6000,14 +6078,35 @@ func (m *Model) hydrateSession() {
 						m.latestPlan = block.Text
 						appendHydrated(msg.ID, m.renderPlanBody(block.Text))
 					}
+				case protocol.BlockToolCall:
+					if block.ToolCallID != "" {
+						toolCalls[block.ToolCallID] = block
+					}
+				}
+			}
+			switch msg.StopReason {
+			case protocol.StopAborted:
+				appendHydrated(msg.ID, styleError.Render("aborted"))
+			case protocol.StopError:
+				if message := strings.TrimSpace(msg.Error); message != "" {
+					for _, prefix := range []string{"agent: provider stream: ", "agent: provider chat: ", "agent: provider resolve: ", "agent: "} {
+						message = strings.TrimPrefix(message, prefix)
+					}
+					appendHydrated(msg.ID, styleError.Render("✖ "+message))
 				}
 			}
 		case protocol.RoleTool:
-			// Live tool cards include transient timing/progress/output previews
-			// that cannot be reconstructed exactly after persistence. Excluding a
-			// synthetic replacement keeps shared branch prefix detection semantic
-			// and prevents the remaining history from replaying after a tool fork.
+			call, _ := toolCalls[msg.ToolCallID]
+			for _, row := range m.hydratedToolTranscriptRows(msg, call) {
+				appendHydrated(msg.ID, row)
+			}
 		}
+	}
+	hydrationOmitted := 0
+	if !m.inlineTranscript && len(hydrated) > maxTranscriptEntries {
+		hydrationOmitted = len(hydrated) - (maxTranscriptEntries - 1)
+		hydrated = hydrated[hydrationOmitted:]
+		hydratedIDs = hydratedIDs[hydrationOmitted:]
 	}
 	m.lines = nil
 	m.transcriptBase = ""
@@ -6019,12 +6118,12 @@ func (m *Model) hydrateSession() {
 		commonRows := 0
 		if hadPrintedHistory {
 			commonMessages := 0
-			limit := min(len(m.inlineDurableMessageIDs), len(messageIDs))
-			for commonMessages < limit && m.inlineDurableMessageIDs[commonMessages] == messageIDs[commonMessages] {
+			limit := min(len(m.inlineDurableMessageIDs), len(durableIDs))
+			for commonMessages < limit && m.inlineDurableMessageIDs[commonMessages] == durableIDs[commonMessages] {
 				commonMessages++
 			}
 			shared := make(map[string]struct{}, commonMessages)
-			for _, id := range messageIDs[:commonMessages] {
+			for _, id := range durableIDs[:commonMessages] {
 				shared[id] = struct{}{}
 			}
 			for commonRows < len(hydratedIDs) {
@@ -6035,7 +6134,7 @@ func (m *Model) hydrateSession() {
 			}
 		}
 		m.inlineHistoryKey = key
-		m.inlineDurableMessageIDs = messageIDs
+		m.inlineDurableMessageIDs = durableIDs
 		m.inlineHeaderPending = true
 		m.lines = boundedInlineHydration(hydrated, commonRows, hadPrintedHistory)
 	} else {
@@ -6050,6 +6149,95 @@ func (m *Model) hydrateSession() {
 		}
 	}
 	m.refreshTranscript()
+}
+
+func (m *Model) hydratedToolTranscriptRows(msg protocol.Message, call protocol.ContentBlock) []string {
+	display := msg.ToolDisplay
+	started := false
+	startMessage := ""
+	output := ""
+	durationMS := int64(0)
+	var progress []string
+	if display != nil {
+		started = display.Started
+		startMessage = display.StartMessage
+		progress = display.Progress
+		output = display.Output
+		durationMS = display.DurationMS
+	} else {
+		// Older sessions predate durable tool-card metadata. Reconstruct the
+		// closest safe equivalent from the assistant call and tool result.
+		started = call.Type == protocol.BlockToolCall && legacyToolWasDispatched(msg)
+		startMessage = persistedToolStartMessage(msg.ToolName, call.Arguments)
+		output = legacyToolDisplayOutput(msg)
+	}
+
+	rows := make([]string, 0, len(progress)+3)
+	bashCommand := ""
+	if started {
+		if msg.ToolName == "bash" {
+			bashCommand = compactBashCommand(startMessage)
+		}
+		rows = append(rows, toolStartTranscriptRows(msg.ToolName, startMessage)...)
+	}
+	for _, message := range progress {
+		if row := toolProgressTranscriptRow(msg.ToolName, message); row != "" {
+			rows = append(rows, row)
+		}
+	}
+	message := ""
+	if msg.IsError {
+		message = output
+	}
+	return append(rows, m.toolEndTranscriptRows(msg.ToolName, bashCommand, durationMS, message, output, msg.IsError)...)
+}
+
+func persistedToolStartMessage(name string, arguments json.RawMessage) string {
+	switch name {
+	case "bash":
+		var input struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(arguments, &input) == nil && input.Command != "" {
+			return input.Command
+		}
+	case "edit", "write":
+		var input struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(arguments, &input) == nil && input.Path != "" {
+			return input.Path
+		}
+	}
+	return "running"
+}
+
+func legacyToolWasDispatched(msg protocol.Message) bool {
+	if !msg.IsError {
+		return true
+	}
+	text := sessionMessageText(msg)
+	for _, prefix := range []string{
+		"Permission denied:",
+		"Error: tool arguments are not valid JSON:",
+		"Error: unknown tool ",
+		"Error: tool call cancelled:",
+		"Error: tool call skipped ",
+	} {
+		if strings.HasPrefix(text, prefix) {
+			return false
+		}
+	}
+	return !strings.Contains(text, " is unavailable in ")
+}
+
+func legacyToolDisplayOutput(msg protocol.Message) string {
+	switch msg.ToolName {
+	case "get_goal", "create_goal", "update_goal":
+		return "(private goal state updated)"
+	default:
+		return sessionMessageText(msg)
+	}
 }
 
 func sessionMessageText(msg protocol.Message) string {
@@ -6300,6 +6488,66 @@ func shortSessionID(id string) string {
 		return id[:12]
 	}
 	return id
+}
+
+// toolStartTranscriptRows returns the durable rows produced when a tool starts.
+// Call IDs remain correlation metadata and never enter the native transcript.
+func toolStartTranscriptRows(toolName, message string) []string {
+	label := toolName
+	if detail := strings.TrimSpace(message); detail != "" && detail != "running" {
+		label += " " + sanitizeToolPreview(detail, 500)
+	}
+	switch toolName {
+	case "spawn_agent", "bash":
+		// Subagent lifecycle events provide the useful spawn row. Bash is kept to
+		// one completion summary rather than a start plus routine progress rows.
+		return nil
+	case "edit":
+		return []string{styleTool.Render(label)}
+	default:
+		return []string{styleTool.Render("▶ " + label)}
+	}
+}
+
+func toolProgressTranscriptRow(toolName, message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" || toolName == "bash" {
+		return ""
+	}
+	return styleHeaderDim.Render("  ↳ " + sanitizeToolPreview(message, 500))
+}
+
+func (m *Model) toolEndTranscriptRows(toolName, bashCommand string, durationMS int64, message, output string, isError bool) []string {
+	label := toolName
+	duration := ""
+	if durationMS > 0 {
+		duration = fmt.Sprintf("%dms", durationMS)
+		if toolName != "bash" {
+			label += "  (" + duration + ")"
+		}
+	}
+	rows := make([]string, 0, 2)
+	if isError {
+		message = strings.TrimSpace(message)
+		if message == "" {
+			message = "tool failed"
+		}
+		if toolName == "bash" {
+			rows = append(rows, m.renderBashSummary(bashCommand, duration, message, true))
+		} else {
+			rows = append(rows, styleError.Render("✖ "+label+": "+sanitizeToolPreview(message, 700)))
+		}
+		return rows
+	}
+	if toolName == "bash" {
+		rows = append(rows, m.renderBashSummary(bashCommand, duration, "", false))
+	} else if toolName != "spawn_agent" && !toolHasDiffPreview(toolName, output) {
+		rows = append(rows, styleTool.Render("✔ "+label))
+	}
+	if preview := renderToolOutput(toolName, output, m.width); preview != "" {
+		rows = append(rows, preview)
+	}
+	return rows
 }
 
 func renderToolOutput(toolName, output string, width int) string {
@@ -6818,7 +7066,11 @@ func (m *Model) renderSessionPicker() string {
 		return ""
 	}
 	if m.sessionLoading {
-		return styleHeaderDim.Render("sessions\n  loading sessions…")
+		status := "loading sessions…"
+		if m.sessionDeleteInFlight {
+			status = "deleting session and subagent histories…"
+		}
+		return styleHeaderDim.Render("sessions\n  " + status)
 	}
 	start, end := m.sessionWindow()
 	var b strings.Builder
@@ -6842,9 +7094,16 @@ func (m *Model) renderSessionPicker() string {
 	if showMarkers && end < len(m.sessions) {
 		b.WriteString(styleHeaderDim.Render(truncateRunes("  ↓ more sessions", pickerWidth)) + "\n")
 	}
-	hint := "(↑/↓ choose · PgUp/PgDn scroll · Enter resume · r rename · Esc cancel)"
+	hint := "(↑/↓ choose · PgUp/PgDn scroll · Enter resume · r rename · d delete · Esc cancel)"
 	if m.sessionRenaming {
 		hint = "Rename session: " + m.sessionRenameInput + "_"
+	}
+	if m.sessionDeleting && m.sessionIndex >= 0 && m.sessionIndex < len(m.sessions) {
+		name := m.sessions[m.sessionIndex].Name
+		if name == "" {
+			name = shortSessionID(m.sessions[m.sessionIndex].ID)
+		}
+		hint = "Permanently delete " + strconv.Quote(name) + " and its subagent histories? Enter confirm · Esc cancel"
 	}
 	b.WriteString(styleFooter.Render(truncateRunes(hint, pickerWidth)))
 	return strings.TrimSuffix(b.String(), "\n")
@@ -7567,6 +7826,7 @@ func (m *Model) refreshThemeStyles() {
 	normalizeTextareaStyles(&m.editor)
 	normalizeTextareaStyles(&m.userInputEditor)
 	m.spinner.Style = lipgloss.NewStyle().Foreground(colorAccent)
+	m.thinkingSpinner.Style = lipgloss.NewStyle().Foreground(colorAccent)
 }
 
 func (m *Model) applyThemeSelection(name string, announce, persist bool) error {

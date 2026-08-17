@@ -43,6 +43,11 @@ type Copier interface {
 	CopyText(context.Context, string, string, string) error
 }
 
+// SessionDeleter removes all private artifacts owned by one deleted session.
+type SessionDeleter interface {
+	DeleteSession(context.Context, string) error
+}
+
 // LocalStore stores artifacts beneath a pinned private root.
 type LocalStore struct {
 	mu       sync.RWMutex
@@ -456,6 +461,28 @@ func (s *LocalStore) CopyText(ctx context.Context, sourceSessionID, targetSessio
 		return fmt.Errorf("artifact: close copy: %w", err)
 	}
 	ok = true
+	return nil
+}
+
+// DeleteSession permanently removes one session's private artifact namespace.
+func (s *LocalStore) DeleteSession(ctx context.Context, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return errors.New("artifact: session ID is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.root == nil {
+		return errors.New("artifact: store is closed")
+	}
+	if err := s.root.RemoveAll(namespace(sessionID)); err != nil {
+		return fmt.Errorf("artifact: remove session namespace: %w", err)
+	}
+	s.verifiedMu.Lock()
+	clear(s.verified)
+	s.verifiedMu.Unlock()
 	return nil
 }
 

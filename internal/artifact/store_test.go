@@ -114,6 +114,31 @@ func TestExistsValidatesSessionOwnershipWithoutReading(t *testing.T) {
 	}
 }
 
+func TestLocalStoreDeleteSessionRemovesOnlyOwnedNamespace(t *testing.T) {
+	store, err := NewLocalStore(t.TempDir(), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	owned, err := store.SaveText(context.Background(), "delete-session", "call", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := store.SaveText(context.Background(), "keep-session", "call", "keep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteSession(context.Background(), "delete-session"); err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := store.Exists(context.Background(), "delete-session", owned.ID); err != nil || exists {
+		t.Fatalf("deleted artifact exists=%v err=%v", exists, err)
+	}
+	if exists, err := store.Exists(context.Background(), "keep-session", kept.ID); err != nil || !exists {
+		t.Fatalf("unrelated artifact exists=%v err=%v", exists, err)
+	}
+}
+
 func TestSaveTextRepairsCrashOrphanAndSameSizeTamper(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "artifacts")
 	store, err := NewLocalStore(root, 1024)

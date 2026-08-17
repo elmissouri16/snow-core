@@ -817,6 +817,85 @@ func TestAppSessionPersistence(t *testing.T) {
 	}
 }
 
+func TestAppDeleteSessionRejectsActiveDatabase(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	t.Setenv("SNOW_HOME", filepath.Join(dir, "home"))
+	t.Setenv("SNOW_SESSIONS_DIR", filepath.Join(dir, "sessions"))
+	a, err := New(ctx, Options{Provider: "fake", Permission: "allow", CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	message := protocol.NewUserMessage("active", a.Session.BranchTip(), "active")
+	if err := a.Session.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+		t.Fatal(err)
+	}
+	path := a.Session.Path()
+	if err := a.DeleteSession(path, a.Session.ID()); err == nil || !strings.Contains(err.Error(), "active session") {
+		t.Fatalf("DeleteSession(active) error = %v", err)
+	}
+	alias := filepath.Join(filepath.Dir(path), "active-alias.db")
+	if err := os.Link(path, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DeleteSession(alias, "wrong-id"); err == nil || !strings.Contains(err.Error(), "active session") {
+		t.Fatalf("DeleteSession(active hard-link alias) error = %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("active session was removed: %v", err)
+	}
+}
+
+func TestAppDeleteSessionCleansManagedPrivateState(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	t.Setenv("SNOW_HOME", home)
+	t.Setenv("SNOW_SESSIONS_DIR", filepath.Join(dir, "sessions"))
+	a, err := New(ctx, Options{Provider: "fake", Permission: "allow", CWD: dir, NoSession: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	idx := session.NewFileIndex(session.DefaultSessionsRoot())
+	store, err := idx.Create(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := protocol.NewUserMessage("delete", store.BranchTip(), "delete")
+	if err := store.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+		t.Fatal(err)
+	}
+	path, id := store.Path(), store.ID()
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := a.artifacts.SaveText(ctx, id, "tool", "private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalPath := filepath.Join(home, "goals", id, "goal", "goal-objective.md")
+	if err := os.MkdirAll(filepath.Dir(goalPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(goalPath, []byte("goal"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DeleteSession(path, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("session database still exists: %v", err)
+	}
+	if exists, err := a.artifacts.Exists(ctx, id, ref.ID); err != nil || exists {
+		t.Fatalf("artifact exists=%v err=%v", exists, err)
+	}
+	if _, err := os.Stat(goalPath); !os.IsNotExist(err) {
+		t.Fatalf("goal file still exists: %v", err)
+	}
+}
+
 func TestAppEmptySessionIsNotPersisted(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

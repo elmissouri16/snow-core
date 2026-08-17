@@ -387,6 +387,26 @@ func emitUpdate(emit func(protocol.AgentEvent), g *protocol.ThreadGoal, clear bo
 	}
 }
 
+// DeleteSessionData removes managed goal files for a permanently deleted
+// session. The pinned global root prevents a malformed ID from escaping home.
+func DeleteSessionData(home, sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" || filepath.Base(sessionID) != sessionID || sessionID == "." || sessionID == ".." {
+		return errors.New("goal: invalid session ID")
+	}
+	root, err := os.OpenRoot(home)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("goal: open global root: %w", err)
+	}
+	defer root.Close()
+	if err := root.RemoveAll(filepath.Join("goals", sessionID)); err != nil {
+		return fmt.Errorf("goal: remove session data: %w", err)
+	}
+	return nil
+}
+
 const managedPrefix = "Read the Snow goal objective file at "
 const managedSuffix = " before continuing."
 

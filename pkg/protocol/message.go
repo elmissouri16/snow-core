@@ -208,6 +208,41 @@ func (u Usage) CostFor(pricing *ModelPricing) *Cost {
 	return cost
 }
 
+// ToolDisplay is durable, surface-safe metadata for reconstructing the tool
+// card that accompanied a tool result. Complete model-facing output remains in
+// Message.Content; Output is the same bounded preview published to interactive
+// clients and may instead contain private UI-only details such as an edit diff.
+//
+// Started distinguishes dispatched tools from synthetic results (for example a
+// permission denial). Progress contains the non-empty progress rows shown before
+// completion. StartMessage is normally a file path or shell command.
+type ToolDisplay struct {
+	Started      bool     `json:"started,omitempty"`
+	StartMessage string   `json:"start_message,omitempty"`
+	Progress     []string `json:"progress,omitempty"`
+	Output       string   `json:"output,omitempty"`
+	DurationMS   int64    `json:"duration_ms,omitempty"`
+}
+
+// ToolTranscript is a branch-scoped presentation entry for tool activity that
+// does not have a provider-facing tool-result message, such as an explicit
+// skill activation performed by the harness before a provider request.
+type ToolTranscript struct {
+	ToolName string      `json:"tool_name"`
+	IsError  bool        `json:"is_error,omitempty"`
+	Display  ToolDisplay `json:"display"`
+}
+
+// Clone returns an independent copy.
+func (d *ToolDisplay) Clone() *ToolDisplay {
+	if d == nil {
+		return nil
+	}
+	out := *d
+	out.Progress = append([]string(nil), d.Progress...)
+	return &out
+}
+
 // Message is a durable conversation entry.
 type Message struct {
 	ID        string         `json:"id"`
@@ -224,9 +259,10 @@ type Message struct {
 	Usage      *Usage     `json:"usage,omitempty"`
 
 	// Tool result metadata
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	ToolName   string `json:"tool_name,omitempty"`
-	IsError    bool   `json:"is_error,omitempty"`
+	ToolCallID  string       `json:"tool_call_id,omitempty"`
+	ToolName    string       `json:"tool_name,omitempty"`
+	IsError     bool         `json:"is_error,omitempty"`
+	ToolDisplay *ToolDisplay `json:"tool_display,omitempty"`
 }
 
 // Clone returns an independent message, including mutable block payloads and
@@ -241,6 +277,7 @@ func (m Message) Clone() Message {
 		out.Content[i].Arguments = append(json.RawMessage(nil), block.Arguments...)
 	}
 	out.Usage = m.Usage.Clone()
+	out.ToolDisplay = m.ToolDisplay.Clone()
 	return out
 }
 

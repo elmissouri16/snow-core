@@ -159,7 +159,7 @@ func TestTerminalFragmentWindowPreservesEscapeAndOptionReturn(t *testing.T) {
 			t.Fatal("active Escape fired before fragment window expired")
 		}
 		_, _ = m.Update(clearMetaEnterMsg(m.metaEnterSeq))
-		if len(m.lines) != 61 || !strings.Contains(stripANSI(m.lines[len(m.lines)-1]), "aborting") {
+		if len(m.lines) != 61 || strings.TrimSpace(stripANSI(m.lines[len(m.lines)-1])) != "aborted" {
 			t.Fatalf("active Escape was not replayed: lines=%d", len(m.lines))
 		}
 	})
