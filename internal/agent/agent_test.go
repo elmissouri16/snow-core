@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/snow-core/snow/internal/auth"
+	"github.com/snow-core/snow/internal/compact"
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/provider"
 	"github.com/snow-core/snow/internal/session"
@@ -654,7 +655,7 @@ func TestManualCompactUsesSummaryAndPreservesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Summary != "model summary" || result.UsedFallback || result.SummarizedMessages == 0 {
+	if !strings.Contains(result.Summary, compact.WorkingStateTitle) || !strings.Contains(result.Summary, "model summary") || result.UsedFallback || result.SummarizedMessages == 0 {
 		t.Fatalf("compact result = %+v", result)
 	}
 	if len(prov.requests) != 1 || len(prov.requests[0].Tools) != 0 || len(prov.requests[0].Messages) != result.SummarizedMessages {
@@ -776,6 +777,93 @@ func TestRepeatedCompactionSummarizesProjectedContext(t *testing.T) {
 	}
 	if len(prov.requests) != 2 || len(prov.requests[1].Messages) >= 10 || prov.requests[1].Messages[0].Role != protocol.RoleCustom || !strings.Contains(prov.requests[1].Messages[0].Content[0].Text, "first summary") {
 		t.Fatalf("second request=%+v", prov.requests)
+	}
+}
+
+func TestRepeatedCompactionSendsLatestCheckpointToNextTurn(t *testing.T) {
+	first := compact.WorkingStateTitle + "\n\n## Objective and constraints\n- first checkpoint sentinel"
+	second := compact.WorkingStateTitle + "\n\n## Objective and constraints\n- latest checkpoint sentinel"
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{{Type: protocol.EvStreamTextDelta, Text: first}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+		{{Type: protocol.EvStreamTextDelta, Text: second}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+		{{Type: protocol.EvStreamTextDelta, Text: "recalled latest"}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}}
+	a, st := setup(t, prov, nil, permission.ModeDeny)
+	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 500, Fallback: "local"}
+	memoryValues := []string{"ALPHA-17", "BRAVO-29", "COBALT-31", "DELTA-43", "EMBER-59", "FROST-61", "GARNET-73", "HARBOR-89"}
+	appendUsers := func(prefix string, count int) {
+		t.Helper()
+		for i := 0; i < count; i++ {
+			text := fmt.Sprintf("%s message %d", prefix, i)
+			if prefix == "first" && i == 2 {
+				text = "Facts available only in this old turn: " + strings.Join(memoryValues, ", ")
+			}
+			msg := protocol.NewUserMessage(fmt.Sprintf("%s-%d", prefix, i), "", text)
+			if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	appendUsers("first", 6)
+	if _, err := a.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	appendUsers("second", 4)
+	if _, err := a.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "Recall the latest checkpoint."); err != nil {
+		t.Fatal(err)
+	}
+	if len(prov.requests) != 3 {
+		t.Fatalf("provider requests=%d, want 3", len(prov.requests))
+	}
+	request := prov.requests[2]
+	custom := 0
+	for _, message := range request.Messages {
+		if message.Role != protocol.RoleCustom {
+			continue
+		}
+		custom++
+		text := messageTextBlocks(message)
+		if !strings.Contains(text, "latest checkpoint sentinel") {
+			t.Fatalf("active checkpoint does not contain latest summary:\n%s", text)
+		}
+		for _, value := range memoryValues {
+			if !strings.Contains(text, value) {
+				t.Fatalf("active checkpoint lost old fact %q after two compactions:\n%s", value, text)
+			}
+		}
+	}
+	if custom != 1 || request.Messages[0].Role != protocol.RoleCustom {
+		t.Fatalf("latest request custom checkpoints=%d messages=%+v", custom, request.Messages)
+	}
+}
+
+func TestManualCompactRejectsMalformedSummaryWhenFallbackIsError(t *testing.T) {
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamTextDelta, Text: `<｜DSML｜tool_calls><｜DSML｜invoke name="bash">`},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+	}}}
+	a, st := setup(t, prov, nil, permission.ModeDeny)
+	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 500, Fallback: "error"}
+	for i := 0; i < 6; i++ {
+		msg := protocol.NewUserMessage(fmt.Sprintf("malformed-%d", i), "", fmt.Sprintf("objective message %d", i))
+		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := a.Compact(context.Background()); err == nil || !strings.Contains(err.Error(), "tool-protocol markup") {
+		t.Fatalf("malformed summary error=%v", err)
+	}
+	projected, err := st.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range projected {
+		if message.Role == protocol.RoleCustom {
+			t.Fatalf("failed quality validation persisted a compaction marker: %+v", projected)
+		}
 	}
 }
 

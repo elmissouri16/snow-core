@@ -2,9 +2,12 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
@@ -527,5 +530,202 @@ func TestSystemPromptFileValidation(t *testing.T) {
 	}
 	if _, err := LoadProjectExtensions(project); err == nil {
 		t.Fatal("empty project system prompt path was accepted")
+	}
+}
+
+func TestProjectSelectionsAreIndependentAndOverlayDefaults(t *testing.T) {
+	projectA := filepath.Join(t.TempDir(), "project-a")
+	projectB := filepath.Join(t.TempDir(), "project-b")
+	cfg := Default()
+	cfg.DefaultProvider = "opencode-go"
+	cfg.DefaultModel = "global-model"
+	cfg.Thinking = "off"
+
+	var err error
+	cfg, err = WithProjectSelection(cfg, projectA, ProjectSelection{Provider: "fake", Model: "model-a", Thinking: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = WithProjectSelection(cfg, projectB, ProjectSelection{Provider: "openai-compatible", Model: "model-b", Thinking: "low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	effectiveA := cfg
+	if found, err := ApplyProjectSelection(&effectiveA, projectA); err != nil || !found {
+		t.Fatalf("apply project A: found=%v err=%v", found, err)
+	}
+	if effectiveA.DefaultProvider != "fake" || effectiveA.DefaultModel != "model-a" || effectiveA.Thinking != "high" {
+		t.Fatalf("project A selection = %s/%s thinking:%s", effectiveA.DefaultProvider, effectiveA.DefaultModel, effectiveA.Thinking)
+	}
+
+	effectiveB := cfg
+	if found, err := ApplyProjectSelection(&effectiveB, projectB); err != nil || !found {
+		t.Fatalf("apply project B: found=%v err=%v", found, err)
+	}
+	if effectiveB.DefaultProvider != "openai-compatible" || effectiveB.DefaultModel != "model-b" || effectiveB.Thinking != "low" {
+		t.Fatalf("project B selection = %s/%s thinking:%s", effectiveB.DefaultProvider, effectiveB.DefaultModel, effectiveB.Thinking)
+	}
+	if cfg.DefaultProvider != "opencode-go" || cfg.DefaultModel != "global-model" || cfg.Thinking != "off" {
+		t.Fatalf("global defaults changed = %s/%s thinking:%s", cfg.DefaultProvider, cfg.DefaultModel, cfg.Thinking)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.ProjectSelections) != 2 {
+		t.Fatalf("reloaded project selections = %+v", reloaded.ProjectSelections)
+	}
+}
+
+func TestUpdateMergesConcurrentProjectAndGlobalChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Save(path, Default()); err != nil {
+		t.Fatal(err)
+	}
+	const projects = 12
+	projectRoot := t.TempDir()
+	var wg sync.WaitGroup
+	errs := make(chan error, projects+3)
+	for i := range projects {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cwd := filepath.Join(projectRoot, fmt.Sprintf("project-%d", i))
+			_, err := SaveProjectSelection(path, cwd, ProjectSelection{Provider: "fake", Model: fmt.Sprintf("model-%d", i), Thinking: "off"})
+			errs <- err
+		}()
+	}
+	mutations := []func(*Config){
+		func(cfg *Config) { cfg.PermissionMode = "deny" },
+		func(cfg *Config) { cfg.ReasoningSummary = "detailed" },
+		func(cfg *Config) { cfg.TUI.Theme = "dark" },
+	}
+	for _, mutation := range mutations {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := Update(path, func(cfg *Config) error {
+				mutation(cfg)
+				return nil
+			})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ProjectSelections) != projects {
+		t.Fatalf("project selections = %d, want %d: %+v", len(cfg.ProjectSelections), projects, cfg.ProjectSelections)
+	}
+	if cfg.PermissionMode != "deny" || cfg.ReasoningSummary != "detailed" || cfg.TUI.Theme != "dark" {
+		t.Fatalf("concurrent global settings were lost: permission=%q summary=%q theme=%q", cfg.PermissionMode, cfg.ReasoningSummary, cfg.TUI.Theme)
+	}
+}
+
+func TestUpdateHelperProcess(t *testing.T) {
+	if os.Getenv("SNOW_CONFIG_UPDATE_HELPER") != "1" {
+		return
+	}
+	path := os.Getenv("SNOW_CONFIG_UPDATE_PATH")
+	kind := os.Getenv("SNOW_CONFIG_UPDATE_KIND")
+	var err error
+	switch kind {
+	case "project":
+		_, err = SaveProjectSelection(path, os.Getenv("SNOW_CONFIG_UPDATE_PROJECT"), ProjectSelection{Provider: "fake", Model: os.Getenv("SNOW_CONFIG_UPDATE_MODEL"), Thinking: "off"})
+	case "theme":
+		_, err = Update(path, func(cfg *Config) error {
+			cfg.TUI.Theme = "dark"
+			return nil
+		})
+	case "summary":
+		_, err = Update(path, func(cfg *Config) error {
+			cfg.ReasoningSummary = "detailed"
+			return nil
+		})
+	default:
+		err = fmt.Errorf("unknown helper kind %q", kind)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateSerializesMixedWritersAcrossProcesses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Save(path, Default()); err != nil {
+		t.Fatal(err)
+	}
+	projectRoot := t.TempDir()
+	type helper struct {
+		kind    string
+		project string
+		model   string
+	}
+	helpers := []helper{
+		{kind: "project", project: filepath.Join(projectRoot, "a"), model: "model-a"},
+		{kind: "project", project: filepath.Join(projectRoot, "b"), model: "model-b"},
+		{kind: "project", project: filepath.Join(projectRoot, "c"), model: "model-c"},
+		{kind: "theme"},
+		{kind: "summary"},
+	}
+	commands := make([]*exec.Cmd, 0, len(helpers))
+	for _, helper := range helpers {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestUpdateHelperProcess$")
+		cmd.Env = append(os.Environ(),
+			"SNOW_CONFIG_UPDATE_HELPER=1",
+			"SNOW_CONFIG_UPDATE_PATH="+path,
+			"SNOW_CONFIG_UPDATE_KIND="+helper.kind,
+			"SNOW_CONFIG_UPDATE_PROJECT="+helper.project,
+			"SNOW_CONFIG_UPDATE_MODEL="+helper.model,
+		)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		commands = append(commands, cmd)
+	}
+	for _, cmd := range commands {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("helper failed: %v", err)
+		}
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ProjectSelections) != 3 || cfg.TUI.Theme != "dark" || cfg.ReasoningSummary != "detailed" {
+		t.Fatalf("cross-process updates were lost: projects=%+v theme=%q summary=%q", cfg.ProjectSelections, cfg.TUI.Theme, cfg.ReasoningSummary)
+	}
+}
+
+func TestLoadRejectsInvalidProjectThinking(t *testing.T) {
+	project := filepath.Join(t.TempDir(), "project")
+	path := filepath.Join(t.TempDir(), "config.json")
+	data, err := json.Marshal(map[string]any{
+		"project_selections": map[string]any{
+			project: map[string]any{"provider": "fake", "model": "fake-1", "thinking": "extreme"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "invalid thinking level") {
+		t.Fatalf("invalid project thinking error = %v", err)
 	}
 }

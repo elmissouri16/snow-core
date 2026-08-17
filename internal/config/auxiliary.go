@@ -251,7 +251,7 @@ func LoadThemes(globalDir, projectRoot string, projectAllowed bool) (map[string]
 
 func defaultAuxBindings() map[string][]string {
 	return map[string][]string{
-		"submit": {"enter"}, "follow_up": {"alt+enter"}, "newline": {"ctrl+j", "alt+enter"}, "paste": {"ctrl+v"}, "abort": {"ctrl+c", "esc"}, "quit": {"ctrl+c", "ctrl+d"}, "toggle_mode": {"shift+tab"},
+		"submit": {"enter"}, "follow_up": {"alt+enter"}, "newline": {"ctrl+j", "alt+enter"}, "paste": {"ctrl+v"}, "abort": {"ctrl+c", "esc"}, "quit": {"ctrl+c", "ctrl+d"}, "toggle_mode": {"shift+tab"}, "thinking": {"ctrl+t"},
 		"picker_up": {"up", "left", "k"}, "picker_down": {"down", "right", "j"}, "picker_previous": {"shift+tab"}, "picker_next": {"tab"}, "picker_page_up": {"pgup"}, "picker_page_down": {"pgdown"}, "picker_top": {"home"}, "picker_bottom": {"end"},
 		"accept": {"enter"}, "close": {"esc"}, "branch_fork": {"f"}, "branch_rename": {"r"}, "branch_delete": {"d"}, "confirm": {"y"},
 	}
@@ -276,8 +276,8 @@ func appendUnique(values []string, value string) []string {
 
 func validateEffectiveAuxBindings(bindings map[string][]string) error {
 	for _, context := range [][]string{
-		{"submit", "newline", "paste", "toggle_mode", "abort"},
-		{"submit", "follow_up", "abort"},
+		{"submit", "newline", "paste", "toggle_mode", "thinking", "abort"},
+		{"submit", "follow_up", "thinking", "abort"},
 		{"picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm"},
 	} {
 		seen := map[string]string{}
@@ -296,7 +296,7 @@ func validateEffectiveAuxBindings(bindings map[string][]string) error {
 
 func validateKeybindingFile(file KeybindingsFile) error {
 	allowed := map[string]bool{}
-	for _, name := range []string{"submit", "follow_up", "newline", "paste", "abort", "quit", "toggle_mode", "page_up", "page_down", "top", "bottom", "line_up", "line_down", "picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm"} {
+	for _, name := range []string{"submit", "follow_up", "newline", "paste", "abort", "quit", "toggle_mode", "thinking", "page_up", "page_down", "top", "bottom", "line_up", "line_down", "picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm"} {
 		allowed[name] = true
 	}
 	clean := map[string][]string{}
@@ -316,8 +316,8 @@ func validateKeybindingFile(file KeybindingsFile) error {
 		}
 	}
 	for _, context := range [][]string{
-		{"submit", "newline", "paste", "toggle_mode", "abort"},
-		{"submit", "follow_up", "abort"},
+		{"submit", "newline", "paste", "toggle_mode", "thinking", "abort"},
+		{"submit", "follow_up", "thinking", "abort"},
 		{"picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm"},
 	} {
 		seen := map[string]string{}
@@ -360,16 +360,13 @@ func validateTheme(t ThemeFile) error {
 			return fmt.Errorf("invalid theme name %q", t.Name)
 		}
 	}
-	switch t.Name {
-	case "default", "dark", "light", "high-contrast":
+	if IsBuiltInTUITheme(t.Name) {
 		return fmt.Errorf("theme name %q is reserved", t.Name)
 	}
 	if t.Extends == "" {
 		t.Extends = "default"
 	}
-	switch t.Extends {
-	case "default", "dark", "light", "high-contrast":
-	default:
+	if !IsBuiltInTUITheme(t.Extends) {
 		return fmt.Errorf("theme extends unsupported built-in %q", t.Extends)
 	}
 	pairs := []AdaptiveColor{t.Colors.Accent, t.Colors.Muted, t.Colors.Foreground, t.Colors.Warning, t.Colors.Error, t.Colors.Success, t.Colors.Separator}

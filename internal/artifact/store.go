@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -30,6 +31,8 @@ type Ref struct {
 type Store interface {
 	SaveText(context.Context, string, string, string) (Ref, error)
 	ReadText(context.Context, string, string) (string, error)
+	Exists(context.Context, string, string) (bool, error)
+	ListIDs(context.Context, string) ([]string, error)
 	Close() error
 }
 
@@ -284,6 +287,96 @@ func (s *LocalStore) ReadText(ctx context.Context, sessionID, id string) (string
 		return "", errors.New("artifact: stored artifact exceeds limit")
 	}
 	return strings.ToValidUTF8(string(data), "�"), nil
+}
+
+// Exists validates whether an opaque artifact belongs to one session without
+// reading its contents into memory.
+func (s *LocalStore) Exists(ctx context.Context, sessionID, id string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if sessionID == "" {
+		return false, errors.New("artifact: session ID is required")
+	}
+	if err := validateID(id); err != nil {
+		return false, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed || s.root == nil {
+		return false, errors.New("artifact: store is closed")
+	}
+	dir, err := openVerifiedNamespace(s.root, namespace(sessionID), false)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("artifact: open namespace: %w", err)
+	}
+	defer dir.Close()
+	file, err := openVerifiedArtifact(dir, id+".txt", s.maxBytes)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("artifact: inspect: %w", err)
+	}
+	return true, file.Close()
+}
+
+// ListIDs enumerates validated immutable artifact IDs owned by one session.
+// It scans the private namespace once so callers can intersect untrusted text
+// markers without performing one filesystem open per marker.
+func (s *LocalStore) ListIDs(ctx context.Context, sessionID string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if sessionID == "" {
+		return nil, errors.New("artifact: session ID is required")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed || s.root == nil {
+		return nil, errors.New("artifact: store is closed")
+	}
+	dir, err := openVerifiedNamespace(s.root, namespace(sessionID), false)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("artifact: open namespace: %w", err)
+	}
+	defer dir.Close()
+	directory, err := dir.Open(".")
+	if err != nil {
+		return nil, fmt.Errorf("artifact: open namespace directory: %w", err)
+	}
+	entries, readErr := directory.ReadDir(-1)
+	closeErr := directory.Close()
+	if readErr != nil || closeErr != nil {
+		return nil, errors.Join(readErr, closeErr)
+	}
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".txt") {
+			continue
+		}
+		id := strings.TrimSuffix(name, ".txt")
+		if validateID(id) != nil {
+			continue
+		}
+		info, err := dir.Lstat(name)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > int64(s.maxBytes) {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // CopyText copies one immutable source artifact into another session namespace

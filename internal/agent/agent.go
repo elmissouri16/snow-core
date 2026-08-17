@@ -126,6 +126,7 @@ type CompactionOptions struct {
 	AutoThresholdPercent int
 	// GoalAutoThresholdPercent is a deprecated source-compatibility alias.
 	GoalAutoThresholdPercent      int
+	ToolHistoryBudgetPercent      int
 	ToolResultInlineBytes         int
 	HistoricalToolResultThreshold int
 }
@@ -174,6 +175,7 @@ type Agent struct {
 	turnProgress          bool
 	latestContextTokens   int
 	latestRequestEstimate int
+	latestContextReport   *ContextReport
 	// Deferred schemas selected for the current user turn. The base selection
 	// is sticky; the latest search_tools result may add at most five more.
 	baseDeferred     []string
@@ -561,6 +563,7 @@ func (a *Agent) setSessionAdmitted(st session.Store, publish bool) error {
 	a.mode = mode
 	a.turnMode = mode
 	a.latestContextTokens = 0
+	a.latestContextReport = nil
 	effort := a.effectiveThinkingLocked(mode)
 	a.mu.Unlock()
 	if publish {
@@ -1372,6 +1375,7 @@ func (a *Agent) SelectBranchAdmitted(branchID string) error {
 			a.turnMode = restored
 			a.resetTurnIdentityLocked()
 			a.latestContextTokens = 0
+			a.latestContextReport = nil
 		} else if oldBranchID != "" {
 			err = errors.Join(err, branches.SelectBranch(oldBranchID))
 		}
@@ -1470,6 +1474,7 @@ func (a *Agent) ForkWithOptionsAdmitted(opts protocol.BranchForkOptions) (protoc
 	a.turnMode = mode
 	a.resetTurnIdentityLocked()
 	a.latestContextTokens = 0
+	a.latestContextReport = nil
 	effort := a.effectiveThinkingLocked(mode)
 	a.mu.Unlock()
 	a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: effort}})
@@ -1665,11 +1670,16 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 	return a.compactActiveContext(ctx, compactionManual)
 }
 
+func isCompactionCheckpointText(text string) bool {
+	return strings.HasPrefix(text, "Working-state checkpoint for compacted history:") ||
+		strings.HasPrefix(text, "Conversation summary:")
+}
+
 func latestPersistedContextTokens(messages []protocol.Message) int {
 	// Usage before a projected compaction summary describes the old full
 	// request. Usage after that marker is valid for the newly grown context.
 	start := 0
-	if len(messages) > 0 && messages[0].Role == protocol.RoleCustom && strings.HasPrefix(messageTextBlocks(messages[0]), "Conversation summary:") {
+	if len(messages) > 0 && messages[0].Role == protocol.RoleCustom && isCompactionCheckpointText(messageTextBlocks(messages[0])) {
 		// The projection places retained pre-marker tail messages after the
 		// summary too. Only messages whose parent chain starts at the compaction
 		// marker were requested after compaction and have valid occupancy usage.
@@ -1705,7 +1715,7 @@ func (a *Agent) autoThresholdPercent() int {
 	return threshold
 }
 
-func (a *Agent) autoCompactionDue(messages []protocol.Message) bool {
+func (a *Agent) pressureCompactionDue(messages []protocol.Message) bool {
 	threshold := a.autoThresholdPercent()
 	model := a.Model()
 	if threshold == 0 || model.ContextWindow <= 0 {
@@ -1731,6 +1741,69 @@ func (a *Agent) autoCompactionDue(messages []protocol.Message) bool {
 	return current > 0 && !stopped && int64(current)*100 >= int64(model.ContextWindow)*int64(threshold)
 }
 
+func (a *Agent) toolHistoryCompactionDue(messages []protocol.Message) bool {
+	percent := a.opts.Compaction.ToolHistoryBudgetPercent
+	model := a.Model()
+	if percent <= 0 || model.ContextWindow <= 0 || len(messages) == 0 {
+		return false
+	}
+	a.mu.RLock()
+	stopped := a.autoStop
+	a.mu.RUnlock()
+	if stopped {
+		return false
+	}
+	threshold := a.opts.Compaction.HistoricalToolResultThreshold
+	if threshold <= 0 {
+		threshold = compact.HistoricalToolResultThreshold
+	}
+	projected := compact.PruneHistoricalToolResults(messages, threshold, compact.HistoricalToolResultHead, compact.HistoricalToolResultTail)
+	plan := compact.PlannerWithOptions(projected, a.compactionPlannerOptions(model, projected))
+	if len(plan.CompactionCandidates) == 0 {
+		return false
+	}
+	eligible := estimateToolHistoryTokens(plan.CompactionCandidates)
+	return int64(eligible)*100 >= int64(model.ContextWindow)*int64(percent)
+}
+
+func estimateToolHistoryTokens(messages []protocol.Message) int {
+	bytes := 0
+	for _, message := range messages {
+		switch message.Role {
+		case protocol.RoleAssistant:
+			for _, block := range message.Content {
+				if block.Type == protocol.BlockToolCall {
+					bytes += len(block.Name) + len(block.ToolCallID) + len(block.Arguments)
+				}
+			}
+		case protocol.RoleTool:
+			bytes += len(message.ToolName) + len(message.ToolCallID)
+			for _, block := range message.Content {
+				if block.Type == protocol.BlockImage {
+					bytes += estimateImageTokens(block.Data) * 4
+					continue
+				}
+				bytes += len(block.Text) + len(block.Arguments)
+			}
+		}
+	}
+	return (bytes + 3) / 4
+}
+
+func (a *Agent) autoCompactionTriggerFor(messages []protocol.Message) compactionTrigger {
+	if a.pressureCompactionDue(messages) {
+		return compactionPressure
+	}
+	if a.toolHistoryCompactionDue(messages) {
+		return compactionToolHistory
+	}
+	return ""
+}
+
+func (a *Agent) autoCompactionDue(messages []protocol.Message) bool {
+	return a.autoCompactionTriggerFor(messages) != ""
+}
+
 // autoCompactAdmittedBoundary compacts at the safe top-of-cycle boundary of
 // any admitted turn. If the turn captured a goal, the goal snapshot must still
 // be active and matching before its context may be replaced.
@@ -1738,7 +1811,8 @@ func (a *Agent) autoCompactAdmittedBoundary(ctx context.Context, messages []prot
 	a.mu.RLock()
 	admittedGoal := a.goalAtTurn.Clone()
 	a.mu.RUnlock()
-	if !a.autoCompactionDue(messages) {
+	trigger := a.autoCompactionTriggerFor(messages)
+	if trigger == "" {
 		return false, nil
 	}
 	if admittedGoal != nil {
@@ -1750,7 +1824,7 @@ func (a *Agent) autoCompactAdmittedBoundary(ctx context.Context, messages []prot
 			return false, err
 		}
 	}
-	result, err := a.compactActiveContext(ctx, compactionPressure)
+	result, err := a.compactActiveContext(ctx, trigger)
 	if err != nil {
 		return true, err
 	}
@@ -1768,7 +1842,12 @@ func (a *Agent) autoCompactAdmittedGoalBoundary(ctx context.Context, messages []
 }
 
 func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
-	if !a.autoCompactionDue(nil) {
+	messages, err := a.contextMessagesCurrent()
+	if err != nil {
+		return false, err
+	}
+	trigger := a.autoCompactionTriggerFor(messages)
+	if trigger == "" {
 		return false, nil
 	}
 	if ctx == nil {
@@ -1804,7 +1883,7 @@ func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
 		a.turnWG.Done()
 	}()
 
-	result, err := a.compactActiveContext(runCtx, compactionPressure)
+	result, err := a.compactActiveContext(runCtx, trigger)
 	if err != nil {
 		return true, err
 	}
@@ -1819,18 +1898,13 @@ func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
 type compactionTrigger string
 
 const (
-	compactionManual   compactionTrigger = "manual"
-	compactionPressure compactionTrigger = "pressure"
-	compactionOverflow compactionTrigger = "context-overflow"
+	compactionManual      compactionTrigger = "manual"
+	compactionPressure    compactionTrigger = "pressure"
+	compactionToolHistory compactionTrigger = "tool-history"
+	compactionOverflow    compactionTrigger = "context-overflow"
 )
 
-func (a *Agent) compactActiveContext(ctx context.Context, trigger compactionTrigger) (protocol.CompactionResult, error) {
-	automatic := trigger != compactionManual
-	msgs, err := a.contextMessagesCurrent()
-	if err != nil {
-		return protocol.CompactionResult{}, fmt.Errorf("agent: compact load context: %w", err)
-	}
-	model := a.Model()
+func (a *Agent) compactionPlannerOptions(model protocol.Model, messages []protocol.Message) compact.PlannerOptions {
 	budget := a.opts.Compaction.RetainTokens
 	if budget <= 0 {
 		budget = model.ContextWindow / 4
@@ -1848,11 +1922,47 @@ func (a *Agent) compactActiveContext(ctx context.Context, trigger compactionTrig
 	if minTurns <= 0 {
 		minTurns = 2
 	}
-	plan := compact.PlannerWithOptions(msgs, compact.PlannerOptions{RetainTokens: budget, MinRetainedTurns: minTurns})
+	if compactionTailIsActive(messages) {
+		// The in-flight user/tool cycle is retained in addition to the configured
+		// number of complete recent turns; it must not consume that quality floor.
+		minTurns++
+	}
+	return compact.PlannerOptions{
+		RetainTokens:          budget,
+		MinRetainedTurns:      minTurns,
+		AllowActiveToolCycles: compactionTailIsActive(messages),
+	}
+}
+
+func compactionTailIsActive(messages []protocol.Message) bool {
+	if len(messages) == 0 {
+		return false
+	}
+	last := messages[len(messages)-1]
+	switch last.Role {
+	case protocol.RoleUser, protocol.RoleAgent, protocol.RoleTool:
+		return true
+	case protocol.RoleAssistant:
+		return last.StopReason == protocol.StopToolUse || last.StopReason == protocol.StopPending
+	default:
+		return false
+	}
+}
+
+func (a *Agent) compactActiveContext(ctx context.Context, trigger compactionTrigger) (protocol.CompactionResult, error) {
+	automatic := trigger != compactionManual
+	msgs, err := a.contextMessagesCurrent()
+	if err != nil {
+		return protocol.CompactionResult{}, fmt.Errorf("agent: compact load context: %w", err)
+	}
+	model := a.Model()
+	plan := compact.PlannerWithOptions(msgs, a.compactionPlannerOptions(model, msgs))
 	result := protocol.CompactionResult{SummarizedMessages: len(plan.CompactionCandidates), RetainedMessages: len(msgs) - len(plan.CompactionCandidates), Automatic: automatic}
 	message := fmt.Sprintf("compacting %d messages", result.SummarizedMessages)
 	if trigger == compactionPressure {
 		message = fmt.Sprintf("context reached %d%%; %s", a.autoThresholdPercent(), message)
+	} else if trigger == compactionToolHistory {
+		message = fmt.Sprintf("completed tool history reached %d%% of the model window; %s", a.opts.Compaction.ToolHistoryBudgetPercent, message)
 	} else if trigger == compactionOverflow {
 		message = "provider rejected the context as too large; " + message + " before one retry"
 	}
@@ -1867,6 +1977,7 @@ func (a *Agent) compactActiveContext(ctx context.Context, trigger compactionTrig
 		return result, nil
 	}
 
+	retainedRefs, referenceVerificationErr := a.verifiedCompactedArtifactReferences(ctx, plan.CompactionCandidates)
 	summaryInput := a.pruneHistoricalToolResults(ctx, plan.CompactionCandidates)
 	summary, summaryErr := a.summarizeForCompaction(ctx, summaryInput)
 	usedFallback := false
@@ -1885,16 +1996,40 @@ func (a *Agent) compactActiveContext(ctx context.Context, trigger compactionTrig
 		a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: summaryErr.Error(), IsError: true, Compaction: &result})
 		return protocol.CompactionResult{}, fmt.Errorf("agent: compact summary: %w", summaryErr)
 	}
+	summary, repairedSummary, normalizeErr := compact.NormalizeWorkingStateCheckpoint(ctx, summary, summaryInput)
+	if normalizeErr != nil {
+		a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: normalizeErr.Error(), IsError: true, Compaction: &result})
+		return protocol.CompactionResult{}, fmt.Errorf("agent: normalize compact summary: %w", normalizeErr)
+	}
+	if repairedSummary && a.opts.Compaction.Fallback == "error" {
+		summaryErr = errors.New("provider compaction summary contained tool-protocol markup")
+		a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: summaryErr.Error(), IsError: true, Compaction: &result})
+		return protocol.CompactionResult{}, fmt.Errorf("agent: compact summary quality: %w", summaryErr)
+	}
+	usedFallback = usedFallback || repairedSummary
+	transcriptRef, transcriptErr := a.saveCompactedToolTranscript(ctx, plan.CompactionCandidates, plan.BoundaryID)
+	manifestRefs := boundedCompactionReferences(retainedRefs, transcriptRef)
+	summary = rebuildCompactionRetrievalSection(summary, manifestRefs)
 	result.Summary = summary
 	result.UsedFallback = usedFallback
 	if _, err = compact.Apply(ctx, a.opts.Session, func(context.Context, []protocol.Message) (string, error) { return summary, nil }, plan); err != nil {
 		a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: err.Error(), IsError: true, Compaction: &result})
 		return protocol.CompactionResult{}, fmt.Errorf("agent: compact apply: %w", err)
 	}
-	message = ""
+	a.mu.Lock()
+	a.latestContextReport = nil
+	a.mu.Unlock()
+	var completionNotes []string
 	if usedFallback {
-		message = "provider summary failed; used local fallback"
+		completionNotes = append(completionNotes, "provider summary required deterministic local fallback or repair")
 	}
+	if referenceVerificationErr != nil {
+		completionNotes = append(completionNotes, "working-state checkpoint saved; some prior retrieval references could not be verified")
+	}
+	if transcriptErr != nil || (estimateToolHistoryTokens(plan.CompactionCandidates) > 0 && transcriptRef == "") {
+		completionNotes = append(completionNotes, "working-state checkpoint saved; exact compacted tool transcript is unavailable")
+	}
+	message = strings.Join(completionNotes, "; ")
 	// Persisted session mutation is observable before the terminal compaction
 	// boundary. Keeping EvCompactionDone last prevents consumers from settling
 	// the turn and then being resurrected by a trailing attributed update.
@@ -1905,7 +2040,22 @@ func (a *Agent) compactActiveContext(ctx context.Context, trigger compactionTrig
 
 func (a *Agent) summarizeForCompaction(ctx context.Context, msgs []protocol.Message) (string, error) {
 	p := a.currentProvider()
-	contract := `Create factual continuation context for a coding agent, not a conversational recap. Use compact sections for: user objective and constraints; decisions with rationale; exact files and symbols changed; commands/tests and outcomes; important tool results; errors and failed approaches; current repository state; and unresolved next steps. Preserve exact identifiers and paths when known. Do not invent facts or call tools.`
+	contract := `Create a factual working-state checkpoint for a coding agent, not a conversational recap. Return bounded Markdown using exactly these headings, in this order:
+# Working State Checkpoint
+## Objective and constraints
+## Current working state
+## Decisions and rationale
+## Files and symbols
+## Commands and verification
+## Important tool results
+## Errors and failed approaches
+## Attributed agent updates
+## Prior working-state checkpoints
+## Retrieval references
+## Unresolved next steps
+## Active tool batch
+
+Preserve exact identifiers, paths, artifact IDs, commands, test outcomes, failure state, and pending work when known. Carry forward still-relevant facts and retrieval references from prior checkpoints. The compaction boundary is safe, so Active tool batch should normally say none; never invent one. Do not invent facts or call tools.`
 	if guidance := strings.TrimSpace(a.opts.Compaction.Guidance); guidance != "" {
 		contract += "\n\nAdditional operator guidance (additive; the contract above remains mandatory):\n" + guidance
 	}
@@ -3139,8 +3289,10 @@ func (a *Agent) run(ctx context.Context) error {
 		}
 
 		requestEstimate := estimateRequestTokens(req.Messages, req.System, req.Tools)
+		contextReport := buildContextReport(req, true)
 		a.mu.Lock()
 		a.latestRequestEstimate = requestEstimate
+		a.latestContextReport = &contextReport
 		a.mu.Unlock()
 
 		stop, err := a.streamTurnWithErrors(ctx, req, overflowRecovered)
@@ -3529,6 +3681,9 @@ streamLoop:
 				usage = &normalized
 				a.mu.Lock()
 				a.latestContextTokens = contextTokensForCompaction(normalized)
+				if a.latestContextReport != nil {
+					a.latestContextReport.Usage = normalized.Clone()
+				}
 				a.mu.Unlock()
 				a.publish(protocol.AgentEvent{Type: protocol.EvUsage, Usage: normalized.Clone()})
 			}
@@ -4455,6 +4610,242 @@ func (a *Agent) spillToolResult(ctx context.Context, toolName, callID string, co
 		return content
 	}
 	return preview[0].Content
+}
+
+func compactedArtifactReferences(messages []protocol.Message) []string {
+	const marker = "Full retained tool result:"
+	seen := make(map[string]bool)
+	var refs []string
+	collect := func(value string) {
+		for offset := 0; ; {
+			index := strings.Index(value[offset:], marker)
+			if index < 0 {
+				return
+			}
+			index += offset
+			start := index + len(marker)
+			for start < len(value) && (value[start] == ' ' || value[start] == '\t') {
+				start++
+			}
+			end := start + len("artifact-") + 32
+			if end <= len(value) {
+				candidate := value[start:end]
+				valid := strings.HasPrefix(candidate, "artifact-")
+				for _, r := range candidate[len("artifact-"):] {
+					if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+						valid = false
+						break
+					}
+				}
+				if valid && !seen[candidate] {
+					seen[candidate] = true
+					refs = append(refs, candidate)
+				}
+			}
+			offset = index + len(marker)
+		}
+	}
+	for _, message := range messages {
+		collect(message.Error)
+		for _, block := range message.Content {
+			collect(block.Text)
+		}
+	}
+	return refs
+}
+
+const maxCompactionRetrievalReferences = 24
+
+func (a *Agent) verifiedCompactedArtifactReferences(ctx context.Context, messages []protocol.Message) ([]string, error) {
+	if a.opts.Artifacts == nil {
+		return nil, nil
+	}
+	a.mu.RLock()
+	sessionID := ""
+	if a.opts.Session != nil {
+		sessionID = a.opts.Session.ID()
+	}
+	a.mu.RUnlock()
+	if sessionID == "" {
+		return nil, errors.New("artifact verification requires a session ID")
+	}
+	ownedIDs, err := a.opts.Artifacts.ListIDs(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	owned := make(map[string]bool, len(ownedIDs))
+	for _, id := range ownedIDs {
+		owned[id] = true
+	}
+	candidates := compactedArtifactReferences(messages)
+	verified := make([]string, 0, min(len(candidates), maxCompactionRetrievalReferences))
+	// References are ordered oldest to newest. Intersect with the structurally
+	// enumerated session namespace, then retain the newest 24. Forged markers
+	// cannot consume verification work or crowd out older valid references.
+	for i := len(candidates) - 1; i >= 0 && len(verified) < maxCompactionRetrievalReferences; i-- {
+		if owned[candidates[i]] {
+			verified = append(verified, candidates[i])
+		}
+	}
+	for left, right := 0, len(verified)-1; left < right; left, right = left+1, right-1 {
+		verified[left], verified[right] = verified[right], verified[left]
+	}
+	return verified, nil
+}
+
+func boundedCompactionReferences(retained []string, transcriptRef string) []string {
+	if len(retained) > maxCompactionRetrievalReferences {
+		retained = retained[len(retained)-maxCompactionRetrievalReferences:]
+	}
+	out := append([]string(nil), retained...)
+	if transcriptRef == "" {
+		return out
+	}
+	if len(out) >= maxCompactionRetrievalReferences {
+		out = out[1:]
+	}
+	return append(out, transcriptRef)
+}
+
+func rebuildCompactionRetrievalSection(summary string, refs []string) string {
+	const (
+		heading = "## Retrieval references"
+		marker  = "Full retained tool result:"
+	)
+	// Model-generated summaries are untrusted. Remove every marker they echo,
+	// regardless of section, then rebuild the one canonical section exclusively
+	// from session-owned references.
+	lines := strings.Split(summary, "\n")
+	for i := 0; i < len(lines); i++ {
+		removed := false
+		for {
+			index := strings.Index(lines[i], marker)
+			if index < 0 {
+				break
+			}
+			end := index + len(marker)
+			for end < len(lines[i]) && (lines[i][end] == ' ' || lines[i][end] == '\t') {
+				end++
+			}
+			candidateEnd := end + len("artifact-") + 32
+			if candidateEnd <= len(lines[i]) && strings.HasPrefix(lines[i][end:candidateEnd], "artifact-") {
+				end = candidateEnd
+			}
+			lines[i] = strings.TrimSpace(lines[i][:index] + lines[i][end:])
+			removed = true
+		}
+		if removed {
+			if lines[i] == "" {
+				lines[i] = "- Unverified artifact reference omitted."
+			}
+			if i+1 < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[i+1]), "Use artifact_read or artifact_grep") {
+				lines[i+1] = ""
+			}
+		}
+	}
+	// Remove every model-supplied top-level retrieval section, not just the
+	// first. Canonical content is inserted once at the required position below.
+	filtered := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); {
+		if strings.TrimSpace(lines[i]) != heading {
+			filtered = append(filtered, lines[i])
+			i++
+			continue
+		}
+		i++
+		for i < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[i]), "## ") {
+			i++
+		}
+	}
+	canonical := []string{heading}
+	if len(refs) == 0 {
+		canonical = append(canonical, "- None recorded.")
+	} else {
+		for _, ref := range refs {
+			canonical = append(canonical,
+				marker+" "+ref,
+				"Use artifact_read or artifact_grep to inspect retained compacted tool evidence.",
+			)
+		}
+	}
+	insertAt := len(filtered)
+	for i, line := range filtered {
+		if strings.TrimSpace(line) == "## Unresolved next steps" {
+			insertAt = i
+			break
+		}
+	}
+	result := append([]string(nil), filtered[:insertAt]...)
+	if len(result) > 0 && result[len(result)-1] != "" {
+		result = append(result, "")
+	}
+	result = append(result, canonical...)
+	if insertAt < len(filtered) && (len(result) == 0 || result[len(result)-1] != "") {
+		result = append(result, "")
+	}
+	result = append(result, filtered[insertAt:]...)
+	return strings.Join(result, "\n")
+}
+
+func (a *Agent) saveCompactedToolTranscript(ctx context.Context, messages []protocol.Message, boundaryID string) (string, error) {
+	if a.opts.Artifacts == nil || estimateToolHistoryTokens(messages) == 0 {
+		return "", nil
+	}
+	a.mu.RLock()
+	sessionID := ""
+	if a.opts.Session != nil {
+		sessionID = a.opts.Session.ID()
+	}
+	a.mu.RUnlock()
+	if sessionID == "" {
+		return "", errors.New("compacted tool transcript requires a session ID")
+	}
+	var transcript strings.Builder
+	transcript.WriteString("Compacted tool transcript. Opaque provider continuity and private reasoning are intentionally omitted.\n")
+	for _, message := range messages {
+		hasToolContent := message.Role == protocol.RoleTool
+		if message.Role == protocol.RoleAssistant {
+			for _, block := range message.Content {
+				if block.Type == protocol.BlockToolCall {
+					hasToolContent = true
+					break
+				}
+			}
+		}
+		if !hasToolContent {
+			continue
+		}
+		fmt.Fprintf(&transcript, "\nmessage %s role=%s", message.ID, message.Role)
+		if message.ParentID != "" {
+			fmt.Fprintf(&transcript, " parent=%s", message.ParentID)
+		}
+		if message.Role == protocol.RoleTool {
+			fmt.Fprintf(&transcript, " tool=%s call_id=%s error=%t", message.ToolName, message.ToolCallID, message.IsError)
+		}
+		transcript.WriteByte('\n')
+		for _, block := range message.Content {
+			switch block.Type {
+			case protocol.BlockToolCall:
+				fmt.Fprintf(&transcript, "tool_call name=%s call_id=%s arguments=%s\n", block.Name, block.ToolCallID, strings.TrimSpace(string(block.Arguments)))
+			case protocol.BlockText, protocol.BlockPlan:
+				transcript.WriteString(block.Text)
+				if !strings.HasSuffix(block.Text, "\n") {
+					transcript.WriteByte('\n')
+				}
+			case protocol.BlockImage:
+				fmt.Fprintf(&transcript, "[image %s, %d bytes]\n", block.MIMEType, len(block.Data))
+			}
+		}
+	}
+	value := transcript.String()
+	if strings.TrimSpace(value) == "" {
+		return "", nil
+	}
+	ref, err := a.opts.Artifacts.SaveText(ctx, sessionID, "compaction-tool-history\x00"+boundaryID, value)
+	if err != nil {
+		return "", fmt.Errorf("save compacted tool transcript: %w", err)
+	}
+	return ref.ID, nil
 }
 
 func (a *Agent) pruneHistoricalToolResults(ctx context.Context, messages []protocol.Message) []protocol.Message {

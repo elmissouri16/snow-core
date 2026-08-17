@@ -89,6 +89,31 @@ func TestLocalStoreIsIdempotentAndBounded(t *testing.T) {
 	}
 }
 
+func TestExistsValidatesSessionOwnershipWithoutReading(t *testing.T) {
+	store, err := NewLocalStore(t.TempDir(), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ref, err := store.SaveText(context.Background(), "session-a", "key", "value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := store.Exists(context.Background(), "session-a", ref.ID); err != nil || !exists {
+		t.Fatalf("owned artifact exists=%v err=%v", exists, err)
+	}
+	if exists, err := store.Exists(context.Background(), "session-b", ref.ID); err != nil || exists {
+		t.Fatalf("cross-session artifact exists=%v err=%v", exists, err)
+	}
+	ids, err := store.ListIDs(context.Background(), "session-a")
+	if err != nil || len(ids) != 1 || ids[0] != ref.ID {
+		t.Fatalf("owned artifact IDs=%v err=%v", ids, err)
+	}
+	if ids, err := store.ListIDs(context.Background(), "session-b"); err != nil || len(ids) != 0 {
+		t.Fatalf("cross-session artifact IDs=%v err=%v", ids, err)
+	}
+}
+
 func TestSaveTextRepairsCrashOrphanAndSameSizeTamper(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "artifacts")
 	store, err := NewLocalStore(root, 1024)

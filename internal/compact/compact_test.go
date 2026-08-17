@@ -2,6 +2,8 @@ package compact
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/snow-core/snow/internal/session"
@@ -64,6 +66,100 @@ func TestPlannerKeepsToolCallsWithResultsAcrossAutonomousTurns(t *testing.T) {
 	}
 	if msgs[plan.KeepFrom].Role == protocol.RoleTool {
 		t.Fatal("retained context begins with an orphan tool result")
+	}
+}
+
+func TestPlannerCompactsCompletedCyclesInsideActiveToolTurn(t *testing.T) {
+	messages := []protocol.Message{mkMsg("user", "", "long-running objective")}
+	for i := 0; i < 5; i++ {
+		callID := fmtID(i) + "-call"
+		assistant := protocol.NewAssistantMessage(fmtID(i)+"-assistant", "", "test", "model", []protocol.ContentBlock{
+			{Type: protocol.BlockProviderData, Name: fmtID(i) + "-state", Data: []byte(`{"opaque":true}`)},
+			{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read", Arguments: json.RawMessage(`{"path":"file"}`)},
+		}, protocol.StopToolUse, nil)
+		messages = append(messages, assistant)
+		messages = append(messages, protocol.NewToolResultMessage(fmtID(i)+"-result", "", callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false))
+	}
+	withoutCycles := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2})
+	if len(withoutCycles.CompactionCandidates) != 0 {
+		t.Fatalf("ordinary turn planning split an active turn: %+v", withoutCycles)
+	}
+	plan := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2, AllowActiveToolCycles: true})
+	if len(plan.CompactionCandidates) == 0 || plan.BoundaryID != "cid-result" {
+		t.Fatalf("active-cycle plan=%+v", plan)
+	}
+	if messages[plan.KeepFrom].Role != protocol.RoleAssistant || !toolPairingBalancedAt(messages, plan.KeepFrom) {
+		t.Fatalf("unsafe active-cycle cut at %d", plan.KeepFrom)
+	}
+	for _, message := range plan.CompactionCandidates {
+		if message.Role == protocol.RoleAssistant {
+			foundCall := false
+			for _, block := range message.Content {
+				foundCall = foundCall || block.Type == protocol.BlockToolCall
+			}
+			if !foundCall {
+				t.Fatalf("provider state was detached from its owning assistant: %+v", message)
+			}
+		}
+	}
+}
+
+func TestPlannerActiveCyclesDoNotConsumeRecentTurnFloor(t *testing.T) {
+	assistantText := func(id string) protocol.Message {
+		return protocol.NewAssistantMessage(id, "", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("done")}, protocol.StopStop, nil)
+	}
+	messages := []protocol.Message{
+		mkMsg("old-user-1", "", "old one"), assistantText("old-assistant-1"),
+		mkMsg("old-user-2", "", "old two"), assistantText("old-assistant-2"),
+		mkMsg("active-user", "", "active objective"),
+	}
+	for i := 0; i < 5; i++ {
+		callID := fmtID(i) + "-active-call"
+		messages = append(messages,
+			protocol.NewAssistantMessage(fmtID(i)+"-active-assistant", "", "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"}}, protocol.StopToolUse, nil),
+			protocol.NewToolResultMessage(fmtID(i)+"-active-result", "", callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false),
+		)
+	}
+	plan := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 3, AllowActiveToolCycles: true})
+	if len(plan.CompactionCandidates) != 0 {
+		t.Fatalf("active cycles consumed the exact recent-turn floor: %+v", plan)
+	}
+}
+
+func TestPlannerCheckpointProjectionKeepsRetainedTerminalGoalTurn(t *testing.T) {
+	messages := []protocol.Message{
+		{ID: "checkpoint", Role: protocol.RoleCustom, Content: []protocol.ContentBlock{protocol.NewTextBlock("working state")}},
+		protocol.NewAssistantMessage("retained-goal", "checkpoint", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("prior exact goal result")}, protocol.StopStop, nil),
+	}
+	for i := 0; i < 5; i++ {
+		callID := fmtID(i) + "-goal-call"
+		messages = append(messages,
+			protocol.NewAssistantMessage(fmtID(i)+"-goal-assistant", "", "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"}}, protocol.StopToolUse, nil),
+			protocol.NewToolResultMessage(fmtID(i)+"-goal-result", "", callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false),
+		)
+	}
+	plan := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 3, AllowActiveToolCycles: true})
+	if len(plan.CompactionCandidates) != 0 {
+		t.Fatalf("checkpoint projection compacted retained terminal goal turn: %+v", plan)
+	}
+}
+
+func TestPlannerCheckpointProjectionCompactsFreshParentedActiveTurn(t *testing.T) {
+	checkpoint := protocol.Message{ID: "compaction-marker", Role: protocol.RoleCustom, Content: []protocol.ContentBlock{protocol.NewTextBlock("working state")}}
+	messages := []protocol.Message{
+		checkpoint,
+		protocol.NewUserMessage("active-user", "marker", "fresh long objective"),
+	}
+	for i := 0; i < 5; i++ {
+		callID := fmtID(i) + "-fresh-call"
+		messages = append(messages,
+			protocol.NewAssistantMessage(fmtID(i)+"-fresh-assistant", "", "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"}}, protocol.StopToolUse, nil),
+			protocol.NewToolResultMessage(fmtID(i)+"-fresh-result", "", callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false),
+		)
+	}
+	plan := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 3, AllowActiveToolCycles: true})
+	if len(plan.CompactionCandidates) == 0 || plan.KeepFrom <= 1 || !toolPairingBalancedAt(messages, plan.KeepFrom) {
+		t.Fatalf("fresh parented active turn was not safely compactable: %+v", plan)
 	}
 }
 
@@ -162,6 +258,203 @@ func TestApplyResolvesVirtualCompactionBoundary(t *testing.T) {
 	projected, err = store.ContextMessages()
 	if err != nil || len(projected) != 3 || projected[1].ID != "c" || projected[2].ID != "d" {
 		t.Fatalf("second projection=%+v err=%v", projected, err)
+	}
+}
+
+func TestToolPairingAllowsProviderScopedIDReuseAcrossCompleteTurns(t *testing.T) {
+	call := func(id, parent string) protocol.Message {
+		return protocol.NewAssistantMessage(id, parent, "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: "reused", Name: "read"}}, protocol.StopToolUse, nil)
+	}
+	msgs := []protocol.Message{
+		mkMsg("u1", "", "first"), call("a1", "u1"), protocol.NewToolResultMessage("r1", "a1", "reused", "read", []protocol.ContentBlock{protocol.NewTextBlock("one")}, false),
+		protocol.NewAssistantMessage("d1", "r1", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("done")}, protocol.StopStop, nil),
+		mkMsg("u2", "d1", "second"), call("a2", "u2"), protocol.NewToolResultMessage("r2", "a2", "reused", "read", []protocol.ContentBlock{protocol.NewTextBlock("two")}, false),
+		protocol.NewAssistantMessage("d2", "r2", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("done")}, protocol.StopStop, nil),
+		mkMsg("u3", "d2", "third"), protocol.NewAssistantMessage("d3", "u3", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("done")}, protocol.StopStop, nil),
+		mkMsg("u4", "d3", "fourth"),
+	}
+	if !toolPairingBalancedAt(msgs, 8) {
+		t.Fatal("complete turns with provider-scoped reused call IDs were rejected")
+	}
+	plan := PlannerWithOptions(msgs, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2})
+	if plan.KeepFrom == 0 || len(plan.CompactionCandidates) == 0 {
+		t.Fatalf("reused complete call IDs disabled compaction: %+v", plan)
+	}
+}
+
+func TestPlannerRejectsToolPairingCut(t *testing.T) {
+	call := protocol.NewAssistantMessage("call", "u1", "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: "tc", Name: "read"}}, protocol.StopToolUse, nil)
+	msgs := []protocol.Message{
+		mkMsg("u1", "", "start"),
+		call,
+		mkMsg("u2", "call", "malformed boundary"),
+		protocol.NewToolResultMessage("result", "u2", "tc", "read", []protocol.ContentBlock{protocol.NewTextBlock("late")}, false),
+		mkMsg("u3", "result", "third"),
+	}
+	if toolPairingBalancedAt(msgs, 2) {
+		t.Fatal("pairing validator accepted a call/result split")
+	}
+	plan := PlannerWithOptions(msgs, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2})
+	if plan.KeepFrom != 0 || len(plan.CompactionCandidates) != 0 {
+		t.Fatalf("malformed tool history produced a compaction plan: %+v", plan)
+	}
+}
+
+func TestFormatWorkingStateCheckpointFillsRequiredSections(t *testing.T) {
+	checkpoint := FormatWorkingStateCheckpoint("current fact")
+	if !strings.HasPrefix(checkpoint, WorkingStateTitle) || !strings.Contains(checkpoint, "## Current working state\ncurrent fact") {
+		t.Fatalf("checkpoint wrapper=%q", checkpoint)
+	}
+	for _, section := range WorkingStateSections {
+		if !strings.Contains(checkpoint, "## "+section) {
+			t.Errorf("checkpoint missing section %q:\n%s", section, checkpoint)
+		}
+	}
+}
+
+func TestNormalizeWorkingStateCheckpointRepairsCriticalSections(t *testing.T) {
+	messages := []protocol.Message{
+		protocol.NewUserMessage("u", "", "Preserve ticket LANTERN-47 and prioritize correctness."),
+		{ID: "tool", Role: protocol.RoleTool, ToolName: "bash", ToolCallID: "call", IsError: true, Content: []protocol.ContentBlock{protocol.NewTextBlock("go test ./... failed")}},
+		{ID: "prior", Role: protocol.RoleCustom, Content: []protocol.ContentBlock{protocol.NewTextBlock("Working-state checkpoint for compacted history: prior decision cobalt")}},
+	}
+	summary := WorkingStateTitle + "\n\n## Current working state\nImplementation exists."
+	got, repaired, err := NormalizeWorkingStateCheckpoint(context.Background(), summary, messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired {
+		t.Fatal("section augmentation should not report full fallback")
+	}
+	for _, want := range []string{"LANTERN-47", "go test ./... failed", "prior decision cobalt"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("normalized checkpoint missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestNormalizeWorkingStateCheckpointCanonicalizesDuplicateVerificationSections(t *testing.T) {
+	messages := []protocol.Message{{
+		ID: "failed", Role: protocol.RoleTool, ToolName: "bash", ToolCallID: "verify", IsError: true,
+		Content: []protocol.ContentBlock{protocol.NewTextBlock("go test ./... failed: compile error")},
+	}}
+	summary := WorkingStateTitle + `
+
+## Commands and verification
+- provider claimed clean
+
+## Commands and verification
+- ALL CHECKS PASSED
+
+## Errors and failed approaches appendix
+- appendix evidence
+
+## Errors and failed approaches
+- None recorded.
+
+## Errors and failed approaches
+- no failures
+
+## Decisions and rationale
+- first unique decision
+
+## Decisions and rationale
+- second unique decision`
+	got, fallback, err := NormalizeWorkingStateCheckpoint(context.Background(), summary, messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallback {
+		t.Fatal("duplicate canonicalization unexpectedly used full fallback")
+	}
+	for _, heading := range []string{"Commands and verification", "Errors and failed approaches", "Decisions and rationale"} {
+		exact := "\n## " + heading + "\n"
+		if strings.Count(got, exact) != 1 {
+			t.Fatalf("heading %q count=%d:\n%s", heading, strings.Count(got, exact), got)
+		}
+	}
+	for _, want := range []string{
+		"ALL CHECKS PASSED",
+		"go test ./... failed: compile error",
+		"Deterministic verification status: failures were recorded",
+		"## Errors and failed approaches appendix",
+		"first unique decision",
+		"second unique decision",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("canonical checkpoint lost %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestNormalizeWorkingStateCheckpointSanitizesMarkupFromPriorCheckpoint(t *testing.T) {
+	prior := WorkingStateTitle + `
+
+## Objective and constraints
+- preserve FACT-BEFORE-MARKUP
+
+## Current working state
+<｜DSML｜tool_calls><｜DSML｜invoke name="bash">dangerous command
+
+## Unresolved next steps
+- preserve FACT-AFTER-MARKUP`
+	messages := []protocol.Message{{ID: "prior", Role: protocol.RoleCustom, Content: []protocol.ContentBlock{protocol.NewTextBlock(prior)}}}
+	got, fallback, err := NormalizeWorkingStateCheckpoint(context.Background(), WorkingStateTitle+"\n\n## Current working state\n- continue safely", messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallback {
+		t.Fatal("provider summary itself was valid; prior-state sanitization should not report full fallback")
+	}
+	if containsProviderToolMarkup(got) || !strings.Contains(got, "FACT-BEFORE-MARKUP") || !strings.Contains(got, "FACT-AFTER-MARKUP") {
+		t.Fatalf("prior checkpoint markup was not safely sanitized:\n%s", got)
+	}
+}
+
+func TestNormalizeWorkingStateCheckpointRejectsProviderToolMarkup(t *testing.T) {
+	messages := []protocol.Message{protocol.NewUserMessage("u", "", "objective lantern")}
+	got, repaired, err := NormalizeWorkingStateCheckpoint(context.Background(), "<｜DSML｜tool_calls><｜DSML｜invoke name=\"bash\">", messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repaired || strings.Contains(strings.ToLower(got), "dsml") || !strings.Contains(got, "objective lantern") {
+		t.Fatalf("markup fallback repaired=%v:\n%s", repaired, got)
+	}
+}
+
+func TestDefaultSummarizerExtractsCleanPathFromToolArguments(t *testing.T) {
+	msgs := []protocol.Message{protocol.NewAssistantMessage("call", "u", "test", "model", []protocol.ContentBlock{{
+		Type: protocol.BlockToolCall, ToolCallID: "read", Name: "read", Arguments: json.RawMessage(`{"path":"internal/compact/compact.go"}`),
+	}}, protocol.StopToolUse, nil)}
+	summary, err := DefaultSummarizer(context.Background(), msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "- internal/compact/compact.go") || strings.Contains(summary, `path\":\"internal/compact/compact.go`) {
+		t.Fatalf("tool argument path extraction was malformed:\n%s", summary)
+	}
+}
+
+func TestDefaultSummarizerPreservesPriorCheckpointAndAgentUpdate(t *testing.T) {
+	msgs := []protocol.Message{
+		{Role: protocol.RoleCustom, Content: []protocol.ContentBlock{protocol.NewTextBlock("prior fact artifact-0123456789abcdef0123456789abcdef")}},
+		{Role: protocol.RoleAgent, Content: []protocol.ContentBlock{protocol.NewTextBlock("reviewer found unresolved race")}},
+		mkMsg("u", "", "preserve constraints"),
+		protocol.NewAssistantMessage("a", "u", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("changed `internal/agent/agent.go` in `compactActiveContext`")}, protocol.StopStop, nil),
+	}
+	summary, err := DefaultSummarizer(context.Background(), msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{WorkingStateTitle, "Prior working-state checkpoints", "prior fact artifact-0123456789abcdef0123456789abcdef", "Attributed agent updates", "reviewer found unresolved race", "Files and symbols", "internal/agent/agent.go", "compactActiveContext", "Active tool batch"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("fallback checkpoint missing %q:\n%s", want, summary)
+		}
+	}
+	retrievalStart := strings.Index(summary, "## Retrieval references")
+	retrievalEnd := strings.Index(summary, "## Unresolved next steps")
+	if retrievalStart < 0 || retrievalEnd < retrievalStart || strings.Contains(summary[retrievalStart:retrievalEnd], "artifact-") {
+		t.Fatalf("unverified bare artifact token was promoted to retrieval evidence:\n%s", summary)
 	}
 }
 

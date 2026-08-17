@@ -54,19 +54,31 @@ func TestAuxiliaryThemesPrecedenceReservedAndBounded(t *testing.T) {
 	}
 }
 
+func TestBuiltInThemesAreReservedCustomBases(t *testing.T) {
+	for _, name := range BuiltInTUIThemes() {
+		if err := validateTheme(ThemeFile{Version: 1, Name: name}); err == nil {
+			t.Errorf("built-in theme name %q was not reserved", name)
+		}
+		if err := validateTheme(ThemeFile{Version: 1, Name: "custom-" + name, Extends: name}); err != nil {
+			t.Errorf("custom theme could not extend %q: %v", name, err)
+		}
+	}
+}
+
 func TestAuxiliaryKeybindingsProjectOverridesAndStrictFields(t *testing.T) {
 	global, project := t.TempDir(), t.TempDir()
 	_ = os.MkdirAll(filepath.Join(project, ".snow"), 0o755)
-	_ = os.WriteFile(filepath.Join(global, "keybindings.yaml"), []byte("version: 1\nbindings:\n  submit: [ctrl+s]\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(global, "keybindings.yaml"), []byte("version: 1\nbindings:\n  submit: [ctrl+s]\n  thinking: [ctrl+y]\n"), 0o600)
 	_ = os.WriteFile(filepath.Join(project, ".snow", "keybindings.yaml"), []byte("version: 1\nbindings:\n  submit: [enter]\n"), 0o600)
 	got, diagnostics := LoadKeybindings(global, project, true)
-	if len(diagnostics) != 0 || got.Bindings["submit"][0] != "enter" {
+	if len(diagnostics) != 0 || got.Bindings["submit"][0] != "enter" || got.Bindings["thinking"][0] != "ctrl+y" {
 		t.Fatalf("got=%+v diagnostics=%+v", got, diagnostics)
 	}
 	for _, invalid := range []string{
 		"version: 1\nbindings:\n  not_an_action: [x]\n",
 		"version: 1\nbindings:\n  submit: [esc]\n",
 		"version: 1\nbindings:\n  follow_up: [ctrl+c]\n",
+		"version: 1\nbindings:\n  thinking: [ctrl+s]\n",
 	} {
 		_ = os.WriteFile(filepath.Join(project, ".snow", "keybindings.yaml"), []byte(invalid), 0o600)
 		got, diagnostics = LoadKeybindings(global, project, true)

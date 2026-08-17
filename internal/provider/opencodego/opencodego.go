@@ -924,8 +924,12 @@ func mapMessage(m protocol.Message) (openAIMessage, bool) {
 	case protocol.RoleTool:
 		return openAIMessage{Role: "tool", ToolCallID: m.ToolCallID, Content: textContent(m)}, true
 	case protocol.RoleCustom:
-		// Harness notes surface as assistant text.
-		return openAIMessage{Role: "assistant", Content: textContent(m)}, true
+		// Harness-owned checkpoints are authoritative input, not prior model
+		// output. Rendering them as assistant text lets chat-completions models
+		// discount or contradict the newest compaction state, especially after
+		// repeated compaction. Responses adapters already render this role as
+		// user input; keep both protocol paths consistent.
+		return openAIMessage{Role: "user", Content: textContent(m)}, true
 	default:
 		return openAIMessage{}, false
 	}

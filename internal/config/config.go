@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
@@ -23,6 +24,8 @@ const DefaultBashTimeout = 120 * time.Second
 
 // DefaultContextCapBytes is the hard cap for injected project context (100 KiB).
 const DefaultContextCapBytes = 100 * 1024
+
+var updateMu sync.Mutex
 
 const (
 	// MaxConcurrentSubagents bounds provider/process fan-out from one root.
@@ -157,6 +160,9 @@ type CompactionConfig struct {
 	Fallback             string `json:"fallback,omitempty"` // local|error
 	Guidance             string `json:"guidance,omitempty"`
 	AutoThresholdPercent int    `json:"auto_threshold_percent"`
+	// ToolHistoryBudgetPercent triggers safe whole-turn compaction when completed
+	// tool calls/results exceed this share of the model window. Zero disables it.
+	ToolHistoryBudgetPercent int `json:"tool_history_budget_percent"`
 	// GoalAutoThresholdPercent is a deprecated source-compatibility alias. New
 	// JSON is emitted through auto_threshold_percent; legacy JSON is accepted by Load.
 	GoalAutoThresholdPercent      int `json:"-"`
@@ -168,7 +174,7 @@ type CompactionConfig struct {
 func DefaultCompaction() CompactionConfig {
 	return CompactionConfig{
 		MinRetainedTurns: 2, SummaryMaxTokens: 2000, Fallback: "local",
-		AutoThresholdPercent: 80, GoalAutoThresholdPercent: 80, ToolResultInlineBytes: 16 << 10,
+		AutoThresholdPercent: 80, ToolHistoryBudgetPercent: 20, GoalAutoThresholdPercent: 80, ToolResultInlineBytes: 16 << 10,
 		ArtifactMaxBytes: 4 << 20, HistoricalToolResultThreshold: 8 << 10,
 	}
 }
@@ -195,6 +201,9 @@ func (c CompactionConfig) Validate() error {
 	if c.AutoThresholdPercent != 0 && (c.AutoThresholdPercent < 50 || c.AutoThresholdPercent > 99) {
 		return errors.New("config: compaction auto_threshold_percent must be 0 or 50..99")
 	}
+	if c.ToolHistoryBudgetPercent != 0 && (c.ToolHistoryBudgetPercent < 5 || c.ToolHistoryBudgetPercent > 50) {
+		return errors.New("config: compaction tool_history_budget_percent must be 0 or 5..50")
+	}
 	if c.ToolResultInlineBytes < 1024 || c.ToolResultInlineBytes > 1<<20 {
 		return errors.New("config: compaction tool_result_inline_bytes must be 1024..1048576")
 	}
@@ -209,9 +218,34 @@ func (c CompactionConfig) Validate() error {
 
 const defaultTUITheme = "default"
 
-// ValidateTUITheme accepts the small built-in palette set. Keeping this in the
-// config package makes persisted settings fail early instead of producing a
-// partially styled terminal later.
+var builtInTUIThemes = [...]string{
+	"default",
+	"dark",
+	"light",
+	"high-contrast",
+	"nord",
+	"dracula",
+	"gruvbox",
+}
+
+// BuiltInTUIThemes returns the selectable built-in themes in display order.
+func BuiltInTUIThemes() []string {
+	return append([]string(nil), builtInTUIThemes[:]...)
+}
+
+// IsBuiltInTUITheme reports whether name is reserved for a built-in palette.
+func IsBuiltInTUITheme(name string) bool {
+	for _, builtIn := range builtInTUIThemes {
+		if name == builtIn {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateTUITheme accepts built-in names and safe custom-theme names. Keeping
+// this in the config package makes persisted settings fail early instead of
+// producing a partially styled terminal later.
 func ValidateTUITheme(theme string) error {
 	theme = strings.TrimSpace(theme)
 	if theme == "" {
@@ -392,10 +426,20 @@ type ProjectCompactionConfig struct {
 	Guidance         string  `json:"guidance,omitempty"`
 }
 
+// ProjectSelection remembers the interactive provider/model/effort choice for
+// one working directory. It lives in the operator-owned global configuration;
+// project input cannot alter it.
+type ProjectSelection struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+}
+
 // Config is the global snow configuration.
 type Config struct {
 	DefaultProvider         string                          `json:"default_provider,omitempty"`
 	DefaultModel            string                          `json:"default_model,omitempty"`
+	ProjectSelections       map[string]ProjectSelection     `json:"project_selections,omitempty"`
 	PermissionMode          string                          `json:"permission_mode,omitempty"`            // ask|allow|deny
 	DefaultProjectTrust     string                          `json:"default_project_trust,omitempty"`      // ask|allow|deny (always|never aliases)
 	Thinking                string                          `json:"thinking,omitempty"`                   // off|minimal|low|medium|high|xhigh|max|ultra
@@ -430,6 +474,7 @@ func Default() Config {
 		ToolOutputBytes:     DefaultToolOutputBytes,
 		BashTimeoutMS:       int(DefaultBashTimeout / time.Millisecond),
 		ContextCapBytes:     DefaultContextCapBytes,
+		ProjectSelections:   map[string]ProjectSelection{},
 		Providers: map[string]ProviderConfig{
 			"opencode-go":       {},
 			"openai-compatible": {},
@@ -442,6 +487,20 @@ func Default() Config {
 		TUI:        TUIConfig{Theme: "default", Mouse: true},
 		Sandbox:    DefaultSandbox(),
 	}
+}
+
+// Clone returns a deep copy suitable for applying runtime-only overlays without
+// mutating the operator configuration through shared maps or slices.
+func Clone(cfg Config) (Config, error) {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: clone marshal: %w", err)
+	}
+	var cloned Config
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return Config{}, fmt.Errorf("config: clone unmarshal: %w", err)
+	}
+	return cloned, nil
 }
 
 // GlobalDir returns the snow global config directory.
@@ -483,6 +542,9 @@ func Load(path string) (Config, error) {
 	if cfg.Providers == nil {
 		cfg.Providers = map[string]ProviderConfig{}
 	}
+	if cfg.ProjectSelections == nil {
+		cfg.ProjectSelections = map[string]ProjectSelection{}
+	}
 	if cfg.MCPServers == nil {
 		cfg.MCPServers = map[string]publicmcp.ServerSpec{}
 	}
@@ -516,11 +578,22 @@ func Load(path string) (Config, error) {
 		Compaction map[string]json.RawMessage `json:"compaction"`
 	}
 	_ = json.Unmarshal(data, &rawConfig)
-	if _, present := rawConfig.Compaction["auto_threshold_percent"]; !present {
+	_, autoThresholdPresent := rawConfig.Compaction["auto_threshold_percent"]
+	_, legacyAutoThresholdPresent := rawConfig.Compaction["goal_auto_threshold_percent"]
+	if !autoThresholdPresent {
 		if legacy, ok := rawConfig.Compaction["goal_auto_threshold_percent"]; ok {
 			_ = json.Unmarshal(legacy, &cfg.Compaction.AutoThresholdPercent)
 		} else {
 			cfg.Compaction.AutoThresholdPercent = defaults.AutoThresholdPercent
+		}
+	}
+	if _, present := rawConfig.Compaction["tool_history_budget_percent"]; !present {
+		// Existing configurations that explicitly disabled automatic compaction
+		// must not silently gain a new automatic trigger after upgrade.
+		if cfg.Compaction.AutoThresholdPercent == 0 && (autoThresholdPresent || legacyAutoThresholdPresent) {
+			cfg.Compaction.ToolHistoryBudgetPercent = 0
+		} else {
+			cfg.Compaction.ToolHistoryBudgetPercent = defaults.ToolHistoryBudgetPercent
 		}
 	}
 	cfg.Compaction.GoalAutoThresholdPercent = cfg.Compaction.AutoThresholdPercent
@@ -541,6 +614,11 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Compaction.HistoricalToolResultThreshold == 0 {
 		cfg.Compaction.HistoricalToolResultThreshold = defaults.HistoricalToolResultThreshold
+	}
+	for projectPath, selection := range cfg.ProjectSelections {
+		if err := validateProjectSelection(projectPath, selection); err != nil {
+			return cfg, err
+		}
 	}
 	for providerID, providerConfig := range cfg.Providers {
 		if providerConfig.Type != "" {
@@ -587,6 +665,106 @@ func validateSystemPromptFile(path string, allowEmpty bool) error {
 		return errors.New("config: system_prompt_file path exceeds 4096 bytes")
 	}
 	return nil
+}
+
+func projectSelectionKey(cwd string) (string, error) {
+	if strings.TrimSpace(cwd) == "" {
+		return "", errors.New("config: project selection path must not be blank")
+	}
+	absolute, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", fmt.Errorf("config: project selection path: %w", err)
+	}
+	absolute = filepath.Clean(absolute)
+	if len(absolute) > 4096 {
+		return "", errors.New("config: project selection path exceeds 4096 bytes")
+	}
+	return absolute, nil
+}
+
+func validateProjectSelection(projectPath string, selection ProjectSelection) error {
+	key, err := projectSelectionKey(projectPath)
+	if err != nil {
+		return err
+	}
+	if key != projectPath {
+		return fmt.Errorf("config: project selection path %q must be absolute and clean", projectPath)
+	}
+	values := []struct {
+		name  string
+		value string
+	}{
+		{name: "provider", value: selection.Provider},
+		{name: "model", value: selection.Model},
+	}
+	for _, field := range values {
+		if field.value != "" && strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("config: project selection %s for %q must not be blank", field.name, projectPath)
+		}
+		if len(field.value) > protocol.MaxAgentMetadataBytes {
+			return fmt.Errorf("config: project selection %s for %q is too large", field.name, projectPath)
+		}
+	}
+	if selection.Thinking != "" {
+		if _, err := protocol.ParseThinkingLevel(selection.Thinking); err != nil {
+			return fmt.Errorf("config: project selection for %q: %w", projectPath, err)
+		}
+	}
+	return nil
+}
+
+// ApplyProjectSelection overlays the remembered interactive selection for cwd
+// onto the effective runtime defaults. It does not mutate the stored map.
+func ApplyProjectSelection(cfg *Config, cwd string) (bool, error) {
+	if cfg == nil {
+		return false, nil
+	}
+	key, err := projectSelectionKey(cwd)
+	if err != nil {
+		return false, err
+	}
+	selection, ok := cfg.ProjectSelections[key]
+	if !ok {
+		return false, nil
+	}
+	if err := validateProjectSelection(key, selection); err != nil {
+		return false, err
+	}
+	if selection.Provider != "" {
+		if selection.Provider != cfg.DefaultProvider && selection.Model == "" {
+			cfg.DefaultModel = ""
+		}
+		cfg.DefaultProvider = selection.Provider
+	}
+	if selection.Model != "" {
+		cfg.DefaultModel = selection.Model
+	}
+	if selection.Thinking != "" {
+		cfg.Thinking = selection.Thinking
+	}
+	return true, nil
+}
+
+// WithProjectSelection returns cfg with a copied project-selection map and the
+// normalized complete selection for cwd. Other project entries are preserved.
+func WithProjectSelection(cfg Config, cwd string, selection ProjectSelection) (Config, error) {
+	key, err := projectSelectionKey(cwd)
+	if err != nil {
+		return cfg, err
+	}
+	selection.Provider = strings.TrimSpace(selection.Provider)
+	selection.Model = strings.TrimSpace(selection.Model)
+	selection.Thinking = strings.TrimSpace(selection.Thinking)
+	if err := validateProjectSelection(key, selection); err != nil {
+		return cfg, err
+	}
+	projectSelections := make(map[string]ProjectSelection, len(cfg.ProjectSelections)+1)
+	for existingKey, existing := range cfg.ProjectSelections {
+		projectSelections[existingKey] = existing
+	}
+	projectSelections[key] = selection
+	cfg.ProjectSelections = projectSelections
+	return cfg, nil
 }
 
 // ProjectExtensions are the only project configuration fields loaded after a
@@ -708,6 +886,61 @@ func Save(path string, cfg Config) error {
 		return err
 	}
 	return atomicWrite(path, data, 0o600)
+}
+
+// Update atomically applies one bounded mutation to the latest config under a
+// process- and host-wide lock. Interactive writers use this instead of saving
+// stale startup snapshots, so concurrent Snow instances preserve each other's
+// unrelated settings.
+func Update(path string, mutate func(*Config) error) (Config, error) {
+	if path == "" {
+		return Config{}, errors.New("config: empty path")
+	}
+	if mutate == nil {
+		return Config{}, errors.New("config: update mutation is nil")
+	}
+	updateMu.Lock()
+	defer updateMu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return Config{}, fmt.Errorf("config: mkdir update lock: %w", err)
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: open update lock: %w", err)
+	}
+	defer lock.Close()
+	if err := lock.Chmod(0o600); err != nil {
+		return Config{}, fmt.Errorf("config: chmod update lock: %w", err)
+	}
+	if err := lockConfigFile(lock); err != nil {
+		return Config{}, fmt.Errorf("config: lock update: %w", err)
+	}
+	defer unlockConfigFile(lock)
+
+	candidate, err := Load(path)
+	if err != nil {
+		return Config{}, err
+	}
+	if err := mutate(&candidate); err != nil {
+		return Config{}, err
+	}
+	if err := Save(path, candidate); err != nil {
+		return Config{}, err
+	}
+	return candidate, nil
+}
+
+// SaveProjectSelection merges one working directory's selection into the
+// latest config without replacing concurrent project or global changes.
+func SaveProjectSelection(path, cwd string, selection ProjectSelection) (Config, error) {
+	return Update(path, func(latest *Config) error {
+		candidate, err := WithProjectSelection(*latest, cwd, selection)
+		if err != nil {
+			return err
+		}
+		*latest = candidate
+		return nil
+	})
 }
 
 // BashTimeout returns the configured bash timeout as a duration.
