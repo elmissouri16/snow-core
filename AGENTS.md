@@ -43,6 +43,9 @@ snowsdk → app + protocol; never bubbletea
   must remain available when provider-facing context is logically compacted.
 - Keep providers, permission checks, tools, sessions, context assembly, and
   compaction behind their existing interfaces.
+- Keep every Go source and test file at or below 1,000 lines. Split files by
+  cohesive responsibility before they exceed this limit; do not create
+  arbitrary numbered chunks solely to satisfy the cap.
 - Keep the Go requirement in `go.mod` and `README.md` synchronized (currently
   the Go 1.27 line while 1.27rc2 is the available toolchain).
 

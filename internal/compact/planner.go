@@ -1,0 +1,692 @@
+package compact
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/snow-core/snow/internal/session"
+	"github.com/snow-core/snow/pkg/protocol"
+)
+
+// Planner preserves the legacy entry point while using turn-aware planning.
+func Planner(msgs []protocol.Message, maxTokens int) Plan {
+	return PlannerWithOptions(msgs, PlannerOptions{RetainTokens: maxTokens, MinRetainedTurns: 2})
+}
+
+// PlannerWithOptions finds a prefix to compact while retaining complete recent
+// user turns. Tool calls and results remain in the same turn by construction.
+func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
+	if opts.MinRetainedTurns < 1 {
+		opts.MinRetainedTurns = 2
+	}
+	if opts.RetainTokens < 1 {
+		opts.RetainTokens = 8 * 1024
+	}
+	if len(msgs) <= 1 {
+		return Plan{EstimatedTokens: estimateTokens(msgs), TotalMessages: len(msgs)}
+	}
+	starts := completeTurnStarts(msgs, opts.AllowActiveToolCycles)
+	suffixTokens := make([]int, len(msgs)+1)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		suffixTokens[i] = suffixTokens[i+1] + estimateMessageTokens(msgs[i])
+	}
+	keep := 0
+	if len(starts) > opts.MinRetainedTurns {
+		keep = starts[len(starts)-opts.MinRetainedTurns]
+		for turn := len(starts) - opts.MinRetainedTurns - 1; turn >= 1; turn-- {
+			candidate := starts[turn]
+			if suffixTokens[candidate] > opts.RetainTokens {
+				break
+			}
+			keep = candidate
+		}
+	}
+	if keep <= 0 || !toolPairingBalancedAt(msgs, keep) {
+		return Plan{EstimatedTokens: estimateTokens(msgs), TotalMessages: len(msgs)}
+	}
+	plan := Plan{KeepFrom: keep, CompactionCandidates: msgs[:keep], TotalMessages: len(msgs)}
+	plan.EstimatedTokens = estimateTokens(plan.CompactionCandidates)
+	for i := len(plan.CompactionCandidates) - 1; i >= 0; i-- {
+		id := plan.CompactionCandidates[i].ID
+		if id != "" && !strings.HasPrefix(id, "compaction-") {
+			plan.BoundaryID = id
+			break
+		}
+	}
+	if plan.BoundaryID == "" {
+		return Plan{EstimatedTokens: estimateTokens(msgs), TotalMessages: len(msgs)}
+	}
+	return plan
+}
+
+// completeTurnStarts returns boundaries that can safely begin retained provider
+// context. User and mailbox messages always begin a turn. Private goal turns do
+// not append another user message, so an assistant message after a terminal
+// assistant response also begins a turn. During an active long-running turn,
+// an assistant request after a complete tool result is also a safe cycle
+// boundary: the preceding call/result pair remains wholly in the compacted
+// prefix and the retained suffix starts with another complete pair.
+func completeTurnStarts(msgs []protocol.Message, allowActiveToolCycles bool) []int {
+	starts := make([]int, 0)
+	for i, msg := range msgs {
+		switch msg.Role {
+		case protocol.RoleUser, protocol.RoleAgent:
+			starts = append(starts, i)
+		case protocol.RoleAssistant:
+			if i > 0 && msgs[i-1].Role == protocol.RoleAssistant && msgs[i-1].StopReason != protocol.StopToolUse {
+				starts = append(starts, i)
+			}
+		}
+	}
+	if !allowActiveToolCycles {
+		return starts
+	}
+
+	// Prefix-only projection cannot compact an early cycle in the active turn
+	// without also compacting every older message. If exact prior turns are still
+	// present, doing so would let cycle boundaries consume the configured recent-
+	// turn floor. Restrict intra-turn planning to a context containing only the
+	// active turn, or to its already-compacted checkpoint projection.
+	activeStart := -1
+	switch {
+	case len(msgs) > 0 && msgs[0].Role == protocol.RoleCustom:
+		// A projected checkpoint may be followed by exact retained goal turns.
+		// Any ordinary start after the marker usually proves such a turn remains,
+		// so prefix-only compaction cannot consume it as an active cycle. The one
+		// safe exception is a fresh user/mailbox turn directly parented to the
+		// marker, with no intervening retained message.
+		switch {
+		case len(starts) == 0:
+			activeStart = 0
+		case len(starts) == 1 && starts[0] == 1 && messageDirectlyParentsCheckpoint(msgs[1], msgs[0]):
+			activeStart = 1
+		default:
+			return starts
+		}
+	case len(starts) == 1:
+		activeStart = starts[0]
+	default:
+		return starts
+	}
+	for i := activeStart + 1; i < len(msgs); i++ {
+		msg := msgs[i]
+		if msg.Role != protocol.RoleAssistant || (msg.StopReason != protocol.StopToolUse && msg.StopReason != protocol.StopPending) {
+			continue
+		}
+		previous := msgs[i-1]
+		if previous.Role == protocol.RoleTool || previous.Role == protocol.RoleCustom {
+			starts = append(starts, i)
+		}
+	}
+	return starts
+}
+
+func messageDirectlyParentsCheckpoint(message, checkpoint protocol.Message) bool {
+	if message.ParentID == "" || checkpoint.ID == "" {
+		return false
+	}
+	markerID := strings.TrimPrefix(checkpoint.ID, "compaction-")
+	return message.ParentID == checkpoint.ID || message.ParentID == markerID
+}
+
+// toolPairingBalancedAt rejects a compaction cut that separates a tool call
+// from its result. Calls in the compacted prefix must be complete; unresolved
+// calls may remain only in the exact retained tail.
+func toolPairingBalancedAt(msgs []protocol.Message, cut int) bool {
+	if cut <= 0 || cut > len(msgs) {
+		return false
+	}
+	type callSide struct {
+		prefix bool
+	}
+	calls := make(map[string]callSide)
+	for i, msg := range msgs {
+		prefix := i < cut
+		if prefix && msg.Role == protocol.RoleAssistant && msg.StopReason == protocol.StopPending {
+			return false
+		}
+		if msg.Role == protocol.RoleAssistant {
+			for _, block := range msg.Content {
+				if block.Type != protocol.BlockToolCall || block.ToolCallID == "" {
+					continue
+				}
+				if _, exists := calls[block.ToolCallID]; exists {
+					return false
+				}
+				calls[block.ToolCallID] = callSide{prefix: prefix}
+			}
+		}
+		if msg.Role != protocol.RoleTool || msg.ToolCallID == "" {
+			continue
+		}
+		call, exists := calls[msg.ToolCallID]
+		if !exists || call.prefix != prefix {
+			return false
+		}
+		// IDs are provider/request scoped and may be reused by a later complete
+		// turn. Remove matched pairs so reuse cannot permanently poison planning.
+		delete(calls, msg.ToolCallID)
+	}
+	for _, call := range calls {
+		if call.prefix {
+			return false
+		}
+	}
+	return true
+}
+
+// Apply compacts the session by appending a marker that records the summary and
+// the last compacted message. ContextMessages uses that marker to project the
+// summary plus retained tail without deleting history.
+func Apply(ctx context.Context, st session.Store, summarizer Summarizer, plan Plan) (Result, error) {
+	if len(plan.CompactionCandidates) == 0 {
+		return Result{}, nil
+	}
+	summary, err := summarizer(ctx, plan.CompactionCandidates)
+	if err != nil {
+		return Result{}, fmt.Errorf("compact: summarize: %w", err)
+	}
+
+	boundary := plan.BoundaryID
+	if boundary == "" {
+		boundary = plan.CompactionCandidates[len(plan.CompactionCandidates)-1].ID
+	}
+	if strings.HasPrefix(boundary, "compaction-") {
+		markerID := strings.TrimPrefix(boundary, "compaction-")
+		entriesStore, ok := st.(session.BranchEntryStore)
+		if !ok {
+			return Result{}, errors.New("compact: cannot resolve prior compaction boundary")
+		}
+		entries, entriesErr := entriesStore.BranchEntries()
+		if entriesErr != nil {
+			return Result{}, fmt.Errorf("compact: resolve prior compaction boundary: %w", entriesErr)
+		}
+		resolved := ""
+		for _, candidate := range entries {
+			if candidate.ID == markerID && candidate.Type == session.EntryCompaction {
+				resolved = candidate.CompactedThrough
+				break
+			}
+		}
+		if resolved == "" {
+			return Result{}, errors.New("compact: prior compaction boundary is unavailable")
+		}
+		boundary = resolved
+	}
+	entry := session.Entry{
+		Type:             session.EntryCompaction,
+		Summary:          summary,
+		CompactedThrough: boundary,
+	}
+	if err := st.Append(entry); err != nil {
+		return Result{}, err
+	}
+
+	totalMessages := max(plan.TotalMessages, len(plan.CompactionCandidates))
+	return Result{
+		SummarizedMessages: plan.KeepFrom,
+		RetainedMessages:   max(0, totalMessages-plan.KeepFrom),
+		Summary:            summary,
+		BeforeEntries:      totalMessages,
+		// The marker entry is appended but is not a message.
+		AfterEntries: totalMessages + 1,
+	}, nil
+}
+
+// estimateTokens is a rough chars/4 heuristic; provider-reported usage is
+// authoritative at runtime.
+func estimateMessageTokens(message protocol.Message) int {
+	n := 0
+	for _, content := range message.Content {
+		n += len(content.Text) / 4
+		n += len(content.Arguments) / 4
+	}
+	return n
+}
+
+func estimateTokens(msgs []protocol.Message) int {
+	n := 0
+	for _, message := range msgs {
+		n += estimateMessageTokens(message)
+	}
+	return n
+}
+
+// FormatWorkingStateCheckpoint gives every durable compaction summary a stable,
+// structured model-facing identity. Missing provider sections are filled
+// deterministically so resume and repeated compaction always receive the same
+// working-state contract.
+func FormatWorkingStateCheckpoint(summary string) string {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		summary = "No checkpoint details were produced."
+	}
+	if !strings.Contains(summary, "\n## ") {
+		detail := strings.TrimSpace(strings.TrimPrefix(summary, WorkingStateTitle))
+		var checkpoint strings.Builder
+		checkpoint.WriteString(WorkingStateTitle)
+		for _, section := range WorkingStateSections {
+			checkpoint.WriteString("\n\n## ")
+			checkpoint.WriteString(section)
+			checkpoint.WriteByte('\n')
+			if section == "Current working state" && detail != "" {
+				checkpoint.WriteString(detail)
+			} else {
+				checkpoint.WriteString("- None recorded.")
+			}
+		}
+		return checkpoint.String()
+	}
+	if !strings.HasPrefix(summary, WorkingStateTitle) {
+		summary = WorkingStateTitle + "\n\n" + summary
+	}
+	for _, section := range WorkingStateSections {
+		heading := "## " + section
+		if !strings.Contains(summary, heading) {
+			summary += "\n\n" + heading + "\n- None recorded."
+		}
+	}
+	return summary
+}
+
+// canonicalizeWorkingStateCheckpoint emits every known section exactly once
+// while preserving unique provider content and unknown extension sections.
+func canonicalizeWorkingStateCheckpoint(summary string) string {
+	known := make(map[string]bool, len(WorkingStateSections))
+	for _, section := range WorkingStateSections {
+		known[section] = true
+	}
+	type chunk struct {
+		heading string
+		body    string
+	}
+	var preamble []string
+	var chunks []chunk
+	var current *chunk
+	flush := func() {
+		if current != nil {
+			chunks = append(chunks, *current)
+			current = nil
+		}
+	}
+	for _, line := range strings.Split(summary, "\n") {
+		if strings.HasPrefix(line, "## ") {
+			flush()
+			current = &chunk{heading: strings.TrimSpace(strings.TrimPrefix(line, "## "))}
+			continue
+		}
+		if current == nil {
+			if strings.TrimSpace(line) != WorkingStateTitle {
+				preamble = append(preamble, line)
+			}
+			continue
+		}
+		if current.body != "" {
+			current.body += "\n"
+		}
+		current.body += line
+	}
+	flush()
+
+	sections := make(map[string]string, len(WorkingStateSections))
+	var extras []chunk
+	for _, item := range chunks {
+		body := strings.TrimSpace(item.body)
+		if !known[item.heading] {
+			extras = append(extras, chunk{heading: item.heading, body: body})
+			continue
+		}
+		prior, exists := sections[item.heading]
+		switch {
+		case !exists:
+			sections[item.heading] = body
+		case checkpointBodyEmpty(prior) && !checkpointBodyEmpty(body):
+			sections[item.heading] = body
+		case !checkpointBodyEmpty(body) && !strings.Contains(prior, body):
+			sections[item.heading] = strings.TrimSpace(prior) + "\n" + body
+		}
+	}
+
+	var out strings.Builder
+	out.WriteString(WorkingStateTitle)
+	if text := strings.TrimSpace(strings.Join(preamble, "\n")); text != "" {
+		out.WriteString("\n\n")
+		out.WriteString(text)
+	}
+	for _, item := range extras {
+		if item.heading == "" {
+			continue
+		}
+		out.WriteString("\n\n## ")
+		out.WriteString(item.heading)
+		if item.body != "" {
+			out.WriteByte('\n')
+			out.WriteString(item.body)
+		}
+	}
+	for _, section := range WorkingStateSections {
+		body := strings.TrimSpace(sections[section])
+		if body == "" {
+			body = "- None recorded."
+		}
+		out.WriteString("\n\n## ")
+		out.WriteString(section)
+		out.WriteByte('\n')
+		out.WriteString(body)
+	}
+	return out.String()
+}
+
+// NormalizeWorkingStateCheckpoint validates provider output and deterministically
+// repairs critical empty sections from the exact compacted prefix. A provider
+// that emits tool-protocol markup instead of a summary is discarded entirely.
+// The returned bool reports that local fallback content was used.
+func NormalizeWorkingStateCheckpoint(ctx context.Context, summary string, msgs []protocol.Message) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	local, err := DefaultSummarizer(ctx, msgs)
+	if err != nil {
+		return "", false, err
+	}
+	if containsProviderToolMarkup(summary) {
+		return local, true, nil
+	}
+	checkpoint := canonicalizeWorkingStateCheckpoint(FormatWorkingStateCheckpoint(summary))
+	local = canonicalizeWorkingStateCheckpoint(FormatWorkingStateCheckpoint(local))
+	// Objective/prior-state and verification evidence are factual rather than
+	// interpretive. Always merge the deterministic extraction so provider prose
+	// cannot silently omit an old constraint or erase a failed command by
+	// claiming the suite is clean. Duplicate bodies are suppressed for repeated
+	// compaction.
+	for _, section := range []string{
+		"Objective and constraints",
+		"Prior working-state checkpoints",
+		"Commands and verification",
+		"Important tool results",
+		"Errors and failed approaches",
+	} {
+		body := checkpointSection(local, section)
+		if checkpointBodyEmpty(body) {
+			continue
+		}
+		current := checkpointSection(checkpoint, section)
+		if checkpointBodyEmpty(current) {
+			checkpoint = replaceCheckpointSection(checkpoint, section, body)
+			continue
+		}
+		if !strings.Contains(current, body) {
+			checkpoint = replaceCheckpointSection(checkpoint, section, current+"\n"+body)
+		}
+	}
+	if failures := checkpointSection(local, "Errors and failed approaches"); !checkpointBodyEmpty(failures) {
+		const warning = "- Deterministic verification status: failures were recorded; do not treat an unverified provider claim that all checks passed as authoritative."
+		current := checkpointSection(checkpoint, "Commands and verification")
+		if !strings.Contains(current, warning) {
+			checkpoint = replaceCheckpointSection(checkpoint, "Commands and verification", current+"\n"+warning)
+		}
+	}
+	return checkpoint, false, nil
+}
+
+func containsProviderToolMarkup(summary string) bool {
+	lower := strings.ToLower(summary)
+	for _, marker := range providerToolMarkupMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeProviderToolMarkup(value string) string {
+	const replacement = "[provider tool-protocol markup removed]"
+	for {
+		lower := strings.ToLower(value)
+		start := -1
+		for _, marker := range providerToolMarkupMarkers {
+			if index := strings.Index(lower, marker); index >= 0 && (start < 0 || index < start) {
+				start = index
+			}
+		}
+		if start < 0 {
+			return value
+		}
+		end := len(value)
+		for _, boundary := range []string{
+			"<｜dsml｜/tool_calls>",
+			"</tool_calls>",
+			"</tool_call>",
+			"</function_call>",
+			"\n## ",
+		} {
+			if offset := strings.Index(lower[start:], boundary); offset >= 0 {
+				candidate := start + offset
+				if boundary != "\n## " {
+					candidate += len(boundary)
+				}
+				if candidate > start && candidate < end {
+					end = candidate
+				}
+			}
+		}
+		value = strings.TrimSpace(value[:start]) + "\n" + replacement + "\n" + strings.TrimSpace(value[end:])
+	}
+}
+
+func checkpointSection(summary, section string) string {
+	heading := "\n## " + section + "\n"
+	start := strings.Index(summary, heading)
+	if start < 0 {
+		return ""
+	}
+	start += len(heading)
+	end := len(summary)
+	if next := strings.Index(summary[start:], "\n## "); next >= 0 {
+		end = start + next
+	}
+	return strings.TrimSpace(summary[start:end])
+}
+
+func checkpointBodyEmpty(body string) bool {
+	body = strings.TrimSpace(body)
+	return body == "" || body == "- None recorded." || body == "None recorded."
+}
+
+func checkpointSectionEmpty(summary, section string) bool {
+	return checkpointBodyEmpty(checkpointSection(summary, section))
+}
+
+func replaceCheckpointSection(summary, section, body string) string {
+	heading := "\n## " + section + "\n"
+	start := strings.Index(summary, heading)
+	if start < 0 {
+		return strings.TrimRight(summary, "\n") + heading + strings.TrimSpace(body)
+	}
+	bodyStart := start + len(heading)
+	bodyEnd := len(summary)
+	if next := strings.Index(summary[bodyStart:], "\n## "); next >= 0 {
+		bodyEnd = bodyStart + next
+	}
+	return summary[:bodyStart] + strings.TrimSpace(body) + summary[bodyEnd:]
+}
+
+// DefaultSummarizer produces a bounded role/tool-aware continuation checkpoint.
+func DefaultSummarizer(ctx context.Context, msgs []protocol.Message) (string, error) {
+	const maxRunes = 8000
+	var users, assistants, toolsOut, failures, priorCheckpoints, agentUpdates, filesSymbols []string
+	fileSymbolSeen := make(map[string]bool)
+	for _, m := range msgs {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		for _, c := range m.Content {
+			text := strings.TrimSpace(sanitizeProviderToolMarkup(c.Text))
+			hintSources := make([]string, 0, 2)
+			if text != "" {
+				hintSources = append(hintSources, text)
+			}
+			if len(c.Arguments) > 0 {
+				argumentText := strings.TrimSpace(sanitizeProviderToolMarkup(string(c.Arguments)))
+				if text == "" {
+					text = argumentText
+				}
+				hintSources = append(hintSources, jsonStringValues(c.Arguments)...)
+			}
+			if text == "" {
+				continue
+			}
+			for _, source := range hintSources {
+				for _, hint := range extractFileAndSymbolHints(source) {
+					if !fileSymbolSeen[hint] {
+						fileSymbolSeen[hint] = true
+						filesSymbols = append(filesSymbols, hint)
+					}
+				}
+			}
+			text = compactText(text, 500)
+			if m.Role == protocol.RoleAssistant && c.Type == protocol.BlockToolCall {
+				command := strings.TrimSpace(c.Name + " " + text)
+				if command != "" {
+					toolsOut = append(toolsOut, command)
+				}
+			}
+			switch m.Role {
+			case protocol.RoleUser:
+				users = append(users, text)
+			case protocol.RoleTool:
+				line := m.ToolName + ": " + text
+				toolsOut = append(toolsOut, line)
+				if m.IsError || strings.Contains(strings.ToLower(text), "error") || strings.Contains(strings.ToLower(text), "failed") {
+					failures = append(failures, line)
+				}
+			case protocol.RoleAssistant:
+				assistants = append(assistants, text)
+			case protocol.RoleCustom:
+				priorCheckpoints = append(priorCheckpoints, text)
+			case protocol.RoleAgent:
+				agentUpdates = append(agentUpdates, text)
+			}
+		}
+	}
+	var b strings.Builder
+	b.WriteString(WorkingStateTitle + "\n\nGenerated by the bounded local fallback. Exact history remains durable.\n")
+	writeRecent := func(title string, values []string, maxItems, sectionRunes int) {
+		b.WriteString("\n## " + title + "\n")
+		if len(values) == 0 || maxItems <= 0 || sectionRunes <= 0 {
+			b.WriteString("- None recorded.\n")
+			return
+		}
+		start := max(0, len(values)-maxItems)
+		remaining := sectionRunes
+		wrote := false
+		for _, value := range values[start:] {
+			valueRunes := []rune(value)
+			if len(valueRunes)+3 > remaining {
+				limit := max(0, remaining-4)
+				if limit == 0 {
+					break
+				}
+				value = string(valueRunes[:min(limit, len(valueRunes))]) + "…"
+			}
+			line := "- " + value + "\n"
+			b.WriteString(line)
+			remaining -= utf8.RuneCountInString(line)
+			wrote = true
+			if remaining <= 4 {
+				break
+			}
+		}
+		if !wrote {
+			b.WriteString("- None recorded.\n")
+		}
+	}
+	writeRecent("Objective and constraints", users, 4, 700)
+	writeRecent("Current working state", assistants, 4, 800)
+	writeRecent("Decisions and rationale", assistants, 3, 600)
+	writeRecent("Files and symbols", filesSymbols, 8, 600)
+	writeRecent("Commands and verification", toolsOut, 4, 700)
+	writeRecent("Important tool results", toolsOut, 4, 700)
+	writeRecent("Errors and failed approaches", failures, 4, 600)
+	writeRecent("Attributed agent updates", agentUpdates, 4, 500)
+	writeRecent("Prior working-state checkpoints", priorCheckpoints, 2, 700)
+	// Retrieval markers are appended only after session-scoped ownership
+	// verification in agent.compactActiveContext.
+	writeRecent("Retrieval references", nil, 0, 0)
+	writeRecent("Unresolved next steps", assistants, 2, 500)
+	writeRecent("Active tool batch", nil, 0, 0)
+	out := []rune(b.String())
+	if len(out) > maxRunes {
+		return "", errors.New("compact: local checkpoint exceeded its fixed bound")
+	}
+	return string(out), nil
+}
+
+func jsonStringValues(raw json.RawMessage) []string {
+	var value any
+	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+		return nil
+	}
+	var out []string
+	var walk func(any)
+	walk = func(current any) {
+		switch typed := current.(type) {
+		case string:
+			out = append(out, typed)
+		case []any:
+			for _, item := range typed {
+				walk(item)
+			}
+		case map[string]any:
+			keys := make([]string, 0, len(typed))
+			for key := range typed {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				walk(typed[key])
+			}
+		}
+	}
+	walk(value)
+	return out
+}
+
+func extractFileAndSymbolHints(value string) []string {
+	var hints []string
+	for _, field := range strings.Fields(value) {
+		raw := field
+		candidate := strings.Trim(field, "`[](){}<>,.;:\"'")
+		if candidate == "" || len(candidate) > 200 || strings.Contains(candidate, "://") {
+			continue
+		}
+		pathLike := strings.Contains(candidate, "/") || strings.Contains(candidate, "\\")
+		if !pathLike {
+			for _, suffix := range []string{".go", ".md", ".json", ".yaml", ".yml", ".toml", ".ts", ".tsx", ".js", ".py", ".sh", ".sql", ".db"} {
+				if strings.HasSuffix(candidate, suffix) {
+					pathLike = true
+					break
+				}
+			}
+		}
+		quotedSymbol := strings.HasPrefix(raw, "`") && strings.Contains(strings.TrimPrefix(raw, "`"), "`")
+		if pathLike || quotedSymbol {
+			hints = append(hints, candidate)
+		}
+	}
+	return hints
+}
+
+func compactText(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	r := []rune(value)
+	if len(r) > limit {
+		return string(r[:limit]) + "…"
+	}
+	return value
+}
