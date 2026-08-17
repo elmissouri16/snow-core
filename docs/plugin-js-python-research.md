@@ -229,6 +229,9 @@ ToolContext
 
 Both SDKs should have no runtime dependencies. TypeScript tooling may remain a
 development dependency; Python can use `asyncio`, `json`, and standard streams.
+The proposed public APIs, package layout, runtime responsibilities, conformance
+matrix, and phased delivery are recorded in the
+[plugin SDK implementation plan](plugin-language-sdks-plan.md).
 
 ## Risks and deferrals
 

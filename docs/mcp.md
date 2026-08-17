@@ -177,8 +177,8 @@ headers and stdio environment credentials work today.
 
 ## Related documents
 
+- [Lazy MCP connection implementation plan](lazy-mcp-implementation-plan.md)
 - [Plugins](plugins.md)
-- [Agent Skills](skills.md)
 - [Tool routing](tool-routing.md)
 - [Configuration](configuration.md)
 - [Security](security.md)

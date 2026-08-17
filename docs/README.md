@@ -48,6 +48,9 @@ for a subject.
 
 - [Model Context Protocol](mcp.md) — stdio and Streamable HTTP configuration,
   management commands, capability bridging, permissions, and current limits.
+- [Lazy MCP connection plan](lazy-mcp-implementation-plan.md) — proposed
+  metadata cache, connection state machine, idle shutdown, security rules,
+  implementation phases, and verification.
 - [Plugins](plugins.md) — statically linked Go plugins plus persistent
   JavaScript/Python/other external runtimes.
 - [External plugin protocol v2](plugin-protocol.md) — complete JSON-RPC JSONL
@@ -55,6 +58,9 @@ for a subject.
 - [JavaScript/Python plugin research](plugin-js-python-research.md) —
   benchmarked architecture decision, alternatives, implementation sequence, and
   deferrals.
+- [JavaScript/Python plugin SDK plan](plugin-language-sdks-plan.md) — proposed
+  authoring APIs, package boundaries, runtime behavior, conformance tests, and
+  implementation phases.
 - [Agent Skills](skills.md) — `SKILL.md` discovery, trust, precedence,
   progressive disclosure, and resource confinement.
 - [Tool routing](tool-routing.md) — deferred schemas, BM25 retrieval,
@@ -92,6 +98,8 @@ To reduce drift, use these documents as the primary references:
 | Python/JavaScript embedding | [`language-sdks.md`](language-sdks.md) |
 | Foreign-process control | [`rpc.md`](rpc.md) |
 | External plugin ABI | [`plugin-protocol.md`](plugin-protocol.md) |
+| Lazy MCP implementation | [Connection plan](lazy-mcp-implementation-plan.md) |
+| Plugin SDK implementation | [SDK plan](plugin-language-sdks-plan.md) |
 | Optional smolvm Bash setup and operation | [`sandbox.md`](sandbox.md) |
 | Safety model and privilege boundaries | [`security.md`](security.md) |
 | Feature-specific behavior | The matching guide in this directory |
