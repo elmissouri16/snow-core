@@ -159,6 +159,19 @@ func TestSubagentFleetNarrowFallback(t *testing.T) {
 	}
 }
 
+func TestSubagentFleetListKeepsIdentityAndModelVisible(t *testing.T) {
+	m := fleetTestModel(t)
+	m.subagentFleetList.Agents[0].Agent.Path = "/root/deepseek_architecture"
+	m.subagentFleetList.Agents[0].Model = "deepseek-v4-flash"
+	m.subagentFleetList.Agents[0].Provider = "opencode-go"
+	view := stripANSI(m.renderSubagentFleetList(48, 4))
+	for _, want := range []string{"/root/deepseek_architecture", "running · deepseek-v4-flash"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("fleet list does not preserve %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestSubagentFleetCountsExcludeRootAndSnapshotsDoNotRegress(t *testing.T) {
 	m := fleetTestModel(t)
 	root := fleetTestState("root", "/root", protocol.AgentRunning)
@@ -295,22 +308,23 @@ func TestAgentCommandOpensFleetAndPreservesConcurrency(t *testing.T) {
 
 func TestSubagentFleetDetailFormatsMessagesAsReadableBlocks(t *testing.T) {
 	m := fleetTestModel(t)
+	m.subagentFleetList.Agents[0].Result = "Finished with **rendered result**."
 	messages := []protocol.Message{
 		{Role: protocol.RoleAssistant, StopReason: protocol.StopToolUse, Content: []protocol.ContentBlock{
-			protocol.NewTextBlock("## Summary\n\n- first item\n- second item"),
+			protocol.NewTextBlock("Summary with **strong emphasis**.\n\n1. first item\n2. second item"),
 			{Type: protocol.BlockToolCall, Name: "bash", Arguments: []byte(`{"command":"go test ./...","timeout_ms":120000}`)},
 		}},
 		{Role: protocol.RoleTool, ToolName: "bash", Content: []protocol.ContentBlock{protocol.NewTextBlock("ok\nnext line")}},
 	}
 	m.subagentFleetMessages = messages
 	plain := stripANSI(strings.Join(m.subagentFleetDetailLines(54), "\n"))
-	for _, want := range []string{"assistant · tool_use", "Summary", "first item", "call · bash", `"command": "go test ./..."`, "tool · bash", "ok", "next line"} {
+	for _, want := range []string{"Result", "rendered result", "assistant · tool_use", "Summary", "strong emphasis", "first item", "call · bash", `"command": "go test ./..."`, "tool · bash", "ok", "next line"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("formatted detail missing %q:\n%s", want, plain)
 		}
 	}
-	if strings.Contains(plain, "assistant  assistant") || strings.Contains(plain, `call bash {"command"`) {
-		t.Fatalf("detail still uses flattened message summaries:\n%s", plain)
+	if strings.Contains(plain, "**") || strings.Contains(plain, "assistant  assistant") || strings.Contains(plain, `call bash {"command"`) {
+		t.Fatalf("detail contains raw Markdown or flattened message summaries:\n%s", plain)
 	}
 }
 

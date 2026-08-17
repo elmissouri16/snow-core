@@ -435,7 +435,7 @@ func (m *Model) subagentFleetLayout() subagentFleetLayout {
 	} else {
 		layout.listWidth = layout.innerWidth
 		layout.detailWidth = layout.innerWidth
-		layout.listHeight = max(3, min(len(m.subagentFleetList.Agents)+1, layout.bodyHeight/3))
+		layout.listHeight = max(4, min(len(m.subagentFleetList.Agents)*2, layout.bodyHeight/2))
 		layout.detailHeight = max(1, layout.bodyHeight-layout.listHeight-1)
 	}
 	return layout
@@ -485,16 +485,17 @@ func (m *Model) renderSubagentFleetList(width, height int) string {
 		}
 		return styleHeaderDim.Render("No subagents")
 	}
-	visible := max(1, height)
-	start := m.subagentFleetIndex - visible/2
+	const rowsPerAgent = 2
+	visibleAgents := max(1, height/rowsPerAgent)
+	start := m.subagentFleetIndex - visibleAgents/2
 	if start < 0 {
 		start = 0
 	}
-	if start+visible > len(m.subagentFleetList.Agents) {
-		start = max(0, len(m.subagentFleetList.Agents)-visible)
+	if start+visibleAgents > len(m.subagentFleetList.Agents) {
+		start = max(0, len(m.subagentFleetList.Agents)-visibleAgents)
 	}
 	var rows []string
-	for i := start; i < len(m.subagentFleetList.Agents) && len(rows) < visible; i++ {
+	for i := start; i < len(m.subagentFleetList.Agents) && len(rows)+rowsPerAgent <= height; i++ {
 		state := m.subagentFleetList.Agents[i]
 		prefix := "  "
 		rowStyle := styleCompletion
@@ -502,8 +503,18 @@ func (m *Model) renderSubagentFleetList(width, height int) string {
 			prefix = "› "
 			rowStyle = styleCompletionSelected
 		}
-		label := fmt.Sprintf("%s %s · %s · %s", fleetStatusGlyph(state.Status), state.Agent.Path, state.Agent.Role, state.Status)
-		rows = append(rows, rowStyle.Render(prefix+truncateRunes(label, max(1, width-2))))
+		model := state.Model
+		if model == "" {
+			model = state.Provider
+		}
+		// Identity gets its own row so neither a long path nor model ID hides the
+		// other. The selected style spans both rows to keep them visually paired.
+		identity := fleetStatusGlyph(state.Status) + " " + string(state.Agent.Path)
+		metadata := strings.Join(nonEmptyStrings([]string{string(state.Status), model, string(state.Agent.Role)}), " · ")
+		rows = append(rows,
+			rowStyle.Render(prefix+truncateRunes(identity, max(1, width-2))),
+			rowStyle.Render("  "+truncateRunes(metadata, max(1, width-2))),
+		)
 	}
 	return strings.Join(rows, "\n")
 }
@@ -558,7 +569,11 @@ func (m *Model) subagentFleetDetailLines(width int) []string {
 	if state.Error != "" {
 		lines = append(lines, styleError.Render("error: "+compactAgentText(state.Error, 1200)))
 	} else if state.Result != "" {
-		lines = append(lines, styleAssistant.Render("result: "+compactAgentText(state.Result, 1200)))
+		lines = append(lines, styleAssistant.Render(" Result"))
+		result := m.renderSubagentFleetMarkdown(state.Result, max(10, width-2))
+		for _, line := range strings.Split(result, "\n") {
+			lines = append(lines, "  "+line)
+		}
 	}
 	if m.subagentFleetDetailLoading {
 		lines = append(lines, styleHeaderDim.Render("loading transcript…"))
@@ -584,19 +599,33 @@ func (m *Model) subagentFleetDetailLines(width int) []string {
 	return wrapped
 }
 
+// renderSubagentFleetMarkdown treats model-authored text as Markdown without
+// guessing from a small marker list. Markdown such as emphasis and ordered
+// lists otherwise rendered inconsistently while headings and bullets worked.
+func (m *Model) renderSubagentFleetMarkdown(text string, width int) string {
+	if !utf8.ValidString(text) {
+		text = strings.ToValidUTF8(text, "�")
+	}
+	text = truncateRunes(text, maxAgentMessagePreviewRunes)
+	if m.subagentFleetMD != nil {
+		return strings.TrimSpace(m.subagentFleetMD.render(text, width))
+	}
+	return strings.TrimSpace(ansi.Wordwrap(text, width, ""))
+}
+
 func (m *Model) fleetMessageLines(message protocol.Message, width int) []string {
 	label, labelStyle := fleetMessageLabel(message)
 	prefix := labelStyle.Render(" " + label + " ")
 	contentWidth := max(10, width-2)
 	var sections []string
 	if text := sessionMessageText(message); text != "" {
-		if !utf8.ValidString(text) {
-			text = strings.ToValidUTF8(text, "�")
-		}
-		text = truncateRunes(text, maxAgentMessagePreviewRunes)
-		if message.Role == protocol.RoleAssistant && m.subagentFleetMD != nil && looksLikeMarkdown(text) {
-			text = strings.TrimSpace(m.subagentFleetMD.render(text, contentWidth))
+		if message.Role == protocol.RoleAssistant || message.Role == protocol.RoleAgent {
+			text = m.renderSubagentFleetMarkdown(text, contentWidth)
 		} else {
+			if !utf8.ValidString(text) {
+				text = strings.ToValidUTF8(text, "�")
+			}
+			text = truncateRunes(text, maxAgentMessagePreviewRunes)
 			text = strings.TrimSpace(ansi.Wordwrap(text, contentWidth, ""))
 		}
 		if text != "" {

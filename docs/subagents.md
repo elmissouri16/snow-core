@@ -234,9 +234,11 @@ history; `/agent` then warns that transcripts will not survive restart.
   next launch). `/agent` opens the live fleet inspector with aggregate
   capacity and a selectable agent list; `/agent <path-or-id>` opens the same
   inspector preselected. Wide terminals use list/detail panes, while narrow
-  terminals stack them. The detail pane combines role/model/effort, duration,
-  usage, result/error, a bounded tool-aware transcript, and bounded live
-  thinking/response/tool activity. Use ↑/↓ or `j`/`k` to
+  terminals stack them. Each two-line list entry keeps the agent path, status,
+  model, and role visible; the detail pane combines role/provider/model/effort,
+  Markdown-rendered model results and conversation messages, a bounded
+  tool-aware transcript, and bounded live thinking/response/tool activity. Use
+  ↑/↓ or `j`/`k` to
   select, wheel/trackpad or PageUp/PageDown and Home/End to scroll detail,
   `r` to refresh authoritative state, and Esc to close. Lists and transcripts
   load asynchronously and attributed events update the in-memory view;
