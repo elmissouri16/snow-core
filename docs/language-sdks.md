@@ -154,13 +154,23 @@ plugin-authoring SDKs for Snow protocol-v2 plugins:
 
 - `sdk/plugin-python` — `snow-plugin` (import `snow_plugin`), Python 3.9+,
   decorator-based `Plugin` registration and `plugin.run()`.
-- `sdk/plugin-javascript` — `@snow-core/plugin`, Node ESM, `definePlugin`,
+- `sdk/plugin-javascript` — `@snow-core/plugin`, Node.js 22+ ESM, `definePlugin`,
   `defineTool`, and `serve()`.
 
 Both SDKs are **private and unpublished**. They own framing, dispatch, progress,
 logging, cancellation, deadlines, events, lifecycle hooks, and stdout
-discipline while keeping handlers tool-focused. The wire contract is
-`docs/plugin-protocol.md`; the implementation plan and acceptance criteria are
+discipline while keeping handlers tool-focused. Snow embeds a reviewed runtime
+snapshot of each package. After explicit approval, copy one beside a generated
+plugin without network access or execution:
+
+```sh
+snow plugin sdk vendor --runtime python .snow/generated-plugins/my-plugin --json
+snow plugin sdk vendor --runtime javascript .snow/generated-plugins/my-plugin --json
+```
+
+The command reports per-file hashes and writes `snow-sdk.json`; review both
+before `plugin check`. The wire contract is `docs/plugin-protocol.md`; the
+implementation plan and acceptance criteria are
 `docs/plugin-language-sdks-plan.md`. Packaged SDK examples live under
 `examples/plugins/{python, javascript}-sdk/` and validate with
 `snow plugin check`.

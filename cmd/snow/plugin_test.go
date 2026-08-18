@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/snow-core/snow/internal/config"
+	"github.com/snow-core/snow/internal/pluginsdk"
 	publicplugin "github.com/snow-core/snow/pkg/plugin"
 	"github.com/snow-core/snow/pkg/protocol"
 )
@@ -162,6 +163,45 @@ func TestPluginListDoesNotStartConfiguredProcess(t *testing.T) {
 	}
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Fatalf("plugin list started executable: %v", err)
+	}
+}
+
+func TestPluginSDKVendorCommandCopiesEmbeddedRuntimeWithoutExecutingIt(t *testing.T) {
+	pluginDir := t.TempDir()
+	stdout, stderr, err := runPluginCommand("", "--mode=json", "plugin", "sdk", "vendor", "--runtime", "python", pluginDir)
+	if err != nil {
+		t.Fatalf("vendor: %v, stderr=%s", err, stderr)
+	}
+	var receipt pluginsdk.Receipt
+	if err := json.Unmarshal([]byte(stdout), &receipt); err != nil {
+		t.Fatalf("receipt: %v, raw=%s", err, stdout)
+	}
+	if receipt.Runtime != pluginsdk.RuntimePython || receipt.Replaced || len(receipt.Files) == 0 || stderr != "" {
+		t.Fatalf("receipt=%+v stderr=%q", receipt, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(pluginDir, "vendor", "python", "snow_plugin", "runtime.py")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(pluginDir, "manifest.json")); !os.IsNotExist(err) {
+		t.Fatalf("vendor command unexpectedly created a manifest: %v", err)
+	}
+
+	if _, _, err := runPluginCommand("", "plugin", "sdk", "vendor", "--runtime", "python", pluginDir, "--json"); err == nil || !strings.Contains(err.Error(), "--replace") {
+		t.Fatalf("duplicate vendor error = %v", err)
+	}
+	stdout, stderr, err = runPluginCommand("", "plugin", "sdk", "vendor", "--runtime", "python", pluginDir, "--replace", "--json")
+	if err != nil {
+		t.Fatalf("replace: %v, stderr=%s", err, stderr)
+	}
+	if err := json.Unmarshal([]byte(stdout), &receipt); err != nil || !receipt.Replaced {
+		t.Fatalf("replacement receipt=%+v err=%v raw=%s", receipt, err, stdout)
+	}
+}
+
+func TestPluginSDKVendorCommandValidatesRuntime(t *testing.T) {
+	_, _, err := runPluginCommand("", "plugin", "sdk", "vendor", "--runtime", "ruby", t.TempDir(), "--json")
+	if err == nil || !strings.Contains(err.Error(), "python or javascript") {
+		t.Fatalf("runtime error = %v", err)
 	}
 }
 

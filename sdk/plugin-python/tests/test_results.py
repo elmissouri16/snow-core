@@ -41,6 +41,8 @@ class ResultBuilderTests(unittest.TestCase):
         self.assertEqual(str(err), "record missing")
         with self.assertRaises(TypeError):
             ToolError("  ")
+        with self.assertRaises(ValueError):
+            ToolError("x" * 4097)
 
 
 if __name__ == "__main__":

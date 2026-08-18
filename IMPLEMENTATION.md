@@ -130,7 +130,7 @@ keeps UI dependencies out of core packages.
 │   ├── sandbox/             # dependency-light public Bash boundary status
 │   └── snowsdk/             # public embeddable API; no TUI dependency
 ├── examples/                # standalone SDK, RPC, and plugin examples
-├── sdk/                     # Python and JavaScript/TypeScript language clients
+├── sdk/                     # Language clients and private plugin-authoring SDKs
 └── docs/                    # user guides and per-topic references
 ```
 
@@ -145,6 +145,7 @@ keeps UI dependencies out of core packages.
 | `internal/context` | Preamble and `AGENTS.md` system-prompt assembly |
 | `internal/permission` | Ask/allow/deny service and remembered rules |
 | `internal/plugin` | Lifecycle manager and Go/external adapters |
+| `internal/pluginsdk` | Embedded private SDK snapshots and confined vendoring |
 | `internal/mcp` | Official-SDK MCP manager and tool/resource bridges |
 | `internal/skills` | Agent Skills parser, catalog, and activation tools |
 | `internal/provider` | `Provider` interface, registry, and adapters |
@@ -777,8 +778,11 @@ discovery strictly validates standard metadata and loads only names and
 descriptions from immutable rank-zero embedded skills plus standard user and
 trust-gated project paths under a 64 KiB catalog budget. The bundled
 `plugin-builder` skill provides supervised, restart-required protocol-v2
-authoring instructions and templates without extracting files beside the
-installed binary.
+authoring instructions and SDK-first Python/JavaScript templates. The binary
+embeds reviewed private SDK snapshots; `plugin sdk vendor` copies one into a
+plugin directory through staged, root-confined replacement without executing
+it and reports per-file hashes. Generated templates require that reviewed copy
+and fail closed rather than hand-rolling protocol framing.
 
 `activate_skill` loads escaped full instructions, the TUI autocompletes
 enabled leading `$skill-name` directives, and a directive activates before

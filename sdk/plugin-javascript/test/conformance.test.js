@@ -6,12 +6,17 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { fileURLToPath } from "node:url";
+import { ToolError } from "../src/index.js";
 const pluginRoot = fileURLToPath(new URL("../", import.meta.url)).replace(/[\/]+$/, "");
 
 const pluginSource = `import { definePlugin, defineTool, serve, textResult, ToolError } from "${pluginRoot}/src/index.js";
 
 const plugin = definePlugin({
   manifest: { id: "conformance-js", name: "Conformance JS", version: "1.0.0" },
+  setup(context) {
+    if (context.sessionId !== "session-js" || context.hostVersion !== "test-host" || context.hostCapabilities[0] !== "tools") throw new Error("bad setup context");
+    return { ready: true };
+  },
   tools: [
     defineTool({
       name: "echo", description: "Echo text", risk: "read",
@@ -22,7 +27,7 @@ const plugin = definePlugin({
         await ctx.log("debug", "echo starting");
         if (Number(args.delay_ms) > 0) await new Promise((resolve) => setTimeout(resolve, Number(args.delay_ms)));
         ctx.signal.throwIfAborted();
-        return textResult(String(args.text), { details: { runtime: "node", length: String(args.text).length } });
+        return textResult(String(args.text), { details: { runtime: "node", length: String(args.text).length, config: ctx.config.marker, state: ctx.state.ready } });
       },
     }),
     defineTool({
@@ -104,10 +109,14 @@ function spawnFixture() {
   });
 }
 
+test("ToolError enforces its provider-facing byte bound", () => {
+  assert.throws(() => new ToolError("x".repeat(4097)), /4096-byte bound/);
+});
+
 test("conformance: protocol v2 lifecycle, tools, errors, cancellation, shutdown", async () => {
   const fixture = await spawnFixture();
   try {
-    const init = fixture.request("initialize", { protocol_version: 2, config: {}, host_capabilities: [] });
+    const init = fixture.request("initialize", { protocol_version: 2, config: { marker: "private" }, host_capabilities: ["tools"], session_id: "session-js", host_version: "test-host" });
     const initFrame = await init;
     assert.equal(initFrame.result.manifest.id, "conformance-js");
     assert.equal(initFrame.result.manifest.protocol_version, 2);
@@ -120,6 +129,8 @@ test("conformance: protocol v2 lifecycle, tools, errors, cancellation, shutdown"
     const call = await fixture.request("tools/call", { name: "echo", call_id: "call-1", arguments: { text: "hello", delay_ms: 20 } });
     assert.equal(call.result.content[0].text, "hello");
     assert.equal(call.result.details.runtime, "node");
+    assert.equal(call.result.details.config, "private");
+    assert.equal(call.result.details.state, true);
     assert.equal(call.result.is_error, false);
     assert.match(fixture.getStderr(), /handler diagnostic/);
 

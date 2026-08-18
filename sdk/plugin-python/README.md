@@ -37,7 +37,8 @@ if __name__ == "__main__":
 
 `plugin.run()` inserts protocol version 2 automatically, owns framing/dialog
 with the Snow host, and supports cancellation, deadlines, progress, logging,
-events, lifecycle hooks, and bounded concurrency.
+events, lifecycle hooks, and bounded concurrency. Tool contexts keep the
+private host `config` separate from setup-derived `state`.
 
 ## Development
 

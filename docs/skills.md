@@ -61,9 +61,14 @@ precedence, are:
 7. `<project>/.agents/skills/` after project trust is allowed;
 8. `<project>/.snow/skills/` after project trust is allowed.
 
-Snow currently embeds `plugin-builder`, a supervised playbook and template set
-for creating external protocol-v2 plugins when a reusable capability is missing.
-It can be activated explicitly with `$plugin-builder`. Like every skill, it is
+Snow currently embeds `plugin-builder`, a supervised playbook and SDK-first
+template set for creating external protocol-v2 plugins when a reusable
+capability is missing. It prefers Snow's private Python or JavaScript SDK,
+uses an explicit offline command to vendor the selected SDK snapshot embedded
+in the binary beside generated code, never fetches an unpublished package name
+from a registry, and fails closed instead of hand-rolling protocol framing. It
+can be activated
+explicitly with `$plugin-builder`. Like every skill, it is
 instructional only: file creation, validation, configuration changes, and shell
 execution remain separate permissioned operations. A valid same-named
 filesystem skill shadows the built-in.

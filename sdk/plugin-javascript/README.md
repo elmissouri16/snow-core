@@ -37,8 +37,9 @@ await serve(plugin);
 ```
 
 `definePlugin` inserts protocol version 2 automatically. Tool handlers receive
-an `AbortSignal` and a deadline; use them for cooperative cancellation. Event
-handlers, setup/shutdown hooks, progress, logging, and bounded
+an `AbortSignal` and a deadline; use them for cooperative cancellation. Their
+context keeps private host `config` separate from setup-derived `state`.
+Event handlers, setup/shutdown hooks, progress, logging, and bounded
 concurrency/queue limits are supported.
 
 ## Development

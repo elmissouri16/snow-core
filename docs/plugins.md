@@ -28,10 +28,13 @@ an instructional resource layer with dedicated activation tools.
 
 Snow ships an immutable, progressively disclosed `$plugin-builder` Agent Skill
 inside the binary. It teaches the root agent to decide between an existing
-tool, one-off shell work, MCP, and a Snow-specific plugin; stage dependency-free
-Python or JavaScript source; review the source diff, SHA-256 hashes, exact
-command, and environment; and run the protocol checker. Its templates and
-protocol notes are read through the normal `read_skill_resource` tool.
+tool, one-off shell work, MCP, and a Snow-specific plugin; stage Python or
+JavaScript source using Snow's private authoring SDKs; explicitly vendor the
+selected SDK snapshot embedded in the binary; review the source diff, SHA-256
+hashes, exact command, dependency path, and environment; and run the protocol
+checker. Generated templates require the reviewed vendored SDK and fail closed
+when it is absent; the skill does not hand-roll protocol framing. The templates
+and protocol notes are read through the normal `read_skill_resource` tool.
 
 Start a prompt with `$plugin-builder` to activate it explicitly. The model may
 also activate it when a reusable capability is missing. Generation still uses
@@ -127,6 +130,8 @@ snow plugin add manifest.json [--project] [--replace] [--enable] [--json]
 snow plugin enable my-tools [--project] [--json]
 snow plugin disable my-tools [--project] [--json]
 snow plugin remove my-tools [--project] [--json]
+snow plugin sdk vendor --runtime python .snow/generated-plugins/my-plugin [--replace] [--json]
+snow plugin sdk vendor --runtime javascript .snow/generated-plugins/my-plugin [--replace] [--json]
 ```
 
 `plugin add` stages a declaration with `enabled: false` by default, regardless
@@ -138,6 +143,18 @@ global command, environment, or private config into the usually commit-visible
 project file. Add and replace preserve unrelated configuration fields, while
 list/get redact child environments, credential-shaped command/header arguments,
 and private runtime configuration.
+
+`plugin sdk vendor` copies the selected private, zero-dependency SDK snapshot
+embedded in the current Snow binary into `<plugin-directory>/vendor/python` or
+`vendor/javascript`. The destination plugin directory must already exist. The
+operation is offline and does not import, execute, validate, register, or enable
+the copied code. It uses a root-confined staging directory, refuses existing
+SDKs unless `--replace` is explicit, and reports every SHA-256 plus a
+`snow-sdk.json` receipt for review. SDK-first plugin templates load this
+vendored copy exclusively and fail closed when it is absent. The packages
+remain unpublished; do not resolve similarly named npm or PyPI packages.
+Vendored Python plugins require Python 3.9+; vendored JavaScript plugins require
+Node.js 22+.
 
 Global, trusted-project, and repeated explicit `--plugin` declarations merge by
 ID in that order. A higher-precedence disabled declaration still suppresses a

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/snow-core/snow/internal/pluginsdk"
 	publicplugin "github.com/snow-core/snow/pkg/plugin"
 )
 
@@ -45,6 +47,22 @@ func TestPythonSDKExamplePlugin(t *testing.T) {
 	testExternalExample(t, "example-python-sdk", []string{runtimePath, "-u", examplePath(t, "python-sdk", "plugin.py")}, "python-sdk")
 }
 
+func TestPluginBuilderJavaScriptSDKTemplate(t *testing.T) {
+	runtimePath, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node unavailable")
+	}
+	testPluginBuilderTemplate(t, "builder-javascript", "plugin.mjs", []string{runtimePath})
+}
+
+func TestPluginBuilderPythonSDKTemplate(t *testing.T) {
+	runtimePath, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	testPluginBuilderTemplate(t, "builder-python", "plugin.py", []string{runtimePath, "-B", "-u"})
+}
+
 func examplePath(t *testing.T, language, name string) string {
 	t.Helper()
 	path, err := filepath.Abs(filepath.Join("..", "..", "examples", "plugins", language, name))
@@ -52,6 +70,74 @@ func examplePath(t *testing.T, language, name string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func testPluginBuilderTemplate(t *testing.T, id, asset string, command []string) {
+	t.Helper()
+	project := t.TempDir()
+	sourcePath, err := filepath.Abs(filepath.Join("..", "skills", "builtin", "plugin-builder", "assets", asset))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pluginDir := filepath.Join(project, ".snow", "generated-plugins", id)
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pluginPath := filepath.Join(pluginDir, asset)
+	if err := os.WriteFile(pluginPath, []byte(strings.ReplaceAll(string(source), "PLUGIN_ID", id)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runtime := pluginsdk.RuntimePython
+	if filepath.Ext(asset) == ".mjs" {
+		runtime = pluginsdk.RuntimeJavaScript
+	}
+	if _, err := pluginsdk.Vendor(pluginsdk.Options{Runtime: runtime, Destination: pluginDir, HostVersion: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	command = append(command, pluginPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	host, err := SpawnExternal(ctx, publicplugin.PluginSpec{ID: id, Command: command, Enabled: true, CWD: project}, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close(context.Background())
+	initialized, err := host.Initialize(ctx, "test", project, "session", []string{"tools"})
+	if err != nil {
+		t.Fatalf("initialize: %v; diagnostics: %s", err, host.Diagnostics())
+	}
+	if initialized.Manifest.ID != id || len(initialized.Tools) != 1 || initialized.Tools[0].Risk != "read" {
+		t.Fatalf("initialize = %+v", initialized)
+	}
+	progress := make(chan ProgressNotification, 1)
+	result, err := host.Call(ctx, "echo", "builder-call", json.RawMessage(`{"text":"hello"}`), func(update ProgressNotification) {
+		progress <- update
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Content) != 1 || result.Content[0].Text != "hello" || !strings.Contains(string(result.Details), `"length":5`) {
+		t.Fatalf("result = %+v", result)
+	}
+	select {
+	case update := <-progress:
+		if update.CallID != "builder-call" {
+			t.Fatalf("progress = %+v", update)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("missing progress")
+	}
+	if runtime == pluginsdk.RuntimePython {
+		cachePath := filepath.Join(pluginDir, "vendor", "python", "snow_plugin", "__pycache__")
+		if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+			t.Fatalf("Python template wrote unreviewed bytecode: %v", err)
+		}
+	}
 }
 
 func testExternalExample(t *testing.T, id string, command []string, runtimeName string) {

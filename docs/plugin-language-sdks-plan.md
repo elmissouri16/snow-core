@@ -425,12 +425,10 @@ await serve(plugin, {
 });
 ```
 
-```python
-plugin.run(
-    max_concurrency=8,
-    max_event_queue=64,
-)
-```
+The JavaScript runtime exposes these options today. The private Python runtime
+currently uses fixed limits of 8 active calls and 64 queued events and reports
+them during initialization; configurable Python limits remain deferred until
+before publication.
 
 Snow's `PluginSpec` remains authoritative; SDK limits are defense in depth.
 
@@ -586,11 +584,14 @@ build tooling available. The normal Go suite must remain network-free.
 - Add complete TypeScript declarations and Python typing markers.
 - Add SDK-based examples while retaining low-level reference fixtures.
 
-### Phase 4: supervised authoring
+### Phase 4: supervised authoring (implemented)
 
-Update the bundled `$plugin-builder` skill after the SDK packages are usable.
-Keep dependency-free raw templates for offline fallback, and add SDK templates
-that generate concise tool-focused source.
+The bundled `$plugin-builder` skill now prefers concise, SDK-based tool
+templates. After explicit approval, `snow plugin sdk vendor` copies the selected
+private SDK snapshot embedded in the Snow binary beside the plugin without
+network access or execution and reports hashes for review. Unpublished package
+names are never resolved from a registry. Generated templates load only the
+reviewed vendored snapshot and fail closed rather than hand-rolling framing.
 
 A later CLI may scaffold disabled plugin declarations:
 

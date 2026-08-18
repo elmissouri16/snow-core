@@ -1,0 +1,26 @@
+{
+  "name": "@snow-core/plugin",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "description": "Zero-dependency JavaScript and TypeScript SDK for authoring Snow protocol-v2 plugins",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "types": "./src/index.d.ts",
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "node --check src/*.js",
+    "test": "npm run check && node --test test/*.test.js",
+    "pack:check": "npm pack --dry-run"
+  }
+}

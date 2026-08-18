@@ -48,13 +48,21 @@ func TestEmbeddedPluginBuilderActivationResourcesAndPrecedence(t *testing.T) {
 	}
 	activate, _ := registry.Get("activate_skill")
 	result, err := activate.Run(context.Background(), json.RawMessage(`{"name":"plugin-builder"}`), nil)
-	if err != nil || result.IsError || !strings.Contains(result.Content[0].Text, "Never silently execute") || !strings.Contains(result.Content[0].Text, "assets/plugin.py") {
+	if err != nil || result.IsError || !strings.Contains(result.Content[0].Text, "Never silently execute") || !strings.Contains(result.Content[0].Text, "Use an SDK template by default") || !strings.Contains(result.Content[0].Text, "snow plugin sdk vendor") {
 		t.Fatalf("activation = %+v, err = %v", result, err)
 	}
 	read, _ := registry.Get("read_skill_resource")
 	resource, err := read.Run(context.Background(), json.RawMessage(`{"name":"plugin-builder","path":"assets/manifest-python.json"}`), nil)
-	if err != nil || resource.IsError || !strings.Contains(resource.Content[0].Text, `"enabled": false`) {
+	if err != nil || resource.IsError || !strings.Contains(resource.Content[0].Text, `"enabled": false`) || !strings.Contains(resource.Content[0].Text, `"-B"`) {
 		t.Fatalf("embedded resource = %+v, err = %v", resource, err)
+	}
+	pythonTemplate, err := read.Run(context.Background(), json.RawMessage(`{"name":"plugin-builder","path":"assets/plugin.py"}`), nil)
+	if err != nil || pythonTemplate.IsError || !strings.Contains(pythonTemplate.Content[0].Text, "from snow_plugin import Plugin") || !strings.Contains(pythonTemplate.Content[0].Text, `"vendor" / "python"`) || strings.Contains(pythonTemplate.Content[0].Text, `"jsonrpc"`) {
+		t.Fatalf("python SDK template = %+v, err = %v", pythonTemplate, err)
+	}
+	javascriptTemplate, err := read.Run(context.Background(), json.RawMessage(`{"name":"plugin-builder","path":"assets/plugin.mjs"}`), nil)
+	if err != nil || javascriptTemplate.IsError || !strings.Contains(javascriptTemplate.Content[0].Text, `"./vendor/javascript/src/index.js"`) || strings.Contains(javascriptTemplate.Content[0].Text, "createInterface") {
+		t.Fatalf("javascript SDK template = %+v, err = %v", javascriptTemplate, err)
 	}
 	traversal, err := read.Run(context.Background(), json.RawMessage(`{"name":"plugin-builder","path":"../secret"}`), nil)
 	if err != nil || !traversal.IsError || !strings.Contains(traversal.Content[0].Text, "stay inside") {

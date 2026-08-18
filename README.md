@@ -304,8 +304,9 @@ Plan and Goal contracts use embedded Markdown sources under `internal/plan` and
 - **Plugins:** statically linked Go extensions or persistent JSON-RPC v2 child
   runtimes with namespaced tools, declared risk, private result metadata,
   progress, cancellation, and explicitly subscribed observe-only events.
-  Dependency-free JavaScript and Python examples are included; configuration has
-  side-effect-free list/get plus add/enable/disable/remove management.
+  Dependency-free JavaScript and Python examples are included; the binary can
+  vendor private SDK snapshots offline, and configuration has side-effect-free
+  list/get plus add/enable/disable/remove management.
 - **Agent Skills:** strict open `SKILL.md` validation with metadata-only startup
   context, TUI autocomplete for leading `$skill-name` or model-driven
   activation, pinned on-demand resource confinement, and trust-aware precedence.
@@ -323,6 +324,7 @@ Build or manage external runtimes without hot-loading them:
 
 ```sh
 # In a Snow prompt, start with: $plugin-builder Build a reusable ...
+snow plugin sdk vendor --runtime javascript .snow/generated-plugins/my-plugin --json
 snow plugin check examples/plugins/javascript/manifest.json
 snow plugin check examples/plugins/python/manifest.json --json
 snow plugin add ./my-plugin/manifest.json --project # staged disabled
@@ -331,7 +333,8 @@ snow plugin list --all
 ```
 
 `plugin check` starts the runtime, so it requires the same trust as executing
-other generated code. list/get/add/enable/disable/remove never start it.
+other generated code. SDK vendoring writes executable source but does not run
+it; list/get/add/enable/disable/remove also never start a plugin.
 
 See [MCP](docs/mcp.md), [plugins](docs/plugins.md), the complete
 [plugin protocol](docs/plugin-protocol.md), [Agent Skills](docs/skills.md),

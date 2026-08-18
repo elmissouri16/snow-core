@@ -430,9 +430,14 @@ are external model context and cannot override system or user authority.
 The embedded `$plugin-builder` skill is guidance, not an execution capability.
 Generated files still need ordinary write approval. Testing, compiling, and
 `plugin check` need execution approval, and dependency downloads need network
-approval. `plugin check` starts initialization code with user privileges; it is
-not passive validation. `plugin add` therefore persists generated declarations
-disabled by default, enabling is separate and explicit, and activation occurs
+approval. `plugin sdk vendor` performs a root-confined, staged copy of SDK
+source embedded in the Snow binary and reports hashes, but the resulting files
+are still untrusted executable input requiring review. SDK-first templates load
+only that reviewed copy and fail closed when it is absent; unpublished SDK
+names must never be resolved from a registry. `plugin check`
+starts initialization code with user privileges; it is not passive validation. `plugin add` therefore persists
+generated declarations disabled by default, enabling is separate and explicit,
+and activation occurs
 only after restart. Project trust never substitutes for generated-code review.
 
 Use `snow plugin check` to inspect a runtime's declared tools, risks, subscribed

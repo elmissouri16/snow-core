@@ -61,6 +61,10 @@ class SubprocessConformanceTests(unittest.TestCase):
 
         plugin = Plugin("demo-python", "Demo", "1.0.0")
 
+        @plugin.on_setup
+        async def setup(context, config):
+            return {{"ready": True, "session": context.session_id}}
+
         @plugin.tool(
             name="echo",
             description="Echo text with optional delay",
@@ -81,7 +85,7 @@ class SubprocessConformanceTests(unittest.TestCase):
             delay = max(0, min(5000, int(arguments.get("delay_ms", 0))))
             if delay:
                 await asyncio.sleep(delay / 1000.0)
-            return text_result(str(arguments["text"]), details={{'runtime': 'python'}})
+            return text_result(str(arguments["text"]), details={{'runtime': 'python', 'config': context.config.get('marker'), 'state': context.state.get('ready')}})
 
         @plugin.tool(name="boom", description="Raise an expected error", risk="read",
                      parameters={{"type": "object"}})
@@ -152,7 +156,7 @@ class SubprocessConformanceTests(unittest.TestCase):
     def test_initialize_tools_list_and_echo(self):
         process = self._start()
         self._send(process, {"jsonrpc": "2.0", "id": "1", "method": "initialize",
-                             "params": {"protocol_version": 2, "cwd": "/tmp", "config": {}}})
+                             "params": {"protocol_version": 2, "cwd": "/tmp", "session_id": "session-python", "config": {"marker": "private"}}})
         init = self._read_until(process, "1")[0]
         manifest = init["result"]["manifest"]
         self.assertEqual(manifest["id"], "demo-python")
@@ -170,6 +174,8 @@ class SubprocessConformanceTests(unittest.TestCase):
         call = next(frame for frame in frames if frame.get("id") == "3")
         self.assertEqual(call["result"]["content"][0]["text"], "hello")
         self.assertEqual(call["result"]["details"]["runtime"], "python")
+        self.assertEqual(call["result"]["details"]["config"], "private")
+        self.assertEqual(call["result"]["details"]["state"], True)
         self.assertIn("notifications/progress", {frame.get("method") for frame in frames})
 
         self._send(process, {"jsonrpc": "2.0", "id": "shutdown", "method": "shutdown", "params": {}})

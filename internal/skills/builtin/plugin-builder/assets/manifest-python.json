@@ -2,6 +2,7 @@
   "id": "PLUGIN_ID",
   "command": [
     "python3",
+    "-B",
     "-u",
     ".snow/generated-plugins/PLUGIN_ID/plugin.py"
   ],
