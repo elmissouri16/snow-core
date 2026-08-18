@@ -25,6 +25,15 @@ const (
 	maxPages               = 100
 )
 
+// Declaration is one resolved MCP declaration plus its cache-partitioning
+// origin. Scope is global, project, or explicit. ProjectIdentity is canonical
+// and is only hashed into cache keys.
+type Declaration struct {
+	Spec            publicmcp.ServerSpec
+	Scope           string
+	ProjectIdentity string
+}
+
 // Options configure an MCP manager.
 type Options struct {
 	CWD             string
@@ -34,6 +43,14 @@ type Options struct {
 	MaxOutputBytes  int
 	RefreshTimeout  time.Duration
 	RefreshDebounce time.Duration
+	// CacheRoot is Snow's private application directory. Empty disables the
+	// durable MCP catalog cache.
+	CacheRoot string
+	// Now is used by deterministic cache and lifecycle tests.
+	Now func() time.Time
+	// ForceRefresh bypasses cache reads for explicit cache-refresh operations.
+	// Successful live negotiation still replaces the cache atomically.
+	ForceRefresh bool
 	// ServerStderr optionally receives stderr written by stdio MCP child
 	// processes. It defaults to io.Discard so child diagnostics cannot corrupt
 	// interactive terminal surfaces.
@@ -53,27 +70,61 @@ type Manager struct {
 	closed     bool
 	connectWG  sync.WaitGroup
 	connectErr error
+	cache      *catalogCache
+}
+
+type runtimeConnectAttempt struct {
+	done chan struct{}
+	err  error
 }
 
 type serverRuntime struct {
 	mu      sync.Mutex
 	manager *Manager
+	decl    Declaration
 	spec    publicmcp.ServerSpec
 	client  *sdkmcp.Client
 	session *sdkmcp.ClientSession
-	closed  bool
+	closed  bool // retained for compatibility with focused internal tests
 	owner   string
 	used    map[string]string
 
-	refreshMu     sync.Mutex
-	refreshCtx    context.Context
-	refreshCancel context.CancelFunc
-	refreshReq    chan struct{}
-	refreshStop   chan struct{}
-	refreshDone   chan struct{}
+	state            runtimeState
+	lazyEligible     bool
+	connectErr       error
+	connectAttempt   *runtimeConnectAttempt
+	warning          string
+	transitionDone   chan struct{}
+	activeCalls      int
+	refreshing       bool
+	lastUsed         time.Time
+	idleTimer        *time.Timer
+	generation       uint64
+	cached           cachedCatalog
+	cacheKey         string
+	liveTools        map[string]string
+	liveCapabilities map[string]bool
+	subscriptions    map[string]struct{}
+	runtimeCtx       context.Context
+	runtimeCancel    context.CancelFunc
+
+	subscriptionMu sync.Mutex
+	refreshMu      sync.Mutex
+	refreshCtx     context.Context
+	refreshCancel  context.CancelFunc
+	refreshReq     chan struct{}
+	refreshStop    chan struct{}
+	refreshDone    chan struct{}
 }
 
 type headerTransport struct {
 	base    http.RoundTripper
 	headers map[string]string
+}
+
+func (m *Manager) now() time.Time {
+	if m.opts.Now != nil {
+		return m.opts.Now()
+	}
+	return time.Now()
 }

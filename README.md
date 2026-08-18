@@ -295,8 +295,10 @@ Plan and Goal contracts use embedded Markdown sources under `internal/plan` and
 ### Extensibility
 
 - **MCP:** official Go SDK client for current stateless Streamable HTTP and
-  stdio, with legacy negotiation, tools, resources, prompts, subscriptions, and
-  live tool-catalog refresh.
+  stdio, with legacy negotiation, tools, resources, prompts, subscriptions,
+  live tool-catalog refresh, and opt-in lazy or lazy-keep-alive connections
+  backed by a bounded, secret-free catalog cache with explicit status, refresh,
+  clear, and strict no-bootstrap startup.
 - **Plugins:** statically linked Go extensions or persistent JSON-RPC v2 child
   runtimes with namespaced tools, declared risk, private result metadata,
   progress, cancellation, and explicitly subscribed observe-only events.
@@ -588,8 +590,6 @@ roadmap live in [`IMPLEMENTATION.md`](IMPLEMENTATION.md).
 
 ## Remaining roadmap
 
-- Optional MCP Apps, Tasks, Enterprise Managed Authorization, and interactive
-  MCP OAuth are not yet exposed.
 - Namespace-first tool routing currently uses local BM25; optional
   semantic/vector routing is deferred pending a suitable downloadable
   cross-platform model.

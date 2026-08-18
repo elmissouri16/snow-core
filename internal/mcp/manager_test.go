@@ -194,6 +194,10 @@ func TestMCPHelperProcess(t *testing.T) {
 	if notice := os.Getenv("SNOW_MCP_HELPER_STDERR"); notice != "" {
 		_, _ = os.Stderr.WriteString(notice)
 	}
+	if os.Getenv("SNOW_MCP_HELPER_OVERSIZED") == "1" {
+		_, _ = os.Stdout.WriteString(strings.Repeat("x", maxCacheBytes+1) + "\n")
+		return
+	}
 	_ = testServer().Run(context.Background(), &sdkmcp.StdioTransport{})
 }
 
@@ -221,6 +225,19 @@ func TestManagerStdioServer(t *testing.T) {
 	}
 	if got := serverStderr.String(); got != "server startup notice\n" {
 		t.Fatalf("captured server stderr = %q", got)
+	}
+}
+
+func TestManagerRejectsOversizedStdioMessageBeforeDecode(t *testing.T) {
+	manager := NewManager(tools.NewRegistry(), Options{CWD: t.TempDir(), HostVersion: "test"})
+	manager.ConnectAll(context.Background(), []publicmcp.ServerSpec{{
+		ID: "oversized", Transport: publicmcp.TransportStdio, Command: os.Args[0],
+		Args: []string{"-test.run=TestMCPHelperProcess"}, Env: map[string]string{"SNOW_MCP_HELPER": "1", "SNOW_MCP_HELPER_OVERSIZED": "1"},
+	}})
+	defer manager.Close()
+	statuses := manager.Statuses()
+	if len(statuses) != 1 || statuses[0].State != stateFailed.String() || statuses[0].Connected {
+		t.Fatalf("statuses = %+v", statuses)
 	}
 }
 

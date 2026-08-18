@@ -212,10 +212,14 @@ func (m *Model) startMCPInfo() (tea.Model, tea.Cmd) {
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].ID < statuses[j].ID })
 	items := make([]statusInfoItem, 0, len(statuses))
 	for _, status := range statuses {
-		state := "failed"
-		if status.Connected {
-			state = "connected"
-		} else if status.Message == "disabled" || strings.HasPrefix(status.Message, "disabled by") {
+		state := status.State
+		if state == "" {
+			state = "failed"
+			if status.Connected {
+				state = "connected"
+			}
+		}
+		if status.Message == "disabled" || strings.HasPrefix(status.Message, "disabled by") {
 			state = "disabled"
 		}
 		label := fmt.Sprintf("%s  ·  %s  ·  %s", status.ID, state, status.Transport)

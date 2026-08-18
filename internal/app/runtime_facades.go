@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	internalmcp "github.com/snow-core/snow/internal/mcp"
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/provider"
 	"github.com/snow-core/snow/internal/tools"
@@ -360,30 +361,39 @@ func mergeDisabledPluginSpecs(global, project, explicit []publicplugin.PluginSpe
 }
 
 func mergeMCPServers(global, project map[string]publicmcp.ServerSpec, explicit []publicmcp.ServerSpec) []publicmcp.ServerSpec {
-	merged := make(map[string]publicmcp.ServerSpec, len(global)+len(project)+len(explicit))
-	for id, spec := range global {
+	declarations := mergeMCPDeclarations(global, project, explicit, "")
+	out := make([]publicmcp.ServerSpec, 0, len(declarations))
+	for _, declaration := range declarations {
+		out = append(out, declaration.Spec)
+	}
+	return out
+}
+
+func mergeMCPDeclarations(global, project map[string]publicmcp.ServerSpec, explicit []publicmcp.ServerSpec, projectIdentity string) []internalmcp.Declaration {
+	merged := make(map[string]internalmcp.Declaration, len(global)+len(project)+len(explicit))
+	add := func(id, scope string, spec publicmcp.ServerSpec) {
 		if spec.ID == "" {
 			spec.ID = id
 		}
-		merged[spec.ID] = spec
+		if spec.ID != "" {
+			merged[spec.ID] = internalmcp.Declaration{Spec: spec, Scope: scope, ProjectIdentity: projectIdentity}
+		}
+	}
+	for id, spec := range global {
+		add(id, "global", spec)
 	}
 	for id, spec := range project {
-		if spec.ID == "" {
-			spec.ID = id
-		}
-		merged[spec.ID] = spec
+		add(id, "project", spec)
 	}
 	for _, spec := range explicit {
-		if spec.ID != "" {
-			merged[spec.ID] = spec
-		}
+		add(spec.ID, "explicit", spec)
 	}
 	ids := make([]string, 0, len(merged))
 	for id := range merged {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	out := make([]publicmcp.ServerSpec, 0, len(ids))
+	out := make([]internalmcp.Declaration, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, merged[id])
 	}

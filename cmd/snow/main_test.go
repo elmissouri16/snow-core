@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -462,14 +463,14 @@ func TestMCPManagementLifecycleAndRedaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := runCLI(t, "snow", "mcp", "add", "demo", "--env", "TOKEN=secret", "--json", "--", "npx", "--api-key=secret", "demo-mcp"); err != nil {
+	if _, err := runCLI(t, "snow", "mcp", "add", "demo", "--env", "TOKEN=secret", "--lifecycle", "lazy", "--cache-bootstrap", "explicit", "--json", "--", "npx", "--api-key=secret", "demo-mcp"); err != nil {
 		t.Fatal(err)
 	}
 	listed, err := runCLI(t, "snow", "mcp", "list", "--json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(listed, "secret") || !strings.Contains(listed, "[redacted]") || !strings.Contains(listed, `"name":"demo"`) {
+	if strings.Contains(listed, "secret") || !strings.Contains(listed, "[redacted]") || !strings.Contains(listed, `"name":"demo"`) || !strings.Contains(listed, `"cache_bootstrap":"explicit"`) {
 		t.Fatalf("redacted list = %s", listed)
 	}
 	if _, err := runCLI(t, "snow", "mcp", "disable", "demo"); err != nil {
@@ -519,13 +520,93 @@ func TestMCPCheckReportsLiveNegotiation(t *testing.T) {
 	})
 	httpServer := httptest.NewServer(sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{Stateless: true}))
 	defer httpServer.Close()
-	configJSON := fmt.Sprintf(`{"mcp_servers":{"remote":{"url":%q}}}`, httpServer.URL)
+	configJSON := fmt.Sprintf(`{"mcp_servers":{"remote":{"url":%q,"lifecycle":"lazy"}}}`, httpServer.URL)
 	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(configJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := runCLI(t, "snow", "mcp", "check", "remote", "--json")
 	if err != nil || !strings.Contains(out, `"connected":true`) || !strings.Contains(out, `"tool_count":1`) {
 		t.Fatalf("check = %s, err = %v", out, err)
+	}
+}
+
+func TestMCPCacheStatusStrictMissDoesNotStartServer(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	sentinel := filepath.Join(home, "started")
+	configJSON := fmt.Sprintf(`{"mcp_servers":{"strict":{"command":"/bin/sh","args":["-c","touch %s"],"lifecycle":"lazy","cache_bootstrap":"explicit"}}}`, sentinel)
+	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCLI(t, "snow", "mcp", "cache", "status", "strict", "--json")
+	if err != nil || !strings.Contains(out, `"state":"missing"`) {
+		t.Fatalf("cache status = %s, err = %v", out, err)
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Fatalf("cache status started server: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "cache")); !os.IsNotExist(err) {
+		t.Fatalf("cache status mutated an absent cache directory: %v", err)
+	}
+}
+
+func TestMCPCacheRefreshRejectsInvalidOriginalConfigBeforeTransport(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	var requests atomic.Int32
+	httpServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests.Add(1) }))
+	defer httpServer.Close()
+	for _, declaration := range []string{
+		fmt.Sprintf(`{"url":%q,"lifecycle":"invalid"}`, httpServer.URL),
+		fmt.Sprintf(`{"url":%q,"lifecycle":"eager","idle_timeout_ms":1000}`, httpServer.URL),
+		fmt.Sprintf(`{"url":%q,"lifecycle":"eager","cache_bootstrap":"explicit"}`, httpServer.URL),
+	} {
+		configJSON := fmt.Sprintf(`{"mcp_servers":{"invalid":%s}}`, declaration)
+		if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(configJSON), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := runCLI(t, "snow", "mcp", "cache", "refresh", "invalid", "--json"); err == nil {
+			t.Fatalf("invalid refresh succeeded: %s", out)
+		}
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("invalid refresh made %d transport requests", requests.Load())
+	}
+}
+
+func TestMCPCacheRefreshStatusAndClear(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	var requests atomic.Int32
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "cache-cli", Version: "1"}, nil)
+	server.AddTool(&sdkmcp.Tool{Name: "echo", InputSchema: json.RawMessage(`{"type":"object"}`)}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{}, nil
+	})
+	handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{Stateless: true})
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		handler.ServeHTTP(w, r)
+	}))
+	defer httpServer.Close()
+	configJSON := fmt.Sprintf(`{"mcp_servers":{"remote":{"url":%q,"lifecycle":"lazy","cache_bootstrap":"explicit"}}}`, httpServer.URL)
+	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCLI(t, "snow", "mcp", "cache", "refresh", "remote", "--json")
+	if err != nil || !strings.Contains(out, `"state":"valid"`) || !strings.Contains(out, `"tool_count":1`) || requests.Load() == 0 {
+		t.Fatalf("cache refresh = %s, err = %v, requests=%d", out, err, requests.Load())
+	}
+	out, err = runCLI(t, "snow", "mcp", "cache", "status", "remote", "--json")
+	if err != nil || !strings.Contains(out, `"state":"valid"`) {
+		t.Fatalf("cache status = %s, err = %v", out, err)
+	}
+	out, err = runCLI(t, "snow", "mcp", "cache", "clear", "remote", "--json")
+	if err != nil || !strings.Contains(out, `"removed":1`) {
+		t.Fatalf("cache clear = %s, err = %v", out, err)
+	}
+	out, err = runCLI(t, "snow", "mcp", "cache", "status", "remote", "--json")
+	if err != nil || !strings.Contains(out, `"state":"missing"`) {
+		t.Fatalf("post-clear status = %s, err = %v", out, err)
 	}
 }
 

@@ -30,7 +30,7 @@ func mcpCmd() *cobra.Command {
 			return runMCPList(cmd, false)
 		},
 	}
-	cmd.AddCommand(mcpListCmd(), mcpGetCmd(), mcpAddCmd(), mcpToggleCmd(true), mcpToggleCmd(false), mcpRemoveCmd(), mcpCheckCmd())
+	cmd.AddCommand(mcpListCmd(), mcpGetCmd(), mcpAddCmd(), mcpToggleCmd(true), mcpToggleCmd(false), mcpRemoveCmd(), mcpCheckCmd(), mcpCacheCmd())
 	return cmd
 }
 
@@ -111,6 +111,11 @@ func mcpGetCmd() *cobra.Command {
 					fmt.Printf("Timeout: %dms\n", view.TimeoutMS)
 				}
 				fmt.Printf("Tool discovery: %s\n", defaultString(view.ToolDiscovery, "deferred"))
+				fmt.Printf("Lifecycle: %s\n", defaultString(view.Lifecycle, publicmcp.LifecycleEager))
+				fmt.Printf("Cache bootstrap: %s\n", defaultString(view.CacheBootstrap, publicmcp.CacheBootstrapAuto))
+				if view.IdleTimeoutMS > 0 {
+					fmt.Printf("Idle timeout: %dms\n", view.IdleTimeoutMS)
+				}
 				if len(view.Env) > 0 {
 					fmt.Printf("Environment: %s\n", formatStringMap(view.Env))
 				}
@@ -129,7 +134,7 @@ func mcpGetCmd() *cobra.Command {
 
 func mcpAddCmd() *cobra.Command {
 	var project, disabled, replace bool
-	var endpoint, cwd, timeoutValue, discovery, bearerEnv string
+	var endpoint, cwd, timeoutValue, idleTimeoutValue, discovery, lifecycle, cacheBootstrap, bearerEnv string
 	var envValues, headerValues []string
 	var asJSON bool
 	cmd := &cobra.Command{
@@ -138,7 +143,7 @@ func mcpAddCmd() *cobra.Command {
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			spec := publicmcp.ServerSpec{ID: name, URL: endpoint, CWD: cwd, Disabled: disabled, ToolDiscovery: discovery}
+			spec := publicmcp.ServerSpec{ID: name, URL: endpoint, CWD: cwd, Disabled: disabled, ToolDiscovery: discovery, Lifecycle: lifecycle, CacheBootstrap: cacheBootstrap}
 			if endpoint == "" {
 				if len(args) < 2 {
 					return errors.New("mcp add: provide --url or a command after --")
@@ -182,6 +187,14 @@ func mcpAddCmd() *cobra.Command {
 				}
 				spec.TimeoutMS = int(timeout / time.Millisecond)
 			}
+			if idleTimeoutValue != "" {
+				idleTimeout, err := time.ParseDuration(idleTimeoutValue)
+				maxInt := int64(^uint(0) >> 1)
+				if err != nil || idleTimeout <= 0 || idleTimeout.Milliseconds() > maxInt {
+					return fmt.Errorf("mcp add: invalid idle timeout %q", idleTimeoutValue)
+				}
+				spec.IdleTimeoutMS = int(idleTimeout / time.Millisecond)
+			}
 			if err := spec.Validate(); err != nil {
 				return err
 			}
@@ -208,6 +221,9 @@ func mcpAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&bearerEnv, "bearer-token-env", "", "environment variable containing an HTTP bearer token")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "stdio working directory")
 	cmd.Flags().StringVar(&timeoutValue, "timeout", "", "connection timeout such as 15s")
+	cmd.Flags().StringVar(&lifecycle, "lifecycle", publicmcp.LifecycleEager, "connection lifecycle: eager|lazy|lazy-keep-alive")
+	cmd.Flags().StringVar(&cacheBootstrap, "cache-bootstrap", publicmcp.CacheBootstrapAuto, "lazy cache bootstrap: auto|explicit")
+	cmd.Flags().StringVar(&idleTimeoutValue, "idle-timeout", "", "lazy idle timeout such as 10m")
 	cmd.Flags().StringVar(&discovery, "discovery", "deferred", "tool discovery: deferred|always")
 	cmd.Flags().BoolVar(&disabled, "disabled", false, "add the server disabled")
 	cmd.Flags().BoolVar(&replace, "replace", false, "replace an existing declaration")
@@ -327,6 +343,14 @@ func mcpCheckCmd() *cobra.Command {
 					statuses = append(statuses, publicmcp.Status{ID: spec.ID, Transport: spec.EffectiveTransport(), Message: "disabled by --no-mcp"})
 				}
 			} else {
+				// check is an explicit live probe: temporarily force eager lifecycle so
+				// a healthy lazy server is reported as connected rather than as a
+				// successfully bootstrapped, disconnected cache entry.
+				for i := range specs {
+					specs[i].Lifecycle = publicmcp.LifecycleEager
+					specs[i].CacheBootstrap = publicmcp.CacheBootstrapAuto
+					specs[i].IdleTimeoutMS = 0
+				}
 				registry := tools.NewRegistry()
 				manager := internalmcp.NewManager(registry, internalmcp.Options{CWD: mustCWD(), Roots: []string{mustCWD()}, HostName: "snow", HostVersion: version, MaxOutputBytes: set.Config.ToolOutputLimit()})
 				manager.ConnectAll(cmd.Context(), specs)
@@ -542,7 +566,6 @@ func loadMCPConfig(cmd *cobra.Command, includeShadowed bool) (mcpConfigSet, erro
 		return mcpConfigSet{}, err
 	}
 	cwd := mustCWD()
-	projectPath := filepath.Join(cwd, ".snow", "config.json")
 	_, _, trustPath := config.DefaultPaths()
 	store, err := trust.New(trustPath)
 	if err != nil {
@@ -553,6 +576,8 @@ func loadMCPConfig(cmd *cobra.Command, includeShadowed bool) (mcpConfigSet, erro
 		return mcpConfigSet{}, err
 	}
 	projectAllowed := !resolution.Prompt && resolution.Level == trust.LevelAllow
+	projectIdentity := resolution.Path
+	projectPath := filepath.Join(projectIdentity, ".snow", "config.json")
 	projectBlocked := false
 	projectServers := map[string]publicmcp.ServerSpec{}
 	if projectAllowed {
@@ -600,11 +625,11 @@ func loadMCPConfig(cmd *cobra.Command, includeShadowed bool) (mcpConfigSet, erro
 		}
 		return views[i].Name < views[j].Name
 	})
-	return mcpConfigSet{Views: views, Effective: effective, ProjectBlocked: projectBlocked, Config: cfg}, nil
+	return mcpConfigSet{Views: views, Effective: effective, Scopes: scopes, ProjectIdentity: projectIdentity, ProjectBlocked: projectBlocked, Config: cfg}, nil
 }
 
 func newMCPView(name, scope string, spec publicmcp.ServerSpec, shadowed bool) mcpConfigView {
-	view := mcpConfigView{Name: name, Enabled: !spec.Disabled, Scope: scope, Transport: spec.EffectiveTransport(), Command: spec.Command, Args: redactArgs(spec.Args), URL: redactURL(spec.URL), CWD: spec.CWD, Env: redactConfigMap(spec.Env, false), Headers: redactConfigMap(spec.Headers, true), TimeoutMS: spec.TimeoutMS, ToolDiscovery: spec.ToolDiscovery, Shadowed: shadowed, spec: spec}
+	view := mcpConfigView{Name: name, Enabled: !spec.Disabled, Scope: scope, Transport: spec.EffectiveTransport(), Command: spec.Command, Args: redactArgs(spec.Args), URL: redactURL(spec.URL), CWD: spec.CWD, Env: redactConfigMap(spec.Env, false), Headers: redactConfigMap(spec.Headers, true), TimeoutMS: spec.TimeoutMS, ToolDiscovery: spec.ToolDiscovery, Lifecycle: spec.Lifecycle, CacheBootstrap: spec.CacheBootstrap, IdleTimeoutMS: spec.IdleTimeoutMS, Shadowed: shadowed, spec: spec}
 	if spec.EffectiveTransport() == publicmcp.TransportStdio {
 		view.Target = strings.TrimSpace(strings.Join(append([]string{spec.Command}, view.Args...), " "))
 	} else {

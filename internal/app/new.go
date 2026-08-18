@@ -418,13 +418,18 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	// MCP servers are independent of Snow's plugin protocol. The official Go
 	// SDK performs protocol negotiation and lifecycle handling; negotiated
 	// tools/resources/prompts are adapted into the same permissioned registry.
-	mcpSpecs := mergeMCPServers(cfg.MCPServers, projectMCPServers, opts.MCPServers)
+	mcpDeclarations := mergeMCPDeclarations(cfg.MCPServers, projectMCPServers, opts.MCPServers, projectInputRoot)
+	mcpSpecs := make([]publicmcp.ServerSpec, 0, len(mcpDeclarations))
+	for _, declaration := range mcpDeclarations {
+		mcpSpecs = append(mcpSpecs, declaration.Spec)
+	}
 	var mcpStatuses []publicmcp.Status
 	if !opts.NoMCP {
 		mcpManager = internalmcp.NewManager(reg, internalmcp.Options{
-			CWD: extensionCWD, Roots: []string{absCWD}, HostName: "snow", HostVersion: "0.1.0-dev", MaxOutputBytes: cfg.ToolOutputLimit(),
+			CWD: projectInputRoot, Roots: []string{projectInputRoot}, HostName: "snow", HostVersion: "0.1.0-dev", MaxOutputBytes: cfg.ToolOutputLimit(),
+			CacheRoot: startup.globalDir,
 		})
-		mcpManager.ConnectAll(ctx, mcpSpecs)
+		mcpManager.Initialize(ctx, mcpDeclarations)
 		mcpStatuses = mcpManager.Statuses()
 	} else {
 		for _, spec := range mcpSpecs {

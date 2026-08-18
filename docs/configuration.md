@@ -467,6 +467,16 @@ See [Subagents](subagents.md) for role examples and the full safety model.
 
 - `plugins` is an array of public `plugin.PluginSpec` declarations.
 - `mcp_servers` maps stable names to public `mcp.ServerSpec` declarations.
+  `lifecycle` is `eager` by default, `lazy`, or `lazy-keep-alive`;
+  `idle_timeout_ms` is a positive `lazy` session override whose zero value uses
+  ten minutes. `cache_bootstrap` is `auto` by default or `explicit` for strict
+  startup with no MCP transport work on a missing, expired, or mismatched cache.
+  Automatic lazy cache misses bootstrap once, while valid tool, resource, and
+  prompt catalogs start disconnected. `lazy-keep-alive` retains its session
+  after first activation. Resource subscriptions keep their session connected
+  until unsubscribe or shutdown; automatic catalogs with no activation
+  descriptor remain eager, while explicit catalogs require `snow mcp cache
+  refresh <name>` to discover changes.
 
 Plugin declarations merge by ID with `global < trusted project < explicit
 --plugin` precedence; a disabled higher layer suppresses an enabled lower

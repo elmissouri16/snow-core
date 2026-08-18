@@ -338,6 +338,30 @@ Snow inventories redact:
 - sensitive MCP headers and environment values;
 - credential-like command arguments and URL credentials.
 
+The lazy MCP catalog cache under `$SNOW_HOME/cache/mcp-v1.json` contains only
+bounded negotiation metadata, tool schemas, and resource/prompt capability
+flags. It never stores server instructions, resource/prompt content, header or environment values, URL
+userinfo/query/fragment data, or argument values. Cache reuse is partitioned by
+hashed project/root identity and a secret-free declaration-shape fingerprint;
+positional arguments and flag values use non-secret shape markers rather than
+digests, preventing offline verification of low-entropy credentials. Entries
+expire after seven days. The cache directory is pinned and private, writes use a
+cross-process lock plus atomic `0600` replacement, and malformed entries trigger
+live bootstrap rather than application failure. A valid lazy cache performs no
+transport work until a permissioned tool or resource/prompt bridge call; an
+uncached automatic lazy declaration must bootstrap once at startup to create
+that metadata. `cache_bootstrap: "explicit"` provides a strict no-transport
+startup path: missing, invalid, expired, and mismatched entries remain
+unavailable until the operator runs the explicitly live `snow mcp cache refresh
+<name>` command. Cache status and clear operations do not start MCP servers.
+A successful resource subscription intentionally holds the live MCP
+session until unsubscribe or shutdown, so its server does not idle-disconnect.
+Per-server subscription URI count and length are bounded; failed unsubscribe
+operations retain their lease rather than risking an untracked live
+subscription. Live tool catalogs enforce per-tool, count, pagination, and
+aggregate byte limits while they are collected; Streamable HTTP response bodies
+and newline-delimited stdio JSON-RPC messages are bounded before SDK decoding.
+
 Do not rely on redaction as a data-loss-prevention system. A model can request a
 readable secret file if it falls under an allowed root, and an allowed shell or
 extension has the user's normal access. Keep secrets outside project roots where

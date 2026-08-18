@@ -23,110 +23,33 @@ import (
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
-// NewManager creates an idle MCP manager.
-func NewManager(registry tools.Registry, opts Options) *Manager {
-	if opts.HostName == "" {
-		opts.HostName = "snow"
+func (rt *serverRuntime) connectLive(parent context.Context) error {
+	rt.mu.Lock()
+	if rt.state == stateClosed || rt.closed {
+		rt.mu.Unlock()
+		return errors.New("runtime is closed")
 	}
-	if opts.HostVersion == "" {
-		opts.HostVersion = "dev"
-	}
-	if opts.MaxOutputBytes <= 0 {
-		opts.MaxOutputBytes = defaultMaxOutput
-	}
-	if opts.RefreshTimeout <= 0 {
-		opts.RefreshTimeout = defaultRefreshTimeout
-	}
-	if opts.RefreshDebounce <= 0 {
-		opts.RefreshDebounce = defaultRefreshDebounce
-	}
-	if opts.ServerStderr == nil {
-		opts.ServerStderr = io.Discard
-	}
-	return &Manager{registry: registry, opts: opts, runtimes: make(map[string]*serverRuntime), statuses: make(map[string]publicmcp.Status), claimed: make(map[string]bool)}
-}
+	rt.generation++
+	generation := rt.generation
+	refreshCtx, refreshCancel := context.WithCancel(rt.runtimeCtx)
+	req, stop, done := make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
+	rt.refreshCtx, rt.refreshCancel = refreshCtx, refreshCancel
+	rt.refreshReq, rt.refreshStop, rt.refreshDone = req, stop, done
+	rt.mu.Unlock()
+	workerStarted := false
+	defer func() {
+		if workerStarted {
+			return
+		}
+		refreshCancel()
+		rt.mu.Lock()
+		if rt.refreshReq == req {
+			rt.refreshCtx, rt.refreshCancel = nil, nil
+			rt.refreshReq, rt.refreshStop, rt.refreshDone = nil, nil, nil
+		}
+		rt.mu.Unlock()
+	}()
 
-// ConnectAll validates and connects enabled servers. One unavailable server
-// does not make the agent unusable; its failure is retained in Statuses.
-func (m *Manager) ConnectAll(ctx context.Context, specs []publicmcp.ServerSpec) {
-	m.mu.Lock()
-	if m.closed {
-		m.mu.Unlock()
-		for _, spec := range specs {
-			m.setStatus(publicmcp.Status{ID: spec.ID, Transport: spec.EffectiveTransport(), Message: "MCP manager is closed"})
-		}
-		return
-	}
-	m.connectWG.Add(1)
-	m.mu.Unlock()
-	defer m.connectWG.Done()
-
-	counts := make(map[string]int, len(specs))
-	for _, spec := range specs {
-		counts[spec.ID]++
-	}
-	for _, spec := range specs {
-		status := publicmcp.Status{ID: spec.ID, Transport: spec.EffectiveTransport()}
-		if counts[spec.ID] > 1 {
-			status.Message = "duplicate MCP server id"
-			m.setStatus(status)
-			continue
-		}
-		m.mu.Lock()
-		if m.closed {
-			m.mu.Unlock()
-			status.Message = "MCP manager is closed"
-			m.setStatus(status)
-			continue
-		}
-		if m.claimed[spec.ID] {
-			m.mu.Unlock()
-			m.setRuntimeMessage(spec.ID, "duplicate MCP server id ignored")
-			continue
-		}
-		m.claimed[spec.ID] = true
-		m.mu.Unlock()
-		if spec.Disabled {
-			status.Message = "disabled"
-			m.setStatus(status)
-			continue
-		}
-		if err := spec.Validate(); err != nil {
-			status.Message = err.Error()
-			m.setStatus(status)
-			continue
-		}
-		refreshCtx, refreshCancel := context.WithCancel(context.Background())
-		rt := &serverRuntime{
-			manager: m, spec: spec, owner: "mcp:" + spec.ID, used: make(map[string]string),
-			refreshCtx: refreshCtx, refreshCancel: refreshCancel,
-			refreshReq: make(chan struct{}, 1), refreshStop: make(chan struct{}), refreshDone: make(chan struct{}),
-		}
-		if err := rt.connect(ctx); err != nil {
-			refreshCancel()
-			status.Message = err.Error()
-			m.setStatus(status)
-			continue
-		}
-		m.mu.Lock()
-		if m.closed {
-			m.mu.Unlock()
-			if closeErr := rt.close(); closeErr != nil {
-				m.mu.Lock()
-				m.connectErr = errors.Join(m.connectErr, fmt.Errorf("mcp %s late close: %w", spec.ID, closeErr))
-				m.mu.Unlock()
-			}
-			status.Message = "MCP manager closed during connect"
-			m.setStatus(status)
-			continue
-		}
-		m.runtimes[spec.ID] = rt
-		m.mu.Unlock()
-		m.updateConnectedStatus(rt)
-	}
-}
-
-func (rt *serverRuntime) connect(parent context.Context) error {
 	timeout := defaultConnectTimeout
 	if rt.spec.TimeoutMS > 0 {
 		timeout = time.Duration(rt.spec.TimeoutMS) * time.Millisecond
@@ -137,17 +60,17 @@ func (rt *serverRuntime) connect(parent context.Context) error {
 	clientOpts := &sdkmcp.ClientOptions{
 		Capabilities: &sdkmcp.ClientCapabilities{RootsV2: &sdkmcp.RootCapabilities{ListChanged: false}},
 		ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
-			rt.requestRefresh()
+			rt.requestRefresh(generation)
 		},
 		KeepAlive: 30 * time.Second,
 	}
-	rt.client = sdkmcp.NewClient(&sdkmcp.Implementation{Name: rt.manager.opts.HostName, Version: rt.manager.opts.HostVersion}, clientOpts)
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: rt.manager.opts.HostName, Version: rt.manager.opts.HostVersion}, clientOpts)
 	for _, root := range rt.manager.opts.Roots {
 		abs, err := filepath.Abs(root)
 		if err != nil {
 			continue
 		}
-		rt.client.AddRoots(&sdkmcp.Root{Name: filepath.Base(abs), URI: (&url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}).String()})
+		client.AddRoots(&sdkmcp.Root{Name: filepath.Base(abs), URI: (&url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}).String()})
 	}
 
 	var transport sdkmcp.Transport
@@ -163,54 +86,78 @@ func (rt *serverRuntime) connect(parent context.Context) error {
 		}
 		cmd.Env = mergeEnvironment(os.Environ(), rt.spec.Env)
 		cmd.Stderr = rt.manager.opts.ServerStderr
-		transport = &sdkmcp.CommandTransport{Command: cmd}
+		transport = &boundedCommandTransport{command: cmd, maxMessageBytes: maxCacheBytes}
 	case publicmcp.TransportStreamableHTTP:
 		transport = &sdkmcp.StreamableClientTransport{Endpoint: rt.spec.URL, HTTPClient: &http.Client{Transport: headerTransport{base: http.DefaultTransport, headers: resolveMap(rt.spec.Headers)}}}
 	default:
 		return fmt.Errorf("unsupported transport %q", rt.spec.Transport)
 	}
-	session, err := rt.client.Connect(ctx, transport, nil)
+	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
-		return fmt.Errorf("mcp %s connect: %w", rt.spec.ID, err)
+		return rt.safeRuntimeError("connect", err)
 	}
-	rt.session = session
+	rt.mu.Lock()
+	if rt.state == stateClosed || rt.closed || rt.generation != generation {
+		rt.mu.Unlock()
+		_ = session.Close()
+		return errors.New("runtime closed during connect")
+	}
+	rt.client, rt.session = client, session
+	rt.mu.Unlock()
 	if err := rt.refresh(ctx); err != nil {
+		rt.mu.Lock()
+		if rt.session == session {
+			rt.client, rt.session = nil, nil
+		}
+		rt.mu.Unlock()
 		closeErr := session.Close()
 		if closeErr != nil {
 			closeErr = fmt.Errorf("mcp %s close after refresh failure: %w", rt.spec.ID, closeErr)
 		}
-		return errors.Join(err, closeErr)
+		return rt.safeRuntimeError("catalog refresh", errors.Join(err, closeErr))
 	}
-	go rt.refreshWorker()
+	rt.mu.Lock()
+	if rt.state == stateClosed || rt.closed || rt.session != session || rt.generation != generation {
+		rt.mu.Unlock()
+		_ = session.Close()
+		return errors.New("runtime closed during connect")
+	}
+	rt.mu.Unlock()
+	workerStarted = true
+	go rt.refreshWorker(generation, refreshCtx, req, stop, done)
 	return nil
 }
 
-func (rt *serverRuntime) requestRefresh() {
+func (rt *serverRuntime) requestRefresh(generation uint64) {
 	rt.mu.Lock()
-	if rt.closed {
+	if rt.state == stateClosed || rt.closed || rt.generation != generation {
 		rt.mu.Unlock()
 		return
 	}
+	req := rt.refreshReq
 	rt.mu.Unlock()
+	if req == nil {
+		return
+	}
 	select {
-	case rt.refreshReq <- struct{}{}:
+	case req <- struct{}{}:
 	default:
 	}
 }
 
-func (rt *serverRuntime) refreshWorker() {
-	defer close(rt.refreshDone)
+func (rt *serverRuntime) refreshWorker(generation uint64, refreshCtx context.Context, req <-chan struct{}, stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
 	for {
 		select {
-		case <-rt.refreshStop:
+		case <-stop:
 			return
-		case <-rt.refreshReq:
+		case <-req:
 		}
 		timer := time.NewTimer(rt.manager.opts.RefreshDebounce)
 	debounce:
 		for {
 			select {
-			case <-rt.refreshStop:
+			case <-stop:
 				if !timer.Stop() {
 					select {
 					case <-timer.C:
@@ -218,7 +165,7 @@ func (rt *serverRuntime) refreshWorker() {
 					}
 				}
 				return
-			case <-rt.refreshReq:
+			case <-req:
 				if !timer.Stop() {
 					select {
 					case <-timer.C:
@@ -230,12 +177,12 @@ func (rt *serverRuntime) refreshWorker() {
 				break debounce
 			}
 		}
-		if err := rt.refresh(rt.refreshCtx); err != nil {
+		if err := rt.refresh(refreshCtx); err != nil {
 			rt.mu.Lock()
-			closed := rt.closed
+			closed := rt.closed || rt.state == stateClosed || rt.generation != generation
 			rt.mu.Unlock()
 			if !closed && !errors.Is(err, context.Canceled) {
-				rt.manager.setRuntimeMessage(rt.spec.ID, "tools/list_changed refresh: "+err.Error())
+				rt.manager.setRuntimeMessage(rt.spec.ID, rt.safeRuntimeError("tools/list_changed refresh", err).Error())
 			}
 		}
 	}
@@ -246,7 +193,20 @@ func (rt *serverRuntime) refresh(ctx context.Context) error {
 	defer rt.refreshMu.Unlock()
 
 	rt.mu.Lock()
-	if rt.closed {
+	if rt.closed || rt.state == stateClosed {
+		rt.mu.Unlock()
+		return errors.New("runtime is closed")
+	}
+	rt.refreshing = true
+	if rt.idleTimer != nil {
+		rt.idleTimer.Stop()
+		rt.idleTimer = nil
+	}
+	rt.mu.Unlock()
+	defer rt.finishRefresh()
+
+	rt.mu.Lock()
+	if rt.closed || rt.state == stateClosed {
 		rt.mu.Unlock()
 		return errors.New("runtime is closed")
 	}
@@ -297,19 +257,11 @@ func (rt *serverRuntime) refresh(ctx context.Context) error {
 			descriptors = append(descriptors, descriptor)
 		}
 	}
-	if init.Capabilities.Resources != nil {
-		for _, adapter := range []tools.Tool{newListResourcesTool(rt), newReadResourceTool(rt)} {
-			descriptors = append(descriptors, rt.bridgeDescriptor(adapter, "resources", used))
-		}
-		if init.Capabilities.Resources.Subscribe {
-			descriptors = append(descriptors, rt.bridgeDescriptor(newResourceSubscriptionTool(rt), "resources", used))
-		}
+	catalog, err := rt.catalogFromLive(init, remoteTools)
+	if err != nil {
+		return err
 	}
-	if init.Capabilities.Prompts != nil {
-		for _, adapter := range []tools.Tool{newListPromptsTool(rt), newGetPromptTool(rt)} {
-			descriptors = append(descriptors, rt.bridgeDescriptor(adapter, "prompts", used))
-		}
-	}
+	descriptors = append(descriptors, rt.bridgeDescriptors(catalog.Capabilities, used)...)
 
 	rt.mu.Lock()
 	if rt.closed || rt.session != session {
@@ -318,11 +270,7 @@ func (rt *serverRuntime) refresh(ctx context.Context) error {
 	}
 	rt.mu.Unlock()
 	if rt.catalogUnchanged(descriptors) {
-		rt.mu.Lock()
-		rt.used = used
-		rt.mu.Unlock()
-		rt.manager.updateConnectedStatus(rt)
-		return nil
+		return rt.commitLiveCatalog(session, used, catalog)
 	}
 	replacer, ok := rt.manager.registry.(tools.AtomicOwnerRegistry)
 	if !ok {
@@ -336,16 +284,7 @@ func (rt *serverRuntime) refresh(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	rt.mu.Lock()
-	if rt.closed || rt.session != session {
-		rt.mu.Unlock()
-		rt.manager.registry.UnregisterOwner(rt.owner)
-		return errors.New("runtime closed during refresh")
-	}
-	rt.used = used
-	rt.mu.Unlock()
-	rt.manager.updateConnectedStatus(rt)
-	return nil
+	return rt.commitLiveCatalog(session, used, catalog)
 }
 
 func (rt *serverRuntime) catalogUnchanged(candidate []tools.ToolDescriptor) bool {
@@ -409,6 +348,24 @@ func (rt *serverRuntime) bridgeDescriptor(adapter tools.Tool, capability string,
 		Schema: schema, Tool: adapter, Source: tools.SourceMCP, Owner: rt.owner, PluginID: rt.spec.ID,
 		OriginalName: originalName, Risk: rt.risk(), Capabilities: []string{"mcp", capability}, Prompt: schema.Description,
 	}
+}
+
+func (rt *serverRuntime) bridgeDescriptors(capabilities []string, used map[string]string) []tools.ToolDescriptor {
+	var descriptors []tools.ToolDescriptor
+	if contains(capabilities, "resources") {
+		for _, adapter := range []tools.Tool{newListResourcesTool(rt), newReadResourceTool(rt)} {
+			descriptors = append(descriptors, rt.bridgeDescriptor(adapter, "resources", used))
+		}
+		if contains(capabilities, "resources.subscribe") {
+			descriptors = append(descriptors, rt.bridgeDescriptor(newResourceSubscriptionTool(rt), "resources", used))
+		}
+	}
+	if contains(capabilities, "prompts") {
+		for _, adapter := range []tools.Tool{newListPromptsTool(rt), newGetPromptTool(rt)} {
+			descriptors = append(descriptors, rt.bridgeDescriptor(adapter, "prompts", used))
+		}
+	}
+	return descriptors
 }
 
 func (rt *serverRuntime) risk() permission.Risk {
@@ -495,14 +452,37 @@ func sanitize(value string) string {
 func listAllTools(ctx context.Context, session *sdkmcp.ClientSession) ([]*sdkmcp.Tool, error) {
 	var out []*sdkmcp.Tool
 	cursor := ""
+	totalBytes := 0
 	for page := 0; page < maxPages; page++ {
 		result, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{Cursor: cursor})
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, result.Tools...)
+		if result == nil {
+			return nil, errors.New("server returned an empty tools/list result")
+		}
+		for _, tool := range result.Tools {
+			if tool == nil || tool.Name == "" || len(tool.Name) > maxCachedNameBytes || len(tool.Title) > maxCachedNameBytes || len(tool.Description) > maxCachedDescription {
+				return nil, errors.New("server tool metadata exceeds catalog limits")
+			}
+			if len(out) >= maxCachedToolsPerServer {
+				return nil, errors.New("server tool count exceeds catalog limit")
+			}
+			schema, err := json.Marshal(tool.InputSchema)
+			if err != nil || len(schema) > maxCachedSchemaBytes {
+				return nil, errors.New("server tool schema exceeds catalog limit")
+			}
+			totalBytes += len(tool.Name) + len(tool.Title) + len(tool.Description) + len(schema)
+			if totalBytes > maxCacheBytes {
+				return nil, errors.New("server tool catalog exceeds aggregate limit")
+			}
+			out = append(out, tool)
+		}
 		if result.NextCursor == "" {
 			return out, nil
+		}
+		if len(result.NextCursor) > maxCachedNameBytes {
+			return nil, errors.New("server pagination cursor exceeds limit")
 		}
 		if result.NextCursor == cursor {
 			return nil, errors.New("server repeated pagination cursor")
@@ -552,16 +532,23 @@ func (m *Manager) CatalogPrompt() string {
 		Instructions string   `json:"server_instructions,omitempty"`
 	}
 	m.mu.RLock()
-	entries := make([]catalogEntry, 0, len(m.runtimes))
-	for id, rt := range m.runtimes {
-		status := m.statuses[id]
-		entry := catalogEntry{ID: id, Protocol: status.ProtocolVersion, Capabilities: append([]string(nil), status.Capabilities...)}
-		if rt.session != nil && rt.session.InitializeResult() != nil {
-			entry.Instructions = boundString(rt.session.InitializeResult().Instructions, 4096)
+	runtimes := make([]*serverRuntime, 0, len(m.runtimes))
+	for _, rt := range m.runtimes {
+		runtimes = append(runtimes, rt)
+	}
+	m.mu.RUnlock()
+	entries := make([]catalogEntry, 0, len(runtimes))
+	for _, rt := range runtimes {
+		rt.mu.Lock()
+		session := rt.session
+		catalog := cloneCachedCatalog(rt.cached)
+		rt.mu.Unlock()
+		entry := catalogEntry{ID: rt.spec.ID, Protocol: catalog.ProtocolVersion, Capabilities: append([]string(nil), catalog.Capabilities...)}
+		if session != nil && session.InitializeResult() != nil {
+			entry.Instructions = boundString(session.InitializeResult().Instructions, 4096)
 		}
 		entries = append(entries, entry)
 	}
-	m.mu.RUnlock()
 	if len(entries) == 0 {
 		return ""
 	}
@@ -591,34 +578,26 @@ func (m *Manager) setRuntimeMessage(id, message string) {
 	m.mu.Unlock()
 }
 
-func (m *Manager) updateConnectedStatus(rt *serverRuntime) {
-	if rt == nil || rt.session == nil {
+func (m *Manager) updateRuntimeStatus(rt *serverRuntime, message string) {
+	if rt == nil {
 		return
 	}
-	init := rt.session.InitializeResult()
-	status := publicmcp.Status{ID: rt.spec.ID, Transport: rt.spec.EffectiveTransport(), Connected: true}
-	if init != nil {
-		status.ProtocolVersion = init.ProtocolVersion
-		if init.ServerInfo != nil {
-			status.ServerName, status.ServerVersion = init.ServerInfo.Name, init.ServerInfo.Version
-		}
-		if init.Capabilities != nil {
-			if init.Capabilities.Tools != nil {
-				status.Capabilities = append(status.Capabilities, "tools")
-			}
-			if init.Capabilities.Resources != nil {
-				status.Capabilities = append(status.Capabilities, "resources")
-			}
-			if init.Capabilities.Prompts != nil {
-				status.Capabilities = append(status.Capabilities, "prompts")
-			}
-			if init.Capabilities.Logging != nil {
-				status.Capabilities = append(status.Capabilities, "logging")
-			}
-			if init.Capabilities.Completions != nil {
-				status.Capabilities = append(status.Capabilities, "completions")
-			}
-		}
+	rt.mu.Lock()
+	state := rt.state
+	session := rt.session
+	catalog := cloneCachedCatalog(rt.cached)
+	lastUsed := rt.lastUsed
+	warning := rt.warning
+	rt.mu.Unlock()
+	if message == "" {
+		message = warning
+	}
+	status := publicmcp.Status{
+		ID: rt.spec.ID, Transport: rt.spec.EffectiveTransport(), State: state.String(),
+		Connected: state == stateConnected && session != nil, Cached: catalog.valid(),
+		CachedAt: catalog.CachedAt, LastUsedAt: lastUsed, Message: boundString(message, 512),
+		ProtocolVersion: catalog.ProtocolVersion, ServerName: catalog.ServerName, ServerVersion: catalog.ServerVersion,
+		Capabilities: append([]string(nil), catalog.Capabilities...),
 	}
 	for _, desc := range m.registry.Descriptors() {
 		if desc.Owner == rt.owner && contains(desc.Capabilities, "tools") {
@@ -630,44 +609,34 @@ func (m *Manager) updateConnectedStatus(rt *serverRuntime) {
 
 func (rt *serverRuntime) close() error {
 	rt.mu.Lock()
-	if rt.closed {
+	if rt.state == stateClosed || rt.closed {
 		rt.mu.Unlock()
 		return nil
 	}
 	rt.closed = true
-	session := rt.session
-	cancel := rt.refreshCancel
-	stop := rt.refreshStop
-	done := rt.refreshDone
+	rt.state = stateClosed
+	cancel := rt.runtimeCancel
+	done := rt.transitionDone
+	if rt.idleTimer != nil {
+		rt.idleTimer.Stop()
+		rt.idleTimer = nil
+	}
 	rt.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	if stop != nil {
-		close(stop)
-	}
-	var errs []error
 	if done != nil {
 		select {
 		case <-done:
 		case <-time.After(defaultCloseTimeout):
-			errs = append(errs, errors.New("refresh worker did not stop within timeout"))
 		}
 	}
-	if session != nil {
-		closed := make(chan error, 1)
-		go func() { closed <- session.Close() }()
-		select {
-		case err := <-closed:
-			if err != nil {
-				errs = append(errs, err)
-			}
-		case <-time.After(defaultCloseTimeout):
-			errs = append(errs, errors.New("session close did not finish within timeout"))
-		}
+	err := rt.disconnectLive(true)
+	rt.manager.updateRuntimeStatus(rt, "closed")
+	if err != nil {
+		return rt.safeRuntimeError("close", err)
 	}
-	rt.manager.registry.UnregisterOwner(rt.owner)
-	return errors.Join(errs...)
+	return nil
 }
 
 // Close gracefully terminates every MCP session.
@@ -696,6 +665,11 @@ func (m *Manager) Close() error {
 			errs = append(errs, fmt.Errorf("mcp %s close: %w", rt.spec.ID, err))
 		}
 	}
+	if m.cache != nil {
+		if err := m.cache.close(); err != nil {
+			errs = append(errs, fmt.Errorf("mcp cache close: %w", err))
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -705,7 +679,43 @@ func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	for key, value := range t.headers {
 		clone.Header.Set(key, value)
 	}
-	return t.base.RoundTrip(clone)
+	response, err := t.base.RoundTrip(clone)
+	if err != nil {
+		return nil, err
+	}
+	if response.ContentLength > maxCacheBytes {
+		_ = response.Body.Close()
+		return nil, errors.New("MCP HTTP response exceeds size limit")
+	}
+	response.Body = &boundedResponseBody{ReadCloser: response.Body, remaining: maxCacheBytes}
+	return response, nil
+}
+
+type boundedResponseBody struct {
+	io.ReadCloser
+	remaining int
+}
+
+func (r *boundedResponseBody) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		var probe [1]byte
+		n, err := r.ReadCloser.Read(probe[:])
+		if n > 0 {
+			return 0, errors.New("MCP HTTP response exceeds size limit")
+		}
+		return 0, err
+	}
+	if len(p) > r.remaining+1 {
+		p = p[:r.remaining+1]
+	}
+	n, err := r.ReadCloser.Read(p)
+	if n > r.remaining {
+		delivered := r.remaining
+		r.remaining = 0
+		return delivered, errors.New("MCP HTTP response exceeds size limit")
+	}
+	r.remaining -= n
+	return n, err
 }
 
 func resolveMap(values map[string]string) map[string]string {

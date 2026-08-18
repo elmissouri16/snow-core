@@ -14,6 +14,7 @@ instructional skills, see [Plugins](plugins.md) and [Agent Skills](skills.md).
 - [Configure servers](#configure-servers)
 - [Connect servers on the command line](#connect-servers-on-the-command-line)
 - [Manage configuration](#manage-configuration)
+- [Connection lifecycle and cache](#connection-lifecycle-and-cache)
 - [Capability bridge](#capability-bridge)
 - [Permissions and process safety](#permissions-and-process-safety)
 - [Current boundary](#current-boundary)
@@ -57,7 +58,9 @@ allowed.
         "Authorization": "Bearer ${MCP_ACCESS_TOKEN}"
       },
       "timeout_ms": 15000,
-      "tool_discovery": "deferred"
+      "tool_discovery": "deferred",
+      "lifecycle": "lazy",
+      "idle_timeout_ms": 600000
     }
   }
 }
@@ -81,11 +84,21 @@ snow mcp
 snow mcp list --json
 snow mcp get chrome-devtools
 snow mcp check [name]
+snow mcp cache [name]
+snow mcp cache status [name]
+snow mcp cache refresh <name>
+snow mcp cache clear <name>
 ```
 
 `--mcp` accepts a single `ServerSpec`, Snow's `mcp_servers` map, or the common
 cross-client `mcpServers` map. `snow mcp` lists configured servers without
 starting them. `snow mcp check` performs a live protocol/capability handshake.
+`snow mcp cache` and `cache status` inspect secret-free metadata without
+starting servers; `cache refresh` first validates the declaration, then uses an
+explicit live operation to atomically replace a catalog only after successful
+negotiation and durable storage. A refresh failure preserves the previous cache.
+`cache clear` removes the selected server's current and superseded fingerprints
+for this project identity.
 
 ## Manage configuration
 
@@ -96,7 +109,9 @@ its source scope. `snow mcp list --all` also includes shadowed declarations.
 
 ```sh
 # stdio
-snow mcp add chrome-devtools -- npx -y chrome-devtools-mcp@latest
+snow mcp add chrome-devtools --lifecycle lazy --cache-bootstrap explicit \
+  -- npx -y chrome-devtools-mcp@latest
+snow mcp cache refresh chrome-devtools
 
 # Streamable HTTP with an environment-backed bearer token
 snow mcp add remote --url https://mcp.example.com/mcp \
@@ -116,13 +131,73 @@ global configuration, Snow copies that declaration into the project config with
 the requested state.
 
 `add` also accepts repeatable `--env NAME`/`--env NAME=VALUE`, `--header
-NAME=VALUE`, `--cwd`, `--discovery deferred|always`, `--disabled`, and
-`--replace`. Duplicate adds fail without `--replace`; remove requires an exact
+NAME=VALUE`, `--cwd`, `--discovery deferred|always`, `--lifecycle
+eager|lazy|lazy-keep-alive`, `--cache-bootstrap auto|explicit`, `--idle-timeout
+DURATION`, `--disabled`, and `--replace`. Duplicate adds fail
+without `--replace`; remove requires an exact
 name. `list` and `get` never launch a process or make a network request. All
 subcommands support `--json`; the bare `snow mcp` list view accepts legacy
 `--mode json` instead. Legacy `--mode json` also remains accepted by inspection
 subcommands. Environment values, sensitive headers, credential-like arguments,
 and URL credentials are redacted from both text and JSON output.
+
+## Connection lifecycle and cache
+
+Servers use `lifecycle: "eager"` by default, preserving the original behavior:
+Snow connects during startup and keeps the session until shutdown. Set
+`lifecycle: "lazy"` to defer an activatable server after its catalog is known.
+Tools and the generic resource/prompt bridges can activate a disconnected
+server. `idle_timeout_ms` controls how long an unused lazy session stays
+connected and defaults to ten minutes. `lifecycle: "lazy-keep-alive"` also
+starts from cache but, after its first permitted activation, retains the live
+session until shutdown.
+
+With the default `cache_bootstrap: "auto"`, the first lazy launch performs one
+bounded live bootstrap to negotiate the server and cache its tool names,
+descriptions, input schemas, and bounded
+resource/prompt capability flags. Later launches with a valid cache reconstruct
+those descriptors without starting a stdio process or making an HTTP request.
+The first permitted tool or bridge call shares one connection attempt among
+concurrent callers, refreshes the live catalog, validates the requested tool or
+capability, and then invokes the operation. If cached metadata changed, Snow
+returns a stale-catalog error rather than silently invoking a different
+operation. After the last active call and idle timeout, Snow closes the session
+but retains the descriptors so a later call can reconnect. A successful
+resource subscription pins the live session until the corresponding
+unsubscribe operation or final Snow shutdown. Subscriptions are idempotent per
+URI and bounded to 128 URIs of at most 4 KiB per server; a failed unsubscribe
+retains its lease so Snow does not disconnect a potentially active
+subscription.
+
+Set `cache_bootstrap: "explicit"` on a lazy lifecycle for a strict startup
+transport guarantee. A valid cache is reconstructed normally. A missing,
+expired, mismatched, or invalid cache leaves the server unavailable without
+launching a process or making a request. Populate it deliberately with
+`snow mcp cache refresh <name>`. This explicit activation path also permits a
+cached empty catalog to remain disconnected; it must be refreshed to discover
+new descriptors because disconnected servers cannot deliver list-change
+notifications.
+
+The versioned cache is stored at `~/.snow/cache/mcp-v1.json` (under the active
+Snow home), expires after seven days, and is partitioned by server declaration
+shape, scope, project/root identity, and a secret-free configuration
+fingerprint. Positional arguments and flag values are represented only by
+non-secret shape markers, so the persisted hash cannot act as an offline
+credential verifier. Writes use a private directory, mode `0600`, a
+cross-process lock, and atomic replacement. Cache records never contain
+environment/header values, URL credentials or query strings, argument values,
+resource contents, prompt expansions, server instructions, or bearer tokens.
+Under automatic bootstrap, a corrupt, expired, mismatched, or missing entry
+falls back to a live bootstrap and does not prevent Snow from starting.
+
+Under automatic bootstrap, a server with no cached tools, resources, or prompts
+has no descriptor capable of activating it and therefore uses eager fallback
+so list-change notifications remain observable. Strict explicit bootstrap
+keeps the same empty catalog disconnected and relies on `cache refresh`.
+Resource/prompt-only servers can remain lazy because their
+cached bridge descriptors provide an activation path. Permission checks still
+happen before execution; denying any cached lazy tool or bridge call does not
+connect to the server.
 
 ## Capability bridge
 
@@ -172,7 +247,7 @@ Core `2026-07-28` tools, resources, prompts, subscriptions, list-change
 notifications, request metadata, stateless HTTP, and legacy lifecycle fallback
 are supported through the official SDK. Optional extension-specific product
 surfaces such as MCP Apps, Tasks, Enterprise Managed Authorization, and an
-interactive OAuth callback UI are not yet exposed by Snow. Static bearer
+interactive OAuth callback UI are outside Snow's current scope. Static bearer
 headers and stdio environment credentials work today.
 
 ## Related documents

@@ -750,15 +750,25 @@ permissioned `mcp_<server>_<tool>` descriptors. Resources, templates,
 subscriptions, and prompts use generic namespaced bridges; tool-list changes
 atomically refresh the registry and BM25 index. Static HTTP headers and stdio
 environment values support environment expansion without entering
-diagnostics. Project server config is trust-gated. See `docs/mcp.md`.
+diagnostics. Project server config is trust-gated. Eager lifecycle remains the
+default; opt-in lazy servers use shared reconnect attempts, active-call and
+resource-subscription leases, idle disconnect, and a seven-day versioned
+catalog cache under the private Snow cache directory. Cached tool schemas and
+resource/prompt capability flags reconstruct permissioned descriptors without
+transport work; reconnect refresh validates stale metadata. Cache keys partition
+declaration scope and project/root identity without persisting credential
+values. Automatic catalogs with no tool or resource/prompt activation
+descriptor use eager fallback so list-change notifications remain observable;
+strict `cache_bootstrap: explicit` instead performs no startup transport and
+requires deliberate refresh. `lazy-keep-alive` starts from cache and retains the
+session after first activation. See `docs/mcp.md`.
 
-The CLI separates side-effect-free configuration inspection (`mcp list|get`)
-from live connection checks (`mcp check`) and atomically manages global or
-project declarations through `add|enable|disable|remove`. Targeted JSON
-updates preserve unrelated and unknown config fields; all inspection output
-redacts credential-bearing values. Optional MCP extension product surfaces
-(Apps, Tasks, Enterprise Managed Authorization) and interactive OAuth
-callback/token persistence remain deferred.
+The CLI separates side-effect-free configuration/cache inspection (`mcp
+list|get|cache status`) from live connection and cache-refresh operations (`mcp
+check`, `mcp cache refresh`), supports scoped cache clearing, and atomically
+manages global or project declarations through `add|enable|disable|remove`.
+Targeted JSON updates preserve unrelated and unknown config fields; all
+inspection output redacts credential-bearing values.
 
 ## Agent Skills
 
@@ -1149,7 +1159,6 @@ that is fully covered elsewhere is referenced rather than repeated.
 | Parallel tool filesystem races | Data loss | Serial tools; no parallel mutation |
 | Plugin/MCP/subagent OS authority | Not covered by smolvm | Documented boundary; external container/VM required for hostile code |
 | Pre-v1 API and file-format drift | Breaking changes | Stabilize `pkg/snowsdk`, `pkg/protocol`, and the session schema before v1 |
-| Optional MCP extension surfaces | Deferred features | Apps, Tasks, Enterprise Managed Authorization, and interactive OAuth callback remain unbuilt |
 | Semantic/vector tool routing | Deferred | Await a locally downloadable open-source model with acceptable licensing and startup cost |
 
 ## Related documents

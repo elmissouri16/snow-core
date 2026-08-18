@@ -1,14 +1,18 @@
 # Lazy MCP Connection Implementation Plan
 
-This document proposes lazy connection and idle shutdown for Snow's Model
-Context Protocol (MCP) servers. It records the intended configuration, cache,
-runtime state machine, concurrency rules, security boundaries, implementation
-phases, and verification plan for a future change. Current MCP behavior remains
-documented in [Model Context Protocol](mcp.md).
+This document records the design for lazy connection and idle shutdown for
+Snow's Model Context Protocol (MCP) servers: configuration, cache, runtime state
+machine, concurrency rules, security boundaries, phases, and verification.
+Current user-facing behavior remains documented in
+[Model Context Protocol](mcp.md).
 
-> **Note:** This is an implementation plan, not current behavior. Snow currently
-> connects every enabled MCP server during application startup. The proposed
-> `lifecycle` and `idle_timeout_ms` fields do not exist yet.
+> **Implementation status:** Phases 1–5 are implemented. Eager remains the
+default; lazy lifecycles use the bounded metadata cache, shared connection
+acquisition, cached resource/prompt bridge reconstruction, and
+subscription-pinned sessions. Phase 5 adds secret-free cache status,
+explicit atomic refresh and scoped clear commands, strict no-bootstrap startup,
+and `lazy-keep-alive`. Changing the default remains a separately reviewed
+release decision.
 
 ## On this page
 
@@ -175,9 +179,8 @@ The first implementation should match the practical Pi behavior:
 This is a one-time bootstrap, not fully lazy first use. It must be clearly shown
 in status and documentation.
 
-A later phase should add explicit cache priming and optional activation tools so
-users can choose a strict mode that never starts uncached servers during normal
-startup.
+Phase 5 adds explicit cache refresh and strict no-bootstrap startup so users can
+choose never to start uncached servers during normal startup.
 
 ## Configuration contract
 
@@ -191,6 +194,10 @@ type ServerSpec struct {
     // "lazy-keep-alive".
     Lifecycle string `json:"lifecycle,omitempty"`
 
+    // CacheBootstrap is "auto" (default) or "explicit". Explicit requires a
+    // lazy lifecycle and performs no startup transport on cache failure.
+    CacheBootstrap string `json:"cache_bootstrap,omitempty"`
+
     // IdleTimeoutMS overrides the default idle timeout for lazy servers.
     // Zero uses the lifecycle default. A negative value is invalid.
     IdleTimeoutMS int `json:"idle_timeout_ms,omitempty"`
@@ -203,7 +210,7 @@ Initial semantics:
 |---|---|---|---|
 | empty or `eager` | Immediate | Off by default | Next call |
 | `lazy` | Cache or bootstrap | Enabled | Next call |
-| `lazy-keep-alive` | Cache or bootstrap | Off after use | Deferred |
+| `lazy-keep-alive` | Cache or bootstrap | Off after use | Next call after disconnect |
 
 Keep eager as the initial default for backward compatibility. Existing
 configurations must retain current startup and failure behavior.
@@ -339,9 +346,11 @@ currently adds live bounded instructions to system context, but persisting them
 creates a durable prompt-injection surface and stale-context question that is
 not required for lazy tool routing.
 
-Resources and prompts may be cached after tool-only lifecycle behavior is
-stable. Capability bridge descriptors can initially require a live bootstrap or
-connection.
+Implemented Phase 4 caches only bounded resource/prompt capability flags and
+reconstructs generic bridge descriptors from them. Resource and prompt bodies,
+prompt expansions, and server instructions remain live-only. Calls reconnect,
+refresh, and validate the capability before dispatch; successful resource
+subscriptions pin the session until unsubscribe or shutdown.
 
 ### Safe fingerprint
 
@@ -834,13 +843,13 @@ render lifecycle fields. Add:
 --idle-timeout <duration>
 ```
 
-Add explicit cache inspection and refresh only after the core lifecycle works.
-Potential commands are:
+The implemented management commands are:
 
 ```sh
-snow mcp cache
-snow mcp check chrome-devtools --refresh-cache
-snow mcp refresh chrome-devtools
+snow mcp cache [name]
+snow mcp cache status [name]
+snow mcp cache refresh <name>
+snow mcp cache clear <name>
 ```
 
 Do not make inspection commands start servers unless their name and help text
@@ -885,20 +894,26 @@ Update:
 - Add idle disconnect while retaining descriptors.
 - Support lazy behavior for stdio and Streamable HTTP transports.
 
-### Phase 4: resources, prompts, and dynamic catalogs
+### Phase 4: resources, prompts, and dynamic catalogs — implemented
 
-- Cache or lazily reconstruct resource and prompt bridge metadata.
-- Preserve pagination and subscription behavior.
+- Reconstruct resource and prompt bridges from bounded cached capability flags.
+- Preserve pagination and pin live sessions for successful subscriptions until
+  unsubscribe or shutdown.
 - Persist successful `tools/list_changed` refreshes.
-- Verify atomic routing-index replacement across reconnects.
+- Atomically replace registry and routing indexes across reconnects, and reject
+  bridge calls when a cached capability disappeared.
 
-### Phase 5: management and strict startup
+### Phase 5: management and strict startup — implemented
 
-- Add explicit cache status and refresh commands.
-- Add a no-bootstrap strict mode only with a usable activation/discovery path.
-- Consider `lazy-keep-alive` reconnect after the basic lazy state machine is
-  proven.
-- Evaluate changing the default from eager in a separately reviewed release.
+- Add secret-free `mcp cache [status]`, explicitly live atomic `cache refresh`,
+  and project/scope-aware `cache clear` commands.
+- Add `cache_bootstrap: explicit` strict startup; cache misses and invalid,
+  expired, or mismatched entries perform no transport work and direct the
+  operator to the explicit refresh path.
+- Add `lazy-keep-alive`: start disconnected from cache, connect on first
+  permitted operation, then retain the session through shutdown.
+- Keep eager as the default; changing it remains a separately reviewed release
+  decision rather than part of this implementation.
 
 ## Verification plan
 
@@ -1053,7 +1068,7 @@ future call, but never replay the failed call automatically.
 
 ### Scope growth
 
-Do not combine lazy lifecycle work with OAuth UI, MCP Apps, task support,
+Do not combine lazy lifecycle work with unrelated MCP product surfaces,
 process multiplexing, or a new proxy-tool API. Keep the first slice confined to
 connection lifecycle and cached tool descriptors.
 
@@ -1072,8 +1087,7 @@ Defer these features until the basic lazy lifecycle is stable:
 - cached resource bodies or prompt expansions;
 - strict no-bootstrap mode without an activation path;
 - distributed cache synchronization;
-- hot adoption of a process started by another Snow instance;
-- MCP Apps, Tasks, or interactive OAuth UI changes.
+- hot adoption of a process started by another Snow instance.
 
 ## Related documents
 

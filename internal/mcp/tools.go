@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -31,9 +32,17 @@ func (t *remoteTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolH
 	if args == nil {
 		args = map[string]any{}
 	}
-	result, err := t.runtime.session.CallTool(ctx, &sdkmcp.CallToolParams{Name: t.remoteName, Arguments: args})
+	session, release, err := t.runtime.acquire(ctx)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("mcp %s %s: %w", t.runtime.spec.ID, t.remoteName, err)), nil
+	}
+	defer release()
+	if !t.runtime.liveToolMatches(t.remoteName, t.schema.Parameters) {
+		return tools.ErrorResult(fmt.Errorf("mcp %s %s: cached tool changed or was removed after reconnect; refresh discovery and retry", t.runtime.spec.ID, t.remoteName)), nil
+	}
+	result, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: t.remoteName, Arguments: args})
+	if err != nil {
+		return tools.ErrorResult(t.runtime.safeRuntimeError("tool call", err)), nil
 	}
 	blocks := convertContents(result.Content)
 	if result.StructuredContent != nil {
@@ -47,6 +56,11 @@ func (t *remoteTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolH
 	}
 	return tools.ToolResult{Content: boundBlocks(blocks, t.runtime.manager.opts.MaxOutputBytes), IsError: result.IsError}, nil
 }
+
+const (
+	maxResourceSubscriptions = 128
+	maxSubscriptionURIBytes  = 4096
+)
 
 type bridgeTool struct {
 	runtime *serverRuntime
@@ -112,17 +126,25 @@ func (t *bridgeTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolH
 			return tools.ErrorResult(fmt.Errorf("mcp %s %s: invalid arguments: %w", t.runtime.spec.ID, t.kind, err)), nil
 		}
 	}
+	session, release, err := t.runtime.acquire(ctx)
+	if err != nil {
+		return t.failure(err), nil
+	}
+	defer release()
+	if !t.runtime.liveBridgeAvailable(t.kind) {
+		return tools.ErrorResult(fmt.Errorf("mcp %s %s: cached capability changed or was removed after reconnect; refresh discovery and retry", t.runtime.spec.ID, t.kind)), nil
+	}
 	var value any
 	switch t.kind {
 	case "list_resources":
 		if args.Kind == "templates" {
-			result, err := t.runtime.session.ListResourceTemplates(ctx, &sdkmcp.ListResourceTemplatesParams{Cursor: args.Cursor})
+			result, err := session.ListResourceTemplates(ctx, &sdkmcp.ListResourceTemplatesParams{Cursor: args.Cursor})
 			if err != nil {
 				return t.failure(err), nil
 			}
 			value = result
 		} else {
-			result, err := t.runtime.session.ListResources(ctx, &sdkmcp.ListResourcesParams{Cursor: args.Cursor})
+			result, err := session.ListResources(ctx, &sdkmcp.ListResourcesParams{Cursor: args.Cursor})
 			if err != nil {
 				return t.failure(err), nil
 			}
@@ -132,7 +154,7 @@ func (t *bridgeTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolH
 		if strings.TrimSpace(args.URI) == "" {
 			return tools.ErrorResult(fmt.Errorf("mcp %s read_resource: uri is required", t.runtime.spec.ID)), nil
 		}
-		result, err := t.runtime.session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: args.URI})
+		result, err := session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: args.URI})
 		if err != nil {
 			return t.failure(err), nil
 		}
@@ -151,9 +173,9 @@ func (t *bridgeTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolH
 		var err error
 		switch args.Action {
 		case "subscribe":
-			err = t.runtime.session.Subscribe(ctx, &sdkmcp.SubscribeParams{URI: args.URI})
+			err = t.runtime.subscribeResource(ctx, session, args.URI)
 		case "unsubscribe":
-			err = t.runtime.session.Unsubscribe(ctx, &sdkmcp.UnsubscribeParams{URI: args.URI})
+			err = t.runtime.unsubscribeResource(ctx, session, args.URI)
 		default:
 			return tools.ErrorResult(fmt.Errorf("mcp %s resource_subscription: action must be subscribe or unsubscribe", t.runtime.spec.ID)), nil
 		}
@@ -162,7 +184,7 @@ func (t *bridgeTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolH
 		}
 		return tools.TextResult(args.Action + "d " + args.URI), nil
 	case "list_prompts":
-		result, err := t.runtime.session.ListPrompts(ctx, &sdkmcp.ListPromptsParams{Cursor: args.Cursor})
+		result, err := session.ListPrompts(ctx, &sdkmcp.ListPromptsParams{Cursor: args.Cursor})
 		if err != nil {
 			return t.failure(err), nil
 		}
@@ -171,7 +193,7 @@ func (t *bridgeTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolH
 		if strings.TrimSpace(args.Name) == "" {
 			return tools.ErrorResult(fmt.Errorf("mcp %s get_prompt: name is required", t.runtime.spec.ID)), nil
 		}
-		result, err := t.runtime.session.GetPrompt(ctx, &sdkmcp.GetPromptParams{Name: args.Name, Arguments: args.Arguments})
+		result, err := session.GetPrompt(ctx, &sdkmcp.GetPromptParams{Name: args.Name, Arguments: args.Arguments})
 		if err != nil {
 			return t.failure(err), nil
 		}
@@ -199,8 +221,73 @@ func (t *bridgeTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolH
 	return tools.TextResult(boundText(string(encoded), t.runtime.manager.opts.MaxOutputBytes)), nil
 }
 
+func (rt *serverRuntime) subscribeResource(ctx context.Context, session *sdkmcp.ClientSession, uri string) error {
+	if len(uri) > maxSubscriptionURIBytes {
+		return errors.New("resource subscription URI exceeds limit")
+	}
+	rt.subscriptionMu.Lock()
+	defer rt.subscriptionMu.Unlock()
+	rt.mu.Lock()
+	if rt.state != stateConnected || rt.session != session {
+		rt.mu.Unlock()
+		return errors.New("resource subscription session is no longer connected")
+	}
+	if _, exists := rt.subscriptions[uri]; exists {
+		rt.mu.Unlock()
+		return nil
+	}
+	if len(rt.subscriptions) >= maxResourceSubscriptions {
+		rt.mu.Unlock()
+		return errors.New("resource subscription limit reached")
+	}
+	rt.mu.Unlock()
+	if err := session.Subscribe(ctx, &sdkmcp.SubscribeParams{URI: uri}); err != nil {
+		return err
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.state != stateConnected || rt.session != session {
+		return errors.New("resource subscription session closed after subscribe")
+	}
+	rt.subscriptions[uri] = struct{}{}
+	rt.activeCalls++
+	if rt.idleTimer != nil {
+		rt.idleTimer.Stop()
+		rt.idleTimer = nil
+	}
+	return nil
+}
+
+func (rt *serverRuntime) unsubscribeResource(ctx context.Context, session *sdkmcp.ClientSession, uri string) error {
+	if len(uri) > maxSubscriptionURIBytes {
+		return errors.New("resource subscription URI exceeds limit")
+	}
+	rt.subscriptionMu.Lock()
+	defer rt.subscriptionMu.Unlock()
+	rt.mu.Lock()
+	if rt.state != stateConnected || rt.session != session {
+		rt.mu.Unlock()
+		return errors.New("resource subscription session is no longer connected")
+	}
+	if _, exists := rt.subscriptions[uri]; !exists {
+		rt.mu.Unlock()
+		return errors.New("resource URI is not subscribed")
+	}
+	rt.mu.Unlock()
+	if err := session.Unsubscribe(ctx, &sdkmcp.UnsubscribeParams{URI: uri}); err != nil {
+		return err
+	}
+	rt.mu.Lock()
+	delete(rt.subscriptions, uri)
+	if rt.activeCalls > 0 {
+		rt.activeCalls--
+	}
+	rt.mu.Unlock()
+	return nil
+}
+
 func (t *bridgeTool) failure(err error) tools.ToolResult {
-	return tools.ErrorResult(fmt.Errorf("mcp %s %s: %w", t.runtime.spec.ID, t.kind, err))
+	return tools.ErrorResult(t.runtime.safeRuntimeError(t.kind, err))
 }
 
 func marshalSchema(schema any) (json.RawMessage, error) {
