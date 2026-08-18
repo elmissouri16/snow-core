@@ -185,13 +185,33 @@ func (e AgentEvent) Clone() AgentEvent {
 	return out
 }
 
-// PermissionRequest is embedded in permission_request events.
+// PermissionRequest is embedded in permission_request events. ID uniquely
+// identifies one interaction so a host can correlate a reply to a specific
+// request even when the root and subagents ask concurrently (they are still
+// serialized FIFO).
 type PermissionRequest struct {
+	ID     string          `json:"id"`
 	Tool   string          `json:"tool"`
 	Args   json.RawMessage `json:"args"`
 	Paths  []string        `json:"paths,omitempty"`
 	Risk   string          `json:"risk"`
 	Reason string          `json:"reason,omitempty"`
+}
+
+// PermissionDecision is a trusted host's response to an interactive request.
+type PermissionDecision string
+
+const (
+	PermissionAllow        PermissionDecision = "allow"
+	PermissionAllowSession PermissionDecision = "allow_session"
+	PermissionAllowAlways  PermissionDecision = "allow_always"
+	PermissionDeny         PermissionDecision = "deny"
+)
+
+// PermissionResponse correlates one trusted-host decision to its request.
+type PermissionResponse struct {
+	RequestID string             `json:"request_id"`
+	Decision  PermissionDecision `json:"decision"`
 }
 
 // Permission is the resolved view for a permission_request event.

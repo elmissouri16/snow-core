@@ -7,7 +7,6 @@ import (
 
 	"github.com/snow-core/snow/internal/agent"
 	"github.com/snow-core/snow/internal/app"
-	"github.com/snow-core/snow/internal/config"
 	publicmcp "github.com/snow-core/snow/pkg/mcp"
 	"github.com/snow-core/snow/pkg/protocol"
 	publicsandbox "github.com/snow-core/snow/pkg/sandbox"
@@ -69,6 +68,7 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		SkillDirs:               opts.SkillDirs,
 		NoSkills:                opts.NoSkills,
 		UserInputHandler:        opts.UserInputHandler,
+		PermissionHandler:       opts.PermissionHandler,
 		Subagents:               subagents,
 		SubagentProvider:        opts.SubagentProvider,
 		SubagentModel:           opts.SubagentModel,
@@ -101,6 +101,15 @@ func (s *Session) Prompt(ctx context.Context, text string) error {
 	return a.Agent.Prompt(ctx, text)
 }
 
+// PromptContent runs a full user turn with text and image content blocks.
+func (s *Session) PromptContent(ctx context.Context, text string, attachments []protocol.ContentBlock) error {
+	a, err := s.activeApp()
+	if err != nil {
+		return err
+	}
+	return a.Agent.PromptContent(ctx, text, attachments)
+}
+
 // PromptWithMode atomically switches mode and starts the prompt.
 func (s *Session) PromptWithMode(ctx context.Context, text string, mode protocol.CollaborationMode) error {
 	a, err := s.activeApp()
@@ -108,6 +117,16 @@ func (s *Session) PromptWithMode(ctx context.Context, text string, mode protocol
 		return err
 	}
 	return a.Agent.PromptWithMode(ctx, text, mode)
+}
+
+// PromptContentWithMode atomically switches mode and starts a turn with text
+// and image content blocks.
+func (s *Session) PromptContentWithMode(ctx context.Context, text string, attachments []protocol.ContentBlock, mode protocol.CollaborationMode) error {
+	a, err := s.activeApp()
+	if err != nil {
+		return err
+	}
+	return a.Agent.PromptContentWithMode(ctx, text, attachments, mode)
 }
 
 // Mode returns the active collaboration mode.
@@ -403,22 +422,7 @@ func (s *Session) Diagnostics() ([]protocol.ConfigDiagnostic, error) {
 	if err != nil {
 		return nil, err
 	}
-	all := append([]config.Diagnostic(nil), a.Diagnostics...)
-	themes, themeDiagnostics := config.LoadThemes(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed)
-	_, keyDiagnostics := config.LoadKeybindings(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed)
-	selected := a.Cfg.TUI.Theme
-	if selected != "default" && selected != "dark" && selected != "light" && selected != "high-contrast" {
-		if _, ok := themes[selected]; !ok {
-			themeDiagnostics = append(themeDiagnostics, config.Diagnostic{Path: "tui.theme", Message: "selected custom theme is missing or invalid: " + selected})
-		}
-	}
-	all = append(all, themeDiagnostics...)
-	all = append(all, keyDiagnostics...)
-	out := make([]protocol.ConfigDiagnostic, 0, len(all))
-	for _, d := range all {
-		out = append(out, protocol.ConfigDiagnostic{Path: d.Path, Message: d.Message})
-	}
-	return out, nil
+	return a.ConfigDiagnostics(), nil
 }
 
 // Compact manually compacts the active branch. Goal continuation may also
@@ -757,6 +761,34 @@ func (s *Session) SandboxStatus() publicsandbox.Status {
 		return publicsandbox.Status{Backend: "host"}
 	}
 	return a.SandboxStatus()
+}
+
+// EnablePermissionReplies permits manual ReplyPermission/RejectPermission
+// resolution of ask-mode permission requests from this SDK session.
+func (s *Session) EnablePermissionReplies() {
+	a, err := s.activeApp()
+	if err != nil {
+		return
+	}
+	a.EnablePermissionReplies()
+}
+
+// ReplyPermission resolves the pending ask-mode permission request.
+func (s *Session) ReplyPermission(response protocol.PermissionResponse) error {
+	a, err := s.activeApp()
+	if err != nil {
+		return err
+	}
+	return a.ReplyPermission(response)
+}
+
+// RejectPermission declines the pending ask-mode permission request.
+func (s *Session) RejectPermission(requestID string) error {
+	a, err := s.activeApp()
+	if err != nil {
+		return err
+	}
+	return a.RejectPermission(requestID)
 }
 
 // CWD returns the session working directory.

@@ -154,6 +154,8 @@ the same provider → tool → session loop.
 | Go SDK | `github.com/snow-core/snow/pkg/snowsdk` | In-process embedding without Cobra or Bubble Tea |
 | Python SDK | [`sdk/python`](sdk/python) | Async typed local client around an external Snow binary |
 | JavaScript/TypeScript SDK | [`sdk/javascript`](sdk/javascript) | Zero-dependency ESM client with TypeScript declarations |
+| Python plugin SDK | [`sdk/plugin-python`](sdk/plugin-python) | Author private protocol-v2 plugins with `snow_plugin` |
+| JavaScript/TypeScript plugin SDK | [`sdk/plugin-javascript`](sdk/plugin-javascript) | Author private protocol-v2 plugins with `@snow-core/plugin` |
 
 Common examples:
 

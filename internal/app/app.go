@@ -47,10 +47,14 @@ type App struct {
 	ProviderModules *provider.Registry
 	// Models is the active provider catalog; AllModels is the combined live
 	// snapshot used by the TUI picker and replaced on catalog refresh.
-	Models           []protocol.Model
-	AllModels        []protocol.Model
-	Model            protocol.Model
-	Perm             *permission.SimpleService
+	Models    []protocol.Model
+	AllModels []protocol.Model
+	Model     protocol.Model
+	Perm      *permission.SimpleService
+	// PermBroker is the trusted-host interactive permission asker. It is used
+	// only in ask mode and only when an embedded handler or manual replies are
+	// enabled; otherwise ask-mode requests deny without blocking.
+	PermBroker       *permission.Broker
 	Session          session.Store
 	Agent            *agent.Agent
 	Goal             *goalpkg.Controller
@@ -127,6 +131,11 @@ type Options struct {
 	// Nil keeps the tool directly visible but makes calls fail fast until an
 	// interactive surface enables manual replies.
 	UserInputHandler userinput.Handler
+	// PermissionHandler resolves interactive ask-mode permission requests from
+	// a trusted host. Only ask mode uses it, and only when a handler or manual
+	// replies are enabled. Nil keeps ask-mode blocking unavailable (deny fast),
+	// preserving the deny-by-default contract.
+	PermissionHandler permission.Handler
 	// Subagents overrides config enablement when non-nil. Enabling never implies
 	// recursive spawning or mutation.
 	Subagents              *bool

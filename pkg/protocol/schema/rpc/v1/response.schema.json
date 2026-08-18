@@ -5,46 +5,120 @@
   "oneOf": [
     {
       "type": "object",
-      "required": ["type", "success", "error"],
+      "required": [
+        "type",
+        "success",
+        "error"
+      ],
       "properties": {
-        "id": {"type": "string"},
-        "type": {"const": "response"},
-        "command": {"type": "string"},
-        "success": {"const": false},
-        "error": {"type": "string", "minLength": 1},
-        "error_code": {"type": "string", "enum": ["canceled", "conflict", "destination_exists", "git_dirty", "git_failure", "invalid", "not_found", "not_git_repository", "session_busy", "subagents_active", "unsupported"]},
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "type": "string"
+        },
+        "success": {
+          "const": false
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1
+        },
+        "error_code": {
+          "type": "string",
+          "enum": [
+            "canceled",
+            "conflict",
+            "destination_exists",
+            "git_dirty",
+            "git_failure",
+            "invalid",
+            "not_found",
+            "not_git_repository",
+            "session_busy",
+            "subagents_active",
+            "unsupported"
+          ]
+        },
         "data": {}
       },
       "additionalProperties": false
     },
     {
       "type": "object",
-      "required": ["type", "command", "success", "data"],
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
       "properties": {
-        "id": {"type": "string"},
-        "type": {"const": "response"},
-        "command": {"const": "session_info"},
-        "success": {"const": true},
-        "data": {"$ref": "session-info.schema.json"}
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "session_info"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "session-info.schema.json"
+        }
       },
       "additionalProperties": false
     },
     {
       "type": "object",
-      "required": ["type", "command", "success", "data"],
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
       "properties": {
-        "id": {"type": "string"},
-        "type": {"const": "response"},
-        "command": {"enum": ["models_list", "subagent_models"]},
-        "success": {"const": true},
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "enum": [
+            "models_list",
+            "subagent_models"
+          ]
+        },
+        "success": {
+          "const": true
+        },
         "data": {
           "type": "object",
-          "required": ["models"],
+          "required": [
+            "models"
+          ],
           "properties": {
-            "provider": {"type": "string"},
-            "current": {"type": "string"},
-            "enabled": {"type": "boolean"},
-            "models": {"type": "array", "items": {"$ref": "model.schema.json"}}
+            "provider": {
+              "type": "string"
+            },
+            "current": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "models": {
+              "type": "array",
+              "items": {
+                "$ref": "model.schema.json"
+              }
+            }
           },
           "additionalProperties": false
         }
@@ -53,36 +127,510 @@
     },
     {
       "type": "object",
-      "required": ["type", "command", "success", "data"],
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
       "properties": {
-        "id": {"type": "string"},
-        "type": {"const": "response"},
-        "command": {"const": "branch_fork"},
-        "success": {"const": true},
-        "data": {"$ref": "session-branch.schema.json"}
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "branch_fork"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "session-branch.schema.json"
+        }
       },
       "additionalProperties": false
     },
     {
       "type": "object",
-      "required": ["type", "command", "success", "data"],
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
       "properties": {
-        "id": {"type": "string"},
-        "type": {"const": "response"},
-        "command": {"enum": ["session_fork", "session_worktree_fork"]},
-        "success": {"const": true},
-        "data": {"$ref": "session-fork.schema.json"}
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "enum": [
+            "session_fork",
+            "session_worktree_fork"
+          ]
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "session-fork.schema.json"
+        }
       },
       "additionalProperties": false
     },
     {
       "type": "object",
-      "required": ["type", "command", "success"],
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
       "properties": {
-        "id": {"type": "string"},
-        "type": {"const": "response"},
-        "command": {"type": "string", "not": {"enum": ["branch_fork", "session_fork", "session_info", "session_worktree_fork", "models_list", "subagent_models"]}},
-        "success": {"const": true},
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "compact"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "summarized_messages",
+            "retained_messages"
+          ],
+          "properties": {
+            "summarized_messages": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained_messages": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "summary": {
+              "type": "string"
+            },
+            "used_fallback": {
+              "type": "boolean"
+            },
+            "automatic": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "branches_list"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "branches"
+          ],
+          "properties": {
+            "branches": {
+              "type": "array",
+              "items": {
+                "$ref": "session-branch.schema.json"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "branch_rename"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "session-branch.schema.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "messages_list"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "messages"
+          ],
+          "properties": {
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "message.schema.json"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "usage"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "common.schema.json#/$defs/usage"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "enum": [
+            "pending_inputs",
+            "pending_inputs_clear"
+          ]
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "common.schema.json#/$defs/inputQueue"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "diagnostics"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "diagnostics"
+          ],
+          "properties": {
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "message"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "mcp_servers"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "servers"
+          ],
+          "properties": {
+            "servers": {
+              "type": "array",
+              "items": {
+                "$ref": "mcp-server.schema.json"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "skills"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "skills.schema.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "sandbox_status"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "sandbox-status.schema.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "permission_reply"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "permission_reject"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "type": "string",
+          "not": {
+            "enum": [
+              "branch_fork",
+              "branches_list",
+              "branch_rename",
+              "compact",
+              "diagnostics",
+              "mcp_servers",
+              "messages_list",
+              "models_list",
+              "pending_inputs",
+              "pending_inputs_clear",
+              "sandbox_status",
+              "session_fork",
+              "session_info",
+              "session_worktree_fork",
+              "skills",
+              "subagent_models",
+              "usage",
+              "permission_reply",
+              "permission_reject"
+            ]
+          }
+        },
+        "success": {
+          "const": true
+        },
         "data": {}
       },
       "additionalProperties": false

@@ -29,6 +29,22 @@ func TestPythonExamplePlugin(t *testing.T) {
 	testExternalExample(t, "example-python", []string{runtimePath, "-u", examplePath(t, "python", "plugin.py")}, "python")
 }
 
+func TestJavaScriptSDKExamplePlugin(t *testing.T) {
+	runtimePath, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node unavailable")
+	}
+	testExternalExample(t, "example-js-sdk", []string{runtimePath, examplePath(t, "javascript-sdk", "plugin.mjs")}, "node-sdk")
+}
+
+func TestPythonSDKExamplePlugin(t *testing.T) {
+	runtimePath, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	testExternalExample(t, "example-python-sdk", []string{runtimePath, "-u", examplePath(t, "python-sdk", "plugin.py")}, "python-sdk")
+}
+
 func examplePath(t *testing.T, language, name string) string {
 	t.Helper()
 	path, err := filepath.Abs(filepath.Join("..", "..", "examples", "plugins", language, name))

@@ -272,6 +272,10 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 
 	// Permission service (deny-by-default headless; TUI replaces asker).
 	perm := permission.NewService(permMode, permission.DenyAll{})
+	permBroker := permission.NewBroker(perm)
+	if opts.PermissionHandler != nil {
+		permBroker.SetHandler(opts.PermissionHandler)
+	}
 
 	// Fetch every available provider catalog during startup. Providers may return
 	// cached/bundled fallbacks; authenticated refreshes replace these snapshots.
@@ -598,6 +602,14 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	host.emitUserInput = ag.EmitUserInputRequest
 	host.inEventCallback = ag.InEventCallback
 	goalController.SetEmitter(func(ev protocol.AgentEvent) { ag.Publish(ev) })
+	// Wire the trusted-host permission broker to the agent event stream and,
+	// only in ask mode, make it the permission asker. Deny and allow modes
+	// never consult the broker, and ask mode still blocks only when a handler
+	// or manual replies are enabled (see Broker.Ask).
+	permBroker.SetPublisher(func(ev protocol.AgentEvent) { ag.Publish(ev) })
+	if permMode == permission.ModeAsk {
+		perm.SetAsker(permBroker)
+	}
 
 	if subManager != nil {
 		factory := subagent.ChildFactoryFunc(func(childCtx context.Context, spec subagent.ChildSpec) (subagent.ChildRuntime, error) {
@@ -751,6 +763,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		ProjectInputRoot:   projectInputRoot,
 		permissionDefault:  permMode,
 		permissionOverride: opts.Permission != "",
+		PermBroker:         permBroker,
 		cwd:                absCWD,
 		userInput:          inputBroker,
 		toolGuard:          toolGuard,

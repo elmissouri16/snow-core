@@ -76,13 +76,20 @@ Snow classifies tool actions by risk:
 | `allow` | Allowed | Allowed |
 
 The TUI supplies an interactive asker and exposes `/allow [always]`, `/deny`,
-and `/permissions`. Print, JSON, and RPC do not provide a permission-reply
-command, so their `ask` mode fails closed. The Go SDK also defaults to `deny`;
-`UserInputHandler` answers model questions and is not a permission asker.
+and `/permissions`. The Go SDK and RPC can opt into a trusted-host interactive
+permission broker: a `PermissionHandler` (Go SDK) or the `permission_reply` /
+`permission_reject` RPC commands (gated by the `permission_interaction`
+capability). `UserInputHandler` answers model questions and is not a permission
+asker.
 
 > **Warning:** Headless callers that select `ask` without an interactive asker
-> are denied by default. SDK and RPC embedders must use `deny` or deliberately
-> opt into `allow`/`AutoApprove`.
+> are denied by default. The permission broker still blocks only when the
+> surface is opted in with a handler or manual replies; otherwise ask-mode
+> requests deny without ever blocking. SDK and RPC embedders must use `deny` or
+> deliberately opt into `allow`/`AutoApprove` or an explicit interactive
+> permission broker. Read-only requests never ask and `allow_session` /
+> `allow_always` decisions are remembered on the service and never leave the
+> process.
 
 `deny` still permits read-risk tools. In the default registry that includes
 deferred `session_search`/`session_reference` and

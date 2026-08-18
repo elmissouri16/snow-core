@@ -188,6 +188,7 @@ export class Snow {
       maxFrameBytes: DEFAULT_MAX_FRAME_BYTES,
       eventQueueSize: 256,
       userInputHandler: undefined,
+      permissionHandler: undefined,
       signal: undefined,
       ...options,
     };
@@ -318,7 +319,7 @@ export class Snow {
     }
   }
 
-  async prompt(message, { mode = "", timeoutMs = this.options.requestTimeoutMs, signal } = {}) {
+  async prompt(message = "", { content, mode = "", timeoutMs = this.options.requestTimeoutMs, signal } = {}) {
     const id = `prompt-${randomUUID()}`;
     const terminal = deferred();
     this.prompts.set(id, terminal);
@@ -330,7 +331,7 @@ export class Snow {
     }
     let abandon = false;
     try {
-      await this.request("prompt", { message, ...(mode ? { mode } : {}) }, { id, timeoutMs });
+      await this.request("prompt", { message, ...(content ? { content } : {}), ...(mode ? { mode } : {}) }, { id, timeoutMs });
       return await withTimeout(terminal.promise, timeoutMs, `timed out waiting for prompt completion (${id})`);
     } catch (error) {
       if (error instanceof SnowTimeoutError) {
@@ -385,6 +386,24 @@ export class Snow {
   subagentReady() { return this.request("subagent_ready"); }
   replyUserInput(requestId, answers) { return this.request("user_input_reply", { params: { request_id: requestId, answers } }); }
   rejectUserInput(requestId) { return this.request("user_input_reject", { params: { request_id: requestId } }); }
+  replyPermission(requestId, decision) { return this.request("permission_reply", { params: { request_id: requestId, decision } }); }
+  rejectPermission(requestId) { return this.request("permission_reject", { params: { request_id: requestId } }); }
+  compact() { return this.request("compact"); }
+  branches() { return this.request("branches_list"); }
+  branchSelect(branchId) { return this.request("branch_select", { params: { branch_id: branchId } }); }
+  branchRename(branchId, name) { return this.request("branch_rename", { params: { branch_id: branchId, name } }); }
+  branchDelete(branchId) { return this.request("branch_delete", { params: { branch_id: branchId } }); }
+  messages() { return this.request("messages_list"); }
+  usage() { return this.request("usage"); }
+  pendingInputs() { return this.request("pending_inputs"); }
+  clearPendingInputs() { return this.request("pending_inputs_clear"); }
+  configurationDiagnostics() { return this.request("diagnostics"); }
+  mcpServers() { return this.request("mcp_servers"); }
+  skills() { return this.request("skills"); }
+  sandboxStatus() { return this.request("sandbox_status"); }
+  setReasoningSummary(reasoningSummary) { return this.request("set_reasoning_summary", { reasoning_summary: reasoningSummary }); }
+  setTextVerbosity(textVerbosity) { return this.request("set_text_verbosity", { text_verbosity: textVerbosity }); }
+
 
   async close() {
     if (this.closed) return;
@@ -541,6 +560,27 @@ export class Snow {
       const task = Promise.resolve().then(() => this._handleUserInput(message));
       this.handlerTasks.add(task);
       task.finally(() => this.handlerTasks.delete(task));
+    }
+    if (message.type === "permission_request" && this.options.permissionHandler) {
+      const task = Promise.resolve().then(() => this._handlePermission(message));
+      this.handlerTasks.add(task);
+      task.finally(() => this.handlerTasks.delete(task));
+    }
+  }
+
+  async _handlePermission(event) {
+    const request = event.permission?.request;
+    if (!request || typeof request.id !== "string") {
+      return this._fatal(new SnowProtocolError("permission_request omitted request data"));
+    }
+    try {
+      const decision = await this.options.permissionHandler(request, { signal: this.handlerController.signal });
+      if (!["allow", "allow_session", "allow_always", "deny"].includes(decision)) {
+        throw new SnowProtocolError("permission handler returned an invalid decision");
+      }
+      await this.replyPermission(request.id, decision);
+    } catch {
+      try { await this.rejectPermission(request.id); } catch { /* process may be closing */ }
     }
   }
 

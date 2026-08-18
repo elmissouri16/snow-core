@@ -14,6 +14,8 @@
     "thinking": {"type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]},
     "thinking_levels": {"type": "array", "items": {"type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]}},
     "collaboration_mode": {"type": "string", "enum": ["default", "plan"]},
+    "reasoning_summary": {"type": "string", "enum": ["off", "auto", "concise", "detailed"]},
+    "text_verbosity": {"type": "string", "enum": ["low", "medium", "high"]},
     "goal": {
       "type": "object",
       "required": ["goal_id", "status", "tokens_used", "token_budget", "estimated_costs"],

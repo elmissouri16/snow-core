@@ -1,0 +1,8 @@
+{
+  "id": "example-python-sdk",
+  "command": ["python3", "-u", "examples/plugins/python-sdk/plugin.py"],
+  "enabled": true,
+  "timeout_ms": 10000,
+  "max_output_bytes": 262144,
+  "env": ["PATH=/usr/local/bin:/usr/bin:/bin"]
+}

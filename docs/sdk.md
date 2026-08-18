@@ -172,6 +172,7 @@ separates inheritance from clean-install defaults.
 | `SubagentMaxAgents` | Zero inherits config; clean-install default 32, maximum 4096, not below concurrency. |
 | `SubagentMaxDepth` | Zero inherits config; clean-install default 1, maximum 8. |
 | `UserInputHandler` | Answers `ask_user`; nil fails the tool call fast instead of blocking. It is not a permission asker. |
+| `PermissionHandler` | Resolves trusted-host `ask` permission requests after their event is published. It returns a correlated `protocol.PermissionResponse`; nil preserves fail-closed behavior unless manual replies are explicitly enabled. |
 
 ### OpenAI-compatible gateways
 
@@ -204,7 +205,8 @@ Recommended host sequence:
 
 1. Build a context with the cancellation and deadline policy for the embedding.
 2. Call `snowsdk.Open`.
-3. Install `Subscribe` callbacks and `UserInputHandler` in `Options`.
+3. Install `Subscribe` callbacks and any trusted `UserInputHandler` or
+   `PermissionHandler` in `Options`.
 4. Read `StateEvent()` if the host needs the initial collaboration-mode state.
 5. Call `ReadyGoals()` and `ReadySubagents()` after observers exist.
 6. Call `Prompt` or `PromptWithMode`, or use the control methods while a turn
@@ -219,6 +221,27 @@ own it.
 `Close` marks the session stopped before releasing runtime resources. Calls
 after close, a nil session, and repeated `Close` return `snowsdk.ErrStopped`
 where a method can return an error.
+
+For trusted interactive hosts, permission mode `ask` can use the correlated
+broker without weakening the headless default:
+
+```go
+session, err := snowsdk.Open(ctx, snowsdk.Options{
+    PermissionMode: "ask",
+    PermissionHandler: func(ctx context.Context, req protocol.PermissionRequest) (protocol.PermissionResponse, error) {
+        return protocol.PermissionResponse{
+            RequestID: req.ID,
+            Decision:  protocol.PermissionAllowSession,
+        }, nil
+    },
+})
+```
+
+Snow publishes `permission_request` before calling the handler. Handler errors,
+invalid decisions, and mismatched response IDs deny the request. Event-loop
+hosts can instead call `EnablePermissionReplies`, then `ReplyPermission` or
+`RejectPermission` with the exact request ID. With neither path enabled, `ask`
+denies immediately rather than blocking.
 
 ### Constructors and helpers
 

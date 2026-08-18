@@ -74,6 +74,54 @@ const childModels = await snow.subagentModels();
 Callback subscriptions and async iterators are independent. Iterators are
 bounded and fail explicitly on overflow. Unknown event types and additive fields
 are preserved.
+## Multimodal prompts
+
+When the binary announces `multimodal_prompts`, `prompt` accepts an additive
+`content` array of `{type: "text"|"image", ...}` blocks via
+`await snow.prompt("", { content: [imageBlock] })`. The legacy message argument
+stays valid; an empty message is allowed only when an image block is present.
+
+## Session and runtime commands
+
+The client exposes typed wrappers for the full RPC command surface:
+
+```js
+await snow.compact();                              // {summarized_messages, retained_messages, ...}
+const { branches } = (await snow.branches()).data; // [{id, name, active, ...}]
+await snow.branchSelect("branch-1");
+await snow.branchRename("branch-1", "new name");
+await snow.branchDelete("branch-1");
+const { messages } = (await snow.messages()).data; // message content blocks and usage
+const usage = (await snow.usage()).data;           // {input, output, total_tokens, ...}
+const pending = (await snow.pendingInputs()).data; // {items: [{kind, text, ...}]}
+await snow.clearPendingInputs();
+const { diagnostics } = (await snow.configurationDiagnostics()).data;
+await snow.setReasoningSummary("concise");         // off|auto|concise|detailed
+await snow.setTextVerbosity("high");               // low|medium|high
+```
+
+Before using these methods with an older Snow binary, inspect
+`snow.ready.capabilities` for `compaction`, `branch_management`,
+`messages_list`, `usage`, `pending_inputs`, `diagnostics`, and
+`response_controls` as applicable. The wrappers reuse the standard `request()`
+correlation and error handling.
+
+## Interactive permissions
+
+Permission mode `ask` remains fail-closed unless a trusted host installs a
+handler or manually replies to events:
+
+```js
+const snow = await Snow.start({
+  permission: "ask",
+  permissionHandler: async (request, { signal }) => "allow_session",
+});
+```
+
+The correlated `permission_request` event is published before the handler runs.
+Handler errors or invalid decisions send `permission_reject`. Event-loop hosts
+can instead call `replyPermission(requestId, decision)` or
+`rejectPermission(requestId)`.
 
 ## Development
 

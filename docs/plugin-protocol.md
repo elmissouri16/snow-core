@@ -304,7 +304,11 @@ Successful tool result:
 JSON-RPC request successfully.
 
 If the encoded result exceeds the configured output limit, Snow replaces it
-with a bounded error result.
+with a bounded error result. Language SDKs expose an explicit expected-tool
+error type whose message becomes provider-facing structured error content.
+Unexpected handler exceptions become JSON-RPC errors containing only the
+exception class/type; their messages are not copied to stdout because they may
+contain configuration or provider-private data.
 
 ## Progress
 

@@ -69,6 +69,74 @@ Unknown additive event fields are retained in `AgentEvent.raw`. Independent
 event iterators use bounded queues and fail explicitly if a consumer cannot
 keep up.
 
+
+When the binary announces `multimodal_prompts`, `prompt` accepts an additive
+`content` list of `{"type": "text"/"image", ...}` blocks. The legacy
+`message` argument stays valid; an empty `message` is allowed only when an
+image block is present.
+
+## RPC parity batch
+
+The client exposes idiomatic wrappers for the runtime parity commands:
+
+```python
+compaction = await snow.compact()
+branches = await snow.branches_list()
+await snow.branch_select("branch-1")
+await snow.branch_rename("branch-1", "feature")
+await snow.branch_delete("branch-1")
+messages = await snow.messages_list()
+usage = await snow.usage()
+pending = await snow.pending_inputs()
+cleared = await snow.pending_inputs_clear()
+diagnostics = await snow.configuration_diagnostics()   # command: "diagnostics"
+await snow.set_reasoning_summary("concise")            # off|auto|concise|detailed
+await snow.set_text_verbosity("high")                  # low|medium|high
+```
+
+`configuration_diagnostics()` is named to avoid colliding with the existing
+client-side `snow.diagnostics` transport-log attribute; it sends the
+`diagnostics` RPC command and returns the server's configuration warnings.
+
+Typed response helpers are available for the richer payloads and accept the
+raw response dictionary from the matching method:
+
+```python
+from snow_sdk import CompactionResult, BranchesList, MessagesList, UsageSnapshot, PendingInputs, DiagnosticsList
+
+result = CompactionResult.from_response(await snow.compact())
+branches = BranchesList.from_response(await snow.branches_list())
+messages = MessagesList.from_response(await snow.messages_list())
+usage = UsageSnapshot.from_response(await snow.usage())
+pending = PendingInputs.from_response(await snow.pending_inputs())
+diagnostics = DiagnosticsList.from_response(await snow.configuration_diagnostics())
+```
+
+All wrappers return the raw response dict, preserve unknown additive fields,
+and remain dependency-free. Before using these methods with an older Snow
+binary, inspect `snow.ready.capabilities` for `compaction`,
+`branch_management`, `messages_list`, `usage`, `pending_inputs`, `diagnostics`,
+and `response_controls` as applicable.
+
+## Interactive permissions
+
+Permission mode `ask` remains fail-closed unless a trusted host installs a
+handler or manually replies to events:
+
+```python
+async def decide(request):
+    return "allow_session"  # allow|allow_session|allow_always|deny
+
+snow = await SnowClient.start(
+    SnowOptions(permission="ask"), permission_handler=decide,
+)
+```
+
+The correlated `permission_request` event is published before the handler runs.
+Handler errors or invalid decisions send `permission_reject`. Event-loop hosts
+can instead call `reply_permission(request_id, decision)` or
+`reject_permission(request_id)`.
+
 ## Development
 
 From the repository root:

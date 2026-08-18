@@ -70,13 +70,31 @@ func decodedJSON(t *testing.T, data []byte) any {
 	return value
 }
 
-func TestLiveRPCFramesConformToVersionOneSchemas(t *testing.T) {
-	requests := []string{
+func liveRPCRequestFrames() []string {
+	return []string{
 		`{"id":"i1","type":"session_info"}`,
 		`{"id":"m1","type":"models_list"}`,
 		`{"id":"sm1","type":"subagent_models"}`,
 		`{"id":"p1","type":"prompt","message":"schema smoke"}`,
+		`{"id":"b1","type":"branches_list"}`,
+		`{"id":"b2","type":"branch_select","params":{"branch_id":"main"}}`,
+		`{"id":"b3","type":"branch_rename","params":{"branch_id":"main","name":"schema"}}`,
+		`{"id":"b4","type":"branch_delete","params":{"branch_id":"missing"}}`,
+		`{"id":"c1","type":"compact"}`,
+		`{"id":"d1","type":"diagnostics"}`,
+		`{"id":"ms1","type":"messages_list"}`,
+		`{"id":"pi1","type":"pending_inputs"}`,
+		`{"id":"pi2","type":"pending_inputs_clear"}`,
+		`{"id":"rs1","type":"set_reasoning_summary","reasoning_summary":"auto"}`,
+		`{"id":"tv1","type":"set_text_verbosity","text_verbosity":"low"}`,
+		`{"id":"u1","type":"usage"}`,
+		`{"id":"pr1","type":"permission_reply","params":{"request_id":"perm-1","decision":"allow"}}`,
+		`{"id":"pr2","type":"permission_reject","params":{"request_id":"perm-1"}}`,
 	}
+}
+
+func TestLiveRPCFramesConformToVersionOneSchemas(t *testing.T) {
+	requests := liveRPCRequestFrames()
 	requestSchema := resolveWireSchema(t, "request.schema.json")
 	for _, frame := range requests {
 		if err := requestSchema.Validate(decodedJSON(t, []byte(frame))); err != nil {

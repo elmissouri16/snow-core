@@ -11,8 +11,9 @@ from this directory and reject network fallback.
 - `prompt-completed.schema.json` defines definitive prompt termination.
 - `agent-event.schema.json` defines normalized event frames.
 - `output.schema.json` is the stdout-frame union.
-- `model.schema.json`, `session-info.schema.json`, and `common.schema.json`
-  contain shared public DTO shapes.
+- `model.schema.json`, `message.schema.json`, `session-branch.schema.json`,
+  `session-info.schema.json`, and `common.schema.json` contain shared public DTO
+  shapes.
 
 The v1 schemas are strict (`additionalProperties: false`) so Go conformance tests
 catch accidental wire drift. Python and JavaScript SDK decoders intentionally

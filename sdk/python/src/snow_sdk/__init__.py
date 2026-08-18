@@ -1,6 +1,6 @@
 """Typed asynchronous client for the local Snow JSONL RPC process."""
 
-from .client import EventSubscription, SnowClient
+from .client import EventSubscription, PermissionHandler, SnowClient, UserInputHandler
 from .errors import (
     SnowCancelledError,
     SnowClosedError,
@@ -14,13 +14,51 @@ from .errors import (
     SnowVersionError,
 )
 from .options import SnowOptions
-from .types import AgentEvent, PromptResult, RPCReady
+from .types import (
+    AgentEvent,
+    ContentBlock,
+    BranchesList,
+    CompactionResult,
+    ConfigDiagnostic,
+    DiagnosticsList,
+    MCPServer,
+    MCPServers,
+    MessagesList,
+    PendingInputs,
+    PromptResult,
+    QueuedInput,
+    RPCReady,
+    SandboxStatus,
+    SessionBranch,
+    Skill,
+    SkillDiagnostic,
+    Skills,
+    UsageSnapshot,
+)
 
 __all__ = [
     "AgentEvent",
+    "ContentBlock",
+    "BranchesList",
+    "CompactionResult",
+    "ConfigDiagnostic",
+    "DiagnosticsList",
     "EventSubscription",
+    "MCPServer",
+    "MCPServers",
+    "MessagesList",
+    "PendingInputs",
+    "PermissionHandler",
     "PromptResult",
+    "QueuedInput",
     "RPCReady",
+    "SandboxStatus",
+    "SessionBranch",
+    "Skill",
+    "SkillDiagnostic",
+    "Skills",
+    "UsageSnapshot",
+    "UserInputHandler",
     "SnowCancelledError",
     "SnowClient",
     "SnowClosedError",

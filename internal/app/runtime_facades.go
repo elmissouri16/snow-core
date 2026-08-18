@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/snow-core/snow/internal/config"
 	internalmcp "github.com/snow-core/snow/internal/mcp"
 	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/internal/provider"
@@ -19,6 +20,27 @@ import (
 	"github.com/snow-core/snow/pkg/protocol"
 	publicsandbox "github.com/snow-core/snow/pkg/sandbox"
 )
+
+// ConfigDiagnostics returns an independent snapshot of non-fatal auxiliary
+// configuration warnings, including lazily loaded theme and keybinding files.
+func (a *App) ConfigDiagnostics() []protocol.ConfigDiagnostic {
+	all := append([]config.Diagnostic(nil), a.Diagnostics...)
+	themes, themeDiagnostics := config.LoadThemes(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed)
+	_, keyDiagnostics := config.LoadKeybindings(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed)
+	selected := a.Cfg.TUI.Theme
+	if selected != "default" && selected != "dark" && selected != "light" && selected != "high-contrast" {
+		if _, ok := themes[selected]; !ok {
+			themeDiagnostics = append(themeDiagnostics, config.Diagnostic{Path: "tui.theme", Message: "selected custom theme is missing or invalid: " + selected})
+		}
+	}
+	all = append(all, themeDiagnostics...)
+	all = append(all, keyDiagnostics...)
+	out := make([]protocol.ConfigDiagnostic, 0, len(all))
+	for _, diagnostic := range all {
+		out = append(out, protocol.ConfigDiagnostic{Path: diagnostic.Path, Message: diagnostic.Message})
+	}
+	return out
+}
 
 // RefreshProviderModels forces an authenticated catalog refresh when the
 // provider supports it and atomically replaces app/picker snapshots.
@@ -416,6 +438,9 @@ func (a *App) Close() error {
 	if a.userInput != nil {
 		a.userInput.Close()
 	}
+	if a.PermBroker != nil {
+		a.PermBroker.Close()
+	}
 	if a.MCPManager != nil {
 		if err := a.MCPManager.Close(); err != nil {
 			errs = append(errs, err)
@@ -491,6 +516,14 @@ func (a *App) EnableUserInputReplies() {
 func (a *App) CloseUserInput() {
 	if a != nil && a.userInput != nil {
 		a.userInput.Close()
+	}
+}
+
+// ClosePermissionBroker releases any pending permission request and prevents
+// future interactive waits. RPC uses this when its input stream reaches EOF.
+func (a *App) ClosePermissionBroker() {
+	if a != nil && a.PermBroker != nil {
+		a.PermBroker.Close()
 	}
 }
 
@@ -656,4 +689,64 @@ func (a *App) RejectUserInput(requestID string) error {
 		return userinput.ErrUnavailable
 	}
 	return a.userInput.Reject(requestID)
+}
+
+// EnablePermissionReplies enables manual RPC/SDK resolution of ask-mode
+// permission requests. It does not change the permission mode.
+func (a *App) EnablePermissionReplies() {
+	if a != nil && a.PermBroker != nil {
+		a.PermBroker.EnableManual()
+	}
+}
+
+// ReplyPermission resolves the pending ask-mode permission request.
+func (a *App) ReplyPermission(response protocol.PermissionResponse) error {
+	if a == nil || a.PermBroker == nil {
+		return errors.New("app: permission broker unavailable")
+	}
+	return a.PermBroker.Reply(response.RequestID, permission.Decision(response.Decision))
+}
+
+// RejectPermission declines the pending ask-mode permission request.
+func (a *App) RejectPermission(requestID string) error {
+	if a == nil || a.PermBroker == nil {
+		return errors.New("app: permission broker unavailable")
+	}
+	return a.PermBroker.Reject(requestID)
+}
+
+// SkillInventoryPublic returns the full skill catalog and its discovery
+// diagnostics as protocol-level secret-free entries for remote surfaces.
+func (a *App) SkillInventoryPublic() (protocol.RPCSkillsList, error) {
+	out := protocol.RPCSkillsList{}
+	if a == nil || a.Skills == nil {
+		out.Skills = []protocol.RPCSkill{}
+		return out, nil
+	}
+	skills := a.Skills.Inventory()
+	out.Skills = make([]protocol.RPCSkill, 0, len(skills))
+	for _, skill := range skills {
+		metadata := make(map[string]string, len(skill.Metadata))
+		for key, value := range skill.Metadata {
+			metadata[key] = value
+		}
+		out.Skills = append(out.Skills, protocol.RPCSkill{
+			Name: skill.Name, Description: skill.Description, License: skill.License,
+			Compatibility: skill.Compatibility, Metadata: metadata, AllowedTools: skill.AllowedTools,
+			Location: skill.Location, Scope: skill.Scope, Source: skill.Source,
+			Enabled: skill.Enabled, DisabledBy: skill.DisabledBy,
+		})
+	}
+	if len(out.Skills) == 0 {
+		out.Skills = []protocol.RPCSkill{}
+	}
+	diagnostics := a.Skills.Diagnostics()
+	if len(a.SkillDiagnostics) > 0 {
+		diagnostics = append(diagnostics, a.SkillDiagnostics...)
+	}
+	out.Diagnostics = make([]protocol.RPCSkillDiagnostic, 0, len(diagnostics))
+	for _, d := range diagnostics {
+		out.Diagnostics = append(out.Diagnostics, protocol.RPCSkillDiagnostic{Path: d.Path, Skill: d.Skill, Level: d.Level, Message: d.Message})
+	}
+	return out, nil
 }

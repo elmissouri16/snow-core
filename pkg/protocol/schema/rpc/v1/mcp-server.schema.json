@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/mcp-server.schema.json",
+  "title": "Snow RPC MCP server status",
+  "type": "object",
+  "properties": {
+    "id": {"type": "string"},
+    "transport": {"type": "string"},
+    "connected": {"type": "boolean"},
+    "protocol_version": {"type": "string"},
+    "server_name": {"type": "string"},
+    "server_version": {"type": "string"},
+    "capabilities": {"type": "array", "items": {"type": "string"}},
+    "tool_count": {"type": "integer"},
+    "message": {"type": "string"},
+    "state": {"type": "string"},
+    "cached": {"type": "boolean"},
+    "cached_at": {"type": "string"},
+    "last_used_at": {"type": "string"}
+  },
+  "additionalProperties": false
+}

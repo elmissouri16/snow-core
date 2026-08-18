@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/message.schema.json",
+  "title": "Snow session message",
+  "$defs": {
+    "role": {"type": "string", "enum": ["user", "assistant", "tool_result", "system", "custom", "agent"]},
+    "stopReason": {"type": "string", "enum": ["stop", "length", "tool_use", "error", "aborted", "pending"]},
+    "contentBlock": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {"type": "string", "enum": ["text", "image", "thinking", "tool_call", "plan"]},
+        "text": {"type": "string"},
+        "plan_complete": {"type": "boolean"},
+        "mime_type": {"type": "string"},
+        "data": {"type": "string"},
+        "tool_call_id": {"type": "string"},
+        "name": {"type": "string"},
+        "arguments": {}
+      },
+      "additionalProperties": false
+    },
+    "toolDisplay": {
+      "type": "object",
+      "properties": {
+        "started": {"type": "boolean"},
+        "start_message": {"type": "string"},
+        "progress": {"type": "array", "items": {"type": "string"}},
+        "output": {"type": "string"},
+        "duration_ms": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "required": ["id", "role", "content", "ts"],
+  "properties": {
+    "id": {"type": "string"},
+    "parent_id": {"type": "string"},
+    "role": {"$ref": "#/$defs/role"},
+    "content": {"type": "array", "items": {"$ref": "#/$defs/contentBlock"}},
+    "ts": {"type": "integer"},
+    "provider": {"type": "string"},
+    "model": {"type": "string"},
+    "stop_reason": {"$ref": "#/$defs/stopReason"},
+    "error": {"type": "string"},
+    "usage": {"$ref": "common.schema.json#/$defs/usage"},
+    "tool_call_id": {"type": "string"},
+    "tool_name": {"type": "string"},
+    "is_error": {"type": "boolean"},
+    "tool_display": {"$ref": "#/$defs/toolDisplay"}
+  },
+  "additionalProperties": false
+}

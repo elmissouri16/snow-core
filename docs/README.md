@@ -58,9 +58,9 @@ for a subject.
 - [JavaScript/Python plugin research](plugin-js-python-research.md) —
   benchmarked architecture decision, alternatives, implementation sequence, and
   deferrals.
-- [JavaScript/Python plugin SDK plan](plugin-language-sdks-plan.md) — proposed
-  authoring APIs, package boundaries, runtime behavior, conformance tests, and
-  implementation phases.
+- [JavaScript/Python plugin SDK plan](plugin-language-sdks-plan.md) — implemented
+  private authoring APIs, package boundaries, runtime behavior, conformance
+  tests, deferred publication, and remaining release gates.
 - [Agent Skills](skills.md) — `SKILL.md` discovery, trust, precedence,
   progressive disclosure, and resource confinement.
 - [Tool routing](tool-routing.md) — deferred schemas, BM25 retrieval,

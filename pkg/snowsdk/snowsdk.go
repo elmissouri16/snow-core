@@ -87,6 +87,11 @@ type Options struct {
 	// UserInputHandler answers direct ask_user tool calls. When nil, calls fail
 	// fast with an unavailable-input tool result instead of blocking.
 	UserInputHandler func(context.Context, protocol.UserInputRequest) (protocol.UserInputResponse, error)
+	// PermissionHandler resolves interactive ask-mode permission requests from
+	// this trusted host. Only ask mode uses it, and only when a handler or
+	// manual replies are enabled; otherwise ask-mode requests deny fast,
+	// preserving the deny-by-default contract.
+	PermissionHandler func(context.Context, protocol.PermissionRequest) (protocol.PermissionResponse, error)
 }
 
 // Session is an opened agent session.

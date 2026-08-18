@@ -8,7 +8,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Optional, Set
+from typing import Any, Awaitable, Callable, Dict, Iterable, Mapping, Optional, Set
 
 from .errors import (
     SnowCancelledError,
@@ -78,14 +78,21 @@ class EventSubscription:
 
 
 UserInputHandler = Callable[[JSONDict], Awaitable[JSONDict]]
+PermissionHandler = Callable[[JSONDict], Awaitable[str]]
 
 
 class SnowClient:
     """Own one persistent ``snow --mode rpc`` subprocess."""
 
-    def __init__(self, options: SnowOptions, user_input_handler: Optional[UserInputHandler]):
+    def __init__(
+        self,
+        options: SnowOptions,
+        user_input_handler: Optional[UserInputHandler],
+        permission_handler: Optional[PermissionHandler],
+    ):
         self.options = options
         self.user_input_handler = user_input_handler
+        self.permission_handler = permission_handler
         self.ready: Optional[RPCReady] = None
         self._process: Optional[asyncio.subprocess.Process] = None
         self._write_lock = asyncio.Lock()
@@ -111,10 +118,11 @@ class SnowClient:
         options: Optional[SnowOptions] = None,
         *,
         user_input_handler: Optional[UserInputHandler] = None,
+        permission_handler: Optional[PermissionHandler] = None,
     ) -> "SnowClient":
         options = options or SnowOptions()
         options.validate()
-        client = cls(options, user_input_handler)
+        client = cls(options, user_input_handler, permission_handler)
         env = os.environ.copy() if options.inherit_environment else {}
         if options.environment is not None:
             env.update(options.environment)
@@ -194,8 +202,9 @@ class SnowClient:
 
     async def prompt(
         self,
-        message: str,
+        message: str = "",
         *,
+        content: Optional[Iterable[Mapping[str, Any]]] = None,
         mode: str = "",
         timeout: Optional[float] = None,
     ) -> PromptResult:
@@ -204,6 +213,8 @@ class SnowClient:
         terminal: asyncio.Future[PromptResult] = asyncio.get_running_loop().create_future()
         self._prompts[request_id] = terminal
         fields: JSONDict = {"message": message}
+        if content is not None:
+            fields["content"] = [dict(block) for block in content]
         if mode:
             fields["mode"] = mode
         try:
@@ -279,6 +290,70 @@ class SnowClient:
     async def follow_up(self, message: str) -> JSONDict:
         return await self.request("follow_up", message=message)
 
+    async def compact(self) -> JSONDict:
+        """Manually compact the active branch context."""
+        return await self.request("compact")
+
+    async def branches_list(self) -> JSONDict:
+        """Return durable branches in the active session."""
+        return await self.request("branches_list")
+
+    async def branch_select(self, branch_id: str) -> JSONDict:
+        """Switch the active branch."""
+        return await self.request("branch_select", params={"branch_id": branch_id})
+
+    async def branch_rename(self, branch_id: str, name: str) -> JSONDict:
+        """Rename a branch without changing its stable ID."""
+        return await self.request("branch_rename", params={"branch_id": branch_id, "name": name})
+
+    async def branch_delete(self, branch_id: str) -> JSONDict:
+        """Delete a non-active branch."""
+        return await self.request("branch_delete", params={"branch_id": branch_id})
+
+    async def messages_list(self) -> JSONDict:
+        """Return the linearized message list for the active branch."""
+        return await self.request("messages_list")
+
+    async def usage(self) -> JSONDict:
+        """Return aggregate token/cache usage for the active branch."""
+        return await self.request("usage")
+
+    async def pending_inputs(self) -> JSONDict:
+        """Return the submission-ordered queue of eligible steer/follow-up input."""
+        return await self.request("pending_inputs")
+
+    async def pending_inputs_clear(self) -> JSONDict:
+        """Return and remove undelivered queued root input."""
+        return await self.request("pending_inputs_clear")
+
+    async def configuration_diagnostics(self) -> JSONDict:
+        """Return non-fatal configuration warnings from the Snow process.
+
+        Named configuration_diagnostics to avoid colliding with the existing
+        client-side ``diagnostics`` transport-log attribute.
+        """
+        return await self.request("diagnostics")
+
+    async def mcp_servers(self) -> JSONDict:
+        """Return secret-free status for negotiated MCP servers."""
+        return await self.request("mcp_servers")
+
+    async def skills(self) -> JSONDict:
+        """Return the full skill catalog plus discovery diagnostics."""
+        return await self.request("skills")
+
+    async def sandbox_status(self) -> JSONDict:
+        """Return the secret-free Bash execution boundary snapshot."""
+        return await self.request("sandbox_status")
+
+    async def set_reasoning_summary(self, reasoning_summary: str) -> JSONDict:
+        """Set the provider reasoning-summary preference (off|auto|concise|detailed)."""
+        return await self.request("set_reasoning_summary", reasoning_summary=reasoning_summary)
+
+    async def set_text_verbosity(self, text_verbosity: str) -> JSONDict:
+        """Set the provider text-verbosity preference (low|medium|high)."""
+        return await self.request("set_text_verbosity", text_verbosity=text_verbosity)
+
     async def goal_get(self) -> JSONDict:
         return await self.request("goal_get")
 
@@ -340,6 +415,21 @@ class SnowClient:
 
     async def reject_user_input(self, request_id: str) -> JSONDict:
         return await self.request("user_input_reject", params={"request_id": request_id})
+
+    async def reply_permission(self, request_id: str, decision: str) -> JSONDict:
+        """Resolve a pending ask-mode permission request with a decision:
+        allow|allow_session|allow_always|deny."""
+        return await self.request(
+            "permission_reply",
+            params={"request_id": request_id, "decision": decision},
+        )
+
+    async def reject_permission(self, request_id: str) -> JSONDict:
+        """Decline a pending ask-mode permission request."""
+        return await self.request(
+            "permission_reject",
+            params={"request_id": request_id},
+        )
 
     async def close(self) -> None:
         if self._closed:
@@ -528,6 +618,30 @@ class SnowClient:
             task = asyncio.create_task(self._handle_user_input(message), name="snow-user-input")
             self._handler_tasks.add(task)
             task.add_done_callback(self._handler_tasks.discard)
+        if kind == "permission_request" and self.permission_handler is not None:
+            task = asyncio.create_task(self._handle_permission(message), name="snow-permission")
+            self._handler_tasks.add(task)
+            task.add_done_callback(self._handler_tasks.discard)
+
+    async def _handle_permission(self, event: JSONDict) -> None:
+        permission = event.get("permission")
+        request = permission.get("request") if isinstance(permission, dict) else None
+        if not isinstance(request, dict) or not isinstance(request.get("id"), str):
+            self._fatal(SnowProtocolError("permission_request omitted request data"))
+            return
+        request_id = request["id"]
+        try:
+            decision = await self.permission_handler(request)  # type: ignore[misc]
+            if decision not in {"allow", "allow_session", "allow_always", "deny"}:
+                raise SnowProtocolError("permission handler returned an invalid decision")
+            await self.reply_permission(request_id, decision)
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            try:
+                await self.reject_permission(request_id)
+            except BaseException:
+                pass
 
     async def _handle_user_input(self, event: JSONDict) -> None:
         request = event.get("user_input")

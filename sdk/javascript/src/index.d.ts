@@ -15,6 +15,7 @@ export interface AgentEvent {
   message?: string;
   agent?: AgentRef;
   user_input?: UserInputRequest;
+  permission?: {request: PermissionRequest};
   [key: string]: unknown;
 }
 
@@ -48,6 +49,17 @@ export interface UserInputAnswer {
   answer: string;
 }
 
+export interface PermissionRequest {
+  id: string;
+  tool: string;
+  args: unknown;
+  paths?: string[];
+  risk: string;
+  reason?: string;
+}
+
+export type PermissionDecision = "allow" | "allow_session" | "allow_always" | "deny";
+
 export interface RPCResponse<T = unknown> {
   id?: string;
   type: "response";
@@ -56,6 +68,21 @@ export interface RPCResponse<T = unknown> {
   error?: string;
   error_code?: "canceled" | "conflict" | "destination_exists" | "git_dirty" | "git_failure" | "invalid" | "not_found" | "not_git_repository" | "session_busy" | "subagents_active" | "unsupported";
   data?: T;
+}
+
+export interface ContentBlock {
+  type: "text" | "image";
+  text?: string;
+  mime_type?: string;
+  data?: string;
+  [key: string]: unknown;
+}
+
+export interface PromptOptions {
+  mode?: CollaborationMode;
+  content?: ContentBlock[];
+  timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface PromptResult {
@@ -92,6 +119,8 @@ export interface SessionInfo {
   model: string;
   thinking: ThinkingLevel;
   thinking_levels: ThinkingLevel[];
+  reasoning_summary?: ReasoningSummaryLevel;
+  text_verbosity?: TextVerbosityLevel;
   collaboration_mode: CollaborationMode;
   [key: string]: unknown;
 }
@@ -136,6 +165,138 @@ export interface SessionForkResult {
   worktree?: {path: string; branch: string; commit?: string};
 }
 
+export interface CompactionResult {
+  summarized_messages: number;
+  retained_messages: number;
+  summary?: string;
+  used_fallback?: boolean;
+  automatic?: boolean;
+  [key: string]: unknown;
+}
+
+export interface QueuedInput {
+  id: string;
+  kind: "steer" | "follow_up";
+  text: string;
+  order: number;
+  [key: string]: unknown;
+}
+
+export interface InputQueue {
+  items: QueuedInput[];
+  [key: string]: unknown;
+}
+
+export interface ContentBlock {
+  type: string;
+  text?: string;
+  mime_type?: string;
+  data?: string;
+  tool_call_id?: string;
+  name?: string;
+  arguments?: unknown;
+  [key: string]: unknown;
+}
+
+export interface Message {
+  id: string;
+  parent_id?: string;
+  role: "user" | "assistant" | "tool_result" | "system" | "custom" | "agent";
+  content: ContentBlock[];
+  ts: number;
+  provider?: string;
+  model?: string;
+  stop_reason?: string;
+  error?: string;
+  usage?: Usage;
+  [key: string]: unknown;
+}
+
+export interface Usage {
+  input: number;
+  output: number;
+  reasoning?: number;
+  cache_read: number;
+  cache_write: number;
+  total_tokens: number;
+  requests?: number;
+  cache_read_known?: boolean;
+  cost?: {
+    input: number;
+    output: number;
+    cache_read: number;
+    cache_write: number;
+    total: number;
+    currency?: string;
+  };
+  [key: string]: unknown;
+}
+
+export interface ConfigDiagnostic {
+  path: string;
+  message: string;
+  [key: string]: unknown;
+}
+
+export type ReasoningSummaryLevel = "off" | "auto" | "concise" | "detailed";
+export type TextVerbosityLevel = "low" | "medium" | "high";
+
+export interface MCPServerStatus {
+  id: string;
+  transport: string;
+  connected: boolean;
+  protocol_version?: string;
+  server_name?: string;
+  server_version?: string;
+  capabilities?: string[];
+  tool_count?: number;
+  message?: string;
+  state?: string;
+  cached?: boolean;
+  cached_at?: string;
+  last_used_at?: string;
+  [key: string]: unknown;
+}
+
+export interface SkillMetadata {
+  name: string;
+  description: string;
+  license?: string;
+  compatibility?: string;
+  metadata?: Record<string, string>;
+  allowed_tools?: string;
+  location: string;
+  scope: string;
+  source: string;
+  enabled: boolean;
+  disabled_by?: string;
+  [key: string]: unknown;
+}
+
+export interface SkillDiagnostic {
+  path?: string;
+  skill?: string;
+  level: string;
+  message: string;
+  [key: string]: unknown;
+}
+
+export interface SandboxStatus {
+  configured: boolean;
+  active: boolean;
+  backend?: string;
+  machine?: string;
+  profile?: string;
+  guest_cwd?: string;
+  read_only?: boolean;
+  network?: boolean;
+  cpus?: number;
+  memory_mib?: number;
+  storage_gib?: number;
+  overlay_gib?: number;
+  [key: string]: unknown;
+}
+
 export interface SnowOptions {
   executable?: string;
   executableArgs?: string[];
@@ -158,6 +319,7 @@ export interface SnowOptions {
   maxFrameBytes?: number;
   eventQueueSize?: number;
   userInputHandler?: (request: UserInputRequest, context: {signal: AbortSignal}) => Promise<{answers: UserInputAnswer[]}>;
+  permissionHandler?: (request: PermissionRequest, context: {signal: AbortSignal}) => Promise<PermissionDecision>;
   signal?: AbortSignal;
 }
 
@@ -181,7 +343,7 @@ export declare class Snow {
   ): () => void;
   events(options?: {capacity?: number; signal?: AbortSignal}): EventIterator;
   request<T = unknown>(type: string, fields?: Record<string, unknown>, options?: {id?: string; timeoutMs?: number}): Promise<RPCResponse<T>>;
-  prompt(message: string, options?: {mode?: CollaborationMode; timeoutMs?: number; signal?: AbortSignal}): Promise<PromptResult>;
+  prompt(message?: string, options?: PromptOptions): Promise<PromptResult>;
   abort(): Promise<RPCResponse>;
   sessionInfo(): Promise<RPCResponse<SessionInfo>>;
   sessionRename(name: string): Promise<RPCResponse>;
@@ -212,6 +374,28 @@ export declare class Snow {
   subagentReady(): Promise<RPCResponse>;
   replyUserInput(requestId: string, answers: UserInputAnswer[]): Promise<RPCResponse>;
   rejectUserInput(requestId: string): Promise<RPCResponse>;
+  /**
+   * Resolve a pending ask-mode permission request. `decision` is one of
+   * allow, allow_session, allow_always, or deny.
+   */
+  replyPermission(requestId: string, decision: PermissionDecision): Promise<RPCResponse>;
+  /** Decline a pending ask-mode permission request. */
+  rejectPermission(requestId: string): Promise<RPCResponse>;
+  compact(): Promise<RPCResponse<CompactionResult>>;
+  branches(): Promise<RPCResponse<{branches: SessionBranch[]; [key: string]: unknown}>>;
+  branchSelect(branchId: string): Promise<RPCResponse>;
+  branchRename(branchId: string, name: string): Promise<RPCResponse<SessionBranch>>;
+  branchDelete(branchId: string): Promise<RPCResponse>;
+  messages(): Promise<RPCResponse<{messages: Message[]; [key: string]: unknown}>>;
+  usage(): Promise<RPCResponse<Usage>>;
+  pendingInputs(): Promise<RPCResponse<InputQueue>>;
+  clearPendingInputs(): Promise<RPCResponse<InputQueue>>;
+  configurationDiagnostics(): Promise<RPCResponse<{diagnostics: ConfigDiagnostic[]; [key: string]: unknown}>>;
+  mcpServers(): Promise<RPCResponse<{servers: MCPServerStatus[]; [key: string]: unknown}>>;
+  skills(): Promise<RPCResponse<{skills: SkillMetadata[]; diagnostics: SkillDiagnostic[]; [key: string]: unknown}>>;
+  sandboxStatus(): Promise<RPCResponse<{status: SandboxStatus; [key: string]: unknown}>>;
+  setReasoningSummary(reasoningSummary: ReasoningSummaryLevel): Promise<RPCResponse>;
+  setTextVerbosity(textVerbosity: TextVerbosityLevel): Promise<RPCResponse>;
   close(): Promise<void>;
 }
 

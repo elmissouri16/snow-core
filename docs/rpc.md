@@ -95,13 +95,24 @@ client for interactive use.
   "capabilities": [
     "active_input",
     "branch_management",
+    "compaction",
+    "diagnostics",
     "goals",
+    "mcp_servers",
+    "messages_list",
     "models_list",
+    "multimodal_prompts",
+    "pending_inputs",
+    "permission_interaction",
     "prompt_completion",
+    "response_controls",
+    "sandbox_status",
     "session_forks",
     "session_info",
+    "skills",
     "subagent_models",
     "subagents",
+    "usage",
     "user_input"
   ],
   "max_input_bytes": 16777216
@@ -116,6 +127,19 @@ advertised even when subagents are disabled for the current process.
 Version 1 is additive: clients must tolerate unknown capabilities, event
 types, and optional output fields. Removing or changing existing fields or
 enums requires a new protocol version.
+
+### Multimodal prompts
+
+`prompt` is additive: when a Snow binary announces `multimodal_prompts`, the
+request may carry a `content` array in addition to the legacy `message`
+string. Each content block is exactly `{"type":"text","text":...}` or
+`{"type":"image","mime_type":...,"data":...}` (base64 in the request frame).
+`message` alone remains valid; an empty `message` is accepted only when
+`content` contains an image. The 16 MiB encoded request bound applies to the
+full frame, so clients must keep aggregate base64 below that limit. Blocks
+other than text/image such as `thinking` or `provider_data` are rejected
+before admission, and the active model must advertise image support for image
+blocks.
 
 ## Request and response envelopes
 
@@ -140,6 +164,8 @@ enums requires a new protocol version.
 | `message` | string | No | Top-level text for `prompt`, `steer`, and `follow_up` |
 | `model` | string | No | Top-level model ID for `set_model` |
 | `thinking` | string | No | Top-level effort for `set_thinking` |
+| `reasoning_summary` | string | No | Top-level provider summary preference for `set_reasoning_summary` |
+| `text_verbosity` | string | No | Top-level provider verbosity preference for `set_text_verbosity` |
 | `mode` | string | No | Top-level collaboration mode for `set_mode` or a prompt-attached mode |
 | `params` | object | No | Command-specific JSON object |
 
@@ -418,6 +444,23 @@ Mode changes may be rejected while conflicting work is active. Prefer an
 explicit value even though an omitted value normalizes to the Default mode
 internally.
 
+### `set_reasoning_summary` and `set_text_verbosity`
+
+These commands change provider response preferences for subsequent turns:
+
+```json
+{"id":"summary-1","type":"set_reasoning_summary","reasoning_summary":"concise"}
+```
+
+```json
+{"id":"verbosity-1","type":"set_text_verbosity","text_verbosity":"high"}
+```
+
+`reasoning_summary` must be `off`, `auto`, `concise`, or `detailed`.
+`text_verbosity` must be `low`, `medium`, or `high`. Unsupported combinations
+are rejected by the active model/provider configuration. Current normalized
+values are exposed as optional additive fields in `session_info`.
+
 ## Session commands
 
 ### `session_rename`
@@ -468,6 +511,46 @@ root/subagent work is active.
 Creates and activates a same-database branch. Success `data` is a
 `SessionBranch`. The source database and shared entry rows retain the
 existing branch semantics.
+
+### Branch inspection and mutation
+
+`branches_list` takes no parameters and returns
+`{"branches":[SessionBranch,...]}`. The list contains stable IDs, names,
+parent/fork provenance, tips, message counts, previews, timestamps, and the
+active flag.
+
+`branch_select`, `branch_rename`, and `branch_delete` use command-specific
+`params`:
+
+```json
+{"id":"select-1","type":"branch_select","params":{"branch_id":"experiment"}}
+```
+
+```json
+{"id":"rename-1","type":"branch_rename","params":{"branch_id":"experiment","name":"review"}}
+```
+
+```json
+{"id":"delete-1","type":"branch_delete","params":{"branch_id":"experiment"}}
+```
+
+Selection and deletion return an acknowledgement; rename returns the updated
+`SessionBranch`. Existing app admission checks remain authoritative: these
+operations can fail with `session_busy` or `subagents_active`, and the active
+branch cannot be deleted.
+
+### `compact`
+
+```json
+{"id":"compact-1","type":"compact"}
+```
+
+Manually compacts provider-facing context for the active branch while retaining
+the append-only exact session history. Success `data` contains
+`summarized_messages`, `retained_messages`, and optional `summary`,
+`used_fallback`, and `automatic` fields. The existing `compaction_started` and
+`compaction_done` events describe lifecycle; `automatic` is false for this
+manual command. Compaction is rejected while conflicting work is active.
 
 ### `session_fork`
 
@@ -552,6 +635,8 @@ Successful `data` contains:
   "model": "kimi-k2.6",
   "thinking": "off",
   "thinking_levels": ["off", "low", "medium", "high"],
+  "reasoning_summary": "auto",
+  "text_verbosity": "low",
   "collaboration_mode": "default",
   "goal": {
     "goal_id": "...",
@@ -596,6 +681,8 @@ Successful `data` contains:
 | `model` | string | Active model ID |
 | `thinking` | string | Active reasoning effort |
 | `thinking_levels` | array | Levels advertised by the active model |
+| `reasoning_summary` | string | Optional active reasoning-summary preference |
+| `text_verbosity` | string | Optional active text-verbosity preference |
 | `collaboration_mode` | string | `default` or `plan` |
 | `goal` | object | Present only when a goal exists |
 | `subagents` | object | Effective child-agent availability and bounds |
@@ -606,7 +693,55 @@ receive a local title with their first accepted prompt. Inside a present
 goal, `token_budget` is `null` when unlimited and `estimated_costs` can be
 `null` when pricing is unavailable. `max_concurrent_agents` is a
 compatibility alias of `max_concurrent_threads`; both currently carry the
-same limit.
+same limit. `reasoning_summary` and `text_verbosity` are optional additive
+fields so v1 clients and older recorded frames remain compatible.
+
+### History, usage, pending input, and diagnostics
+
+The following inspection commands take no parameters:
+
+| Command | Success `data` | Notes |
+|---|---|---|
+| `messages_list` | `{"messages":[...]}` | Linearized active-branch history; provider-private continuity blocks are omitted |
+| `usage` | usage object | Aggregate token, cache, request, and optional cost totals for the active branch |
+| `pending_inputs` | `{"items":[...]}` | Submission-ordered queued `steer` and `follow_up` input |
+| `pending_inputs_clear` | `{"items":[...]}` | Atomically removes and returns undelivered queued input |
+| `diagnostics` | `{"diagnostics":[...]}` | Non-fatal configuration warnings with `path` and `message` |
+| `mcp_servers` | `{"servers":[...]}` | Secret-free negotiated MCP server status (no credentials, headers, or argv) |
+| `skills` | `{"skills":[...],"diagnostics":[...]}` | Full skill catalog plus discovery diagnostics |
+| `sandbox_status` | `{"status":{...}}` | Secret-free Bash execution boundary snapshot |
+
+## Permission interaction
+
+Ask-mode permission requests are published as `permission_request` events with
+a stable, host-facing `id`:
+
+```json
+{"type":"permission_request","permission":{"request":{"id":"perm-3","tool":"bash","risk":"exec"}}}
+```
+
+A client resolves them with `permission_reply` (decision `allow`,
+`allow_session`, `allow_always`, or `deny`) or `permission_reject`:
+
+```json
+{"id":"pr-1","type":"permission_reply","params":{"request_id":"perm-3","decision":"allow"}}
+```
+
+```json
+{"id":"rj-1","type":"permission_reject","params":{"request_id":"perm-3"}}
+```
+
+Remaining security invariants are preserved: the service is deny-by-default,
+reads never ask, allow/deny modes never consult a broker, and ask-mode requests
+block only when the surface is opted in with a handler or manual replies.
+`allow_session` and `allow_always` are remembered for the remainder of the
+session. `permission_interaction` capability gates these commands.
+
+`messages_list` can include user and assistant text, images, thinking summaries,
+tool calls, tool results, and surface-safe tool-display metadata. It never
+emits opaque `provider_data` continuity blocks. Tool output and queued input can
+contain project/user data; clients must apply their own display and storage
+policy. Arrays are encoded as `[]`, not `null`.
 
 ## User input commands
 
@@ -1276,12 +1411,15 @@ user's OS privileges. Read the [Security model](security.md).
 ## Current RPC boundary
 
 The current command surface covers prompts, active root input, cancellation,
-active-provider and subagent model discovery, model/thinking/mode controls,
-session inspection, model-requested input, goals, and subagents.
+active-provider and subagent model discovery, model/thinking/mode and response
+controls, session and branch management, manual compaction, active-branch
+messages and usage, MCP/skill/sandbox discovery, pending-input
+inspection/clearing, configuration diagnostics, model-requested input, goals,
+and subagents.
 
-Branch management, compaction, reasoning-summary and text-verbosity controls,
-configuration mutation, MCP/skill management, and login are currently
-CLI/TUI/SDK concerns rather than RPC commands.
+Configuration mutation, login, and an interactive permission broker remain
+outside the RPC command surface. MCP/skill/sandbox inventory is read-only and
+secret-free; management/mutation stays outside the boundary.
 
 ## Related documents
 

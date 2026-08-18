@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/skills.schema.json",
+  "title": "Snow RPC skills",
+  "type": "object",
+  "required": ["skills"],
+  "properties": {
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "location", "scope", "source", "enabled"],
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "license": {"type": "string"},
+          "compatibility": {"type": "string"},
+          "metadata": {"type": "object"},
+          "allowed_tools": {"type": "string"},
+          "location": {"type": "string"},
+          "scope": {"type": "string"},
+          "source": {"type": "string"},
+          "enabled": {"type": "boolean"},
+          "disabled_by": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["level", "message"],
+        "properties": {
+          "path": {"type": "string"},
+          "skill": {"type": "string"},
+          "level": {"type": "string"},
+          "message": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

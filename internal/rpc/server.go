@@ -28,6 +28,7 @@ func NewWithOptions(ctx context.Context, a *app.App, in io.Reader, out io.Writer
 		ctx = context.Background()
 	}
 	a.EnableUserInputReplies()
+	a.EnablePermissionReplies()
 	return &Server{in: in, out: out, app: a, writeFailed: make(chan struct{}), snowVersion: opts.SnowVersion}
 }
 
@@ -108,6 +109,7 @@ finish:
 	// and wait commands. Ordinary prompts retain their own documented join path.
 	cancelServe()
 	s.app.CloseUserInput()
+	s.app.ClosePermissionBroker()
 	s.mu.Lock()
 	done := s.promptDone
 	s.mu.Unlock()
@@ -225,6 +227,11 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: "user_input_reject", Success: true})
 		return nil
+	case "permission_reply":
+		return s.handlePermissionReply(req)
+	case "permission_reject":
+		return s.handlePermissionReject(req)
+
 	case "subagent_spawn":
 		var p protocol.SpawnSubagentRequest
 		if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -415,6 +422,144 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		enabled := s.app.Subagents != nil
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: protocol.RPCModelList{Enabled: &enabled, Models: models}})
 		return nil
+	case "set_reasoning_summary":
+		if req.ReasoningSummary == "" {
+			return errors.New("set_reasoning_summary requires reasoning_summary")
+		}
+		summary, err := protocol.ParseReasoningSummary(req.ReasoningSummary)
+		if err != nil {
+			return err
+		}
+		if err := s.app.Agent.SetReasoningSummary(summary); err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: "set_reasoning_summary", Success: true})
+		return nil
+	case "set_text_verbosity":
+		if req.TextVerbosity == "" {
+			return errors.New("set_text_verbosity requires text_verbosity")
+		}
+		verbosity, err := protocol.ParseTextVerbosity(req.TextVerbosity)
+		if err != nil {
+			return err
+		}
+		if err := s.app.Agent.SetTextVerbosity(verbosity); err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: "set_text_verbosity", Success: true})
+		return nil
+	case "compact":
+		result, err := s.app.Agent.Compact(ctx)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: result})
+		return nil
+	case "branches_list":
+		branches, err := s.app.Agent.Branches()
+		if err != nil {
+			return err
+		}
+		if branches == nil {
+			branches = []protocol.SessionBranch{}
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: protocol.RPCBranchList{Branches: branches}})
+		return nil
+	case "branch_select":
+		var p struct {
+			BranchID string `json:"branch_id"`
+		}
+		if len(req.Params) == 0 {
+			return errors.New("branch_select requires params")
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return fmt.Errorf("branch_select params: %w", err)
+		}
+		if p.BranchID == "" {
+			return errors.New("branch_select requires branch_id")
+		}
+		if err := s.app.SelectBranch(p.BranchID); err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true})
+		return nil
+	case "branch_rename":
+		var p struct {
+			BranchID string `json:"branch_id"`
+			Name     string `json:"name"`
+		}
+		if len(req.Params) == 0 {
+			return errors.New("branch_rename requires params")
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return fmt.Errorf("branch_rename params: %w", err)
+		}
+		if p.BranchID == "" || p.Name == "" {
+			return errors.New("branch_rename requires branch_id and name")
+		}
+		branch, err := s.app.RenameBranch(p.BranchID, p.Name)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: branch})
+		return nil
+	case "branch_delete":
+		var p struct {
+			BranchID string `json:"branch_id"`
+		}
+		if len(req.Params) == 0 {
+			return errors.New("branch_delete requires params")
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return fmt.Errorf("branch_delete params: %w", err)
+		}
+		if p.BranchID == "" {
+			return errors.New("branch_delete requires branch_id")
+		}
+		if err := s.app.DeleteBranch(p.BranchID); err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true})
+		return nil
+	case "messages_list":
+		messages, err := s.app.Agent.Messages()
+		if err != nil {
+			return err
+		}
+		messages = publicMessages(messages)
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: protocol.RPCMessagesList{Messages: messages}})
+		return nil
+	case "usage":
+		usage, err := s.app.Agent.Usage()
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: usage})
+		return nil
+	case "pending_inputs":
+		queue := s.app.Agent.PendingInputs()
+		if queue.Items == nil {
+			queue.Items = []protocol.QueuedInput{}
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: queue})
+		return nil
+	case "pending_inputs_clear":
+		queue := s.app.Agent.ClearPendingInputs()
+		if queue.Items == nil {
+			queue.Items = []protocol.QueuedInput{}
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: queue})
+		return nil
+	case "diagnostics":
+		diagnostics := s.app.ConfigDiagnostics()
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: protocol.RPCDiagnosticsList{Diagnostics: diagnostics}})
+		return nil
+	case "mcp_servers":
+		return s.handleMCPServers(req)
+	case "skills":
+		return s.handleSkills(req)
+	case "sandbox_status":
+		return s.handleSandboxStatus(req)
 	case "set_model":
 		if req.Model == "" {
 			return errors.New("set_model requires model")
@@ -535,6 +680,8 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 			Model:             model.ID,
 			Thinking:          s.app.Agent.Thinking(),
 			ThinkingLevels:    model.SupportedThinkingLevels(),
+			ReasoningSummary:  s.app.Agent.ReasoningSummary(),
+			TextVerbosity:     s.app.Agent.TextVerbosity(),
 			CollaborationMode: s.app.Agent.Mode(),
 			Subagents: protocol.RPCSubagentLimits{
 				Enabled:              s.app.Subagents != nil,
@@ -563,8 +710,18 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if req.Message == "" {
+	if req.Content != nil {
+		if err := validatePromptContent(req.Message, req.Content); err != nil {
+			return err
+		}
+	} else if req.Message == "" {
 		return errors.New("prompt requires message")
+	}
+	if hasImageContent(req.Content) {
+		if !s.app.Agent.Model().SupportsVision {
+			return errors.New("model does not support image input")
+		}
+		return s.handleImagePrompt(ctx, req)
 	}
 	if req.Mode != "" {
 		if _, err := protocol.ParseCollaborationMode(req.Mode); err != nil {
@@ -593,14 +750,24 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 	go func() {
 		defer s.promptWG.Done()
 		var err error
-		if req.Mode != "" {
+		switch {
+		case len(req.Content) > 0 && req.Mode != "":
+			mode, parseErr := protocol.ParseCollaborationMode(req.Mode)
+			if parseErr != nil {
+				err = parseErr
+			} else {
+				err = s.app.Agent.PromptContentWithMode(promptCtx, req.Message, req.Content, mode)
+			}
+		case len(req.Content) > 0:
+			err = s.app.Agent.PromptContent(promptCtx, req.Message, req.Content)
+		case req.Mode != "":
 			mode, parseErr := protocol.ParseCollaborationMode(req.Mode)
 			if parseErr != nil {
 				err = parseErr
 			} else {
 				err = s.app.Agent.PromptWithMode(promptCtx, req.Message, mode)
 			}
-		} else {
+		default:
 			err = s.app.Agent.Prompt(promptCtx, req.Message)
 		}
 		canceled := promptCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
@@ -645,6 +812,25 @@ func cloneModels(models []protocol.Model) []protocol.Model {
 	out := make([]protocol.Model, len(models))
 	for i, model := range models {
 		out[i] = model.Clone()
+	}
+	return out
+}
+
+// publicMessages returns an independent wire-safe history snapshot. Provider
+// continuity blocks are durable context for provider adapters only and must
+// never cross an RPC, rendering, or logging boundary.
+func publicMessages(messages []protocol.Message) []protocol.Message {
+	out := make([]protocol.Message, 0, len(messages))
+	for _, message := range messages {
+		copy := message.Clone()
+		content := make([]protocol.ContentBlock, 0, len(copy.Content))
+		for _, block := range copy.Content {
+			if block.Type != protocol.BlockProviderData {
+				content = append(content, block)
+			}
+		}
+		copy.Content = content
+		out = append(out, copy)
 	}
 	return out
 }

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/snow-core/snow/internal/auth"
+	"github.com/snow-core/snow/internal/permission"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -192,6 +193,53 @@ func TestSDKClearPendingInputsReturnsUndeliveredText(t *testing.T) {
 	close(provider.release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSDKPromptContentRunsTurnWithAttachments(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	s, err := Open(ctx, Options{Provider: "fake", NoSession: true, PermissionMode: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// Force the vision-capable model so image attachments are accepted.
+	for i := range s.app.Models {
+		s.app.Models[i].SupportsVision = true
+	}
+	model := s.Model()
+	model.SupportsVision = true
+	if err := s.app.Agent.SetProviderAndModel(s.app.Providers["fake"], model); err != nil {
+		t.Fatal(err)
+	}
+	attachments := []protocol.ContentBlock{{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte{1, 2, 3}}}
+	if err := s.PromptContent(ctx, "describe this", attachments); err != nil {
+		t.Fatalf("PromptContent = %v", err)
+	}
+	if err := s.PromptContentWithMode(ctx, "again", attachments, protocol.ModePlan); err != nil {
+		t.Fatalf("PromptContentWithMode = %v", err)
+	}
+	messages, err := s.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var userBlocks []protocol.ContentBlock
+	for _, message := range messages {
+		if message.Role == protocol.RoleUser {
+			userBlocks = append(userBlocks, message.Content...)
+		}
+	}
+	var images int
+	for _, block := range userBlocks {
+		if block.Type == protocol.BlockImage && block.MIMEType == "image/png" && len(block.Data) == 3 {
+			images++
+		}
+	}
+	if images != 2 {
+		t.Fatalf("persisted image attachments = %d, want 2 in %#v", images, userBlocks)
 	}
 }
 
@@ -534,5 +582,84 @@ func TestUserInputHandler(t *testing.T) {
 	}
 	if seen.ID != request.ID || response.RequestID != request.ID || response.Answers[0].Answer != "A" {
 		t.Fatalf("seen=%+v response=%+v", seen, response)
+	}
+}
+
+func TestPermissionHandlerPublishesAndResolves(t *testing.T) {
+	handled := make(chan protocol.PermissionRequest, 1)
+	s, err := Open(context.Background(), Options{
+		Provider: "fake", NoSession: true, CWD: t.TempDir(), PermissionMode: "ask",
+		NoPlugins: true, NoMCP: true, NoSkills: true,
+		PermissionHandler: func(_ context.Context, request protocol.PermissionRequest) (protocol.PermissionResponse, error) {
+			handled <- request
+			return protocol.PermissionResponse{RequestID: request.ID, Decision: protocol.PermissionAllowSession}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	events := make(chan protocol.PermissionRequest, 1)
+	unsubscribe := s.Subscribe(func(event protocol.AgentEvent) {
+		if event.Type == protocol.EvPermissionRequest && event.Permission != nil {
+			events <- event.Permission.Request
+		}
+	})
+	defer unsubscribe()
+	a, err := s.activeApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		decision permission.Decision
+		err      error
+	}
+	resolved := make(chan result, 1)
+	go func() {
+		decision, authorizeErr := a.Perm.Authorize(context.Background(), permission.Request{Tool: "bash", Risk: permission.RiskExec})
+		resolved <- result{decision: decision, err: authorizeErr}
+	}()
+
+	var published protocol.PermissionRequest
+	select {
+	case published = <-events:
+		if published.ID == "" || published.Tool != "bash" {
+			t.Fatalf("published request = %+v", published)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("permission event was not published")
+	}
+	select {
+	case request := <-handled:
+		if request.ID != published.ID {
+			t.Fatalf("handler id = %q, event id = %q", request.ID, published.ID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("permission handler did not run")
+	}
+	select {
+	case got := <-resolved:
+		if got.err != nil || got.decision != permission.DecisionAllowSession {
+			t.Fatalf("Authorize = %s, %v", got.decision, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("permission request did not resolve")
+	}
+}
+
+func TestSDKPermissionReplyFacade(t *testing.T) {
+	s, err := Open(context.Background(), Options{Provider: "fake", NoSession: true, PermissionMode: "ask", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.EnablePermissionReplies()
+	// No pending request -> must fail, not panic.
+	if err := s.ReplyPermission(protocol.PermissionResponse{RequestID: "perm-1", Decision: protocol.PermissionAllow}); err == nil {
+		t.Fatal("expected error replying to nonexistent permission request")
+	}
+	if err := s.RejectPermission("perm-1"); err == nil {
+		t.Fatal("expected error rejecting nonexistent permission request")
 	}
 }

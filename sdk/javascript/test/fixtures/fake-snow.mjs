@@ -11,7 +11,7 @@ emit({
   type: "rpc_ready",
   protocol_version: scenario === "bad_version_type" ? 1 : (scenario === "bad_version" ? "2" : "1"),
   snow_version: scenario === "bad_snow_type" ? 1 : "fixture",
-  capabilities: scenario === "bad_caps_type" ? [1] : ["models_list", "prompt_completion", "session_info", "subagent_models", "user_input"],
+  capabilities: scenario === "bad_caps_type" ? [1] : ["models_list", "multimodal_prompts", "permission_interaction", "prompt_completion", "session_info", "subagent_models", "user_input"],
   max_input_bytes: scenario === "bad_max_type" ? "128" : (scenario === "small_limit" ? 128 : 16777216),
 });
 emit({ type: "mode_changed", mode: { mode: "default", reasoning_effort: "off" } });
@@ -26,6 +26,7 @@ if (scenario === "stdin_closed") {
 
 let held = null;
 let askingPrompt = null;
+let permissionPrompt = null;
 let waitingPrompt = null;
 const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
 for await (const line of lines) {
@@ -51,7 +52,48 @@ for await (const line of lines) {
       }
       break;
     case "session_info":
-      emit({ id, type: "response", command: request.type, success: true, data: { provider: "fake", model: "fake-1" } });
+      emit({ id, type: "response", command: request.type, success: true, data: { provider: "fake", model: "fake-1", reasoning_summary: "auto", text_verbosity: "medium" } });
+      break;
+    case "compact":
+      emit({ id, type: "response", command: request.type, success: true, data: { summarized_messages: 1, retained_messages: 2, summary: "fixture summary" } });
+      break;
+    case "branches_list":
+      emit({ id, type: "response", command: request.type, success: true, data: { branches: [{ id: "branch-1", name: "main", tip_id: "entry-1", messages: 0, created_at: 0, updated_at: 0, active: true }] } });
+      break;
+    case "branch_select":
+    case "branch_delete":
+      emit({ id, type: "response", command: request.type, success: true });
+      break;
+    case "branch_rename":
+      emit({ id, type: "response", command: request.type, success: true, data: { id: "branch-1", name: request.params.name, tip_id: "entry-1", messages: 0, created_at: 0, updated_at: 0, active: true } });
+      break;
+    case "messages_list":
+      emit({ id, type: "response", command: request.type, success: true, data: { messages: [{ id: "msg-1", role: "user", content: [{ type: "text", text: "hello" }], ts: 0 }] } });
+      break;
+    case "usage":
+      emit({ id, type: "response", command: request.type, success: true, data: { input: 10, output: 5, cache_read: 0, cache_write: 0, total_tokens: 15, requests: 1 } });
+      break;
+    case "pending_inputs":
+      emit({ id, type: "response", command: request.type, success: true, data: { items: [{ id: "q1", kind: "steer", text: "focus", order: 1 }] } });
+      break;
+    case "pending_inputs_clear":
+      emit({ id, type: "response", command: request.type, success: true, data: { items: [{ id: "q1", kind: "steer", text: "focus", order: 1 }] } });
+      break;
+    case "diagnostics":
+      emit({ id, type: "response", command: request.type, success: true, data: { diagnostics: [{ path: "tui.theme", message: "fixture theme missing" }] } });
+      break;
+    case "set_reasoning_summary":
+    case "set_text_verbosity":
+      emit({ id, type: "response", command: request.type, success: true });
+      break;
+    case "mcp_servers":
+      emit({ id, type: "response", command: request.type, success: true, data: { servers: [{ id: "mcp-1", transport: "stdio", connected: true, tool_count: 2 }] } });
+      break;
+    case "skills":
+      emit({ id, type: "response", command: request.type, success: true, data: { skills: [{ name: "caveman", location: "/skills/caveman", scope: "builtin", source: "catalog", enabled: true, description: "compressed mode" }], diagnostics: [{ path: "/skills/broken", level: "error", message: "shadowed" }] } });
+      break;
+    case "sandbox_status":
+      emit({ id, type: "response", command: request.type, success: true, data: { status: { configured: false, active: false, backend: "host" } } });
       break;
     case "models_list":
     case "subagent_models":
@@ -59,8 +101,32 @@ for await (const line of lines) {
       break;
     case "prompt": {
       emit({ id, type: "response", command: "prompt", success: true });
+      if (request.content !== undefined) {
+        if (request.content.some((block) => block.type !== "image")) {
+          emit({ id, type: "response", command: "prompt", success: false, error: "fixture only accepts image content" });
+          emit({ type: "prompt_completed", request_id: id, status: "failed", error: "fixture only accepts image content" });
+          break;
+        }
+        emit({ type: "text_delta", text: "image received", turn_id: "turn-img" });
+        emit({ type: "turn_done", turn_id: "turn-img" });
+        emit({ type: "prompt_completed", request_id: id, status: "completed" });
+        break;
+      }
       if (request.message === "wait") {
         waitingPrompt = id;
+        break;
+      }
+      if (request.message === "permission") {
+        permissionPrompt = id;
+        emit({
+          type: "permission_request",
+          permission: {
+            request: {
+              id: "perm-handler-1", tool: "bash", args: { command: "echo ok" },
+              paths: [], risk: "exec", reason: "fixture",
+            },
+          },
+        });
         break;
       }
       if (request.message === "ask") {
@@ -82,6 +148,15 @@ for await (const line of lines) {
       }
       break;
     }
+    case "permission_reply":
+    case "permission_reject":
+      emit({ id, type: "response", command: request.type, success: true });
+      if (permissionPrompt) {
+        emit({ type: "turn_done", turn_id: "turn-permission" });
+        emit({ type: "prompt_completed", request_id: permissionPrompt, status: "completed" });
+        permissionPrompt = null;
+      }
+      break;
     case "user_input_reply":
     case "user_input_reject":
       emit({ id, type: "response", command: request.type, success: true });

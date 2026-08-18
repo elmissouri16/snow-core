@@ -31,6 +31,7 @@ remains the only in-process embedding surface.
 - [Security defaults](#security-defaults)
 - [Events and streaming](#events-and-streaming)
 - [Model-requested user input](#model-requested-user-input)
+- [Interactive tool permissions](#interactive-tool-permissions)
 - [Error handling](#error-handling)
 - [Running tests and CI conformance](#running-tests-and-ci-conformance)
 - [Compatibility matrix](#compatibility-matrix)
@@ -85,9 +86,11 @@ without crashing the reader.
 
 The Python client also exposes `request`, `abort`, `session_info`,
 `session_rename`, `branch_fork`, `session_fork`, `session_worktree_fork`,
-`models`, `subagent_models`, `set_model`, `set_thinking`, `set_mode`, `steer`,
-`follow_up`, the `goal_*` and `subagent_*` command families, and
-`reply_user_input`/`reject_user_input`. `prompt` accepts an optional `mode`
+`compact`, branch list/select/rename/delete, `messages_list`, `usage`, pending
+input inspection/clearing, `configuration_diagnostics`, `models`,
+`subagent_models`, model/mode/reasoning-summary/text-verbosity setters,
+`steer`, `follow_up`, the `goal_*` and `subagent_*` command families, and
+`reply_user_input`/`reject_user_input` plus `reply_permission`/`reject_permission`. `prompt` accepts an optional `mode`
 (`default` or `plan`); a timeout aborts the run and consumes its terminal
 completion before raising `SnowTimeoutError`. Event iterator capacity is
 configurable.
@@ -135,12 +138,32 @@ the owned process.
 The public declarations include RPC responses, session and model data, events,
 user input, and the SDK error hierarchy. The command surface includes
 `request`, `abort`, `sessionInfo`, `sessionRename`, `branchFork`, `sessionFork`,
-`sessionWorktreeFork`, `models`, `subagentModels`, model and mode setters,
-`steer`/`followUp`, the `goal*` and `subagent*` method families, and
-`replyUserInput`/`rejectUserInput`. `prompt` accepts a `mode` option (`default`
+`sessionWorktreeFork`, `compact`, branch list/select/rename/delete, `messages`,
+`usage`, pending-input inspection/clearing, `configurationDiagnostics`,
+`models`, `subagentModels`, model/mode/reasoning-summary/text-verbosity
+setters, `steer`/`followUp`, the `goal*` and `subagent*` method families, and
+`replyUserInput`/`rejectUserInput` plus `replyPermission`/`rejectPermission`. `prompt` accepts a `mode` option (`default`
 or `plan`); timeout handling aborts and consumes terminal completion before
 raising `SnowTimeoutError`. Iterator and subscription capacities are
 configurable.
+
+## Plugin authoring SDKs
+
+Separate from the RPC clients above, the repository contains two dependency-free
+plugin-authoring SDKs for Snow protocol-v2 plugins:
+
+- `sdk/plugin-python` — `snow-plugin` (import `snow_plugin`), Python 3.9+,
+  decorator-based `Plugin` registration and `plugin.run()`.
+- `sdk/plugin-javascript` — `@snow-core/plugin`, Node ESM, `definePlugin`,
+  `defineTool`, and `serve()`.
+
+Both SDKs are **private and unpublished**. They own framing, dispatch, progress,
+logging, cancellation, deadlines, events, lifecycle hooks, and stdout
+discipline while keeping handlers tool-focused. The wire contract is
+`docs/plugin-protocol.md`; the implementation plan and acceptance criteria are
+`docs/plugin-language-sdks-plan.md`. Packaged SDK examples live under
+`examples/plugins/{python, javascript}-sdk/` and validate with
+`snow plugin check`.
 
 ## Lifecycle
 
@@ -154,13 +177,24 @@ Every process starts with a first frame similar to:
   "capabilities": [
     "active_input",
     "branch_management",
+    "compaction",
+    "diagnostics",
     "goals",
+    "mcp_servers",
+    "messages_list",
     "models_list",
+    "multimodal_prompts",
+    "pending_inputs",
+    "permission_interaction",
     "prompt_completion",
+    "response_controls",
+    "sandbox_status",
     "session_forks",
     "session_info",
+    "skills",
     "subagent_models",
     "subagents",
+    "usage",
     "user_input"
   ],
   "max_input_bytes": 16777216
@@ -263,6 +297,43 @@ sends `user_input_reply`; validation or handler failure sends
 This channel answers model questions only. It never approves tool permissions.
 RPC permission mode `ask` remains fail-closed.
 
+## Interactive tool permissions
+
+Trusted hosts can opt into the separate permission broker by selecting `ask`
+and installing a permission handler. Python accepts `permission_handler=` in
+`SnowClient.start`; JavaScript accepts `permissionHandler` in `Snow.start` and
+passes an abort signal as the second argument:
+
+```python
+async def approve(request):
+    # request: id, tool, args, paths, risk, and optional reason
+    return "allow_session"
+
+snow = await SnowClient.start(
+    SnowOptions(permission="ask"), permission_handler=approve,
+)
+```
+
+```js
+const snow = await Snow.start({
+  permission: "ask",
+  permissionHandler: async (request, { signal }) => "allow_session",
+});
+```
+
+The only decisions are `allow`, `allow_session`, `allow_always`, and `deny`.
+Snow publishes the correlated `permission_request` event before invoking the
+handler. Invalid results, handler failures, and client shutdown reject the
+request. A headless `ask` client without a handler still denies immediately;
+it never silently approves or waits forever.
+
+For hosts that own their event loop, the equivalent manual methods are
+`reply_permission` / `reject_permission` in Python and `replyPermission` /
+`rejectPermission` in JavaScript. Replies must carry the exact request ID;
+stale or mismatched IDs fail without resolving another request. The
+`permission_interaction` capability advertises this additive protocol-v1
+feature.
+
 ## Error handling
 
 Both clients:
@@ -311,7 +382,10 @@ checks, and runnable Python and JavaScript examples.
 | JavaScript and TypeScript | `@snow-core/sdk` (`sdk/javascript`) | Node.js 22 | protocol v1 | checked in, not on npm |
 
 Both clients require the `prompt_completion` and `session_info` capabilities
-announced by `rpc_ready` and reject a Snow binary that lacks them.
+announced by `rpc_ready` and reject a Snow binary that lacks them. When
+`multimodal_prompts` is announced, `prompt` accepts an additive `content`
+array of text/image blocks (Python `content=[...]`, JavaScript
+`{content: [...]}`) while preserving legacy `message` calls.
 
 ## Related documents
 

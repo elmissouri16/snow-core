@@ -73,6 +73,18 @@ func TestRPCPublicDTOJSONRoundTrips(t *testing.T) {
 		},
 		func(t *testing.T) { assertJSONRoundTrip(t, RPCPendingInputCounts{Steering: 1, FollowUp: 2, Total: 3}) },
 		func(t *testing.T) {
+			assertJSONRoundTrip(t, RPCRequest{ID: "c1", Type: "set_reasoning_summary", ReasoningSummary: "concise", TextVerbosity: "high"})
+		},
+		func(t *testing.T) {
+			assertJSONRoundTrip(t, RPCBranchList{Branches: []SessionBranch{{ID: "main", TipID: "entry-1", Active: true}}})
+		},
+		func(t *testing.T) {
+			assertJSONRoundTrip(t, RPCMessagesList{Messages: []Message{{ID: "m1", Role: RoleUser, Content: []ContentBlock{}, Timestamp: 1}}})
+		},
+		func(t *testing.T) {
+			assertJSONRoundTrip(t, RPCDiagnosticsList{Diagnostics: []ConfigDiagnostic{{Path: "config.json", Message: "warning"}}})
+		},
+		func(t *testing.T) {
 			assertJSONRoundTrip(t, RPCSessionInfo{SessionID: "s", Name: "n", Path: "p", CWD: "c", Provider: "fake", Model: "fake-1", Thinking: ThinkingOff, ThinkingLevels: []ThinkingLevel{ThinkingOff}, CollaborationMode: ModeDefault, Goal: &RPCGoalSummary{GoalID: "g", Status: GoalActive, TokenBudget: &budget, EstimatedCosts: []Cost{}}, Subagents: RPCSubagentLimits{}, PendingInputs: RPCPendingInputCounts{}})
 		},
 	}

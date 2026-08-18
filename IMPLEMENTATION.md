@@ -957,8 +957,9 @@ type Options struct {
     AutoApprove     bool   // dangerous; for trusted CI only
     Tools           []string // subset allowlist; empty = defaults
     SystemPrompt    string
-    Thinking        string
+    Thinking         string
     UserInputHandler func(context.Context, protocol.UserInputRequest) (protocol.UserInputResponse, error)
+    PermissionHandler func(context.Context, protocol.PermissionRequest) (protocol.PermissionResponse, error)
 }
 
 type Session struct { /* opaque */ }
@@ -989,9 +990,13 @@ Versioned JSONL over stdin/stdout:
 
 - First frame: `rpc_ready` with string protocol version, Snow build version,
   sorted protocol capabilities, and maximum input size.
-- Commands: `prompt`, `abort`, `user_input_reply`, `user_input_reject`,
-  `models_list`, `subagent_models`, `set_model`, `set_thinking`,
-  `session_info`, and others.
+- Commands cover prompts (including additive text/image content when
+  `multimodal_prompts` is announced) and active input, model/mode/response
+  controls, session and branch management, manual compaction, active-branch
+  messages and usage, MCP/skill/sandbox discovery, pending-input
+  inspection/clearing, configuration diagnostics, goals, subagents,
+  model-requested input, and a trusted-host interactive permission broker
+  (`permission_reply`/`permission_reject`, gated by `permission_interaction`).
 - Events mirror SDK events; RPC-only control frames are not persisted events.
 - Framing splits on `\n` only (not Unicode line separators).
 - Schemas are network-free Draft 2020-12 contracts under
@@ -1015,8 +1020,17 @@ should prefer `pkg/snowsdk`. See `docs/rpc.md` and `docs/language-sdks.md`.
 
 Zero-runtime-dependency Python 3.9+ async and Node.js 22+ ESM/TypeScript
 packages use an explicitly installed external Snow binary, safe defaults,
-bounded JSONL routing, user-input handlers, and real-binary CI conformance
+bounded JSONL routing, multimodal prompts, MCP/skill/sandbox discovery,
+user-input and trusted-host permission handlers, and real-binary CI conformance
 tests. They never download a binary.
+
+Separate private plugin-authoring packages live in `sdk/plugin-python`
+(`snow-plugin`, imported as `snow_plugin`) and `sdk/plugin-javascript`
+(`@snow-core/plugin`). They implement the persistent external protocol-v2
+lifecycle, bounded tool calls/results/events, cancellation, progress/logging,
+shutdown, and stderr-safe diagnostics without runtime dependencies. Go
+`ExternalHost` tests execute both packaged examples. External npm/PyPI
+publication remains deliberately deferred.
 
 ## Security model
 
@@ -1061,6 +1075,11 @@ go test -race ./internal/...
 go test -race ./internal/subagent ./internal/agent ./internal/app ./internal/session ./internal/rpc ./pkg/snowsdk
 go test ./internal/agent ./cmd/snow -count=1
 (cd examples/sdk && go test ./... && go run .)
+PYTHONPATH=sdk/plugin-python/src python3 -m unittest discover -s sdk/plugin-python/tests -v
+python3 -m compileall -q sdk/plugin-python/src sdk/plugin-python/tests
+(cd sdk/plugin-javascript && npm test && npm run pack:check)
+./snow plugin check examples/plugins/python-sdk/manifest.json
+./snow plugin check examples/plugins/javascript-sdk/manifest.json
 go build -o ./snow ./cmd/snow
 SNOW_TEST_BINARY="$PWD/snow" PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v
 (cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration && npm run pack:check)
@@ -1090,7 +1109,8 @@ After a verified feature change, refresh the user-local binary with
 
 `.github/workflows/ci.yml` runs on pushes, pull requests, and manual
 dispatches: Linux and macOS run formatting (Linux), vet, `go test ./...`,
-production builds, and credential-free standalone SDK/RPC example execution;
+production builds, credential-free standalone SDK/RPC example execution, and
+plugin-SDK conformance/pack checks;
 Linux also runs `go test -race ./internal/... ./pkg/snowsdk`. Real-provider
 checks remain manual.
 

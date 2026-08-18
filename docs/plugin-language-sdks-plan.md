@@ -1,15 +1,18 @@
 # JavaScript and Python Plugin SDK Implementation Plan
 
-This document proposes dependency-free JavaScript/TypeScript and Python SDKs
-for authoring Snow protocol-v2 plugins. It defines the intended public API,
+This document specifies and tracks dependency-free JavaScript/TypeScript and
+Python SDKs for authoring Snow protocol-v2 plugins. It defines the public API,
 runtime responsibilities, package layout, conformance strategy, implementation
 phases, and release gates. The external plugin wire contract remains owned by
 [External plugin protocol v2](plugin-protocol.md).
 
-> **Note:** This is a future implementation plan, not current behavior. The
-> existing `@snow-core/sdk` and `snow-core-sdk` packages are RPC clients for
-> controlling a Snow process; they must remain separate from the plugin
-> authoring SDKs described here.
+> **Status:** Phase 2 (private minimal SDKs) and Phase 3 core ergonomics are
+> implemented in `sdk/plugin-python` and `sdk/plugin-javascript`; both pass
+> `snow plugin check` against the packaged examples under
+> `examples/plugins/{python, javascript}-sdk`. Publication and the remaining
+> Phase 4/5 items stay deferred. The existing `@snow-core/sdk` and
+> `snow-core-sdk` packages are RPC clients for controlling a Snow process; they
+> remain separate from the plugin authoring SDKs described here.
 
 ## On this page
 
@@ -67,8 +70,8 @@ controls Snow or runs as a Snow extension.
 |---|---|
 | `@snow-core/sdk` | Existing JavaScript/TypeScript client for Snow RPC mode |
 | `snow-core-sdk` | Existing Python client for Snow RPC mode |
-| `@snow-core/plugin` | Proposed Node.js/TypeScript plugin runtime |
-| `snow-plugin` | Proposed Python plugin runtime |
+| `@snow-core/plugin` | Implemented private Node.js/TypeScript plugin runtime |
+| `snow-plugin` | Implemented private Python plugin runtime |
 
 A representative repository layout is:
 
@@ -76,7 +79,7 @@ A representative repository layout is:
 sdk/
 ├── javascript/                  # Existing @snow-core/sdk RPC client
 ├── python/                      # Existing snow-core-sdk RPC client
-├── plugin-javascript/           # Proposed @snow-core/plugin
+├── plugin-javascript/           # Private @snow-core/plugin
 │   ├── package.json
 │   ├── README.md
 │   ├── src/
@@ -88,7 +91,7 @@ sdk/
 │   │   ├── results.js
 │   │   └── errors.js
 │   └── test/
-└── plugin-python/               # Proposed snow-plugin
+└── plugin-python/               # Private snow-plugin
     ├── pyproject.toml
     ├── README.md
     ├── src/snow_plugin/
@@ -104,8 +107,8 @@ sdk/
 ```
 
 Keep the low-level reference runtimes under `examples/plugins` as executable
-wire documentation and conformance fixtures. SDK-based examples should be
-added beside them after the local packages are usable.
+wire documentation and conformance fixtures. SDK-based examples now live
+beside them under `examples/plugins/python-sdk` and `javascript-sdk`.
 
 ## Intended author experience
 
