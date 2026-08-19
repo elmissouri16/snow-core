@@ -20,6 +20,19 @@ func testStream(capacity int) *codexStream {
 	return &codexStream{ch: make(chan protocol.StreamEvent, capacity), done: make(chan struct{}), ctx: context.Background(), provider: "test"}
 }
 
+func TestReasoningAccumReconstructsManyFragments(t *testing.T) {
+	accum := newReasoningAccum()
+	for i := 0; i < 4096; i++ {
+		if err := accum.canAppend("item", "x"); err != nil {
+			t.Fatal(err)
+		}
+		accum.append("item", "x")
+	}
+	if got := accum.text("item"); got != strings.Repeat("x", 4096) {
+		t.Fatalf("reconstructed length=%d", len(got))
+	}
+}
+
 func TestStreamRejectsAggregateSSEEvent(t *testing.T) {
 	fragment := strings.Repeat("x", 3<<20)
 	body := "data: " + fragment + "\ndata: " + fragment + "\ndata: " + fragment + "\n"

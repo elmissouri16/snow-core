@@ -90,8 +90,40 @@ func (r *terminalErrorReader) Read(p []byte) (int, error) {
 	}
 	return 0, r.err
 }
+func (*terminalErrorReader) Close() error                { return nil }
+func (*terminalErrorReader) InterruptsReadOnClose() bool { return true }
+
+type blockingReader struct{ block chan struct{} }
+
+func (r *blockingReader) Read([]byte) (int, error) {
+	<-r.block
+	return 0, io.EOF
+}
+
+type blockingReadCloser struct {
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (r *blockingReadCloser) Read([]byte) (int, error) {
+	<-r.closed
+	return 0, io.EOF
+}
+
+func (r *blockingReadCloser) Close() error {
+	r.once.Do(func() { close(r.closed) })
+	return nil
+}
+func (*blockingReadCloser) InterruptsReadOnClose() bool { return true }
 
 type shortWriter struct{}
+
+type blockingWriter struct{ release chan struct{} }
+
+func (w *blockingWriter) Write(p []byte) (int, error) {
+	<-w.release
+	return len(p), nil
+}
 
 func rpcFrame(t *testing.T, output, kind, id string) []byte {
 	t.Helper()
@@ -118,50 +150,7 @@ func (shortWriter) Write(p []byte) (int, error) {
 	}
 	return len(p) - 1, nil
 }
-
-func TestRPCPropagatesShortWrites(t *testing.T) {
-	var in bytes.Buffer
-	in.WriteString(`{"id":"r1","type":"bogus"}` + "\n")
-	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	if err := New(context.Background(), a, &in, shortWriter{}).Serve(context.Background()); err != io.ErrShortWrite {
-		t.Fatalf("Serve error = %v, want %v", err, io.ErrShortWrite)
-	}
-}
-
-func TestRPCRejectsNegativeWaitTimeoutBeforeStartingWorker(t *testing.T) {
-	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	server := New(context.Background(), a, strings.NewReader(""), io.Discard)
-	err = server.handle(context.Background(), Request{Type: "subagent_wait", Params: json.RawMessage(`{"timeout_ms":-1}`)})
-	if err == nil || !strings.Contains(err.Error(), "cannot be negative") {
-		t.Fatalf("negative timeout error = %v", err)
-	}
-}
-
-func TestRPCScannerErrorUsesOrderlyShutdown(t *testing.T) {
-	sentinel := errors.New("input failed")
-	reader := &terminalErrorReader{data: []byte(`{"id":"p1","type":"prompt","message":"hello"}` + "\n"), err: sentinel}
-	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	var out bytes.Buffer
-	err = New(context.Background(), a, reader, &out).Serve(context.Background())
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("Serve error = %v", err)
-	}
-	if a.Agent.IsRunning() {
-		t.Fatal("Serve returned while prompt worker was still running")
-	}
-}
+func (shortWriter) RPCWriteBounded() bool { return true }
 
 func TestRPCPromptAndEvents(t *testing.T) {
 	var in bytes.Buffer

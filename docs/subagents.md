@@ -226,7 +226,11 @@ running/queued work to interrupted metadata, and never restarts work before
 `ReadySubagents`. Durable terminal children may be unloaded when the residency
 cap is exceeded; follow-up, messaging, or transcript inspection lazily reloads
 them. Set `durable=false` only when intentionally choosing process-local child
-history; `/agent` then warns that transcripts will not survive restart.
+history; `/agent` then warns that transcripts will not survive restart. Because
+there is no durable state from which to restore those children, non-durable
+terminal runtimes and their transcripts remain resident until shutdown, bounded
+by `max_agents_per_session` (32 by default). Keep that limit low when children
+produce large transcripts.
 
 ## Surfaces
 

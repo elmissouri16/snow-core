@@ -181,13 +181,14 @@ type SubagentTaskStore interface {
 
 // SessionInfo is a listing entry for the index.
 type SessionInfo struct {
-	Path      string `json:"path"`
-	ID        string `json:"id"`
-	CWD       string `json:"cwd"`
-	Name      string `json:"name,omitempty"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
-	Messages  int    `json:"messages"`
+	Path           string `json:"path"`
+	ID             string `json:"id"`
+	CWD            string `json:"cwd"`
+	Name           string `json:"name,omitempty"`
+	CreatedAt      int64  `json:"created_at"`
+	UpdatedAt      int64  `json:"updated_at"`
+	Messages       int    `json:"messages"`
+	MessagesCapped bool   `json:"messages_capped,omitempty"`
 	// searchFingerprint tracks branch names/tips for the derived FTS cache.
 	searchFingerprint string
 }

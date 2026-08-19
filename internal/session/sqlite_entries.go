@@ -277,11 +277,13 @@ func (s *SQLiteStore) Branches() ([]protocol.SessionBranch, error) {
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("session: sqlite branch close: %w", err)
 	}
+	stats, err := branchStatsAllFrom(tx)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
-		out[i].Messages, out[i].Preview, err = branchStatsFrom(tx, out[i].TipID)
-		if err != nil {
-			return nil, err
-		}
+		out[i].Messages = stats[out[i].ID].messages
+		out[i].Preview = stats[out[i].ID].preview
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("session: sqlite branches snapshot commit: %w", err)
@@ -289,45 +291,55 @@ func (s *SQLiteStore) Branches() ([]protocol.SessionBranch, error) {
 	return out, nil
 }
 
-func branchStatsFrom(q sqliteQueryer, tip string) (int, string, error) {
-	rows, err := q.Query(`WITH RECURSIVE branch(seq, id, parent_id, entry_type, message) AS (
-		SELECT seq, id, parent_id, entry_type, message FROM entries WHERE id=?
+type branchStatsValue struct {
+	messages int
+	preview  string
+}
+
+func branchStatsAllFrom(q sqliteQueryer) (map[string]branchStatsValue, error) {
+	rows, err := q.Query(`WITH RECURSIVE branch(branch_id, seq, id, parent_id, entry_type, message) AS (
+		SELECT sb.branch_id, e.seq, e.id, e.parent_id, e.entry_type, e.message
+		FROM session_branches sb JOIN entries e ON e.id=sb.tip_id
 		UNION ALL
-		SELECT e.seq, e.id, e.parent_id, e.entry_type, e.message
-		FROM entries e JOIN branch b ON e.id=b.parent_id
-	) SELECT message, count(*) OVER() FROM branch
-	WHERE entry_type=? ORDER BY seq DESC`, tip, EntryMessage)
+		SELECT b.branch_id, e.seq, e.id, e.parent_id, e.entry_type, e.message
+		FROM branch b JOIN entries e ON e.id=b.parent_id
+	) SELECT branch_id, message FROM branch WHERE entry_type=? ORDER BY branch_id, seq DESC`, EntryMessage)
 	if err != nil {
-		return 0, "", err
+		return nil, err
 	}
 	defer rows.Close()
-	count := 0
+	stats := make(map[string]branchStatsValue)
 	for rows.Next() {
+		var branchID string
 		var raw []byte
-		if err := rows.Scan(&raw, &count); err != nil {
-			return 0, "", err
+		if err := rows.Scan(&branchID, &raw); err != nil {
+			return nil, err
 		}
-		var message protocol.Message
-		if err := json.Unmarshal(raw, &message); err != nil {
-			return 0, "", err
-		}
-		var text strings.Builder
-		for _, block := range message.Content {
-			if block.Type == protocol.BlockText {
-				text.WriteString(block.Text)
+		stat := stats[branchID]
+		stat.messages++
+		if stat.preview == "" {
+			var message protocol.Message
+			if err := json.Unmarshal(raw, &message); err != nil {
+				return nil, err
+			}
+			var text strings.Builder
+			for _, block := range message.Content {
+				if block.Type == protocol.BlockText {
+					text.WriteString(block.Text)
+				}
+			}
+			if text.Len() > 0 {
+				preview := strings.Join(strings.Fields(text.String()), " ")
+				runes := []rune(preview)
+				if len(runes) > 120 {
+					preview = string(runes[:119]) + "…"
+				}
+				stat.preview = preview
 			}
 		}
-		if text.Len() == 0 {
-			continue
-		}
-		preview := strings.Join(strings.Fields(text.String()), " ")
-		runes := []rune(preview)
-		if len(runes) > 120 {
-			preview = string(runes[:119]) + "…"
-		}
-		return count, preview, nil
+		stats[branchID] = stat
 	}
-	return count, "", rows.Err()
+	return stats, rows.Err()
 }
 
 // SelectBranch implements BranchStore.

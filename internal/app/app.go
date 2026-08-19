@@ -72,17 +72,20 @@ type App struct {
 	ProjectAllowed   bool
 	ProjectInputRoot string
 
-	stateMu            sync.Mutex
-	permissionDefault  permission.Mode
-	permissionOverride bool
-	modelCatalog       map[string][]protocol.Model
-	runtimeSelection   *liveRuntimeSelection
-	cwd                string
-	userInput          *userinput.Broker
-	toolGuard          *builtin.PathGuard
-	sessionHistory     *builtin.SessionBinding
-	sessionQuery       *session.QueryEngine
-	artifacts          artifact.Store
+	stateMu             sync.Mutex
+	diagnosticsMu       sync.Mutex
+	diagnosticsCacheKey string
+	diagnosticsCache    []protocol.ConfigDiagnostic
+	permissionDefault   permission.Mode
+	permissionOverride  bool
+	modelCatalog        map[string][]protocol.Model
+	runtimeSelection    *liveRuntimeSelection
+	cwd                 string
+	userInput           *userinput.Broker
+	toolGuard           *builtin.PathGuard
+	sessionHistory      *builtin.SessionBinding
+	sessionQuery        *session.QueryEngine
+	artifacts           artifact.Store
 }
 
 // SessionDeleteCleanupError reports that the durable session was deleted but

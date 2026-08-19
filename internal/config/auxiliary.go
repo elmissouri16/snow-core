@@ -401,26 +401,62 @@ func validateColor(value string) error {
 }
 
 func decodeAuxScoped(confinedRoot, path string, out any) error {
-	if confinedRoot != "" {
-		if err := validateAuxPath(confinedRoot, path); err != nil {
-			return err
-		}
+	if confinedRoot == "" {
+		return decodeAux(path, out)
 	}
-	return decodeAux(path, out)
-}
-
-func validateAuxPath(root, path string) error {
-	rel, err := filepath.Rel(root, path)
+	rel, err := filepath.Rel(confinedRoot, path)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return errors.New("auxiliary config escapes trusted project root")
 	}
-	current := root
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	root, err := os.OpenRoot(confinedRoot)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err := validateAuxRootPath(root, rel); err != nil {
+		return err
+	}
+	before, err := root.Lstat(rel)
+	if err != nil {
+		return err
+	}
+	file, err := root.Open(rel)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	after, err := file.Stat()
+	if err != nil || !os.SameFile(before, after) {
+		return errors.New("auxiliary config changed while opening")
+	}
+	return decodeAuxFile(file, after, out)
+}
+
+func validateAuxPath(rootPath, path string) error {
+	rel, err := filepath.Rel(rootPath, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return errors.New("auxiliary config escapes trusted project root")
+	}
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return validateAuxRootPath(root, rel)
+}
+
+func validateAuxRootPath(root *os.Root, rel string) error {
+	current := ""
+	for _, part := range strings.Split(filepath.Clean(rel), string(filepath.Separator)) {
 		if part == "" || part == "." {
 			continue
 		}
-		current = filepath.Join(current, part)
-		info, statErr := os.Lstat(current)
+		if current == "" {
+			current = part
+		} else {
+			current = filepath.Join(current, part)
+		}
+		info, statErr := root.Lstat(current)
 		if errors.Is(statErr, fs.ErrNotExist) {
 			return nil
 		}
@@ -448,7 +484,14 @@ func decodeAux(path string, out any) error {
 	}
 	defer file.Close()
 	opened, err := file.Stat()
-	if err != nil || !opened.Mode().IsRegular() {
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return errors.New("auxiliary config changed while opening")
+	}
+	return decodeAuxFile(file, opened, out)
+}
+
+func decodeAuxFile(file io.Reader, opened fs.FileInfo, out any) error {
+	if !opened.Mode().IsRegular() {
 		return errors.New("auxiliary config must remain a regular file")
 	}
 	if opened.Size() > AuxiliaryFileLimit {

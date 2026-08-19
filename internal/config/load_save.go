@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,27 @@ import (
 	"github.com/snow-core/snow/pkg/plugin"
 	"github.com/snow-core/snow/pkg/protocol"
 )
+
+const (
+	MaxConfigFileBytes   = 4 << 20
+	MaxProjectSelections = 4096
+)
+
+func readConfigFile(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, MaxConfigFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > MaxConfigFileBytes {
+		return nil, fmt.Errorf("configuration exceeds %d byte limit", MaxConfigFileBytes)
+	}
+	return data, nil
+}
 
 // TUIConfig holds TUI preferences.
 // ValidateProviderProfileID keeps profile IDs safe for config/auth map keys and
@@ -334,7 +356,7 @@ func Load(path string) (Config, error) {
 	if path == "" {
 		return cfg, nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := readConfigFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return cfg, nil
@@ -419,6 +441,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Compaction.HistoricalToolResultThreshold == 0 {
 		cfg.Compaction.HistoricalToolResultThreshold = defaults.HistoricalToolResultThreshold
+	}
+	if len(cfg.ProjectSelections) > MaxProjectSelections {
+		return cfg, fmt.Errorf("config: project_selections exceeds %d entry limit", MaxProjectSelections)
 	}
 	for projectPath, selection := range cfg.ProjectSelections {
 		if err := validateProjectSelection(projectPath, selection); err != nil {
@@ -563,6 +588,9 @@ func WithProjectSelection(cfg Config, cwd string, selection ProjectSelection) (C
 	if err := validateProjectSelection(key, selection); err != nil {
 		return cfg, err
 	}
+	if _, exists := cfg.ProjectSelections[key]; !exists && len(cfg.ProjectSelections) >= MaxProjectSelections {
+		return cfg, fmt.Errorf("config: project_selections limit %d reached", MaxProjectSelections)
+	}
 	projectSelections := make(map[string]ProjectSelection, len(cfg.ProjectSelections)+1)
 	for existingKey, existing := range cfg.ProjectSelections {
 		projectSelections[existingKey] = existing
@@ -620,7 +648,7 @@ func LoadProjectExtensions(path string) (ProjectExtensions, error) {
 	if path == "" {
 		return ProjectExtensions{}, nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := readConfigFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ProjectExtensions{}, nil
@@ -678,6 +706,9 @@ func Save(path string, cfg Config) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
+	}
+	if len(data) > MaxConfigFileBytes {
+		return fmt.Errorf("config: encoded configuration exceeds %d byte limit", MaxConfigFileBytes)
 	}
 	return atomicWrite(path, data, 0o600)
 }

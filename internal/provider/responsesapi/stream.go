@@ -80,14 +80,14 @@ type toolAccum struct {
 }
 
 type reasoningAccum struct {
-	items            map[string]string
+	items            map[string]*strings.Builder
 	totalBytes       int
 	emitted          bool
 	trailingNewlines int
 }
 
 func newReasoningAccum() *reasoningAccum {
-	return &reasoningAccum{items: make(map[string]string)}
+	return &reasoningAccum{items: make(map[string]*strings.Builder)}
 }
 
 // append preserves raw per-item text for completed-snapshot reconciliation but
@@ -98,8 +98,12 @@ func (r *reasoningAccum) append(key, text string) string {
 	if r == nil || text == "" {
 		return text
 	}
-	_, seen := r.items[key]
-	r.items[key] += text
+	builder, seen := r.items[key]
+	if !seen {
+		builder = &strings.Builder{}
+		r.items[key] = builder
+	}
+	builder.WriteString(text)
 	r.totalBytes += len(text)
 	out := text
 	if !seen && r.emitted {
@@ -130,10 +134,10 @@ func (r *reasoningAccum) canAppend(key, text string) error {
 }
 
 func (r *reasoningAccum) text(key string) string {
-	if r == nil {
+	if r == nil || r.items[key] == nil {
 		return ""
 	}
-	return r.items[key]
+	return r.items[key].String()
 }
 
 func trailingNewlineCount(value string) int {

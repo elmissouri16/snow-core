@@ -95,7 +95,10 @@ func (a *Agent) toolHistoryCompactionDue(messages []protocol.Message) bool {
 	if threshold <= 0 {
 		threshold = compact.HistoricalToolResultThreshold
 	}
-	projected := compact.PruneHistoricalToolResults(messages, threshold, compact.HistoricalToolResultHead, compact.HistoricalToolResultTail)
+	projected := messages
+	if compact.NeedsHistoricalToolResultPruning(messages, threshold) {
+		projected = compact.PruneHistoricalToolResults(messages, threshold, compact.HistoricalToolResultHead, compact.HistoricalToolResultTail)
+	}
 	plan := compact.PlannerWithOptions(projected, a.compactionPlannerOptions(model, projected))
 	if len(plan.CompactionCandidates) == 0 {
 		return false
@@ -169,6 +172,7 @@ func (a *Agent) autoCompactAdmittedBoundary(ctx context.Context, messages []prot
 	if result.SummarizedMessages > 0 {
 		a.mu.Lock()
 		a.latestContextTokens = 0
+		a.latestRequestEstimate = 0
 		a.mu.Unlock()
 	}
 	return true, nil
@@ -228,6 +232,7 @@ func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
 	if result.SummarizedMessages > 0 {
 		a.mu.Lock()
 		a.latestContextTokens = 0
+		a.latestRequestEstimate = 0
 		a.mu.Unlock()
 	}
 	return true, nil

@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -21,14 +23,61 @@ import (
 	publicsandbox "github.com/snow-core/snow/pkg/sandbox"
 )
 
+func auxiliaryConfigFingerprint(globalDir, projectRoot string, projectAllowed bool) string {
+	h := sha256.New()
+	paths := []string{filepath.Join(globalDir, "keybindings.yaml"), filepath.Join(globalDir, "themes")}
+	if projectAllowed {
+		paths = append(paths, filepath.Join(projectRoot, ".snow", "keybindings.yaml"), filepath.Join(projectRoot, ".snow", "themes"))
+	}
+	for _, path := range paths {
+		info, err := os.Lstat(path)
+		if err != nil {
+			fmt.Fprintf(h, "%s\x00missing\x00", path)
+			continue
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00%d\x00%d\x00", path, info.Mode(), info.Size(), info.ModTime().UnixNano())
+		if !info.IsDir() {
+			continue
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			fmt.Fprintf(h, "error:%v\x00", err)
+			continue
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		count := 0
+		for _, entry := range entries {
+			if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".yaml") {
+				continue
+			}
+			entryInfo, err := entry.Info()
+			if err != nil || !entryInfo.Mode().IsRegular() {
+				continue
+			}
+			fmt.Fprintf(h, "%s\x00%d\x00%d\x00%d\x00", entry.Name(), entryInfo.Mode(), entryInfo.Size(), entryInfo.ModTime().UnixNano())
+			count++
+			if count >= config.ThemeFileLimit+1 {
+				break
+			}
+		}
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 // ConfigDiagnostics returns an independent snapshot of non-fatal auxiliary
 // configuration warnings, including lazily loaded theme and keybinding files.
 func (a *App) ConfigDiagnostics() []protocol.ConfigDiagnostic {
+	key := auxiliaryConfigFingerprint(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed) + "\x00" + a.Cfg.TUI.Theme
+	a.diagnosticsMu.Lock()
+	defer a.diagnosticsMu.Unlock()
+	if key == a.diagnosticsCacheKey && a.diagnosticsCache != nil {
+		return append([]protocol.ConfigDiagnostic(nil), a.diagnosticsCache...)
+	}
 	all := append([]config.Diagnostic(nil), a.Diagnostics...)
 	themes, themeDiagnostics := config.LoadThemes(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed)
 	_, keyDiagnostics := config.LoadKeybindings(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed)
 	selected := a.Cfg.TUI.Theme
-	if selected != "default" && selected != "dark" && selected != "light" && selected != "high-contrast" {
+	if !config.IsBuiltInTUITheme(selected) {
 		if _, ok := themes[selected]; !ok {
 			themeDiagnostics = append(themeDiagnostics, config.Diagnostic{Path: "tui.theme", Message: "selected custom theme is missing or invalid: " + selected})
 		}
@@ -39,6 +88,8 @@ func (a *App) ConfigDiagnostics() []protocol.ConfigDiagnostic {
 	for _, diagnostic := range all {
 		out = append(out, protocol.ConfigDiagnostic{Path: diagnostic.Path, Message: diagnostic.Message})
 	}
+	a.diagnosticsCacheKey = key
+	a.diagnosticsCache = append([]protocol.ConfigDiagnostic(nil), out...)
 	return out
 }
 

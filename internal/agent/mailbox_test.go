@@ -57,6 +57,46 @@ func TestMailboxFIFOAndProviderDelivery(t *testing.T) {
 	}
 }
 
+func TestMailboxRejectsUnboundedPendingInput(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	a, err := New(Options{Provider: fake.NewRecorded(), Registry: tools.NewRegistry(), Session: st, Permission: permission.NewService(permission.ModeDeny, nil), Model: protocol.Model{Provider: "fake", ID: "fake-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	// Idle envelopes are persisted immediately, but remain unread until the
+	// next provider request and must still count toward the admission limit.
+	for i := 0; i < maxPendingMailboxItems; i++ {
+		err := a.EnqueueMailbox(protocol.AgentMessage{ID: fmt.Sprintf("limit-%d", i), Author: "/root/c", Recipient: "/root", Kind: protocol.AgentMessageNormal, Content: "x", CreatedAt: time.Now().UnixMilli()})
+		if err != nil {
+			t.Fatalf("enqueue %d: %v", i, err)
+		}
+	}
+	if err := a.EnqueueMailbox(protocol.AgentMessage{ID: "overflow", Author: "/root/c", Recipient: "/root", Kind: protocol.AgentMessageNormal, Content: "x", CreatedAt: time.Now().UnixMilli()}); err == nil {
+		t.Fatal("mailbox accepted input past the pending limit")
+	}
+}
+
+func TestMailboxUnreadLimitResetsAcrossBranchSwitch(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	a, err := New(Options{Provider: fake.NewRecorded(), Registry: tools.NewRegistry(), Session: st, Permission: permission.NewService(permission.ModeDeny, nil), Model: protocol.Model{Provider: "fake", ID: "fake-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	for i := 0; i < maxPendingMailboxItems; i++ {
+		if err := a.EnqueueMailbox(protocol.AgentMessage{ID: fmt.Sprintf("branch-a-%d", i), Author: "/root/c", Recipient: "/root", Kind: protocol.AgentMessageNormal, Content: "x", CreatedAt: time.Now().UnixMilli()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := a.Fork(""); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnqueueMailbox(protocol.AgentMessage{ID: "branch-b", Author: "/root/c", Recipient: "/root", Kind: protocol.AgentMessageNormal, Content: "x", CreatedAt: time.Now().UnixMilli()}); err != nil {
+		t.Fatalf("new branch inherited unread mailbox limit: %v", err)
+	}
+}
+
 func TestMailboxConcurrentProducersLinearize(t *testing.T) {
 	prov := fake.NewRecorded()
 	st := session.NewMemoryStore(session.Options{})

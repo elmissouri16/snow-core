@@ -177,7 +177,10 @@ previews, and refuses ambiguous replacements unless configured for all matches.
 - always exclude `.git`;
 - honor hierarchical `.gitignore` and `.ignore` by default;
 - apply bounded global and trusted-project policy;
-- bound matches, results, and output bytes;
+- bound matches, results, output bytes, regex/glob patterns (4 KiB), and a
+  single directory listing (100,000 entries);
+- open each regular file once through the pinned root and pass that verified
+  handle to the search operation;
 - support per-call soft-policy overrides without disabling hard exclusions.
 
 This confinement applies only to built-in file operations. Plugins, stdio MCP
@@ -379,8 +382,9 @@ SDK, RPC, TUI, and plugin event consumers must not display or log them.
 
 > **Warning:** Oversized plain-text tool results may be spilled beneath
 > `$SNOW_HOME/artifacts`. These artifacts can contain sensitive command or file
-> output. Snow does not currently garbage-collect them, and deleting a session
-> database does not remove its artifact namespace.
+> output. Snow does not currently run background garbage collection for
+> orphaned artifacts. Deleting a session through Snow removes its artifact
+> namespace; manual database removal or interrupted cleanup can leave orphans.
 
 Artifact directories are `0700`, files are immutable `0600`, and model-visible
 references are opaque IDs scoped to the active session. Dedicated

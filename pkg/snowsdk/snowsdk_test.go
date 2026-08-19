@@ -16,6 +16,7 @@ import (
 
 	"github.com/snow-core/snow/internal/auth"
 	"github.com/snow-core/snow/internal/permission"
+	"github.com/snow-core/snow/internal/session"
 	"github.com/snow-core/snow/pkg/protocol"
 )
 
@@ -162,6 +163,28 @@ func TestSDKActiveQueueMethodsAndSnapshots(t *testing.T) {
 	}
 	if strings.Join(users, ",") != "initial,steer,follow" {
 		t.Fatalf("durable users = %q", users)
+	}
+}
+
+func TestSDKMessagesStripProviderContinuityData(t *testing.T) {
+	s, err := Open(context.Background(), Options{Provider: "fake", NoSession: true, PermissionMode: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	message := protocol.Message{Role: protocol.RoleAssistant, StopReason: protocol.StopStop, Content: []protocol.ContentBlock{
+		protocol.NewTextBlock("public"),
+		{Type: protocol.BlockProviderData, Data: []byte("private-continuity")},
+	}}
+	if err := s.app.Session.Append(session.Entry{Type: session.EntryMessage, Message: &message}); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := s.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || len(messages[0].Content) != 1 || messages[0].Content[0].Type != protocol.BlockText {
+		t.Fatalf("public messages leaked provider data: %+v", messages)
 	}
 }
 

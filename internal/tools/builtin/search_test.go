@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/snow-core/snow/internal/config"
 )
@@ -47,7 +48,7 @@ func TestWalkSearchFilesUsesPinnedRootAfterLaunchPathReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	var visited []string
-	err := walkSearchFiles(context.Background(), guard.CWD(), guard, searchWalkOptions{PolicyRoot: guard.CWD(), Policy: config.DefaultSearchPolicy()}, func(path string) error {
+	err := walkSearchFiles(context.Background(), guard.CWD(), guard, searchWalkOptions{PolicyRoot: guard.CWD(), Policy: config.DefaultSearchPolicy()}, func(path string, _ *os.File) error {
 		visited = append(visited, filepath.Base(path))
 		return nil
 	})
@@ -95,6 +96,22 @@ func TestGrepMatchesLinesAndGlobFilters(t *testing.T) {
 	}
 }
 
+func TestGrepNormalizesCRLFAndUTF8SafePreview(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "crlf.txt"), []byte("needle\r\nother\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grep := NewGrep(NewPathGuard([]string{root}, root))
+	result, err := grep.Run(context.Background(), searchArgs(t, map[string]any{"pattern": "needle$"}), stubHost{cwd: root, roots: []string{root}})
+	if err != nil || result.IsError || !strings.Contains(result.Content[0].Text, "crlf.txt:1: needle") || strings.Contains(result.Content[0].Text, "\r") {
+		t.Fatalf("CRLF grep result=%+v err=%v", result, err)
+	}
+	preview := truncate(strings.Repeat("a", searchLinePreviewBytes-1)+"界tail", searchLinePreviewBytes)
+	if !utf8.ValidString(preview) || strings.ContainsRune(preview, utf8.RuneError) {
+		t.Fatalf("invalid UTF-8 preview %q", preview)
+	}
+}
+
 func TestGrepBoundsOversizedLinesAndContinues(t *testing.T) {
 	root := t.TempDir()
 	contents := strings.Repeat("x", maxSearchLineBytes+1) + "\nneedle\n"
@@ -128,6 +145,10 @@ func TestGrepMaxMatchesAndInvalidArguments(t *testing.T) {
 	bad, _ := g.Run(context.Background(), searchArgs(t, map[string]any{"pattern": "["}), stubHost{cwd: root, roots: []string{root}})
 	if !bad.IsError || !strings.Contains(bad.Content[0].Text, "invalid regex") {
 		t.Fatalf("invalid regex result = %+v", bad)
+	}
+	oversized, _ := g.Run(context.Background(), searchArgs(t, map[string]any{"pattern": strings.Repeat("x", maxSearchPatternBytes+1)}), stubHost{cwd: root, roots: []string{root}})
+	if !oversized.IsError || !strings.Contains(oversized.Content[0].Text, "pattern exceeds") {
+		t.Fatalf("oversized regex result = %+v", oversized)
 	}
 }
 

@@ -4,6 +4,7 @@ package artifact
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -36,6 +37,12 @@ type Store interface {
 	Close() error
 }
 
+// TextOpener provides bounded consumers a verified streaming view without
+// materializing the complete artifact.
+type TextOpener interface {
+	OpenText(context.Context, string, string) (io.ReadCloser, int64, error)
+}
+
 // Copier preserves an existing opaque artifact ID in another session
 // namespace. Session forks use it so durable compaction references remain
 // valid without exposing filesystem paths or weakening session isolation.
@@ -49,6 +56,8 @@ type SessionDeleter interface {
 }
 
 // LocalStore stores artifacts beneath a pinned private root.
+const maxVerifiedArtifacts = 1024
+
 type LocalStore struct {
 	mu       sync.RWMutex
 	root     *os.Root
@@ -164,6 +173,12 @@ func (s *LocalStore) markArtifactVerified(id string, info fs.FileInfo) {
 		return
 	}
 	s.verifiedMu.Lock()
+	if _, exists := s.verified[id]; !exists && len(s.verified) >= maxVerifiedArtifacts {
+		for oldest := range s.verified {
+			delete(s.verified, oldest)
+			break
+		}
+	}
 	s.verified[id] = info
 	s.verifiedMu.Unlock()
 }
@@ -183,8 +198,10 @@ func (s *LocalStore) SaveText(ctx context.Context, sessionID, key, text string) 
 	id := artifactID(sessionID, key, text)
 	name := id + ".txt"
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// Serialize publication so readers never observe an in-progress content
+	// address and concurrent idempotent saves cannot unlink each other's file.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed || s.root == nil {
 		return Ref{}, errors.New("artifact: store is closed")
 	}
@@ -193,12 +210,8 @@ func (s *LocalStore) SaveText(ctx context.Context, sessionID, key, text string) 
 		return Ref{}, fmt.Errorf("artifact: create namespace: %w", err)
 	}
 	defer dir.Close()
-	file, err := dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		existing, openErr := openVerifiedArtifact(dir, name, s.maxBytes)
-		if openErr != nil {
-			return Ref{}, openErr
-		}
+	existing, openErr := openVerifiedArtifact(dir, name, s.maxBytes)
+	if openErr == nil {
 		existingInfo, statErr := existing.Stat()
 		if statErr != nil {
 			_ = existing.Close()
@@ -216,22 +229,40 @@ func (s *LocalStore) SaveText(ctx context.Context, sessionID, key, text string) 
 			s.markArtifactVerified(id, existingInfo)
 			return Ref{ID: id, Bytes: len(text)}, nil
 		}
-		// A crash can leave a partial O_EXCL file at the final content address.
-		// Since this call carries the complete hash input, repair that orphan
-		// rather than poisoning the address permanently.
+		// A prior crash may have left a partial legacy final file. This caller
+		// has the complete content-address input, so repair it under the writer
+		// lock before atomically publishing the replacement.
 		if removeErr := dir.Remove(name); removeErr != nil {
 			return Ref{}, errors.New("artifact: existing artifact does not match immutable content")
 		}
-		file, err = dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	} else if !errors.Is(openErr, os.ErrNotExist) {
+		return Ref{}, openErr
 	}
-	if err != nil {
-		return Ref{}, fmt.Errorf("artifact: create: %w", err)
+
+	var tempName string
+	var file *os.File
+	for attempt := 0; attempt < 8; attempt++ {
+		var suffix [8]byte
+		if _, err := rand.Read(suffix[:]); err != nil {
+			return Ref{}, fmt.Errorf("artifact: temporary name: %w", err)
+		}
+		tempName = name + ".tmp-" + hex.EncodeToString(suffix[:])
+		file, err = dir.OpenFile(tempName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return Ref{}, fmt.Errorf("artifact: create temporary: %w", err)
+		}
 	}
-	ok := false
+	if file == nil {
+		return Ref{}, errors.New("artifact: could not allocate temporary file")
+	}
+	published := false
 	defer func() {
 		_ = file.Close()
-		if !ok {
-			_ = dir.Remove(name)
+		if !published {
+			_ = dir.Remove(tempName)
 		}
 	}()
 	if _, err := io.WriteString(file, text); err != nil {
@@ -247,9 +278,52 @@ func (s *LocalStore) SaveText(ctx context.Context, sessionID, key, text string) 
 	if err := file.Close(); err != nil {
 		return Ref{}, fmt.Errorf("artifact: close: %w", err)
 	}
-	ok = true
+	if err := dir.Rename(tempName, name); err != nil {
+		return Ref{}, fmt.Errorf("artifact: publish: %w", err)
+	}
+	published = true
 	s.markArtifactVerified(id, info)
 	return Ref{ID: id, Bytes: len(text)}, nil
+}
+
+// OpenText returns a verified streaming artifact reader. The returned file
+// remains valid after the pinned namespace handle is closed.
+func (s *LocalStore) OpenText(ctx context.Context, sessionID, id string) (io.ReadCloser, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	if sessionID == "" {
+		return nil, 0, errors.New("artifact: session ID is required")
+	}
+	if err := validateID(id); err != nil {
+		return nil, 0, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed || s.root == nil {
+		return nil, 0, errors.New("artifact: store is closed")
+	}
+	dir, err := openVerifiedNamespace(s.root, namespace(sessionID), false)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, 0, errors.New("artifact: artifact not found in current session")
+		}
+		return nil, 0, fmt.Errorf("artifact: open namespace: %w", err)
+	}
+	defer dir.Close()
+	file, err := openVerifiedArtifact(dir, id+".txt", s.maxBytes)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, 0, errors.New("artifact: artifact not found in current session")
+		}
+		return nil, 0, fmt.Errorf("artifact: open: %w", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, 0, err
+	}
+	return file, info.Size(), nil
 }
 
 // ReadText returns a complete artifact after validating session ownership.

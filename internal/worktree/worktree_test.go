@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -43,6 +44,28 @@ func TestCreateAndRemove(t *testing.T) {
 	}
 }
 
+func TestRemovePreservesWorktreeWithUserChanges(t *testing.T) {
+	repo := newRepository(t)
+	target := filepath.Join(filepath.Dir(repo), "dirty rollback worktree")
+	result, err := Create(context.Background(), Request{SourceDir: repo, TargetDir: target, Branch: "snow/dirty-rollback"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", target).Run()
+		_ = exec.Command("git", "-C", repo, "branch", "-D", result.Branch).Run()
+	})
+	if err := os.WriteFile(filepath.Join(target, "README.md"), []byte("user change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Remove(context.Background(), result); err == nil {
+		t.Fatal("rollback removed a worktree containing user changes")
+	}
+	if _, err := os.Stat(filepath.Join(target, "README.md")); err != nil {
+		t.Fatalf("dirty worktree was not preserved: %v", err)
+	}
+}
+
 func TestCreateRejectsDirtyAndUnsafeDestinations(t *testing.T) {
 	repo := newRepository(t)
 	if err := os.WriteFile(filepath.Join(repo, "dirty.txt"), []byte("dirty"), 0o600); err != nil {
@@ -73,18 +96,30 @@ func TestCreateRejectsExistingDestinationAndNonRepository(t *testing.T) {
 	}
 }
 
-func TestResolveSessionPathRejectsRelativeEscape(t *testing.T) {
+func TestResolveSessionPathRequiresAbsoluteExplicitDestination(t *testing.T) {
 	root := t.TempDir()
-	inside, err := ResolveSessionPath(root, "sessions/child.db")
-	if err != nil || inside != filepath.Join(root, "sessions", "child.db") {
-		t.Fatalf("inside=%q err=%v", inside, err)
+	for _, relative := range []string{"sessions/child.db", "../outside.db"} {
+		if _, err := ResolveSessionPath(root, relative); !errors.Is(err, ErrUnsafeDestination) {
+			t.Fatalf("relative %q error=%v", relative, err)
+		}
 	}
-	if _, err := ResolveSessionPath(root, "../outside.db"); !errors.Is(err, ErrUnsafeDestination) {
-		t.Fatalf("escape error=%v", err)
+	if got, err := ResolveSessionPath(root, ""); err != nil || got != "" {
+		t.Fatalf("default destination=%q err=%v", got, err)
 	}
 	absolute := filepath.Join(t.TempDir(), "explicit.db")
 	if got, err := ResolveSessionPath(root, absolute); err != nil || got != absolute {
 		t.Fatalf("absolute=%q err=%v", got, err)
+	}
+}
+
+func TestResolveSessionPathRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "sessions")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := ResolveSessionPath(root, "sessions/child.db"); !errors.Is(err, ErrUnsafeDestination) {
+		t.Fatalf("symlink escape error=%v", err)
 	}
 }
 
@@ -94,6 +129,22 @@ func TestCreatePropagatesCancellation(t *testing.T) {
 	_, err := create(ctx, canceledRunner{}, Request{SourceDir: t.TempDir()})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error = %v", err)
+	}
+}
+
+func TestBoundedGitOutputCapsRetainedBytes(t *testing.T) {
+	var output boundedGitOutput
+	payload := bytes.Repeat([]byte("x"), maxGitOutput*4)
+	if n, err := output.Write(payload); err != nil || n != len(payload) {
+		t.Fatalf("Write() = %d, %v", n, err)
+	}
+	got := output.Bytes()
+	marker := []byte("\n… output truncated")
+	if len(got) != maxGitOutput+len(marker) {
+		t.Fatalf("retained bytes = %d, want %d", len(got), maxGitOutput+len(marker))
+	}
+	if !bytes.Equal(got[maxGitOutput:], marker) {
+		t.Fatalf("missing truncation marker: %q", got[maxGitOutput:])
 	}
 }
 

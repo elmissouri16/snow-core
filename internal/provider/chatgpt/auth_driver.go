@@ -77,14 +77,18 @@ func (d *AuthDriver) Login(ctx context.Context, request auth.LoginRequest, inter
 	if interaction == nil {
 		interaction = auth.NopInteraction{}
 	}
+	var pasteCallback func(context.Context) (string, error)
+	if availability, ok := interaction.(auth.PromptAvailability); !ok || availability.PromptAvailable() {
+		pasteCallback = func(ctx context.Context) (string, error) {
+			response, err := interaction.Prompt(ctx, auth.Prompt{ID: "callback_url", Kind: auth.PromptText, Title: "Paste the complete OAuth callback URL", Optional: true})
+			return response.Value, err
+		}
+	}
 	return LoginCredential(ctx, LoginOptions{
 		Method: method, HTTPClient: d.provider.client, AuthBaseURL: d.provider.authBaseURL, Now: d.provider.now,
 		AllowedWorkspaceIDs: append([]string(nil), request.Params["allowed_workspace_id"]...),
 		OpenBrowser:         interaction.OpenURL,
-		PasteCallback: func(ctx context.Context) (string, error) {
-			response, err := interaction.Prompt(ctx, auth.Prompt{ID: "callback_url", Kind: auth.PromptText, Title: "Paste the complete OAuth callback URL", Optional: true})
-			return response.Value, err
-		},
+		PasteCallback:       pasteCallback,
 		Progress: func(progress LoginProgress) {
 			interaction.Progress(auth.Progress{Kind: progress.Kind, Message: progress.Message, URL: progress.URL, UserCode: progress.UserCode})
 		},

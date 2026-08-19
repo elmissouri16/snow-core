@@ -376,9 +376,11 @@ func (a *Agent) setSessionAdmitted(st session.Store, publish bool) error {
 	a.mode = mode
 	a.turnMode = mode
 	a.latestContextTokens = 0
+	a.latestRequestEstimate = 0
 	a.latestContextReport = nil
 	effort := a.effectiveThinkingLocked(mode)
 	a.mu.Unlock()
+	a.resetMailboxUnread()
 	if publish {
 		a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: effort}})
 	}
@@ -398,6 +400,9 @@ func (a *Agent) SetProvider(p provider.Provider) error {
 		return errors.New("agent: cannot change provider while running")
 	}
 	a.opts.Provider = p
+	a.latestContextTokens = 0
+	a.latestRequestEstimate = 0
+	a.latestContextReport = nil
 	return nil
 }
 
@@ -420,6 +425,9 @@ func (a *Agent) SetProviderAndModel(p provider.Provider, m protocol.Model) error
 	}
 	a.opts.Provider = p
 	a.model = m
+	a.latestContextTokens = 0
+	a.latestRequestEstimate = 0
+	a.latestContextReport = nil
 	a.mu.Unlock()
 	unlock()
 	reentrant := a.bus.InCallback()
@@ -460,6 +468,9 @@ func (a *Agent) SetProviderModelThinking(p provider.Provider, m protocol.Model, 
 	a.opts.Provider = p
 	a.model = m
 	a.opts.Thinking = parsed
+	a.latestContextTokens = 0
+	a.latestRequestEstimate = 0
+	a.latestContextReport = nil
 	a.mu.Unlock()
 	unlock()
 	reentrant := a.bus.InCallback()
@@ -494,6 +505,9 @@ func (a *Agent) SetModel(m protocol.Model) error {
 		return errors.New("agent: cannot change model while running")
 	}
 	a.model = m
+	a.latestContextTokens = 0
+	a.latestRequestEstimate = 0
+	a.latestContextReport = nil
 	a.mu.Unlock()
 	unlock()
 	reentrantEventCallback := a.bus.InCallback()
@@ -689,6 +703,9 @@ func (a *Agent) closeInputQueue(clear bool) protocol.InputQueue {
 }
 
 // Subscribe registers an event listener; returns an unsubscribe func.
+// Subscribe registers an ordered event callback. Callbacks must return
+// promptly; a callback that runs longer than the bounded subscriber timeout is
+// evicted so it cannot strand delivery or agent shutdown.
 func (a *Agent) Subscribe(fn func(protocol.AgentEvent)) func() { return a.bus.Subscribe(fn) }
 
 func (a *Agent) DrainEvents(ctx context.Context) error { return a.bus.Drain(ctx) }

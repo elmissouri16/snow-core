@@ -476,6 +476,13 @@ func TestSessionsPickerListsCurrentDirectoryAndNavigates(t *testing.T) {
 	}
 }
 
+func TestSessionPickerMarksCappedMessageCount(t *testing.T) {
+	got := formatSessionPickerInfo(session.SessionInfo{ID: "session-123456", Messages: 10001, MessagesCapped: true}, "")
+	if !strings.Contains(got, "10001+ messages") {
+		t.Fatalf("picker info=%q", got)
+	}
+}
+
 func TestSessionPickerShowsTitleFirstAndRenamesSelectedSession(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)

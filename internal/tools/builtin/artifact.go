@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -60,21 +61,50 @@ func (t *ArtifactRead) Run(ctx context.Context, raw json.RawMessage, _ tools.Too
 	if args.Limit > artifactReadMaxLines {
 		return tools.ErrorResult(fmt.Errorf("artifact_read: limit exceeds %d", artifactReadMaxLines)), nil
 	}
-	text, err := t.read(ctx, args.ArtifactID)
+	reader, err := t.open(ctx, args.ArtifactID)
 	if err != nil {
 		return tools.ErrorResult(err), nil
 	}
-	lines := strings.Split(text, "\n")
-	start := args.Offset - 1
-	if start >= len(lines) {
-		return tools.TextResult(fmt.Sprintf("(offset %d beyond artifact; %d lines total)", args.Offset, len(lines))), nil
+	defer reader.Close()
+	out, start, end, total, err := artifactLineWindowReader(ctx, reader, args.Offset, args.Limit)
+	if err != nil {
+		return tools.ErrorResult(fmt.Errorf("artifact_read: scan: %w", err)), nil
 	}
-	end := min(start+args.Limit, len(lines))
-	out := strings.Join(lines[start:end], "\n")
+	if start >= total {
+		return tools.TextResult(fmt.Sprintf("(offset %d beyond artifact; %d lines total)", args.Offset, total)), nil
+	}
 	if len(out) > artifactReadMaxBytes {
 		out = artifactUTF8Prefix(out, artifactReadMaxBytes) + "\n[… read window truncated at 64 KiB …]"
 	}
-	return tools.TextResult(fmt.Sprintf("Artifact %s, lines %d-%d of %d:\n%s", args.ArtifactID, start+1, end, len(lines), out)), nil
+	return tools.TextResult(fmt.Sprintf("Artifact %s, lines %d-%d of %d:\n%s", args.ArtifactID, start+1, end, total, out)), nil
+}
+
+func artifactLineWindow(text string, offset, limit int) (string, int, int, int) {
+	total := strings.Count(text, "\n") + 1
+	startLine := offset - 1
+	if startLine >= total {
+		return "", startLine, startLine, total
+	}
+	startByte := 0
+	for line := 0; line < startLine; line++ {
+		next := strings.IndexByte(text[startByte:], '\n')
+		startByte += next + 1
+	}
+	endLine := min(startLine+limit, total)
+	endByte := startByte
+	for line := startLine; line < endLine; line++ {
+		next := strings.IndexByte(text[endByte:], '\n')
+		if next < 0 {
+			endByte = len(text)
+			break
+		}
+		if line+1 == endLine {
+			endByte += next
+			break
+		}
+		endByte += next + 1
+	}
+	return text[startByte:endByte], startLine, endLine, total
 }
 
 func (t *ArtifactRead) read(ctx context.Context, id string) (string, error) {
@@ -82,6 +112,54 @@ func (t *ArtifactRead) read(ctx context.Context, id string) (string, error) {
 		return "", errors.New("artifact: unavailable")
 	}
 	return t.Store.ReadText(ctx, t.Current.Current().ID(), id)
+}
+
+func (t *ArtifactRead) open(ctx context.Context, id string) (io.ReadCloser, error) {
+	if t == nil || t.Store == nil || t.Current == nil || t.Current.Current() == nil {
+		return nil, errors.New("artifact: unavailable")
+	}
+	sessionID := t.Current.Current().ID()
+	if opener, ok := t.Store.(artifact.TextOpener); ok {
+		reader, _, err := opener.OpenText(ctx, sessionID, id)
+		return reader, err
+	}
+	text, err := t.Store.ReadText(ctx, sessionID, id)
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(strings.NewReader(text)), nil
+}
+
+func artifactLineWindowReader(ctx context.Context, reader io.Reader, offset, limit int) (string, int, int, int, error) {
+	start := offset - 1
+	line := 1
+	buffered := bufio.NewReaderSize(reader, 64<<10)
+	var out strings.Builder
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", start, start, 0, err
+		}
+		fragment, err := buffered.ReadSlice('\n')
+		if line >= offset && line < offset+limit && out.Len() <= artifactReadMaxBytes {
+			remaining := artifactReadMaxBytes + 1 - out.Len()
+			if remaining > 0 {
+				out.Write(fragment[:min(len(fragment), remaining)])
+			}
+		}
+		if len(fragment) > 0 && fragment[len(fragment)-1] == '\n' {
+			line++
+		}
+		switch {
+		case err == nil, errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case errors.Is(err, io.EOF):
+			value := strings.TrimSuffix(out.String(), "\n")
+			total := line
+			return value, start, min(start+limit, total), total, nil
+		default:
+			return "", start, start, 0, err
+		}
+	}
 }
 
 // ArtifactGrep searches one current-session artifact with RE2.
@@ -130,33 +208,46 @@ func (t *ArtifactGrep) Run(ctx context.Context, raw json.RawMessage, _ tools.Too
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("artifact_grep: invalid RE2 pattern: %w", err)), nil
 	}
-	reader := &ArtifactRead{Store: t.Store, Current: t.Current}
-	text, err := reader.read(ctx, args.ArtifactID)
+	artifactReader := &ArtifactRead{Store: t.Store, Current: t.Current}
+	reader, err := artifactReader.open(ctx, args.ArtifactID)
 	if err != nil {
 		return tools.ErrorResult(err), nil
 	}
+	defer reader.Close()
 	var out strings.Builder
-	scanner := bufio.NewScanner(strings.NewReader(text))
-	scanner.Buffer(make([]byte, 64<<10), 1<<20)
-	line, matches := 0, 0
-	for scanner.Scan() {
+	buffered := bufio.NewReaderSize(reader, 64<<10)
+	line, matches, skipped := 0, 0, 0
+	for {
 		if err := ctx.Err(); err != nil {
 			return tools.ErrorResult(err), nil
 		}
-		line++
-		if !re.MatchString(scanner.Text()) {
-			continue
+		text, oversized, readErr := readBoundedSearchLine(ctx, buffered, maxSearchLineBytes)
+		if len(text) > 0 || oversized {
+			line++
+			if oversized {
+				skipped++
+			} else {
+				text = strings.TrimSuffix(strings.TrimSuffix(text, "\n"), "\r")
+				if re.MatchString(text) {
+					fmt.Fprintf(&out, "%d:%s\n", line, text)
+					matches++
+				}
+			}
 		}
-		fmt.Fprintf(&out, "%d:%s\n", line, scanner.Text())
-		matches++
 		if matches >= args.MaxMatches || out.Len() >= artifactReadMaxBytes {
 			break
 		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return tools.ErrorResult(fmt.Errorf("artifact_grep: scan: %w", readErr)), nil
+		}
 	}
-	if err := scanner.Err(); err != nil {
-		return tools.ErrorResult(fmt.Errorf("artifact_grep: scan: %w", err)), nil
+	if skipped > 0 {
+		fmt.Fprintf(&out, "[… %d line(s) larger than %d bytes skipped …]\n", skipped, maxSearchLineBytes)
 	}
-	if matches == 0 {
+	if matches == 0 && skipped == 0 {
 		return tools.TextResult("No matches."), nil
 	}
 	value := out.String()

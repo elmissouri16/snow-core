@@ -549,7 +549,11 @@ func formatSessionPickerInfo(info session.SessionInfo, activeID string) string {
 	if info.Name != "" {
 		label = info.Name + "  ·  " + label
 	}
-	label += fmt.Sprintf("  ·  %d messages", info.Messages)
+	if info.MessagesCapped {
+		label += fmt.Sprintf("  ·  %d+ messages", info.Messages)
+	} else {
+		label += fmt.Sprintf("  ·  %d messages", info.Messages)
+	}
 	if info.ID == activeID {
 		label += "  ✓ active"
 	}

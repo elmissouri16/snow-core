@@ -316,6 +316,7 @@ func (a *Agent) run(ctx context.Context) error {
 					overflowRecovered = true
 					a.mu.Lock()
 					a.latestContextTokens = 0
+					a.latestRequestEstimate = 0
 					a.mu.Unlock()
 					turn-- // the failed oversized request did not complete a model round
 					continue

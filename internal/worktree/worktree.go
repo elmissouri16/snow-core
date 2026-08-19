@@ -4,6 +4,7 @@
 package worktree
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -53,15 +55,45 @@ type runner interface {
 
 type gitRunner struct{}
 
+type boundedGitOutput struct {
+	mu        sync.Mutex
+	buf       bytes.Buffer
+	truncated bool
+}
+
+func (w *boundedGitOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	remaining := maxGitOutput - w.buf.Len()
+	if remaining > 0 {
+		_, _ = w.buf.Write(p[:min(remaining, len(p))])
+	}
+	if len(p) > remaining {
+		w.truncated = true
+	}
+	return len(p), nil
+}
+
+func (w *boundedGitOutput) Bytes() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	output := append([]byte(nil), w.buf.Bytes()...)
+	if w.truncated {
+		output = append(output, []byte("\n… output truncated")...)
+	}
+	return output
+}
+
 func (gitRunner) Run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
-	output, err := cmd.CombinedOutput()
-	if len(output) > maxGitOutput {
-		output = append(output[:maxGitOutput], []byte("\n… output truncated")...)
-	}
+	cmd.WaitDelay = 2 * time.Second
+	var captured boundedGitOutput
+	cmd.Stdout, cmd.Stderr = &captured, &captured
+	err := cmd.Run()
+	output := captured.Bytes()
 	if err != nil {
 		if ctx.Err() != nil {
 			return output, ctx.Err()
@@ -243,8 +275,15 @@ func Remove(ctx context.Context, result Result) error {
 		return errors.New("worktree: incomplete rollback identity")
 	}
 	git := gitRunner{}
+	if !registeredExactWorktree(ctx, git, result) {
+		return errors.New("worktree: rollback target is no longer the created worktree")
+	}
+	head, err := git.Run(ctx, result.TargetDir, "rev-parse", "HEAD")
+	if err != nil || strings.TrimSpace(string(head)) != result.Commit {
+		return errors.New("worktree: rollback target commit changed")
+	}
 	var errs []error
-	if _, err := git.Run(ctx, result.SourceRoot, "worktree", "remove", "--force", result.TargetDir); err != nil {
+	if _, err := git.Run(ctx, result.SourceRoot, "worktree", "remove", result.TargetDir); err != nil {
 		errs = append(errs, err)
 		return errors.Join(errs...)
 	}
@@ -257,16 +296,15 @@ func Remove(ctx context.Context, result Result) error {
 // ResolveSessionPath resolves a relative child-session path inside a newly
 // created worktree. Absolute paths remain explicit operator choices; relative
 // traversal outside root is rejected.
-func ResolveSessionPath(root, requested string) (string, error) {
+func ResolveSessionPath(_ string, requested string) (string, error) {
 	if requested == "" || filepath.IsAbs(requested) {
 		return requested, nil
 	}
-	candidate := filepath.Clean(filepath.Join(root, requested))
-	rel, err := filepath.Rel(root, candidate)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", ErrUnsafeDestination
-	}
-	return candidate, nil
+	// SQLite opens its database and sidecars by pathname. Returning a validated
+	// relative path would reintroduce a symlink-swap window after this function
+	// releases its pinned root. Until the SQLite store can open through an
+	// os.Root handle, fail closed and require an explicit absolute destination.
+	return "", ErrUnsafeDestination
 }
 
 func pathsOverlap(left, right string) bool {

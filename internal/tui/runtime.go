@@ -118,6 +118,8 @@ func (i tuiOAuthInteraction) Prompt(context.Context, auth.Prompt) (auth.Response
 	return auth.Response{}, auth.ErrInteractionUnavailable
 }
 
+func (tuiOAuthInteraction) PromptAvailable() bool { return false }
+
 func (i tuiOAuthInteraction) OpenURL(ctx context.Context, target string) error {
 	return openOAuthBrowser(ctx, target)
 }

@@ -2,13 +2,16 @@ package rpc
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
+	"time"
 
 	"github.com/snow-core/snow/internal/app"
 	"github.com/snow-core/snow/internal/session"
@@ -29,13 +32,67 @@ func NewWithOptions(ctx context.Context, a *app.App, in io.Reader, out io.Writer
 	}
 	a.EnableUserInputReplies()
 	a.EnablePermissionReplies()
-	return &Server{in: in, out: out, app: a, writeFailed: make(chan struct{}), snowVersion: opts.SnowVersion}
+	input, hasClose := in.(io.ReadCloser)
+	if !hasClose {
+		input = io.NopCloser(in)
+	}
+	independentInputInterrupt := false
+	switch typed := in.(type) {
+	case *bytes.Buffer, *bytes.Reader, *strings.Reader, *io.PipeReader:
+		independentInputInterrupt = true
+	case *os.File:
+		if info, err := typed.Stat(); err == nil && info.Mode().IsRegular() {
+			independentInputInterrupt = true
+		}
+	}
+	if declared, ok := in.(InterruptibleInput); ok && declared.InterruptsReadOnClose() {
+		independentInputInterrupt = true
+	}
+	var inputDeadline func(time.Time) error
+	if setter, ok := in.(interface{ SetReadDeadline(time.Time) error }); ok {
+		inputDeadline = setter.SetReadDeadline
+	}
+	interruptible := independentInputInterrupt || inputDeadline != nil
+	independentOutputBound := false
+	switch out.(type) {
+	case *bytes.Buffer, *strings.Builder:
+		independentOutputBound = true
+	}
+	if declared, ok := out.(BoundedOutput); ok && declared.RPCWriteBounded() {
+		independentOutputBound = true
+	}
+	if typ := reflect.TypeOf(out); typ != nil && typ.Comparable() && out == io.Discard {
+		independentOutputBound = true
+	}
+	_, deadlineOutput := out.(interface{ SetWriteDeadline(time.Time) error })
+	return &Server{in: input, inputInterruptible: interruptible, inputIndependentInterruptible: independentInputInterrupt, inputDeadline: inputDeadline, out: out, outputBounded: independentOutputBound || deadlineOutput, outputIndependentBound: independentOutputBound, app: a, writeFailed: make(chan struct{}), snowVersion: opts.SnowVersion, waitSlots: make(chan struct{}, maxConcurrentWaits)}
+}
+
+func (s *Server) interruptInput() {
+	if s.inputDeadline != nil {
+		_ = s.inputDeadline(time.Now())
+	}
+	_ = s.in.Close()
 }
 
 // Serve reads commands until EOF.
 func (s *Server) Serve(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if !s.inputInterruptible {
+		return errors.New("rpc: input must be finite or guarantee that Close/deadline interrupts reads")
+	}
+	if s.inputDeadline != nil && !s.inputIndependentInterruptible {
+		if err := s.inputDeadline(time.Now()); err != nil {
+			return fmt.Errorf("rpc: input read deadline unavailable: %w", err)
+		}
+		if err := s.inputDeadline(time.Time{}); err != nil {
+			return fmt.Errorf("rpc: clear input read deadline: %w", err)
+		}
+	}
+	if !s.outputBounded {
+		return errors.New("rpc: output must be deadline-capable or guarantee bounded writes")
 	}
 	if err := s.announceReady(); err != nil {
 		return err
@@ -49,8 +106,14 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 	scans := make(chan scanResult, 1)
 	scanStop := make(chan struct{})
-	defer close(scanStop)
+	scanDone := make(chan struct{})
+	defer func() {
+		close(scanStop)
+		s.interruptInput()
+		<-scanDone
+	}()
 	go func() {
+		defer close(scanDone)
 		scanner := bufio.NewScanner(s.in)
 		scanner.Buffer(make([]byte, 0, 64*1024), protocol.RPCMaxInputBytes)
 		for scanner.Scan() {
@@ -72,9 +135,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		case <-s.writeFailed:
 			goto finish
 		case <-ctx.Done():
-			if closer, ok := s.in.(io.Closer); ok {
-				_ = closer.Close()
-			}
+			s.interruptInput()
 			cancelServe()
 			goto finish
 		case result := <-scans:
@@ -276,9 +337,15 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		if err != nil {
 			return err
 		}
+		select {
+		case s.waitSlots <- struct{}{}:
+		default:
+			return fmt.Errorf("rpc: concurrent subagent_wait limit %d reached", maxConcurrentWaits)
+		}
 		s.promptWG.Add(1)
 		go func() {
 			defer s.promptWG.Done()
+			defer func() { <-s.waitSlots }()
 			var (
 				res protocol.WaitSubagentsResult
 				err error
@@ -841,19 +908,41 @@ func (s *Server) write(v any) error {
 		s.recordWriteErr(err)
 		return err
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.writeErr != nil {
-		return s.writeErr
+	priorErr := s.writeErr
+	s.mu.Unlock()
+	if priorErr != nil {
+		return priorErr
+	}
+	if !s.outputBounded {
+		err := errors.New("rpc: output must be deadline-capable or guarantee bounded writes")
+		s.recordWriteErr(err)
+		return err
+	}
+	deadlineSet := false
+	if setter, ok := s.out.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		if err := setter.SetWriteDeadline(time.Now().Add(rpcWriteTimeout)); err != nil {
+			if !s.outputIndependentBound {
+				err = fmt.Errorf("rpc: output write deadline unavailable: %w", err)
+				s.recordWriteErr(err)
+				return err
+			}
+		} else {
+			deadlineSet = true
+		}
+		if deadlineSet {
+			defer setter.SetWriteDeadline(time.Time{})
+		}
 	}
 	payload := append(b, '\n')
 	n, err := s.out.Write(payload)
 	if err == nil && n != len(payload) {
 		err = io.ErrShortWrite
 	}
-	if err != nil && s.writeErr == nil {
-		s.writeErr = err
-		s.writeFailOnce.Do(func() { close(s.writeFailed) })
+	if err != nil {
+		s.recordWriteErr(err)
 	}
 	return err
 }

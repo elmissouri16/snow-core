@@ -224,7 +224,10 @@ trusted project `.snow/config.json`; repository content therefore cannot choose
 a provider or reasoning effort. Snow writes normalized absolute directory keys
 and preserves unrelated project entries with a locked atomic read-modify-write,
 so concurrent Snow instances in different folders do not replace each other's
-selection.
+selection. Global and project configuration files are limited to 4 MiB. The
+remembered map is limited to 4,096 projects; updates to an existing entry remain
+allowed at capacity, while adding another project fails explicitly. Snow never
+silently prunes temporarily unavailable or removable project paths.
 
 ## SmolVM Bash sandbox defaults
 

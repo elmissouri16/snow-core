@@ -165,6 +165,11 @@ func chatGPTStatus(status auth.Status) chatgpt.AuthStatus {
 
 func waitOAuthEvent(events <-chan tea.Msg) tea.Cmd { return func() tea.Msg { return <-events } }
 
+var (
+	oauthBrowserCommand = exec.CommandContext
+	oauthBrowserReap    = func(cmd *exec.Cmd) { go func() { _ = cmd.Wait() }() }
+)
+
 func openOAuthBrowser(ctx context.Context, target string) error {
 	var name string
 	var args []string
@@ -174,7 +179,12 @@ func openOAuthBrowser(ctx context.Context, target string) error {
 	default:
 		name, args = "xdg-open", []string{target}
 	}
-	return exec.CommandContext(ctx, name, args...).Start()
+	cmd := oauthBrowserCommand(ctx, name, args...)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	oauthBrowserReap(cmd)
+	return nil
 }
 
 // renderChatGPTAuthPicker renders discovered source names and secret-free

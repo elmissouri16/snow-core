@@ -68,6 +68,32 @@ func PruneHistoricalToolResultsWithRefs(messages []protocol.Message, threshold, 
 	return out
 }
 
+// NeedsHistoricalToolResultPruning reports whether pruning would change at
+// least one message without allocating a projected transcript.
+func NeedsHistoricalToolResultPruning(messages []protocol.Message, threshold int) bool {
+	if threshold <= 0 {
+		return false
+	}
+	for _, message := range messages {
+		if message.Role != protocol.RoleTool || len(message.Content) == 0 {
+			continue
+		}
+		bytes := 0
+		plain := true
+		for _, block := range message.Content {
+			if block.Type != protocol.BlockText {
+				plain = false
+				break
+			}
+			bytes += len(block.Text)
+		}
+		if plain && bytes > threshold {
+			return true
+		}
+	}
+	return false
+}
+
 func validUTF8Prefix(value string, limit int) string {
 	if limit >= len(value) {
 		return value

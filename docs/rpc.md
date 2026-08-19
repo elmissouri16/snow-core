@@ -53,8 +53,12 @@ newline-delimited stream to stdout.
 - Split only on the LF byte. Unicode line separators are not frame
   boundaries.
 - Responses and events share one serialized writer, so bytes from different
-  objects never interleave. Object ordering is still asynchronous: a later
-  command may respond before an earlier prompt or `subagent_wait` completes.
+  objects never interleave. Clients must continuously drain stdout. Embedded
+  custom transports must provide an interruptible input (`Close` or a deadline
+  actually ends `Read`) and deadline-capable or explicitly bounded writes;
+  unbounded transports are rejected before serving. Object ordering is still
+  asynchronous: a later command may respond before an earlier prompt or
+  `subagent_wait` completes.
 
 The first frame is always `rpc_ready`. Snow then writes the initial
 collaboration-mode event and restored goal and subagent events before
@@ -1021,7 +1025,9 @@ normalized. Success returns `SubagentState`.
 The default/empty `until` is `activity`. `all` waits until every descendant
 is terminal or the bounded timeout expires. Values that cannot be represented
 safely are rejected before a wait worker starts. Wait handling is
-asynchronous; several wait responses may arrive out of request order. `data`
+asynchronous; several wait responses may arrive out of request order. A server
+accepts at most 64 concurrent wait workers and rejects additional waits until a
+slot is released. `data`
 is a `WaitSubagentsResult` aggregate and never contains private child result
 text.
 

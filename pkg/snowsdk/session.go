@@ -519,7 +519,9 @@ func (s *Session) DeleteBranch(branchID string) error {
 	return a.DeleteBranch(branchID)
 }
 
-// Subscribe registers an event listener; returns an unsubscribe func.
+// Subscribe registers an ordered event listener and returns an unsubscribe
+// function. Callbacks must return promptly; callbacks exceeding the runtime's
+// bounded delivery timeout are evicted so they cannot strand later events.
 func (s *Session) Subscribe(fn func(protocol.AgentEvent)) func() {
 	if fn == nil {
 		return func() {}
@@ -688,7 +690,20 @@ func (s *Session) Messages() ([]protocol.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	return a.Agent.Messages()
+	messages, err := a.Agent.Messages()
+	if err != nil {
+		return nil, err
+	}
+	for i := range messages {
+		content := make([]protocol.ContentBlock, 0, len(messages[i].Content))
+		for _, block := range messages[i].Content {
+			if block.Type != protocol.BlockProviderData {
+				content = append(content, block)
+			}
+		}
+		messages[i].Content = content
+	}
+	return messages, nil
 }
 
 // Usage returns aggregate token/cache usage for the active session branch.

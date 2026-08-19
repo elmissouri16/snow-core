@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -530,6 +531,29 @@ func TestSystemPromptFileValidation(t *testing.T) {
 	}
 	if _, err := LoadProjectExtensions(project); err == nil {
 		t.Fatal("empty project system prompt path was accepted")
+	}
+}
+
+func TestLoadRejectsOversizedConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, bytes.Repeat([]byte(" "), MaxConfigFileBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "configuration exceeds") {
+		t.Fatalf("oversized config error = %v", err)
+	}
+}
+
+func TestProjectSelectionCountIsBounded(t *testing.T) {
+	cfg := Default()
+	for i := 0; i < MaxProjectSelections; i++ {
+		cfg.ProjectSelections[fmt.Sprintf("/project/%04d", i)] = ProjectSelection{Provider: "fake"}
+	}
+	if _, err := WithProjectSelection(cfg, "/new-project", ProjectSelection{Provider: "fake"}); err == nil {
+		t.Fatal("new project selection was accepted at capacity")
+	}
+	if _, err := WithProjectSelection(cfg, "/project/0000", ProjectSelection{Provider: "fake", Model: "updated"}); err != nil {
+		t.Fatalf("existing project selection update failed at capacity: %v", err)
 	}
 }
 

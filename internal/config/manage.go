@@ -28,7 +28,7 @@ type rawPluginDeclaration struct {
 // declarations without starting them. Duplicate IDs are rejected because one
 // configuration scope cannot contain two authoritative declarations.
 func LoadPluginDeclarations(path string) ([]publicplugin.PluginSpec, error) {
-	data, err := os.ReadFile(path)
+	data, err := readConfigFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -247,7 +247,7 @@ func updateSection(path string, global bool, key string, update func(json.RawMes
 		return errors.New("config: empty path")
 	}
 	root := map[string]json.RawMessage{}
-	data, err := os.ReadFile(path)
+	data, err := readConfigFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("config: read %s: %w", path, err)
 	}
@@ -269,6 +269,9 @@ func updateSection(path string, global bool, key string, update func(json.RawMes
 		return fmt.Errorf("config: encode %s: %w", path, err)
 	}
 	encoded = append(encoded, '\n')
+	if len(encoded) > MaxConfigFileBytes {
+		return fmt.Errorf("config: encoded configuration exceeds %d byte limit", MaxConfigFileBytes)
+	}
 	mode := os.FileMode(0o644)
 	if global {
 		mode = 0o600

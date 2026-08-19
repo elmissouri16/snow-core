@@ -28,6 +28,17 @@ func TestPruneHistoricalToolResultsPreservesDurableInputAndMetadata(t *testing.T
 	}
 }
 
+func TestNeedsHistoricalToolResultPruning(t *testing.T) {
+	plain := protocol.NewToolResultMessage("plain", "", "call", "read", []protocol.ContentBlock{protocol.NewTextBlock(strings.Repeat("x", 161))}, false)
+	rich := protocol.NewToolResultMessage("rich", "", "call-2", "read", []protocol.ContentBlock{protocol.NewTextBlock(strings.Repeat("x", 200)), {Type: protocol.BlockImage, Data: []byte{1}}}, false)
+	if !NeedsHistoricalToolResultPruning([]protocol.Message{plain}, 160) {
+		t.Fatal("oversized plain result was not detected")
+	}
+	if NeedsHistoricalToolResultPruning([]protocol.Message{rich}, 160) {
+		t.Fatal("rich result was incorrectly marked prunable")
+	}
+}
+
 func TestPruneHistoricalToolResultsKeepsUTF8AndSkipsRichBlocks(t *testing.T) {
 	value := strings.Repeat("界", 100)
 	plain := protocol.NewToolResultMessage("plain", "", "call", "read", []protocol.ContentBlock{protocol.NewTextBlock(value)}, false)

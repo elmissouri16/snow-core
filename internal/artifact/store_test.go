@@ -2,9 +2,11 @@ package artifact
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -48,6 +50,25 @@ func TestLocalStoreScopesArtifactsAndRejectsTraversal(t *testing.T) {
 	fileInfo, err := os.Stat(files[0])
 	if err != nil || fileInfo.Mode().Perm() != 0o600 {
 		t.Fatalf("file mode=%v err=%v", fileInfo.Mode().Perm(), err)
+	}
+}
+
+func TestLocalStoreBoundsVerifiedArtifactCache(t *testing.T) {
+	store, err := NewLocalStore(t.TempDir(), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for i := 0; i < maxVerifiedArtifacts+100; i++ {
+		if _, err := store.SaveText(context.Background(), "session", fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store.verifiedMu.Lock()
+	got := len(store.verified)
+	store.verifiedMu.Unlock()
+	if got > maxVerifiedArtifacts {
+		t.Fatalf("verified cache entries=%d, want <=%d", got, maxVerifiedArtifacts)
 	}
 }
 
@@ -136,6 +157,40 @@ func TestLocalStoreDeleteSessionRemovesOnlyOwnedNamespace(t *testing.T) {
 	}
 	if exists, err := store.Exists(context.Background(), "keep-session", kept.ID); err != nil || !exists {
 		t.Fatalf("unrelated artifact exists=%v err=%v", exists, err)
+	}
+}
+
+func TestSaveTextConcurrentSameAddressPublishesCompleteContent(t *testing.T) {
+	store, err := NewLocalStore(filepath.Join(t.TempDir(), "artifacts"), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	const workers = 32
+	text := strings.Repeat("concurrent-content\n", 1024)
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ref, saveErr := store.SaveText(context.Background(), "session", "same", text)
+			if saveErr != nil {
+				errs <- saveErr
+				return
+			}
+			got, readErr := store.ReadText(context.Background(), "session", ref.ID)
+			if readErr != nil {
+				errs <- readErr
+			} else if got != text {
+				errs <- fmt.Errorf("partial content: got %d bytes", len(got))
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
 

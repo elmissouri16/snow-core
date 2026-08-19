@@ -5,11 +5,14 @@ import (
 )
 
 const (
-	defaultSearchOutputBytes = 256 * 1024
-	defaultGrepMaxMatches    = 1000
-	defaultGlobMaxResults    = 500
-	searchLinePreviewBytes   = 300
-	maxSearchLineBytes       = 1 << 20
+	defaultSearchOutputBytes  = 256 * 1024
+	defaultGrepMaxMatches     = 1000
+	defaultGlobMaxResults     = 500
+	searchLinePreviewBytes    = 300
+	maxSearchLineBytes        = 1 << 20
+	maxSearchPatternBytes     = 4096
+	maxSearchGlobBytes        = 4096
+	maxSearchDirectoryEntries = 100000
 )
 
 // Grep is a pure-Go content search tool (no external ripgrep dependency).

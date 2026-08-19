@@ -206,8 +206,9 @@ New oversized results are spilled immediately to immutable private files under
 only the preview plus an opaque artifact ID. The deferred read-risk
 `artifact_read` and `artifact_grep` tools authorize IDs against the current
 session and return bounded fragments; artifacts are not added to ordinary
-filesystem roots. Snow does not currently garbage-collect spilled artifacts,
-and deleting a session database does not remove its artifact namespace.
+filesystem roots. Snow does not currently run background garbage collection
+for orphaned spills. Deleting a session through Snow removes its artifact
+namespace; manual database removal or interrupted cleanup can leave orphans.
 This model-free pruning reduces every subsequent provider request, not only
 the summarizer. `Metadata` and `SetMetadata` store append-only per-session
 state such as permission mode and remembered tool rules.
@@ -218,7 +219,9 @@ Snow appends error results that mark read-risk calls as retryable and
 write/exec/network/delegation calls as having an unknown outcome. It never
 automatically retries an interrupted side effect. Recovery is idempotent and
 uses one atomic batch when the store supports batch appends. `FileIndex.List`
-counts branch messages with SQL rather than loading the full transcript.
+counts branch messages with bounded SQL rather than loading the full transcript;
+when a branch exceeds the traversal bound, `SessionInfo.MessagesCapped` is true
+and `Messages` is the bounded count rather than an exact total.
 
 Root-only databases are removed on close and omitted from `FileIndex.List`.
 Messages, goals, additional branches, non-default thread state, remembered
@@ -268,9 +271,10 @@ snow fork-worktree [session-path] --worktree ../snow-experiment \
 It requires a clean, non-bare Git repository: uncommitted state is rejected
 because Git does not transfer it to a new worktree. Snow invokes Git directly
 with a 30-second timeout and bounded output, creates a new branch (default
-`snow/<slug>-<suffix>`), and never reuses an existing path or branch. A
-relative `--destination` resolves inside the new worktree; absolute paths are
-explicit operator choices, and traversal outside the worktree is rejected.
+`snow/<slug>-<suffix>`), and never reuses an existing path or branch. Omit
+`--destination` for Snow's private default location, or pass an absolute path
+as an explicit operator choice. Relative destinations fail closed because
+SQLite cannot yet open its database and sidecars through a pinned root handle.
 
 On failure Snow rolls back the exact worktree and unchanged branch with
 compare-and-swap and never silently falls back to a less isolated fork. The
@@ -284,10 +288,15 @@ Snow exposes two deferred, read-only model tools for reusing prior work:
 
 - `session_search` builds a disposable SQLite full-text search 5 (FTS5)
   index from the current project's durable root sessions and returns one
-  bounded representative hit per matching branch. The durable session
-  databases remain authoritative and are never modified; the derived index
-  is a disposable in-memory FTS5 cache rebuilt when the project's session
-  set changes.
+  bounded representative hit per matching branch. Shared entries are indexed
+  once and mapped to their branches separately. The cache covers at most the
+  64 most recently updated sessions, 256 branches per session, 65,536 unique
+  documents, 262,144 branch mappings, and 64 MiB of projected text; individual
+  documents are capped at 64 KiB. These limits affect search discovery only—
+  durable history remains complete and authoritative. Unchanged searches use
+  cheap database/WAL file identities rather than reopening every session. On
+  invalidation, the old in-memory index is closed before its bounded replacement
+  is built.
 - `session_reference` captures a selected search result as a bounded immutable
   snapshot. The snapshot is persisted as the ordinary tool-result message on
   the current branch, so later changes to the source session cannot alter

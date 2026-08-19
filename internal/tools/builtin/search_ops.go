@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/snow-core/snow/internal/config"
 	"github.com/snow-core/snow/internal/tools"
@@ -36,7 +37,7 @@ func (g *Grep) Schema() tools.ToolSchema {
 			"type": "object",
 			"required": ["pattern"],
 			"properties": {
-				"pattern": {"type": "string", "description": "Go regular expression (RE2) to search for"},
+				"pattern": {"type": "string", "maxLength": 4096, "description": "Go regular expression (RE2) to search for"},
 				"path": {"type": "string", "description": "File or directory to search. Defaults to cwd."},
 				"glob": {"type": "string", "description": "Filename/path glob filter, for example '*.go' or '**/*.md'. Empty matches all files."},
 				"ignore_case": {"type": "boolean", "default": false},
@@ -58,6 +59,12 @@ func (g *Grep) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	}
 	if strings.TrimSpace(a.Pattern) == "" {
 		return tools.ErrorResult(fmt.Errorf("grep: pattern is required")), nil
+	}
+	if len(a.Pattern) > maxSearchPatternBytes {
+		return tools.ErrorResult(fmt.Errorf("grep: pattern exceeds %d byte limit", maxSearchPatternBytes)), nil
+	}
+	if len(a.Glob) > maxSearchGlobBytes {
+		return tools.ErrorResult(fmt.Errorf("grep: glob exceeds %d byte limit", maxSearchGlobBytes)), nil
 	}
 
 	pattern := a.Pattern
@@ -103,7 +110,7 @@ func (g *Grep) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	var out strings.Builder
 	matches := 0
 	truncated := false
-	walkErr := walkSearchFiles(ctx, root, guard, searchWalkOptions{PolicyRoot: searchPolicyRoot(root, host), Policy: g.Policy, Hidden: a.Hidden, IncludeIgnored: a.IncludeIgnored, Exclude: a.Exclude}, func(path string) error {
+	walkErr := walkSearchFiles(ctx, root, guard, searchWalkOptions{PolicyRoot: searchPolicyRoot(root, host), Policy: g.Policy, Hidden: a.Hidden, IncludeIgnored: a.IncludeIgnored, Exclude: a.Exclude}, func(path string, file *os.File) error {
 		if filter != nil {
 			rel := relativeSearchPath(root, path, rootIsFile)
 			ok, matchErr := filter.Match(rel)
@@ -114,15 +121,6 @@ func (g *Grep) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 				return nil
 			}
 		}
-		rooted, rootErr := guard.rooted(path)
-		if rootErr != nil {
-			return nil
-		}
-		file, _, openErr := openRootedRegular(rooted.root, rooted.name)
-		if openErr != nil {
-			return nil // unreadable/non-regular files do not abort a repository search
-		}
-		defer file.Close()
 		if !isTextReader(file) {
 			return nil
 		}
@@ -146,8 +144,8 @@ func (g *Grep) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 						return filepath.SkipAll
 					}
 					out.WriteString(entry)
-				} else if re.MatchString(strings.TrimSuffix(line, "\n")) {
-					line = strings.TrimSuffix(line, "\n")
+				} else if re.MatchString(strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")) {
+					line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
 					matches++
 					entry := fmt.Sprintf("%s:%d: %s\n", relativeSearchPath(root, path, rootIsFile), lineNo, truncate(line, searchLinePreviewBytes))
 					if out.Len()+len(entry) > maxOutput {
@@ -229,6 +227,9 @@ func (g *Glob) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if strings.TrimSpace(a.Pattern) == "" {
 		return tools.ErrorResult(fmt.Errorf("glob: pattern is required")), nil
 	}
+	if len(a.Pattern) > maxSearchGlobBytes {
+		return tools.ErrorResult(fmt.Errorf("glob: pattern exceeds %d byte limit", maxSearchGlobBytes)), nil
+	}
 	matcher, err := compileGlob(a.Pattern)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("glob: invalid pattern: %w", err)), nil
@@ -260,7 +261,7 @@ func (g *Glob) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	paths := make([]string, 0, minInt(maxResults, 128))
 	outputBytes := 0
 	truncated := false
-	walkErr := walkSearchFiles(ctx, root, guard, searchWalkOptions{PolicyRoot: searchPolicyRoot(root, host), Policy: g.Policy, Hidden: a.Hidden, IncludeIgnored: a.IncludeIgnored, Exclude: a.Exclude}, func(path string) error {
+	walkErr := walkSearchFiles(ctx, root, guard, searchWalkOptions{PolicyRoot: searchPolicyRoot(root, host), Policy: g.Policy, Hidden: a.Hidden, IncludeIgnored: a.IncludeIgnored, Exclude: a.Exclude}, func(path string, _ *os.File) error {
 		rel := relativeSearchPath(root, path, rootIsFile)
 		matched, matchErr := matcher.Match(rel)
 		if matchErr != nil {
@@ -356,7 +357,7 @@ func resolveSearchRoot(path string, host tools.ToolHost, fallback *PathGuard, na
 // hard exclusions and one invocation-scoped hierarchical ignore matcher. Every
 // enumeration and open is relative to the pinned os.Root; ambient WalkDir would
 // reintroduce an ancestor-swap race before the per-file confinement check.
-func walkSearchFiles(ctx context.Context, root string, guard *PathGuard, opts searchWalkOptions, fn func(path string) error) error {
+func walkSearchFiles(ctx context.Context, root string, guard *PathGuard, opts searchWalkOptions, fn func(path string, file *os.File) error) error {
 	rootedRoot, err := guard.rooted(root)
 	if err != nil {
 		return err
@@ -366,7 +367,7 @@ func walkSearchFiles(ctx context.Context, root string, guard *PathGuard, opts se
 		return err
 	}
 	if info.Mode().IsRegular() {
-		_ = opened.Close()
+		defer opened.Close()
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -377,7 +378,7 @@ func walkSearchFiles(ctx context.Context, root string, guard *PathGuard, opts se
 		if matcher.ignore(root, false) {
 			return nil
 		}
-		return fn(root)
+		return fn(root, opened)
 	}
 	if !info.IsDir() {
 		_ = opened.Close()
@@ -400,10 +401,13 @@ func walkSearchFiles(ctx context.Context, root string, guard *PathGuard, opts se
 			}
 			return nil
 		}
-		entries, err := dir.ReadDir(-1)
+		entries, err := dir.ReadDir(maxSearchDirectoryEntries + 1)
 		_ = dir.Close()
-		if err != nil {
+		if err != nil && err != io.EOF {
 			return nil
+		}
+		if len(entries) > maxSearchDirectoryEntries {
+			return fmt.Errorf("directory %q exceeds %d entry search limit", absDir, maxSearchDirectoryEntries)
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 		for _, entry := range entries {
@@ -432,12 +436,15 @@ func walkSearchFiles(ctx context.Context, root string, guard *PathGuard, opts se
 			if err != nil {
 				continue
 			}
-			_ = file.Close()
 			if openedInfo.Mode().IsRegular() && !matcher.ignore(childAbs, false) {
-				if err := fn(childAbs); err != nil {
-					return err
+				visitErr := fn(childAbs, file)
+				_ = file.Close()
+				if visitErr != nil {
+					return visitErr
 				}
+				continue
 			}
+			_ = file.Close()
 		}
 		return nil
 	}
@@ -653,7 +660,11 @@ func truncate(s string, n int) string {
 	if n <= 0 || len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	prefix := s[:n]
+	for len(prefix) > 0 && !utf8.ValidString(prefix) {
+		prefix = prefix[:len(prefix)-1]
+	}
+	return prefix + "…"
 }
 
 func minInt(a, b int) int {

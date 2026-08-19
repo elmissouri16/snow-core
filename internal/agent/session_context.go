@@ -103,7 +103,15 @@ func (a *Agent) enqueueMailboxAdmitted(message protocol.AgentMessage) error {
 		a.mailboxMu.Unlock()
 		return errors.New("agent: closed")
 	}
+	messageBytes := mailboxMessageBytes(message)
+	if a.mailboxUnreadItems >= maxPendingMailboxItems || a.mailboxUnreadBytes+messageBytes > maxPendingMailboxBytes {
+		a.mailboxMu.Unlock()
+		return fmt.Errorf("agent: mailbox limit reached (%d messages or %d bytes)", maxPendingMailboxItems, maxPendingMailboxBytes)
+	}
 	a.mailbox = append(a.mailbox, message)
+	a.mailboxBytes += messageBytes
+	a.mailboxUnreadItems++
+	a.mailboxUnreadBytes += messageBytes
 	a.mailboxUnread = true
 	if running {
 		a.mailboxMu.Unlock()
@@ -111,8 +119,19 @@ func (a *Agent) enqueueMailboxAdmitted(message protocol.AgentMessage) error {
 	}
 	batch := append([]protocol.AgentMessage(nil), a.mailbox...)
 	a.mailbox = nil
+	a.mailboxBytes = 0
 	a.mailboxMu.Unlock()
 	return a.persistMailboxBatchLocked(batch)
+}
+
+func (a *Agent) resetMailboxUnread() {
+	a.mailboxMu.Lock()
+	a.mailbox = nil
+	a.mailboxBytes = 0
+	a.mailboxUnreadItems = 0
+	a.mailboxUnreadBytes = 0
+	a.mailboxUnread = false
+	a.mailboxMu.Unlock()
 }
 
 // PendingMailbox reports whether attributed input is waiting for a safe point.
@@ -131,9 +150,17 @@ func (a *Agent) drainMailboxForProvider() error {
 	a.mailboxMu.Lock()
 	batch := append([]protocol.AgentMessage(nil), a.mailbox...)
 	a.mailbox = nil
+	a.mailboxBytes = 0
+	a.mailboxMu.Unlock()
+	if err := a.persistMailboxBatchLocked(batch); err != nil {
+		return err
+	}
+	a.mailboxMu.Lock()
+	a.mailboxUnreadItems = 0
+	a.mailboxUnreadBytes = 0
 	a.mailboxUnread = false
 	a.mailboxMu.Unlock()
-	return a.persistMailboxBatchLocked(batch)
+	return nil
 }
 
 func (a *Agent) drainMailbox() error {
@@ -142,6 +169,7 @@ func (a *Agent) drainMailbox() error {
 	a.mailboxMu.Lock()
 	batch := append([]protocol.AgentMessage(nil), a.mailbox...)
 	a.mailbox = nil
+	a.mailboxBytes = 0
 	a.mailboxMu.Unlock()
 	return a.persistMailboxBatchLocked(batch)
 }
@@ -174,9 +202,16 @@ func (a *Agent) persistMailboxBatchLocked(batch []protocol.AgentMessage) error {
 	return nil
 }
 
+func mailboxMessageBytes(message protocol.AgentMessage) int {
+	return len(message.ID) + len(message.Author) + len(message.Recipient) + len(message.Kind) + len(message.Content)
+}
+
 func (a *Agent) requeueMailbox(batch []protocol.AgentMessage) {
 	a.mailboxMu.Lock()
 	a.mailbox = append(append([]protocol.AgentMessage(nil), batch...), a.mailbox...)
+	for _, message := range batch {
+		a.mailboxBytes += mailboxMessageBytes(message)
+	}
 	a.mailboxUnread = true
 	a.mailboxMu.Unlock()
 }
@@ -196,6 +231,7 @@ func (a *Agent) finishTurnMailbox(mark func()) error {
 	a.mu.Unlock()
 	batch := append([]protocol.AgentMessage(nil), a.mailbox...)
 	a.mailbox = nil
+	a.mailboxBytes = 0
 	a.mailboxMu.Unlock()
 	return a.persistMailboxBatchLocked(batch)
 }
@@ -446,6 +482,7 @@ func (a *Agent) SelectBranchAdmitted(branchID string) error {
 			a.turnMode = restored
 			a.resetTurnIdentityLocked()
 			a.latestContextTokens = 0
+			a.latestRequestEstimate = 0
 			a.latestContextReport = nil
 		} else if oldBranchID != "" {
 			err = errors.Join(err, branches.SelectBranch(oldBranchID))
@@ -457,6 +494,7 @@ func (a *Agent) SelectBranchAdmitted(branchID string) error {
 	if err != nil {
 		return err
 	}
+	a.resetMailboxUnread()
 	a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: effort}})
 	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	a.publishGoalSnapshot()
@@ -545,9 +583,11 @@ func (a *Agent) ForkWithOptionsAdmitted(opts protocol.BranchForkOptions) (protoc
 	a.turnMode = mode
 	a.resetTurnIdentityLocked()
 	a.latestContextTokens = 0
+	a.latestRequestEstimate = 0
 	a.latestContextReport = nil
 	effort := a.effectiveThinkingLocked(mode)
 	a.mu.Unlock()
+	a.resetMailboxUnread()
 	a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: effort}})
 	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	a.publishGoalSnapshot()

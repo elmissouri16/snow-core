@@ -88,6 +88,7 @@ func inspectSQLiteSession(path, cwd string, updatedAt int64) (SessionInfo, bool,
 		return SessionInfo{}, false, err
 	}
 	var fingerprint strings.Builder
+	latestUpdatedAt := updatedAt
 	fmt.Fprintf(&fingerprint, "%s\x00%s\x00", header.ID, header.Name)
 	branchRows, branchErr := db.Query(`SELECT branch_id, branch_name, tip_id, updated_at FROM session_branches ORDER BY branch_id`)
 	if branchErr != nil && strings.Contains(strings.ToLower(branchErr.Error()), "no such table") {
@@ -103,6 +104,7 @@ func inspectSQLiteSession(path, cwd string, updatedAt int64) (SessionInfo, bool,
 				return SessionInfo{}, false, err
 			}
 			fmt.Fprintf(&fingerprint, "%s\x00%s\x00%s\x00%d\x00", id, name, branchTip, branchUpdated)
+			latestUpdatedAt = max(latestUpdatedAt, branchUpdated)
 		}
 		if err := branchRows.Err(); err != nil {
 			_ = branchRows.Close()
@@ -112,15 +114,16 @@ func inspectSQLiteSession(path, cwd string, updatedAt int64) (SessionInfo, bool,
 			return SessionInfo{}, false, err
 		}
 	}
-	var messages int
-	if err := db.QueryRow(`WITH RECURSIVE branch(id, parent_id, entry_type) AS (
-		SELECT id, parent_id, entry_type FROM entries WHERE id = ?
+	var messages, traversalDepth int
+	if err := db.QueryRow(`WITH RECURSIVE branch(id, parent_id, entry_type, depth) AS (
+		SELECT id, parent_id, entry_type, 0 FROM entries WHERE id = ?
 		UNION ALL
-		SELECT e.id, e.parent_id, e.entry_type FROM entries e JOIN branch b ON e.id = b.parent_id
-	) SELECT count(*) FROM branch WHERE entry_type = ?`, activeTip, EntryMessage).Scan(&messages); err != nil {
+		SELECT e.id, e.parent_id, e.entry_type, b.depth+1 FROM entries e JOIN branch b ON e.id = b.parent_id
+		WHERE b.depth <= ?
+	) SELECT count(*) FILTER (WHERE entry_type = ? AND depth <= ?), COALESCE(max(depth),0) FROM branch`, activeTip, maxSessionQueryDepth, EntryMessage, maxSessionQueryDepth).Scan(&messages, &traversalDepth); err != nil {
 		return SessionInfo{}, false, err
 	}
-	return SessionInfo{Path: path, ID: header.ID, CWD: header.CWD, Name: header.Name, CreatedAt: header.CreatedAt, UpdatedAt: updatedAt, Messages: messages, searchFingerprint: fingerprint.String()}, true, nil
+	return SessionInfo{Path: path, ID: header.ID, CWD: header.CWD, Name: header.Name, CreatedAt: header.CreatedAt, UpdatedAt: latestUpdatedAt, Messages: messages, MessagesCapped: traversalDepth > maxSessionQueryDepth, searchFingerprint: fingerprint.String()}, true, nil
 }
 
 func subagentChildSessionPaths(path string) (map[string]bool, error) {

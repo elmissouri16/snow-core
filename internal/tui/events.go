@@ -490,19 +490,30 @@ func (m *Model) appendTranscriptLine(line string) {
 		return
 	}
 	m.transcriptBytes += len(line)
-	for (len(m.lines) > maxTranscriptEntries || m.transcriptBytes > maxTranscriptBytes) && len(m.lines) > 1 {
+	if (len(m.lines) > maxTranscriptEntries || m.transcriptBytes > maxTranscriptBytes) && len(m.lines) > 1 {
 		removeAt := 0
 		if m.transcriptDropped > 0 {
 			removeAt = 1 // preserve the existing omission marker
 		}
-		if removeAt >= len(m.lines)-1 {
-			break // retain at least the newest entry even when it alone is oversized
+		// Create bounded headroom in one slice move instead of shifting up to
+		// 2,000 entries for every subsequent streamed line.
+		targetEntries := max(1, maxTranscriptEntries-64)
+		targetBytes := max(1, maxTranscriptBytes-(64<<10))
+		removeCount, removedBytes := 0, 0
+		for removeAt+removeCount < len(m.lines)-1 && (len(m.lines)-removeCount > targetEntries || m.transcriptBytes-removedBytes > targetBytes) {
+			removedBytes += len(m.lines[removeAt+removeCount])
+			removeCount++
 		}
-		m.transcriptBytes -= len(m.lines[removeAt])
-		copy(m.lines[removeAt:], m.lines[removeAt+1:])
-		m.lines = m.lines[:len(m.lines)-1]
-		m.transcriptDropped++
-		m.transcriptBaseAppend = false
+		if removeCount > 0 {
+			m.transcriptBytes -= removedBytes
+			copy(m.lines[removeAt:], m.lines[removeAt+removeCount:])
+			for i := len(m.lines) - removeCount; i < len(m.lines); i++ {
+				m.lines[i] = ""
+			}
+			m.lines = m.lines[:len(m.lines)-removeCount]
+			m.transcriptDropped += removeCount
+			m.transcriptBaseAppend = false
+		}
 	}
 	if m.transcriptDropped == 0 {
 		return

@@ -290,8 +290,10 @@ returned string.
 
 | Method | Purpose |
 |---|---|
-| `Prompt(ctx, text)` | Run one root user turn to completion |
-| `PromptWithMode(ctx, text, mode)` | Atomically select `default` or `plan` and start the prompt |
+| `Prompt(ctx, text)` | Run one text root user turn to completion |
+| `PromptContent(ctx, text, attachments)` | Run a root turn with text plus normalized image attachments |
+| `PromptWithMode(ctx, text, mode)` | Atomically select `default` or `plan` and start a text prompt |
+| `PromptContentWithMode(ctx, text, attachments, mode)` | Atomically select mode and start a prompt with image attachments |
 | `Mode()` / `SetMode(mode)` | Inspect or change collaboration mode while idle |
 | `Steer(ctx, text)` | Queue input for the next safe assistant plus complete tool-batch boundary |
 | `FollowUp(ctx, text)` | Queue input after natural completion and earlier steering |
@@ -307,9 +309,6 @@ accepted input through a fresh request. Internal failures and turn-limit
 rejection retain undelivered entries; inspect `PendingInputs`, then call
 `ClearPendingInputs` to restore or resubmit them before starting another
 prompt.
-
-The current public SDK prompt methods accept text only; the core runtime's
-image and content-block prompt path is not yet exposed through `pkg/snowsdk`.
 
 Run the blocking prompt in a goroutine and use events or host state to decide
 when steering is useful:
@@ -458,11 +457,11 @@ Common payload fields include:
 - Every subscriber receives a deep clone. Mutating one callback's event cannot
   affect another observer.
 
-Callbacks are dispatched in order. Keep them short: a blocking callback delays
-later event delivery. Control calls are designed not to hold event-dispatch
-locks, but starting long blocking work inside a callback still serializes
-observation, and a dispatcher-reentrant prompt cannot wait on an RPC-style
-input reply that the same dispatcher would need to publish.
+Callbacks are dispatched in order. Keep them short: a callback that does not
+return within one second is evicted so it cannot strand later event delivery or
+shutdown. Go cannot forcibly stop the callback's own code, so hosts must still
+offload blocking work and arrange its cancellation. Control calls are designed
+not to hold event-dispatch locks, and callback-reentrant drains fail fast.
 
 ## Sessions
 
@@ -705,8 +704,8 @@ Concurrency guidance:
 
 - The SDK does not expose an interactive permission asker; `ask` mode is
   fail-closed by default.
-- Prompt methods accept text only; image and content-block prompt paths are not
-  yet public.
+- Attachment prompts currently accept normalized `protocol.BlockImage` blocks;
+  provider-specific opaque continuity blocks remain internal.
 - `SessionPath` is open-or-create. There is no strict "must already exist"
   resume option and no saved-session catalog; hosts that require strict resume
   must validate and select the path before `Open`.

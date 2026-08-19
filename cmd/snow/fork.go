@@ -91,7 +91,7 @@ func forkWorktreeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.FromEntryID, "from-entry", "", "entry id to fork (default: source branch tip)")
 	cmd.Flags().StringVar(&opts.SourceBranchID, "source-branch", "", "source branch id (default: active branch)")
 	cmd.Flags().StringVar(&opts.Name, "name", "", "new session/worktree name")
-	cmd.Flags().StringVar(&opts.DestinationPath, "destination", "", "child SQLite path (must not exist; relative paths are inside the worktree)")
+	cmd.Flags().StringVar(&opts.DestinationPath, "destination", "", "absolute child SQLite path (must not exist; default uses Snow's private session root)")
 	cmd.Flags().StringVar(&opts.WorktreePath, "worktree", "", "worktree path (default: generated sibling path)")
 	cmd.Flags().StringVar(&opts.GitBranch, "git-branch", "", "new Git branch (default: generated snow/* name)")
 	return cmd

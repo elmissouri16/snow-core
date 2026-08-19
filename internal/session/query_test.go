@@ -2,9 +2,12 @@ package session
 
 import (
 	"context"
+	"database/sql"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/snow-core/snow/pkg/protocol"
 )
@@ -67,6 +70,51 @@ func TestQueryEngineSearchScopesAndProjects(t *testing.T) {
 	}
 	if excluded, err := engine.Search(context.Background(), "cobalt", 5, priorID); err != nil || len(excluded) != 0 {
 		t.Fatalf("excluded current search = %+v, %v", excluded, err)
+	}
+}
+
+func TestQueryEngineIndexesSharedEntriesOnceWithBranchMappings(t *testing.T) {
+	root := t.TempDir()
+	idx := NewFileIndex(root)
+	project := filepath.Join(root, "project")
+	store, err := idx.Create(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendQueryMessage(t, store, protocol.RoleUser, protocol.NewTextBlock("shared searchable phrase"))
+	sharedID := store.BranchTip()
+	branches := store.(BranchStore)
+	fork, err := branches.ForkBranch(sharedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendQueryMessage(t, store, protocol.RoleAssistant, protocol.NewTextBlock("fork answer"))
+	if err := branches.SelectBranch("main"); err != nil {
+		t.Fatal(err)
+	}
+	appendQueryMessage(t, store, protocol.RoleAssistant, protocol.NewTextBlock("main answer"))
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := NewQueryEngine(idx, project)
+	defer engine.Close()
+	hits, err := engine.Search(context.Background(), "shared searchable", 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("shared hits=%+v, want one per branch", hits)
+	}
+	var docs, mappings int
+	if err := engine.cacheDB.QueryRow(`SELECT count(*) FROM session_docs WHERE entry_id=?`, sharedID).Scan(&docs); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.cacheDB.QueryRow(`SELECT count(*) FROM session_branch_docs WHERE entry_id=?`, sharedID).Scan(&mappings); err != nil {
+		t.Fatal(err)
+	}
+	if docs != 1 || mappings != 2 {
+		t.Fatalf("docs=%d mappings=%d fork=%s", docs, mappings, fork.ID)
 	}
 }
 
@@ -137,6 +185,102 @@ func TestQueryEngineInvalidatesWhileWALSessionIsOpen(t *testing.T) {
 	}
 }
 
+func TestListRecentForQueryIncludesLiveWALBeyondDBMtimeCap(t *testing.T) {
+	root := t.TempDir()
+	index := NewFileIndex(root)
+	project := filepath.Join(root, "project")
+	for i := 0; i < maxSearchSessions; i++ {
+		store, err := index.Create(project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		appendQueryMessage(t, store, protocol.RoleUser, protocol.NewTextBlock("closed session"))
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	active, err := index.Create(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer active.Close()
+	appendQueryMessage(t, active, protocol.RoleUser, protocol.NewTextBlock("live WAL session"))
+	old := time.Unix(1, 0)
+	if err := os.Chtimes(active.Path(), old, old); err != nil {
+		t.Fatal(err)
+	}
+	recent, err := index.listRecentForQuery(project, maxSearchSessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, info := range recent {
+		if info.ID == active.ID() {
+			return
+		}
+	}
+	t.Fatalf("live WAL session %s omitted from %d recent sessions", active.ID(), len(recent))
+}
+
+func TestInspectSQLiteSessionUsesBranchTimestampForRanking(t *testing.T) {
+	root := t.TempDir()
+	index := NewFileIndex(root)
+	project := filepath.Join(root, "project")
+	store, err := index.Create(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendQueryMessage(t, store, protocol.RoleUser, protocol.NewTextBlock("recent WAL activity"))
+	path := store.Path()
+	defer store.Close()
+	info, include, err := inspectSQLiteSession(path, project, 1)
+	if err != nil || !include {
+		t.Fatalf("inspect include=%v err=%v", include, err)
+	}
+	if info.UpdatedAt <= 1 {
+		t.Fatalf("UpdatedAt=%d, want branch timestamp newer than stale DB mtime", info.UpdatedAt)
+	}
+}
+
+func TestQueryReferenceBoundsCorruptParentCycle(t *testing.T) {
+	root := t.TempDir()
+	index := NewFileIndex(root)
+	project := filepath.Join(root, "project")
+	store, err := index.Create(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendQueryMessage(t, store, protocol.RoleUser, protocol.NewTextBlock("cycle-safe content"))
+	path, id, tip := store.Path(), store.ID(), store.BranchTip()
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE entries SET parent_id=id WHERE id=?`, tip); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := index.List(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || !listed[0].MessagesCapped {
+		t.Fatalf("cyclic listing did not expose capped message count: %+v", listed)
+	}
+	ref, err := NewQueryEngine(index, project).Reference(context.Background(), id, "main", tip, 4096, "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Bytes > 4096 || !ref.Truncated || !strings.Contains(ref.Content, "cycle-safe") {
+		t.Fatalf("cycle reference=%+v", ref)
+	}
+}
+
 func TestQueryEngineReferenceIsBoundedUntrustedAndTipPinned(t *testing.T) {
 	root := t.TempDir()
 	idx := NewFileIndex(root)
@@ -172,5 +316,8 @@ func TestQueryEngineReferenceIsBoundedUntrustedAndTipPinned(t *testing.T) {
 	}
 	if _, err := engine.Reference(context.Background(), priorID, "main", "stale-tip", 1024, "current"); err == nil {
 		t.Fatal("stale tip was accepted")
+	}
+	if _, err := engine.Reference(context.Background(), priorID, "main", "", 1024, "current"); err == nil {
+		t.Fatal("empty tip pin was accepted")
 	}
 }

@@ -248,6 +248,193 @@ func (f *FileIndex) DeleteWithIDs(cwd, path, expectedID string) ([]string, error
 	return ownedIDs, nil
 }
 
+// queryFileCacheKey returns a cheap identity for the project session corpus.
+// Unlike List it never opens SQLite databases, so unchanged search-cache hits
+// pay only directory walking and file metadata checks. WAL and journal files
+// are included so live-session writes invalidate the derived index.
+func (f *FileIndex) queryFileCacheKey(cwd string) (string, error) {
+	dirNames := []string{EncodeCWD(cwd), legacyEncodeCWD(cwd)}
+	seenDirs := make(map[string]bool, len(dirNames))
+	var identities []string
+	for _, dirName := range dirNames {
+		dir := filepath.Join(f.Root, dirName)
+		if seenDirs[dir] {
+			continue
+		}
+		seenDirs[dir] = true
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
+			}
+			if info.IsDir() {
+				if strings.HasSuffix(path, ".db.agents") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !info.Mode().IsRegular() {
+				return nil
+			}
+			base := path
+			switch {
+			case strings.HasSuffix(path, ".db"):
+			case strings.HasSuffix(path, ".db-wal"):
+				base = strings.TrimSuffix(path, "-wal")
+			case strings.HasSuffix(path, ".db-journal"):
+				base = strings.TrimSuffix(path, "-journal")
+			default:
+				return nil
+			}
+			if strings.Contains(base, ".db.agents"+string(filepath.Separator)) {
+				return nil
+			}
+			identities = append(identities, fmt.Sprintf("%s\x00%d\x00%d\x00%t", path, info.Size(), info.ModTime().UnixNano(), singleLink(info)))
+			return nil
+		})
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+	sort.Strings(identities)
+	h := sha256.New()
+	for _, identity := range identities {
+		_, _ = h.Write([]byte(identity))
+		_, _ = h.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+func (f *FileIndex) findByID(cwd, id string) (SessionInfo, error) {
+	if strings.TrimSpace(id) == "" {
+		return SessionInfo{}, ErrNotFound
+	}
+	dirNames := []string{EncodeCWD(cwd), legacyEncodeCWD(cwd)}
+	seenDirs := make(map[string]bool, len(dirNames))
+	var found SessionInfo
+	stop := errors.New("session: found query target")
+	for _, dirName := range dirNames {
+		dir := filepath.Join(f.Root, dirName)
+		if seenDirs[dir] {
+			continue
+		}
+		seenDirs[dir] = true
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
+			}
+			if info.IsDir() {
+				if strings.HasSuffix(path, ".db.agents") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".db") || !info.Mode().IsRegular() || !singleLink(info) {
+				return nil
+			}
+			candidate, include, inspectErr := inspectSQLiteSession(path, cwd, info.ModTime().UnixMilli())
+			if inspectErr == nil && include && candidate.ID == id {
+				found = candidate
+				return stop
+			}
+			return nil
+		})
+		if errors.Is(err, stop) {
+			return found, nil
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return SessionInfo{}, err
+		}
+	}
+	return SessionInfo{}, ErrNotFound
+}
+
+func (f *FileIndex) listRecentForQuery(cwd string, limit int) ([]SessionInfo, error) {
+	if limit < 1 {
+		return nil, nil
+	}
+	type candidate struct {
+		path      string
+		info      os.FileInfo
+		updatedAt int64
+	}
+	dirNames := []string{EncodeCWD(cwd), legacyEncodeCWD(cwd)}
+	seenDirs := make(map[string]bool, len(dirNames))
+	byPath := make(map[string]*candidate)
+	sidecarUpdated := make(map[string]int64)
+	var candidates []candidate
+	for _, dirName := range dirNames {
+		dir := filepath.Join(f.Root, dirName)
+		if seenDirs[dir] {
+			continue
+		}
+		seenDirs[dir] = true
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
+			}
+			if info.IsDir() {
+				if strings.HasSuffix(path, ".db.agents") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !info.Mode().IsRegular() || !singleLink(info) {
+				return nil
+			}
+			updatedAt := info.ModTime().UnixMilli()
+			switch {
+			case strings.HasSuffix(path, ".db"):
+				entry := &candidate{path: path, info: info, updatedAt: max(updatedAt, sidecarUpdated[path])}
+				byPath[path] = entry
+			case strings.HasSuffix(path, ".db-wal"):
+				base := strings.TrimSuffix(path, "-wal")
+				sidecarUpdated[base] = max(sidecarUpdated[base], updatedAt)
+				if entry := byPath[base]; entry != nil {
+					entry.updatedAt = max(entry.updatedAt, updatedAt)
+				}
+			case strings.HasSuffix(path, ".db-journal"):
+				base := strings.TrimSuffix(path, "-journal")
+				sidecarUpdated[base] = max(sidecarUpdated[base], updatedAt)
+				if entry := byPath[base]; entry != nil {
+					entry.updatedAt = max(entry.updatedAt, updatedAt)
+				}
+			}
+			return nil
+		})
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	for _, entry := range byPath {
+		candidates = append(candidates, *entry)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].updatedAt > candidates[j].updatedAt
+	})
+	out := make([]SessionInfo, 0, min(limit, len(candidates)))
+	for _, candidate := range candidates {
+		info, include, err := inspectSQLiteSession(candidate.path, cwd, candidate.updatedAt)
+		if err != nil || !include {
+			continue
+		}
+		out = append(out, info)
+		if len(out) == limit {
+			break
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt > out[j].UpdatedAt })
+	return out, nil
+}
+
 // List implements Index. Returns sessions sorted by most recently updated.
 // It searches the collision-resistant directory and the legacy flattened
 // directory, filtering the latter by its stored CWD so colliding projects can

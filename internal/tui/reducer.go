@@ -73,6 +73,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.loginMode && !m.loginProfileMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.sandboxSetup && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
 			switch {
 			case keyMatches(msg, m.keys.PageUp):
+				m.refreshTranscriptForced()
 				m.transcript.PageUp()
 				return m, nil
 			case keyMatches(msg, m.keys.PageDown):
@@ -80,6 +81,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.catchUpTranscriptAtBottom()
 				return m, nil
 			case keyMatches(msg, m.keys.Top):
+				m.refreshTranscriptForced()
 				m.transcript.GotoTop()
 				return m, nil
 			case keyMatches(msg, m.keys.Bottom):
@@ -87,6 +89,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.catchUpTranscriptAtBottom()
 				return m, nil
 			case keyMatches(msg, m.keys.LineUp):
+				m.refreshTranscriptForced()
 				m.transcript.ScrollUp(m.transcript.MouseWheelDelta)
 				return m, nil
 			case keyMatches(msg, m.keys.LineDown):
@@ -339,6 +342,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case oauthDoneMsg:
 		if m.oauthLoading {
 			m.oauthLoading = false
+			if m.oauthCancel != nil {
+				m.oauthCancel()
+			}
 			m.oauthCancel = nil
 			m.oauthEvents = nil
 			m.pickChatGPTAuth = false

@@ -121,12 +121,13 @@ func newEventBusWithCap(maxItems int) *eventBus {
 		maxItems = 1
 	}
 	b := &eventBus{
-		subs:      make(map[int]func(protocol.AgentEvent)),
-		wake:      make(chan struct{}, 1),
-		space:     make(chan struct{}, 1),
-		closingCh: make(chan struct{}),
-		maxItems:  maxItems,
-		closed:    make(chan struct{}),
+		subs:        make(map[int]func(protocol.AgentEvent)),
+		callbackIDs: make(map[uint64]struct{}),
+		wake:        make(chan struct{}, 1),
+		space:       make(chan struct{}, 1),
+		closingCh:   make(chan struct{}),
+		maxItems:    maxItems,
+		closed:      make(chan struct{}),
 	}
 	go b.dispatch()
 	return b
@@ -159,7 +160,11 @@ func (b *eventBus) dispatch() {
 			case b.space <- struct{}{}:
 			default:
 			}
-			fns := make([]func(protocol.AgentEvent), 0, len(b.subs))
+			type subscriber struct {
+				id int
+				fn func(protocol.AgentEvent)
+			}
+			fns := make([]subscriber, 0, len(b.subs))
 			if _, ok := item.(protocol.AgentEvent); ok {
 				ids := make([]int, 0, len(b.subs))
 				for id := range b.subs {
@@ -167,27 +172,62 @@ func (b *eventBus) dispatch() {
 				}
 				sort.Ints(ids)
 				for _, id := range ids {
-					fns = append(fns, b.subs[id])
+					fns = append(fns, subscriber{id: id, fn: b.subs[id]})
 				}
 			}
 			b.mu.Unlock()
 			switch v := item.(type) {
 			case protocol.AgentEvent:
-				for _, fn := range fns {
+				completed := make(chan int, len(fns))
+				pending := make(map[int]struct{}, len(fns))
+				for _, sub := range fns {
 					b.mu.Lock()
-					if b.closing {
-						b.mu.Unlock()
+					_, subscribed := b.subs[sub.id]
+					closing := b.closing
+					b.mu.Unlock()
+					if closing {
 						break
 					}
-					b.inCallback = true
-					b.mu.Unlock()
-					func() {
-						defer func() { _ = recover() }()
+					if !subscribed {
+						continue
+					}
+					pending[sub.id] = struct{}{}
+					go func(subscriberID int, fn func(protocol.AgentEvent)) {
+						id := currentGoroutineID()
+						b.mu.Lock()
+						b.callbackIDs[id] = struct{}{}
+						b.mu.Unlock()
+						defer func() {
+							_ = recover()
+							b.mu.Lock()
+							delete(b.callbackIDs, id)
+							b.mu.Unlock()
+							completed <- subscriberID
+						}()
 						fn(v.Clone())
-					}()
-					b.mu.Lock()
-					b.inCallback = false
-					b.mu.Unlock()
+					}(sub.id, sub.fn)
+				}
+				if len(pending) > 0 {
+					timer := time.NewTimer(eventSubscriberTimeout)
+					for len(pending) > 0 {
+						select {
+						case id := <-completed:
+							delete(pending, id)
+						case <-timer.C:
+							b.mu.Lock()
+							for id := range pending {
+								delete(b.subs, id)
+							}
+							b.mu.Unlock()
+							pending = nil
+						}
+					}
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
 				}
 			case eventBarrier:
 				close(v.done)
@@ -217,7 +257,8 @@ func (b *eventBus) InCallback() bool {
 	current := currentGoroutineID()
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.inCallback && current != 0 && current == atomic.LoadUint64(&b.dispatcherID)
+	_, ok := b.callbackIDs[current]
+	return current != 0 && ok
 }
 
 func (b *eventBus) Drain(ctx context.Context) error {
@@ -315,14 +356,33 @@ func coalescibleBusEvent(kind protocol.AgentEventType) bool {
 	}
 }
 
+func protectedBusEvent(kind protocol.AgentEventType) bool {
+	switch kind {
+	case protocol.EvToolStart, protocol.EvToolEnd,
+		protocol.EvTurnDone, protocol.EvError, protocol.EvAborted,
+		protocol.EvPermissionRequest, protocol.EvUserInputRequest,
+		protocol.EvPlanStarted, protocol.EvPlanCompleted,
+		protocol.EvCompactionStarted, protocol.EvCompactionDone:
+		return true
+	default:
+		return false
+	}
+}
+
 func (b *eventBus) Publish(ev protocol.AgentEvent) {
 	copyEvent := ev.Clone()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.closing {
-		return
-	}
-	if len(b.items) >= b.maxItems {
+	for {
+		b.mu.Lock()
+		if b.closing {
+			b.mu.Unlock()
+			return
+		}
+		if len(b.items) < b.maxItems {
+			b.items = append(b.items, copyEvent)
+			b.signal()
+			b.mu.Unlock()
+			return
+		}
 		removeAt := -1
 		for i, item := range b.items {
 			queued, ok := item.(protocol.AgentEvent)
@@ -331,25 +391,38 @@ func (b *eventBus) Publish(ev protocol.AgentEvent) {
 				break
 			}
 		}
-		if removeAt < 0 && !coalescibleBusEvent(copyEvent.Type) {
-			// Preserve drain barriers and make room for a lifecycle event by
-			// evicting the oldest ordinary event.
+		if removeAt < 0 && protectedBusEvent(copyEvent.Type) {
 			for i, item := range b.items {
-				if _, ok := item.(protocol.AgentEvent); ok {
+				queued, ok := item.(protocol.AgentEvent)
+				if ok && !protectedBusEvent(queued.Type) {
 					removeAt = i
 					break
 				}
 			}
 		}
-		if removeAt < 0 {
+		if removeAt >= 0 {
+			copy(b.items[removeAt:], b.items[removeAt+1:])
+			b.items[len(b.items)-1] = nil
+			b.items = b.items[:len(b.items)-1]
+			b.items = append(b.items, copyEvent)
+			b.signal()
+			b.mu.Unlock()
 			return
 		}
-		copy(b.items[removeAt:], b.items[removeAt+1:])
-		b.items[len(b.items)-1] = nil
-		b.items = b.items[:len(b.items)-1]
+		if !protectedBusEvent(copyEvent.Type) {
+			b.mu.Unlock()
+			return
+		}
+		// Protected terminal/pairing events apply bounded backpressure rather
+		// than dropping either the queued boundary or the new one. The dispatcher
+		// signals space as soon as it takes an item, independently of callbacks.
+		b.mu.Unlock()
+		select {
+		case <-b.space:
+		case <-b.closingCh:
+			return
+		}
 	}
-	b.items = append(b.items, copyEvent)
-	b.signal()
 }
 
 func newID() string {

@@ -23,6 +23,8 @@ const (
 	maxRoutingEventTools    = 20
 	maxPendingRootInputs    = 64
 	maxQueuedInputBytes     = 64 * 1024
+	maxPendingMailboxItems  = 64
+	maxPendingMailboxBytes  = 1 << 20
 	automaticTurnDelay      = 25 * time.Millisecond
 	goalTransientRetryDelay = 250 * time.Millisecond
 	maxGoalTransientRetries = 1
@@ -128,15 +130,18 @@ type Agent struct {
 	// mailboxMu protects attributed collaboration messages. Producers only
 	// enqueue; the admitted agent loop is the sole writer that drains them into
 	// the mutable session cursor at safe boundaries.
-	mailboxMu        sync.Mutex
-	mailboxPersistMu sync.Mutex
-	mailbox          []protocol.AgentMessage
-	mailboxUnread    bool
-	mailboxClosed    bool
-	opts             Options
-	model            protocol.Model
-	bus              *eventBus
-	running          bool
+	mailboxMu          sync.Mutex
+	mailboxPersistMu   sync.Mutex
+	mailbox            []protocol.AgentMessage
+	mailboxBytes       int
+	mailboxUnreadItems int
+	mailboxUnreadBytes int
+	mailboxUnread      bool
+	mailboxClosed      bool
+	opts               Options
+	model              protocol.Model
+	bus                *eventBus
+	running            bool
 	// tool results retained between the tool_use assistant message and the
 	// continuation provider call. pendingToolError forces synthetic results for
 	// an unsafe batch, such as length-truncated tool arguments.
@@ -239,7 +244,10 @@ const maxCompactionRetrievalReferences = 24
 // Event bus
 // ---------------------------------------------------------------------------
 
-const eventBusMaxItems = 1024
+const (
+	eventBusMaxItems       = 1024
+	eventSubscriberTimeout = time.Second
+)
 
 type eventBus struct {
 	mu           sync.Mutex
@@ -251,7 +259,7 @@ type eventBus struct {
 	items        []any
 	maxItems     int
 	closing      bool
-	inCallback   bool
+	callbackIDs  map[uint64]struct{}
 	dispatcherID uint64
 	closed       chan struct{}
 }

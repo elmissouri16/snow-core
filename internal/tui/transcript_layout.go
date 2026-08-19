@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -13,6 +14,43 @@ import (
 	"github.com/snow-core/snow/internal/trust"
 	"github.com/snow-core/snow/pkg/protocol"
 )
+
+const maxStreamingTranscriptSnapshotBytes = 512 << 10
+
+func boundedRenderedTail(value string, maxBytes int) string {
+	if maxBytes <= 0 || len(value) <= maxBytes {
+		return value
+	}
+	start := len(value) - maxBytes
+	for start < len(value) && !utf8.RuneStart(value[start]) {
+		start++
+	}
+	// Begin at a rendered line boundary so the tail cannot start in the middle
+	// of a CSI/SGR escape. Explicit resets prevent styles active in the omitted
+	// prefix from leaking into the retained viewport or following UI.
+	if newline := strings.IndexByte(value[start:], '\n'); newline >= 0 {
+		start += newline + 1
+	} else if escape := strings.LastIndexByte(value[:start], '\x1b'); escape >= 0 {
+		// If the byte cutoff landed inside the final ANSI sequence, advance past
+		// its terminator. Generated transcript styling uses CSI sequences.
+		end := escape + 1
+		if end < len(value) && value[end] == '[' {
+			end++
+			for end < len(value) && (value[end] < 0x40 || value[end] > 0x7e) {
+				end++
+			}
+			if end < len(value) {
+				end++
+			}
+		} else if end < len(value) {
+			end++
+		}
+		if end > start {
+			start = end
+		}
+	}
+	return "\x1b[0m" + value[start:] + "\x1b[0m"
+}
 
 func (m *Model) refreshTranscriptWithForce(force bool) {
 	if m.batchingEvents {
@@ -50,26 +88,38 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 				// equivalent to reflowing the complete transcript at this width.
 				wrapped = lipgloss.NewStyle().Width(width).Render(wrapped)
 			}
+			var base strings.Builder
+			base.Grow(len(m.transcriptBase) + len(wrapped) + 1)
+			base.WriteString(m.transcriptBase)
 			if m.transcriptBase != "" {
-				m.transcriptBase += "\n"
+				base.WriteByte('\n')
 			}
-			m.transcriptBase += wrapped
+			base.WriteString(wrapped)
+			m.transcriptBase = base.String()
 		}
 		m.transcriptBaseSynced = len(stableLines)
 		m.transcriptBaseWidth = width
 		m.transcriptBaseDirty = false
 		m.transcriptBaseAppend = false
 	}
-	content := m.transcriptBase
-	if live := m.liveText(); live != "" {
-		if content != "" {
-			content += "\n"
-		}
-		if width > 0 {
-			live = lipgloss.NewStyle().Width(width).Render(live)
-		}
-		content += live
+	live := m.liveText()
+	if live != "" && width > 0 {
+		live = lipgloss.NewStyle().Width(width).Render(live)
 	}
+	baseContent := m.transcriptBase
+	if live != "" && !force && len(baseContent) > maxStreamingTranscriptSnapshotBytes {
+		baseContent = styleFooter.Render("── older transcript hidden while streaming; scroll up to load ──") + "\n" + boundedRenderedTail(baseContent, maxStreamingTranscriptSnapshotBytes)
+	}
+	var contentBuilder strings.Builder
+	contentBuilder.Grow(len(baseContent) + len(live) + 1)
+	contentBuilder.WriteString(baseContent)
+	if live != "" {
+		if baseContent != "" {
+			contentBuilder.WriteByte('\n')
+		}
+		contentBuilder.WriteString(live)
+	}
+	content := contentBuilder.String()
 	if !m.transcriptDirty && content == m.transcriptContent {
 		return
 	}

@@ -147,6 +147,27 @@ func TestWheelBurstReachesExactViewportOffset(t *testing.T) {
 	}
 }
 
+func TestStreamingTranscriptUsesBoundedTailUntilForced(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width, m.height = 80, 20
+	m.layout()
+	m.transcriptBase = "old-head\n" + strings.Repeat("history\n", 100000) + "recent-tail"
+	m.transcriptBaseWidth = m.transcript.Width
+	m.transcriptBaseDirty = false
+	m.transcriptDirty = true
+	m.assistantBuf.WriteString("live output")
+	m.refreshTranscript()
+	content := stripANSI(m.transcriptContent)
+	if len(content) > maxStreamingTranscriptSnapshotBytes+4096 || strings.Contains(content, "old-head") || !strings.Contains(content, "recent-tail") || !strings.Contains(content, "live output") {
+		t.Fatalf("streaming snapshot was not bounded to the tail: bytes=%d", len(content))
+	}
+	m.refreshTranscriptForced()
+	if !strings.Contains(stripANSI(m.transcriptContent), "old-head") {
+		t.Fatal("forced refresh did not restore complete transcript history")
+	}
+}
+
 func TestAdaptiveStreamFlushIntervals(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	if got := m.transcriptFlushDelay(); got != streamFlushFast {

@@ -40,6 +40,13 @@ type Interaction interface {
 	Progress(Progress)
 }
 
+// PromptAvailability is an optional capability signal for interactions that
+// cannot collect text input. Drivers use it to avoid starting fallback prompt
+// goroutines that can never produce a response.
+type PromptAvailability interface {
+	PromptAvailable() bool
+}
+
 // NopInteraction is useful for non-interactive status/runtime operations.
 type NopInteraction struct{}
 
@@ -48,6 +55,7 @@ func (NopInteraction) Prompt(context.Context, Prompt) (Response, error) {
 }
 func (NopInteraction) OpenURL(context.Context, string) error { return ErrInteractionUnavailable }
 func (NopInteraction) Progress(Progress)                     {}
+func (NopInteraction) PromptAvailable() bool                 { return false }
 
 var ErrInteractionUnavailable = interactionError("auth: interactive login input is unavailable")
 
