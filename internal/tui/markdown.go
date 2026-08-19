@@ -27,6 +27,28 @@ type mdRenderer struct {
 
 func newMarkdownRenderer() *mdRenderer { return &mdRenderer{} }
 
+// clearCache releases the last raw and rendered documents while retaining the
+// width-specific renderer. Finalized transcript rows own their rendered output,
+// so keeping these duplicate strings would only extend their lifetime.
+func (r *mdRenderer) clearCache() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.lastRaw = ""
+	r.lastOut = ""
+	r.lastW = 0
+	r.mu.Unlock()
+}
+
+func (m *Model) clearFinalizedMarkdownCaches() {
+	if m == nil {
+		return
+	}
+	m.md.clearCache()
+	m.thinkingMD.clearCache()
+}
+
 func newThinkingMarkdownRenderer() *mdRenderer {
 	style := styles.DarkStyleConfig
 	muted := "245"

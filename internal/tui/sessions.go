@@ -109,6 +109,7 @@ func boundedInlineHydration(hydrated []string, common int, switched bool) []stri
 }
 
 func (m *Model) hydrateSession() {
+	defer m.clearFinalizedMarkdownCaches()
 	m.clearTranscriptSelection()
 	if m.app == nil || m.app.Agent == nil {
 		m.lines = nil

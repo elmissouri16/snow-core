@@ -43,6 +43,7 @@ func (m *Model) refreshSubagentFleet() tea.Cmd {
 	if !m.subagentFleetOpen || m.subagentFleetLoading {
 		return nil
 	}
+	m.subagentFleetMD.clearCache()
 	m.subagentFleetLoading = true
 	m.subagentFleetError = ""
 	// Invalidate an in-flight selected transcript immediately. The refreshed
@@ -53,6 +54,7 @@ func (m *Model) refreshSubagentFleet() tea.Cmd {
 }
 
 func (m *Model) loadSubagentFleetDetail() tea.Cmd {
+	m.subagentFleetMD.clearCache()
 	target := m.subagentFleetSelectedPath()
 	if target == "" {
 		m.subagentFleetDetailLoading = false
@@ -186,6 +188,7 @@ func (m *Model) closeSubagentFleet() {
 	m.subagentFleetError = ""
 	m.subagentFleetDetailError = ""
 	m.subagentFleetWarning = ""
+	m.subagentFleetMD.clearCache()
 }
 
 func (m *Model) subagentFleetSelectedPath() string {

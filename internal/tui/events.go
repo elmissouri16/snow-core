@@ -547,6 +547,7 @@ func (m *Model) finalizeThinking() {
 		return
 	}
 	m.appendTranscriptLine(m.renderThinkingBody(m.thinkingBuf.String()))
+	m.thinkingMD.clearCache()
 	m.transcriptBaseDirty = true
 	m.thinkingBuf.Reset()
 	m.refreshTranscript()
@@ -564,6 +565,7 @@ func (m *Model) finishAssistant() {
 func (m *Model) finalizeAssistant() {
 	if m.assistantBuf.Len() > 0 {
 		m.appendTranscriptLine(m.renderAssistantBody(m.assistantBuf.String()))
+		m.md.clearCache()
 		m.transcriptBaseDirty = true
 		m.assistantBuf.Reset()
 		m.refreshTranscript()
@@ -589,6 +591,7 @@ func (m *Model) finalizePlan() {
 	text := m.planBuf.String()
 	m.latestPlan = text
 	m.appendTranscriptLine(m.renderPlanBody(text))
+	m.md.clearCache()
 	m.transcriptBaseDirty = true
 	m.planBuf.Reset()
 	m.currentPlanID = ""

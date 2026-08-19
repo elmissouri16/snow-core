@@ -17,6 +17,23 @@ import (
 
 const maxStreamingTranscriptSnapshotBytes = 512 << 10
 
+// joinTranscriptContent avoids copying the complete stable transcript when no
+// live tail exists. A live snapshot is still copied into a right-sized buffer
+// so renderer scratch capacity cannot remain pinned by transcriptContent.
+func joinTranscriptContent(base, live string) string {
+	if live == "" {
+		return base
+	}
+	var content strings.Builder
+	content.Grow(len(base) + len(live) + 1)
+	content.WriteString(base)
+	if base != "" {
+		content.WriteByte('\n')
+	}
+	content.WriteString(live)
+	return content.String()
+}
+
 func boundedRenderedTail(value string, maxBytes int) string {
 	if maxBytes <= 0 || len(value) <= maxBytes {
 		return value
@@ -110,16 +127,7 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 	if live != "" && !force && len(baseContent) > maxStreamingTranscriptSnapshotBytes {
 		baseContent = styleFooter.Render("── older transcript hidden while streaming; scroll up to load ──") + "\n" + boundedRenderedTail(baseContent, maxStreamingTranscriptSnapshotBytes)
 	}
-	var contentBuilder strings.Builder
-	contentBuilder.Grow(len(baseContent) + len(live) + 1)
-	contentBuilder.WriteString(baseContent)
-	if live != "" {
-		if baseContent != "" {
-			contentBuilder.WriteByte('\n')
-		}
-		contentBuilder.WriteString(live)
-	}
-	content := contentBuilder.String()
+	content := joinTranscriptContent(baseContent, live)
 	if !m.transcriptDirty && content == m.transcriptContent {
 		return
 	}
