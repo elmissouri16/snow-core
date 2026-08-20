@@ -448,7 +448,7 @@ func (m *Model) subagentFleetLayout() subagentFleetLayout {
 func (m *Model) renderSubagentFleetModal() string {
 	layout := m.subagentFleetLayout()
 	header := m.renderSubagentFleetHeader(layout.innerWidth)
-	footer := styleFooter.Render(" ↑/↓ or j/k select · PgUp/PgDn detail · Home/End · r refresh · Esc close ")
+	footer := styleFooter.Render(" ↑/↓ or j/k select · PgUp/PgDn detail · Home/End · r refresh · " + m.keys.Processes.Help().Key + " processes · Esc close ")
 	var body string
 	if layout.wide {
 		left := lipgloss.NewStyle().Width(layout.listWidth).Height(layout.listHeight).MaxHeight(layout.listHeight).Render(m.renderSubagentFleetList(layout.listWidth, layout.listHeight))

@@ -197,6 +197,8 @@ described in [Configuration](configuration.md).
 | `Ctrl+V` | Paste through the active textarea | Paste through the active textarea |
 | `Shift+Tab` | Toggle Default/Plan mode | Queue mode change until `turn_done` |
 | `Ctrl+T` | Open the active model's thinking-effort picker | Open the picker; the selected effort applies to subsequent provider requests |
+| `Alt+A` | Open the subagent fleet inspector | Open the inspector without interrupting the active turn |
+| `Alt+P` | Open the managed-process fleet inspector | Open the inspector without interrupting the active turn |
 | `Ctrl+C` | Quit | Abort, clear queued work, restore queued composer text, and defer active goal continuation |
 | `Esc` | Close modal/picker | Abort active work and defer active goal continuation, or reject the active input modal |
 | `Ctrl+D` | Quit when the composer is empty | — |

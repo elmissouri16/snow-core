@@ -163,12 +163,15 @@ func TestConfiguredHelpAndEmergencyEscape(t *testing.T) {
 }
 
 func TestKeybindingOverridesEmergencyAndValidation(t *testing.T) {
-	keys, err := applyKeybindingOverrides(tuiKeys, map[string][]string{"submit": {"ctrl+s"}, "close": {"q"}})
+	keys, err := applyKeybindingOverrides(tuiKeys, map[string][]string{"submit": {"ctrl+s"}, "agents": {"ctrl+g"}, "processes": {"ctrl+p"}, "close": {"q"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if keys.Submit.Keys()[0] != "ctrl+s" {
 		t.Fatalf("submit=%v", keys.Submit.Keys())
+	}
+	if keys.Agents.Keys()[0] != "ctrl+g" || keys.Processes.Keys()[0] != "ctrl+p" {
+		t.Fatalf("fleet shortcuts: agents=%v processes=%v", keys.Agents.Keys(), keys.Processes.Keys())
 	}
 	foundEsc := false
 	for _, value := range keys.Close.Keys() {
@@ -178,6 +181,9 @@ func TestKeybindingOverridesEmergencyAndValidation(t *testing.T) {
 	}
 	if !foundEsc {
 		t.Fatalf("close=%v", keys.Close.Keys())
+	}
+	if _, err := applyKeybindingOverrides(tuiKeys, map[string][]string{"agents": {"j"}}); err == nil {
+		t.Fatal("fleet shortcut shadowing picker navigation accepted")
 	}
 	if _, err := applyKeybindingOverrides(tuiKeys, map[string][]string{"unknown": {"x"}}); err == nil {
 		t.Fatal("unknown action accepted")

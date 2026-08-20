@@ -319,7 +319,7 @@ func (m *Model) processFleetLayout() processFleetLayout {
 func (m *Model) renderProcessFleetModal() string {
 	layout := m.processFleetLayout()
 	header := m.renderProcessFleetHeader(layout.innerWidth)
-	footer := styleFooter.Render(" ↑/↓ or j/k select · PgUp/PgDn output · Home/End · r refresh · Esc close ")
+	footer := styleFooter.Render(" ↑/↓ or j/k select · PgUp/PgDn output · Home/End · r refresh · " + m.keys.Agents.Help().Key + " agents · Esc close ")
 	var body string
 	if layout.wide {
 		left := lipgloss.NewStyle().Width(layout.listWidth).Height(layout.listHeight).MaxHeight(layout.listHeight).Render(m.renderProcessFleetList(layout.listWidth, layout.listHeight))

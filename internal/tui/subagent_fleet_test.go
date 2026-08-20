@@ -43,7 +43,7 @@ func TestSubagentFleetOpenRenderNavigateAndClose(t *testing.T) {
 	if got := strings.Count(rendered, "\n") + 1; got != m.height {
 		t.Fatalf("fleet frame height=%d want=%d", got, m.height)
 	}
-	for _, want := range []string{"Subagent fleet inspector", "/root/one", "/root/two", "Live activity", "capacity 1/4"} {
+	for _, want := range []string{"Subagent fleet inspector", "/root/one", "/root/two", "Live activity", "capacity 1/4", "alt+p processes"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("fleet view missing %q:\n%s", want, view)
 		}
@@ -277,6 +277,34 @@ func TestSubagentFleetMissingTargetDoesNotSelectAnotherAgent(t *testing.T) {
 	cmd := m.applySubagentFleetList(subagentFleetListMsg{generation: 4, target: "/root/missing", list: m.subagentFleetList})
 	if cmd != nil || !strings.Contains(m.subagentFleetError, "not found") || m.subagentFleetDetailLoading {
 		t.Fatalf("missing target: cmd=%v error=%q loading=%v", cmd != nil, m.subagentFleetError, m.subagentFleetDetailLoading)
+	}
+}
+
+func TestFleetShortcutsOpenAndSwitchInspectors(t *testing.T) {
+	enabled := true
+	testHome(t)
+	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(), Subagents: &enabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	m := newModel(context.Background(), app.Options{})
+	m.app = a
+	m.busy = true
+
+	altA := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}, Alt: true}
+	_, cmd := m.handleKey(altA)
+	if !m.subagentFleetOpen || m.processFleetOpen || cmd == nil {
+		t.Fatalf("alt+a: agents=%v processes=%v cmd=%v", m.subagentFleetOpen, m.processFleetOpen, cmd != nil)
+	}
+	altP := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}, Alt: true}
+	_, cmd = m.handleKey(altP)
+	if m.subagentFleetOpen || !m.processFleetOpen || cmd == nil {
+		t.Fatalf("alt+p: agents=%v processes=%v cmd=%v", m.subagentFleetOpen, m.processFleetOpen, cmd != nil)
+	}
+	_, cmd = m.handleKey(altP)
+	if !m.processFleetOpen || cmd != nil {
+		t.Fatalf("repeated alt+p: open=%v cmd=%v", m.processFleetOpen, cmd != nil)
 	}
 }
 

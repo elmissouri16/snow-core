@@ -39,7 +39,7 @@ func TestProcessFleetRenderNavigateAndClose(t *testing.T) {
 	if got := strings.Count(rendered, "\n") + 1; got != m.height {
 		t.Fatalf("process fleet frame height=%d want=%d", got, m.height)
 	}
-	for _, want := range []string{"Process fleet inspector", "dev-server", "test-watch", "Combined stdout / stderr", "listening on :3000", `\x1b[31mraw escape`, "1 running"} {
+	for _, want := range []string{"Process fleet inspector", "dev-server", "test-watch", "Combined stdout / stderr", "listening on :3000", `\x1b[31mraw escape`, "1 running", "alt+a agents"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("process fleet missing %q:\n%s", want, plain)
 		}

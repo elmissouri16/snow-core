@@ -18,6 +18,8 @@ also include the generated GitHub comparison for the tagged commit.
   managed process groups without persisting or reattaching PIDs. The TUI now
   exposes `/processes [id|name]`, an auto-refreshing fleet-style inspector with
   a selectable process list and escaped, scrollable combined stdout/stderr.
+  `Alt+P` opens the process fleet and `Alt+A` opens the subagent fleet, including
+  during active turns; both bindings are configurable.
 
 ### Removed
 

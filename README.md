@@ -185,7 +185,8 @@ The TUI uses Bubble Tea's supported full-window pattern: alternate screen,
 sticky header/footer, and a Bubbles transcript viewport. `/processes` opens an
 auto-refreshing process fleet inspector with a selectable managed-process list
 and a live, scrollable combined stdout/stderr panel; `/processes ID_OR_NAME`
-preselects one record. Output is
+preselects one record. `Alt+P` opens the process fleet directly, while `Alt+A`
+opens the subagent fleet; both remain available during active turns. Output is
 escaped before rendering so subprocess control sequences cannot become terminal
 commands. Mouse mode defaults on
 so wheel/trackpad gestures scroll Snow's transcript viewport instead of terminal

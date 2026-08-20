@@ -354,6 +354,27 @@ func (m *Model) quitCmd() tea.Cmd {
 	return tea.Quit
 }
 
+func (m *Model) handleFleetShortcut(msg tea.KeyMsg) (bool, tea.Cmd) {
+	switch {
+	case keyMatches(msg, m.keys.Agents):
+		if m.subagentFleetOpen {
+			return true, nil
+		}
+		if m.app.Subagents == nil {
+			m.lastStatus = "subagents are disabled (enable them in /settings or start with --subagents)"
+			return true, nil
+		}
+		return true, m.openSubagentFleet("")
+	case keyMatches(msg, m.keys.Processes):
+		if m.processFleetOpen {
+			return true, nil
+		}
+		return true, m.openProcessFleet("")
+	default:
+		return false, nil
+	}
+}
+
 // handleKey processes key presses, the command palette, and login capture.
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.trustPending {
@@ -449,6 +470,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleUserInputKey(msg)
 	}
 
+	if m.processFleetOpen || m.subagentFleetOpen {
+		if handled, cmd := m.handleFleetShortcut(msg); handled {
+			return m, cmd
+		}
+	}
 	if m.processFleetOpen {
 		return m.handleProcessFleetKey(msg)
 	}
@@ -668,8 +694,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Top-level shortcuts open the thinking picker or cycle collaboration mode.
-	// Every modal/completion path above retains its existing navigation semantics.
+	// Top-level shortcuts open fleet inspectors or the thinking picker, or cycle
+	// collaboration mode. Every modal/completion path above retains its existing
+	// navigation semantics.
+	if handled, cmd := m.handleFleetShortcut(msg); handled {
+		return m, cmd
+	}
 	if keyMatches(msg, m.keys.Thinking) {
 		return m.startThinkingPick()
 	}

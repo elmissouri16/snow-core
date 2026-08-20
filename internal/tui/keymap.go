@@ -21,6 +21,8 @@ type tuiKeyMap struct {
 	Quit           key.Binding
 	Mode           key.Binding
 	Thinking       key.Binding
+	Agents         key.Binding
+	Processes      key.Binding
 	PageUp         key.Binding
 	PageDown       key.Binding
 	Top            key.Binding
@@ -52,6 +54,8 @@ var tuiKeys = tuiKeyMap{
 	Quit:           key.NewBinding(key.WithKeys("ctrl+c", "ctrl+d"), key.WithHelp("ctrl+c/ctrl+d", "quit")),
 	Mode:           key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "mode")),
 	Thinking:       key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "thinking")),
+	Agents:         key.NewBinding(key.WithKeys("alt+a"), key.WithHelp("alt+a", "agent fleet")),
+	Processes:      key.NewBinding(key.WithKeys("alt+p"), key.WithHelp("alt+p", "process fleet")),
 	PageUp:         key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")),
 	PageDown:       key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
 	Top:            key.NewBinding(key.WithKeys("home"), key.WithHelp("home", "top")),
@@ -82,7 +86,7 @@ func (k tuiKeyMap) ShortHelp() []key.Binding {
 // FullHelp implements bubbles/help.KeyMap for the detailed /help output.
 func (k tuiKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Submit, k.FollowUp, k.Newline, k.Paste, k.Abort, k.Quit, k.Mode, k.Thinking},
+		{k.Submit, k.FollowUp, k.Newline, k.Paste, k.Abort, k.Quit, k.Mode, k.Thinking, k.Agents, k.Processes},
 		{k.PageUp, k.PageDown, k.Top, k.Bottom, k.LineUp, k.LineDown},
 		{k.PickerUp, k.PickerDown, k.PickerNext, k.PickerPrev, k.Accept, k.Close},
 		{k.BranchFork, k.BranchRename, k.BranchDelete, k.Confirm},
@@ -91,7 +95,7 @@ func (k tuiKeyMap) FullHelp() [][]key.Binding {
 
 func applyKeybindingOverrides(base tuiKeyMap, overrides map[string][]string) (tuiKeyMap, error) {
 	targets := map[string]*key.Binding{
-		"submit": &base.Submit, "follow_up": &base.FollowUp, "newline": &base.Newline, "paste": &base.Paste, "abort": &base.Abort, "quit": &base.Quit, "toggle_mode": &base.Mode, "thinking": &base.Thinking,
+		"submit": &base.Submit, "follow_up": &base.FollowUp, "newline": &base.Newline, "paste": &base.Paste, "abort": &base.Abort, "quit": &base.Quit, "toggle_mode": &base.Mode, "thinking": &base.Thinking, "agents": &base.Agents, "processes": &base.Processes,
 		"page_up": &base.PageUp, "page_down": &base.PageDown, "top": &base.Top, "bottom": &base.Bottom, "line_up": &base.LineUp, "line_down": &base.LineDown,
 		"picker_up": &base.PickerUp, "picker_down": &base.PickerDown, "picker_previous": &base.PickerPrev, "picker_next": &base.PickerNext,
 		"picker_page_up": &base.PickerPageUp, "picker_page_down": &base.PickerPageDown, "picker_top": &base.PickerTop, "picker_bottom": &base.PickerBottom,
@@ -132,15 +136,18 @@ func applyKeybindingOverrides(base tuiKeyMap, overrides map[string][]string) (tu
 	base.Abort = ensureBindingKey(base.Abort, "esc")
 	base.Quit = ensureBindingKey(base.Quit, "ctrl+c")
 	base.Close = ensureBindingKey(base.Close, "esc")
-	if err := validateBindingCollisions(map[string]key.Binding{"submit": base.Submit, "newline": base.Newline, "paste": base.Paste, "toggle_mode": base.Mode, "thinking": base.Thinking, "abort": base.Abort}); err != nil {
+	if err := validateBindingCollisions(map[string]key.Binding{"submit": base.Submit, "newline": base.Newline, "paste": base.Paste, "toggle_mode": base.Mode, "thinking": base.Thinking, "agents": base.Agents, "processes": base.Processes, "abort": base.Abort}); err != nil {
 		return base, err
 	}
 	// Busy submit/steer and follow-up share a context; newline is deliberately
 	// excluded because alt+enter is a newline only while idle.
-	if err := validateBindingCollisions(map[string]key.Binding{"submit": base.Submit, "follow_up": base.FollowUp, "thinking": base.Thinking, "abort": base.Abort}); err != nil {
+	if err := validateBindingCollisions(map[string]key.Binding{"submit": base.Submit, "follow_up": base.FollowUp, "thinking": base.Thinking, "agents": base.Agents, "processes": base.Processes, "abort": base.Abort}); err != nil {
 		return base, err
 	}
-	if err := validateBindingCollisions(map[string]key.Binding{"picker_up": base.PickerUp, "picker_down": base.PickerDown, "picker_previous": base.PickerPrev, "picker_next": base.PickerNext, "picker_page_up": base.PickerPageUp, "picker_page_down": base.PickerPageDown, "picker_top": base.PickerTop, "picker_bottom": base.PickerBottom, "accept": base.Accept, "close": base.Close, "branch_fork": base.BranchFork, "branch_rename": base.BranchRename, "branch_delete": base.BranchDelete, "confirm": base.Confirm}); err != nil {
+	if err := validateBindingCollisions(map[string]key.Binding{"agents": base.Agents, "processes": base.Processes, "quit": base.Quit}); err != nil {
+		return base, err
+	}
+	if err := validateBindingCollisions(map[string]key.Binding{"picker_up": base.PickerUp, "picker_down": base.PickerDown, "picker_previous": base.PickerPrev, "picker_next": base.PickerNext, "picker_page_up": base.PickerPageUp, "picker_page_down": base.PickerPageDown, "picker_top": base.PickerTop, "picker_bottom": base.PickerBottom, "accept": base.Accept, "close": base.Close, "branch_fork": base.BranchFork, "branch_rename": base.BranchRename, "branch_delete": base.BranchDelete, "confirm": base.Confirm, "agents": base.Agents, "processes": base.Processes}); err != nil {
 		return base, err
 	}
 	for _, mandatory := range []struct {
