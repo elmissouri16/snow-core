@@ -9,10 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/snow-core/snow/internal/config"
-	internalmcp "github.com/snow-core/snow/internal/mcp"
-	"github.com/snow-core/snow/internal/tools"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
+	"github.com/elmissouri16/snow-core/internal/config"
+	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 )
 
 func mcpCacheCmd() *cobra.Command {

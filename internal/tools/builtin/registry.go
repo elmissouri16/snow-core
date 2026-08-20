@@ -5,8 +5,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/tools"
 )
 
 // Options configure the builtin tool set.

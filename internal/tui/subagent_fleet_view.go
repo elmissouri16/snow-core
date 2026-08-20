@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func (m *Model) openSubagentFleet(target string) tea.Cmd {

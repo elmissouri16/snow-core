@@ -15,14 +15,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/snow-core/snow/internal/agent"
-	"github.com/snow-core/snow/internal/app"
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/provider/chatgpt"
-	internalsandbox "github.com/snow-core/snow/internal/sandbox"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/trust"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/agent"
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/provider/chatgpt"
+	internalsandbox "github.com/elmissouri16/snow-core/internal/sandbox"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/trust"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // Styles use the adaptive default palette until a model applies the selected

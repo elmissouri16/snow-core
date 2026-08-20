@@ -548,6 +548,8 @@ controlled inherited environment.
 
 ## Related documents
 
+- [Security reporting policy](../SECURITY.md) — private vulnerability disclosure
+- [Release policy](releases.md) — supported alpha versions and release handling
 - [Sandboxed Bash with smolvm](sandbox.md) — optional Bash-only VM backend
 - [Configuration](configuration.md) — trust, auth, and sandbox storage paths
 - [Plugins](plugins.md) — external plugin lifecycle and risk declarations

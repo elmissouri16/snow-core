@@ -12,7 +12,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
-	"github.com/snow-core/snow/internal/config"
+	"github.com/elmissouri16/snow-core/internal/config"
 )
 
 func TestPinnedSmolVMReleaseDownloadContract(t *testing.T) {

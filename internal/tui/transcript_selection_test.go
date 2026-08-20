@@ -10,7 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
 
-	"github.com/snow-core/snow/internal/app"
+	"github.com/elmissouri16/snow-core/internal/app"
 )
 
 func newTranscriptSelectionTestModel(t *testing.T, lines []string) *Model {

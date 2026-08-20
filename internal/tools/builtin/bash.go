@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/snow-core/snow/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/tools"
 )
 
 const (

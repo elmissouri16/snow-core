@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // Authenticated is the sole credential boundary presented to an Agent. It

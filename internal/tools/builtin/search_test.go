@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/snow-core/snow/internal/config"
+	"github.com/elmissouri16/snow-core/internal/config"
 )
 
 func searchArgs(t *testing.T, value any) json.RawMessage {

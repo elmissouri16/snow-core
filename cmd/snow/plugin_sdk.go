@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/snow-core/snow/internal/pluginsdk"
+	"github.com/elmissouri16/snow-core/internal/pluginsdk"
 )
 
 func pluginSDKCmd() *cobra.Command {

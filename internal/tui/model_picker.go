@@ -7,10 +7,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/snow-core/snow/internal/app"
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // handleModelPick navigates and searches the /model picker. Slash enters search

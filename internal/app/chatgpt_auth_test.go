@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/snow-core/snow/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/auth"
 )
 
 func TestNoSessionStillUsesConfiguredAuthStore(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/snow-core/snow/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/tools"
 )
 
 // Tool adapts a plugin Host into the tools.Tool interface so plugins can be

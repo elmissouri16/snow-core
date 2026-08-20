@@ -283,7 +283,9 @@ Remediated tree:
   packages with repeated runs up to `-count=20` passed
 - `git diff --check` passed
 
-`staticcheck` and `govulncheck` were not installed in the audit environment.
+`staticcheck` and `govulncheck` were not installed in the original audit
+environment. Alpha release CI now runs pinned `govulncheck` separately; this
+historical note records only the tooling available during that audit.
 
 ## Related documents
 

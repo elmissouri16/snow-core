@@ -12,10 +12,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/snow-core/snow/internal/app"
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 type rpcQueueProvider struct {
@@ -157,9 +157,10 @@ func TestRPCPromptAndEvents(t *testing.T) {
 	var out bytes.Buffer
 
 	a, err := app.New(context.Background(), app.Options{
-		Provider:   "fake",
-		NoSession:  true,
-		Permission: "allow",
+		Provider:     "fake",
+		NoSession:    true,
+		Permission:   "allow",
+		BuildVersion: "0.1.0-alpha.test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +185,7 @@ func TestRPCPromptAndEvents(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &ready); err != nil {
 		t.Fatal(err)
 	}
-	if ready.Type != protocol.RPCTypeReady || ready.ProtocolVersion != protocol.RPCProtocolVersion {
+	if ready.Type != protocol.RPCTypeReady || ready.ProtocolVersion != protocol.RPCProtocolVersion || ready.SnowVersion != "0.1.0-alpha.test" {
 		t.Fatalf("bad first frame: %+v", ready)
 	}
 	var resp Response

@@ -13,16 +13,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/snow-core/snow/internal/app"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/subagent"
-	"github.com/snow-core/snow/internal/worktree"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/subagent"
+	"github.com/elmissouri16/snow-core/internal/worktree"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-// New creates an RPC server with development-version metadata.
+// New creates an RPC server using the assembled app's build metadata.
 func New(ctx context.Context, a *app.App, in io.Reader, out io.Writer) *Server {
-	return NewWithOptions(ctx, a, in, out, ServerOptions{SnowVersion: "dev"})
+	snowVersion := "dev"
+	if a != nil && a.BuildVersion != "" {
+		snowVersion = a.BuildVersion
+	}
+	return NewWithOptions(ctx, a, in, out, ServerOptions{SnowVersion: snowVersion})
 }
 
 // NewWithOptions creates an RPC server.
@@ -957,42 +961,4 @@ func (s *Server) recordWriteErr(err error) {
 		s.writeErr = err
 		s.writeFailOnce.Do(func() { close(s.writeFailed) })
 	}
-}
-
-// Main is the RPC entry point used by embedders that do not supply build metadata.
-func Main(ctx context.Context, opts app.Options) error {
-	return MainWithVersion(ctx, opts, "dev")
-}
-
-// MainWithVersion is the RPC entry point used by cmd/snow --mode rpc.
-func MainWithVersion(ctx context.Context, opts app.Options, snowVersion string) (err error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	a, err := app.New(ctx, opts)
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, a.Close()) }()
-	for _, diagnostic := range a.Diagnostics {
-		fmt.Fprintf(os.Stderr, "config warning: %s: %s\n", diagnostic.Path, diagnostic.Message)
-	}
-
-	// Stream agent events to stdout as JSONL through the server's locked
-	// writer so responses and events can never interleave corruptly.
-	srv := NewWithOptions(ctx, a, os.Stdin, os.Stdout, ServerOptions{SnowVersion: snowVersion})
-	if err := srv.announceReady(); err != nil {
-		return err
-	}
-	a.Agent.Subscribe(func(ev protocol.AgentEvent) {
-		srv.write(ev)
-	})
-	srv.write(a.Agent.StateEvent())
-	if err := a.ReadyGoal(); err != nil {
-		return err
-	}
-	if err := a.ReadySubagents(); err != nil {
-		return err
-	}
-	return srv.Serve(ctx)
 }

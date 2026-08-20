@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // openAIModelCatalog is the OpenAI-compatible shape used by OpenCode Go's

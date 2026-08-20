@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode"
 
-	providerpkg "github.com/snow-core/snow/internal/provider"
+	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
 )
 
 const (

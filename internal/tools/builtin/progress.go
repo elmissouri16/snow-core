@@ -1,6 +1,6 @@
 package builtin
 
-import "github.com/snow-core/snow/internal/tools"
+import "github.com/elmissouri16/snow-core/internal/tools"
 
 // emitProgress is intentionally best-effort. Tools remain usable directly in
 // tests and SDK integrations that do not provide a host progress sink.

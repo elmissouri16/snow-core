@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func TestManagerToolsDriveLifecycle(t *testing.T) {

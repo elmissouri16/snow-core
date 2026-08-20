@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/snow-core/snow/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/auth"
 )
 
 func TestDeviceIntervalAcceptsStringOrNumber(t *testing.T) {

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/snow-core/snow/internal/pluginsdk"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
+	"github.com/elmissouri16/snow-core/internal/pluginsdk"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 )
 
 func TestJavaScriptExamplePlugin(t *testing.T) {

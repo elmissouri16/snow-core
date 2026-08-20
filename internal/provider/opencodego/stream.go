@@ -16,8 +16,8 @@ import (
 	"strings"
 	"sync"
 
-	providerpkg "github.com/snow-core/snow/internal/provider"
-	"github.com/snow-core/snow/pkg/protocol"
+	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 type openAIChunk struct {

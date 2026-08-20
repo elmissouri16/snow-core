@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/snow-core/snow/internal/app"
+	"github.com/elmissouri16/snow-core/internal/app"
 )
 
 type deadlineOnlyReader struct {
@@ -44,6 +44,49 @@ func (w *unavailableDeadlineWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 func (*unavailableDeadlineWriter) SetWriteDeadline(time.Time) error { return os.ErrNoDeadline }
+
+func TestProcessInputReaderInterruptsInheritedPipeFallback(t *testing.T) {
+	base := &blockingReadCloser{closed: make(chan struct{})}
+	reader := newProcessInputReader(base)
+	if !reader.InterruptsReadOnClose() {
+		t.Fatal("process input reader must declare close interruption")
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := reader.Read(make([]byte, 1))
+		done <- err
+	}()
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not interrupt inherited input read")
+	}
+}
+
+func TestProcessOutputWriterBoundsInheritedPipeFallback(t *testing.T) {
+	release := make(chan struct{})
+	writer := &processOutputWriter{
+		out:     &blockingWriter{release: release},
+		timeout: 10 * time.Millisecond,
+	}
+	if !writer.RPCWriteBounded() {
+		t.Fatal("process output writer must declare bounded writes")
+	}
+	_, err := writer.Write([]byte("blocked"))
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("write error = %v, want timeout", err)
+	}
+	close(release)
+
+	var out bytes.Buffer
+	writer = &processOutputWriter{out: &out, timeout: time.Second}
+	if n, err := writer.Write([]byte("ok")); err != nil || n != 2 || out.String() != "ok" {
+		t.Fatalf("write n=%d err=%v output=%q", n, err, out.String())
+	}
+}
 
 func TestRPCPropagatesShortWrites(t *testing.T) {
 	var in bytes.Buffer

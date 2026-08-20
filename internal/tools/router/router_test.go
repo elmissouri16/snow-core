@@ -15,9 +15,9 @@ import (
 	bleve "github.com/blevesearch/bleve/v2"
 	blevemapping "github.com/blevesearch/bleve/v2/mapping"
 
-	"github.com/snow-core/snow/internal/permission"
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 type testTool struct{ schema protocol.ToolSchema }

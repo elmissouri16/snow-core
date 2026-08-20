@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/provider"
-	"github.com/snow-core/snow/internal/skills"
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/internal/trust"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/skills"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/trust"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func (e *SessionDeleteCleanupError) Error() string {

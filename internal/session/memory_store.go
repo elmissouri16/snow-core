@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func cloneEntry(entry Entry) Entry {

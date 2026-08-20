@@ -14,13 +14,14 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/provider/fake"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/userinput"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/buildinfo"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/provider/fake"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/userinput"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 type appDeferredPlugin struct{}
@@ -85,6 +86,28 @@ func (appDeferredPlugin) Register(_ context.Context, registrar publicplugin.Regi
 	})
 }
 func (appDeferredPlugin) Close(context.Context) error { return nil }
+
+func TestBuildVersionDefaultsAndOverrides(t *testing.T) {
+	newApp := func(version string) *App {
+		t.Helper()
+		a, err := New(context.Background(), Options{
+			Provider: "fake", NoSession: true, Permission: "deny", CWD: t.TempDir(),
+			NoPlugins: true, NoMCP: true, NoSkills: true, BuildVersion: version,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = a.Close() })
+		return a
+	}
+
+	if got := newApp("").BuildVersion; got != buildinfo.Version {
+		t.Fatalf("default build version = %q, want %q", got, buildinfo.Version)
+	}
+	if got := newApp("0.1.0-alpha.test").BuildVersion; got != "0.1.0-alpha.test" {
+		t.Fatalf("explicit build version = %q", got)
+	}
+}
 
 func TestMergePluginSpecsUsesGlobalProjectExplicitPrecedence(t *testing.T) {
 	base := publicplugin.PluginSpec{ID: "demo", Command: []string{"global"}, Enabled: true}

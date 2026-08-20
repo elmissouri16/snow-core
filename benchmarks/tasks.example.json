@@ -38,11 +38,11 @@
     },
     {
       "id": "inspect-module",
-      "prompt": "Read go.mod, then create benchmark-output/module.txt containing exactly two lines: module=github.com/snow-core/snow and go=1.27, followed by one final newline. Do not modify any other files.",
+      "prompt": "Read go.mod, then create benchmark-output/module.txt containing exactly two lines: module=github.com/elmissouri16/snow-core and go=1.27, followed by one final newline. Do not modify any other files.",
       "verify": [
         "python3",
         "-c",
-        "from pathlib import Path; assert Path('benchmark-output/module.txt').read_text() == 'module=github.com/snow-core/snow\\ngo=1.27\\n'"
+        "from pathlib import Path; assert Path('benchmark-output/module.txt').read_text() == 'module=github.com/elmissouri16/snow-core\\ngo=1.27\\n'"
       ]
     },
     {
@@ -131,11 +131,11 @@
     },
     {
       "id": "write-repo-facts",
-      "prompt": "Inspect the repository, then create benchmark-output/repo-facts.json as valid JSON with exactly these fields and values: module github.com/snow-core/snow, go 1.27, has_tui true, and has_sdk true. The booleans indicate whether internal/tui and pkg/snowsdk exist. Do not modify any other files.",
+      "prompt": "Inspect the repository, then create benchmark-output/repo-facts.json as valid JSON with exactly these fields and values: module github.com/elmissouri16/snow-core, go 1.27, has_tui true, and has_sdk true. The booleans indicate whether internal/tui and pkg/snowsdk exist. Do not modify any other files.",
       "verify": [
         "python3",
         "-c",
-        "import json; from pathlib import Path; assert json.loads(Path('benchmark-output/repo-facts.json').read_text()) == {'module': 'github.com/snow-core/snow', 'go': '1.27', 'has_tui': True, 'has_sdk': True}"
+        "import json; from pathlib import Path; assert json.loads(Path('benchmark-output/repo-facts.json').read_text()) == {'module': 'github.com/elmissouri16/snow-core', 'go': '1.27', 'has_tui': True, 'has_sdk': True}"
       ]
     }
   ]

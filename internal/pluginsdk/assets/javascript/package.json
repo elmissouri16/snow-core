@@ -3,6 +3,7 @@
   "version": "0.1.0-dev.0",
   "private": true,
   "description": "Zero-dependency JavaScript and TypeScript SDK for authoring Snow protocol-v2 plugins",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -16,7 +17,8 @@
   "types": "./src/index.d.ts",
   "files": [
     "src",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "check": "node --check src/*.js",

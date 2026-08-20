@@ -1,8 +1,8 @@
-module github.com/snow-core/snow/examples/sdk
+module github.com/elmissouri16/snow-core/examples/sdk
 
-go 1.27rc2
+go 1.27rc3
 
-require github.com/snow-core/snow v0.0.0
+require github.com/elmissouri16/snow-core v0.0.0
 
 require (
 	github.com/JohannesKaufmann/dom v0.3.1 // indirect
@@ -78,4 +78,4 @@ require (
 
 // Keep the checked-in example runnable against this checkout. External users can
 // remove this line and require a published Snow version instead.
-replace github.com/snow-core/snow => ../..
+replace github.com/elmissouri16/snow-core => ../..

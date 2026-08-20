@@ -43,7 +43,7 @@ When copying this module outside the repository, remove the `replace` line from
 `go.mod` and select a published Snow version:
 
 ```sh
-go get github.com/snow-core/snow@latest
+go get github.com/elmissouri16/snow-core@latest
 go mod tidy
 ```
 

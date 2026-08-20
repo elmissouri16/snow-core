@@ -14,11 +14,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/permission"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/buildinfo"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
+
+func TestOpenUsesLinkedBuildVersion(t *testing.T) {
+	s, err := Open(context.Background(), Options{
+		Provider: "fake", NoSession: true, PermissionMode: "deny",
+		NoPlugins: true, NoMCP: true, NoSkills: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if got := s.app.BuildVersion; got != buildinfo.Version {
+		t.Fatalf("build version = %q, want %q", got, buildinfo.Version)
+	}
+}
 
 func TestRunPromptOpenAICompatibleProvider(t *testing.T) {
 	t.Setenv("SNOW_HOME", t.TempDir())

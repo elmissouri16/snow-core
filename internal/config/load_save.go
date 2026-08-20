@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	"github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	"github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 const (

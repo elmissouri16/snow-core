@@ -17,9 +17,10 @@ dependencies out of core packages.
 
 Before a change, read `README.md` plus the relevant source and tests. Use
 `IMPLEMENTATION.md` for architecture, package maps, decisions, and roadmap;
-`docs/README.md` for canonical documentation ownership; and `docs/security.md`
-for the expanded threat model. When documentation differs from current code and
-tests, verify behavior in code and update the canonical document.
+`docs/README.md` for canonical documentation ownership, `docs/security.md`
+for the expanded threat model, and `docs/releases.md` for release gates. When
+documentation differs from current code and tests, verify behavior in code and
+update the canonical document.
 
 ## Architecture constraints
 
@@ -47,11 +48,14 @@ snowsdk → app + protocol; never bubbletea
   cohesive responsibility before they exceed this limit; do not create
   arbitrary numbered chunks solely to satisfy the cap.
 - Keep the Go requirement in `go.mod` and `README.md` synchronized (currently
-  the Go 1.27 line while 1.27rc2 is the available toolchain).
+  the Go 1.27 line while 1.27rc3 is the available toolchain).
 
 ## Runtime invariants
 
 - `cmd/snow` builds `app.Options`; `internal/app.New` owns runtime wiring.
+- `internal/buildinfo.Version` is the linked default copied through
+  `app.Options.BuildVersion`; keep CLI, RPC, plugin, MCP, and SDK metadata on
+  that one effective value.
 - `agent.Prompt` persists the user input, streams one provider request, persists
   the assistant result, executes serial permissioned tools, and chains results
   until a terminal response, error, cancellation, or configured limit.
@@ -97,7 +101,11 @@ snowsdk → app + protocol; never bubbletea
    ran successfully with the required runtime available.
 6. After a successfully verified feature change, run
    `./scripts/install-local.sh` so `~/.local/bin/snow` reflects the checkout.
-7. Report changed files, verification commands, and environment blockers.
+7. Before preparing or publishing any release, follow the canonical
+   `docs/releases.md#next-release-runbook`. Update `CHANGELOG.md`, require the
+   reusable CI gate, run secret-free manual provider smoke checks, and never
+   move a published tag or improvise a separate packaging path.
+8. Report changed files, verification commands, and environment blockers.
 
 ## Verification
 
@@ -120,8 +128,13 @@ go test ./internal/agent ./cmd/snow -count=1
 go build -o ./snow ./cmd/snow
 SNOW_TEST_BINARY="$PWD/snow" PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v
 (cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration && npm run pack:check)
+PYTHONPATH=sdk/plugin-python/src python3 -m unittest discover -s sdk/plugin-python/tests -v
+(cd sdk/plugin-javascript && npm test && npm run pack:check)
+./snow plugin check examples/plugins/python-sdk/manifest.json
+./snow plugin check examples/plugins/javascript-sdk/manifest.json
 python3 examples/rpc/python/client.py --snow ./snow
 node examples/rpc/javascript/client.mjs ./snow
+govulncheck ./...
 ```
 
 The normal suite must remain network-free. Provider integration tests use local
@@ -136,4 +149,6 @@ change affects SDKs, RPC, providers, TUI lifecycle, concurrency, or packaging.
   matrix, roadmap, and known gaps.
 - `docs/README.md` — documentation index and canonical ownership map.
 - `docs/security.md` — complete privilege and threat boundaries.
+- `SECURITY.md` — private vulnerability-reporting policy.
+- `docs/releases.md` — alpha versioning, verification, artifacts, and rollback.
 - Matching guides under `docs/` — user-facing behavior and configuration.

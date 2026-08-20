@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/snow-core/snow/internal/auth"
-	goalpkg "github.com/snow-core/snow/internal/goal"
-	"github.com/snow-core/snow/internal/permission"
-	providerpkg "github.com/snow-core/snow/internal/provider"
-	"github.com/snow-core/snow/internal/provider/responsesapi"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/provider/responsesapi"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func goalAgent(t *testing.T, p *scriptedProvider) (*Agent, *goalpkg.Controller, *session.SQLiteStore) {

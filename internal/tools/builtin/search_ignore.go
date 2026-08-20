@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/snow-core/snow/internal/config"
+	"github.com/elmissouri16/snow-core/internal/config"
 )
 
 type searchWalkOptions struct {

@@ -17,8 +17,9 @@ Go agent runtime, providers, tools, sessions, goals, and subagents
 This design keeps behavior and security fixes in one runtime. The Go SDK
 remains the only in-process embedding surface.
 
-> **Note:** The language SDKs and RPC protocol v1 are pre-alpha. The packages
-> are checked in and tested but intentionally not published to PyPI or npm yet.
+> **Note:** RPC protocol v1 ships with the Snow alpha. The Python and JavaScript
+> client packages remain pre-alpha: they are checked in and tested but are not
+> published to PyPI or npm.
 
 ## On this page
 
@@ -183,7 +184,7 @@ Every process starts with a first frame similar to:
 {
   "type": "rpc_ready",
   "protocol_version": "1",
-  "snow_version": "0.1.0-dev",
+  "snow_version": "0.1.0-alpha.1",
   "capabilities": [
     "active_input",
     "branch_management",

@@ -1,7 +1,7 @@
 package builtin
 
 import (
-	"github.com/snow-core/snow/internal/config"
+	"github.com/elmissouri16/snow-core/internal/config"
 )
 
 const (

@@ -95,7 +95,7 @@ client for interactive use.
 {
   "type": "rpc_ready",
   "protocol_version": "1",
-  "snow_version": "0.1.0-dev",
+  "snow_version": "0.1.0-alpha.1",
   "capabilities": [
     "active_input",
     "branch_management",

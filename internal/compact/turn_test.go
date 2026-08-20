@@ -3,7 +3,7 @@ package compact
 import (
 	"testing"
 
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func assistant(id, parent string, content []protocol.ContentBlock) protocol.Message {

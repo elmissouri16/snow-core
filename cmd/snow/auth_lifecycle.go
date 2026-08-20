@@ -6,11 +6,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/provider/chatgpt"
-	"github.com/snow-core/snow/internal/provider/openaicompat"
-	"github.com/snow-core/snow/internal/provider/opencodego"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/provider/chatgpt"
+	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
+	"github.com/elmissouri16/snow-core/internal/provider/opencodego"
 )
 
 func newCLIAuthService(store auth.Store, providerConfigs ...map[string]config.ProviderConfig) (*auth.Service, *chatgpt.Provider, error) {

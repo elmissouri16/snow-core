@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/config"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/config"
 )
 
 func TestCLIAuthServiceRegistersNamedCompatibleProfiles(t *testing.T) {

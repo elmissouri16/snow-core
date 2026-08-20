@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/snow-core/snow/internal/config"
-	internalsandbox "github.com/snow-core/snow/internal/sandbox"
+	"github.com/elmissouri16/snow-core/internal/config"
+	internalsandbox "github.com/elmissouri16/snow-core/internal/sandbox"
 )
 
 func TestSandboxStatusAndExplicitSDKPolicy(t *testing.T) {

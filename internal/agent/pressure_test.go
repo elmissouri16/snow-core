@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/snow-core/snow/internal/artifact"
-	"github.com/snow-core/snow/internal/compact"
-	"github.com/snow-core/snow/internal/permission"
-	"github.com/snow-core/snow/internal/provider"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/artifact"
+	"github.com/elmissouri16/snow-core/internal/compact"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func appendCompleteTurns(t *testing.T, store *session.MemoryStore, count int) {

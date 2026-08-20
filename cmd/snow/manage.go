@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/snow-core/snow/internal/config"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
+	"github.com/elmissouri16/snow-core/internal/config"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 )
 
 type mcpConfigView struct {

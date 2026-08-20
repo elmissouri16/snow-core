@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // UpdatePlan is the Default-mode TODO/checklist tool. It does not enter Plan mode.

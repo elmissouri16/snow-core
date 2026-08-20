@@ -3,8 +3,8 @@ package agent
 import (
 	"strings"
 
-	planpkg "github.com/snow-core/snow/internal/plan"
-	"github.com/snow-core/snow/pkg/protocol"
+	planpkg "github.com/elmissouri16/snow-core/internal/plan"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 type planStreamCollector struct {

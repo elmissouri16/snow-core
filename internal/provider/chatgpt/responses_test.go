@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elmissouri16/snow-core/internal/auth"
+	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 	"github.com/klauspost/compress/zstd"
-	"github.com/snow-core/snow/internal/auth"
-	providerpkg "github.com/snow-core/snow/internal/provider"
-	"github.com/snow-core/snow/pkg/protocol"
 )
 
 func TestChatClassifiesUsageLimit(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // TestAppDefaultModelPrefersProviderDefault verifies that with no configured

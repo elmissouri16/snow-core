@@ -7,8 +7,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 const materializeThreshold = 8 * 1024

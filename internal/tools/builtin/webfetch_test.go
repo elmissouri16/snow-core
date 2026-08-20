@@ -15,8 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 	surfhttp "github.com/enetx/http"
-	"github.com/snow-core/snow/pkg/protocol"
 )
 
 func testWebFetch() *WebFetch {

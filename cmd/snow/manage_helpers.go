@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 )
 
 func parseAssignments(values []string, allowBare bool) (map[string]string, error) {

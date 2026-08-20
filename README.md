@@ -5,11 +5,12 @@ agent loop powers an interactive terminal UI, print/JSON/RPC command-line modes,
 and an embeddable pure-Go SDK, with the same tools, sessions, permissions, and
 events behind every surface.
 
-[![Go 1.27rc2](https://img.shields.io/badge/Go-1.27rc2-00ADD8)](https://go.dev/doc/install)
+[![Go 1.27rc3](https://img.shields.io/badge/Go-1.27rc3-00ADD8)](https://go.dev/doc/install)
 [![CI](https://github.com/elmissouri16/snow-core/actions/workflows/ci.yml/badge.svg)](https://github.com/elmissouri16/snow-core/actions/workflows/ci.yml)
 
-> **Note:** Snow is pre-alpha. The core runtime is functional and tested, but
-> public APIs and file formats may still change before v1.
+> **Note:** Snow is alpha software. The core runtime is functional and tested,
+> but public APIs, protocols, configuration, and file formats may still change
+> before v1.
 
 - Interactive terminal UI, print mode, JSONL events, and JSONL RPC
 - OpenCode Go, user-configured OpenAI-compatible endpoints, and ChatGPT/Codex
@@ -38,9 +39,10 @@ events behind every surface.
 
 ### Requirements
 
-- Go 1.27; `go.mod` declares `1.27rc2` because that is the available toolchain
-  required by the pinned Surf release.
 - macOS or Linux.
+- Go 1.27 only when building from source; `go.mod` declares `1.27rc3` because
+  that is the available toolchain required by the pinned Surf release.
+  Prebuilt release archives do not require Go.
 
 ### Build or install
 
@@ -60,8 +62,12 @@ export PATH="$HOME/.local/bin:$PATH"
 ```
 
 Choose either build path. Override the install directory with
-`SNOW_INSTALL_DIR=/path/to/bin`. Snow treats the directory where it is launched
-as the active project.
+`SNOW_INSTALL_DIR=/path/to/bin`. On an exact alpha tag,
+`install-local.sh` embeds the tag version; `SNOW_VERSION` can provide an
+explicit version for a reviewed local build. Tagged alpha releases also publish
+macOS/Linux amd64/arm64 archives and `SHA256SUMS`; see the
+[release policy](docs/releases.md). Snow treats the directory where it is
+launched as the active project.
 
 ### Try it without credentials
 
@@ -151,7 +157,7 @@ the same provider → tool → session loop.
 | Print | `snow -p "..."` | Human-readable one-shot automation |
 | JSON events | `snow --mode json -p "..."` | Shell pipelines and event recording |
 | RPC | `snow --mode rpc` | Versioned, long-lived foreign-language/IDE control over JSONL stdio |
-| Go SDK | `github.com/snow-core/snow/pkg/snowsdk` | In-process embedding without Cobra or Bubble Tea |
+| Go SDK | `github.com/elmissouri16/snow-core/pkg/snowsdk` | In-process embedding without Cobra or Bubble Tea |
 | Python SDK | [`sdk/python`](sdk/python) | Async typed local client around an external Snow binary |
 | JavaScript/TypeScript SDK | [`sdk/javascript`](sdk/javascript) | Zero-dependency ESM client with TypeScript declarations |
 | Python plugin SDK | [`sdk/plugin-python`](sdk/plugin-python) | Author private protocol-v2 plugins with `snow_plugin` |
@@ -422,8 +428,8 @@ import (
     "fmt"
     "time"
 
-    "github.com/snow-core/snow/pkg/protocol"
-    "github.com/snow-core/snow/pkg/snowsdk"
+    "github.com/elmissouri16/snow-core/pkg/protocol"
+    "github.com/elmissouri16/snow-core/pkg/snowsdk"
 )
 
 func main() {
@@ -519,6 +525,8 @@ Snow is a harness, **not a whole-process sandbox**:
 
 Read the consolidated [security model](docs/security.md) before enabling shell,
 network, extension, subagent mutation, or automatic approval in an embedding.
+Report suspected vulnerabilities privately through the
+[security policy](SECURITY.md), not in public issues.
 
 ## Configuration and storage
 
@@ -558,7 +566,8 @@ Start at the [documentation index](docs/README.md).
 | Embed from Python or JavaScript/TypeScript | [Language SDKs](docs/language-sdks.md) · [Python](sdk/python) · [JavaScript](sdk/javascript) |
 | Build a raw JSONL client | [RPC](docs/rpc.md) · [schemas](pkg/protocol/schema/rpc/v1) |
 | Author JavaScript/Python plugins | [Plugins](docs/plugins.md) · [Protocol v2](docs/plugin-protocol.md) |
-| Review operational boundaries | [Security](docs/security.md) |
+| Review operational boundaries or report a vulnerability | [Security model](docs/security.md) · [Reporting policy](SECURITY.md) |
+| Prepare or verify a release | [Release policy](docs/releases.md) · [Changelog](CHANGELOG.md) |
 | Authenticate ChatGPT/Codex | [ChatGPT auth](docs/chatgpt-auth.md) |
 | Resume and branch conversations | [Sessions](docs/sessions.md) |
 | Use Plan Mode, goals, or subagents | [Plan Mode](docs/plan-mode.md) · [Goals](docs/goals.md) · [Subagents](docs/subagents.md) |
@@ -567,9 +576,11 @@ Start at the [documentation index](docs/README.md).
 
 ## Development
 
-[GitHub Actions CI](.github/workflows/ci.yml) runs the network-free suite on
-Linux and macOS, builds the binary, executes the standalone SDK/RPC examples,
-and runs the race detector on Linux. This local list is the common baseline;
+[GitHub Actions CI](.github/workflows/ci.yml) runs automatically for `main`
+pushes and pull requests and remains manually dispatchable. Linux and macOS run
+the network-free suite, binary and SDK/plugin checks, and examples; Linux also
+runs the race detector, four release-target cross-builds, and `govulncheck`.
+This local list is the common baseline;
 the affected-area matrix in [`IMPLEMENTATION.md`](IMPLEMENTATION.md#testing-and-verification)
 is the complete maintainer reference:
 
@@ -582,8 +593,14 @@ go test -race ./internal/... ./pkg/snowsdk
 go build -o ./snow ./cmd/snow
 SNOW_TEST_BINARY="$PWD/snow" PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v
 (cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration && npm run pack:check)
+PYTHONPATH=sdk/plugin-python/src python3 -m unittest discover -s sdk/plugin-python/tests -v
+(cd sdk/plugin-javascript && npm test && npm run pack:check)
+./snow plugin check examples/plugins/python-sdk/manifest.json
+./snow plugin check examples/plugins/javascript-sdk/manifest.json
 python3 examples/rpc/python/client.py --snow ./snow
 node examples/rpc/javascript/client.mjs ./snow
+# Release check after installing the pinned command:
+govulncheck ./...
 ```
 
 Provider integration tests use local mocked HTTP/SSE servers. Real-provider
@@ -603,8 +620,10 @@ roadmap live in [`IMPLEMENTATION.md`](IMPLEMENTATION.md).
 
 - [Documentation index](docs/README.md) — every user, integration, extension,
   and maintainer guide in one place.
-- [Security model](docs/security.md) — consolidated safety and privilege
-  boundaries.
+- [Security model](docs/security.md) and [reporting policy](SECURITY.md) —
+  operational boundaries and private vulnerability disclosure.
+- [Release policy](docs/releases.md) and [changelog](CHANGELOG.md) — alpha
+  versioning, artifacts, checksums, and release history.
 - [Using Snow](docs/using-snow.md) — TUI/CLI modes, keys, commands, and
   workflows.
 - [Agent working guide](AGENTS.md) — repository rules for contributors.

@@ -18,12 +18,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/snow-core/snow/internal/app"
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/provider/chatgpt"
-	"github.com/snow-core/snow/internal/trust"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/provider/chatgpt"
+	"github.com/elmissouri16/snow-core/internal/trust"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // Run starts the interactive TUI and blocks until exit.

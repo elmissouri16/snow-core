@@ -17,10 +17,10 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/snow-core/snow/internal/permission"
-	"github.com/snow-core/snow/internal/tools"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func (rt *serverRuntime) connectLive(parent context.Context) error {

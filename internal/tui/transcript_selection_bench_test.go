@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/snow-core/snow/internal/app"
+	"github.com/elmissouri16/snow-core/internal/app"
 )
 
 func BenchmarkTranscriptSelectionDragFrame(b *testing.B) {

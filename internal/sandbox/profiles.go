@@ -21,8 +21,8 @@ var builtinProfiles = []Profile{
 		Source: "index.docker.io/library/ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea", Network: true,
 	},
 	{
-		ID: "go", Name: "Go 1.27rc2", Description: "Official Go 1.27rc2 Bookworm image matching snow-core's toolchain line",
-		Source: "index.docker.io/library/golang:1.27rc2-bookworm@sha256:a2f9daa5dbd9f7a68eb3c32cf91e4f9fc50a11a07f8b9cd9ffa542d2298d9f82", Network: true,
+		ID: "go", Name: "Go 1.27rc3", Description: "Official Go 1.27rc3 Bookworm image matching snow-core's toolchain line",
+		Source: "index.docker.io/library/golang:1.27rc3-bookworm@sha256:e265a6dd120f4bff9beabc3e2e5e2f3198bdb6a7235cca1562962863980ea7e2", Network: true,
 		CPUs: 4, MemoryMiB: 6144,
 	},
 	{

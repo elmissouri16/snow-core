@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/snow-core/snow/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/auth"
 )
 
 // SourceID identifies a compatible local auth producer.

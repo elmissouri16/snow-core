@@ -13,10 +13,10 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	internalmcp "github.com/snow-core/snow/internal/mcp"
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/internal/trust"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
+	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/trust"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 )
 
 func TestMergeMCPDeclarationsPreservesWinningScope(t *testing.T) {

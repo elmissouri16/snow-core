@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/snow-core/snow/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/auth"
 )
 
 // AuthDriver adapts ChatGPT OAuth to the provider-independent auth lifecycle.

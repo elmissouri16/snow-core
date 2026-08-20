@@ -9,31 +9,36 @@ import (
 	"slices"
 	"time"
 
-	"github.com/snow-core/snow/internal/agent"
-	"github.com/snow-core/snow/internal/artifact"
-	"github.com/snow-core/snow/internal/config"
-	ctxpkg "github.com/snow-core/snow/internal/context"
-	goalpkg "github.com/snow-core/snow/internal/goal"
-	internalmcp "github.com/snow-core/snow/internal/mcp"
-	"github.com/snow-core/snow/internal/permission"
-	internalplugin "github.com/snow-core/snow/internal/plugin"
-	"github.com/snow-core/snow/internal/provider"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/skills"
-	"github.com/snow-core/snow/internal/subagent"
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/internal/tools/builtin"
-	toolrouter "github.com/snow-core/snow/internal/tools/router"
-	"github.com/snow-core/snow/internal/userinput"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/agent"
+	"github.com/elmissouri16/snow-core/internal/artifact"
+	"github.com/elmissouri16/snow-core/internal/buildinfo"
+	"github.com/elmissouri16/snow-core/internal/config"
+	ctxpkg "github.com/elmissouri16/snow-core/internal/context"
+	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
+	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
+	"github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/skills"
+	"github.com/elmissouri16/snow-core/internal/subagent"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/tools/builtin"
+	toolrouter "github.com/elmissouri16/snow-core/internal/tools/router"
+	"github.com/elmissouri16/snow-core/internal/userinput"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // New assembles the app.
 func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	buildVersion := opts.BuildVersion
+	if buildVersion == "" {
+		buildVersion = buildinfo.Version
 	}
 	startup, err := initializeStartup(ctx, opts)
 	if err != nil {
@@ -391,7 +396,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		extensionCWD = projectInputRoot
 	}
 	manager = internalplugin.NewManager(reg, internalplugin.ManagerOptions{
-		CWD: extensionCWD, SessionID: st.ID(), HostVersion: "snow-core", HostCapabilities: []string{"tools", "events"},
+		CWD: extensionCWD, SessionID: st.ID(), HostVersion: buildVersion, HostCapabilities: []string{"tools", "events"},
 		MaxProgressBytes: cfg.ToolOutputLimit(), MaxOutputBytes: cfg.ToolOutputLimit(),
 	})
 	var allPluginSpecs []publicplugin.PluginSpec
@@ -430,7 +435,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	var mcpStatuses []publicmcp.Status
 	if !opts.NoMCP {
 		mcpManager = internalmcp.NewManager(reg, internalmcp.Options{
-			CWD: projectInputRoot, Roots: []string{projectInputRoot}, HostName: "snow", HostVersion: "0.1.0-dev", MaxOutputBytes: cfg.ToolOutputLimit(),
+			CWD: projectInputRoot, Roots: []string{projectInputRoot}, HostName: "snow", HostVersion: buildVersion, MaxOutputBytes: cfg.ToolOutputLimit(),
 			CacheRoot: startup.globalDir,
 		})
 		mcpManager.Initialize(ctx, mcpDeclarations)
@@ -732,6 +737,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		PersistedCfg:       persistedCfg,
 		ConfigPath:         configPath,
 		AuthPath:           authPath,
+		BuildVersion:       buildVersion,
 		Auth:               authStore,
 		AuthService:        authService,
 		Registry:           reg,

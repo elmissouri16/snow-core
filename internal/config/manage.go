@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 )
 
 var pluginSpecKeys = []string{

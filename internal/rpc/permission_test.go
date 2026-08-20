@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/snow-core/snow/internal/app"
-	"github.com/snow-core/snow/internal/permission"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func permissionRequest(id string) permission.Request {

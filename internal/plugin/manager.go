@@ -8,10 +8,10 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/snow-core/snow/internal/permission"
-	"github.com/snow-core/snow/internal/tools"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // Diagnostic describes a plugin that was skipped, failed, or closed.

@@ -16,7 +16,7 @@ import (
 	blevemapping "github.com/blevesearch/bleve/v2/mapping"
 	"github.com/blevesearch/bleve/v2/search/query"
 
-	"github.com/snow-core/snow/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/tools"
 )
 
 const (

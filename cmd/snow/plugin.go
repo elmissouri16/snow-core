@@ -14,11 +14,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/snow-core/snow/internal/config"
-	internalplugin "github.com/snow-core/snow/internal/plugin"
-	"github.com/snow-core/snow/internal/trust"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/config"
+	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
+	"github.com/elmissouri16/snow-core/internal/trust"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 type pluginCheckToolView struct {

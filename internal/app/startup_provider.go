@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/provider"
-	"github.com/snow-core/snow/internal/provider/chatgpt"
-	"github.com/snow-core/snow/internal/provider/fake"
-	"github.com/snow-core/snow/internal/provider/openaicompat"
-	"github.com/snow-core/snow/internal/provider/opencodego"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/provider/chatgpt"
+	"github.com/elmissouri16/snow-core/internal/provider/fake"
+	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
+	"github.com/elmissouri16/snow-core/internal/provider/opencodego"
 )
 
 // startupProvider is the selected provider transport plus the complete module

@@ -4,7 +4,7 @@ This guide covers Snow's terminal surfaces: the interactive TUI, print output,
 JSON events, and the command-line controls shared by all modes. For machine
 control, see [JSONL RPC](rpc.md). For embedding, see the [Go SDK](sdk.md).
 
-> **Note:** Snow is pre-alpha. The generated command reference from
+> **Note:** Snow is alpha software. The generated command reference from
 > `snow --help` is authoritative for your build, and behavior described here is
 > verified against source.
 
@@ -536,7 +536,7 @@ the host.
 In the TUI use `/sandbox` or `/sandbox status`; `/sandbox init` opens an
 interactive setup form for the environment profile, CPUs, memory MiB, storage
 GiB, overlay GiB, project mount mode, and guest networking. Built-in choices are
-digest-pinned Minimal Ubuntu, Go 1.27rc2, Node.js 22, and Python 3.12 with
+digest-pinned Minimal Ubuntu, Go 1.27rc3, Node.js 22, and Python 3.12 with
 uv 0.12.5. The form starts on the configured/custom image with its existing
 network choice; a deliberate environment-row change selects a profile. The Go
 profile recommends 4 CPUs and 6144 MiB RAM by default so snow-core's heavier

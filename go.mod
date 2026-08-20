@@ -1,6 +1,6 @@
-module github.com/snow-core/snow
+module github.com/elmissouri16/snow-core
 
-go 1.27rc2
+go 1.27rc3
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2

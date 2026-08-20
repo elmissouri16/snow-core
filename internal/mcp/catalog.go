@@ -11,7 +11,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/snow-core/snow/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/tools"
 )
 
 func (rt *serverRuntime) catalogFromLive(init *sdkmcp.InitializeResult, remoteTools []*sdkmcp.Tool) (cachedCatalog, error) {

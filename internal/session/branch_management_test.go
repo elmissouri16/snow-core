@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func exerciseBranchManagement(t *testing.T, st Store) {

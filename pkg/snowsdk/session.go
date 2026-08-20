@@ -5,11 +5,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/snow-core/snow/internal/agent"
-	"github.com/snow-core/snow/internal/app"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	"github.com/snow-core/snow/pkg/protocol"
-	publicsandbox "github.com/snow-core/snow/pkg/sandbox"
+	"github.com/elmissouri16/snow-core/internal/agent"
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/buildinfo"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
+	publicsandbox "github.com/elmissouri16/snow-core/pkg/sandbox"
 )
 
 func (s *Session) activeApp() (*app.App, error) {
@@ -42,6 +43,7 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	}
 	a, err := app.New(ctx, app.Options{
 		CWD:                     opts.CWD,
+		BuildVersion:            buildinfo.Version,
 		Provider:                opts.Provider,
 		Model:                   opts.Model,
 		SessionPath:             opts.SessionPath,

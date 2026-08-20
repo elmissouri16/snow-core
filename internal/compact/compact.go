@@ -5,7 +5,7 @@ package compact
 import (
 	"context"
 
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // Summarizer produces a summary of messages.

@@ -2,4 +2,6 @@
 // the JSONL RPC control plane.
 package main
 
-var version = "0.1.0-dev"
+import "github.com/elmissouri16/snow-core/internal/buildinfo"
+
+var version = buildinfo.Version

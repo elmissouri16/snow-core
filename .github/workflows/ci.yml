@@ -1,9 +1,12 @@
 name: CI
 
-# Automatic push and pull-request runs are paused for now. Keep manual runs
-# available so CI can still be invoked explicitly when needed.
 on:
+  push:
+    branches:
+      - main
+  pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -16,7 +19,7 @@ jobs:
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -26,22 +29,27 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           # setup-go currently drops rc suffixes when parsing go.mod. Keep this
           # semver-form prerelease synchronized with the root/module go lines.
-          go-version: '1.27.0-rc.2'
+          go-version: '1.27.0-rc.3'
           check-latest: true
           cache: true
           cache-dependency-path: |
             go.sum
             examples/sdk/go.sum
 
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.9'
+
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
 
@@ -63,17 +71,26 @@ jobs:
 
       - name: Build snow
         shell: bash
-        run: go build -o "$RUNNER_TEMP/snow" ./cmd/snow
+        run: go build -trimpath -o "$RUNNER_TEMP/snow" ./cmd/snow
 
-      - name: Test standalone SDK example
+      - name: Smoke-test snow
+        shell: bash
+        run: |
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          cd "$work"
+          SNOW_HOME="$work/home" "$RUNNER_TEMP/snow" \
+            --provider fake --no-session -p "CI lifecycle smoke test"
+
+      - name: Test standalone Go SDK example
         working-directory: examples/sdk
         run: go test ./...
 
-      - name: Run standalone SDK example
+      - name: Run standalone Go SDK example
         working-directory: examples/sdk
         run: go run . -provider fake -prompt "CI lifecycle smoke test"
 
-      - name: Test Python SDK
+      - name: Test Python RPC SDK
         shell: bash
         env:
           SNOW_TEST_BINARY: ${{ runner.temp }}/snow
@@ -82,7 +99,7 @@ jobs:
           python3 -m compileall -q sdk/python/src sdk/python/tests
           python3 -m unittest discover -s sdk/python/tests -v
 
-      - name: Test JavaScript SDK
+      - name: Test JavaScript RPC SDK
         working-directory: sdk/javascript
         env:
           SNOW_TEST_BINARY: ${{ runner.temp }}/snow
@@ -90,6 +107,26 @@ jobs:
           npm test
           npm run test:integration
           npm run pack:check
+
+      - name: Test Python plugin SDK
+        shell: bash
+        env:
+          PYTHONPATH: sdk/plugin-python/src
+        run: |
+          python3 -m compileall -q sdk/plugin-python/src sdk/plugin-python/tests
+          python3 -m unittest discover -s sdk/plugin-python/tests -v
+
+      - name: Test JavaScript plugin SDK
+        working-directory: sdk/plugin-javascript
+        run: |
+          npm test
+          npm run pack:check
+
+      - name: Check SDK-based plugin examples
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/snow" plugin check examples/plugins/python-sdk/manifest.json
+          "$RUNNER_TEMP/snow" plugin check examples/plugins/javascript-sdk/manifest.json
 
       - name: Run Python RPC SDK example
         shell: bash
@@ -106,17 +143,74 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          # setup-go currently drops rc suffixes when parsing go.mod. Keep this
-          # semver-form prerelease synchronized with the root/module go lines.
-          go-version: '1.27.0-rc.2'
+          go-version: '1.27.0-rc.3'
           check-latest: true
           cache: true
           cache-dependency-path: go.sum
 
       - name: Test internal runtime and SDK with race detector
         run: go test -race ./internal/... ./pkg/snowsdk -count=1
+
+  cross-build:
+    name: Cross-build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        goos:
+          - linux
+          - darwin
+        goarch:
+          - amd64
+          - arm64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.0-rc.3'
+          check-latest: true
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Cross-build Snow without cgo
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -o "$RUNNER_TEMP/snow" ./cmd/snow
+
+  vulnerability:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.0-rc.3'
+          check-latest: true
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Install govulncheck
+        env:
+          GOBIN: ${{ runner.temp }}/bin
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+
+      - name: Scan reachable Go vulnerabilities
+        run: |
+          "$RUNNER_TEMP/bin/govulncheck" ./...

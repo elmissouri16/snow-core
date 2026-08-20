@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/trust"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/trust"
 )
 
 func TestProjectTrustPreflightAndImmediateResourceLoading(t *testing.T) {

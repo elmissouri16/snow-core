@@ -20,17 +20,17 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/snow-core/snow/internal/app"
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/provider/chatgpt"
-	"github.com/snow-core/snow/internal/provider/openaicompat"
-	"github.com/snow-core/snow/internal/rpc"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/tui"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/provider/chatgpt"
+	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
+	"github.com/elmissouri16/snow-core/internal/rpc"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/tui"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func main() {
@@ -348,7 +348,7 @@ func promptSecret(prompt string) (string, error) {
 }
 
 func buildOptions(cmd *cobra.Command) (app.Options, error) {
-	opts := app.Options{}
+	opts := app.Options{BuildVersion: version}
 	opts.CWD = mustCWD()
 	opts.Provider, _ = cmd.Flags().GetString("provider")
 	opts.Model, _ = cmd.Flags().GetString("model")
@@ -576,7 +576,7 @@ func runInteractiveOptions(cmd *cobra.Command, sessionPicker, requireExistingSes
 	}
 
 	if mode == "rpc" {
-		return rpc.MainWithVersion(ctx, opts, version)
+		return rpc.Main(ctx, opts)
 	}
 	if prompt != "" || mode == "print" || mode == "json" {
 		showUsage, _ := cmd.Flags().GetBool("usage")

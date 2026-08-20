@@ -5,7 +5,7 @@ and maintainer design material for snow-core. Start with the table below, or use
 the canonical-ownership map at the end when you need the authoritative reference
 for a subject.
 
-> **Note:** Snow is pre-alpha. Source code and tests are the behavioral
+> **Note:** Snow is alpha software. Source code and tests are the behavioral
 > authority when an older research or roadmap document differs from a current
 > feature guide.
 
@@ -17,7 +17,9 @@ for a subject.
 | Learn the TUI, CLI modes, keys, and slash commands | [Using Snow](using-snow.md) |
 | Configure providers, permissions, sessions, themes, and search | [Configuration](configuration.md) |
 | Set up, operate, switch, or troubleshoot the optional Bash VM | [Sandboxed Bash](sandbox.md) |
-| Understand safety and privilege boundaries | [Security](security.md) |
+| Understand safety and privilege boundaries | [Security model](security.md) |
+| Report a suspected vulnerability | [Security reporting](../SECURITY.md) |
+| Prepare or verify an alpha release | [Release policy](releases.md) |
 | Authenticate with ChatGPT/Codex | [ChatGPT authentication](chatgpt-auth.md) |
 
 ## Embed and automate
@@ -72,6 +74,10 @@ for a subject.
   interfaces, decisions, phased roadmap, verification, and open risks.
 - [Agent working guide](../AGENTS.md) — repository-specific coding rules,
   security constraints, and verification commands.
+- [Release policy](releases.md) — alpha versioning, CI gates, artifacts,
+  checksums, and rollback.
+- [Security reporting](../SECURITY.md) — private vulnerability disclosure and
+  supported-release policy.
 - [Documentation style guide](style-guide.md) — writing and formatting
   conventions for documentation contributors.
 - [TUI responsiveness](tui-performance.md) — Bubble Tea rendering and
@@ -102,6 +108,8 @@ To reduce drift, use these documents as the primary references:
 | Plugin SDK implementation | [SDK plan](plugin-language-sdks-plan.md) |
 | Optional smolvm Bash setup and operation | [`sandbox.md`](sandbox.md) |
 | Safety model and privilege boundaries | [`security.md`](security.md) |
+| Vulnerability disclosure | [`SECURITY.md`](../SECURITY.md) |
+| Alpha versioning and distribution | [`releases.md`](releases.md) |
 | Feature-specific behavior | The matching guide in this directory |
 | Contributor workflow and must-load repository rules | [`AGENTS.md`](../AGENTS.md) |
 | Package architecture, dependency direction, and roadmap | [`IMPLEMENTATION.md`](../IMPLEMENTATION.md) |
@@ -110,6 +118,8 @@ To reduce drift, use these documents as the primary references:
 ## Related documents
 
 - [Project README](../README.md) — first run and product overview.
+- [Release policy](releases.md) — alpha release and distribution requirements.
+- [Security reporting](../SECURITY.md) — private vulnerability disclosure.
 - [Documentation style guide](style-guide.md) — conventions used across this
   directory.
 - [Architecture and roadmap](../IMPLEMENTATION.md) — design decisions and open

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func TestSDKGoalMethodsStopped(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func TestAppPlanModeAndModeTools(t *testing.T) {

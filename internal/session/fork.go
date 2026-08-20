@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // ErrInvalidForkBoundary reports a snapshot that would separate a tool call

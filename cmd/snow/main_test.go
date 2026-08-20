@@ -22,11 +22,11 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/snow-core/snow/internal/app"
-	"github.com/snow-core/snow/internal/session"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/session"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 var errCLIClose = errors.New("cli close failed")
@@ -88,6 +88,9 @@ func TestBuildOptionsReadsSubagentModel(t *testing.T) {
 	}
 	if opts.SubagentProvider != "opencode-go" || opts.SubagentModel != "model-x" {
 		t.Fatalf("subagent selection = %s/%s", opts.SubagentProvider, opts.SubagentModel)
+	}
+	if opts.BuildVersion != version {
+		t.Fatalf("build version = %q, want %q", opts.BuildVersion, version)
 	}
 }
 

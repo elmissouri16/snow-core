@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 )
 
 const v2PluginSource = `package main

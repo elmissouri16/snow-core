@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/config"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/config"
 )
 
 // AuthProviders returns the deterministic, safe authentication inventory.

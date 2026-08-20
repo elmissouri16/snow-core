@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // ParseForkTurns accepts none, all, or a positive integer string.

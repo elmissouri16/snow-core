@@ -20,8 +20,8 @@ Every document follows the same skeleton, top to bottom:
    covers, for whom, and where related material lives. Plain prose; no header
    for the intro itself.
 3. **Status or scope note** (optional) — a single `> **Note:**` blockquote
-   when the reader must know about pre-alpha status, trust boundaries, or
-   scope limits before continuing.
+   when the reader must know about release status, trust boundaries, or scope
+   limits before continuing.
 4. **On this page** — a table of contents for documents longer than ~120
    lines. One link per `##` section, using GitHub anchor links. Skip the TOC
    for short documents.
@@ -62,7 +62,7 @@ kinds, and use them sparingly:
 
 | Kind | Markup | When to use |
 |---|---|---|
-| Note | `> **Note:**` | Neutral clarification, scope limit, pre-alpha status |
+| Note | `> **Note:**` | Neutral clarification, scope limit, release status |
 | Tip | `> **Tip:**` | Best practice, shortcut, recommended workflow |
 | Warning | `> **Warning:**` | Security boundary, credential handling, data loss, breaking change |
 | Caution | `> **Caution:**` | Destructive or irreversible operation |

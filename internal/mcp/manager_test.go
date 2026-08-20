@@ -16,8 +16,8 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/snow-core/snow/internal/tools"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 )
 
 func TestManagerCloseWaitsForAdmittedConnections(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // Handler lets a trusted host asynchronously resolve a permission request. It

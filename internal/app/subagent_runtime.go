@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/snow-core/snow/internal/agent"
-	"github.com/snow-core/snow/internal/session"
+	"github.com/elmissouri16/snow-core/internal/agent"
+	"github.com/elmissouri16/snow-core/internal/session"
 )
 
 // childAgentRuntime owns the independent child transcript store. agent.Agent

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/snow-core/snow/internal/permission"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // ToolSchema is the JSON-schema-backed description of a tool.

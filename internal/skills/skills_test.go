@@ -10,7 +10,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/snow-core/snow/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/tools"
 )
 
 func writeSkill(t *testing.T, root, dir, name, description, body string) string {

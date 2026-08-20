@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/permission"
-	"github.com/snow-core/snow/internal/sandbox"
-	"github.com/snow-core/snow/internal/tempfile"
-	"github.com/snow-core/snow/internal/trust"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/sandbox"
+	"github.com/elmissouri16/snow-core/internal/tempfile"
+	"github.com/elmissouri16/snow-core/internal/trust"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // startupConfig contains the dependency-ordered state created before tools.

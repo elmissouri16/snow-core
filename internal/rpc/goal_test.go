@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/snow-core/snow/internal/app"
+	"github.com/elmissouri16/snow-core/internal/app"
 	"testing"
 )
 

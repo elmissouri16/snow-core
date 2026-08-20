@@ -19,7 +19,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
 
-	"github.com/snow-core/snow/internal/tools/builtin"
+	"github.com/elmissouri16/snow-core/internal/tools/builtin"
 )
 
 // Discover scans standard user and project paths. Higher-ranked project and

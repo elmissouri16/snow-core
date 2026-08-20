@@ -133,7 +133,7 @@ Host request:
   "method": "initialize",
   "params": {
     "protocol_version": 2,
-    "host_version": "snow-core",
+    "host_version": "0.1.0-alpha.1",
     "cwd": "/effective/plugin/cwd",
     "session_id": "session-id",
     "host_capabilities": ["tools", "events"],
@@ -142,8 +142,9 @@ Host request:
 }
 ```
 
-`host_version` is an opaque host value: normal app wiring currently sends
-`snow-core`, while `plugin check` may send the binary build version.
+`host_version` is an opaque host value. Normal app wiring, `plugin check`, RPC,
+and MCP use the effective Snow build version; untagged builds default to
+`0.1.0-dev`.
 
 Preferred result:
 

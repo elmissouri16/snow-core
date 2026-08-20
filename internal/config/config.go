@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	"github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	"github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // DefaultToolOutputBytes is the default per-tool result cap (256 KiB).

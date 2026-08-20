@@ -8,7 +8,7 @@ or Bubble Tea.
 Public integration data lives in `pkg/protocol`, a standard-library-only
 package shared by the SDK, JSON, RPC, plugins, sessions, and the TUI.
 
-> **Note:** Snow is pre-alpha. `pkg/snowsdk` and `pkg/protocol` are the
+> **Note:** Snow is alpha software. `pkg/snowsdk` and `pkg/protocol` are the
 > intended public surfaces, but compatibility is not guaranteed until v1.
 
 ## On this page
@@ -27,11 +27,13 @@ package shared by the SDK, JSON, RPC, plugins, sessions, and the TUI.
 ## Install
 
 ```sh
-go get github.com/snow-core/snow/pkg/snowsdk
+go get github.com/elmissouri16/snow-core/pkg/snowsdk
 ```
 
 A separate checked-in module under [`examples/sdk`](../examples/sdk) exercises
-only the public packages and is run by Linux and macOS CI. From this checkout:
+only the public packages and is run by Linux and macOS CI. SDK-created runtimes
+advertise the linked Snow build version to external plugins and MCP servers.
+From this checkout:
 
 ```sh
 cd examples/sdk
@@ -43,8 +45,8 @@ Import both packages:
 
 ```go
 import (
-    "github.com/snow-core/snow/pkg/protocol"
-    "github.com/snow-core/snow/pkg/snowsdk"
+    "github.com/elmissouri16/snow-core/pkg/protocol"
+    "github.com/elmissouri16/snow-core/pkg/snowsdk"
 )
 ```
 
@@ -63,8 +65,8 @@ import (
     "fmt"
     "time"
 
-    "github.com/snow-core/snow/pkg/protocol"
-    "github.com/snow-core/snow/pkg/snowsdk"
+    "github.com/elmissouri16/snow-core/pkg/protocol"
+    "github.com/elmissouri16/snow-core/pkg/snowsdk"
 )
 
 func main() {
@@ -263,7 +265,7 @@ import (
     "context"
     "fmt"
 
-    "github.com/snow-core/snow/pkg/snowsdk"
+    "github.com/elmissouri16/snow-core/pkg/snowsdk"
 )
 
 func main() {
@@ -715,7 +717,7 @@ Concurrency guidance:
   subscribed session.
 - `Diagnostics()` omits plugin startup failures and detailed skill parse
   diagnostics.
-- The package is pre-alpha; public compatibility is not guaranteed until v1.
+- The package is alpha; public compatibility is not guaranteed until v1.
 
 ## Related documents
 

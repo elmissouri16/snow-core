@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/permission"
-	internalsandbox "github.com/snow-core/snow/internal/sandbox"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	internalsandbox "github.com/elmissouri16/snow-core/internal/sandbox"
 )
 
 func TestAppRejectsCorruptSandboxAuthorityState(t *testing.T) {

@@ -13,9 +13,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/provider/openaicompat"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func compatibleConfig(t *testing.T, serverURL, defaultModel string) string {

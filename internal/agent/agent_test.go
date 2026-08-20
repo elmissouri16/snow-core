@@ -14,13 +14,13 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/permission"
-	"github.com/snow-core/snow/internal/provider"
-	"github.com/snow-core/snow/internal/session"
-	skillspkg "github.com/snow-core/snow/internal/skills"
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/session"
+	skillspkg "github.com/elmissouri16/snow-core/internal/skills"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // ---------------------------------------------------------------------------

@@ -22,13 +22,15 @@ func TestSDKAssetsMatchCanonicalSources(t *testing.T) {
 			runtime: RuntimePython,
 			root:    filepath.Join("..", "..", "sdk", "plugin-python"),
 			include: func(name string) bool {
-				return strings.HasPrefix(name, "src/snow_plugin/") && !strings.Contains(name, "__pycache__") && !strings.HasSuffix(name, ".pyc")
+				return name == "LICENSE" || strings.HasPrefix(name, "src/snow_plugin/") && !strings.Contains(name, "__pycache__") && !strings.HasSuffix(name, ".pyc")
 			},
 		},
 		{
 			runtime: RuntimeJavaScript,
 			root:    filepath.Join("..", "..", "sdk", "plugin-javascript"),
-			include: func(name string) bool { return name == "package.json" || strings.HasPrefix(name, "src/") },
+			include: func(name string) bool {
+				return name == "LICENSE" || name == "package.json" || strings.HasPrefix(name, "src/")
+			},
 		},
 	}
 	for _, tc := range cases {
@@ -115,6 +117,17 @@ func TestVendorStagesMetadataAndRequiresExplicitReplace(t *testing.T) {
 	}
 	if metadata.Runtime != RuntimePython || metadata.HostVersion != "test-version" || len(metadata.Files) != len(receipt.Files)-1 {
 		t.Fatalf("metadata = %+v", metadata)
+	}
+	licenseData, err := os.ReadFile(filepath.Join(destination, "vendor", "python", "LICENSE"))
+	if err != nil || !bytes.Contains(licenseData, []byte("MIT License")) {
+		t.Fatalf("vendored license missing or invalid: %q, %v", licenseData, err)
+	}
+	licenseReceipted := false
+	for _, file := range metadata.Files {
+		licenseReceipted = licenseReceipted || file.Path == "LICENSE"
+	}
+	if !licenseReceipted {
+		t.Fatalf("vendored license missing from metadata: %+v", metadata.Files)
 	}
 
 	initPath := filepath.Join(destination, "vendor", "python", "snow_plugin", "__init__.py")

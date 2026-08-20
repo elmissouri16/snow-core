@@ -13,12 +13,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/snow-core/snow/internal/app"
-	"github.com/snow-core/snow/internal/config"
-	internalmcp "github.com/snow-core/snow/internal/mcp"
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/internal/trust"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/config"
+	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/trust"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 )
 
 func mcpCmd() *cobra.Command {

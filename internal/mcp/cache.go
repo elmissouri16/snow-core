@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 )
 
 const (

@@ -10,9 +10,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 
-	"github.com/snow-core/snow/internal/provider/openaicompat"
-	"github.com/snow-core/snow/internal/trust"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
+	"github.com/elmissouri16/snow-core/internal/trust"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 const maxStreamingTranscriptSnapshotBytes = 512 << 10

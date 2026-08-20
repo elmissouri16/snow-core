@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // Mode is the permission policy.

@@ -11,16 +11,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/snow-core/snow/internal/config"
-	internalmcp "github.com/snow-core/snow/internal/mcp"
-	"github.com/snow-core/snow/internal/permission"
-	"github.com/snow-core/snow/internal/provider"
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/internal/userinput"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
-	publicsandbox "github.com/snow-core/snow/pkg/sandbox"
+	"github.com/elmissouri16/snow-core/internal/config"
+	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/userinput"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
+	publicsandbox "github.com/elmissouri16/snow-core/pkg/sandbox"
 )
 
 func auxiliaryConfigFingerprint(globalDir, projectRoot string, projectAllowed bool) string {

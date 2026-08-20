@@ -6,7 +6,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/snow-core/snow/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/auth"
 )
 
 // Module binds one built-in transport to its authentication driver. Provider

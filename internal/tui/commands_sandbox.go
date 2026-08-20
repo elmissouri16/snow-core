@@ -8,13 +8,13 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/permission"
-	"github.com/snow-core/snow/internal/provider/chatgpt"
-	"github.com/snow-core/snow/internal/provider/openaicompat"
-	internalsandbox "github.com/snow-core/snow/internal/sandbox"
-	"github.com/snow-core/snow/internal/trust"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/provider/chatgpt"
+	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
+	internalsandbox "github.com/elmissouri16/snow-core/internal/sandbox"
+	"github.com/elmissouri16/snow-core/internal/trust"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // runCommand handles slash commands.

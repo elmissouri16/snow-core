@@ -9,7 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/snow-core/snow/internal/app"
+	"github.com/elmissouri16/snow-core/internal/app"
 )
 
 func TestMentionDiscoveryIsAsyncAndIgnoresStaleEditorState(t *testing.T) {

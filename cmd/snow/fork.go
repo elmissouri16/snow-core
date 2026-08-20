@@ -10,11 +10,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/snow-core/snow/internal/artifact"
-	"github.com/snow-core/snow/internal/config"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/worktree"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/artifact"
+	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/worktree"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func forkCmd() *cobra.Command {

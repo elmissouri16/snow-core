@@ -8,16 +8,16 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/snow-core/snow/internal/artifact"
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/config"
-	goalpkg "github.com/snow-core/snow/internal/goal"
-	"github.com/snow-core/snow/internal/permission"
-	"github.com/snow-core/snow/internal/provider"
-	"github.com/snow-core/snow/internal/provider/openaicompat"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/worktree"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/artifact"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/config"
+	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/worktree"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // bindPermissionSession restores permission state for st and routes future

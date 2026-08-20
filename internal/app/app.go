@@ -5,26 +5,26 @@ package app
 import (
 	"sync"
 
-	"github.com/snow-core/snow/internal/agent"
-	"github.com/snow-core/snow/internal/artifact"
-	"github.com/snow-core/snow/internal/auth"
-	"github.com/snow-core/snow/internal/config"
-	goalpkg "github.com/snow-core/snow/internal/goal"
-	internalmcp "github.com/snow-core/snow/internal/mcp"
-	"github.com/snow-core/snow/internal/permission"
-	internalplugin "github.com/snow-core/snow/internal/plugin"
-	"github.com/snow-core/snow/internal/provider"
-	"github.com/snow-core/snow/internal/sandbox"
-	"github.com/snow-core/snow/internal/session"
-	"github.com/snow-core/snow/internal/skills"
-	"github.com/snow-core/snow/internal/subagent"
-	"github.com/snow-core/snow/internal/tools"
-	"github.com/snow-core/snow/internal/tools/builtin"
-	"github.com/snow-core/snow/internal/trust"
-	"github.com/snow-core/snow/internal/userinput"
-	publicmcp "github.com/snow-core/snow/pkg/mcp"
-	publicplugin "github.com/snow-core/snow/pkg/plugin"
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/internal/agent"
+	"github.com/elmissouri16/snow-core/internal/artifact"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/config"
+	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
+	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
+	"github.com/elmissouri16/snow-core/internal/permission"
+	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
+	"github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/sandbox"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/skills"
+	"github.com/elmissouri16/snow-core/internal/subagent"
+	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/tools/builtin"
+	"github.com/elmissouri16/snow-core/internal/trust"
+	"github.com/elmissouri16/snow-core/internal/userinput"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // App is the assembled runtime.
@@ -36,6 +36,7 @@ type App struct {
 	PersistedCfg config.Config
 	ConfigPath   string
 	AuthPath     string
+	BuildVersion string
 
 	Auth            auth.Store // compatibility handle for credential inventory
 	AuthService     *auth.Service
@@ -104,6 +105,7 @@ type liveRuntimeSelection struct {
 type Options struct {
 	CWD                     string
 	ConfigPath              string
+	BuildVersion            string
 	AuthPath                string
 	SandboxStatePath        string // optional operator-state override for tests/internal surfaces
 	DisableSandbox          bool   // explicit host-shell override despite a configured association

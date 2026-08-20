@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // ProtocolVersion is the version of the external plugin protocol.

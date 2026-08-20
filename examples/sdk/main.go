@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/snow-core/snow/pkg/protocol"
-	"github.com/snow-core/snow/pkg/snowsdk"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/snowsdk"
 )
 
 func main() {

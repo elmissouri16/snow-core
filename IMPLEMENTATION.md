@@ -9,9 +9,9 @@ strategy, the phased roadmap, and condensed research decisions. User-facing
 behavior is documented under `docs/`; day-to-day operating guidance lives in
 `AGENTS.md`.
 
-> **Note:** snow-core is pre-alpha. Source code and tests are the behavioral
-> authority; this document is the architecture and roadmap reference and does
-> not substitute for checking current source and tests.
+> **Note:** snow-core is alpha software. Source code and tests are the
+> behavioral authority; this document is the architecture and roadmap reference
+> and does not substitute for checking current source and tests.
 
 ## On this page
 
@@ -183,7 +183,14 @@ snowsdk → app + protocol; never bubbletea
 TUI or Cobra. `pkg/protocol` is standard-library-only. `internal/` is not a
 stable external API; the public surface is `pkg/snowsdk`, `pkg/protocol`, and
 the dependency-light `pkg/*` contracts such as `pkg/sandbox`. `go.mod` and
-`README.md` both declare the Go 1.27 line (currently `1.27rc2`).
+`README.md` both declare the Go 1.27 line (currently `1.27rc3`).
+
+`internal/buildinfo.Version` is the single linked build-version default.
+`cmd/snow` copies it into `app.Options.BuildVersion`; `internal/app.New`
+normalizes and stores the value before passing it to RPC, external-plugin, and
+MCP handshakes. Go SDK sessions seed the same linked value. Release builds
+replace the symbol through `-ldflags -X`, while untagged builds remain
+`0.1.0-dev`.
 
 ### Runtime data flow
 
@@ -1089,6 +1096,7 @@ SNOW_TEST_BINARY="$PWD/snow" PYTHONPATH=sdk/python/src python3 -m unittest disco
 (cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration && npm run pack:check)
 python3 examples/rpc/python/client.py --snow ./snow
 node examples/rpc/javascript/client.mjs ./snow
+govulncheck ./...
 ```
 
 After a verified feature change, refresh the user-local binary with
@@ -1111,16 +1119,21 @@ After a verified feature change, refresh the user-local binary with
 
 ### CI
 
-`.github/workflows/ci.yml` runs on pushes, pull requests, and manual
-dispatches: Linux and macOS run formatting (Linux), vet, `go test ./...`,
-production builds, credential-free standalone SDK/RPC example execution, and
-plugin-SDK conformance/pack checks;
-Linux also runs `go test -race ./internal/... ./pkg/snowsdk`. Real-provider
-checks remain manual.
+`.github/workflows/ci.yml` runs for `main` pushes, pull requests, manual
+dispatches, and calls from the release workflow. Linux and macOS run formatting
+(Linux), vet, `go test ./...`, production builds, credential-free standalone
+SDK/RPC examples, language-SDK integration checks, JavaScript dry-run package
+checks, and plugin-SDK conformance checks. Linux also runs
+`go test -race ./internal/... ./pkg/snowsdk`, cgo-disabled builds for all four
+release targets, and a pinned `govulncheck` reachable-code scan. Real-provider
+checks remain manual. `.github/workflows/release-alpha.yml` accepts only
+`vMAJOR.MINOR.PATCH-alpha.N` tags, reuses the complete CI gate, publishes
+macOS/Linux amd64/arm64 archives and `SHA256SUMS`, and marks the GitHub release
+as a prerelease.
 
 ## Roadmap
 
-Phases 0 through 4 are complete and shipped. The list below records what each
+Phases 0 through 4 are implemented in-tree. The list below records what each
 phase delivered; the current work queue is "Known gaps / next work" under the
 next heading.
 
@@ -1142,7 +1155,7 @@ that is fully covered elsewhere is referenced rather than repeated.
 | Decision | Choice |
 |---|---|
 | Product role | Standalone harness, not an IDE backend |
-| Binary name and module | `snow`, `github.com/snow-core/snow` |
+| Binary name and module | `snow`, `github.com/elmissouri16/snow-core` |
 | Modularity | In-process interfaces plus JSON-RPC stdio subprocess plugins; no Go `.so` loading |
 | Auth | OpenCode Go API key, user-configured OpenAI-compatible endpoints, and ChatGPT/Codex OAuth |
 | Sessions | Snow-owned pure-Go SQLite tree (schema version 9) |
@@ -1189,6 +1202,8 @@ that is fully covered elsewhere is referenced rather than repeated.
 
 - [Using Snow](docs/using-snow.md) — TUI/CLI modes, flags, keys, commands, queues, and workflows
 - [Security model](docs/security.md) — consolidated privilege and threat boundaries
+- [Security reporting](SECURITY.md) — private vulnerability disclosure policy
+- [Release policy](docs/releases.md) — alpha versioning, verification, artifacts, and rollback
 - [SDK](docs/sdk.md) — public Go SDK lifecycle and API reference
 - [Sessions](docs/sessions.md) — pure-Go SQLite session storage and schema
 - [RPC](docs/rpc.md) — versioned JSONL framing, schemas, commands, and events

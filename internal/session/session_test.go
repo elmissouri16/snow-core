@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/snow-core/snow/pkg/protocol"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func msg(id, parent, text string) Entry {

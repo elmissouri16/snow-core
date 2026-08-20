@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/snow-core/snow/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/auth"
 )
 
 func writeJSON(t *testing.T, path string, value any) {

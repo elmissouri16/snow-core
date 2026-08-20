@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/snow-core/snow/internal/config"
+	"github.com/elmissouri16/snow-core/internal/config"
 )
 
 func loadSystemPromptFile(path, baseDir, confinedRoot string, maxBytes int) (string, error) {

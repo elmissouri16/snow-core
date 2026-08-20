@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/snow-core/snow/internal/auth"
-	providerpkg "github.com/snow-core/snow/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/auth"
+	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
 )
 
 const (

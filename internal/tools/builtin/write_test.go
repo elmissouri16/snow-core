@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/snow-core/snow/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/tools"
 )
 
 func TestWrite_CreatesFile(t *testing.T) {
