@@ -174,6 +174,26 @@ func TestActivationAndResourceReadAreConfined(t *testing.T) {
 		t.Fatalf("details = %#v", result.Details)
 	}
 
+	deactivate, ok := registry.Get("deactivate_skill")
+	if !ok {
+		t.Fatal("deactivate_skill missing")
+	}
+	deactivated, err := deactivate.Run(context.Background(), json.RawMessage(`{"name":"pdf-tools"}`), nil)
+	if err != nil || deactivated.IsError || deactivated.Content[0].Text != "deactivated skill pdf-tools" {
+		t.Fatalf("deactivation = %+v, err = %v", deactivated, err)
+	}
+	if details, ok := deactivated.Details.(tools.SkillDeactivationDetails); !ok || details.Name != "pdf-tools" {
+		t.Fatalf("deactivation details = %#v", deactivated.Details)
+	}
+	all, err := deactivate.Run(context.Background(), json.RawMessage(`{"name":"*"}`), nil)
+	if err != nil || all.IsError || all.Content[0].Text != "deactivated all active skills" {
+		t.Fatalf("all deactivation = %+v, err = %v", all, err)
+	}
+	unknown, err := deactivate.Run(context.Background(), json.RawMessage(`{"name":"missing"}`), nil)
+	if err != nil || !unknown.IsError || !strings.Contains(unknown.Content[0].Text, "unknown skill") {
+		t.Fatalf("unknown deactivation = %+v, err = %v", unknown, err)
+	}
+
 	read, ok := registry.Get("read_skill_resource")
 	if !ok {
 		t.Fatal("read_skill_resource missing")
@@ -346,7 +366,7 @@ func TestCatalogBudgetDisablesOverflowWithoutPartialDisclosure(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, "first", "first", strings.Repeat("a", 100), "body")
 	writeSkill(t, root, "second", "second", strings.Repeat("b", 100), "body")
-	limit := len(catalogPromptPrefix(true)) + len("</available_skills>") + len(catalogPromptEntry(Skill{Name: "first", Description: strings.Repeat("a", 100)}))
+	limit := len(catalogPromptPrefix(true, true)) + len("</available_skills>") + len(catalogPromptEntry(Skill{Name: "first", Description: strings.Repeat("a", 100)}))
 	catalog := Discover(Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}, MaxCatalogBytes: limit})
 	defer catalog.Close()
 	if got := catalog.List(); len(got) != 1 || got[0].Name != "first" {
@@ -361,17 +381,18 @@ func TestCatalogBudgetDisablesOverflowWithoutPartialDisclosure(t *testing.T) {
 	}
 }
 
-func TestCatalogPromptAdaptsToResourceToolAvailability(t *testing.T) {
+func TestCatalogPromptAdaptsToSkillToolAvailability(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, "review", "review", "Review code.", "body")
 	catalog := Discover(Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}})
 	defer catalog.Close()
-	withoutReader := catalog.CatalogPromptForTools(false)
-	if strings.Contains(withoutReader, "read_skill_resource") || !strings.Contains(withoutReader, "$skill-name") {
-		t.Fatalf("catalog without reader = %q", withoutReader)
+	activationOnly := catalog.CatalogPromptForToolAvailability(false, false)
+	if strings.Contains(activationOnly, "read_skill_resource") || strings.Contains(activationOnly, "deactivate_skill") || !strings.Contains(activationOnly, "$skill-name") {
+		t.Fatalf("activation-only catalog = %q", activationOnly)
 	}
-	if !strings.Contains(catalog.CatalogPromptForTools(true), "read_skill_resource") {
-		t.Fatal("catalog with reader omitted resource instructions")
+	full := catalog.CatalogPromptForToolAvailability(true, true)
+	if !strings.Contains(full, "read_skill_resource") || !strings.Contains(full, "deactivate_skill") || !strings.Contains(full, "persist across turns") {
+		t.Fatalf("full skill catalog omitted lifecycle instructions: %q", full)
 	}
 }
 

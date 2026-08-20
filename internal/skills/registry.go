@@ -170,7 +170,7 @@ scanDirs:
 	if catalogLimit <= 0 {
 		catalogLimit = defaultCatalogBytes
 	}
-	catalogBytes := len(catalogPromptPrefix(true)) + len("</available_skills>")
+	catalogBytes := len(catalogPromptPrefix(true, true)) + len("</available_skills>")
 	for _, skill := range candidates {
 		if skill.Enabled {
 			entryBytes := len(catalogPromptEntry(skill))
@@ -503,16 +503,23 @@ func (r *Registry) Close() error { return nil }
 
 // CatalogPrompt returns tier-one progressive disclosure for the standard Snow
 // skill tool set.
-func (r *Registry) CatalogPrompt() string { return r.CatalogPromptForTools(true) }
+func (r *Registry) CatalogPrompt() string { return r.CatalogPromptForToolAvailability(true, true) }
 
 // CatalogPromptForTools omits resource-reader instructions when an explicit
-// tool allowlist excludes that optional capability.
+// tool allowlist excludes that optional capability. It retains deactivation
+// guidance for compatibility with callers using the standard skill tool set.
 func (r *Registry) CatalogPromptForTools(resourceReader bool) string {
+	return r.CatalogPromptForToolAvailability(resourceReader, true)
+}
+
+// CatalogPromptForToolAvailability describes only skill lifecycle tools that
+// are actually exposed by the active registry.
+func (r *Registry) CatalogPromptForToolAvailability(resourceReader, deactivator bool) string {
 	if r == nil || len(r.ordered) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(catalogPromptPrefix(resourceReader))
+	b.WriteString(catalogPromptPrefix(resourceReader, deactivator))
 	for _, skill := range r.ordered {
 		b.WriteString(catalogPromptEntry(skill))
 	}
@@ -520,10 +527,13 @@ func (r *Registry) CatalogPromptForTools(resourceReader bool) string {
 	return b.String()
 }
 
-func catalogPromptPrefix(resourceReader bool) string {
+func catalogPromptPrefix(resourceReader, deactivator bool) string {
 	prefix := "The following Agent Skills provide specialized instructions. When a task matches a description, call activate_skill with its name before proceeding. A prompt beginning with $skill-name activates that skill directly. Relative paths are rooted at the activated skill directory."
 	if resourceReader {
 		prefix += " Use read_skill_resource for referenced files."
+	}
+	if deactivator {
+		prefix += " Active skills persist across turns. When the user explicitly exits a skill workflow or requests a handoff to work that conflicts with an active skill, call deactivate_skill before proceeding. Use deactivation only for the requested lifecycle transition, never to evade other applicable instructions."
 	}
 	return prefix + "\n<available_skills>\n"
 }

@@ -787,7 +787,10 @@ and fail closed rather than hand-rolling protocol framing.
 
 `activate_skill` loads escaped full instructions, the TUI autocompletes
 enabled leading `$skill-name` directives, and a directive activates before
-provider dispatch while recording branch-scoped state.
+provider dispatch while recording branch-scoped state. `deactivate_skill`
+removes one named active skill, or all active skills only via `name: "*"`, and
+atomically persists a provider-hidden lifecycle marker with the tool result so
+the next continuation and resumed sessions omit that guidance.
 `read_skill_resource` uses immutable bounded `embed.FS` reads for built-ins or
 verifies the discovery-time directory identity before using a pinned
 per-operation `os.Root` for filesystem resources. Activated content is

@@ -89,8 +89,12 @@ func skillPromptForRegistry(catalog *skills.Registry, registry tools.Registry) s
 	if len(skillNamesForRegistry(catalog, registry)) == 0 {
 		return ""
 	}
-	reader, ok := registry.Descriptor("read_skill_resource")
-	return catalog.CatalogPromptForTools(ok && reader.Owner == "skills")
+	reader, readerOK := registry.Descriptor("read_skill_resource")
+	deactivator, deactivatorOK := registry.Descriptor("deactivate_skill")
+	return catalog.CatalogPromptForToolAvailability(
+		readerOK && reader.Owner == "skills",
+		deactivatorOK && deactivator.Owner == "skills",
+	)
 }
 
 // DefaultPaths resolves config/auth paths from the environment.

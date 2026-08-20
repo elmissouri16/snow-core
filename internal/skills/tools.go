@@ -25,7 +25,7 @@ func RegisterTools(reg tools.Registry, catalog *Registry) error {
 	if catalog == nil || len(catalog.ordered) == 0 {
 		return nil
 	}
-	for _, tool := range []tools.Tool{&ActivateTool{Catalog: catalog}, &ReadResourceTool{Catalog: catalog}} {
+	for _, tool := range []tools.Tool{&ActivateTool{Catalog: catalog}, &DeactivateTool{Catalog: catalog}, &ReadResourceTool{Catalog: catalog}} {
 		schema := tool.Schema()
 		if err := reg.RegisterDescriptor(tools.ToolDescriptor{Schema: schema, Tool: tool, Source: tools.SourceBuiltin, Owner: "skills", OriginalName: schema.Name, Risk: "read"}); err != nil {
 			return err
@@ -87,6 +87,55 @@ func (t *ActivateTool) Run(ctx context.Context, raw json.RawMessage, _ tools.Too
 	}
 	b.WriteString("\n</skill_content>")
 	return tools.ToolResult{Content: []protocol.ContentBlock{protocol.NewTextBlock(b.String())}, Details: tools.SkillActivationDetails{Name: skill.Name, Content: b.String()}}, nil
+}
+
+// DeactivateTool requests removal of one or every session-active skill. The
+// agent owns the active set and durable marker; the catalog constrains names.
+type DeactivateTool struct{ Catalog *Registry }
+
+func (t *DeactivateTool) Schema() tools.ToolSchema {
+	names := make([]string, 0, len(t.Catalog.ordered)+1)
+	for _, skill := range t.Catalog.ordered {
+		names = append(names, skill.Name)
+	}
+	names = append(names, "*")
+	params, _ := json.Marshal(map[string]any{
+		"type": "object", "required": []string{"name"},
+		"properties": map[string]any{"name": map[string]any{
+			"type": "string", "enum": names,
+			"description": "Active skill name, or * to deactivate all active skills.",
+		}},
+	})
+	return tools.ToolSchema{
+		Name:        "deactivate_skill",
+		Description: "Deactivate a session-active Agent Skill. Use this when the user explicitly exits a skill workflow or requests a handoff to conflicting work; use * only when the user asks to clear all active skills.",
+		Parameters:  params,
+	}
+}
+
+func (t *DeactivateTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {
+	var args struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return tools.ErrorResult(fmt.Errorf("deactivate_skill: invalid arguments: %w", err)), nil
+	}
+	if err := ctx.Err(); err != nil {
+		return tools.ErrorResult(err), nil
+	}
+	if args.Name != "*" {
+		if _, ok := t.Catalog.Get(args.Name); !ok {
+			return tools.ErrorResult(fmt.Errorf("deactivate_skill: unknown skill %q", args.Name)), nil
+		}
+	}
+	message := "deactivated skill " + args.Name
+	if args.Name == "*" {
+		message = "deactivated all active skills"
+	}
+	return tools.ToolResult{
+		Content: []protocol.ContentBlock{protocol.NewTextBlock(message)},
+		Details: tools.SkillDeactivationDetails{Name: args.Name},
+	}, nil
 }
 
 // ReadResourceTool reads one file confined to a discovered skill directory.

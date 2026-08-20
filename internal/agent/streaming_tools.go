@@ -561,13 +561,39 @@ func (a *Agent) appendToolResult(parent string, msg protocol.Message, details ..
 		Output:       preview,
 		DurationMS:   durationMS,
 	}
-	if err := a.opts.Session.Append(session.Entry{
+	messageEntry := session.Entry{
 		Type:     session.EntryMessage,
 		ID:       msg.ID,
 		ParentID: parent,
 		Message:  &msg,
-	}); err != nil {
-		return fmt.Errorf("agent: append tool result: %w", err)
+	}
+	deactivation := ""
+	if !msg.IsError {
+		for _, detail := range details {
+			if name, ok := skillDeactivationName(detail); ok {
+				deactivation = name
+				break
+			}
+		}
+	}
+	var persistErr error
+	if deactivation == "" {
+		persistErr = a.opts.Session.Append(messageEntry)
+	} else {
+		batch, batchOK := a.opts.Session.(session.BatchStore)
+		_, branchOK := a.opts.Session.(session.BranchEntryStore)
+		if !batchOK || !branchOK {
+			return errors.New("agent: deactivate_skill requires atomic branch-aware session storage")
+		}
+		markerID := newID()
+		messageEntry.ParentID = markerID
+		persistErr = batch.AppendBatch([]session.Entry{
+			{Type: session.EntryMeta, ID: markerID, ParentID: parent, Key: skillDeactivationMeta, Value: deactivation},
+			messageEntry,
+		})
+	}
+	if persistErr != nil {
+		return fmt.Errorf("agent: append tool result: %w", persistErr)
 	}
 	ev := protocol.AgentEvent{
 		Type:           protocol.EvToolEnd,
@@ -639,6 +665,18 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		}
 		return msg, false, nil
 	}
+	if cb.Name == "deactivate_skill" {
+		_, batchOK := a.opts.Session.(session.BatchStore)
+		_, branchOK := a.opts.Session.(session.BranchEntryStore)
+		if !batchOK || !branchOK {
+			msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
+				[]protocol.ContentBlock{protocol.NewTextBlock("Error: deactivate_skill requires atomic branch-aware session storage")}, true)
+			if err := a.appendToolResult(parent, msg); err != nil {
+				return msg, false, err
+			}
+			return msg, false, nil
+		}
+	}
 
 	// Permission gate.
 	risk := riskFor(cb.Name)
@@ -698,6 +736,7 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 	if !tr.IsError {
 		a.applyDiscoveryDetails(tr.Details)
 		a.applySkillActivationDetails(tr.Details)
+		a.applySkillDeactivationDetails(tr.Details)
 		a.applyPlanUpdateDetails(tr.Details)
 	}
 	return msg, true, nil

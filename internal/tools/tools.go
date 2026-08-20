@@ -122,6 +122,12 @@ type SkillActivationDetails struct {
 	Content string
 }
 
+// SkillDeactivationDetails lets the agent remove one or every active skill and
+// persist that lifecycle change outside provider-visible conversation text.
+type SkillDeactivationDetails struct {
+	Name string
+}
+
 // PlanUpdateDetails is private tool metadata promoted by the agent to a
 // structured public plan_update event.
 type PlanUpdateDetails struct{ Update protocol.PlanUpdate }

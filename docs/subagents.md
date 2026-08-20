@@ -185,7 +185,7 @@ preserve the parent tool allowlist):
     "allow_mutation": true,
     "roles": {
       "general": {
-        "tools": ["read", "grep", "glob", "artifact_read", "artifact_grep", "activate_skill", "read_skill_resource", "bash"]
+        "tools": ["read", "grep", "glob", "artifact_read", "artifact_grep", "activate_skill", "deactivate_skill", "read_skill_resource", "bash"]
       },
       "implementer": {
         "allow_mutation": true

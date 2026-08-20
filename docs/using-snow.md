@@ -449,7 +449,12 @@ A matching skill may be activated by the model through `activate_skill`. To
 activate one explicitly on any interactive, print, RPC, or SDK prompt path,
 begin the text with its discovered name as `$skill-name`; Snow loads it before
 the provider request. Multiple leading skill directives are allowed, and the
-same syntax works in queued steering and follow-ups.
+same syntax works in queued steering and follow-ups. Active skills persist
+across turns independently of Default or Plan mode. When you explicitly leave a
+skill workflow or request a conflicting handoff, the model can call
+`deactivate_skill` for that skill before continuing; `name: "*"` is reserved for
+an explicit request to clear all active skills. `/skills clear` provides the
+same all-skills recovery directly in the TUI.
 
 ## Management commands
 

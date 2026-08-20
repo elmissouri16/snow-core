@@ -121,7 +121,8 @@ writes the current project's trust-gated `.snow/config.json`. Project policy
 overrides global policy, named overrides take precedence over scope-wide
 `disabled`, and runtime `--no-skills` remains absolute. Disabled skills appear
 in inventory with their reason but never enter the startup catalog,
-`activate_skill` enum, resource reader, or restored active-skill context.
+`activate_skill`/`deactivate_skill` enums, resource reader, or restored
+active-skill context.
 `--no-skills`, trust revocation, and named policy changes therefore also filter
 activations persisted by an older session. The interactive TUI's `/skills`
 picker is read-only; `/skills clear` durably clears every active skill on the
@@ -140,7 +141,8 @@ Snow follows all three disclosure tiers:
    the start avoids activating tokens embedded in pasted or quoted untrusted
    text. In the TUI, typing a leading `$` opens autocomplete over enabled skill
    names and descriptions; Enter or Tab inserts the selected directive without
-   submitting.
+   submitting. `deactivate_skill` removes one named active skill, or `*` when
+   the user explicitly requests clearing all active skills.
 3. `read_skill_resource` reads one referenced script, reference, or asset on
    demand. Filesystem skills use a pinned `os.Root`; each operation verifies
    the directory identity recorded at discovery, preventing traversal, symlink
@@ -166,6 +168,16 @@ branch-scoped, provider-hidden marker and emits ordinary tool lifecycle events;
 resume rehydrates only those markers, never historical text that merely happens
 to contain a matching token.
 
+Active skills persist independently of collaboration mode. When the user
+explicitly exits a skill workflow or requests a handoff to work that conflicts
+with it, the model can call `deactivate_skill`. Snow removes the named skill
+before the next provider continuation and atomically stores a branch-scoped,
+provider-hidden marker with the successful tool result, so the deactivation
+survives resume and compaction. `name: "*"` clears all active skills only when
+the user requests that broader transition. Deactivation changes session-active
+instructions; it does not disable discovery, alter policy, or delete skill
+files. A later activation of the same skill takes precedence.
+
 Every transition from Plan to Default mode clears all session-active skills
 automatically. This includes Shift+Tab, `/default`, the **Implement this plan**
 handoff, SDK/RPC mode changes, and prompts atomically submitted in Default mode.
@@ -176,12 +188,12 @@ deleting their historical activation records. `/skills clear` remains available
 as an optional mode-independent recovery operation, not a required handoff
 step.
 
-An explicit `--tools`/SDK tool allowlist is an upper bound for the two skill
+An explicit `--tools`/SDK tool allowlist is an upper bound for the three skill
 tools as well. If `activate_skill` is omitted, skills remain in inventory with a
-runtime-disabled reason and are excluded from provider context; a resource-only
-allowlist also drops the incoherent names-only reader. If only the resource
-reader is omitted, activation remains available without advertising that
-reader.
+runtime-disabled reason and are excluded from provider context; resource-only
+or deactivation-only allowlists also drop those incoherent tools. If activation
+is present but `read_skill_resource` or `deactivate_skill` is omitted, the
+catalog advertises only the lifecycle capabilities actually available.
 
 Skill instructions and resources remain untrusted input. Bundled scripts run
 only through normal Snow tools and their permission policy; discovering or

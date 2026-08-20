@@ -41,6 +41,39 @@ func (a *Agent) applySkillActivationDetails(details any) {
 	a.mu.Unlock()
 }
 
+func skillDeactivationName(details any) (string, bool) {
+	var deactivation tools.SkillDeactivationDetails
+	switch value := details.(type) {
+	case tools.SkillDeactivationDetails:
+		deactivation = value
+	case *tools.SkillDeactivationDetails:
+		if value == nil {
+			return "", false
+		}
+		deactivation = *value
+	default:
+		return "", false
+	}
+	if deactivation.Name == "" {
+		return "", false
+	}
+	return deactivation.Name, true
+}
+
+func (a *Agent) applySkillDeactivationDetails(details any) {
+	name, ok := skillDeactivationName(details)
+	if !ok || (name != skillDeactivationAll && !skillNameAllowed(a.opts.SkillNames, name)) {
+		return
+	}
+	a.mu.Lock()
+	if name == skillDeactivationAll {
+		clear(a.activeSkills)
+	} else {
+		delete(a.activeSkills, name)
+	}
+	a.mu.Unlock()
+}
+
 func (a *Agent) publishGoalSnapshot() {
 	if a.opts.Goal == nil {
 		return

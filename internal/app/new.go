@@ -132,9 +132,9 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		activationAllowed := allowed["activate_skill"]
 		filtered := tools.NewRegistry()
 		for _, descriptor := range reg.Descriptors() {
-			// The resource reader is meaningful only with tier-one disclosure and
-			// activation, and otherwise leaks a names-only enum surface.
-			if descriptor.Schema.Name == "read_skill_resource" && !activationAllowed {
+			// Resource and deactivation tools are meaningful only with tier-one
+			// disclosure and activation, and otherwise leak names-only enums.
+			if (descriptor.Schema.Name == "read_skill_resource" || descriptor.Schema.Name == "deactivate_skill") && !activationAllowed {
 				continue
 			}
 			if allowed[descriptor.Schema.Name] {

@@ -430,7 +430,7 @@ func TestToolAllowlistIsUpperBoundForSkillTools(t *testing.T) {
 	if skill, ok := a.Skills.Lookup("review"); !ok || skill.Enabled || !strings.Contains(skill.DisabledBy, "tool allowlist") {
 		t.Fatalf("tool-disabled skill inventory = %+v, %v", skill, ok)
 	}
-	for _, name := range []string{"activate_skill", "read_skill_resource"} {
+	for _, name := range []string{"activate_skill", "deactivate_skill", "read_skill_resource"} {
 		if _, ok := a.Registry.Get(name); ok {
 			t.Fatalf("explicit tool allowlist unexpectedly retained %s", name)
 		}
@@ -446,6 +446,9 @@ func TestToolAllowlistIsUpperBoundForSkillTools(t *testing.T) {
 	if _, ok := activationOnly.Registry.Get("read_skill_resource"); ok {
 		t.Fatal("activation-only allowlist retained read_skill_resource")
 	}
+	if _, ok := activationOnly.Registry.Get("deactivate_skill"); ok {
+		t.Fatal("activation-only allowlist retained deactivate_skill")
+	}
 	if _, ok := activationOnly.Skills.Get("review"); !ok {
 		t.Fatal("activation-only allowlist disabled the skill catalog")
 	}
@@ -457,6 +460,14 @@ func TestToolAllowlistIsUpperBoundForSkillTools(t *testing.T) {
 	defer readerOnly.Close()
 	if _, ok := readerOnly.Registry.Get("read_skill_resource"); ok {
 		t.Fatal("resource-only allowlist retained an incoherent names-only reader")
+	}
+	deactivatorOnly, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(), Tools: []string{"deactivate_skill"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer deactivatorOnly.Close()
+	if _, ok := deactivatorOnly.Registry.Get("deactivate_skill"); ok {
+		t.Fatal("deactivation-only allowlist retained an incoherent names-only tool")
 	}
 }
 

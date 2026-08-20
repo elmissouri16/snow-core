@@ -5,6 +5,12 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+### Added
+
+- Added a model-callable `deactivate_skill` tool that removes one named active
+  skill, or all active skills on an explicit `*` request, before the next model
+  continuation and durably preserves that lifecycle transition across resume.
+
 ### Removed
 
 - Removed the optional smolvm Bash sandbox end to end: runtime routing, CLI/TUI

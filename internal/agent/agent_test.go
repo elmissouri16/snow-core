@@ -363,6 +363,154 @@ func TestClearActiveSkillsPersistsAcrossResume(t *testing.T) {
 	}
 }
 
+func TestDeactivateSkillToolRemovesActiveSkillAndPersists(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	activation := "<skill_content name=\"review\">\nfollow review workflow\n</skill_content>"
+	activated := protocol.NewToolResultMessage("skill-result", "", "activate-call", "activate_skill", []protocol.ContentBlock{protocol.NewTextBlock(activation)}, false)
+	if err := st.Append(session.Entry{Type: session.EntryMessage, ID: activated.ID, Message: &activated}); err != nil {
+		t.Fatal(err)
+	}
+
+	registry := tools.NewRegistry()
+	schema := protocol.ToolSchema{
+		Name:        "deactivate_skill",
+		Description: "deactivate",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","enum":["review","*"]}},"required":["name"]}`),
+	}
+	tool := &testTool{name: "deactivate_skill", schema: schema, runFunc: func(_ context.Context, args json.RawMessage, _ tools.ToolHost) tools.ToolResult {
+		var input struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(args, &input); err != nil {
+			return tools.ErrorResult(err)
+		}
+		return tools.ToolResult{
+			Content: []protocol.ContentBlock{protocol.NewTextBlock("deactivated skill " + input.Name)},
+			Details: tools.SkillDeactivationDetails{Name: input.Name},
+		}
+	}}
+	if err := registry.RegisterDescriptor(tools.ToolDescriptor{Schema: schema, Tool: tool, Source: tools.SourceBuiltin, Owner: "skills", Risk: permission.RiskRead}); err != nil {
+		t.Fatal(err)
+	}
+	observeSchema := protocol.ToolSchema{Name: "observe", Description: "observe", Parameters: json.RawMessage(`{"type":"object"}`)}
+	observe := &testTool{name: "observe", schema: observeSchema, runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+		return tools.TextResult("observed after deactivation")
+	}}
+	if err := registry.RegisterDescriptor(tools.ToolDescriptor{Schema: observeSchema, Tool: observe, Source: tools.SourceBuiltin, Owner: "test", Risk: permission.RiskRead}); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "deactivate-call", ToolName: "deactivate_skill", Arguments: json.RawMessage(`{"name":"review"}`)}, {Type: protocol.EvStreamToolCallDone, ToolCallID: "observe-call", ToolName: "observe", Arguments: json.RawMessage(`{}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+		{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}}
+	a, err := New(Options{
+		Provider: provider, Registry: registry, Session: st,
+		Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base",
+		Model: protocol.Model{Provider: "scripted", ID: "m1", SupportsTools: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "switch to implementation"); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.requests) != 2 {
+		t.Fatalf("provider requests = %d, want tool call and continuation", len(provider.requests))
+	}
+	if !strings.Contains(provider.requests[0].System, "follow review workflow") {
+		t.Fatalf("first request missing active skill: %q", provider.requests[0].System)
+	}
+	if strings.Contains(provider.requests[1].System, "follow review workflow") {
+		t.Fatalf("deactivated skill remained in continuation: %q", provider.requests[1].System)
+	}
+	a.Close()
+
+	entries, err := st.BranchEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	markerFound := false
+	for _, entry := range entries {
+		markerFound = markerFound || entry.Type == session.EntryMeta && entry.Key == skillDeactivationMeta && entry.Value == "review"
+	}
+	if !markerFound {
+		t.Fatalf("named deactivation marker missing: %+v", entries)
+	}
+
+	resumedProvider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	resumed, err := New(Options{
+		Provider: resumedProvider, Registry: registry, Session: st,
+		Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base",
+		Model: protocol.Model{Provider: "scripted", ID: "m1", SupportsTools: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resumed.Close()
+	if err := resumed.Prompt(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+	if len(resumedProvider.requests) != 1 || strings.Contains(resumedProvider.requests[0].System, "follow review workflow") {
+		t.Fatalf("named deactivation did not survive resume: %q", resumedProvider.requests[0].System)
+	}
+}
+
+type baseOnlySessionStore struct{ session.Store }
+
+func TestDeactivateSkillToolRequiresAtomicBranchStore(t *testing.T) {
+	memory := session.NewMemoryStore(session.Options{})
+	activation := "<skill_content name=\"review\">\nfollow review workflow\n</skill_content>"
+	activated := protocol.NewToolResultMessage("skill-result", "", "activate-call", "activate_skill", []protocol.ContentBlock{protocol.NewTextBlock(activation)}, false)
+	if err := memory.Append(session.Entry{Type: session.EntryMessage, ID: activated.ID, Message: &activated}); err != nil {
+		t.Fatal(err)
+	}
+	st := &baseOnlySessionStore{Store: memory}
+	registry := tools.NewRegistry()
+	schema := protocol.ToolSchema{Name: "deactivate_skill", Description: "deactivate", Parameters: json.RawMessage(`{"type":"object"}`)}
+	called := false
+	tool := &testTool{name: "deactivate_skill", schema: schema, runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+		called = true
+		return tools.ToolResult{Content: []protocol.ContentBlock{protocol.NewTextBlock("deactivated skill review")}, Details: tools.SkillDeactivationDetails{Name: "review"}}
+	}}
+	if err := registry.RegisterDescriptor(tools.ToolDescriptor{Schema: schema, Tool: tool, Source: tools.SourceBuiltin, Owner: "skills", Risk: permission.RiskRead}); err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "deactivate-call", ToolName: "deactivate_skill", Arguments: json.RawMessage(`{"name":"review"}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+		{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}}
+	a, err := New(Options{
+		Provider: provider, Registry: registry, Session: st,
+		Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base",
+		Model: protocol.Model{Provider: "scripted", ID: "m1", SupportsTools: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if err := a.Prompt(context.Background(), "switch to implementation"); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("deactivate_skill ran without atomic branch-aware storage")
+	}
+	if len(provider.requests) != 2 || !strings.Contains(provider.requests[1].System, "follow review workflow") {
+		t.Fatalf("active skill changed after rejected deactivation: requests=%d system=%q", len(provider.requests), provider.requests[1].System)
+	}
+	messages, err := memory.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundError := false
+	for _, message := range messages {
+		foundError = foundError || message.Role == protocol.RoleTool && message.ToolName == "deactivate_skill" && message.IsError && strings.Contains(toolResultText(message.Content), "atomic branch-aware")
+	}
+	if !foundError {
+		t.Fatalf("missing deactivation capability error: %+v", messages)
+	}
+}
+
 func TestRestoredSkillsHonorCurrentPolicy(t *testing.T) {
 	st := session.NewMemoryStore(session.Options{})
 	activation := "<skill_content name=\"review\">\nfollow review workflow\n</skill_content>"

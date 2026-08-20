@@ -144,8 +144,8 @@ func DefaultSubagents() SubagentConfig {
 		MinWaitTimeoutMS: 10_000, DefaultWaitTimeoutMS: 30_000, MaxWaitTimeoutMS: 3_600_000,
 		TaskTimeoutMS: 1_800_000, MaxResultBytes: 65_536, Durable: true, ExposeChildToolEvents: true,
 		DefaultRole: "general", Roles: map[string]AgentRole{
-			"general":     {Description: "General shell-capable investigation (bash remains permission-gated; file mutation is disabled by default)", Tools: []string{"read", "grep", "glob", "artifact_read", "artifact_grep", "activate_skill", "read_skill_resource", "bash"}},
-			"explorer":    {Description: "Narrow read-only codebase investigation", Tools: []string{"read", "grep", "glob", "artifact_read", "artifact_grep", "activate_skill", "read_skill_resource"}},
+			"general":     {Description: "General shell-capable investigation (bash remains permission-gated; file mutation is disabled by default)", Tools: []string{"read", "grep", "glob", "artifact_read", "artifact_grep", "activate_skill", "deactivate_skill", "read_skill_resource", "bash"}},
+			"explorer":    {Description: "Narrow read-only codebase investigation", Tools: []string{"read", "grep", "glob", "artifact_read", "artifact_grep", "activate_skill", "deactivate_skill", "read_skill_resource"}},
 			"implementer": {Description: "Shell-capable implementation task (write/edit require explicit role and global opt-in)"},
 		}}
 }
@@ -191,7 +191,7 @@ func (c SubagentConfig) ValidateSubagents() error {
 	if _, ok := c.Roles[c.DefaultRole]; !ok {
 		return fmt.Errorf("config: unknown subagent default role %q", c.DefaultRole)
 	}
-	childTools := map[string]bool{"read": true, "grep": true, "glob": true, "artifact_read": true, "artifact_grep": true, "activate_skill": true, "read_skill_resource": true, "write": true, "edit": true, "bash": true}
+	childTools := map[string]bool{"read": true, "grep": true, "glob": true, "artifact_read": true, "artifact_grep": true, "activate_skill": true, "deactivate_skill": true, "read_skill_resource": true, "write": true, "edit": true, "bash": true}
 	for name, role := range c.Roles {
 		if name == "default" || name == "worker" {
 			return fmt.Errorf("config: subagent role %q was renamed; use %q", name, map[string]string{"default": "general", "worker": "implementer"}[name])
