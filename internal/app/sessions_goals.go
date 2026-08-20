@@ -60,12 +60,18 @@ func (a *App) SetSession(st session.Store) error {
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return errors.New("app: cannot switch session while subagents are active")
 	}
+	if a.ProcessManager != nil && a.ProcessManager.HasRunning() {
+		return errors.New("app: cannot switch session while managed processes are running")
+	}
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return errors.New("app: cannot switch session while subagents are active")
+	}
+	if a.ProcessManager != nil && a.ProcessManager.HasRunning() {
+		return errors.New("app: cannot switch session while managed processes are running")
 	}
 	if st == nil {
 		return fmt.Errorf("app: session is nil")
@@ -95,6 +101,19 @@ func (a *App) SetSession(st session.Store) error {
 			return errors.New("app: session does not support subagent topology")
 		}
 		if err := a.Subagents.SetStoreAdmitted(taskStore); err != nil {
+			_ = a.Goal.SetStore(old)
+			_ = a.Agent.SetSessionQuietAdmitted(old)
+			_ = a.bindPermissionSession(old)
+			return err
+		}
+	}
+	if a.ProcessManager != nil {
+		if err := a.ProcessManager.BindSession(st.ID()); err != nil {
+			if a.Subagents != nil {
+				if oldTasks, ok := old.(session.SubagentTaskStore); ok {
+					_ = a.Subagents.SetStoreAdmitted(oldTasks)
+				}
+			}
 			_ = a.Goal.SetStore(old)
 			_ = a.Agent.SetSessionQuietAdmitted(old)
 			_ = a.bindPermissionSession(old)

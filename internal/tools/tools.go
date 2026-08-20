@@ -551,11 +551,11 @@ func CloneRegistry(src Registry, allow func(ToolDescriptor) bool) (*SimpleRegist
 
 func defaultRisk(name string) permission.Risk {
 	switch name {
-	case "read", "grep", "glob", "search_tools", "session_search", "session_reference", "artifact_read", "artifact_grep", "list_subagent_models", "ask_user", "request_user_input", "update_plan":
+	case "read", "grep", "glob", "search_tools", "session_search", "session_reference", "artifact_read", "artifact_grep", "list_subagent_models", "ask_user", "request_user_input", "update_plan", "process_status", "process_logs", "process_list":
 		return permission.RiskRead
 	case "write", "edit":
 		return permission.RiskWrite
-	case "bash":
+	case "bash", "process_start", "process_stop":
 		return permission.RiskExec
 	case "webfetch":
 		return permission.RiskNet

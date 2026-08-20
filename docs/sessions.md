@@ -66,6 +66,16 @@ arguments and result content. Full-screen transcript limits are applied to
 rendered rows rather than raw messages, so non-rendered compatibility entries do
 not evict useful user or assistant text.
 
+Managed background-process state is deliberately runtime-owned rather than a
+SQLite table. Processes are shared by branches in the active session, and their
+ordinary start/status/log/stop tool results remain historical messages, but
+opaque process handles are not resumable and PIDs are never persisted as
+ownership. A session switch is rejected while a managed process is running;
+after every process is terminal, switching sessions clears the old runtime
+inventory. Same-session branch operations remain available, while independent
+session and worktree forks do not inherit process handles. `--no-session`
+provides the same behavior for the lifetime of its in-memory app.
+
 ## Titles and identity
 
 Built-in sessions receive a provider-free display title from the first accepted

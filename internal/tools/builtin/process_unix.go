@@ -4,17 +4,17 @@ package builtin
 
 import (
 	"os/exec"
-	"syscall"
 	"time"
+
+	"github.com/elmissouri16/snow-core/internal/procgroup"
 )
 
 func startManagedProcess(cmd *exec.Cmd) error {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := procgroup.Configure(cmd); err != nil {
+		return err
+	}
 	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		return procgroup.Kill(cmd.Process)
 	}
 	if cmd.WaitDelay <= 0 {
 		cmd.WaitDelay = 2 * time.Second

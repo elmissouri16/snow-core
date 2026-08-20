@@ -607,10 +607,15 @@ The SDK has no built-in interactive permission UI. Its omission default is
 lower-level interactive host, which `pkg/snowsdk` does not currently expose.
 
 `AutoApprove` is equivalent to `allow`; it does not add containment. Plugins,
-stdio MCP servers, file tools, Bash, and subagents execute with their documented
-host privileges. Snow has no built-in process sandbox; use external isolation
-when containment is required. Subagents share filesystem and process side
-effects. Project trust controls input loading, not containment.
+stdio MCP servers, file tools, Bash, managed-process starts/stops, and subagents
+execute with their documented host privileges. An empty `Tools` list exposes
+all five managed-process tools by default; `process_start` can keep a host
+command alive across later prompts until `process_stop`, process exit, or normal
+app shutdown. Handles are runtime-local and crashes cannot guarantee cleanup.
+Snow has no built-in process sandbox; use external isolation when containment is
+required. Subagents share filesystem and process side effects but do not receive
+the managed-process tools in v1. Project trust controls input loading, not
+containment.
 
 For a narrow inspection embedding:
 

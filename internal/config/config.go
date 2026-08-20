@@ -19,6 +19,12 @@ const DefaultBashTimeout = 120 * time.Second
 // DefaultContextCapBytes is the hard cap for injected project context (100 KiB).
 const DefaultContextCapBytes = 100 * 1024
 
+const (
+	DefaultProcessMaxRunning          = 4
+	DefaultProcessMaxRecords          = 32
+	DefaultProcessRetainedOutputBytes = 1 << 20
+)
+
 var updateMu sync.Mutex
 
 const (
@@ -161,6 +167,13 @@ type ProjectSelection struct {
 	Thinking string `json:"thinking,omitempty"`
 }
 
+// ProcessConfig bounds app-owned managed background processes.
+type ProcessConfig struct {
+	MaxRunning          int `json:"max_running,omitempty"`
+	MaxRecords          int `json:"max_records,omitempty"`
+	RetainedOutputBytes int `json:"retained_output_bytes,omitempty"`
+}
+
 // Config is the global snow configuration.
 type Config struct {
 	DefaultProvider         string                          `json:"default_provider,omitempty"`
@@ -183,6 +196,7 @@ type Config struct {
 	MCPServers              map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
 	Skills                  SkillsConfig                    `json:"skills,omitempty"`
 	Subagents               SubagentConfig                  `json:"subagents,omitempty"`
+	Processes               ProcessConfig                   `json:"processes,omitempty"`
 	Compaction              CompactionConfig                `json:"compaction,omitempty"`
 }
 

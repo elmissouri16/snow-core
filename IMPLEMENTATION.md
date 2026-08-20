@@ -100,6 +100,8 @@ keeps UI dependencies out of core packages.
 │   ├── permission/          # ask/allow/deny service and remembered rules
 │   ├── plan/                # Plan collaboration-mode contract and parser
 │   ├── plugin/              # lifecycle manager and Go/external adapters
+│   ├── process/             # app-owned managed background process runtime
+│   ├── procgroup/           # shared Unix process-group signals and exit state
 │   ├── provider/            # Provider interface and adapters
 │   │   ├── fake/            # deterministic scripted provider for tests/demos
 │   │   ├── opencodego/      # OpenCode Go API-key adapter
@@ -141,6 +143,8 @@ keeps UI dependencies out of core packages.
 | `internal/context` | Preamble and `AGENTS.md` system-prompt assembly |
 | `internal/permission` | Ask/allow/deny service and remembered rules |
 | `internal/plugin` | Lifecycle manager and Go/external adapters |
+| `internal/process` | Session-bound app-owned background processes, output rings, readiness, and cleanup |
+| `internal/procgroup` | Shared Unix process-group configuration, signaling, and exit-state helpers |
 | `internal/pluginsdk` | Embedded private SDK snapshots and confined vendoring |
 | `internal/mcp` | Official-SDK MCP manager and tool/resource bridges |
 | `internal/skills` | Agent Skills parser, catalog, and activation tools |
@@ -472,7 +476,12 @@ tool-call round trips through the real agent loop.
 | `read` | Read file contents (optional offset/limit) | read | Pinned `os.Root`; binary files produce a short error; streams bounded ranges |
 | `write` | Create or overwrite a file | write | Rooted atomic same-directory replace; new files honor umask; replacements preserve mode |
 | `edit` | Exact string replace or patch | write | 8 MiB input/result and 10,000-match caps; bounded preview; fails on ambiguity unless `replace_all` |
-| `bash` | Run a shell command in cwd | exec | POSIX `sh`; timeout, process-group cleanup, pipe-drain bounds, combined output cap |
+| `bash` | Run a foreground shell command in cwd | exec | POSIX `sh`; timeout, process-group cleanup, pipe-drain bounds, combined output cap |
+| `process_start` | Start an app-owned background shell process | exec | Opaque handle; process group; bounded output tail; optional loopback TCP/HTTP or RE2-log readiness |
+| `process_status` | Read one managed process state | read | Runtime/session-scoped metadata; no command, environment, or PID exposure |
+| `process_logs` | Read combined managed-process output | read | Absolute retry-safe cursor, rollover count, UTF-8 sanitation, bounded optional wait |
+| `process_stop` | Terminate and reap a managed process group | exec | Graceful group signal then bounded kill escalation; idempotent terminal stop |
+| `process_list` | List safe active-session process metadata | read | Running-first bounded inventory; excludes commands, environment, PIDs, and logs |
 | `grep` | Search text files with RE2 and line numbers | read | Pure Go; glob filter, case option, match/output caps |
 | `glob` | Match regular file paths | read | Pure Go; recursive `**` segments and result/output caps |
 | `ask_user` | Request one to three user decisions or free-form answers | read/interaction | TUI prompt, SDK callback, or RPC reply/reject; automatic Other choice |
@@ -491,6 +500,16 @@ schema is sent with the other direct built-ins on every tool-capable request,
 and the explicit SDK/CLI `Tools` allowlist remains authoritative. A choice
 returns its exact label; Other and free-form responses return trimmed text.
 The model-facing result is ordered JSON.
+
+The five managed-process schemas are also direct built-ins. One app-owned
+`internal/process.Manager` outlives individual tool calls and continuously
+drains child output while the serial agent loop proceeds. Processes are scoped
+to the active session but shared by its branches; active children block session
+switching, while forks never copy handles. `App.Close` closes agent admission,
+then terminates and reaps managed groups before session/path resources. State is
+not reconstructed from persisted PIDs after restart. The global `processes`
+configuration bounds concurrent children, retained terminal records, and output
+per record; individual child lifetime is deliberately the owning app lifetime.
 
 ### Tool interfaces
 
@@ -897,8 +916,14 @@ clipboard images in the agent composer or falls back to textarea paste.
 `/allow [always]`, `/default`, `/deny`, `/fork`, `/help`, `/login`,
 `/logout [provider]`, `/model`, `/plan [message]`, `/thinking`, `/new`,
 `/permissions`, `/resume`, `/agent [path]`, `/agent concurrency N`,
-`/sessions`, `/settings`, `/compact`, `/mcp`, `/skills`, `/tree`,
-`/quit`, and `/trust [allow|deny]`.
+`/processes [id|name]`, `/sessions`, `/settings`, `/compact`, `/mcp`, `/skills`,
+`/tree`, `/quit`, and `/trust [allow|deny]`.
+
+`/processes` is a first-party TUI projection over the app-owned process manager,
+not a second lifecycle implementation or a public RPC/SDK process API. It polls
+bounded state/log snapshots while open, preserves opaque-handle selection,
+follows the output tail by default, supports explicit detail scrolling, and
+neutralizes subprocess terminal control bytes before rendering.
 
 ### Event to UI mapping
 

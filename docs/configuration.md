@@ -114,6 +114,11 @@ A representative configuration:
   "plan_mode_reasoning_effort": "medium",
   "tool_output_bytes": 262144,
   "bash_timeout_ms": 120000,
+  "processes": {
+    "max_running": 4,
+    "max_records": 32,
+    "retained_output_bytes": 1048576
+  },
   "context_cap_bytes": 102400,
   "system_prompt_file": "system.md",
   "providers": {
@@ -193,7 +198,10 @@ fills required zero-value defaults before validation.
 | `collaboration_mode` | `default` | `default` or `plan`; branch persistence may restore a saved mode |
 | `plan_mode_reasoning_effort` | Plan preset | Optional explicit normalized thinking level |
 | `tool_output_bytes` | `262144` | Bound for provider-facing tool results and previews |
-| `bash_timeout_ms` | `120000` | Operator cap for host shell execution |
+| `bash_timeout_ms` | `120000` | Operator cap for foreground host shell execution |
+| `processes.max_running` | `4` | Maximum concurrently running app-owned background process groups (`1..32`) |
+| `processes.max_records` | `32` | Maximum running and terminal runtime records; must be at least `max_running` and at most `256` |
+| `processes.retained_output_bytes` | `1048576` | Newest combined stdout/stderr bytes retained per process (`65536..16777216`) |
 | `context_cap_bytes` | `102400` | Hard cap for loaded project instructions and maximum configured system-prompt file size |
 | `system_prompt_file` | unset | Markdown/text file replacing the embedded base preamble; relative paths resolve from the loaded config file's directory (normally the global config directory; `--config`/`ConfigPath` can override it) and `~` is supported |
 
@@ -216,6 +224,13 @@ selection. Global and project configuration files are limited to 4 MiB. The
 remembered map is limited to 4,096 projects; updates to an existing entry remain
 allowed at capacity, while adding another project fails explicitly. Snow never
 silently prunes temporarily unavailable or removable project paths.
+
+The global-only `processes` limits bound managed development servers and their
+in-memory output tails. Project configuration cannot raise them. Individual
+processes have no wall-clock deadline: they run until natural exit,
+`process_stop`, or normal app shutdown. `process_logs.max_bytes` remains capped
+by `tool_output_bytes`; log waits, readiness checks, stop grace, and shutdown
+also have fixed runtime bounds.
 
 ## Providers
 

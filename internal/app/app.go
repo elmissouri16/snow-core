@@ -13,6 +13,7 @@ import (
 	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
 	"github.com/elmissouri16/snow-core/internal/permission"
 	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
+	managedprocess "github.com/elmissouri16/snow-core/internal/process"
 	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/skills"
@@ -60,6 +61,7 @@ type App struct {
 	Goal             *goalpkg.Controller
 	Trust            *trust.Store
 	PluginManager    *internalplugin.Manager
+	ProcessManager   *managedprocess.Manager
 	MCPManager       *internalmcp.Manager
 	MCPStatuses      []publicmcp.Status
 	Skills           *skills.Registry

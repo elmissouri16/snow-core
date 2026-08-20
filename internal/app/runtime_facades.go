@@ -14,6 +14,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/config"
 	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
 	"github.com/elmissouri16/snow-core/internal/permission"
+	managedprocess "github.com/elmissouri16/snow-core/internal/process"
 	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/tools"
 	"github.com/elmissouri16/snow-core/internal/userinput"
@@ -457,6 +458,13 @@ func (a *App) Close() error {
 	if a.Agent != nil {
 		a.Agent.Close()
 	}
+	if a.ProcessManager != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := a.ProcessManager.Close(ctx); err != nil {
+			errs = append(errs, err)
+		}
+		cancel()
+	}
 	if a.userInput != nil {
 		a.userInput.Close()
 	}
@@ -657,6 +665,29 @@ func (a *App) SubagentMessages(ctx context.Context, target string) ([]protocol.M
 		return nil, errors.New("app: subagents disabled")
 	}
 	return a.Subagents.Messages(ctx, target)
+}
+
+// ManagedProcessState and ManagedProcessLogs are app-facade snapshots used by
+// first-party surfaces. They intentionally do not create a public RPC or SDK
+// process-control contract.
+type ManagedProcessState = managedprocess.State
+type ManagedProcessLogs = managedprocess.LogsResult
+
+func (a *App) ListManagedProcesses(ctx context.Context) ([]ManagedProcessState, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if a.ProcessManager == nil {
+		return nil, errors.New("app: managed processes unavailable")
+	}
+	return a.ProcessManager.List(), nil
+}
+
+func (a *App) ManagedProcessLogs(ctx context.Context, processID string, cursor *int64, maxBytes int) (ManagedProcessLogs, error) {
+	if a.ProcessManager == nil {
+		return ManagedProcessLogs{}, errors.New("app: managed processes unavailable")
+	}
+	return a.ProcessManager.Logs(ctx, managedprocess.LogsRequest{ProcessID: processID, Cursor: cursor, MaxBytes: maxBytes})
 }
 
 // ActiveModelsSnapshot returns the active provider, current model, and a

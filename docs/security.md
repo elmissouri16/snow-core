@@ -34,7 +34,7 @@ accidental and injected damage, but they are not an OS-level sandbox.
 |---|---|---|
 | Accidental file mutation | `ask`/`allow`/`deny`, tool allowlists, role intersections | `allow` intentionally permits the operation |
 | Path escape | Pinned `os.Root` handles, canonical roots, symlink-aware checks | Bind mounts, device files, and already-running user processes remain outside the boundary |
-| Unbounded output or processes | Read/search/tool byte caps, shell timeout, cancellation, process-group cleanup | Host children still run as the user |
+| Unbounded output or processes | Read/search/tool byte caps, foreground shell timeout, managed-process count/output limits, cancellation, process-group cleanup | Host children still run as the user; crashes and deliberate daemonization can escape cleanup |
 | Network access | Network risk classification and public-address-only `webfetch` | Provider traffic and allowed MCP, plugins, and host shell can do their own networking |
 | Project-supplied executable config | Canonical trust decision before project config or extension loading | Trust is not code signing or sandboxing |
 | Credential disclosure | Separate `0600` auth store, redacted inventories, no secret status output | Models and tools can expose secrets placed in readable project files or prompts |
@@ -187,13 +187,32 @@ whole-process sandbox.
 
 ## Process boundaries
 
-The model-facing tool is named `bash`. It uses host `sh -c`, a separate process
-group, group cancellation, and a bounded `os/exec` pipe-drain delay. Commands
-inherit the user's privileges and environment. Timeouts, cancellation, and
-output caps reduce runaway behavior but do not prevent a host command from
-reading secrets, modifying files, starting network connections, or affecting
-other processes before it is stopped. Snow provides no built-in container or VM
-backend; operators requiring process containment must supply it outside Snow.
+The foreground model-facing tool is named `bash`. It uses host `sh -c`, a
+separate process group, group cancellation, and a bounded `os/exec` pipe-drain
+delay. Commands inherit the user's privileges and environment.
+
+The `process_start`, `process_status`, `process_logs`, `process_stop`, and
+`process_list` tools provide app-owned background work for development servers.
+Starts and stops are `exec` risk; secret-safe state and bounded output reads are
+`read` risk. Each process has an opaque runtime-local handle, uses the active
+project directory and inherited environment, receives `/dev/null` as stdin, and
+has combined stdout/stderr continuously drained into a bounded in-memory tail.
+TCP and HTTP readiness probes are loopback-only; log readiness uses RE2. Full
+commands are intentionally absent from inventories, state results, and
+lifecycle diagnostics.
+
+Managed processes live across turns and branches in one active session but are
+not reconstructed from PIDs or session history. Session switching is rejected
+while one runs. Normal app shutdown sends group termination, escalates to group
+kill, and reaps children. A Snow `SIGKILL`, host crash, or command that creates a
+new session/process group can still leave work behind; Snow never claims durable
+supervisor semantics or attempts PID reattachment after restart.
+
+Timeouts, cancellation, count/output caps, and process-group cleanup reduce
+runaway behavior but do not prevent a host command from reading secrets,
+modifying files, starting network connections, or affecting other processes
+before it is stopped. Snow provides no built-in container or VM backend;
+operators requiring process containment must supply it outside Snow.
 
 ## Network boundaries
 

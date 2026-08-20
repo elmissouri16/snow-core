@@ -70,11 +70,11 @@ func boundEventText(text string, maxBytes int) string {
 // riskFor maps tool names to permission risk classes.
 func riskFor(name string) permission.Risk {
 	switch name {
-	case "read", "grep", "glob", "search_tools", "ask_user", "request_user_input", "update_plan", "get_goal", "create_goal", "update_goal":
+	case "read", "grep", "glob", "search_tools", "ask_user", "request_user_input", "update_plan", "get_goal", "create_goal", "update_goal", "process_status", "process_logs", "process_list":
 		return permission.RiskRead
 	case "write", "edit":
 		return permission.RiskWrite
-	case "bash":
+	case "bash", "process_start", "process_stop":
 		return permission.RiskExec
 	case "webfetch":
 		return permission.RiskNet

@@ -60,6 +60,27 @@ func IsOpenAICompatibleProfile(id string, provider ProviderConfig) bool {
 	return id == ProviderTypeOpenAICompatible || provider.Type == ProviderTypeOpenAICompatible
 }
 
+func DefaultProcesses() ProcessConfig {
+	return ProcessConfig{
+		MaxRunning:          DefaultProcessMaxRunning,
+		MaxRecords:          DefaultProcessMaxRecords,
+		RetainedOutputBytes: DefaultProcessRetainedOutputBytes,
+	}
+}
+
+func (c ProcessConfig) Validate() error {
+	if c.MaxRunning < 1 || c.MaxRunning > 32 {
+		return errors.New("config: processes max_running must be 1..32")
+	}
+	if c.MaxRecords < c.MaxRunning || c.MaxRecords > 256 {
+		return errors.New("config: processes max_records must be at least max_running and at most 256")
+	}
+	if c.RetainedOutputBytes < 64<<10 || c.RetainedOutputBytes > 16<<20 {
+		return errors.New("config: processes retained_output_bytes must be 65536..16777216")
+	}
+	return nil
+}
+
 func DefaultCompaction() CompactionConfig {
 	return CompactionConfig{
 		MinRetainedTurns: 2, SummaryMaxTokens: 2000, Fallback: "local",
@@ -253,6 +274,7 @@ func Default() Config {
 		MCPServers: map[string]publicmcp.ServerSpec{},
 		Skills:     SkillsConfig{Overrides: map[string]bool{}},
 		Subagents:  DefaultSubagents(),
+		Processes:  DefaultProcesses(),
 		Compaction: DefaultCompaction(),
 		TUI:        TUIConfig{Theme: "default", Mouse: true},
 	}
@@ -393,6 +415,9 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 	if err := cfg.Subagents.ValidateSubagents(); err != nil {
+		return cfg, err
+	}
+	if err := cfg.Processes.Validate(); err != nil {
 		return cfg, err
 	}
 	if err := cfg.Compaction.Validate(); err != nil {

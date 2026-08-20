@@ -18,6 +18,7 @@ import (
 	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
 	"github.com/elmissouri16/snow-core/internal/permission"
 	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
+	managedprocess "github.com/elmissouri16/snow-core/internal/process"
 	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/skills"
@@ -68,8 +69,14 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	projectInputRoot := startup.projectInputRoot
 
 	// Tools. Pin the canonical root once so later launch-path replacement cannot
-	// retarget the file capability.
+	// retarget the file capability. Managed processes are app-owned and bound to
+	// the session after its store is opened, but their tools must be registered
+	// before the explicit allowlist and deferred router are assembled.
 	reg := tools.NewRegistry()
+	processManager := managedprocess.NewManager(managedprocess.Options{
+		CWD: absCWD, MaxRunning: cfg.Processes.MaxRunning, MaxRecords: cfg.Processes.MaxRecords,
+		RetainedOutputBytes: cfg.Processes.RetainedOutputBytes, MaxLogReadBytes: cfg.ToolOutputLimit(),
+	})
 	toolGuard := builtin.NewPathGuard([]string{absCWD}, absCWD)
 	guardCommitted := false
 	defer func() {
@@ -88,7 +95,12 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	// Register builtins. The explicit tool allowlist is applied after Agent
 	// Skills register their built-in capabilities so it remains a true upper
 	// bound for every built-in tool.
-	builtin.RegisterBuiltins(reg, toolOpts)
+	if err := builtin.RegisterBuiltins(reg, toolOpts); err != nil {
+		return nil, fmt.Errorf("app: built-in tools: %w", err)
+	}
+	if err := builtin.RegisterProcessTools(reg, processManager); err != nil {
+		return nil, fmt.Errorf("app: managed process tools: %w", err)
+	}
 
 	// Agent Skills use metadata-only startup discovery. Project locations are
 	// trust-gated; full SKILL.md bodies and resources load only through the
@@ -182,6 +194,10 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			return nil, fmt.Errorf("app: create session: %w", err)
 		}
 	}
+	if err := processManager.BindSession(st.ID()); err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("app: bind managed processes: %w", err)
+	}
 
 	var (
 		inputBroker *userinput.Broker
@@ -205,6 +221,9 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		if ag != nil {
 			ag.Close()
 		}
+		processCloseCtx, processCancel := context.WithTimeout(context.Background(), managedprocess.DefaultShutdownTimeout)
+		cleanupErrs = append(cleanupErrs, processManager.Close(processCloseCtx))
+		processCancel()
 		if inputBroker != nil {
 			inputBroker.Close()
 		}
@@ -752,6 +771,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		Goal:               goalController,
 		Trust:              tr,
 		PluginManager:      manager,
+		ProcessManager:     processManager,
 		MCPManager:         mcpManager,
 		MCPStatuses:        append([]publicmcp.Status(nil), mcpStatuses...),
 		Skills:             skillCatalog,
