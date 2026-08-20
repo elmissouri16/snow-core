@@ -32,6 +32,8 @@ func (m *Model) switchSession(st session.Store) error {
 	m.subagentFleetMessages = nil
 	m.subagentFleetDetailState = protocol.SubagentState{}
 	m.closeSubagentFleet()
+	m.processFleetList = nil
+	m.closeProcessFleet()
 	m.assistantBuf.Reset()
 	m.thinkingBuf.Reset()
 	m.planBuf.Reset()

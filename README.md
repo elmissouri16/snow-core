@@ -182,7 +182,12 @@ snow --mode rpc --permission deny
 ```
 
 The TUI uses Bubble Tea's supported full-window pattern: alternate screen,
-sticky header/footer, and a Bubbles transcript viewport. Mouse mode defaults on
+sticky header/footer, and a Bubbles transcript viewport. `/processes` opens an
+auto-refreshing process fleet inspector with a selectable managed-process list
+and a live, scrollable combined stdout/stderr panel; `/processes ID_OR_NAME`
+preselects one record. Output is
+escaped before rendering so subprocess control sequences cannot become terminal
+commands. Mouse mode defaults on
 so wheel/trackpad gestures scroll Snow's transcript viewport instead of terminal
 scrollback. Primary drag selects and copies transcript text; on Apple Terminal,
 hold Fn while dragging for terminal-native selection. Right-click opens Snow's
@@ -224,7 +229,9 @@ levels.
 | `read` | Read a bounded file window | read |
 | `write` | Atomically create or replace a file; new files honor the process umask | write |
 | `edit` | Apply exact, uniqueness-checked replacements to files up to 8 MiB | write |
-| `bash` | Run a bounded POSIX `sh` command | exec |
+| `bash` | Run a bounded foreground POSIX `sh` command | exec |
+| `process_start` / `process_stop` | Start or stop an app-owned background process group | exec |
+| `process_status` / `process_logs` / `process_list` | Inspect bounded session-scoped managed-process state and output | read |
 | `grep` | RE2 text search with globs, ignore files, and output caps | read |
 | `glob` | Pure-Go path matching, including recursive `**` | read |
 | `ask_user` | Ask the host structured questions | read/interaction |
@@ -237,7 +244,10 @@ launch-path replacement and ancestor-swap races cannot redirect built-in file
 operations outside the root. Search honors hierarchical `.gitignore` and
 `.ignore`, global/trusted-project search policy, hidden/generated defaults, and
 per-call exclusions. `webfetch` is deferred, public-address-only,
-redirect-checked, and never executes JavaScript.
+redirect-checked, and never executes JavaScript. Managed background processes
+run across later turns and branches in the active session, continuously retain a
+bounded output tail, and are stopped and reaped on normal Snow shutdown. Their
+opaque handles are runtime-local and are never reattached after restart.
 
 ### Sessions and context
 

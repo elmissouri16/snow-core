@@ -15,6 +15,7 @@ import (
 )
 
 func (m *Model) openSubagentFleet(target string) tea.Cmd {
+	m.closeProcessFleet()
 	m.subagentFleetOpen = true
 	m.subagentFleetLoading = true
 	m.subagentFleetError = ""

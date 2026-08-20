@@ -309,6 +309,28 @@ type Model struct {
 	subagentFleetActivity         map[string][]string
 	subagentFleetActivityKinds    map[string]protocol.AgentEventType
 	subagentFleetActivitySpace    map[string]bool
+	processFleetOpen              bool
+	processFleetLoading           bool
+	processFleetLogLoading        bool
+	processFleetGeneration        uint64
+	processFleetLogGeneration     uint64
+	processFleetTickGeneration    uint64
+	processFleetRequested         string
+	processFleetList              []app.ManagedProcessState
+	processFleetIndex             int
+	processFleetError             string
+	processFleetLogError          string
+	processFleetOutputID          string
+	processFleetOutput            string
+	processFleetOutputVersion     uint64
+	processFleetWrappedVersion    uint64
+	processFleetWrappedWidth      int
+	processFleetWrappedOutput     []string
+	processFleetCursor            int64
+	processFleetCursorSet         bool
+	processFleetEOF               bool
+	processFleetDetailOffset      int
+	processFleetDetailEnd         bool
 	busy                          bool
 	activeTurnID                  string
 	abortNoticePending            bool

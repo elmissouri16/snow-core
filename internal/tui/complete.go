@@ -31,6 +31,7 @@ var commands = []commandSpec{
 	{name: "/new", desc: "start a new session"},
 	{name: "/permissions", desc: "choose permission mode", argHint: "ask|allow|deny"},
 	{name: "/plan", desc: "switch to Plan mode", argHint: "[message]"},
+	{name: "/processes", desc: "open managed process fleet and live output", argHint: "[id | name]"},
 	{name: "/quit", desc: "exit snow"},
 	{name: "/resume", desc: "resume a session for this directory", argHint: "[path]"},
 	{name: "/sessions", desc: "choose, rename, or delete a session for this directory"},

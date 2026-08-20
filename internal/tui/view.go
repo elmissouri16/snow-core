@@ -238,6 +238,9 @@ func (m *Model) View() string {
 	}
 	// The fleet inspector owns the frame, except when a blocking host request
 	// must preempt it. Its renderer consumes only bounded in-memory snapshots.
+	if m.processFleetOpen && !m.permPending && !m.userInputPending {
+		return clipboardSequence + fitFrame(m.renderProcessFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
+	}
 	if m.subagentFleetOpen && !m.permPending && !m.userInputPending {
 		return clipboardSequence + fitFrame(m.renderSubagentFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
 	}

@@ -220,6 +220,16 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.startMCPInfo()
+	case "/processes":
+		if len(args) > 1 {
+			m.pushLine(styleError.Render("usage: /processes [id | name]"))
+			return m, nil
+		}
+		target := ""
+		if len(args) == 1 {
+			target = args[0]
+		}
+		return m, m.openProcessFleet(target)
 	case "/fork":
 		if len(args) > 0 {
 			m.pushLine(styleError.Render("/fork takes no arguments"))

@@ -10,6 +10,14 @@ also include the generated GitHub comparison for the tagged commit.
 - Added a model-callable `deactivate_skill` tool that removes one named active
   skill, or all active skills on an explicit `*` request, before the next model
   continuation and durably preserves that lifecycle transition across resume.
+- Added first-class `process_start`, `process_status`, `process_logs`,
+  `process_stop`, and `process_list` tools for session-scoped development
+  servers. Starts/stops use `exec` permission; inspection uses `read` permission;
+  global count/record/output limits default to 4/32/1 MiB; optional loopback
+  TCP/HTTP and log readiness is bounded; normal Snow shutdown stops and reaps
+  managed process groups without persisting or reattaching PIDs. The TUI now
+  exposes `/processes [id|name]`, an auto-refreshing fleet-style inspector with
+  a selectable process list and escaped, scrollable combined stdout/stderr.
 
 ### Removed
 

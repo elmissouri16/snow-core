@@ -449,6 +449,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleUserInputKey(msg)
 	}
 
+	if m.processFleetOpen {
+		return m.handleProcessFleetKey(msg)
+	}
 	if m.subagentFleetOpen {
 		return m.handleSubagentFleetKey(msg)
 	}
@@ -724,11 +727,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	goalControl := m.busy && (strings.HasPrefix(trimmed, "/goal pause") || strings.HasPrefix(trimmed, "/goal clear") || strings.HasPrefix(trimmed, "/goal edit"))
+	processInspectorControl := m.busy && (trimmed == "/processes" || strings.HasPrefix(trimmed, "/processes "))
+	busyControl := goalControl || processInspectorControl
 	if abortKey && m.busy {
 		m.requestAbort()
 		return m, nil
 	}
-	if (followUpKey || submitKey && m.busy && !goalControl) && len(m.promptImages) > 0 {
+	if (followUpKey || submitKey && m.busy && !busyControl) && len(m.promptImages) > 0 {
 		m.lastErrorText = "image attachments cannot be queued; wait for the current turn"
 		m.lastStatus = m.lastErrorText
 		return m, nil
@@ -736,10 +741,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if followUpKey && m.busy && trimmed != "" && !strings.HasPrefix(trimmed, "/") {
 		return m, m.submitQueuedInput(text, protocol.QueuedInputFollowUp)
 	}
-	if submitKey && m.busy && !goalControl && trimmed != "" && !strings.HasPrefix(trimmed, "/") {
+	if submitKey && m.busy && !busyControl && trimmed != "" && !strings.HasPrefix(trimmed, "/") {
 		return m, m.submitQueuedInput(text, protocol.QueuedInputSteer)
 	}
-	if submitKey && (!m.busy || goalControl) {
+	if submitKey && (!m.busy || busyControl) {
 		if strings.HasPrefix(text, "/") && len(m.promptImages) == 0 {
 			return m.runCommand(trimmed)
 		}

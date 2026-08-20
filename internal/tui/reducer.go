@@ -29,6 +29,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		m.refreshTranscriptForced()
 	case tea.MouseMsg:
+		if m.processFleetOpen {
+			m.handleProcessFleetMouse(msg)
+			return m, nil
+		}
 		if m.subagentFleetOpen {
 			m.handleSubagentFleetMouse(msg)
 			return m, nil
@@ -69,7 +73,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
 		// transcript when not in a picker.
-		if !m.loginMode && !m.loginProfileMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
+		if !m.loginMode && !m.loginProfileMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.processFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
 			switch {
 			case keyMatches(msg, m.keys.PageUp):
 				m.refreshTranscriptForced()
@@ -524,6 +528,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applySubagentFleetList(msg)
 	case subagentFleetDetailMsg:
 		m.applySubagentFleetDetail(msg)
+		return m, nil
+	case processFleetListMsg:
+		return m, m.applyProcessFleetList(msg)
+	case processFleetLogsMsg:
+		m.applyProcessFleetLogs(msg)
+		return m, nil
+	case processFleetTickMsg:
+		if m.processFleetOpen && msg.generation == m.processFleetGeneration && msg.tick == m.processFleetTickGeneration {
+			return m, m.refreshProcessFleet()
+		}
 		return m, nil
 	case subagentInspectMsg:
 		if msg.generation != m.pickerGeneration {

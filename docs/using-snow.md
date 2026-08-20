@@ -141,6 +141,27 @@ compact `✓ <command> · <duration>` transcript summary followed by any command
 output. Long or multiline commands are reduced to one truncated display row;
 routine start and finished progress events do not consume separate rows.
 
+For development servers that must outlive one tool call, the model can use the
+managed-process family instead of shell `&`:
+
+- `process_start` launches a non-interactive POSIX command in the project and
+  returns an opaque process ID. It can optionally wait up to 120 seconds for a
+  loopback TCP port, a loopback HTTP(S) response, or an RE2 log pattern.
+- `process_status` reads cached running or terminal state.
+- `process_logs` reads combined stdout/stderr with a non-destructive byte cursor,
+  bounded output, rollover accounting, and an optional wait up to 30 seconds.
+- `process_stop` terminates and reaps the process group with bounded graceful
+  escalation.
+- `process_list` returns a secret-safe active-session inventory without command
+  strings, environment values, or OS PIDs.
+
+These processes continue while later agent turns edit files or run checks. They
+share all branches in the active session and stop on normal Snow shutdown.
+Session switching is blocked while one is running. Handles do not survive a
+restart, independent fork, crash, or `SIGKILL`, and intentionally daemonized
+children may escape cleanup. Standard input is `/dev/null`; interactive process
+control and live pushed logs are not supported.
+
 The full-screen viewport keeps a bounded recent render cache (up to 2,000
 entries or 4 MiB of rendered rows) so long-running streams cannot grow terminal
 memory without limit. An omission marker replaces older rendered rows; durable
@@ -270,6 +291,7 @@ has no remembered tuple; explicit startup flags override it for that process.
 | `/agent` | Open the live subagent fleet inspector; select with ↑/↓ or j/k, scroll detail with wheel/trackpad or PageUp/PageDown, refresh with `r`, close with Esc |
 | `/agent PATH` | Open the fleet inspector with one child preselected |
 | `/agent concurrency N` | Persist child concurrency for the next launch |
+| `/processes [id \| name]` | Open the session's auto-refreshing process fleet—even during an active agent turn; select with ↑/↓ or j/k, inspect combined stdout/stderr with wheel/trackpad or PageUp/PageDown, jump with Home/End, refresh with `r`, and close with Esc |
 | `/mcp` | Inspect configured/connected MCP server status |
 | `/skills [clear]` | Inspect discovered Agent Skills, or durably clear session-active skills |
 | `/trust [allow|deny]` | Show or persist exact-project trust for the next launch |
