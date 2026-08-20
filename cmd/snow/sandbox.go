@@ -188,6 +188,7 @@ func newSandboxManager(cmd *cobra.Command) (*internalsandbox.Manager, config.Con
 	manager, err := internalsandbox.New(internalsandbox.Options{
 		Context:                  cmd.Context(),
 		SkipExecutableValidation: forget,
+		AllowStaleProfilePolicy:  cmd.Name() == "delete",
 		ProjectRoot:              mustCWD(),
 		StatePath:                filepath.Join(config.GlobalDir(), "sandboxes.json"),
 		Executable:               cfg.Sandbox.Executable,

@@ -129,7 +129,7 @@ func loadStore(path string) (storeFile, error) {
 		if !filepath.IsAbs(key) || filepath.Clean(key) != key || record.Project != key {
 			return state, fmt.Errorf("sandbox: invalid stored project identity %q", key)
 		}
-		if err := validateRecord(record); err != nil {
+		if err := validateStoredRecord(record); err != nil {
 			return state, fmt.Errorf("sandbox: invalid record for %s: %w", key, err)
 		}
 		normalized[key] = record.clone()

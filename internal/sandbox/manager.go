@@ -25,6 +25,7 @@ var (
 	ErrNotInitialized     = errors.New("sandbox is not initialized for this project")
 	ErrAlreadyInitialized = errors.New("sandbox is already initialized for this project")
 	envNameRE             = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,127}$`)
+	profileIDRE           = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 	smolVMVersionRE       = regexp.MustCompile(`^smolvm v?([0-9]+)\.([0-9]+)\.([0-9]+)$`)
 )
 
@@ -41,6 +42,7 @@ type osLauncher struct{}
 type Options struct {
 	Context                  context.Context
 	SkipExecutableValidation bool // recovery-only: permits forgetting a stale association
+	AllowStaleProfilePolicy  bool // recovery-only: permits deleting or forgetting an obsolete built-in profile
 	ProjectRoot              string
 	StatePath                string
 	Executable               string

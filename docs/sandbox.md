@@ -437,9 +437,38 @@ cleanup is otherwise intentional.
 |---|---|---|
 | "sandbox is already initialized" | An association already exists | Stop/start it, or delete with explicit confirmation before reinitializing |
 | Stale association or externally removed VM | The VM was removed outside Snow | Run `snow sandbox delete --force --forget` |
+| Built-in profile no longer matches its policy | Snow updated a profile's digest-pinned image or network policy | Delete and recreate the sandbox with the same profile; Snow fails closed until then |
 | macOS machine cannot restart after stop | First boot completed without host `mkfs.ext4`, so persistent disks were not formatted | Install `e2fsprogs`, then delete and recreate the association |
 | Active backend failure | smolvm, the machine, its record, or guest execution failed | The Bash call errors (fail closed); check status, then stop or delete explicitly |
 | Updated binary is not applied | A running Snow process cannot load newly installed code | Quit and restart the TUI |
+
+### Built-in profile updates
+
+Built-in profiles are tied to exact audited image digests and network policy.
+When a Snow update changes either value, an existing association cannot be
+silently relabeled as the new profile: its VM was created under the old policy.
+Snow therefore fails closed with an actionable stale-record error.
+
+Delete and recreate the machine from the affected project directory:
+
+```sh
+snow sandbox delete --force
+snow sandbox init --profile PROFILE
+```
+
+For example, use `--profile go` for the built-in Go sandbox. Host project files
+remain in place, but guest-only packages, caches, and configuration are removed
+with the old VM. If the VM was already removed outside Snow, use the explicit
+association-only recovery path instead:
+
+```sh
+snow sandbox delete --force --forget
+snow sandbox init --profile PROFILE
+```
+
+Stale profile policy for one project does not block unrelated projects in the
+same operator store. Ordinary startup, status, and execution still reject the
+stale current-project association until the operator deletes it.
 
 ### macOS restart failure details
 

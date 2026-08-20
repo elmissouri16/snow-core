@@ -87,6 +87,11 @@ func New(opts Options) (*Manager, error) {
 	if record, ok, err := m.store.Get(m.project); err != nil {
 		return nil, err
 	} else if ok {
+		if !opts.AllowStaleProfilePolicy {
+			if err := validateProfilePolicy(record); err != nil {
+				return nil, fmt.Errorf("sandbox: stale record for %s: %w", m.project, err)
+			}
+		}
 		if !opts.SkipExecutableValidation && !record.Stopped {
 			validationParent := opts.Context
 			if validationParent == nil {
@@ -138,6 +143,17 @@ func validateEnvAllowlist(values []string) error {
 }
 
 func validateRecord(record Record) error {
+	if err := validateStoredRecord(record); err != nil {
+		return err
+	}
+	return validateProfilePolicy(record)
+}
+
+// validateStoredRecord accepts structurally safe historical policy so an
+// operator can delete an obsolete sandbox after a built-in profile changes.
+// Runtime assembly separately requires validateProfilePolicy and remains
+// fail-closed.
+func validateStoredRecord(record Record) error {
 	if !filepath.IsAbs(record.Project) || filepath.Clean(record.Project) != record.Project {
 		return errors.New("project must be a canonical absolute path")
 	}
@@ -156,11 +172,8 @@ func validateRecord(record Record) error {
 	if record.SourceKind != SourceImage && record.SourceKind != SourcePack {
 		return fmt.Errorf("unknown source kind %q", record.SourceKind)
 	}
-	if record.Profile != "" {
-		profile, ok := FindProfile(record.Profile)
-		if !ok || record.SourceKind != SourceImage || record.Source != profile.Source || record.Network != profile.Network {
-			return fmt.Errorf("profile %q does not match its built-in policy", record.Profile)
-		}
+	if record.Profile != "" && !profileIDRE.MatchString(record.Profile) {
+		return fmt.Errorf("invalid profile identity %q", record.Profile)
 	}
 	if !filepath.IsAbs(record.GuestCWD) || filepath.Clean(record.GuestCWD) == string(filepath.Separator) {
 		return errors.New("guest working directory must be absolute and non-root")
@@ -170,6 +183,17 @@ func validateRecord(record Record) error {
 		return errors.New("resource values are outside supported bounds")
 	}
 	return validateEnvAllowlist(record.EnvAllowlist)
+}
+
+func validateProfilePolicy(record Record) error {
+	if record.Profile == "" {
+		return nil
+	}
+	profile, ok := FindProfile(record.Profile)
+	if !ok || record.SourceKind != SourceImage || record.Source != profile.Source || record.Network != profile.Network {
+		return fmt.Errorf("profile %q no longer matches its built-in policy; run `snow sandbox delete --force`, then recreate it with `snow sandbox init --profile %s`", record.Profile, record.Profile)
+	}
+	return nil
 }
 
 // Project returns the exact canonical identity used by the state store.

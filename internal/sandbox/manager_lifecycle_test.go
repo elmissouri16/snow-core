@@ -59,6 +59,56 @@ func TestManagerPersistentDiskPrerequisiteGuardsBootPaths(t *testing.T) {
 	}
 }
 
+func TestManagerStaleProfileFailsClosedButAllowsDeletion(t *testing.T) {
+	project := t.TempDir()
+	statePath := filepath.Join(t.TempDir(), "sandboxes.json")
+	launcher := &fakeLauncher{path: "/opt/smolvm"}
+	manager := newTestManager(t, launcher, project, statePath)
+	if _, err := manager.Init(context.Background(), InitOptions{Profile: "go"}); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := loadStore(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalProject := manager.Project()
+	record := state.Projects[canonicalProject]
+	record.Source += "-obsolete"
+	state.Projects[canonicalProject] = record
+	if err := saveStore(statePath, state); err != nil {
+		t.Fatal(err)
+	}
+
+	options := Options{
+		ProjectRoot: project, StatePath: statePath, Executable: "smolvm",
+		CPUs: 2, MemoryMiB: 2048, GuestCWD: "/workspace", Launcher: launcher,
+	}
+	if _, err := New(options); err == nil || !strings.Contains(err.Error(), "sandbox delete --force") || !strings.Contains(err.Error(), "sandbox init --profile go") {
+		t.Fatalf("stale profile error = %v", err)
+	}
+
+	// A stale record for one project must not poison every project in the
+	// operator-owned store.
+	otherOptions := options
+	otherOptions.ProjectRoot = t.TempDir()
+	if _, err := New(otherOptions); err != nil {
+		t.Fatalf("unrelated project rejected by stale record: %v", err)
+	}
+
+	options.AllowStaleProfilePolicy = true
+	recovery, err := New(options)
+	if err != nil {
+		t.Fatalf("recovery manager: %v", err)
+	}
+	if err := recovery.Delete(context.Background()); err != nil {
+		t.Fatalf("delete stale profile: %v", err)
+	}
+	if _, ok, err := NewStore(statePath).Get(canonicalProject); err != nil || ok {
+		t.Fatalf("stale record after deletion: ok=%v err=%v", ok, err)
+	}
+}
+
 func TestManagerStartAndStopPreserveAssociation(t *testing.T) {
 	project := t.TempDir()
 	launcher := &fakeLauncher{path: "/opt/smolvm"}

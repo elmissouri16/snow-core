@@ -99,8 +99,39 @@ exit 0
 	if err != nil || !strings.Contains(output, "profile: python") || !strings.Contains(output, "guest network: enabled") {
 		t.Fatalf("profile init: output=%q err=%v", output, err)
 	}
-	if _, err := runSandboxCLI("sandbox", "delete", "--force"); err != nil {
+
+	// Simulate a Snow upgrade changing the digest-pinned built-in profile.
+	statePath := filepath.Join(home, "sandboxes.json")
+	data, err := os.ReadFile(statePath)
+	if err != nil {
 		t.Fatal(err)
+	}
+	var state struct {
+		Projects map[string]map[string]any `json:"projects"`
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	for project, record := range state.Projects {
+		source, ok := record["source"].(string)
+		if !ok {
+			t.Fatalf("sandbox source = %#v", record["source"])
+		}
+		record["source"] = source + "-obsolete"
+		state.Projects[project] = record
+	}
+	data, err = json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runSandboxCLI("sandbox", "status"); err == nil || !strings.Contains(err.Error(), "sandbox delete --force") {
+		t.Fatalf("stale profile status error = %v", err)
+	}
+	if _, err := runSandboxCLI("sandbox", "delete", "--force"); err != nil {
+		t.Fatalf("delete stale profile: %v", err)
 	}
 }
 
