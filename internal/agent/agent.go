@@ -29,6 +29,8 @@ const (
 	goalTransientRetryDelay = 250 * time.Millisecond
 	maxGoalTransientRetries = 1
 	skillActivationMeta     = "agent_skill_activation"
+	skillDeactivationMeta   = "agent_skill_deactivation"
+	skillDeactivationAll    = "*"
 
 	repeatedToolFirstThreshold     = 3
 	repeatedToolNextThreshold      = 5

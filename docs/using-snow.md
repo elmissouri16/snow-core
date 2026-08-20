@@ -275,7 +275,7 @@ has no remembered tuple; explicit startup flags override it for that process.
 | `/agent concurrency N` | Persist child concurrency for the next launch |
 | `/mcp` | Inspect configured/connected MCP server status |
 | `/sandbox [status|init|start|stop|delete confirm]` | Inspect or control the persistent smolvm Bash guest; init accepts `--from`, `--read-only`, and `--network` |
-| `/skills` | Inspect discovered Agent Skills |
+| `/skills [clear]` | Inspect discovered Agent Skills, or durably clear session-active skills |
 | `/trust [allow|deny]` | Show or persist exact-project trust for the next launch |
 | `/quit` | Exit Snow |
 
@@ -303,6 +303,10 @@ per branch.
   plan. It removes mode-specific incompatible aliases/checklists, but ordinary
   `write`, `edit`, `bash`, plugin, and MCP capabilities remain exposed behind
   their normal permission gates. It is not a sandbox.
+- Leaving Plan for Default automatically and durably clears active Agent Skills,
+  whether the transition uses Shift+Tab, `/default`, the implementation picker,
+  SDK/RPC mode control, or an atomic Default-mode prompt. No manual clear is
+  required.
 - `update_plan` is a Default-mode implementation checklist and is deliberately
   unavailable in Plan Mode.
 - Thread Goals are branch-scoped persisted objectives with optional token

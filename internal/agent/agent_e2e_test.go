@@ -313,7 +313,7 @@ func TestAgentEndToEndBuiltinWorkflow(t *testing.T) {
 		t.Fatalf("provider calls = %d, want initial + continuation", len(p.Requests()))
 	}
 	continuation := p.Requests()[1]
-	if continuation.Thinking != protocol.ThinkingHigh || continuation.System != "end-to-end system prompt" {
+	if continuation.Thinking != protocol.ThinkingHigh || !strings.HasPrefix(continuation.System, "end-to-end system prompt") || !strings.Contains(continuation.System, "# Default Mode") {
 		t.Fatalf("continuation request lost options: %+v", continuation)
 	}
 	if len(continuation.Messages) != 8 {

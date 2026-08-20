@@ -124,7 +124,8 @@ in inventory with their reason but never enter the startup catalog,
 `activate_skill` enum, resource reader, or restored active-skill context.
 `--no-skills`, trust revocation, and named policy changes therefore also filter
 activations persisted by an older session. The interactive TUI's `/skills`
-picker is read-only; `/settings` persists the global Agent Skills enable/disable
+picker is read-only; `/skills clear` durably clears every active skill on the
+current branch, and `/settings` persists the global Agent Skills enable/disable
 toggle, applied on the next launch.
 
 ## Progressive disclosure
@@ -164,6 +165,16 @@ the system context. A successful direct `$skill-name` activation writes a
 branch-scoped, provider-hidden marker and emits ordinary tool lifecycle events;
 resume rehydrates only those markers, never historical text that merely happens
 to contain a matching token.
+
+Every transition from Plan to Default mode clears all session-active skills
+automatically. This includes Shift+Tab, `/default`, the **Implement this plan**
+handoff, SDK/RPC mode changes, and prompts atomically submitted in Default mode.
+It prevents a planner or read-only audit skill from surviving the planning
+boundary and blocking implementation. The agent appends a branch-scoped,
+provider-hidden clear marker, so the skills stay inactive after resume without
+deleting their historical activation records. `/skills clear` remains available
+as an optional mode-independent recovery operation, not a required handoff
+step.
 
 An explicit `--tools`/SDK tool allowlist is an upper bound for the two skill
 tools as well. If `activate_skill` is omitted, skills remain in inventory with a

@@ -287,11 +287,23 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 		}
 		return m.startSettings()
 	case "/skills":
-		if len(args) > 0 {
-			m.pushLine(styleError.Render("/skills takes no arguments"))
+		if len(args) == 0 {
+			return m.startSkillsInfo()
+		}
+		if len(args) != 1 || args[0] != "clear" {
+			m.pushLine(styleError.Render("usage: /skills [clear]"))
 			return m, nil
 		}
-		return m.startSkillsInfo()
+		cleared, err := m.app.Agent.ClearActiveSkills()
+		if err != nil {
+			m.pushLine(styleError.Render("skills: " + err.Error()))
+			return m, nil
+		}
+		if cleared == 0 {
+			m.pushLine(styleFooter.Render("no active skills to clear"))
+		} else {
+			m.pushLine(styleFooter.Render(fmt.Sprintf("cleared %d active skill(s)", cleared)))
+		}
 	case "/thinking":
 		if len(args) == 0 {
 			return m.startThinkingPick()

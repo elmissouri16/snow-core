@@ -36,7 +36,7 @@ var commands = []commandSpec{
 	{name: "/sandbox", desc: "show or control the persistent smolvm shell sandbox", argHint: "[status|init|start|stop|delete confirm]"},
 	{name: "/sessions", desc: "choose, rename, or delete a session for this directory"},
 	{name: "/settings", desc: "configure model and response behavior"},
-	{name: "/skills", desc: "inspect discovered Agent Skills"},
+	{name: "/skills", desc: "inspect or clear session-active Agent Skills", argHint: "[clear]"},
 	{name: "/tree", desc: "navigate branches in this session"},
 	{name: "/thinking", desc: "choose reasoning effort", argHint: "[off|minimal|low|medium|high|xhigh|max|ultra]"},
 	{name: "/trust", desc: "show or set project trust", argHint: "[allow|deny]"},

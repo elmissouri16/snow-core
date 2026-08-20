@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -69,6 +70,48 @@ func TestPlanImplementationModalChoices(t *testing.T) {
 		}
 	})
 
+	t.Run("current context clears planner skills", func(t *testing.T) {
+		testHome(t)
+		skillRoot := t.TempDir()
+		skillDir := filepath.Join(skillRoot, "handoff-planner")
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: handoff-planner\ndescription: Plan a handoff.\n---\nNever implement; another agent executes the plan.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		m := newModel(context.Background(), app.Options{})
+		a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(), SkillDirs: []string{skillRoot}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.app = a
+		t.Cleanup(func() { _ = a.Close() })
+		if err := m.app.Agent.Prompt(context.Background(), "$handoff-planner audit"); err != nil {
+			t.Fatal(err)
+		}
+		completePlanForModal(t, m)
+		_, cmd := m.handlePlanImplementationKey(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("missing prompt command")
+		}
+		_ = cmd()
+		entries, err := m.app.Session.(session.BranchEntryStore).BranchEntries()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleared := false
+		for _, entry := range entries {
+			cleared = cleared || entry.Type == session.EntryMeta && entry.Key == "agent_skill_deactivation" && entry.Value == "*"
+		}
+		if !cleared {
+			t.Fatalf("implementation handoff did not persist active-skill clear: %+v", entries)
+		}
+		if m.app.Agent.Mode() != protocol.ModeDefault {
+			t.Fatalf("mode=%q want default", m.app.Agent.Mode())
+		}
+	})
+
 	t.Run("fresh ephemeral", func(t *testing.T) {
 		m := newModel(context.Background(), app.Options{})
 		buildAppForTest(t, m)
@@ -118,6 +161,24 @@ func TestPlanImplementationModalChoices(t *testing.T) {
 			t.Fatalf("cmd=%v session=%q mode=%q", cmd != nil, m.app.Session.ID(), m.app.Agent.Mode())
 		}
 	})
+}
+
+func TestSkillsClearCommandPersistsHandoffMarker(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	if _, cmd := m.runCommand("/skills clear"); cmd != nil {
+		t.Fatal("skills clear unexpectedly returned a command")
+	}
+	entries, err := m.app.Session.(session.BranchEntryStore).BranchEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Type == session.EntryMeta && entry.Key == "agent_skill_deactivation" && entry.Value == "*" {
+			return
+		}
+	}
+	t.Fatalf("skills clear did not persist marker: %+v", entries)
 }
 
 func TestPlanCommandExpandsFileMentions(t *testing.T) {

@@ -18,6 +18,12 @@ var instructionsMarkdown string
 // Markdown source stays editable while go:embed preserves the single binary.
 var Instructions = strings.TrimSuffix(instructionsMarkdown, "\n")
 
+// DefaultInstructions makes the inactive Plan-mode boundary explicit. Without
+// it, old transcript claims about Plan mode can look current after a switch.
+const DefaultInstructions = `# Default Mode
+
+You are in Default collaboration mode. Plan Mode is not active. You may execute user requests with the available tools, subject to all other instructions and permission gates. Active Agent Skills are independent constraints; if one prevents requested work, identify that skill rather than claiming Plan Mode is active.`
+
 // SegmentKind identifies output extracted from streamed assistant text.
 type SegmentKind uint8
 

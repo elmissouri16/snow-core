@@ -17,12 +17,19 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	}
 	unlockAdmission := a.LockAdmission()
 	admissionHeld := true
+	skillsCleared := 0
+	reentrantEventCallback := a.bus.InCallback()
 	defer func() {
 		if admissionHeld {
 			unlockAdmission()
 		}
+		if skillsCleared > 0 {
+			a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+			if !reentrantEventCallback {
+				a.drainEventsBestEffort()
+			}
+		}
 	}()
-	reentrantEventCallback := a.bus.InCallback()
 	if strings_trim(text) == "" && len(attachments) == 0 {
 		return errors.New("agent: empty prompt")
 	}
@@ -32,6 +39,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	a.mu.RLock()
 	closed, running, wasAutomatic := a.closed, a.running, a.autoRunning
 	pendingRecovery := len(a.queuedInputs) > 0
+	modeBeforeAdmission := a.mode
 	prospectiveMode := a.mode
 	if requestedMode != nil {
 		prospectiveMode = *requestedMode
@@ -58,6 +66,13 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 		return fmt.Errorf("%w: undelivered queued input was accepted before automatic work could be preempted; call ClearPendingInputs first", ErrPromptRejected)
 	}
 	a.stopAutomatic(false)
+	if requestedMode != nil && modeBeforeAdmission == protocol.ModePlan && *requestedMode == protocol.ModeDefault {
+		cleared, err := a.clearActiveSkillsDurably(true)
+		if err != nil {
+			return errors.Join(ErrPromptRejected, err)
+		}
+		skillsCleared = cleared
+	}
 
 	// Claim the running flag BEFORE applying the attached mode or appending so
 	// concurrent callers cannot observe a half-applied transition.
@@ -164,6 +179,10 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	a.mu.Unlock()
 	unlockAdmission()
 	admissionHeld = false
+	if skillsCleared > 0 {
+		a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+		skillsCleared = 0
+	}
 	if modeChanged {
 		a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: level}})
 	}

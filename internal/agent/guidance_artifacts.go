@@ -92,11 +92,67 @@ func (a *Agent) requestSystemPrompt() string {
 	a.mu.RUnlock()
 	if mode == protocol.ModePlan {
 		base += "\n\n<collaboration_mode>\n" + planpkg.Instructions + "\n</collaboration_mode>"
+	} else {
+		base += "\n\n<collaboration_mode>\n" + planpkg.DefaultInstructions + "\n</collaboration_mode>"
 	}
 	if len(contents) == 0 {
 		return base
 	}
 	return base + "\n\n<active_agent_skills>\n" + strings.Join(contents, "\n") + "\n</active_agent_skills>"
+}
+
+// clearActiveSkillsDurably removes every branch-active Agent Skill while the
+// caller holds turn admission. A provider-hidden marker makes the transition
+// durable across resume and compaction without deleting activation history.
+// Automatic mode transitions skip the marker when no skill is active; the
+// explicit recovery command records one even when the current set is empty.
+func (a *Agent) clearActiveSkillsDurably(skipIfEmpty bool) (int, error) {
+	a.mu.RLock()
+	if a.closed {
+		a.mu.RUnlock()
+		return 0, errors.New("agent: closed")
+	}
+	if a.running {
+		a.mu.RUnlock()
+		return 0, errors.New("agent: cannot clear active skills while running")
+	}
+	count := len(a.activeSkills)
+	st := a.opts.Session
+	a.mu.RUnlock()
+	if skipIfEmpty && count == 0 {
+		return 0, nil
+	}
+	if _, ok := st.(session.BranchEntryStore); !ok {
+		return 0, errors.New("agent: session does not support durable active-skill clearing")
+	}
+
+	a.mailboxPersistMu.Lock()
+	err := st.Append(session.Entry{Type: session.EntryMeta, ID: newID(), Key: skillDeactivationMeta, Value: skillDeactivationAll})
+	a.mailboxPersistMu.Unlock()
+	if err != nil {
+		return 0, fmt.Errorf("agent: persist active-skill clear: %w", err)
+	}
+	a.mu.Lock()
+	clear(a.activeSkills)
+	a.mu.Unlock()
+	return count, nil
+}
+
+// ClearActiveSkills explicitly removes every branch-active Agent Skill while
+// the agent is idle. Leaving Plan mode performs the same clear automatically;
+// this method remains available as a mode-independent recovery operation.
+func (a *Agent) ClearActiveSkills() (int, error) {
+	unlockAdmission := a.LockAdmission()
+	count, err := a.clearActiveSkillsDurably(false)
+	unlockAdmission()
+	if err != nil {
+		return 0, err
+	}
+	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	if !a.bus.InCallback() {
+		a.drainEventsBestEffort()
+	}
+	return count, nil
 }
 
 func loadCollaborationMode(st session.Store) (protocol.CollaborationMode, error) {
@@ -120,14 +176,10 @@ func restoreActiveSkills(st session.Store, registry tools.Registry, host tools.T
 	if st == nil {
 		return active
 	}
-	messages, err := st.Messages()
-	if err != nil {
-		return active
-	}
 	reload := make(map[string]bool)
-	for _, message := range messages {
+	applyMessage := func(message protocol.Message) {
 		if message.Role != protocol.RoleTool || message.ToolName != "activate_skill" || message.IsError {
-			continue
+			return
 		}
 		for _, block := range message.Content {
 			if block.Type != protocol.BlockText || !strings.HasPrefix(block.Text, "<skill_content name=") {
@@ -144,15 +196,49 @@ func restoreActiveSkills(st session.Store, registry tools.Registry, host tools.T
 			}
 		}
 	}
+
+	// Built-in stores expose the complete root-to-tip entry sequence. Process
+	// activation messages and provider-hidden markers together so a later clear
+	// marker wins on resume, while a still-later activation remains effective.
+	processedEntries := false
 	if entries, ok := st.(session.BranchEntryStore); ok {
-		if branch, branchErr := entries.BranchEntries(); branchErr == nil {
+		if branch, err := entries.BranchEntries(); err == nil {
+			processedEntries = true
 			for _, entry := range branch {
-				if entry.Type == session.EntryMeta && entry.Key == skillActivationMeta && skillNameAllowed(allowed, entry.Value) {
-					reload[entry.Value] = true
+				if entry.Type == session.EntryMessage && entry.Message != nil {
+					applyMessage(*entry.Message)
+					continue
+				}
+				if entry.Type != session.EntryMeta {
+					continue
+				}
+				switch entry.Key {
+				case skillActivationMeta:
+					if skillNameAllowed(allowed, entry.Value) {
+						reload[entry.Value] = true
+					}
+				case skillDeactivationMeta:
+					if entry.Value == skillDeactivationAll {
+						clear(active)
+						clear(reload)
+					} else {
+						delete(active, entry.Value)
+						delete(reload, entry.Value)
+					}
 				}
 			}
 		}
 	}
+	if !processedEntries {
+		messages, err := st.Messages()
+		if err != nil {
+			return active
+		}
+		for _, message := range messages {
+			applyMessage(message)
+		}
+	}
+
 	// Rehydrate current catalog content for direct markers and for app-provided
 	// policy maps. This prevents stale project instructions from surviving a
 	// trust or precedence change while preserving legacy standalone behavior.

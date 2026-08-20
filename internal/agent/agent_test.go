@@ -303,6 +303,66 @@ func TestActivatedSkillsRestoredIntoSystemContext(t *testing.T) {
 	}
 }
 
+func TestClearActiveSkillsPersistsAcrossResume(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	activation := "<skill_content name=\"review\">\nfollow review workflow\n</skill_content>"
+	msg := protocol.NewToolResultMessage("skill-result", "", "call-1", "activate_skill", []protocol.ContentBlock{protocol.NewTextBlock(activation)}, false)
+	if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+		t.Fatal(err)
+	}
+	newAgent := func(p *scriptedProvider) *Agent {
+		a, err := New(Options{
+			Provider: p, Registry: tools.NewRegistry(), Session: st,
+			Permission: permission.NewService(permission.ModeDeny, nil), SystemPrompt: "base",
+			Model: protocol.Model{Provider: "scripted", ID: "m1"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+
+	a := newAgent(&scriptedProvider{})
+	if system := a.requestSystemPrompt(); !strings.Contains(system, "follow review workflow") {
+		t.Fatalf("activated skill missing before clear: %q", system)
+	}
+	cleared, err := a.ClearActiveSkills()
+	if err != nil || cleared != 1 {
+		t.Fatalf("ClearActiveSkills() = %d, %v", cleared, err)
+	}
+	if system := a.requestSystemPrompt(); strings.Contains(system, "follow review workflow") {
+		t.Fatalf("cleared skill remained active: %q", system)
+	}
+	a.Close()
+
+	resumed := newAgent(&scriptedProvider{})
+	if system := resumed.requestSystemPrompt(); strings.Contains(system, "follow review workflow") {
+		t.Fatalf("cleared skill restored after resume: %q", system)
+	}
+	resumed.Close()
+	entries, err := st.BranchEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entry := range entries {
+		found = found || entry.Type == session.EntryMeta && entry.Key == skillDeactivationMeta && entry.Value == skillDeactivationAll
+	}
+	if !found {
+		t.Fatalf("missing durable skill clear marker: %+v", entries)
+	}
+
+	reactivation := protocol.NewToolResultMessage("skill-result-2", "", "call-2", "activate_skill", []protocol.ContentBlock{protocol.NewTextBlock(activation)}, false)
+	if err := st.Append(session.Entry{Type: session.EntryMessage, ID: reactivation.ID, Message: &reactivation}); err != nil {
+		t.Fatal(err)
+	}
+	reactivated := newAgent(&scriptedProvider{})
+	defer reactivated.Close()
+	if system := reactivated.requestSystemPrompt(); !strings.Contains(system, "follow review workflow") {
+		t.Fatalf("later activation did not override clear marker: %q", system)
+	}
+}
+
 func TestRestoredSkillsHonorCurrentPolicy(t *testing.T) {
 	st := session.NewMemoryStore(session.Options{})
 	activation := "<skill_content name=\"review\">\nfollow review workflow\n</skill_content>"

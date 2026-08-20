@@ -38,6 +38,65 @@ func newPlanAgent(t *testing.T, p *scriptedProvider, reg *tools.SimpleRegistry, 
 	return a
 }
 
+func appendPlanSkillActivation(t *testing.T, st *session.MemoryStore) string {
+	t.Helper()
+	activation := "<skill_content name=\"planner\">\nNever implement; another agent executes the plan.\n</skill_content>"
+	msg := protocol.NewToolResultMessage("skill-result", "", "call-1", "activate_skill", []protocol.ContentBlock{protocol.NewTextBlock(activation)}, false)
+	if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+		t.Fatal(err)
+	}
+	return activation
+}
+
+func requireSkillClearMarker(t *testing.T, st session.BranchEntryStore) {
+	t.Helper()
+	entries, err := st.BranchEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Type == session.EntryMeta && entry.Key == skillDeactivationMeta && entry.Value == skillDeactivationAll {
+			return
+		}
+	}
+	t.Fatalf("missing durable active-skill clear marker: %+v", entries)
+}
+
+func TestLeavingPlanModeAutomaticallyClearsActiveSkills(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	activation := appendPlanSkillActivation(t, st)
+	a := newPlanAgent(t, &scriptedProvider{}, nil, st)
+	if system := a.requestSystemPrompt(); !strings.Contains(system, activation) {
+		t.Fatalf("planner skill missing before mode switch: %q", system)
+	}
+	if err := a.SetMode(protocol.ModeDefault); err != nil {
+		t.Fatal(err)
+	}
+	if system := a.requestSystemPrompt(); strings.Contains(system, "Never implement") {
+		t.Fatalf("planner skill survived Plan-to-Default switch: %q", system)
+	}
+	requireSkillClearMarker(t, st)
+}
+
+func TestDefaultPromptHandoffAutomaticallyClearsActiveSkills(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	appendPlanSkillActivation(t, st)
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+	}}}
+	a := newPlanAgent(t, p, nil, st)
+	if err := a.PromptWithMode(context.Background(), "Implement the plan.", protocol.ModeDefault); err != nil {
+		t.Fatal(err)
+	}
+	if a.Mode() != protocol.ModeDefault {
+		t.Fatalf("mode=%q want default", a.Mode())
+	}
+	if len(p.requests) != 1 || strings.Contains(p.requests[0].System, "Never implement") {
+		t.Fatalf("implementation request retained planner skill: %+v", p.requests)
+	}
+	requireSkillClearMarker(t, st)
+}
+
 func TestPlanModeParsesEventsAndPersistsOrderedBlocks(t *testing.T) {
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
 		{Type: protocol.EvStreamTextDelta, Text: "Intro\n<proposed"},
@@ -122,6 +181,21 @@ func TestPlanCompletedRequiresDurableAssistantMessage(t *testing.T) {
 	}
 	if completed != 0 {
 		t.Fatalf("published %d durable completion events", completed)
+	}
+}
+
+func TestDefaultModeSystemPromptExplicitlyDisablesPlanMode(t *testing.T) {
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	st := session.NewMemoryStore(session.Options{})
+	a := newPlanAgent(t, p, nil, st)
+	if err := a.SetMode(protocol.ModeDefault); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Prompt(context.Background(), "implement"); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.requests) != 1 || !strings.Contains(p.requests[0].System, "# Default Mode") || strings.Contains(p.requests[0].System, "# Plan Mode") {
+		t.Fatalf("default system prompt = %q", p.requests[0].System)
 	}
 }
 

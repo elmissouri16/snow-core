@@ -100,13 +100,26 @@ rerun Glamour from the original plan source.
 
 After a completed plan, the TUI offers to:
 
-1. switch to Default and submit `Implement the plan.`;
+1. switch to Default and submit `Implement the plan.` in the current context;
 2. create a fresh session, include the complete plan, and implement there;
 3. remain in Plan mode.
 
-The mode switch and implementation prompt are submitted atomically. Automatic
-internal turns are rejected while Plan mode is active, which is the safety seam
-used by persistent goals.
+Every Plan-to-Default transition automatically clears session-active Agent
+Skills, including Shift+Tab, `/default`, SDK/RPC mode changes, and atomic
+Default-mode prompts. Audit/planning workflows may carry independent read-only
+instructions that would otherwise survive the mode switch and block
+implementation. The clear is branch-scoped, provider-hidden, append-only, and
+durable across resume; historical activation records remain available. The
+fresh-session choice naturally begins without session activations.
+
+The mode switch and implementation prompt are submitted atomically after that
+handoff. Automatic internal turns are rejected while Plan mode is active, which
+is the safety seam used by persistent goals. Default requests also state
+explicitly that Plan mode is inactive, preventing stale transcript claims from
+being mistaken for the current mode; independent constraints are attributed to
+the active skill or permission gate that actually supplies them. `/skills
+clear` remains an optional mode-independent recovery operation; it is not part
+of the normal Plan-to-implementation workflow.
 
 ## Configuration
 

@@ -168,12 +168,19 @@ func (a *Agent) Mode() protocol.CollaborationMode {
 func (a *Agent) SetMode(mode protocol.CollaborationMode) error {
 	unlockAdmission := a.LockAdmission()
 	admissionHeld := true
+	skillsCleared := 0
+	reentrantEventCallback := a.bus.InCallback()
 	defer func() {
 		if admissionHeld {
 			unlockAdmission()
 		}
+		if skillsCleared > 0 {
+			a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+			if !reentrantEventCallback {
+				a.drainEventsBestEffort()
+			}
+		}
 	}()
-	reentrantEventCallback := a.bus.InCallback()
 	parsed, err := protocol.ParseCollaborationMode(string(mode))
 	if err != nil {
 		return err
@@ -182,6 +189,7 @@ func (a *Agent) SetMode(mode protocol.CollaborationMode) error {
 	a.mu.RLock()
 	running := a.running
 	wasAutomatic := a.autoRunning
+	previousMode := a.mode
 	automaticGoalTurn := wasAutomatic && a.turnOrigin == "goal"
 	a.mu.RUnlock()
 	if running && !automaticGoalTurn {
@@ -198,6 +206,13 @@ func (a *Agent) SetMode(mode protocol.CollaborationMode) error {
 		if err := a.StopGoal(context.Background(), false); err != nil {
 			return resumeAfterFailure(err)
 		}
+	}
+	if previousMode == protocol.ModePlan && parsed == protocol.ModeDefault {
+		cleared, err := a.clearActiveSkillsDurably(true)
+		if err != nil {
+			return resumeAfterFailure(err)
+		}
+		skillsCleared = cleared
 	}
 	a.mu.Lock()
 	if a.running {
@@ -216,6 +231,10 @@ func (a *Agent) SetMode(mode protocol.CollaborationMode) error {
 	a.mu.Unlock()
 	unlockAdmission()
 	admissionHeld = false
+	if skillsCleared > 0 {
+		a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+		skillsCleared = 0
+	}
 	a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: parsed, ReasoningEffort: effort}})
 	if parsed == protocol.ModeDefault {
 		deferred := false
