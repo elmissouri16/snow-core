@@ -110,7 +110,6 @@ client for interactive use.
     "permission_interaction",
     "prompt_completion",
     "response_controls",
-    "sandbox_status",
     "session_forks",
     "session_info",
     "skills",
@@ -713,7 +712,6 @@ The following inspection commands take no parameters:
 | `diagnostics` | `{"diagnostics":[...]}` | Non-fatal configuration warnings with `path` and `message` |
 | `mcp_servers` | `{"servers":[...]}` | Secret-free negotiated MCP server status (no credentials, headers, or argv) |
 | `skills` | `{"skills":[...],"diagnostics":[...]}` | Full skill catalog plus discovery diagnostics |
-| `sandbox_status` | `{"status":{...}}` | Secret-free Bash execution boundary snapshot |
 
 ## Permission interaction
 
@@ -1419,12 +1417,11 @@ user's OS privileges. Read the [Security model](security.md).
 The current command surface covers prompts, active root input, cancellation,
 active-provider and subagent model discovery, model/thinking/mode and response
 controls, session and branch management, manual compaction, active-branch
-messages and usage, MCP/skill/sandbox discovery, pending-input
-inspection/clearing, configuration diagnostics, model-requested input, goals,
-and subagents.
+messages and usage, MCP/skill discovery, pending-input inspection/clearing,
+configuration diagnostics, model-requested input, goals, and subagents.
 
 Configuration mutation, login, and an interactive permission broker remain
-outside the RPC command surface. MCP/skill/sandbox inventory is read-only and
+outside the RPC command surface. MCP and skill inventory is read-only and
 secret-free; management/mutation stays outside the boundary.
 
 ## Related documents

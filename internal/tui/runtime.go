@@ -269,34 +269,11 @@ func (m *Model) Close() error {
 		m.startupMu.Lock()
 		m.closeErr = errors.Join(m.closeErr, m.startupCloseErr)
 		m.startupMu.Unlock()
-		// Sandbox lifecycle commands run as Bubble Tea workers. The run context
-		// is canceled before Close, so wait for their bounded rollback before the
-		// process exits and could otherwise leave an untracked VM.
-		m.closeSandboxOperations()
 		if m.app != nil {
 			m.closeErr = errors.Join(m.closeErr, m.app.Close())
 		}
 	})
 	return m.closeErr
-}
-
-func (m *Model) beginSandboxOperation() bool {
-	m.sandboxOpMu.Lock()
-	defer m.sandboxOpMu.Unlock()
-	if m.sandboxOpClosing {
-		return false
-	}
-	m.sandboxOpWG.Add(1)
-	return true
-}
-
-func (m *Model) endSandboxOperation() { m.sandboxOpWG.Done() }
-
-func (m *Model) closeSandboxOperations() {
-	m.sandboxOpMu.Lock()
-	m.sandboxOpClosing = true
-	m.sandboxOpMu.Unlock()
-	m.sandboxOpWG.Wait()
 }
 
 func (m *Model) retainStartupApp(candidate *app.App) bool {
@@ -423,7 +400,7 @@ func (m *Model) spinnerActive() bool {
 	if m.lastErr != nil {
 		return false
 	}
-	return m.trustSaving || m.compacting || m.sandboxLoading || (m.busy && !m.permPending && !m.userInputPending)
+	return m.trustSaving || m.compacting || (m.busy && !m.permPending && !m.userInputPending)
 }
 
 func (m *Model) inlineDisplayStart() int {

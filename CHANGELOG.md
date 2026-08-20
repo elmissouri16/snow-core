@@ -5,6 +5,14 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the optional smolvm Bash sandbox end to end: runtime routing, CLI/TUI
+  controls, configuration, SDK/RPC contracts, language-client methods, schemas,
+  implementation packages, and current documentation. Bash now always executes
+  on the host under the existing permission and timeout controls; old
+  `sandboxes.json` state is left untouched but is no longer read.
+
 ### Fixed
 
 - Made every Plan-to-Default transition durably clear active planning/audit

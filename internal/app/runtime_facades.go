@@ -20,7 +20,6 @@ import (
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
-	publicsandbox "github.com/elmissouri16/snow-core/pkg/sandbox"
 )
 
 func auxiliaryConfigFingerprint(globalDir, projectRoot string, projectAllowed bool) string {
@@ -348,34 +347,6 @@ func (a *App) SetPermissionDefault(mode permission.Mode) error {
 
 // CWD returns the app working directory.
 func (a *App) CWD() string { return a.cwd }
-
-// SandboxStatus returns a secret-free snapshot of the Bash execution boundary.
-func (a *App) SandboxStatus() publicsandbox.Status {
-	status := publicsandbox.Status{Backend: "host"}
-	if a == nil || a.Sandbox == nil {
-		return status
-	}
-	record, configured, err := a.Sandbox.Record()
-	if err != nil {
-		return status
-	}
-	status.Configured = configured
-	status.Active = configured && a.SandboxEnabled && a.Sandbox.Active()
-	if !configured {
-		return status
-	}
-	status.Backend = "smolvm"
-	status.Machine = record.Machine
-	status.Profile = record.Profile
-	status.GuestCWD = record.GuestCWD
-	status.ReadOnly = record.ReadOnly
-	status.Network = record.Network
-	status.CPUs = record.CPUs
-	status.MemoryMiB = record.MemoryMiB
-	status.StorageGiB = record.StorageGiB
-	status.OverlayGiB = record.OverlayGiB
-	return status
-}
 
 func getwd() (string, error) { return os.Getwd() }
 

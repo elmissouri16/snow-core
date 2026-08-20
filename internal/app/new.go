@@ -66,9 +66,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	configDiagnostics := startup.configDiagnostics
 	projectAllowed := startup.projectAllowed
 	projectInputRoot := startup.projectInputRoot
-	sandboxManager := startup.sandboxManager
-	bashCommandFactory := startup.bashCommandFactory
-	bashSandboxActive := startup.bashSandboxActive
 
 	// Tools. Pin the canonical root once so later launch-path replacement cannot
 	// retarget the file capability.
@@ -81,14 +78,12 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 	}()
 	toolOpts := builtin.Options{
-		MaxOutputBytes:     cfg.ToolOutputLimit(),
-		BashTimeout:        cfg.BashTimeout(),
-		BashCommandFactory: bashCommandFactory,
-		BashSandboxActive:  bashSandboxActive,
-		Roots:              []string{absCWD},
-		CWD:                absCWD,
-		Guard:              toolGuard,
-		SearchPolicy:       searchPolicy,
+		MaxOutputBytes: cfg.ToolOutputLimit(),
+		BashTimeout:    cfg.BashTimeout(),
+		Roots:          []string{absCWD},
+		CWD:            absCWD,
+		Guard:          toolGuard,
+		SearchPolicy:   searchPolicy,
 	}
 	// Register builtins. The explicit tool allowlist is applied after Agent
 	// Skills register their built-in capabilities so it remains a true upper
@@ -760,8 +755,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		MCPManager:         mcpManager,
 		MCPStatuses:        append([]publicmcp.Status(nil), mcpStatuses...),
 		Skills:             skillCatalog,
-		Sandbox:            sandboxManager,
-		SandboxEnabled:     !opts.DisableSandbox,
 		Subagents:          subManager,
 		Diagnostics:        append([]config.Diagnostic(nil), configDiagnostics...),
 		SearchPolicy:       searchPolicy,

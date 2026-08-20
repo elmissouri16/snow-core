@@ -3,7 +3,6 @@ package tui
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -70,7 +69,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
 		// transcript when not in a picker.
-		if !m.loginMode && !m.loginProfileMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.sandboxSetup && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
+		if !m.loginMode && !m.loginProfileMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
 			switch {
 			case keyMatches(msg, m.keys.PageUp):
 				m.refreshTranscriptForced()
@@ -286,25 +285,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.beginPendingModeSwitch(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-		}
-	case sandboxDoneMsg:
-		if msg.generation != m.sandboxGeneration {
-			return m, nil
-		}
-		m.sandboxLoading = false
-		if msg.err != nil {
-			message := msg.err.Error()
-			if !strings.HasPrefix(message, "sandbox:") {
-				message = "sandbox: " + message
-			}
-			m.pushLine(styleError.Render(message))
-		} else {
-			status := formatTUISandboxStatus(msg.status)
-			if msg.action == "delete" {
-				status = "sandbox deleted · future Bash commands run on the host"
-			}
-			m.lastStatus = status
-			m.pushLine(styleFooter.Render(status))
 		}
 	case promptDoneMsg:
 		if msg.generation != m.runGeneration || msg.err == nil {
@@ -633,7 +613,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.lastStatus = "created worktree " + msg.result.Worktree.Path
-		m.pushLine(styleFooter.Render(fmt.Sprintf("worktree fork created\n  path: %s\n  branch: %s\n  session: %s\nRun `snow resume %q` in a new process. Trust and sandbox settings are independent for the new project path.", msg.result.Worktree.Path, msg.result.Worktree.Branch, msg.result.SessionPath, msg.result.SessionPath)))
+		m.pushLine(styleFooter.Render(fmt.Sprintf("worktree fork created\n  path: %s\n  branch: %s\n  session: %s\nRun `snow resume %q` in a new process. Trust is evaluated independently for the new project path.", msg.result.Worktree.Path, msg.result.Worktree.Branch, msg.result.SessionPath, msg.result.SessionPath)))
 	case sessionStoreMsg:
 		if msg.generation != m.sessionOpGeneration {
 			if msg.store != nil {

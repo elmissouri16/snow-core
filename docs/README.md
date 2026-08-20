@@ -16,7 +16,6 @@ for a subject.
 | Install Snow and run my first prompt | [Project README](../README.md#quick-start) |
 | Learn the TUI, CLI modes, keys, and slash commands | [Using Snow](using-snow.md) |
 | Configure providers, permissions, sessions, themes, and search | [Configuration](configuration.md) |
-| Set up, operate, switch, or troubleshoot the optional Bash VM | [Sandboxed Bash](sandbox.md) |
 | Understand safety and privilege boundaries | [Security model](security.md) |
 | Report a suspected vulnerability | [Security reporting](../SECURITY.md) |
 | Prepare or verify an alpha release | [Release policy](releases.md) |
@@ -106,7 +105,6 @@ To reduce drift, use these documents as the primary references:
 | External plugin ABI | [`plugin-protocol.md`](plugin-protocol.md) |
 | Lazy MCP implementation | [Connection plan](lazy-mcp-implementation-plan.md) |
 | Plugin SDK implementation | [SDK plan](plugin-language-sdks-plan.md) |
-| Optional smolvm Bash setup and operation | [`sandbox.md`](sandbox.md) |
 | Safety model and privilege boundaries | [`security.md`](security.md) |
 | Vulnerability disclosure | [`SECURITY.md`](../SECURITY.md) |
 | Alpha versioning and distribution | [`releases.md`](releases.md) |

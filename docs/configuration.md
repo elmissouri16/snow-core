@@ -13,7 +13,6 @@ and the supported global/project fields.
 - [Paths](#paths)
 - [Precedence](#precedence)
 - [Global config.json](#global-configjson)
-- [SmolVM Bash sandbox defaults](#smolvm-bash-sandbox-defaults)
 - [Providers](#providers)
 - [TUI](#tui)
 - [Compaction](#compaction)
@@ -35,7 +34,6 @@ and the supported global/project fields.
 | `~/.snow/system.md` | Suggested custom system preamble | Optional; loaded only when selected by `system_prompt_file` |
 | `~/.snow/auth.json` | Provider credentials | Atomic writes, mode `0600` |
 | `~/.snow/trust.json` | Canonical project decisions | Atomic locked writes, mode `0600` |
-| `~/.snow/sandboxes.json` | Exact canonical-project smolvm Bash associations | Operator-owned; atomic interprocess-locked writes, mode `0600` |
 | `~/.snow/sessions/` | Per-project SQLite sessions | Child histories live beside root databases under `.db.agents/` |
 | `~/.snow/keybindings.yaml` | Global TUI key overrides | Strict versioned YAML, maximum 64 KiB |
 | `~/.snow/themes/*.yaml` | Global custom themes | Up to 64 regular non-symlink files |
@@ -49,7 +47,7 @@ Environment overrides:
 
 | Variable | Effect |
 |---|---|
-| `SNOW_HOME` | Replaces the global `~/.snow` directory for config, auth, trust, sandbox associations, caches, goals, themes, keys, and search policy |
+| `SNOW_HOME` | Replaces the global `~/.snow` directory for config, auth, trust, caches, goals, themes, keys, and search policy |
 | `SNOW_SESSIONS_DIR` | Replaces only the session database root |
 | `OPENCODE_API_KEY` | Fallback credential for `opencode-go` |
 | `OPENAI_API_KEY` | Optional fallback Bearer credential for the legacy `openai-compatible` profile only |
@@ -73,7 +71,7 @@ Trusted project configuration is a separate, deliberately narrow overlay. It
 may add plugins, MCP servers, and skill policy, select a confined project
 system preamble, and override only the project TUI theme and compaction
 preferences described below. It cannot select provider credentials, permission
-mode, shell executable, model, or global tool authority.
+mode, model, or global tool authority.
 
 Credentials use a separate order:
 
@@ -118,16 +116,6 @@ A representative configuration:
   "bash_timeout_ms": 120000,
   "context_cap_bytes": 102400,
   "system_prompt_file": "system.md",
-  "sandbox": {
-    "executable": "smolvm",
-    "default_image": "index.docker.io/library/ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
-    "cpus": 2,
-    "memory_mib": 2048,
-    "storage_gib": 0,
-    "overlay_gib": 0,
-    "guest_cwd": "/workspace",
-    "env_allowlist": ["LANG", "LC_ALL", "TERM"]
-  },
   "providers": {
     "opencode-go": {
       "base_url": "https://opencode.ai/zen/go/v1",
@@ -205,7 +193,7 @@ fills required zero-value defaults before validation.
 | `collaboration_mode` | `default` | `default` or `plan`; branch persistence may restore a saved mode |
 | `plan_mode_reasoning_effort` | Plan preset | Optional explicit normalized thinking level |
 | `tool_output_bytes` | `262144` | Bound for provider-facing tool results and previews |
-| `bash_timeout_ms` | `120000` | Operator cap for host or smolvm guest shell execution |
+| `bash_timeout_ms` | `120000` | Operator cap for host shell execution |
 | `context_cap_bytes` | `102400` | Hard cap for loaded project instructions and maximum configured system-prompt file size |
 | `system_prompt_file` | unset | Markdown/text file replacing the embedded base preamble; relative paths resolve from the loaded config file's directory (normally the global config directory; `--config`/`ConfigPath` can override it) and `~` is supported |
 
@@ -228,53 +216,6 @@ selection. Global and project configuration files are limited to 4 MiB. The
 remembered map is limited to 4,096 projects; updates to an existing entry remain
 allowed at capacity, while adding another project fails explicitly. Snow never
 silently prunes temporarily unavailable or removable project paths.
-
-## SmolVM Bash sandbox defaults
-
-See [Sandboxed Bash with smolvm](sandbox.md) for profiles, lifecycle,
-persistence, and troubleshooting.
-
-The global `sandbox` object configures defaults for the optional external
-smolvm backend. Only operator-owned global config is read for this policy;
-trusted project `.snow/config.json` cannot add or weaken it.
-
-| Field | Default | Meaning |
-|---|---|---|
-| `executable` | `smolvm` | CLI name/path resolved when initializing a machine; the resolved absolute path is pinned in its record |
-| `default_image` | digest-pinned Ubuntu 24.04 multi-platform index | Image/source used when `sandbox init` omits one; operators may select another pinned image or local pack |
-| `cpus` | `2` | Virtual CPUs (`1..64`) |
-| `memory_mib` | `2048` | Guest memory in MiB (`128..262144`) |
-| `storage_gib` | `0` (smolvm default) | Persistent image/container-data disk size in GiB; nonzero values are passed as `--storage` |
-| `overlay_gib` | `0` (smolvm default) | Persistent root-filesystem overlay size in GiB; nonzero values are passed as `--overlay` |
-| `guest_cwd` | `/workspace` | Absolute non-root guest path for the sole project mount and Bash working directory |
-| `env_allowlist` | `LANG`, `LC_ALL`, `TERM` | Strict host environment variable names allowed into guest Bash; names, not values, are configured |
-
-The mutable canonical-project association is not stored in `config.json`. It is
-an exact-key, versioned map at `$SNOW_HOME/sandboxes.json` (`0600`) with
-interprocess-locked atomic writes. It records the resolved executable, machine,
-source, resources, mount policy, guest-network choice, and environment-name
-allowlist. Parent project associations do not apply to children. A running Snow
-process snapshots its association at assembly time; another process cannot
-silently change that process's Bash routing.
-
-Snow currently supports the audited smolvm `1.8.x` CLI beginning at `1.8.1`.
-When `executable` is the default `smolvm` and it is missing, an explicit init
-bootstraps pinned 1.8.1 through the checksum-pinned upstream installer. Custom
-command/path values fail normally and are never replaced or auto-installed. For
-that line, networking is disabled by omission and `--net` is the explicit
-opt-in. Future minor/major versions are rejected until their flags/defaults are
-reviewed. `--network` is persisted guest runtime authority for the lifetime of
-the association. For no-argument initialization, Snow downloads the
-digest-pinned registry image over host HTTPS into a private temporary
-Docker-save archive and passes that local archive to smolvm; the guest
-therefore needs no bootstrap network authority. Use a local `.smolmachine`
-pack with `--from` when initialization itself must remain offline.
-
-The SDK inherits an existing association by default, exposes a secret-free
-`SandboxStatus`, and provides explicit `DisableSandbox` and `RequireSandbox`
-options. Disabling is an explicit host-shell override that skips sandbox-state
-loading (including corrupt stale state); requiring fails `Open` when the
-canonical project has no association.
 
 ## Providers
 
@@ -640,6 +581,5 @@ files bounded to 64 KiB. Theme discovery is capped at 64 files per scope.
 
 - [Using Snow](using-snow.md)
 - [Security model](security.md)
-- [Sandboxed Bash with smolvm](sandbox.md)
 - [Sessions](sessions.md)
 - [SDK](sdk.md)

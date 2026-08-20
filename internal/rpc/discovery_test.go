@@ -23,7 +23,6 @@ func TestRPCDiscoveryCommandsReturnSecretFreeSnapshots(t *testing.T) {
 	input := strings.Join([]string{
 		`{"id":"mcp1","type":"mcp_servers"}`,
 		`{"id":"sk1","type":"skills"}`,
-		`{"id":"sb1","type":"sandbox_status"}`,
 		"",
 	}, "\n")
 	var out bytes.Buffer
@@ -62,14 +61,5 @@ func TestRPCDiscoveryCommandsReturnSecretFreeSnapshots(t *testing.T) {
 	}
 	if diagnostics, ok := skillData["diagnostics"]; ok && diagnostics == nil {
 		t.Fatal("skill diagnostics must not encode null")
-	}
-
-	sandboxData, ok := must("sb1").Data.(map[string]any)
-	if !ok {
-		t.Fatalf("sandbox_status data has type %T", must("sb1").Data)
-	}
-	status, ok := sandboxData["status"].(map[string]any)
-	if !ok || status["backend"] != "host" || status["configured"] != false || status["active"] != false {
-		t.Fatalf("sandbox status = %#v", sandboxData["status"])
 	}
 }

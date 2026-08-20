@@ -19,7 +19,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/internal/provider/chatgpt"
-	internalsandbox "github.com/elmissouri16/snow-core/internal/sandbox"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/trust"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -102,13 +101,6 @@ type chatGPTAccountChoice struct {
 type compactDoneMsg struct {
 	generation uint64
 	result     protocol.CompactionResult
-	err        error
-}
-
-type sandboxDoneMsg struct {
-	generation uint64
-	action     string
-	status     internalsandbox.Status
 	err        error
 }
 
@@ -412,30 +404,20 @@ type Model struct {
 	skillVisible bool
 
 	// File mention picker state (for @path references).
-	mentionMatches           []string
-	mentionIndex             int
-	mentionVisible           bool
-	mentionFiles             []string
-	mentionFilesCWD          string
-	mentionFilesLoaded       bool
-	mentionLoading           bool
-	mentionGeneration        uint64
-	pickerGeneration         uint64
-	sessionOpGeneration      uint64
-	sessionLoading           bool
-	treeLoading              bool
-	modelLoading             bool
-	sessionOpLoading         bool
-	sandboxLoading           bool
-	sandboxGeneration        uint64
-	sandboxSetup             bool
-	sandboxSetupIndex        int
-	sandboxSetupOpts         internalsandbox.InitOptions
-	sandboxSetupProfileIndex int
-	sandboxSetupCustomOpts   internalsandbox.InitOptions
-	sandboxOpMu              sync.Mutex
-	sandboxOpClosing         bool
-	sandboxOpWG              sync.WaitGroup
+	mentionMatches      []string
+	mentionIndex        int
+	mentionVisible      bool
+	mentionFiles        []string
+	mentionFilesCWD     string
+	mentionFilesLoaded  bool
+	mentionLoading      bool
+	mentionGeneration   uint64
+	pickerGeneration    uint64
+	sessionOpGeneration uint64
+	sessionLoading      bool
+	treeLoading         bool
+	modelLoading        bool
+	sessionOpLoading    bool
 
 	// Provider picker state (for /login and /logout).
 	pickProvider   bool

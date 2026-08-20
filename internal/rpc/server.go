@@ -629,8 +629,6 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		return s.handleMCPServers(req)
 	case "skills":
 		return s.handleSkills(req)
-	case "sandbox_status":
-		return s.handleSandboxStatus(req)
 	case "set_model":
 		if req.Model == "" {
 			return errors.New("set_model requires model")

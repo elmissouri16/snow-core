@@ -342,10 +342,6 @@ class SnowClient:
         """Return the full skill catalog plus discovery diagnostics."""
         return await self.request("skills")
 
-    async def sandbox_status(self) -> JSONDict:
-        """Return the secret-free Bash execution boundary snapshot."""
-        return await self.request("sandbox_status")
-
     async def set_reasoning_summary(self, reasoning_summary: str) -> JSONDict:
         """Set the provider reasoning-summary preference (off|auto|concise|detailed)."""
         return await self.request("set_reasoning_summary", reasoning_summary=reasoning_summary)

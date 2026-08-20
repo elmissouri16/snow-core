@@ -400,7 +400,6 @@ export class Snow {
   configurationDiagnostics() { return this.request("diagnostics"); }
   mcpServers() { return this.request("mcp_servers"); }
   skills() { return this.request("skills"); }
-  sandboxStatus() { return this.request("sandbox_status"); }
   setReasoningSummary(reasoningSummary) { return this.request("set_reasoning_summary", { reasoning_summary: reasoningSummary }); }
   setTextVerbosity(textVerbosity) { return this.request("set_text_verbosity", { text_verbosity: textVerbosity }); }
 

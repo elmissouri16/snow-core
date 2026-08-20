@@ -49,7 +49,6 @@
             "models_list",
             "pending_inputs",
             "pending_inputs_clear",
-            "sandbox_status",
             "session_fork",
             "session_info",
             "session_worktree_fork",

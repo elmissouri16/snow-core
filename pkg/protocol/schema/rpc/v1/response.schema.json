@@ -518,33 +518,6 @@
       "required": [
         "type",
         "command",
-        "success",
-        "data"
-      ],
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "type": {
-          "const": "response"
-        },
-        "command": {
-          "const": "sandbox_status"
-        },
-        "success": {
-          "const": true
-        },
-        "data": {
-          "$ref": "sandbox-status.schema.json"
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "type",
-        "command",
         "success"
       ],
       "properties": {
@@ -616,7 +589,6 @@
               "models_list",
               "pending_inputs",
               "pending_inputs_clear",
-              "sandbox_status",
               "session_fork",
               "session_info",
               "session_worktree_fork",

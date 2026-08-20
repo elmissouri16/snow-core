@@ -47,22 +47,6 @@ type TUIConfig struct {
 	Mouse bool   `json:"mouse"`
 }
 
-// SandboxConfig controls the optional operator-owned smolvm shell backend.
-// Project configuration cannot override these fields. Per-project machine
-// associations are stored separately in sandboxes.json.
-type SandboxConfig struct {
-	Executable   string   `json:"executable,omitempty"`
-	DefaultImage string   `json:"default_image,omitempty"`
-	CPUs         int      `json:"cpus,omitempty"`
-	MemoryMiB    int      `json:"memory_mib,omitempty"`
-	StorageGiB   int      `json:"storage_gib,omitempty"`
-	OverlayGiB   int      `json:"overlay_gib,omitempty"`
-	GuestCWD     string   `json:"guest_cwd,omitempty"`
-	EnvAllowlist []string `json:"env_allowlist,omitempty"`
-}
-
-const DefaultUbuntuImage = "index.docker.io/library/ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
-
 // CompactionConfig controls manual and pressure-based automatic compaction.
 // Zero RetainTokens uses a model-aware retention target. A zero automatic
 // threshold disables pressure compaction and overflow recovery.
@@ -195,7 +179,6 @@ type Config struct {
 	SystemPromptFile        string                          `json:"system_prompt_file,omitempty"`
 	Providers               map[string]ProviderConfig       `json:"providers,omitempty"`
 	TUI                     TUIConfig                       `json:"tui,omitempty"`
-	Sandbox                 SandboxConfig                   `json:"sandbox,omitempty"`
 	Plugins                 []plugin.PluginSpec             `json:"plugins,omitempty"`
 	MCPServers              map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
 	Skills                  SkillsConfig                    `json:"skills,omitempty"`

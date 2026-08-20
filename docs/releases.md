@@ -50,11 +50,6 @@ The source build currently requires Go 1.27; `go.mod` uses `1.27rc3` while that
 is the toolchain available for the pinned dependency set. CI uses the same
 release-candidate toolchain explicitly. Binary users do not need Go installed.
 
-The optional smolvm Bash sandbox has its own platform prerequisites. In
-particular, Snow can run on macOS amd64 while automatic smolvm installation may
-remain unavailable when no audited upstream archive and checksum exist. See the
-[sandbox guide](sandbox.md) before advertising sandbox support for a target.
-
 Windows is not currently supported.
 
 ## Release requirements
@@ -124,7 +119,7 @@ Add a new topmost version section to `CHANGELOG.md` using the release date:
 
 Summarize user-visible changes, breaking changes, migrations, security fixes,
 and known alpha limitations. Keep the Go requirement synchronized across
-`go.mod`, `README.md`, CI, and sandbox profiles if the toolchain changed.
+`go.mod`, `README.md`, and CI if the toolchain changed.
 
 Run the verification commands in `AGENTS.md` and the expanded matrix in
 `IMPLEMENTATION.md`. Run the manual live-provider/authentication smokes outside

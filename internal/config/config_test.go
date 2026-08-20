@@ -37,51 +37,6 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	}
 }
 
-func TestSandboxDefaultsAndValidation(t *testing.T) {
-	cfg, err := Load(filepath.Join(t.TempDir(), "missing.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Sandbox.Executable != "smolvm" || cfg.Sandbox.DefaultImage != DefaultUbuntuImage || cfg.Sandbox.CPUs != 2 || cfg.Sandbox.MemoryMiB != 2048 || cfg.Sandbox.GuestCWD != "/workspace" {
-		t.Fatalf("sandbox defaults = %+v", cfg.Sandbox)
-	}
-	if strings.Join(cfg.Sandbox.EnvAllowlist, ",") != "LANG,LC_ALL,TERM" {
-		t.Fatalf("sandbox environment defaults = %#v", cfg.Sandbox.EnvAllowlist)
-	}
-
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"sandbox":{"executable":"/opt/smolvm","default_image":"dev@sha256:abc","cpus":4,"memory_mib":4096,"storage_gib":40,"overlay_gib":20,"guest_cwd":"/work","env_allowlist":["LANG"]}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Sandbox.Executable != "/opt/smolvm" || loaded.Sandbox.DefaultImage != "dev@sha256:abc" || loaded.Sandbox.StorageGiB != 40 || loaded.Sandbox.OverlayGiB != 20 || loaded.Sandbox.GuestCWD != "/work" {
-		t.Fatalf("loaded sandbox = %+v", loaded.Sandbox)
-	}
-	if err := os.WriteFile(path, []byte(`{"sandbox":{"cpus":0,"memory_mib":64}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "memory_mib") {
-		t.Fatalf("invalid sandbox memory accepted: %v", err)
-	}
-	for _, body := range []string{
-		`{"sandbox":{"guest_cwd":"relative"}}`,
-		`{"sandbox":{"storage_gib":-1}}`,
-		`{"sandbox":{"overlay_gib":1048577}}`,
-		`{"sandbox":{"env_allowlist":["PATH","bad-name"]}}`,
-		`{"sandbox":{"env_allowlist":["TERM","TERM"]}}`,
-	} {
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := Load(path); err == nil {
-			t.Fatalf("invalid sandbox config accepted: %s", body)
-		}
-	}
-}
-
 func TestMouseAppModeSurvivesSaveAndLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	cfg := Default()

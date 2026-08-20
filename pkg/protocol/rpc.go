@@ -41,7 +41,6 @@ var rpcCommands = []string{
 	"permission_reject",
 	"permission_reply",
 	"prompt",
-	"sandbox_status",
 	"session_fork",
 	"session_info",
 	"session_rename",
@@ -86,7 +85,6 @@ var rpcCapabilities = []string{
 	"permission_interaction",
 	"prompt_completion",
 	"response_controls",
-	"sandbox_status",
 	"session_forks",
 	"session_info",
 	"skills",
@@ -276,22 +274,6 @@ type RPCSkillDiagnostic struct {
 	Message string `json:"message"`
 }
 
-// RPCSandboxStatus is the secret-free Bash execution boundary snapshot.
-type RPCSandboxStatus struct {
-	Configured bool   `json:"configured"`
-	Active     bool   `json:"active"`
-	Backend    string `json:"backend,omitempty"`
-	Machine    string `json:"machine,omitempty"`
-	Profile    string `json:"profile,omitempty"`
-	GuestCWD   string `json:"guest_cwd,omitempty"`
-	ReadOnly   bool   `json:"read_only,omitempty"`
-	Network    bool   `json:"network,omitempty"`
-	CPUs       int    `json:"cpus,omitempty"`
-	MemoryMiB  int    `json:"memory_mib,omitempty"`
-	StorageGiB int    `json:"storage_gib,omitempty"`
-	OverlayGiB int    `json:"overlay_gib,omitempty"`
-}
-
 // RPCMCPServersList is the response data for mcp_servers.
 type RPCMCPServersList struct {
 	Servers []RPCMCPServer `json:"servers"`
@@ -302,9 +284,4 @@ type RPCMCPServersList struct {
 type RPCSkillsList struct {
 	Skills      []RPCSkill           `json:"skills"`
 	Diagnostics []RPCSkillDiagnostic `json:"diagnostics,omitempty"`
-}
-
-// RPCSandboxStatusResponse is the response data for sandbox_status.
-type RPCSandboxStatusResponse struct {
-	Status RPCSandboxStatus `json:"status"`
 }

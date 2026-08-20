@@ -147,8 +147,6 @@ separates inheritance from clean-install defaults.
 | `NoSession` | Use an in-memory conversation. Branches and goals work for the process lifetime only; auth and model caches remain persistent. |
 | `AuthPath` | Credential file override. Empty uses `$SNOW_HOME/auth.json`. |
 | `ConfigPath` | Global config override. Empty uses `$SNOW_HOME/config.json`. |
-| `DisableSandbox` | Explicitly keep Bash on the host and skip loading sandbox state, even when the canonical project has an operator-owned association. Existing associations are inherited and validated by default. |
-| `RequireSandbox` | Fail `Open` unless the canonical project has a smolvm association. Conflicts with `DisableSandbox`. |
 | `PermissionMode` | `ask`, `allow`, or `deny`. Omission in the SDK forces `deny` rather than inheriting interactive `ask`. |
 | `AutoApprove` | Forces `allow` and takes precedence over `PermissionMode`. Dangerous outside externally isolated or trusted environments. |
 | `Tools` | Built-in tool allowlist. Empty exposes all registered built-ins. |
@@ -510,7 +508,6 @@ stale child work is observed as interrupted metadata, not silently restarted.
 | `RenameSession(name)` | Change the display title without changing ID, path, or history |
 | `SessionPath()` | SQLite path, or empty for in-memory sessions |
 | `CWD()` | Active project directory |
-| `SandboxStatus()` | Fixed secret-free Bash boundary (`Configured`, `Active`, backend, machine, guest mount, resources, and network policy) |
 
 The first accepted prompt assigns an untitled built-in store a deterministic,
 provider-free title. `RenameSession` trims surrounding whitespace, requires
@@ -547,7 +544,7 @@ persist across process restarts only in SQLite-backed sessions; under
 new, reopenable database and deliberately leave the SDK receiver bound to its
 source. Open `result.SessionPath` explicitly to continue in the child. This
 detached contract prevents an in-place worktree operation from reusing stale
-project trust, sandbox, search, or file-root bindings.
+project trust, search, or file-root bindings.
 
 Independent forks preserve the exact stable root-to-entry chain and immutable
 parent provenance. They reject unresolved tool-call boundaries, never overwrite
@@ -610,13 +607,10 @@ The SDK has no built-in interactive permission UI. Its omission default is
 lower-level interactive host, which `pkg/snowsdk` does not currently expose.
 
 `AutoApprove` is equivalent to `allow`; it does not add containment. Plugins,
-stdio MCP servers, file tools, and subagents execute with their documented host
-privileges. Bash also uses the host unless an inherited exact-project smolvm
-association is active. `SandboxStatus()` makes that fixed per-session boundary
-observable; `RequireSandbox` fails startup instead of accepting host Bash,
-while `DisableSandbox` is an explicit host override. The VM contains only Bash.
-Subagents share filesystem and process side effects. Project trust controls
-input loading, not containment.
+stdio MCP servers, file tools, Bash, and subagents execute with their documented
+host privileges. Snow has no built-in process sandbox; use external isolation
+when containment is required. Subagents share filesystem and process side
+effects. Project trust controls input loading, not containment.
 
 For a narrow inspection embedding:
 

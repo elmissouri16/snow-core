@@ -81,11 +81,6 @@ func (m *Model) renderOverlays() string {
 			overlays = append(overlays, r)
 		}
 	}
-	if m.sandboxSetup {
-		if r := m.renderSandboxSetup(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
 	if m.pickSettings {
 		if r := m.renderSettings(); r != "" {
 			overlays = append(overlays, r)
@@ -271,9 +266,6 @@ func (m *Model) View() string {
 		if m.sessionOpLoading {
 			status = "session…"
 		}
-		if m.sandboxLoading {
-			status = m.spinner.View() + " sandbox"
-		}
 		if m.compatibleLoginPending {
 			status = "models…"
 		}
@@ -406,18 +398,11 @@ func (m *Model) renderHeader(status string) string {
 	w := m.managedFrameWidth()
 	brand := styleBrand.Render(" snow ")
 	midText := "booting"
-	shellBoundary := ""
-	shellVM := false
 	if m.lastErr != nil {
 		midText = "startup failed"
 	} else if m.app != nil {
 		model := m.app.Agent.Model()
 		goalText := ""
-		shellBoundary = "shell:host"
-		if m.app.SandboxStatus().Active {
-			shellBoundary = "shell:vm"
-			shellVM = true
-		}
 		if m.goal != nil {
 			goalText = fmt.Sprintf("  ·  goal:%s %s", m.goal.Status, formatGoalTokenUsage(m.goal))
 		}
@@ -425,7 +410,6 @@ func (m *Model) renderHeader(status string) string {
 		if w >= 80 {
 			midText += "  ·  thinking:" + string(m.app.Agent.Thinking()) +
 				"  ·  mode:" + m.collaborationModeLabel() + goalText +
-				"  ·  " + shellBoundary +
 				"  ·  " + shortPath(m.app.CWD(), max(12, w/3))
 		} else if w >= 48 {
 			midText += "  ·  mode:" + m.collaborationModeLabel() + "  ·  " + shortPath(m.app.CWD(), max(10, w/4))
@@ -439,13 +423,6 @@ func (m *Model) renderHeader(status string) string {
 	}
 	midText = truncateRunes(midText, maxMid)
 	mid := styleHeaderDim.Render(midText)
-	if before, after, ok := strings.Cut(midText, shellBoundary); ok && shellBoundary != "" {
-		boundaryStyle := styleTool // warning yellow: Bash executes on the host
-		if shellVM {
-			boundaryStyle = styleDiffAdd // success green: Bash routes through the VM
-		}
-		mid = styleHeaderDim.Render(before) + boundaryStyle.Render(shellBoundary) + styleHeaderDim.Render(after)
-	}
 	used := lipgloss.Width(brand) + lipgloss.Width(mid) + lipgloss.Width(right)
 	pad := max(1, w-used)
 	return brand + mid + strings.Repeat(" ", pad) + right

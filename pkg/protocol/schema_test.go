@@ -91,7 +91,6 @@ func TestRPCSchemasResolveWithoutNetwork(t *testing.T) {
 		"prompt-completed.schema.json",
 		"request.schema.json",
 		"response.schema.json",
-		"sandbox-status.schema.json",
 		"session-branch.schema.json",
 		"skills.schema.json",
 		"session-info.schema.json",

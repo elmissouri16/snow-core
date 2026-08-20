@@ -335,8 +335,6 @@ test("parity command wrappers use the expected RPC frames and typed data", async
     const skills = await snow.skills();
     assert.equal(skills.data.skills[0].name, "caveman");
     assert.equal(skills.data.diagnostics[0].level, "error");
-    const sandbox = await snow.sandboxStatus();
-    assert.equal(sandbox.data.status.backend, "host");
 
     assert.equal((await snow.replyPermission("perm-1", "allow")).command, "permission_reply");
     assert.equal((await snow.rejectPermission("perm-1")).command, "permission_reject");

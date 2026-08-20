@@ -60,63 +60,6 @@ func IsOpenAICompatibleProfile(id string, provider ProviderConfig) bool {
 	return id == ProviderTypeOpenAICompatible || provider.Type == ProviderTypeOpenAICompatible
 }
 
-// DefaultSandbox returns the safe one-command bootstrap defaults. Ubuntu is
-// the upstream smolvm example image; guest networking remains disabled unless
-// init explicitly enables it.
-func DefaultSandbox() SandboxConfig {
-	return SandboxConfig{
-		Executable:   "smolvm",
-		DefaultImage: DefaultUbuntuImage,
-		CPUs:         2,
-		MemoryMiB:    2048,
-		GuestCWD:     "/workspace",
-		EnvAllowlist: []string{"LANG", "LC_ALL", "TERM"},
-	}
-}
-
-// Validate rejects sandbox settings that would make lifecycle or environment
-// behavior ambiguous. Network and mount authority are chosen explicitly when a
-// project sandbox is initialized, not inherited from project input.
-func (c SandboxConfig) Validate() error {
-	if strings.TrimSpace(c.Executable) == "" || len(c.Executable) > 4096 {
-		return errors.New("config: sandbox executable must be a non-blank path or command")
-	}
-	if c.DefaultImage != "" && (strings.TrimSpace(c.DefaultImage) == "" || len(c.DefaultImage) > 4096) {
-		return errors.New("config: sandbox default_image must be non-blank and at most 4096 bytes")
-	}
-	if c.CPUs < 1 || c.CPUs > 64 {
-		return errors.New("config: sandbox cpus must be 1..64")
-	}
-	if c.MemoryMiB < 128 || c.MemoryMiB > 262144 {
-		return errors.New("config: sandbox memory_mib must be 128..262144")
-	}
-	if c.StorageGiB < 0 || c.StorageGiB > 1048576 {
-		return errors.New("config: sandbox storage_gib must be 0..1048576 (0 uses smolvm default)")
-	}
-	if c.OverlayGiB < 0 || c.OverlayGiB > 1048576 {
-		return errors.New("config: sandbox overlay_gib must be 0..1048576 (0 uses smolvm default)")
-	}
-	if !filepath.IsAbs(c.GuestCWD) || filepath.Clean(c.GuestCWD) == string(filepath.Separator) {
-		return errors.New("config: sandbox guest_cwd must be an absolute non-root path")
-	}
-	seen := make(map[string]bool, len(c.EnvAllowlist))
-	for _, name := range c.EnvAllowlist {
-		if name == "" || len(name) > 128 {
-			return errors.New("config: sandbox env_allowlist entries must be non-empty and at most 128 bytes")
-		}
-		for i, r := range name {
-			if !(r == '_' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9') {
-				return fmt.Errorf("config: invalid sandbox environment name %q", name)
-			}
-		}
-		if seen[name] {
-			return fmt.Errorf("config: duplicate sandbox environment name %q", name)
-		}
-		seen[name] = true
-	}
-	return nil
-}
-
 func DefaultCompaction() CompactionConfig {
 	return CompactionConfig{
 		MinRetainedTurns: 2, SummaryMaxTokens: 2000, Fallback: "local",
@@ -312,7 +255,6 @@ func Default() Config {
 		Subagents:  DefaultSubagents(),
 		Compaction: DefaultCompaction(),
 		TUI:        TUIConfig{Theme: "default", Mouse: true},
-		Sandbox:    DefaultSandbox(),
 	}
 }
 
@@ -384,22 +326,6 @@ func Load(path string) (Config, error) {
 	if cfg.TUI.Theme == "" {
 		cfg.TUI.Theme = defaultTUITheme
 	}
-	sandboxDefaults := DefaultSandbox()
-	if cfg.Sandbox.Executable == "" {
-		cfg.Sandbox.Executable = sandboxDefaults.Executable
-	}
-	if cfg.Sandbox.CPUs == 0 {
-		cfg.Sandbox.CPUs = sandboxDefaults.CPUs
-	}
-	if cfg.Sandbox.MemoryMiB == 0 {
-		cfg.Sandbox.MemoryMiB = sandboxDefaults.MemoryMiB
-	}
-	if cfg.Sandbox.GuestCWD == "" {
-		cfg.Sandbox.GuestCWD = sandboxDefaults.GuestCWD
-	}
-	if cfg.Sandbox.EnvAllowlist == nil {
-		cfg.Sandbox.EnvAllowlist = append([]string(nil), sandboxDefaults.EnvAllowlist...)
-	}
 	defaults := DefaultCompaction()
 	var rawConfig struct {
 		Compaction map[string]json.RawMessage `json:"compaction"`
@@ -470,9 +396,6 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 	if err := cfg.Compaction.Validate(); err != nil {
-		return cfg, err
-	}
-	if err := cfg.Sandbox.Validate(); err != nil {
 		return cfg, err
 	}
 	if err := validateSystemPromptFile(cfg.SystemPromptFile, true); err != nil {

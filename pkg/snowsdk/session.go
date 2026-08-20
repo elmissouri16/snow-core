@@ -10,7 +10,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/buildinfo"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
-	publicsandbox "github.com/elmissouri16/snow-core/pkg/sandbox"
 )
 
 func (s *Session) activeApp() (*app.App, error) {
@@ -38,9 +37,6 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	if opts.EnableSubagents && opts.DisableSubagents {
 		return nil, errors.New("snowsdk: EnableSubagents and DisableSubagents conflict")
 	}
-	if opts.DisableSandbox && opts.RequireSandbox {
-		return nil, errors.New("snowsdk: DisableSandbox and RequireSandbox conflict")
-	}
 	a, err := app.New(ctx, app.Options{
 		CWD:                     opts.CWD,
 		BuildVersion:            buildinfo.Version,
@@ -50,8 +46,6 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		NoSession:               opts.NoSession,
 		AuthPath:                opts.AuthPath,
 		ConfigPath:              opts.ConfigPath,
-		DisableSandbox:          opts.DisableSandbox,
-		RequireSandbox:          opts.RequireSandbox,
 		Permission:              effectivePermission(opts),
 		Tools:                   opts.Tools,
 		SystemPrompt:            opts.SystemPrompt,
@@ -494,7 +488,7 @@ func (s *Session) ForkSession(ctx context.Context, opts protocol.SessionForkOpti
 
 // ForkWorktree creates a clean Git worktree and an independent durable session
 // rooted there. The receiver remains bound to the source so project-specific
-// trust, sandbox, and tool roots are never retargeted in place.
+// trust and tool roots are never retargeted in place.
 func (s *Session) ForkWorktree(ctx context.Context, opts protocol.SessionWorktreeForkOptions) (protocol.SessionForkResult, error) {
 	a, err := s.activeApp()
 	if err != nil {
@@ -769,15 +763,6 @@ func (s *Session) SessionPath() string {
 		return ""
 	}
 	return path
-}
-
-// SandboxStatus returns the fixed, secret-free Bash execution boundary for this session.
-func (s *Session) SandboxStatus() publicsandbox.Status {
-	a, err := s.activeApp()
-	if err != nil {
-		return publicsandbox.Status{Backend: "host"}
-	}
-	return a.SandboxStatus()
 }
 
 // EnablePermissionReplies permits manual ReplyPermission/RejectPermission

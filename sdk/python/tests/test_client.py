@@ -69,8 +69,6 @@ class SnowClientTests(unittest.IsolatedAsyncioTestCase):
             skills = await snow.skills()
             self.assertEqual(skills["data"]["skills"][0]["name"], "caveman")
             self.assertEqual(skills["data"]["diagnostics"][0]["level"], "error")
-            sandbox = await snow.sandbox_status()
-            self.assertEqual(sandbox["data"]["status"]["backend"], "host")
 
             reply = await snow.reply_permission("perm-1", "allow")
             self.assertEqual(reply["command"], "permission_reply")
@@ -96,7 +94,6 @@ class SnowClientTests(unittest.IsolatedAsyncioTestCase):
             MCPServers,
             MessagesList,
             PendingInputs,
-            SandboxStatus,
             Skills,
             UsageSnapshot,
         )
@@ -129,8 +126,6 @@ class SnowClientTests(unittest.IsolatedAsyncioTestCase):
             skills = Skills.from_response(await snow.skills())
             self.assertEqual(skills.skills[0].name, "caveman")
             self.assertEqual(skills.diagnostics[0].level, "error")
-            sandbox = SandboxStatus.from_response(await snow.sandbox_status())
-            self.assertEqual(sandbox.backend, "host")
 
     async def test_handshake_discovery_and_prompt_events(self):
         async with await SnowClient.start(fixture_options()) as snow:
@@ -367,7 +362,6 @@ class SnowBinaryIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance((await snow.configuration_diagnostics())["data"]["diagnostics"], list)
                 self.assertIsInstance((await snow.mcp_servers())["data"]["servers"], list)
                 self.assertIsInstance((await snow.skills())["data"]["skills"], list)
-                self.assertIsInstance((await snow.sandbox_status())["data"]["status"]["configured"], bool)
 
                 branches = (await snow.branches_list())["data"]["branches"]
                 main = next(branch for branch in branches if branch["active"])

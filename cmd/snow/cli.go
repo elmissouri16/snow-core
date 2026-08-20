@@ -63,8 +63,6 @@ func run() error {
 	root.PersistentFlags().String("base-url", "", "provider base URL override")
 	root.PersistentFlags().String("config", "", "config file path")
 	root.PersistentFlags().String("auth", "", "auth file path")
-	root.PersistentFlags().Bool("require-sandbox", false, "fail startup unless this project has an initialized smolvm Bash sandbox")
-	root.PersistentFlags().Bool("no-sandbox", false, "explicitly keep Bash on the host even if a project sandbox exists")
 	root.PersistentFlags().String("thinking", "", "thinking level: off|minimal|low|medium|high|xhigh|max|ultra")
 	root.PersistentFlags().StringSlice("tools", nil, "restrict built-in tools to a comma-separated allowlist")
 	root.PersistentFlags().StringArray("plugin", nil, "load an explicit plugin manifest or executable (repeatable)")
@@ -92,7 +90,6 @@ func run() error {
 	root.AddCommand(skillsCmd())
 	root.AddCommand(mcpCmd())
 	root.AddCommand(pluginCmd())
-	root.AddCommand(sandboxCmd())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -359,11 +356,6 @@ func buildOptions(cmd *cobra.Command) (app.Options, error) {
 	opts.BaseURL, _ = cmd.Flags().GetString("base-url")
 	opts.ConfigPath, _ = cmd.Flags().GetString("config")
 	opts.AuthPath, _ = cmd.Flags().GetString("auth")
-	opts.RequireSandbox, _ = cmd.Flags().GetBool("require-sandbox")
-	opts.DisableSandbox, _ = cmd.Flags().GetBool("no-sandbox")
-	if opts.RequireSandbox && opts.DisableSandbox {
-		return opts, errors.New("--require-sandbox and --no-sandbox are mutually exclusive")
-	}
 	opts.Thinking, _ = cmd.Flags().GetString("thinking")
 	opts.Tools, _ = cmd.Flags().GetStringSlice("tools")
 	opts.CollaborationMode, _ = cmd.Flags().GetString("collaboration-mode")

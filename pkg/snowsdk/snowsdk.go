@@ -32,11 +32,6 @@ type Options struct {
 	AuthPath string
 	// ConfigPath overrides the default config file path.
 	ConfigPath string
-	// DisableSandbox explicitly keeps Bash on the host even when the canonical
-	// project has a smolvm association. The association is inherited by default.
-	DisableSandbox bool
-	// RequireSandbox makes Open fail unless the project has a smolvm association.
-	RequireSandbox bool
 	// PermissionMode is ask|allow|deny. Headless default: deny for mutating tools.
 	PermissionMode string
 	// AutoApprove allows all tool calls without asking. Dangerous; CI/trusted only.

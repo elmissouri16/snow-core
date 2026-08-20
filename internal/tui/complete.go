@@ -33,7 +33,6 @@ var commands = []commandSpec{
 	{name: "/plan", desc: "switch to Plan mode", argHint: "[message]"},
 	{name: "/quit", desc: "exit snow"},
 	{name: "/resume", desc: "resume a session for this directory", argHint: "[path]"},
-	{name: "/sandbox", desc: "show or control the persistent smolvm shell sandbox", argHint: "[status|init|start|stop|delete confirm]"},
 	{name: "/sessions", desc: "choose, rename, or delete a session for this directory"},
 	{name: "/settings", desc: "configure model and response behavior"},
 	{name: "/skills", desc: "inspect or clear session-active Agent Skills", argHint: "[clear]"},

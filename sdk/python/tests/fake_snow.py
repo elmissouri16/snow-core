@@ -172,9 +172,6 @@ for line in sys.stdin:
     if command == "skills":
         emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"skills": [{"name": "caveman", "location": "/skills/caveman", "scope": "builtin", "source": "catalog", "enabled": True, "description": "compressed mode"}], "diagnostics": [{"path": "/skills/broken", "level": "error", "message": "shadowed"}]}})
         continue
-    if command == "sandbox_status":
-        emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"status": {"configured": False, "active": False, "backend": "host"}}})
-        continue
     if command in ("permission_reply", "permission_reject"):
         emit({"id": request_id, "type": "response", "command": command, "success": True})
         if permission_prompt is not None:

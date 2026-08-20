@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/internal/permission"
-	"github.com/elmissouri16/snow-core/internal/sandbox"
 	"github.com/elmissouri16/snow-core/internal/tempfile"
 	"github.com/elmissouri16/snow-core/internal/trust"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
@@ -22,7 +20,7 @@ import (
 
 // startupConfig contains the dependency-ordered state created before tools.
 // Keeping this phase together makes New the sole runtime-wiring owner while
-// giving configuration, trust, and sandbox setup an explicit boundary.
+// giving configuration and trust setup an explicit boundary.
 type startupConfig struct {
 	absCWD, globalDir, configPath string
 	persistedCfg, cfg             config.Config
@@ -44,9 +42,6 @@ type startupConfig struct {
 	configDiagnostics             []config.Diagnostic
 	projectAllowed                bool
 	projectInputRoot              string
-	sandboxManager                *sandbox.Manager
-	bashCommandFactory            func(context.Context, string, []string, time.Duration) (*exec.Cmd, bool, bool, error)
-	bashSandboxActive             func() bool
 }
 
 func initializeStartup(ctx context.Context, opts Options) (startupConfig, error) {
@@ -247,43 +242,6 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 
 	searchPolicy, configDiagnostics := config.LoadSearchPolicy(config.GlobalDir(), projectInputRoot, projectAllowed)
 
-	// Shell sandbox state is operator-owned and keyed to the canonical project.
-	// It is deliberately independent of trust-gated project configuration.
-	sandboxStatePath := opts.SandboxStatePath
-	if sandboxStatePath == "" {
-		sandboxStatePath = filepath.Join(globalDir, "sandboxes.json")
-	}
-	if opts.DisableSandbox && opts.RequireSandbox {
-		return startupConfig{}, errors.New("app: DisableSandbox and RequireSandbox conflict")
-	}
-	var sandboxManager *sandbox.Manager
-	var bashCommandFactory func(context.Context, string, []string, time.Duration) (*exec.Cmd, bool, bool, error)
-	var bashSandboxActive func() bool
-	if !opts.DisableSandbox {
-		sandboxManager, err = sandbox.New(sandbox.Options{
-			Context:      ctx,
-			ProjectRoot:  projectInputRoot,
-			StatePath:    sandboxStatePath,
-			Executable:   cfg.Sandbox.Executable,
-			DefaultImage: cfg.Sandbox.DefaultImage,
-			CPUs:         cfg.Sandbox.CPUs,
-			MemoryMiB:    cfg.Sandbox.MemoryMiB,
-			StorageGiB:   cfg.Sandbox.StorageGiB,
-			OverlayGiB:   cfg.Sandbox.OverlayGiB,
-			GuestCWD:     cfg.Sandbox.GuestCWD,
-			EnvAllowlist: cfg.Sandbox.EnvAllowlist,
-			AutoInstall:  true,
-		})
-		if err != nil {
-			return startupConfig{}, fmt.Errorf("app: sandbox: %w", err)
-		}
-		if opts.RequireSandbox && !sandboxManager.Active() {
-			return startupConfig{}, errors.New("app: sandbox is required but not initialized for this project")
-		}
-		bashCommandFactory = sandboxManager.Command
-		bashSandboxActive = sandboxManager.Active
-	}
-
 	startup = startupConfig{
 		absCWD: absCWD, globalDir: globalDir, configPath: configPath,
 		persistedCfg: persistedCfg, cfg: cfg, permMode: permMode,
@@ -293,8 +251,7 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 		projectMCPServers: projectMCPServers, projectSkills: projectSkills,
 		projectSystemPrompt: projectSystemPrompt, searchPolicy: searchPolicy,
 		configDiagnostics: configDiagnostics, projectAllowed: projectAllowed,
-		projectInputRoot: projectInputRoot, sandboxManager: sandboxManager,
-		bashCommandFactory: bashCommandFactory, bashSandboxActive: bashSandboxActive,
+		projectInputRoot: projectInputRoot,
 	}
 	return startup, nil
 }

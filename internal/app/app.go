@@ -14,7 +14,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/permission"
 	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
 	"github.com/elmissouri16/snow-core/internal/provider"
-	"github.com/elmissouri16/snow-core/internal/sandbox"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/skills"
 	"github.com/elmissouri16/snow-core/internal/subagent"
@@ -65,8 +64,6 @@ type App struct {
 	MCPStatuses      []publicmcp.Status
 	Skills           *skills.Registry
 	SkillDiagnostics []skills.Diagnostic
-	Sandbox          *sandbox.Manager
-	SandboxEnabled   bool
 	Subagents        *subagent.Manager
 	Diagnostics      []config.Diagnostic
 	SearchPolicy     config.EffectiveSearchPolicy
@@ -107,9 +104,6 @@ type Options struct {
 	ConfigPath              string
 	BuildVersion            string
 	AuthPath                string
-	SandboxStatePath        string // optional operator-state override for tests/internal surfaces
-	DisableSandbox          bool   // explicit host-shell override despite a configured association
-	RequireSandbox          bool   // fail assembly unless the project has an association
 	Provider                string
 	Model                   string
 	APIKey                  string

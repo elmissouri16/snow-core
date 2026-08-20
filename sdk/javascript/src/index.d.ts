@@ -281,22 +281,6 @@ export interface SkillDiagnostic {
   [key: string]: unknown;
 }
 
-export interface SandboxStatus {
-  configured: boolean;
-  active: boolean;
-  backend?: string;
-  machine?: string;
-  profile?: string;
-  guest_cwd?: string;
-  read_only?: boolean;
-  network?: boolean;
-  cpus?: number;
-  memory_mib?: number;
-  storage_gib?: number;
-  overlay_gib?: number;
-  [key: string]: unknown;
-}
-
 export interface SnowOptions {
   executable?: string;
   executableArgs?: string[];
@@ -393,7 +377,6 @@ export declare class Snow {
   configurationDiagnostics(): Promise<RPCResponse<{diagnostics: ConfigDiagnostic[]; [key: string]: unknown}>>;
   mcpServers(): Promise<RPCResponse<{servers: MCPServerStatus[]; [key: string]: unknown}>>;
   skills(): Promise<RPCResponse<{skills: SkillMetadata[]; diagnostics: SkillDiagnostic[]; [key: string]: unknown}>>;
-  sandboxStatus(): Promise<RPCResponse<{status: SandboxStatus; [key: string]: unknown}>>;
   setReasoningSummary(reasoningSummary: ReasoningSummaryLevel): Promise<RPCResponse>;
   setTextVerbosity(textVerbosity: TextVerbosityLevel): Promise<RPCResponse>;
   close(): Promise<void>;

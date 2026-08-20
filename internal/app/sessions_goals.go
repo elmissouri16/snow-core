@@ -178,7 +178,7 @@ func (a *App) ForkSession(ctx context.Context, opts protocol.SessionForkOptions)
 
 // ForkWorktree creates a clean Git worktree plus an independent durable
 // session rooted there. It is detached: the current App keeps its immutable
-// trust, sandbox, and tool-root bindings.
+// trust and tool-root bindings.
 func (a *App) ForkWorktree(ctx context.Context, opts protocol.SessionWorktreeForkOptions) (protocol.SessionForkResult, error) {
 	if ctx == nil {
 		ctx = context.Background()

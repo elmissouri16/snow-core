@@ -25,7 +25,6 @@ events behind every surface.
 - [Choose a surface](#choose-a-surface)
 - [Providers](#providers)
 - [Capabilities](#capabilities)
-- [Optional smolvm shell sandbox](#optional-smolvm-shell-sandbox)
 - [Embed with Go](#embed-with-go)
 - [Automate over RPC](#automate-over-rpc)
 - [Security first](#security-first)
@@ -248,7 +247,7 @@ redirect-checked, and never executes JavaScript.
 - Independent durable session snapshots with immutable parent provenance and
   exact stable-entry boundaries
 - Clean Git-worktree forks with direct argument-based Git execution, rollback,
-  and independent project trust/sandbox identity
+  and an independent project trust identity
 - Current-directory session picker with automatic first-prompt titles, manual
   rename, explicit path resume, and a three-way `/fork` picker
 - Turn-aware compaction for ordinary, goal, and child turns at configurable
@@ -353,71 +352,6 @@ JavaScript/Python plugin runtimes. All SDK/RPC examples default to the
 credential-free fake provider and are exercised by CI on Linux and macOS. See
 the [cross-language SDK guide](docs/language-sdks.md).
 
-## Optional smolvm shell sandbox
-
-Snow can route the model-facing `bash` tool through a persistent, project-scoped
-Linux VM managed by external [smolvm](https://github.com/smol-machines/smolvm)
-1.8.x (minimum 1.8.1). This is opt-in and deliberately narrow: it contains Bash
-commands, not the Snow process, providers, built-in file tools, plugins, MCP
-servers, or host-side subagent orchestration. On macOS, install the
-persistent-disk formatter first; Snow detects the standard keg-only Homebrew
-path and blocks initialization or restart when it is unavailable:
-
-```sh
-brew install e2fsprogs              # macOS only
-
-# Install pinned smolvm 1.8.1 when absent, then create digest-pinned Ubuntu 24.04.
-snow sandbox init
-
-# Built-in digest-pinned development profiles (all enable guest networking):
-snow sandbox init --profile go      # defaults to 4 CPUs and 6144 MiB RAM
-snow sandbox init --profile node
-snow sandbox init --profile python  # Python 3.12 + uv
-
-# Explicit VM resources (storage/overlay are GiB):
-snow sandbox init --cpus 4 --memory 8192 --storage 40 --overlay 20
-
-# Optional custom/pinned image or local pack:
-snow sandbox init ubuntu@sha256:<digest>
-snow sandbox init --from ./dev.smolmachine
-
-snow sandbox status
-snow sandbox stop                 # explicitly route Bash to the host, preserving the VM
-snow sandbox start                # restore VM routing
-snow sandbox delete --force       # delete the VM and keep Bash on the host
-```
-
-When the default `smolvm` command is absent, explicit initialization downloads
-the official version-tagged installer and platform release archive, verifies
-Snow-pinned SHA-256 values for both, runs the installer only against the already
-verified local archive, and validates the installed binary before creating the
-VM. Shell profiles are not modified. This host bootstrap requires HTTPS access
-and writes the upstream user-local `~/.smolvm`, `~/.local/bin`, and smolvm data
-paths. A custom configured executable is never auto-installed.
-
-Initialization mounts exactly the canonical project directory at `/workspace`.
-Guest runtime networking is disabled unless `--network` or a built-in
-development profile is explicitly selected. CLI init without a profile downloads
-the digest-pinned configured image over host HTTPS to a private temporary
-Docker-save archive, so guest bootstrap networking is not needed. Only the
-configured environment-name allowlist crosses into guest commands.
-
-The project-to-machine association is operator-owned state in
-`$SNOW_HOME/sandboxes.json`; project configuration cannot enable or weaken it.
-While an association is active, unavailable/corrupt smolvm state fails closed:
-Snow never silently retries that Bash command on the host. An explicit
-`sandbox stop` persists a stopped state and routes later Bash to the host until
-`sandbox start`. The TUI exposes the same lifecycle through `/sandbox`;
-`/sandbox init` opens a setup form for a built-in environment profile, CPU,
-memory, storage, overlay, mount mode, and guest networking. The Ubuntu, Go,
-Node.js, and Python+uv profiles are version/digest-pinned and deliberately
-enable persistent guest networking. The wide header shows `shell:host` or
-`shell:vm`.
-
-See the [sandbox guide](docs/sandbox.md), [security](docs/security.md), and
-[configuration](docs/configuration.md) for lifecycle, persistence,
-troubleshooting, the exact boundary, and all options.
-
 ## Embed with Go
 
 ```go
@@ -503,9 +437,9 @@ finishes. See the [RPC protocol reference](docs/rpc.md) and
 
 Snow is a harness, **not a whole-process sandbox**:
 
-- By default Snow, `bash`, plugins, stdio MCP servers, and subagents run with
-  the user's OS privileges. An initialized smolvm project association isolates
-  only model-facing `bash`; every other Snow capability remains host-side.
+- Snow, `bash`, plugins, stdio MCP servers, and subagents run with the user's
+  OS privileges. Snow has no built-in process sandbox; use an external
+  container, VM, or OS policy when containment is required.
 - Headless SDK/RPC/print callers should normally use `deny`; `ask` has no
   interactive permission reply channel outside the TUI and therefore fails
   closed.
@@ -536,15 +470,14 @@ Default global paths:
 ~/.snow/config.json       runtime defaults
 ~/.snow/auth.json         provider credentials (0600)
 ~/.snow/trust.json        project trust decisions (0600)
-~/.snow/sandboxes.json    operator-owned project → smolvm associations (0600)
 ~/.snow/sessions/         SQLite session databases
 ~/.snow/keybindings.yaml  TUI key overrides
 ~/.snow/themes/*.yaml     custom themes
 ~/.snow/search.yaml       grep/glob policy
 ```
 
-`SNOW_HOME` relocates global configuration/auth/trust/sandbox/auxiliary files
-and `SNOW_SESSIONS_DIR` relocates session databases. Interactive provider,
+`SNOW_HOME` relocates global configuration, auth, trust, cache, and auxiliary
+files, and `SNOW_SESSIONS_DIR` relocates session databases. Interactive provider,
 model, and thinking selections are remembered independently for each absolute
 project directory in the operator-owned global config. Global or trusted-project
 configuration may select a Markdown `system_prompt_file`; explicit SDK

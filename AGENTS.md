@@ -36,7 +36,7 @@ snowsdk → app + protocol; never bubbletea
   the TUI or Cobra.
 - Keep `pkg/protocol` standard-library-only.
 - Treat `internal/` as unstable. Public contracts belong in `pkg/snowsdk`,
-  `pkg/protocol`, or dependency-light `pkg/*` packages such as `pkg/sandbox`.
+  `pkg/protocol`, or another dependency-light `pkg/*` package.
 - Keep turn execution serial. TUI, print, JSON, RPC, and SDK consumers observe
   the same normalized `protocol.AgentEvent` stream.
 - Preserve the append-only, parent-linked session tree and `BranchTip`
@@ -72,9 +72,9 @@ snowsdk → app + protocol; never bubbletea
 
 ## Security constraints
 
-- Snow, plugins, stdio MCP servers, and subagents run with the user's OS
-  privileges. The optional smolvm backend contains only model-facing Bash—not
-  Snow, file tools, providers, extensions, webfetch, or subagent control.
+- Snow, model-facing Bash, plugins, stdio MCP servers, and subagents run with
+  the user's OS privileges. Snow has no built-in process sandbox; external
+  containment is the operator's responsibility.
 - Permission gates remain authoritative. Headless `ask` must fail closed; use
   `deny` unless a caller deliberately grants greater authority.
 - Subagents share the working directory, filesystem, and process side effects

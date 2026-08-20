@@ -26,12 +26,6 @@ type Bash struct {
 	MaxOutputBytes int
 	// Timeout caps execution. Defaults to 120s.
 	Timeout time.Duration
-	// CommandFactory optionally routes commands through an operator-owned
-	// execution backend. active=false is the only case that permits the normal
-	// host shell; backend errors fail closed.
-	CommandFactory func(context.Context, string, []string, time.Duration) (cmd *exec.Cmd, gracefulCancel bool, active bool, err error)
-	// SandboxActive is used only to describe the current tool boundary.
-	SandboxActive func() bool
 }
 
 // NewBash returns a Bash tool with defaults.
@@ -47,13 +41,9 @@ type bashArgs struct {
 
 // Schema implements tools.Tool.
 func (b *Bash) Schema() tools.ToolSchema {
-	description := shellDescription()
-	if b.SandboxActive != nil && b.SandboxActive() {
-		description = "Run a non-interactive POSIX shell command inside the configured persistent smolvm Linux sandbox. The host project is mounted at the sandbox working directory."
-	}
 	return tools.ToolSchema{
 		Name:        "bash",
-		Description: description,
+		Description: shellDescription(),
 		Parameters: json.RawMessage(`{
   "type": "object",
   "required": ["command"],
@@ -109,36 +99,16 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		hostEnv = host.Environ()
 		hostCWD = host.CWD()
 	}
-	var cmd *exec.Cmd
-	var err error
-	gracefulCancel := false
-	backendActive := false
-	if b.CommandFactory != nil {
-		cmd, gracefulCancel, backendActive, err = b.CommandFactory(runCtx, a.Command, hostEnv, timeout)
-		if err != nil {
-			return tools.ErrorResult(fmt.Errorf("bash: %w", err)), nil
-		}
-	}
-	if !backendActive {
-		cmd, err = shellCommand(runCtx, a.Command, hostEnv, hostCWD)
-		if err != nil {
-			return tools.ErrorResult(fmt.Errorf("bash: %w", err)), nil
-		}
-	}
-	if cmd == nil {
-		return tools.ErrorResult(errors.New("bash: execution backend returned no command")), nil
+	cmd, err := shellCommand(runCtx, a.Command, hostEnv, hostCWD)
+	if err != nil {
+		return tools.ErrorResult(fmt.Errorf("bash: %w", err)), nil
 	}
 	cmd.WaitDelay = boundedProcessWaitDelay(timeout)
 
 	if host != nil {
 		cmd.Dir = host.CWD()
-		// A command factory may need a backend-specific environment (for
-		// example smolvm's macOS disk formatter path). Preserve it; only apply
-		// the host environment when the factory left Env unset.
-		if cmd.Env == nil {
-			if env := host.Environ(); env != nil {
-				cmd.Env = env
-			}
+		if env := host.Environ(); env != nil {
+			cmd.Env = env
 		}
 	}
 
@@ -151,15 +121,9 @@ func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	cmd.Stdout = limited
 	cmd.Stderr = limited
 
-	managed, err := startManagedProcess(cmd, gracefulCancel)
+	err = startManagedProcess(cmd)
 	if err == nil {
 		err = cmd.Wait()
-	}
-	if managed != nil {
-		if gracefulCancel && managed.wasCanceled() {
-			managed.forceKill()
-		}
-		managed.close()
 	}
 
 	output := sanitizeBoundedUTF8(limited.buf, cap)

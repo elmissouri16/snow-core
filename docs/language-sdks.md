@@ -199,7 +199,6 @@ Every process starts with a first frame similar to:
     "permission_interaction",
     "prompt_completion",
     "response_controls",
-    "sandbox_status",
     "session_forks",
     "session_info",
     "skills",

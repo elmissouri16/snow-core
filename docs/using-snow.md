@@ -24,7 +24,6 @@ control, see [JSONL RPC](rpc.md). For embedding, see the [Go SDK](sdk.md).
 - [Print and JSON behavior](#print-and-json-behavior)
 - [Agent Skills activation](#agent-skills-activation)
 - [Management commands](#management-commands)
-- [Persistent smolvm Bash guest](#persistent-smolvm-bash-guest)
 - [Related documents](#related-documents)
 
 ## Runtime modes
@@ -61,8 +60,6 @@ startup errors rather than silently falling back.
 | `--session PATH` | Resume an existing SQLite session |
 | `--no-session` | Use an ephemeral in-memory conversation |
 | `--config PATH` / `--auth PATH` | Override global configuration or credential files |
-| `--require-sandbox` | Fail startup unless this canonical project has a smolvm Bash association |
-| `--no-sandbox` | Explicitly keep Bash on the host even when an association exists |
 | `--api-key VALUE` | Supply an explicit provider credential |
 | `--base-url URL` | Override the active provider endpoint |
 | `--plugin VALUE` | Load an explicit plugin manifest/executable; repeatable |
@@ -274,7 +271,6 @@ has no remembered tuple; explicit startup flags override it for that process.
 | `/agent PATH` | Open the fleet inspector with one child preselected |
 | `/agent concurrency N` | Persist child concurrency for the next launch |
 | `/mcp` | Inspect configured/connected MCP server status |
-| `/sandbox [status|init|start|stop|delete confirm]` | Inspect or control the persistent smolvm Bash guest; init accepts `--from`, `--read-only`, and `--network` |
 | `/skills [clear]` | Inspect discovered Agent Skills, or durably clear session-active skills |
 | `/trust [allow|deny]` | Show or persist exact-project trust for the next launch |
 | `/quit` | Exit Snow |
@@ -480,96 +476,7 @@ snow plugin enable ID [--project]
 snow plugin disable ID [--project]
 snow plugin remove ID [--project]
 snow plugin check MANIFEST_OR_EXECUTABLE [--json]
-
-snow sandbox [status] [--json]
-snow sandbox init [IMAGE_OR_PACK] [--profile ubuntu|go|node|python] [--from]
-                  [--cpus N] [--memory MiB]
-                  [--storage GIB] [--overlay GIB] [--guest-cwd PATH]
-                  [--read-only] [--network]
-snow sandbox start
-snow sandbox stop
-snow sandbox delete --force [--forget]
 ```
-
-## Persistent smolvm Bash guest
-
-For a consolidated profile, persistence, project-scoping, process, and recovery
-guide, see [Sandboxed Bash with smolvm](sandbox.md).
-
-`snow sandbox init` is the one-command default: it ensures pinned smolvm 1.8.1,
-creates a deterministic digest-pinned Ubuntu 24.04 machine for the exact
-canonical current project, starts it, then atomically publishes the
-association. Supply another image, configure global `sandbox.default_image`, or
-use `--from` with an existing local `.smolmachine` artifact to override Ubuntu.
-
-If the default `smolvm` command is absent, init downloads the version-tagged
-official installer script and platform release archive over HTTPS, checks
-Snow-pinned SHA-256 values for both, and executes the installer against only
-that already verified local archive with `--version 1.8.1 --no-modify-path`.
-The upstream installer writes user-local `~/.smolvm`, `~/.local/bin/smolvm`, and
-platform smolvm data files. It does not modify shell profiles. A custom
-`sandbox.executable` is operator policy: if that path/command is absent, Snow
-fails instead of installing or replacing it.
-
-The create operation mounts only the canonical project directory, at
-`/workspace` by default. `--read-only` changes that Bash guest mount. Guest
-runtime networking is off in the supported smolvm line unless `--network` is
-explicit. That flag persists full guest network authority for later Bash calls.
-No-argument init downloads the digest-pinned registry image over host HTTPS
-into a private temporary Docker-save archive, then gives smolvm that local
-archive; no guest bootstrap network is enabled. Use a local pack when bootstrap
-itself must be offline. `snow sandbox stop` explicitly persists host routing
-while preserving the machine; `snow sandbox start` restores VM routing. Active
-backend failures never silently fall back to the host. Bash commands use
-foreground `machine exec --stream`, keep the existing Snow output/timeout
-bounds, and forward only the global environment name allowlist. A timeout/cancel
-first sends SIGINT so smolvm can cancel the guest command, then kills the
-launcher process group after a short grace.
-
-Once initialized, an active association enables sandboxed Bash for each newly
-assembled CLI/TUI/RPC runtime in that project. While active, corrupt state, a
-missing pinned executable, unavailable machinery, and exec errors are returned
-as Bash errors, never retried on the host. `stop` is an explicit routing-policy
-change: after the VM stops and state commits, it preserves VM storage but sends
-future Bash calls to the host; no Bash call auto-starts it. `start` restores VM
-routing. `delete --force` deletes the VM and removes the association. If the VM
-was removed outside Snow or association cleanup must be repaired,
-`delete --force --forget` removes only the operator record and leaves Bash on
-the host.
-
-In the TUI use `/sandbox` or `/sandbox status`; `/sandbox init` opens an
-interactive setup form for the environment profile, CPUs, memory MiB, storage
-GiB, overlay GiB, project mount mode, and guest networking. Built-in choices are
-digest-pinned Minimal Ubuntu, Go 1.27rc3, Node.js 22, and Python 3.12 with
-uv 0.12.5. The form starts on the configured/custom image with its existing
-network choice; a deliberate environment-row change selects a profile. The Go
-profile recommends 4 CPUs and 6144 MiB RAM by default so snow-core's heavier
-dependencies compile; resource fields and CLI flags can still override those
-values. Every built-in profile explicitly enables persistent guest networking
-so apt, go, npm, and uv can reach their registries; custom/configured images
-retain the separately selected network choice. Choosing `smolvm default` for
-either disk explicitly clears a nonzero global disk default. An optional source
-still accepts `--from`, `--read-only`, and `--network` as initial form choices.
-Use arrows to select/change values, Space to toggle authority choices, Enter to
-create, and Esc to cancel. Deletion requires the explicit
-`/sandbox delete confirm` spelling. CLI `--profile` is mutually exclusive with
-an explicit image/pack source. On the CLI, omitting `--storage`/`--overlay`
-uses global defaults while an explicit zero requests smolvm's own default. A
-wide header continuously labels the Bash boundary as green `shell:vm` or
-warning-yellow `shell:host`.
-
-This boundary applies only to the model-facing Bash tool. Snow itself,
-`read`/`write`/`edit`, webfetch/provider traffic, plugins, MCP servers, and
-host-side subagent orchestration retain their documented host authority.
-
-MCP, skill, and plugin mutations are global by default; add `--project` to
-target project configuration. Plugin add stages declarations disabled unless
-`--enable` is explicit, every plugin configuration change requires restart, and
-project declarations still require project trust before loading. Plugin
-list/get/add/enable/disable/remove never start a process. `plugin check`
-performs a bounded runtime handshake and therefore executes the plugin, but does
-not mutate configuration. Full details are in [MCP](mcp.md),
-[Agent Skills](skills.md), and [Plugins](plugins.md).
 
 ## Related documents
 
@@ -577,4 +484,3 @@ not mutate configuration. Full details are in [MCP](mcp.md),
 - [JSONL RPC](rpc.md)
 - [Go SDK](sdk.md)
 - [Sessions](sessions.md)
-- [Sandboxed Bash with smolvm](sandbox.md)

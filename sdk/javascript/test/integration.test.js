@@ -54,7 +54,6 @@ test("real Snow fake-provider lifecycle", { skip: !binary }, async () => {
     assert(Array.isArray((await snow.configurationDiagnostics()).data.diagnostics));
     assert(Array.isArray((await snow.mcpServers()).data.servers));
     assert(Array.isArray((await snow.skills()).data.skills));
-    assert.equal(typeof (await snow.sandboxStatus()).data.status.configured, "boolean");
 
     const branches = (await snow.branches()).data.branches;
     const main = branches.find((branch) => branch.active);

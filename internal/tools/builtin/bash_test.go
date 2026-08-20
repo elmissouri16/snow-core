@@ -2,9 +2,7 @@ package builtin
 
 import (
 	"context"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -130,61 +128,6 @@ func TestBash_EmptyCommand(t *testing.T) {
 	res := runBash(b, dir, map[string]any{"command": ""})
 	if !res.IsError {
 		t.Fatal("expected error for empty command")
-	}
-}
-
-type environmentHost struct {
-	stubHost
-	environ []string
-}
-
-func (h environmentHost) Environ() []string { return h.environ }
-
-func TestBashPreservesBackendEnvironment(t *testing.T) {
-	dir := t.TempDir()
-	b := NewBash()
-	b.CommandFactory = func(ctx context.Context, _ string, _ []string, _ time.Duration) (*exec.Cmd, bool, bool, error) {
-		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", `printf %s "$BACKEND_ENV"`)
-		cmd.Env = []string{"BACKEND_ENV=preserved"}
-		return cmd, false, true, nil
-	}
-	res, _ := b.Run(context.Background(), argsFor(t, map[string]any{"command": "true"}), environmentHost{
-		stubHost: stubHost{cwd: dir, roots: []string{dir}},
-		environ:  []string{"BACKEND_ENV=overwritten"},
-	})
-	if res.IsError || res.Content[0].Text != "preserved" {
-		t.Fatalf("backend environment result = %+v", res)
-	}
-}
-
-func TestBash_BackendRoutesCommandAndFailsClosed(t *testing.T) {
-	dir := t.TempDir()
-	b := NewBash()
-	b.CommandFactory = func(ctx context.Context, command string, _ []string, _ time.Duration) (*exec.Cmd, bool, bool, error) {
-		return exec.CommandContext(ctx, "sh", "-c", "printf sandbox"), false, true, nil
-	}
-	res := runBash(b, dir, map[string]any{"command": "printf host"})
-	if res.IsError || res.Content[0].Text != "sandbox" {
-		t.Fatalf("sandbox backend result = %+v", res)
-	}
-
-	b.CommandFactory = func(context.Context, string, []string, time.Duration) (*exec.Cmd, bool, bool, error) {
-		return nil, true, true, errors.New("sandbox unavailable")
-	}
-	res = runBash(b, dir, map[string]any{"command": "printf must-not-run"})
-	if !res.IsError || !strings.Contains(res.Content[0].Text, "sandbox unavailable") {
-		t.Fatalf("backend failure did not fail closed: %+v", res)
-	}
-}
-
-func TestBash_InactiveBackendUsesHostShell(t *testing.T) {
-	b := NewBash()
-	b.CommandFactory = func(context.Context, string, []string, time.Duration) (*exec.Cmd, bool, bool, error) {
-		return nil, false, false, nil
-	}
-	res := runBash(b, t.TempDir(), map[string]any{"command": "printf host"})
-	if res.IsError || res.Content[0].Text != "host" {
-		t.Fatalf("inactive backend result = %+v", res)
 	}
 }
 

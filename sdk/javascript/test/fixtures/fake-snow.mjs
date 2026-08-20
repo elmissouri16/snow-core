@@ -92,9 +92,6 @@ for await (const line of lines) {
     case "skills":
       emit({ id, type: "response", command: request.type, success: true, data: { skills: [{ name: "caveman", location: "/skills/caveman", scope: "builtin", source: "catalog", enabled: true, description: "compressed mode" }], diagnostics: [{ path: "/skills/broken", level: "error", message: "shadowed" }] } });
       break;
-    case "sandbox_status":
-      emit({ id, type: "response", command: request.type, success: true, data: { status: { configured: false, active: false, backend: "host" } } });
-      break;
     case "models_list":
     case "subagent_models":
       emit({ id, type: "response", command: request.type, success: true, data: { models: [{ provider: "fake", id: "fake-1" }] } });

@@ -280,7 +280,7 @@ func (m *Model) managedFrameWidth() int {
 // enough rows to show more than their selected item.
 func (m *Model) inlineModalOverlay() bool {
 	return m.inlineTranscript && (m.pickProvider || m.pickChatGPTAuth || m.pickModel ||
-		m.pickThinking || m.pickSettings || m.sandboxSetup || m.pickSession || m.pickTree ||
+		m.pickThinking || m.pickSettings || m.pickSession || m.pickTree ||
 		m.pickInfo || m.pickPermissionMode || m.permPending || m.userInputPending ||
 		m.confirmGoalReplace || m.planPrompt)
 }
@@ -486,16 +486,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyEnter && !m.busy {
 			msg.Alt = true
 		}
-	}
-
-	// --- Sandbox initialization resource form ---
-	if m.sandboxSetup {
-		// Left and right adjust the selected resource in this form, even though
-		// ordinary pickers also bind them to previous/next navigation.
-		if msg.Type != tea.KeyLeft && msg.Type != tea.KeyRight {
-			msg = normalizePickerKeyWithMap(msg, m.keys)
-		}
-		return m.handleSandboxSetupKey(msg)
 	}
 
 	// --- OpenAI-compatible profile-name capture mode ---

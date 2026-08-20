@@ -28,7 +28,6 @@ behavior is documented under `docs/`; day-to-day operating guidance lives in
 - [Agent Skills](#agent-skills)
 - [Tool routing](#tool-routing)
 - [Subagents](#subagents)
-- [Sandbox](#sandbox)
 - [TUI and surfaces](#tui-and-surfaces)
 - [Public API surface](#public-api-surface)
 - [Security model](#security-model)
@@ -46,10 +45,9 @@ events rather than reimplementing turn logic.
 
 ### Mission
 
-The core is intentionally not a desktop product, a whole-process sandbox, a
-memory database, or an autonomous multi-agent workflow product. The optional
-smolvm backend isolates only model-facing Bash. The optional root-scoped
-subagent manager only orchestrates ordinary agent loops. The design keeps the
+The core is intentionally not a desktop product, a process sandbox, a memory
+database, or an autonomous multi-agent workflow product. The optional
+root-scoped subagent manager only orchestrates ordinary agent loops. The design keeps the
 agent loop understandable, keeps providers and tools behind interfaces, and
 keeps UI dependencies out of core packages.
 
@@ -63,8 +61,8 @@ keeps UI dependencies out of core packages.
   `ask_user`, plus deferred public-web `webfetch`.
 - SQLite-backed sessions with automatic/manual display titles, indexed branch
   IDs, resume, and fork primitives.
-- A stable public surface under `pkg/snowsdk`, `pkg/protocol`, and
-  dependency-light status/config packages such as `pkg/sandbox`.
+- A stable public surface under `pkg/snowsdk`, `pkg/protocol`, and other
+  dependency-light `pkg/*` packages.
 - Safe, explicit behavior: deny mutating tools by default in headless use and
   never log credentials.
 
@@ -72,9 +70,9 @@ keeps UI dependencies out of core packages.
 
 - No desktop product surface or Electron/IPC contract; Snow is a standalone
   harness, not a backend for another IDE.
-- No whole-process or per-extension built-in sandbox. External plugin and
-  stdio MCP servers execute with OS privileges; only optional model-facing Bash
-  can be routed through smolvm.
+- No built-in process or per-extension sandbox. Bash, external plugins, stdio
+  MCP servers, and subagents execute with the user's OS privileges; operators
+  provide external containment when needed.
 - No general memory database. Prior-session reference is deliberately narrower
   than a general memory product.
 - No autonomous multi-agent workflow engine. Subagent orchestration is optional,
@@ -109,7 +107,6 @@ keeps UI dependencies out of core packages.
 │   │   ├── responsesapi/    # shared bounded Responses request/SSE codec
 │   │   └── chatgpt/         # Codex OAuth checks/import and Responses adapter
 │   ├── rpc/                 # JSONL stdin/stdout control plane
-│   ├── sandbox/             # persistent project-scoped smolvm Bash lifecycle/state
 │   ├── session/             # SQLite/in-memory stores, topology, session index
 │   ├── skills/              # Agent Skills parser, catalog, and activation tools
 │   │   └── builtin/         # immutable rank-zero built-in skills
@@ -127,7 +124,6 @@ keeps UI dependencies out of core packages.
 │   ├── plugin/              # dependency-light public extension contract
 │   ├── protocol/            # dependency-light public messages/events/models
 │   │   └── schema/          # network-free Draft 2020-12 wire schemas
-│   ├── sandbox/             # dependency-light public Bash boundary status
 │   └── snowsdk/             # public embeddable API; no TUI dependency
 ├── examples/                # standalone SDK, RPC, and plugin examples
 ├── sdk/                     # Language clients and private plugin-authoring SDKs
@@ -150,7 +146,6 @@ keeps UI dependencies out of core packages.
 | `internal/skills` | Agent Skills parser, catalog, and activation tools |
 | `internal/provider` | `Provider` interface, registry, and adapters |
 | `internal/rpc` | JSONL stdin/stdout control plane |
-| `internal/sandbox` | Persistent project-scoped smolvm Bash lifecycle/state |
 | `internal/session` | SQLite/in-memory stores, topology, and session index |
 | `internal/subagent` | Root manager, context projection, roles, V2 tools |
 | `internal/tools` | `Tool`/`Registry`/`ToolHost` interfaces and BM25 router |
@@ -166,7 +161,6 @@ keeps UI dependencies out of core packages.
 | `pkg/mcp` | Dependency-light public MCP server config/status |
 | `pkg/protocol` | Dependency-light public messages/events/models |
 | `pkg/protocol/schema` | Network-free Draft 2020-12 wire schemas |
-| `pkg/sandbox` | Dependency-light public Bash boundary status |
 | `pkg/snowsdk` | Public embeddable API; no TUI dependency |
 
 ## Dependency direction and runtime data flow
@@ -182,7 +176,7 @@ snowsdk → app + protocol; never bubbletea
 `agent`, `provider`, `session`, `tools`, and `pkg/protocol` never import the
 TUI or Cobra. `pkg/protocol` is standard-library-only. `internal/` is not a
 stable external API; the public surface is `pkg/snowsdk`, `pkg/protocol`, and
-the dependency-light `pkg/*` contracts such as `pkg/sandbox`. `go.mod` and
+other dependency-light `pkg/*` contracts. `go.mod` and
 `README.md` both declare the Go 1.27 line (currently `1.27rc3`).
 
 `internal/buildinfo.Version` is the single linked build-version default.
@@ -873,23 +867,6 @@ attributed FIFO broker; headless ask mode remains fail-closed. Child
 `ask_user` stays excluded, preventing ambiguous input routing. See
 `docs/subagents.md`.
 
-## Sandbox
-
-The optional smolvm backend isolates Bash only, not Snow, file tools,
-providers, plugins, MCP, or subagent control. It is persistent and
-project-scoped: an exact canonical-project operator store, sole project mount,
-explicit guest network, strict guest environment allowlist, fail-closed
-execution, and bounded lifecycle commands.
-
-CLI/TUI controls cover initialization, status, and CPU/memory/storage/overlay
-settings. The checksum-pinned user-local smolvm 1.8.1 bootstrap installs only
-the official default command; custom executable paths are never auto-installed
-or replaced. macOS persistent-disk formatter preflight and standard Homebrew
-path discovery are included, with a default Ubuntu image, digest-pinned
-Ubuntu/Go/Node/Python+uv profiles, and explicit host-return confirmation.
-Bash runs with the user's OS privileges unless an exact-project smolvm
-association is active. See `docs/sandbox.md`.
-
 ## TUI and surfaces
 
 The Bubble Tea TUI is the interactive default. It renders a transcript with
@@ -917,7 +894,7 @@ clipboard images in the agent composer or falls back to textarea paste.
 `/allow [always]`, `/default`, `/deny`, `/fork`, `/help`, `/login`,
 `/logout [provider]`, `/model`, `/plan [message]`, `/thinking`, `/new`,
 `/permissions`, `/resume`, `/agent [path]`, `/agent concurrency N`,
-`/sessions`, `/settings`, `/compact`, `/mcp`, `/sandbox`, `/skills`, `/tree`,
+`/sessions`, `/settings`, `/compact`, `/mcp`, `/skills`, `/tree`,
 `/quit`, and `/trust [allow|deny]`.
 
 ### Event to UI mapping
@@ -950,8 +927,8 @@ footer. See `docs/tui-performance.md`.
 
 ## Public API surface
 
-The stable public surface is `pkg/snowsdk`, `pkg/protocol`, and
-dependency-light `pkg/*` contracts such as `pkg/sandbox`.
+The stable public surface is `pkg/snowsdk`, `pkg/protocol`, and other
+dependency-light `pkg/*` contracts.
 
 ### Go SDK
 
@@ -1004,7 +981,7 @@ Versioned JSONL over stdin/stdout:
 - Commands cover prompts (including additive text/image content when
   `multimodal_prompts` is announced) and active input, model/mode/response
   controls, session and branch management, manual compaction, active-branch
-  messages and usage, MCP/skill/sandbox discovery, pending-input
+  messages and usage, MCP/skill discovery, pending-input
   inspection/clearing, configuration diagnostics, goals, subagents,
   model-requested input, and a trusted-host interactive permission broker
   (`permission_reply`/`permission_reject`, gated by `permission_interaction`).
@@ -1031,7 +1008,7 @@ should prefer `pkg/snowsdk`. See `docs/rpc.md` and `docs/language-sdks.md`.
 
 Zero-runtime-dependency Python 3.9+ async and Node.js 22+ ESM/TypeScript
 packages use an explicitly installed external Snow binary, safe defaults,
-bounded JSONL routing, multimodal prompts, MCP/skill/sandbox discovery,
+bounded JSONL routing, multimodal prompts, MCP/skill discovery,
 user-input and trusted-host permission handlers, and real-binary CI conformance
 tests. They never download a binary.
 
@@ -1045,12 +1022,10 @@ publication remains deliberately deferred.
 
 ## Security model
 
-Snow and every subagent run with the user's OS privileges. Bash does too
-unless an exact-project smolvm association is active; that optional VM covers
-Bash only, not Snow, file tools, providers, plugins, MCP, or subagent
-control. Explicit sandbox init may run the checksum-pinned official smolvm
-1.8.1 installer as the user when the default command is absent; custom
-executable paths are never auto-installed or replaced.
+Snow, Bash, plugins, stdio MCP servers, and every subagent run with the user's
+OS privileges. Snow has no built-in process sandbox; operators requiring
+containment must run the harness inside an external container, VM, or suitable
+OS policy.
 
 Subagents share cwd, filesystem, and process side effects and incur separate
 model usage. Parallel mutation can conflict; `general` and `implementer` roles
@@ -1143,7 +1118,7 @@ next heading.
 | 1 — Vertical slice | Agent loop with serial tool dispatch, SQLite session persistence, `read`/`bash`, OpenCode Go streaming chat and startup model discovery, API-key auth, print mode, basic TUI, system prompt and `AGENTS.md` load, cancellation |
 | 2 — OAuth, mutations, permissions | `write`/`edit` with path gates, ask/allow/deny permissions, login/logout, ChatGPT browser/device OAuth with guarded refresh, sessions/resume/new, durable branches and `/tree`, manual `/compact`, project trust, interactive asker |
 | 3 — SDK, search, RPC | Public `pkg/snowsdk`, `grep`/`glob`, JSON mode, RPC protocol v1, Python/JavaScript SDKs, extensibility core and JSON-RPC v2 stdio host, bounded steer/follow-up queue |
-| 4 — Extensibility and UX | Agent Skills, MCP client, themes and keybindings, persistent ChatGPT catalog cache, fork/tree navigation, optional smolvm Bash backend, macOS/Linux platform guard, plugin permission gate, opt-in BM25 tool routing |
+| 4 — Extensibility and UX | Agent Skills, MCP client, themes and keybindings, persistent ChatGPT catalog cache, fork/tree navigation, macOS/Linux platform guard, plugin permission gate, opt-in BM25 tool routing |
 
 ## Research and decisions
 
@@ -1161,7 +1136,7 @@ that is fully covered elsewhere is referenced rather than repeated.
 | Sessions | Snow-owned pure-Go SQLite tree (schema version 9) |
 | TUI | Charmbracelet Bubble Tea |
 | SDK | `pkg/snowsdk` running the same core as the CLI |
-| Sandbox | No whole-process/per-extension sandbox; optional persistent external smolvm 1.8.x backend for Bash only |
+| Process isolation | No built-in process or per-extension sandbox; use external containment when required |
 | Subagents | Optional, root-scoped, Codex-V2-style, built from the ordinary agent loop |
 
 ### Research notes
@@ -1194,7 +1169,7 @@ that is fully covered elsewhere is referenced rather than repeated.
 | Symlink path escapes | File safety bug | `EvalSymlinks` plus prefix check; thorough tests |
 | Model ignores tool schema | Poor loops | Tight descriptions; malformed-argument errors; run-scoped call limits and repeated-call reminders |
 | Parallel tool filesystem races | Data loss | Serial tools; no parallel mutation |
-| Plugin/MCP/subagent OS authority | Not covered by smolvm | Documented boundary; external container/VM required for hostile code |
+| Bash/plugin/MCP/subagent OS authority | Runs as the user | Documented boundary; external container/VM required for hostile code |
 | Pre-v1 API and file-format drift | Breaking changes | Stabilize `pkg/snowsdk`, `pkg/protocol`, and the session schema before v1 |
 | Semantic/vector tool routing | Deferred | Await a locally downloadable open-source model with acceptable licensing and startup cost |
 

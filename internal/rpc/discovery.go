@@ -32,14 +32,3 @@ func (s *Server) handleSkills(req Request) error {
 	s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: skills})
 	return nil
 }
-
-// handleSandboxStatus emits the secret-free Bash execution boundary snapshot.
-func (s *Server) handleSandboxStatus(req Request) error {
-	status := s.app.SandboxStatus()
-	s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: protocol.RPCSandboxStatusResponse{Status: protocol.RPCSandboxStatus{
-		Configured: status.Configured, Active: status.Active, Backend: status.Backend, Machine: status.Machine,
-		Profile: status.Profile, GuestCWD: status.GuestCWD, ReadOnly: status.ReadOnly, Network: status.Network,
-		CPUs: status.CPUs, MemoryMiB: status.MemoryMiB, StorageGiB: status.StorageGiB, OverlayGiB: status.OverlayGiB,
-	}}})
-	return nil
-}
