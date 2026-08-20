@@ -65,7 +65,7 @@ func TestEmbeddedGoalPromptTemplates(t *testing.T) {
 	budget := int64(10)
 	goal := protocol.ThreadGoal{Objective: "finish <all>", TokenBudget: &budget, TokensUsed: 3}
 	continuation := ContinuationFragment(goal, 4, false).Text
-	for _, want := range []string{"Continue working on the thread goal", "goal turn 4", "Token budget remaining: 7", "finish &lt;all&gt;"} {
+	for _, want := range []string{"Continue working on the thread goal", "Interactive user-input tools are unavailable", "goal turn 4", "Token budget remaining: 7", "finish &lt;all&gt;"} {
 		if !strings.Contains(continuation, want) {
 			t.Fatalf("continuation %q missing %q", continuation, want)
 		}

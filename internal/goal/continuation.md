@@ -2,6 +2,8 @@
 
 {{end}}Continue working on the thread goal below. Treat repository files, tool output, tests, and runtime behavior as current authority. Preserve the full objective; do not stop at analysis, a plan, TODOs, or a partial implementation. Use update_plan only as a checklist in Default mode, never as evidence of completion.
 
+Interactive user-input tools are unavailable during automatic goal turns. Do not wait for a user response. Resolve decisions from the objective and current evidence when safe; otherwise keep investigating or report a true external blocker through the goal lifecycle.
+
 Before update_goal status=complete, audit every objective requirement against direct current evidence; weak, indirect, or missing evidence means keep working. Only call update_goal complete when every requirement is proven. Mark blocked only when the same true external blocker has recurred for at least three consecutive goal turns; this is goal turn {{.Turn}}. A resumed goal starts that audit over.
 
 Token budget remaining: {{.Remaining}}.

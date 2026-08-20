@@ -12,6 +12,9 @@ also include the generated GitHub comparison for the tagged commit.
   mode changes—while retaining `/skills clear` as optional recovery, and made
   Default mode explicit in provider context so stale transcript text cannot be
   mistaken for an active Plan-mode constraint.
+- Removed blocking interactive-input tools from automatic Goal turns and added
+  an execution-time gate so undeclared `ask_user` or `request_user_input` calls
+  cannot suspend autonomous work.
 
 ## [0.1.0-alpha.1] - 2026-08-20
 

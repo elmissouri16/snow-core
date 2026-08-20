@@ -144,11 +144,16 @@ func matchIDs(matches []tools.ToolMatch) []string {
 func (a *Agent) requestToolSchemas() []protocol.ToolSchema {
 	a.mu.RLock()
 	mode := a.turnMode
+	origin := a.turnOrigin
 	if !a.running {
 		mode = a.mode
+		origin = ""
 	}
 	a.mu.RUnlock()
 	allowed := func(name string) bool {
+		if origin == "goal" && (name == "ask_user" || name == "request_user_input") {
+			return false
+		}
 		if desc, ok := a.opts.Registry.Descriptor(name); ok && desc.Risk == permission.RiskDelegate && !tools.CanExpose(a.opts.Permission, desc) {
 			return false
 		}

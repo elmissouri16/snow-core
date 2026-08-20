@@ -26,9 +26,15 @@ active goal with a deferred continuation. Editing rotates the goal ID,
 reactivates the objective, preserves its accumulated usage and budget, and
 makes in-flight updates for the old objective stale.
 
-Active goals continue through private serial turns in Default mode. Plan mode
-cancels and joins automatic goal work, never launches goal turns, and never
-charges planning work. Returning to Default resumes only an active,
+Active goals continue through private serial turns in Default mode. Automatic
+goal turns do not expose `ask_user` or `request_user_input`, and execution
+rejects either name even if a provider emits an undeclared call; autonomous work
+must continue from the objective and available evidence or use the goal blocker
+lifecycle instead of waiting for interactive input. Ordinary user-originated
+Default and Plan turns retain their mode-appropriate input tool.
+
+Plan mode cancels and joins automatic goal work, never launches goal turns, and
+never charges planning work. Returning to Default resumes only an active,
 non-deferred goal. User prompts may temporarily interrupt eligible automatic
 work, but they never clear a persisted continuation deferral.
 

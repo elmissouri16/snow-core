@@ -602,7 +602,17 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		return msg, false, nil
 	}
 
-	mode := a.capturedTurnMode()
+	a.mu.RLock()
+	mode, origin := a.turnMode, a.turnOrigin
+	a.mu.RUnlock()
+	if origin == "goal" && (cb.Name == "ask_user" || cb.Name == "request_user_input") {
+		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
+			[]protocol.ContentBlock{protocol.NewTextBlock("Error: interactive user input is unavailable during automatic goal turns")}, true)
+		if err := a.appendToolResult(parent, msg); err != nil {
+			return msg, false, err
+		}
+		return msg, false, nil
+	}
 	if mode == protocol.ModePlan && cb.Name == "update_plan" {
 		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
 			[]protocol.ContentBlock{protocol.NewTextBlock("update_plan is a TODO/checklist tool and is not allowed in Plan mode")}, true)

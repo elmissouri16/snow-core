@@ -18,6 +18,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/provider/responsesapi"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/internal/tools/builtin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -72,6 +73,59 @@ func TestInternalGoalTurnNoUserMessageAndAccountsOnce(t *testing.T) {
 		t.Fatalf("requests=%+v", p.requests)
 	}
 }
+func TestAutomaticGoalTurnsCannotRequestInteractiveInput(t *testing.T) {
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{
+			{Type: protocol.EvStreamToolCallDone, ToolCallID: "ask", ToolName: "ask_user", Arguments: []byte(`{"questions":[{"id":"choice","header":"Choice","question":"What next?"}]}`)},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+		},
+		{{Type: protocol.EvStreamTextDelta, Text: "continued without blocking"}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}}
+	a, c, st := goalAgent(t, p)
+	reg := a.opts.Registry.(*tools.SimpleRegistry)
+	for _, tool := range []tools.Tool{builtin.NewAskUser(), builtin.NewRequestUserInput()} {
+		if err := reg.Register(tool); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.Create("continue autonomously", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.TryInternalTurn(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.requests) != 2 {
+		t.Fatalf("provider requests=%d want 2", len(p.requests))
+	}
+	for i, request := range p.requests {
+		for _, schema := range request.Tools {
+			if schema.Name == "ask_user" || schema.Name == "request_user_input" {
+				t.Fatalf("request %d exposed blocking input tool %q", i, schema.Name)
+			}
+		}
+	}
+	if len(p.requests[0].InternalContext) != 1 || !strings.Contains(p.requests[0].InternalContext[0].Text, "Interactive user-input tools are unavailable") {
+		t.Fatalf("goal steering did not explain autonomous input policy: %+v", p.requests[0].InternalContext)
+	}
+	messages, err := st.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range messages {
+		if message.Role == protocol.RoleTool && message.ToolName == "ask_user" {
+			var output strings.Builder
+			for _, block := range message.Content {
+				output.WriteString(block.Text)
+			}
+			if !message.IsError || !strings.Contains(output.String(), "unavailable during automatic goal turns") {
+				t.Fatalf("ask_user hard-gate result=%+v", message)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing hard-gated ask_user result: %+v", messages)
+}
+
 func TestGoalUsageUpdatesAfterEachProviderResponse(t *testing.T) {
 	p := &scriptedProvider{}
 	a, c, _ := goalAgent(t, p)
