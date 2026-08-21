@@ -99,10 +99,14 @@ The no-argument TUI `/login` and `/logout` commands open provider pickers.
 key resolves. An optional key can come from `OPENCODE_API_KEY`, `--api-key`, or
 the masked login flow. Logout removes only Snow's stored key; an explicit flag
 or environment fallback remains active until cleared. Zen exposes only the
-maintained promotional free catalog and never switches to a paid model. Anonymous quotas and model
-availability can change; HTTP 429 responses are retried before output after 2,
-5, and 15 seconds, then surfaced as a usage-limit error. The model picker shows
-the documented privacy/training notice for the highlighted Zen model.
+maintained promotional free catalog and never switches to a paid model.
+Anonymous quotas and model availability can change; HTTP 429 responses are
+retried before output after 2, 5, and 15 seconds, then surfaced as a usage-limit
+error. The model picker shows the documented privacy/training notice for the
+highlighted Zen model. Zen model metadata includes context and output limits,
+so the footer shows a concrete context budget. A provider response that ends
+without text or a tool call is shown as an error rather than a silent blank
+turn.
 
 Selecting `openai-compatible` in the TUI first asks for a profile name, then an
 endpoint and optional masked API key. A blank name updates the legacy

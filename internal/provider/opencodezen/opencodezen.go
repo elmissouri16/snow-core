@@ -150,6 +150,7 @@ func (p *Provider) Chat(ctx context.Context, credential auth.Credential, request
 	for attempt := 0; ; attempt++ {
 		stream, err := p.chatAttempt(ctx, key, spec.Transport, request)
 		if err == nil {
+			stream = &validatedResponseStream{stream: stream, model: request.Model.ID}
 			first, nextErr := stream.Next(ctx)
 			if !isHTTP429(first.Err) {
 				return &prefetchedStream{stream: stream, first: first, firstErr: nextErr, pending: true}, nil
@@ -242,6 +243,53 @@ func sleepContext(ctx context.Context, delay time.Duration) error {
 		return ctx.Err()
 	}
 }
+
+// validatedResponseStream prevents successful-but-empty Zen completions from
+// disappearing in the UI. Some upstream routes can terminate cleanly without
+// text or a tool call; that is not a usable assistant response and must remain
+// a visible diagnostic rather than an apparently successful blank turn.
+type validatedResponseStream struct {
+	stream   protocol.EventStream
+	model    string
+	hasText  bool
+	hasTool  bool
+	thinking bool
+}
+
+func (s *validatedResponseStream) Next(ctx context.Context) (protocol.StreamEvent, error) {
+	event, err := s.stream.Next(ctx)
+	if err != nil {
+		return event, err
+	}
+	switch event.Type {
+	case protocol.EvStreamTextDelta:
+		if strings.TrimSpace(event.Text) != "" {
+			s.hasText = true
+		}
+	case protocol.EvStreamThinkingDelta:
+		if strings.TrimSpace(event.Text) != "" {
+			s.thinking = true
+		}
+	case protocol.EvStreamToolCallDone:
+		s.hasTool = true
+	case protocol.EvStreamDone:
+		if !s.hasText && !s.hasTool {
+			message := fmt.Sprintf("opencode-zen: model %q returned an empty completion", s.model)
+			if event.StopReason == protocol.StopLength {
+				message = fmt.Sprintf("opencode-zen: model %q reached its output limit before producing an answer", s.model)
+			} else if event.StopReason == protocol.StopToolUse {
+				message = fmt.Sprintf("opencode-zen: model %q reported tool use without a tool call", s.model)
+			} else if s.thinking {
+				message += " after reasoning without producing a final answer"
+			}
+			message += "; retry the prompt or switch Zen models"
+			return protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New(message)}, nil
+		}
+	}
+	return event, nil
+}
+
+func (s *validatedResponseStream) Close() error { return s.stream.Close() }
 
 type prefetchedStream struct {
 	stream   protocol.EventStream

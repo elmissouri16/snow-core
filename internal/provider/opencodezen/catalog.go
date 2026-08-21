@@ -23,15 +23,75 @@ type freeModelSpec struct {
 	Transport transportKind
 }
 
+// freeModels is the maintained promotional allowlist. Limits are sourced from
+// OpenCode's models.dev metadata. Big Pickle advertises a 200k total context
+// but a stricter 160k input limit, so Snow uses 160k for safe compaction and
+// exposes 200k as the maximum context.
 func freeModels() []freeModelSpec {
 	return []freeModelSpec{
-		{Model: protocol.Model{Provider: ProviderID, ID: "big-pickle", DisplayName: "Big Pickle", Description: "Privacy warning: collected data may be used to improve the model during its free period.", SupportsTools: true}, Transport: transportChat},
-		{Model: protocol.Model{Provider: ProviderID, ID: "x-preview-f-free", DisplayName: "Ox Alpha Free", Description: "Privacy: the provider documents zero retention and no use of your data for model training.", SupportsTools: true}, Transport: transportChat},
-		{Model: protocol.Model{Provider: ProviderID, ID: "mimo-v2.5-free", DisplayName: "MiMo-V2.5 Free", Description: "Privacy warning: collected data may be used to improve the model during its free period.", SupportsTools: true}, Transport: transportChat},
-		{Model: protocol.Model{Provider: ProviderID, ID: "hy3-free", DisplayName: "Hy3 Free", Description: "Privacy warning: collected data may be used to improve the model during its free period.", SupportsTools: true}, Transport: transportChat},
-		{Model: protocol.Model{Provider: ProviderID, ID: "nemotron-3-ultra-free", DisplayName: "Nemotron 3 Ultra Free", Description: "Privacy warning: NVIDIA trial endpoint; do not submit personal or confidential data. Use is logged for security and product improvement.", SupportsTools: true}, Transport: transportChat},
-		{Model: protocol.Model{Provider: ProviderID, ID: "nemotron-3.5-lightning-free", DisplayName: "Nemotron 3.5 Lightning Free", Description: "Privacy warning: NVIDIA trial endpoint; do not submit personal or confidential data. Use is logged for security and product improvement.", SupportsTools: true}, Transport: transportChat},
-		{Model: protocol.Model{Provider: ProviderID, ID: "muse-spark-1.2-contributor-free", DisplayName: "Muse Spark 1.2 Contributor Free", Description: "Privacy warning: prompts and completions may be used to train future Meta models.", SupportsTools: true}, Transport: transportResponses},
+		{
+			Model: protocol.Model{
+				Provider: ProviderID, ID: "big-pickle", DisplayName: "Big Pickle",
+				Description:   "Privacy warning: collected data may be used to improve the model during its free period. Effective input limit: 160k of 200k total context.",
+				ContextWindow: 160000, MaxContextWindow: 200000, MaxOutputTokens: 32000,
+				SupportsTools: true, SupportsThinking: true,
+			},
+			Transport: transportChat,
+		},
+		{
+			Model: protocol.Model{
+				Provider: ProviderID, ID: "x-preview-f-free", DisplayName: "Ox Alpha Free",
+				Description:   "Privacy: the provider documents zero retention and no use of your data for model training.",
+				ContextWindow: 1000000, MaxOutputTokens: 131072,
+				SupportsTools: true, SupportsThinking: true, SupportsVision: true,
+			},
+			Transport: transportChat,
+		},
+		{
+			Model: protocol.Model{
+				Provider: ProviderID, ID: "mimo-v2.5-free", DisplayName: "MiMo-V2.5 Free",
+				Description:   "Privacy warning: collected data may be used to improve the model during its free period.",
+				ContextWindow: 200000, MaxOutputTokens: 32000,
+				SupportsTools: true, SupportsThinking: true, SupportsVision: true,
+			},
+			Transport: transportChat,
+		},
+		{
+			Model: protocol.Model{
+				Provider: ProviderID, ID: "hy3-free", DisplayName: "Hy3 Free",
+				Description:   "Privacy warning: collected data may be used to improve the model during its free period.",
+				ContextWindow: 190000, MaxOutputTokens: 64000,
+				SupportsTools: true, SupportsThinking: true,
+			},
+			Transport: transportChat,
+		},
+		{
+			Model: protocol.Model{
+				Provider: ProviderID, ID: "nemotron-3-ultra-free", DisplayName: "Nemotron 3 Ultra Free",
+				Description:   "Privacy warning: NVIDIA trial endpoint; do not submit personal or confidential data. Use is logged for security and product improvement.",
+				ContextWindow: 1000000, MaxOutputTokens: 128000,
+				SupportsTools: true, SupportsThinking: true,
+			},
+			Transport: transportChat,
+		},
+		{
+			Model: protocol.Model{
+				Provider: ProviderID, ID: "nemotron-3.5-lightning-free", DisplayName: "Nemotron 3.5 Lightning Free",
+				Description:   "Privacy warning: NVIDIA trial endpoint; do not submit personal or confidential data. Use is logged for security and product improvement.",
+				ContextWindow: 262144, MaxOutputTokens: 262144,
+				SupportsTools: true, SupportsThinking: true,
+			},
+			Transport: transportChat,
+		},
+		{
+			Model: protocol.Model{
+				Provider: ProviderID, ID: "muse-spark-1.2-contributor-free", DisplayName: "Muse Spark 1.2 Contributor Free",
+				Description:   "Privacy warning: prompts and completions may be used to train future Meta models.",
+				ContextWindow: 1048576, MaxOutputTokens: 131072,
+				SupportsTools: true, SupportsThinking: true, SupportsVision: true,
+			},
+			Transport: transportResponses,
+		},
 	}
 }
 

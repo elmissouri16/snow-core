@@ -103,8 +103,10 @@ export OPENCODE_API_KEY=sk-opencode-...
 
 Zen uses only Snow's maintained non-deprecated free-model catalog and never
 silently switches to a paid model. Anonymous quotas and the promotional lineup
-are not stable. The TUI model picker shows each model's documented privacy or
-training notice; review it before sending private code.
+are not stable. Verified context/output limits drive the footer and automatic
+compaction; a provider completion with no answer or tool call is surfaced as an
+error instead of a silent blank turn. The TUI model picker shows each model's
+documented privacy or training notice; review it before sending private code.
 
 OpenAI-compatible endpoint (Responses preferred; Chat Completions fallback; API
 key optional):

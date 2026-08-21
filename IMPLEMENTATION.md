@@ -443,10 +443,15 @@ the remaining maintained models to Chat Completions/SSE. Both normalize into
 the shared provider event contract. A pre-output HTTP 429 is retried after 2,
 5, and 15 seconds with context-aware waits, then becomes a structured
 `LimitError`; no retry occurs after output. Active keys are redacted from
-bounded errors. Model descriptions carry the documented retention/training
-notice shown by the TUI and exposed through existing SDK/RPC model metadata.
-Snow does not import OpenCode credentials, rotate accounts, fall back to paid
-Zen models, or promise continued promotional availability.
+bounded errors. The maintained model records pin verified models.dev context,
+output, thinking, tool, and vision capabilities; Big Pickle uses its stricter
+160k input limit as the effective context and records 200k as its maximum.
+Successful terminal streams with no text or completed tool call are converted
+to actionable stream errors instead of durable blank assistant turns. Model
+descriptions carry the documented retention/training notice shown by the TUI
+and exposed through existing SDK/RPC model metadata. Snow does not import
+OpenCode credentials, rotate accounts, fall back to paid Zen models, or promise
+continued promotional availability.
 
 ### OpenAI-compatible
 

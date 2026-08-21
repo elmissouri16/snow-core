@@ -266,7 +266,12 @@ Chat Completions. `OPENCODE_API_KEY`, `snow login opencode-zen`, and
 uses anonymous access. Logout removes Snow's stored Zen key; an explicit
 `--api-key` or `OPENCODE_API_KEY` fallback remains active until the caller clears
 it. Snow never imports OpenCode's local `auth.json` or falls back from a free
-model to a paid one.
+model to a paid one. Snow publishes verified context and output limits for all
+maintained Zen models, so the TUI footer and automatic compaction have concrete
+budgets. Big Pickle uses its stricter 160k input limit for compaction and exposes
+its advertised 200k total as the maximum context. If a Zen route terminates
+without text or a tool call, Snow reports an empty-completion error instead of
+silently accepting a blank assistant turn.
 
 For `openai-compatible`, `base_url` is required and may be an API root such as
 `https://gateway.example/v1` or a full URL ending in `/responses` or

@@ -89,6 +89,36 @@ func TestListModelsValidEmptyLiveCatalogIsAuthoritative(t *testing.T) {
 	}
 }
 
+func TestFreeCatalogPublishesVerifiedContextLimits(t *testing.T) {
+	want := map[string]struct {
+		context, maximum, output int
+	}{
+		"big-pickle":                      {160000, 200000, 32000},
+		"x-preview-f-free":                {1000000, 0, 131072},
+		"mimo-v2.5-free":                  {200000, 0, 32000},
+		"hy3-free":                        {190000, 0, 64000},
+		"nemotron-3-ultra-free":           {1000000, 0, 128000},
+		"nemotron-3.5-lightning-free":     {262144, 0, 262144},
+		"muse-spark-1.2-contributor-free": {1048576, 0, 131072},
+	}
+	for _, model := range staticCatalog() {
+		limits, ok := want[model.ID]
+		if !ok {
+			t.Fatalf("unexpected model %q", model.ID)
+		}
+		if model.ContextWindow != limits.context || model.MaxContextWindow != limits.maximum || model.MaxOutputTokens != limits.output {
+			t.Errorf("%s limits=%d/%d/%d want=%d/%d/%d", model.ID, model.ContextWindow, model.MaxContextWindow, model.MaxOutputTokens, limits.context, limits.maximum, limits.output)
+		}
+		if !model.SupportsTools || !model.SupportsThinking {
+			t.Errorf("%s capabilities=%+v", model.ID, model)
+		}
+		delete(want, model.ID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing metadata for %v", want)
+	}
+}
+
 func TestCatalogCacheValidationAndPermissions(t *testing.T) {
 	cacheRoot := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -171,13 +201,56 @@ func TestChatRoutesTransportAndOmitsAnonymousAuthorization(t *testing.T) {
 	}
 }
 
+func TestChatSurfacesSuccessfulEmptyCompletions(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		payload  string
+		contains string
+	}{
+		{name: "empty", payload: `data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`, contains: "returned an empty completion"},
+		{name: "reasoning-only", payload: `data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`, contains: "without producing a final answer"},
+		{name: "output-limit", payload: `data: {"choices":[{"delta":{},"finish_reason":"length"}]}
+
+data: [DONE]
+
+`, contains: "reached its output limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, tc.payload)
+			}))
+			defer server.Close()
+			p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client(), RetryDelays: []time.Duration{}})
+			stream, err := p.Chat(context.Background(), auth.Credential{}, chatRequest("big-pickle"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			streamErr := drainError(stream)
+			if streamErr == nil || !strings.Contains(streamErr.Error(), tc.contains) || !strings.Contains(streamErr.Error(), "big-pickle") {
+				t.Fatalf("error=%v, want %q", streamErr, tc.contains)
+			}
+		})
+	}
+}
+
 func TestChatUsesBearerAndRejectsUnknownModel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer zen-secret" {
 			t.Errorf("Authorization=%q", got)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
 	p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client(), RetryDelays: []time.Duration{}})
@@ -297,6 +370,22 @@ func drainText(t *testing.T, stream protocol.EventStream) string {
 		}
 		if event.Type == protocol.EvStreamTextDelta {
 			text.WriteString(event.Text)
+		}
+	}
+}
+
+func drainError(stream protocol.EventStream) error {
+	defer stream.Close()
+	for {
+		event, err := stream.Next(context.Background())
+		if err != nil {
+			return err
+		}
+		if event.Type == protocol.EvStreamError {
+			return event.Err
+		}
+		if event.Type == protocol.EvStreamDone {
+			return nil
 		}
 	}
 }
