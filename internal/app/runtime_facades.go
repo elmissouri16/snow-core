@@ -196,6 +196,11 @@ func modelCatalogAuthoritative(p provider.Provider) bool {
 	return ok && authority.ModelCatalogAuthoritative()
 }
 
+func rejectsUnknownModels(p provider.Provider) bool {
+	strict, ok := p.(interface{ RejectUnknownModels() bool })
+	return ok && strict.RejectUnknownModels()
+}
+
 func configuredStreamIdleTimeout(milliseconds int) time.Duration {
 	if milliseconds < 0 {
 		return -1
@@ -230,6 +235,9 @@ func (a *App) SetProvider(id string) error {
 		return fmt.Errorf("app: provider %q is not available", id)
 	}
 	catalog := a.modelCatalog[id]
+	if rejectsUnknownModels(p) && len(catalog) == 0 {
+		return fmt.Errorf("app: provider %s has no maintained models currently available", id)
+	}
 	target := a.Model
 	if a.Agent != nil {
 		target = a.Agent.Model()
@@ -292,6 +300,19 @@ func (a *App) SetModel(m protocol.Model) error {
 	if m.Provider != a.ProviderID {
 		return fmt.Errorf("app: model provider %q does not match active provider %q", m.Provider, a.ProviderID)
 	}
+	if rejectsUnknownModels(a.Provider) {
+		found := false
+		for _, candidate := range a.modelCatalog[a.ProviderID] {
+			if candidate.ID == m.ID {
+				m = candidate.Clone()
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("app: model %q is not available for provider %s", m.ID, a.ProviderID)
+		}
+	}
 	if err := a.Agent.SetModel(m); err != nil {
 		return err
 	}
@@ -319,6 +340,19 @@ func (a *App) SetProviderModelThinking(providerID string, model protocol.Model, 
 		return fmt.Errorf("app: model provider %q does not match selected provider %q", model.Provider, providerID)
 	}
 	model = model.Clone()
+	if rejectsUnknownModels(p) {
+		found := false
+		for _, candidate := range a.modelCatalog[providerID] {
+			if candidate.ID == model.ID {
+				model = candidate.Clone()
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("app: model %q is not available for provider %s", model.ID, providerID)
+		}
+	}
 	if err := a.Agent.SetProviderModelThinking(p, model, level); err != nil {
 		return err
 	}

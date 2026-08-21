@@ -267,7 +267,16 @@ func (m *Model) beginKeyCapture(provider string) {
 	m.compVisible = false
 	m.pickProvider = false
 	hint := "type key then Enter · Esc to cancel"
-	if m.isOpenAICompatibleProfile(provider) || m.loginEndpoint != "" {
+	optional := m.isOpenAICompatibleProfile(provider) || m.loginEndpoint != ""
+	if m.app != nil {
+		for _, descriptor := range m.app.AuthProviders() {
+			if descriptor.ProviderID == provider && !descriptor.Required {
+				optional = true
+				break
+			}
+		}
+	}
+	if optional {
 		hint = "type optional key, or press Enter to keep existing/fallback/keyless · Esc to cancel"
 	}
 	m.pushLine(styleFooter.Render("API key for " + provider + " (hidden): " + hint))
@@ -300,6 +309,18 @@ func (m *Model) isOpenAICompatibleProfile(providerID string) bool {
 	return ok && config.IsOpenAICompatibleProfile(providerID, providerConfig)
 }
 
+func (m *Model) providerAuthOptional(providerID string) bool {
+	if m.app == nil {
+		return false
+	}
+	for _, descriptor := range m.app.AuthProviders() {
+		if descriptor.ProviderID == providerID {
+			return !descriptor.Required
+		}
+	}
+	return false
+}
+
 func (m *Model) isSupportedProvider(providerID string) bool {
 	for _, descriptor := range m.app.AuthProviders() {
 		if descriptor.ProviderID == providerID {
@@ -318,9 +339,13 @@ func (m *Model) providerStatus(providerID string) string {
 		return providerID + "  (invalid auth: " + err.Error() + ")"
 	}
 	kind := status.Method
+	optional := false
 	for _, descriptor := range m.app.AuthProviders() {
-		if descriptor.ProviderID == providerID && kind == "" && len(descriptor.Kinds) > 0 {
-			kind = descriptor.Kinds[0]
+		if descriptor.ProviderID == providerID {
+			optional = !descriptor.Required
+			if kind == "" && len(descriptor.Kinds) > 0 {
+				kind = descriptor.Kinds[0]
+			}
 			break
 		}
 	}
@@ -334,6 +359,12 @@ func (m *Model) providerStatus(providerID string) string {
 		}
 	} else if kind == auth.CredentialAPIKey {
 		summary = "no key"
+		if optional {
+			summary = "keyless"
+			if providerID == "opencode-zen" {
+				summary = "anonymous"
+			}
+		}
 		if credential, ok := m.app.Auth.Get(providerID); ok && credential.Valid() {
 			summary = "stored ✓"
 		} else if status.State == auth.StateConfigured {

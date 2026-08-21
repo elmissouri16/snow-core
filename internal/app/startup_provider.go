@@ -13,6 +13,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/provider/fake"
 	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
 	"github.com/elmissouri16/snow-core/internal/provider/opencodego"
+	"github.com/elmissouri16/snow-core/internal/provider/opencodezen"
 )
 
 // startupProvider is the selected provider transport plus the complete module
@@ -44,6 +45,23 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 			return nil, fmt.Errorf("app: opencode-go: %w", err)
 		}
 		return oc, nil
+	}
+
+	newOpenCodeZen := func() (provider.Transport, error) {
+		zenCfg := opencodezen.Config{CacheRoot: filepath.Join(config.GlobalDir(), "cache", "opencode-zen-models")}
+		if pc, ok := cfg.Providers[opencodezen.ProviderID]; ok {
+			zenCfg.BaseURL = pc.BaseURL
+			zenCfg.DefaultModel = pc.DefaultModel
+			zenCfg.StreamIdleTimeout = configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS)
+		}
+		if opts.BaseURL != "" && providerID == opencodezen.ProviderID {
+			zenCfg.BaseURL = opts.BaseURL
+		}
+		zen, err := opencodezen.New(zenCfg)
+		if err != nil {
+			return nil, fmt.Errorf("app: opencode-zen: %w", err)
+		}
+		return zen, nil
 	}
 
 	newChatGPT := func() *chatgpt.Provider {
@@ -80,6 +98,9 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 	builtIns := []builtInModule{
 		{id: "opencode-go", order: 10, build: newOpenCode, authFor: func(provider.Transport) (auth.Driver, error) {
 			return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: "opencode-go", DisplayName: "OpenCode Go", Required: true, Environment: []string{opencodego.EnvAPIKey}}), nil
+		}},
+		{id: opencodezen.ProviderID, order: 15, build: newOpenCodeZen, authFor: func(provider.Transport) (auth.Driver, error) {
+			return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: opencodezen.ProviderID, DisplayName: "OpenCode Zen", Required: false, Environment: []string{opencodezen.EnvAPIKey}}), nil
 		}},
 		{id: openaicompat.ProviderID, order: 20, build: func() (provider.Transport, error) { return newOpenAICompatible(openaicompat.ProviderID) }, authFor: func(provider.Transport) (auth.Driver, error) {
 			return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: openaicompat.ProviderID, DisplayName: "OpenAI-compatible", Required: false, Environment: []string{openaicompat.EnvAPIKey}}), nil

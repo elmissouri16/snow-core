@@ -407,7 +407,7 @@ func TestValidateProviderProfileID(t *testing.T) {
 			t.Fatalf("valid %q: %v", valid, err)
 		}
 	}
-	for _, invalid := range []string{"", "X Provider", "-leading", "chatgpt"} {
+	for _, invalid := range []string{"", "X Provider", "-leading", "chatgpt", "opencode-zen"} {
 		if err := ValidateProviderProfileID(invalid); err == nil {
 			t.Fatalf("invalid profile %q accepted", invalid)
 		}

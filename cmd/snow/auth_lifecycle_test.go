@@ -8,6 +8,23 @@ import (
 	"github.com/elmissouri16/snow-core/internal/config"
 )
 
+func TestCLIAuthServiceRegistersOpenCodeZenOptionalAuth(t *testing.T) {
+	t.Setenv("OPENCODE_API_KEY", "")
+	service, _, err := newCLIAuthService(auth.NewMemoryStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := service.Resolve(context.Background(), "opencode-zen")
+	if err != nil || credential.Key != "" {
+		t.Fatalf("anonymous credential=%+v err=%v", credential, err)
+	}
+	t.Setenv("OPENCODE_API_KEY", "zen-key")
+	credential, err = service.Resolve(context.Background(), "opencode-zen")
+	if err != nil || credential.Key != "zen-key" {
+		t.Fatalf("environment credential=%+v err=%v", credential, err)
+	}
+}
+
 func TestCLIAuthServiceRegistersNamedCompatibleProfiles(t *testing.T) {
 	store := auth.NewMemoryStore()
 	if err := store.Put("x-provider", auth.Credential{Type: auth.CredentialAPIKey, Key: "secret"}); err != nil {

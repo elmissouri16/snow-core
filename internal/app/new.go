@@ -329,6 +329,12 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		modelCatalogErrors[result.id] = result.err
 	}
 	models := modelCatalog[providerID]
+	if rejectsUnknownModels(prov) && len(models) == 0 {
+		if listErr := modelCatalogErrors[providerID]; listErr != nil {
+			return nil, fmt.Errorf("app: provider %s model discovery failed: %w", providerID, listErr)
+		}
+		return nil, fmt.Errorf("app: provider %s has no maintained models currently available", providerID)
+	}
 	activeProviderConfig := cfg.Providers[providerID]
 	if config.IsOpenAICompatibleProfile(providerID, activeProviderConfig) && cfg.DefaultModel == "" && len(models) == 0 {
 		if listErr := modelCatalogErrors[providerID]; listErr != nil {
@@ -363,6 +369,11 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 				break
 			}
 		}
+	}
+	// Strict catalogs reject explicit/configured unknown IDs so they cannot
+	// bypass provider policy (for example, Zen's free-only boundary).
+	if model.ID != "" && !configuredFound && rejectsUnknownModels(prov) {
+		return nil, fmt.Errorf("app: model %q is not available for provider %s", model.ID, providerID)
 	}
 	// Account-scoped providers must not retain a configured model omitted by
 	// the selected account catalog. Other providers preserve explicit unknown

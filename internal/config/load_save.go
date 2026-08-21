@@ -50,7 +50,7 @@ func ValidateProviderProfileID(id string) error {
 		}
 	}
 	switch id {
-	case "opencode-go", "chatgpt", "fake":
+	case "opencode-go", "opencode-zen", "chatgpt", "fake":
 		return fmt.Errorf("config: provider profile name %q is reserved", id)
 	}
 	return nil
@@ -268,6 +268,7 @@ func Default() Config {
 		ProjectSelections:   map[string]ProjectSelection{},
 		Providers: map[string]ProviderConfig{
 			"opencode-go":       {},
+			"opencode-zen":      {},
 			"openai-compatible": {},
 			"chatgpt":           {},
 		},

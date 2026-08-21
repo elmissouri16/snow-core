@@ -99,3 +99,10 @@ func (p *Authenticated) ModelCatalogAuthoritative() bool {
 	}
 	return false
 }
+
+func (p *Authenticated) RejectUnknownModels() bool {
+	if value, ok := p.transport.(interface{ RejectUnknownModels() bool }); ok {
+		return value.RejectUnknownModels()
+	}
+	return false
+}

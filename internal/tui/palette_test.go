@@ -239,7 +239,7 @@ func TestModelLoginFlow(t *testing.T) {
 		t.Fatalf("inline provider picker frame height=%d want terminal height %d", got, m.height)
 	}
 	pickerView := stripANSI(m.View())
-	for _, provider := range []string{"opencode-go", "openai-compatible", "chatgpt"} {
+	for _, provider := range []string{"opencode-go", "opencode-zen", "openai-compatible", "chatgpt"} {
 		if !strings.Contains(pickerView, provider) {
 			t.Fatalf("inline provider picker truncated %q: %q", provider, pickerView)
 		}
@@ -296,6 +296,39 @@ func TestModelLoginFlow(t *testing.T) {
 	joined := strings.Join(m.lines, "\n")
 	if strings.Contains(joined, "sk-test-123") {
 		t.Fatalf("secret leaked into transcript: %q", joined)
+	}
+}
+
+func TestModelPickerShowsPrivacyDescription(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	m.pickModel = true
+	m.modelList = []protocol.Model{{Provider: "opencode-zen", ID: "big-pickle", Description: "Privacy warning: training use."}}
+	if got := stripANSI(m.renderModelPicker()); !strings.Contains(got, "Privacy warning: training use.") {
+		t.Fatalf("picker=%q", got)
+	}
+}
+
+func TestOpenCodeZenLoginAllowsAnonymousMode(t *testing.T) {
+	t.Setenv("OPENCODE_API_KEY", "")
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.editor.SetValue("/login opencode-zen")
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.loginMode || m.loginProvider != "opencode-zen" {
+		t.Fatalf("login mode=%v provider=%q", m.loginMode, m.loginProvider)
+	}
+	if got := strings.Join(m.lines, "\n"); !strings.Contains(got, "optional key") {
+		t.Fatalf("optional hint missing: %q", got)
+	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.loginMode {
+		t.Fatal("blank optional login should finish")
+	}
+	if _, ok := m.app.Auth.Get("opencode-zen"); ok {
+		t.Fatal("anonymous mode should not persist a credential")
+	}
+	if got := strings.Join(m.lines, "\n"); !strings.Contains(got, "anonymous/keyless") {
+		t.Fatalf("anonymous status missing: %q", got)
 	}
 }
 

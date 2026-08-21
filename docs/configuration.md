@@ -49,7 +49,7 @@ Environment overrides:
 |---|---|
 | `SNOW_HOME` | Replaces the global `~/.snow` directory for config, auth, trust, caches, goals, themes, keys, and search policy |
 | `SNOW_SESSIONS_DIR` | Replaces only the session database root |
-| `OPENCODE_API_KEY` | Fallback credential for `opencode-go` |
+| `OPENCODE_API_KEY` | Fallback credential for `opencode-go` and optional credential for `opencode-zen` |
 | `OPENAI_API_KEY` | Optional fallback Bearer credential for the legacy `openai-compatible` profile only |
 | `XDG_DATA_HOME` | Included when discovering compatible OpenCode ChatGPT credentials |
 | `SNOW_DEBUG` | File path for TUI debug logs, for example `SNOW_DEBUG=/tmp/snow.log`; intended for development |
@@ -125,6 +125,10 @@ A representative configuration:
     "opencode-go": {
       "base_url": "https://opencode.ai/zen/go/v1",
       "default_model": "kimi-k2.6"
+    },
+    "opencode-zen": {
+      "base_url": "https://opencode.ai/zen/v1",
+      "default_model": "big-pickle"
     },
     "openai-compatible": {
       "base_url": "https://gateway.example/v1",
@@ -249,6 +253,20 @@ response without imposing a total turn deadline. Omit it or set `0` for the
 conservative 10-minute default; set `-1` to disable the watchdog. Positive
 values above 86,400,000 ms (24 hours) are rejected. Any received bytes reset
 the timer.
+
+`opencode-zen` defaults to `https://opencode.ai/zen/v1` and `big-pickle`.
+It exposes only Snow's maintained non-deprecated promotional free allowlist,
+intersected with the live `/models` response. The catalog is authoritative:
+paid, unknown, or deprecated Zen IDs are rejected rather than accepted as
+custom models. A fresh bounded disk cache and then the bundled free catalog
+keep discovery failures nonfatal. The local transport map routes Muse Spark
+Contributor Free through Responses and the other maintained models through
+Chat Completions. `OPENCODE_API_KEY`, `snow login opencode-zen`, and
+`--api-key` are optional; with no resolved key Snow omits `Authorization` and
+uses anonymous access. Logout removes Snow's stored Zen key; an explicit
+`--api-key` or `OPENCODE_API_KEY` fallback remains active until the caller clears
+it. Snow never imports OpenCode's local `auth.json` or falls back from a free
+model to a paid one.
 
 For `openai-compatible`, `base_url` is required and may be an API root such as
 `https://gateway.example/v1` or a full URL ending in `/responses` or

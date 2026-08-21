@@ -13,8 +13,8 @@ events behind every surface.
 > before v1.
 
 - Interactive terminal UI, print mode, JSONL events, and JSONL RPC
-- OpenCode Go, user-configured OpenAI-compatible endpoints, and ChatGPT/Codex
-  OAuth
+- OpenCode Go, OpenCode Zen free models, user-configured OpenAI-compatible
+  endpoints, and ChatGPT/Codex OAuth
 - SQLite sessions with resume, branches, compaction, and persistent goals
 - Built-in coding tools, MCP, plugins, Agent Skills, and optional subagents
 - Pure-Go SDK under [`pkg/snowsdk`](pkg/snowsdk)
@@ -88,6 +88,23 @@ snow -p "summarize this repository"
 # or persist the key in Snow's credential store
 snow login opencode-go
 ```
+
+OpenCode Zen promotional free models — anonymous by default, with an optional
+Zen API key:
+
+```sh
+snow --provider opencode-zen --model big-pickle \
+  -p "summarize this repository"
+
+# Optional: raises account-scoped limits when Zen permits it
+export OPENCODE_API_KEY=sk-opencode-...
+# or: snow login opencode-zen
+```
+
+Zen uses only Snow's maintained non-deprecated free-model catalog and never
+silently switches to a paid model. Anonymous quotas and the promotional lineup
+are not stable. The TUI model picker shows each model's documented privacy or
+training notice; review it before sending private code.
 
 OpenAI-compatible endpoint (Responses preferred; Chat Completions fallback; API
 key optional):
@@ -211,6 +228,7 @@ building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
 | Provider | ID | Authentication | Runtime |
 |---|---|---|---|
 | OpenCode Go | `opencode-go` | API key | OpenAI-compatible chat completions/SSE with live model discovery enriched by models.dev metadata |
+| OpenCode Zen | `opencode-zen` | Optional API key or anonymous | Maintained promotional free catalog; live availability filtering; per-model Chat Completions or Responses/SSE; bounded 429 retries |
 | OpenAI-compatible | `openai-compatible` or a named profile | Optional Bearer API key per profile | One or more user-supplied API roots with sibling `/models`; prefers Responses/SSE and falls back to Chat Completions/SSE |
 | ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | Codex Responses/SSE with browser/device login, guarded refresh, account-scoped catalogs, session affinity, zstd, and bounded pre-output retries |
 | Fake | `fake` | None | Deterministic local provider for tests and examples |

@@ -284,6 +284,16 @@ func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.finishCompatibleLogin(secret)
 		}
 		if strings.TrimSpace(secret) == "" {
+			if m.providerAuthOptional(m.loginProvider) {
+				if credential, ok := m.app.Auth.Get(m.loginProvider); ok && credential.Valid() {
+					m.pushLine(styleFooter.Render("kept stored API key for " + m.loginProvider))
+				} else if status, err := m.app.AuthStatus(m.ctx, m.loginProvider); err == nil && status.Configured() {
+					m.pushLine(styleFooter.Render(m.loginProvider + ": no stored key; explicit or environment credential remains active"))
+				} else {
+					m.pushLine(styleFooter.Render(m.loginProvider + ": using anonymous/keyless access"))
+				}
+				return m, nil
+			}
 			m.pushLine(styleError.Render("login: empty API key"))
 			return m, nil
 		}

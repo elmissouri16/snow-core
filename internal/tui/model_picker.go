@@ -215,6 +215,10 @@ func (m *Model) renderModelPicker() string {
 			b.WriteString(styleHeaderDim.Render("  " + strings.Join(details, "  ·  ")))
 			b.WriteString("\n")
 		}
+		if selected.Description != "" {
+			b.WriteString(styleFooter.Render("  " + selected.Description))
+			b.WriteString("\n")
+		}
 	}
 	b.WriteString(styleFooter.Render("(↑/↓ choose · / search · Enter apply · Esc cancel)"))
 	return strings.TrimSuffix(b.String(), "\n")
@@ -237,6 +241,9 @@ func (m *Model) setModel(selected protocol.Model) {
 	}
 	if resetThinking {
 		m.pushLine(styleTool.Render("thinking changed from " + string(currentThinking) + " to off because model " + strconv.Quote(selected.ID) + " does not advertise that effort"))
+	}
+	if selected.Description != "" {
+		m.pushLine(styleTool.Render(selected.Description))
 	}
 }
 

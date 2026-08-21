@@ -62,6 +62,7 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 	tempfile.SweepStale(globalDir, []string{".auth-", ".snow-config-", ".snow-trust-"}, 24*time.Hour)
 	tempfile.SweepStale(filepath.Join(globalDir, "cache", "chatgpt-models"), []string{".models-"}, 24*time.Hour)
 	tempfile.SweepStale(filepath.Join(globalDir, "cache", "opencode-models"), []string{".models-"}, 24*time.Hour)
+	tempfile.SweepStale(filepath.Join(globalDir, "cache", "opencode-zen-models"), []string{".models-"}, 24*time.Hour)
 
 	configPath := opts.ConfigPath
 	if configPath == "" {

@@ -246,6 +246,19 @@ private/local endpoints are allowed deliberately, so transport security and
 service behavior remain the operator's responsibility. Snow does not sandbox or
 certify the endpoint.
 
+OpenCode Zen is also an external provider boundary. Its promotional free models
+have materially different retention and training terms: Ox Alpha Free is
+documented as zero-retention/no-training; Big Pickle, MiMo, and Hy3 data may be
+used to improve those models; NVIDIA Nemotron free routes are trial endpoints
+that must not receive personal or confidential data; Muse Contributor Free may
+use prompts and completions for future model training. Snow carries these
+notices in model descriptions and shows them in the TUI picker, but a notice is
+not a data-loss-prevention control. Do not send secrets, production
+credentials, personal data, or proprietary code unless the selected provider's
+current terms are acceptable. Promotional terms and availability can change.
+Snow's free-only Zen catalog prevents accidental paid selection, not disclosure
+to the selected free service.
+
 ChatGPT/Codex requests send a fixed-width hash derived from Snow's session,
 branch, and request purpose for provider cache and routing affinity. This avoids
 sending raw local identifiers but is pseudonymous metadata, not an anonymity or
@@ -262,7 +275,11 @@ profile has no explicit or stored key. The legacy `openai-compatible` profile
 may additionally use `OPENAI_API_KEY`; named profiles do not share that
 fallback. A provider-scoped auth service binds explicit credentials to one
 provider, centralizes explicit/store/environment precedence, and supplies
-credentials to both model discovery and inference. ChatGPT's OAuth driver
+credentials to both model discovery and inference. `opencode-zen` optionally
+uses the same `OPENCODE_API_KEY` environment fallback as `opencode-go`, while
+persisted entries remain isolated by provider ID; without a resolved Zen key,
+Snow omits `Authorization` and uses anonymous access. Snow does not silently
+read or import OpenCode's own credential file. ChatGPT's OAuth driver
 exchanges tokens through that service; refresh uses a provider-specific
 cross-process lock and atomically persists rotated tokens without holding the
 global store lock during network I/O. Trust data is also locked and mode `0600`.

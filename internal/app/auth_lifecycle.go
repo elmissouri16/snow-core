@@ -19,6 +19,8 @@ func (a *App) AuthProviders() []auth.Descriptor {
 		switch id {
 		case "opencode-go":
 			return 10
+		case "opencode-zen":
+			return 15
 		case "chatgpt":
 			return 30
 		case "fake":

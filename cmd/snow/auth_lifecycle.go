@@ -11,6 +11,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/provider/chatgpt"
 	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
 	"github.com/elmissouri16/snow-core/internal/provider/opencodego"
+	"github.com/elmissouri16/snow-core/internal/provider/opencodezen"
 )
 
 func newCLIAuthService(store auth.Store, providerConfigs ...map[string]config.ProviderConfig) (*auth.Service, *chatgpt.Provider, error) {
@@ -18,6 +19,7 @@ func newCLIAuthService(store auth.Store, providerConfigs ...map[string]config.Pr
 	chatgptProvider := chatgpt.New(chatgpt.Config{Store: store})
 	for _, driver := range []auth.Driver{
 		auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: opencodego.ProviderID, DisplayName: "OpenCode Go", Required: true, Environment: []string{opencodego.EnvAPIKey}}),
+		auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: opencodezen.ProviderID, DisplayName: "OpenCode Zen", Required: false, Environment: []string{opencodezen.EnvAPIKey}}),
 		auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: openaicompat.ProviderID, DisplayName: "OpenAI-compatible", Required: false, Environment: []string{openaicompat.EnvAPIKey}}),
 		chatgpt.NewAuthDriver(chatgptProvider),
 	} {

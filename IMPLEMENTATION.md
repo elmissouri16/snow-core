@@ -55,7 +55,8 @@ keeps UI dependencies out of core packages.
 
 - A single Go `snow` binary for macOS and Linux.
 - Streaming text, thinking, tool, usage, error, and lifecycle events.
-- OpenCode Go API-key access, user-configured OpenAI-compatible Responses or
+- OpenCode Go API-key access, optional-auth OpenCode Zen promotional free
+  models, user-configured OpenAI-compatible Responses or
   Chat Completions endpoints, and ChatGPT/Codex-compatible OAuth credentials.
 - Built-in `read`, `write`, `edit`, `bash`, `grep`, `glob`, direct interactive
   `ask_user`, plus deferred public-web `webfetch`.
@@ -105,6 +106,7 @@ keeps UI dependencies out of core packages.
 │   ├── provider/            # Provider interface and adapters
 │   │   ├── fake/            # deterministic scripted provider for tests/demos
 │   │   ├── opencodego/      # OpenCode Go API-key adapter
+│   │   ├── opencodezen/     # Zen optional-auth free-model adapter
 │   │   ├── openaicompat/    # user-configured Responses/Chat Completions adapter
 │   │   ├── responsesapi/    # shared bounded Responses request/SSE codec
 │   │   └── chatgpt/         # Codex OAuth checks/import and Responses adapter
@@ -290,6 +292,7 @@ and lifecycle.
 | Provider | ID | Credential | Endpoint and behavior |
 |---|---|---|---|
 | OpenCode Go | `opencode-go` | API key | `https://opencode.ai/zen/go/v1`, OpenAI-compatible `/models` and `/chat/completions`, default `kimi-k2.6` |
+| OpenCode Zen | `opencode-zen` | optional API key or anonymous | `https://opencode.ai/zen/v1`; maintained free allowlist intersected with `/models`; model-specific `/chat/completions` or `/responses`; default `big-pickle` |
 | OpenAI-compatible | `openai-compatible` or named profile | optional API key per profile | one or more user-supplied API roots plus sibling `/models`; Responses preferred with Chat Completions fallback; no built-in endpoint |
 | ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | ChatGPT Codex Responses backend; browser/device login, refresh, authenticated cached catalog |
 | Fake | `fake` | none | deterministic scripted provider for tests and demos |
@@ -424,6 +427,26 @@ matching IDs with OpenCode's public `models.dev` catalog for capability,
 reasoning, and pricing metadata; the API key is never sent to the metadata
 host and direct gateway fields win. Discovery falls back to the pinned static
 default without failing startup or logging keys.
+
+### OpenCode Zen
+
+`internal/provider/opencodezen` is a separate, optional-auth adapter for Zen's
+promotional free routes. Credential resolution accepts an explicit key, the
+`opencode-zen` Snow auth entry, `OPENCODE_API_KEY`, or an empty anonymous
+credential; keyless requests omit `Authorization` completely. The provider
+intersects live `GET /models` availability with a maintained seven-model free
+allowlist and is catalog-authoritative, so paid, unknown, and deprecated IDs
+cannot be selected accidentally. `big-pickle` is the bundled default.
+
+The local transport map sends Muse Spark Contributor Free to Responses/SSE and
+the remaining maintained models to Chat Completions/SSE. Both normalize into
+the shared provider event contract. A pre-output HTTP 429 is retried after 2,
+5, and 15 seconds with context-aware waits, then becomes a structured
+`LimitError`; no retry occurs after output. Active keys are redacted from
+bounded errors. Model descriptions carry the documented retention/training
+notice shown by the TUI and exposed through existing SDK/RPC model metadata.
+Snow does not import OpenCode credentials, rotate accounts, fall back to paid
+Zen models, or promise continued promotional availability.
 
 ### OpenAI-compatible
 
@@ -1160,7 +1183,7 @@ that is fully covered elsewhere is referenced rather than repeated.
 | Product role | Standalone harness, not an IDE backend |
 | Binary name and module | `snow`, `github.com/elmissouri16/snow-core` |
 | Modularity | In-process interfaces plus JSON-RPC stdio subprocess plugins; no Go `.so` loading |
-| Auth | OpenCode Go API key, user-configured OpenAI-compatible endpoints, and ChatGPT/Codex OAuth |
+| Auth | OpenCode Go API key, optional-key/anonymous OpenCode Zen, user-configured OpenAI-compatible endpoints, and ChatGPT/Codex OAuth |
 | Sessions | Snow-owned pure-Go SQLite tree (schema version 9) |
 | TUI | Charmbracelet Bubble Tea |
 | SDK | `pkg/snowsdk` running the same core as the CLI |

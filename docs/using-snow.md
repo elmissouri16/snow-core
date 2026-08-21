@@ -81,18 +81,29 @@ in [Configuration](configuration.md).
 
 ```sh
 snow login opencode-go
+snow login opencode-zen       # optional; no login is needed for anonymous use
 snow login openai-compatible
 snow login openai-compatible --name x-provider --base-url https://gateway.example/v1
 snow login chatgpt
 snow login chatgpt --device-code
 snow login chatgpt --no-open
 snow logout opencode-go
+snow logout opencode-zen      # removes Snow's stored key
 snow logout openai-compatible
 snow logout chatgpt
 snow auth check chatgpt
 ```
 
 The no-argument TUI `/login` and `/logout` commands open provider pickers.
+`opencode-zen` works without login and omits the authorization header when no
+key resolves. An optional key can come from `OPENCODE_API_KEY`, `--api-key`, or
+the masked login flow. Logout removes only Snow's stored key; an explicit flag
+or environment fallback remains active until cleared. Zen exposes only the
+maintained promotional free catalog and never switches to a paid model. Anonymous quotas and model
+availability can change; HTTP 429 responses are retried before output after 2,
+5, and 15 seconds, then surfaced as a usage-limit error. The model picker shows
+the documented privacy/training notice for the highlighted Zen model.
+
 Selecting `openai-compatible` in the TUI first asks for a profile name, then an
 endpoint and optional masked API key. A blank name updates the legacy
 `openai-compatible` profile; a name such as `x-provider` creates a separate
