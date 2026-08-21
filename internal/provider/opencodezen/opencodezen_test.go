@@ -21,6 +21,24 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+func TestCatalogURLDefaultsOnlyForOpenCodeZenEndpoint(t *testing.T) {
+	provider, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.catalogURL != DefaultCatalogURL || DefaultCatalogURL != "https://models.dev/api.json" {
+		t.Fatalf("default catalog URL=%q", provider.catalogURL)
+	}
+
+	custom, err := New(Config{BaseURL: "https://gateway.example/v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if custom.catalogURL != "" {
+		t.Fatalf("custom gateway unexpectedly uses catalog %q", custom.catalogURL)
+	}
+}
+
 func TestListModelsFiltersToMaintainedFreeCatalogAndOptionalAuth(t *testing.T) {
 	for _, tc := range []struct {
 		name, key, wantAuth string
@@ -89,33 +107,138 @@ func TestListModelsValidEmptyLiveCatalogIsAuthoritative(t *testing.T) {
 	}
 }
 
-func TestFreeCatalogPublishesVerifiedContextLimits(t *testing.T) {
-	want := map[string]struct {
-		context, maximum, output int
-	}{
-		"big-pickle":                      {160000, 200000, 32000},
-		"x-preview-f-free":                {1000000, 0, 131072},
-		"mimo-v2.5-free":                  {200000, 0, 32000},
-		"hy3-free":                        {190000, 0, 64000},
-		"nemotron-3-ultra-free":           {1000000, 0, 128000},
-		"nemotron-3.5-lightning-free":     {262144, 0, 262144},
-		"muse-spark-1.2-contributor-free": {1048576, 0, 131072},
+func TestStaticCatalogPublishesPolicyMetadataWithoutReasoningClaims(t *testing.T) {
+	want := map[string]struct{ context, maximum, output int }{
+		"big-pickle":                      {context: 160000, maximum: 200000, output: 32000},
+		"x-preview-f-free":                {context: 1000000, output: 131072},
+		"mimo-v2.5-free":                  {context: 200000, output: 32000},
+		"hy3-free":                        {context: 190000, output: 64000},
+		"nemotron-3-ultra-free":           {context: 1000000, output: 128000},
+		"nemotron-3.5-lightning-free":     {context: 262144, output: 262144},
+		"muse-spark-1.2-contributor-free": {context: 1048576, output: 131072},
 	}
 	for _, model := range staticCatalog() {
-		limits, ok := want[model.ID]
+		expected, ok := want[model.ID]
 		if !ok {
 			t.Fatalf("unexpected model %q", model.ID)
 		}
-		if model.ContextWindow != limits.context || model.MaxContextWindow != limits.maximum || model.MaxOutputTokens != limits.output {
-			t.Errorf("%s limits=%d/%d/%d want=%d/%d/%d", model.ID, model.ContextWindow, model.MaxContextWindow, model.MaxOutputTokens, limits.context, limits.maximum, limits.output)
+		if model.ContextWindow != expected.context || model.MaxContextWindow != expected.maximum || model.MaxOutputTokens != expected.output {
+			t.Errorf("%s limits=%d/%d/%d want=%d/%d/%d", model.ID, model.ContextWindow, model.MaxContextWindow, model.MaxOutputTokens, expected.context, expected.maximum, expected.output)
 		}
-		if !model.SupportsTools || !model.SupportsThinking {
-			t.Errorf("%s capabilities=%+v", model.ID, model)
+		if !model.SupportsTools || model.SupportsThinking || len(model.ThinkingLevels) != 0 {
+			t.Errorf("%s static capabilities guessed reasoning: %+v", model.ID, model)
+		}
+		if got := model.SupportedThinkingLevels(); !slices.Equal(got, []protocol.ThinkingLevel{protocol.ThinkingOff}) {
+			t.Errorf("%s thinking levels=%v want=[off]", model.ID, got)
 		}
 		delete(want, model.ID)
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing metadata for %v", want)
+	}
+}
+
+func TestListModelsLoadsReasoningMetadataFromModelsDev(t *testing.T) {
+	catalogAuthorization := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			if got := r.Header.Get("Authorization"); got != "Bearer zen-secret" {
+				t.Errorf("models Authorization=%q", got)
+			}
+			_, _ = io.WriteString(w, `{"data":[
+				{"id":"big-pickle"},{"id":"x-preview-f-free"},{"id":"hy3-free"},
+				{"id":"muse-spark-1.2-contributor-free"},{"id":"gpt-5.4"}
+			]}`)
+		case "/catalog":
+			catalogAuthorization <- r.Header.Get("Authorization")
+			_, _ = io.WriteString(w, `{"opencode":{"models":{
+				"big-pickle":{"reasoning":true,"reasoning_options":[{"type":"toggle"}]},
+				"x-preview-f-free":{"reasoning":true,"reasoning_options":[{"type":"effort","values":["low","high","max"]}]},
+				"hy3-free":{"reasoning":true,"reasoning_options":[{"type":"toggle"},{"type":"effort","values":["low","medium","high"]}]},
+				"muse-spark-1.2-contributor-free":{"reasoning":true,"reasoning_options":[{"type":"effort","values":["minimal","low","medium","high","xhigh"]}]},
+				"gpt-5.4":{"reasoning":true,"reasoning_options":[{"type":"effort","values":["ultra"]}]}
+			}}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	p, err := New(Config{BaseURL: server.URL + "/v1", CatalogURL: server.URL + "/catalog", HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := p.ListModelsWithCredential(context.Background(), auth.Credential{Key: "zen-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := <-catalogAuthorization; got != "" {
+		t.Fatalf("catalog request leaked Authorization=%q", got)
+	}
+	want := map[string][]protocol.ThinkingLevel{
+		"big-pickle":                      {protocol.ThinkingOff},
+		"x-preview-f-free":                {protocol.ThinkingOff, protocol.ThinkingLow, protocol.ThinkingHigh, protocol.ThinkingMax},
+		"hy3-free":                        {protocol.ThinkingOff, protocol.ThinkingLow, protocol.ThinkingMedium, protocol.ThinkingHigh},
+		"muse-spark-1.2-contributor-free": {protocol.ThinkingOff, protocol.ThinkingMinimal, protocol.ThinkingLow, protocol.ThinkingMedium, protocol.ThinkingHigh, protocol.ThinkingXHigh},
+	}
+	if len(models) != len(want) {
+		t.Fatalf("models=%v", modelIDs(models))
+	}
+	for _, model := range models {
+		levels, ok := want[model.ID]
+		if !ok {
+			t.Fatalf("unexpected model %q", model.ID)
+		}
+		if !model.SupportsThinking || !slices.Equal(model.SupportedThinkingLevels(), levels) {
+			t.Errorf("%s supports=%v levels=%v want=%v", model.ID, model.SupportsThinking, model.SupportedThinkingLevels(), levels)
+		}
+	}
+}
+
+func TestListModelsUsesCachedReasoningWhenMetadataRefreshFails(t *testing.T) {
+	cacheRoot := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"x-preview-f-free"}]}`)
+		case "/catalog":
+			http.Error(w, "offline", http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cachedModel := freeModels()[1].Model
+	cachedModel.SupportsThinking = true
+	cachedModel.ThinkingLevels = []protocol.ThinkingLevel{protocol.ThinkingLow, protocol.ThinkingHigh}
+	cachedAt := time.Now().Add(-time.Hour)
+	data, _ := json.Marshal(catalogCache{
+		Version: catalogCacheVersion, BaseURL: server.URL + "/v1", CatalogURL: server.URL + "/catalog",
+		FetchedAt: cachedAt.UnixMilli(), Models: []protocol.Model{cachedModel},
+	})
+	if err := os.WriteFile(filepath.Join(cacheRoot, "catalog.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := New(Config{
+		BaseURL: server.URL + "/v1", CatalogURL: server.URL + "/catalog",
+		HTTPClient: server.Client(), CacheRoot: cacheRoot,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := p.ListModels(context.Background())
+	if err != nil || len(models) != 1 || !models[0].SupportsThinking || !slices.Equal(models[0].ThinkingLevels, cachedModel.ThinkingLevels) {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+	persisted, err := os.ReadFile(filepath.Join(cacheRoot, "catalog.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cache catalogCache
+	if json.Unmarshal(persisted, &cache) != nil || cache.FetchedAt != cachedAt.UnixMilli() {
+		t.Fatalf("failed metadata refresh replaced verified cache: %+v", cache)
 	}
 }
 
@@ -136,17 +259,37 @@ func TestCatalogCacheValidationAndPermissions(t *testing.T) {
 	}
 
 	validModel := freeModels()[1].Model
-	validData, _ := json.Marshal(catalogCache{Version: 1, BaseURL: "https://cache.invalid/v1", FetchedAt: time.Now().UnixMilli(), Models: []protocol.Model{validModel}})
+	validModel.SupportsThinking = true
+	validModel.ThinkingLevels = []protocol.ThinkingLevel{protocol.ThinkingLow, protocol.ThinkingHigh}
+	validData, _ := json.Marshal(catalogCache{
+		Version: catalogCacheVersion, BaseURL: "https://cache.invalid/v1",
+		FetchedAt: time.Now().UnixMilli(), Models: []protocol.Model{validModel},
+	})
 	if err := os.WriteFile(cachePath, validData, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cached, _ := New(Config{BaseURL: "https://cache.invalid/v1", CacheRoot: cacheRoot})
 	models, err := cached.ListModels(context.Background())
-	if err != nil || len(models) != 1 || models[0].ID != validModel.ID {
-		t.Fatalf("valid cache models=%v err=%v", modelIDs(models), err)
+	if err != nil || len(models) != 1 || models[0].ID != validModel.ID || !models[0].SupportsThinking || !slices.Equal(models[0].ThinkingLevels, validModel.ThinkingLevels) {
+		t.Fatalf("valid cache models=%+v err=%v", models, err)
 	}
 
-	paidData, _ := json.Marshal(catalogCache{Version: 1, BaseURL: "https://cache.invalid/v1", FetchedAt: time.Now().UnixMilli(), Models: []protocol.Model{{Provider: ProviderID, ID: "gpt-5.4"}}})
+	legacyData, _ := json.Marshal(catalogCache{
+		Version: 1, BaseURL: "https://cache.invalid/v1",
+		FetchedAt: time.Now().UnixMilli(), Models: []protocol.Model{validModel},
+	})
+	if err := os.WriteFile(cachePath, legacyData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacy, _ := New(Config{BaseURL: "https://cache.invalid/v1", CacheRoot: cacheRoot})
+	if models, _ := legacy.loadCatalogCache(time.Now()); len(models) != 0 {
+		t.Fatalf("legacy cache retained pinned reasoning: %+v", models)
+	}
+
+	paidData, _ := json.Marshal(catalogCache{
+		Version: catalogCacheVersion, BaseURL: "https://cache.invalid/v1",
+		FetchedAt: time.Now().UnixMilli(), Models: []protocol.Model{{Provider: ProviderID, ID: "gpt-5.4"}},
+	})
 	if err := os.WriteFile(cachePath, paidData, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +341,103 @@ func TestChatRoutesTransportAndOmitsAnonymousAuthorization(t *testing.T) {
 	}
 	if chatCalls != 1 || responsesCalls != 1 {
 		t.Fatalf("chat=%d responses=%d", chatCalls, responsesCalls)
+	}
+}
+
+func TestChatSerializesAdvertisedThinkingEfforts(t *testing.T) {
+	wantEffort := map[string]string{
+		"x-preview-f-free":                "max",
+		"hy3-free":                        "medium",
+		"muse-spark-1.2-contributor-free": "xhigh",
+	}
+	seen := make(map[string]bool, len(wantEffort))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/catalog":
+			_, _ = io.WriteString(w, `{"opencode":{"models":{
+				"x-preview-f-free":{"reasoning":true,"reasoning_options":[{"type":"effort","values":["low","high","max"]}]},
+				"hy3-free":{"reasoning":true,"reasoning_options":[{"type":"effort","values":["low","medium","high"]}]},
+				"muse-spark-1.2-contributor-free":{"reasoning":true,"reasoning_options":[{"type":"effort","values":["minimal","low","medium","high","xhigh"]}]}
+			}}}`)
+			return
+		case "/v1/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"x-preview-f-free"},{"id":"hy3-free"},{"id":"muse-spark-1.2-contributor-free"}]}`)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		model, _ := body["model"].(string)
+		want, ok := wantEffort[model]
+		if !ok {
+			t.Errorf("unexpected model in request body: %v", body)
+		}
+		var got string
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			got, _ = body["reasoning_effort"].(string)
+		case "/v1/responses":
+			reasoning, _ := body["reasoning"].(map[string]any)
+			got, _ = reasoning["effort"].(string)
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		if got != want {
+			t.Errorf("%s reasoning effort=%q want=%q; body=%v", model, got, want, body)
+		}
+		seen[model] = true
+		w.Header().Set("Content-Type", "text/event-stream")
+		if r.URL.Path == "/v1/responses" {
+			_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")
+			return
+		}
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	p, err := New(Config{
+		BaseURL: server.URL + "/v1", CatalogURL: server.URL + "/catalog",
+		HTTPClient: server.Client(), RetryDelays: []time.Duration{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	advertised := make(map[string]protocol.Model, len(models))
+	for _, model := range models {
+		advertised[model.ID] = model
+	}
+	for _, tc := range []struct {
+		model    string
+		thinking protocol.ThinkingLevel
+	}{
+		{model: "x-preview-f-free", thinking: protocol.ThinkingMax},
+		{model: "hy3-free", thinking: protocol.ThinkingMedium},
+		{model: "muse-spark-1.2-contributor-free", thinking: protocol.ThinkingXHigh},
+	} {
+		model, ok := advertised[tc.model]
+		if !ok {
+			t.Fatalf("missing dynamically advertised model %q", tc.model)
+		}
+		request := chatRequest(tc.model)
+		request.Model = model
+		request.Thinking = tc.thinking
+		stream, err := p.Chat(context.Background(), auth.Credential{}, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := drainText(t, stream); got != "ok" {
+			t.Fatalf("%s text=%q", tc.model, got)
+		}
+	}
+	if len(seen) != len(wantEffort) {
+		t.Fatalf("models seen=%v want=%v", seen, wantEffort)
 	}
 }
 

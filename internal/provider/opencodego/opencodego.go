@@ -19,6 +19,7 @@ import (
 
 	"github.com/elmissouri16/snow-core/internal/auth"
 	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/provider/modelsdev"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -46,7 +47,7 @@ const DefaultBaseURL = "https://opencode.ai/zen/go/v1"
 // enrich provider model availability with capabilities, limits, and variants.
 // The OpenCode Go /models endpoint is authoritative for availability but may
 // return only the OpenAI-compatible id/object/owned_by fields.
-const DefaultCatalogURL = "https://models.dev/api.json"
+const DefaultCatalogURL = modelsdev.DefaultURL
 
 // DefaultModelID is the fallback model id used when neither the request nor
 // config selects one. Verified present in the live GET /zen/go/v1/models

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/auth"
+	"github.com/elmissouri16/snow-core/internal/provider/modelsdev"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -67,44 +68,6 @@ type modelCapabilities struct {
 
 type modelArchitecture struct {
 	InputModalities []string `json:"input_modalities"`
-}
-
-type modelsDevCatalog map[string]modelsDevProvider
-
-type modelsDevProvider struct {
-	Models map[string]modelsDevModel `json:"models"`
-}
-
-type modelsDevModel struct {
-	ID               string                     `json:"id"`
-	Name             string                     `json:"name"`
-	Reasoning        *bool                      `json:"reasoning"`
-	ReasoningOptions []modelsDevReasoningOption `json:"reasoning_options"`
-	ToolCall         *bool                      `json:"tool_call"`
-	Limit            modelsDevLimit             `json:"limit"`
-	Cost             *modelsDevCost             `json:"cost,omitempty"`
-	Modalities       modelsDevModalities        `json:"modalities"`
-}
-
-type modelsDevReasoningOption struct {
-	Type   string   `json:"type"`
-	Values []string `json:"values"`
-}
-
-type modelsDevLimit struct {
-	Context int `json:"context"`
-	Output  int `json:"output"`
-}
-
-type modelsDevCost struct {
-	Input      float64 `json:"input"`
-	Output     float64 `json:"output"`
-	CacheRead  float64 `json:"cache_read"`
-	CacheWrite float64 `json:"cache_write"`
-}
-
-type modelsDevModalities struct {
-	Input []string `json:"input"`
 }
 
 type catalogCacheFile struct {
@@ -209,12 +172,13 @@ func (p *Provider) listModels(ctx context.Context, credential auth.Credential) (
 	}
 	discoveryCtx, cancel := context.WithTimeout(ctx, p.discoveryTimeout)
 	defer cancel()
-	var catalog <-chan map[string]modelsDevModel
+	var catalog <-chan map[string]modelsdev.Model
 	if p.catalogURL != "" {
-		catalogResult := make(chan map[string]modelsDevModel, 1)
+		catalogResult := make(chan map[string]modelsdev.Model, 1)
 		catalog = catalogResult
 		go func() {
-			catalogResult <- p.fetchModelsDev(discoveryCtx)
+			models, _ := modelsdev.FetchProvider(discoveryCtx, p.client, p.catalogURL, ProviderID)
+			catalogResult <- models
 		}()
 	}
 	req, err := http.NewRequestWithContext(discoveryCtx, http.MethodGet, p.baseURL+"/models", nil)
@@ -236,7 +200,7 @@ func (p *Provider) listModels(ctx context.Context, credential auth.Credential) (
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&payload); err != nil {
 		return cloneModels(fallback), nil
 	}
-	var metadata map[string]modelsDevModel
+	var metadata map[string]modelsdev.Model
 	if catalog != nil {
 		metadata = <-catalog
 	}
@@ -258,30 +222,10 @@ func (p *Provider) listModels(ctx context.Context, credential auth.Credential) (
 	return cloneModels(out), nil
 }
 
-func (p *Provider) fetchModelsDev(ctx context.Context) map[string]modelsDevModel {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.catalogURL, nil)
-	if err != nil {
-		return nil
-	}
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil
-	}
-	var payload modelsDevCatalog
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&payload); err != nil {
-		return nil
-	}
-	return payload[ProviderID].Models
-}
-
 // enrichModelRecord applies OpenCode's models.dev metadata only where the
 // provider's live /models record omitted a field. Availability and any direct
 // gateway metadata therefore remain authoritative.
-func enrichModelRecord(record openAIModelRecord, details modelsDevModel) openAIModelRecord {
+func enrichModelRecord(record openAIModelRecord, details modelsdev.Model) openAIModelRecord {
 	if record.Name == "" && record.DisplayName == "" {
 		record.Name = details.Name
 	}

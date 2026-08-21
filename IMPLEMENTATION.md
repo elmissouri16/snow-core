@@ -443,15 +443,31 @@ the remaining maintained models to Chat Completions/SSE. Both normalize into
 the shared provider event contract. A pre-output HTTP 429 is retried after 2,
 5, and 15 seconds with context-aware waits, then becomes a structured
 `LimitError`; no retry occurs after output. Active keys are redacted from
-bounded errors. The maintained model records pin verified models.dev context,
-output, thinking, tool, and vision capabilities; Big Pickle uses its stricter
-160k input limit as the effective context and records 200k as its maximum.
-Successful terminal streams with no text or completed tool call are converted
-to actionable stream errors instead of durable blank assistant turns. Model
-descriptions carry the documented retention/training notice shown by the TUI
-and exposed through existing SDK/RPC model metadata. Snow does not import
-OpenCode credentials, rotate accounts, fall back to paid Zen models, or promise
-continued promotional availability.
+bounded errors.
+
+On a canonical-endpoint Zen catalog refresh, the provider concurrently fetches
+live `/models` availability and the public models.dev `opencode` record under
+the bounded discovery context. A custom base URL disables that merge unless the
+internal provider config explicitly supplies a catalog URL. Only IDs in both
+the maintained free policy and live Zen availability are returned. `reasoning` and
+`reasoning_options[type=effort].values` are normalized into model-level thinking
+metadata; no model-specific effort set is compiled into Snow. Metadata requests
+carry no Zen authorization. The v2 atomic 0600 catalog cache rehydrates current
+local transport/privacy/limit policy plus the last fetched reasoning metadata,
+and invalidates the older cache schema that contained pinned capability values.
+A failed metadata refresh uses verified cached reasoning when available and
+otherwise exposes no guessed effort controls. Advertised values serialize as
+`reasoning_effort` for Chat Completions or `reasoning.effort` for Responses.
+Snow's `off` setting omits the override rather than claiming the provider
+disables inherent reasoning.
+
+Big Pickle uses its stricter 160k input limit as the effective context and
+records 200k as its maximum. Successful terminal streams with no text or
+completed tool call are converted to actionable stream errors instead of
+durable blank assistant turns. Model descriptions carry the documented
+retention/training notice shown by the TUI and exposed through existing SDK/RPC
+model metadata. Snow does not import OpenCode credentials, rotate accounts,
+fall back to paid Zen models, or promise continued promotional availability.
 
 ### OpenAI-compatible
 

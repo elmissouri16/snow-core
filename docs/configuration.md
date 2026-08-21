@@ -258,20 +258,35 @@ the timer.
 It exposes only Snow's maintained non-deprecated promotional free allowlist,
 intersected with the live `/models` response. The catalog is authoritative:
 paid, unknown, or deprecated Zen IDs are rejected rather than accepted as
-custom models. A fresh bounded disk cache and then the bundled free catalog
-keep discovery failures nonfatal. The local transport map routes Muse Spark
-Contributor Free through Responses and the other maintained models through
-Chat Completions. `OPENCODE_API_KEY`, `snow login opencode-zen`, and
-`--api-key` are optional; with no resolved key Snow omits `Authorization` and
-uses anonymous access. Logout removes Snow's stored Zen key; an explicit
-`--api-key` or `OPENCODE_API_KEY` fallback remains active until the caller clears
-it. Snow never imports OpenCode's local `auth.json` or falls back from a free
-model to a paid one. Snow publishes verified context and output limits for all
-maintained Zen models, so the TUI footer and automatic compaction have concrete
-budgets. Big Pickle uses its stricter 160k input limit for compaction and exposes
-its advertised 200k total as the maximum context. If a Zen route terminates
-without text or a tool call, Snow reports an empty-completion error instead of
-silently accepting a blank assistant turn.
+custom models. A fresh bounded disk cache and then the bundled free policy
+records keep discovery failures nonfatal. The local transport map routes Muse
+Spark Contributor Free through Responses and the other maintained models
+through Chat Completions.
+
+During provider catalog discovery against the canonical Zen endpoint, Snow
+concurrently fetches OpenCode's public models.dev catalog and dynamically merges
+`reasoning` plus `reasoning_options[type=effort]` for matching maintained Zen
+IDs. No model-specific effort list is pinned in Snow, and the Zen API key is
+never sent to models.dev. A custom Zen `base_url` disables this external
+metadata merge because the OpenCode catalog cannot be assumed to describe an
+unrelated gateway. Successfully fetched reasoning metadata is retained in the
+15-minute memory/disk catalog cache. If models.dev is unavailable, Snow uses the
+last verified cached reasoning metadata when present; otherwise it advertises
+no selectable override rather than guessing. Models without advertised effort
+controls remain on Snow's `off` setting, which omits an effort override and
+leaves the model's provider default behavior intact.
+
+`OPENCODE_API_KEY`, `snow login opencode-zen`, and `--api-key` are optional;
+with no resolved key Snow omits `Authorization` and uses anonymous access.
+Logout removes Snow's stored Zen key; an explicit `--api-key` or
+`OPENCODE_API_KEY` fallback remains active until the caller clears it. Snow
+never imports OpenCode's local `auth.json` or falls back from a free model to a
+paid one. Snow publishes verified context and output limits for all maintained
+Zen models, so the TUI footer and automatic compaction have concrete budgets.
+Big Pickle uses its stricter 160k input limit for compaction and exposes its
+advertised 200k total as the maximum context. If a Zen route terminates without
+text or a tool call, Snow reports an empty-completion error instead of silently
+accepting a blank assistant turn.
 
 For `openai-compatible`, `base_url` is required and may be an API root such as
 `https://gateway.example/v1` or a full URL ending in `/responses` or

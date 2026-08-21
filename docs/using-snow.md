@@ -104,9 +104,11 @@ Anonymous quotas and model availability can change; HTTP 429 responses are
 retried before output after 2, 5, and 15 seconds, then surfaced as a usage-limit
 error. The model picker shows the documented privacy/training notice for the
 highlighted Zen model. Zen model metadata includes context and output limits,
-so the footer shows a concrete context budget. A provider response that ends
-without text or a tool call is shown as an error rather than a silent blank
-turn.
+so the footer shows a concrete context budget. Reasoning capability and effort
+choices are loaded dynamically by the Zen provider from OpenCode's public
+models.dev catalog; Snow sends no Zen credential to that host and does not pin
+model-specific effort lists. A provider response that ends without text or a
+tool call is shown as an error rather than a silent blank turn.
 
 Selecting `openai-compatible` in the TUI first asks for a profile name, then an
 endpoint and optional masked API key. A blank name updates the legacy
@@ -228,9 +230,11 @@ described in [Configuration](configuration.md).
 
 Choice pickers accept arrows, `j`/`k`, Tab/Shift+Tab, Home/End, and Enter. The
 model picker also accepts `/` to search provider IDs, model IDs, display names,
-and descriptions. Selecting a reasoning-capable model opens a second picker
-with that model's advertised effort levels, including `off`, before applying
-and persisting both. Blocking permission and model-requested input overlays
+and descriptions. Selecting a model with controllable reasoning opens a second
+picker with that model's advertised effort levels, including `off`, before
+applying and persisting both. `off` means Snow omits the provider effort
+override; an inherently reasoning model may still use its provider-default
+reasoning behavior. Blocking permission and model-requested input overlays
 take keyboard and visual precedence over ordinary pickers, including requests
 from subagents.
 

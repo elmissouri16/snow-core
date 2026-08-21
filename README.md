@@ -104,8 +104,11 @@ export OPENCODE_API_KEY=sk-opencode-...
 Zen uses only Snow's maintained non-deprecated free-model catalog and never
 silently switches to a paid model. Anonymous quotas and the promotional lineup
 are not stable. Verified context/output limits drive the footer and automatic
-compaction; a provider completion with no answer or tool call is surfaced as an
-error instead of a silent blank turn. The TUI model picker shows each model's
+compaction. At provider catalog refresh, Snow loads reasoning capability and
+selectable efforts from OpenCode's current public models.dev record; the Zen
+credential is never sent there, and Snow never guesses efforts from model names.
+A provider completion with no answer or tool call is surfaced as an error
+instead of a silent blank turn. The TUI model picker shows each model's
 documented privacy or training notice; review it before sending private code.
 
 OpenAI-compatible endpoint (Responses preferred; Chat Completions fallback; API
@@ -230,7 +233,7 @@ building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
 | Provider | ID | Authentication | Runtime |
 |---|---|---|---|
 | OpenCode Go | `opencode-go` | API key | OpenAI-compatible chat completions/SSE with live model discovery enriched by models.dev metadata |
-| OpenCode Zen | `opencode-zen` | Optional API key or anonymous | Maintained promotional free catalog; live availability filtering; per-model Chat Completions or Responses/SSE; bounded 429 retries |
+| OpenCode Zen | `opencode-zen` | Optional API key or anonymous | Maintained promotional free catalog; live availability plus models.dev reasoning discovery; per-model Chat Completions or Responses/SSE; bounded 429 retries |
 | OpenAI-compatible | `openai-compatible` or a named profile | Optional Bearer API key per profile | One or more user-supplied API roots with sibling `/models`; prefers Responses/SSE and falls back to Chat Completions/SSE |
 | ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | Codex Responses/SSE with browser/device login, guarded refresh, account-scoped catalogs, session affinity, zstd, and bounded pre-output retries |
 | Fake | `fake` | None | Deterministic local provider for tests and examples |

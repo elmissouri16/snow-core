@@ -17,17 +17,19 @@ import (
 
 	"github.com/elmissouri16/snow-core/internal/auth"
 	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/provider/modelsdev"
 	"github.com/elmissouri16/snow-core/internal/provider/opencodego"
 	"github.com/elmissouri16/snow-core/internal/provider/responsesapi"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 const (
-	ProviderID       = "opencode-zen"
-	EnvAPIKey        = "OPENCODE_API_KEY"
-	DefaultBaseURL   = "https://opencode.ai/zen/v1"
-	DefaultModelID   = "big-pickle"
-	maxErrorBodySize = 1000
+	ProviderID        = "opencode-zen"
+	EnvAPIKey         = "OPENCODE_API_KEY"
+	DefaultBaseURL    = "https://opencode.ai/zen/v1"
+	DefaultCatalogURL = modelsdev.DefaultURL
+	DefaultModelID    = "big-pickle"
+	maxErrorBodySize  = 1000
 )
 
 var defaultRetryDelays = []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second}
@@ -41,10 +43,15 @@ const (
 
 // Config controls the OpenCode Zen adapter.
 type Config struct {
-	BaseURL           string
-	APIKey            string
-	DefaultModel      string
-	HTTPClient        *http.Client
+	BaseURL      string
+	APIKey       string
+	DefaultModel string
+	HTTPClient   *http.Client
+	// CatalogURL overrides the public models.dev metadata endpoint. When
+	// BaseURL is customized and CatalogURL is empty, metadata enrichment is
+	// disabled so OpenCode metadata is not applied to an unrelated compatible
+	// gateway.
+	CatalogURL        string
 	DiscoveryTimeout  time.Duration
 	StreamIdleTimeout time.Duration
 	CacheRoot         string
@@ -60,6 +67,7 @@ type Provider struct {
 	apiKey            string
 	defaultModel      string
 	client            *http.Client
+	catalogURL        string
 	discoveryTimeout  time.Duration
 	streamIdleTimeout time.Duration
 	cacheRoot         string
@@ -93,6 +101,10 @@ func New(cfg Config) (*Provider, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
+	catalogURL := strings.TrimSpace(cfg.CatalogURL)
+	if catalogURL == "" && base == DefaultBaseURL {
+		catalogURL = DefaultCatalogURL
+	}
 	discoveryTimeout := cfg.DiscoveryTimeout
 	if discoveryTimeout <= 0 {
 		discoveryTimeout = 5 * time.Second
@@ -114,7 +126,7 @@ func New(cfg Config) (*Provider, error) {
 	}
 	return &Provider{
 		baseURL: base, apiKey: strings.TrimSpace(cfg.APIKey), defaultModel: defaultModel, client: client,
-		discoveryTimeout: discoveryTimeout, streamIdleTimeout: idleTimeout,
+		catalogURL: catalogURL, discoveryTimeout: discoveryTimeout, streamIdleTimeout: idleTimeout,
 		cacheRoot: strings.TrimSpace(cfg.CacheRoot), retryDelays: append([]time.Duration(nil), retryDelays...),
 	}, nil
 }
