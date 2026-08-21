@@ -34,6 +34,10 @@ for await (const line of lines) {
   const request = JSON.parse(line);
   const id = request.id ?? "";
   switch (request.type) {
+    case "fatal_ignore_sigterm":
+      process.on("SIGTERM", () => {});
+      process.stdout.write("{not-json}\n");
+      break;
     case "crash":
       process.stderr.write("fixture process failure\n");
       process.exit(7);

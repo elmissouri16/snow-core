@@ -204,9 +204,12 @@ lifecycle diagnostics.
 Managed processes live across turns and branches in one active session but are
 not reconstructed from PIDs or session history. Session switching is rejected
 while one runs. Normal app shutdown sends group termination, escalates to group
-kill, and reaps children. A Snow `SIGKILL`, host crash, or command that creates a
-new session/process group can still leave work behind; Snow never claims durable
-supervisor semantics or attempts PID reattachment after restart.
+kill, and reaps children. External plugins and stdio MCP servers also start as
+process-group leaders; after their protocol-level graceful shutdown, Snow
+terminates and then kills any remaining group descendants within bounded waits.
+A Snow `SIGKILL`, host crash, or command that creates a new session/process group
+can still leave work behind; Snow never claims durable supervisor semantics or
+attempts PID reattachment after restart.
 
 Timeouts, cancellation, count/output caps, and process-group cleanup reduce
 runaway behavior but do not prevent a host command from reading secrets,

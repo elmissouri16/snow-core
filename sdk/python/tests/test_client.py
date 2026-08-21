@@ -301,6 +301,23 @@ class SnowClientTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await snow.close()
 
+    async def test_unknown_prompt_completion_is_nonfatal(self):
+        async with await SnowClient.start(fixture_options()) as snow:
+            snow._route({"type": "prompt_completed", "request_id": "evicted", "status": "canceled"})
+            self.assertIsNone(snow._failure)
+            self.assertEqual(snow.diagnostics[-1]["kind"], "unknown_prompt_completion")
+            self.assertEqual((await snow.session_info())["data"]["model"], "fake-1")
+
+    async def test_fatal_protocol_error_escalates_to_kill(self):
+        snow = await SnowClient.start(fixture_options(close_timeout=0.05))
+        try:
+            with self.assertRaises(SnowProtocolError):
+                await snow.request("fatal_ignore_sigterm")
+            await asyncio.wait_for(asyncio.shield(snow._wait_task), 1.0)
+            self.assertIsNotNone(snow._process.returncode)
+        finally:
+            await snow.close()
+
     def test_options_are_safe_and_external_binary_only(self):
         args = SnowOptions(command=("/opt/snow",)).argv()
         self.assertEqual(args[0], "/opt/snow")

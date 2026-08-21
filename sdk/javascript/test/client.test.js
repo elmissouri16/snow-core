@@ -292,6 +292,32 @@ test("version, protocol, process, and overflow errors are typed", async () => {
   }
 });
 
+test("unknown prompt completions are nonfatal diagnostics", async () => {
+  const snow = await Snow.start(fixtureOptions);
+  try {
+    snow._route({ type: "prompt_completed", request_id: "evicted", status: "canceled" });
+    assert.equal(snow.failure, null);
+    assert.equal(snow.diagnostics.at(-1).kind, "unknown_prompt_completion");
+    assert.equal((await snow.sessionInfo()).data.model, "fake-1");
+  } finally {
+    await snow.close();
+  }
+});
+
+test("fatal protocol errors escalate to SIGKILL", async () => {
+  const snow = await Snow.start({ ...fixtureOptions, closeTimeoutMs: 50 });
+  try {
+    await assert.rejects(snow.request("fatal_ignore_sigterm"), SnowProtocolError);
+    const exited = await Promise.race([
+      snow.closeState.promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("fatal child was not killed")), 1_000)),
+    ]);
+    assert.equal(exited.signal, "SIGKILL");
+  } finally {
+    await snow.close();
+  }
+});
+
 test("parity command wrappers use the expected RPC frames and typed data", async () => {
   const snow = await Snow.start(fixtureOptions);
   try {

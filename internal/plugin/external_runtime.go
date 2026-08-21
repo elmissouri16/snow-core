@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/elmissouri16/snow-core/internal/procgroup"
 	"github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -32,6 +33,9 @@ func SpawnExternal(ctx context.Context, spec plugin.PluginSpec, cwd string) (*Ex
 	cmd := exec.CommandContext(ctx, spec.Command[0], spec.Command[1:]...)
 	cmd.Dir = cwd
 	cmd.Env = append([]string(nil), spec.Env...)
+	if err := procgroup.Configure(cmd); err != nil {
+		return nil, fmt.Errorf("plugin %s: configure process group: %w", spec.ID, err)
+	}
 	if spec.Env == nil {
 		cmd.Env = []string{}
 	}
@@ -575,15 +579,22 @@ func (h *ExternalHost) Close(ctx context.Context) error {
 		if err := h.in.Close(); err != nil {
 			errs = append(errs, err)
 		}
+		leaderDone := false
 		select {
 		case <-h.waitDone:
+			leaderDone = true
 		case <-shutdownCtx.Done():
-			if h.cmd.Process != nil {
-				if err := h.cmd.Process.Kill(); err != nil {
-					errs = append(errs, err)
-				}
+		}
+		const cleanupGrace = 2 * time.Second
+		if err := procgroup.Shutdown(h.cmd.Process, cleanupGrace); err != nil {
+			errs = append(errs, err)
+		}
+		if !leaderDone {
+			select {
+			case <-h.waitDone:
+			case <-time.After(cleanupGrace):
+				errs = append(errs, errors.New("plugin process leader did not exit after group kill"))
 			}
-			<-h.waitDone
 		}
 		h.mu.Lock()
 		if h.waitErr != nil {

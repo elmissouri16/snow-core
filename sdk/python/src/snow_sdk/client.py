@@ -105,6 +105,7 @@ class SnowClient:
         self._reader_task: Optional[asyncio.Task[Any]] = None
         self._stderr_task: Optional[asyncio.Task[Any]] = None
         self._wait_task: Optional[asyncio.Task[Any]] = None
+        self._fatal_kill_handle: Optional[asyncio.TimerHandle] = None
         self._stderr_tail = bytearray()
         self._write_limit = options.max_frame_bytes
         self.diagnostics: list[JSONDict] = []
@@ -437,6 +438,9 @@ class SnowClient:
         if self._closed:
             return
         self._closing = True
+        if self._fatal_kill_handle is not None:
+            self._fatal_kill_handle.cancel()
+            self._fatal_kill_handle = None
         process = self._process
         if process is not None and process.stdin is not None and not process.stdin.is_closing():
             process.stdin.close()
@@ -528,6 +532,9 @@ class SnowClient:
     async def _wait_process(self) -> None:
         assert self._process is not None
         code = await self._process.wait()
+        if self._fatal_kill_handle is not None:
+            self._fatal_kill_handle.cancel()
+            self._fatal_kill_handle = None
         if self._stderr_task is not None:
             await self._stderr_task
         if not self._closing:
@@ -600,8 +607,12 @@ class SnowClient:
                 if request_id in self._abandoned_prompts:
                     self._abandoned_prompts.discard(request_id)
                     self._diagnose("late_prompt_completion", message)
-                    return
-                self._fatal(SnowProtocolError(f"completion for unknown prompt {request_id!r}"))
+                else:
+                    # A bounded abandoned-prompt set may have evicted this ID.
+                    # Unknown responses are already nonfatal; treat terminal
+                    # prompt frames the same way so a delayed completion cannot
+                    # tear down an otherwise healthy transport.
+                    self._diagnose("unknown_prompt_completion", message)
                 return
             status = str(message.get("status", ""))
             if status == "completed":
@@ -688,7 +699,21 @@ class SnowClient:
             try:
                 process.terminate()
             except ProcessLookupError:
-                pass
+                return
+            self._fatal_kill_handle = asyncio.get_running_loop().call_later(
+                self.options.close_timeout,
+                self._kill_after_fatal,
+                process,
+            )
+
+    def _kill_after_fatal(self, process: asyncio.subprocess.Process) -> None:
+        self._fatal_kill_handle = None
+        if process.returncode is not None:
+            return
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
 
     def _finish(self, error: BaseException, subscriptions_error: Optional[BaseException]) -> None:
         for future in list(self._pending.values()):

@@ -3,6 +3,7 @@
 
 import json
 import os
+import signal
 import sys
 import time
 
@@ -48,6 +49,11 @@ for line in sys.stdin:
     request = json.loads(line)
     request_id = request.get("id", "")
     command = request["type"]
+    if command == "fatal_ignore_sigterm":
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        sys.stdout.write("{not-json}\n")
+        sys.stdout.flush()
+        continue
     if command == "crash":
         print("fixture process failure", file=sys.stderr, flush=True)
         raise SystemExit(7)

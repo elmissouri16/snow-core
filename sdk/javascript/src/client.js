@@ -224,6 +224,7 @@ export class Snow {
     this.readyState = deferred();
     this.closeState = deferred();
     this.stdoutEndTimer = null;
+    this.fatalKillTimer = null;
   }
 
   static async start(options = {}) {
@@ -260,6 +261,10 @@ export class Snow {
       if (this.stdoutEndTimer) {
         clearTimeout(this.stdoutEndTimer);
         this.stdoutEndTimer = null;
+      }
+      if (this.fatalKillTimer) {
+        clearTimeout(this.fatalKillTimer);
+        this.fatalKillTimer = null;
       }
       this.closeState.resolve({ code, signal });
       if (!this.closing) {
@@ -409,6 +414,10 @@ export class Snow {
   async close() {
     if (this.closed) return;
     this.closing = true;
+    if (this.fatalKillTimer) {
+      clearTimeout(this.fatalKillTimer);
+      this.fatalKillTimer = null;
+    }
     this.handlerController.abort();
     if (this.child && this.child.exitCode === null && this.child.signalCode === null) {
       this.child.stdin.end();
@@ -542,11 +551,9 @@ export class Snow {
       const id = String(message.request_id ?? "");
       const state = this.prompts.get(id);
       if (!state) {
-        if (this.abandonedPrompts.delete(id)) {
-          this._diagnose("late_prompt_completion", message);
-          return;
-        }
-        return this._fatal(new SnowProtocolError(`completion for unknown prompt ${JSON.stringify(id)}`));
+        if (this.abandonedPrompts.delete(id)) this._diagnose("late_prompt_completion", message);
+        else this._diagnose("unknown_prompt_completion", message);
+        return;
       }
       this.prompts.delete(id);
       if (message.status === "completed") state.resolve({ requestId: id, status: "completed", raw: message });
@@ -616,7 +623,15 @@ export class Snow {
     this.failure = error;
     if (!this.ready) this.readyState.reject(error);
     this._finish(error, error);
-    if (!this.closing && this.child && this.child.exitCode === null) this.child.kill("SIGTERM");
+    if (!this.closing && this.child && this.child.exitCode === null && this.child.signalCode === null) {
+      const child = this.child;
+      child.kill("SIGTERM");
+      this.fatalKillTimer = setTimeout(() => {
+        this.fatalKillTimer = null;
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      }, this.options.closeTimeoutMs);
+      this.fatalKillTimer.unref?.();
+    }
   }
 
   _finish(error, iteratorError) {

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/elmissouri16/snow-core/internal/procgroup"
 )
 
 // boundedCommandTransport preserves the SDK command transport's process
@@ -21,6 +23,9 @@ type boundedCommandTransport struct {
 }
 
 func (t *boundedCommandTransport) Connect(ctx context.Context) (sdkmcp.Connection, error) {
+	if err := procgroup.Configure(t.command); err != nil {
+		return nil, fmt.Errorf("configure MCP subprocess group: %w", err)
+	}
 	stdout, err := t.command.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -96,19 +101,28 @@ func (p *commandProcess) close() error {
 		stdinErr := p.stdin.Close()
 		result := make(chan error, 1)
 		go func() { result <- p.command.Wait() }()
+
+		var waitErr error
+		leaderDone := false
 		select {
-		case waitErr := <-result:
-			p.err = errors.Join(stdinErr, waitErr)
-			return
+		case waitErr = <-result:
+			leaderDone = true
+			if !procgroup.Exists(p.command.Process) {
+				p.err = errors.Join(stdinErr, waitErr)
+				return
+			}
 		case <-time.After(p.timeout):
 		}
-		killErr := p.command.Process.Kill()
-		select {
-		case waitErr := <-result:
-			p.err = errors.Join(stdinErr, killErr, waitErr)
-		case <-time.After(p.timeout):
-			p.err = errors.Join(stdinErr, killErr, fmt.Errorf("MCP subprocess did not exit after kill"))
+
+		groupErr := procgroup.Shutdown(p.command.Process, p.timeout)
+		if !leaderDone {
+			select {
+			case waitErr = <-result:
+			case <-time.After(p.timeout):
+				waitErr = fmt.Errorf("MCP subprocess leader did not exit after group kill")
+			}
 		}
+		p.err = errors.Join(stdinErr, groupErr, waitErr)
 	})
 	return p.err
 }
