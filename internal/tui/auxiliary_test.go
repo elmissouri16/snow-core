@@ -89,7 +89,7 @@ func TestCustomPickerBindingDrivesRuntimeModelPicker(t *testing.T) {
 	}
 }
 
-func TestCustomThinkingBindingDrivesRuntimePicker(t *testing.T) {
+func TestCustomThinkingBindingCyclesRuntimeEffort(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	model := m.app.Agent.Model()
@@ -104,8 +104,8 @@ func TestCustomThinkingBindingDrivesRuntimePicker(t *testing.T) {
 	}
 	m.keys = keys
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
-	if !m.pickThinking {
-		t.Fatal("custom thinking shortcut did not open picker")
+	if m.pickThinking || m.app.Agent.Thinking() != protocol.ThinkingLow {
+		t.Fatalf("custom thinking shortcut picker=%v effort=%q", m.pickThinking, m.app.Agent.Thinking())
 	}
 }
 

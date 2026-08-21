@@ -375,6 +375,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case modeSwitchDoneMsg:
 		m.finishModeSwitch(msg)
+	case clearThinkingFlashMsg:
+		if uint64(msg) == m.thinkingFlashSeq {
+			m.thinkingFlash = false
+			m.layout()
+		}
 	case clearMetaEnterMsg:
 		messages := m.expireTerminalInput(uint64(msg))
 		if len(messages) == 0 && uint64(msg) == m.metaEnterSeq {

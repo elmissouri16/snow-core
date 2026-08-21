@@ -214,7 +214,7 @@ described in [Configuration](configuration.md).
 | `Ctrl+V` | Paste through the active textarea | Paste through the active textarea |
 | `Up` / `Down` | Browse prompts from the active session branch; Down past the newest restores the current draft | Same; recalled text can be submitted as steering or follow-up input |
 | `Shift+Tab` | Toggle Default/Plan mode | Queue mode change until `turn_done` |
-| `Ctrl+T` | Open the active model's thinking-effort picker | Open the picker; the selected effort applies to subsequent provider requests |
+| `Ctrl+T` | Cycle through the active model's supported thinking efforts | Cycle the effort; the header/footer briefly highlights the new value without adding a transcript entry |
 | `Alt+A` | Open the subagent fleet inspector | Open the inspector without interrupting the active turn |
 | `Alt+P` | Open the managed-process fleet inspector | Open the inspector without interrupting the active turn |
 | `Ctrl+C` | Quit | Abort, clear queued work, restore queued composer text, and defer active goal continuation |

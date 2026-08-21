@@ -188,6 +188,8 @@ type inlineExitMsg struct{}
 // recover split mouse, Shift+Tab, and Option+Return sequences.
 type clearMetaEnterMsg uint64
 
+type clearThinkingFlashMsg uint64
+
 type mentionFilesMsg struct {
 	cwd        string
 	generation uint64
@@ -473,6 +475,8 @@ type Model struct {
 	thinkingIndex         int
 	thinkingModel         *protocol.Model
 	thinkingReturnToModel bool
+	thinkingFlash         bool
+	thinkingFlashSeq      uint64
 
 	// Interactive permission picker state (allow/deny without typing).
 	permPending bool

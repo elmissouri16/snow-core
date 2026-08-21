@@ -246,7 +246,7 @@ func TestModelPermissionCommand(t *testing.T) {
 	}
 }
 
-func TestThinkingShortcutOpensPickerAndAppliesSelection(t *testing.T) {
+func TestThinkingShortcutCyclesAvailableEfforts(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	model := m.app.Agent.Model()
@@ -259,18 +259,39 @@ func TestThinkingShortcutOpensPickerAndAppliesSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.editor.SetValue("draft prompt")
+	lineCount := len(m.lines)
 
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlT})
-	if !m.pickThinking || m.thinkingList[m.thinkingIndex] != protocol.ThinkingLow {
-		t.Fatalf("thinking shortcut picker = open:%v levels:%v index:%d", m.pickThinking, m.thinkingList, m.thinkingIndex)
+	if m.pickThinking {
+		t.Fatal("thinking shortcut opened picker instead of cycling")
 	}
-	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyDown})
-	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyEnter})
 	if got := m.app.Agent.Thinking(); got != protocol.ThinkingHigh {
-		t.Fatalf("thinking = %q, want high", got)
+		t.Fatalf("first cycle thinking = %q, want high", got)
+	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlT})
+	if got := m.app.Agent.Thinking(); got != protocol.ThinkingOff {
+		t.Fatalf("second cycle thinking = %q, want off", got)
+	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlT})
+	if got := m.app.Agent.Thinking(); got != protocol.ThinkingLow {
+		t.Fatalf("wrapped cycle thinking = %q, want low", got)
 	}
 	if got := m.editor.Value(); got != "draft prompt" {
 		t.Fatalf("shortcut changed composer text to %q", got)
+	}
+	if len(m.lines) != lineCount {
+		t.Fatalf("thinking cycle added transcript lines: before=%d after=%d", lineCount, len(m.lines))
+	}
+	if !m.thinkingFlash {
+		t.Fatal("thinking cycle did not activate header flash")
+	}
+	_, _ = m.Update(clearThinkingFlashMsg(m.thinkingFlashSeq - 1))
+	if !m.thinkingFlash {
+		t.Fatal("stale flash timer cleared current feedback")
+	}
+	_, _ = m.Update(clearThinkingFlashMsg(m.thinkingFlashSeq))
+	if m.thinkingFlash {
+		t.Fatal("current flash timer did not clear feedback")
 	}
 }
 

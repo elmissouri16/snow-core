@@ -425,7 +425,11 @@ func (m *Model) renderHeader(status string) string {
 		maxMid = 4
 	}
 	midText = truncateRunes(midText, maxMid)
-	mid := styleHeaderDim.Render(midText)
+	midStyle := styleHeaderDim
+	if m.thinkingFlash {
+		midStyle = styleBrand
+	}
+	mid := midStyle.Render(midText)
 	used := lipgloss.Width(brand) + lipgloss.Width(mid) + lipgloss.Width(right)
 	pad := max(1, w-used)
 	return brand + mid + strings.Repeat(" ", pad) + right
@@ -568,7 +572,11 @@ func (m *Model) renderFooter() string {
 	if pad < 1 {
 		pad = 1
 	}
-	styledRight := styleFooter.Render(rightPrefix) + m.contextUsageStyle().Render(contextUsage)
+	runtimeStyle := styleFooter
+	if m.thinkingFlash {
+		runtimeStyle = styleBrand
+	}
+	styledRight := runtimeStyle.Render(rightPrefix) + m.contextUsageStyle().Render(contextUsage)
 	line += strings.Repeat(" ", pad) + styledRight
 	return styleFooter.Render(" ") + line
 }

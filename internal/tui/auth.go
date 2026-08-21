@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -446,6 +447,34 @@ func (m *Model) storedCredentialProviders() []string {
 		}
 	}
 	return providers
+}
+
+func (m *Model) cycleThinkingEffort() (tea.Model, tea.Cmd) {
+	if m.app == nil {
+		return m, nil
+	}
+	levels := m.app.Agent.Model().SupportedThinkingLevels()
+	if len(levels) == 0 {
+		return m, nil
+	}
+	current := m.app.Agent.Thinking()
+	next := levels[0]
+	for i, level := range levels {
+		if level == current {
+			next = levels[(i+1)%len(levels)]
+			break
+		}
+	}
+	if err := m.setThinking(next, false); err != nil {
+		m.pushLine(styleError.Render(err.Error()))
+		return m, nil
+	}
+	m.thinkingFlash = true
+	m.thinkingFlashSeq++
+	seq := m.thinkingFlashSeq
+	return m, tea.Tick(650*time.Millisecond, func(time.Time) tea.Msg {
+		return clearThinkingFlashMsg(seq)
+	})
 }
 
 func (m *Model) startThinkingPick() (tea.Model, tea.Cmd) {

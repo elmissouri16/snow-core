@@ -694,14 +694,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Top-level shortcuts open fleet inspectors or the thinking picker, or cycle
+	// Top-level shortcuts open fleet inspectors, cycle thinking effort, or cycle
 	// collaboration mode. Every modal/completion path above retains its existing
 	// navigation semantics.
 	if handled, cmd := m.handleFleetShortcut(msg); handled {
 		return m, cmd
 	}
 	if keyMatches(msg, m.keys.Thinking) {
-		return m.startThinkingPick()
+		return m.cycleThinkingEffort()
 	}
 	if keyMatches(msg, m.keys.Mode) {
 		return m, m.toggleCollaborationMode()

@@ -25,6 +25,13 @@ also include the generated GitHub comparison for the tagged commit.
   `Alt+P` opens the process fleet and `Alt+A` opens the subagent fleet, including
   during active turns; both bindings are configurable.
 
+### Changed
+
+- Changed the `Ctrl+T` thinking shortcut to cycle directly through the active
+  model's supported efforts instead of opening a picker or adding transcript
+  entries. The header/footer briefly highlights each change, while `/thinking`
+  still supports explicit selection.
+
 ### Removed
 
 - Removed the optional smolvm Bash sandbox end to end: runtime routing, CLI/TUI

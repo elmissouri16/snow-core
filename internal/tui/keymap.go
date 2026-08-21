@@ -54,7 +54,7 @@ var tuiKeys = tuiKeyMap{
 	Abort:          key.NewBinding(key.WithKeys("ctrl+c", "esc"), key.WithHelp("ctrl+c/esc", "abort")),
 	Quit:           key.NewBinding(key.WithKeys("ctrl+c", "ctrl+d"), key.WithHelp("ctrl+c/ctrl+d", "quit")),
 	Mode:           key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "mode")),
-	Thinking:       key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "thinking")),
+	Thinking:       key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "cycle thinking")),
 	Agents:         key.NewBinding(key.WithKeys("alt+a"), key.WithHelp("alt+a", "agent fleet")),
 	Processes:      key.NewBinding(key.WithKeys("alt+p"), key.WithHelp("alt+p", "process fleet")),
 	PageUp:         key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")),
