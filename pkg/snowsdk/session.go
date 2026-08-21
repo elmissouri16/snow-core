@@ -313,6 +313,25 @@ func (s *Session) InterruptSubagent(ctx context.Context, target string) (protoco
 	return a.InterruptSubagent(ctx, target)
 }
 
+// CloseSubagent releases a terminal child's open-agent slot while preserving
+// its stable identity and durable history. It returns the previous status.
+func (s *Session) CloseSubagent(ctx context.Context, target string) (protocol.AgentStatus, error) {
+	a, e := s.activeApp()
+	if e != nil {
+		return protocol.AgentNotFound, e
+	}
+	return a.CloseSubagent(ctx, target)
+}
+
+// ResumeSubagent reopens a closed identity without starting a turn.
+func (s *Session) ResumeSubagent(ctx context.Context, target string) (protocol.SubagentState, error) {
+	a, e := s.activeApp()
+	if e != nil {
+		return protocol.SubagentState{}, e
+	}
+	return a.ResumeSubagent(ctx, target)
+}
+
 // Subagents returns bounded snapshots for the root and its visible descendants.
 func (s *Session) Subagents() []protocol.SubagentState {
 	a, e := s.activeApp()

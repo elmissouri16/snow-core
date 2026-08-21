@@ -131,13 +131,13 @@ func TestSubagentDuplicateRollbackAndDelegationRisk(t *testing.T) {
 	if _, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{Name: "same", Task: "two", ForkTurns: "none"}); err == nil {
 		t.Fatal("duplicate accepted")
 	}
-	for _, name := range []string{"spawn_agent", "followup_task"} {
+	for _, name := range []string{"spawn_agent", "followup_task", "resume_agent"} {
 		desc, ok := a.Registry.Descriptor(name)
 		if !ok || desc.Risk != permission.RiskDelegate {
 			t.Fatalf("%s risk=%q", name, desc.Risk)
 		}
 	}
-	for _, name := range []string{"send_message", "wait_agent", "interrupt_agent", "list_agents"} {
+	for _, name := range []string{"send_message", "wait_agent", "interrupt_agent", "close_agent", "list_agents"} {
 		desc, ok := a.Registry.Descriptor(name)
 		if !ok || desc.Risk != permission.RiskRead {
 			t.Fatalf("%s risk=%q", name, desc.Risk)
@@ -216,6 +216,98 @@ func TestDefaultDurableSubagentColdResumeDoesNotRestart(t *testing.T) {
 	}
 	if events == 0 {
 		t.Fatal("ready did not publish restored topology")
+	}
+}
+
+func TestClosedDurableSubagentPreservesHistoryAndCapacityAcrossResume(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.DefaultProvider = "fake"
+	cfg.Subagents.Enabled = true
+	cfg.Subagents.MaxConcurrentThreads = 1
+	cfg.Subagents.MaxAgentsPerSession = 1
+	configPath := filepath.Join(dir, "config.json")
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	rootPath := filepath.Join(dir, "root.db")
+	newApp := func() *App {
+		a, err := New(context.Background(), Options{CWD: dir, ConfigPath: configPath, SessionPath: rootPath, NoPlugins: true, NoMCP: true, NoSkills: true, Permission: "allow"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.ReadySubagents(); err != nil {
+			a.Close()
+			t.Fatal(err)
+		}
+		return a
+	}
+
+	a := newApp()
+	first, err := a.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{Name: "archived", Task: "inspect", ForkTurns: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := awaitSubagent(t, a, string(first.Agent.Path), protocol.AgentCompleted)
+	previous, err := a.CloseSubagent(context.Background(), string(first.Agent.Path))
+	if err != nil || previous != protocol.AgentCompleted {
+		t.Fatalf("close previous=%s err=%v", previous, err)
+	}
+	closed := awaitSubagent(t, a, string(first.Agent.Path), protocol.AgentClosed)
+	if closed.Result != completed.Result || closed.Usage == nil {
+		t.Fatalf("closed metadata lost: completed=%+v closed=%+v", completed, closed)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened := newApp()
+	defer reopened.Close()
+	restored, err := reopened.Subagent(context.Background(), string(first.Agent.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Status != protocol.AgentClosed || restored.Agent.ThreadID != first.Agent.ThreadID || restored.Result != completed.Result {
+		t.Fatalf("restored closed identity=%+v", restored)
+	}
+	messages, err := reopened.SubagentMessages(context.Background(), string(first.Agent.Path))
+	if err != nil || len(messages) == 0 {
+		t.Fatalf("restored transcript messages=%d err=%v", len(messages), err)
+	}
+	list, err := reopened.ListSubagents(context.Background(), "")
+	if err != nil || list.Open != 0 || list.Closed != 1 {
+		t.Fatalf("restored list=%+v err=%v", list, err)
+	}
+	replacement, err := reopened.SpawnSubagent(context.Background(), protocol.SpawnSubagentRequest{Name: "replacement", Task: "inspect", ForkTurns: "none"})
+	if err != nil {
+		t.Fatalf("closed durable identity still consumed capacity: %v", err)
+	}
+	awaitSubagent(t, reopened, string(replacement.Agent.Path), protocol.AgentCompleted)
+	if _, err := reopened.CloseSubagent(context.Background(), string(replacement.Agent.Path)); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.FollowupSubagent(context.Background(), string(first.Agent.Path), "inspect again"); err != nil {
+		t.Fatal(err)
+	}
+	continued := awaitSubagent(t, reopened, string(first.Agent.Path), protocol.AgentCompleted)
+	if continued.Agent.ThreadID != first.Agent.ThreadID || continued.Agent.Path != first.Agent.Path {
+		t.Fatalf("followup replaced closed identity: first=%+v continued=%+v", first.Agent, continued.Agent)
+	}
+	if _, err := reopened.CloseSubagent(context.Background(), string(first.Agent.Path)); err != nil {
+		t.Fatal(err)
+	}
+	list, err = reopened.ListSubagents(context.Background(), "")
+	if err != nil || list.Open != 0 || list.Closed != 2 {
+		t.Fatalf("second close did not release capacity: list=%+v err=%v", list, err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	final := newApp()
+	defer final.Close()
+	list, err = final.ListSubagents(context.Background(), "")
+	if err != nil || list.Open != 0 || list.Closed != 2 {
+		t.Fatalf("closed histories above open limit did not restore: list=%+v err=%v", list, err)
 	}
 }
 

@@ -353,6 +353,8 @@ export declare class Snow {
   subagentFollowup(target: string, message: string): Promise<RPCResponse>;
   subagentWait(options?: {timeoutMs?: number; until?: "activity" | "all"}): Promise<RPCResponse>;
   subagentInterrupt(target: string): Promise<RPCResponse>;
+  subagentClose(target: string): Promise<RPCResponse>;
+  subagentResume(target: string): Promise<RPCResponse>;
   subagentList(pathPrefix?: string): Promise<RPCResponse>;
   subagentGet(target: string): Promise<RPCResponse>;
   subagentReady(): Promise<RPCResponse>;

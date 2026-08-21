@@ -889,10 +889,11 @@ persistence, and shutdown. Every child is an ordinary `internal/agent.Agent`;
 `agent` does not import `subagent`, and collaboration enters through
 registered tools plus a generic attributed mailbox.
 
-The seven direct model tools are `spawn_agent`, `list_subagent_models`,
-`send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and
-`list_agents`. Tool instances bind caller identity. Spawn and follow-up use
-`permission.RiskDelegate`; remaining controls use read risk. `wait_agent`
+The nine direct model tools are `spawn_agent`, `list_subagent_models`,
+`send_message`, `followup_task`, `wait_agent`, `interrupt_agent`,
+`close_agent`, `resume_agent`, and `list_agents`. Tool instances bind caller
+identity. Spawn, follow-up, and resume use `permission.RiskDelegate`; remaining
+controls use read risk. `wait_agent`
 supports the original next-activity barrier and an `until=all` descendant join
 with aggregate running/queued/terminal counts; SDK and RPC expose the same
 bounded join.
@@ -924,7 +925,11 @@ load lazily. Cold open never restarts work; surfaces subscribe and call
 manager before closing the root event bus and shared resources. Active
 children block root-session switching; after all children reach a terminal
 state, switching sessions detaches the old in-memory runtimes and restores the
-target session's topology.
+target session's topology. The per-session agent limit counts open identities,
+not historical closed ones. Closing a terminal durable child unloads its
+runtime but preserves its stable path, thread ID, transcript, result, usage,
+and topology; resume re-admits it, while follow-up resumes closed targets
+automatically when capacity permits.
 
 The shared cwd and OS authority are not a sandbox. Parallel edits can
 conflict, provider usage is independent, and child/repository output is

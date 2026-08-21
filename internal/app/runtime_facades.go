@@ -680,6 +680,20 @@ func (a *App) InterruptSubagent(ctx context.Context, target string) (protocol.Ag
 	return a.Subagents.Interrupt(ctx, a.Subagents.RootCaller(), target)
 }
 
+func (a *App) CloseSubagent(ctx context.Context, target string) (protocol.AgentStatus, error) {
+	if a.Subagents == nil {
+		return protocol.AgentNotFound, errors.New("app: subagents disabled")
+	}
+	return a.Subagents.CloseAgent(ctx, a.Subagents.RootCaller(), target)
+}
+
+func (a *App) ResumeSubagent(ctx context.Context, target string) (protocol.SubagentState, error) {
+	if a.Subagents == nil {
+		return protocol.SubagentState{}, errors.New("app: subagents disabled")
+	}
+	return a.Subagents.ResumeAgent(ctx, a.Subagents.RootCaller(), target)
+}
+
 func (a *App) ListSubagents(ctx context.Context, prefix string) (protocol.SubagentList, error) {
 	if a.Subagents == nil {
 		return protocol.SubagentList{}, nil

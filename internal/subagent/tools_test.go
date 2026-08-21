@@ -84,6 +84,11 @@ func TestManagerToolsDriveLifecycle(t *testing.T) {
 	run("wait_agent", map[string]any{"timeout_ms": 200, "until": "all"})
 	awaitToolState(t, m, "inspect", protocol.AgentCompleted)
 
+	run("close_agent", map[string]any{"target": "inspect"})
+	awaitToolState(t, m, "inspect", protocol.AgentClosed)
+	run("resume_agent", map[string]any{"target": "inspect"})
+	awaitToolState(t, m, "inspect", protocol.AgentNotLoaded)
+
 	// A second task exercises interrupt_agent while its initial turn is active.
 	run("spawn_agent", map[string]any{"name": "stop", "task": "long task", "fork_turns": "none"})
 	awaitToolState(t, m, "stop", protocol.AgentRunning)

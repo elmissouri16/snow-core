@@ -23,8 +23,12 @@ func (m *Model) updateComposerEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		msg = tea.KeyMsg{Type: tea.KeyCtrlV}
 	}
 	textMayChange := composerEditorKeyMayChange(msg, m.editor.KeyMap)
+	previous := m.editor.Value()
 	var cmd tea.Cmd
 	m.editor, cmd = m.editor.Update(msg)
+	if m.editor.Value() != previous {
+		m.resetInputHistoryNavigation()
+	}
 	if msg.Type == tea.KeyEsc {
 		m.compVisible = false
 		return m, nil
@@ -73,6 +77,7 @@ func composerEditorKeyMayChange(msg tea.KeyMsg, keyMap textarea.KeyMap) bool {
 // pickCompletion selects a palette entry: commands needing args are inserted
 // into the editor for completion; argument-free commands run immediately.
 func (m *Model) insertCompletion(name string) (tea.Model, tea.Cmd) {
+	m.resetInputHistoryNavigation()
 	suffix := ""
 	if spec, ok := commandByExact(name); ok && spec.needsArgs() {
 		suffix = " "
@@ -87,6 +92,7 @@ func (m *Model) insertCompletion(name string) (tea.Model, tea.Cmd) {
 func (m *Model) pickCompletion(name string) (tea.Model, tea.Cmd) {
 	m.compVisible = false
 	if spec, ok := commandByExact(name); ok && spec.needsArgs() {
+		m.resetInputHistoryNavigation()
 		m.editor.SetValue(name + " ")
 		m.editor.CursorEnd()
 		m.refreshPalette()
@@ -174,6 +180,7 @@ func (m *Model) refreshMentionsFor(text string) tea.Cmd {
 }
 
 func (m *Model) insertMention(path string) (tea.Model, tea.Cmd) {
+	m.resetInputHistoryNavigation()
 	text := m.editor.Value()
 	_, start, ok := mentionQuery(text)
 	if !ok {
@@ -470,6 +477,7 @@ func (m *Model) startQueueFallback() tea.Cmd {
 	}
 	msg := m.queueFallbacks[0]
 	m.queueFallbacks = m.queueFallbacks[1:]
+	m.rememberInputHistory(msg.text)
 	// The fallback is semantically the steer that narrowly missed admission;
 	// defer any already queued collaboration-mode transition until this prompt's
 	// own turn_done boundary.
@@ -490,7 +498,7 @@ func (m *Model) startQueueFallback() tea.Cmd {
 		_, beforeID, _ := m.app.Agent.ActiveTurn()
 		err := m.app.Agent.Prompt(ctx, msg.expanded)
 		_, turnID, running := m.app.Agent.ActiveTurn()
-		return promptDoneMsg{generation: generation, turnID: turnID, admitted: running || (turnID != "" && turnID != beforeID), err: err}
+		return promptDoneMsg{generation: generation, turnID: turnID, admitted: running || (turnID != "" && turnID != beforeID), historyText: msg.text, err: err}
 	}
 	return promptCmd
 }
@@ -529,13 +537,15 @@ func (m *Model) startPrompt(text string) tea.Cmd {
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
-	prompt := m.expandedPrompt(stripImageAttachmentTokens(text, len(m.promptImages)))
+	historyText := stripImageAttachmentTokens(text, len(m.promptImages))
+	m.rememberInputHistory(historyText)
+	prompt := m.expandedPrompt(historyText)
 	images := m.takePromptImages()
 	return func() tea.Msg {
 		err := m.app.Agent.PromptContent(ctx, prompt, images)
 		_, turnID, _ := m.app.Agent.ActiveTurn()
 		admitted := err == nil || !errors.Is(err, agent.ErrPromptRejected)
-		return promptDoneMsg{generation: generation, turnID: turnID, admitted: admitted, text: text, attachments: images, err: err}
+		return promptDoneMsg{generation: generation, turnID: turnID, admitted: admitted, text: text, historyText: historyText, attachments: images, err: err}
 	}
 }
 

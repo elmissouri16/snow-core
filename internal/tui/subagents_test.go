@@ -80,7 +80,7 @@ func TestSubagentToolRenderingIsCompact(t *testing.T) {
 	}
 	list, handled := renderSubagentToolSummary("list_agents", `{"running":0,"queued":0,"terminal":3,"concurrent_limit":4,"agent_limit":32}`)
 	plainList := stripANSI(list)
-	if !handled || !strings.Contains(plainList, "0 running · 0 queued · 3 finished") || !strings.Contains(plainList, "capacity 0/4 · identities 3/32") {
+	if !handled || !strings.Contains(plainList, "0 running · 0 queued · 3 finished") || !strings.Contains(plainList, "capacity 0/4 · open 3/32") {
 		t.Fatalf("list summary handled=%v output=%q", handled, plainList)
 	}
 	if output, handled := renderSubagentToolSummary("spawn_agent", `{"status":"queued"}`); !handled || output != "" {

@@ -31,7 +31,7 @@ func fleetTestModel(t *testing.T) *Model {
 			fleetTestState("one", "/root/one", protocol.AgentRunning),
 			fleetTestState("two", "/root/two", protocol.AgentCompleted),
 		},
-		Running: 1, Terminal: 1, ConcurrentLimit: 4, AgentLimit: 32,
+		Running: 1, Terminal: 1, Open: 2, ConcurrentLimit: 4, AgentLimit: 32,
 	}
 	return m
 }
@@ -172,13 +172,29 @@ func TestSubagentFleetListKeepsIdentityAndModelVisible(t *testing.T) {
 	}
 }
 
+func TestSubagentFleetPreservesAuthoritativeCapacityAndTreatsNotLoadedAsTerminal(t *testing.T) {
+	m := fleetTestModel(t)
+	m.subagentFleetGeneration = 9
+	list := protocol.SubagentList{
+		Agents:     []protocol.SubagentState{fleetTestState("idle", "/root/idle", protocol.AgentNotLoaded)},
+		Open:       7,
+		Closed:     5,
+		AgentLimit: 32,
+		Truncated:  true,
+	}
+	_ = m.applySubagentFleetList(subagentFleetListMsg{generation: 9, list: list})
+	if m.subagentFleetList.Open != 7 || m.subagentFleetList.Closed != 5 || m.subagentFleetList.Terminal != 1 || m.subagentFleetList.Queued != 0 {
+		t.Fatalf("fleet aggregates=%+v", m.subagentFleetList)
+	}
+}
+
 func TestSubagentFleetCountsExcludeRootAndSnapshotsDoNotRegress(t *testing.T) {
 	m := fleetTestModel(t)
 	root := fleetTestState("root", "/root", protocol.AgentRunning)
 	root.Agent.ParentThreadID, root.Agent.ParentPath, root.Agent.Role, root.Agent.Depth = "", "", "root", 0
 	m.subagentFleetList.Agents = append([]protocol.SubagentState{root}, m.subagentFleetList.Agents...)
 	m.subagentFleetIndex = 1
-	m.recountSubagentFleet()
+	m.recountSubagentFleet(false)
 	if m.subagentFleetList.Running != 1 || m.subagentFleetList.Terminal != 1 {
 		t.Fatalf("root affected child counts: %+v", m.subagentFleetList)
 	}

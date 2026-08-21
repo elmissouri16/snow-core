@@ -388,6 +388,8 @@ provider branding.
 | `WaitSubagents(ctx, timeout)` | Wait for one activity or lifecycle change |
 | `WaitSubagentsUntilAll(ctx, timeout)` | Wait until every root child is terminal or the timeout expires |
 | `InterruptSubagent(ctx, target)` | Cancel only the target's current turn |
+| `CloseSubagent(ctx, target)` | Release a terminal child's open-agent slot while preserving identity and history |
+| `ResumeSubagent(ctx, target)` | Reopen a closed identity without starting a turn |
 | `Subagents()` | Return snapshots for the root and its visible descendants |
 | `Subagent(target)` | Inspect one child by canonical path or supported identifier |
 | `SubagentUsage()` | Aggregate child usage |
@@ -399,7 +401,10 @@ SDK names are strict lowercase segments under `/root` with letters, digits, and
 underscores. Unlike the model-facing tool, the SDK does not normalize hyphens.
 
 `Subagents()` includes the root snapshot as well as visible descendants; do not
-interpret its length as the child count. Terminal child snapshots can expose
+interpret its length as the open-child count. Closed children remain visible
+with status `closed`, retain their stable paths, and do not consume the
+open-agent limit. `FollowupSubagent` automatically resumes a closed target when
+capacity permits. Terminal child snapshots can expose
 bounded `Result`, `Error`, `Usage`, and `Generation` metadata. Wait results
 contain aggregate state, not full private child content. Results and mail
 arrive live through attributed `AgentEvent` and `AgentMessage` values. The SDK

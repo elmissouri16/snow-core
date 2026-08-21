@@ -62,6 +62,8 @@ class SnowClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(diagnostics["data"]["diagnostics"][0]["path"], "tui.theme")
             self.assertEqual((await snow.set_reasoning_summary("concise"))["command"], "set_reasoning_summary")
             self.assertEqual((await snow.set_text_verbosity("high"))["command"], "set_text_verbosity")
+            self.assertEqual((await snow.subagent_close("/root/reviewer"))["command"], "subagent_close")
+            self.assertEqual((await snow.subagent_resume("/root/reviewer"))["command"], "subagent_resume")
 
             mcp = await snow.mcp_servers()
             self.assertEqual(mcp["command"], "mcp_servers")

@@ -391,6 +391,12 @@ class SnowClient:
     async def subagent_interrupt(self, target: str) -> JSONDict:
         return await self.request("subagent_interrupt", params={"target": target})
 
+    async def subagent_close(self, target: str) -> JSONDict:
+        return await self.request("subagent_close", params={"target": target})
+
+    async def subagent_resume(self, target: str) -> JSONDict:
+        return await self.request("subagent_resume", params={"target": target})
+
     async def subagent_list(self, path_prefix: str = "") -> JSONDict:
         fields: JSONDict = {}
         if path_prefix:

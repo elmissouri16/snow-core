@@ -16,7 +16,7 @@ import (
 )
 
 func (m *Manager) evictIdle() {
-	if !m.limits.Durable || m.limits.MaxLoadedChildren < 1 {
+	if m.limits.MaxLoadedChildren < 1 {
 		return
 	}
 	for {
@@ -32,7 +32,7 @@ func (m *Manager) evictIdle() {
 		for _, id := range m.order {
 			r := m.byID[id]
 			r.mu.Lock()
-			if r.child != nil {
+			if r.child != nil && r.record.ChildSessionPath != "" {
 				loaded++
 				candidates = append(candidates, r)
 			}
@@ -80,7 +80,9 @@ func (m *Manager) evictIdle() {
 			r.workerStop = nil
 			r.workerDone = nil
 			r.mu.Unlock()
-			m.setStatus(r, protocol.AgentNotLoaded, "", "")
+			if status != protocol.AgentClosed {
+				m.setStatus(r, protocol.AgentNotLoaded, "", "")
+			}
 			unlockRoot()
 			if workerStop != nil {
 				close(workerStop)
@@ -254,7 +256,7 @@ func (m *Manager) setStatus(r *runtime, status protocol.AgentStatus, result, err
 	if persistErr != nil {
 		m.emit(protocol.AgentEvent{Type: protocol.EvError, Agent: state.Agent.Clone(), Message: state.Error})
 	}
-	if state.Status.Terminal() {
+	if state.Status.TerminalOutcome() {
 		m.emitTerminalStatus(r, &state)
 	} else {
 		m.emit(protocol.AgentEvent{Type: protocol.EvSubagentStatus, Agent: state.Agent.Clone(), Subagent: state.Clone()})
@@ -285,7 +287,7 @@ func validTransition(from, to protocol.AgentStatus) bool {
 	case protocol.AgentRunning:
 		return to == protocol.AgentCompleted || to == protocol.AgentInterrupted || to == protocol.AgentErrored || to == protocol.AgentShutdown
 	case protocol.AgentCompleted, protocol.AgentInterrupted, protocol.AgentErrored, protocol.AgentNotLoaded:
-		return to == protocol.AgentQueued || to == protocol.AgentRunning || to == protocol.AgentErrored || to == protocol.AgentShutdown || to == protocol.AgentNotLoaded
+		return to == protocol.AgentQueued || to == protocol.AgentRunning || to == protocol.AgentErrored || to == protocol.AgentShutdown || to == protocol.AgentNotLoaded || to == protocol.AgentClosed
 	}
 	return false
 }

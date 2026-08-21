@@ -31,6 +31,17 @@ func TestAgentPathValidationAndResolution(t *testing.T) {
 	}
 }
 
+func TestIdleAgentStatusesAreValidAndTerminal(t *testing.T) {
+	for _, status := range []AgentStatus{AgentClosed, AgentNotLoaded} {
+		if !status.Valid() || !status.Terminal() {
+			t.Fatalf("%s status must be a valid terminal lifecycle state", status)
+		}
+	}
+	if !AgentClosed.TerminalOutcome() || AgentNotLoaded.TerminalOutcome() {
+		t.Fatal("closed is a visible outcome; not_loaded is only an idle terminal state")
+	}
+}
+
 func TestSpawnSubagentRequestUsesClearJSONNames(t *testing.T) {
 	req := SpawnSubagentRequest{Name: "api_review", Task: "Review the API", Role: "explorer", Provider: "opencode-go", Model: "model-x"}
 	raw, err := json.Marshal(req)

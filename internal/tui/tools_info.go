@@ -18,7 +18,7 @@ import (
 
 func renderSubagentToolSummary(toolName, output string) (string, bool) {
 	switch toolName {
-	case "spawn_agent", "send_message", "followup_task", "interrupt_agent":
+	case "spawn_agent", "send_message", "followup_task", "interrupt_agent", "close_agent", "resume_agent":
 		return "", true
 	case "wait_agent":
 		var result protocol.WaitSubagentsResult
@@ -40,6 +40,8 @@ func renderSubagentToolSummary(toolName, output string) (string, bool) {
 			Running         int `json:"running"`
 			Queued          int `json:"queued"`
 			Terminal        int `json:"terminal"`
+			Open            int `json:"open"`
+			Closed          int `json:"closed"`
 			ConcurrentLimit int `json:"concurrent_limit"`
 			AgentLimit      int `json:"agent_limit"`
 		}
@@ -47,7 +49,15 @@ func renderSubagentToolSummary(toolName, output string) (string, bool) {
 			return "", false
 		}
 		status := formatSubagentCounts(result.Running, result.Queued, result.Terminal)
-		status += fmt.Sprintf(" · capacity %d/%d · identities %d/%d", result.Running, result.ConcurrentLimit, result.Running+result.Queued+result.Terminal, result.AgentLimit)
+		open := result.Open
+		if open == 0 && result.Closed == 0 {
+			// Compatibility with older list_agents output.
+			open = result.Running + result.Queued + result.Terminal
+		}
+		status += fmt.Sprintf(" · capacity %d/%d · open %d/%d", result.Running, result.ConcurrentLimit, open, result.AgentLimit)
+		if result.Closed != 0 {
+			status += fmt.Sprintf(" · %d closed", result.Closed)
+		}
 		return styleHeaderDim.Render("  ↳ " + status), true
 	default:
 		return "", false

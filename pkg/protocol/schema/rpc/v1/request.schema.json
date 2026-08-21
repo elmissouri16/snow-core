@@ -656,8 +656,10 @@
         },
         "type": {
           "enum": [
+            "subagent_close",
             "subagent_get",
-            "subagent_interrupt"
+            "subagent_interrupt",
+            "subagent_resume"
           ]
         },
         "params": {

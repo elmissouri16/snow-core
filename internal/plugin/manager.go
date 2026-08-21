@@ -150,7 +150,10 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		if p.goPlugin != nil {
 			if ext, ok := p.goPlugin.(*externalPlaceholder); ok {
 				external = true
-				host, spawnErr := SpawnExternal(ctx, ext.spec, m.options.CWD)
+				// The manager owns the process for the full app lifetime. Keep the
+				// startup context on handshake calls, but do not let cancellation
+				// kill the child before Close can send its graceful shutdown request.
+				host, spawnErr := SpawnExternal(context.WithoutCancel(ctx), ext.spec, m.options.CWD)
 				if spawnErr != nil {
 					err = spawnErr
 				} else {

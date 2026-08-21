@@ -51,7 +51,7 @@
       "required": ["agent", "status", "created_at"],
       "properties": {
         "agent": {"$ref": "#/$defs/agentRef"},
-        "status": {"type": "string", "enum": ["pending_init", "queued", "running", "interrupted", "completed", "errored", "shutdown", "not_loaded", "not_found"]},
+        "status": {"type": "string", "enum": ["pending_init", "queued", "running", "interrupted", "completed", "errored", "shutdown", "closed", "not_loaded", "not_found"]},
         "model": {"type": "string"},
         "provider": {"type": "string"},
         "thinking": {"type": "string"},

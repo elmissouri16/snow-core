@@ -212,6 +212,7 @@ described in [Configuration](configuration.md).
 | `Alt+Enter` | Insert newline where reported as Meta/Alt | Queue a follow-up after steering and ordinary work settle |
 | `Ctrl+J` | Insert a reliable newline | Insert a reliable newline |
 | `Ctrl+V` | Paste through the active textarea | Paste through the active textarea |
+| `Up` / `Down` | Browse prompts from the active session branch; Down past the newest restores the current draft | Same; recalled text can be submitted as steering or follow-up input |
 | `Shift+Tab` | Toggle Default/Plan mode | Queue mode change until `turn_done` |
 | `Ctrl+T` | Open the active model's thinking-effort picker | Open the picker; the selected effort applies to subsequent provider requests |
 | `Alt+A` | Open the subagent fleet inspector | Open the inspector without interrupting the active turn |
@@ -227,6 +228,12 @@ described in [Configuration](configuration.md).
 | `PageUp` / `PageDown` | Scroll transcript viewport | Same |
 | `Home` / `End` | Jump transcript viewport | Same |
 | `Ctrl+Up` / `Ctrl+Down` | Scroll viewport by line | Same |
+
+Prompt history is branch-scoped and is rebuilt from all durable user messages
+when a session is opened or resumed. Up starts history browsing from an empty or
+single-line draft; multiline drafts keep normal textarea arrow navigation. Once
+history browsing starts, Up and Down traverse multiline entries too, and Down
+past the newest entry restores the draft that was present before browsing.
 
 Choice pickers accept arrows, `j`/`k`, Tab/Shift+Tab, Home/End, and Enter. The
 model picker also accepts `/` to search provider IDs, model IDs, display names,

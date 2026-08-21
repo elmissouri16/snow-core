@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,7 @@ type mockChild struct {
 	delay       time.Duration
 	active, max *atomic.Int32
 	cancel      context.CancelFunc
+	enqueueErr  error
 }
 
 func (c *mockChild) turn(ctx context.Context, text string) error {
@@ -59,6 +61,9 @@ func (c *mockChild) Prompt(ctx context.Context, s string) error {
 }
 func (c *mockChild) RunMailbox(ctx context.Context) error { return c.turn(ctx, "follow") }
 func (c *mockChild) EnqueueMailbox(m protocol.AgentMessage) error {
+	if c.enqueueErr != nil {
+		return c.enqueueErr
+	}
 	c.mu.Lock()
 	c.messages = append(c.messages, protocol.NewAgentMessage(m.ID, "", m))
 	c.mu.Unlock()
@@ -338,7 +343,7 @@ func TestManagerExecutionSlotsAndStableList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if list.ConcurrentLimit != 2 || list.Running != 0 || list.Queued != 0 || list.Terminal != 3 || list.AgentLimit != 8 {
+	if list.ConcurrentLimit != 2 || list.Running != 0 || list.Queued != 0 || list.Terminal != 3 || list.Open != 3 || list.Closed != 0 || list.AgentLimit != 8 {
 		t.Fatalf("list summary=%+v", list)
 	}
 	want := []protocol.AgentPath{"/root", "/root/one", "/root/two", "/root/three"}
@@ -349,6 +354,227 @@ func TestManagerExecutionSlotsAndStableList(t *testing.T) {
 	}
 	if err := m.Close(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCloseReleasesOpenAgentCapacityAndFollowupResumes(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	root := rootAgent(t, st)
+	defer root.Close()
+	var active, maxActive atomic.Int32
+	m := New(context.Background(), Limits{
+		MaxConcurrentThreads: 1, MaxAgentsPerSession: 1, MaxDepth: 1,
+		TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second,
+		DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}},
+	})
+	factory := ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
+		return &mockChild{delay: time.Millisecond, active: &active, max: &maxActive}, nil
+	})
+	if err := m.Bind(root, factory, root.Publish, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(context.Background())
+	caller := m.RootCaller()
+
+	first, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{Name: "first", Task: "one", ForkTurns: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitToolState(t, m, string(first.Agent.Path), protocol.AgentCompleted)
+	if _, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{Name: "blocked", Task: "two", ForkTurns: "none"}); err == nil || !strings.Contains(err.Error(), "open-agent limit") {
+		t.Fatalf("spawn at open-agent capacity error=%v", err)
+	}
+	previous, err := m.CloseAgent(context.Background(), caller, "first")
+	if err != nil || previous != protocol.AgentCompleted {
+		t.Fatalf("close previous=%s err=%v", previous, err)
+	}
+	awaitToolState(t, m, "first", protocol.AgentClosed)
+	list, err := m.List(context.Background(), caller, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.Open != 0 || list.Closed != 1 || list.Terminal != 1 || list.AgentLimit != 1 {
+		t.Fatalf("closed list summary=%+v", list)
+	}
+	if _, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{Name: "first", Task: "replacement", ForkTurns: "none"}); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("closed path was not reserved: %v", err)
+	}
+
+	second, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{Name: "second", Task: "two", ForkTurns: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitToolState(t, m, string(second.Agent.Path), protocol.AgentCompleted)
+	if err := m.Followup(context.Background(), caller, "first", "again"); err == nil || !strings.Contains(err.Error(), "open-agent limit") {
+		t.Fatalf("closed followup at capacity error=%v", err)
+	}
+	if state, _ := m.Get(context.Background(), "first"); state.Status != protocol.AgentClosed {
+		t.Fatalf("failed followup reopened first: %s", state.Status)
+	}
+	if _, err := m.CloseAgent(context.Background(), caller, "second"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Followup(context.Background(), caller, "first", "again"); err != nil {
+		t.Fatal(err)
+	}
+	awaitToolState(t, m, "first", protocol.AgentCompleted)
+	if _, err := m.CloseAgent(context.Background(), caller, "first"); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := m.ResumeAgent(context.Background(), caller, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Status != protocol.AgentNotLoaded {
+		t.Fatalf("resumed status=%s", resumed.Status)
+	}
+	list, err = m.List(context.Background(), caller, "")
+	if err != nil || list.Open != 1 || list.Closed != 1 {
+		t.Fatalf("resumed list=%+v err=%v", list, err)
+	}
+}
+
+func TestNonDurableClosedHistoryHasSeparateStoredIdentityBound(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	root := rootAgent(t, st)
+	defer root.Close()
+	var active, maxActive atomic.Int32
+	m := New(context.Background(), Limits{MaxConcurrentThreads: 1, MaxAgentsPerSession: 1, MaxDepth: 1, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}}})
+	if err := m.Bind(root, ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
+		return &mockChild{delay: time.Millisecond, active: &active, max: &maxActive}, nil
+	}), root.Publish, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(context.Background())
+	for _, name := range []string{"one", "two"} {
+		if _, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: name, Task: name, ForkTurns: "none"}); err != nil {
+			t.Fatal(err)
+		}
+		awaitToolState(t, m, name, protocol.AgentCompleted)
+		if _, err := m.CloseAgent(context.Background(), m.RootCaller(), name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "three", Task: "three", ForkTurns: "none"}); err == nil || !strings.Contains(err.Error(), "non-durable stored identity limit") {
+		t.Fatalf("non-durable history bound error=%v", err)
+	}
+	if state, err := m.ResumeAgent(context.Background(), m.RootCaller(), "one"); err != nil || state.Status != protocol.AgentNotLoaded {
+		t.Fatalf("stored identity could not be reused: state=%+v err=%v", state, err)
+	}
+}
+
+func TestEvictingReloadedClosedDurableAgentPreservesClosedStatus(t *testing.T) {
+	dir := t.TempDir()
+	st, err := session.NewSQLiteStore(filepath.Join(dir, "root.db"), dir, session.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	root := rootAgent(t, st)
+	defer root.Close()
+	var active, maxActive atomic.Int32
+	m := New(context.Background(), Limits{MaxConcurrentThreads: 1, MaxLoadedChildren: 1, MaxAgentsPerSession: 1, MaxDepth: 1, Durable: true, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}}})
+	if err := m.Bind(root, ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
+		return &mockChild{delay: time.Millisecond, active: &active, max: &maxActive}, nil
+	}), root.Publish, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(context.Background())
+	caller := m.RootCaller()
+	if _, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{Name: "archived", Task: "one", ForkTurns: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	awaitToolState(t, m, "archived", protocol.AgentCompleted)
+	if _, err := m.CloseAgent(context.Background(), caller, "archived"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Messages(context.Background(), "archived"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{Name: "open", Task: "two", ForkTurns: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	awaitToolState(t, m, "open", protocol.AgentCompleted)
+	m.evictIdle()
+	archived, err := m.Get(context.Background(), "archived")
+	if err != nil || archived.Status != protocol.AgentClosed {
+		t.Fatalf("evicted archived state=%+v err=%v", archived, err)
+	}
+	list, err := m.List(context.Background(), caller, "")
+	if err != nil || list.Open != 1 || list.Closed != 1 {
+		t.Fatalf("closed eviction changed capacity: list=%+v err=%v", list, err)
+	}
+}
+
+func TestFailedFollowupRestoresClosedCapacity(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	root := rootAgent(t, st)
+	defer root.Close()
+	var active, maxActive atomic.Int32
+	child := &mockChild{delay: time.Millisecond, active: &active, max: &maxActive}
+	m := New(context.Background(), Limits{MaxConcurrentThreads: 1, MaxAgentsPerSession: 1, MaxDepth: 1, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}}})
+	if err := m.Bind(root, ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
+		return child, nil
+	}), root.Publish, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(context.Background())
+	caller := m.RootCaller()
+	if _, err := m.Spawn(context.Background(), caller, protocol.SpawnSubagentRequest{Name: "closed", Task: "work", ForkTurns: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	awaitToolState(t, m, "closed", protocol.AgentCompleted)
+	if _, err := m.CloseAgent(context.Background(), caller, "closed"); err != nil {
+		t.Fatal(err)
+	}
+	child.enqueueErr = errors.New("mailbox unavailable")
+	if err := m.Followup(context.Background(), caller, "closed", "retry"); err == nil || !strings.Contains(err.Error(), "mailbox unavailable") {
+		t.Fatalf("followup error=%v", err)
+	}
+	state, err := m.Get(context.Background(), "closed")
+	if err != nil || state.Status != protocol.AgentClosed {
+		t.Fatalf("failed followup state=%+v err=%v", state, err)
+	}
+	list, err := m.List(context.Background(), caller, "")
+	if err != nil || list.Open != 0 || list.Closed != 1 {
+		t.Fatalf("failed followup leaked capacity: list=%+v err=%v", list, err)
+	}
+}
+
+func TestCloseRejectsActiveAgent(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	root := rootAgent(t, st)
+	defer root.Close()
+	var active, maxActive atomic.Int32
+	m := New(context.Background(), Limits{MaxConcurrentThreads: 1, MaxAgentsPerSession: 1, MaxDepth: 1, TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second, DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}}})
+	if err := m.Bind(root, ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) {
+		return &mockChild{delay: time.Second, active: &active, max: &maxActive}, nil
+	}), root.Publish, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(context.Background())
+	if _, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "busy", Task: "work", ForkTurns: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	awaitToolState(t, m, "busy", protocol.AgentRunning)
+	previous, err := m.CloseAgent(context.Background(), m.RootCaller(), "busy")
+	if err == nil || previous != protocol.AgentRunning || !strings.Contains(err.Error(), "not terminal") {
+		t.Fatalf("close active previous=%s err=%v", previous, err)
 	}
 }
 

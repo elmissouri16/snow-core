@@ -399,7 +399,7 @@ func fitFrameBottom(frame string, width, height int) string {
 // renderHeader is the sticky top bar: brand · provider/model · thinking · runtime · cwd · status.
 func (m *Model) renderHeader(status string) string {
 	w := m.managedFrameWidth()
-	brand := styleBrand.Render(" snow ")
+	brand := styleBrand.Render(" ❄ snow ")
 	midText := "booting"
 	if m.lastErr != nil {
 		midText = "startup failed"

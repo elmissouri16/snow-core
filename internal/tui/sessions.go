@@ -114,6 +114,8 @@ func (m *Model) hydrateSession() {
 	defer m.clearFinalizedMarkdownCaches()
 	m.clearTranscriptSelection()
 	if m.app == nil || m.app.Agent == nil {
+		m.inputHistory = nil
+		m.resetInputHistoryNavigation()
 		m.lines = nil
 		m.transcriptBase = ""
 		m.transcriptBaseSynced = 0
@@ -134,6 +136,7 @@ func (m *Model) hydrateSession() {
 		m.pushLine(styleError.Render("session read: " + err.Error()))
 		return
 	}
+	m.hydrateInputHistory(messages)
 	renderMessages := messages
 	durableIDs := make([]string, 0, len(messages))
 	for _, message := range messages {

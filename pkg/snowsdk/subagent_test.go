@@ -48,6 +48,14 @@ func TestSDKSubagentSurface(t *testing.T) {
 	if state.Status != protocol.AgentCompleted {
 		t.Fatalf("status=%s", state.Status)
 	}
+	previous, err := s.CloseSubagent(context.Background(), "sdk")
+	if err != nil || previous != protocol.AgentCompleted {
+		t.Fatalf("close previous=%s err=%v", previous, err)
+	}
+	state, err = s.ResumeSubagent(context.Background(), "sdk")
+	if err != nil || state.Status != protocol.AgentNotLoaded {
+		t.Fatalf("resume state=%+v err=%v", state, err)
+	}
 	list := s.Subagents()
 	if len(list) != 2 {
 		t.Fatalf("list=%+v", list)

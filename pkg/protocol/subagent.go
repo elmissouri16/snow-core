@@ -93,13 +93,14 @@ const (
 	AgentCompleted   AgentStatus = "completed"
 	AgentErrored     AgentStatus = "errored"
 	AgentShutdown    AgentStatus = "shutdown"
+	AgentClosed      AgentStatus = "closed"
 	AgentNotLoaded   AgentStatus = "not_loaded"
 	AgentNotFound    AgentStatus = "not_found"
 )
 
 func (s AgentStatus) Valid() bool {
 	switch s {
-	case AgentPendingInit, AgentQueued, AgentRunning, AgentInterrupted, AgentCompleted, AgentErrored, AgentShutdown, AgentNotLoaded, AgentNotFound:
+	case AgentPendingInit, AgentQueued, AgentRunning, AgentInterrupted, AgentCompleted, AgentErrored, AgentShutdown, AgentClosed, AgentNotLoaded, AgentNotFound:
 		return true
 	}
 	return false
@@ -107,10 +108,17 @@ func (s AgentStatus) Valid() bool {
 
 func (s AgentStatus) Terminal() bool {
 	switch s {
-	case AgentCompleted, AgentInterrupted, AgentErrored, AgentShutdown:
+	case AgentCompleted, AgentInterrupted, AgentErrored, AgentShutdown, AgentClosed, AgentNotLoaded:
 		return true
 	}
 	return false
+}
+
+// TerminalOutcome reports whether the lifecycle state is both terminal and a
+// user-visible outcome. NotLoaded is terminal for waiting and aggregation but
+// is a routine residency state rather than a completed lifecycle outcome.
+func (s AgentStatus) TerminalOutcome() bool {
+	return s.Terminal() && s != AgentNotLoaded
 }
 
 // AgentRef identifies one node in a subagent tree.
@@ -276,6 +284,8 @@ type SubagentList struct {
 	Running         int             `json:"running"`
 	Queued          int             `json:"queued"`
 	Terminal        int             `json:"terminal"`
+	Open            int             `json:"open"`
+	Closed          int             `json:"closed"`
 	ConcurrentLimit int             `json:"concurrent_limit"`
 	AgentLimit      int             `json:"agent_limit"`
 	Truncated       bool            `json:"truncated,omitempty"`

@@ -734,6 +734,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// --- Normal editing / sending ---
+	if handled, cmd := m.navigateInputHistory(msg); handled {
+		return m, cmd
+	}
 	submitKey := keyMatches(msg, m.keys.Submit)
 	followUpKey := keyMatches(msg, m.keys.FollowUp)
 	abortKey := keyMatches(msg, m.keys.Abort)

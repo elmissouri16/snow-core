@@ -295,6 +295,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if !msg.admitted {
+			m.forgetNewestInputHistory(msg.historyText)
 			if len(msg.attachments) > 0 {
 				m.promptImages = append(msg.attachments, m.promptImages...)
 			}
@@ -695,6 +696,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.accepted {
+			m.rememberInputHistory(msg.text)
 			pending := false
 			for _, item := range m.app.Agent.PendingInputs().Items {
 				if item.ID == msg.itemID {

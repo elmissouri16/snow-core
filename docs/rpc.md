@@ -1068,9 +1068,36 @@ text.
 | `params.path_prefix` | string | No | Path prefix filter for `subagent_list` |
 | `params.target` | string | Yes | Canonical child path for `subagent_get` and `subagent_interrupt` |
 
-`subagent_list` returns a `SubagentList` with snapshots and limits.
-`subagent_get` returns one `SubagentState`. `subagent_interrupt` returns
-`{"previous_status":"..."}` and leaves the child reusable.
+`subagent_list` returns a `SubagentList` with snapshots and limits. Its `open`
+field is the number of identities consuming the root session's `agent_limit`;
+`closed` is the visible closed-child count. `subagent_get` returns one
+`SubagentState`. `subagent_interrupt` returns `{"previous_status":"..."}` and
+leaves the child reusable.
+
+### Close and resume
+
+```json
+{
+  "id": "close-1",
+  "type": "subagent_close",
+  "params": {"target": "/root/api_review"}
+}
+```
+
+```json
+{
+  "id": "resume-1",
+  "type": "subagent_resume",
+  "params": {"target": "/root/api_review"}
+}
+```
+
+`subagent_close` requires a terminal child, releases its open-agent slot, and
+preserves its stable path, thread ID, topology, result, usage, and durable
+transcript. Success returns its previous and current (`closed`) statuses.
+`subagent_resume` consumes an available open-agent slot and returns the reopened
+`SubagentState` without starting a turn. `subagent_followup` performs this
+resume automatically when its target is closed. Closed paths remain reserved.
 
 ### `subagent_ready`
 

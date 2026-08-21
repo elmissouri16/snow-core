@@ -270,7 +270,7 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 			value.TextVerbosity = "medium"
 		case "subagent_followup", "subagent_send_message":
 			value.Params = json.RawMessage(`{"target":"/root/child","message":"continue"}`)
-		case "subagent_get", "subagent_interrupt":
+		case "subagent_close", "subagent_get", "subagent_interrupt", "subagent_resume":
 			value.Params = json.RawMessage(`{"target":"/root/child"}`)
 		case "subagent_spawn":
 			value.Params = json.RawMessage(`{"name":"child","task":"inspect"}`)

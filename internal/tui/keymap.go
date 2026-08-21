@@ -10,7 +10,8 @@ import (
 )
 
 // tuiKeyMap is the single source of truth for the bindings advertised by the
-// TUI. Textarea navigation remains owned by Bubbles; these bindings are only
+// TUI. Textarea navigation remains owned by Bubbles except for the ordinary
+// composer's fixed Up/Down session-history behavior; these bindings are only
 // consulted by Snow's outer model and picker handlers.
 type tuiKeyMap struct {
 	Submit         key.Binding

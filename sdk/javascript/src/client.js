@@ -381,6 +381,8 @@ export class Snow {
   subagentFollowup(target, message) { return this.request("subagent_followup", { params: { target, message } }); }
   subagentWait({ timeoutMs = 0, until = "activity" } = {}) { return this.request("subagent_wait", { params: { timeout_ms: timeoutMs, until } }); }
   subagentInterrupt(target) { return this.request("subagent_interrupt", { params: { target } }); }
+  subagentClose(target) { return this.request("subagent_close", { params: { target } }); }
+  subagentResume(target) { return this.request("subagent_resume", { params: { target } }); }
   subagentList(pathPrefix = "") { return this.request("subagent_list", pathPrefix ? { params: { path_prefix: pathPrefix } } : {}); }
   subagentGet(target) { return this.request("subagent_get", { params: { target } }); }
   subagentReady() { return this.request("subagent_ready"); }

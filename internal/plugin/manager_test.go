@@ -346,6 +346,33 @@ func TestManagerExternalRiskDefaultsToExec(t *testing.T) {
 	}
 }
 
+func TestManagerCancellationStillGracefullyClosesExternalPlugin(t *testing.T) {
+	bin := buildV2Plugin(t)
+	reg := tools.NewRegistry()
+	m := NewManager(reg, ManagerOptions{CWD: t.TempDir()})
+	if err := m.LoadExternal(publicplugin.PluginSpec{ID: "v2", Command: []string{bin}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := m.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	host := m.plugins[0].external
+	if host == nil {
+		t.Fatal("external host was not retained")
+	}
+
+	cancel()
+	select {
+	case <-host.waitDone:
+		t.Fatal("canceling the app context killed the plugin before graceful shutdown")
+	case <-time.After(250 * time.Millisecond):
+	}
+	if err := m.Close(context.Background()); err != nil {
+		t.Fatalf("graceful close after app cancellation: %v", err)
+	}
+}
+
 func TestManagerExternalRegistrationUsesSingleNamespace(t *testing.T) {
 	bin := buildV2Plugin(t)
 	reg := tools.NewRegistry()

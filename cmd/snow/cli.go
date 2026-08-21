@@ -652,7 +652,7 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 					writeOut("\n[agent %s started]\n", ev.Subagent.Agent.Path)
 				}
 			case protocol.EvSubagentStatus:
-				if ev.Subagent != nil && ev.Subagent.Status.Terminal() {
+				if ev.Subagent != nil && ev.Subagent.Status.TerminalOutcome() {
 					writeOut("\n[agent %s %s]\n", ev.Subagent.Agent.Path, ev.Subagent.Status)
 				}
 			case protocol.EvToolEnd:

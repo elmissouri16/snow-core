@@ -21,7 +21,7 @@ type managerTool struct {
 }
 
 func Tools(m *Manager, caller Caller) []tools.Tool {
-	names := []string{"spawn_agent", "list_subagent_models", "send_message", "followup_task", "wait_agent", "interrupt_agent", "list_agents"}
+	names := []string{"spawn_agent", "list_subagent_models", "send_message", "followup_task", "wait_agent", "interrupt_agent", "close_agent", "resume_agent", "list_agents"}
 	out := make([]tools.Tool, 0, len(names))
 	for _, name := range names {
 		out = append(out, &managerTool{name: name, manager: m, caller: caller})
@@ -143,6 +143,30 @@ func (t *managerTool) Run(ctx context.Context, raw json.RawMessage, _ tools.Tool
 			return tools.ErrorResult(err), nil
 		}
 		return jsonResult(map[string]any{"previous_status": previous})
+	case "close_agent":
+		var in struct {
+			Target string `json:"target"`
+		}
+		if err := decodeStrict(raw, &in); err != nil {
+			return tools.ErrorResult(err), nil
+		}
+		previous, err := t.manager.CloseAgent(ctx, t.caller, in.Target)
+		if err != nil {
+			return tools.ErrorResult(err), nil
+		}
+		return jsonResult(map[string]any{"previous_status": previous, "status": protocol.AgentClosed})
+	case "resume_agent":
+		var in struct {
+			Target string `json:"target"`
+		}
+		if err := decodeStrict(raw, &in); err != nil {
+			return tools.ErrorResult(err), nil
+		}
+		state, err := t.manager.ResumeAgent(ctx, t.caller, in.Target)
+		if err != nil {
+			return tools.ErrorResult(err), nil
+		}
+		return jsonResult(map[string]any{"status": state.Status})
 	case "list_agents":
 		var in struct {
 			PathPrefix string `json:"path_prefix,omitempty"`
@@ -164,10 +188,12 @@ func (t *managerTool) Run(ctx context.Context, raw json.RawMessage, _ tools.Tool
 			Running         int    `json:"running"`
 			Queued          int    `json:"queued"`
 			Terminal        int    `json:"terminal"`
+			Open            int    `json:"open"`
+			Closed          int    `json:"closed"`
 			ConcurrentLimit int    `json:"concurrent_limit"`
 			AgentLimit      int    `json:"agent_limit"`
 			Truncated       bool   `json:"truncated,omitempty"`
-		}{Running: list.Running, Queued: list.Queued, Terminal: list.Terminal, ConcurrentLimit: list.ConcurrentLimit, AgentLimit: list.AgentLimit, Truncated: list.Truncated}
+		}{Running: list.Running, Queued: list.Queued, Terminal: list.Terminal, Open: list.Open, Closed: list.Closed, ConcurrentLimit: list.ConcurrentLimit, AgentLimit: list.AgentLimit, Truncated: list.Truncated}
 		for _, s := range list.Agents {
 			out.Agents = append(out.Agents, item{AgentName: s.Agent.Path, AgentStatus: s.Status, Role: s.Agent.Role})
 		}
@@ -250,12 +276,14 @@ var toolSchemas = map[string]protocol.ToolSchema{
 	"followup_task":        {Name: "followup_task", Description: "Queue an attributed task and run or reuse the target when it is idle.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"},"message":{"type":"string"}},"required":["target","message"],"additionalProperties":false}`)},
 	"wait_agent":           {Name: "wait_agent", Description: "Wait for subagents. Use until=all whenever the answer depends on outstanding child work; activity returns after the next mailbox or lifecycle event. Result content arrives through attributed mailbox messages.", Parameters: json.RawMessage(`{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":0},"until":{"type":"string","enum":["activity","all"],"description":"activity waits for one event; all waits until every descendant is terminal or the timeout expires"}},"additionalProperties":false}`)},
 	"interrupt_agent":      {Name: "interrupt_agent", Description: "Interrupt a target's current turn while keeping its identity reusable.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"}},"required":["target"],"additionalProperties":false}`)},
-	"list_agents":          {Name: "list_agents", Description: "List stable agent paths and lifecycle states without private task content.", Parameters: json.RawMessage(`{"type":"object","properties":{"path_prefix":{"type":"string"}},"additionalProperties":false}`)},
+	"close_agent":          {Name: "close_agent", Description: "Close a terminal agent to release its open-agent slot while preserving its stable identity and history for later resume.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"}},"required":["target"],"additionalProperties":false}`)},
+	"resume_agent":         {Name: "resume_agent", Description: "Reopen a closed agent without starting a turn. This consumes an open-agent slot; use followup_task to reopen and run it in one operation.", Parameters: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string"}},"required":["target"],"additionalProperties":false}`)},
+	"list_agents":          {Name: "list_agents", Description: "List stable agent paths and lifecycle states without private task content, including closed agents.", Parameters: json.RawMessage(`{"type":"object","properties":{"path_prefix":{"type":"string"}},"additionalProperties":false}`)},
 }
 
 func ToolDescriptor(t tools.Tool) tools.ToolDescriptor {
 	risk := permission.RiskRead
-	if t.Schema().Name == "spawn_agent" || t.Schema().Name == "followup_task" {
+	if t.Schema().Name == "spawn_agent" || t.Schema().Name == "followup_task" || t.Schema().Name == "resume_agent" {
 		risk = permission.RiskDelegate
 	}
 	return tools.ToolDescriptor{Schema: t.Schema(), Tool: t, Source: tools.SourceBuiltin, Owner: "subagents", Risk: risk}

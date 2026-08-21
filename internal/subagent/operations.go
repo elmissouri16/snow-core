@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -29,14 +30,30 @@ func (m *Manager) Followup(ctx context.Context, caller Caller, target, message s
 	if ref.Path == protocol.RootAgentPath {
 		return errors.New("subagents: root cannot receive followup_task")
 	}
+	reopened := false
+	if t.snapshot().Status == protocol.AgentClosed {
+		if _, err := m.resumeRuntime(t); err != nil {
+			return err
+		}
+		reopened = true
+	}
+	rollback := func(cause error) error {
+		if !reopened {
+			return cause
+		}
+		if err := m.recloseAfterFailedFollowup(t); err != nil {
+			return fmt.Errorf("%w (also failed to restore closed state: %v)", cause, err)
+		}
+		return cause
+	}
 	child := runtimeChild(t)
 	if child == nil {
 		if err := m.loadRuntime(t); err != nil {
-			return err
+			return rollback(err)
 		}
 		child = runtimeChild(t)
 		if child == nil {
-			return errors.New("subagents: child runtime unavailable")
+			return rollback(errors.New("subagents: child runtime unavailable"))
 		}
 	}
 	wasRunning := child.IsRunning()
@@ -44,21 +61,21 @@ func (m *Manager) Followup(ctx context.Context, caller Caller, target, message s
 	t.mu.Lock()
 	if t.closed {
 		t.mu.Unlock()
-		return ErrClosed
+		return rollback(ErrClosed)
 	}
 	if err := ctx.Err(); err != nil {
 		t.mu.Unlock()
-		return err
+		return rollback(err)
 	}
 	if !t.followupQueued && len(t.tasks) >= cap(t.tasks) {
 		t.mu.Unlock()
-		return errors.New("subagents: followup queue full")
+		return rollback(errors.New("subagents: followup queue full"))
 	}
 	t.mu.Unlock()
 	// Mailbox persistence may perform SQLite I/O. Root admission keeps this
 	// runtime attached while avoiding a long hold of the runtime mutex.
 	if err := child.EnqueueMailbox(env); err != nil {
-		return err
+		return rollback(err)
 	}
 	t.mu.Lock()
 	if !t.followupQueued {
@@ -334,7 +351,7 @@ func (m *Manager) List(_ context.Context, caller Caller, prefix string) (protoco
 		}
 		out = append(out, protocol.SubagentState{Agent: m.rootRef, Status: rootStatus, Model: m.root.Model().ID, Provider: m.root.Model().Provider, Thinking: m.root.Thinking()})
 	}
-	result := protocol.SubagentList{ConcurrentLimit: m.limits.MaxConcurrentThreads, AgentLimit: m.limits.MaxAgentsPerSession}
+	result := protocol.SubagentList{Open: m.openAgentCountLocked(), ConcurrentLimit: m.limits.MaxConcurrentThreads, AgentLimit: m.limits.MaxAgentsPerSession}
 	activeBranch := m.activeBranchLocked()
 	for _, id := range m.order {
 		r := m.byID[id]
@@ -352,6 +369,9 @@ func (m *Manager) List(_ context.Context, caller Caller, prefix string) (protoco
 			result.Running++
 		case protocol.AgentPendingInit, protocol.AgentQueued:
 			result.Queued++
+		case protocol.AgentClosed:
+			result.Closed++
+			result.Terminal++
 		default:
 			result.Terminal++
 		}

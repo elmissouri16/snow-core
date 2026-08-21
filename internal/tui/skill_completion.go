@@ -90,6 +90,7 @@ func (m *Model) refreshSkillCompletionsFor(text string) {
 }
 
 func (m *Model) insertSkillCompletion(name string) (tea.Model, tea.Cmd) {
+	m.resetInputHistoryNavigation()
 	text := m.editor.Value()
 	_, start, _, ok := skillCompletionQuery(text)
 	if !ok {

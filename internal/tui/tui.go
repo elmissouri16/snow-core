@@ -109,6 +109,7 @@ type promptDoneMsg struct {
 	turnID      string
 	admitted    bool
 	text        string
+	historyText string
 	attachments []protocol.ContentBlock
 	err         error
 }
@@ -269,12 +270,15 @@ type Model struct {
 	width   int
 	height  int
 
-	transcript      viewport.Model
-	editor          textarea.Model
-	spinner         spinner.Model
-	thinkingSpinner spinner.Model
-	spinnerRunning  bool
-	help            help.Model
+	transcript        viewport.Model
+	editor            textarea.Model
+	inputHistory      []string
+	inputHistoryIndex int
+	inputHistoryDraft string
+	spinner           spinner.Model
+	thinkingSpinner   spinner.Model
+	spinnerRunning    bool
+	help              help.Model
 
 	lines                         []string // rendered transcript lines
 	assistantBuf                  strings.Builder

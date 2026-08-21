@@ -41,6 +41,7 @@ func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cm
 			m.pushLine(styleError.Render(m.lastErrorText))
 		}
 		if m.editor.Value() != previous {
+			m.resetInputHistoryNavigation()
 			if mentionCmd := m.refreshInputCompletions(); mentionCmd != nil {
 				cmd = tea.Batch(cmd, mentionCmd)
 			}
@@ -56,7 +57,7 @@ func (m *Model) handleSubagentEvent(ev protocol.AgentEvent) {
 	case protocol.EvSubagentStarted:
 		m.pushLine(styleTool.Render(fmt.Sprintf("• agent %s started (%s)", ev.Agent.Path, ev.Agent.Role)))
 	case protocol.EvSubagentStatus:
-		if ev.Subagent != nil && ev.Subagent.Status.Terminal() {
+		if ev.Subagent != nil && ev.Subagent.Status.TerminalOutcome() {
 			m.pushLine(styleTool.Render(fmt.Sprintf("• agent %s %s", ev.Agent.Path, ev.Subagent.Status)))
 		}
 	}

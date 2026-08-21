@@ -97,6 +97,15 @@ func TestFooterShowsKnownCacheMissAsZeroPercent(t *testing.T) {
 	}
 }
 
+func TestHeaderUsesSnowLogo(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	m.width = 80
+
+	if header := stripANSI(m.renderHeader("ready")); !strings.Contains(header, "❄ snow") {
+		t.Fatalf("header missing Snow logo: %q", header)
+	}
+}
+
 func TestHeaderShowsThinkingImmediatelyAfterModel(t *testing.T) {
 	m := newModel(t.Context(), app.Options{})
 	buildAppForTest(t, m)

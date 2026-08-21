@@ -18,6 +18,7 @@ import (
 // runCommand handles slash commands.
 func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 	m.editor.Reset()
+	m.resetInputHistoryNavigation()
 	parts := strings.Fields(line)
 	cmd := parts[0]
 	args := parts[1:]

@@ -382,6 +382,27 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: map[string]any{"previous_status": previous}})
 		return nil
+	case "subagent_close", "subagent_resume":
+		var p struct {
+			Target string `json:"target"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return err
+		}
+		if req.Type == "subagent_close" {
+			previous, err := s.app.CloseSubagent(ctx, p.Target)
+			if err != nil {
+				return err
+			}
+			s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: map[string]any{"previous_status": previous, "status": protocol.AgentClosed}})
+			return nil
+		}
+		state, err := s.app.ResumeSubagent(ctx, p.Target)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: state})
+		return nil
 	case "subagent_list":
 		var p struct {
 			PathPrefix string `json:"path_prefix"`

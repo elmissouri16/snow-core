@@ -55,7 +55,9 @@ When enabled, the complete direct tool set is always exposed together:
 | `followup_task` | Queue a task and run or reuse an idle child. |
 | `wait_agent` | Use `until=activity` for the next lifecycle/mailbox event or `until=all` to join all descendants; it never returns private child content. |
 | `interrupt_agent` | Cancel only the target's current turn. |
-| `list_agents` | List stable paths and states without prompts or full results. |
+| `close_agent` | Close a terminal child, releasing its open-agent slot while preserving its identity and history. |
+| `resume_agent` | Reopen a closed child without starting a turn; this consumes an open-agent slot. |
+| `list_agents` | List stable paths and states without prompts or full results, including closed children. |
 
 `spawn_agent` uses distinct fields: `name` is the child's stable identity,
 `task` is its assignment, `role` selects its capability profile, and optional
@@ -111,8 +113,17 @@ can therefore become idle while children remain running; lifecycle rows and
 depends on outstanding children, and to synthesize repetitive results
 compactly.
 
-`interrupt_agent` leaves a child reusable. App close cancels and joins the
-full tree before closing the root event bus and shared extensions. Active
+`interrupt_agent` leaves a child reusable and still counted as open. A terminal
+child may be passed to `close_agent`, which changes its status to `closed`,
+releases its open-agent slot, and keeps its path, thread ID, bounded result,
+usage, topology, and durable transcript. Closed paths remain reserved and
+cannot be reused by `spawn_agent`. `resume_agent` reopens a closed identity
+without starting work; `followup_task` performs the same admission
+automatically before queuing the requested turn. Either operation fails if the
+open-agent limit is already full. `send_message` requires an open target so a
+caller must resume a closed child first.
+
+App close cancels and joins the full tree before closing the root event bus and shared extensions. Active
 children block branch switching and root-session switching. Once all children
 are terminal, switching sessions detaches their in-memory runtimes and
 restores the target session's persisted topology; durable child databases
@@ -125,7 +136,7 @@ remain private to their original root session.
 | Enabled | false |
 | Concurrently running children | 4 |
 | Loaded durable children | 4 (derived from child concurrency) |
-| Agents per root session | 32 |
+| Open agents per root session | 32 |
 | Depth | 1 |
 | Task timeout | 30 minutes |
 | Result delivered to parent | 64 KiB |
@@ -141,7 +152,13 @@ adjust the "Concurrent subagents" setting in `/settings`, edit
 `~/.snow/config.json`, or override one launch with
 `--subagent-max-concurrency N`. If necessary Snow raises
 `max_agents_per_session` to the requested concurrency for the TUI/CLI
-override; `--subagent-max-agents N` controls that identity cap explicitly.
+override; `--subagent-max-agents N` controls the open-identity cap explicitly.
+Historical closed identities do not count toward this cap, although they remain
+listed and keep their stable paths reserved. Separate non-configurable stored
+identity bounds prevent unbounded history growth: durable sessions allow up to
+4,096 identities, while non-durable sessions retain at most twice the configured
+open-agent limit (capped at 4,096) because their closed transcripts cannot be
+unloaded safely. These are storage/residency bounds, not execution capacity.
 
 ## Authority and security
 
@@ -222,15 +239,23 @@ child enters an errored state instead.
 
 Child databases do not appear in the normal session picker. On cold open Snow
 restores topology without loading child runtimes, converts stale
-running/queued work to interrupted metadata, and never restarts work before
-`ReadySubagents`. Durable terminal children may be unloaded when the residency
-cap is exceeded; follow-up, messaging, or transcript inspection lazily reloads
-them. Set `durable=false` only when intentionally choosing process-local child
+running/queued work to interrupted metadata, preserves `closed` status, and
+never restarts work before `ReadySubagents`. Durable terminal children may be
+unloaded when the residency cap is exceeded; follow-up, messaging, or
+transcript inspection lazily reloads them. Closing a durable child immediately
+unloads its runtime while retaining its database and topology row; resuming it
+re-admits the identity and leaves runtime loading lazy until work, mail, or
+inspection requires it. Unloadability follows each identity's stored child
+database locator, so existing durable children remain unloadable if a later
+configuration disables durability for newly spawned children.
+
+Set `durable=false` only when intentionally choosing process-local child
 history; `/agent` then warns that transcripts will not survive restart. Because
 there is no durable state from which to restore those children, non-durable
-terminal runtimes and their transcripts remain resident until shutdown, bounded
-by `max_agents_per_session` (32 by default). Keep that limit low when children
-produce large transcripts.
+terminal and closed runtimes retain their process-local transcripts in memory
+until shutdown. The open-agent limit bounds non-closed identities, but closed
+non-durable identities can still consume memory, so durable mode remains the
+recommended default.
 
 ## Surfaces
 
@@ -252,11 +277,12 @@ produce large transcripts.
   token streams.
 - SDK: `ReadySubagents`, `SubagentModels`, `SpawnSubagent`,
   `SendSubagentMessage`, `FollowupSubagent`, `WaitSubagents`,
-  `WaitSubagentsUntilAll`, `InterruptSubagent`, `Subagents`, `Subagent`, and
-  `SubagentUsage`.
+  `WaitSubagentsUntilAll`, `InterruptSubagent`, `CloseSubagent`,
+  `ResumeSubagent`, `Subagents`, `Subagent`, and `SubagentUsage`.
 - RPC: `subagent_ready`, `subagent_spawn`, `subagent_send_message`,
-  `subagent_followup`, `subagent_wait`, `subagent_interrupt`, `subagent_list`,
-  `subagent_get`, and `subagent_models`.
+  `subagent_followup`, `subagent_wait`, `subagent_interrupt`,
+  `subagent_close`, `subagent_resume`, `subagent_list`, `subagent_get`, and
+  `subagent_models`.
 - JSON/events/plugins: ordinary child events carry `agent`; lifecycle events
   also carry `subagent`, and mailbox events carry `agent_message`. Root events
   retain omitted correlation fields for compatibility.

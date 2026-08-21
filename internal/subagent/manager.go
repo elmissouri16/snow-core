@@ -19,7 +19,10 @@ var (
 	ErrClosed   = errors.New("subagents: closed")
 )
 
-const maxListAgents = 256
+const (
+	maxListAgents            = 256
+	maxStoredAgentIdentities = 4096
+)
 
 // rolePolicyFingerprintVersion changes whenever the built-in capability policy
 // changes. Persisted children from an older policy must fail safe rather than

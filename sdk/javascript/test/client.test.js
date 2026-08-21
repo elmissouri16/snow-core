@@ -329,6 +329,8 @@ test("parity command wrappers use the expected RPC frames and typed data", async
 
     assert.equal((await snow.setReasoningSummary("concise")).command, "set_reasoning_summary");
     assert.equal((await snow.setTextVerbosity("high")).command, "set_text_verbosity");
+    assert.equal((await snow.subagentClose("/root/reviewer")).command, "subagent_close");
+    assert.equal((await snow.subagentResume("/root/reviewer")).command, "subagent_resume");
 
     const mcp = await snow.mcpServers();
     assert.equal(mcp.data.servers[0].id, "mcp-1");

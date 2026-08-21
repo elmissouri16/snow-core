@@ -116,7 +116,7 @@ func (m *Model) applySubagentFleetList(msg subagentFleetListMsg) tea.Cmd {
 		}
 	}
 	m.subagentFleetList = msg.list
-	m.recountSubagentFleet()
+	m.recountSubagentFleet(true)
 	m.subagentFleetError = ""
 	m.subagentFleetWarning = ""
 	if msg.historicalCount > 0 {
@@ -313,15 +313,18 @@ func (m *Model) recordSubagentFleetEvent(ev protocol.AgentEvent) {
 		m.subagentFleetActivitySpace[threadID] = strings.HasSuffix(ev.Text, " ") || strings.HasSuffix(ev.Text, "\n") || strings.HasSuffix(ev.Text, "\t")
 	}
 	found := false
+	var previousStatus, currentStatus protocol.AgentStatus
 	for i := range m.subagentFleetList.Agents {
 		state := &m.subagentFleetList.Agents[i]
 		if state.Agent.ThreadID != threadID {
 			continue
 		}
 		found = true
+		previousStatus = state.Status
 		if ev.Subagent != nil && ev.Subagent.Generation >= state.Generation {
 			*state = *ev.Subagent.Clone()
 		}
+		currentStatus = state.Status
 		if ev.Usage != nil {
 			state.Usage = ev.Usage.Clone()
 		}
@@ -330,29 +333,69 @@ func (m *Model) recordSubagentFleetEvent(ev protocol.AgentEvent) {
 		}
 		break
 	}
+	if found && previousStatus != currentStatus {
+		m.adjustSubagentFleetCapacity(previousStatus, currentStatus)
+	}
 	if !found && ev.Type == protocol.EvSubagentStarted {
 		state := protocol.SubagentState{Agent: *ev.Agent.Clone(), Status: protocol.AgentRunning}
 		if ev.Subagent != nil {
 			state = *ev.Subagent.Clone()
 		}
 		m.subagentFleetList.Agents = append(m.subagentFleetList.Agents, state)
+		m.adjustSubagentFleetCapacity(protocol.AgentNotFound, state.Status)
 	}
-	m.recountSubagentFleet()
+	m.recountSubagentFleet(true)
 }
 
-func (m *Model) recountSubagentFleet() {
+func (m *Model) adjustSubagentFleetCapacity(from, to protocol.AgentStatus) {
+	fromClosed := from == protocol.AgentClosed
+	toClosed := to == protocol.AgentClosed
+	if from == protocol.AgentNotFound {
+		if toClosed {
+			m.subagentFleetList.Closed++
+		} else {
+			m.subagentFleetList.Open++
+		}
+		return
+	}
+	if fromClosed == toClosed {
+		return
+	}
+	if toClosed {
+		m.subagentFleetList.Open = max(0, m.subagentFleetList.Open-1)
+		m.subagentFleetList.Closed++
+		return
+	}
+	m.subagentFleetList.Closed = max(0, m.subagentFleetList.Closed-1)
+	m.subagentFleetList.Open++
+}
+
+func (m *Model) recountSubagentFleet(preserveCapacity bool) {
 	m.subagentFleetList.Running, m.subagentFleetList.Queued, m.subagentFleetList.Terminal = 0, 0, 0
+	if !preserveCapacity {
+		m.subagentFleetList.Open, m.subagentFleetList.Closed = 0, 0
+	}
 	for _, state := range m.subagentFleetList.Agents {
 		if state.Agent.Path == protocol.RootAgentPath {
 			continue
 		}
-		switch {
-		case state.Status.Terminal():
+		if state.Status == protocol.AgentClosed {
+			if !preserveCapacity {
+				m.subagentFleetList.Closed++
+			}
 			m.subagentFleetList.Terminal++
-		case state.Status == protocol.AgentRunning:
+			continue
+		}
+		if !preserveCapacity {
+			m.subagentFleetList.Open++
+		}
+		switch state.Status {
+		case protocol.AgentRunning:
 			m.subagentFleetList.Running++
-		default:
+		case protocol.AgentPendingInit, protocol.AgentQueued:
 			m.subagentFleetList.Queued++
+		default:
+			m.subagentFleetList.Terminal++
 		}
 	}
 }
@@ -467,9 +510,10 @@ func (m *Model) renderSubagentFleetModal() string {
 
 func (m *Model) renderSubagentFleetHeader(width int) string {
 	title := styleHeader.Render(" Subagent fleet inspector ")
-	status := fmt.Sprintf("%d running · %d queued · %d finished · capacity %d/%d",
+	status := fmt.Sprintf("%d running · %d queued · %d finished · capacity %d/%d · open %d/%d · %d closed",
 		m.subagentFleetList.Running, m.subagentFleetList.Queued, m.subagentFleetList.Terminal,
-		m.subagentFleetList.Running, m.subagentFleetList.ConcurrentLimit)
+		m.subagentFleetList.Running, m.subagentFleetList.ConcurrentLimit,
+		m.subagentFleetList.Open, m.subagentFleetList.AgentLimit, m.subagentFleetList.Closed)
 	if m.subagentFleetLoading {
 		status = "refreshing… · " + status
 	}
@@ -533,6 +577,8 @@ func fleetStatusGlyph(status protocol.AgentStatus) string {
 		return "✗"
 	case protocol.AgentInterrupted, protocol.AgentShutdown:
 		return "■"
+	case protocol.AgentClosed:
+		return "◇"
 	default:
 		return "○"
 	}

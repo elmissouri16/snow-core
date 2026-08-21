@@ -448,7 +448,7 @@ overrides both. If omitted, the child inherits the parent selection. Key bounds
 are:
 
 - concurrency: `1..256` child agents; root does not consume a slot;
-- identities: `1..4096`, and not below concurrency;
+- open identities: `1..4096`, and not below concurrency; closed identities remain durable but do not count;
 - depth: `1..8`;
 - wait timeouts: minimum is nonnegative, default is at least the minimum,
   maximum is at least the default and no more than 24 hours;

@@ -7,6 +7,10 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Added
 
+- Added Codex-style `close_agent` and `resume_agent` lifecycle controls across
+  model tools, RPC, and SDKs. Closing a terminal child releases the open-agent
+  slot while preserving its stable path, transcript, result, and usage;
+  follow-up automatically resumes a closed identity when capacity permits.
 - Added a model-callable `deactivate_skill` tool that removes one named active
   skill, or all active skills on an explicit `*` request, before the next model
   continuation and durably preserves that lifecycle transition across resume.

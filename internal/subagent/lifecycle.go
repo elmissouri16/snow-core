@@ -120,9 +120,10 @@ func (m *Manager) Bind(root *agent.Agent, factory ChildFactory, publish func(pro
 		if err != nil {
 			return err
 		}
-		if len(records) > m.limits.MaxAgentsPerSession {
-			return errors.New("subagents: persisted agent limit exceeded")
+		if len(records) > maxStoredAgentIdentities {
+			return errors.New("subagents: persisted identity safety limit exceeded")
 		}
+		openRecords := 0
 		for _, rec := range records {
 			if err := validatePersistedRecord(rec); err != nil {
 				return err
@@ -158,6 +159,12 @@ func (m *Manager) Bind(root *agent.Agent, factory ChildFactory, publish func(pro
 			byID[copy.State.Agent.ThreadID] = r
 			byPath[copy.State.Agent.Path] = r
 			order = append(order, copy.State.Agent.ThreadID)
+			if copy.State.Status != protocol.AgentClosed {
+				openRecords++
+			}
+		}
+		if openRecords > m.limits.MaxAgentsPerSession {
+			return errors.New("subagents: persisted open-agent limit exceeded")
 		}
 		for _, id := range deleteIDs {
 			_ = store.DeleteSubagent(id)
@@ -225,10 +232,30 @@ func storeID(store session.SubagentTaskStore) string {
 }
 
 func normalizeRestoredStatus(s protocol.AgentStatus) protocol.AgentStatus {
+	if s == protocol.AgentClosed {
+		return protocol.AgentClosed
+	}
 	if s == protocol.AgentRunning || s == protocol.AgentQueued || s == protocol.AgentPendingInit {
 		return protocol.AgentInterrupted
 	}
 	return protocol.AgentNotLoaded
+}
+
+func (m *Manager) storedIdentityLimitLocked() int {
+	if m.limits.Durable || m.limits.MaxAgentsPerSession >= maxStoredAgentIdentities/2 {
+		return maxStoredAgentIdentities
+	}
+	return max(1, m.limits.MaxAgentsPerSession*2)
+}
+
+func (m *Manager) openAgentCountLocked() int {
+	open := 0
+	for _, r := range m.byID {
+		if r.snapshot().Status != protocol.AgentClosed {
+			open++
+		}
+	}
+	return open
 }
 
 // SetStore rebinds the manager during an App session switch and restores
@@ -328,8 +355,17 @@ func (m *Manager) setStore(store session.SubagentTaskStore) error {
 	if err != nil {
 		return err
 	}
-	if len(records) > m.limits.MaxAgentsPerSession {
-		return errors.New("subagents: persisted agent limit exceeded")
+	if len(records) > maxStoredAgentIdentities {
+		return errors.New("subagents: persisted identity safety limit exceeded")
+	}
+	openRecords := 0
+	for _, rec := range records {
+		if rec.State.Status != protocol.AgentClosed {
+			openRecords++
+		}
+	}
+	if openRecords > m.limits.MaxAgentsPerSession {
+		return errors.New("subagents: persisted open-agent limit exceeded")
 	}
 	// Check before reconciling the target store so an attempted switch cannot
 	// mutate target topology while an old child is still running.
@@ -349,6 +385,7 @@ func (m *Manager) setStore(store session.SubagentTaskStore) error {
 	var order []string
 	var states []protocol.SubagentState
 	var deleteIDs []string
+	normalizedOpenRecords := 0
 	for _, rec := range records {
 		if err := validatePersistedRecord(rec); err != nil {
 			return err
@@ -385,6 +422,12 @@ func (m *Manager) setStore(store session.SubagentTaskStore) error {
 		byPath[copy.State.Agent.Path] = r
 		order = append(order, copy.State.Agent.ThreadID)
 		states = append(states, copy.State)
+		if copy.State.Status != protocol.AgentClosed {
+			normalizedOpenRecords++
+		}
+	}
+	if normalizedOpenRecords > m.limits.MaxAgentsPerSession {
+		return errors.New("subagents: persisted open-agent limit exceeded")
 	}
 	for _, id := range deleteIDs {
 		_ = store.DeleteSubagent(id)
@@ -536,9 +579,16 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 		m.mu.Unlock()
 		return protocol.SubagentState{}, errors.New("subagents: no child execution capacity configured")
 	}
-	if len(m.byID)+len(m.reserved) >= m.limits.MaxAgentsPerSession {
+	if len(m.byID)+len(m.reserved) >= m.storedIdentityLimitLocked() {
 		m.mu.Unlock()
-		return protocol.SubagentState{}, errors.New("subagents: agent limit reached")
+		if m.limits.Durable {
+			return protocol.SubagentState{}, errors.New("subagents: stored identity safety limit reached")
+		}
+		return protocol.SubagentState{}, errors.New("subagents: non-durable stored identity limit reached; reuse a closed agent or enable durable subagents")
+	}
+	if m.openAgentCountLocked()+len(m.reserved) >= m.limits.MaxAgentsPerSession {
+		m.mu.Unlock()
+		return protocol.SubagentState{}, errors.New("subagents: open-agent limit reached; close a terminal agent or raise max_agents_per_session")
 	}
 	if path.Depth() > m.limits.MaxDepth {
 		m.mu.Unlock()
@@ -717,6 +767,9 @@ func (m *Manager) SendMessage(ctx context.Context, caller Caller, target, messag
 	t, ref, err := m.resolveTarget(caller, target)
 	if err != nil {
 		return err
+	}
+	if t != nil && t.snapshot().Status == protocol.AgentClosed {
+		return fmt.Errorf("subagents: agent %s is closed; resume it before sending a message", ref.Path)
 	}
 	env := protocol.AgentMessage{ID: newThreadID(), Author: caller.Path, Recipient: ref.Path, Kind: protocol.AgentMessageNormal, Content: message, CreatedAt: time.Now().UnixMilli()}
 	if err := m.enqueueTarget(t, ref, env); err != nil {
