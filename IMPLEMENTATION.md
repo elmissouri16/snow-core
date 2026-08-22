@@ -682,8 +682,9 @@ a 10-minute stream-silence watchdog, and a 100 KiB project-context cap.
 
 Configured prompt files are bounded by `context_cap_bytes`; project prompt
 paths are trust-gated, confined to the canonical project root, and reject
-symlink components. `AGENTS.md` content uses the same byte budget and adds a
-truncation notice when needed.
+symlink components. Each discovered `AGENTS.md` is opened through a pinned
+parent-directory handle, must remain a regular non-symlink file, and is read
+only through the remaining byte budget before a truncation notice is added.
 
 ## Sessions and storage
 

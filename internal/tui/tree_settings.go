@@ -184,15 +184,19 @@ func (m *Model) renderPermissionPicker() string {
 		return ""
 	}
 	req := m.permRequest
-	label := "🔐 " + req.Tool + " · " + string(req.Risk)
+	label := "🔐 " + sanitizeTerminalText(req.Tool) + " · " + sanitizeTerminalText(string(req.Risk))
 	if m.permAgent != nil {
-		label += " · " + string(m.permAgent.Path)
+		label += " · " + sanitizeTerminalText(string(m.permAgent.Path))
 	}
 	if len(req.Paths) > 0 {
-		label += " · " + strings.Join(req.Paths, ", ")
+		paths := make([]string, len(req.Paths))
+		for i, path := range req.Paths {
+			paths[i] = sanitizeTerminalText(path)
+		}
+		label += " · " + strings.Join(paths, ", ")
 	}
 	if req.Reason != "" {
-		label += " · " + req.Reason
+		label += " · " + sanitizeTerminalText(req.Reason)
 	}
 	var b strings.Builder
 	b.WriteString(styleTool.Render(label) + "\n")

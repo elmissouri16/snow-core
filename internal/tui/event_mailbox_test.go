@@ -72,6 +72,79 @@ func TestAgentEventMailboxPreservesLifecycleAndPlanBoundaries(t *testing.T) {
 	}
 }
 
+func TestAgentEventMailboxNeverEvictsInteractionOrTerminalEvents(t *testing.T) {
+	q := newAgentEventMailbox()
+	protected := []protocol.AgentEvent{
+		{Type: protocol.EvPermissionRequest, TurnID: "permission"},
+		{Type: protocol.EvUserInputRequest, TurnID: "user-input"},
+		{Type: protocol.EvTurnDone, TurnID: "done"},
+		{Type: protocol.EvAborted, TurnID: "aborted"},
+	}
+	for _, event := range protected {
+		q.Push(event)
+	}
+	for i := len(protected); i < maxMailboxQueuedItems+1; i++ {
+		q.Push(protocol.AgentEvent{Type: protocol.EvToolStart, ToolCallID: string(rune(i + 1))})
+	}
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.items) != maxMailboxQueuedItems {
+		t.Fatalf("mailbox items=%d want %d", len(q.items), maxMailboxQueuedItems)
+	}
+	for _, want := range protected {
+		found := false
+		for _, item := range q.items {
+			if item.event.Type == want.Type && item.event.TurnID == want.TurnID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("protected event %s/%s was evicted", want.Type, want.TurnID)
+		}
+	}
+}
+
+func TestAgentEventMailboxBackpressuresProtectedOverflow(t *testing.T) {
+	q := newAgentEventMailbox()
+	defer q.Close()
+	for i := 0; i < maxMailboxQueuedItems; i++ {
+		q.Push(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: string(rune(i + 1))})
+	}
+	pushed := make(chan struct{})
+	go func() {
+		q.Push(protocol.AgentEvent{Type: protocol.EvAborted, TurnID: "new"})
+		close(pushed)
+	}()
+	select {
+	case <-pushed:
+		t.Fatal("protected overflow was dropped instead of backpressured")
+	case <-time.After(20 * time.Millisecond):
+	}
+	if batch := q.popBatch(1); len(batch) != 1 {
+		t.Fatalf("popped batch len=%d", len(batch))
+	}
+	select {
+	case <-pushed:
+	case <-time.After(time.Second):
+		t.Fatal("protected producer did not resume after mailbox space opened")
+	}
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	found := false
+	for _, item := range q.items {
+		if item.event.Type == protocol.EvAborted && item.event.TurnID == "new" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("resumed protected event was not retained")
+	}
+}
+
 func TestAgentEventMailboxDoesNotLeaveStaleWakeAfterConsumerRace(t *testing.T) {
 	q := newAgentEventMailbox()
 	q.Push(protocol.AgentEvent{Type: protocol.EvToolStart, ToolName: "one"})

@@ -271,9 +271,9 @@ func (m *Model) renderUserInput() string {
 		}
 		tabs = append(tabs, mark)
 	}
-	title := fmt.Sprintf("? %s  %s", question.Header, strings.Join(tabs, " "))
+	title := fmt.Sprintf("? %s  %s", sanitizeTerminalText(question.Header), strings.Join(tabs, " "))
 	b.WriteString(styleTool.Render(truncateRunes(title, width)) + "\n")
-	wrapped := xansi.Wordwrap(question.Question, width, "")
+	wrapped := xansi.Wordwrap(sanitizeTerminalText(question.Question), width, "")
 	wrapped = xansi.Hardwrap(wrapped, width, true)
 	editorView := ""
 	if m.userInputEditing {
@@ -302,9 +302,9 @@ func (m *Model) renderUserInput() string {
 		b.WriteString(styleFooter.Render("(Enter accept · Ctrl+V paste · Ctrl+J newline · Tab next · Shift+Tab previous · Esc decline)"))
 	} else {
 		for i, option := range question.Options {
-			line := option.Label
+			line := sanitizeTerminalText(option.Label)
 			if option.Description != "" {
-				line += "  " + styleHeaderDim.Render(option.Description)
+				line += "  " + styleHeaderDim.Render(sanitizeTerminalText(option.Description))
 			}
 			prefix := "  "
 			style := styleCompletion
@@ -324,7 +324,7 @@ func (m *Model) renderUserInput() string {
 		b.WriteString(styleFooter.Render("(↑/↓ choose · Enter accept · Tab next · Shift+Tab previous · Esc decline)"))
 	}
 	if m.userInputError != "" {
-		b.WriteString("\n" + styleError.Render(truncateRunes(m.userInputError, width)))
+		b.WriteString("\n" + styleError.Render(truncateRunes(sanitizeTerminalText(m.userInputError), width)))
 	}
 	return strings.TrimSuffix(lipgloss.NewStyle().MaxWidth(width).Render(b.String()), "\n")
 }

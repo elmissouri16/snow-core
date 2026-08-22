@@ -412,7 +412,8 @@ type Model struct {
 	subagentFleetMD         *mdRenderer
 	toolRunning             bool
 	activeToolCallID        string
-	activeBashCommand       string
+	activeToolStartMessage  string
+	activeToolRows          []string
 	pendingInputs           protocol.InputQueue
 	queueEpoch              uint64
 	queueAttempts           []queuedTUIAttempt

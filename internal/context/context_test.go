@@ -99,6 +99,69 @@ func TestAssembleCapTruncates(t *testing.T) {
 	}
 }
 
+func TestAssembleRejectsSymlinkedAgentsFile(t *testing.T) {
+	dir := t.TempDir()
+	secretPath := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(secretPath, []byte("provider-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secretPath, filepath.Join(dir, "AGENTS.md")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	l := NewLoader(10000, false)
+	if files := l.FindAgents(dir); len(files) != 0 {
+		t.Fatalf("symlinked AGENTS.md discovered: %+v", files)
+	}
+	if rendered := l.Assemble(dir, "", "").Render(); strings.Contains(rendered, "provider-secret") {
+		t.Fatal("symlink target leaked into project context")
+	}
+}
+
+func TestReadProjectFileRevalidatesReplacement(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(path, []byte("safe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files := NewLoader(10000, false).FindAgents(dir)
+	if len(files) != 1 {
+		t.Fatalf("files = %+v", files)
+	}
+	secretPath := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(secretPath, []byte("provider-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secretPath, path); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if data, _, err := readProjectFile(files[0].Path, 10000); err == nil {
+		t.Fatalf("replacement read succeeded: %q", data)
+	}
+}
+
+func TestReadProjectFileBoundsSparseFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(path, []byte("begin"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, 256<<20); err != nil {
+		t.Skipf("sparse files unavailable: %v", err)
+	}
+
+	data, truncated, err := readProjectFile(path, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || len(data) != 32 || !strings.HasPrefix(string(data), "begin") {
+		t.Fatalf("bounded read = len %d, truncated %v, prefix %q", len(data), truncated, data[:min(len(data), 5)])
+	}
+}
+
 func TestCLAUDEOffByDefault(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("claude stuff"), 0o644); err != nil {

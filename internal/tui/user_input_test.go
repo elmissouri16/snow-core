@@ -87,6 +87,27 @@ func TestUserInputChoiceThenFreeForm(t *testing.T) {
 	}
 }
 
+func TestRenderUserInputSanitizesTerminalControls(t *testing.T) {
+	m := newModel(context.Background(), appOptionsForUserInputTest())
+	m.width, m.height = 100, 30
+	m.startUserInput(protocol.UserInputRequest{ID: "unsafe", Questions: []protocol.UserInputQuestion{{
+		ID:       "choice",
+		Header:   "Header\x1b[2J",
+		Question: "Question\x1b]52;c;Y2xpcGJvYXJk\x07\u009b31m",
+		Options: []protocol.UserInputOption{{
+			Label:       "Option\x1b[3J",
+			Description: "Description\x1b]2;spoofed\x07",
+		}},
+	}}})
+
+	rendered := m.renderUserInput()
+	for _, control := range []string{"\x1b[2J", "\x1b[3J", "\x1b]52", "\x1b]2", "\x07", "\u009b"} {
+		if strings.Contains(rendered, control) {
+			t.Fatalf("rendered user input retained terminal control %q: %q", control, rendered)
+		}
+	}
+}
+
 func TestInlineUserInputLongQuestionKeepsActionsVisible(t *testing.T) {
 	m := newModel(context.Background(), appOptionsForUserInputTest())
 	buildAppForTest(t, m)

@@ -58,7 +58,7 @@ func TestModelHydratesPersistedToolTranscript(t *testing.T) {
 
 	m.hydrateSession()
 	plain := stripANSI(strings.Join(m.lines, "\n"))
-	wants := []string{"think: Inspecting files", "▶ grep", "scanning files", "✔ grep  (12ms)", "main.go:7: needle"}
+	wants := []string{"think: Inspecting files", "✔ grep  (12ms)", "main.go:7: needle"}
 	position := -1
 	for _, want := range wants {
 		next := strings.Index(plain, want)
@@ -114,7 +114,7 @@ func TestModelHydratesExplicitSkillToolTranscript(t *testing.T) {
 
 	m.hydrateSession()
 	plain := stripANSI(strings.Join(m.lines, "\n"))
-	for _, want := range []string{"$review check this", "▶ activate_skill activating explicitly requested skill review", "✔ activate_skill  (9ms)", "skill instructions loaded"} {
+	for _, want := range []string{"$review check this", "✔ activate_skill activating explicitly requested skill review  (9ms)", "skill instructions loaded"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("resumed explicit skill transcript missing %q: %q", want, plain)
 		}
@@ -201,7 +201,7 @@ func TestModelHydratesLegacyInterruptedToolTurn(t *testing.T) {
 
 	m.hydrateSession()
 	plain := stripANSI(strings.Join(m.lines, "\n"))
-	for _, want := range []string{"think: Reading the repository", "▶ read", "✔ read", "README contents", "aborted"} {
+	for _, want := range []string{"think: Reading the repository", "✔ read", "README contents", "aborted"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("legacy interrupted turn missing %q after resume: %q", want, plain)
 		}

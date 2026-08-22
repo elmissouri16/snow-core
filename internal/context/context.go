@@ -6,7 +6,9 @@ package context
 import (
 	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,7 +62,7 @@ func (l *Loader) FindAgents(cwd string) []ProjectFile {
 				continue
 			}
 			seen[p] = true
-			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			if isRegularProjectFile(dir, name) {
 				files = append(files, ProjectFile{Path: p, Depth: depth})
 			}
 		}
@@ -72,6 +74,54 @@ func (l *Loader) FindAgents(cwd string) []ProjectFile {
 		depth++
 	}
 	return files
+}
+
+func isRegularProjectFile(dir, name string) bool {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return false
+	}
+	defer root.Close()
+	info, err := root.Lstat(name)
+	return err == nil && info.Mode()&os.ModeSymlink == 0 && info.Mode().IsRegular()
+}
+
+func readProjectFile(path string, limit int) ([]byte, bool, error) {
+	if limit <= 0 {
+		return nil, false, nil
+	}
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, false, err
+	}
+	defer root.Close()
+
+	name := filepath.Base(path)
+	before, err := root.Lstat(name)
+	if err != nil {
+		return nil, false, err
+	}
+	if before.Mode()&os.ModeSymlink != 0 || !before.Mode().IsRegular() {
+		return nil, false, errors.New("project instruction must be a regular non-symlink file")
+	}
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, false, err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(before, opened) {
+		return nil, false, errors.New("project instruction changed while opening")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, int64(limit)+1))
+	if err != nil {
+		return nil, false, err
+	}
+	truncated := len(data) > limit
+	if truncated {
+		data = data[:limit]
+	}
+	return data, truncated, nil
 }
 
 // Assembly is the result of context assembly.
@@ -100,18 +150,18 @@ func (l *Loader) Assemble(cwd, preamble, userInstructions string) Assembly {
 	files := l.FindAgents(cwd)
 	remaining := l.CapBytes
 	for _, f := range files {
-		data, err := os.ReadFile(f.Path)
+		if remaining <= 0 {
+			break
+		}
+		data, truncated, err := readProjectFile(f.Path, remaining)
 		if err != nil || len(data) == 0 {
 			continue
 		}
 		title := fmt.Sprintf("%s (depth %d)", filepath.Base(f.Path), f.Depth)
-		if len(data) > remaining {
-			data = data[:remaining]
-			a.Truncated = true
-		}
 		a.Sections = append(a.Sections, Section{Title: title, Content: string(data)})
 		remaining -= len(data)
-		if remaining <= 0 {
+		if truncated {
+			a.Truncated = true
 			break
 		}
 	}

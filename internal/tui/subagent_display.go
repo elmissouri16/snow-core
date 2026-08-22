@@ -190,7 +190,7 @@ func formatAgentTime(milliseconds int64) string {
 }
 
 func compactAgentText(value string, maxRunes int) string {
-	value = strings.Join(strings.Fields(value), " ")
+	value = strings.Join(strings.Fields(sanitizeTerminalText(value)), " ")
 	return truncateRunes(value, maxRunes)
 }
 

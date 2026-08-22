@@ -58,13 +58,15 @@ messages. Tool-result messages include bounded, surface-safe `tool_display`
 metadata (start detail, progress rows, completion duration, and the same output
 or private diff preview published live); harness activity without a provider tool
 result, such as explicit skill activation, uses provider-excluded branch metadata.
-Presentation metadata is stripped at every provider request boundary. Completed
-and interrupted tool-heavy turns therefore retain their native transcript cards,
-terminal error rows, and aborted boundaries after resume. Sessions created before
-this metadata existed receive a best-effort reconstruction from tool-call
-arguments and result content. Full-screen transcript limits are applied to
-rendered rows rather than raw messages, so non-rendered compatibility entries do
-not evict useful user or assistant text.
+Presentation metadata is stripped at every provider request boundary. While a
+tool runs, its start and progress rows occupy the transient transcript tail; its
+terminal event replaces them with one success/error lifecycle row plus any result
+preview. Resume reconstructs that completed form instead of replaying obsolete
+running rows, while interrupted turns retain terminal error and aborted
+boundaries. Sessions created before this metadata existed receive a best-effort
+reconstruction from tool-call arguments and result content. Full-screen
+transcript limits are applied to rendered rows rather than raw messages, so
+non-rendered compatibility entries do not evict useful user or assistant text.
 
 Managed background-process state is deliberately runtime-owned rather than a
 SQLite table. Processes are shared by branches in the active session, and their

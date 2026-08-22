@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -199,17 +201,38 @@ func (m *Model) renderBashSummary(command, duration, message string, isError boo
 	return line
 }
 
-// sanitizeToolPreview removes terminal controls before tool output is rendered
-// in the TUI. Tool output is untrusted repository/process data.
+// sanitizeTerminalText removes terminal controls from untrusted text while
+// retaining ordinary Unicode, newlines, and tabs. In particular, stripping
+// ESC, BEL, carriage return, and C1 controls disarms CSI/OSC sequences before
+// lipgloss or x/ansi process the text.
+func sanitizeTerminalText(value string) string {
+	return sanitizeTerminalTextLimit(value, -1)
+}
+
+// sanitizeToolPreview removes terminal controls and bounds tool output before
+// it is rendered in the TUI. Tool output is untrusted repository/process data.
 func sanitizeToolPreview(value string, maxBytes int) string {
+	return sanitizeTerminalTextLimit(value, maxBytes)
+}
+
+func sanitizeTerminalTextLimit(value string, maxBytes int) string {
+	if maxBytes == 0 {
+		return ""
+	}
 	var b strings.Builder
+	if maxBytes > 0 && len(value) > maxBytes {
+		b.Grow(maxBytes)
+	} else {
+		b.Grow(len(value))
+	}
 	for _, r := range value {
-		if r == '\n' || r == '\t' || (r >= 0x20 && r != 0x7f) {
-			b.WriteRune(r)
+		if r != '\n' && r != '\t' && unicode.IsControl(r) {
+			continue
 		}
-		if b.Len() >= maxBytes {
+		if maxBytes > 0 && b.Len()+utf8.RuneLen(r) > maxBytes {
 			break
 		}
+		b.WriteRune(r)
 	}
 	return b.String()
 }

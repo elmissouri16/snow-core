@@ -510,6 +510,9 @@ func (m *Model) beginOptimisticRun() uint64 {
 	m.turnUsageSeen = false
 	m.busy = true
 	m.toolRunning = false
+	m.activeToolCallID = ""
+	m.activeToolStartMessage = ""
+	m.activeToolRows = nil
 	m.lastErrorText = ""
 	m.runStartedAt = m.currentTime()
 	return m.runGeneration

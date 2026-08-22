@@ -80,7 +80,8 @@ func (m *Model) setRunIdle() {
 	m.activeTurnID = ""
 	m.toolRunning = false
 	m.activeToolCallID = ""
-	m.activeBashCommand = ""
+	m.activeToolStartMessage = ""
+	m.activeToolRows = nil
 	m.compacting = false
 	m.compactStatus = ""
 	m.runStartedAt = time.Time{}
@@ -186,7 +187,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 	case protocol.EvCompactionStarted:
 		m.busy = true
 		m.compacting = true
-		m.compactStatus = strings.TrimSpace(ev.Message)
+		m.compactStatus = strings.TrimSpace(sanitizeTerminalText(ev.Message))
 		if m.compactStatus == "" {
 			m.compactStatus = "compacting context"
 		}
@@ -217,7 +218,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 	case protocol.EvTextDelta:
 		m.finalizeThinking()
 		m.finalizePlan()
-		m.assistantBuf.WriteString(ev.Text)
+		m.assistantBuf.WriteString(sanitizeTerminalText(ev.Text))
 		m.refreshTranscript()
 	case protocol.EvPlanStarted:
 		m.finishAssistant()
@@ -228,12 +229,12 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		}
 		m.sawPlanThisTurn = true
 	case protocol.EvPlanDelta:
-		m.planBuf.WriteString(ev.Text)
+		m.planBuf.WriteString(sanitizeTerminalText(ev.Text))
 		m.refreshTranscript()
 	case protocol.EvPlanCompleted:
 		if ev.Plan != nil && strings.TrimSpace(ev.Plan.Text) != "" {
 			m.planBuf.Reset()
-			m.planBuf.WriteString(ev.Plan.Text)
+			m.planBuf.WriteString(sanitizeTerminalText(ev.Plan.Text))
 			m.completedPlanThisTurn = true
 			m.finalizePlan()
 		}
@@ -269,20 +270,16 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.lastStatus = "mode " + string(ev.Mode.Mode)
 		}
 	case protocol.EvThinkingDelta:
-		m.thinkingBuf.WriteString(ev.Text)
+		m.thinkingBuf.WriteString(sanitizeTerminalText(ev.Text))
 		m.refreshTranscript()
 	case protocol.EvToolStart:
 		m.toolRunning = true
 		m.activeToolCallID = ev.ToolCallID
-		m.activeBashCommand = ""
-		if ev.ToolName == "bash" {
-			m.activeBashCommand = compactBashCommand(ev.Message)
-		}
+		m.activeToolStartMessage = ev.Message
+		m.activeToolRows = toolStartTranscriptRows(ev.ToolName, ev.Message)
 		m.finishAssistant()
-		for _, row := range toolStartTranscriptRows(ev.ToolName, ev.Message) {
-			m.pushLine(row)
-		}
 		m.busy = true
+		m.refreshTranscript()
 	case protocol.EvToolProgress:
 		m.busy = true
 		message := strings.TrimSpace(ev.Message)
@@ -290,20 +287,24 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			message = strings.TrimSpace(ev.ToolProgress.Message)
 		}
 		if row := toolProgressTranscriptRow(ev.ToolName, message); row != "" {
-			m.pushLine(row)
+			m.activeToolRows = append(m.activeToolRows, row)
+			m.refreshTranscript()
 		}
 	case protocol.EvToolEnd:
 		if ev.ToolName == "ask_user" && m.userInputPending {
 			m.clearUserInput()
 		}
+		startMessage := m.activeToolStartMessage
 		m.toolRunning = false
-		for _, row := range m.toolEndTranscriptRows(ev.ToolName, m.activeBashCommand, ev.ToolDurationMS, ev.Message, ev.ToolOutput, ev.IsError) {
+		m.activeToolRows = nil
+		for _, row := range m.toolEndTranscriptRows(ev.ToolName, startMessage, ev.ToolDurationMS, ev.Message, ev.ToolOutput, ev.IsError) {
 			m.pushLine(row)
 		}
 		if m.activeToolCallID == "" || ev.ToolCallID == "" || m.activeToolCallID == ev.ToolCallID {
 			m.activeToolCallID = ""
-			m.activeBashCommand = ""
+			m.activeToolStartMessage = ""
 		}
+		m.refreshTranscript()
 		// Keep the composer locked until turn_done. Tool calls are serial but
 		// their end/start events can be separated by scheduling, so unlocking
 		// here permits a second Prompt to race the current agent turn.
@@ -368,9 +369,9 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.permChoice = 0
 			m.layout()
 			m.finishAssistant()
-			label := "🔐 permission request: " + req.Tool
+			label := "🔐 permission request: " + sanitizeTerminalText(req.Tool)
 			if ev.Agent != nil {
-				label += " · " + string(ev.Agent.Path)
+				label += " · " + sanitizeTerminalText(string(ev.Agent.Path))
 			}
 			m.pushLine(styleTool.Render(label))
 		}
@@ -385,7 +386,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		m.sawPlanThisTurn = false
 		m.completedPlanThisTurn = false
 		m.planPrompt = false
-		message := strings.TrimSpace(ev.Message)
+		message := strings.TrimSpace(sanitizeTerminalText(ev.Message))
 		for _, prefix := range []string{"agent: provider stream: ", "agent: provider chat: ", "agent: provider resolve: ", "agent: "} {
 			message = strings.TrimPrefix(message, prefix)
 		}
@@ -402,6 +403,9 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		m.turnUsageSeen = false
 		m.clearUserInput()
 		m.toolRunning = false
+		m.activeToolCallID = ""
+		m.activeToolStartMessage = ""
+		m.activeToolRows = nil
 		if ev.Usage != nil {
 			m.lastUsage = ev.Usage.Clone()
 			if os.Getenv("SNOW_DEBUG") != "" {
@@ -611,8 +615,9 @@ func (m *Model) renderPlanBody(text string) string {
 func (m *Model) renderPlanUpdate(update protocol.PlanUpdate) string {
 	var b strings.Builder
 	b.WriteString(styleHeader.Render("Plan update"))
-	if strings.TrimSpace(update.Explanation) != "" {
-		b.WriteString("\n" + styleHeaderDim.Render(strings.TrimSpace(update.Explanation)))
+	explanation := strings.TrimSpace(sanitizeTerminalText(update.Explanation))
+	if explanation != "" {
+		b.WriteString("\n" + styleHeaderDim.Render(explanation))
 	}
 	for _, step := range update.Plan {
 		mark := "○"
@@ -621,7 +626,7 @@ func (m *Model) renderPlanUpdate(update protocol.PlanUpdate) string {
 		} else if step.Status == protocol.PlanStepInProgress {
 			mark = "→"
 		}
-		b.WriteString("\n" + mark + " " + step.Step)
+		b.WriteString("\n" + mark + " " + sanitizeTerminalText(step.Step))
 	}
 	return b.String()
 }
@@ -690,6 +695,12 @@ func (m *Model) liveText() string {
 			b.WriteString("\n")
 		}
 		b.WriteString(styleHeader.Render("Plan") + "\n" + styleAssistant.Render(m.planBuf.String()))
+	}
+	if len(m.activeToolRows) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(strings.Join(m.activeToolRows, "\n"))
 	}
 	return b.String()
 }

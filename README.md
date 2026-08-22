@@ -208,9 +208,10 @@ sticky header/footer, and a Bubbles transcript viewport. `/processes` opens an
 auto-refreshing process fleet inspector with a selectable managed-process list
 and a live, scrollable combined stdout/stderr panel; `/processes ID_OR_NAME`
 preselects one record. `Alt+P` opens the process fleet directly, while `Alt+A`
-opens the subagent fleet; both remain available during active turns. Output is
-escaped before rendering so subprocess control sequences cannot become terminal
-commands. Mouse mode defaults on
+opens the subagent fleet; both remain available during active turns. Model,
+interaction, tool, and subprocess text is stripped of terminal controls before
+Snow adds its own display styling, so untrusted CSI/OSC sequences cannot become
+terminal commands. Mouse mode defaults on
 so wheel/trackpad gestures scroll Snow's transcript viewport instead of terminal
 scrollback. Primary drag selects and copies transcript text; on Apple Terminal,
 hold Fn while dragging for terminal-native selection. Right-click opens Snow's

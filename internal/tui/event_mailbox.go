@@ -54,66 +54,91 @@ func coalesceRootSessionUpdates(events []protocol.AgentEvent) []protocol.AgentEv
 	return coalesced
 }
 
-// agentEventMailbox is a lossless, ordered handoff from agent callbacks to the
-// Bubble Tea update loop. Producers never wait for the UI consumer. Adjacent
-// stream deltas are represented as parts and joined only when a batch is
-// popped, avoiding quadratic concatenation while the UI is busy rendering.
+// agentEventMailbox is an ordered handoff from agent callbacks to the Bubble
+// Tea update loop. Coalescible and snapshot events are shed at the hard bound;
+// interaction requests and terminal turn boundaries apply backpressure instead
+// of being lost. Adjacent stream deltas are represented as parts and joined
+// only when a batch is popped, avoiding quadratic concatenation while busy.
 type agentEventMailbox struct {
 	mu      sync.Mutex
 	items   []queuedAgentEvent
 	bytes   int
 	dropped int
 	wake    chan struct{}
+	space   chan struct{}
 	done    chan struct{}
 	closed  bool
 }
 
 func newAgentEventMailbox() *agentEventMailbox {
-	return &agentEventMailbox{wake: make(chan struct{}, 1), done: make(chan struct{})}
+	return &agentEventMailbox{wake: make(chan struct{}, 1), space: make(chan struct{}), done: make(chan struct{})}
 }
 
 func (q *agentEventMailbox) Push(ev protocol.AgentEvent) {
 	if q == nil {
 		return
 	}
-	copy := ev.Clone()
-	if isCoalescibleStreamDelta(copy.Type) && len(copy.Text) > maxMailboxDeltaBytes {
-		copy.Text = boundedUTF8Tail(copy.Text, maxMailboxDeltaBytes)
+	copyEvent := ev.Clone()
+	if isCoalescibleStreamDelta(copyEvent.Type) && len(copyEvent.Text) > maxMailboxDeltaBytes {
+		copyEvent.Text = boundedUTF8Tail(copyEvent.Text, maxMailboxDeltaBytes)
 	}
-	q.mu.Lock()
-	if q.closed {
-		q.mu.Unlock()
-		return
-	}
-	wasEmpty := len(q.items) == 0
-	if len(q.items) > 0 && compatibleStreamDeltas(q.items[len(q.items)-1].event, copy) {
-		item := &q.items[len(q.items)-1]
-		item.textParts = append(item.textParts, copy.Text)
-		item.bytes += len(copy.Text)
-		q.bytes += len(copy.Text)
-		for item.bytes > maxMailboxDeltaBytes && len(item.textParts) > 1 {
-			removed := len(item.textParts[0])
-			item.textParts[0] = ""
-			item.textParts = item.textParts[1:]
-			item.bytes -= removed
-			q.bytes -= removed
-			q.dropped++
+	for {
+		q.mu.Lock()
+		if q.closed {
+			q.mu.Unlock()
+			return
 		}
-	} else {
-		item := queuedAgentEvent{event: copy, bytes: approximateAgentEventBytes(copy)}
-		if isCoalescibleStreamDelta(copy.Type) {
-			item.textParts = []string{copy.Text}
-			item.bytes = len(copy.Text)
+		wasEmpty := len(q.items) == 0
+		if len(q.items) > 0 && compatibleStreamDeltas(q.items[len(q.items)-1].event, copyEvent) {
+			item := &q.items[len(q.items)-1]
+			item.textParts = append(item.textParts, copyEvent.Text)
+			item.bytes += len(copyEvent.Text)
+			q.bytes += len(copyEvent.Text)
+			for item.bytes > maxMailboxDeltaBytes && len(item.textParts) > 1 {
+				removed := len(item.textParts[0])
+				item.textParts[0] = ""
+				item.textParts = item.textParts[1:]
+				item.bytes -= removed
+				q.bytes -= removed
+				q.dropped++
+			}
+			q.trimLocked()
+			if wasEmpty && len(q.items) > 0 {
+				q.signalLocked()
+			}
+			q.mu.Unlock()
+			return
+		}
+
+		item := queuedAgentEvent{event: copyEvent, bytes: approximateAgentEventBytes(copyEvent)}
+		if isCoalescibleStreamDelta(copyEvent.Type) {
+			item.textParts = []string{copyEvent.Text}
+			item.bytes = len(copyEvent.Text)
 			item.event.Text = ""
+		}
+		if !q.makeRoomLocked(item.bytes) {
+			if !mailboxProtectedEvent(copyEvent.Type) {
+				q.dropped++
+				q.mu.Unlock()
+				return
+			}
+			space := q.space
+			q.mu.Unlock()
+			select {
+			case <-space:
+				continue
+			case <-q.done:
+				return
+			}
 		}
 		q.items = append(q.items, item)
 		q.bytes += item.bytes
+		if wasEmpty {
+			q.signalLocked()
+		}
+		q.mu.Unlock()
+		return
 	}
-	q.trimLocked()
-	if wasEmpty && len(q.items) > 0 {
-		q.signalLocked()
-	}
-	q.mu.Unlock()
 }
 
 func approximateAgentEventBytes(ev protocol.AgentEvent) int {
@@ -136,34 +161,66 @@ func mailboxSnapshotEvent(typ protocol.AgentEventType) bool {
 	}
 }
 
+func mailboxProtectedEvent(typ protocol.AgentEventType) bool {
+	switch typ {
+	case protocol.EvPermissionRequest, protocol.EvUserInputRequest,
+		protocol.EvTurnDone, protocol.EvAborted:
+		return true
+	default:
+		return false
+	}
+}
+
+func (q *agentEventMailbox) makeRoomLocked(newBytes int) bool {
+	for len(q.items) >= maxMailboxQueuedItems || (len(q.items) > 0 && q.bytes+newBytes > maxMailboxQueuedBytes) {
+		if !q.evictOneLocked() {
+			return false
+		}
+	}
+	return true
+}
+
 func (q *agentEventMailbox) trimLocked() {
 	for len(q.items) > maxMailboxQueuedItems || q.bytes > maxMailboxQueuedBytes {
-		removeAt := -1
+		if !q.evictOneLocked() {
+			return
+		}
+	}
+}
+
+func (q *agentEventMailbox) evictOneLocked() bool {
+	removeAt := -1
+	for i := range q.items {
+		if isCoalescibleStreamDelta(q.items[i].event.Type) {
+			removeAt = i
+			break
+		}
+	}
+	if removeAt < 0 {
 		for i := range q.items {
-			if isCoalescibleStreamDelta(q.items[i].event.Type) {
+			if mailboxSnapshotEvent(q.items[i].event.Type) {
 				removeAt = i
 				break
 			}
 		}
-		if removeAt < 0 {
-			for i := range q.items {
-				if mailboxSnapshotEvent(q.items[i].event.Type) {
-					removeAt = i
-					break
-				}
+	}
+	if removeAt < 0 {
+		for i := range q.items {
+			if !mailboxProtectedEvent(q.items[i].event.Type) {
+				removeAt = i
+				break
 			}
 		}
-		if removeAt < 0 {
-			// A pathological flood of lifecycle events must still have a hard
-			// memory bound. Preserve the newest state when no coalescible item exists.
-			removeAt = 0
-		}
-		q.bytes -= q.items[removeAt].bytes
-		copy(q.items[removeAt:], q.items[removeAt+1:])
-		q.items[len(q.items)-1] = queuedAgentEvent{}
-		q.items = q.items[:len(q.items)-1]
-		q.dropped++
 	}
+	if removeAt < 0 {
+		return false
+	}
+	q.bytes -= q.items[removeAt].bytes
+	copy(q.items[removeAt:], q.items[removeAt+1:])
+	q.items[len(q.items)-1] = queuedAgentEvent{}
+	q.items = q.items[:len(q.items)-1]
+	q.dropped++
+	return true
 }
 
 func (q *agentEventMailbox) signalLocked() {
@@ -189,6 +246,8 @@ func (q *agentEventMailbox) popBatch(limit int) []protocol.AgentEvent {
 	}
 	clear(q.items[:count])
 	q.items = q.items[count:]
+	close(q.space)
+	q.space = make(chan struct{})
 	if len(q.items) == 0 {
 		q.items = nil
 	}

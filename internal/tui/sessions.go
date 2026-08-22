@@ -293,43 +293,29 @@ func (m *Model) hydrateSession() {
 
 func (m *Model) hydratedToolTranscriptRows(msg protocol.Message, call protocol.ContentBlock) []string {
 	display := msg.ToolDisplay
-	started := false
 	startMessage := ""
 	output := ""
 	durationMS := int64(0)
-	var progress []string
 	if display != nil {
-		started = display.Started
-		startMessage = display.StartMessage
-		progress = display.Progress
+		if display.Started {
+			startMessage = display.StartMessage
+		}
 		output = display.Output
 		durationMS = display.DurationMS
 	} else {
 		// Older sessions predate durable tool-card metadata. Reconstruct the
 		// closest safe equivalent from the assistant call and tool result.
-		started = call.Type == protocol.BlockToolCall && legacyToolWasDispatched(msg)
-		startMessage = persistedToolStartMessage(msg.ToolName, call.Arguments)
+		if call.Type == protocol.BlockToolCall && legacyToolWasDispatched(msg) {
+			startMessage = persistedToolStartMessage(msg.ToolName, call.Arguments)
+		}
 		output = legacyToolDisplayOutput(msg)
 	}
 
-	rows := make([]string, 0, len(progress)+3)
-	bashCommand := ""
-	if started {
-		if msg.ToolName == "bash" {
-			bashCommand = compactBashCommand(startMessage)
-		}
-		rows = append(rows, toolStartTranscriptRows(msg.ToolName, startMessage)...)
-	}
-	for _, message := range progress {
-		if row := toolProgressTranscriptRow(msg.ToolName, message); row != "" {
-			rows = append(rows, row)
-		}
-	}
 	message := ""
 	if msg.IsError {
 		message = output
 	}
-	return append(rows, m.toolEndTranscriptRows(msg.ToolName, bashCommand, durationMS, message, output, msg.IsError)...)
+	return m.toolEndTranscriptRows(msg.ToolName, startMessage, durationMS, message, output, msg.IsError)
 }
 
 func persistedToolStartMessage(name string, arguments json.RawMessage) string {
@@ -624,13 +610,18 @@ func shortSessionID(id string) string {
 	return id
 }
 
-// toolStartTranscriptRows returns the durable rows produced when a tool starts.
-// Call IDs remain correlation metadata and never enter the native transcript.
-func toolStartTranscriptRows(toolName, message string) []string {
+func toolTranscriptLabel(toolName, message string) string {
 	label := toolName
 	if detail := strings.TrimSpace(message); detail != "" && detail != "running" {
 		label += " " + sanitizeToolPreview(detail, 500)
 	}
+	return label
+}
+
+// toolStartTranscriptRows returns the temporary rows shown while a tool runs.
+// Completion replaces these rows, and call IDs remain correlation metadata.
+func toolStartTranscriptRows(toolName, message string) []string {
+	label := toolTranscriptLabel(toolName, message)
 	switch toolName {
 	case "spawn_agent", "bash":
 		// Subagent lifecycle events provide the useful spawn row. Bash is kept to
@@ -651,8 +642,8 @@ func toolProgressTranscriptRow(toolName, message string) string {
 	return styleHeaderDim.Render("  ↳ " + sanitizeToolPreview(message, 500))
 }
 
-func (m *Model) toolEndTranscriptRows(toolName, bashCommand string, durationMS int64, message, output string, isError bool) []string {
-	label := toolName
+func (m *Model) toolEndTranscriptRows(toolName, startMessage string, durationMS int64, message, output string, isError bool) []string {
+	label := toolTranscriptLabel(toolName, startMessage)
 	duration := ""
 	if durationMS > 0 {
 		duration = fmt.Sprintf("%dms", durationMS)
@@ -667,15 +658,15 @@ func (m *Model) toolEndTranscriptRows(toolName, bashCommand string, durationMS i
 			message = "tool failed"
 		}
 		if toolName == "bash" {
-			rows = append(rows, m.renderBashSummary(bashCommand, duration, message, true))
+			rows = append(rows, m.renderBashSummary(startMessage, duration, message, true))
 		} else {
 			rows = append(rows, styleError.Render("✖ "+label+": "+sanitizeToolPreview(message, 700)))
 		}
 		return rows
 	}
 	if toolName == "bash" {
-		rows = append(rows, m.renderBashSummary(bashCommand, duration, "", false))
-	} else if toolName != "spawn_agent" && !toolHasDiffPreview(toolName, output) {
+		rows = append(rows, m.renderBashSummary(startMessage, duration, "", false))
+	} else if toolName != "spawn_agent" {
 		rows = append(rows, styleTool.Render("✔ "+label))
 	}
 	if preview := renderToolOutput(toolName, output, m.width); preview != "" {

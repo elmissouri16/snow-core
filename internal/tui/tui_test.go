@@ -458,16 +458,30 @@ func TestModelToolProgressAndOutputCard(t *testing.T) {
 	m.busy = true
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolStart, ToolName: "grep", ToolCallID: "call-123456"})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolProgress, ToolName: "grep", Message: "scanning files"})
-	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolName: "grep", ToolDurationMS: 12, ToolOutput: "main.go:1: match\nmain.go:2: match"})
+	running := stripANSI(m.transcriptContent)
+	for _, want := range []string{"▶ grep", "scanning files"} {
+		if !strings.Contains(running, want) {
+			t.Fatalf("running tool card missing %q: %q", want, running)
+		}
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolName: "grep", ToolCallID: "call-123456", ToolDurationMS: 12, ToolOutput: "main.go:1: match\nmain.go:2: match"})
 	if !m.busy {
 		t.Fatal("tool_end must not unlock the composer before turn_done")
 	}
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
 	plain := stripANSI(m.View())
-	for _, want := range []string{"grep", "scanning files", "main.go:1: match", "12ms"} {
+	for _, want := range []string{"✔ grep", "main.go:1: match", "12ms"} {
 		if !strings.Contains(plain, want) {
-			t.Fatalf("tool card missing %q: %q", want, plain)
+			t.Fatalf("completed tool card missing %q: %q", want, plain)
 		}
+	}
+	for _, unwanted := range []string{"▶ grep", "scanning files"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("completed tool card retained running row %q: %q", unwanted, plain)
+		}
+	}
+	if got := strings.Count(plain, "grep"); got != 1 {
+		t.Fatalf("completed tool lifecycle rows = %d, want 1: %q", got, plain)
 	}
 	if strings.Contains(plain, "call-123456") {
 		t.Fatalf("native tool card should hide call IDs: %q", plain)
@@ -501,6 +515,34 @@ func TestModelBashToolUsesSingleSummaryRow(t *testing.T) {
 	for _, unwanted := range []string{"running command", "command finished", "▶ bash"} {
 		if strings.Contains(plain, unwanted) {
 			t.Fatalf("bash summary contains redundant status %q: %q", unwanted, plain)
+		}
+	}
+}
+
+func TestModelProcessToolUsesSingleCompletedLifecycleRow(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolStart, ToolCallID: "process-call", ToolName: "process_start"})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolProgress, ToolCallID: "process-call", ToolName: "process_start", Message: "starting process"})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolProgress, ToolCallID: "process-call", ToolName: "process_start", Message: "waiting for readiness"})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolCallID: "process-call", ToolName: "process_start", ToolDurationMS: 79, ToolOutput: `{"process_id":"proc-1","status":"running"}`})
+
+	plain := stripANSI(m.transcriptContent)
+	if got := strings.Count(plain, "process_start"); got != 1 {
+		t.Fatalf("process lifecycle rows = %d, want 1: %q", got, plain)
+	}
+	for _, want := range []string{"✔ process_start  (79ms)", `"process_id":"proc-1"`} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("completed process card missing %q: %q", want, plain)
+		}
+	}
+	for _, unwanted := range []string{"▶ process_start", "waiting for readiness"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("completed process card retained running detail %q: %q", unwanted, plain)
 		}
 	}
 }

@@ -118,7 +118,10 @@ A trusted project's configured system-prompt file may replace the global or
 embedded base preamble. Its path is confined beneath the canonical project root,
 rejects symlink components, and is size-bounded. Project `AGENTS.md` files are
 always loaded as model instructions and are not controlled by extension trust.
-Both remain prompt-injection inputs.
+Snow opens each one through a pinned parent-directory handle, accepts only a
+regular non-symlink file whose identity remains stable across open, and reads no
+more than the remaining project-context budget. Both kinds of instruction file
+remain prompt-injection inputs.
 
 Allowing project trust means "load these declarations from this path." It does
 not mean:
@@ -216,6 +219,14 @@ runaway behavior but do not prevent a host command from reading secrets,
 modifying files, starting network connections, or affecting other processes
 before it is stopped. Snow provides no built-in container or VM backend;
 operators requiring process containment must supply it outside Snow.
+
+The TUI treats model, interaction, plugin, MCP, tool, and subprocess text as
+untrusted terminal input. It removes terminal control characters before adding
+Snow's own ANSI styling, disarming CSI/OSC sequences such as screen, title,
+hyperlink, and clipboard controls. This prevents terminal-command injection; it
+does not make displayed prose trustworthy or prevent social engineering.
+Decision requests and terminal turn boundaries also receive bounded mailbox
+backpressure rather than being discarded when the UI event queue is saturated.
 
 ## Network boundaries
 
