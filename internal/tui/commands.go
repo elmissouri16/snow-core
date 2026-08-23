@@ -17,7 +17,12 @@ import (
 
 // runCommand handles slash commands.
 func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
+	return m.runCommandWithDisplay(line, line)
+}
+
+func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.Cmd) {
 	m.editor.Reset()
+	m.pastedTexts = nil
 	m.resetInputHistoryNavigation()
 	parts := strings.Fields(line)
 	cmd := parts[0]
@@ -143,6 +148,7 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		message := strings.TrimSpace(strings.TrimPrefix(line, "/plan"))
+		displayMessage := strings.TrimSpace(strings.TrimPrefix(displayLine, "/plan"))
 		m.nudgeDismissed[m.planNudgeScope()] = true
 		if message == "" {
 			if err := m.app.Agent.SetMode(protocol.ModePlan); err != nil {
@@ -150,7 +156,10 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.pushLine(styleUser.Render("› " + message))
+		if displayMessage == "" {
+			displayMessage = message
+		}
+		m.pushLine(styleUser.Render("› " + displayMessage))
 		return m, m.startPromptWithMode(message, protocol.ModePlan)
 	case "/default":
 		if len(args) > 0 {

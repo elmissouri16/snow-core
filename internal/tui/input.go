@@ -22,12 +22,23 @@ func (m *Model) updateComposerEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if keyMatches(msg, m.keys.Paste) {
 		msg = tea.KeyMsg{Type: tea.KeyCtrlV}
 	}
+	deleteBackward := key.Matches(msg, m.editor.KeyMap.DeleteCharacterBackward)
+	deleteForward := key.Matches(msg, m.editor.KeyMap.DeleteCharacterForward)
+	if (deleteBackward || deleteForward) && m.removePastedTextAtCursor(deleteBackward) {
+		m.resetInputHistoryNavigation()
+		return m, m.refreshInputCompletions()
+	}
+	if m.collapseComposerPaste(msg) {
+		m.resetInputHistoryNavigation()
+		return m, m.refreshInputCompletions()
+	}
 	textMayChange := composerEditorKeyMayChange(msg, m.editor.KeyMap)
 	previous := m.editor.Value()
 	var cmd tea.Cmd
 	m.editor, cmd = m.editor.Update(msg)
 	if m.editor.Value() != previous {
 		m.resetInputHistoryNavigation()
+		m.prunePastedTextAttachments(m.editor.Value())
 	}
 	if msg.Type == tea.KeyEsc {
 		m.compVisible = false
@@ -426,16 +437,16 @@ func (m *Model) expandedPrompt(text string) string {
 	return expandMentionPrompt(text, m.app.CWD(), m.mentionFiles)
 }
 
-func (m *Model) submitQueuedInput(text string, kind protocol.QueuedInputKind) tea.Cmd {
-	expanded := m.expandedPrompt(text)
+func (m *Model) submitQueuedInput(text, fullText string, kind protocol.QueuedInputKind) tea.Cmd {
+	expanded := m.expandedPrompt(fullText)
 	epoch := m.queueEpoch
-	m.queueAttempts = append(m.queueAttempts, queuedTUIAttempt{kind: kind, text: text, expanded: expanded, epoch: epoch})
+	m.queueAttempts = append(m.queueAttempts, queuedTUIAttempt{kind: kind, text: text, fullText: fullText, expanded: expanded, epoch: epoch})
 	return func() tea.Msg {
 		item, err := m.app.Agent.QueueInput(kind, expanded)
 		if errors.Is(err, agent.ErrNotRunning) {
-			return queueSubmitMsg{kind: kind, text: text, expanded: expanded, epoch: epoch, fallback: true}
+			return queueSubmitMsg{kind: kind, text: text, fullText: fullText, expanded: expanded, epoch: epoch, fallback: true}
 		}
-		return queueSubmitMsg{kind: kind, text: text, expanded: expanded, itemID: item.ID, epoch: epoch, accepted: err == nil, err: err}
+		return queueSubmitMsg{kind: kind, text: text, fullText: fullText, expanded: expanded, itemID: item.ID, epoch: epoch, accepted: err == nil, err: err}
 	}
 }
 
@@ -471,13 +482,21 @@ func (m *Model) waitForQueueSettlement() tea.Cmd {
 	}
 }
 
+func queueMessageFullText(msg queueSubmitMsg) string {
+	if msg.fullText != "" {
+		return msg.fullText
+	}
+	return msg.text
+}
+
 func (m *Model) startQueueFallback() tea.Cmd {
 	if len(m.queueFallbacks) == 0 || m.app == nil {
 		return nil
 	}
 	msg := m.queueFallbacks[0]
 	m.queueFallbacks = m.queueFallbacks[1:]
-	m.rememberInputHistory(msg.text)
+	fullText := queueMessageFullText(msg)
+	m.rememberInputHistory(fullText)
 	// The fallback is semantically the steer that narrowly missed admission;
 	// defer any already queued collaboration-mode transition until this prompt's
 	// own turn_done boundary.
@@ -485,8 +504,10 @@ func (m *Model) startQueueFallback() tea.Cmd {
 	m.beginOptimisticRun()
 	m.planPrompt = false
 	m.pushLine(styleUser.Render("› " + msg.text))
+	var pastedTexts []pastedTextAttachment
 	if m.editor.Value() == msg.text {
 		m.editor.Reset()
+		pastedTexts = m.takePastedTextAttachments()
 	}
 	if m.cancelRun != nil {
 		m.cancelRun()
@@ -498,7 +519,11 @@ func (m *Model) startQueueFallback() tea.Cmd {
 		_, beforeID, _ := m.app.Agent.ActiveTurn()
 		err := m.app.Agent.Prompt(ctx, msg.expanded)
 		_, turnID, running := m.app.Agent.ActiveTurn()
-		return promptDoneMsg{generation: generation, turnID: turnID, admitted: running || (turnID != "" && turnID != beforeID), historyText: msg.text, err: err}
+		return promptDoneMsg{
+			generation: generation, turnID: turnID,
+			admitted: running || (turnID != "" && turnID != beforeID),
+			text:     msg.text, historyText: fullText, pastedTexts: pastedTexts, err: err,
+		}
 	}
 	return promptCmd
 }
@@ -540,7 +565,8 @@ func (m *Model) startPrompt(text string) tea.Cmd {
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
-	historyText := stripImageAttachmentTokens(text, len(m.promptImages))
+	pastedTexts := m.takePastedTextAttachments()
+	historyText := stripImageAttachmentTokens(expandPastedTextAttachments(text, pastedTexts), len(m.promptImages))
 	m.rememberInputHistory(historyText)
 	prompt := m.expandedPrompt(historyText)
 	images := m.takePromptImages()
@@ -548,7 +574,10 @@ func (m *Model) startPrompt(text string) tea.Cmd {
 		err := m.app.Agent.PromptContent(ctx, prompt, images)
 		_, turnID, _ := m.app.Agent.ActiveTurn()
 		admitted := err == nil || !errors.Is(err, agent.ErrPromptRejected)
-		return promptDoneMsg{generation: generation, turnID: turnID, admitted: admitted, text: text, historyText: historyText, attachments: images, err: err}
+		return promptDoneMsg{
+			generation: generation, turnID: turnID, admitted: admitted,
+			text: text, historyText: historyText, attachments: images, pastedTexts: pastedTexts, err: err,
+		}
 	}
 }
 
@@ -559,13 +588,18 @@ func (m *Model) startPromptWithMode(text string, mode protocol.CollaborationMode
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
-	prompt := m.expandedPrompt(stripImageAttachmentTokens(text, len(m.promptImages)))
+	pastedTexts := m.takePastedTextAttachments()
+	historyText := stripImageAttachmentTokens(expandPastedTextAttachments(text, pastedTexts), len(m.promptImages))
+	prompt := m.expandedPrompt(historyText)
 	images := m.takePromptImages()
 	return func() tea.Msg {
 		err := m.app.Agent.PromptContentWithMode(ctx, prompt, images, mode)
 		_, turnID, _ := m.app.Agent.ActiveTurn()
 		admitted := err == nil || !errors.Is(err, agent.ErrPromptRejected)
-		return promptDoneMsg{generation: generation, turnID: turnID, admitted: admitted, text: text, attachments: images, err: err}
+		return promptDoneMsg{
+			generation: generation, turnID: turnID, admitted: admitted,
+			text: text, historyText: historyText, attachments: images, pastedTexts: pastedTexts, err: err,
+		}
 	}
 }
 
@@ -631,9 +665,10 @@ func (m *Model) restoreAbortedInputs(queue protocol.InputQueue, fallbacks []queu
 		parts = append(parts, m.originalQueuedText(item))
 	}
 	for _, fallback := range fallbacks {
-		parts = append(parts, fallback.text)
+		parts = append(parts, queueMessageFullText(fallback))
 	}
 	if draft != "" {
+		draft = m.expandedPastedText(draft)
 		duplicateAcceptedDraft := len(parts) > 0 && parts[len(parts)-1] == draft
 		if !duplicateAcceptedDraft {
 			parts = append(parts, draft)
@@ -643,8 +678,7 @@ func (m *Model) restoreAbortedInputs(queue protocol.InputQueue, fallbacks []queu
 	clear(m.queueOriginalText)
 	clear(m.queueRendered)
 	if len(parts) > 0 {
-		m.editor.SetValue(strings.Join(parts, "\n\n"))
-		m.editor.CursorEnd()
+		m.setComposerValueCollapsingLargeText(strings.Join(parts, "\n\n"))
 		m.refreshInputCompletions()
 	}
 }
@@ -655,6 +689,9 @@ func (m *Model) originalQueuedText(item protocol.QueuedInput) string {
 	}
 	for _, attempt := range m.queueAttempts {
 		if attempt.kind == item.Kind && attempt.expanded == item.Text {
+			if attempt.fullText != "" {
+				return attempt.fullText
+			}
 			return attempt.text
 		}
 	}

@@ -33,6 +33,12 @@ func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cm
 		m.layout()
 		return m, cmd
 	default:
+		if keyMsg, ok := result.msg.(tea.KeyMsg); ok && m.collapseComposerPaste(keyMsg) {
+			m.resetInputHistoryNavigation()
+			cmd := m.refreshInputCompletions()
+			m.layout()
+			return m, cmd
+		}
 		previous := m.editor.Value()
 		var cmd tea.Cmd
 		m.editor, cmd = m.editor.Update(result.msg)
@@ -42,6 +48,7 @@ func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cm
 		}
 		if m.editor.Value() != previous {
 			m.resetInputHistoryNavigation()
+			m.prunePastedTextAttachments(m.editor.Value())
 			if mentionCmd := m.refreshInputCompletions(); mentionCmd != nil {
 				cmd = tea.Batch(cmd, mentionCmd)
 			}

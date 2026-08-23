@@ -245,6 +245,16 @@ reasoning behavior. Blocking permission and model-requested input overlays
 take keyboard and visual precedence over ordinary pickers, including requests
 from subagents.
 
+### Large text paste
+
+The ordinary composer collapses a pasted block of at least 4,096 characters or
+40 lines into one inline `[Pasted text #N · …]` token. Snow keeps the exact text
+behind that token and expands it only when the prompt is submitted, so large
+pastes do not remain in the textarea's per-keystroke render path. Prompt
+history, queued steering/follow-ups, and rejected or aborted submissions retain
+the full text. When the draft contains only paste tokens, Backspace or Esc
+removes the newest one. Smaller snippets remain directly editable.
+
 ### Image paste
 
 In the ordinary agent composer, Ctrl+V probes the system clipboard for PNG,

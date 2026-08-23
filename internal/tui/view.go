@@ -461,6 +461,9 @@ func (m *Model) renderEditor() string {
 			token := imageAttachmentToken(i)
 			editorView = strings.ReplaceAll(editorView, token, stylePrompt.Render(token))
 		}
+		for _, attachment := range m.pastedTexts {
+			editorView = strings.ReplaceAll(editorView, attachment.token, stylePrompt.Render(attachment.token))
+		}
 		input = stylePrompt.Render("› ") + editorView
 	}
 	height := max(minComposerHeight, m.editor.Height())

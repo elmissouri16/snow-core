@@ -111,6 +111,7 @@ type promptDoneMsg struct {
 	text        string
 	historyText string
 	attachments []protocol.ContentBlock
+	pastedTexts []pastedTextAttachment
 	err         error
 }
 
@@ -162,6 +163,7 @@ type queueSettledMsg struct {
 type queueSubmitMsg struct {
 	kind     protocol.QueuedInputKind
 	text     string
+	fullText string
 	expanded string
 	itemID   string
 	epoch    uint64
@@ -173,6 +175,7 @@ type queueSubmitMsg struct {
 type queuedTUIAttempt struct {
 	kind     protocol.QueuedInputKind
 	text     string
+	fullText string
 	expanded string
 	epoch    uint64
 }
@@ -274,6 +277,8 @@ type Model struct {
 
 	transcript        viewport.Model
 	editor            textarea.Model
+	pastedTexts       []pastedTextAttachment
+	nextPastedTextID  uint64
 	inputHistory      []string
 	inputHistoryIndex int
 	inputHistoryDraft string

@@ -707,6 +707,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.toggleCollaborationMode()
 	}
 
+	if !m.busy && len(m.pastedTexts) > 0 &&
+		strings.TrimSpace(stripImageAttachmentTokens(stripPastedTextAttachmentTokens(m.editor.Value(), m.pastedTexts), len(m.promptImages))) == "" &&
+		(msg.Type == tea.KeyBackspace || msg.Type == tea.KeyEsc) {
+		m.removeLastPastedTextAttachment()
+		m.refreshInputCompletions()
+		m.layout()
+		return m, nil
+	}
+
 	if !m.busy && len(m.promptImages) > 0 &&
 		strings.TrimSpace(stripImageAttachmentTokens(m.editor.Value(), len(m.promptImages))) == "" &&
 		(msg.Type == tea.KeyBackspace || msg.Type == tea.KeyEsc) {
@@ -749,7 +758,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	displayText := m.editor.Value()
-	text := stripImageAttachmentTokens(displayText, len(m.promptImages))
+	text := stripImageAttachmentTokens(m.expandedPastedText(displayText), len(m.promptImages))
 	if submitKey && m.modeSwitching {
 		m.lastStatus = "waiting for mode switch"
 		return m, nil
@@ -772,14 +781,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if followUpKey && m.busy && trimmed != "" && !strings.HasPrefix(trimmed, "/") {
-		return m, m.submitQueuedInput(text, protocol.QueuedInputFollowUp)
+		return m, m.submitQueuedInput(displayText, text, protocol.QueuedInputFollowUp)
 	}
 	if submitKey && m.busy && !busyControl && trimmed != "" && !strings.HasPrefix(trimmed, "/") {
-		return m, m.submitQueuedInput(text, protocol.QueuedInputSteer)
+		return m, m.submitQueuedInput(displayText, text, protocol.QueuedInputSteer)
 	}
 	if submitKey && (!m.busy || busyControl) {
 		if strings.HasPrefix(text, "/") && len(m.promptImages) == 0 {
-			return m.runCommand(trimmed)
+			displayCommand := strings.TrimSpace(stripImageAttachmentTokens(displayText, len(m.promptImages)))
+			return m.runCommandWithDisplay(trimmed, displayCommand)
 		}
 		if trimmed != "" || len(m.promptImages) > 0 {
 			display := displayText

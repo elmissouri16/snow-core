@@ -65,7 +65,7 @@ func (m *Model) navigateInputHistory(msg tea.KeyMsg) (bool, tea.Cmd) {
 	if msg.Type != tea.KeyUp && msg.Type != tea.KeyDown {
 		return false, nil
 	}
-	if len(m.promptImages) > 0 {
+	if len(m.promptImages) > 0 || len(m.pastedTexts) > 0 {
 		return false, nil
 	}
 
@@ -102,8 +102,7 @@ func (m *Model) navigateInputHistory(msg tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 func (m *Model) showInputHistoryValue(value string) {
-	m.editor.SetValue(value)
-	m.editor.CursorEnd()
+	m.setComposerValueCollapsingLargeText(value)
 	// Recalled $skill, /command, or @mention text must not open a picker that
 	// captures the next arrow key and interrupts history traversal. Editing the
 	// recalled value refreshes completions normally.

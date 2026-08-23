@@ -301,12 +301,21 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if msg.text != "" {
 				current := m.editor.Value()
-				if current == "" {
-					m.editor.SetValue(msg.text)
+				if !shouldCollapsePastedText(msg.text) && pastedTextAttachmentsReferenced(msg.text, msg.pastedTexts) {
+					m.pastedTexts = append(msg.pastedTexts, m.pastedTexts...)
+					if current == "" {
+						m.editor.SetValue(msg.text)
+					} else {
+						m.editor.SetValue(msg.text + "\n" + current)
+					}
+					m.editor.CursorEnd()
 				} else {
-					m.editor.SetValue(msg.text + "\n" + current)
+					restored := expandPastedTextAttachments(msg.text, msg.pastedTexts)
+					if current != "" {
+						restored += "\n" + m.expandedPastedText(current)
+					}
+					m.setComposerValueCollapsingLargeText(restored)
 				}
-				m.editor.CursorEnd()
 			}
 			m.layout()
 		}
@@ -701,12 +710,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.accepted {
-			m.rememberInputHistory(msg.text)
+			fullText := queueMessageFullText(msg)
+			m.rememberInputHistory(fullText)
 			pending := false
 			for _, item := range m.app.Agent.PendingInputs().Items {
 				if item.ID == msg.itemID {
 					pending = true
-					m.queueOriginalText[item.ID] = msg.text
+					m.queueOriginalText[item.ID] = fullText
 					m.renderQueuedInput(item, msg.text)
 					break
 				}
@@ -719,6 +729,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.editor.Value() == msg.text {
 				m.editor.Reset()
+				m.pastedTexts = nil
 				m.refreshInputCompletions()
 			}
 		}
@@ -782,6 +793,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.editor.Value() != previousEditorValue {
 			// Paste and other non-key textarea messages bypass handleKey but must
 			// still resize the composer and refresh input-driven overlays.
+			m.prunePastedTextAttachments(m.editor.Value())
 			if mentionCmd := m.refreshInputCompletions(); mentionCmd != nil {
 				cmds = append(cmds, mentionCmd)
 			}
