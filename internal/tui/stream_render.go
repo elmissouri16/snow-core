@@ -80,6 +80,7 @@ func eventNeedsImmediateTranscript(kind protocol.AgentEventType) bool {
 		protocol.EvPermissionRequest,
 		protocol.EvUserInputRequest,
 		protocol.EvQueueUpdated,
+		protocol.EvProviderRetry,
 		protocol.EvError,
 		protocol.EvTurnDone,
 		protocol.EvAborted:

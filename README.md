@@ -287,8 +287,8 @@ opaque handles are runtime-local and are never reattached after restart.
   rename, explicit path resume, and a three-way `/fork` picker
 - Turn-aware compaction for ordinary, goal, and child turns at configurable
   total-context and aggregate old-tool-history thresholds; completed tool cycles
-  inside one long active turn are safe checkpoint boundaries, and oversized
-  provider requests receive at most one bounded recovery retry
+  inside one long active turn are safe checkpoint boundaries, and context
+  overflow receives at most one dedicated compaction recovery
 - Durable structured working-state checkpoints preserve objectives, decisions,
   files, deterministic verification/failure evidence, collaboration updates,
   retrieval references, and pending work while complete old turns—including
@@ -297,6 +297,9 @@ opaque handles are runtime-local and are never reattached after restart.
   provider context keeps bounded previews, and compacted tool prefixes gain a
   bounded verified text/metadata transcript reference without rewriting
   append-only history
+- Centralized cancellation-aware provider recovery with structured temporary
+  outage/throttle classification, exponential jittered backoff, `Retry-After`,
+  a five-minute ordinary window, and a longer 30-minute `/goal` window
 - Strict provider terminal-event validation, stop/content consistency checks,
   and synthetic errors instead of executing length-truncated tool calls
 - Resume-time repair of interrupted final tool batches with risk-aware

@@ -249,7 +249,9 @@ func boundRoutingMessage(message string, max int) string {
 func (a *Agent) run(ctx context.Context) error {
 	turn := 0
 	overflowRecovered := false
-	providerStartRetries := 0
+	providerAttempts := 0
+	var retryStarted time.Time
+	retryRecovery := false
 	syntheticOnlyBatches := 0
 	for {
 		if a.opts.MaxTurns > 0 && turn >= a.opts.MaxTurns {
@@ -289,6 +291,9 @@ func (a *Agent) run(ctx context.Context) error {
 		if reminder := a.takeRepeatedToolReminder(); reminder != "" {
 			internalContext = append(internalContext, protocol.InternalContextFragment{Source: "loop-guard", Text: reminder})
 		}
+		if retryRecovery {
+			internalContext = append(internalContext, protocol.InternalContextFragment{Source: "provider-recovery", Text: "The previous provider response was interrupted. Continue from the durable conversation and tool results. Do not assume unrecorded work completed, and do not repeat completed side effects unless the recorded result proves a retry is needed."})
+		}
 		req := protocol.ChatRequest{
 			Model:              a.Model(),
 			Messages:           providerMessages(msgs),
@@ -308,14 +313,16 @@ func (a *Agent) run(ctx context.Context) error {
 		a.latestContextReport = &contextReport
 		a.mu.Unlock()
 
-		stop, err := a.streamTurnWithErrors(ctx, req, overflowRecovered)
+		providerAttempts++
+		stop, err := a.streamTurnWithErrors(ctx, req, false)
 		if err != nil {
-			var startErr *providerStartError
-			startFailure := errors.As(err, &startErr)
-			if !startFailure {
-				providerStartRetries = 0
-			}
 			if !overflowRecovered && a.autoThresholdPercent() > 0 && ctx.Err() == nil && provider.IsContextWindowExceeded(err) {
+				if !providerFailureActivity(err) {
+					parent := a.opts.Session.BranchTip()
+					if persistErr := a.persistAssistant(newID(), parent, nil, protocol.StopError, nil, err.Error()); persistErr != nil {
+						return errors.Join(err, persistErr)
+					}
+				}
 				result, compactErr := a.compactActiveContext(ctx, compactionOverflow)
 				if compactErr == nil && result.SummarizedMessages > 0 {
 					overflowRecovered = true
@@ -323,6 +330,9 @@ func (a *Agent) run(ctx context.Context) error {
 					a.latestContextTokens = 0
 					a.latestRequestEstimate = 0
 					a.mu.Unlock()
+					providerAttempts = 0
+					retryStarted = time.Time{}
+					retryRecovery = false
 					turn-- // the failed oversized request did not complete a model round
 					continue
 				}
@@ -332,18 +342,25 @@ func (a *Agent) run(ctx context.Context) error {
 				}
 			}
 
-			// A provider failure before a stream exists is safe to retry once:
-			// no model output or tool side effect can have escaped that attempt.
-			if ctx.Err() == nil && providerStartRetries < 1 && startFailure && provider.IsTransientError(err) {
-				providerStartRetries++
-				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "transient provider startup failure; retrying once"})
-				if waitErr := waitForContext(ctx, goalTransientRetryDelay); waitErr != nil {
-					waitErr = errors.Join(waitErr, a.persistAbortedBoundary())
-					a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
-					return waitErr
+			// Provider adapters classify but never schedule retries. Before activity,
+			// this repeats the side-effect-free request. After activity, the failed
+			// assistant boundary has been persisted and the next request is a durable
+			// continuation; incomplete tool calls were never dispatched.
+			if advice, retryable := provider.RetryAdviceFor(err); retryable && isProviderFailure(err) && ctx.Err() == nil {
+				if retryStarted.IsZero() {
+					retryStarted = time.Now()
 				}
-				turn-- // a pre-stream transport failure did not complete a model round
-				continue
+				retryRecovery = retryRecovery || providerFailureActivity(err)
+				profile := a.retryProfile()
+				if delay, ok := a.scheduleProviderRetry(ctx, profile, retryStarted, providerAttempts, retryRecovery, advice); ok {
+					if waitErr := waitForRetry(ctx, delay); waitErr != nil {
+						waitErr = errors.Join(waitErr, a.persistAbortedBoundary())
+						a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
+						return waitErr
+					}
+					turn-- // a failed provider attempt did not complete a model round
+					continue
+				}
 			}
 
 			// Accepted steering/follow-up work must not disappear behind an
@@ -361,17 +378,19 @@ func (a *Agent) run(ctx context.Context) error {
 					if deliverErr := a.deliverQueuedInput(ctx, queued); deliverErr != nil {
 						return errors.Join(err, deliverErr)
 					}
-					providerStartRetries = 0
+					providerAttempts = 0
+					retryStarted = time.Time{}
+					retryRecovery = false
 					syntheticOnlyBatches = 0
 					continue
 				}
 			}
-			if !overflowRecovered {
-				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
-			}
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
 			return err
 		}
-		providerStartRetries = 0
+		providerAttempts = 0
+		retryStarted = time.Time{}
+		retryRecovery = false
 		naturalStop := false
 		switch stop {
 		case protocol.StopToolUse:

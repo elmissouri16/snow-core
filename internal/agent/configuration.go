@@ -30,6 +30,11 @@ func isProviderFailure(err error) bool {
 	return errors.As(err, &marked)
 }
 
+func providerFailureActivity(err error) bool {
+	var turnErr *providerTurnError
+	return errors.As(err, &turnErr) && turnErr.activity
+}
+
 // New creates an agent.
 func New(opts Options) (*Agent, error) {
 	if opts.Provider == nil {
@@ -43,6 +48,12 @@ func New(opts Options) (*Agent, error) {
 	}
 	if opts.Permission == nil {
 		opts.Permission = permission.NewService(permission.ModeDeny, nil)
+	}
+	if opts.Retry == (RetryOptions{}) {
+		opts.Retry = DefaultRetryOptions()
+	}
+	if err := opts.Retry.validate(); err != nil {
+		return nil, err
 	}
 	if opts.Model.Provider == "" && opts.Provider != nil {
 		opts.Model.Provider = opts.Provider.ID()
@@ -92,8 +103,20 @@ func New(opts Options) (*Agent, error) {
 		}
 		opts.SkillNames = names
 	}
-	if _, err := repairInterruptedToolCalls(opts.Session, opts.Registry); err != nil {
+	repair, err := repairInterruptedToolCallsReport(opts.Session, opts.Registry)
+	if err != nil {
 		return nil, fmt.Errorf("agent: recover interrupted tool calls: %w", err)
+	}
+	if repair.UnknownNonReadOutcome && opts.Goal != nil {
+		goal, goalErr := opts.Goal.Get()
+		if goalErr != nil {
+			return nil, fmt.Errorf("agent: inspect goal after interrupted tool call: %w", goalErr)
+		}
+		if goal != nil && goal.Status == protocol.GoalActive {
+			if deferErr := opts.Goal.Defer(true); deferErr != nil {
+				return nil, fmt.Errorf("agent: defer goal after interrupted non-read tool call: %w", deferErr)
+			}
+		}
 	}
 	a := &Agent{opts: opts, model: opts.Model, bus: newEventBus(), mode: mode, turnMode: mode, rootEpoch: 1}
 	a.pending = make(map[string]protocol.ContentBlock)

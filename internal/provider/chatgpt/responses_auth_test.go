@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/auth"
+	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -64,7 +65,7 @@ func TestResponses401RefreshesAndRetriesOnce(t *testing.T) {
 	}
 }
 
-func TestResponses401AndTransientFailuresShareThreeAttemptCap(t *testing.T) {
+func TestResponses401RefreshThenTransientFailureReturnsToAgent(t *testing.T) {
 	newAccess := testJWT(t, map[string]any{"exp": float64(time.Now().Add(time.Hour).Unix()), "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct"}})
 	var refreshes atomic.Int32
 	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -86,7 +87,6 @@ func TestResponses401AndTransientFailuresShareThreeAttemptCap(t *testing.T) {
 	old := auth.Credential{Type: auth.CredentialOAuth, Access: "old", Refresh: "old-refresh", AccountID: "acct"}
 	_ = store.Put(ProviderID, old)
 	p := New(Config{BaseURL: responseServer.URL, AuthBaseURL: authServer.URL, HTTPClient: http.DefaultClient, Store: store})
-	p.wait = func(_, _ context.Context, _ time.Duration) error { return nil }
 	stream, err := p.Chat(context.Background(), old, protocol.ChatRequest{Model: protocol.Model{Provider: ProviderID, ID: "m"}})
 	if err != nil {
 		t.Fatal(err)
@@ -96,15 +96,15 @@ func TestResponses401AndTransientFailuresShareThreeAttemptCap(t *testing.T) {
 	if err != nil || event.Type != protocol.EvStreamError || event.Err == nil {
 		t.Fatalf("event=%+v err=%v", event, err)
 	}
-	if calls.Load() != 3 || refreshes.Load() != 1 {
+	if calls.Load() != 2 || refreshes.Load() != 1 {
 		t.Fatalf("response calls=%d refreshes=%d", calls.Load(), refreshes.Load())
 	}
-	if !strings.Contains(event.Err.Error(), "3 attempts") {
-		t.Fatalf("error=%v", event.Err)
+	if advice, ok := providerpkg.RetryAdviceFor(event.Err); !ok || advice.Kind != providerpkg.RetryTransient {
+		t.Fatalf("error=%v advice=%+v ok=%v", event.Err, advice, ok)
 	}
 }
 
-func TestResponsesLate401DoesNotExceedThreeAttemptCap(t *testing.T) {
+func TestResponsesRepeated401RefreshesOnlyOnce(t *testing.T) {
 	var refreshes atomic.Int32
 	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		refreshes.Add(1)
@@ -113,11 +113,7 @@ func TestResponsesLate401DoesNotExceedThreeAttemptCap(t *testing.T) {
 	defer authServer.Close()
 	var calls atomic.Int32
 	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if calls.Add(1) < 3 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"error":{"message":"temporarily unavailable","code":"service_unavailable"}}`))
-			return
-		}
+		calls.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer responseServer.Close()
@@ -125,7 +121,6 @@ func TestResponsesLate401DoesNotExceedThreeAttemptCap(t *testing.T) {
 	credential := auth.Credential{Type: auth.CredentialOAuth, Access: "old", Refresh: "old-refresh", AccountID: "acct"}
 	_ = store.Put(ProviderID, credential)
 	p := New(Config{BaseURL: responseServer.URL, AuthBaseURL: authServer.URL, HTTPClient: http.DefaultClient, Store: store})
-	p.wait = func(_, _ context.Context, _ time.Duration) error { return nil }
 	stream, err := p.Chat(context.Background(), credential, protocol.ChatRequest{Model: protocol.Model{Provider: ProviderID, ID: "m"}})
 	if err != nil {
 		t.Fatal(err)
@@ -135,10 +130,10 @@ func TestResponsesLate401DoesNotExceedThreeAttemptCap(t *testing.T) {
 	if err != nil || event.Type != protocol.EvStreamError || event.Err == nil {
 		t.Fatalf("event=%+v err=%v", event, err)
 	}
-	if calls.Load() != 3 || refreshes.Load() != 0 {
+	if calls.Load() != 2 || refreshes.Load() != 1 {
 		t.Fatalf("response calls=%d refreshes=%d", calls.Load(), refreshes.Load())
 	}
-	if !strings.Contains(event.Err.Error(), "HTTP 401") || !strings.Contains(event.Err.Error(), "3 attempts") {
+	if !strings.Contains(event.Err.Error(), "HTTP 401") {
 		t.Fatalf("error=%v", event.Err)
 	}
 }

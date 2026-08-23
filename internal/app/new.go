@@ -49,6 +49,12 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	configPath := startup.configPath
 	persistedCfg := startup.persistedCfg
 	cfg := startup.cfg
+	if opts.Retry != nil {
+		if err := opts.Retry.Validate(); err != nil {
+			return nil, err
+		}
+		cfg.Retry = *opts.Retry
+	}
 	permMode := startup.permMode
 	thinking := startup.thinking
 	reasoningSummary := startup.reasoningSummary
@@ -621,6 +627,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		Goal:              goalController,
 		SkillNames:        skillNames,
 		Artifacts:         artifactStore,
+		Retry:             agentRetryOptions(cfg.Retry),
 		Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
 			SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance,
 			AutoThresholdPercent: cfg.Compaction.AutoThresholdPercent, ToolHistoryBudgetPercent: cfg.Compaction.ToolHistoryBudgetPercent,
@@ -734,7 +741,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			child, err := agent.New(agent.Options{Provider: childProvider, Registry: childReg, Session: childStore, Permission: childPerm, ToolHost: childHost,
 				SystemPrompt: childSystem, Model: childModel, Thinking: spec.State.Thinking, ReasoningSummary: reasoningSummary,
 				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Identity: spec.State.Agent.Clone(),
-				SkillNames: childSkillNames, Artifacts: artifactStore, Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
+				SkillNames: childSkillNames, Artifacts: artifactStore, Retry: agentRetryOptions(cfg.Retry), Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
 					SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance,
 					AutoThresholdPercent: cfg.Compaction.AutoThresholdPercent, ToolHistoryBudgetPercent: cfg.Compaction.ToolHistoryBudgetPercent,
 					ToolResultInlineBytes: cfg.Compaction.ToolResultInlineBytes, HistoricalToolResultThreshold: cfg.Compaction.HistoricalToolResultThreshold}})

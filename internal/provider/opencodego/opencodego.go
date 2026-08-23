@@ -240,8 +240,14 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, req protocol
 		if resp.StatusCode == http.StatusUnauthorized {
 			msg = p.providerID + ": invalid API key (HTTP 401)"
 		}
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusPaymentRequired {
+		if resp.StatusCode == http.StatusPaymentRequired {
 			return errorStream(ctx, &providerpkg.LimitError{Provider: p.providerID, Status: resp.StatusCode, Message: redactedSnippet}), nil
+		}
+		if advice, retryable := providerpkg.HTTPRetryAdvice(resp.StatusCode, resp.Header, time.Now(), 24*time.Hour); retryable {
+			if advice.Kind == providerpkg.RetryRateLimit {
+				return errorStream(ctx, &providerpkg.RateLimitError{Provider: p.providerID, Status: resp.StatusCode, Message: redactedSnippet, RetryAfter: advice.RetryAfter}), nil
+			}
+			return errorStream(ctx, &providerpkg.AdvisedError{Err: errors.New(msg), Advice: advice}), nil
 		}
 		return errorStream(ctx, errors.New(msg)), nil
 	}

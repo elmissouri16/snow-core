@@ -32,8 +32,6 @@ const (
 	maxErrorBodySize  = 1000
 )
 
-var defaultRetryDelays = []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second}
-
 type transportKind uint8
 
 const (
@@ -55,10 +53,6 @@ type Config struct {
 	DiscoveryTimeout  time.Duration
 	StreamIdleTimeout time.Duration
 	CacheRoot         string
-	// RetryDelays overrides the delays used after pre-output HTTP 429 responses.
-	// Nil uses the production 2s/5s/15s schedule; an empty non-nil slice disables
-	// retries. It primarily supports deterministic tests.
-	RetryDelays []time.Duration
 }
 
 // Provider implements provider.Transport for OpenCode Zen.
@@ -71,7 +65,6 @@ type Provider struct {
 	discoveryTimeout  time.Duration
 	streamIdleTimeout time.Duration
 	cacheRoot         string
-	retryDelays       []time.Duration
 
 	catalogMu    sync.Mutex
 	cachedModels []protocol.Model
@@ -115,19 +108,10 @@ func New(cfg Config) (*Provider, error) {
 	} else if idleTimeout < 0 {
 		idleTimeout = -1
 	}
-	retryDelays := cfg.RetryDelays
-	if retryDelays == nil {
-		retryDelays = defaultRetryDelays
-	}
-	for _, delay := range retryDelays {
-		if delay < 0 {
-			return nil, errors.New("opencode-zen: retry delays must not be negative")
-		}
-	}
 	return &Provider{
 		baseURL: base, apiKey: strings.TrimSpace(cfg.APIKey), defaultModel: defaultModel, client: client,
 		catalogURL: catalogURL, discoveryTimeout: discoveryTimeout, streamIdleTimeout: idleTimeout,
-		cacheRoot: strings.TrimSpace(cfg.CacheRoot), retryDelays: append([]time.Duration(nil), retryDelays...),
+		cacheRoot: strings.TrimSpace(cfg.CacheRoot),
 	}, nil
 }
 
@@ -159,24 +143,11 @@ func (p *Provider) Chat(ctx context.Context, credential auth.Credential, request
 		return eventErrorStream(fmt.Errorf("opencode-zen: model %q is not in the maintained free catalog", request.Model.ID)), nil
 	}
 	key := p.resolveKey(credential)
-	for attempt := 0; ; attempt++ {
-		stream, err := p.chatAttempt(ctx, key, spec.Transport, request)
-		if err == nil {
-			stream = &validatedResponseStream{stream: stream, model: request.Model.ID}
-			first, nextErr := stream.Next(ctx)
-			if !isHTTP429(first.Err) {
-				return &prefetchedStream{stream: stream, first: first, firstErr: nextErr, pending: true}, nil
-			}
-			_ = stream.Close()
-			err = first.Err
-		}
-		if !isHTTP429(err) || attempt >= len(p.retryDelays) {
-			return eventErrorStream(err), nil
-		}
-		if err := sleepContext(ctx, p.retryDelays[attempt]); err != nil {
-			return eventErrorStream(err), nil
-		}
+	stream, err := p.chatAttempt(ctx, key, spec.Transport, request)
+	if err != nil {
+		return eventErrorStream(err), nil
 	}
+	return &validatedResponseStream{stream: stream, model: request.Model.ID}, nil
 }
 
 func (p *Provider) chatAttempt(ctx context.Context, key string, transport transportKind, request protocol.ChatRequest) (protocol.EventStream, error) {
@@ -209,19 +180,28 @@ func (p *Provider) chatAttempt(ctx context.Context, key string, transport transp
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("opencode-zen: Responses request failed: %w", err)
+		message := providerpkg.RedactSecrets("opencode-zen: Responses request failed: "+err.Error(), key)
+		cause := &providerpkg.CauseError{Message: message, Cause: err}
+		return nil, &providerpkg.AdvisedError{Err: cause, Advice: providerpkg.RetryAdvice{Kind: providerpkg.RetryTransient}}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
 		message := providerpkg.RedactSecrets(strings.TrimSpace(string(snippet)), key)
-		if resp.StatusCode == http.StatusPaymentRequired || resp.StatusCode == http.StatusTooManyRequests {
+		if resp.StatusCode == http.StatusPaymentRequired {
 			return nil, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: message}
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
 			return nil, errors.New("opencode-zen: credential rejected (HTTP 401)")
 		}
-		return nil, fmt.Errorf("opencode-zen: HTTP %d: %s", resp.StatusCode, truncate(message, 500))
+		cause := fmt.Errorf("opencode-zen: HTTP %d: %s", resp.StatusCode, truncate(message, 500))
+		if advice, retryable := providerpkg.HTTPRetryAdvice(resp.StatusCode, resp.Header, time.Now(), 24*time.Hour); retryable {
+			if advice.Kind == providerpkg.RetryRateLimit {
+				return nil, &providerpkg.RateLimitError{Provider: ProviderID, Status: resp.StatusCode, Message: message, RetryAfter: advice.RetryAfter}
+			}
+			return nil, &providerpkg.AdvisedError{Err: cause, Advice: advice}
+		}
+		return nil, cause
 	}
 	mediaType := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
 	if !strings.EqualFold(mediaType, "text/event-stream") {
@@ -230,30 +210,6 @@ func (p *Provider) chatAttempt(ctx context.Context, key string, transport transp
 		return nil, fmt.Errorf("opencode-zen: incompatible response content type %q: %s", mediaType, truncate(providerpkg.RedactSecrets(strings.TrimSpace(string(snippet)), key), 500))
 	}
 	return responsesapi.NewStreamWithIdleTimeout(ctx, resp, ProviderID, p.streamIdleTimeout, key), nil
-}
-
-func isHTTP429(err error) bool {
-	var limited *providerpkg.LimitError
-	return errors.As(err, &limited) && limited.Status == http.StatusTooManyRequests
-}
-
-func sleepContext(ctx context.Context, delay time.Duration) error {
-	if delay == 0 {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			return nil
-		}
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 // validatedResponseStream prevents successful-but-empty Zen completions from
@@ -302,22 +258,6 @@ func (s *validatedResponseStream) Next(ctx context.Context) (protocol.StreamEven
 }
 
 func (s *validatedResponseStream) Close() error { return s.stream.Close() }
-
-type prefetchedStream struct {
-	stream   protocol.EventStream
-	first    protocol.StreamEvent
-	firstErr error
-	pending  bool
-}
-
-func (s *prefetchedStream) Next(ctx context.Context) (protocol.StreamEvent, error) {
-	if s.pending {
-		s.pending = false
-		return s.first, s.firstErr
-	}
-	return s.stream.Next(ctx)
-}
-func (s *prefetchedStream) Close() error { return s.stream.Close() }
 
 type singleErrorStream struct {
 	err  error

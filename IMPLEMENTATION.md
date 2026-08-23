@@ -247,13 +247,38 @@ events and never drive the loop themselves.
 11. Identical consecutive tool calls are detected per admitted run using
     canonical JSON arguments; bounded advisory reminders at counts 3, 5, and 8
     do not veto execution.
+12. The agent owns one structured provider-retry episode. Adapters classify
+    temporary outage/throttle failures and expose `Retry-After` but do not
+    schedule transient retries; ChatGPT retains only its guarded 401 refresh.
+13. Pre-activity attempts repeat a side-effect-free request. Post-activity
+    attempts continue from durable context; failed assistant boundaries are
+    excluded, incomplete calls are never dispatched, and completed tool results
+    remain visible. Restart with an unknown non-read outcome defers an active
+    goal before automatic readiness.
+
+### Provider recovery
+
+`internal/provider` exposes `RetryAdvice` for temporary transport/overload and
+temporary rate-limit failures plus shared bounded `Retry-After` parsing. HTTP
+408/425/5xx, network failures, idle/truncated streams, and structured overload
+codes are candidates; cancellation, auth, validation, hard quota/payment,
+context, persistence, accounting, and tool failures are not. Joined failures
+are retryable only when every member is retryable.
+
+`internal/agent` applies exponential jittered backoff under both attempt and
+elapsed limits. Defaults are 12 attempts/5 minutes with a 30-second delay cap
+for ordinary and child turns, and 30 attempts/30 minutes with a two-minute cap
+for automatic goals. Success resets consecutive failure state. Goal outage
+exhaustion pauses, temporary throttle exhaustion becomes `usage_limited`, and
+budget crossing retains precedence. `provider_retry` is a structured
+nonterminal event; final exhaustion emits one `error`.
 
 ### Streaming events
 
 The core publishes normalized `protocol.AgentEvent` values. Core types are
 `session_updated`, `text_delta`, `thinking_delta`, `tool_start`,
 `tool_progress`, `tool_end`, `tool_routing`, `permission_request`,
-`user_input_request`, `usage`, `queue_updated`, `turn_done`, `error`,
+`user_input_request`, `usage`, `provider_retry`, `queue_updated`, `turn_done`, `error`,
 `aborted`, and `model_changed`. Plan, compaction, goal, and subagent
 lifecycle events (`plan_started`, `compaction_started`, `thread_goal_updated`,
 `subagent_started`, and friends) extend the same stream.
@@ -440,10 +465,11 @@ cannot be selected accidentally. `big-pickle` is the bundled default.
 
 The local transport map sends Muse Spark Contributor Free to Responses/SSE and
 the remaining maintained models to Chat Completions/SSE. Both normalize into
-the shared provider event contract. A pre-output HTTP 429 is retried after 2,
-5, and 15 seconds with context-aware waits, then becomes a structured
-`LimitError`; no retry occurs after output. Active keys are redacted from
-bounded errors.
+the shared provider event contract. Temporary HTTP 429 responses carry
+structured rate-limit advice and bounded `Retry-After`; the central agent policy
+owns every wait and attempt so provider and goal budgets cannot multiply. HTTP
+402 remains terminal usage limitation. Active keys are redacted from bounded
+errors.
 
 On a canonical-endpoint Zen catalog refresh, the provider concurrently fetches
 live `/models` availability and the public models.dev `opencode` record under
@@ -490,8 +516,9 @@ excluded, and provider errors redact active keys.
 browser PKCE and device-code login, compatible Codex/Pi/OpenCode credential
 imports, guarded automatic refresh, an origin-and-account-scoped ETag model
 cache, and hardened Codex Responses SSE streaming with branch-scoped prompt
-affinity, zstd compression, bounded pre-output transient retries, structured
-error diagnostics, and mandatory terminal events. The TUI/CLI report
+affinity, zstd compression, structured retry advice and error diagnostics, and
+mandatory terminal events. The central agent retry coordinator schedules
+transient recovery; the TUI/CLI report
 configured, expired, or missing ChatGPT auth without refreshing during checks.
 
 Login opens the system browser (or prints the URL with `--no-open`) and

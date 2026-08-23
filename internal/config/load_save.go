@@ -81,6 +81,36 @@ func (c ProcessConfig) Validate() error {
 	return nil
 }
 
+func DefaultRetry() RetryConfig {
+	return RetryConfig{
+		Normal: RetryProfileConfig{MaxAttempts: 12, MaxElapsedMS: int((5 * time.Minute) / time.Millisecond), InitialDelayMS: 1000, MaxDelayMS: 30_000, JitterPercent: 20},
+		Goal:   RetryProfileConfig{MaxAttempts: 30, MaxElapsedMS: int((30 * time.Minute) / time.Millisecond), InitialDelayMS: 2000, MaxDelayMS: 120_000, JitterPercent: 20},
+	}
+}
+
+func (c RetryConfig) Validate() error {
+	if err := c.Normal.validate("normal"); err != nil {
+		return err
+	}
+	return c.Goal.validate("goal")
+}
+
+func (c RetryProfileConfig) validate(name string) error {
+	if c.MaxAttempts < 1 || c.MaxAttempts > 100 {
+		return fmt.Errorf("config: retry %s max_attempts must be 1..100", name)
+	}
+	if c.MaxElapsedMS < 1 || time.Duration(c.MaxElapsedMS)*time.Millisecond > 24*time.Hour {
+		return fmt.Errorf("config: retry %s max_elapsed_ms must be 1..86400000", name)
+	}
+	if c.InitialDelayMS < 1 || c.MaxDelayMS < c.InitialDelayMS || time.Duration(c.MaxDelayMS)*time.Millisecond > time.Hour {
+		return fmt.Errorf("config: retry %s delays must satisfy 1 <= initial_delay_ms <= max_delay_ms <= 3600000", name)
+	}
+	if c.JitterPercent < 0 || c.JitterPercent > 100 {
+		return fmt.Errorf("config: retry %s jitter_percent must be 0..100", name)
+	}
+	return nil
+}
+
 func DefaultCompaction() CompactionConfig {
 	return CompactionConfig{
 		MinRetainedTurns: 2, SummaryMaxTokens: 2000, Fallback: "local",
@@ -276,6 +306,7 @@ func Default() Config {
 		Skills:     SkillsConfig{Overrides: map[string]bool{}},
 		Subagents:  DefaultSubagents(),
 		Processes:  DefaultProcesses(),
+		Retry:      DefaultRetry(),
 		Compaction: DefaultCompaction(),
 		TUI:        TUIConfig{Theme: "default", Mouse: true},
 	}
@@ -419,6 +450,9 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 	if err := cfg.Processes.Validate(); err != nil {
+		return cfg, err
+	}
+	if err := cfg.Retry.Validate(); err != nil {
 		return cfg, err
 	}
 	if err := cfg.Compaction.Validate(); err != nil {

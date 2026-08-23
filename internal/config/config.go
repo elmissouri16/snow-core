@@ -53,6 +53,21 @@ type TUIConfig struct {
 	Mouse bool   `json:"mouse"`
 }
 
+// RetryProfileConfig bounds one consecutive provider outage. It is global-only
+// operator policy and is never loaded from trust-gated project configuration.
+type RetryProfileConfig struct {
+	MaxAttempts    int `json:"max_attempts"`
+	MaxElapsedMS   int `json:"max_elapsed_ms"`
+	InitialDelayMS int `json:"initial_delay_ms"`
+	MaxDelayMS     int `json:"max_delay_ms"`
+	JitterPercent  int `json:"jitter_percent"`
+}
+
+type RetryConfig struct {
+	Normal RetryProfileConfig `json:"normal"`
+	Goal   RetryProfileConfig `json:"goal"`
+}
+
 // CompactionConfig controls manual and pressure-based automatic compaction.
 // Zero RetainTokens uses a model-aware retention target. A zero automatic
 // threshold disables pressure compaction and overflow recovery.
@@ -197,6 +212,7 @@ type Config struct {
 	Skills                  SkillsConfig                    `json:"skills,omitempty"`
 	Subagents               SubagentConfig                  `json:"subagents,omitempty"`
 	Processes               ProcessConfig                   `json:"processes,omitempty"`
+	Retry                   RetryConfig                     `json:"retry,omitempty"`
 	Compaction              CompactionConfig                `json:"compaction,omitempty"`
 }
 

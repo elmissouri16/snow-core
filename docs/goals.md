@@ -85,15 +85,26 @@ request already known to be impossible.
 ### Failure classification
 
 Tool, context, persistence, and accounting failures immediately stop an active
-goal as `blocked`; provider quota exhaustion becomes `usage_limited`.
-Structured transient provider failures (for example a ChatGPT network or 5xx
-error) receive one delayed goal-boundary retry while the goal remains active.
-The retry continues from the persisted partial/error response, so the host
-does not automatically replay completed write/exec tools. If that single
-recovery attempt fails, the goal becomes `blocked` rather than looping.
-Accounting errors are returned to the caller and never permit another
-autonomous turn. This host error classification is distinct from a model
+goal as `blocked`; hard provider quota/payment exhaustion becomes
+`usage_limited`. Structured network, HTTP 408/425/5xx, stream interruption,
+overload, and temporary 429 failures use the centralized goal retry profile:
+up to 30 attempts within 30 minutes by default, with exponential jittered
+backoff capped at two minutes and provider `Retry-After` honored as a minimum.
+Every wait remains responsive to pause, abort, preemption, and shutdown.
+
+Before provider activity, Snow safely repeats the side-effect-free request.
+After partial activity, it persists a failed boundary and issues a new recovery
+continuation from durable conversation and completed tool results; incomplete
+streamed tool calls are never dispatched. Exhausted transport outages pause the
+goal, while exhausted temporary throttling becomes `usage_limited`. Accounting
+errors never permit another autonomous turn, and exact goal-budget crossing
+retains precedence. This host error classification is distinct from a model
 declaring an external blocker.
+
+On restart, an interrupted read-only tool can be represented by a synthetic
+retryable result. An unresolved write, exec, network, delegation, or unknown
+operation has an uncertain external outcome, so Snow repairs transcript pairing
+but durably defers the active goal instead of auto-resuming it.
 
 Three automatic turns with no text or tool progress conservatively pause the
 goal and emit an error; they do not falsely claim that the blocked audit

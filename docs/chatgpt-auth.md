@@ -169,10 +169,13 @@ parallel tool selection (execution inside Snow remains serial), and omits
 sampling/output-limit fields unsupported by the subscription path. JSON bodies
 of at least 32 KiB use zstd compression.
 
-Snow retries network failures, HTTP 408/425/500/502/503/504, and immediate
-pre-output overload/truncation failures at most twice with context-cancellable,
-`Retry-After`-aware backoff. It never retries 402/429, a second 401, validation
-errors, or a stream after any normalized activity was delivered.
+The adapter classifies network failures, HTTP 408/425/5xx, immediate stream
+overload/truncation, and temporary 429 throttling with bounded retry advice.
+The central agent policy owns cancellation-aware exponential backoff and honors
+`Retry-After`, preventing adapter and goal attempt counts from multiplying.
+HTTP 402, a second 401, authentication/validation errors, and hard quota are
+terminal. After normalized activity, recovery is a new durable continuation,
+never a replay of streamed tool calls.
 
 Responses/SSE parsing bounds individual and aggregate events, tool-call
 count/identities/arguments, retained reasoning, error codes, and request IDs.

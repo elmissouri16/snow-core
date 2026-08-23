@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/compact"
+	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -412,45 +413,84 @@ Preserve exact identifiers, paths, artifact IDs, commands, test outcomes, failur
 		Thinking:           protocol.ThinkingOff,
 		SessionAffinityKey: a.requestAffinityKey("compaction"),
 	}
-	stream, err := p.Chat(ctx, req)
-	if err != nil {
-		return "", err
+	profile := a.retryProfile()
+	attempt := 0
+	var retryStarted time.Time
+	recovery := false
+	for {
+		attempt++
+		stream, err := p.Chat(ctx, req)
+		activity := false
+		var summary string
+		if err == nil {
+			summary, activity, err = readCompactionSummary(ctx, stream)
+		}
+		if err == nil {
+			return summary, nil
+		}
+		advice, retryable := provider.RetryAdviceFor(err)
+		if !retryable || ctx.Err() != nil {
+			return "", err
+		}
+		if retryStarted.IsZero() {
+			retryStarted = time.Now()
+		}
+		recovery = recovery || activity
+		delay, ok := a.scheduleProviderRetry(ctx, profile, retryStarted, attempt, recovery, advice)
+		if !ok {
+			return "", err
+		}
+		if waitErr := waitForRetry(ctx, delay); waitErr != nil {
+			return "", waitErr
+		}
+	}
+}
+
+func readCompactionSummary(ctx context.Context, stream protocol.EventStream) (string, bool, error) {
+	if stream == nil {
+		return "", false, errors.New("provider summary returned a nil stream")
 	}
 	defer stream.Close()
 	var out strings.Builder
-	sawDone := false
-summaryStream:
+	activity := false
 	for {
 		ev, err := stream.Next(ctx)
 		if errors.Is(err, io.EOF) {
-			if !sawDone {
-				return "", errors.New("provider summary stream ended before terminal done event")
-			}
-			break
+			cause := errors.New("provider summary stream ended before terminal done event")
+			return "", activity, &provider.AdvisedError{Err: cause, Advice: provider.RetryAdvice{Kind: provider.RetryTransient}}
 		}
 		if err != nil {
-			return "", err
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return "", activity, err
+			}
+			if _, retryable := provider.RetryAdviceFor(err); retryable {
+				return "", activity, err
+			}
+			return "", activity, &provider.AdvisedError{Err: err, Advice: provider.RetryAdvice{Kind: provider.RetryTransient}}
 		}
 		switch ev.Type {
 		case protocol.EvStreamTextDelta:
+			activity = true
 			out.WriteString(ev.Text)
+		case protocol.EvStreamThinkingDelta, protocol.EvStreamProviderData, protocol.EvStreamUsage,
+			protocol.EvStreamToolCallDelta, protocol.EvStreamToolCallDone:
+			activity = true
 		case protocol.EvStreamDone:
 			if ev.StopReason == protocol.StopError || ev.StopReason == protocol.StopAborted {
-				return "", fmt.Errorf("provider summary stopped with %s", ev.StopReason)
+				return "", activity, fmt.Errorf("provider summary stopped with %s", ev.StopReason)
 			}
-			sawDone = true
-			break summaryStream
+			summary := strings.TrimSpace(out.String())
+			if summary == "" {
+				return "", activity, errors.New("provider summary returned no text")
+			}
+			return summary, activity, nil
 		case protocol.EvStreamError:
 			if ev.Err != nil {
-				return "", ev.Err
+				return "", activity, ev.Err
 			}
-			return "", errors.New("provider summary failed")
+			return "", activity, errors.New("provider summary failed")
 		}
 	}
-	if strings.TrimSpace(out.String()) == "" {
-		return "", errors.New("provider summary returned no text")
-	}
-	return strings.TrimSpace(out.String()), nil
 }
 
 func (a *Agent) turnCompletionLocked() (string, string, *protocol.Usage) {

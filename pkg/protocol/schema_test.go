@@ -109,6 +109,7 @@ func TestRepresentativeRPCValuesConformToSchemas(t *testing.T) {
 		RPCPromptCompleted{Type: RPCTypePromptCompleted, RequestID: "p1", Status: RPCPromptCompletedStatus},
 		RPCPromptCompleted{Type: RPCTypePromptCompleted, Status: RPCPromptCompletedStatus},
 		AgentEvent{Type: EvModeChanged, Mode: &CollaborationModeState{Mode: ModeDefault, ReasoningEffort: ThinkingOff}},
+		AgentEvent{Type: EvProviderRetry, ProviderRetry: &ProviderRetry{Provider: "fake", Kind: "transient", Phase: "pre_activity", Attempt: 2, MaxAttempts: 12, DelayMS: 1000, ElapsedMS: 0, MaxElapsedMS: 300000}},
 		AgentEvent{Type: EvPermissionRequest, Permission: &Permission{Request: PermissionRequest{ID: "perm-1", Tool: "bash", Args: json.RawMessage(`{"command":"echo ok"}`), Risk: "exec"}}},
 		AgentEvent{Type: EvUserInputRequest, UserInput: &UserInputRequest{ID: "ask", Questions: []UserInputQuestion{{ID: "q", Header: "Q", Question: "Choose", Options: []UserInputOption{{Label: "A"}}}}}},
 		AgentEvent{Type: EvThreadGoalUpdated, ThreadGoal: &ThreadGoalUpdate{Goal: &ThreadGoal{SessionID: "s", BranchID: "b", GoalID: "g", Objective: "ship", Status: GoalActive, TokenBudget: &budget, TokensUsed: 1, SecondsUsed: 2, CreatedAt: 3, UpdatedAt: 4}}},

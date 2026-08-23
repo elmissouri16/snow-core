@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"testing"
+	"time"
 )
 
 type transientTestError struct{ retry bool }
@@ -28,6 +30,48 @@ func TestIsTransientErrorRequiresEntireErrorChainToBeRetryable(t *testing.T) {
 	}
 	if IsTransientError(transientTestError{retry: false}) {
 		t.Fatal("negative transient marker was ignored")
+	}
+}
+
+func TestRetryAdviceSeparatesThrottleAndRejectsMixedJoins(t *testing.T) {
+	throttle := &RateLimitError{Provider: "x", Status: 429, Message: "slow down", RetryAfter: 3 * time.Second}
+	advice, ok := RetryAdviceFor(fmt.Errorf("request: %w", throttle))
+	if !ok || advice.Kind != RetryRateLimit || advice.RetryAfter != 3*time.Second {
+		t.Fatalf("advice=%+v ok=%v", advice, ok)
+	}
+	if IsTransientError(throttle) {
+		t.Fatal("temporary throttle was conflated with transport outage")
+	}
+	if _, ok := RetryAdviceFor(errors.Join(throttle, errors.New("persist failed"))); ok {
+		t.Fatal("mixed joined failure was retryable")
+	}
+	joined, ok := RetryAdviceFor(errors.Join(throttle, transientTestError{retry: true}))
+	if !ok || joined.Kind != RetryRateLimit || joined.RetryAfter != 3*time.Second {
+		t.Fatalf("joined advice=%+v ok=%v", joined, ok)
+	}
+}
+
+func TestParseRetryAfterFormsAndBounds(t *testing.T) {
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name   string
+		header http.Header
+		want   time.Duration
+	}{
+		{name: "seconds", header: http.Header{"Retry-After": []string{"7"}}, want: 7 * time.Second},
+		{name: "milliseconds", header: http.Header{"Retry-After-Ms": []string{"1250"}}, want: 1250 * time.Millisecond},
+		{name: "date", header: http.Header{"Retry-After": []string{now.Add(9 * time.Second).Format(http.TimeFormat)}}, want: 9 * time.Second},
+		{name: "larger form wins", header: http.Header{"Retry-After": []string{"2"}, "Retry-After-Ms": []string{"5000"}}, want: 5 * time.Second},
+		{name: "malformed", header: http.Header{"Retry-After": []string{"later"}}, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ParseRetryAfter(tc.header, now, time.Minute); got != tc.want {
+				t.Fatalf("delay=%v want %v", got, tc.want)
+			}
+		})
+	}
+	if got := ParseRetryAfter(http.Header{"Retry-After": []string{"999"}}, now, 30*time.Second); got != 30*time.Second {
+		t.Fatalf("bounded delay=%v", got)
 	}
 }
 

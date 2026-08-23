@@ -20,54 +20,39 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-func TestChatClassifiesUsageLimit(t *testing.T) {
+func TestChatClassifiesThrottleAndQuotaWithoutLocalRetry(t *testing.T) {
 	const access = "secret-access-token"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "quota "+access, http.StatusTooManyRequests)
-	}))
-	defer server.Close()
-	p := &Provider{baseURL: server.URL, client: server.Client()}
-	stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: access, Extra: map[string]any{"account_id": "a"}}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ev, err := stream.Next(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var limited providerpkg.UsageLimitedError
-	if ev.Err == nil || !errors.As(ev.Err, &limited) {
-		t.Fatalf("event=%+v", ev)
-	}
-	if strings.Contains(ev.Err.Error(), access) || !strings.Contains(ev.Err.Error(), "[redacted]") {
-		t.Fatalf("credential leaked in error: %v", ev.Err)
-	}
-}
-
-func TestChatDoesNotRetryUsageLimitStatuses(t *testing.T) {
-	for _, status := range []int{http.StatusPaymentRequired, http.StatusTooManyRequests} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		kind   providerpkg.RetryKind
+		quota  bool
+	}{{http.StatusTooManyRequests, providerpkg.RetryRateLimit, false}, {http.StatusPaymentRequired, "", true}} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
 			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls++
-				w.WriteHeader(status)
-				_, _ = w.Write([]byte("usage limited"))
+				http.Error(w, "quota "+access, tc.status)
 			}))
 			defer server.Close()
-			p := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
-			p.wait = func(_, _ context.Context, _ time.Duration) error { t.Fatal("unexpected retry"); return nil }
-			stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
+			p := &Provider{baseURL: server.URL, client: server.Client()}
+			stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: access, Extra: map[string]any{"account_id": "a"}}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer stream.Close()
-			event, err := stream.Next(context.Background())
-			var limited providerpkg.UsageLimitedError
-			if err != nil || event.Type != protocol.EvStreamError || !errors.As(event.Err, &limited) {
-				t.Fatalf("event=%+v err=%v", event, err)
+			ev, err := stream.Next(context.Background())
+			if err != nil || ev.Err == nil || calls != 1 {
+				t.Fatalf("event=%+v err=%v calls=%d", ev, err, calls)
 			}
-			if calls != 1 {
-				t.Fatalf("calls=%d", calls)
+			if tc.quota {
+				var limited providerpkg.UsageLimitedError
+				if !errors.As(ev.Err, &limited) {
+					t.Fatalf("quota error=%T %v", ev.Err, ev.Err)
+				}
+			} else if advice, ok := providerpkg.RetryAdviceFor(ev.Err); !ok || advice.Kind != tc.kind {
+				t.Fatalf("advice=%+v ok=%v", advice, ok)
+			}
+			if strings.Contains(ev.Err.Error(), access) || !strings.Contains(ev.Err.Error(), "[redacted]") {
+				t.Fatalf("credential leaked in error: %v", ev.Err)
 			}
 		})
 	}
@@ -300,78 +285,47 @@ func TestCompressRequestBodyConcurrent(t *testing.T) {
 	}
 }
 
-func TestChatRetriesTransientHTTPStatuses(t *testing.T) {
-	for _, status := range []int{http.StatusRequestTimeout, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+func TestChatClassifiesTransientHTTPStatusesWithoutLocalRetry(t *testing.T) {
+	for _, status := range []int{http.StatusRequestTimeout, http.StatusTooEarly, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, 599} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			calls := 0
-			var bodies [][]byte
-			var encodings []string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls++
-				body, _ := io.ReadAll(r.Body)
-				bodies = append(bodies, body)
-				encodings = append(encodings, r.Header.Get("Content-Encoding"))
-				if calls <= maxTransientRetries {
-					w.Header().Set("retry-after-ms", "0")
-					w.WriteHeader(status)
-					_, _ = w.Write([]byte(`{"error":{"message":"temporarily unavailable","code":"server_error"}}`))
-					return
-				}
-				w.Header().Set("Content-Type", "text/event-stream")
-				_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"))
+				w.Header().Set("Retry-After", "2")
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"message":"temporarily unavailable","code":"server_error"}}`))
 			}))
 			defer server.Close()
 			p := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
-			var delays []time.Duration
-			p.wait = func(_, _ context.Context, delay time.Duration) error { delays = append(delays, delay); return nil }
-			stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}, System: strings.Repeat("context", 6000)})
+			stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer stream.Close()
-			if err := consumeSuccessfulStream(stream); err != nil {
-				t.Fatal(err)
-			}
-			if calls != 3 || len(delays) != 2 || delays[0] != 0 || delays[1] != 0 {
-				t.Fatalf("calls=%d delays=%v", calls, delays)
-			}
-			if len(bodies) != 3 || !bytes.Equal(bodies[0], bodies[1]) || !bytes.Equal(bodies[1], bodies[2]) {
-				t.Fatal("encoded body was not reused across retries")
-			}
-			if len(encodings) != 3 || encodings[0] != "zstd" || encodings[1] != "zstd" || encodings[2] != "zstd" {
-				t.Fatalf("content encodings=%v", encodings)
+			event, err := stream.Next(context.Background())
+			advice, ok := providerpkg.RetryAdviceFor(event.Err)
+			if err != nil || event.Type != protocol.EvStreamError || !ok || advice.Kind != providerpkg.RetryTransient || advice.RetryAfter != 2*time.Second || calls != 1 {
+				t.Fatalf("event=%+v err=%v advice=%+v ok=%v calls=%d", event, err, advice, ok, calls)
 			}
 		})
 	}
 }
 
-func TestChatRetriesNetworkFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer server.Close()
-	base := server.Client().Transport
+func TestChatClassifiesNetworkFailureWithoutLocalRetry(t *testing.T) {
+	sentinel := errors.New("temporary dial failure")
 	calls := 0
-	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		calls++
-		if calls == 1 {
-			return nil, errors.New("temporary dial failure")
-		}
-		return base.RoundTrip(req)
+		return nil, sentinel
 	})}
-	p := New(Config{BaseURL: server.URL, HTTPClient: client})
-	p.wait = func(_, _ context.Context, _ time.Duration) error { return nil }
+	p := New(Config{BaseURL: "https://example.test", HTTPClient: client})
 	stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Close()
-	if err := consumeSuccessfulStream(stream); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 2 {
-		t.Fatalf("calls=%d", calls)
+	event, err := stream.Next(context.Background())
+	advice, ok := providerpkg.RetryAdviceFor(event.Err)
+	if err != nil || !ok || advice.Kind != providerpkg.RetryTransient || !errors.Is(event.Err, sentinel) || calls != 1 {
+		t.Fatalf("event=%+v err=%v advice=%+v calls=%d", event, err, advice, calls)
 	}
 }
 
@@ -440,27 +394,21 @@ func TestChatNextCallContextTimeoutDoesNotTerminateStream(t *testing.T) {
 	}
 }
 
-func TestChatRetriesPreOutputStreamReadFailure(t *testing.T) {
+func TestChatClassifiesPreOutputStreamReadFailureWithoutLocalRetry(t *testing.T) {
 	calls := 0
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		calls++
-		if calls == 1 {
-			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: &readErrorBody{err: errors.New("read failed")}}, nil
-		}
-		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: &readErrorBody{err: errors.New("read failed")}}, nil
 	})}
 	p := New(Config{BaseURL: "https://example.test", HTTPClient: client})
-	p.wait = func(_, _ context.Context, _ time.Duration) error { return nil }
 	stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Close()
-	if err := consumeSuccessfulStream(stream); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 2 {
-		t.Fatalf("calls=%d", calls)
+	event, err := stream.Next(context.Background())
+	advice, ok := providerpkg.RetryAdviceFor(event.Err)
+	if err != nil || !ok || advice.Kind != providerpkg.RetryTransient || calls != 1 {
+		t.Fatalf("event=%+v err=%v advice=%+v calls=%d", event, err, advice, calls)
 	}
 }
 
@@ -472,7 +420,6 @@ func TestChatDoesNotRetryStreamReadFailureAfterActivity(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: body}, nil
 	})}
 	p := New(Config{BaseURL: "https://example.test", HTTPClient: client})
-	p.wait = func(_, _ context.Context, _ time.Duration) error { t.Fatal("unexpected retry"); return nil }
 	stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 	if err != nil {
 		t.Fatal(err)
@@ -491,7 +438,7 @@ func TestChatDoesNotRetryStreamReadFailureAfterActivity(t *testing.T) {
 	}
 }
 
-func TestChatRetriesImmediateStreamFailureAndTruncation(t *testing.T) {
+func TestChatClassifiesImmediateStreamFailureAndTruncation(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		first string
@@ -504,25 +451,18 @@ func TestChatRetriesImmediateStreamFailureAndTruncation(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls++
 				w.Header().Set("Content-Type", "text/event-stream")
-				if calls == 1 {
-					_, _ = w.Write([]byte(tc.first))
-					return
-				}
-				_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"))
+				_, _ = w.Write([]byte(tc.first))
 			}))
 			defer server.Close()
 			p := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
-			p.wait = func(_, _ context.Context, _ time.Duration) error { return nil }
 			stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer stream.Close()
-			if err := consumeSuccessfulStream(stream); err != nil {
-				t.Fatal(err)
-			}
-			if calls != 2 {
-				t.Fatalf("calls=%d", calls)
+			event, err := stream.Next(context.Background())
+			advice, ok := providerpkg.RetryAdviceFor(event.Err)
+			if err != nil || !ok || advice.Kind != providerpkg.RetryTransient || calls != 1 {
+				t.Fatalf("event=%+v err=%v advice=%+v calls=%d", event, err, advice, calls)
 			}
 		})
 	}
@@ -549,7 +489,6 @@ func TestChatDoesNotRetryStreamFailureAfterActivity(t *testing.T) {
 			}))
 			defer server.Close()
 			p := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
-			p.wait = func(_, _ context.Context, _ time.Duration) error { return nil }
 			stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 			if err != nil {
 				t.Fatal(err)
@@ -579,7 +518,6 @@ func TestChatDoesNotRetryValidationErrorWithTransientWords(t *testing.T) {
 	}))
 	defer server.Close()
 	p := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
-	p.wait = func(_, _ context.Context, _ time.Duration) error { t.Fatal("unexpected retry"); return nil }
 	stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 	if err != nil {
 		t.Fatal(err)
@@ -594,7 +532,7 @@ func TestChatDoesNotRetryValidationErrorWithTransientWords(t *testing.T) {
 	}
 }
 
-func TestChatBoundsRetriesAndPreservesHTTPDiagnostics(t *testing.T) {
+func TestChatPreservesHTTPDiagnosticsWithoutLocalRetry(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
@@ -604,7 +542,6 @@ func TestChatBoundsRetriesAndPreservesHTTPDiagnostics(t *testing.T) {
 	}))
 	defer server.Close()
 	p := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
-	p.wait = func(_, _ context.Context, _ time.Duration) error { return nil }
 	stream, err := p.Chat(context.Background(), auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 	if err != nil {
 		t.Fatal(err)
@@ -615,32 +552,24 @@ func TestChatBoundsRetriesAndPreservesHTTPDiagnostics(t *testing.T) {
 		t.Fatalf("event=%+v err=%v", event, err)
 	}
 	message := event.Err.Error()
-	for _, want := range []string{"HTTP 503", "service_unavailable", "req-final", "3 attempts"} {
+	for _, want := range []string{"HTTP 503", "service_unavailable", "req-final"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("missing %q in %q", want, message)
 		}
 	}
-	if calls != 3 {
+	if calls != 1 {
 		t.Fatalf("calls=%d", calls)
 	}
 }
 
-func TestChatRetryWaitIsContextCancellable(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	defer server.Close()
-	p := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
+func TestChatProviderAttemptIsContextCancellable(t *testing.T) {
 	started := make(chan struct{})
-	p.wait = func(parent, call context.Context, _ time.Duration) error {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		close(started)
-		select {
-		case <-parent.Done():
-			return parent.Err()
-		case <-call.Done():
-			return call.Err()
-		}
-	}
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})}
+	p := New(Config{BaseURL: "https://example.test", HTTPClient: client})
 	ctx, cancel := context.WithCancel(context.Background())
 	stream, err := p.Chat(ctx, auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 	if err != nil {
@@ -665,29 +594,6 @@ func TestResponseRequestIDRedactsBeforeBounding(t *testing.T) {
 	}
 	if got := responseRequestID(http.Header{"X-Request-Id": []string{"\u009breq"}}); got != "req" {
 		t.Fatalf("C1 request id=%q", got)
-	}
-}
-
-func TestResponseRetryDelayParsesAndCaps(t *testing.T) {
-	now := time.Unix(1_000, 0)
-	for _, tc := range []struct {
-		name    string
-		headers http.Header
-		want    time.Duration
-	}{
-		{"milliseconds", http.Header{"Retry-After-Ms": []string{"250"}}, 250 * time.Millisecond},
-		{"seconds", http.Header{"Retry-After": []string{"2"}}, 2 * time.Second},
-		{"date", http.Header{"Retry-After": []string{now.Add(3 * time.Second).UTC().Format(http.TimeFormat)}}, 3 * time.Second},
-		{"cap", http.Header{"Retry-After": []string{"300"}}, maxRetryDelay},
-		{"millisecond_overflow", http.Header{"Retry-After-Ms": []string{"9223372036854775807"}}, maxRetryDelay},
-		{"second_overflow", http.Header{"Retry-After": []string{"9223372036854775807"}}, maxRetryDelay},
-		{"absent", http.Header{}, -1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := responseRetryDelay(&http.Response{Header: tc.headers}, now); got != tc.want {
-				t.Fatalf("got=%v want=%v", got, tc.want)
-			}
-		})
 	}
 }
 

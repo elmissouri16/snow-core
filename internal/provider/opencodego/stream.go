@@ -213,7 +213,8 @@ func (s *stream) readSSE(resp *http.Response) {
 			}
 		}
 		if errors.Is(err, providerpkg.ErrStreamIdle) {
-			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: stream idle timeout: %w", s.provider, err)})
+			cause := fmt.Errorf("%s: stream idle timeout: %w", s.provider, err)
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: &providerpkg.AdvisedError{Err: cause, Advice: providerpkg.RetryAdvice{Kind: providerpkg.RetryTransient}}})
 			return
 		}
 		if err != nil {
@@ -221,7 +222,8 @@ func (s *stream) readSSE(resp *http.Response) {
 				if terminalObserved {
 					sendDone()
 				} else {
-					markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: stream truncated before terminal event", s.provider)})
+					cause := fmt.Errorf("%s: stream truncated before terminal event", s.provider)
+					markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: &providerpkg.AdvisedError{Err: cause, Advice: providerpkg.RetryAdvice{Kind: providerpkg.RetryTransient}}})
 				}
 				return
 			}
@@ -233,7 +235,8 @@ func (s *stream) readSSE(resp *http.Response) {
 			if s.reqCtx.Err() != nil {
 				return // cancellation; Next() surfaces ctx.Err()
 			}
-			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: stream read failed: %w", s.provider, err)})
+			cause := fmt.Errorf("%s: stream read failed: %w", s.provider, err)
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: &providerpkg.AdvisedError{Err: cause, Advice: providerpkg.RetryAdvice{Kind: providerpkg.RetryTransient}}})
 			return
 		}
 	}

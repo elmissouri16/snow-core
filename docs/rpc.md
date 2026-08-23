@@ -1112,7 +1112,7 @@ After the `rpc_ready` handshake, frames other than `response` and
 
 | Category | Event types |
 |---|---|
-| Streaming | `text_delta`, `thinking_delta`, `usage` |
+| Streaming | `text_delta`, `thinking_delta`, `usage`, `provider_retry` |
 | Tools | `tool_start`, `tool_progress`, `tool_end`, `tool_routing` |
 | Interaction | `user_input_request`, `queue_updated` |
 | Lifecycle/state | `session_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
@@ -1158,6 +1158,7 @@ tags.
 | `text_delta` | `text` | In provider stream order |
 | `thinking_delta` | `text` | In provider stream order |
 | `usage` | `usage` | Per provider usage record, including at turn completion |
+| `provider_retry` | `provider_retry` | Before a cancellation-aware retry wait; nonterminal |
 
 ### Tool events
 
@@ -1186,8 +1187,12 @@ tags.
 | `model_changed` | `model` | When the active model changes |
 | `mode_changed` | `mode` | When collaboration mode or reasoning effort changes |
 
-`error` events carry `message` only; `is_error` is not currently set on them.
-Error-path `compaction_done` events do set `is_error: true`.
+`provider_retry` carries `provider`, retry `kind`, request `phase`, next
+`attempt`, `max_attempts`, `delay_ms`, `elapsed_ms`, and `max_elapsed_ms`.
+Expected retry waits do not emit `error`; final exhaustion emits one terminal
+error diagnostic. `error` events carry `message` only; `is_error` is not
+currently set on them. Error-path `compaction_done` events do set
+`is_error: true`.
 
 ### Plan events
 

@@ -8,6 +8,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/agent"
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/buildinfo"
+	"github.com/elmissouri16/snow-core/internal/config"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -37,6 +38,14 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	if opts.EnableSubagents && opts.DisableSubagents {
 		return nil, errors.New("snowsdk: EnableSubagents and DisableSubagents conflict")
 	}
+	var retry *config.RetryConfig
+	if opts.Retry != nil {
+		profile := func(value RetryProfile) config.RetryProfileConfig {
+			return config.RetryProfileConfig{MaxAttempts: value.MaxAttempts, MaxElapsedMS: value.MaxElapsedMS, InitialDelayMS: value.InitialDelayMS, MaxDelayMS: value.MaxDelayMS, JitterPercent: value.JitterPercent}
+		}
+		value := config.RetryConfig{Normal: profile(opts.Retry.Normal), Goal: profile(opts.Retry.Goal)}
+		retry = &value
+	}
 	a, err := app.New(ctx, app.Options{
 		CWD:                     opts.CWD,
 		BuildVersion:            buildinfo.Version,
@@ -54,6 +63,7 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		TextVerbosity:           opts.TextVerbosity,
 		CollaborationMode:       opts.CollaborationMode,
 		PlanModeReasoningEffort: opts.PlanModeReasoningEffort,
+		Retry:                   retry,
 		APIKey:                  opts.APIKey,
 		BaseURL:                 opts.BaseURL,
 		Plugins:                 opts.Plugins,

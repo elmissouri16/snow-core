@@ -17,6 +17,7 @@ const (
 	EvPermissionRequest AgentEventType = "permission_request"
 	EvUserInputRequest  AgentEventType = "user_input_request"
 	EvUsage             AgentEventType = "usage"
+	EvProviderRetry     AgentEventType = "provider_retry"
 	EvQueueUpdated      AgentEventType = "queue_updated"
 	EvTurnDone          AgentEventType = "turn_done"
 	EvError             AgentEventType = "error"
@@ -49,6 +50,7 @@ func KnownAgentEventTypes() []AgentEventType {
 		EvPermissionRequest,
 		EvUserInputRequest,
 		EvUsage,
+		EvProviderRetry,
 		EvQueueUpdated,
 		EvTurnDone,
 		EvError,
@@ -91,6 +93,20 @@ type ToolRouting struct {
 	Fallback       bool     `json:"fallback,omitempty"`
 }
 
+// ProviderRetry describes a nonterminal provider recovery wait. Message text is
+// deliberately excluded so raw provider diagnostics cannot leak through the
+// normalized event stream.
+type ProviderRetry struct {
+	Provider     string `json:"provider"`
+	Kind         string `json:"kind"`
+	Phase        string `json:"phase"`
+	Attempt      int    `json:"attempt"`
+	MaxAttempts  int    `json:"max_attempts"`
+	DelayMS      int64  `json:"delay_ms"`
+	ElapsedMS    int64  `json:"elapsed_ms"`
+	MaxElapsedMS int64  `json:"max_elapsed_ms"`
+}
+
 // AgentEvent is a single event delivered to subscribers.
 type AgentEvent struct {
 	Type AgentEventType `json:"type"`
@@ -105,18 +121,19 @@ type AgentEvent struct {
 	// ToolDurationMS is populated on tool_end when timing is available.
 	ToolDurationMS int64 `json:"tool_duration_ms,omitempty"`
 	// ToolProgress carries structured progress emitted by a running tool.
-	ToolProgress *ToolProgress           `json:"tool_progress,omitempty"`
-	ToolRouting  *ToolRouting            `json:"tool_routing,omitempty"`
-	Usage        *Usage                  `json:"usage,omitempty"`
-	Model        *Model                  `json:"model,omitempty"`
-	Mode         *CollaborationModeState `json:"mode,omitempty"`
-	Plan         *PlanItem               `json:"plan,omitempty"`
-	PlanUpdate   *PlanUpdate             `json:"plan_update,omitempty"`
-	Compaction   *CompactionResult       `json:"compaction,omitempty"`
-	Permission   *Permission             `json:"permission,omitempty"`
-	UserInput    *UserInputRequest       `json:"user_input,omitempty"`
-	Queue        *InputQueue             `json:"queue,omitempty"`
-	ThreadGoal   *ThreadGoalUpdate       `json:"thread_goal,omitempty"`
+	ToolProgress  *ToolProgress           `json:"tool_progress,omitempty"`
+	ToolRouting   *ToolRouting            `json:"tool_routing,omitempty"`
+	ProviderRetry *ProviderRetry          `json:"provider_retry,omitempty"`
+	Usage         *Usage                  `json:"usage,omitempty"`
+	Model         *Model                  `json:"model,omitempty"`
+	Mode          *CollaborationModeState `json:"mode,omitempty"`
+	Plan          *PlanItem               `json:"plan,omitempty"`
+	PlanUpdate    *PlanUpdate             `json:"plan_update,omitempty"`
+	Compaction    *CompactionResult       `json:"compaction,omitempty"`
+	Permission    *Permission             `json:"permission,omitempty"`
+	UserInput     *UserInputRequest       `json:"user_input,omitempty"`
+	Queue         *InputQueue             `json:"queue,omitempty"`
+	ThreadGoal    *ThreadGoalUpdate       `json:"thread_goal,omitempty"`
 	// Agent correlates ordinary child stream/tool/usage events. Root events keep
 	// this nil for backward compatibility. Lifecycle snapshots use Subagent.
 	Agent          *AgentRef      `json:"agent,omitempty"`
@@ -143,6 +160,10 @@ func (e AgentEvent) Clone() AgentEvent {
 		v := *e.ToolRouting
 		v.ToolIDs = append([]string(nil), e.ToolRouting.ToolIDs...)
 		out.ToolRouting = &v
+	}
+	if e.ProviderRetry != nil {
+		v := *e.ProviderRetry
+		out.ProviderRetry = &v
 	}
 	out.Usage = e.Usage.Clone()
 	if e.Model != nil {

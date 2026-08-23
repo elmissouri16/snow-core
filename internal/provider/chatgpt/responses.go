@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,9 +23,6 @@ import (
 )
 
 const (
-	maxTransientRetries      = 2
-	initialRetryDelay        = time.Second
-	maxRetryDelay            = 30 * time.Second
 	requestCompressMinimum   = 32 << 10
 	maxHTTPErrorReadBytes    = 64 << 10
 	maxHTTPErrorSnippetBytes = 1000
@@ -82,92 +78,51 @@ type retryingCodexStream struct {
 	contentEncoding string
 	affinity        string
 
-	mu               sync.Mutex
-	current          protocol.EventStream
-	pending          chan codexAttemptResult
-	closed           bool
-	terminal         bool
-	delivered        bool
-	authRetried      bool
-	transientRetries int
-	requestAttempts  int
+	mu              sync.Mutex
+	current         protocol.EventStream
+	pending         chan codexAttemptResult
+	closed          bool
+	terminal        bool
+	authRetried     bool
+	requestAttempts int
 }
 
 func (s *retryingCodexStream) Next(ctx context.Context) (protocol.StreamEvent, error) {
-	for {
-		if err := ctx.Err(); err != nil {
-			return protocol.StreamEvent{}, err
-		}
-		if err := s.ctx.Err(); err != nil {
-			return protocol.StreamEvent{}, err
-		}
-		if s.isTerminal() {
-			return protocol.StreamEvent{}, io.EOF
-		}
-		stream := s.activeStream()
-		if stream == nil {
-			result, waitErr := s.awaitAttempt(ctx)
-			if waitErr != nil {
-				return protocol.StreamEvent{}, waitErr
-			}
-			stream = result.stream
-			err, delay := result.err, result.delay
-			if err != nil {
-				if s.canRetry(err) {
-					s.transientRetries++
-					if delay < 0 {
-						delay = retryBackoff(s.transientRetries)
-					}
-					if waitErr := s.wait(ctx, delay); waitErr != nil {
-						return protocol.StreamEvent{}, waitErr
-					}
-					continue
-				}
-				s.markTerminal()
-				return protocol.StreamEvent{Type: protocol.EvStreamError, Err: withAttemptCount(err, s.requestAttempts)}, nil
-			}
-			s.setActiveStream(stream)
-		}
-
-		event, err := stream.Next(ctx)
-		if err != nil {
-			if ctx.Err() != nil && s.ctx.Err() == nil {
-				return protocol.StreamEvent{}, ctx.Err()
-			}
-			if errors.Is(err, io.EOF) {
-				s.markTerminal()
-				return protocol.StreamEvent{}, io.EOF
-			}
-			if !s.delivered && s.canRetry(err) {
-				s.transientRetries++
-				s.clearActiveStream()
-				if waitErr := s.wait(ctx, retryBackoff(s.transientRetries)); waitErr != nil {
-					return protocol.StreamEvent{}, waitErr
-				}
-				continue
-			}
-			s.markTerminal()
-			return protocol.StreamEvent{}, withAttemptCount(err, s.requestAttempts)
-		}
-		if event.Type == protocol.EvStreamError {
-			if !s.delivered && s.canRetry(event.Err) {
-				s.transientRetries++
-				s.clearActiveStream()
-				if waitErr := s.wait(ctx, retryBackoff(s.transientRetries)); waitErr != nil {
-					return protocol.StreamEvent{}, waitErr
-				}
-				continue
-			}
-			s.markTerminal()
-			event.Err = withAttemptCount(event.Err, s.requestAttempts)
-			return event, nil
-		}
-		s.delivered = true
-		if event.Type == protocol.EvStreamDone {
-			s.markTerminal()
-		}
-		return event, nil
+	if err := ctx.Err(); err != nil {
+		return protocol.StreamEvent{}, err
 	}
+	if err := s.ctx.Err(); err != nil {
+		return protocol.StreamEvent{}, err
+	}
+	if s.isTerminal() {
+		return protocol.StreamEvent{}, io.EOF
+	}
+	stream := s.activeStream()
+	if stream == nil {
+		result, waitErr := s.awaitAttempt(ctx)
+		if waitErr != nil {
+			return protocol.StreamEvent{}, waitErr
+		}
+		if result.err != nil {
+			s.markTerminal()
+			return protocol.StreamEvent{Type: protocol.EvStreamError, Err: result.err}, nil
+		}
+		stream = result.stream
+		s.setActiveStream(stream)
+	}
+
+	event, err := stream.Next(ctx)
+	if err != nil {
+		if ctx.Err() != nil && s.ctx.Err() == nil {
+			return protocol.StreamEvent{}, ctx.Err()
+		}
+		s.markTerminal()
+		return protocol.StreamEvent{}, err
+	}
+	if event.Type == protocol.EvStreamError || event.Type == protocol.EvStreamDone {
+		s.markTerminal()
+	}
+	return event, nil
 }
 
 func (s *retryingCodexStream) Close() error {
@@ -190,7 +145,6 @@ func (s *retryingCodexStream) Close() error {
 type codexAttemptResult struct {
 	stream protocol.EventStream
 	err    error
-	delay  time.Duration
 }
 
 func (s *retryingCodexStream) awaitAttempt(ctx context.Context) (codexAttemptResult, error) {
@@ -200,7 +154,7 @@ func (s *retryingCodexStream) awaitAttempt(ctx context.Context) (codexAttemptRes
 		pending = make(chan codexAttemptResult, 1)
 		s.pending = pending
 		go func(ch chan codexAttemptResult) {
-			stream, err, delay := s.startAttempt()
+			stream, err := s.startAttempt()
 			s.mu.Lock()
 			closed := s.closed
 			s.mu.Unlock()
@@ -208,7 +162,7 @@ func (s *retryingCodexStream) awaitAttempt(ctx context.Context) (codexAttemptRes
 				_ = stream.Close()
 				stream = nil
 			}
-			ch <- codexAttemptResult{stream: stream, err: err, delay: delay}
+			ch <- codexAttemptResult{stream: stream, err: err}
 		}(pending)
 	}
 	s.mu.Unlock()
@@ -250,16 +204,6 @@ func (s *retryingCodexStream) setActiveStream(stream protocol.EventStream) {
 	s.mu.Unlock()
 }
 
-func (s *retryingCodexStream) clearActiveStream() {
-	s.mu.Lock()
-	stream := s.current
-	s.current = nil
-	s.mu.Unlock()
-	if stream != nil {
-		_ = stream.Close()
-	}
-}
-
 func (s *retryingCodexStream) isTerminal() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -272,38 +216,12 @@ func (s *retryingCodexStream) markTerminal() {
 	s.mu.Unlock()
 }
 
-func (s *retryingCodexStream) canRetry(err error) bool {
-	return !s.delivered && s.transientRetries < maxTransientRetries && s.requestAttempts < maxTransientRetries+1 && retryableCodexError(err)
-}
-
-func (s *retryingCodexStream) wait(ctx context.Context, delay time.Duration) error {
-	if delay > maxRetryDelay {
-		delay = maxRetryDelay
-	}
-	if delay < 0 {
-		delay = 0
-	}
-	if s.provider.wait != nil {
-		return s.provider.wait(s.ctx, ctx, delay)
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-s.ctx.Done():
-		return s.ctx.Err()
-	}
-}
-
-func (s *retryingCodexStream) startAttempt() (protocol.EventStream, error, time.Duration) {
+func (s *retryingCodexStream) startAttempt() (protocol.EventStream, error) {
 	for {
 		s.requestAttempts++
 		req, err := http.NewRequestWithContext(s.ctx, http.MethodPost, s.provider.endpoint(), bytes.NewReader(s.body))
 		if err != nil {
-			return nil, responsesapi.NewResponseError(ProviderID, 0, "create request failed", "request_build_error", ""), -1
+			return nil, responsesapi.NewResponseError(ProviderID, 0, "create request failed", "request_build_error", "")
 		}
 		req.Header.Set("Authorization", "Bearer "+s.creds.Access)
 		req.Header.Set("chatgpt-account-id", s.status.AccountID)
@@ -322,42 +240,50 @@ func (s *retryingCodexStream) startAttempt() (protocol.EventStream, error, time.
 
 		resp, requestErr := redirectSafeClient(s.provider.client).Do(req)
 		if requestErr != nil {
-			return nil, responsesapi.NewResponseError(ProviderID, 0, "network request failed", "network_error", ""), -1
+			message := providerpkg.RedactSecrets("chatgpt: network request failed: "+requestErr.Error(), s.creds.Access, s.creds.Refresh)
+			return nil, &providerpkg.AdvisedError{Err: &providerpkg.CauseError{Message: message, Cause: requestErr}, Advice: providerpkg.RetryAdvice{Kind: providerpkg.RetryTransient}}
 		}
-		if resp.StatusCode == http.StatusUnauthorized && !s.authRetried && s.requestAttempts < maxTransientRetries+1 {
+		if resp.StatusCode == http.StatusUnauthorized && !s.authRetried {
 			resp.Body.Close()
 			s.authRetried = true
 			fresh, refreshErr := s.provider.refreshRejected(s.ctx, s.creds)
 			if refreshErr != nil {
-				return nil, refreshErr, -1
+				return nil, refreshErr
 			}
 			s.creds = fresh
 			s.status, refreshErr = CheckAuth(fresh)
 			if refreshErr != nil {
-				return nil, refreshErr, -1
+				return nil, refreshErr
 			}
 			continue
 		}
 		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
-			return responsesapi.NewStreamWithIdleTimeout(s.ctx, resp, ProviderID, s.provider.streamIdleTimeout, s.creds.Access, s.creds.Refresh), nil, 0
+			return responsesapi.NewStreamWithIdleTimeout(s.ctx, resp, ProviderID, s.provider.streamIdleTimeout, s.creds.Access, s.creds.Refresh), nil
 		}
 
 		now := time.Now()
 		if s.provider.now != nil {
 			now = s.provider.now()
 		}
-		delay := responseRetryDelay(resp, now)
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxHTTPErrorReadBytes))
 		resp.Body.Close()
 		requestID := responseRequestID(resp.Header, s.creds.Access, s.creds.Refresh)
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusPaymentRequired {
-			message := responsesapi.SanitizeErrorText(string(snippet), maxHTTPErrorSnippetBytes, s.creds.Access, s.creds.Refresh)
-			if requestID != "" {
-				message += " (request ID " + requestID + ")"
-			}
-			return nil, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: message}, -1
+		message := responsesapi.SanitizeErrorText(string(snippet), maxHTTPErrorSnippetBytes, s.creds.Access, s.creds.Refresh)
+		if requestID != "" {
+			message += " (request ID " + requestID + ")"
 		}
-		return nil, responseError(resp.StatusCode, snippet, requestID, s.creds.Access, s.creds.Refresh), delay
+		if resp.StatusCode == http.StatusPaymentRequired {
+			return nil, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: message}
+		}
+		advice, retryable := providerpkg.HTTPRetryAdvice(resp.StatusCode, resp.Header, now, 24*time.Hour)
+		if retryable && advice.Kind == providerpkg.RetryRateLimit {
+			return nil, &providerpkg.RateLimitError{Provider: ProviderID, Status: resp.StatusCode, Message: message, RetryAfter: advice.RetryAfter}
+		}
+		responseErr := responseError(resp.StatusCode, snippet, requestID, s.creds.Access, s.creds.Refresh)
+		if retryable {
+			return nil, &providerpkg.AdvisedError{Err: responseErr, Advice: advice}
+		}
+		return nil, responseErr
 	}
 }
 
@@ -440,42 +366,6 @@ func compressRequestBody(body []byte) ([]byte, string) {
 	return encoded, "zstd"
 }
 
-func retryBackoff(retry int) time.Duration {
-	if retry <= 1 {
-		return initialRetryDelay
-	}
-	delay := initialRetryDelay << (retry - 1)
-	if delay > maxRetryDelay {
-		return maxRetryDelay
-	}
-	return delay
-}
-
-func responseRetryDelay(resp *http.Response, now time.Time) time.Duration {
-	if value := strings.TrimSpace(resp.Header.Get("retry-after-ms")); value != "" {
-		if ms, err := strconv.ParseInt(value, 10, 64); err == nil && ms >= 0 {
-			if ms >= int64(maxRetryDelay/time.Millisecond) {
-				return maxRetryDelay
-			}
-			return time.Duration(ms) * time.Millisecond
-		}
-	}
-	value := strings.TrimSpace(resp.Header.Get("Retry-After"))
-	if value == "" {
-		return -1
-	}
-	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil && seconds >= 0 {
-		if seconds >= int64(maxRetryDelay/time.Second) {
-			return maxRetryDelay
-		}
-		return time.Duration(seconds) * time.Second
-	}
-	if when, err := http.ParseTime(value); err == nil {
-		return min(max(time.Duration(0), when.Sub(now)), maxRetryDelay)
-	}
-	return -1
-}
-
 func responseRequestID(header http.Header, secrets ...string) string {
 	for _, name := range []string{"x-request-id", "request-id", "openai-request-id"} {
 		if value := strings.TrimSpace(header.Get(name)); value != "" {
@@ -490,23 +380,6 @@ func responseRequestID(header http.Header, secrets ...string) string {
 		}
 	}
 	return ""
-}
-
-func retryableCodexError(err error) bool {
-	return providerpkg.IsTransientError(err)
-}
-
-func withAttemptCount(err error, attempts int) error {
-	if err == nil || attempts <= 1 {
-		return err
-	}
-	var responseErr *responsesapi.ResponseError
-	if errors.As(err, &responseErr) {
-		copy := *responseErr
-		copy.Attempts = attempts
-		return &copy
-	}
-	return fmt.Errorf("%w (after %d attempts)", err, attempts)
 }
 
 // buildResponsesBody remains as a thin compatibility seam for ChatGPT package

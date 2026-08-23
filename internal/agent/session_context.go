@@ -339,23 +339,34 @@ func contextMessagesFromStore(store session.Store) ([]protocol.Message, error) {
 // result is appended; later ordinary messages would make the outcome ambiguous
 // for reasons other than an interrupted dispatch, so older unmatched calls are
 // deliberately left untouched.
+type interruptedToolRepair struct {
+	Count                 int
+	UnknownNonReadOutcome bool
+}
+
 func repairInterruptedToolCalls(store session.Store, registry tools.Registry) (int, error) {
+	report, err := repairInterruptedToolCallsReport(store, registry)
+	return report.Count, err
+}
+
+func repairInterruptedToolCallsReport(store session.Store, registry tools.Registry) (interruptedToolRepair, error) {
+	var report interruptedToolRepair
 	if store == nil {
-		return 0, errors.New("session is nil")
+		return report, errors.New("session is nil")
 	}
 	messages, err := store.Messages()
 	if err != nil {
-		return 0, err
+		return report, err
 	}
 	if len(messages) == 0 {
-		return 0, nil
+		return report, nil
 	}
 	assistantIndex := len(messages) - 1
 	for assistantIndex >= 0 && messages[assistantIndex].Role == protocol.RoleTool {
 		assistantIndex--
 	}
 	if assistantIndex < 0 || messages[assistantIndex].Role != protocol.RoleAssistant {
-		return 0, nil
+		return report, nil
 	}
 	assistant := messages[assistantIndex]
 	calls := make([]protocol.ContentBlock, 0)
@@ -365,12 +376,12 @@ func repairInterruptedToolCalls(store session.Store, registry tools.Registry) (i
 		}
 	}
 	if len(calls) == 0 {
-		return 0, nil
+		return report, nil
 	}
 	resolved := make(map[string]bool, len(messages)-assistantIndex-1)
 	for _, message := range messages[assistantIndex+1:] {
 		if message.Role != protocol.RoleTool {
-			return 0, nil
+			return report, nil
 		}
 		resolved[message.ToolCallID] = true
 	}
@@ -386,6 +397,9 @@ func repairInterruptedToolCalls(store session.Store, registry tools.Registry) (i
 				risk = descriptor.Risk
 			}
 		}
+		if risk != permission.RiskRead {
+			report.UnknownNonReadOutcome = true
+		}
 		text := interruptedToolResultText(risk)
 		message := protocol.NewToolResultMessage(newID(), parent, call.ToolCallID, call.Name,
 			[]protocol.ContentBlock{protocol.NewTextBlock(text)}, true)
@@ -393,20 +407,22 @@ func repairInterruptedToolCalls(store session.Store, registry tools.Registry) (i
 		parent = message.ID
 	}
 	if len(entries) == 0 {
-		return 0, nil
+		return report, nil
 	}
 	if batch, ok := store.(session.BatchStore); ok {
 		if err := batch.AppendBatch(entries); err != nil {
-			return 0, err
+			return interruptedToolRepair{}, err
 		}
-		return len(entries), nil
+		report.Count = len(entries)
+		return report, nil
 	}
 	for _, entry := range entries {
 		if err := store.Append(entry); err != nil {
-			return 0, err
+			return interruptedToolRepair{}, err
 		}
 	}
-	return len(entries), nil
+	report.Count = len(entries)
+	return report, nil
 }
 
 func interruptedToolResultText(risk permission.Risk) string {

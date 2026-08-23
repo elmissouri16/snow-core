@@ -18,19 +18,17 @@ import (
 )
 
 const (
-	defaultDeferredTopK     = 5
-	deferredCandidateK      = 20
-	maxRoutingEventTools    = 20
-	maxPendingRootInputs    = 64
-	maxQueuedInputBytes     = 64 * 1024
-	maxPendingMailboxItems  = 64
-	maxPendingMailboxBytes  = 1 << 20
-	automaticTurnDelay      = 25 * time.Millisecond
-	goalTransientRetryDelay = 250 * time.Millisecond
-	maxGoalTransientRetries = 1
-	skillActivationMeta     = "agent_skill_activation"
-	skillDeactivationMeta   = "agent_skill_deactivation"
-	skillDeactivationAll    = "*"
+	defaultDeferredTopK    = 5
+	deferredCandidateK     = 20
+	maxRoutingEventTools   = 20
+	maxPendingRootInputs   = 64
+	maxQueuedInputBytes    = 64 * 1024
+	maxPendingMailboxItems = 64
+	maxPendingMailboxBytes = 1 << 20
+	automaticTurnDelay     = 25 * time.Millisecond
+	skillActivationMeta    = "agent_skill_activation"
+	skillDeactivationMeta  = "agent_skill_deactivation"
+	skillDeactivationAll   = "*"
 
 	repeatedToolFirstThreshold     = 3
 	repeatedToolNextThreshold      = 5
@@ -51,7 +49,10 @@ type providerFailure interface{ providerFailure() }
 
 type providerStartError struct{ err error }
 
-type providerTurnError struct{ err error }
+type providerTurnError struct {
+	err      error
+	activity bool
+}
 
 // Options configures an Agent.
 type Options struct {
@@ -85,6 +86,9 @@ type Options struct {
 	// the legacy unrestricted behavior for standalone Agent embedders; an empty
 	// non-nil map disables every persisted skill activation.
 	SkillNames map[string]bool
+	// Retry configures centralized provider recovery for ordinary and automatic
+	// goal turns. Zero uses DefaultRetryOptions.
+	Retry RetryOptions
 	// Compaction configures manual and pressure-based automatic compaction.
 	Compaction CompactionOptions
 	// Artifacts preserves oversized plain-text tool results outside provider

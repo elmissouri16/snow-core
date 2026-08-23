@@ -204,6 +204,7 @@ func TestNoProgressGuardPausesAfterThree(t *testing.T) {
 func TestAutomaticGoalRecoversFromTransientProviderFailure(t *testing.T) {
 	p := &scriptedProvider{}
 	a, c, _ := goalAgent(t, p)
+	a.opts.Retry.Goal = RetryProfile{MaxAttempts: 2, MaxElapsed: time.Second, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}
 	g, err := c.Create("recover automatically", nil, false)
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +217,7 @@ func TestAutomaticGoalRecoversFromTransientProviderFailure(t *testing.T) {
 	}
 	retrying := make(chan struct{}, 1)
 	a.Subscribe(func(event protocol.AgentEvent) {
-		if event.Type == protocol.EvError && strings.Contains(event.Message, "retrying active goal") {
+		if event.Type == protocol.EvProviderRetry && event.ProviderRetry != nil {
 			select {
 			case retrying <- struct{}{}:
 			default:
@@ -246,10 +247,32 @@ func TestAutomaticGoalRecoversFromTransientProviderFailure(t *testing.T) {
 	}
 }
 
-func TestAutomaticGoalBlocksAfterTransientRetryExhaustion(t *testing.T) {
+func TestAutomaticGoalThrottleExhaustionBecomesUsageLimited(t *testing.T) {
+	throttle := &providerpkg.RateLimitError{Provider: "test", Status: 429, Message: "slow down"}
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamError, Err: throttle}}}}
+	a, c, _ := goalAgent(t, p)
+	a.opts.Retry.Goal = RetryProfile{MaxAttempts: 2, MaxElapsed: time.Second, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}
+	_, _ = c.Create("wait through throttle", nil, false)
+	a.ContinueGoal()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := a.WaitGoal(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != protocol.GoalUsageLimited || p.call != 2 {
+		t.Fatalf("goal=%+v calls=%d", got, p.call)
+	}
+}
+
+func TestAutomaticGoalPausesAfterTransientRetryExhaustion(t *testing.T) {
 	transient := responsesapi.NewResponseError("chatgpt", 0, "network request failed", "network_error", "")
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamError, Err: transient}}}}
 	a, c, _ := goalAgent(t, p)
+	a.opts.Retry.Goal = RetryProfile{MaxAttempts: 2, MaxElapsed: time.Second, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}
 	_, _ = c.Create("stop after bounded retry", nil, false)
 	a.ContinueGoal()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -261,7 +284,7 @@ func TestAutomaticGoalBlocksAfterTransientRetryExhaustion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != protocol.GoalBlocked || p.call != 2 {
+	if got.Status != protocol.GoalPaused || p.call != 2 {
 		t.Fatalf("goal=%+v calls=%d", got, p.call)
 	}
 }

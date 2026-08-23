@@ -643,6 +643,10 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 					writeOut("\n[goal %s · %d tokens]\n", g.Status, g.TokensUsed)
 					lastGoalStatus = g.Status
 				}
+			case protocol.EvProviderRetry:
+				if retry := ev.ProviderRetry; retry != nil {
+					writeErrOut("\nsnow: provider retry %d/%d in %dms (%s)\n", retry.Attempt, retry.MaxAttempts, retry.DelayMS, retry.Kind)
+				}
 			case protocol.EvError:
 				writeErrOut("\nsnow: %s\n", ev.Message)
 			case protocol.EvToolStart:

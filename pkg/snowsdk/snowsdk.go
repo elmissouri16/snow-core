@@ -15,6 +15,24 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+// RetryProfile bounds a consecutive provider outage. Millisecond values are
+// validated by the runtime; both attempt and elapsed limits must permit another
+// request.
+type RetryProfile struct {
+	MaxAttempts    int
+	MaxElapsedMS   int
+	InitialDelayMS int
+	MaxDelayMS     int
+	JitterPercent  int
+}
+
+// RetryOptions overrides global retry policy for one SDK runtime. Nil inherits
+// global configuration. Spawned child agents inherit the same effective policy.
+type RetryOptions struct {
+	Normal RetryProfile
+	Goal   RetryProfile
+}
+
 // Options configures a Session.
 type Options struct {
 	// CWD is the working directory. Empty means the caller's cwd.
@@ -50,6 +68,8 @@ type Options struct {
 	CollaborationMode string
 	// PlanModeReasoningEffort optionally overrides Plan's Medium preset.
 	PlanModeReasoningEffort string
+	// Retry overrides the global provider retry policy for this runtime.
+	Retry *RetryOptions
 	// APIKey provides an explicit credential (overrides auth.json and env).
 	APIKey string
 	// BaseURL overrides the active provider base URL. OpenAI-compatible requires

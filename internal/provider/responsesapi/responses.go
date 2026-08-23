@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 	"unicode"
 
 	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
@@ -46,12 +47,13 @@ func providerLabel(id string) string {
 // request payloads or credentials. Adapters may use the structured fields for
 // retry classification while callers receive the same safe Error string.
 type ResponseError struct {
-	Provider  string
-	Message   string
-	Code      string
-	RequestID string
-	Status    int
-	Attempts  int
+	Provider   string
+	Message    string
+	Code       string
+	RequestID  string
+	Status     int
+	Attempts   int
+	RetryAfter time.Duration
 }
 
 func (e *ResponseError) ContextWindowExceeded() bool {
@@ -79,9 +81,7 @@ func (e *ResponseError) Transient() bool {
 	if e == nil {
 		return false
 	}
-	switch e.Status {
-	case http.StatusRequestTimeout, http.StatusTooEarly, http.StatusInternalServerError,
-		http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	if e.Status == http.StatusRequestTimeout || e.Status == http.StatusTooEarly || e.Status >= 500 && e.Status <= 599 {
 		return true
 	}
 	code := strings.ToLower(strings.TrimSpace(e.Code))
@@ -93,6 +93,18 @@ func (e *ResponseError) Transient() bool {
 	message := strings.ToLower(e.Message)
 	return strings.Contains(message, "overload") || strings.Contains(message, "service unavailable") ||
 		strings.Contains(message, "upstream connect") || strings.Contains(message, "temporarily unavailable")
+}
+
+// RetryAdvice separates temporary throttling from transport/overload failures.
+// Terminal quota failures are converted to provider.LimitError by adapters.
+func (e *ResponseError) RetryAdvice() providerpkg.RetryAdvice {
+	if e != nil && e.Status == http.StatusTooManyRequests {
+		return providerpkg.RetryAdvice{Kind: providerpkg.RetryRateLimit, RetryAfter: e.RetryAfter}
+	}
+	if e != nil && e.Transient() {
+		return providerpkg.RetryAdvice{Kind: providerpkg.RetryTransient, RetryAfter: e.RetryAfter}
+	}
+	return providerpkg.RetryAdvice{}
 }
 
 func (e *ResponseError) Error() string {

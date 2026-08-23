@@ -119,15 +119,17 @@ type Options struct {
 	TextVerbosity           string
 	CollaborationMode       string
 	PlanModeReasoningEffort string
-	NoSession               bool   // in-memory session (SDK ephemeral)
-	BaseURL                 string // active provider base URL override
-	Plugins                 []publicplugin.PluginSpec
-	GoPlugins               []publicplugin.Plugin
-	NoPlugins               bool
-	MCPServers              []publicmcp.ServerSpec
-	NoMCP                   bool
-	SkillDirs               []string
-	NoSkills                bool
+	// Retry overrides global retry policy for this runtime only.
+	Retry      *config.RetryConfig
+	NoSession  bool   // in-memory session (SDK ephemeral)
+	BaseURL    string // active provider base URL override
+	Plugins    []publicplugin.PluginSpec
+	GoPlugins  []publicplugin.Plugin
+	NoPlugins  bool
+	MCPServers []publicmcp.ServerSpec
+	NoMCP      bool
+	SkillDirs  []string
+	NoSkills   bool
 	// UserInputHandler answers ask_user calls for embedded/headless clients.
 	// Nil keeps the tool directly visible but makes calls fail fast until an
 	// interactive surface enables manual replies.

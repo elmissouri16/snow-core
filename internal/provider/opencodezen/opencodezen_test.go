@@ -326,7 +326,7 @@ func TestChatRoutesTransportAndOmitsAnonymousAuthorization(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	p, _ := New(Config{BaseURL: server.URL + "/v1", HTTPClient: server.Client(), RetryDelays: []time.Duration{}})
+	p, _ := New(Config{BaseURL: server.URL + "/v1", HTTPClient: server.Client()})
 	for _, tc := range []struct{ model, want string }{
 		{model: "big-pickle", want: "chat"},
 		{model: "muse-spark-1.2-contributor-free", want: "responses"},
@@ -400,7 +400,7 @@ func TestChatSerializesAdvertisedThinkingEfforts(t *testing.T) {
 
 	p, err := New(Config{
 		BaseURL: server.URL + "/v1", CatalogURL: server.URL + "/catalog",
-		HTTPClient: server.Client(), RetryDelays: []time.Duration{},
+		HTTPClient: server.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -471,7 +471,7 @@ data: [DONE]
 				_, _ = io.WriteString(w, tc.payload)
 			}))
 			defer server.Close()
-			p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client(), RetryDelays: []time.Duration{}})
+			p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
 			stream, err := p.Chat(context.Background(), auth.Credential{}, chatRequest("big-pickle"))
 			if err != nil {
 				t.Fatal(err)
@@ -493,7 +493,7 @@ func TestChatUsesBearerAndRejectsUnknownModel(t *testing.T) {
 		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
-	p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client(), RetryDelays: []time.Duration{}})
+	p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
 	stream, _ := p.Chat(context.Background(), auth.Credential{Key: "zen-secret"}, chatRequest("big-pickle"))
 	drainText(t, stream)
 	stream, _ = p.Chat(context.Background(), auth.Credential{}, chatRequest("gpt-5.4"))
@@ -503,86 +503,59 @@ func TestChatUsesBearerAndRejectsUnknownModel(t *testing.T) {
 	}
 }
 
-func TestChatRetriesHTTP429BeforeOutput(t *testing.T) {
+func TestChatClassifiesHTTP429WithoutLocalRetry(t *testing.T) {
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		call := calls.Add(1)
-		if call <= 3 {
-			http.Error(w, `{"error":{"type":"FreeUsageLimitError","message":"later"}}`, http.StatusTooManyRequests)
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Retry-After", "3")
+		http.Error(w, `{"error":{"type":"FreeUsageLimitError","message":"later"}}`, http.StatusTooManyRequests)
 	}))
 	defer server.Close()
-	p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client(), RetryDelays: []time.Duration{0, 0, 0}})
+	p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
 	stream, _ := p.Chat(context.Background(), auth.Credential{}, chatRequest("big-pickle"))
-	if got := drainText(t, stream); got != "ok" || calls.Load() != 4 {
-		t.Fatalf("text=%q calls=%d", got, calls.Load())
+	event, err := stream.Next(context.Background())
+	advice, ok := providerpkg.RetryAdviceFor(event.Err)
+	if err != nil || !ok || advice.Kind != providerpkg.RetryRateLimit || advice.RetryAfter != 3*time.Second || calls.Load() != 1 {
+		t.Fatalf("event=%+v err=%v advice=%+v calls=%d", event, err, advice, calls.Load())
 	}
 }
 
-func TestResponsesRetriesHTTP429(t *testing.T) {
+func TestResponsesClassifiesHTTP429WithoutLocalRetry(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
 			http.NotFound(w, r)
 			return
 		}
-		if calls.Add(1) == 1 {
-			http.Error(w, "limit", http.StatusTooManyRequests)
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")
+		calls.Add(1)
+		http.Error(w, "limit", http.StatusTooManyRequests)
 	}))
 	defer server.Close()
-	p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client(), RetryDelays: []time.Duration{0}})
+	p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
 	stream, _ := p.Chat(context.Background(), auth.Credential{}, chatRequest("muse-spark-1.2-contributor-free"))
-	if got := drainText(t, stream); got != "ok" || calls.Load() != 2 {
-		t.Fatalf("text=%q calls=%d", got, calls.Load())
+	event, err := stream.Next(context.Background())
+	advice, ok := providerpkg.RetryAdviceFor(event.Err)
+	if err != nil || !ok || advice.Kind != providerpkg.RetryRateLimit || calls.Load() != 1 {
+		t.Fatalf("event=%+v err=%v advice=%+v calls=%d", event, err, advice, calls.Load())
 	}
 }
 
-func TestChatStopsAfterRetryBudgetAndRedactsKey(t *testing.T) {
+func TestChatRateLimitRedactsKey(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		http.Error(w, "limit zen-secret", http.StatusTooManyRequests)
 	}))
 	defer server.Close()
-	p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client(), RetryDelays: []time.Duration{0, 0, 0}})
+	p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client()})
 	stream, _ := p.Chat(context.Background(), auth.Credential{Key: "zen-secret"}, chatRequest("big-pickle"))
 	event, err := stream.Next(context.Background())
-	var limited *providerpkg.LimitError
-	if err != nil || event.Type != protocol.EvStreamError || !errors.As(event.Err, &limited) || calls.Load() != 4 {
-		t.Fatalf("event=%+v err=%v calls=%d", event, err, calls.Load())
+	advice, ok := providerpkg.RetryAdviceFor(event.Err)
+	if err != nil || event.Type != protocol.EvStreamError || !ok || advice.Kind != providerpkg.RetryRateLimit || calls.Load() != 1 {
+		t.Fatalf("event=%+v err=%v advice=%+v calls=%d", event, err, advice, calls.Load())
 	}
 	if strings.Contains(event.Err.Error(), "zen-secret") || !strings.Contains(event.Err.Error(), "[redacted]") {
 		t.Fatalf("secret not redacted: %v", event.Err)
-	}
-}
-
-func TestRetryWaitHonorsCancellation(t *testing.T) {
-	first := make(chan struct{}, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		first <- struct{}{}
-		http.Error(w, "limit", http.StatusTooManyRequests)
-	}))
-	defer server.Close()
-	p, _ := New(Config{BaseURL: server.URL, HTTPClient: server.Client(), RetryDelays: []time.Duration{time.Hour}})
-	ctx, cancel := context.WithCancel(context.Background())
-	result := make(chan protocol.EventStream, 1)
-	go func() {
-		stream, _ := p.Chat(ctx, auth.Credential{}, chatRequest("big-pickle"))
-		result <- stream
-	}()
-	<-first
-	cancel()
-	stream := <-result
-	event, err := stream.Next(context.Background())
-	if !errors.Is(err, context.Canceled) && (event.Type != protocol.EvStreamError || !errors.Is(event.Err, context.Canceled)) {
-		t.Fatalf("event=%+v err=%v", event, err)
 	}
 }
 

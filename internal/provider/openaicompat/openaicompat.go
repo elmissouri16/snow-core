@@ -446,7 +446,8 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, request prot
 	}
 	resp, err := secureClient(p.client).Do(req)
 	if err != nil {
-		return newErrorStream(ctx, errors.New("openai-compatible: network request failed")), nil
+		cause := &providerpkg.CauseError{Message: "openai-compatible: network request failed", Cause: err}
+		return newErrorStream(ctx, &providerpkg.AdvisedError{Err: cause, Advice: providerpkg.RetryAdvice{Kind: providerpkg.RetryTransient}}), nil
 	}
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrorResponseBytes))
@@ -458,13 +459,20 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, request prot
 		defer resp.Body.Close()
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorResponseBytes))
 		message := providerpkg.RedactSecrets(responseMessage(snippet), key)
-		if resp.StatusCode == http.StatusPaymentRequired || resp.StatusCode == http.StatusTooManyRequests {
+		if resp.StatusCode == http.StatusPaymentRequired {
 			return newErrorStream(ctx, &providerpkg.LimitError{Provider: p.providerID, Status: resp.StatusCode, Message: message}), nil
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
 			return newErrorStream(ctx, errors.New("openai-compatible: credential rejected (HTTP 401)")), nil
 		}
-		return newErrorStream(ctx, fmt.Errorf("openai-compatible: HTTP %d: %s", resp.StatusCode, truncate(message, 500))), nil
+		cause := fmt.Errorf("openai-compatible: HTTP %d: %s", resp.StatusCode, truncate(message, 500))
+		if advice, retryable := providerpkg.HTTPRetryAdvice(resp.StatusCode, resp.Header, time.Now(), 24*time.Hour); retryable {
+			if advice.Kind == providerpkg.RetryRateLimit {
+				return newErrorStream(ctx, &providerpkg.RateLimitError{Provider: p.providerID, Status: resp.StatusCode, Message: message, RetryAfter: advice.RetryAfter}), nil
+			}
+			return newErrorStream(ctx, &providerpkg.AdvisedError{Err: cause, Advice: advice}), nil
+		}
+		return newErrorStream(ctx, cause), nil
 	}
 	p.wireMode.Store(wireModeResponses)
 	mediaType := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])

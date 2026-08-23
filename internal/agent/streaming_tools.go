@@ -56,6 +56,7 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 	toolDone := map[string]bool{}                   // id -> final arguments observed
 	toolOrder := []string{}                         // first-seen id order
 	sawDone := false
+	activity := false
 
 streamLoop:
 	for {
@@ -77,15 +78,20 @@ streamLoop:
 			stop = protocol.StopError
 			collector.Interrupt()
 			content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
-			if perr := a.persistAssistant(asstID, parent, content, stop, usage, err.Error()); perr != nil {
-				return protocol.StopError, perr
+			if activity {
+				if perr := a.persistAssistant(asstID, parent, content, stop, usage, err.Error()); perr != nil {
+					return protocol.StopError, perr
+				}
 			}
 			if publishErrors {
 				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
 			}
-			return protocol.StopError, &providerTurnError{err: err}
+			return protocol.StopError, &providerTurnError{err: err, activity: activity}
 		}
 
+		if ev.Type != protocol.EvStreamError && ev.Type != protocol.EvStreamDone {
+			activity = true
+		}
 		switch ev.Type {
 		case protocol.EvStreamTextDelta:
 			if strings.TrimSpace(ev.Text) != "" {
@@ -176,16 +182,18 @@ streamLoop:
 			}
 			collector.Interrupt()
 			content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
-			if perr := a.persistAssistant(asstID, parent, content, stop, usage, errMsg); perr != nil {
-				return protocol.StopError, perr
+			if activity {
+				if perr := a.persistAssistant(asstID, parent, content, stop, usage, errMsg); perr != nil {
+					return protocol.StopError, perr
+				}
 			}
 			if publishErrors {
 				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: errMsg})
 			}
 			if ev.Err != nil {
-				return protocol.StopError, &providerTurnError{err: fmt.Errorf("agent: provider stream: %w", ev.Err)}
+				return protocol.StopError, &providerTurnError{err: fmt.Errorf("agent: provider stream: %w", ev.Err), activity: activity}
 			}
-			return protocol.StopError, &providerTurnError{err: fmt.Errorf("agent: %s", errMsg)}
+			return protocol.StopError, &providerTurnError{err: fmt.Errorf("agent: %s", errMsg), activity: activity}
 		}
 	}
 
@@ -199,7 +207,7 @@ streamLoop:
 		if publishErrors {
 			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: protocolErr.Error()})
 		}
-		return protocol.StopError, &providerTurnError{err: protocolErr}
+		return protocol.StopError, &providerTurnError{err: protocolErr, activity: activity}
 	}
 
 	// Terminal error/abort signals never commit streamed tool calls. They may be
@@ -221,7 +229,7 @@ streamLoop:
 		if publishErrors {
 			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: errMsg})
 		}
-		return stop, &providerTurnError{err: errors.New(errMsg)}
+		return stop, &providerTurnError{err: errors.New(errMsg), activity: activity}
 	}
 
 	// Validate terminal metadata against the actual streamed calls. Content is
@@ -258,7 +266,7 @@ streamLoop:
 		if publishErrors {
 			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: protocolErr.Error()})
 		}
-		return protocol.StopError, &providerTurnError{err: protocolErr}
+		return protocol.StopError, &providerTurnError{err: protocolErr, activity: activity}
 	}
 
 	persistedStop := stop

@@ -49,7 +49,6 @@ type Provider struct {
 	clientVersion     string
 	streamIdleTimeout time.Duration
 	now               func() time.Time
-	wait              func(context.Context, context.Context, time.Duration) error
 	modelsMu          sync.RWMutex
 	models            []modelRecord
 	authRefreshMu     sync.RWMutex

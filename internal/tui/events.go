@@ -386,6 +386,18 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		if ev.UserInput != nil {
 			m.startUserInput(*ev.UserInput)
 		}
+	case protocol.EvProviderRetry:
+		if retry := ev.ProviderRetry; retry != nil {
+			m.finishAssistant()
+			delay := (time.Duration(retry.DelayMS) * time.Millisecond).Round(time.Millisecond)
+			line := fmt.Sprintf("↻ provider unavailable · retry %d/%d in %s", retry.Attempt, retry.MaxAttempts, delay)
+			if retry.Kind == "rate_limit" {
+				line = fmt.Sprintf("↻ provider rate limited · retry %d/%d in %s", retry.Attempt, retry.MaxAttempts, delay)
+			}
+			m.lastStatus = line
+			m.pushLine(styleFooter.Render(line))
+			m.refreshTranscript()
+		}
 	case protocol.EvError:
 		// Errors are diagnostics, not lifecycle boundaries. Correlated
 		// turn_done/aborted events settle admitted work; promptDoneMsg handles the

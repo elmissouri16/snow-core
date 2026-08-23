@@ -156,6 +156,7 @@ separates inheritance from clean-install defaults.
 | `TextVerbosity` | `low`, `medium`, or `high`. Empty inherits config. |
 | `CollaborationMode` | `default` or `plan`. Empty restores branch state or clean-install Default. |
 | `PlanModeReasoningEffort` | Optional Plan Mode override using the same eight thinking values; model support remains authoritative. |
+| `Retry` | Optional `*snowsdk.RetryOptions` runtime override. Nil inherits global configuration; `Normal` and `Goal` profiles specify attempt, elapsed, initial/max-delay millisecond bounds, and jitter percent. Child agents inherit the effective policy. |
 | `APIKey` | Explicit credential with precedence over the auth store and environment. |
 | `BaseURL` | Active provider endpoint override; required for an OpenAI-compatible profile unless configured globally. Accepts an API root or a full `/responses` or `/chat/completions` URL. |
 | `Plugins` | Explicit external plugin process declarations. Configured plugins may also load. |
@@ -424,7 +425,7 @@ collaboration-mode snapshot for initial host state.
 
 | Category | Event types |
 |---|---|
-| Streaming | `text_delta`, `thinking_delta`, `usage` |
+| Streaming | `text_delta`, `thinking_delta`, `usage`, `provider_retry` |
 | Tools | `tool_start`, `tool_progress`, `tool_end`, `tool_routing` |
 | Interaction | `user_input_request`, `queue_updated`; `permission_request` exists in the cross-surface protocol but the public headless SDK has no permission asker that emits it |
 | Lifecycle and state | `session_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
@@ -438,7 +439,7 @@ Common payload fields include:
 - `Text`, `Message`, `IsError`
 - `ToolCallID`, `ToolName`, bounded `ToolOutput`, `ToolDurationMS`,
   `ToolProgress`, `ToolRouting`
-- `Usage`, `Model`, `Mode`
+- `Usage`, `ProviderRetry`, `Model`, `Mode`
 - `Plan`, `PlanUpdate`, `Compaction`
 - `Permission`, `UserInput`, `Queue`, `ThreadGoal`
 - `Agent`, `Subagent`, `AgentMessage`
@@ -457,6 +458,10 @@ Common payload fields include:
   on every root event, including events outside a turn.
 - `TurnOrigin` and `GoalContinuing` distinguish ordinary user prompts from
   internal goal-continuation turns.
+- `provider_retry` is nonterminal progress, not an `error`. Its payload reports
+  provider, `transient`/`rate_limit` kind, `pre_activity`/`recovery` phase, next
+  attempt, selected delay, and elapsed limits. Only final exhaustion emits an
+  `error` event.
 - `ToolOutput` is a bounded UI preview; complete root tool results remain in
   `Messages()`.
 - Every subscriber receives a deep clone. Mutating one callback's event cannot

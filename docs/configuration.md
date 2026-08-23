@@ -15,6 +15,7 @@ and the supported global/project fields.
 - [Global config.json](#global-configjson)
 - [Providers](#providers)
 - [TUI](#tui)
+- [Provider retry](#provider-retry)
 - [Compaction](#compaction)
 - [Skills](#skills)
 - [Subagents](#subagents)
@@ -71,7 +72,7 @@ Trusted project configuration is a separate, deliberately narrow overlay. It
 may add plugins, MCP servers, and skill policy, select a confined project
 system preamble, and override only the project TUI theme and compaction
 preferences described below. It cannot select provider credentials, permission
-mode, model, or global tool authority.
+mode, model, provider-retry policy, or global tool authority.
 
 Credentials use a separate order:
 
@@ -150,6 +151,22 @@ A representative configuration:
     "dirs": [],
     "include_claude": false,
     "overrides": {}
+  },
+  "retry": {
+    "normal": {
+      "max_attempts": 12,
+      "max_elapsed_ms": 300000,
+      "initial_delay_ms": 1000,
+      "max_delay_ms": 30000,
+      "jitter_percent": 20
+    },
+    "goal": {
+      "max_attempts": 30,
+      "max_elapsed_ms": 1800000,
+      "initial_delay_ms": 2000,
+      "max_delay_ms": 120000,
+      "jitter_percent": 20
+    }
   },
   "subagents": {
     "enabled": false,
@@ -349,6 +366,34 @@ disabling wheel handling. Right-click opens Snow's **Copy selection** context
 menu without changing mouse mode. F6 toggles explicitly, and `mouse: false` starts
 natively. In native mode wheel gestures may scroll terminal history;
 PageUp/PageDown, Home/End, and Ctrl+Up/Ctrl+Down still scroll Snow.
+
+## Provider retry
+
+The global `retry` policy controls one centralized, cancellation-aware provider
+recovery loop. Provider adapters classify failures and expose `Retry-After`, but
+do not run separate transient retry schedules. Both the attempt and elapsed
+limits must permit another request.
+
+| Profile | Attempts | Elapsed window | Initial / maximum delay |
+|---|---:|---:|---:|
+| `normal` | 12 | 5 minutes | 1 second / 30 seconds |
+| `goal` | 30 | 30 minutes | 2 seconds / 2 minutes |
+
+Backoff is exponential with the configured `jitter_percent`. A valid provider
+`Retry-After` is a minimum delay; when it exceeds the remaining elapsed window,
+Snow stops rather than retrying earlier than requested. Successful provider
+rounds reset the consecutive-failure episode.
+
+Only structured network/transport, HTTP 408/425/5xx, stream truncation/idle,
+overload, and temporary 429 failures are retried. Authentication, validation,
+hard quota/payment, context, persistence, accounting, tool, and cancellation
+failures are not. Context overflow retains its separate one-compaction recovery.
+
+This policy is operator-owned global configuration. Project `.snow/config.json`
+files cannot modify it. Root and child agents inherit the same effective policy;
+`snowsdk.Options.Retry` may supply a runtime-only override. Bounds are 1–100
+attempts, elapsed windows up to 24 hours, delays up to 1 hour, and jitter from
+0–100 percent.
 
 ## Compaction
 

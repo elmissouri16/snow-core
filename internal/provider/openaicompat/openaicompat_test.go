@@ -414,9 +414,13 @@ func TestChatClassifiesLimitsAndRedactsSecrets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var limited providerpkg.UsageLimitedError
-			if ev.Err == nil || !errors.As(ev.Err, &limited) {
-				t.Fatalf("event=%+v", ev)
+			if status == http.StatusPaymentRequired {
+				var limited providerpkg.UsageLimitedError
+				if ev.Err == nil || !errors.As(ev.Err, &limited) {
+					t.Fatalf("event=%+v", ev)
+				}
+			} else if advice, ok := providerpkg.RetryAdviceFor(ev.Err); !ok || advice.Kind != providerpkg.RetryRateLimit {
+				t.Fatalf("event=%+v advice=%+v ok=%v", ev, advice, ok)
 			}
 			if strings.Contains(ev.Err.Error(), key) || !strings.Contains(ev.Err.Error(), "[redacted]") {
 				t.Fatalf("secret leak: %v", ev.Err)

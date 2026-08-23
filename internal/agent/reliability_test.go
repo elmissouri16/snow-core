@@ -476,7 +476,7 @@ func TestCancellationDuringProviderStartupBackoffPersistsAbort(t *testing.T) {
 	a, store := setup(t, provider, nil, permission.ModeDeny)
 	retrying := make(chan struct{}, 1)
 	a.Subscribe(func(event protocol.AgentEvent) {
-		if event.Type == protocol.EvError && strings.Contains(event.Message, "retrying once") {
+		if event.Type == protocol.EvProviderRetry && event.ProviderRetry != nil {
 			select {
 			case retrying <- struct{}{}:
 			default:
