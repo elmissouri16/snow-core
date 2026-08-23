@@ -480,6 +480,7 @@ func createSQLiteSchema(db *sql.DB) error {
 			goal_id TEXT NOT NULL,
 			objective TEXT NOT NULL,
 			status TEXT NOT NULL,
+			blocked_reason TEXT NOT NULL DEFAULT '',
 			token_budget INTEGER,
 			tokens_used INTEGER NOT NULL DEFAULT 0,
 			seconds_used INTEGER NOT NULL DEFAULT 0,
@@ -615,6 +616,12 @@ func ensureBranches(db *sql.DB, tip string, createdAt int64, version int) error 
 				_ = tx.Rollback()
 				return fmt.Errorf("session: fork provenance migration: %w", err)
 			}
+		}
+	}
+	if version < 10 {
+		if _, err := tx.Exec(`ALTER TABLE thread_goals ADD COLUMN blocked_reason TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			_ = tx.Rollback()
+			return fmt.Errorf("session: goal blocked reason migration: %w", err)
 		}
 	}
 	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS session_branches_name_idx ON session_branches(branch_name COLLATE NOCASE)`); err != nil {

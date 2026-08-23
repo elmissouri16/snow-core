@@ -489,8 +489,8 @@ func (s *SQLiteStore) ForkBranchWithOptions(opts protocol.BranchForkOptions) (pr
 		_ = tx.Rollback()
 		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork thread state: %w", err)
 	}
-	if _, err := tx.Exec(`INSERT INTO thread_goals(branch_id, goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at)
-		SELECT ?, ?, objective, status, token_budget, tokens_used, seconds_used, created_at, ? FROM thread_goals WHERE branch_id = ?`, branchID, newID(), now, sourceID); err != nil {
+	if _, err := tx.Exec(`INSERT INTO thread_goals(branch_id, goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at)
+		SELECT ?, ?, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, ? FROM thread_goals WHERE branch_id = ?`, branchID, newID(), now, sourceID); err != nil {
 		_ = tx.Rollback()
 		return protocol.SessionBranch{}, fmt.Errorf("session: sqlite fork goal: %w", err)
 	}

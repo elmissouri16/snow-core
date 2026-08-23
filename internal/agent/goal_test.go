@@ -338,7 +338,7 @@ func TestAccountingFailureStopsGoalAndReturnsError(t *testing.T) {
 		t.Fatal(drainErr)
 	}
 	got, _ := controller.Get()
-	if got.GoalID != g.GoalID || got.Status != protocol.GoalBlocked {
+	if got.GoalID != g.GoalID || got.Status != protocol.GoalBlocked || !strings.Contains(got.BlockedReason, "injected accounting failure") {
 		t.Fatalf("goal=%+v", got)
 	}
 	if done == nil || done.GoalContinuing {

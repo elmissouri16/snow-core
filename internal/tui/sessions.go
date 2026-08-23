@@ -69,6 +69,9 @@ func (m *Model) switchSession(st session.Store) error {
 		m.pushLine(styleError.Render("continue restored goal: " + err.Error()))
 	}
 	if m.goal != nil && (m.goal.Status == protocol.GoalPaused || m.goal.Status == protocol.GoalBlocked || m.goal.Status == protocol.GoalUsageLimited) {
+		if m.goal.Status == protocol.GoalBlocked {
+			m.pushLine(renderBlockedGoalTranscript(m.goal))
+		}
 		m.pushLine(styleFooter.Render(fmt.Sprintf("Resume %s goal? Use /goal resume to continue.", m.goal.Status)))
 	}
 	return nil

@@ -186,12 +186,16 @@ func TestReentrantEmitterAndTurnGate(t *testing.T) {
 	<-done
 	c.RecordGoalTurn(g.GoalID)
 	c.RecordGoalTurn(g.GoalID)
-	if _, err := c.SetStatus(g.GoalID, protocol.GoalBlocked, true); err == nil {
+	if _, err := c.SetStatusWithReason(g.GoalID, protocol.GoalBlocked, true, "dependency unavailable"); err == nil {
 		t.Fatal("early blocked accepted")
 	}
 	c.RecordGoalTurn(g.GoalID)
-	if _, err := c.SetStatus(g.GoalID, protocol.GoalBlocked, true); err != nil {
+	blocked, err := c.SetStatusWithReason(g.GoalID, protocol.GoalBlocked, true, "dependency unavailable")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if blocked.BlockedReason != "dependency unavailable" {
+		t.Fatalf("blocked reason = %q", blocked.BlockedReason)
 	}
 }
 func TestSubsecondRemainderAndManagedCleanupFork(t *testing.T) {
@@ -455,5 +459,20 @@ func TestGoalToolsPrivateAndOwnership(t *testing.T) {
 	r, _ = update.Run(context.Background(), []byte(`{"goal_id":"`+g.GoalID+`","status":"paused"}`), nil)
 	if !r.IsError {
 		t.Fatal("model pause accepted")
+	}
+	c.RecordGoalTurn(g.GoalID)
+	c.RecordGoalTurn(g.GoalID)
+	c.RecordGoalTurn(g.GoalID)
+	r, _ = update.Run(context.Background(), []byte(`{"goal_id":"`+g.GoalID+`","status":"blocked"}`), nil)
+	if !r.IsError {
+		t.Fatal("model blocked goal without a reason")
+	}
+	r, _ = update.Run(context.Background(), []byte(`{"goal_id":"`+g.GoalID+`","status":"blocked","reason":"deployment credentials are unavailable"}`), nil)
+	if r.IsError {
+		t.Fatalf("model blocked update failed: %+v", r)
+	}
+	blocked, _ := c.Get()
+	if blocked.BlockedReason != "deployment credentials are unavailable" {
+		t.Fatalf("blocked reason = %q", blocked.BlockedReason)
 	}
 }

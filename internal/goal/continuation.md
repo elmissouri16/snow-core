@@ -4,7 +4,7 @@
 
 Interactive user-input tools are unavailable during automatic goal turns. Do not wait for a user response. Resolve decisions from the objective and current evidence when safe; otherwise keep investigating or report a true external blocker through the goal lifecycle.
 
-Before update_goal status=complete, audit every objective requirement against direct current evidence; weak, indirect, or missing evidence means keep working. Only call update_goal complete when every requirement is proven. Mark blocked only when the same true external blocker has recurred for at least three consecutive goal turns; this is goal turn {{.Turn}}. A resumed goal starts that audit over.
+Before update_goal status=complete, audit every objective requirement against direct current evidence; weak, indirect, or missing evidence means keep working. Only call update_goal complete when every requirement is proven. Mark blocked only when the same true external blocker has recurred for at least three consecutive goal turns, and include a concise reason that identifies that blocker; this is goal turn {{.Turn}}. A resumed goal starts that audit over.
 
 Token budget remaining: {{.Remaining}}.
 <goal_objective untrusted="true">

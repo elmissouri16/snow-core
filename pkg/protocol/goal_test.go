@@ -17,6 +17,17 @@ func TestThreadGoalValidationAndRemaining(t *testing.T) {
 		t.Fatal("invalid status accepted")
 	}
 	bad = g
+	bad.BlockedReason = "dependency unavailable"
+	if bad.Validate() == nil {
+		t.Fatal("blocked reason on active goal accepted")
+	}
+	bad = g
+	bad.Status = GoalBlocked
+	bad.BlockedReason = string(make([]rune, MaxThreadGoalBlockedReasonChars+1))
+	if bad.Validate() == nil {
+		t.Fatal("oversized blocked reason accepted")
+	}
+	bad = g
 	z := int64(0)
 	bad.TokenBudget = &z
 	if bad.Validate() == nil {

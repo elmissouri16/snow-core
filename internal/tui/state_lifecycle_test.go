@@ -47,10 +47,13 @@ func TestTerminalGoalSnapshotReleasesBoundaryProjection(t *testing.T) {
 	buildAppForTest(t, m)
 	m.busy = true
 	m.runStartedAt = time.Now()
-	goal := &protocol.ThreadGoal{GoalID: "goal", Objective: "work", Status: protocol.GoalBlocked}
+	goal := &protocol.ThreadGoal{GoalID: "goal", Objective: "work", Status: protocol.GoalBlocked, BlockedReason: "CI service is unavailable"}
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: goal}})
 	if m.busy || !m.runStartedAt.IsZero() {
 		t.Fatalf("terminal goal snapshot left boundary active: busy=%v started=%v", m.busy, m.runStartedAt)
+	}
+	if transcript := stripANSI(strings.Join(m.lines, "\n")); !strings.Contains(transcript, "Goal blocked: CI service is unavailable") {
+		t.Fatalf("blocked reason missing from transcript: %q", transcript)
 	}
 }
 

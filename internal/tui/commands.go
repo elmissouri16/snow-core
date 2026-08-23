@@ -47,6 +47,9 @@ func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.
 			} else {
 				m.goal = g
 				m.pushLine(styleFooter.Render(fmt.Sprintf("goal %s · %s · %ds\n%s", g.Status, formatGoalTokenUsage(g), g.SecondsUsed, g.Objective)))
+				if g.Status == protocol.GoalBlocked {
+					m.pushLine(renderBlockedGoalTranscript(g))
+				}
 			}
 			return m, nil
 		}

@@ -286,8 +286,11 @@ func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 	if err := a.Agent.SetModel(model); err != nil {
 		t.Fatal(err)
 	}
-	goal, err := a.CreateGoal("priced goal", nil, false)
+	goal, err := a.Goal.Create("priced goal", nil, false)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Goal.SetStatusWithReason(goal.GoalID, protocol.GoalBlocked, false, "CI unavailable"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := a.Session.(session.ThreadGoalStore).AccountGoal(goal.GoalID, 10, 1, &protocol.Cost{Currency: "USD", Total: 0.02}); err != nil {
@@ -319,7 +322,7 @@ func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 	pending, _ := data["pending_inputs"].(map[string]any)
 	goalInfo, _ := data["goal"].(map[string]any)
 	costs, _ := goalInfo["estimated_costs"].([]any)
-	if info.Command != "session_info" || !info.Success || data["thinking"] != "low" || fmt.Sprint(data["thinking_levels"]) != "[off low]" || pending["total"] != float64(0) || len(costs) != 1 {
+	if info.Command != "session_info" || !info.Success || data["thinking"] != "low" || fmt.Sprint(data["thinking_levels"]) != "[off low]" || pending["total"] != float64(0) || goalInfo["blocked_reason"] != "CI unavailable" || len(costs) != 1 {
 		t.Fatalf("session info = %+v", info)
 	}
 }

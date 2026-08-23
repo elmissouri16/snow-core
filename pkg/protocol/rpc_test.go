@@ -93,6 +93,30 @@ func TestRPCPublicDTOJSONRoundTrips(t *testing.T) {
 	}
 }
 
+func TestRPCGoalSummaryBlockedReasonJSON(t *testing.T) {
+	active, err := json.Marshal(RPCGoalSummary{GoalID: "active", Status: GoalActive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(active, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fields["blocked_reason"]; ok {
+		t.Fatalf("active goal exposed blocked_reason: %s", active)
+	}
+	blocked, err := json.Marshal(RPCGoalSummary{GoalID: "blocked", Status: GoalBlocked, BlockedReason: "CI unavailable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(blocked, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if fields["blocked_reason"] != "CI unavailable" {
+		t.Fatalf("blocked goal JSON = %s", blocked)
+	}
+}
+
 func TestRPCWireDTOJSON(t *testing.T) {
 	tests := []struct {
 		name  string

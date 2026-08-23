@@ -785,7 +785,7 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		goal, _ := s.app.GoalState()
 		if goal != nil {
-			info.Goal = &protocol.RPCGoalSummary{GoalID: goal.GoalID, Status: goal.Status, TokensUsed: goal.TokensUsed, TokenBudget: goal.TokenBudget, EstimatedCosts: append([]protocol.Cost(nil), goal.EstimatedCosts...)}
+			info.Goal = &protocol.RPCGoalSummary{GoalID: goal.GoalID, Status: goal.Status, BlockedReason: goal.BlockedReason, TokensUsed: goal.TokensUsed, TokenBudget: goal.TokenBudget, EstimatedCosts: append([]protocol.Cost(nil), goal.EstimatedCosts...)}
 		}
 		steering, followUps := s.app.Agent.PendingInputs().Counts()
 		info.PendingInputs = protocol.RPCPendingInputCounts{Steering: steering, FollowUp: followUps, Total: steering + followUps}

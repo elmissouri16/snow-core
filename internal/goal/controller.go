@@ -230,8 +230,30 @@ func (c *Controller) RecordGoalTurn(goalID string) {
 }
 
 func (c *Controller) SetStatus(expected string, status protocol.ThreadGoalStatus, model bool) (*protocol.ThreadGoal, error) {
+	return c.SetStatusWithReason(expected, status, model, "")
+}
+
+func (c *Controller) SetStatusWithReason(expected string, status protocol.ThreadGoalStatus, model bool, blockedReason string) (*protocol.ThreadGoal, error) {
 	if model && status != protocol.GoalComplete && status != protocol.GoalBlocked {
 		return nil, errors.New("goal: model may only set complete or blocked")
+	}
+	blockedReason = strings.TrimSpace(blockedReason)
+	if status == protocol.GoalBlocked {
+		if blockedReason == "" {
+			if model {
+				return nil, errors.New("goal: blocked reason is required")
+			}
+			blockedReason = "Snow stopped the goal after an unrecoverable error."
+		}
+		runes := []rune(blockedReason)
+		if len(runes) > protocol.MaxThreadGoalBlockedReasonChars {
+			if model {
+				return nil, fmt.Errorf("goal: blocked reason exceeds %d characters", protocol.MaxThreadGoalBlockedReasonChars)
+			}
+			blockedReason = string(runes[:protocol.MaxThreadGoalBlockedReasonChars])
+		}
+	} else if blockedReason != "" {
+		return nil, errors.New("goal: blocked reason is valid only for blocked status")
 	}
 	c.mu.Lock()
 	old, err := c.goalStore().Goal()
@@ -269,7 +291,7 @@ func (c *Controller) SetStatus(expected string, status protocol.ThreadGoalStatus
 	if status == protocol.GoalActive && old.Status != protocol.GoalPaused && old.Status != protocol.GoalBlocked && old.Status != protocol.GoalUsageLimited {
 		return returnUnlock(c, nil, errors.New("goal: only paused, blocked, or usage-limited goals can be resumed"))
 	}
-	g, err := c.atomicStore().TransitionGoal(expected, old.Status, status, status == protocol.GoalActive)
+	g, err := c.atomicStore().TransitionGoal(expected, old.Status, status, blockedReason, status == protocol.GoalActive)
 	if err == nil && status == protocol.GoalActive {
 		c.auditGoalID = ""
 		c.auditTurns = 0

@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-const MaxThreadGoalObjectiveChars = 32 * 1024
+const (
+	MaxThreadGoalObjectiveChars     = 32 * 1024
+	MaxThreadGoalBlockedReasonChars = 8 * 1024
+)
 
 type ThreadGoalStatus string
 
@@ -40,6 +43,7 @@ type ThreadGoal struct {
 	GoalID         string           `json:"goal_id"`
 	Objective      string           `json:"objective"`
 	Status         ThreadGoalStatus `json:"status"`
+	BlockedReason  string           `json:"blocked_reason,omitempty"`
 	TokenBudget    *int64           `json:"token_budget,omitempty"`
 	TokensUsed     int64            `json:"tokens_used"`
 	SecondsUsed    int64            `json:"seconds_used"`
@@ -88,6 +92,12 @@ func (g ThreadGoal) Validate() error {
 	}
 	if _, err := ParseThreadGoalStatus(string(g.Status)); err != nil {
 		return err
+	}
+	if len([]rune(g.BlockedReason)) > MaxThreadGoalBlockedReasonChars {
+		return fmt.Errorf("protocol: goal blocked reason exceeds %d characters", MaxThreadGoalBlockedReasonChars)
+	}
+	if g.Status != GoalBlocked && g.BlockedReason != "" {
+		return errors.New("protocol: goal blocked reason requires blocked status")
 	}
 	if g.TokenBudget != nil && *g.TokenBudget <= 0 {
 		return errors.New("protocol: goal token budget must be positive")

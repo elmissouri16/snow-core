@@ -13,7 +13,7 @@ import (
 )
 
 // SessionVersion is the current on-disk schema version.
-const SessionVersion = 9
+const SessionVersion = 10
 
 // Header is the first line of every session file.
 type Header struct {
@@ -155,7 +155,7 @@ type ThreadGoalStore interface {
 type ThreadGoalAtomicStore interface {
 	ReplaceGoal(expectedGoalID string, goal protocol.ThreadGoal) error
 	ReviseGoal(expectedGoalID, nextGoalID, objective string) (*protocol.ThreadGoal, error)
-	TransitionGoal(expectedGoalID string, expectedStatus, nextStatus protocol.ThreadGoalStatus, clearDeferral bool) (*protocol.ThreadGoal, error)
+	TransitionGoal(expectedGoalID string, expectedStatus, nextStatus protocol.ThreadGoalStatus, blockedReason string, clearDeferral bool) (*protocol.ThreadGoal, error)
 }
 
 // SubagentRecord stores root-scoped topology separately from conversation

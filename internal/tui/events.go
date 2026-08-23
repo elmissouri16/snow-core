@@ -258,10 +258,15 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.adoptTurn(ev)
 		}
 		if ev.ThreadGoal != nil {
+			previousGoal := m.goal.Clone()
 			if ev.ThreadGoal.Cleared {
 				m.goal = nil
 			} else {
 				m.goal = ev.ThreadGoal.Goal.Clone()
+			}
+			if m.goal != nil && m.goal.Status == protocol.GoalBlocked &&
+				(previousGoal == nil || previousGoal.GoalID != m.goal.GoalID || previousGoal.Status != protocol.GoalBlocked || previousGoal.BlockedReason != m.goal.BlockedReason) {
+				m.pushLine(renderBlockedGoalTranscript(m.goal))
 			}
 			// Goal workers can stop at a safe boundary (pause, clear, blocked
 			// auto-compaction) without another turn terminal event. A terminal goal
@@ -677,6 +682,17 @@ func looksLikeMarkdown(text string) bool {
 		}
 	}
 	return false
+}
+
+func renderBlockedGoalTranscript(goal *protocol.ThreadGoal) string {
+	if goal == nil || goal.Status != protocol.GoalBlocked {
+		return ""
+	}
+	reason := strings.TrimSpace(goal.BlockedReason)
+	if reason == "" {
+		reason = "No blocker reason was recorded."
+	}
+	return styleError.Render("Goal blocked: " + sanitizeTerminalText(reason))
 }
 
 func (m *Model) pushLine(s string) {

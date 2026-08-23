@@ -164,7 +164,7 @@ func (s *SQLiteStore) SetCollaborationMode(mode protocol.CollaborationMode) erro
 func scanGoal(row interface{ Scan(...any) error }, sessionID, branchID string) (*protocol.ThreadGoal, error) {
 	var g protocol.ThreadGoal
 	var budget sql.NullInt64
-	err := row.Scan(&g.GoalID, &g.Objective, &g.Status, &budget, &g.TokensUsed, &g.SecondsUsed, &g.CreatedAt, &g.UpdatedAt)
+	err := row.Scan(&g.GoalID, &g.Objective, &g.Status, &g.BlockedReason, &budget, &g.TokensUsed, &g.SecondsUsed, &g.CreatedAt, &g.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -239,7 +239,7 @@ func (s *SQLiteStore) Goal() (*protocol.ThreadGoal, error) {
 		return nil, fmt.Errorf("session: sqlite goal begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	g, err := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
+	g, err := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
 	if err != nil {
 		return nil, fmt.Errorf("session: sqlite goal: %w", err)
 	}
@@ -261,12 +261,12 @@ func (s *SQLiteStore) CreateGoal(goal protocol.ThreadGoal, replace bool) error {
 		return fmt.Errorf("session: sqlite create goal begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	query := `INSERT INTO thread_goals(branch_id, goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?)
+	query := `INSERT INTO thread_goals(branch_id, goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(branch_id) DO UPDATE SET goal_id=excluded.goal_id, objective=excluded.objective, status=excluded.status,
-			token_budget=excluded.token_budget, tokens_used=excluded.tokens_used, seconds_used=excluded.seconds_used,
+			blocked_reason=excluded.blocked_reason, token_budget=excluded.token_budget, tokens_used=excluded.tokens_used, seconds_used=excluded.seconds_used,
 			created_at=excluded.created_at, updated_at=excluded.updated_at`
-	args := []any{s.branchID, goal.GoalID, strings.TrimSpace(goal.Objective), goal.Status, goal.TokenBudget, goal.TokensUsed, goal.SecondsUsed, goal.CreatedAt, goal.UpdatedAt}
+	args := []any{s.branchID, goal.GoalID, strings.TrimSpace(goal.Objective), goal.Status, goal.BlockedReason, goal.TokenBudget, goal.TokensUsed, goal.SecondsUsed, goal.CreatedAt, goal.UpdatedAt}
 	if !replace {
 		query += ` WHERE thread_goals.status IN (?, ?)`
 		args = append(args, protocol.GoalComplete, protocol.GoalBudgetLimited)
@@ -304,11 +304,11 @@ func (s *SQLiteStore) ReplaceGoal(expected string, goal protocol.ThreadGoal) err
 	defer func() { _ = tx.Rollback() }()
 	var res sql.Result
 	if expected == "" {
-		res, err = tx.Exec(`INSERT INTO thread_goals(branch_id, goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at)
-			VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(branch_id) DO NOTHING`, s.branchID, goal.GoalID, strings.TrimSpace(goal.Objective), goal.Status, goal.TokenBudget, goal.TokensUsed, goal.SecondsUsed, goal.CreatedAt, goal.UpdatedAt)
+		res, err = tx.Exec(`INSERT INTO thread_goals(branch_id, goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(branch_id) DO NOTHING`, s.branchID, goal.GoalID, strings.TrimSpace(goal.Objective), goal.Status, goal.BlockedReason, goal.TokenBudget, goal.TokensUsed, goal.SecondsUsed, goal.CreatedAt, goal.UpdatedAt)
 	} else {
-		res, err = tx.Exec(`UPDATE thread_goals SET goal_id=?, objective=?, status=?, token_budget=?, tokens_used=?, seconds_used=?, created_at=?, updated_at=?
-			WHERE branch_id=? AND goal_id=?`, goal.GoalID, strings.TrimSpace(goal.Objective), goal.Status, goal.TokenBudget, goal.TokensUsed, goal.SecondsUsed, goal.CreatedAt, goal.UpdatedAt, s.branchID, expected)
+		res, err = tx.Exec(`UPDATE thread_goals SET goal_id=?, objective=?, status=?, blocked_reason=?, token_budget=?, tokens_used=?, seconds_used=?, created_at=?, updated_at=?
+			WHERE branch_id=? AND goal_id=?`, goal.GoalID, strings.TrimSpace(goal.Objective), goal.Status, goal.BlockedReason, goal.TokenBudget, goal.TokensUsed, goal.SecondsUsed, goal.CreatedAt, goal.UpdatedAt, s.branchID, expected)
 	}
 	if err != nil {
 		return fmt.Errorf("session: sqlite replace goal: %w", err)
@@ -341,14 +341,14 @@ func (s *SQLiteStore) ReviseGoal(expected, nextGoalID, objective string) (*proto
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UnixMilli()
-	g, err := scanGoalWithCosts(tx.QueryRow(`UPDATE thread_goals SET goal_id=?, objective=?, status=?, updated_at=?
+	g, err := scanGoalWithCosts(tx.QueryRow(`UPDATE thread_goals SET goal_id=?, objective=?, status=?, blocked_reason='', updated_at=?
 		WHERE branch_id=? AND goal_id=?
-		RETURNING goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at`, nextGoalID, objective, protocol.GoalActive, now, s.branchID, expected), tx, s.header.ID, s.branchID)
+		RETURNING goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at`, nextGoalID, objective, protocol.GoalActive, now, s.branchID, expected), tx, s.header.ID, s.branchID)
 	if err != nil {
 		return nil, err
 	}
 	if g == nil {
-		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
+		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
 		if readErr != nil {
 			return nil, readErr
 		}
@@ -366,11 +366,18 @@ func (s *SQLiteStore) ReviseGoal(expected, nextGoalID, objective string) (*proto
 	return g.Clone(), nil
 }
 
-func (s *SQLiteStore) TransitionGoal(expected string, expectedStatus, nextStatus protocol.ThreadGoalStatus, clearDeferral bool) (*protocol.ThreadGoal, error) {
+func (s *SQLiteStore) TransitionGoal(expected string, expectedStatus, nextStatus protocol.ThreadGoalStatus, blockedReason string, clearDeferral bool) (*protocol.ThreadGoal, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := protocol.ParseThreadGoalStatus(string(nextStatus)); err != nil {
 		return nil, err
+	}
+	blockedReason = strings.TrimSpace(blockedReason)
+	if nextStatus == protocol.GoalBlocked && blockedReason == "" {
+		return nil, errors.New("session: blocked status requires a reason")
+	}
+	if nextStatus != protocol.GoalBlocked {
+		blockedReason = ""
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -378,14 +385,14 @@ func (s *SQLiteStore) TransitionGoal(expected string, expectedStatus, nextStatus
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UnixMilli()
-	g, err := scanGoalWithCosts(tx.QueryRow(`UPDATE thread_goals SET status=?, updated_at=?
+	g, err := scanGoalWithCosts(tx.QueryRow(`UPDATE thread_goals SET status=?, blocked_reason=?, updated_at=?
 		WHERE branch_id=? AND goal_id=? AND status=?
-		RETURNING goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at`, nextStatus, now, s.branchID, expected, expectedStatus), tx, s.header.ID, s.branchID)
+		RETURNING goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at`, nextStatus, blockedReason, now, s.branchID, expected, expectedStatus), tx, s.header.ID, s.branchID)
 	if err != nil {
 		return nil, err
 	}
 	if g == nil {
-		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
+		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
 		if readErr != nil {
 			return nil, readErr
 		}
@@ -421,6 +428,9 @@ func (s *SQLiteStore) UpdateGoal(expected string, objective *string, status *pro
 		if _, err := protocol.ParseThreadGoalStatus(string(*status)); err != nil {
 			return nil, err
 		}
+		if *status == protocol.GoalBlocked {
+			return nil, errors.New("session: blocked status requires reason-bearing transition")
+		}
 		statusSet, statusValue = 1, *status
 	}
 	budgetSet, budgetValue := 0, int64(0)
@@ -439,16 +449,17 @@ func (s *SQLiteStore) UpdateGoal(expected string, objective *string, status *pro
 	g, err := scanGoalWithCosts(tx.QueryRow(`UPDATE thread_goals SET
 		objective = CASE WHEN ? = 1 THEN ? ELSE objective END,
 		status = CASE WHEN ? = 1 THEN ? ELSE status END,
+		blocked_reason = CASE WHEN ? = 1 THEN '' ELSE blocked_reason END,
 		token_budget = CASE WHEN ? = 1 THEN ? ELSE token_budget END,
 		updated_at = ?
 		WHERE branch_id = ? AND goal_id = ?
-		RETURNING goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at`,
-		objectiveSet, objectiveValue, statusSet, statusValue, budgetSet, budgetValue, now, s.branchID, expected), tx, s.header.ID, s.branchID)
+		RETURNING goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at`,
+		objectiveSet, objectiveValue, statusSet, statusValue, statusSet, budgetSet, budgetValue, now, s.branchID, expected), tx, s.header.ID, s.branchID)
 	if err != nil {
 		return nil, err
 	}
 	if g == nil {
-		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
+		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
 		if readErr != nil {
 			return nil, readErr
 		}
@@ -515,14 +526,14 @@ func (s *SQLiteStore) AccountGoal(expected string, tokens, seconds int64, estima
 			status = CASE WHEN status = ? AND token_budget IS NOT NULL AND tokens_used + ? >= token_budget THEN ? ELSE status END,
 			updated_at = ?
 		WHERE branch_id = ? AND goal_id = ? AND tokens_used <= ? AND seconds_used <= ?
-		RETURNING goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at`,
+		RETURNING goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at`,
 		tokens, seconds, protocol.GoalActive, tokens, protocol.GoalBudgetLimited, now,
 		s.branchID, expected, math.MaxInt64-tokens, math.MaxInt64-seconds), s.header.ID, s.branchID)
 	if err != nil {
 		return nil, false, err
 	}
 	if g == nil {
-		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
+		current, readErr := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
 		if readErr != nil {
 			return nil, false, readErr
 		}

@@ -693,8 +693,11 @@ Successful `data` contains:
 
 `name` is empty until assigned for legacy/untitled stores; built-in stores
 receive a local title with their first accepted prompt. Inside a present
-goal, `token_budget` is `null` when unlimited and `estimated_costs` can be
-`null` when pricing is unavailable. `max_concurrent_agents` is a
+goal, `token_budget` is `null` when unlimited, `blocked_reason` is present
+for newly blocked goals, and `estimated_costs` can be `null` when pricing is
+unavailable. A blocked goal migrated from a pre-version-10 session can omit the
+reason because the older schema did not retain one.
+`max_concurrent_agents` is a
 compatibility alias of `max_concurrent_threads`; both currently carry the
 same limit. `reasoning_summary` and `text_verbosity` are optional additive
 fields so v1 clients and older recorded frames remain compatible.
@@ -1254,8 +1257,11 @@ optional `cache_read_known`, `cache_write`, `total_tokens`, optional
 `{currency?,input,output,cache_read,cache_write,total}`.
 
 A full goal contains `session_id`, `branch_id`, `goal_id`, `objective`,
-`status`, optional `token_budget`, `tokens_used`, `seconds_used`, optional
-`estimated_costs`, `created_at`, and `updated_at`. Status is `active`,
+`status`, optional `blocked_reason`, optional `token_budget`, `tokens_used`,
+`seconds_used`, optional `estimated_costs`, `created_at`, and `updated_at`.
+`blocked_reason` explains the durable blocker and is omitted in other states;
+it can also be absent on a blocked goal migrated from a pre-version-10 session.
+Status is `active`,
 `paused`, `blocked`, `usage_limited`, `budget_limited`, or `complete`.
 
 A subagent snapshot contains `agent`, `status`, optional provider, model, and

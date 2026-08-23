@@ -31,6 +31,15 @@ import (
 
 var errCLIClose = errors.New("cli close failed")
 
+func TestPrintableGoalBlockedReason(t *testing.T) {
+	if got := printableGoalBlockedReason("  CI\x1b[31m\n unavailable  "); got != "CI[31m unavailable" {
+		t.Fatalf("printable reason = %q", got)
+	}
+	if got := printableGoalBlockedReason("\x00\x1b"); got != "No blocker reason was recorded." {
+		t.Fatalf("empty printable reason = %q", got)
+	}
+}
+
 type closeFailingCLIPlugin struct{}
 
 func (closeFailingCLIPlugin) Manifest() publicplugin.Manifest {

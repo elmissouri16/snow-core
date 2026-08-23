@@ -99,7 +99,12 @@ streamed tool calls are never dispatched. Exhausted transport outages pause the
 goal, while exhausted temporary throttling becomes `usage_limited`. Accounting
 errors never permit another autonomous turn, and exact goal-budget crossing
 retains precedence. This host error classification is distinct from a model
-declaring an external blocker.
+declaring an external blocker. Every `blocked` transition stores a bounded
+`blocked_reason`: host failures use the underlying failure, while model updates
+must supply a concise reason naming the audited external blocker. The reason is
+cleared when the goal resumes or its objective is revised. A blocked goal
+migrated from a pre-version-10 session has no historical reason and displays an
+explicit fallback instead.
 
 On restart, an interrupted read-only tool can be represented by a synthetic
 retryable result. An unresolved write, exec, network, delegation, or unknown
@@ -150,8 +155,11 @@ either branch cannot remove the other's objective.
 /goal clear
 ```
 
-Restored paused, blocked, and usage-limited goals display resume guidance. The
-sticky header, footer, and `/goal` output refresh cumulative usage after every
+Restored paused, blocked, and usage-limited goals display resume guidance.
+When a goal becomes blocked, the TUI writes `Goal blocked: <reason>` into the
+transcript; restored blocked goals and `/goal` inspection show the same durable
+reason, and human-readable print mode emits a `[reason: ...]` line. The sticky
+header, footer, and `/goal` output refresh cumulative usage after every
 provider response within the goal, rather than waiting for the admitted goal
 turn to finish. The compact label uses `tks`, for example
 `2.1m tks · est. $0.0183`. Costs persist across resume, edit, and fork and are
@@ -171,8 +179,9 @@ snapshot and starts only an active, non-deferred Default-mode goal.
 
 RPC commands are `goal_get`, `goal_set`/`goal_create`, `goal_edit`,
 `goal_pause`, `goal_resume`, `goal_clear`, and `goal_continue`; successful
-responses use `data`. `ThreadGoal.estimated_costs` is an optional array of
-currency-bearing `Cost` totals; `session_info.goal` includes the same field.
+responses use `data`. `ThreadGoal.blocked_reason` contains the durable reason
+when status is `blocked`; `ThreadGoal.estimated_costs` is an optional array of
+currency-bearing `Cost` totals. `session_info.goal` includes the same fields.
 Print/JSON, RPC, and TUI install event observers before they signal goal
 readiness.
 
@@ -188,10 +197,11 @@ an event that the same dispatcher would have to deliver.
 
 Direct `get_goal`, `create_goal`, and `update_goal` tools are registered
 normally. Models may set only `complete` or `blocked`. Completion requires a
-direct evidence audit. A model-side blocked update has a mechanical minimum of
-three goal turns and the steering prompt requires the same true external
-blocker on all three; blocker identity remains a prompt-audited semantic claim,
-matching the Codex contract. Resume and objective edit reset that audit.
+direct evidence audit. A blocked update must include `reason`. It has a
+mechanical minimum of three goal turns, and the steering prompt requires the
+same true external blocker on all three; blocker identity remains a
+prompt-audited semantic claim, matching the Codex contract. Resume and
+objective edit reset that audit and clear the stored reason.
 Pause, resume, clear, and limit states remain host-controlled.
 
 The current objective is synthesized on every goal-bearing provider request as

@@ -342,6 +342,7 @@ func (s *MemoryStore) ReviseGoal(expected, nextGoalID, objective string) (*proto
 	copy.GoalID = nextGoalID
 	copy.Objective = strings.TrimSpace(objective)
 	copy.Status = protocol.GoalActive
+	copy.BlockedReason = ""
 	copy.UpdatedAt = time.Now().UnixMilli()
 	if err := copy.Validate(); err != nil {
 		return nil, err
@@ -351,7 +352,7 @@ func (s *MemoryStore) ReviseGoal(expected, nextGoalID, objective string) (*proto
 	return copy.Clone(), nil
 }
 
-func (s *MemoryStore) TransitionGoal(expected string, expectedStatus, nextStatus protocol.ThreadGoalStatus, clearDeferral bool) (*protocol.ThreadGoal, error) {
+func (s *MemoryStore) TransitionGoal(expected string, expectedStatus, nextStatus protocol.ThreadGoalStatus, blockedReason string, clearDeferral bool) (*protocol.ThreadGoal, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -367,8 +368,16 @@ func (s *MemoryStore) TransitionGoal(expected string, expectedStatus, nextStatus
 	if _, err := protocol.ParseThreadGoalStatus(string(nextStatus)); err != nil {
 		return nil, err
 	}
+	blockedReason = strings.TrimSpace(blockedReason)
+	if nextStatus == protocol.GoalBlocked && blockedReason == "" {
+		return nil, errors.New("session: blocked status requires a reason")
+	}
 	copy := g.Clone()
 	copy.Status = nextStatus
+	copy.BlockedReason = ""
+	if nextStatus == protocol.GoalBlocked {
+		copy.BlockedReason = strings.TrimSpace(blockedReason)
+	}
 	copy.UpdatedAt = time.Now().UnixMilli()
 	if err := copy.Validate(); err != nil {
 		return nil, err
@@ -399,7 +408,13 @@ func (s *MemoryStore) UpdateGoal(expected string, objective *string, status *pro
 		if err != nil {
 			return nil, err
 		}
+		if parsed == protocol.GoalBlocked {
+			return nil, errors.New("session: blocked status requires reason-bearing transition")
+		}
 		copy.Status = parsed
+		if parsed != protocol.GoalBlocked {
+			copy.BlockedReason = ""
+		}
 	}
 	if budget != nil {
 		if *budget <= 0 {

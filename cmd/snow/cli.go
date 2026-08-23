@@ -577,6 +577,23 @@ func runInteractiveOptions(cmd *cobra.Command, sessionPicker, requireExistingSes
 	return runTUI(ctx, opts, sessionPicker)
 }
 
+func printableGoalBlockedReason(reason string) string {
+	reason = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		if r < 0x20 || r >= 0x7f && r <= 0x9f {
+			return -1
+		}
+		return r
+	}, reason)
+	reason = strings.Join(strings.Fields(reason), " ")
+	if reason == "" {
+		return "No blocker reason was recorded."
+	}
+	return reason
+}
+
 func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, showUsage bool) (err error) {
 	if strings.TrimSpace(prompt) == "" {
 		return fmt.Errorf("print mode requires -p prompt")
@@ -641,6 +658,9 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 				} else if ev.ThreadGoal != nil && ev.ThreadGoal.Goal != nil && ev.ThreadGoal.Goal.Status != lastGoalStatus {
 					g := ev.ThreadGoal.Goal
 					writeOut("\n[goal %s · %d tokens]\n", g.Status, g.TokensUsed)
+					if g.Status == protocol.GoalBlocked {
+						writeOut("[reason: %s]\n", printableGoalBlockedReason(g.BlockedReason))
+					}
 					lastGoalStatus = g.Status
 				}
 			case protocol.EvProviderRetry:

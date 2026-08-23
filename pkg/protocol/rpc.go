@@ -180,6 +180,7 @@ type RPCModelList struct {
 type RPCGoalSummary struct {
 	GoalID         string           `json:"goal_id"`
 	Status         ThreadGoalStatus `json:"status"`
+	BlockedReason  string           `json:"blocked_reason,omitempty"`
 	TokensUsed     int64            `json:"tokens_used"`
 	TokenBudget    *int64           `json:"token_budget"`
 	EstimatedCosts []Cost           `json:"estimated_costs"`

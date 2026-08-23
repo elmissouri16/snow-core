@@ -197,7 +197,7 @@ func TestGoalAutoCompactionBlocksWhenNoTurnsCanBeCompacted(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	got, _ := c.Get()
-	if got.GoalID != g.GoalID || got.Status != protocol.GoalBlocked || p.call != 1 {
+	if got.GoalID != g.GoalID || got.Status != protocol.GoalBlocked || !strings.Contains(got.BlockedReason, "Automatic compaction failed") || p.call != 1 {
 		t.Fatalf("goal=%+v calls=%d", got, p.call)
 	}
 }

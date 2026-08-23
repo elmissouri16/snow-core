@@ -606,8 +606,10 @@ Normal prompts never clear an abort or manual-compaction deferral; call
 processes; `NoSession` keeps them only for the current process. Budgets must be
 positive. Goal statuses are `active`, `paused`, `blocked`, `usage_limited`,
 `budget_limited`, and `complete`. Returned `protocol.ThreadGoal` values include
-optional per-currency `EstimatedCosts`; values come from provider or catalog
-pricing and are estimates, not invoices. See
+a durable `BlockedReason` while blocked (empty only for pre-version-10
+sessions migrated without one) and optional per-currency `EstimatedCosts`;
+blocker reasons clear on resume or objective revision, while
+cost values come from provider or catalog pricing and are estimates, not invoices. See
 [Persistent Thread Goals](goals.md).
 
 ## Permissions and security

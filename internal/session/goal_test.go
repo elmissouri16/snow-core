@@ -38,6 +38,22 @@ func exerciseGoals(t *testing.T, st Store) {
 	if _, err := gs.UpdateGoal("stale", nil, &paused, nil); err == nil {
 		t.Fatal("stale update succeeded")
 	}
+	blockedStatus := protocol.GoalBlocked
+	if _, err := gs.UpdateGoal("g1", nil, &blockedStatus, nil); err == nil {
+		t.Fatal("reasonless blocked update succeeded")
+	}
+	atomic := st.(ThreadGoalAtomicStore)
+	if _, err := atomic.TransitionGoal("g1", protocol.GoalActive, protocol.GoalBlocked, "  ", false); err == nil {
+		t.Fatal("reasonless atomic blocked transition succeeded")
+	}
+	blocked, err := atomic.TransitionGoal("g1", protocol.GoalActive, protocol.GoalBlocked, "required service unavailable", false)
+	if err != nil || blocked.BlockedReason != "required service unavailable" {
+		t.Fatalf("blocked transition=%+v err=%v", blocked, err)
+	}
+	resumed, err := atomic.TransitionGoal("g1", protocol.GoalBlocked, protocol.GoalActive, "", true)
+	if err != nil || resumed.BlockedReason != "" {
+		t.Fatalf("resumed transition=%+v err=%v", resumed, err)
+	}
 	got, cross, err := gs.AccountGoal("stale", 10, 1, nil)
 	if err != nil || cross || got.GoalID != "g1" || got.TokensUsed != 0 {
 		t.Fatalf("stale account=%+v %v %v", got, cross, err)
@@ -247,11 +263,11 @@ func TestSQLiteGoalTransitionsAndReplacementAreCompareAndSwap(t *testing.T) {
 	}
 	results := make(chan result, 2)
 	go func() {
-		g, err := first.TransitionGoal(original.GoalID, protocol.GoalActive, protocol.GoalPaused, false)
+		g, err := first.TransitionGoal(original.GoalID, protocol.GoalActive, protocol.GoalPaused, "", false)
 		results <- result{g, err}
 	}()
 	go func() {
-		g, err := second.TransitionGoal(original.GoalID, protocol.GoalActive, protocol.GoalBlocked, false)
+		g, err := second.TransitionGoal(original.GoalID, protocol.GoalActive, protocol.GoalBlocked, "dependency unavailable", false)
 		results <- result{g, err}
 	}()
 	successes := 0
@@ -267,6 +283,9 @@ func TestSQLiteGoalTransitionsAndReplacementAreCompareAndSwap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if current.Status == protocol.GoalBlocked && current.BlockedReason != "dependency unavailable" {
+		t.Fatalf("blocked reason = %q", current.BlockedReason)
+	}
 	if _, _, err := second.AccountGoal(current.GoalID, 5, 1, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +293,7 @@ func TestSQLiteGoalTransitionsAndReplacementAreCompareAndSwap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if revised.TokensUsed != 5 || revised.SecondsUsed != 1 || revised.Status != protocol.GoalActive {
+	if revised.TokensUsed != 5 || revised.SecondsUsed != 1 || revised.Status != protocol.GoalActive || revised.BlockedReason != "" {
 		t.Fatalf("revision lost accounting/state: %+v", revised)
 	}
 	if _, err := second.ReviseGoal(current.GoalID, "stale-revision", "stale"); err == nil {
@@ -339,6 +358,50 @@ func TestSQLiteV7MigrationBackfillsUnambiguousGoalCosts(t *testing.T) {
 	}
 	if len(got.EstimatedCosts) != 1 || got.EstimatedCosts[0].Total != 0.03 {
 		t.Fatalf("migrated estimated costs=%+v", got.EstimatedCosts)
+	}
+}
+
+func TestSQLiteGoalBlockedReasonV10Migration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "goal-v9.db")
+	st, err := NewSQLiteStore(path, t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	goal := protocol.ThreadGoal{GoalID: "legacy-blocked", Objective: "wait for dependency", Status: protocol.GoalActive, CreatedAt: now, UpdatedAt: now}
+	if err := st.CreateGoal(goal, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.TransitionGoal(goal.GoalID, protocol.GoalActive, protocol.GoalBlocked, "not retained by v9", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE thread_goals DROP COLUMN blocked_reason`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE session_meta SET version=9`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewSQLiteStore(path, "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	got, err := reopened.Goal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != protocol.GoalBlocked || got.BlockedReason != "" || reopened.Header().Version != SessionVersion {
+		t.Fatalf("migrated goal=%+v version=%d", got, reopened.Header().Version)
 	}
 }
 

@@ -391,7 +391,11 @@ func (a *Agent) stopGoalOnError(turnErr error) error {
 	if err := controller.Defer(true); err != nil {
 		return fmt.Errorf("goal: defer before %s transition: %w", status, err)
 	}
-	if _, err := controller.SetStatus(g.GoalID, status, false); err != nil {
+	if status == protocol.GoalBlocked {
+		if _, err := controller.SetStatusWithReason(g.GoalID, status, false, turnErr.Error()); err != nil {
+			return fmt.Errorf("goal: persist %s status: %w", status, err)
+		}
+	} else if _, err := controller.SetStatus(g.GoalID, status, false); err != nil {
 		return fmt.Errorf("goal: persist %s status: %w", status, err)
 	}
 	return nil
@@ -590,7 +594,7 @@ func (a *Agent) ContinueGoal() {
 				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal auto-compaction: " + compactErr.Error()})
 				if deferErr := a.opts.Goal.Defer(true); deferErr != nil {
 					a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal auto-compaction deferral: " + deferErr.Error()})
-				} else if _, statusErr := a.opts.Goal.SetStatus(g.GoalID, protocol.GoalBlocked, false); statusErr != nil {
+				} else if _, statusErr := a.opts.Goal.SetStatusWithReason(g.GoalID, protocol.GoalBlocked, false, "Automatic compaction failed: "+compactErr.Error()); statusErr != nil {
 					a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal auto-compaction status: " + statusErr.Error()})
 				}
 				break
