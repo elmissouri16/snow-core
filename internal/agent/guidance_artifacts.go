@@ -423,23 +423,18 @@ func explicitSkillNames(text string, candidates []string) []string {
 	for _, name := range candidates {
 		available[name] = true
 	}
-	rest := strings.TrimLeftFunc(text, unicode.IsSpace)
 	var names []string
 	seen := make(map[string]bool)
-	for strings.HasPrefix(rest, "$") {
-		end := strings.IndexFunc(rest, unicode.IsSpace)
-		if end < 0 {
-			end = len(rest)
+	for _, field := range strings.FieldsFunc(text, unicode.IsSpace) {
+		if len(field) < 2 || field[0] != '$' {
+			continue
 		}
-		name := strings.TrimPrefix(rest[:end], "$")
-		if !available[name] {
-			break
+		name := field[1:]
+		if !available[name] || seen[name] {
+			continue
 		}
-		if !seen[name] {
-			names = append(names, name)
-			seen[name] = true
-		}
-		rest = strings.TrimLeftFunc(rest[end:], unicode.IsSpace)
+		names = append(names, name)
+		seen[name] = true
 	}
 	return names
 }

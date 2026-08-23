@@ -124,8 +124,8 @@ func (m *Model) refreshPaletteFor(text string) {
 	}
 }
 
-// refreshInputCompletions keeps slash commands, leading $skill directives,
-// and @ file references mutually exclusive while the editor changes.
+// refreshInputCompletions keeps slash commands, $skill references, and @ file
+// references mutually exclusive while the editor changes.
 func (m *Model) refreshInputCompletions() tea.Cmd {
 	return m.refreshInputCompletionsFor(m.editor.Value())
 }

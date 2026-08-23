@@ -164,7 +164,7 @@ func TestQueuedSkillMentionActivatesBeforeContinuation(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- a.Prompt(context.Background(), "initial") }()
 	<-p.started
-	if err := a.Steer("$review Use this skill now."); err != nil {
+	if err := a.Steer("Use $review for this continuation."); err != nil {
 		t.Fatal(err)
 	}
 	close(p.release)

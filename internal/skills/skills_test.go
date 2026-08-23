@@ -387,7 +387,7 @@ func TestCatalogPromptAdaptsToSkillToolAvailability(t *testing.T) {
 	catalog := Discover(Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}})
 	defer catalog.Close()
 	activationOnly := catalog.CatalogPromptForToolAvailability(false, false)
-	if strings.Contains(activationOnly, "read_skill_resource") || strings.Contains(activationOnly, "deactivate_skill") || !strings.Contains(activationOnly, "$skill-name") {
+	if strings.Contains(activationOnly, "read_skill_resource") || strings.Contains(activationOnly, "deactivate_skill") || !strings.Contains(activationOnly, "whitespace-delimited $skill-name token anywhere") {
 		t.Fatalf("activation-only catalog = %q", activationOnly)
 	}
 	full := catalog.CatalogPromptForToolAvailability(true, true)

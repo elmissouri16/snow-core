@@ -348,8 +348,8 @@ Plan and Goal contracts use embedded Markdown sources under `internal/plan` and
   vendor private SDK snapshots offline, and configuration has side-effect-free
   list/get plus add/enable/disable/remove management.
 - **Agent Skills:** strict open `SKILL.md` validation with metadata-only startup
-  context, TUI autocomplete for leading `$skill-name` or model-driven
-  activation, pinned on-demand resource confinement, and trust-aware precedence.
+  context, inline `$skill-name` autocomplete and explicit activation, pinned
+  on-demand resource confinement, and trust-aware precedence.
   The binary
   embeds `$plugin-builder`, a supervised workflow and template set for staging,
   validating, reviewing, and explicitly enabling agent-authored plugins.

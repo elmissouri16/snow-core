@@ -3,6 +3,8 @@ package tui
 import (
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -14,20 +16,22 @@ type skillCompletionItem struct {
 	Description string
 }
 
-// skillCompletionQuery recognizes only leading $skill directives. This mirrors
-// the agent activation contract and avoids offering completion for tokens in
-// ordinary or pasted prose. Multiple completed leading directives are allowed.
+// skillCompletionQuery recognizes a $skill token at the end of the editor.
+// Exact skill tokens earlier in the prompt are returned so the picker can omit
+// skills that are already selected. Activation uses the same whitespace token
+// boundaries across every input surface.
 func skillCompletionQuery(text string) (query string, start int, selected []string, ok bool) {
-	start = strings.LastIndexAny(text, " \t\n") + 1
-	if start >= len(text) || text[start] != '$' || strings.ContainsAny(text[start:], "\r\n") {
+	for index, r := range text {
+		if unicode.IsSpace(r) {
+			_, size := utf8.DecodeRuneInString(text[index:])
+			start = index + size
+		}
+	}
+	if start >= len(text) || text[start] != '$' {
 		return "", 0, nil, false
 	}
-	prefix := strings.TrimSpace(text[:start])
-	if prefix != "" {
-		for _, field := range strings.Fields(prefix) {
-			if len(field) < 2 || field[0] != '$' {
-				return "", 0, nil, false
-			}
+	for _, field := range strings.Fields(text[:start]) {
+		if len(field) >= 2 && field[0] == '$' {
 			selected = append(selected, field[1:])
 		}
 	}
@@ -75,15 +79,8 @@ func (m *Model) refreshSkillCompletionsFor(text string) {
 	}
 	catalog := m.app.Skills.List()
 	items := make([]skillCompletionItem, 0, len(catalog))
-	available := make(map[string]bool, len(catalog))
 	for _, skill := range catalog {
 		items = append(items, skillCompletionItem{Name: skill.Name, Description: skill.Description})
-		available[skill.Name] = true
-	}
-	for _, name := range selected {
-		if !available[name] {
-			return
-		}
 	}
 	m.skillMatches = matchSkillCompletions(items, query, selected)
 	m.skillVisible = len(m.skillMatches) > 0

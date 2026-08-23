@@ -427,7 +427,7 @@ type Model struct {
 	compIndex   int
 	compVisible bool
 
-	// Agent Skill completion state (for leading $skill-name directives).
+	// Agent Skill completion state (for $skill-name references).
 	skillMatches []skillCompletionItem
 	skillIndex   int
 	skillVisible bool

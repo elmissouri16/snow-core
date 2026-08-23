@@ -646,7 +646,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// --- Agent Skill picker: Enter/Tab insert a leading directive. ---
+	// --- Agent Skill picker: Enter/Tab complete the current $skill token. ---
 	if m.skillVisible {
 		msg = normalizePickerKeyWithMap(msg, m.keys)
 		switch msg.Type {

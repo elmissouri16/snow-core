@@ -331,11 +331,14 @@ Typing `@` in the composer starts asynchronous project-file discovery. Enter or
 Tab inserts the selected path without submitting the prompt. Discovery never
 follows symlink entries and respects Snow's search policy.
 
-Typing `$` at the beginning of the composer opens enabled Agent Skills
-completion. The picker shows each matching name and description; Enter or Tab
-inserts `$skill-name ` without submitting. It also completes another leading
-skill after an existing directive, such as `$review $docs `. Non-leading tokens
-in ordinary or pasted prose do not open the picker or activate a skill.
+Typing `$` after whitespace at the end of the composer opens enabled Agent
+Skills completion. The picker shows each matching name and description; Enter or Tab
+inserts `$skill-name ` at the current token without submitting. Exact,
+whitespace-delimited references activate installed skills in prompts such as
+`use $review for this change`; multiple references can appear in one prompt.
+Pasted text with an exact enabled `$skill-name` token also activates it, so wrap
+literal examples in backticks or attach punctuation when activation is not
+intended.
 
 Project `AGENTS.md` files are loaded nearest-first into bounded context. They
 are always treated as instructions, independently from project-extension trust.

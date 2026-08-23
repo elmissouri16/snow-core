@@ -528,7 +528,7 @@ func (r *Registry) CatalogPromptForToolAvailability(resourceReader, deactivator 
 }
 
 func catalogPromptPrefix(resourceReader, deactivator bool) string {
-	prefix := "The following Agent Skills provide specialized instructions. When a task matches a description, call activate_skill with its name before proceeding. A prompt beginning with $skill-name activates that skill directly. Relative paths are rooted at the activated skill directory."
+	prefix := "The following Agent Skills provide specialized instructions. When a task matches a description, call activate_skill with its name before proceeding. An exact whitespace-delimited $skill-name token anywhere in a user prompt activates that skill directly. Relative paths are rooted at the activated skill directory."
 	if resourceReader {
 		prefix += " Use read_skill_resource for referenced files."
 	}

@@ -418,7 +418,10 @@ are not signatures, capabilities, or sandboxes.
 
 Review a skill before enabling or activating it, especially when it recommends
 shell commands, package installation, network access, or secret-bearing tools.
-See [Agent Skills](skills.md).
+An exact, whitespace-delimited `$skill-name` token anywhere in user input is an
+explicit activation reference across TUI, print, RPC, and SDK surfaces. Treat
+pasted prompts accordingly; wrap literal skill-name examples in backticks or
+attach punctuation when activation is not intended. See [Agent Skills](skills.md).
 
 ### Subagents
 

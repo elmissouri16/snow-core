@@ -135,14 +135,17 @@ Snow follows all three disclosure tiers:
 
 1. Only each skill's name and description enter the startup system catalog.
 2. `activate_skill` loads the current `SKILL.md` body when the model decides a
-   task matches. A prompt, steer, or follow-up beginning with `$skill-name` is
-   treated as an explicit activation directive before the next provider
-   request, without relying on a model tool call. Requiring the directive at
-   the start avoids activating tokens embedded in pasted or quoted untrusted
-   text. In the TUI, typing a leading `$` opens autocomplete over enabled skill
-   names and descriptions; Enter or Tab inserts the selected directive without
-   submitting. `deactivate_skill` removes one named active skill, or `*` when
-   the user explicitly requests clearing all active skills.
+   task matches. An exact, whitespace-delimited `$skill-name` token anywhere in
+   a prompt, steer, or follow-up is treated as an explicit activation reference
+   before the next provider request, without relying on a model tool call. In
+   the TUI, typing `$` after whitespace at the end of the composer opens
+   autocomplete over enabled skill names and descriptions; Enter or Tab replaces
+   the current token without
+   submitting. Because inline references are intentional activation syntax,
+   pasted text containing an exact enabled `$skill-name` token activates it too;
+   wrap examples in backticks or attach punctuation when activation is not
+   intended. `deactivate_skill` removes one named active skill, or `*` when the
+   user explicitly requests clearing all active skills.
 3. `read_skill_resource` reads one referenced script, reference, or asset on
    demand. Filesystem skills use a pinned `os.Root`; each operation verifies
    the directory identity recorded at discovery, preventing traversal, symlink

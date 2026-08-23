@@ -647,11 +647,13 @@ func TestExplicitSkillDirectiveParsing(t *testing.T) {
 		want []string
 	}{
 		{"$review do work", []string{"review"}},
-		{"  $review $docs do work", []string{"review", "docs"}},
-		{"Use $review in pasted prose", nil},
-		{"quoted text\n$review", nil},
-		{"$reviewer", nil},
-		{"$review $review once", []string{"review"}},
+		{"Use $review to inspect this", []string{"review"}},
+		{"Use $review and $docs together", []string{"review", "docs"}},
+		{"quoted text\n$review", []string{"review"}},
+		{"Use\u2003$docs", []string{"docs"}},
+		{"Use `$review` as an example", nil},
+		{"Use $reviewer", nil},
+		{"Use $review then $review once", []string{"review"}},
 	} {
 		if got := explicitSkillNames(test.text, candidates); !slices.Equal(got, test.want) {
 			t.Errorf("explicitSkillNames(%q) = %v, want %v", test.text, got, test.want)
@@ -690,7 +692,7 @@ func TestExplicitSkillMentionActivatesAndRestoresWithoutModelToolCall(t *testing
 			eventMu.Unlock()
 		}
 	})
-	if err := first.Prompt(context.Background(), "$review Use this skill for the change."); err != nil {
+	if err := first.Prompt(context.Background(), "Use $review for this change."); err != nil {
 		t.Fatal(err)
 	}
 	if len(firstProvider.requests) != 1 || len(firstProvider.requests[0].Messages) != 1 || firstProvider.requests[0].Messages[0].Role != protocol.RoleUser || !strings.Contains(firstProvider.requests[0].System, "follow explicit review workflow") {

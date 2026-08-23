@@ -15,17 +15,21 @@ import (
 )
 
 func TestSkillCompletionQueryMatchingAndReplacement(t *testing.T) {
-	query, start, selected, ok := skillCompletionQuery("$re")
-	if !ok || query != "re" || start != 0 || len(selected) != 0 {
+	query, start, selected, ok := skillCompletionQuery("Use $re")
+	if !ok || query != "re" || start != len("Use ") || len(selected) != 0 {
 		t.Fatalf("first query = %q, %d, %v, %v", query, start, selected, ok)
 	}
-	query, start, selected, ok = skillCompletionQuery("  $review $do")
-	if !ok || query != "do" || start != len("  $review ") || len(selected) != 1 || selected[0] != "review" {
+	query, start, selected, ok = skillCompletionQuery("Use $review with $do")
+	if !ok || query != "do" || start != len("Use $review with ") || len(selected) != 1 || selected[0] != "review" {
 		t.Fatalf("second query = %q, %d, %v, %v", query, start, selected, ok)
 	}
-	for _, text := range []string{"Use $review", "quoted text\n$review", "@review"} {
+	query, start, selected, ok = skillCompletionQuery("Use\u2003$do")
+	if !ok || query != "do" || start != len("Use\u2003") || len(selected) != 0 {
+		t.Fatalf("unicode whitespace query = %q, %d, %v, %v", query, start, selected, ok)
+	}
+	for _, text := range []string{"Use `$review", "quoted text\n$review later", "@review"} {
 		if _, _, _, ok := skillCompletionQuery(text); ok {
-			t.Fatalf("ordinary text %q opened skill completion", text)
+			t.Fatalf("non-skill token %q opened skill completion", text)
 		}
 	}
 	items := []skillCompletionItem{{Name: "review", Description: "Review code."}, {Name: "release", Description: "Ship code."}, {Name: "docs", Description: "Write docs."}}
@@ -33,12 +37,12 @@ func TestSkillCompletionQueryMatchingAndReplacement(t *testing.T) {
 	if len(matches) != 1 || matches[0].Name != "review" {
 		t.Fatalf("matches = %+v", matches)
 	}
-	if got := replaceSkillCompletionToken("$re", 0, "review"); got != "$review " {
+	if got := replaceSkillCompletionToken("Use $re", len("Use "), "review"); got != "Use $review " {
 		t.Fatalf("replacement = %q", got)
 	}
 }
 
-func TestModelSkillCompletionInsertsLeadingDirectives(t *testing.T) {
+func TestModelSkillCompletionInsertsInlineReferences(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.width, m.height = 100, 30
@@ -55,7 +59,7 @@ func TestModelSkillCompletionInsertsLeadingDirectives(t *testing.T) {
 	}
 	m.app.Skills = skills.Discover(skills.Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}})
 
-	m.editor.SetValue("$re")
+	m.editor.SetValue("Use $re")
 	if cmd := m.refreshInputCompletions(); cmd != nil {
 		t.Fatal("skill completion unexpectedly scheduled asynchronous work")
 	}
@@ -66,32 +70,32 @@ func TestModelSkillCompletionInsertsLeadingDirectives(t *testing.T) {
 		t.Fatalf("skill picker rendering = %q", picker)
 	}
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if got := m.editor.Value(); got != "$review " {
+	if got := m.editor.Value(); got != "Use $review " {
 		t.Fatalf("editor after skill completion = %q", got)
 	}
 	if m.skillVisible || m.busy {
 		t.Fatalf("skill picker submit state = visible %v busy %v", m.skillVisible, m.busy)
 	}
 
-	m.editor.SetValue("$review $d")
+	m.editor.SetValue("Use $review with $d")
 	m.refreshInputCompletions()
 	if !m.skillVisible || len(m.skillMatches) != 1 || m.skillMatches[0].Name != "docs" {
-		t.Fatalf("second directive picker = visible %v matches %+v", m.skillVisible, m.skillMatches)
+		t.Fatalf("second reference picker = visible %v matches %+v", m.skillVisible, m.skillMatches)
 	}
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
-	if got := m.editor.Value(); got != "$review $docs " {
+	if got := m.editor.Value(); got != "Use $review with $docs " {
 		t.Fatalf("editor after second skill completion = %q", got)
 	}
 
 	m.editor.SetValue("Use $re in pasted prose")
 	m.refreshInputCompletions()
 	if m.skillVisible {
-		t.Fatal("ordinary prose opened the skill picker")
+		t.Fatal("non-current skill token opened the picker")
 	}
-	m.editor.SetValue("$unknown $re")
+	m.editor.SetValue("Use $unknown then $re")
 	m.refreshInputCompletions()
-	if m.skillVisible {
-		t.Fatal("unknown prior directive opened a completion that could not activate")
+	if !m.skillVisible || len(m.skillMatches) != 1 || m.skillMatches[0].Name != "review" {
+		t.Fatalf("unknown prior token suppressed inline completion: %+v", m.skillMatches)
 	}
 
 	m.busy = true
