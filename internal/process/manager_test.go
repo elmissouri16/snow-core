@@ -183,6 +183,134 @@ func TestManagerCloseKillsDescendantGroup(t *testing.T) {
 	}
 }
 
+func TestManagerRebindKillsDescendantGroup(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "escaped-after-switch")
+	manager := testManager(t)
+	command := fmt.Sprintf("(trap '' TERM; sleep 3; printf escaped > %q) & wait", marker)
+	state, err := manager.Start(context.Background(), StartRequest{Command: command}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := manager.lookup(state.ProcessID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.RebindSession(context.Background(), "session-two"); err != nil {
+		t.Fatal(err)
+	}
+	stopped := record.state()
+	if stopped.Status != "stopped" || stopped.Reason != "session_switch" {
+		t.Fatalf("stopped state = %+v", stopped)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("managed descendant survived session switch: %v", err)
+	}
+}
+
+func TestManagerRebindStopsLiveGroupAfterLeaderExit(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "escaped-after-leader")
+	manager := testManager(t)
+	command := fmt.Sprintf("(sleep 3; printf escaped > %q) >/dev/null 2>&1 &", marker)
+	state, err := manager.Start(context.Background(), StartRequest{Command: command}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := manager.lookup(state.ProcessID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for record.state().Status == "running" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if record.state().Status == "running" || !record.hasLiveGroup() {
+		t.Fatalf("test did not produce terminal leader with live group: state=%+v live=%t", record.state(), record.hasLiveGroup())
+	}
+	if err := manager.RebindSession(context.Background(), "session-two"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(3200 * time.Millisecond)
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("descendant of terminal leader survived session switch: %v", err)
+	}
+}
+
+func TestManagerFailedRebindRetainsOldInventoryForRetry(t *testing.T) {
+	manager := testManager(t)
+	state, err := manager.Start(context.Background(), StartRequest{
+		Command:   "(trap '' TERM; printf READY; sleep 10) & wait",
+		Readiness: &ReadinessRequest{Type: "log", Pattern: "READY", TimeoutMS: 1000},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := manager.RebindSession(ctx, "session-two"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("rebind error = %v", err)
+	}
+	manager.mu.Lock()
+	sessionID := manager.sessionID
+	manager.mu.Unlock()
+	if sessionID != "session-one" {
+		t.Fatalf("session id = %q, want session-one", sessionID)
+	}
+	stopped, err := manager.Status(state.ProcessID)
+	if err != nil {
+		t.Fatalf("old inventory unavailable after failed rebind: %v", err)
+	}
+	if stopped.Status != "stopped" || stopped.Reason != "session_switch" {
+		t.Fatalf("stopped state = %+v", stopped)
+	}
+	if err := manager.RebindSession(context.Background(), "session-two"); err != nil {
+		t.Fatalf("retry rebind: %v", err)
+	}
+	if _, err := manager.Status(state.ProcessID); err == nil {
+		t.Fatal("old inventory remained after successful retry")
+	}
+}
+
+func TestManagerCloseDuringRebindPreventsNewStartsAndBinding(t *testing.T) {
+	manager := testManager(t)
+	if _, err := manager.Start(context.Background(), StartRequest{
+		Command:   "(trap '' TERM; printf READY; sleep 10) & wait",
+		Readiness: &ReadinessRequest{Type: "log", Pattern: "READY", TimeoutMS: 1000},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	rebindDone := make(chan error, 1)
+	go func() { rebindDone <- manager.RebindSession(context.Background(), "session-two") }()
+	deadline := time.Now().Add(time.Second)
+	for {
+		manager.mu.Lock()
+		rebinding := manager.rebinding
+		manager.mu.Unlock()
+		if rebinding {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("rebind did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := manager.Start(context.Background(), StartRequest{Command: "sleep 10"}, nil); err == nil || !strings.Contains(err.Error(), "session switch") {
+		t.Fatalf("start during rebind error = %v", err)
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := manager.Close(closeCtx); err != nil {
+		t.Fatalf("close during rebind: %v", err)
+	}
+	if err := <-rebindDone; err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("rebind after close error = %v", err)
+	}
+	if err := manager.BindSession("session-three"); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("bind after close error = %v", err)
+	}
+}
+
 func TestManagerStopCancellationEscalatesImmediately(t *testing.T) {
 	manager := testManager(t)
 	state, err := manager.Start(context.Background(), StartRequest{
@@ -204,25 +332,32 @@ func TestManagerStopCancellationEscalatesImmediately(t *testing.T) {
 	}
 }
 
-func TestManagerBlocksSessionRebindAndEnforcesLimit(t *testing.T) {
+func TestManagerRebindStopsProcessesClearsInventoryAndEnforcesLimit(t *testing.T) {
 	manager := testManager(t, func(opts *Options) { opts.MaxRunning = 1 })
 	state, err := manager.Start(context.Background(), StartRequest{Command: "sleep 10", Name: "one"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.BindSession("session-two"); err == nil {
-		t.Fatal("session rebind succeeded with running process")
+		t.Fatal("plain session bind succeeded with running process")
 	}
 	if _, err := manager.Start(context.Background(), StartRequest{Command: "sleep 10", Name: "two"}, nil); err == nil || !strings.Contains(err.Error(), "limit") {
 		t.Fatalf("limit error = %v", err)
 	}
-	if _, err := manager.Stop(context.Background(), state.ProcessID, 50*time.Millisecond); err != nil {
+	if err := manager.RebindSession(context.Background(), "session-two"); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.BindSession("session-two"); err != nil {
-		t.Fatal(err)
+	if manager.HasRunning() {
+		t.Fatal("process remained running after session rebind")
 	}
 	if _, err := manager.Status(state.ProcessID); err == nil {
 		t.Fatal("old-session process handle remained visible")
+	}
+	replacement, err := manager.Start(context.Background(), StartRequest{Command: "sleep 10", Name: "two"}, nil)
+	if err != nil {
+		t.Fatalf("start after rebind: %v", err)
+	}
+	if _, err := manager.Stop(context.Background(), replacement.ProcessID, 50*time.Millisecond); err != nil {
+		t.Fatal(err)
 	}
 }

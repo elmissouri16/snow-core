@@ -575,12 +575,13 @@ The model-facing result is ordered JSON.
 The five managed-process schemas are also direct built-ins. One app-owned
 `internal/process.Manager` outlives individual tool calls and continuously
 drains child output while the serial agent loop proceeds. Processes are scoped
-to the active session but shared by its branches; active children block session
-switching, while forks never copy handles. `App.Close` closes agent admission,
-then terminates and reaps managed groups before session/path resources. State is
-not reconstructed from persisted PIDs after restart. The global `processes`
-configuration bounds concurrent children, retained terminal records, and output
-per record; individual child lifetime is deliberately the owning app lifetime.
+to the active session but shared by its branches; switching root sessions stops
+and reaps every managed group before clearing the old inventory, while forks
+never copy handles. `App.Close` closes agent admission, then terminates and reaps
+managed groups before session/path resources. State is not reconstructed from
+persisted PIDs after restart. The global `processes` configuration bounds
+concurrent children, retained terminal records, and output per record; individual
+child lifetime ends on natural exit, explicit stop, session switch, or app close.
 
 ### Tool interfaces
 

@@ -249,7 +249,9 @@ silently prunes temporarily unavailable or removable project paths.
 The global-only `processes` limits bound managed development servers and their
 in-memory output tails. Project configuration cannot raise them. Individual
 processes have no wall-clock deadline: they run until natural exit,
-`process_stop`, or normal app shutdown. `process_logs.max_bytes` remains capped
+`process_stop`, a session switch, or normal app shutdown. Session switching
+stops and clears the active managed-process inventory.
+`process_logs.max_bytes` remains capped
 by `tool_output_bytes`; log waits, readiness checks, stop grace, and shutdown
 also have fixed runtime bounds.
 

@@ -622,8 +622,10 @@ lower-level interactive host, which `pkg/snowsdk` does not currently expose.
 stdio MCP servers, file tools, Bash, managed-process starts/stops, and subagents
 execute with their documented host privileges. An empty `Tools` list exposes
 all five managed-process tools by default; `process_start` can keep a host
-command alive across later prompts until `process_stop`, process exit, or normal
-app shutdown. Handles are runtime-local and crashes cannot guarantee cleanup.
+command alive across later prompts until `process_stop`, process exit, session
+switch, or normal app shutdown. Session switching stops and clears every managed
+process before binding the new session. Handles are runtime-local and crashes
+cannot guarantee cleanup.
 Snow has no built-in process sandbox; use external isolation when containment is
 required. Subagents share filesystem and process side effects but do not receive
 the managed-process tools in v1. Project trust controls input loading, not

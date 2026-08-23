@@ -44,7 +44,7 @@ func TestAppCloseStopsManagedProcessDescendants(t *testing.T) {
 	}
 }
 
-func TestAppSessionSwitchBlockedWhileManagedProcessRuns(t *testing.T) {
+func TestAppSessionSwitchStopsAndClearsManagedProcesses(t *testing.T) {
 	app := newProcessTestApp(t, nil)
 	defer app.Close()
 	state, err := app.ProcessManager.Start(context.Background(), managedprocess.StartRequest{Command: "sleep 10"}, nil)
@@ -52,17 +52,21 @@ func TestAppSessionSwitchBlockedWhileManagedProcessRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	next := session.NewMemoryStore(session.Options{CWD: t.TempDir()})
-	if err := app.SetSession(next); err == nil || !strings.Contains(err.Error(), "managed processes") {
-		t.Fatalf("session switch error = %v", err)
-	}
-	if _, err := app.ProcessManager.Stop(context.Background(), state.ProcessID, 50*time.Millisecond); err != nil {
-		t.Fatal(err)
-	}
 	if err := app.SetSession(next); err != nil {
-		t.Fatal(err)
+		t.Fatalf("session switch: %v", err)
+	}
+	if app.ProcessManager.HasRunning() {
+		t.Fatal("managed process still running after session switch")
 	}
 	if _, err := app.ProcessManager.Status(state.ProcessID); err == nil {
-		t.Fatal("old session process remained visible after rebind")
+		t.Fatal("old session process remained visible after switch")
+	}
+	replacement, err := app.ProcessManager.Start(context.Background(), managedprocess.StartRequest{Command: "sleep 10", Name: "new-session"}, nil)
+	if err != nil {
+		t.Fatalf("start process in new session: %v", err)
+	}
+	if _, err := app.ProcessManager.Stop(context.Background(), replacement.ProcessID, 50*time.Millisecond); err != nil {
+		t.Fatal(err)
 	}
 }
 

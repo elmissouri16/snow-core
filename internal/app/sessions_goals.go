@@ -13,6 +13,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/config"
 	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
 	"github.com/elmissouri16/snow-core/internal/permission"
+	managedprocess "github.com/elmissouri16/snow-core/internal/process"
 	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -60,18 +61,12 @@ func (a *App) SetSession(st session.Store) error {
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return errors.New("app: cannot switch session while subagents are active")
 	}
-	if a.ProcessManager != nil && a.ProcessManager.HasRunning() {
-		return errors.New("app: cannot switch session while managed processes are running")
-	}
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return errors.New("app: cannot switch session while subagents are active")
-	}
-	if a.ProcessManager != nil && a.ProcessManager.HasRunning() {
-		return errors.New("app: cannot switch session while managed processes are running")
 	}
 	if st == nil {
 		return fmt.Errorf("app: session is nil")
@@ -108,16 +103,28 @@ func (a *App) SetSession(st session.Store) error {
 		}
 	}
 	if a.ProcessManager != nil {
-		if err := a.ProcessManager.BindSession(st.ID()); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), managedprocess.DefaultShutdownTimeout)
+		err := a.ProcessManager.RebindSession(ctx, st.ID())
+		cancel()
+		if err != nil {
+			rollbackErrs := make([]error, 0, 4)
 			if a.Subagents != nil {
 				if oldTasks, ok := old.(session.SubagentTaskStore); ok {
-					_ = a.Subagents.SetStoreAdmitted(oldTasks)
+					if rollbackErr := a.Subagents.SetStoreAdmitted(oldTasks); rollbackErr != nil {
+						rollbackErrs = append(rollbackErrs, fmt.Errorf("restore subagent store: %w", rollbackErr))
+					}
 				}
 			}
-			_ = a.Goal.SetStore(old)
-			_ = a.Agent.SetSessionQuietAdmitted(old)
-			_ = a.bindPermissionSession(old)
-			return err
+			if rollbackErr := a.Goal.SetStore(old); rollbackErr != nil {
+				rollbackErrs = append(rollbackErrs, fmt.Errorf("restore goal store: %w", rollbackErr))
+			}
+			if rollbackErr := a.Agent.SetSessionQuietAdmitted(old); rollbackErr != nil {
+				rollbackErrs = append(rollbackErrs, fmt.Errorf("restore agent session: %w", rollbackErr))
+			}
+			if rollbackErr := a.bindPermissionSession(old); rollbackErr != nil {
+				rollbackErrs = append(rollbackErrs, fmt.Errorf("restore permission session: %w", rollbackErr))
+			}
+			return errors.Join(err, errors.Join(rollbackErrs...))
 		}
 	}
 	a.Agent.ResetTurnIdentityAdmitted()

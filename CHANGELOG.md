@@ -18,8 +18,10 @@ also include the generated GitHub comparison for the tagged commit.
   `process_stop`, and `process_list` tools for session-scoped development
   servers. Starts/stops use `exec` permission; inspection uses `read` permission;
   global count/record/output limits default to 4/32/1 MiB; optional loopback
-  TCP/HTTP and log readiness is bounded; normal Snow shutdown stops and reaps
-  managed process groups without persisting or reattaching PIDs. The TUI now
+  TCP/HTTP and log readiness is bounded; session switching and normal Snow
+  shutdown stop and reap managed process groups without persisting or
+  reattaching PIDs. Session switches also clear the old runtime inventory
+  instead of requiring users to stop each process manually. The TUI now
   exposes `/processes [id|name]`, an auto-refreshing fleet-style inspector with
   a selectable process list and escaped, scrollable combined stdout/stderr.
   `Alt+P` opens the process fleet and `Alt+A` opens the subagent fleet, including

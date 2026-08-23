@@ -72,9 +72,12 @@ Managed background-process state is deliberately runtime-owned rather than a
 SQLite table. Processes are shared by branches in the active session, and their
 ordinary start/status/log/stop tool results remain historical messages, but
 opaque process handles are not resumable and PIDs are never persisted as
-ownership. A session switch is rejected while a managed process is running;
-after every process is terminal, switching sessions clears the old runtime
-inventory. Same-session branch operations remain available, while independent
+ownership. Switching sessions stops and reaps every running managed process,
+then clears the old runtime inventory before binding the new session. If cleanup
+cannot complete within its bounded timeout, the switch fails rather than letting
+an old process escape session ownership. The old inventory remains available
+for inspection or retry, but processes already stopped during the attempt stay
+terminal. Same-session branch operations remain available, while independent
 session and worktree forks do not inherit process handles. `--no-session`
 provides the same behavior for the lifetime of its in-memory app.
 

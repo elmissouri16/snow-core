@@ -179,10 +179,12 @@ URL, or pattern. Snow does not claim that a server is ready without evidence:
   strings, environment values, or OS PIDs.
 
 These processes continue while later agent turns edit files or run checks. They
-share all branches in the active session and stop on normal Snow shutdown.
-Session switching is blocked while one is running. Handles do not survive a
-restart, independent fork, crash, or `SIGKILL`, and intentionally daemonized
-children may escape cleanup. Standard input is `/dev/null`; interactive process
+share all branches in the active session and stop on explicit request, session
+switch, or normal Snow shutdown. A session switch stops and reaps every managed
+process and clears its runtime inventory before binding the new session. If that
+bounded cleanup fails, the switch fails rather than orphaning old-session work.
+Handles do not survive a restart, independent fork, crash, or `SIGKILL`, and
+intentionally daemonized children may escape cleanup. Standard input is `/dev/null`; interactive process
 control and live pushed logs are not supported.
 
 The full-screen viewport keeps a bounded recent render cache (up to 2,000

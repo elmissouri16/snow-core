@@ -69,7 +69,7 @@ func (p *runtimeProcess) wait() {
 	if p.reason == "" {
 		p.reason = "natural"
 	}
-	if p.reason == "stop_requested" || p.reason == "shutdown" || p.reason == "readiness_failed" || p.reason == "start_cancelled" {
+	if p.reason == "stop_requested" || p.reason == "session_switch" || p.reason == "shutdown" || p.reason == "readiness_failed" || p.reason == "start_cancelled" {
 		p.status = "stopped"
 	} else {
 		p.status = "exited"
@@ -85,10 +85,11 @@ func (p *runtimeProcess) wait() {
 	close(p.done)
 }
 
-func (p *runtimeProcess) isRunning() bool {
+func (p *runtimeProcess) hasLiveGroup() bool {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.status == "running"
+	cmd := p.cmd
+	p.mu.Unlock()
+	return cmd != nil && cmd.Process != nil && procgroup.Exists(cmd.Process)
 }
 
 func (p *runtimeProcess) markReady() {
@@ -121,17 +122,8 @@ func (p *runtimeProcess) stop(ctx context.Context, grace time.Duration, reason s
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	select {
-	case <-p.done:
-		return nil
-	default:
-	}
 	p.mu.Lock()
-	if p.status != "running" {
-		p.mu.Unlock()
-		return nil
-	}
-	if p.reason == "" {
+	if p.status == "running" && p.reason == "" {
 		p.reason = reason
 	}
 	cmd := p.cmd
@@ -139,32 +131,41 @@ func (p *runtimeProcess) stop(ctx context.Context, grace time.Duration, reason s
 	if cmd == nil || cmd.Process == nil {
 		return errors.New("managed process was not started")
 	}
+	if !procgroup.Exists(cmd.Process) {
+		return nil
+	}
 	terminateErr := procgroup.Terminate(cmd.Process)
-	timer := time.NewTimer(grace)
-	defer timer.Stop()
-	cancelErr := error(nil)
-	select {
-	case <-p.done:
-		// The shell leader may exit before descendants finish graceful cleanup.
-		// Return immediately only when the complete process group is gone.
-		if !procgroup.Exists(cmd.Process) {
-			return ignoreExpectedExitError(terminateErr)
-		}
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			cancelErr = ctx.Err()
-		}
-	case <-timer.C:
-	case <-ctx.Done():
-		cancelErr = ctx.Err()
+	exited, cancelErr := waitForProcessGroupExit(ctx, cmd.Process, grace)
+	if exited {
+		return ignoreExpectedExitError(terminateErr)
 	}
 	killErr := procgroup.Kill(cmd.Process)
-	select {
-	case <-p.done:
-		return errors.Join(cancelErr, ignoreExpectedExitError(terminateErr), ignoreExpectedExitError(killErr))
-	case <-time.After(DefaultStopGrace):
+	exited, _ = waitForProcessGroupExit(context.Background(), cmd.Process, DefaultStopGrace)
+	if !exited {
 		return errors.Join(cancelErr, ignoreExpectedExitError(terminateErr), ignoreExpectedExitError(killErr), fmt.Errorf("managed process %s did not exit after kill", p.id))
+	}
+	return errors.Join(cancelErr, ignoreExpectedExitError(terminateErr), ignoreExpectedExitError(killErr))
+}
+
+func waitForProcessGroupExit(ctx context.Context, process *os.Process, timeout time.Duration) (bool, error) {
+	if !procgroup.Exists(process) {
+		return true, nil
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if !procgroup.Exists(process) {
+				return true, nil
+			}
+		case <-timer.C:
+			return !procgroup.Exists(process), nil
+		case <-ctx.Done():
+			return !procgroup.Exists(process), ctx.Err()
+		}
 	}
 }
 

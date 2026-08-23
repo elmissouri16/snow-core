@@ -205,10 +205,13 @@ commands are intentionally absent from inventories, state results, and
 lifecycle diagnostics.
 
 Managed processes live across turns and branches in one active session but are
-not reconstructed from PIDs or session history. Session switching is rejected
-while one runs. Normal app shutdown sends group termination, escalates to group
-kill, and reaps children. External plugins and stdio MCP servers also start as
-process-group leaders; after their protocol-level graceful shutdown, Snow
+not reconstructed from PIDs or session history. Session switching sends group
+termination, escalates to group kill, reaps children, and clears the old runtime
+inventory before binding the new session. Cleanup is bounded; on failure the
+switch fails and retains the old inventory for inspection or retry, although
+processes already stopped during that attempt remain terminal. Normal app
+shutdown performs the same group cleanup. External plugins and stdio MCP
+servers also start as process-group leaders; after their protocol-level graceful shutdown, Snow
 terminates and then kills any remaining group descendants within bounded waits.
 A Snow `SIGKILL`, host crash, or command that creates a new session/process group
 can still leave work behind; Snow never claims durable supervisor semantics or

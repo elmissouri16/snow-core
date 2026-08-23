@@ -88,6 +88,7 @@ type Manager struct {
 	sessionID string
 	records   map[string]*runtimeProcess
 	order     []string
+	rebinding bool
 	closed    bool
 	closeOnce sync.Once
 	closeDone chan struct{}
@@ -119,13 +120,64 @@ func (m *Manager) BindSession(sessionID string) error {
 	if m.closed {
 		return errors.New("process manager is closed")
 	}
-	if m.hasRunningLocked() {
-		return errors.New("process manager: cannot switch session while processes are running")
+	if m.rebinding {
+		return errors.New("process manager: session switch already in progress")
 	}
+	if m.hasRunningLocked() {
+		return errors.New("process manager: cannot bind session while processes are running")
+	}
+	m.bindSessionLocked(sessionID)
+	return nil
+}
+
+// RebindSession stops every running process owned by the current session,
+// clears its runtime-only inventory, and binds the manager to sessionID.
+func (m *Manager) RebindSession(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return errors.New("process manager: session id is empty")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return errors.New("process manager is closed")
+	}
+	if m.rebinding {
+		m.mu.Unlock()
+		return errors.New("process manager: session switch already in progress")
+	}
+	m.rebinding = true
+	records := make([]*runtimeProcess, 0, len(m.records))
+	for _, record := range m.records {
+		if record.hasLiveGroup() {
+			records = append(records, record)
+		}
+	}
+	m.mu.Unlock()
+
+	err := stopProcessRecords(ctx, records, DefaultStopGrace, "session_switch")
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rebinding = false
+	if err != nil {
+		return fmt.Errorf("process manager: stop processes for session switch: %w", err)
+	}
+	if m.closed {
+		return errors.New("process manager is closed")
+	}
+	m.bindSessionLocked(sessionID)
+	return nil
+}
+
+func (m *Manager) bindSessionLocked(sessionID string) {
 	m.sessionID = sessionID
 	m.records = make(map[string]*runtimeProcess)
 	m.order = nil
-	return nil
 }
 
 func (m *Manager) HasRunning() bool {
@@ -136,7 +188,7 @@ func (m *Manager) HasRunning() bool {
 
 func (m *Manager) hasRunningLocked() bool {
 	for _, record := range m.records {
-		if record.isRunning() {
+		if record.hasLiveGroup() {
 			return true
 		}
 	}
@@ -229,12 +281,15 @@ func (m *Manager) admitLocked(record *runtimeProcess) error {
 	if m.closed {
 		return errors.New("process manager is closed")
 	}
+	if m.rebinding {
+		return errors.New("process manager: session switch in progress")
+	}
 	if m.sessionID == "" {
 		return errors.New("process manager is not bound to a session")
 	}
 	running := 0
 	for _, existing := range m.records {
-		if existing.isRunning() {
+		if existing.hasLiveGroup() {
 			running++
 			if existing.name == record.name {
 				return fmt.Errorf("process start: running process name %q already exists", record.name)
@@ -392,7 +447,7 @@ func (m *Manager) evictTerminalLocked() {
 		removed := false
 		for i, id := range m.order {
 			record := m.records[id]
-			if record != nil && !record.isRunning() {
+			if record != nil && !record.hasLiveGroup() {
 				delete(m.records, id)
 				m.order = append(m.order[:i], m.order[i+1:]...)
 				removed = true
@@ -405,6 +460,27 @@ func (m *Manager) evictTerminalLocked() {
 	}
 }
 
+func stopProcessRecords(ctx context.Context, records []*runtimeProcess, grace time.Duration, reason string) error {
+	var wg sync.WaitGroup
+	errs := make(chan error, len(records))
+	for _, record := range records {
+		wg.Add(1)
+		go func(record *runtimeProcess) {
+			defer wg.Done()
+			if err := record.stop(ctx, grace, reason); err != nil {
+				errs <- err
+			}
+		}(record)
+	}
+	wg.Wait()
+	close(errs)
+	var joined []error
+	for err := range errs {
+		joined = append(joined, err)
+	}
+	return errors.Join(joined...)
+}
+
 func (m *Manager) Close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -414,31 +490,15 @@ func (m *Manager) Close(ctx context.Context) error {
 		m.closed = true
 		records := make([]*runtimeProcess, 0, len(m.records))
 		for _, record := range m.records {
-			if record.isRunning() {
+			if record.hasLiveGroup() {
 				records = append(records, record)
 			}
 		}
 		m.mu.Unlock()
 		go func() {
-			var wg sync.WaitGroup
-			errs := make(chan error, len(records))
-			for _, record := range records {
-				wg.Add(1)
-				go func(record *runtimeProcess) {
-					defer wg.Done()
-					if err := record.stop(context.Background(), DefaultStopGrace, "shutdown"); err != nil {
-						errs <- err
-					}
-				}(record)
-			}
-			wg.Wait()
-			close(errs)
-			var joined []error
-			for err := range errs {
-				joined = append(joined, err)
-			}
+			err := stopProcessRecords(context.Background(), records, DefaultStopGrace, "shutdown")
 			m.mu.Lock()
-			m.closeErr = errors.Join(joined...)
+			m.closeErr = err
 			m.mu.Unlock()
 			close(m.closeDone)
 		}()
