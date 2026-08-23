@@ -158,8 +158,14 @@ compact `✓ <command> · <duration>` transcript summary followed by any command
 output. Long or multiline commands are reduced to one truncated display row;
 routine start and finished progress events do not consume separate rows.
 
-For development servers that must outlive one tool call, the model can use the
-managed-process family instead of shell `&`:
+Snow's default tool guidance routes development servers, preview servers, file
+watchers, background workers, and similar long-running commands to the managed-
+process family instead of Bash or shell backgrounding (`&`, `nohup`, or
+`disown`). It uses stable names and checks the active process list to avoid
+starting duplicates. When project configuration or command output provides a
+reliable readiness signal, Snow waits for loopback HTTP, TCP, or log readiness;
+otherwise it verifies startup through status and logs without guessing a port,
+URL, or pattern. Snow does not claim that a server is ready without evidence:
 
 - `process_start` launches a non-interactive POSIX command in the project and
   returns an opaque process ID. It can optionally wait up to 120 seconds for a

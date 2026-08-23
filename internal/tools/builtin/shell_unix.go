@@ -12,5 +12,5 @@ func shellCommand(ctx context.Context, command string, _ []string, _ string) (*e
 }
 
 func shellDescription() string {
-	return "Run a non-interactive POSIX shell command in the working directory."
+	return "Run a bounded, non-interactive one-shot POSIX shell command in the working directory. Use process_start instead for development servers, watchers, background workers, and other long-running commands; never background them with &, nohup, or disown."
 }

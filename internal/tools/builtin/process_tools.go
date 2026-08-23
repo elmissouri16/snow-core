@@ -47,15 +47,16 @@ type processStartArgs struct {
 func (t *processStartTool) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "process_start",
-		Description: "Start a managed non-interactive background process. It runs across later turns and is stopped when Snow closes.",
+		Description: "Prefer this for development servers, preview servers, watchers, background workers, and other long-running commands. Starts one managed non-interactive process that persists across later turns and stops when Snow closes; use a stable name and a reliable readiness check when inferable.",
 		Parameters: json.RawMessage(`{
   "type":"object",
   "additionalProperties":false,
   "required":["command"],
   "properties":{
-    "command":{"type":"string","description":"Non-interactive POSIX shell command to run in the project directory."},
-    "name":{"type":"string","pattern":"^[a-z][a-z0-9_-]{0,63}$","description":"Optional safe display name, unique among running processes."},
+    "command":{"type":"string","description":"Non-interactive POSIX shell command to run in the project directory without shell backgrounding such as trailing &, nohup, or disown."},
+    "name":{"type":"string","pattern":"^[a-z][a-z0-9_-]{0,63}$","description":"Optional stable safe display name, unique among running processes."},
     "readiness":{
+      "description":"Optional reliable startup evidence. Infer from project configuration or command output; do not guess ports, URLs, or patterns.",
       "oneOf":[
         {"type":"object","additionalProperties":false,"required":["type","port"],"properties":{"type":{"const":"tcp"},"host":{"type":"string","description":"Loopback host; defaults to 127.0.0.1."},"port":{"type":"integer","minimum":1,"maximum":65535},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000,"default":30000}}},
         {"type":"object","additionalProperties":false,"required":["type","url"],"properties":{"type":{"const":"http"},"url":{"type":"string","description":"Absolute loopback HTTP(S) readiness URL."},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000,"default":30000}}},
@@ -185,7 +186,7 @@ func (t *processStopTool) Run(ctx context.Context, args json.RawMessage, host to
 type processListTool struct{ manager *managedprocess.Manager }
 
 func (t *processListTool) Schema() tools.ToolSchema {
-	return tools.ToolSchema{Name: "process_list", Description: "List bounded secret-safe metadata for managed processes in the active session.", Parameters: json.RawMessage(`{"type":"object","additionalProperties":false}`)}
+	return tools.ToolSchema{Name: "process_list", Description: "List bounded secret-safe metadata for managed processes in the active session. Check stable names before starting a development server or watcher to avoid duplicates.", Parameters: json.RawMessage(`{"type":"object","additionalProperties":false}`)}
 }
 
 func (t *processListTool) Run(context.Context, json.RawMessage, tools.ToolHost) (tools.ToolResult, error) {

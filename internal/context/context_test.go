@@ -8,8 +8,10 @@ import (
 )
 
 func TestDefaultPreambleIsEmbeddedMarkdown(t *testing.T) {
-	if !strings.Contains(DefaultPreamble, "You are snow") {
-		t.Fatalf("embedded preamble = %q", DefaultPreamble)
+	for _, want := range []string{"You are snow", "Use process_start instead of bash for development servers", "check process_list to avoid duplicates", "never claim readiness without evidence"} {
+		if !strings.Contains(DefaultPreamble, want) {
+			t.Fatalf("embedded preamble missing %q: %q", want, DefaultPreamble)
+		}
 	}
 }
 

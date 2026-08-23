@@ -17,6 +17,15 @@ func runBash(b *Bash, dir string, args map[string]any) tools.ToolResult {
 	return res
 }
 
+func TestBashSchemaDirectsLongRunningCommandsToProcessStart(t *testing.T) {
+	description := NewBash().Schema().Description
+	for _, want := range []string{"bounded", "one-shot", "process_start", "development servers", "watchers"} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("bash description missing %q: %q", want, description)
+		}
+	}
+}
+
 func TestBash_SimpleCommand(t *testing.T) {
 	dir := t.TempDir()
 	b := NewBash()
