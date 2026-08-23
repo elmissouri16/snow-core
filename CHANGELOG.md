@@ -29,6 +29,11 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- Changed managed-process startup guidance to treat a stable log marker as
+  sufficient readiness evidence. Snow now prefers log readiness and does not
+  add an HTTP or TCP probe merely to reconfirm a process that announced it is
+  ready; network probes remain available when network health is explicitly
+  required or no reliable log marker exists.
 - Changed the `Ctrl+T` thinking shortcut to cycle directly through the active
   model's supported efforts instead of opening a picker or adding transcript
   entries. The header/footer briefly highlights each change, while `/thinking`

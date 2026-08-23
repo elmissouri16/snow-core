@@ -38,15 +38,22 @@ func TestRegisterProcessToolsContractsAndRisks(t *testing.T) {
 		}
 	}
 	start, _ := registry.Descriptor("process_start")
-	for _, phrase := range []string{"development servers", "watchers", "long-running commands", "stable name", "readiness check"} {
+	for _, phrase := range []string{"development servers", "watchers", "long-running commands", "stable name", "startup log marker is sufficient", "prefer log readiness", "do not reconfirm"} {
 		if !strings.Contains(start.Schema.Description, phrase) {
 			t.Fatalf("process_start description missing %q: %q", phrase, start.Schema.Description)
 		}
 	}
-	for _, phrase := range []string{"startup evidence", "do not guess", "without shell backgrounding"} {
-		if !strings.Contains(string(start.Schema.Parameters), phrase) {
-			t.Fatalf("process_start parameters missing %q: %s", phrase, start.Schema.Parameters)
+	parameters := string(start.Schema.Parameters)
+	for _, phrase := range []string{"startup evidence", "stable log marker is sufficient and preferred", "explicitly requests service/network health", "no reliable log marker exists", "do not guess", "without shell backgrounding"} {
+		if !strings.Contains(parameters, phrase) {
+			t.Fatalf("process_start parameters missing %q: %s", phrase, parameters)
 		}
+	}
+	logOption := strings.Index(parameters, `"const":"log"`)
+	tcpOption := strings.Index(parameters, `"const":"tcp"`)
+	httpOption := strings.Index(parameters, `"const":"http"`)
+	if logOption < 0 || tcpOption < 0 || httpOption < 0 || logOption > tcpOption || logOption > httpOption {
+		t.Fatalf("log readiness must be presented first: %s", parameters)
 	}
 	list, _ := registry.Descriptor("process_list")
 	if !strings.Contains(list.Schema.Description, "avoid duplicates") {

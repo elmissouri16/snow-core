@@ -47,7 +47,7 @@ type processStartArgs struct {
 func (t *processStartTool) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "process_start",
-		Description: "Prefer this for development servers, preview servers, watchers, background workers, and other long-running commands. Starts one managed non-interactive process that persists across later turns and stops when Snow closes; use a stable name and a reliable readiness check when inferable.",
+		Description: "Prefer this for development servers, preview servers, watchers, background workers, and other long-running commands. Starts one managed non-interactive process that persists across later turns and stops when Snow closes; use a stable name. A stable startup log marker is sufficient readiness evidence: prefer log readiness and do not reconfirm it with TCP or HTTP.",
 		Parameters: json.RawMessage(`{
   "type":"object",
   "additionalProperties":false,
@@ -56,11 +56,11 @@ func (t *processStartTool) Schema() tools.ToolSchema {
     "command":{"type":"string","description":"Non-interactive POSIX shell command to run in the project directory without shell backgrounding such as trailing &, nohup, or disown."},
     "name":{"type":"string","pattern":"^[a-z][a-z0-9_-]{0,63}$","description":"Optional stable safe display name, unique among running processes."},
     "readiness":{
-      "description":"Optional reliable startup evidence. Infer from project configuration or command output; do not guess ports, URLs, or patterns.",
+      "description":"Optional reliable startup evidence. A stable log marker is sufficient and preferred. Use TCP or HTTP only when the user explicitly requests service/network health or no reliable log marker exists; do not guess ports, URLs, or patterns.",
       "oneOf":[
-        {"type":"object","additionalProperties":false,"required":["type","port"],"properties":{"type":{"const":"tcp"},"host":{"type":"string","description":"Loopback host; defaults to 127.0.0.1."},"port":{"type":"integer","minimum":1,"maximum":65535},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000,"default":30000}}},
-        {"type":"object","additionalProperties":false,"required":["type","url"],"properties":{"type":{"const":"http"},"url":{"type":"string","description":"Absolute loopback HTTP(S) readiness URL."},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000,"default":30000}}},
-        {"type":"object","additionalProperties":false,"required":["type","pattern"],"properties":{"type":{"const":"log"},"pattern":{"type":"string","description":"RE2 pattern matched against combined process output."},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000,"default":30000}}}
+        {"type":"object","additionalProperties":false,"required":["type","pattern"],"properties":{"type":{"const":"log"},"pattern":{"type":"string","description":"Preferred when the process emits a stable startup marker. RE2 pattern matched against combined process output."},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000,"default":30000}}},
+        {"type":"object","additionalProperties":false,"required":["type","port"],"properties":{"type":{"const":"tcp"},"host":{"type":"string","description":"Loopback host; defaults to 127.0.0.1. Do not use merely to reconfirm a stable log marker."},"port":{"type":"integer","minimum":1,"maximum":65535},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000,"default":30000}}},
+        {"type":"object","additionalProperties":false,"required":["type","url"],"properties":{"type":{"const":"http"},"url":{"type":"string","description":"Absolute loopback HTTP(S) readiness URL. Do not use merely to reconfirm a stable log marker."},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000,"default":30000}}}
       ]
     }
   }

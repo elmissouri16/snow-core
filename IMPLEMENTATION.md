@@ -555,7 +555,7 @@ tool-call round trips through the real agent loop.
 | `write` | Create or overwrite a file | write | Rooted atomic same-directory replace; new files honor umask; replacements preserve mode |
 | `edit` | Exact string replace or patch | write | 8 MiB input/result and 10,000-match caps; bounded preview; fails on ambiguity unless `replace_all` |
 | `bash` | Run a foreground shell command in cwd | exec | POSIX `sh`; timeout, process-group cleanup, pipe-drain bounds, combined output cap |
-| `process_start` | Start an app-owned background shell process | exec | Opaque handle; process group; bounded output tail; optional loopback TCP/HTTP or RE2-log readiness |
+| `process_start` | Start an app-owned background shell process | exec | Opaque handle; process group; bounded output tail; log-first readiness, with optional loopback TCP/HTTP only when network evidence is required |
 | `process_status` | Read one managed process state | read | Runtime/session-scoped metadata; no command, environment, or PID exposure |
 | `process_logs` | Read combined managed-process output | read | Absolute retry-safe cursor, rollover count, UTF-8 sanitation, bounded optional wait |
 | `process_stop` | Terminate and reap a managed process group | exec | Graceful group signal then bounded kill escalation; idempotent terminal stop |

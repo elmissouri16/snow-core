@@ -164,14 +164,18 @@ Snow's default tool guidance routes development servers, preview servers, file
 watchers, background workers, and similar long-running commands to the managed-
 process family instead of Bash or shell backgrounding (`&`, `nohup`, or
 `disown`). It uses stable names and checks the active process list to avoid
-starting duplicates. When project configuration or command output provides a
-reliable readiness signal, Snow waits for loopback HTTP, TCP, or log readiness;
-otherwise it verifies startup through status and logs without guessing a port,
-URL, or pattern. Snow does not claim that a server is ready without evidence:
+starting duplicates. A stable startup log marker is sufficient readiness
+evidence, so Snow prefers RE2 log readiness and does not reconfirm that marker
+with an HTTP request or TCP connection. Network probes are reserved for an
+explicit service/network-health request or a process without a reliable log
+marker. Otherwise Snow verifies startup through status and logs without
+guessing a port, URL, or pattern. Snow does not claim that a server is ready
+without evidence:
 
 - `process_start` launches a non-interactive POSIX command in the project and
-  returns an opaque process ID. It can optionally wait up to 120 seconds for a
-  loopback TCP port, a loopback HTTP(S) response, or an RE2 log pattern.
+  returns an opaque process ID. It can optionally wait up to 120 seconds for an
+  RE2 log pattern or, when network evidence is actually required, a loopback TCP
+  port or loopback HTTP(S) response.
 - `process_status` reads cached running or terminal state.
 - `process_logs` reads combined stdout/stderr with a non-destructive byte cursor,
   bounded output, rollover accounting, and an optional wait up to 30 seconds.
