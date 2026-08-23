@@ -340,6 +340,62 @@ func TestAppRejectsBlankStartupModelID(t *testing.T) {
 	}
 }
 
+func TestAppRepairsRememberedThinkingWithdrawnByModelCatalog(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SNOW_HOME", home)
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.DefaultProvider = "fake"
+	cfg.DefaultModel = "fake-1"
+	cfg, err := config.WithProjectSelection(cfg, project, config.ProjectSelection{
+		Provider: "fake", Model: "fake-1", Thinking: "ultra",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(home, "config.json")
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := New(context.Background(), Options{
+		CWD: project, ConfigPath: configPath, NoSession: true, Permission: "allow",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if got := a.Agent.Thinking(); got != protocol.ThinkingOff {
+		t.Fatalf("repaired thinking = %q, want off", got)
+	}
+	persisted, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := persisted.ProjectSelections[project].Thinking; got != "off" {
+		t.Fatalf("persisted repaired thinking = %q, want off", got)
+	}
+	foundDiagnostic := false
+	for _, diagnostic := range a.Diagnostics {
+		if strings.Contains(diagnostic.Message, "reset project thinking") && strings.Contains(diagnostic.Message, "ultra") {
+			foundDiagnostic = true
+		}
+	}
+	if !foundDiagnostic {
+		t.Fatalf("repair diagnostic missing: %+v", a.Diagnostics)
+	}
+
+	if _, err := New(context.Background(), Options{
+		CWD: project, ConfigPath: configPath, Provider: "fake", Model: "fake-1",
+		Thinking: "ultra", NoSession: true, Permission: "allow",
+	}); err == nil || !strings.Contains(err.Error(), "does not advertise thinking level") {
+		t.Fatalf("explicit unsupported thinking error = %v", err)
+	}
+}
+
 func TestAppRestoresIndependentProjectModelSelections(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SNOW_HOME", home)

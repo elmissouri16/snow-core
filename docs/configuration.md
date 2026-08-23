@@ -226,11 +226,14 @@ fills required zero-value defaults before validation.
 | `context_cap_bytes` | `102400` | Hard cap for loaded project instructions and maximum configured system-prompt file size |
 | `system_prompt_file` | unset | Markdown/text file replacing the embedded base preamble; relative paths resolve from the loaded config file's directory (normally the global config directory; `--config`/`ConfigPath` can override it) and `~` is supported |
 
-Model capabilities remain authoritative. An explicit reasoning level that is
-not advertised by the selected model is rejected. In the TUI, selecting a model
-that does not support the current level atomically resets thinking to `off`,
-persists the provider/model/effort tuple for the active working directory, and
-reports the adjustment instead of leaving the next prompt in an invalid state.
+Model capabilities remain authoritative. An explicit CLI/SDK reasoning level
+that is not advertised by the selected model is rejected. If refreshed backend
+metadata withdraws a previously remembered project effort, startup resets that
+project tuple to `off` and reports a configuration diagnostic. In the TUI,
+selecting a model that does not support the current level likewise atomically
+resets thinking to `off`, persists the provider/model/effort tuple for the
+active working directory, and reports the adjustment instead of leaving the
+next prompt in an invalid state.
 A different project directory retains its own tuple across restarts. The global
 `default_provider`, `default_model`, and `thinking` values remain fallbacks and
 are not rewritten by `/model`, `/thinking`, or the settings picker. Explicit
@@ -272,6 +275,15 @@ response without imposing a total turn deadline. Omit it or set `0` for the
 conservative 10-minute default; set `-1` to disable the watchdog. Positive
 values above 86,400,000 ms (24 hours) are rejected. Any received bytes reset
 the timer.
+
+`opencode-go` discovers available models from its live `/models` endpoint and
+fills omitted metadata from matching records in OpenCode's public models.dev
+catalog. Direct gateway fields win. Snow exposes only explicit per-model effort
+values from fields such as `thinking_levels`, `reasoning_efforts`, or
+`reasoning_options[type=effort].values`. A reasoning-support boolean or generic
+`reasoning_effort` parameter does not identify selectable values, so Snow does
+not infer the conventional `low`/`medium`/`high` set. Without an explicit list,
+only `off` is available.
 
 `opencode-zen` defaults to `https://opencode.ai/zen/v1` and `big-pickle`.
 It exposes only Snow's maintained non-deprecated promotional free allowlist,

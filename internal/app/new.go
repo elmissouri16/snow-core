@@ -411,6 +411,39 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 	}
 
+	// Backend catalogs can withdraw an effort that an older interactive
+	// selection persisted. Repair only that remembered project tuple; explicit
+	// CLI/SDK and global fallback values remain strict startup errors.
+	if !model.SupportsThinkingLevel(thinking) && startup.projectSelectionApplied && opts.Thinking == "" {
+		selection, ok := persistedCfg.ProjectSelections[absCWD]
+		if ok && selection.Provider == providerID && selection.Model == model.ID && selection.Thinking == string(thinking) {
+			previous := thinking
+			candidate, updateErr := config.Update(configPath, func(latest *config.Config) error {
+				updated, err := config.WithProjectSelection(*latest, absCWD, config.ProjectSelection{
+					Provider: providerID,
+					Model:    model.ID,
+					Thinking: string(protocol.ThinkingOff),
+				})
+				if err != nil {
+					return err
+				}
+				*latest = updated
+				return nil
+			})
+			if updateErr != nil {
+				return nil, fmt.Errorf("app: repair unsupported project thinking selection: %w", updateErr)
+			}
+			persistedCfg = candidate
+			cfg.ProjectSelections = candidate.ProjectSelections
+			cfg.Thinking = string(protocol.ThinkingOff)
+			thinking = protocol.ThinkingOff
+			configDiagnostics = append(configDiagnostics, config.Diagnostic{
+				Path:    configPath,
+				Message: fmt.Sprintf("reset project thinking from %q to off because model %q no longer advertises it", previous, model.ID),
+			})
+		}
+	}
+
 	runtimeSelection := &liveRuntimeSelection{provider: providerID, model: model, providers: providers, catalogs: modelCatalog}
 
 	// Host (path roots + progress bridge).

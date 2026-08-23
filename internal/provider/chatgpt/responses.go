@@ -34,6 +34,9 @@ var requestEncoderPool sync.Pool
 // subscription credentials. The access token is only placed in the request
 // header and is never included in errors or stream events.
 func (p *Provider) Chat(ctx context.Context, creds auth.Credential, req protocol.ChatRequest) (protocol.EventStream, error) {
+	if protocol.NormalizeThinkingLevel(req.Thinking) == protocol.ThinkingUltra {
+		return errorStream(ctx, fmt.Errorf("chatgpt: model %q cannot use catalog-only ultra as reasoning.effort", req.Model.ID)), nil
+	}
 	status, err := CheckAuth(creds)
 	if err != nil {
 		return errorStream(ctx, err), nil

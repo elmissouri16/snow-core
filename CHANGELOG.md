@@ -44,6 +44,13 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Fixed
 
+- Corrected model-specific thinking discovery across providers. ChatGPT efforts
+  now come from authenticated backend records (or the same-account cache),
+  intersected with valid Responses inference efforts; Codex's catalog-only
+  `ultra` host preset is no longer sent as `reasoning.effort`. OpenCode Go no
+  longer invents `low`/`medium`/`high` from a generic reasoning flag or
+  parameter. Without explicit per-model effort values, providers expose only
+  Snow's local `off`; stale remembered selections reset to `off`.
 - Made every Plan-to-Default transition durably clear active planning/audit
   skills—including Shift+Tab, `/default`, implementation handoffs, and SDK/RPC
   mode changes—while retaining `/skills clear` as optional recovery, and made

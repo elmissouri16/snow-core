@@ -38,6 +38,7 @@ type startupConfig struct {
 	projectMCPServers             map[string]publicmcp.ServerSpec
 	projectSkills                 config.ProjectSkillsConfig
 	projectSystemPrompt           bool
+	projectSelectionApplied       bool
 	searchPolicy                  config.EffectiveSearchPolicy
 	configDiagnostics             []config.Diagnostic
 	projectAllowed                bool
@@ -78,7 +79,8 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 	if err != nil {
 		return startupConfig{}, err
 	}
-	if _, err := config.ApplyProjectSelection(&cfg, absCWD); err != nil {
+	projectSelectionApplied, err := config.ApplyProjectSelection(&cfg, absCWD)
+	if err != nil {
 		return startupConfig{}, fmt.Errorf("app: project model selection: %w", err)
 	}
 	// Apply CLI/SDK overrides after the remembered project selection. A provider
@@ -250,7 +252,7 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 		collaborationMode: collaborationMode, planThinking: planThinking,
 		authPath: authPath, authStore: authStore, authService: authService, trust: tr, projectPlugins: projectPlugins,
 		projectMCPServers: projectMCPServers, projectSkills: projectSkills,
-		projectSystemPrompt: projectSystemPrompt, searchPolicy: searchPolicy,
+		projectSystemPrompt: projectSystemPrompt, projectSelectionApplied: projectSelectionApplied, searchPolicy: searchPolicy,
 		configDiagnostics: configDiagnostics, projectAllowed: projectAllowed,
 		projectInputRoot: projectInputRoot,
 	}

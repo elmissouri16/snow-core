@@ -57,8 +57,8 @@ func TestRemoteCatalogMappingETagAndAccountCache(t *testing.T) {
 	if models[0].SupportsReasoningSummary == nil || *models[0].SupportsReasoningSummary {
 		t.Fatalf("Spark-like explicit summary capability was not preserved: %+v", models[0])
 	}
-	if got := m.SupportedThinkingLevels(); len(got) != 6 || got[1] != protocol.ThinkingLow || got[2] != protocol.ThinkingXHigh || got[3] != protocol.ThinkingMax || got[4] != protocol.ThinkingUltra || got[5] != protocol.ThinkingHigh {
-		t.Fatalf("levels=%v", got)
+	if got := m.SupportedThinkingLevels(); len(got) != 5 || got[1] != protocol.ThinkingLow || got[2] != protocol.ThinkingXHigh || got[3] != protocol.ThinkingMax || got[4] != protocol.ThinkingHigh {
+		t.Fatalf("inference levels=%v", got)
 	}
 	if _, err = p.RefreshModels(context.Background()); err != nil {
 		t.Fatal(err)

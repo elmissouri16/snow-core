@@ -277,8 +277,7 @@ func mapModelRecords(records []modelRecord) []protocol.Model {
 		}
 		levels := make([]protocol.ThinkingLevel, 0, len(r.SupportedReasoningLevels))
 		for _, level := range r.SupportedReasoningLevels {
-			parsed, err := protocol.ParseThinkingLevel(level.Effort)
-			if err == nil && parsed != protocol.ThinkingOff {
+			if parsed, ok := inferenceThinkingLevel(level.Effort); ok {
 				levels = appendUniqueThinking(levels, parsed)
 			}
 		}
@@ -292,7 +291,7 @@ func mapModelRecords(records []modelRecord) []protocol.Model {
 				m.SupportsVision = true
 			}
 		}
-		if defaultThinking, err := protocol.ParseThinkingLevel(r.DefaultReasoningLevel); err == nil && defaultThinking != protocol.ThinkingOff {
+		if defaultThinking, ok := inferenceThinkingLevel(r.DefaultReasoningLevel); ok {
 			m.DefaultThinking = defaultThinking
 		}
 		if r.Upgrade != nil {
@@ -301,6 +300,18 @@ func mapModelRecords(records []modelRecord) []protocol.Model {
 		out = append(out, m)
 	}
 	return out
+}
+
+// inferenceThinkingLevel intersects catalog UI presets with values accepted by
+// the Codex Responses reasoning.effort field. The catalog's "ultra" preset is a
+// Codex host mode that enables proactive multi-agent behavior; sending it as a
+// reasoning effort is rejected by the inference backend.
+func inferenceThinkingLevel(value string) (protocol.ThinkingLevel, bool) {
+	level, err := protocol.ParseThinkingLevel(value)
+	if err != nil || level == protocol.ThinkingOff || level == protocol.ThinkingUltra {
+		return protocol.ThinkingOff, false
+	}
+	return level, true
 }
 
 func appendUniqueThinking(levels []protocol.ThinkingLevel, level protocol.ThinkingLevel) []protocol.ThinkingLevel {
@@ -315,10 +326,10 @@ func appendUniqueThinking(levels []protocol.ThinkingLevel, level protocol.Thinki
 func Models() []protocol.Model { return mapModelRecords(bundledModels()) }
 func bundledModels() []modelRecord {
 	return []modelRecord{
-		{Slug: "gpt-5.6-sol", DisplayName: "GPT-5.6-Sol", Description: "Latest frontier agentic coding model.", DefaultReasoningLevel: "low", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"medium"}, {"high"}, {"xhigh"}, {"max"}, {"ultra"}}, Visibility: "list", Priority: 1, SupportVerbosity: true, ContextWindow: 272000, MaxContextWindow: 272000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text", "image"}},
-		{Slug: "gpt-5.6-terra", DisplayName: "GPT-5.6-Terra", Description: "Balanced agentic coding model for everyday work.", DefaultReasoningLevel: "medium", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"medium"}, {"high"}}, Visibility: "list", Priority: 2, SupportVerbosity: true, ContextWindow: 272000, MaxContextWindow: 272000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text", "image"}},
-		{Slug: "gpt-5.6-luna", DisplayName: "GPT-5.6-Luna", Description: "Fast and affordable agentic coding model.", DefaultReasoningLevel: "medium", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"medium"}, {"high"}}, Visibility: "list", Priority: 3, SupportVerbosity: true, ContextWindow: 272000, MaxContextWindow: 272000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text", "image"}},
-		{Slug: "gpt-5.3-codex-spark", DisplayName: "GPT-5.3-Codex-Spark", Description: "Ultra-fast coding model.", DefaultReasoningLevel: "high", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"medium"}, {"high"}}, Visibility: "list", Priority: 26, SupportVerbosity: true, ContextWindow: 128000, MaxContextWindow: 128000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text"}},
+		{Slug: "gpt-5.6-sol", DisplayName: "GPT-5.6-Sol", Description: "Latest frontier agentic coding model.", Visibility: "list", Priority: 1, SupportVerbosity: true, ContextWindow: 272000, MaxContextWindow: 272000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text", "image"}},
+		{Slug: "gpt-5.6-terra", DisplayName: "GPT-5.6-Terra", Description: "Balanced agentic coding model for everyday work.", Visibility: "list", Priority: 2, SupportVerbosity: true, ContextWindow: 272000, MaxContextWindow: 272000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text", "image"}},
+		{Slug: "gpt-5.6-luna", DisplayName: "GPT-5.6-Luna", Description: "Fast and affordable agentic coding model.", Visibility: "list", Priority: 3, SupportVerbosity: true, ContextWindow: 272000, MaxContextWindow: 272000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text", "image"}},
+		{Slug: "gpt-5.3-codex-spark", DisplayName: "GPT-5.3-Codex-Spark", Description: "Ultra-fast coding model.", Visibility: "list", Priority: 26, SupportVerbosity: true, ContextWindow: 128000, MaxContextWindow: 128000, EffectiveContextWindowPercent: 95, InputModalities: []string{"text"}},
 	}
 }
 

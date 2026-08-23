@@ -105,9 +105,11 @@ retried before output after 2, 5, and 15 seconds, then surfaced as a usage-limit
 error. The model picker shows the documented privacy/training notice for the
 highlighted Zen model. Zen model metadata includes context and output limits,
 so the footer shows a concrete context budget. Reasoning capability and effort
-choices are loaded dynamically by the Zen provider from OpenCode's public
-models.dev catalog; Snow sends no Zen credential to that host and does not pin
-model-specific effort lists. A provider response that ends without text or a
+choices are loaded dynamically by the Zen provider from explicit per-model
+`reasoning_options[type=effort].values` in OpenCode's public models.dev catalog;
+a reasoning boolean or toggle alone adds no picker values. Snow sends no Zen
+credential to that host and does not pin model-specific effort lists. A
+provider response that ends without text or a
 tool call is shown as an error rather than a silent blank turn.
 
 Selecting `openai-compatible` in the TUI first asks for a profile name, then an

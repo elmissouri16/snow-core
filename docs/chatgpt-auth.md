@@ -146,17 +146,22 @@ are cached for 15 minutes under
 origin/account metadata, ETags, and mode `0600`.
 
 Only records with `visibility=list` or unset visibility are shown;
-`supported_in_api=false` does not hide subscription-only models. Snow maps every
-advertised effort (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and
-`ultra`) into normalized protocol thinking levels; `off` remains the explicit
-no-reasoning selection.
+`supported_in_api=false` does not hide subscription-only models. Snow maps each
+model's advertised inference effort (`minimal`, `low`, `medium`, `high`,
+`xhigh`, or `max`) into normalized protocol thinking levels; `off` remains the
+explicit no-reasoning selection. Codex may also advertise `ultra`, but upstream
+defines it as a host preset that enables proactive multi-agent behavior rather
+than a valid Responses `reasoning.effort`. Snow therefore does not expose it as
+a ChatGPT thinking level or send it to inference.
 
 Authenticated account catalogs are authoritative: a model missing from the
 selected account is not merged back from the bundled snapshot, and an
 unavailable active model is replaced by a compatible account model.
 Authenticated sessions fall back only to a same-account cache; they never inject
 a bundled model after account discovery fails. The bundled snapshot is used only
-before a ChatGPT account is configured.
+before a ChatGPT account is configured and intentionally carries no thinking
+levels or default effort. Until authenticated backend discovery succeeds, those
+models expose only Snow's `off` setting rather than guessed capabilities.
 
 ## Codex inference and SSE
 

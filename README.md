@@ -242,8 +242,9 @@ building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
 Model metadata controls tool, vision, context, reasoning, summary, verbosity,
 and pricing behavior. Thinking levels are model-aware: Snow accepts `off`,
 `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`, but exposes
-only efforts advertised by the selected model and rejects unsupported explicit
-levels.
+only explicit per-model efforts advertised by provider metadata and rejects
+unsupported levels. Generic reasoning-support flags never synthesize picker
+options; without an advertised effort list, only Snow's local `off` is exposed.
 
 ## Capabilities
 

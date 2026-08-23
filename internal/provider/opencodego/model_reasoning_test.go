@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -138,9 +141,12 @@ func TestListModelsMissingReasoningMetadataIsConservative(t *testing.T) {
 	}
 }
 
-func TestListModelsSupportedParameterAdvertisesLevels(t *testing.T) {
+func TestListModelsGenericReasoningCapabilityDoesNotInventLevels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, `{"data":[{"id":"parameter-model","reasoning":true,"supported_parameters":["reasoning_effort"]}]}`)
+		_, _ = fmt.Fprint(w, `{"data":[
+			{"id":"parameter-model","reasoning":true,"supported_parameters":["reasoning_effort"]},
+			{"id":"boolean-model","supports_reasoning_effort":true}
+		]}`)
 	}))
 	defer srv.Close()
 
@@ -148,8 +154,56 @@ func TestListModelsSupportedParameterAdvertisesLevels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || !models[0].SupportsThinking || len(models[0].SupportedThinkingLevels()) != 4 {
-		t.Fatalf("parameter capability = %+v", models)
+	if len(models) != 2 {
+		t.Fatalf("models = %+v", models)
+	}
+	for _, model := range models {
+		if !model.SupportsThinking || len(model.ThinkingLevels) != 0 {
+			t.Errorf("%s capability = %+v, want reasoning support without invented levels", model.ID, model)
+		}
+		levels := model.SupportedThinkingLevels()
+		if len(levels) != 1 || levels[0] != protocol.ThinkingOff {
+			t.Errorf("%s selectable levels = %v, want [off]", model.ID, levels)
+		}
+	}
+}
+
+func TestListModelsRejectsCacheFromInferredEffortSchema(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	cacheRoot := t.TempDir()
+	stale := catalogCacheFile{
+		Version:   1,
+		BaseURL:   srv.URL,
+		FetchedAt: time.Now().UnixMilli(),
+		Models: []protocol.Model{{
+			Provider: ProviderID, ID: "guessed-model", SupportsThinking: true,
+			ThinkingLevels: []protocol.ThinkingLevel{protocol.ThinkingLow, protocol.ThinkingMedium, protocol.ThinkingHigh},
+		}},
+	}
+	data, err := json.Marshal(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheRoot, "catalog.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := New(Config{BaseURL: stale.BaseURL, CacheRoot: cacheRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != DefaultModelID {
+		t.Fatalf("models = %+v, want static fallback instead of v1 cache", models)
+	}
+	if got := models[0].SupportedThinkingLevels(); len(got) != 1 || got[0] != protocol.ThinkingOff {
+		t.Fatalf("fallback thinking levels = %v, want [off]", got)
 	}
 }
 

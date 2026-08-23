@@ -70,6 +70,8 @@ type modelArchitecture struct {
 	InputModalities []string `json:"input_modalities"`
 }
 
+const catalogCacheVersion = 2
+
 type catalogCacheFile struct {
 	Version    int              `json:"version"`
 	BaseURL    string           `json:"base_url"`
@@ -100,7 +102,7 @@ func (p *Provider) loadCatalogCache(now time.Time) ([]protocol.Model, bool) {
 		return nil, false
 	}
 	var cached catalogCacheFile
-	if json.Unmarshal(data, &cached) != nil || cached.Version != 1 || cached.BaseURL != p.baseURL || cached.CatalogURL != p.catalogURL || len(cached.Models) == 0 {
+	if json.Unmarshal(data, &cached) != nil || cached.Version != catalogCacheVersion || cached.BaseURL != p.baseURL || cached.CatalogURL != p.catalogURL || len(cached.Models) == 0 {
 		return nil, false
 	}
 	fetched := time.UnixMilli(cached.FetchedAt)
@@ -116,7 +118,7 @@ func (p *Provider) saveCatalogCache(models []protocol.Model, now time.Time) {
 		return
 	}
 	_ = os.Chmod(p.cacheRoot, 0o700)
-	data, err := json.Marshal(catalogCacheFile{Version: 1, BaseURL: p.baseURL, CatalogURL: p.catalogURL, FetchedAt: now.UnixMilli(), Models: cloneModels(models)})
+	data, err := json.Marshal(catalogCacheFile{Version: catalogCacheVersion, BaseURL: p.baseURL, CatalogURL: p.catalogURL, FetchedAt: now.UnixMilli(), Models: cloneModels(models)})
 	if err != nil || len(data) > catalogCacheMaxBytes {
 		return
 	}
@@ -385,16 +387,9 @@ func normalizeModelRecord(record openAIModelRecord) (protocol.Model, bool) {
 	} else {
 		model.SupportsThinking = reasoningAdvertised
 	}
-	if reasoningAdvertised && len(parsedLevels) == 0 {
-		// A generic reasoning_effort parameter documents only the standard
-		// low/medium/high values. More specific levels require explicit catalog
-		// advertisement so Snow never sends a guessed native value.
-		parsedLevels = []protocol.ThinkingLevel{
-			protocol.ThinkingLow,
-			protocol.ThinkingMedium,
-			protocol.ThinkingHigh,
-		}
-	}
+	// Capability booleans and a generic reasoning_effort parameter establish
+	// that the model can reason, but do not advertise any selectable value.
+	// Only explicit per-model level arrays become picker options.
 	if !model.SupportsThinking {
 		parsedLevels = nil
 	}

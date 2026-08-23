@@ -1,14 +1,16 @@
 package chatgpt
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-func TestStaticCatalogAdvertisesNormalizedThinkingLevels(t *testing.T) {
+func TestStaticCatalogDoesNotGuessThinkingLevels(t *testing.T) {
 	models, err := New().ListModels(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -17,19 +19,15 @@ func TestStaticCatalogAdvertisesNormalizedThinkingLevels(t *testing.T) {
 		t.Fatal("static catalog is empty")
 	}
 	for _, model := range models {
-		if !model.SupportsThinking {
-			t.Fatalf("model does not advertise thinking: %+v", model)
+		if model.SupportsThinking || model.DefaultThinking != "" || len(model.ThinkingLevels) != 0 {
+			t.Fatalf("static model guessed backend thinking metadata: %+v", model)
+		}
+		levels := model.SupportedThinkingLevels()
+		if len(levels) != 1 || levels[0] != protocol.ThinkingOff {
+			t.Fatalf("static model %q levels = %v, want [off]", model.ID, levels)
 		}
 		if model.SupportsReasoningSummary != nil {
 			t.Fatalf("bundled model should preserve legacy summary behavior: %+v", model)
-		}
-		levels := model.SupportedThinkingLevels()
-		wantLen := 4
-		if model.ID == "gpt-5.6-sol" {
-			wantLen = 7
-		}
-		if len(levels) != wantLen || levels[0] != protocol.ThinkingOff || levels[1] != protocol.ThinkingLow || levels[3] != protocol.ThinkingHigh {
-			t.Fatalf("model %q levels = %v", model.ID, levels)
 		}
 	}
 }
@@ -46,7 +44,6 @@ func TestBuildResponsesBodyThinkingMapping(t *testing.T) {
 			protocol.ThinkingHigh,
 			protocol.ThinkingXHigh,
 			protocol.ThinkingMax,
-			protocol.ThinkingUltra,
 		},
 	}
 	want := map[protocol.ThinkingLevel]string{
@@ -57,7 +54,6 @@ func TestBuildResponsesBodyThinkingMapping(t *testing.T) {
 		protocol.ThinkingHigh:    "high",
 		protocol.ThinkingXHigh:   "xhigh",
 		protocol.ThinkingMax:     "max",
-		protocol.ThinkingUltra:   "ultra",
 	}
 	for level, native := range want {
 		body, err := buildResponsesBody(protocol.ChatRequest{Model: model, Thinking: level})
@@ -76,6 +72,29 @@ func TestBuildResponsesBodyThinkingMapping(t *testing.T) {
 		} else if !ok || reasoning["effort"] != native || reasoning["summary"] != "auto" {
 			t.Fatalf("level %q reasoning=%v, want effort=%q summary=auto", level, reasoning, native)
 		}
+	}
+}
+
+func TestChatRejectsCatalogOnlyUltraEffort(t *testing.T) {
+	stream, err := New().Chat(context.Background(), auth.Credential{}, protocol.ChatRequest{
+		Model: protocol.Model{
+			Provider:         ProviderID,
+			ID:               "catalog-ultra",
+			SupportsThinking: true,
+			ThinkingLevels:   []protocol.ThinkingLevel{protocol.ThinkingUltra},
+		},
+		Thinking: protocol.ThinkingUltra,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	event, err := stream.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != protocol.EvStreamError || event.Err == nil || !strings.Contains(event.Err.Error(), "catalog-only ultra") {
+		t.Fatalf("event = %+v, want catalog-only ultra error", event)
 	}
 }
 

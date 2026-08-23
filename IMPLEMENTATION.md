@@ -450,8 +450,11 @@ effort to OpenAI `reasoning_effort` while rejecting levels the selected model
 does not advertise. Startup model discovery fetches `GET /models` and merges
 matching IDs with OpenCode's public `models.dev` catalog for capability,
 reasoning, and pricing metadata; the API key is never sent to the metadata
-host and direct gateway fields win. Discovery falls back to the pinned static
-default without failing startup or logging keys.
+host and direct gateway fields win. Only explicit per-model effort arrays become
+selectable thinking levels. Reasoning booleans and a generic
+`reasoning_effort` parameter do not synthesize `low`/`medium`/`high`; without
+advertised values the model exposes only Snow's local `off`. Discovery falls
+back to the pinned static default without failing startup or logging keys.
 
 ### OpenCode Zen
 
@@ -526,8 +529,12 @@ receives the code on `localhost:1455/auth/callback`, or accepts the full
 callback URL when the port is occupied or the browser is remote. The code is
 exchanged for access/refresh tokens, `auth.json` is written atomically with
 mode `0600`, JWT/account metadata is validated without persisting the ID
-token, and the authenticated catalog is refreshed with a bundled offline
-fallback on outage. Before `Chat`, credentials expiring within five minutes
+token, and the authenticated catalog is refreshed with only a same-account
+backend cache as its outage fallback. The pre-login bundled model list carries
+no guessed thinking efforts; selectable efforts and defaults appear only after
+backend discovery. ChatGPT discovery excludes Codex's `ultra` host preset
+because it enables host-side proactive multi-agent behavior and is not accepted
+as a Responses `reasoning.effort`. Before `Chat`, credentials expiring within five minutes
 are refreshed under the cross-process auth-store lock; a pre-stream 401
 permits one guarded forced refresh and retry. WebSocket continuation remains
 deferred.
