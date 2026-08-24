@@ -443,14 +443,17 @@ Common payload fields include:
 - `Plan`, `PlanUpdate`, `Compaction`
 - `Permission`, `UserInput`, `Queue`, `ThreadGoal`
 - `Agent`, `Subagent`, `AgentMessage`
-- `TurnID`, `TurnOrigin`, `TurnSequence`, `RootEpoch`, `GoalContinuing`
+- `TurnID`, `TurnOrigin`, `TurnSequence`, `RootEpoch`, `Snapshot`,
+  `GoalContinuing`
 
 ### Correlation and payload fields
 
 - `event.Agent == nil` denotes a root-agent event, including ordinary prompts,
   goal continuation, and root state and lifecycle events.
 - Attributed child stream, tool, and usage events carry `Agent`.
-- Child lifecycle snapshots carry `Subagent`.
+- Child lifecycle state carries `Subagent`; `Snapshot` is true when restored
+  state initializes observers rather than reporting a transition that just
+  occurred.
 - Mailbox events carry `AgentMessage`.
 - `TurnID` is the stable turn identity; `TurnSequence` is a process-local
   monotonic admission order that restarts with the process.

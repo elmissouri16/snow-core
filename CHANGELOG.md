@@ -60,6 +60,10 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Fixed
 
+- Prevented restored subagent status snapshots from appearing as fresh
+  lifecycle rows at the end of resumed TUI and print-mode transcripts. Snapshot
+  events still initialize the fleet inspector and remain observable to SDK,
+  JSON, RPC, and plugin consumers with `snapshot: true`.
 - Corrected model-specific thinking discovery across providers. ChatGPT efforts
   now come from authenticated backend records (or the same-account cache),
   intersected with valid Responses inference efforts; Codex's catalog-only

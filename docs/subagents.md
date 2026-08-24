@@ -284,7 +284,9 @@ recommended default.
   select, wheel/trackpad or PageUp/PageDown and Home/End to scroll detail,
   `r` to refresh authoritative state, and Esc to close. Lists and transcripts
   load asynchronously and attributed events update the in-memory view;
-  blocking permission/user-input prompts still take precedence.
+  blocking permission/user-input prompts still take precedence. Restored
+  lifecycle snapshots hydrate the fleet inspector without appending fresh
+  lifecycle rows to the resumed root transcript.
   `/agent concurrency N` persists a positive child limit up to the safety cap
   of 256. The root transcript receives compact lifecycle rows, never child
   token streams.
@@ -297,8 +299,10 @@ recommended default.
   `subagent_close`, `subagent_resume`, `subagent_list`, `subagent_get`, and
   `subagent_models`.
 - JSON/events/plugins: ordinary child events carry `agent`; lifecycle events
-  also carry `subagent`, and mailbox events carry `agent_message`. Root events
-  retain omitted correlation fields for compatibility.
+  also carry `subagent`, and mailbox events carry `agent_message`. A restored
+  lifecycle publication carries `snapshot: true`, distinguishing observer
+  initialization from a transition that just occurred. Root events retain
+  omitted correlation fields for compatibility.
 
 SDK and restored-session hosts should subscribe first, then call
 `ReadySubagents`. CLI, print/JSON, RPC, and TUI do this automatically.

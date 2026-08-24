@@ -1133,7 +1133,9 @@ emitted.
 - `agent` omitted: root-agent event, including ordinary prompts, goal
   continuation, and root state/lifecycle events.
 - `agent` present: attributed child stream, tool, or usage event.
-- `subagent` present: child lifecycle snapshot.
+- `subagent` present: child lifecycle state.
+- `snapshot: true`: restored state published to initialize observers after
+  startup or a session switch, not a lifecycle transition that just occurred.
 - `agent_message` present: attributed mailbox event.
 - `turn_sequence`: process-local monotonic admission order for correlated
   turn events. Use `turn_id` as the stable identity; the sequence restarts
@@ -1224,7 +1226,7 @@ currently set on them. Error-path `compaction_done` events do set
 | Event type | Payload fields | Ordering |
 |---|---|---|
 | `subagent_started` | `subagent` | Child lifecycle snapshot on start |
-| `subagent_status` | `subagent` | Child lifecycle or status change |
+| `subagent_status` | `subagent`, `snapshot?` | Child lifecycle/status change, or restored observer state when `snapshot` is true |
 | `subagent_message` | `agent_message` | Attributed mailbox delivery |
 | `subagent_activity` | reserved | Not currently emitted |
 

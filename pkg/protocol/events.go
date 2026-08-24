@@ -136,15 +136,18 @@ type AgentEvent struct {
 	ThreadGoal    *ThreadGoalUpdate       `json:"thread_goal,omitempty"`
 	// Agent correlates ordinary child stream/tool/usage events. Root events keep
 	// this nil for backward compatibility. Lifecycle snapshots use Subagent.
-	Agent          *AgentRef      `json:"agent,omitempty"`
-	Subagent       *SubagentState `json:"subagent,omitempty"`
-	AgentMessage   *AgentMessage  `json:"agent_message,omitempty"`
-	TurnID         string         `json:"turn_id,omitempty"`
-	TurnOrigin     string         `json:"turn_origin,omitempty"`
-	TurnSequence   uint64         `json:"turn_sequence,omitempty"`
-	RootEpoch      uint64         `json:"root_epoch,omitempty"`
-	GoalContinuing bool           `json:"goal_continuing,omitempty"`
-	IsError        bool           `json:"is_error,omitempty"`
+	Agent        *AgentRef      `json:"agent,omitempty"`
+	Subagent     *SubagentState `json:"subagent,omitempty"`
+	AgentMessage *AgentMessage  `json:"agent_message,omitempty"`
+	TurnID       string         `json:"turn_id,omitempty"`
+	TurnOrigin   string         `json:"turn_origin,omitempty"`
+	TurnSequence uint64         `json:"turn_sequence,omitempty"`
+	RootEpoch    uint64         `json:"root_epoch,omitempty"`
+	// Snapshot marks state published to initialize observers after restore or a
+	// session switch, rather than a lifecycle transition that just occurred.
+	Snapshot       bool `json:"snapshot,omitempty"`
+	GoalContinuing bool `json:"goal_continuing,omitempty"`
+	IsError        bool `json:"is_error,omitempty"`
 }
 
 // Clone returns a fully independent event for one observer. Event subscribers

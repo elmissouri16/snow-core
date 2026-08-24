@@ -60,6 +60,9 @@ func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cm
 
 func (m *Model) handleSubagentEvent(ev protocol.AgentEvent) {
 	m.recordSubagentFleetEvent(ev)
+	if ev.Snapshot {
+		return
+	}
 	switch ev.Type {
 	case protocol.EvSubagentStarted:
 		m.pushLine(styleTool.Render(fmt.Sprintf("• agent %s started (%s)", ev.Agent.Path, ev.Agent.Role)))

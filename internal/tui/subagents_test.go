@@ -88,6 +88,47 @@ func TestSubagentToolRenderingIsCompact(t *testing.T) {
 	}
 }
 
+func TestRestoredSubagentSnapshotsStayOutOfTranscript(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	state := &protocol.SubagentState{
+		Agent: protocol.AgentRef{
+			ThreadID: "child", ParentThreadID: "root", Path: "/root/restored",
+			ParentPath: "/root", Role: "explorer", Depth: 1,
+		},
+		Status: protocol.AgentClosed, Generation: 4,
+	}
+	m.handleAgentEvent(protocol.AgentEvent{
+		Type: protocol.EvSubagentStatus, Agent: state.Agent.Clone(),
+		Subagent: state, Snapshot: true,
+	})
+	if len(m.lines) != 0 {
+		t.Fatalf("restored snapshot added transcript rows: %q", m.lines)
+	}
+	if len(m.subagentFleetActivity[state.Agent.ThreadID]) != 0 {
+		t.Fatalf("restored snapshot added live activity: %q", m.subagentFleetActivity[state.Agent.ThreadID])
+	}
+	if len(m.subagentFleetList.Agents) != 1 || m.subagentFleetList.Agents[0].Status != protocol.AgentClosed {
+		t.Fatalf("restored fleet state=%+v", m.subagentFleetList.Agents)
+	}
+}
+
+func TestLiveSubagentTerminalStatusAddsLifecycleRow(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	state := &protocol.SubagentState{
+		Agent: protocol.AgentRef{
+			ThreadID: "child", ParentThreadID: "root", Path: "/root/live",
+			ParentPath: "/root", Role: "explorer", Depth: 1,
+		},
+		Status: protocol.AgentCompleted, Generation: 2,
+	}
+	m.handleAgentEvent(protocol.AgentEvent{
+		Type: protocol.EvSubagentStatus, Agent: state.Agent.Clone(), Subagent: state,
+	})
+	if len(m.lines) != 1 || !strings.Contains(stripANSI(m.lines[0]), "agent /root/live completed") {
+		t.Fatalf("live lifecycle rows=%q", m.lines)
+	}
+}
+
 func TestSuccessfulSpawnUsesSingleLifecycleRow(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	ref := &protocol.AgentRef{ThreadID: "child", ParentThreadID: "root", Path: "/root/count", ParentPath: "/root", Role: "general", Depth: 1}

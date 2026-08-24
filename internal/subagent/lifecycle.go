@@ -454,7 +454,7 @@ func (m *Manager) setStore(store session.SubagentTaskStore) error {
 	m.mu.Unlock()
 	if ready {
 		for i := range states {
-			m.emit(protocol.AgentEvent{Type: protocol.EvSubagentStatus, Agent: states[i].Agent.Clone(), Subagent: states[i].Clone()})
+			m.emit(protocol.AgentEvent{Type: protocol.EvSubagentStatus, Agent: states[i].Agent.Clone(), Subagent: states[i].Clone(), Snapshot: true})
 		}
 	}
 	return nil
@@ -482,7 +482,7 @@ func (m *Manager) Ready(context.Context) error {
 	}
 	m.mu.Unlock()
 	for i := range states {
-		m.emit(protocol.AgentEvent{Type: protocol.EvSubagentStatus, Agent: states[i].Agent.Clone(), Subagent: states[i].Clone()})
+		m.emit(protocol.AgentEvent{Type: protocol.EvSubagentStatus, Agent: states[i].Agent.Clone(), Subagent: states[i].Clone(), Snapshot: true})
 	}
 	return nil
 }

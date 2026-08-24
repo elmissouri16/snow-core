@@ -641,6 +641,9 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 	} else {
 		lastGoalStatus := protocol.ThreadGoalStatus("")
 		a.Agent.Subscribe(func(ev protocol.AgentEvent) {
+			if ev.Snapshot {
+				return
+			}
 			if ev.Agent != nil && ev.Type != protocol.EvSubagentStarted && ev.Type != protocol.EvSubagentStatus {
 				return
 			}

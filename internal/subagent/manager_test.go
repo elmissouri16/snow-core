@@ -103,6 +103,43 @@ func rootAgent(t *testing.T, st session.Store) *agent.Agent {
 	return a
 }
 
+func TestReadyMarksRestoredStatusesAsSnapshots(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	root := rootAgent(t, st)
+	defer root.Close()
+	m := New(context.Background(), Limits{
+		MaxConcurrentThreads: 1, MaxAgentsPerSession: 2, MaxDepth: 1,
+		TaskTimeout: time.Second, MinWait: time.Millisecond, DefaultWait: time.Millisecond, MaxWait: time.Second,
+		DefaultRole: "general", Roles: map[string]Role{"general": {Name: "general"}},
+	})
+	var published []protocol.AgentEvent
+	factory := ChildFactoryFunc(func(context.Context, ChildSpec) (ChildRuntime, error) { return nil, nil })
+	if err := m.Bind(root, factory, func(event protocol.AgentEvent) {
+		published = append(published, event)
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	state := protocol.SubagentState{
+		Agent: protocol.AgentRef{
+			ThreadID: "restored", ParentThreadID: "root", Path: "/root/restored",
+			ParentPath: "/root", Role: "general", Depth: 1,
+		},
+		Status: protocol.AgentClosed, Generation: 3,
+	}
+	m.mu.Lock()
+	m.byID[state.Agent.ThreadID] = &runtime{state: state, tasks: make(chan childTask, 1)}
+	m.byPath[state.Agent.Path] = m.byID[state.Agent.ThreadID]
+	m.order = append(m.order, state.Agent.ThreadID)
+	m.mu.Unlock()
+	if err := m.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(context.Background())
+	if len(published) != 1 || published[0].Type != protocol.EvSubagentStatus || !published[0].Snapshot {
+		t.Fatalf("restored events=%+v", published)
+	}
+}
+
 func TestSpawnForkNoneSkipsParentContext(t *testing.T) {
 	st := session.NewMemoryStore(session.Options{})
 	message := protocol.NewUserMessage("parent-message", "", "large parent context")

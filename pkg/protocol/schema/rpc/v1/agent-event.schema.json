@@ -147,6 +147,7 @@
     "turn_origin": {"type": "string"},
     "turn_sequence": {"type": "integer", "minimum": 0},
     "root_epoch": {"type": "integer", "minimum": 0},
+    "snapshot": {"type": "boolean"},
     "goal_continuing": {"type": "boolean"},
     "is_error": {"type": "boolean"}
   },

@@ -286,7 +286,10 @@ func (m *Model) recordSubagentFleetEvent(ev protocol.AgentEvent) {
 		return
 	}
 	threadID := ev.Agent.ThreadID
-	line := formatSubagentFleetEvent(ev)
+	line := ""
+	if !ev.Snapshot {
+		line = formatSubagentFleetEvent(ev)
+	}
 	if line != "" {
 		lines := m.subagentFleetActivity[threadID]
 		// Providers often deliver one token per delta. Coalesce adjacent text or
@@ -336,7 +339,7 @@ func (m *Model) recordSubagentFleetEvent(ev protocol.AgentEvent) {
 	if found && previousStatus != currentStatus {
 		m.adjustSubagentFleetCapacity(previousStatus, currentStatus)
 	}
-	if !found && ev.Type == protocol.EvSubagentStarted {
+	if !found && (ev.Type == protocol.EvSubagentStarted || ev.Snapshot && ev.Subagent != nil) {
 		state := protocol.SubagentState{Agent: *ev.Agent.Clone(), Status: protocol.AgentRunning}
 		if ev.Subagent != nil {
 			state = *ev.Subagent.Clone()

@@ -13,6 +13,7 @@ export interface AgentEvent {
   type: string;
   text?: string;
   message?: string;
+  snapshot?: boolean;
   agent?: AgentRef;
   user_input?: UserInputRequest;
   permission?: {request: PermissionRequest};
