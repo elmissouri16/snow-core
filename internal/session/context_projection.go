@@ -22,6 +22,10 @@ const contextProjectionChunkMessages = 64
 // one separately retained message from pinning the complete projected context.
 func contextMessagesFromEntries(entries []Entry) []protocol.Message {
 	lastCompaction, boundaryPos := latestContextCompaction(entries)
+	return contextMessagesFromEntriesAt(entries, lastCompaction, boundaryPos)
+}
+
+func contextMessagesFromEntriesAt(entries []Entry, lastCompaction, boundaryPos int) []protocol.Message {
 	start := 0
 	messageCount := 0
 	if lastCompaction >= 0 {
@@ -62,6 +66,26 @@ func contextMessagesFromEntries(entries []Entry) []protocol.Message {
 
 // latestContextCompaction deliberately performs no map allocation when a
 // branch has no effective compaction marker, which is the common hot path.
+func projectCompactedBranchContext(entries []Entry) ([]protocol.Message, bool) {
+	lastCompaction, boundaryPos := latestContextCompaction(entries)
+	if lastCompaction < 0 {
+		return nil, false
+	}
+	return contextMessagesFromEntriesAt(entries, lastCompaction, boundaryPos), true
+}
+
+func (s *MemoryStore) ProjectBranchContext(entries []Entry) ([]protocol.Message, bool) {
+	return projectCompactedBranchContext(entries)
+}
+
+func (s *SQLiteStore) ProjectBranchContext(entries []Entry) ([]protocol.Message, bool) {
+	return projectCompactedBranchContext(entries)
+}
+
+func (s *JSONLStore) ProjectBranchContext(entries []Entry) ([]protocol.Message, bool) {
+	return projectCompactedBranchContext(entries)
+}
+
 func latestContextCompaction(entries []Entry) (lastCompaction, boundaryPos int) {
 	lastCompaction, boundaryPos = -1, -1
 	hasCompaction := false

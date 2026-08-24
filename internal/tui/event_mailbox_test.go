@@ -10,6 +10,41 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+func TestQueuedAgentEventPacksTinyDeltaMetadata(t *testing.T) {
+	var item queuedAgentEvent
+	const fragments = 100_000
+	for range fragments {
+		item.appendText("x")
+	}
+	activeData := len(item.textData) - item.textDataHead
+	activeMetadata := len(item.textLengths) - item.textLengthHead
+	if item.textFragments != fragments || activeData != fragments {
+		t.Fatalf("fragments=%d data=%d", item.textFragments, activeData)
+	}
+	if activeMetadata > activeData+16 {
+		t.Fatalf("packed metadata=%d exceeds payload=%d", activeMetadata, activeData)
+	}
+	if got := item.joinedText(); len(got) != fragments || got[0] != 'x' || got[len(got)-1] != 'x' {
+		t.Fatalf("joined tiny deltas length=%d", len(got))
+	}
+}
+
+func TestAgentEventMailboxEvictsCompleteDeltaFragments(t *testing.T) {
+	q := newAgentEventMailbox()
+	first := strings.Repeat("a", 5<<20)
+	second := strings.Repeat("b", 4<<20)
+	q.Push(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: first, TurnID: "turn"})
+	q.Push(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: second, TurnID: "turn"})
+	q.Push(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: "tail", TurnID: "turn"})
+	batch := q.popBatch(maxAgentEventsPerUpdate)
+	if len(batch) != 1 || batch[0].Text != second+"tail" {
+		t.Fatalf("coalesced fragment tail length=%d", len(batch[0].Text))
+	}
+	if q.dropped != 1 {
+		t.Fatalf("dropped=%d want 1", q.dropped)
+	}
+}
+
 func TestAgentEventMailboxCoalescesWithoutBlockingProducer(t *testing.T) {
 	q := newAgentEventMailbox()
 	const deltas = 10_000

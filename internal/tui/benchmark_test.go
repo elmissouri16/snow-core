@@ -24,6 +24,37 @@ func BenchmarkMailboxIngestion(b *testing.B) {
 	}
 }
 
+func BenchmarkSessionHydration5000(b *testing.B) {
+	home := b.TempDir()
+	runtime, err := app.New(context.Background(), app.Options{
+		Provider: "fake", Permission: "allow", CWD: home,
+		SessionPath: filepath.Join(home, "session.db"),
+		ConfigPath:  filepath.Join(home, "config.json"), AuthPath: filepath.Join(home, "auth.json"),
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer runtime.Close()
+	payload := strings.Repeat("x", 2400)
+	batch := make([]session.Entry, 5000)
+	for i := range batch {
+		message := protocol.NewAssistantMessage(fmt.Sprintf("message-%d", i), "", "fake", "fake-model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: payload}}, protocol.StopStop, nil)
+		batch[i] = session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}
+	}
+	if err := runtime.Session.(session.BatchStore).AppendBatch(batch); err != nil {
+		b.Fatal(err)
+	}
+	m := newModel(context.Background(), app.Options{})
+	m.app = runtime
+	m.width, m.height = 120, 40
+	m.layout()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		m.hydrateSession()
+	}
+}
+
 func BenchmarkBusySessionUpdateBurst12MB(b *testing.B) {
 	home := b.TempDir()
 	runtime, err := app.New(context.Background(), app.Options{

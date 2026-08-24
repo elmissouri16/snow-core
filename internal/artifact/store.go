@@ -37,6 +37,14 @@ type Store interface {
 	Close() error
 }
 
+// ReferenceVerifier confirms that a reference still has the exact file identity,
+// size, and modification time recorded by a successful SaveText verification.
+// Callers must fall back to SaveText when this optional check is unavailable or
+// false so altered content takes the existing atomic repair path.
+type ReferenceVerifier interface {
+	TextReferenceVerified(context.Context, string, string) (bool, error)
+}
+
 // TextOpener provides bounded consumers a verified streaming view without
 // materializing the complete artifact.
 type TextOpener interface {
@@ -370,6 +378,47 @@ func (s *LocalStore) ReadText(ctx context.Context, sessionID, id string) (string
 
 // Exists validates whether an opaque artifact belongs to one session without
 // reading its contents into memory.
+func (s *LocalStore) TextReferenceVerified(ctx context.Context, sessionID, id string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if sessionID == "" {
+		return false, errors.New("artifact: session ID is required")
+	}
+	if err := validateID(id); err != nil {
+		return false, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed || s.root == nil {
+		return false, errors.New("artifact: store is closed")
+	}
+	dir, err := openVerifiedNamespace(s.root, namespace(sessionID), false)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("artifact: open namespace: %w", err)
+	}
+	defer dir.Close()
+	file, err := openVerifiedArtifact(dir, id+".txt", s.maxBytes)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("artifact: inspect: %w", err)
+	}
+	info, statErr := file.Stat()
+	closeErr := file.Close()
+	if statErr != nil {
+		return false, statErr
+	}
+	if closeErr != nil {
+		return false, closeErr
+	}
+	return s.artifactVerified(id, info), nil
+}
+
 func (s *LocalStore) Exists(ctx context.Context, sessionID, id string) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err

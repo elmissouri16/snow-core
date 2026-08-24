@@ -163,7 +163,7 @@ func (a *Agent) autoCompactAdmittedBoundary(ctx context.Context, messages []prot
 			return false, err
 		}
 	}
-	result, err := a.compactActiveContext(ctx, trigger)
+	result, err := a.compactActiveContextMessages(ctx, trigger, messages)
 	if err != nil {
 		return true, err
 	}
@@ -277,11 +277,15 @@ func compactionTailIsActive(messages []protocol.Message) bool {
 }
 
 func (a *Agent) compactActiveContext(ctx context.Context, trigger compactionTrigger) (protocol.CompactionResult, error) {
-	automatic := trigger != compactionManual
 	msgs, err := a.contextMessagesCurrent()
 	if err != nil {
 		return protocol.CompactionResult{}, fmt.Errorf("agent: compact load context: %w", err)
 	}
+	return a.compactActiveContextMessages(ctx, trigger, msgs)
+}
+
+func (a *Agent) compactActiveContextMessages(ctx context.Context, trigger compactionTrigger, msgs []protocol.Message) (protocol.CompactionResult, error) {
+	automatic := trigger != compactionManual
 	model := a.Model()
 	plan := compact.PlannerWithOptions(msgs, a.compactionPlannerOptions(model, msgs))
 	result := protocol.CompactionResult{SummarizedMessages: len(plan.CompactionCandidates), RetainedMessages: len(msgs) - len(plan.CompactionCandidates), Automatic: automatic}
@@ -339,7 +343,7 @@ func (a *Agent) compactActiveContext(ctx context.Context, trigger compactionTrig
 	summary = rebuildCompactionRetrievalSection(summary, manifestRefs)
 	result.Summary = summary
 	result.UsedFallback = usedFallback
-	if _, err = compact.Apply(ctx, a.opts.Session, func(context.Context, []protocol.Message) (string, error) { return summary, nil }, plan); err != nil {
+	if _, err := compact.Apply(ctx, a.opts.Session, func(context.Context, []protocol.Message) (string, error) { return summary, nil }, plan); err != nil {
 		a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: err.Error(), IsError: true, Compaction: &result})
 		return protocol.CompactionResult{}, fmt.Errorf("agent: compact apply: %w", err)
 	}

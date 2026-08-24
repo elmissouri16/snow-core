@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/elmissouri16/snow-core/internal/agent"
 	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // childAgentRuntime owns the independent child transcript store. agent.Agent
@@ -11,6 +12,16 @@ import (
 type childAgentRuntime struct {
 	*agent.Agent
 	store session.Store
+}
+
+func (r *childAgentRuntime) LatestAssistantMessage() (protocol.Message, bool, error) {
+	if r == nil || r.store == nil {
+		return protocol.Message{}, false, nil
+	}
+	if latest, ok := r.store.(session.LatestAssistantStore); ok {
+		return latest.LatestAssistantMessage()
+	}
+	return protocol.Message{}, false, nil
 }
 
 func (r *childAgentRuntime) Close() {

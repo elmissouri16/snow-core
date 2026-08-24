@@ -518,8 +518,34 @@ func requestHasImages(request protocol.ChatRequest) bool {
 }
 
 func withoutProviderReasoning(request protocol.ChatRequest) protocol.ChatRequest {
+	hasProviderData := false
+	for _, message := range request.Messages {
+		for _, block := range message.Content {
+			if block.Type == protocol.BlockProviderData {
+				hasProviderData = true
+				break
+			}
+		}
+		if hasProviderData {
+			break
+		}
+	}
+	if !hasProviderData {
+		return request
+	}
+
 	request.Messages = append([]protocol.Message(nil), request.Messages...)
 	for i, message := range request.Messages {
+		removeProviderData := false
+		for _, block := range message.Content {
+			if block.Type == protocol.BlockProviderData {
+				removeProviderData = true
+				break
+			}
+		}
+		if !removeProviderData {
+			continue
+		}
 		message = message.Clone()
 		content := message.Content[:0]
 		for _, block := range message.Content {

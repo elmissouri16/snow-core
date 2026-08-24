@@ -175,7 +175,7 @@ func (s *SQLiteStore) Messages() ([]protocol.Message, error) {
 	for rows.Next() {
 		var id, parentID string
 		var typ EntryType
-		var raw []byte
+		var raw sql.RawBytes
 		if err := rows.Scan(&id, &parentID, &typ, &raw); err != nil {
 			return nil, fmt.Errorf("session: sqlite scan message: %w", err)
 		}
@@ -193,6 +193,80 @@ func (s *SQLiteStore) Messages() ([]protocol.Message, error) {
 		return nil, fmt.Errorf("session: sqlite messages rows: %w", err)
 	}
 	return messages, nil
+}
+
+// TailMessages implements TailMessageStore with indexed parent lookups. It
+// skips provider-hidden entries and stops after the first non-tool message, so
+// work scales with the final tool batch rather than the complete branch.
+func (s *SQLiteStore) TailMessages() ([]protocol.Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, errors.New("session: store closed")
+	}
+	id := s.tip
+	reversed := make([]protocol.Message, 0, 4)
+	for id != "" {
+		var parentID string
+		var typ EntryType
+		var raw []byte
+		if err := s.db.QueryRow(`SELECT parent_id, entry_type, message FROM entries WHERE id=?`, id).Scan(&parentID, &typ, &raw); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrNotFound
+			}
+			return nil, fmt.Errorf("session: sqlite tail message: %w", err)
+		}
+		if typ == EntryMessage && len(raw) != 0 {
+			var message protocol.Message
+			if err := json.Unmarshal(raw, &message); err != nil {
+				return nil, fmt.Errorf("session: sqlite decode tail message: %w", err)
+			}
+			message.ID, message.ParentID = id, parentID
+			reversed = append(reversed, message)
+			if message.Role != protocol.RoleTool {
+				break
+			}
+		}
+		id = parentID
+	}
+	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
+		reversed[left], reversed[right] = reversed[right], reversed[left]
+	}
+	return reversed, nil
+}
+
+// LatestAssistantMessage implements LatestAssistantStore with indexed parent
+// lookups and decodes only the suffix needed to find visible assistant output.
+func (s *SQLiteStore) LatestAssistantMessage() (protocol.Message, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return protocol.Message{}, false, errors.New("session: store closed")
+	}
+	id := s.tip
+	for id != "" {
+		var parentID string
+		var typ EntryType
+		var raw []byte
+		if err := s.db.QueryRow(`SELECT parent_id, entry_type, message FROM entries WHERE id=?`, id).Scan(&parentID, &typ, &raw); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return protocol.Message{}, false, ErrNotFound
+			}
+			return protocol.Message{}, false, fmt.Errorf("session: sqlite latest assistant: %w", err)
+		}
+		if typ == EntryMessage && len(raw) != 0 {
+			var message protocol.Message
+			if err := json.Unmarshal(raw, &message); err != nil {
+				return protocol.Message{}, false, fmt.Errorf("session: sqlite decode latest assistant: %w", err)
+			}
+			message.ID, message.ParentID = id, parentID
+			if message.Role == protocol.RoleAssistant && assistantHasResult(message) {
+				return message, true, nil
+			}
+		}
+		id = parentID
+	}
+	return protocol.Message{}, false, nil
 }
 
 // ContextMessages implements ContextStore. It preserves complete history in
@@ -237,8 +311,62 @@ func (s *SQLiteStore) BranchEntries() ([]Entry, error) {
 	if s.closed {
 		return nil, errors.New("session: store closed")
 	}
-	entries, err := s.branchEntries(s.tip)
-	return cloneEntries(entries), err
+	// branchEntries decodes a fresh query result and therefore already owns every
+	// message and mutable block payload. Returning it directly preserves the
+	// defensive-store contract without cloning the complete branch a second time.
+	return s.branchEntries(s.tip)
+}
+
+// BranchStateEntries implements BranchStateStore. The recursive walk still
+// validates active ancestry, but SQLite transfers and decodes only entries the
+// host requested instead of every historical message blob.
+func (s *SQLiteStore) BranchStateEntries(metaKeys, toolNames []string) ([]Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, errors.New("session: store closed")
+	}
+	if len(metaKeys) == 0 && len(toolNames) == 0 {
+		return nil, nil
+	}
+	conditions := make([]string, 0, 2)
+	args := make([]any, 0, 1+len(metaKeys)+len(toolNames)+3)
+	args = append(args, s.tip)
+	if len(metaKeys) > 0 {
+		conditions = append(conditions, `(entry_type = ? AND meta_key IN (`+sqlValuePlaceholders(len(metaKeys))+`))`)
+		args = append(args, EntryMeta)
+		for _, key := range metaKeys {
+			args = append(args, key)
+		}
+	}
+	if len(toolNames) > 0 {
+		conditions = append(conditions, `(entry_type = ? AND message IS NOT NULL AND json_valid(message) AND json_extract(message, '$.role') = ? AND json_extract(message, '$.tool_name') IN (`+sqlValuePlaceholders(len(toolNames))+`))`)
+		args = append(args, EntryMessage, protocol.RoleTool)
+		for _, name := range toolNames {
+			args = append(args, name)
+		}
+	}
+	query := `WITH RECURSIVE branch(seq, id, parent_id, entry_type, message, summary, compacted_through, meta_key, meta_value) AS (
+		SELECT seq, id, parent_id, entry_type, message, summary, compacted_through, meta_key, meta_value
+		FROM entries WHERE id = ?
+		UNION ALL
+		SELECT e.seq, e.id, e.parent_id, e.entry_type, e.message, e.summary, e.compacted_through, e.meta_key, e.meta_value
+		FROM entries e JOIN branch b ON e.id = b.parent_id
+	)
+	SELECT id, parent_id, entry_type, message, summary, compacted_through, meta_key, meta_value
+	FROM branch WHERE ` + strings.Join(conditions, ` OR `) + ` ORDER BY seq`
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("session: sqlite branch state: %w", err)
+	}
+	return scanBranchEntries(rows)
+}
+
+func sqlValuePlaceholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", count), ",")
 }
 
 // Branches implements BranchStore.
@@ -311,7 +439,7 @@ func branchStatsAllFrom(q sqliteQueryer) (map[string]branchStatsValue, error) {
 	stats := make(map[string]branchStatsValue)
 	for rows.Next() {
 		var branchID string
-		var raw []byte
+		var raw sql.RawBytes
 		if err := rows.Scan(&branchID, &raw); err != nil {
 			return nil, err
 		}
@@ -727,7 +855,7 @@ func scanBranchEntries(rows *sql.Rows) ([]Entry, error) {
 	var entries []Entry
 	for rows.Next() {
 		var e Entry
-		var raw []byte
+		var raw sql.RawBytes
 		if err := rows.Scan(&e.ID, &e.ParentID, &e.Type, &raw, &e.Summary, &e.CompactedThrough, &e.Key, &e.Value); err != nil {
 			return nil, fmt.Errorf("session: sqlite scan entry: %w", err)
 		}

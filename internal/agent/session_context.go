@@ -311,6 +311,19 @@ func contextMessagesFromStore(store session.Store) ([]protocol.Message, error) {
 	// Failed provider attempts remain durable for diagnostics but are not valid
 	// conversational input. In particular, an overflow retry must not replay a
 	// partial assistant response or leave the next request ending in assistant.
+	// Context stores already return an owned defensive projection. Keep that
+	// projection intact in the overwhelmingly common no-failure case instead of
+	// allocating another full message-header slice on every provider round.
+	hasFailedAttempt := false
+	for _, message := range messages {
+		if message.Role == protocol.RoleAssistant && message.StopReason == protocol.StopError {
+			hasFailedAttempt = true
+			break
+		}
+	}
+	if !hasFailedAttempt {
+		return messages, nil
+	}
 	out := make([]protocol.Message, 0, len(messages))
 	skippedToolCalls := make(map[string]bool)
 	for _, message := range messages {
@@ -354,7 +367,13 @@ func repairInterruptedToolCallsReport(store session.Store, registry tools.Regist
 	if store == nil {
 		return report, errors.New("session is nil")
 	}
-	messages, err := store.Messages()
+	var messages []protocol.Message
+	var err error
+	if tail, ok := store.(session.TailMessageStore); ok {
+		messages, err = tail.TailMessages()
+	} else {
+		messages, err = store.Messages()
+	}
 	if err != nil {
 		return report, err
 	}

@@ -43,15 +43,19 @@ func ForkContext(messages []protocol.Message, forkTurns string, cwd, id string) 
 		clean = lastUserTurns(clean, n)
 	}
 	parent := store.BranchTip()
+	batch := make([]session.Entry, 0, len(clean))
 	for i := range clean {
-		m := cloneMessage(clean[i])
-		m.ID = fmt.Sprintf("fork-%d-%s", i+1, shortID(m.ID))
-		m.ParentID = parent
-		if err := store.Append(session.Entry{Type: session.EntryMessage, ID: m.ID, ParentID: parent, Message: &m}); err != nil {
-			_ = store.Close()
-			return nil, err
-		}
-		parent = m.ID
+		// sanitizeContext already owns all mutable payloads. Rewrite only the
+		// copied message header; AppendBatch performs the store's defensive copy.
+		message := &clean[i]
+		message.ID = fmt.Sprintf("fork-%d-%s", i+1, shortID(message.ID))
+		message.ParentID = parent
+		batch = append(batch, session.Entry{Type: session.EntryMessage, ID: message.ID, ParentID: parent, Message: message})
+		parent = message.ID
+	}
+	if err := store.AppendBatch(batch); err != nil {
+		_ = store.Close()
+		return nil, err
 	}
 	return store, nil
 }
@@ -86,8 +90,10 @@ func sanitizeContext(messages []protocol.Message) []protocol.Message {
 		if original.Role == protocol.RoleTool && !complete[original.ToolCallID] {
 			continue
 		}
-		m := cloneMessage(original)
-		m.Content = m.Content[:0]
+		m := original
+		m.Content = make([]protocol.ContentBlock, 0, len(original.Content))
+		m.Usage = original.Usage.Clone()
+		m.ToolDisplay = original.ToolDisplay.Clone()
 		for _, block := range original.Content {
 			switch block.Type {
 			case protocol.BlockThinking:
@@ -129,16 +135,6 @@ func lastUserTurns(messages []protocol.Message, n int) []protocol.Message {
 	return messages[starts[len(starts)-n]:]
 }
 
-func cloneMessage(m protocol.Message) protocol.Message {
-	out := m
-	out.Content = append([]protocol.ContentBlock(nil), m.Content...)
-	for i := range out.Content {
-		out.Content[i].Data = append([]byte(nil), m.Content[i].Data...)
-		out.Content[i].Arguments = append([]byte(nil), m.Content[i].Arguments...)
-	}
-	out.Usage = m.Usage.Clone()
-	return out
-}
 func shortID(id string) string {
 	id = strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {

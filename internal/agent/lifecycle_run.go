@@ -369,7 +369,8 @@ func boundRoutingMessage(message string, max int) string {
 
 func (a *Agent) run(ctx context.Context) error {
 	stableTools := a.requestToolSchemasWithTurnRouting(false)
-	admittedFixedTokens := fixedContextTokens(a.requestSystemPromptForTools(stableTools), stableTools)
+	stableSystem := a.requestSystemPromptForTools(stableTools)
+	admittedFixedTokens := fixedContextTokensWithSchemaBytes(stableSystem, providerSchemaBytes(stableTools))
 	turn := 0
 	overflowRecovered := false
 	providerAttempts := 0
@@ -405,7 +406,7 @@ func (a *Agent) run(ctx context.Context) error {
 				return fmt.Errorf("agent: reload compacted context: %w", err)
 			}
 		}
-		msgs = a.pruneHistoricalToolResults(ctx, msgs)
+		msgs = a.pruneHistoricalToolResultsOwned(ctx, msgs)
 
 		internalContext, err := a.goalInternalContext()
 		if err != nil {
@@ -430,7 +431,8 @@ func (a *Agent) run(ctx context.Context) error {
 			SessionAffinityKey: a.requestAffinityKey("turn"),
 		}
 
-		fixedTokens := fixedContextTokens(req.System, req.Tools)
+		schemaBytes := providerSchemaBytes(req.Tools)
+		fixedTokens := fixedContextTokensWithSchemaBytes(req.System, schemaBytes)
 		if budget := a.fixedContextBudgetTokens(req.Model); budget > 0 && fixedTokens > budget && fixedTokens > admittedFixedTokens {
 			return fixedContextBudgetError(fixedTokens, budget, a.opts.FixedContextBudgetPercent)
 		}
@@ -438,8 +440,8 @@ func (a *Agent) run(ctx context.Context) error {
 			admittedFixedTokens = fixedTokens
 		}
 
-		requestEstimate := estimateRequestTokens(req.Messages, req.System, req.Tools)
-		contextReport := buildContextReport(req, true)
+		requestEstimate := estimateRequestTokensWithSchemaBytes(req.Messages, req.System, schemaBytes)
+		contextReport := buildContextReportWithSchemaBytes(req, true, schemaBytes)
 		a.applyFixedContextBudget(&contextReport, req.Model)
 		a.mu.Lock()
 		a.latestRequestEstimate = requestEstimate

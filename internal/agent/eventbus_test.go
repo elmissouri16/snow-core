@@ -147,6 +147,70 @@ func TestEventBusEvictsPermanentlyBlockedSubscriber(t *testing.T) {
 	bus.Wait()
 }
 
+func TestEventBusSubscriberWorkerSurvivesPanicAndPreservesOrder(t *testing.T) {
+	bus := newEventBusWithCap(8)
+	defer func() { bus.Close(); bus.Wait() }()
+	var mu sync.Mutex
+	var got []string
+	bus.Subscribe(func(event protocol.AgentEvent) {
+		if event.Text == "panic" {
+			panic("expected test panic")
+		}
+		mu.Lock()
+		got = append(got, event.Text)
+		mu.Unlock()
+	})
+	for _, text := range []string{"one", "panic", "two", "three"} {
+		bus.Publish(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: text})
+	}
+	if err := bus.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 3 || got[0] != "one" || got[1] != "two" || got[2] != "three" {
+		t.Fatalf("delivery order=%v", got)
+	}
+}
+
+func TestEventBusUnsubscribeInsideCallbackDoesNotDelayDrain(t *testing.T) {
+	bus := newEventBusWithCap(4)
+	defer func() { bus.Close(); bus.Wait() }()
+	var unsubscribe func()
+	called := make(chan struct{})
+	unsubscribe = bus.Subscribe(func(protocol.AgentEvent) {
+		unsubscribe()
+		close(called)
+	})
+	bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("subscriber was not called")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := bus.Drain(ctx); err != nil {
+		t.Fatalf("drain after callback unsubscribe: %v", err)
+	}
+}
+
+func BenchmarkEventBusDispatch256(b *testing.B) {
+	bus := newEventBusWithCap(eventBusMaxItems)
+	bus.Subscribe(func(protocol.AgentEvent) {})
+	defer func() { bus.Close(); bus.Wait() }()
+	ctx := context.Background()
+	b.ReportAllocs()
+	for b.Loop() {
+		for range 256 {
+			bus.Publish(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: "delta"})
+		}
+		if err := bus.Drain(ctx); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestEventBusDrainFromCallbackFailsFast(t *testing.T) {
 	bus := newEventBusWithCap(2)
 	defer func() { bus.Close(); bus.Wait() }()

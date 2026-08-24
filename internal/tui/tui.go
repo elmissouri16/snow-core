@@ -418,7 +418,8 @@ type Model struct {
 	toolRunning             bool
 	activeToolCallID        string
 	activeToolStartMessage  string
-	activeToolRows          []string
+	activeToolText          strings.Builder
+	activeToolRows          int
 	pendingInputs           protocol.InputQueue
 	queueEpoch              uint64
 	queueAttempts           []queuedTUIAttempt

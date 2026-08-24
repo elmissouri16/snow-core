@@ -2,6 +2,7 @@ package responsesapi
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -153,10 +154,11 @@ func (s *codexStream) read() {
 	defer s.body.Close()
 	scanner := bufio.NewScanner(s.body)
 	scanner.Buffer(make([]byte, 4096), maxCodexSSELineBytes)
-	var data []string
+	data := make([]byte, 0, 4096)
 	dataBytes := 0
 	dataFragments := 0
 	calls := make(map[string]*toolAccum)
+	event := make(map[string]any)
 	bounds := &codexStreamBounds{}
 	reasoning := newReasoningAccum()
 	var finish protocol.StopReason
@@ -173,47 +175,57 @@ func (s *codexStream) read() {
 		s.send(protocol.StreamEvent{Type: protocol.EvStreamDone, StopReason: finish})
 	}
 	flush := func() bool {
-		if len(data) == 0 {
+		if dataFragments == 0 {
 			return false
 		}
-		payload := strings.TrimSpace(strings.Join(data, "\n"))
-		data = nil
-		dataBytes = 0
-		dataFragments = 0
-		if payload == "" {
+		payload := bytes.TrimSpace(data)
+		reset := func() {
+			data = data[:0]
+			dataBytes = 0
+			dataFragments = 0
+		}
+		if len(payload) == 0 {
+			reset()
 			return false
 		}
-		if payload == "[DONE]" {
+		if bytes.Equal(payload, []byte("[DONE]")) {
+			reset()
 			terminal = true
 			sendDone()
 			return true
 		}
-		var event map[string]any
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		clear(event)
+		if err := json.Unmarshal(payload, &event); err != nil {
+			reset()
 			s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: invalid SSE event: %w", s.provider, err)})
 			return true
 		}
-		return s.processEvent(event, calls, reasoning, bounds, &finish, &sawTool, &terminal)
+		stop := s.processEvent(event, calls, reasoning, bounds, &finish, &sawTool, &terminal)
+		reset()
+		return stop
 	}
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
 			if flush() {
 				return
 			}
 			continue
 		}
-		if strings.HasPrefix(line, "data:") {
-			fragment := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if bytes.HasPrefix(line, []byte("data:")) {
+			fragment := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
 			// Count a separator byte even for an empty fragment and independently
-			// cap fragment count so slice overhead cannot bypass the byte bound.
+			// cap fragment count so buffer overhead cannot bypass the byte bound.
 			if dataFragments >= maxCodexSSEEventFragments || len(fragment)+1 > maxCodexSSEEventBytes-dataBytes {
 				s.send(protocol.StreamEvent{Type: protocol.EvStreamError, Err: s.prefix("SSE event exceeds size limit")})
 				return
 			}
+			if dataFragments > 0 {
+				data = append(data, '\n')
+			}
+			data = append(data, fragment...)
 			dataFragments++
 			dataBytes += len(fragment) + 1
-			data = append(data, fragment)
 		}
 	}
 	scanErr := scanner.Err()

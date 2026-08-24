@@ -68,10 +68,20 @@ func (p *Provider) buildBody(req protocol.ChatRequest) ([]byte, error) {
 	if !req.Model.SupportsThinkingLevel(level) {
 		return nil, unsupportedThinkingError(p.providerID, req.Model, model, level)
 	}
+	messageCapacity := len(req.Messages) + len(req.InternalContext)
+	if req.System != "" {
+		messageCapacity++
+	}
 	oreq := openAIChatRequest{
 		Model:         model,
 		Stream:        true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
+	}
+	if messageCapacity > 0 {
+		oreq.Messages = make([]openAIMessage, 0, messageCapacity)
+	}
+	if len(req.Tools) > 0 {
+		oreq.Tools = make([]openAITool, 0, len(req.Tools))
 	}
 	if req.System != "" {
 		oreq.Messages = append(oreq.Messages, openAIMessage{Role: "system", Content: req.System})
@@ -118,7 +128,7 @@ func (p *Provider) buildBody(req protocol.ChatRequest) ([]byte, error) {
 			oreq.ReasoningEffort = &v
 		}
 	}
-	return json.Marshal(oreq)
+	return marshalChatRequest(oreq)
 }
 
 // mapThinkingEffort maps Snow's normalized levels to OpenAI-compatible
@@ -161,7 +171,16 @@ func mapMessage(m protocol.Message) (openAIMessage, bool) {
 		// not lose sender/recipient/type metadata.
 		return openAIMessage{Role: "user", Content: messageContent(m)}, true
 	case protocol.RoleAssistant:
+		toolCalls := 0
+		for _, block := range m.Content {
+			if block.Type == protocol.BlockToolCall {
+				toolCalls++
+			}
+		}
 		om := openAIMessage{Role: "assistant", Content: textContent(m)}
+		if toolCalls > 0 {
+			om.ToolCalls = make([]openAIToolCall, 0, toolCalls)
+		}
 		for _, b := range m.Content {
 			if b.Type != protocol.BlockToolCall {
 				continue
@@ -240,6 +259,16 @@ func messageContent(m protocol.Message) any {
 // textContent joins the representable text of a message. Thinking blocks are
 // skipped for OpenAI-compatible Chat Completions.
 func textContent(m protocol.Message) string {
+	if len(m.Content) == 1 {
+		switch block := m.Content[0]; block.Type {
+		case protocol.BlockText:
+			return block.Text
+		case protocol.BlockPlan:
+			return planBlockText(block)
+		default:
+			return ""
+		}
+	}
 	var sb strings.Builder
 	for _, block := range m.Content {
 		switch block.Type {

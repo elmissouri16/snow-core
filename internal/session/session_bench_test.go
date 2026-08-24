@@ -53,6 +53,33 @@ func BenchmarkSQLiteContextMessages(b *testing.B) {
 	})
 }
 
+func BenchmarkMemoryContextMessagesAfterCompaction(b *testing.B) {
+	store := NewMemoryStore(Options{})
+	defer store.Close()
+	batch := make([]Entry, 5000)
+	body := strings.Repeat("context ", 128)
+	for i := range batch {
+		batch[i] = msg(fmt.Sprintf("m%d", i), "", body)
+	}
+	if err := store.AppendBatch(batch); err != nil {
+		b.Fatal(err)
+	}
+	if err := store.Append(Entry{Type: EntryCompaction, ID: "checkpoint", Summary: "bounded working state", CompactedThrough: "m4899"}); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		messages, err := store.ContextMessages()
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(messages) != 101 {
+			b.Fatalf("messages=%d", len(messages))
+		}
+	}
+}
+
 // BenchmarkLargeSessionReload loads a session with 10k entries and measures
 // the reload time (target < 500ms per IMPLEMENTATION.md §13.4).
 func BenchmarkLargeSessionReload(b *testing.B) {

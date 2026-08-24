@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -49,6 +50,45 @@ func TestForkContextSanitizesAndSelectsTurns(t *testing.T) {
 		if m.Role == protocol.RoleAgent {
 			t.Fatal("old mail copied")
 		}
+	}
+}
+
+func TestForkContextOwnsMutablePayloads(t *testing.T) {
+	arguments := []byte(`{"path":"README.md"}`)
+	data := []byte{1, 2, 3}
+	messages := []protocol.Message{
+		protocol.NewUserMessage("user", "", "inspect"),
+		protocol.NewAssistantMessage("assistant", "user", "p", "m", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: "call", Name: "read", Arguments: arguments}, {Type: protocol.BlockImage, MIMEType: "image/png", Data: data}}, protocol.StopToolUse, nil),
+		protocol.NewToolResultMessage("result", "assistant", "call", "read", []protocol.ContentBlock{protocol.NewTextBlock("done")}, false),
+	}
+	store, err := ForkContext(messages, "all", "/tmp", "owned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	arguments[0] = '['
+	data[0] = 9
+	got, err := store.Messages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || string(got[1].Content[0].Arguments) != `{"path":"README.md"}` || got[1].Content[1].Data[0] != 1 {
+		t.Fatalf("forked payload changed: %+v", got)
+	}
+	if got[0].ParentID == "" || got[1].ParentID != got[0].ID || got[2].ParentID != got[1].ID {
+		t.Fatalf("fork chain=%+v", got)
+	}
+	got[1].Content[0].Arguments[0] = 'X'
+	if messages[1].Content[0].Arguments[0] != '[' {
+		t.Fatal("forked result aliases parent input")
+	}
+}
+
+func TestBoundClonesTruncatedUTF8Prefix(t *testing.T) {
+	value := "prefix 世界 trailing"
+	got := bound(value, 9)
+	if got != "prefix " || !strings.HasPrefix(value, got) {
+		t.Fatalf("bound=%q", got)
 	}
 }
 

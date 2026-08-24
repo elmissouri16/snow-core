@@ -1,9 +1,9 @@
 package tui
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"reflect"
-	"strings"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,9 +23,59 @@ type agentEventBatchMsg struct {
 }
 
 type queuedAgentEvent struct {
-	event     protocol.AgentEvent
-	textParts []string
-	bytes     int
+	event protocol.AgentEvent
+	bytes int
+
+	// Stream text is packed separately from the event envelope. Varint fragment
+	// lengths preserve complete-fragment tail eviction without retaining one
+	// 16-byte string header per provider delta.
+	textData       []byte
+	textLengths    []byte
+	textDataHead   int
+	textLengthHead int
+	textFragments  int
+}
+
+func (item *queuedAgentEvent) appendText(text string) {
+	if text == "" && item.textFragments > 0 {
+		return
+	}
+	item.textData = append(item.textData, text...)
+	item.textLengths = binary.AppendUvarint(item.textLengths, uint64(len(text)))
+	item.textFragments++
+}
+
+func (item *queuedAgentEvent) dropOldestTextFragment() (int, bool) {
+	if item.textFragments <= 1 {
+		return 0, false
+	}
+	length, width := binary.Uvarint(item.textLengths[item.textLengthHead:])
+	if width <= 0 || length > uint64(len(item.textData)-item.textDataHead) {
+		return 0, false
+	}
+	item.textLengthHead += width
+	item.textDataHead += int(length)
+	item.textFragments--
+	item.compactTextStorage()
+	return int(length), true
+}
+
+func (item *queuedAgentEvent) compactTextStorage() {
+	const compactThreshold = 64 << 10
+	if item.textDataHead >= compactThreshold && item.textDataHead*2 >= len(item.textData) {
+		copy(item.textData, item.textData[item.textDataHead:])
+		item.textData = item.textData[:len(item.textData)-item.textDataHead]
+		item.textDataHead = 0
+	}
+	if item.textLengthHead >= compactThreshold && item.textLengthHead*2 >= len(item.textLengths) {
+		copy(item.textLengths, item.textLengths[item.textLengthHead:])
+		item.textLengths = item.textLengths[:len(item.textLengths)-item.textLengthHead]
+		item.textLengthHead = 0
+	}
+}
+
+func (item *queuedAgentEvent) joinedText() string {
+	return string(item.textData[item.textDataHead:])
 }
 
 // coalesceTUISnapshotEvents keeps only root snapshots superseded within one UI
@@ -115,13 +165,14 @@ func (q *agentEventMailbox) Push(ev protocol.AgentEvent) {
 		wasEmpty := len(q.items) == 0
 		if len(q.items) > 0 && compatibleStreamDeltas(q.items[len(q.items)-1].event, copyEvent) {
 			item := &q.items[len(q.items)-1]
-			item.textParts = append(item.textParts, copyEvent.Text)
+			item.appendText(copyEvent.Text)
 			item.bytes += len(copyEvent.Text)
 			q.bytes += len(copyEvent.Text)
-			for item.bytes > maxMailboxDeltaBytes && len(item.textParts) > 1 {
-				removed := len(item.textParts[0])
-				item.textParts[0] = ""
-				item.textParts = item.textParts[1:]
+			for item.bytes > maxMailboxDeltaBytes && item.textFragments > 1 {
+				removed, ok := item.dropOldestTextFragment()
+				if !ok {
+					break
+				}
 				item.bytes -= removed
 				q.bytes -= removed
 				q.dropped++
@@ -136,7 +187,7 @@ func (q *agentEventMailbox) Push(ev protocol.AgentEvent) {
 
 		item := queuedAgentEvent{event: copyEvent, bytes: approximateAgentEventBytes(copyEvent)}
 		if isCoalescibleStreamDelta(copyEvent.Type) {
-			item.textParts = []string{copyEvent.Text}
+			item.appendText(copyEvent.Text)
 			item.bytes = len(copyEvent.Text)
 			item.event.Text = ""
 		}
@@ -284,8 +335,8 @@ func (q *agentEventMailbox) popBatch(limit int) []protocol.AgentEvent {
 	events := make([]protocol.AgentEvent, 0, len(items))
 	for _, item := range items {
 		ev := item.event
-		if item.textParts != nil {
-			ev.Text = strings.Join(item.textParts, "")
+		if item.textFragments > 0 {
+			ev.Text = item.joinedText()
 		}
 		events = append(events, ev)
 	}

@@ -109,6 +109,15 @@ func (m *Manager) finalResult(r *runtime) string {
 	if child == nil {
 		return ""
 	}
+	if latest, ok := child.(interface {
+		LatestAssistantMessage() (protocol.Message, bool, error)
+	}); ok {
+		message, found, err := latest.LatestAssistantMessage()
+		if err != nil || !found {
+			return ""
+		}
+		return bound(assistantResultText(message), m.limits.MaxResultBytes)
+	}
 	msgs, err := child.Messages()
 	if err != nil {
 		return ""
@@ -117,17 +126,21 @@ func (m *Manager) finalResult(r *runtime) string {
 		if msgs[i].Role != protocol.RoleAssistant {
 			continue
 		}
-		var b strings.Builder
-		for _, c := range msgs[i].Content {
-			if c.Type == protocol.BlockText || c.Type == protocol.BlockPlan {
-				b.WriteString(c.Text)
-			}
-		}
-		if strings.TrimSpace(b.String()) != "" {
-			return bound(b.String(), m.limits.MaxResultBytes)
+		if value := assistantResultText(msgs[i]); strings.TrimSpace(value) != "" {
+			return bound(value, m.limits.MaxResultBytes)
 		}
 	}
 	return ""
+}
+
+func assistantResultText(message protocol.Message) string {
+	var b strings.Builder
+	for _, block := range message.Content {
+		if block.Type == protocol.BlockText || block.Type == protocol.BlockPlan {
+			b.WriteString(block.Text)
+		}
+	}
+	return b.String()
 }
 
 func (m *Manager) deliverFinal(s *protocol.SubagentState, result, errText string) error {
@@ -637,5 +650,5 @@ func bound(s string, n int) string {
 	for end > 0 && !utf8.ValidString(s[:end]) {
 		end--
 	}
-	return s[:end]
+	return strings.Clone(s[:end])
 }

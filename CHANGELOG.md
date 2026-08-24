@@ -29,6 +29,10 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- Reduced CPU and transient memory for long-session reopen, compacted in-memory
+  context assembly, TUI hydration, OpenAI-compatible request/SSE handling,
+  event delivery, artifact pruning, and subagent forks without changing
+  provider wire payloads, session history, event order, or transcript limits.
 - Changed managed-process startup guidance to treat a stable log marker as
   sufficient readiness evidence. Snow now prefers log readiness and does not
   add an HTTP or TCP probe merely to reconfirm a process that announced it is

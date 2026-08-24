@@ -33,39 +33,54 @@ func PruneHistoricalToolResultsWithRefs(messages []protocol.Message, threshold, 
 	out := make([]protocol.Message, len(messages))
 	for i, message := range messages {
 		out[i] = message.Clone()
-		if message.Role != protocol.RoleTool || threshold <= 0 || head < 0 || tail < 0 {
-			continue
+		if pruned, ok := prunedHistoricalToolResult(message, threshold, head, tail, resolver); ok {
+			out[i].Content = []protocol.ContentBlock{protocol.NewTextBlock(pruned)}
 		}
-		var text strings.Builder
-		plain := len(message.Content) > 0
-		for _, block := range message.Content {
-			if block.Type != protocol.BlockText {
-				plain = false
-				break
-			}
-			text.WriteString(block.Text)
-		}
-		if !plain || text.Len() <= threshold {
-			continue
-		}
-		value := text.String()
-		prefix := validUTF8Prefix(value, min(head, len(value)))
-		suffixBudget := min(tail, len(value)-len(prefix))
-		suffix := validUTF8Suffix(value, suffixBudget)
-		omitted := len(value) - len(prefix) - len(suffix)
-		marker := fmt.Sprintf("\n\n[… %d bytes omitted …]\n", omitted)
-		if resolver != nil {
-			if ref := strings.TrimSpace(resolver(message, value)); ref != "" {
-				marker += "Full retained tool result: " + ref + "\nUse artifact_read or artifact_grep to inspect it.\n"
-			}
-		}
-		pruned := prefix + marker + "\n" + suffix
-		if len(pruned) >= len(value) {
-			continue
-		}
-		out[i].Content = []protocol.ContentBlock{protocol.NewTextBlock(pruned)}
 	}
 	return out
+}
+
+// PruneHistoricalToolResultsOwnedWithRefs prunes a caller-owned projection in
+// place. It is intentionally separate from the defensive public projection so
+// durable/session callers cannot accidentally weaken ownership guarantees.
+func PruneHistoricalToolResultsOwnedWithRefs(messages []protocol.Message, threshold, head, tail int, resolver func(protocol.Message, string) string) []protocol.Message {
+	for i, message := range messages {
+		if pruned, ok := prunedHistoricalToolResult(message, threshold, head, tail, resolver); ok {
+			messages[i].Content = []protocol.ContentBlock{protocol.NewTextBlock(pruned)}
+		}
+	}
+	return messages
+}
+
+func prunedHistoricalToolResult(message protocol.Message, threshold, head, tail int, resolver func(protocol.Message, string) string) (string, bool) {
+	if message.Role != protocol.RoleTool || threshold <= 0 || head < 0 || tail < 0 {
+		return "", false
+	}
+	var text strings.Builder
+	plain := len(message.Content) > 0
+	for _, block := range message.Content {
+		if block.Type != protocol.BlockText {
+			plain = false
+			break
+		}
+		text.WriteString(block.Text)
+	}
+	if !plain || text.Len() <= threshold {
+		return "", false
+	}
+	value := text.String()
+	prefix := validUTF8Prefix(value, min(head, len(value)))
+	suffixBudget := min(tail, len(value)-len(prefix))
+	suffix := validUTF8Suffix(value, suffixBudget)
+	omitted := len(value) - len(prefix) - len(suffix)
+	marker := fmt.Sprintf("\n\n[… %d bytes omitted …]\n", omitted)
+	if resolver != nil {
+		if ref := strings.TrimSpace(resolver(message, value)); ref != "" {
+			marker += "Full retained tool result: " + ref + "\nUse artifact_read or artifact_grep to inspect it.\n"
+		}
+	}
+	pruned := prefix + marker + "\n" + suffix
+	return pruned, len(pruned) < len(value)
 }
 
 // NeedsHistoricalToolResultPruning reports whether pruning would change at

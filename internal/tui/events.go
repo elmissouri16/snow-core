@@ -82,13 +82,38 @@ func (m *Model) renderQueuedInput(item protocol.QueuedInput, text string) {
 	m.queueRendered[item.ID] = true
 }
 
+func (m *Model) clearActiveToolText() {
+	// Assign a zero builder rather than Reset so a completed tool cannot pin a
+	// previous high-water progress buffer for the rest of the TUI session.
+	m.activeToolText = strings.Builder{}
+	m.activeToolRows = 0
+}
+
+func (m *Model) setActiveToolText(rows []string) {
+	m.clearActiveToolText()
+	for _, row := range rows {
+		m.appendActiveToolText(row)
+	}
+}
+
+func (m *Model) appendActiveToolText(row string) {
+	if row == "" {
+		return
+	}
+	if m.activeToolRows > 0 {
+		m.activeToolText.WriteByte('\n')
+	}
+	m.activeToolText.WriteString(row)
+	m.activeToolRows++
+}
+
 func (m *Model) setRunIdle() {
 	m.busy = false
 	m.activeTurnID = ""
 	m.toolRunning = false
 	m.activeToolCallID = ""
 	m.activeToolStartMessage = ""
-	m.activeToolRows = nil
+	m.clearActiveToolText()
 	m.compacting = false
 	m.compactStatus = ""
 	m.runStartedAt = time.Time{}
@@ -288,7 +313,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		m.toolRunning = true
 		m.activeToolCallID = ev.ToolCallID
 		m.activeToolStartMessage = ev.Message
-		m.activeToolRows = toolStartTranscriptRows(ev.ToolName, ev.Message)
+		m.setActiveToolText(toolStartTranscriptRows(ev.ToolName, ev.Message))
 		m.finishAssistant()
 		m.busy = true
 		m.refreshTranscript()
@@ -299,7 +324,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			message = strings.TrimSpace(ev.ToolProgress.Message)
 		}
 		if row := toolProgressTranscriptRow(ev.ToolName, message); row != "" {
-			m.activeToolRows = append(m.activeToolRows, row)
+			m.appendActiveToolText(row)
 			m.refreshTranscript()
 		}
 	case protocol.EvToolEnd:
@@ -308,7 +333,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		}
 		startMessage := m.activeToolStartMessage
 		m.toolRunning = false
-		m.activeToolRows = nil
+		m.clearActiveToolText()
 		for _, row := range m.toolEndTranscriptRows(ev.ToolName, startMessage, ev.ToolDurationMS, ev.Message, ev.ToolOutput, ev.IsError) {
 			m.pushLine(row)
 		}
@@ -429,7 +454,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		m.toolRunning = false
 		m.activeToolCallID = ""
 		m.activeToolStartMessage = ""
-		m.activeToolRows = nil
+		m.clearActiveToolText()
 		if ev.Usage != nil {
 			m.lastUsage = ev.Usage.Clone()
 			if os.Getenv("SNOW_DEBUG") != "" {
@@ -731,11 +756,11 @@ func (m *Model) liveText() string {
 		}
 		b.WriteString(styleHeader.Render("Plan") + "\n" + styleAssistant.Render(m.planBuf.String()))
 	}
-	if len(m.activeToolRows) > 0 {
+	if m.activeToolRows > 0 {
 		if b.Len() > 0 {
 			b.WriteString("\n")
 		}
-		b.WriteString(strings.Join(m.activeToolRows, "\n"))
+		b.WriteString(m.activeToolText.String())
 	}
 	return b.String()
 }

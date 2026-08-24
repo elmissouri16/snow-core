@@ -728,14 +728,16 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 						return nil, err
 					}
 					parent := opened.BranchTip()
+					batch := make([]session.Entry, 0, len(messages))
 					for i := range messages {
-						msg := messages[i]
-						msg.ParentID = parent
-						if err := opened.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, ParentID: parent, Message: &msg}); err != nil {
-							_ = opened.Close()
-							return nil, err
-						}
-						parent = msg.ID
+						message := &messages[i]
+						message.ParentID = parent
+						batch = append(batch, session.Entry{Type: session.EntryMessage, ID: message.ID, ParentID: parent, Message: message})
+						parent = message.ID
+					}
+					if err := opened.AppendBatch(batch); err != nil {
+						_ = opened.Close()
+						return nil, err
 					}
 					childStore = opened
 				} else {

@@ -642,10 +642,45 @@ tradeoffs auditable rather than contractual:
   output storage in 64-message retention chunks: 62.6% less time, 61.3% fewer
   allocated bytes, and 98.3% fewer allocations. The cold recursive-query/decode
   path remained about 9.2–9.4 ms while bytes and allocations fell 10.6% and
-  6.1%; recurring warm projection is the optimized path.
+  6.1%; recurring warm projection is the optimized path. A follow-on bounded
+  MemoryStore lineage projection for 5,000 messages with a 100-message
+  post-compaction tail reduced 768.5 µs / 3,918,900 B / 87 allocations to
+  17.0 µs / 75,448 B / 20 allocations (97.8% less time and 98.1% fewer bytes)
+  while exact history remained append-only.
+- Startup recovery now uses indexed tail queries for interrupted tool calls and
+  filtered branch-state queries for active skills instead of decoding complete
+  history. Reopening a compacted 5,000-message, 12 MB SQLite session fell from
+  about 113 ms / 97.2 MB allocated to 34.8 ms / 0.76 MB allocated; retained live
+  heap stayed near 0.09 MB. The query fallbacks remain available for custom
+  stores.
+- OpenAI-compatible Chat request construction now pre-sizes transformations and
+  uses a differential-tested JSON appender. At 1,500 messages and 20 tools,
+  plain history fell from 908.3 µs / 3,343,277 B / 4,538 allocations to
+  588.1 µs / 1,091,411 B / 1,507 allocations; tool-heavy history fell from
+  885.0 µs / 2,189,334 B / 4,537 allocations to 498.9 µs / 809,260 B / 2,256
+  allocations. Byte-oriented SSE ingestion reduced the 600-delta Chat proxy
+  from 630.7 µs / 240,197 B / 3,618 allocations to 581.0 µs / 90,797 B / 1,211
+  allocations. Reusable Responses SSE buffers reduced its corresponding proxy
+  from 716.2 µs / 396,561 B / 8,448 allocations to 649.1 µs / 87,597 B / 4,843
+  allocations. Wire and normalized-event parity remain covered by differential
+  and stream corpus tests.
+- Persistent event-subscriber workers preserve serial event order, concurrent
+  subscriber callbacks, timeout eviction, reentrant-drain rejection, and
+  payload isolation without a goroutine and timer per delivery. A 256-event,
+  one-subscriber batch fell from 828.5 µs / 286,050 B / 2,315 allocations to
+  202.0 µs / 115,912 B / 523 allocations. Forking 1,500 inherited subagent
+  messages in one batch fell from 878.0 µs / 2,387,694 B / 11,792 allocations
+  to 645.3 µs / 2,328,852 B / 8,814 allocations; durable forks likewise use one
+  SQLite transaction, and final-result lookup no longer clones full history.
 - For the TUI, ingesting 10,000 adjacent deltas reduced from a 4.376 ms median /
   6,492,386 B / 20,025 allocations to 0.682 ms / 732,960 B / 27 allocations.
-  Reusing an unchanged 120-column viewport and exact fitted frame reduced a
+  The follow-on packed-fragment mailbox reduced that then-current 0.682 ms /
+  732,961 B proxy to 0.596 ms / 399,136 B while bounding fragment metadata by
+  payload size. Single-snapshot hydration, borrowed SQLite blobs, compacted
+  context reuse, and retained-row rendering reduced a 5,000-message / 12 MB
+  hydration from 256.0 ms / 253,929,896 B / 306,617 allocations to 126.8 ms /
+  120,659,052 B / 105,086 allocations without changing the 2,000 rendered-row
+  limit or omission count. Reusing an unchanged 120-column viewport and exact fitted frame reduced a
   stable `View` from 170.592 µs / 112,947 B / 211 allocations to 51.152 µs /
   24,342 B / 144 allocations (70.0% less time, 78.4% fewer bytes). The cache is
   keyed by content generation, scroll, dimensions, and exact frame input; live
@@ -662,9 +697,13 @@ tradeoffs auditable rather than contractual:
 Reproduction uses `go build -trimpath -ldflags='-s -w'`, `/usr/bin/time -l`,
 the fake-provider JSON `tool_routing` event, and `go test` benchmarks
 `BenchmarkBuildRequest`, `BenchmarkBuildRequestStages`,
-`BenchmarkBuildRequestImages`, `BenchmarkSQLiteContextMessages`,
-`BenchmarkMailboxIngestion`, `BenchmarkViewNormalAndNarrow`, and
-`BenchmarkSearch/tools_1000`, all with `-benchmem` and repeated counts. Numbers
+`BenchmarkBuildRequestImages`, `BenchmarkBuildChatRequest1500`,
+`BenchmarkChatSSE600`, `BenchmarkResponsesSSE600`,
+`BenchmarkSQLiteContextMessages`, `BenchmarkMemoryContextMessagesAfterCompaction`,
+`BenchmarkEventBusDispatch256`, `BenchmarkForkContext1500`,
+`BenchmarkMailboxIngestion`, `BenchmarkSessionHydration5000`,
+`BenchmarkViewNormalAndNarrow`, and `BenchmarkSearch/tools_1000`, all with
+`-benchmem` and repeated counts. Numbers
 vary by host and should be compared only with the same command and checkout
 conditions.
 

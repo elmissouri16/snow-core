@@ -17,6 +17,37 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+func TestWithoutProviderReasoningReusesCleanRequest(t *testing.T) {
+	request := protocol.ChatRequest{Messages: []protocol.Message{{ID: "plain", Role: protocol.RoleAssistant, Content: []protocol.ContentBlock{protocol.NewTextBlock("answer")}}}}
+	got := withoutProviderReasoning(request)
+	if len(got.Messages) != 1 || &got.Messages[0] != &request.Messages[0] {
+		t.Fatal("reasoning-free request was copied")
+	}
+}
+
+func TestWithoutProviderReasoningCopiesOnlyAffectedMessages(t *testing.T) {
+	request := protocol.ChatRequest{Messages: []protocol.Message{
+		{ID: "plain", Role: protocol.RoleUser, Content: []protocol.ContentBlock{protocol.NewTextBlock("question")}},
+		{ID: "reasoning", Role: protocol.RoleAssistant, Content: []protocol.ContentBlock{
+			{Type: protocol.BlockProviderData, Data: []byte(`{"opaque":true}`)},
+			protocol.NewTextBlock("answer"),
+		}},
+	}}
+	got := withoutProviderReasoning(request)
+	if len(got.Messages) != 2 || &got.Messages[0] == &request.Messages[0] {
+		t.Fatal("request message headers were not isolated")
+	}
+	if &got.Messages[0].Content[0] != &request.Messages[0].Content[0] {
+		t.Fatal("unaffected message content was unnecessarily cloned")
+	}
+	if len(got.Messages[1].Content) != 1 || got.Messages[1].Content[0].Type != protocol.BlockText {
+		t.Fatalf("provider data was not removed: %+v", got.Messages[1].Content)
+	}
+	if len(request.Messages[1].Content) != 2 || request.Messages[1].Content[0].Type != protocol.BlockProviderData {
+		t.Fatal("reasoning filter mutated its input")
+	}
+}
+
 func TestNormalizeEndpoints(t *testing.T) {
 	for _, tc := range []struct{ input, responses, models string }{
 		{"https://example.com/v1", "https://example.com/v1/responses", "https://example.com/v1/models"},

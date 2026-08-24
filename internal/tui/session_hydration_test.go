@@ -85,6 +85,42 @@ func TestModelHydratesPersistedToolTranscript(t *testing.T) {
 	}
 }
 
+func TestModelHydrationPairsReusedToolCallIDsWithNearestCall(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	for i, command := range []string{"first-command", "second-command"} {
+		assistantID := fmt.Sprintf("assistant-%d", i)
+		assistant := protocol.NewAssistantMessage(
+			assistantID,
+			m.app.Session.BranchTip(),
+			"fake",
+			"fake-model",
+			[]protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: "reused-call", Name: "bash", Arguments: json.RawMessage(fmt.Sprintf(`{"command":%q}`, command))}},
+			protocol.StopToolUse,
+			nil,
+		)
+		if err := m.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: assistant.ID, ParentID: assistant.ParentID, Message: &assistant}); err != nil {
+			t.Fatal(err)
+		}
+		result := protocol.NewToolResultMessage(fmt.Sprintf("result-%d", i), m.app.Session.BranchTip(), "reused-call", "bash", []protocol.ContentBlock{protocol.NewTextBlock(command + " output")}, false)
+		if err := m.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: result.ID, ParentID: result.ParentID, Message: &result}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m.hydrateSession()
+	plain := stripANSI(strings.Join(m.lines, "\n"))
+	first := strings.Index(plain, "✓ first-command")
+	second := strings.Index(plain, "✓ second-command")
+	if first < 0 || second <= first || strings.Count(plain, "✓ first-command") != 1 || strings.Count(plain, "✓ second-command") != 1 {
+		t.Fatalf("reused tool-call IDs paired incorrectly: %q", plain)
+	}
+}
+
 func TestModelHydratesExplicitSkillToolTranscript(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
@@ -243,6 +279,47 @@ func TestModelHydrationLimitsRenderedRowsNotRawMessages(t *testing.T) {
 	}
 }
 
+func TestModelHydrationRetainsExactBoundaryRowsAndLatestOmittedPlan(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	boundary := protocol.NewAssistantMessage("boundary", m.app.Session.BranchTip(), "fake", "fake-model", []protocol.ContentBlock{
+		{Type: protocol.BlockText, Text: "drop-boundary-one"},
+		{Type: protocol.BlockPlan, Text: "omitted latest plan"},
+		{Type: protocol.BlockText, Text: "drop-boundary-three"},
+		{Type: protocol.BlockText, Text: "keep-boundary-four"},
+	}, protocol.StopStop, nil)
+	if err := m.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: boundary.ID, Message: &boundary}); err != nil {
+		t.Fatal(err)
+	}
+	batch := make([]session.Entry, maxTranscriptEntries-2)
+	for i := range batch {
+		message := protocol.NewUserMessage(fmt.Sprintf("recent-%d", i), "", fmt.Sprintf("recent row %d", i))
+		batch[i] = session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}
+	}
+	if err := m.app.Session.(session.BatchStore).AppendBatch(batch); err != nil {
+		t.Fatal(err)
+	}
+
+	m.hydrateSession()
+	plain := stripANSI(strings.Join(m.lines, "\n"))
+	if !strings.Contains(plain, "── 3 older transcript entries omitted ──") {
+		t.Fatalf("omission marker changed: %q", plain[:min(len(plain), 500)])
+	}
+	if strings.Contains(plain, "drop-boundary-one") || strings.Contains(plain, "drop-boundary-three") || strings.Contains(plain, "omitted latest plan") {
+		t.Fatal("rows before the retained boundary remained visible")
+	}
+	if !strings.Contains(plain, "keep-boundary-four") || !strings.Contains(plain, "recent row 1997") {
+		t.Fatal("retained hydration suffix is incomplete")
+	}
+	if m.latestPlan != "omitted latest plan" {
+		t.Fatalf("latestPlan=%q", m.latestPlan)
+	}
+}
+
 func TestModelHydratesPersistedThinking(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
@@ -323,6 +400,21 @@ func TestModelAbortOnEscDuringActiveRun(t *testing.T) {
 	plain = stripANSI(strings.Join(m.lines, "\n"))
 	if strings.Count(plain, "aborted") != 1 {
 		t.Fatalf("terminal abort event duplicated status: %q", plain)
+	}
+}
+
+func TestActiveToolProgressBufferReleasedAtCompletion(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolStart, ToolCallID: "call", ToolName: "read", Message: "running"})
+	for i := 0; i < 1000; i++ {
+		m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolProgress, ToolCallID: "call", ToolName: "read", Message: strings.Repeat("x", 256)})
+	}
+	if m.activeToolRows != 1001 || m.activeToolText.Len() == 0 {
+		t.Fatalf("active progress rows=%d bytes=%d", m.activeToolRows, m.activeToolText.Len())
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolCallID: "call", ToolName: "read"})
+	if m.activeToolRows != 0 || m.activeToolText.Len() != 0 || m.activeToolText.Cap() != 0 {
+		t.Fatalf("completed progress buffer rows=%d len=%d cap=%d", m.activeToolRows, m.activeToolText.Len(), m.activeToolText.Cap())
 	}
 }
 

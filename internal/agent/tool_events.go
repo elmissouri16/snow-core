@@ -121,7 +121,7 @@ func newEventBusWithCap(maxItems int) *eventBus {
 		maxItems = 1
 	}
 	b := &eventBus{
-		subs:        make(map[int]func(protocol.AgentEvent)),
+		subs:        make(map[int]*eventSubscriber),
 		callbackIDs: make(map[uint64]struct{}),
 		wake:        make(chan struct{}, 1),
 		space:       make(chan struct{}, 1),
@@ -140,9 +140,41 @@ func (b *eventBus) signal() {
 	}
 }
 
+func (b *eventBus) runSubscriber(sub *eventSubscriber) {
+	id := currentGoroutineID()
+	b.mu.Lock()
+	b.callbackIDs[id] = struct{}{}
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		delete(b.callbackIDs, id)
+		b.mu.Unlock()
+	}()
+	for {
+		select {
+		case task := <-sub.tasks:
+			func() {
+				defer func() { _ = recover() }()
+				sub.fn(task.event)
+			}()
+			// The event-local channel is buffered for every dispatched subscriber,
+			// so a late completion after timeout never strands the worker.
+			task.completed <- eventSubscriberCompletion{id: sub.id, generation: task.generation}
+		case <-sub.stop:
+			return
+		}
+	}
+}
+
 func (b *eventBus) dispatch() {
 	atomic.StoreUint64(&b.dispatcherID, currentGoroutineID())
 	defer close(b.closed)
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
+	var generation uint64
 	for range b.wake {
 		for {
 			b.mu.Lock()
@@ -160,11 +192,7 @@ func (b *eventBus) dispatch() {
 			case b.space <- struct{}{}:
 			default:
 			}
-			type subscriber struct {
-				id int
-				fn func(protocol.AgentEvent)
-			}
-			fns := make([]subscriber, 0, len(b.subs))
+			subscribers := make([]*eventSubscriber, 0, len(b.subs))
 			if _, ok := item.(protocol.AgentEvent); ok {
 				ids := make([]int, 0, len(b.subs))
 				for id := range b.subs {
@@ -172,65 +200,73 @@ func (b *eventBus) dispatch() {
 				}
 				sort.Ints(ids)
 				for _, id := range ids {
-					fns = append(fns, subscriber{id: id, fn: b.subs[id]})
+					subscribers = append(subscribers, b.subs[id])
 				}
 			}
 			b.mu.Unlock()
-			switch v := item.(type) {
+
+			switch event := item.(type) {
 			case protocol.AgentEvent:
-				completed := make(chan int, len(fns))
-				pending := make(map[int]struct{}, len(fns))
-				for _, sub := range fns {
+				generation++
+				active := make([]*eventSubscriber, 0, len(subscribers))
+				for _, sub := range subscribers {
 					b.mu.Lock()
-					_, subscribed := b.subs[sub.id]
+					current, subscribed := b.subs[sub.id]
 					closing := b.closing
 					b.mu.Unlock()
 					if closing {
 						break
 					}
-					if !subscribed {
-						continue
+					if subscribed && current == sub {
+						active = append(active, sub)
 					}
-					pending[sub.id] = struct{}{}
-					go func(subscriberID int, fn func(protocol.AgentEvent)) {
-						id := currentGoroutineID()
-						b.mu.Lock()
-						b.callbackIDs[id] = struct{}{}
-						b.mu.Unlock()
-						defer func() {
-							_ = recover()
-							b.mu.Lock()
-							delete(b.callbackIDs, id)
-							b.mu.Unlock()
-							completed <- subscriberID
-						}()
-						fn(v.Clone())
-					}(sub.id, sub.fn)
 				}
-				if len(pending) > 0 {
-					timer := time.NewTimer(eventSubscriberTimeout)
-					for len(pending) > 0 {
-						select {
-						case id := <-completed:
-							delete(pending, id)
-						case <-timer.C:
-							b.mu.Lock()
-							for id := range pending {
+				completed := make(chan eventSubscriberCompletion, len(active))
+				pending := make(map[int]*eventSubscriber, len(active))
+				for i, sub := range active {
+					payload := event
+					if i+1 < len(active) {
+						payload = event.Clone()
+					}
+					task := eventSubscriberTask{event: payload, generation: generation, completed: completed}
+					select {
+					case sub.tasks <- task:
+						pending[sub.id] = sub
+					case <-sub.stop:
+					}
+				}
+				if len(pending) == 0 {
+					continue
+				}
+				timer.Reset(eventSubscriberTimeout)
+				for len(pending) > 0 {
+					select {
+					case done := <-completed:
+						if done.generation == generation {
+							delete(pending, done.id)
+						}
+					case <-timer.C:
+						b.mu.Lock()
+						for id, sub := range pending {
+							if b.subs[id] == sub {
 								delete(b.subs, id)
 							}
-							b.mu.Unlock()
-							pending = nil
 						}
+						b.mu.Unlock()
+						for _, sub := range pending {
+							sub.close()
+						}
+						pending = nil
 					}
-					if !timer.Stop() {
-						select {
-						case <-timer.C:
-						default:
-						}
+				}
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
 					}
 				}
 			case eventBarrier:
-				close(v.done)
+				close(event.done)
 			case eventStop:
 				return
 			}
@@ -308,6 +344,7 @@ func (b *eventBus) Wait() {
 }
 
 func (b *eventBus) Close() {
+	var subscribers []*eventSubscriber
 	b.mu.Lock()
 	if !b.closing {
 		b.closing = true
@@ -320,10 +357,16 @@ func (b *eventBus) Close() {
 			}
 		}
 		b.items = []any{eventStop{}}
-		b.subs = make(map[int]func(protocol.AgentEvent))
+		for _, sub := range b.subs {
+			subscribers = append(subscribers, sub)
+		}
+		b.subs = make(map[int]*eventSubscriber)
 		b.signal()
 	}
 	b.mu.Unlock()
+	for _, sub := range subscribers {
+		sub.close()
+	}
 }
 
 func (b *eventBus) Subscribe(fn func(protocol.AgentEvent)) func() {
@@ -331,17 +374,23 @@ func (b *eventBus) Subscribe(fn func(protocol.AgentEvent)) func() {
 		return func() {}
 	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.closing {
+		b.mu.Unlock()
 		return func() {}
 	}
 	id := b.next
 	b.next++
-	b.subs[id] = fn
+	sub := &eventSubscriber{id: id, fn: fn, tasks: make(chan eventSubscriberTask), stop: make(chan struct{})}
+	b.subs[id] = sub
+	b.mu.Unlock()
+	go b.runSubscriber(sub)
 	return func() {
 		b.mu.Lock()
-		defer b.mu.Unlock()
-		delete(b.subs, id)
+		if b.subs[id] == sub {
+			delete(b.subs, id)
+		}
+		b.mu.Unlock()
+		sub.close()
 	}
 }
 

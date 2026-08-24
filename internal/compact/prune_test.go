@@ -28,6 +28,23 @@ func TestPruneHistoricalToolResultsPreservesDurableInputAndMetadata(t *testing.T
 	}
 }
 
+func TestOwnedPruningMatchesDefensiveProjection(t *testing.T) {
+	original := strings.Repeat("head", 100)
+	message := protocol.NewToolResultMessage("result", "call", "call-1", "bash", []protocol.ContentBlock{protocol.NewTextBlock(original)}, false)
+	defensive := PruneHistoricalToolResultsWithRefs([]protocol.Message{message}, 160, 50, 50, func(protocol.Message, string) string { return "artifact-00000000000000000000000000000000" })
+	ownedInput := []protocol.Message{message.Clone()}
+	owned := PruneHistoricalToolResultsOwnedWithRefs(ownedInput, 160, 50, 50, func(protocol.Message, string) string { return "artifact-00000000000000000000000000000000" })
+	if len(owned) != 1 || owned[0].Content[0].Text != defensive[0].Content[0].Text {
+		t.Fatalf("owned projection=%+v defensive=%+v", owned, defensive)
+	}
+	if &owned[0] != &ownedInput[0] {
+		t.Fatal("owned pruning replaced the caller slice")
+	}
+	if message.Content[0].Text != original {
+		t.Fatal("owned projection test mutated durable input")
+	}
+}
+
 func TestNeedsHistoricalToolResultPruning(t *testing.T) {
 	plain := protocol.NewToolResultMessage("plain", "", "call", "read", []protocol.ContentBlock{protocol.NewTextBlock(strings.Repeat("x", 161))}, false)
 	rich := protocol.NewToolResultMessage("rich", "", "call-2", "read", []protocol.ContentBlock{protocol.NewTextBlock(strings.Repeat("x", 200)), {Type: protocol.BlockImage, Data: []byte{1}}}, false)

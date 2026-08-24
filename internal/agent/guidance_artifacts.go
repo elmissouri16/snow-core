@@ -176,7 +176,11 @@ func (a *Agent) systemPromptForToolsAndSkills(schemas []protocol.ToolSchema, act
 }
 
 func fixedContextTokens(system string, schemas []protocol.ToolSchema) int {
-	return estimatedTokensForBytes(len(system) + providerSchemaBytes(schemas))
+	return fixedContextTokensWithSchemaBytes(system, providerSchemaBytes(schemas))
+}
+
+func fixedContextTokensWithSchemaBytes(system string, schemaBytes int) int {
+	return estimatedTokensForBytes(len(system) + schemaBytes)
 }
 
 func fixedContextBudgetError(used, limit int, percent int) error {
@@ -311,34 +315,45 @@ func restoreActiveSkills(st session.Store, registry tools.Registry, host tools.T
 		}
 	}
 
-	// Built-in stores expose the complete root-to-tip entry sequence. Process
-	// activation messages and provider-hidden markers together so a later clear
-	// marker wins on resume, while a still-later activation remains effective.
+	// Built-in stores can filter branch state before decoding unrelated message
+	// blobs. Custom/legacy stores retain the complete-entry fallback.
 	processedEntries := false
-	if entries, ok := st.(session.BranchEntryStore); ok {
-		if branch, err := entries.BranchEntries(); err == nil {
+	var branch []session.Entry
+	if state, ok := st.(session.BranchStateStore); ok {
+		if selected, err := state.BranchStateEntries([]string{skillActivationMeta, skillDeactivationMeta}, []string{"activate_skill"}); err == nil {
+			branch = selected
 			processedEntries = true
-			for _, entry := range branch {
-				if entry.Type == session.EntryMessage && entry.Message != nil {
-					applyMessage(*entry.Message)
-					continue
+		}
+	}
+	if !processedEntries {
+		if entries, ok := st.(session.BranchEntryStore); ok {
+			if all, err := entries.BranchEntries(); err == nil {
+				branch = all
+				processedEntries = true
+			}
+		}
+	}
+	if processedEntries {
+		for _, entry := range branch {
+			if entry.Type == session.EntryMessage && entry.Message != nil {
+				applyMessage(*entry.Message)
+				continue
+			}
+			if entry.Type != session.EntryMeta {
+				continue
+			}
+			switch entry.Key {
+			case skillActivationMeta:
+				if skillNameAllowed(allowed, entry.Value) {
+					reload[entry.Value] = true
 				}
-				if entry.Type != session.EntryMeta {
-					continue
-				}
-				switch entry.Key {
-				case skillActivationMeta:
-					if skillNameAllowed(allowed, entry.Value) {
-						reload[entry.Value] = true
-					}
-				case skillDeactivationMeta:
-					if entry.Value == skillDeactivationAll {
-						clear(active)
-						clear(reload)
-					} else {
-						delete(active, entry.Value)
-						delete(reload, entry.Value)
-					}
+			case skillDeactivationMeta:
+				if entry.Value == skillDeactivationAll {
+					clear(active)
+					clear(reload)
+				} else {
+					delete(active, entry.Value)
+					delete(reload, entry.Value)
 				}
 			}
 		}
@@ -888,39 +903,56 @@ func (a *Agent) saveCompactedToolTranscript(ctx context.Context, messages []prot
 }
 
 func (a *Agent) pruneHistoricalToolResults(ctx context.Context, messages []protocol.Message) []protocol.Message {
+	return a.pruneHistoricalToolResultsProjection(ctx, messages, false)
+}
+
+func (a *Agent) pruneHistoricalToolResultsOwned(ctx context.Context, messages []protocol.Message) []protocol.Message {
+	return a.pruneHistoricalToolResultsProjection(ctx, messages, true)
+}
+
+func (a *Agent) pruneHistoricalToolResultsProjection(ctx context.Context, messages []protocol.Message, owned bool) []protocol.Message {
 	threshold := a.opts.Compaction.HistoricalToolResultThreshold
 	if threshold <= 0 {
 		threshold = compact.HistoricalToolResultThreshold
 	}
-	return compact.PruneHistoricalToolResultsWithRefs(messages, threshold, compact.HistoricalToolResultHead, compact.HistoricalToolResultTail,
-		func(message protocol.Message, text string) string {
-			if a.opts.Artifacts == nil || message.ToolName == "artifact_read" || message.ToolName == "artifact_grep" {
-				return ""
-			}
-			a.mu.RLock()
-			sessionID := ""
-			if a.opts.Session != nil {
-				sessionID = a.opts.Session.ID()
-			}
-			a.mu.RUnlock()
-			ref, err := a.opts.Artifacts.SaveText(ctx, sessionID, message.ToolName+"\x00"+message.ToolCallID+"\x00"+message.ID, text)
-			if err != nil {
-				return ""
-			}
-			return ref.ID
-		})
+	// Session context is already an owned defensive projection. Avoid cloning
+	// every message and mutable block payload when there is nothing to shorten.
+	if !compact.NeedsHistoricalToolResultPruning(messages, threshold) {
+		return messages
+	}
+	resolver := func(message protocol.Message, text string) string {
+		if a.opts.Artifacts == nil || message.ToolName == "artifact_read" || message.ToolName == "artifact_grep" {
+			return ""
+		}
+		a.mu.RLock()
+		sessionID := ""
+		if a.opts.Session != nil {
+			sessionID = a.opts.Session.ID()
+		}
+		a.mu.RUnlock()
+		key := message.ToolName + "\x00" + message.ToolCallID + "\x00" + message.ID
+		return a.saveHistoricalToolArtifact(ctx, sessionID, key, text, message.ID != "")
+	}
+	if owned {
+		return compact.PruneHistoricalToolResultsOwnedWithRefs(messages, threshold, compact.HistoricalToolResultHead, compact.HistoricalToolResultTail, resolver)
+	}
+	return compact.PruneHistoricalToolResultsWithRefs(messages, threshold, compact.HistoricalToolResultHead, compact.HistoricalToolResultTail, resolver)
 }
 
 // providerMessages removes surface-only transcript metadata before crossing a
 // provider boundary. In particular, ToolDisplay may contain a private edit diff
 // that is intentionally visible to the local UI but absent from model context.
 func providerMessages(messages []protocol.Message) []protocol.Message {
-	out := make([]protocol.Message, len(messages))
-	copy(out, messages)
-	for i := range out {
-		out[i].ToolDisplay = nil
+	for i := range messages {
+		if messages[i].ToolDisplay != nil {
+			out := append([]protocol.Message(nil), messages...)
+			for j := range out {
+				out[j].ToolDisplay = nil
+			}
+			return out
+		}
 	}
-	return out
+	return messages
 }
 
 func toolResultText(content []protocol.ContentBlock) string {

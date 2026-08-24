@@ -431,6 +431,7 @@ func (a *Agent) setSessionAdmitted(st session.Store, publish bool) error {
 		return fmt.Errorf("agent: recover interrupted tool calls: %w", err)
 	}
 	a.opts.Session = st
+	clear(a.artifactRefs)
 	a.activeSkills = restoreActiveSkills(st, a.opts.Registry, a.opts.ToolHost, a.opts.SkillNames)
 	a.mode = mode
 	a.turnMode = mode

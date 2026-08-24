@@ -671,6 +671,92 @@ func (s *MemoryStore) Messages() ([]protocol.Message, error) {
 	return linearize(s.entries, s.byID, s.tip)
 }
 
+// TailMessages implements TailMessageStore without constructing the complete
+// root-to-tip path.
+func (s *MemoryStore) TailMessages() ([]protocol.Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, errors.New("session: store closed")
+	}
+	id := s.tip
+	reversed := make([]protocol.Message, 0, 4)
+	for id != "" {
+		index, ok := s.byID[id]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		entry := s.entries[index]
+		if entry.Type == EntryMessage && entry.Message != nil {
+			message := entry.Message.Clone()
+			reversed = append(reversed, message)
+			if message.Role != protocol.RoleTool {
+				break
+			}
+		}
+		id = entry.ParentID
+	}
+	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
+		reversed[left], reversed[right] = reversed[right], reversed[left]
+	}
+	return reversed, nil
+}
+
+// LatestAssistantMessage implements LatestAssistantStore with a parent-index
+// walk and clones only the selected result.
+func (s *MemoryStore) LatestAssistantMessage() (protocol.Message, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return protocol.Message{}, false, errors.New("session: store closed")
+	}
+	current := s.tip
+	for steps := 0; current != "" && steps <= len(s.entries); steps++ {
+		index, ok := s.byID[current]
+		if !ok {
+			break
+		}
+		entry := s.entries[index]
+		if entry.Type == EntryMessage && entry.Message != nil && entry.Message.Role == protocol.RoleAssistant && assistantHasResult(*entry.Message) {
+			return entry.Message.Clone(), true, nil
+		}
+		current = entry.ParentID
+	}
+	return protocol.Message{}, false, nil
+}
+
+// AggregateUsage sums the active branch without constructing message clones.
+func (s *MemoryStore) AggregateUsage() (protocol.Usage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return protocol.Usage{}, errors.New("session: store closed")
+	}
+	var total protocol.Usage
+	current := s.tip
+	for steps := 0; current != "" && steps <= len(s.entries); steps++ {
+		index, ok := s.byID[current]
+		if !ok {
+			break
+		}
+		entry := s.entries[index]
+		if entry.Type == EntryMessage && entry.Message != nil && entry.Message.Usage != nil {
+			total = total.Add(*entry.Message.Usage)
+		}
+		current = entry.ParentID
+	}
+	return total, nil
+}
+
+func assistantHasResult(message protocol.Message) bool {
+	for _, block := range message.Content {
+		if (block.Type == protocol.BlockText || block.Type == protocol.BlockPlan) && strings.TrimSpace(block.Text) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // ContextMessages implements ContextStore.
 func (s *MemoryStore) ContextMessages() ([]protocol.Message, error) {
 	s.mu.RLock()
@@ -678,7 +764,52 @@ func (s *MemoryStore) ContextMessages() ([]protocol.Message, error) {
 	if s.closed {
 		return nil, errors.New("session: store closed")
 	}
-	return contextMessagesFromEntries(pathFrom(s.entries, s.byID, s.tip)), nil
+	return contextMessagesFromEntries(contextPathFrom(s.entries, s.byID, s.tip)), nil
+}
+
+// contextPathFrom walks only as far as the nearest effective compaction
+// boundary. Exact entries remain retained in MemoryStore, but recurring
+// provider projections no longer rebuild the complete pre-compaction path.
+func contextPathFrom(entries []Entry, byID map[string]int, tip string) []Entry {
+	reversed := make([]Entry, 0, contextProjectionChunkMessages)
+	seen := make(map[string]struct{})
+	current := tip
+	markerAt := -1
+	boundaryID := ""
+	boundaryFound := false
+	for current != "" {
+		if _, duplicate := seen[current]; duplicate {
+			break
+		}
+		seen[current] = struct{}{}
+		index, ok := byID[current]
+		if !ok {
+			break
+		}
+		entry := entries[index]
+		reversed = append(reversed, entry)
+		if markerAt < 0 && entry.Type == EntryCompaction && strings.TrimSpace(entry.Summary) != "" {
+			markerAt = len(reversed) - 1
+			boundaryID = entry.CompactedThrough
+			if boundaryID == "" {
+				break
+			}
+		} else if markerAt >= 0 && entry.ID == boundaryID {
+			boundaryFound = true
+			break
+		}
+		current = entry.ParentID
+	}
+	if markerAt >= 0 && boundaryID != "" && !boundaryFound {
+		// Unknown, forward, or off-branch boundaries clamp at the marker exactly
+		// like SQLite's context projection; older history must not resurface.
+		reversed = reversed[:markerAt+1]
+	}
+	out := make([]Entry, len(reversed))
+	for i := range reversed {
+		out[len(reversed)-1-i] = reversed[i]
+	}
+	return out
 }
 
 // BranchEntries implements BranchEntryStore.
@@ -689,6 +820,59 @@ func (s *MemoryStore) BranchEntries() ([]Entry, error) {
 		return nil, errors.New("session: store closed")
 	}
 	return cloneEntries(pathFrom(s.entries, s.byID, s.tip)), nil
+}
+
+// BranchStateEntries implements BranchStateStore without materializing the
+// complete branch. Append validation guarantees an acyclic parent chain; the
+// entry-count guard remains defensive against malformed in-memory fixtures.
+func (s *MemoryStore) BranchStateEntries(metaKeys, toolNames []string) ([]Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, errors.New("session: store closed")
+	}
+	wantedMeta := makeStringSet(metaKeys)
+	wantedTools := makeStringSet(toolNames)
+	reversed := make([]Entry, 0)
+	current := s.tip
+	for steps := 0; current != "" && steps <= len(s.entries); steps++ {
+		index, ok := s.byID[current]
+		if !ok {
+			break
+		}
+		entry := s.entries[index]
+		if branchStateEntryMatches(entry, wantedMeta, wantedTools) {
+			reversed = append(reversed, cloneEntry(entry))
+		}
+		current = entry.ParentID
+	}
+	out := make([]Entry, len(reversed))
+	for i := range reversed {
+		out[len(reversed)-1-i] = reversed[i]
+	}
+	return out, nil
+}
+
+func makeStringSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value != "" {
+			set[value] = struct{}{}
+		}
+	}
+	return set
+}
+
+func branchStateEntryMatches(entry Entry, metaKeys, toolNames map[string]struct{}) bool {
+	if entry.Type == EntryMeta {
+		_, ok := metaKeys[entry.Key]
+		return ok
+	}
+	if entry.Type != EntryMessage || entry.Message == nil || entry.Message.Role != protocol.RoleTool {
+		return false
+	}
+	_, ok := toolNames[entry.Message.ToolName]
+	return ok
 }
 
 // Branches implements BranchStore.

@@ -340,7 +340,11 @@ func messageTextBlocks(message protocol.Message) string {
 }
 
 func estimateRequestTokens(messages []protocol.Message, system string, schemas []protocol.ToolSchema) int {
-	bytes := len(system) + providerSchemaBytes(schemas)
+	return estimateRequestTokensWithSchemaBytes(messages, system, providerSchemaBytes(schemas))
+}
+
+func estimateRequestTokensWithSchemaBytes(messages []protocol.Message, system string, schemaBytes int) int {
+	bytes := len(system) + schemaBytes
 	for _, message := range messages {
 		bytes += len(message.Role) + len(message.ToolName) + len(message.ToolCallID)
 		for _, block := range message.Content {

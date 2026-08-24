@@ -86,6 +86,10 @@ func (a *Agent) ContextReport() (ContextReport, error) {
 }
 
 func buildContextReport(req protocol.ChatRequest, latestRequest bool) ContextReport {
+	return buildContextReportWithSchemaBytes(req, latestRequest, providerSchemaBytes(req.Tools))
+}
+
+func buildContextReportWithSchemaBytes(req protocol.ChatRequest, latestRequest bool, schemaBytes int) ContextReport {
 	const (
 		categorySystem        = "System prompt"
 		categoryToolSchemas   = "Tool schemas"
@@ -128,7 +132,7 @@ func buildContextReport(req protocol.ChatRequest, latestRequest bool) ContextRep
 	}
 
 	add(categorySystem, len(req.System), boolCount(req.System != ""))
-	add(categoryToolSchemas, providerSchemaBytes(req.Tools), len(req.Tools))
+	add(categoryToolSchemas, schemaBytes, len(req.Tools))
 	for _, fragment := range req.InternalContext {
 		// Every current adapter wraps an internal fragment in the same sealed
 		// compatibility envelope. JSON framing and tokenizer effects remain in
@@ -184,7 +188,7 @@ func buildContextReport(req protocol.ChatRequest, latestRequest bool) ContextRep
 
 	report := ContextReport{
 		LatestRequest:      latestRequest,
-		FixedContextTokens: estimatedTokensForBytes(len(req.System) + providerSchemaBytes(req.Tools)),
+		FixedContextTokens: estimatedTokensForBytes(len(req.System) + schemaBytes),
 		MessageCount:       len(req.Messages),
 		ToolCount:          len(req.Tools),
 		ContextWindow:      req.Model.ContextWindow,

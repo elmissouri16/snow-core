@@ -200,6 +200,7 @@ type Agent struct {
 	// activeSkills are re-appended to the system instructions on every provider
 	// request so manual compaction cannot silently discard activated guidance.
 	activeSkills       map[string]string
+	artifactRefs       map[string]string
 	mode               protocol.CollaborationMode
 	turnMode           protocol.CollaborationMode
 	turnPlanSeen       bool
@@ -263,7 +264,10 @@ const (
 	maxPersistedToolProgressBytes = 1 << 20
 )
 
-const maxCompactionRetrievalReferences = 24
+const (
+	maxCompactionRetrievalReferences = 24
+	maxCachedArtifactReferences      = 256
+)
 
 // ---------------------------------------------------------------------------
 // Event bus
@@ -276,7 +280,7 @@ const (
 
 type eventBus struct {
 	mu           sync.Mutex
-	subs         map[int]func(protocol.AgentEvent)
+	subs         map[int]*eventSubscriber
 	next         int
 	wake         chan struct{}
 	space        chan struct{}
@@ -290,6 +294,31 @@ type eventBus struct {
 }
 type eventBarrier struct{ done chan struct{} }
 type eventStop struct{}
+
+type eventSubscriber struct {
+	id       int
+	fn       func(protocol.AgentEvent)
+	tasks    chan eventSubscriberTask
+	stop     chan struct{}
+	stopOnce sync.Once
+}
+
+type eventSubscriberTask struct {
+	event      protocol.AgentEvent
+	generation uint64
+	completed  chan<- eventSubscriberCompletion
+}
+
+type eventSubscriberCompletion struct {
+	id         int
+	generation uint64
+}
+
+func (s *eventSubscriber) close() {
+	if s != nil {
+		s.stopOnce.Do(func() { close(s.stop) })
+	}
+}
 
 // ---------------------------------------------------------------------------
 // IDs

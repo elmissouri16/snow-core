@@ -53,6 +53,35 @@ func TestLocalStoreScopesArtifactsAndRejectsTraversal(t *testing.T) {
 	}
 }
 
+func TestLocalStoreTextReferenceVerificationDetectsTamperAndRepairs(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLocalStore(root, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ref, err := store.SaveText(context.Background(), "session", "key", "original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verified, err := store.TextReferenceVerified(context.Background(), "session", ref.ID); err != nil || !verified {
+		t.Fatalf("initial verification=%t err=%v", verified, err)
+	}
+	path := filepath.Join(root, namespace("session"), ref.ID+".txt")
+	if err := os.WriteFile(path, []byte("tampered content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if verified, err := store.TextReferenceVerified(context.Background(), "session", ref.ID); err != nil || verified {
+		t.Fatalf("tampered verification=%t err=%v", verified, err)
+	}
+	if _, err := store.SaveText(context.Background(), "session", "key", "original"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := store.ReadText(context.Background(), "session", ref.ID); err != nil || got != "original" {
+		t.Fatalf("repaired=%q err=%v", got, err)
+	}
+}
+
 func TestLocalStoreBoundsVerifiedArtifactCache(t *testing.T) {
 	store, err := NewLocalStore(t.TempDir(), 1024)
 	if err != nil {

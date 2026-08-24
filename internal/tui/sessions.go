@@ -85,6 +85,11 @@ func (m *Model) inlineSessionKey() string {
 		return ""
 	}
 	key := m.app.Session.ID()
+	if active, ok := m.app.Session.(session.ActiveBranchStore); ok {
+		if branchID := active.ActiveBranchID(); branchID != "" {
+			return key + "\x00" + branchID
+		}
+	}
 	if branches, ok := m.app.Session.(session.BranchStore); ok {
 		if list, err := branches.Branches(); err == nil {
 			for _, branch := range list {
@@ -137,29 +142,40 @@ func (m *Model) hydrateSession() {
 		m.refreshTranscript()
 		return
 	}
-	messages, err := m.app.Agent.Messages()
-	if err != nil {
-		m.pushLine(styleError.Render("session read: " + err.Error()))
-		return
-	}
-	m.hydrateInputHistory(messages)
-	renderMessages := messages
-	durableIDs := make([]string, 0, len(messages))
-	for _, message := range messages {
-		durableIDs = append(durableIDs, message.ID)
-	}
+	// Built-in branch-entry stores already return one defensive root-to-tip
+	// snapshot containing both provider messages and surface-only transcript
+	// metadata. Derive both hydration views from it instead of decoding the same
+	// exact branch once through Messages and again through BranchEntries.
+	var messages, renderMessages, branchContext []protocol.Message
+	var durableIDs []string
+	loadedBranch := false
+	projectedBranch := false
+	branchCompacted := false
 	if entries, ok := m.app.Session.(session.BranchEntryStore); ok {
 		if branch, branchErr := entries.BranchEntries(); branchErr == nil {
-			renderMessages = make([]protocol.Message, 0, len(messages))
-			durableIDs = make([]string, 0, len(branch))
+			loadedBranch = true
+			messages = make([]protocol.Message, 0, len(branch))
+			if m.inlineTranscript {
+				durableIDs = make([]string, 0, len(branch))
+			}
 			for _, entry := range branch {
-				durableIDs = append(durableIDs, entry.ID)
+				if m.inlineTranscript {
+					durableIDs = append(durableIDs, entry.ID)
+				}
 				switch {
 				case entry.Type == session.EntryMessage && entry.Message != nil:
-					renderMessages = append(renderMessages, entry.Message.Clone())
+					message := *entry.Message
+					messages = append(messages, message)
+					if renderMessages != nil {
+						renderMessages = append(renderMessages, message)
+					}
 				case entry.Type == session.EntryMeta && entry.Key == session.MetaToolTranscript:
 					var transcript protocol.ToolTranscript
 					if json.Unmarshal([]byte(entry.Value), &transcript) == nil && transcript.ToolName != "" {
+						if renderMessages == nil {
+							renderMessages = make([]protocol.Message, 0, len(branch))
+							renderMessages = append(renderMessages, messages...)
+						}
 						renderMessages = append(renderMessages, protocol.Message{
 							ID:          entry.ID,
 							Role:        protocol.RoleTool,
@@ -170,14 +186,51 @@ func (m *Model) hydrateSession() {
 					}
 				}
 			}
+			if renderMessages == nil {
+				renderMessages = messages
+			}
+			if projector, ok := m.app.Session.(session.BranchContextProjector); ok {
+				branchContext, branchCompacted = projector.ProjectBranchContext(branch)
+				projectedBranch = true
+			}
 		}
 	}
-	key := m.inlineSessionKey()
+	if !loadedBranch {
+		var err error
+		messages, err = m.app.Agent.Messages()
+		if err != nil {
+			m.pushLine(styleError.Render("session read: " + err.Error()))
+			return
+		}
+		renderMessages = messages
+		if m.inlineTranscript {
+			durableIDs = make([]string, 0, len(messages))
+			for _, message := range messages {
+				durableIDs = append(durableIDs, message.ID)
+			}
+		}
+	}
+	m.hydrateInputHistory(messages)
+	refreshUsage := func() {
+		if projectedBranch {
+			if branchCompacted {
+				m.refreshProjectedContextUsage(branchContext, true)
+			} else {
+				m.refreshProjectedContextUsage(messages, false)
+			}
+			return
+		}
+		m.refreshContextUsage(messages)
+	}
+	key := ""
+	if m.inlineTranscript {
+		key = m.inlineSessionKey()
+	}
 	if m.inlineTranscript && key != "" && key == m.inlineHistoryKey {
 		// Live events already committed this branch's new rows. Track durable
 		// identity for a future branch switch without replaying history now.
 		m.inlineDurableMessageIDs = durableIDs
-		m.refreshContextUsage(messages)
+		refreshUsage()
 		return
 	}
 	hadPrintedHistory := m.inlineTranscript && m.inlineEverCommitted
@@ -188,41 +241,29 @@ func (m *Model) hydrateSession() {
 	m.latestPlan = ""
 	m.transcriptBaseDirty = true
 	m.transcriptDirty = true
-	m.refreshContextUsage(messages)
+	refreshUsage()
 	hydrated := make([]string, 0, min(len(messages), maxTranscriptEntries))
-	hydratedIDs := make([]string, 0, min(len(messages), maxTranscriptEntries))
-	appendHydrated := func(id, row string) {
-		hydrated = append(hydrated, row)
-		hydratedIDs = append(hydratedIDs, id)
+	var hydratedIDs []string
+	if m.inlineTranscript {
+		hydratedIDs = make([]string, 0, min(len(messages), maxTranscriptEntries))
+	}
+	appendHydrated := func(id string, rows []string) {
+		for _, row := range rows {
+			hydrated = append(hydrated, row)
+			if m.inlineTranscript {
+				hydratedIDs = append(hydratedIDs, id)
+			}
+		}
 	}
 	toolCalls := make(map[string]protocol.ContentBlock)
-	for _, msg := range renderMessages {
-		switch msg.Role {
-		case protocol.RoleUser:
-			text := sessionMessageText(msg)
-			images := sessionMessageImageCount(msg)
-			if text != "" || images > 0 {
-				if text == "" {
-					text = fmt.Sprintf("[%d image(s)]", images)
-				} else if images > 0 {
-					text += fmt.Sprintf(" [%d image(s)]", images)
-				}
-				appendHydrated(msg.ID, styleUser.Render("› "+text))
-			}
-		case protocol.RoleAssistant:
-			if thinking := sessionMessageThinking(msg); thinking != "" {
-				appendHydrated(msg.ID, m.renderThinkingBody(thinking))
-			}
+	var toolCallForMessage map[int]protocol.ContentBlock
+	for i, msg := range renderMessages {
+		if msg.Role == protocol.RoleAssistant {
 			for _, block := range msg.Content {
 				switch block.Type {
-				case protocol.BlockText:
-					if strings.TrimSpace(block.Text) != "" {
-						appendHydrated(msg.ID, m.renderAssistantBody(block.Text))
-					}
 				case protocol.BlockPlan:
 					if strings.TrimSpace(block.Text) != "" {
 						m.latestPlan = block.Text
-						appendHydrated(msg.ID, m.renderPlanBody(block.Text))
 					}
 				case protocol.BlockToolCall:
 					if block.ToolCallID != "" {
@@ -230,29 +271,42 @@ func (m *Model) hydrateSession() {
 					}
 				}
 			}
-			switch msg.StopReason {
-			case protocol.StopAborted:
-				appendHydrated(msg.ID, styleError.Render("aborted"))
-			case protocol.StopError:
-				if message := strings.TrimSpace(msg.Error); message != "" {
-					for _, prefix := range []string{"agent: provider stream: ", "agent: provider chat: ", "agent: provider resolve: ", "agent: "} {
-						message = strings.TrimPrefix(message, prefix)
-					}
-					appendHydrated(msg.ID, styleError.Render("✖ "+message))
+			continue
+		}
+		if msg.Role == protocol.RoleTool {
+			if call, ok := toolCalls[msg.ToolCallID]; ok {
+				if toolCallForMessage == nil {
+					toolCallForMessage = make(map[int]protocol.ContentBlock)
 				}
-			}
-		case protocol.RoleTool:
-			call, _ := toolCalls[msg.ToolCallID]
-			for _, row := range m.hydratedToolTranscriptRows(msg, call) {
-				appendHydrated(msg.ID, row)
+				toolCallForMessage[i] = call
 			}
 		}
 	}
+
 	hydrationOmitted := 0
-	if !m.inlineTranscript && len(hydrated) > maxTranscriptEntries {
-		hydrationOmitted = len(hydrated) - (maxTranscriptEntries - 1)
-		hydrated = hydrated[hydrationOmitted:]
-		hydratedIDs = hydratedIDs[hydrationOmitted:]
+	rowCounts := make([]int, len(renderMessages))
+	if !m.inlineTranscript {
+		totalRows := 0
+		for i, msg := range renderMessages {
+			rowCounts[i] = m.hydrationMessageRowCount(msg, toolCallForMessage[i])
+			totalRows += rowCounts[i]
+		}
+		if totalRows > maxTranscriptEntries {
+			hydrationOmitted = totalRows - (maxTranscriptEntries - 1)
+		}
+	}
+	skipRows := hydrationOmitted
+	for i, msg := range renderMessages {
+		if !m.inlineTranscript && skipRows >= rowCounts[i] {
+			skipRows -= rowCounts[i]
+			continue
+		}
+		rows := m.hydrationMessageRows(msg, toolCallForMessage[i])
+		if !m.inlineTranscript && skipRows > 0 {
+			rows = rows[min(skipRows, len(rows)):]
+			skipRows = 0
+		}
+		appendHydrated(msg.ID, rows)
 	}
 	m.lines = nil
 	m.transcriptBase = ""
@@ -295,6 +349,93 @@ func (m *Model) hydrateSession() {
 		}
 	}
 	m.refreshTranscript()
+}
+
+func (m *Model) hydrationMessageRowCount(msg protocol.Message, call protocol.ContentBlock) int {
+	switch msg.Role {
+	case protocol.RoleUser:
+		for _, block := range msg.Content {
+			if block.Type == protocol.BlockImage || (block.Type == protocol.BlockText && strings.TrimSpace(block.Text) != "") {
+				return 1
+			}
+		}
+	case protocol.RoleAssistant:
+		rows := 0
+		hasThinking := false
+		for _, block := range msg.Content {
+			switch block.Type {
+			case protocol.BlockThinking:
+				// All non-empty thinking blocks are joined into one transcript row.
+				if !hasThinking && strings.TrimSpace(block.Text) != "" {
+					hasThinking = true
+					rows++
+				}
+			case protocol.BlockText, protocol.BlockPlan:
+				if strings.TrimSpace(block.Text) != "" {
+					rows++
+				}
+			}
+		}
+		switch msg.StopReason {
+		case protocol.StopAborted:
+			rows++
+		case protocol.StopError:
+			if strings.TrimSpace(msg.Error) != "" {
+				rows++
+			}
+		}
+		return rows
+	case protocol.RoleTool:
+		return len(m.hydratedToolTranscriptRows(msg, call))
+	}
+	return 0
+}
+
+func (m *Model) hydrationMessageRows(msg protocol.Message, call protocol.ContentBlock) []string {
+	rows := make([]string, 0, 3)
+	switch msg.Role {
+	case protocol.RoleUser:
+		text := sessionMessageText(msg)
+		images := sessionMessageImageCount(msg)
+		if text != "" || images > 0 {
+			if text == "" {
+				text = fmt.Sprintf("[%d image(s)]", images)
+			} else if images > 0 {
+				text += fmt.Sprintf(" [%d image(s)]", images)
+			}
+			rows = append(rows, styleUser.Render("› "+text))
+		}
+	case protocol.RoleAssistant:
+		if thinking := sessionMessageThinking(msg); thinking != "" {
+			rows = append(rows, m.renderThinkingBody(thinking))
+		}
+		for _, block := range msg.Content {
+			switch block.Type {
+			case protocol.BlockText:
+				if strings.TrimSpace(block.Text) != "" {
+					rows = append(rows, m.renderAssistantBody(block.Text))
+				}
+			case protocol.BlockPlan:
+				if strings.TrimSpace(block.Text) != "" {
+					rows = append(rows, m.renderPlanBody(block.Text))
+				}
+			}
+		}
+		switch msg.StopReason {
+		case protocol.StopAborted:
+			rows = append(rows, styleError.Render("aborted"))
+		case protocol.StopError:
+			if message := strings.TrimSpace(msg.Error); message != "" {
+				for _, prefix := range []string{"agent: provider stream: ", "agent: provider chat: ", "agent: provider resolve: ", "agent: "} {
+					message = strings.TrimPrefix(message, prefix)
+				}
+				rows = append(rows, styleError.Render("✖ "+message))
+			}
+		}
+	case protocol.RoleTool:
+		return m.hydratedToolTranscriptRows(msg, call)
+	}
+	return rows
 }
 
 func (m *Model) hydratedToolTranscriptRows(msg protocol.Message, call protocol.ContentBlock) []string {

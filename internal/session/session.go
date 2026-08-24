@@ -91,11 +91,39 @@ type ContextStore interface {
 	ContextMessages() ([]protocol.Message, error)
 }
 
+// TailMessageStore returns only the final non-tool message and any tool results
+// that follow it on the active branch. It lets crash recovery inspect the last
+// possibly interrupted assistant tool batch without decoding exact history.
+// Returned messages are defensive copies owned by the caller.
+type TailMessageStore interface {
+	TailMessages() ([]protocol.Message, error)
+}
+
+// LatestAssistantStore finds the newest assistant message containing non-empty
+// text or plan output without materializing the complete active branch.
+type LatestAssistantStore interface {
+	LatestAssistantMessage() (protocol.Message, bool, error)
+}
+
 // BranchEntryStore exposes a defensive root-to-tip entry snapshot for durable
 // host state that must remain branch-scoped but must not enter provider message
 // context. Built-in stores implement it.
 type BranchEntryStore interface {
 	BranchEntries() ([]Entry, error)
+}
+
+// BranchStateStore returns only active-branch entries relevant to host state.
+// Implementations preserve root-to-tip ordering and return defensive copies;
+// callers supply the metadata keys and tool-result names they understand.
+type BranchStateStore interface {
+	BranchStateEntries(metaKeys, toolNames []string) ([]Entry, error)
+}
+
+// BranchContextProjector derives compacted provider context from an already
+// loaded, caller-owned BranchEntries snapshot. A false result means the branch
+// has no effective compaction and the caller may reuse its message projection.
+type BranchContextProjector interface {
+	ProjectBranchContext([]Entry) ([]protocol.Message, bool)
 }
 
 // BranchStore provides durable same-database branch references. A fork shares

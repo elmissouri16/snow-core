@@ -7,6 +7,7 @@ package opencodego
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -205,8 +206,9 @@ func (s *stream) readSSE(resp *http.Response) {
 			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: SSE line exceeds limit or is unreadable: %w", s.provider, err)})
 			return
 		}
-		if line != "" {
-			stop := s.handleLine(strings.TrimSpace(line), &eventName, accums, &order, &finish, &terminalObserved, markError)
+		line = bytes.TrimSpace(line)
+		if len(line) > 0 {
+			stop := s.handleLine(line, &eventName, accums, &order, &finish, &terminalObserved, markError)
 			if stop {
 				sendDone()
 				return
@@ -243,39 +245,39 @@ func (s *stream) readSSE(resp *http.Response) {
 }
 
 // handleLine returns true when the stream should stop (e.g. after [DONE]).
-func (s *stream) handleLine(line string, eventName *string, accums map[int]*toolCallAccum, order *[]int, finish *protocol.StopReason, terminalObserved *bool, markError func(protocol.StreamEvent)) bool {
+func (s *stream) handleLine(line []byte, eventName *string, accums map[int]*toolCallAccum, order *[]int, finish *protocol.StopReason, terminalObserved *bool, markError func(protocol.StreamEvent)) bool {
 	switch {
-	case strings.HasPrefix(line, "event:"):
-		*eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-	case strings.HasPrefix(line, "data:"):
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" {
+	case bytes.HasPrefix(line, []byte("event:")):
+		*eventName = string(bytes.TrimSpace(bytes.TrimPrefix(line, []byte("event:"))))
+	case bytes.HasPrefix(line, []byte("data:")):
+		data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		if len(data) == 0 {
 			return false
 		}
 		if *eventName == "error" {
 			*eventName = ""
-			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New(s.provider + ": " + providerpkg.RedactSecrets(data, s.secret))})
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New(s.provider + ": " + providerpkg.RedactSecrets(string(data), s.secret))})
 			return false
 		}
 		*eventName = ""
-		if data == "[DONE]" {
+		if bytes.Equal(data, []byte("[DONE]")) {
 			// [DONE] terminates the stream; some servers keep the connection
 			// open afterwards, so signal the caller to stop reading.
 			*terminalObserved = true
 			return true
 		}
 		var chunk openAIChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		if err := json.Unmarshal(data, &chunk); err != nil {
 			var errPayload struct {
 				Error *struct {
 					Message string `json:"message"`
 				} `json:"error"`
 			}
-			if uerr := json.Unmarshal([]byte(data), &errPayload); uerr == nil && errPayload.Error != nil && errPayload.Error.Message != "" {
+			if uerr := json.Unmarshal(data, &errPayload); uerr == nil && errPayload.Error != nil && errPayload.Error.Message != "" {
 				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New(s.provider + ": " + providerpkg.RedactSecrets(errPayload.Error.Message, s.secret))})
 			} else {
 				// Malformed chunk: surface it rather than silently dropping.
-				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: unparseable SSE data: %s", s.provider, truncateStr(providerpkg.RedactSecrets(data, s.secret), 500))})
+				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: unparseable SSE data: %s", s.provider, truncateStr(providerpkg.RedactSecrets(string(data), s.secret), 500))})
 			}
 			return false
 		}
@@ -380,21 +382,26 @@ func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, 
 	return nil
 }
 
-func readBoundedSSELine(reader *bufio.Reader, maxBytes int) (string, error) {
-	var line []byte
+func readBoundedSSELine(reader *bufio.Reader, maxBytes int) ([]byte, error) {
+	part, err := reader.ReadSlice('\n')
+	if len(part) > maxBytes {
+		return nil, fmt.Errorf("line exceeds %d bytes", maxBytes)
+	}
+	if err != bufio.ErrBufferFull {
+		// The borrowed reader buffer remains valid until the next read, and the
+		// caller processes it synchronously before advancing the stream.
+		return part, err
+	}
+	line := append([]byte(nil), part...)
 	for {
-		part, err := reader.ReadSlice('\n')
+		part, err = reader.ReadSlice('\n')
 		if len(line)+len(part) > maxBytes {
-			return "", fmt.Errorf("line exceeds %d bytes", maxBytes)
+			return nil, fmt.Errorf("line exceeds %d bytes", maxBytes)
 		}
 		line = append(line, part...)
-		if err == nil {
-			return string(line), nil
+		if err != bufio.ErrBufferFull {
+			return line, err
 		}
-		if err == bufio.ErrBufferFull {
-			continue
-		}
-		return string(line), err
 	}
 }
 
