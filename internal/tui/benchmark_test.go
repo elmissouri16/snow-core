@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,6 +41,49 @@ func BenchmarkSessionHydration5000(b *testing.B) {
 	for i := range batch {
 		message := protocol.NewAssistantMessage(fmt.Sprintf("message-%d", i), "", "fake", "fake-model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: payload}}, protocol.StopStop, nil)
 		batch[i] = session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}
+	}
+	if err := runtime.Session.(session.BatchStore).AppendBatch(batch); err != nil {
+		b.Fatal(err)
+	}
+	m := newModel(context.Background(), app.Options{})
+	m.app = runtime
+	m.width, m.height = 120, 40
+	m.layout()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		m.hydrateSession()
+	}
+}
+
+func BenchmarkSessionHydrationMixed5000(b *testing.B) {
+	home := b.TempDir()
+	runtime, err := app.New(context.Background(), app.Options{
+		Provider: "fake", Permission: "allow", CWD: home,
+		SessionPath: filepath.Join(home, "session.db"),
+		ConfigPath:  filepath.Join(home, "config.json"), AuthPath: filepath.Join(home, "auth.json"),
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer runtime.Close()
+	batch := make([]session.Entry, 0, 5000)
+	assistantBody := strings.Repeat("x", 1200)
+	userBody := strings.Repeat("u", 256)
+	for i := 0; i < 1250; i++ {
+		user := protocol.NewUserMessage(fmt.Sprintf("mixed-user-%d", i), "", userBody)
+		batch = append(batch, session.Entry{Type: session.EntryMessage, ID: user.ID, Message: &user})
+		usage := &protocol.Usage{Input: 1000 + i, Output: 100, Total: 1100 + i}
+		assistant := protocol.NewAssistantMessage(fmt.Sprintf("mixed-assistant-%d", i), "", "fake", "fake-model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: assistantBody}}, protocol.StopStop, usage)
+		batch = append(batch, session.Entry{Type: session.EntryMessage, ID: assistant.ID, Message: &assistant})
+		callID := fmt.Sprintf("mixed-call-%d", i)
+		call := protocol.NewAssistantMessage(fmt.Sprintf("mixed-call-message-%d", i), "", "fake", "fake-model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read", Arguments: json.RawMessage(`{"path":"README.md"}`)}}, protocol.StopToolUse, nil)
+		batch = append(batch, session.Entry{Type: session.EntryMessage, ID: call.ID, Message: &call})
+		result := protocol.NewToolResultMessage(fmt.Sprintf("mixed-result-%d", i), "", callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("bounded output")}, false)
+		if i%100 != 0 {
+			result.ToolDisplay = &protocol.ToolDisplay{Started: true, StartMessage: "README.md", Output: "bounded output", DurationMS: 1}
+		}
+		batch = append(batch, session.Entry{Type: session.EntryMessage, ID: result.ID, Message: &result})
 	}
 	if err := runtime.Session.(session.BatchStore).AppendBatch(batch); err != nil {
 		b.Fatal(err)

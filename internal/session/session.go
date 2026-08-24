@@ -13,7 +13,7 @@ import (
 )
 
 // SessionVersion is the current on-disk schema version.
-const SessionVersion = 10
+const SessionVersion = 11
 
 // Header is the first line of every session file.
 type Header struct {

@@ -7,6 +7,10 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Added
 
+- Added a Linux CI performance-regression guard with reviewed `B/op` and
+  `allocs/op` ceilings plus broad `ns/op` catastrophe limits for long-session
+  hydration, context projection, event
+  delivery, provider request construction, and SSE ingestion.
 - Added Codex-style `close_agent` and `resume_agent` lifecycle controls across
   model tools, RPC, and SDKs. Closing a terminal child releases the open-agent
   slot while preserving its stable path, transcript, result, and usage;
@@ -33,6 +37,9 @@ also include the generated GitHub comparison for the tagged commit.
   context assembly, TUI hydration, OpenAI-compatible request/SSE handling,
   event delivery, artifact pruning, and subagent forks without changing
   provider wire payloads, session history, event order, or transcript limits.
+  Schema-v11 sessions now maintain a rebuildable hydration projection so the
+  TUI fetches old message blobs only for its bounded visible suffix and focused
+  tool-call lookbehind.
 - Changed managed-process startup guidance to treat a stable log marker as
   sufficient readiness evidence. Snow now prefers log readiness and does not
   add an HTTP or TCP probe merely to reconfirm a process that announced it is

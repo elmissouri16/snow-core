@@ -1,0 +1,90 @@
+# Performance regression guard
+
+Snow keeps performance checks deterministic enough for local development and
+GitHub-hosted CI by using allocation metrics as the precise primary gate plus
+generous wall-clock ceilings that catch only catastrophic slowdowns.
+This guide owns the benchmark ceiling policy; TUI renderer invariants remain in
+[TUI performance](tui-performance.md).
+
+## Run the guard
+
+From the repository root:
+
+```sh
+python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+python3 scripts/check_benchmarks.py
+```
+
+The checker uses only the Python standard library and rejects a Go toolchain
+that does not exactly match the version pinned in the limits file. Each
+configured benchmark runs once per sample, three times, on one logical CPU:
+
+```text
+go test <package> -run ^$ -bench <pattern> -benchmem \
+  -benchtime=1x -count=3 -cpu=1
+```
+
+The median `B/op` and `allocs/op` values must remain below the reviewed ceilings
+in [`benchmarks/performance-limits.json`](../benchmarks/performance-limits.json).
+The hydration byte ceiling is intentionally below the pre-pagination result, so
+restoring a complete-history blob decode fails even with platform headroom.
+`B/op` and `allocs/op` are the precise gates. Selected `ns/op` limits are set
+several times above local medians only to catch catastrophic CPU regressions;
+hosted-runner CPU allocation, virtualization, scheduler load, and SQLite
+storage latency are not stable enough for a tight timing contract.
+
+The initial ceilings were seeded from the documented Apple M3 Pro measurements
+with explicit platform headroom. The first re-enabled `ubuntu-latest` run is the
+authoritative Linux validation and must pass before release. A platform-only
+adjustment still requires captured CI evidence and review; limits must never be
+raised automatically.
+
+## Covered paths
+
+The checked set focuses on recurring or historically expensive operations:
+
+- assistant-heavy and mixed user/tool 5,000-message TUI hydration plus mailbox
+  ingestion;
+- lightweight SQLite branch hydration, 1,500-entry atomic batch append,
+  cold/warm context projection, and compacted in-memory context projection;
+- 256-event subscriber delivery;
+- 1,500-message OpenAI-compatible request construction;
+- Chat Completions and Responses SSE ingestion.
+
+The hydration tests also assert the algorithmic bound directly: message blobs
+are requested in pages of at most 256, only the newest 1,999 full-screen rows
+are decoded, and legacy tool calls outside that suffix use focused lookups.
+Exact input history, plans, context usage, compaction boundaries, inline branch
+prefixes, tool pairing, and omission counts remain covered by parity tests.
+
+## Ceiling policy
+
+Allocation ceilings are regression limits, not targets or generated snapshots.
+When intentionally changing a covered path:
+
+1. Run the focused benchmark at least three times with the pinned toolchain.
+2. Explain an allocation increase in the change review; first look for an
+   accidental full-history decode, clone, temporary map, or buffer growth.
+3. If the increase is required, set a manually reviewed ceiling with enough
+   headroom for platform/toolchain variation, normally about 20–25% over a
+   stable median.
+4. Never raise limits automatically or merely to make CI green.
+5. Record material improvements or intentional tradeoffs in
+   [`IMPLEMENTATION.md`](../IMPLEMENTATION.md#performance-evidence-2026-08-24).
+
+The generous timing ceilings automatically catch catastrophic slowdowns;
+smaller timing regressions still require local profiling. Use repeated runs and
+`benchstat` when comparing two commits, and do not infer a product latency
+guarantee from one hosted runner.
+
+## CI and releases
+
+The Linux-only **Performance regression guard** job in
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs the checker and
+its parser tests. The reusable CI workflow makes it part of the release gate.
+
+Local success is not remote CI evidence. The canonical temporary workflow
+status and re-enable commands live in the
+[agent working guide](../AGENTS.md#temporary-github-actions-state). Before a
+release, require the complete remote CI run—including this regression guard—to
+pass as described in the [release policy](releases.md).

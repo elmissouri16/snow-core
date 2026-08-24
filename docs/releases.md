@@ -61,6 +61,7 @@ version comments document the corresponding upstream major. The gate includes:
 - formatting and `go vet`;
 - all Go tests on Linux and macOS;
 - the Linux race suite;
+- the Linux performance-regression guard and its parser tests;
 - cgo-disabled cross-builds for every release target;
 - standalone Go SDK and RPC examples;
 - Python and JavaScript RPC SDK unit and integration checks, plus JavaScript

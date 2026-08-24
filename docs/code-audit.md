@@ -112,6 +112,12 @@ remain authoritative over this summary.
   artifacts are repaired, stale atomic-write files are swept conservatively,
   browser helper processes are reaped, skill discovery reads frontmatter
   prefixes, and subagent eviction workers are coalesced and joined.
+- **PERF-07 — Page exact TUI hydration and gate regressions** (Medium, closed).
+  Schema-v11 stores an append-atomic, rebuildable ancestry projection; the TUI
+  reads message blobs in 256-entry pages for only the retained suffix plus
+  focused tool-call lookbehind. Parity tests preserve omission, plan, input,
+  context, compaction, branch, and tool-card semantics. Linux CI gates reviewed
+  median `B/op` and `allocs/op` ceilings while reporting noisy timing only.
 
 ## Security and filesystem safety
 

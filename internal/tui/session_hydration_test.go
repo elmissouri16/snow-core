@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +84,211 @@ func TestModelHydratesPersistedToolTranscript(t *testing.T) {
 	live.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolCallID: "call-1", ToolName: "grep", ToolOutput: "main.go:7: needle", ToolDurationMS: 12})
 	if livePlain := stripANSI(strings.Join(live.lines, "\n")); plain != livePlain {
 		t.Fatalf("resumed tool transcript differs from live transcript:\nresume: %q\nlive:   %q", plain, livePlain)
+	}
+}
+
+type legacyHydrationStore struct {
+	session.Store
+	branch  session.BranchEntryStore
+	context session.ContextStore
+}
+
+func (s legacyHydrationStore) BranchEntries() ([]session.Entry, error) {
+	return s.branch.BranchEntries()
+}
+
+func (s legacyHydrationStore) ContextMessages() ([]protocol.Message, error) {
+	return s.context.ContextMessages()
+}
+
+type paginatedHydrationSpy struct {
+	session.Store
+	hydration session.BranchHydrationStore
+	lookup    session.BranchEntryLookup
+	calls     int
+	maxPage   int
+	totalIDs  int
+}
+
+func (s *paginatedHydrationSpy) BranchHydration() (session.BranchHydrationSnapshot, error) {
+	return s.hydration.BranchHydration()
+}
+
+func (s *paginatedHydrationSpy) BranchEntriesByID(ids []string) ([]session.Entry, error) {
+	s.calls++
+	s.maxPage = max(s.maxPage, len(ids))
+	s.totalIDs += len(ids)
+	return s.lookup.BranchEntriesByID(ids)
+}
+
+func TestPaginatedHydrationBoundsMessageBlobPages(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width, m.height = 100, 30
+	m.layout()
+	for i := 0; i < 5000; i++ {
+		message := protocol.NewAssistantMessage(fmt.Sprintf("bounded-%04d", i), m.app.Session.BranchTip(), "fake", "model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: "visible row"}}, protocol.StopStop, nil)
+		if err := m.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spy := &paginatedHydrationSpy{
+		Store:     m.app.Session,
+		hydration: m.app.Session.(session.BranchHydrationStore),
+		lookup:    m.app.Session.(session.BranchEntryLookup),
+	}
+	originalSession := m.app.Session
+	m.app.Session = spy
+	m.hydrateSession()
+	m.app.Session = originalSession
+	if spy.calls == 0 || spy.maxPage > sessionHydrationPageSize {
+		t.Fatalf("lookup calls=%d max page=%d", spy.calls, spy.maxPage)
+	}
+	if spy.totalIDs != maxTranscriptEntries-1 {
+		t.Fatalf("decoded message blobs=%d want=%d", spy.totalIDs, maxTranscriptEntries-1)
+	}
+	if len(m.lines) != maxTranscriptEntries {
+		t.Fatalf("transcript rows=%d want=%d", len(m.lines), maxTranscriptEntries)
+	}
+}
+
+func TestPaginatedHydrationSkipsDurableToolLookbehind(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width, m.height = 100, 30
+	m.layout()
+	call := protocol.NewAssistantMessage("display-call", m.app.Session.BranchTip(), "fake", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: "displayed", Name: "bash", Arguments: json.RawMessage(`{"command":"echo displayed"}`)}}, protocol.StopToolUse, nil)
+	if err := m.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: call.ID, Message: &call}); err != nil {
+		t.Fatal(err)
+	}
+	result := protocol.NewToolResultMessage("display-result", m.app.Session.BranchTip(), "displayed", "bash", []protocol.ContentBlock{protocol.NewTextBlock("displayed")}, false)
+	result.ToolDisplay = &protocol.ToolDisplay{Started: true, StartMessage: "echo displayed", Output: "displayed"}
+	if err := m.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: result.ID, Message: &result}); err != nil {
+		t.Fatal(err)
+	}
+	spy := &paginatedHydrationSpy{
+		Store:     m.app.Session,
+		hydration: m.app.Session.(session.BranchHydrationStore),
+		lookup:    m.app.Session.(session.BranchEntryLookup),
+	}
+	originalSession := m.app.Session
+	m.app.Session = spy
+	m.hydrateSession()
+	m.app.Session = originalSession
+	if spy.totalIDs != 1 {
+		t.Fatalf("decoded ids=%d want only durable tool result", spy.totalIDs)
+	}
+	if plain := stripANSI(strings.Join(m.lines, "\n")); !strings.Contains(plain, "echo displayed") {
+		t.Fatalf("durable tool label missing: %q", plain)
+	}
+}
+
+func TestPaginatedHydrationMatchesLegacyProjection(t *testing.T) {
+	fast := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, fast)
+	fast.width, fast.height = 100, 30
+	fast.layout()
+
+	oldUser := protocol.NewUserMessage("old-user", fast.app.Session.BranchTip(), "  old input\nkept exactly  ")
+	if err := fast.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: oldUser.ID, Message: &oldUser}); err != nil {
+		t.Fatal(err)
+	}
+	oldPlan := protocol.NewAssistantMessage("old-plan", fast.app.Session.BranchTip(), "fake", "fake-model", []protocol.ContentBlock{
+		{Type: protocol.BlockThinking, Text: "old thought"},
+		{Type: protocol.BlockPlan, Text: "plan outside visible suffix"},
+	}, protocol.StopStop, nil)
+	if err := fast.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: oldPlan.ID, Message: &oldPlan}); err != nil {
+		t.Fatal(err)
+	}
+	call := protocol.NewAssistantMessage("old-call", fast.app.Session.BranchTip(), "fake", "fake-model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: "paged-call", Name: "bash", Arguments: json.RawMessage(`{"command":"paged command"}`)}}, protocol.StopToolUse, nil)
+	if err := fast.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: call.ID, Message: &call}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < maxTranscriptEntries+25; i++ {
+		message := protocol.NewAssistantMessage(fmt.Sprintf("row-%04d", i), fast.app.Session.BranchTip(), "fake", "fake-model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: fmt.Sprintf("row %04d", i)}}, protocol.StopStop, nil)
+		if err := fast.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result := protocol.NewToolResultMessage("paged-result", fast.app.Session.BranchTip(), "paged-call", "bash", []protocol.ContentBlock{protocol.NewTextBlock("paged output")}, false)
+	if err := fast.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: result.ID, Message: &result}); err != nil {
+		t.Fatal(err)
+	}
+
+	legacy := newModel(context.Background(), app.Options{})
+	legacy.width, legacy.height = fast.width, fast.height
+	legacy.layout()
+	originalSession := fast.app.Session
+	legacyStore := legacyHydrationStore{
+		Store:   originalSession,
+		branch:  originalSession.(session.BranchEntryStore),
+		context: originalSession.(session.ContextStore),
+	}
+	legacy.app = fast.app
+
+	fast.hydrateSession()
+	fast.app.Session = legacyStore
+	legacy.hydrateSession()
+	fast.app.Session = originalSession
+	if got, want := stripANSI(strings.Join(fast.lines, "\n")), stripANSI(strings.Join(legacy.lines, "\n")); got != want {
+		t.Fatalf("paginated transcript differs from legacy\nfast:   %q\nlegacy: %q", got, want)
+	}
+	if !slices.Equal(fast.inputHistory, legacy.inputHistory) {
+		t.Fatalf("input history fast=%q legacy=%q", fast.inputHistory, legacy.inputHistory)
+	}
+	if fast.latestPlan != legacy.latestPlan || fast.latestPlan != "plan outside visible suffix" {
+		t.Fatalf("latest plan fast=%q legacy=%q", fast.latestPlan, legacy.latestPlan)
+	}
+	if fast.transcriptDropped != legacy.transcriptDropped || fast.contextTokens != legacy.contextTokens || fast.contextEstimated != legacy.contextEstimated {
+		t.Fatalf("state fast=(dropped=%d tokens=%d estimated=%t) legacy=(dropped=%d tokens=%d estimated=%t)", fast.transcriptDropped, fast.contextTokens, fast.contextEstimated, legacy.transcriptDropped, legacy.contextTokens, legacy.contextEstimated)
+	}
+}
+
+func TestPaginatedHydrationContextUsageMatchesMessageProjection(t *testing.T) {
+	cases := []struct {
+		name       string
+		compaction bool
+		usage      bool
+	}{
+		{name: "estimated"},
+		{name: "latest usage plus tail", usage: true},
+		{name: "compacted", usage: true, compaction: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := session.NewMemoryStore(session.Options{})
+			defer store.Close()
+			firstUsage := (*protocol.Usage)(nil)
+			if tc.usage {
+				firstUsage = &protocol.Usage{Input: 80, Output: 20, Total: 100}
+			}
+			first := protocol.NewAssistantMessage("first", store.BranchTip(), "fake", "model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: "measured text"}}, protocol.StopStop, firstUsage)
+			if err := store.Append(session.Entry{Type: session.EntryMessage, ID: first.ID, Message: &first}); err != nil {
+				t.Fatal(err)
+			}
+			if tc.compaction {
+				if err := store.Append(session.Entry{Type: session.EntryCompaction, ID: "compact", Summary: "summary", CompactedThrough: first.ID}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tail := protocol.NewAssistantMessage("tail", store.BranchTip(), "fake", "model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: "tail text"}}, protocol.StopStop, nil)
+			if err := store.Append(session.Entry{Type: session.EntryMessage, ID: tail.ID, Message: &tail}); err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := store.BranchHydration()
+			if err != nil {
+				t.Fatal(err)
+			}
+			projected, err := store.ContextMessages()
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := projectedContextUsage(projected, tc.compaction)
+			got := hydrationContextUsage(snapshot.ContextUsage)
+			if got.tokens != want.tokens || got.estimated != want.estimated || !reflect.DeepEqual(got.usage, want.usage) {
+				t.Fatalf("usage mismatch got=%+v want=%+v", got, want)
+			}
+		})
 	}
 }
 

@@ -27,7 +27,11 @@ func (m *Model) hydrateInputHistory(messages []protocol.Message) {
 			history = append(history, value)
 		}
 	}
-	m.inputHistory = history
+	m.hydrateInputHistoryValues(history)
+}
+
+func (m *Model) hydrateInputHistoryValues(history []string) {
+	m.inputHistory = append([]string(nil), history...)
 	m.resetInputHistoryNavigation()
 }
 

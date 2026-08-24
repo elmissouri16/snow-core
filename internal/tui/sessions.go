@@ -102,10 +102,11 @@ func (m *Model) inlineSessionKey() string {
 	return key
 }
 
+const hydrationSegmentLimit = 2000
+
 func boundedInlineHydration(hydrated []string, common int, switched bool) []string {
 	common = min(max(0, common), len(hydrated))
 	rows := hydrated[common:]
-	const hydrationSegmentLimit = 2000
 	omitted := 0
 	if len(rows) > hydrationSegmentLimit {
 		omitted = len(rows) - hydrationSegmentLimit
@@ -121,7 +122,7 @@ func boundedInlineHydration(hydrated []string, common int, switched bool) []stri
 	return append(out, rows...)
 }
 
-func (m *Model) hydrateSession() {
+func (m *Model) hydrateSessionLegacy() {
 	defer m.clearFinalizedMarkdownCaches()
 	m.clearTranscriptSelection()
 	if m.app == nil || m.app.Agent == nil {
@@ -465,6 +466,10 @@ func (m *Model) hydratedToolTranscriptRows(msg protocol.Message, call protocol.C
 	return m.toolEndTranscriptRows(msg.ToolName, startMessage, durationMS, message, output, msg.IsError)
 }
 
+func toolCallArgumentsAffectStartMessage(name string) bool {
+	return name == "bash" || name == "edit" || name == "write"
+}
+
 func persistedToolStartMessage(name string, arguments json.RawMessage) string {
 	switch name {
 	case "bash":
@@ -486,22 +491,7 @@ func persistedToolStartMessage(name string, arguments json.RawMessage) string {
 }
 
 func legacyToolWasDispatched(msg protocol.Message) bool {
-	if !msg.IsError {
-		return true
-	}
-	text := sessionMessageText(msg)
-	for _, prefix := range []string{
-		"Permission denied:",
-		"Error: tool arguments are not valid JSON:",
-		"Error: unknown tool ",
-		"Error: tool call cancelled:",
-		"Error: tool call skipped ",
-	} {
-		if strings.HasPrefix(text, prefix) {
-			return false
-		}
-	}
-	return !strings.Contains(text, " is unavailable in ")
+	return session.LegacyToolResultWasDispatched(msg)
 }
 
 func legacyToolDisplayOutput(msg protocol.Message) string {

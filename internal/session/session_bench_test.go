@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // BenchmarkSQLiteContextMessages compares the recursive SQL/JSON decode miss
@@ -76,6 +78,62 @@ func BenchmarkMemoryContextMessagesAfterCompaction(b *testing.B) {
 		}
 		if len(messages) != 101 {
 			b.Fatalf("messages=%d", len(messages))
+		}
+	}
+}
+
+func BenchmarkSQLiteAppendBatch1500(b *testing.B) {
+	b.StopTimer()
+	dir := b.TempDir()
+	batch := make([]Entry, 1500)
+	body := strings.Repeat("batch ", 64)
+	for i := range batch {
+		message := protocol.NewAssistantMessage(fmt.Sprintf("batch-%d", i), "", "fake", "model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: body}}, protocol.StopStop, nil)
+		batch[i] = Entry{Type: EntryMessage, ID: message.ID, Message: &message}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		store, err := NewSQLiteStore(filepath.Join(dir, fmt.Sprintf("append-%d.db", i)), dir, Options{})
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.StartTimer()
+		err = store.AppendBatch(batch)
+		b.StopTimer()
+		if closeErr := store.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkSQLiteBranchHydration5000(b *testing.B) {
+	store, err := NewSQLiteStore(filepath.Join(b.TempDir(), "hydration.db"), b.TempDir(), Options{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer store.Close()
+	batch := make([]Entry, 5000)
+	body := strings.Repeat("x", 2400)
+	for i := range batch {
+		message := protocol.NewAssistantMessage(fmt.Sprintf("h%d", i), "", "fake", "model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: body}}, protocol.StopStop, nil)
+		batch[i] = Entry{Type: EntryMessage, ID: message.ID, Message: &message}
+	}
+	if err := store.AppendBatch(batch); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		snapshot, err := store.BranchHydration()
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(snapshot.Entries) != 5001 {
+			b.Fatalf("entries=%d", len(snapshot.Entries))
 		}
 	}
 }

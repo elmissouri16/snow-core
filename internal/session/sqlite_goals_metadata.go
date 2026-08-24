@@ -96,6 +96,9 @@ func (s *SQLiteStore) AppendWithInitialTitle(entry Entry, title string) error {
 		entry.Summary, entry.CompactedThrough, entry.Key, entry.Value); err != nil {
 		return fmt.Errorf("session: sqlite append: %w", err)
 	}
+	if err := insertHydrationProjection(tx, entry); err != nil {
+		return err
+	}
 	now := time.Now().UnixMilli()
 	if result, err := tx.Exec(`UPDATE session_branches SET tip_id = ?, updated_at = ? WHERE branch_id = ? AND tip_id = ?`, entry.ID, now, s.branchID, expectedTip); err != nil {
 		return fmt.Errorf("session: sqlite branch tip: %w", err)
@@ -695,6 +698,10 @@ func (s *SQLiteStore) Append(entry Entry) error {
 		entry.Summary, entry.CompactedThrough, entry.Key, entry.Value); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("session: sqlite append: %w", err)
+	}
+	if err := insertHydrationProjection(tx, entry); err != nil {
+		_ = tx.Rollback()
+		return err
 	}
 	now := time.Now().UnixMilli()
 	if result, err := tx.Exec(`UPDATE session_branches SET tip_id = ?, updated_at = ? WHERE branch_id = ? AND tip_id = ?`, entry.ID, now, s.branchID, expectedTip); err != nil {

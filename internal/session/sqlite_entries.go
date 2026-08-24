@@ -57,6 +57,16 @@ func (s *SQLiteStore) AppendBatch(batch []Entry) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	entryStmt, err := tx.Prepare(`INSERT INTO entries(id,parent_id,entry_type,message,summary,compacted_through,meta_key,meta_value) VALUES(?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return fmt.Errorf("session: sqlite prepare batch entries: %w", err)
+	}
+	defer entryStmt.Close()
+	projectionStmt, err := tx.Prepare(insertHydrationProjectionSQL)
+	if err != nil {
+		return fmt.Errorf("session: sqlite prepare batch hydration: %w", err)
+	}
+	defer projectionStmt.Close()
 	for _, entry := range batch {
 		var raw []byte
 		if entry.Message != nil {
@@ -65,8 +75,11 @@ func (s *SQLiteStore) AppendBatch(batch []Entry) error {
 				return err
 			}
 		}
-		if _, err = tx.Exec(`INSERT INTO entries(id,parent_id,entry_type,message,summary,compacted_through,meta_key,meta_value) VALUES(?,?,?,?,?,?,?,?)`, entry.ID, entry.ParentID, entry.Type, raw, entry.Summary, entry.CompactedThrough, entry.Key, entry.Value); err != nil {
+		if _, err = entryStmt.Exec(entry.ID, entry.ParentID, entry.Type, raw, entry.Summary, entry.CompactedThrough, entry.Key, entry.Value); err != nil {
 			return fmt.Errorf("session: sqlite append batch: %w", err)
+		}
+		if err = insertPreparedHydrationProjection(projectionStmt, entry); err != nil {
+			return err
 		}
 	}
 	now := time.Now().UnixMilli()

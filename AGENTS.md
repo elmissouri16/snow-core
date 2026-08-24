@@ -132,6 +132,8 @@ gofmt -w <changed-go-files>
 go test <affected-packages>
 go test ./...
 go vet ./...
+python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+python3 scripts/check_benchmarks.py
 ```
 
 Use affected-area checks where applicable:

@@ -331,8 +331,8 @@ func newSQLiteStore(path, cwd string, opts Options, existingOnly bool) (*SQLiteS
 			return closeDB(fmt.Errorf("session: sqlite begin: %w", err))
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO session_meta(singleton, version, session_id, created_at, cwd, name, branch_tip, parent_session_id, parent_branch_id, fork_entry_id)
-			VALUES(1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, s.header.Version, s.header.ID, s.header.CreatedAt,
+			INSERT INTO session_meta(singleton, version, hydration_projection_version, session_id, created_at, cwd, name, branch_tip, parent_session_id, parent_branch_id, fork_entry_id)
+			VALUES(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, s.header.Version, entryHydrationProjectionVersion, s.header.ID, s.header.CreatedAt,
 			s.header.CWD, s.header.Name, s.tip, s.header.ParentSessionID, s.header.ParentBranchID, s.header.ForkEntryID); err != nil {
 			_ = tx.Rollback()
 			return closeDB(fmt.Errorf("session: sqlite metadata: %w", err))
@@ -342,6 +342,11 @@ func newSQLiteStore(path, cwd string, opts Options, existingOnly bool) (*SQLiteS
 			VALUES(?, ?, ?, NULL, '', ?, ?)`, "root", "", EntryMeta, "root", s.header.ID); err != nil {
 			_ = tx.Rollback()
 			return closeDB(fmt.Errorf("session: sqlite root: %w", err))
+		}
+		root := Entry{Type: EntryMeta, ID: "root", Key: "root", Value: s.header.ID}
+		if err := insertHydrationProjection(tx, root); err != nil {
+			_ = tx.Rollback()
+			return closeDB(err)
 		}
 		if _, err := tx.Exec(`
 			INSERT INTO session_branches(branch_id, branch_name, parent_branch_id, forked_from_id, tip_id, created_at, updated_at, active)
@@ -438,6 +443,7 @@ func createSQLiteSchema(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS session_meta (
 			singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
 			version INTEGER NOT NULL,
+			hydration_projection_version INTEGER NOT NULL DEFAULT 0,
 			session_id TEXT NOT NULL UNIQUE,
 			created_at INTEGER NOT NULL,
 			cwd TEXT NOT NULL,
@@ -460,6 +466,16 @@ func createSQLiteSchema(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS entries_parent_idx ON entries(parent_id);
 		CREATE INDEX IF NOT EXISTS entries_type_idx ON entries(entry_type);
+		CREATE TABLE IF NOT EXISTS entry_hydration_projection (
+			entry_id TEXT PRIMARY KEY,
+			projection_version INTEGER NOT NULL,
+			role TEXT NOT NULL DEFAULT '',
+			latest_plan_index INTEGER NOT NULL DEFAULT -1,
+			projection BLOB NOT NULL,
+			FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS entry_hydration_projection_version_idx
+			ON entry_hydration_projection(projection_version);
 		CREATE TABLE IF NOT EXISTS session_branches (
 			branch_id TEXT PRIMARY KEY,
 			branch_name TEXT NOT NULL DEFAULT '',
@@ -624,12 +640,29 @@ func ensureBranches(db *sql.DB, tip string, createdAt int64, version int) error 
 			return fmt.Errorf("session: goal blocked reason migration: %w", err)
 		}
 	}
+	if version < hydrationProjectionSchemaVersion {
+		if _, err := tx.Exec(`ALTER TABLE session_meta ADD COLUMN hydration_projection_version INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			_ = tx.Rollback()
+			return fmt.Errorf("session: hydration projection version migration: %w", err)
+		}
+	}
+	var hydrationProjectionVersion int
+	if err := tx.QueryRow(`SELECT hydration_projection_version FROM session_meta WHERE singleton = 1`).Scan(&hydrationProjectionVersion); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("session: hydration projection version: %w", err)
+	}
+	if version < hydrationProjectionSchemaVersion || hydrationProjectionVersion != entryHydrationProjectionVersion {
+		if err := backfillHydrationProjections(tx); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("session: hydration projection migration: %w", err)
+		}
+	}
 	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS session_branches_name_idx ON session_branches(branch_name COLLATE NOCASE)`); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("session: branch name index: %w", err)
 	}
-	if version < SessionVersion {
-		if _, err := tx.Exec(`UPDATE session_meta SET version = ? WHERE singleton = 1`, SessionVersion); err != nil {
+	if version < SessionVersion || hydrationProjectionVersion != entryHydrationProjectionVersion {
+		if _, err := tx.Exec(`UPDATE session_meta SET version = ?, hydration_projection_version = ? WHERE singleton = 1`, SessionVersion, entryHydrationProjectionVersion); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("session: sqlite version migration: %w", err)
 		}

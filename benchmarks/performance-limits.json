@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "go_version": "go1.27rc3",
+  "samples": 3,
+  "benchtime": "1x",
+  "benchmark_timeout_seconds": 900,
+  "groups": [
+    {
+      "package": "./internal/tui",
+      "pattern": "^(BenchmarkMailboxIngestion|BenchmarkSessionHydration5000|BenchmarkSessionHydrationMixed5000)$",
+      "benchmarks": {
+        "BenchmarkMailboxIngestion": {
+          "max_ns_per_op": 5000000,
+          "max_bytes_per_op": 500000,
+          "max_allocs_per_op": 60
+        },
+        "BenchmarkSessionHydration5000": {
+          "max_ns_per_op": 600000000,
+          "max_bytes_per_op": 116000000,
+          "max_allocs_per_op": 125000
+        },
+        "BenchmarkSessionHydrationMixed5000": {
+          "max_ns_per_op": 400000000,
+          "max_bytes_per_op": 35000000,
+          "max_allocs_per_op": 150000
+        }
+      }
+    },
+    {
+      "package": "./internal/session",
+      "pattern": "^(BenchmarkSQLiteContextMessages|BenchmarkMemoryContextMessagesAfterCompaction|BenchmarkSQLiteAppendBatch1500|BenchmarkSQLiteBranchHydration5000)$",
+      "benchmarks": {
+        "BenchmarkSQLiteContextMessages/cold": {
+          "max_ns_per_op": 100000000,
+          "max_bytes_per_op": 6700000,
+          "max_allocs_per_op": 27200
+        },
+        "BenchmarkSQLiteContextMessages/warm": {
+          "max_ns_per_op": 5000000,
+          "max_bytes_per_op": 660000,
+          "max_allocs_per_op": 40
+        },
+        "BenchmarkMemoryContextMessagesAfterCompaction": {
+          "max_ns_per_op": 5000000,
+          "max_bytes_per_op": 95000,
+          "max_allocs_per_op": 32
+        },
+        "BenchmarkSQLiteAppendBatch1500": {
+          "max_ns_per_op": 100000000,
+          "max_bytes_per_op": 4200000,
+          "max_allocs_per_op": 61000
+        },
+        "BenchmarkSQLiteBranchHydration5000": {
+          "max_ns_per_op": 200000000,
+          "max_bytes_per_op": 5800000,
+          "max_allocs_per_op": 44000
+        }
+      }
+    },
+    {
+      "package": "./internal/agent",
+      "pattern": "^BenchmarkEventBusDispatch256$",
+      "benchmarks": {
+        "BenchmarkEventBusDispatch256": {
+          "max_ns_per_op": 5000000,
+          "max_bytes_per_op": 145000,
+          "max_allocs_per_op": 650
+        }
+      }
+    },
+    {
+      "package": "./internal/provider/opencodego",
+      "pattern": "^(BenchmarkBuildChatRequest1500|BenchmarkChatSSE600)$",
+      "benchmarks": {
+        "BenchmarkBuildChatRequest1500/plain": {
+          "max_ns_per_op": 20000000,
+          "max_bytes_per_op": 1365000,
+          "max_allocs_per_op": 1900
+        },
+        "BenchmarkBuildChatRequest1500/tool-heavy": {
+          "max_ns_per_op": 20000000,
+          "max_bytes_per_op": 1015000,
+          "max_allocs_per_op": 2830
+        },
+        "BenchmarkChatSSE600": {
+          "max_ns_per_op": 20000000,
+          "max_bytes_per_op": 115000,
+          "max_allocs_per_op": 1525
+        }
+      }
+    },
+    {
+      "package": "./internal/provider/responsesapi",
+      "pattern": "^BenchmarkResponsesSSE600$",
+      "benchmarks": {
+        "BenchmarkResponsesSSE600": {
+          "max_ns_per_op": 20000000,
+          "max_bytes_per_op": 110000,
+          "max_allocs_per_op": 6100
+        }
+      }
+    }
+  ]
+}

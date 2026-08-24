@@ -677,10 +677,20 @@ tradeoffs auditable rather than contractual:
   The follow-on packed-fragment mailbox reduced that then-current 0.682 ms /
   732,961 B proxy to 0.596 ms / 399,136 B while bounding fragment metadata by
   payload size. Single-snapshot hydration, borrowed SQLite blobs, compacted
-  context reuse, and retained-row rendering reduced a 5,000-message / 12 MB
-  hydration from 256.0 ms / 253,929,896 B / 306,617 allocations to 126.8 ms /
-  120,659,052 B / 105,086 allocations without changing the 2,000 rendered-row
-  limit or omission count. Reusing an unchanged 120-column viewport and exact fitted frame reduced a
+  context reuse, and retained-row rendering first reduced a 5,000-message /
+  12 MB hydration from 256.0 ms / 253,929,896 B / 306,617 allocations to
+  126.8 ms / 120,659,052 B / 105,086 allocations. Schema-v11 hydration
+  projections now scan exact ancestry without old message blobs and fetch the
+  visible suffix in 256-entry pages; embedding required input-history/plan text
+  in the message-light projection also removes two whole-ancestry JSON queries.
+  The assistant-heavy proxy is 115.9 ms / 106,075,832 B / 99,405 allocations.
+  Relative to the original path that is 54.7% less time, 58.2% fewer bytes, and
+  67.6% fewer allocations, with the same 2,000-row limit, omission count, input
+  history, latest plan, context usage, and tool pairing. A mixed 5,000-entry
+  user/assistant/tool proxy is 46.1 ms / 27,686,456 B / 111,622 allocations.
+  Lightweight ancestry alone is 14.9 ms / 4,564,576 B / 35,043 allocations for
+  5,000 entries; rendering retained Markdown rows is now the
+  dominant cost. Reusing an unchanged 120-column viewport and exact fitted frame reduced a
   stable `View` from 170.592 µs / 112,947 B / 211 allocations to 51.152 µs /
   24,342 B / 144 allocations (70.0% less time, 78.4% fewer bytes). The cache is
   keyed by content generation, scroll, dimensions, and exact frame input; live
@@ -700,9 +710,12 @@ the fake-provider JSON `tool_routing` event, and `go test` benchmarks
 `BenchmarkBuildRequestImages`, `BenchmarkBuildChatRequest1500`,
 `BenchmarkChatSSE600`, `BenchmarkResponsesSSE600`,
 `BenchmarkSQLiteContextMessages`, `BenchmarkMemoryContextMessagesAfterCompaction`,
-`BenchmarkEventBusDispatch256`, `BenchmarkForkContext1500`,
+`BenchmarkSQLiteAppendBatch1500`, `BenchmarkSQLiteBranchHydration5000`,
+`BenchmarkEventBusDispatch256`,
+`BenchmarkForkContext1500`,
 `BenchmarkMailboxIngestion`, `BenchmarkSessionHydration5000`,
-`BenchmarkViewNormalAndNarrow`, and `BenchmarkSearch/tools_1000`, all with
+`BenchmarkSessionHydrationMixed5000`, `BenchmarkViewNormalAndNarrow`, and
+`BenchmarkSearch/tools_1000`, all with
 `-benchmem` and repeated counts. Numbers
 vary by host and should be compared only with the same command and checkout
 conditions.
@@ -1311,6 +1324,8 @@ Run these commands from the repository root:
 gofmt -w <changed-go-files>
 go test ./...
 go vet ./...
+python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+python3 scripts/check_benchmarks.py
 go test -race ./internal/...
 go test -race ./internal/subagent ./internal/agent ./internal/app ./internal/session ./internal/rpc ./pkg/snowsdk
 go test ./internal/agent ./cmd/snow -count=1
@@ -1344,7 +1359,11 @@ After a verified feature change, refresh the user-local binary with
   OpenAI-compatible SSE server with no credentials or network.
 - Language SDK tests run network-free unit tests and real-binary fake-provider
   integration tests on Linux and macOS.
-- Benchmarks cover TUI startup, stream lag, and large-session reload.
+- Benchmarks cover TUI startup, stream lag, bounded branch hydration,
+  provider request/stream processing, event delivery, and large-session reload.
+  Reviewed allocation ceilings are enforced by `scripts/check_benchmarks.py`;
+  generous timing ceilings catch catastrophic regressions without treating
+  hosted-runner latency as a tight product contract.
 
 ### CI
 
@@ -1352,9 +1371,10 @@ After a verified feature change, refresh the user-local binary with
 dispatches, and calls from the release workflow. Linux and macOS run formatting
 (Linux), vet, `go test ./...`, production builds, credential-free standalone
 SDK/RPC examples, language-SDK integration checks, JavaScript dry-run package
-checks, and plugin-SDK conformance checks. Linux also runs
-`go test -race ./internal/... ./pkg/snowsdk`, cgo-disabled builds for all four
-release targets, and a pinned `govulncheck` reachable-code scan. Real-provider
+checks, and plugin-SDK conformance checks. Linux also runs the deterministic
+performance-regression guard, `go test -race ./internal/... ./pkg/snowsdk`,
+cgo-disabled builds for all four release targets, and a pinned `govulncheck`
+reachable-code scan. Real-provider
 checks remain manual. `.github/workflows/release-alpha.yml` accepts only
 `vMAJOR.MINOR.PATCH-alpha.N` tags, reuses the complete CI gate, publishes
 macOS/Linux amd64/arm64 archives and `SHA256SUMS`, and marks the GitHub release
@@ -1387,7 +1407,7 @@ that is fully covered elsewhere is referenced rather than repeated.
 | Binary name and module | `snow`, `github.com/elmissouri16/snow-core` |
 | Modularity | In-process interfaces plus JSON-RPC stdio subprocess plugins; no Go `.so` loading |
 | Auth | OpenCode Go API key, optional-key/anonymous OpenCode Zen, user-configured OpenAI-compatible endpoints, and ChatGPT/Codex OAuth |
-| Sessions | Snow-owned pure-Go SQLite tree (schema version 9) |
+| Sessions | Snow-owned pure-Go SQLite tree (schema version 11) |
 | TUI | Charmbracelet Bubble Tea |
 | SDK | `pkg/snowsdk` running the same core as the CLI |
 | Process isolation | No built-in process or per-extension sandbox; use external containment when required |
@@ -1435,4 +1455,5 @@ that is fully covered elsewhere is referenced rather than repeated.
 - [Release policy](docs/releases.md) — alpha versioning, verification, artifacts, and rollback
 - [SDK](docs/sdk.md) — public Go SDK lifecycle and API reference
 - [Sessions](docs/sessions.md) — pure-Go SQLite session storage and schema
+- [Performance](docs/performance.md) — allocation ceilings and CI regression guard
 - [RPC](docs/rpc.md) — versioned JSONL framing, schemas, commands, and events

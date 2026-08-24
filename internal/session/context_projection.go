@@ -8,7 +8,10 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-const contextProjectionChunkMessages = 64
+const (
+	contextProjectionChunkMessages = 64
+	compactedCheckpointPrefix      = "Working-state checkpoint for compacted history:\n"
+)
 
 // contextMessagesFromEntries projects a branch after its latest compaction
 // marker. History remains append-only; only the provider-facing projection
@@ -218,7 +221,7 @@ func (b *contextProjectionBuilder) appendCheckpoint(entry *Entry) {
 	}
 	blockAt := b.blockAt
 	b.blockAt++
-	b.blocks[blockAt] = protocol.NewTextBlock("Working-state checkpoint for compacted history:\n" + entry.Summary)
+	b.blocks[blockAt] = protocol.NewTextBlock(compactedCheckpointPrefix + entry.Summary)
 	message.Content = b.blocks[blockAt:b.blockAt:b.blockAt]
 }
 

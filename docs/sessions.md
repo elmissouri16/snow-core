@@ -128,8 +128,9 @@ Each database contains the following tables:
 
 | Table | Purpose | Columns |
 |---|---|---|
-| `session_meta` | One metadata row per session | `singleton`, `version`, `session_id`, `created_at`, `cwd`, `name`, `branch_tip`, `parent_session_id`, `parent_branch_id`, `fork_entry_id` |
+| `session_meta` | One metadata row per session | `singleton`, `version`, `hydration_projection_version`, `session_id`, `created_at`, `cwd`, `name`, `branch_tip`, `parent_session_id`, `parent_branch_id`, `fork_entry_id` |
 | `entries` | Append-ordered, parent-linked entries | `seq`, `id`, `parent_id`, `entry_type`, `message`, `summary`, `compacted_through`, `meta_key`, `meta_value` |
+| `entry_hydration_projection` | Rebuildable scalar projection for bounded TUI hydration | `entry_id`, `projection_version`, `role`, `latest_plan_index`, `projection` |
 | `session_branches` | Durable branch references | `branch_id`, `branch_name`, `parent_branch_id`, `forked_from_id`, `tip_id`, `created_at`, `updated_at`, `active` |
 | `thread_state` | Branch-scoped collaboration mode | `branch_id`, `collaboration_mode` |
 | `thread_goals` | Branch-scoped goal state | `branch_id`, `goal_id`, `objective`, `status`, `token_budget`, `tokens_used`, `seconds_used`, `created_at`, `updated_at` |
@@ -141,6 +142,8 @@ Snow creates these indexes:
 
 - `entries_parent_idx` on `entries(parent_id)`;
 - `entries_type_idx` on `entries(entry_type)`;
+- `entry_hydration_projection_version_idx` on
+  `entry_hydration_projection(projection_version)`;
 - `session_branches_active_idx` on `session_branches(active)`;
 - `subagent_threads_parent_idx` on
   `subagent_threads(parent_thread_id, created_at)`;
@@ -148,6 +151,18 @@ Snow creates these indexes:
   `subagent_threads(parent_branch_id, created_at)`;
 - a unique `session_branches_name_idx` on
   `session_branches(branch_name COLLATE NOCASE)`.
+
+`entry_hydration_projection` is a derived index, not conversation authority.
+The authoritative `entries` row and its parent link remain unchanged. Snow
+writes each projection in the same transaction as its source entry. A separate
+session-level projection version triggers keyset-batched format migrations;
+missing or mismatched rows are repaired on first hydration rather than scanned
+on every open. The projection contains row/count/context scalars, tool-call
+identifiers, and the exact user-input/latest-plan text needed by TUI state. It
+never copies image bytes, provider-private continuity payloads, assistant text,
+or tool output. This lets the TUI scan complete ancestry cheaply, then fetch
+large message blobs only for the bounded visible suffix and focused legacy
+tool-call lookbehind.
 
 User image attachments are stored as `image` content blocks in the message
 JSON; Go's JSON encoding represents their bytes as base64. Clipboard images
@@ -174,7 +189,10 @@ Later versions add columns and backfill conservatively:
 - version 8 adds atomic per-currency goal cost totals; migration backfills
   priced historical goal usage only when its exact token sum matches the
   persisted goal counter;
-- version 9 adds empty-by-default session-fork provenance columns.
+- version 9 adds empty-by-default session-fork provenance columns;
+- version 10 adds the durable blocked-goal reason;
+- version 11 adds and backfills the rebuildable hydration projection used for
+  bounded transcript resume.
 
 ## Branches and compaction projection
 

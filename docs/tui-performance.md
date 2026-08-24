@@ -180,11 +180,17 @@ bursts inside each UI batch and never reloads the complete SQLite branch while
 a turn is live; provider `usage` events update the context counter in constant
 time. A usage-less terminal boundary schedules one asynchronous
 projected-context refresh, so SQLite decoding cannot block keyboard handling.
-Idle hydration
-remains available for external session mutations, while explicit context
-refreshes read the projected branch only once. This keeps long, tool-heavy
-sessions from blocking keyboard handling with repeated full-history JSON
-decoding.
+Idle hydration remains available for external session mutations, while
+explicit context refreshes read the projected branch only once. Built-in stores
+first scan a lightweight root-to-tip hydration projection containing exact row
+counts, input-history state, plan/context scalars, durable IDs, and tool-call
+identifiers. The TUI then requests visible message blobs in pages of at most 256
+and decodes only the newest 1,999 full-screen rows (or 2,000 inline segments),
+plus focused legacy tool-call lookbehind. The omission count, partial boundary
+row, complete composer history, latest plan, compaction usage, and branch-prefix
+semantics remain exact. Custom stores retain the complete-history fallback.
+This keeps long, tool-heavy sessions from blocking keyboard handling with
+repeated full-history JSON decoding.
 
 ## Verification
 

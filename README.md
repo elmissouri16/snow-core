@@ -551,7 +551,8 @@ Start at the [documentation index](docs/README.md).
 [GitHub Actions CI](.github/workflows/ci.yml) runs automatically for `main`
 pushes and pull requests and remains manually dispatchable. Linux and macOS run
 the network-free suite, binary and SDK/plugin checks, and examples; Linux also
-runs the race detector, four release-target cross-builds, and `govulncheck`.
+runs the race detector, deterministic performance-regression guard, four
+release-target cross-builds, and `govulncheck`.
 This local list is the common baseline;
 the affected-area matrix in [`IMPLEMENTATION.md`](IMPLEMENTATION.md#testing-and-verification)
 is the complete maintainer reference:
@@ -560,6 +561,7 @@ is the complete maintainer reference:
 gofmt -w <changed-go-files>
 go test ./...
 go vet ./...
+python3 scripts/check_benchmarks.py
 go test -race ./internal/... ./pkg/snowsdk
 (cd examples/sdk && go test ./... && go run .)
 go build -o ./snow ./cmd/snow

@@ -81,6 +81,8 @@ for a subject.
   conventions for documentation contributors.
 - [TUI responsiveness](tui-performance.md) — Bubble Tea rendering and
   performance implementation guidance.
+- [Performance regression guard](performance.md) — deterministic allocation
+  ceilings, local commands, CI policy, and benchmark review procedure.
 - [Code audit and remediation record](code-audit.md) — repository-wide 2026 bug,
   security, lifecycle, and maintainability findings with closure evidence.
 - [Codex Plan Mode and Goals research](codex-plan-mode-and-goals.md) — source
@@ -108,6 +110,7 @@ To reduce drift, use these documents as the primary references:
 | Safety model and privilege boundaries | [`security.md`](security.md) |
 | Vulnerability disclosure | [`SECURITY.md`](../SECURITY.md) |
 | Alpha versioning and distribution | [`releases.md`](releases.md) |
+| Performance allocation gates | [`performance.md`](performance.md) |
 | Feature-specific behavior | The matching guide in this directory |
 | Contributor workflow and must-load repository rules | [`AGENTS.md`](../AGENTS.md) |
 | Package architecture, dependency direction, and roadmap | [`IMPLEMENTATION.md`](../IMPLEMENTATION.md) |

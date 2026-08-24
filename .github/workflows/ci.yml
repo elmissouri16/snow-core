@@ -136,6 +136,34 @@ jobs:
         shell: bash
         run: node examples/rpc/javascript/client.mjs "$RUNNER_TEMP/snow" "CI lifecycle smoke test"
 
+  performance:
+    name: Performance regression guard (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.0-rc.3'
+          check-latest: true
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.9'
+
+      - name: Test benchmark guard
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
+      - name: Check benchmark regression ceilings
+        run: python3 scripts/check_benchmarks.py
+
   race:
     name: Race detector (Linux)
     runs-on: ubuntu-latest
