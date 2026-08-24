@@ -221,7 +221,7 @@ func TestSpawnAdaptsInheritedThinkingButRejectsExplicitUnsupported(t *testing.T)
 	if err := m.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	m.SetModelSelection(func(provider, model string) (protocol.Model, error) {
+	m.SetModelSelection(func(_ context.Context, provider, model string) (protocol.Model, error) {
 		return protocol.Model{Provider: provider, ID: model, SupportsTools: true}, nil
 	})
 	// Role thinking is explicit operator policy and must remain strict.
@@ -258,7 +258,7 @@ func TestSpawnRejectsUnavailableSelectionBeforeFactory(t *testing.T) {
 	if err := m.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	m.SetModelSelection(func(provider, model string) (protocol.Model, error) {
+	m.SetModelSelection(func(_ context.Context, provider, model string) (protocol.Model, error) {
 		return protocol.Model{}, fmt.Errorf("unknown selection %s/%s", provider, model)
 	})
 	_, err := m.Spawn(context.Background(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "bad", Task: "inspect", Provider: "other", Model: "missing", ForkTurns: "none"})

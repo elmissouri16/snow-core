@@ -71,16 +71,23 @@ export interface RPCResponse<T = unknown> {
 }
 
 export interface ContentBlock {
-  type: "text" | "image";
+  type: string;
   text?: string;
   mime_type?: string;
   data?: string;
+  tool_call_id?: string;
+  name?: string;
+  arguments?: unknown;
   [key: string]: unknown;
+}
+
+export interface PromptContentBlock extends ContentBlock {
+  type: "text" | "image";
 }
 
 export interface PromptOptions {
   mode?: CollaborationMode;
-  content?: ContentBlock[];
+  content?: PromptContentBlock[];
   timeoutMs?: number;
   signal?: AbortSignal;
 }
@@ -184,17 +191,6 @@ export interface QueuedInput {
 
 export interface InputQueue {
   items: QueuedInput[];
-  [key: string]: unknown;
-}
-
-export interface ContentBlock {
-  type: string;
-  text?: string;
-  mime_type?: string;
-  data?: string;
-  tool_call_id?: string;
-  name?: string;
-  arguments?: unknown;
   [key: string]: unknown;
 }
 

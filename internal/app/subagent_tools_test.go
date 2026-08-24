@@ -26,6 +26,23 @@ func hasRegisteredTool(reg tools.Registry, name string) bool {
 	return ok
 }
 
+func TestRuntimeToolGuidanceKeepsExistingChildLifecycleInstructions(t *testing.T) {
+	guidance := runtimeToolGuidance()
+	found := false
+	for _, fragment := range guidance {
+		if fragment.Text != subagentLifecycleGuidance {
+			continue
+		}
+		found = true
+		if len(fragment.AnyOf) == 0 || len(fragment.UnlessAny) != 1 || fragment.UnlessAny[0] != "spawn_agent" {
+			t.Fatalf("lifecycle guidance gate=%+v", fragment)
+		}
+	}
+	if !found {
+		t.Fatal("missing existing-child lifecycle guidance")
+	}
+}
+
 func TestCloneChildRegistryRoleCapabilities(t *testing.T) {
 	parent := testChildParentRegistry(t)
 	defaults := config.Default().Subagents.Roles
@@ -106,8 +123,8 @@ func TestSubagentPromptExplainsRoleAndPermissionPolicy(t *testing.T) {
 
 func TestCloneChildRegistryHonorsParentToolAllowlist(t *testing.T) {
 	parent := testChildParentRegistry(t)
-	limited, err := tools.CloneRegistry(parent, func(desc tools.ToolDescriptor) bool {
-		return desc.Schema.Name != "bash"
+	limited, err := tools.CloneRegistry(parent, func(desc tools.DescriptorMetadata) bool {
+		return desc.Name != "bash"
 	})
 	if err != nil {
 		t.Fatal(err)

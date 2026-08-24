@@ -729,6 +729,13 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 	// Run the tool with panic recovery and bridge progress into the agent
 	// event stream used by the TUI, SDK, print mode, and RPC.
 	tr := a.runTool(ctx, tool, rawArgs, cb.ToolCallID, cb.Name)
+	if !tr.IsError {
+		if activation, ok := skillActivationDetails(tr.Details); ok {
+			if activationErr := a.validateSkillActivation(activation); activationErr != nil {
+				tr = tools.ErrorResult(activationErr)
+			}
+		}
+	}
 
 	var out []protocol.ContentBlock
 	if len(tr.Content) == 0 {

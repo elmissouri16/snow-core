@@ -63,7 +63,7 @@ func (t *managerTool) Run(ctx context.Context, raw json.RawMessage, _ tools.Tool
 			ThinkingLevels  []protocol.ThinkingLevel `json:"thinking_levels"`
 			DefaultThinking protocol.ThinkingLevel   `json:"default_thinking,omitempty"`
 		}
-		models := t.manager.Models()
+		models, catalogErr := t.manager.Models(ctx)
 		out := make([]item, 0, len(models))
 		providers := make([]string, 0)
 		seenProviders := make(map[string]bool)
@@ -78,6 +78,9 @@ func (t *managerTool) Run(ctx context.Context, raw json.RawMessage, _ tools.Tool
 			out = append(out, item{Provider: model.Provider, Model: model.ID, DisplayName: model.DisplayName, Tools: model.SupportsTools, ThinkingLevels: model.SupportedThinkingLevels(), DefaultThinking: model.DefaultThinking})
 		}
 		result := map[string]any{"models": out, "available_providers": providers}
+		if catalogErr != nil {
+			result["warning"] = catalogErr.Error()
+		}
 		if in.Provider != "" && len(out) == 0 {
 			result["message"] = fmt.Sprintf("no models found for exact provider %q; use one of available_providers", in.Provider)
 		}

@@ -3,7 +3,8 @@
 Snow keeps existing tools directly available and lets future tools opt into
 local progressive disclosure. Deferred tools remain fully registered and
 executable, but their JSON parameter schemas are sent to the model only when a
-Bleve BM25 search selects them.
+Bleve BM25 search selects them, a lifecycle bundle is already active, or the
+model explicitly discovers them through `search_tools`.
 
 ## On this page
 
@@ -56,12 +57,14 @@ direct exposure.
 
 ## Built-in deferred web fetch
 
-`webfetch` is Snow's first built-in deferred tool. It uses the `web` namespace
-and retrieval terms for URLs, pages, links, fetching, reading, visiting,
-downloading, HTML, Markdown, JSON, and webpage summarization. Consequently the
-normal app builds the Bleve index and registers direct `search_tools` even when
-no plugins are installed. An explicit SDK/CLI tool allowlist that excludes
-`webfetch` retains the original direct-only/no-router path.
+`webfetch` uses the `web` namespace and retrieval terms for URLs, pages,
+links, fetching, reading, visiting, downloading, HTML, Markdown, JSON, and
+webpage summarization. The five managed-process tools are also deferred under
+the `managed_process` namespace. Consequently the normal app registers direct
+`search_tools` even when no plugins are installed, while actual Bleve index
+construction waits for the first non-empty routing search. An explicit SDK/CLI
+tool allowlist that excludes every deferred tool retains the original
+direct-only/no-router path.
 
 The tool performs a static GET with Surf v1.0.203's Chrome 150 profile; it does
 not execute JavaScript. It converts HTML to Markdown, passes textual formats
@@ -77,11 +80,13 @@ untrusted-content boundary are always applied.
 
 ## Runtime behavior
 
-At startup Snow builds two in-memory Bleve v2 indexes from deferred metadata.
-The namespace index has one summary document per namespace; the tool index has
-one document per tool. Both contain only canonical/original names, namespace,
-description, and keywords. Full parameter schemas, execution handlers,
-ownership, and risk stay in the normal registry and are never indexed.
+At startup Snow retains a compact, schema-free snapshot of deferred retrieval
+metadata. The first non-empty search lazily builds two in-memory Bleve v2
+indexes exactly once. The namespace index has one summary document per
+namespace; the tool index has one document per tool. Both contain only
+canonical/original names, namespace, description, and keywords. Full parameter
+schemas, execution handlers, ownership, and risk stay in the normal registry
+and are never retained by or indexed in Bleve.
 
 Namespace summaries are deterministic and capped at 32 KiB each. They prioritize
 the namespace identifier and normalized form, normalized tool names, and
@@ -95,10 +100,13 @@ For each user prompt Snow:
 3. Searches again within the selected namespaces.
 4. Fuses global and namespace-scoped ranks with deterministic reciprocal-rank
    fusion (weights 1.0 and 1.15, constant 60).
-5. Requests the complete deferred ranking before permission filtering, so
-   denied high-ranked tools cannot hide a permitted lower-ranked result, then
-   adds the top five permitted schemas after the direct schemas.
-6. Keeps that selection for all provider continuations in the turn and runs the
+5. Requests 20 candidates, filters them against permission policy, and doubles
+   that window only when needed to find five permitted results or exhaust the
+   catalog. This prevents denied high-ranked tools from hiding a permitted
+   lower-ranked result without searching the full catalog on every turn.
+6. Adds the top five permitted schemas after direct schemas. Selecting any
+   managed-process member expands the complete five-tool lifecycle bundle.
+7. Keeps that selection for all provider continuations in the turn and runs the
    existing execution-time permission gate for every tool call.
 
 The global result is always retained as a rescue path: the strongest global hit
@@ -106,23 +114,27 @@ is guaranteed to remain within the first five fused candidates, so a wrong
 namespace choice cannot hide it from normal schema exposure. A one-namespace
 catalog, a query with no namespace match, or a namespace-index search failure
 preserves the original global BM25 order. A total tool-index build or search
-failure keeps the existing fail-open behavior described below.
+failure invokes the bounded local metadata fallback described below.
 
-There is no additional LLM call for routing. Both indexes are rebuilt together
-from the authoritative registry for every process and are closed with the app.
-Plugin and MCP catalog refreshes build a complete replacement pair and swap it
-atomically, so removed tools cannot survive in stale namespace summaries. If a
-dynamic replacement cannot be built, the last valid pair remains active until a
-later refresh succeeds; startup and search failures still use fail-open
-exposure.
+There is no additional LLM call for routing. An MCP/plugin catalog refresh
+before the first search replaces only the pending compact snapshot and remains
+lazy. After initialization, refreshes build a complete replacement pair and
+swap it atomically, so removed tools cannot survive in stale namespace
+summaries. If a dynamic replacement cannot be built, the last valid pair
+remains active until a later refresh succeeds. Both indexes close with the app.
 
 When deferred tools exist, Snow also registers the direct, read-only
 `search_tools` meta-tool. A model may search again with a more precise query;
 up to five returned schemas become available on the next provider continuation.
-The original automatic selection plus the latest explicit search are capped at
-ten deferred schemas. If the startup pair cannot build or the active tool index
-cannot search, Snow fails open for functionality by exposing every
-permission-eligible deferred schema for that turn.
+Automatic and explicit selections are independently capped at five before
+lifecycle-bundle expansion. Once any managed process record exists, its whole
+bundle remains visible across turns so status, logs, and stop operations do not
+require rediscovery; session rebinding clears that sticky state.
+
+If Bleve cannot build or search, automatic routing uses a deterministic local
+name/namespace/keyword/description ranker instead of exposing the complete
+catalog. That fallback returns at most five permitted tools and at most 64 KiB
+of serialized schemas. Router failures remain visible in `tool_routing` events.
 
 ## Observability and limits
 

@@ -18,17 +18,20 @@ import (
 )
 
 const (
-	defaultDeferredTopK    = 5
-	deferredCandidateK     = 20
-	maxRoutingEventTools   = 20
-	maxPendingRootInputs   = 64
-	maxQueuedInputBytes    = 64 * 1024
-	maxPendingMailboxItems = 64
-	maxPendingMailboxBytes = 1 << 20
-	automaticTurnDelay     = 25 * time.Millisecond
-	skillActivationMeta    = "agent_skill_activation"
-	skillDeactivationMeta  = "agent_skill_deactivation"
-	skillDeactivationAll   = "*"
+	defaultDeferredTopK              = 5
+	deferredCandidateK               = 20
+	maxRoutingEventTools             = 20
+	maxDeferredFallbackSchemaBytes   = 64 << 10
+	defaultFixedContextBudgetPercent = 25
+	unknownModelFixedContextTokens   = 32 * 1024
+	maxPendingRootInputs             = 64
+	maxQueuedInputBytes              = 64 * 1024
+	maxPendingMailboxItems           = 64
+	maxPendingMailboxBytes           = 1 << 20
+	automaticTurnDelay               = 25 * time.Millisecond
+	skillActivationMeta              = "agent_skill_activation"
+	skillDeactivationMeta            = "agent_skill_deactivation"
+	skillDeactivationAll             = "*"
 
 	repeatedToolFirstThreshold     = 3
 	repeatedToolNextThreshold      = 5
@@ -54,18 +57,36 @@ type providerTurnError struct {
 	activity bool
 }
 
+// DeferredBundle exposes a complete lifecycle surface when any member is
+// selected. Sticky keeps the bundle visible while runtime state still needs it.
+type DeferredBundle struct {
+	Members []string
+	Sticky  func() bool
+}
+
+// ToolGuidance is appended only when at least one AnyOf tool is exposed and no
+// UnlessAny tool is exposed.
+type ToolGuidance struct {
+	AnyOf     []string
+	UnlessAny []string
+	Text      string
+}
+
 // Options configures an Agent.
 type Options struct {
-	Provider     provider.Provider
-	Registry     tools.Registry
-	Session      session.Store
-	Permission   permission.Service
-	ToolHost     tools.ToolHost
-	Router       tools.Router
-	SystemPrompt string
-	Model        protocol.Model
-	MaxTurns     int // 0 = unlimited
-	CallLimit    int // max tool calls per turn (0 = unlimited)
+	Provider                  provider.Provider
+	Registry                  tools.Registry
+	Session                   session.Store
+	Permission                permission.Service
+	ToolHost                  tools.ToolHost
+	Router                    tools.Router
+	DeferredBundles           []DeferredBundle
+	ToolGuidance              []ToolGuidance
+	FixedContextBudgetPercent int
+	SystemPrompt              string
+	Model                     protocol.Model
+	MaxTurns                  int // 0 = unlimited
+	CallLimit                 int // max tool calls per turn (0 = unlimited)
 	// Thinking level forwarded to providers that support reasoning effort.
 	Thinking protocol.ThinkingLevel
 	// ReasoningSummary and TextVerbosity are forwarded to adapters that support
@@ -99,14 +120,12 @@ type Options struct {
 // CompactionOptions is kept in agent to avoid coupling core runtime behavior to
 // persisted configuration packages.
 type CompactionOptions struct {
-	RetainTokens         int
-	MinRetainedTurns     int
-	SummaryMaxTokens     int
-	Fallback             string
-	Guidance             string
-	AutoThresholdPercent int
-	// GoalAutoThresholdPercent is a deprecated source-compatibility alias.
-	GoalAutoThresholdPercent      int
+	RetainTokens                  int
+	MinRetainedTurns              int
+	SummaryMaxTokens              int
+	Fallback                      string
+	Guidance                      string
+	AutoThresholdPercent          int
 	ToolHistoryBudgetPercent      int
 	ToolResultInlineBytes         int
 	HistoricalToolResultThreshold int

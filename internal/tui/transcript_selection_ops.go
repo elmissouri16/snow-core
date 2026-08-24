@@ -540,8 +540,33 @@ func applyTranscriptSelectionHighlight(text string) string {
 	return out.String()
 }
 
+const maxTranscriptViewportCacheBytes = 256 << 10
+
+func (m *Model) transcriptViewportView() string {
+	if m.transcriptViewCacheValid &&
+		m.transcriptViewCacheRevision == m.transcriptViewRevision &&
+		m.transcriptViewCacheOffset == m.transcript.YOffset &&
+		m.transcriptViewCacheWidth == m.transcript.Width &&
+		m.transcriptViewCacheHeight == m.transcript.Height {
+		return m.transcriptViewCache
+	}
+	view := m.transcript.View()
+	if len(view) > maxTranscriptViewportCacheBytes {
+		m.transcriptViewCache = ""
+		m.transcriptViewCacheValid = false
+		return view
+	}
+	m.transcriptViewCacheRevision = m.transcriptViewRevision
+	m.transcriptViewCacheOffset = m.transcript.YOffset
+	m.transcriptViewCacheWidth = m.transcript.Width
+	m.transcriptViewCacheHeight = m.transcript.Height
+	m.transcriptViewCache = view
+	m.transcriptViewCacheValid = true
+	return view
+}
+
 func (m *Model) cacheTranscriptSelectionView() {
-	m.transcriptSelectionView = m.transcript.View()
+	m.transcriptSelectionView = m.transcriptViewportView()
 	m.transcriptSelectionViewRow = m.transcript.YOffset
 	m.transcriptSelectionViewValid = true
 }
@@ -554,7 +579,7 @@ func (m *Model) renderTranscriptView() string {
 	if m.transcriptSelectionViewValid && m.transcriptSelectionViewRow == m.transcript.YOffset {
 		view = m.transcriptSelectionView
 	} else {
-		view = m.transcript.View()
+		view = m.transcriptViewportView()
 		if m.transcriptSelection.pressActive {
 			m.transcriptSelectionView = view
 			m.transcriptSelectionViewRow = m.transcript.YOffset

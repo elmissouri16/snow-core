@@ -666,6 +666,11 @@ func (a *App) ConfigureOpenAICompatibleProfile(profileID, baseURL string) error 
 	if err := config.ValidateProviderProfileID(profileID); err != nil {
 		return err
 	}
+	unlockTransition, err := a.beginProviderTransition("configure provider")
+	if err != nil {
+		return err
+	}
+	defer unlockTransition()
 	environment := []string(nil)
 	if profileID == openaicompat.ProviderID {
 		environment = []string{openaicompat.EnvAPIKey}
@@ -700,26 +705,34 @@ func (a *App) ConfigureOpenAICompatibleProfile(profileID, baseURL string) error 
 	}
 
 	a.stateMu.Lock()
-	defer a.stateMu.Unlock()
-	if a.ProviderID == profileID {
+	active := a.ProviderID == profileID
+	a.stateMu.Unlock()
+	if active {
 		model := a.Agent.Model()
 		if err := a.Agent.SetProviderAndModel(authenticated, model); err != nil {
 			return err
 		}
 	}
+	a.stateMu.Lock()
 	a.Providers[profileID] = authenticated
-	a.modelCatalog[profileID] = nil
-	if a.ProviderID == profileID {
+	delete(a.modelCatalog, profileID)
+	if active {
 		a.Provider = authenticated
 		a.Models = nil
 	}
 	if a.runtimeSelection != nil {
 		a.runtimeSelection.mu.Lock()
 		a.runtimeSelection.providers[profileID] = authenticated
-		a.runtimeSelection.catalogs[profileID] = nil
+		if a.runtimeSelection.catalogGeneration == nil {
+			a.runtimeSelection.catalogGeneration = make(map[string]uint64)
+		}
+		a.runtimeSelection.catalogGeneration[profileID]++
+		delete(a.runtimeSelection.catalogs, profileID)
+		delete(a.runtimeSelection.catalogErrors, profileID)
 		a.runtimeSelection.mu.Unlock()
 	}
 	a.rebuildAllModelsLocked()
+	a.stateMu.Unlock()
 	return nil
 }
 

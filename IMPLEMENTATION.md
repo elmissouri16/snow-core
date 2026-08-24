@@ -196,8 +196,10 @@ replace the symbol through `-ldflags -X`, while untagged builds remain
 
 1. `cmd/snow` parses flags and builds `app.Options`.
 2. `internal/app.New` loads config/auth/trust, builds the tool registry,
-   fetches startup model catalogs, creates a session, permission service,
-   provider, and agent.
+   constructs and fetches catalogs for only the active and explicitly configured
+   subagent providers, and creates the session, permission service, provider,
+   and agent. Picker-only and ad-hoc child adapters and catalogs materialize
+   through shared, race-safe on-demand wrappers and caches.
 3. `agent.Prompt` appends the user message, resolves credentials, starts a
    provider stream, publishes normalized events, persists the assistant
    message, then runs serial tool calls behind the permission service.
@@ -570,16 +572,20 @@ tool-call round trips through the real agent loop.
 | `webfetch` | Fetch a public HTTP(S) resource | network | Deferred schema; Surf Chrome 150; secure TLS; HTML to Markdown; SSRF, timeout, redirect, media-type, and output bounds |
 
 `grep`, `glob`, `ask_user`, `update_plan`, `search_tools`, and session-history
-tools are registered in the default builtin registry. `webfetch` is the first
-built-in deferred tool, so the normal app also loads the small direct
-`search_tools` recovery schema while keeping the full `webfetch` schema out of
-unrelated provider requests. `ask_user` has no discovery metadata: its full
+tools are registered in the default builtin registry. `webfetch`, session
+retrieval, artifact retrieval, and the managed-process lifecycle are deferred,
+so the normal app loads the small direct `search_tools` recovery schema while
+keeping their full schemas out of unrelated provider requests. `ask_user` has
+no discovery metadata: its full
 schema is sent with the other direct built-ins on every tool-capable request,
 and the explicit SDK/CLI `Tools` allowlist remains authoritative. A choice
 returns its exact label; Other and free-form responses return trimmed text.
 The model-facing result is ordered JSON.
 
-The five managed-process schemas are also direct built-ins. One app-owned
+The five managed-process schemas form one deferred bundle: selecting any member
+exposes all five, and retained process records keep the bundle visible across
+turns so lifecycle control is never stranded. Their detailed system guidance is
+also conditional on `process_start` exposure. One app-owned
 `internal/process.Manager` outlives individual tool calls and continuously
 drains child output while the serial agent loop proceeds. Processes are scoped
 to the active session but shared by its branches; switching root sessions stops
@@ -589,6 +595,55 @@ managed groups before session/path resources. State is not reconstructed from
 persisted PIDs after restart. The global `processes` configuration bounds
 concurrent children, retained terminal records, and output per record; individual
 child lifetime ends on natural exit, explicit stop, session switch, or app close.
+
+### Performance evidence (2026-08-24)
+
+Local Apple M3 Pro release-build proxies, recorded to make the context/startup
+tradeoffs auditable rather than contractual:
+
+- A clean fake-provider request exposes 15 schemas / 8,506 serialized schema
+  bytes, down from the 14,031-byte pre-change recurring-context proxy (39.4%).
+- A process-relevant request expands the complete five-tool lifecycle bundle on
+  demand: 20 schemas / 11,989 bytes; an unrelated request carries none of those
+  five schemas.
+- Five sequential one-shot fake-provider launches measured 0.03–0.04 s real
+  time and 47,480,832–48,381,952-byte maximum RSS (47,824,896-byte median),
+  versus the earlier 48.1–48.7 MB startup proxy. A later isolated
+  provider-initialization benchmark reduced the median from 3.975 µs / 7,136 B /
+  60 allocations to 2.736 µs / 4,424 B / 59 allocations by retaining lazy
+  constructors for inactive adapters: 31.2% less time/op and 38.0% fewer
+  allocated bytes in that startup component. The per-start allocation saving is
+  2,712 bytes with the default provider inventory, so whole-process RSS remained
+  below the resolution of repeatable measurement.
+- A warm 1,500-message SQLite `ContextMessages` projection reduced from a
+  201.824 µs median / 1,359,489 B / 1,518 allocations to 75.457 µs / 526,209 B /
+  26 allocations by skipping the unused compaction index and packing defensive
+  output storage in 64-message retention chunks: 62.6% less time, 61.3% fewer
+  allocated bytes, and 98.3% fewer allocations. The cold recursive-query/decode
+  path remained about 9.2–9.4 ms while bytes and allocations fell 10.6% and
+  6.1%; recurring warm projection is the optimized path.
+- For the TUI, ingesting 10,000 adjacent deltas reduced from a 4.376 ms median /
+  6,492,386 B / 20,025 allocations to 0.682 ms / 732,960 B / 27 allocations.
+  Reusing an unchanged 120-column viewport and exact fitted frame reduced a
+  stable `View` from 170.592 µs / 112,947 B / 211 allocations to 51.152 µs /
+  24,342 B / 144 allocations (70.0% less time, 78.4% fewer bytes). The cache is
+  keyed by content generation, scroll, dimensions, and exact frame input; live
+  changes still render normally.
+- The stripped binary is 66,196,018 bytes (20,708,174 bytes at gzip `-9`),
+  134,944 bytes / 0.20% above the 66,061,074-byte baseline. Surf and Bleve remain
+  the dominant linked binary-size hotspots; this work keeps them for behavior
+  compatibility and removes their eager recurring work instead.
+- At 1,000 tools, steady-state router samples were 1.93–1.94 ms / about 42 KB /
+  422 allocations for global search and 4.62–5.01 ms / about 279 KB / 3,555–3,557
+  allocations for namespace-first search. Index construction is lazy,
+  cancellation-aware, and shared by concurrent first searches.
+
+Reproduction uses `go build -trimpath -ldflags='-s -w'`, `/usr/bin/time -l`,
+the fake-provider JSON `tool_routing` event, and `go test` benchmarks
+`BenchmarkSQLiteContextMessages`, `BenchmarkMailboxIngestion`,
+`BenchmarkViewNormalAndNarrow`, and `BenchmarkSearch/tools_1000`, all with
+`-benchmem` and repeated counts. Numbers vary by host and should be compared
+only with the same command and checkout conditions.
 
 ### Tool interfaces
 
@@ -708,8 +763,9 @@ a 10-minute stream-silence watchdog, and a 100 KiB project-context cap.
    risk.
 3. Optional `CLAUDE.md` compatibility read (off by default in current app
    wiring).
-4. Startup skill metadata, MCP instructions, and subagent guidance when
-   enabled.
+4. Startup skill metadata plus root-only MCP instructions. Shell, mutation,
+   process, and subagent guidance is appended per request only when matching
+   tool schemas are actually exposed.
 5. Per-request collaboration-mode instructions from embedded
    `internal/plan/system.md` and activated-skill instructions.
 6. Goal-bearing turns receive separate trailing internal context rendered from
@@ -720,6 +776,12 @@ paths are trust-gated, confined to the canonical project root, and reject
 symlink components. Each discovered `AGENTS.md` is opened through a pinned
 parent-directory handle, must remain a regular non-symlink file, and is read
 only through the remaining byte budget before a truncation notice is added.
+The global `fixed_context_budget_percent` separately measures the final system
+text plus exposed schemas against the model window (25% by default; unknown
+windows use 32,768 estimated tokens). It is an admission guard for new skills,
+model changes, and request-time routed schema growth, never a silent truncation
+mechanism; restored over-budget
+state remains intact and visible in the context report.
 
 ## Sessions and storage
 
@@ -781,7 +843,10 @@ private reasoning, and provider continuity. Verified artifact references are
 carried forward with a fixed cap of 24 across repeated compaction and physical
 forks; stale or forged markers are ignored. Transcript persistence failures emit
 a lifecycle warning, while full append-only session history remains the
-authority for replay.
+authority for replay. The deterministic local fallback partitions command and
+non-command evidence so each full payload appears once, uses references for
+failure sections, and renders one retrieval helper for the complete verified
+artifact list.
 
 ### On-disk layout
 
@@ -895,7 +960,11 @@ verifies the discovery-time directory identity before using a pinned
 per-operation `os.Root` for filesystem resources. Activated content is
 reattached on every provider call and reconstructed from successful markers
 and session history after resume so compaction does not drop it; current
-trust/disable/tool policy filters stale activations. See `docs/skills.md`.
+trust/disable/tool policy filters stale activations. New activations are
+admitted atomically against the final serialized fixed-context budget and are
+rejected before result/marker persistence rather than truncated. Existing
+resumed state remains grandfathered and observable through `/context`. See
+`docs/skills.md`.
 
 Global and trust-gated project `skills.disabled`/`skills.overrides` policy can
 hide entries from prompts and activation without deleting their files. CLI
@@ -906,12 +975,15 @@ hide entries from prompts and activation without deleting their files. CLI
 
 Existing tools and zero-value discovery metadata remain always loaded.
 Native, Go-plugin, external-plugin, SDK, and MCP registrations may opt into
-`deferred` discovery per tool. Snow builds an in-memory Bleve BM25 index after
-startup registration, indexes only name/namespace/description/keywords, and
-loads the top five permitted full schemas from the authoritative registry.
-`search_tools` provides an explicit recovery pass, while index/search failures
-fall back to direct exposure for that turn. Routing emits structured metrics
-but does not make an extra LLM call. Optional semantic/vector routing remains
+`deferred` discovery per tool. Snow retains a compact schema-free metadata
+snapshot after startup registration and lazily builds the in-memory Bleve BM25
+indexes on the first non-empty search. Candidate windows start at 20 and double
+only when permission filtering has not found five usable results. Registry
+projection filters immutable metadata before cloning accepted parameter JSON.
+`search_tools` provides an explicit recovery pass; index/search failures use a
+bounded metadata ranker with a five-tool/64-KiB fallback instead of exposing the
+whole catalog. Routing emits structured metrics but does not make an extra LLM
+call. Optional semantic/vector routing remains
 deferred pending a locally downloadable open-source model with acceptable
 licensing, platform support, binary size, memory use, and startup time. See
 `docs/tool-routing.md`.
@@ -940,7 +1012,12 @@ consume a slot. Depth defaults to one and is bounded up to eight. Child
 authority is role-scoped: the `general` and `implementer` roles may use
 permission-gated `bash`, while `explorer` remains read/search-only. Recursion
 and file mutation are independent intersections of global and role policy;
-write/edit require both mutation switches.
+write/edit require both mutation switches. Child system prompts are assembled
+from the finalized child registry: MCP, process, shell, mutation, and recursive
+delegation guidance is included only when the corresponding capability is
+present. Root startup validates the active and explicitly configured child
+providers; other catalogs resolve on demand through context-aware manager
+callbacks.
 
 Parent and child transcripts never share a mutable cursor. Context forks use
 `ContextMessages`, strip unsafe or incomplete protocol artifacts, and repair
@@ -1110,7 +1187,9 @@ all prompt events, and legacy same-ID prompt failure responses are retained.
 `user_input_reply.params` is a `UserInputResponse`;
 `user_input_reject.params` contains `request_id`. EOF closes the interactive
 input broker so pending/future questions fail fast while an ordinary one-shot
-prompt is still allowed to finish.
+prompt is still allowed to finish. Dispatcher ownership is split by cohesive
+command domain (for example `subagent_commands.go`), and an AST parity test
+requires every `pkg/protocol` command-inventory entry to have a dispatcher case.
 
 Primary consumers are the checked-in dependency-light Python 3.9+ async and
 Node.js 22+ ESM/TypeScript SDKs, other non-Go hosts, and IDE bridges. They

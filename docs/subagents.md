@@ -69,6 +69,14 @@ automatically uses that model's supported default (falling back to `off`); an
 explicitly requested per-spawn or role effort remains strict and returns a
 supported-level diagnostic.
 
+Snow no longer fetches every unrelated provider catalog during root startup.
+The active provider and providers explicitly referenced by configured defaults
+or roles are validated immediately. `list_subagent_models` resolves the
+remaining catalogs on demand, and a direct spawn against an unloaded provider
+performs the same contextual lookup before committing the child identity.
+Concurrent requests share the cached result; an unavailable inactive provider
+does not delay or fail ordinary root work.
+
 At the provider boundary, manager-bound model tools also accept a sole
 `{"_raw":"<JSON object>"}` compatibility envelope produced by some tool-call
 parsers. `_raw` is not a public tool argument: Snow unwraps it internally,
@@ -102,7 +110,12 @@ bound to its caller by the host.
 string. Forks use the current post-compaction context and an independent
 store. Snow removes thinking, incomplete plans, old collaboration mail, and
 dangling tool calls/results, rebuilds parent IDs, excludes branch goals, and
-rebuilds the current trusted system prompt.
+rebuilds the current trusted system prompt. Child prompt assembly starts from
+that project/base prompt and then adds only guidance supported by the finalized
+child registry: shell guidance requires `bash`, mutation guidance requires
+`write`/`edit`, and recursive delegation guidance requires an exposed
+`spawn_agent`. Root-only MCP and managed-process instructions are not inherited
+by children that cannot call those tools.
 
 Children run concurrently up to the tree execution limit; each individual
 child still processes turns and tools serially. Parent turn completion or

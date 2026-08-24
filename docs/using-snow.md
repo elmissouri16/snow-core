@@ -160,10 +160,12 @@ compact `✓ <command> · <duration>` transcript summary followed by any command
 output. Long or multiline commands are reduced to one truncated display row;
 routine start and finished progress events do not consume separate rows.
 
-Snow's default tool guidance routes development servers, preview servers, file
-watchers, background workers, and similar long-running commands to the managed-
-process family instead of Bash or shell backgrounding (`&`, `nohup`, or
-`disown`). It uses stable names and checks the active process list to avoid
+When a task needs them, Snow's capability-aware routing exposes the complete
+managed-process lifecycle bundle and adds its detailed guidance. Ordinary
+editing and search requests do not carry these five schemas. Development
+servers, preview servers, file watchers, background workers, and similar
+long-running commands use this family instead of Bash or shell backgrounding
+(`&`, `nohup`, or `disown`). It uses stable names and checks the active process list to avoid
 starting duplicates. A stable startup log marker is sufficient readiness
 evidence, so Snow prefers RE2 log readiness and does not reconfirm that marker
 with an HTTP request or TCP connection. Network probes are reserved for an
@@ -183,6 +185,11 @@ without evidence:
   escalation.
 - `process_list` returns a secret-safe active-session inventory without command
   strings, environment values, or OS PIDs.
+
+Selecting any member exposes all five lifecycle schemas. After the first
+process record is created, the bundle remains available on later turns,
+including for exited-process logs, until session rebinding clears the runtime
+inventory.
 
 These processes continue while later agent turns edit files or run checks. They
 share all branches in the active session and stop on explicit request, session
@@ -251,7 +258,14 @@ past the newest entry restores the draft that was present before browsing.
 
 Choice pickers accept arrows, `j`/`k`, Tab/Shift+Tab, Home/End, and Enter. The
 model picker also accepts `/` to search provider IDs, model IDs, display names,
-and descriptions. Selecting a model with controllable reasoning opens a second
+and descriptions. It opens immediately from the active/cached catalog, loads
+missing inactive provider catalogs asynchronously, and keeps the cached list
+interactive while that refresh completes. Snow constructs only the active and
+explicitly configured subagent provider adapters at startup; other adapters and
+their HTTP clients materialize on first catalog, login, or selection use.
+Consequently, an invalid inactive-provider endpoint is reported when that
+provider is first used rather than blocking an unrelated provider's startup.
+Selecting a model with controllable reasoning opens a second
 picker with that model's advertised effort levels, including `off`, before
 applying and persisting both. `off` means Snow omits the provider effort
 override; an inherently reasoning model may still use its provider-default
@@ -458,7 +472,9 @@ vision-patch estimate for images; compressed PNG/JPEG/GIF file size is never
 used as an image token count. The shares are then rescaled to the same
 provider-calibrated current-context total shown in the footer. When calibration
 changes the total, `/context` also shows the raw local estimate as a diagnostic.
-The provider aggregate remains authoritative; individual category attribution,
+It separately reports estimated fixed-context tokens, the model-aware admission
+budget, and an over-budget marker. Fixed context includes final system guidance,
+active skills, and exposed schemas, but not conversation messages. The provider aggregate remains authoritative; individual category attribution,
 especially opaque continuity and images, remains approximate. Latest generation
 usage is shown separately because only its persisted content is added to a
 following request.
@@ -472,7 +488,10 @@ a bounded private transcript of compacted tool text, arguments, and result/image
 metadata is linked for `artifact_read`/`artifact_grep`; image payloads and full
 history remain in the append-only session. Up to 24 verified retrieval
 references survive repeated compaction, and a lifecycle warning reports any
-transcript persistence failure instead of advertising a missing artifact.
+transcript persistence failure instead of advertising a missing artifact. The
+bounded local fallback stores each command/tool evidence payload once, uses
+cross-references for failures, and prints the artifact retrieval helper once per
+checkpoint rather than once per reference.
 
 When invoked during automatic goal work, manual compaction pauses that goal
 after the checkpoint; use `/goal resume` to continue. Every admitted turn may

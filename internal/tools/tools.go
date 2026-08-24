@@ -161,6 +161,21 @@ type ToolDescriptor struct {
 	Prompt       string
 }
 
+// DescriptorMetadata is the immutable, schema-light projection used to filter
+// catalogs before cloning parameter JSON.
+type DescriptorMetadata struct {
+	Name         string
+	OriginalName string
+	Description  string
+	Source       Source
+	Owner        string
+	Risk         permission.Risk
+	Deferred     bool
+	Namespace    string
+	Keywords     []string
+	Capabilities []string
+}
+
 // Registry holds the set of tools available to the agent and the richer
 // host-only descriptor metadata used by extension managers.
 type Registry interface {
@@ -414,11 +429,62 @@ func (r *SimpleRegistry) Descriptor(name string) (ToolDescriptor, bool) {
 
 // Descriptors returns metadata in registration order.
 func (r *SimpleRegistry) Descriptors() []ToolDescriptor {
+	return r.SelectDescriptors(nil)
+}
+
+// DescriptorMetadata returns a schema-light snapshot without cloning parameter
+// JSON. Capability names remain defensively copied.
+func (r *SimpleRegistry) DescriptorMetadata(name string) (DescriptorMetadata, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	desc, ok := r.descriptors[name]
+	if !ok {
+		return DescriptorMetadata{}, false
+	}
+	return descriptorMetadata(desc), true
+}
+
+// SelectMetadata returns schema-light entries in registration order.
+func (r *SimpleRegistry) SelectMetadata(allow func(DescriptorMetadata) bool) []DescriptorMetadata {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]DescriptorMetadata, 0, len(r.keys))
+	for _, key := range r.keys {
+		metadata := descriptorMetadata(r.descriptors[key])
+		if allow == nil || allow(metadata) {
+			out = append(out, metadata)
+		}
+	}
+	return out
+}
+
+// SelectDescriptors filters immutable metadata under the registry read lock and
+// clones only accepted descriptors.
+func (r *SimpleRegistry) SelectDescriptors(allow func(DescriptorMetadata) bool) []ToolDescriptor {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]ToolDescriptor, 0, len(r.keys))
-	for _, k := range r.keys {
-		out = append(out, cloneDescriptor(r.descriptors[k]))
+	for _, key := range r.keys {
+		desc := r.descriptors[key]
+		if allow != nil && !allow(descriptorMetadata(desc)) {
+			continue
+		}
+		out = append(out, cloneDescriptor(desc))
+	}
+	return out
+}
+
+// SelectSchemas filters immutable metadata before cloning accepted schemas.
+func (r *SimpleRegistry) SelectSchemas(allow func(DescriptorMetadata) bool) []ToolSchema {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]ToolSchema, 0, len(r.keys))
+	for _, key := range r.keys {
+		desc := r.descriptors[key]
+		if allow != nil && !allow(descriptorMetadata(desc)) {
+			continue
+		}
+		out = append(out, cloneSchema(desc.Schema))
 	}
 	return out
 }
@@ -460,6 +526,12 @@ func IsDeferred(desc ToolDescriptor) bool {
 // CanExpose performs the non-interactive permission check used for deferred
 // schemas. Unknown permission implementations preserve the existing behavior.
 func CanExpose(service permission.Service, desc ToolDescriptor) bool {
+	return CanExposeMetadata(service, descriptorMetadata(desc))
+}
+
+// CanExposeMetadata performs the deferred schema exposure check without
+// requiring a full schema clone.
+func CanExposeMetadata(service permission.Service, desc DescriptorMetadata) bool {
 	if service == nil {
 		return true
 	}
@@ -467,7 +539,7 @@ func CanExpose(service permission.Service, desc ToolDescriptor) bool {
 	if !ok {
 		return true
 	}
-	return policy.CanExpose(desc.Schema.Name, desc.Risk)
+	return policy.CanExpose(desc.Name, desc.Risk)
 }
 
 func normalizeDiscovery(desc *ToolDescriptor) error {
@@ -509,6 +581,99 @@ func normalizeDiscovery(desc *ToolDescriptor) error {
 	return nil
 }
 
+// MetadataFromDescriptor returns the immutable schema-light projection of a
+// descriptor without cloning its parameter JSON.
+func MetadataFromDescriptor(desc ToolDescriptor) DescriptorMetadata {
+	return descriptorMetadata(desc)
+}
+
+func descriptorMetadata(desc ToolDescriptor) DescriptorMetadata {
+	metadata := DescriptorMetadata{
+		Name: desc.Schema.Name, OriginalName: desc.OriginalName, Description: desc.Schema.Description, Source: desc.Source, Owner: desc.Owner, Risk: desc.Risk,
+		Deferred: IsDeferred(desc), Capabilities: cloneStrings(desc.Capabilities),
+	}
+	if desc.Schema.Discovery != nil {
+		metadata.Namespace = desc.Schema.Discovery.Namespace
+		metadata.Keywords = cloneStrings(desc.Schema.Discovery.Keywords)
+	}
+	return metadata
+}
+
+func registryMetadata(registry Registry, name string) (DescriptorMetadata, bool) {
+	if projected, ok := registry.(interface {
+		DescriptorMetadata(string) (DescriptorMetadata, bool)
+	}); ok {
+		return projected.DescriptorMetadata(name)
+	}
+	desc, ok := registry.Descriptor(name)
+	if !ok {
+		return DescriptorMetadata{}, false
+	}
+	return descriptorMetadata(desc), true
+}
+
+// Metadata returns a schema-light descriptor snapshot.
+func Metadata(registry Registry, name string) (DescriptorMetadata, bool) {
+	if registry == nil {
+		return DescriptorMetadata{}, false
+	}
+	return registryMetadata(registry, name)
+}
+
+// SelectMetadata returns schema-light entries without cloning parameter JSON.
+func SelectMetadata(registry Registry, allow func(DescriptorMetadata) bool) []DescriptorMetadata {
+	if registry == nil {
+		return nil
+	}
+	if projected, ok := registry.(interface {
+		SelectMetadata(func(DescriptorMetadata) bool) []DescriptorMetadata
+	}); ok {
+		return projected.SelectMetadata(allow)
+	}
+	out := make([]DescriptorMetadata, 0)
+	for _, desc := range registry.Descriptors() {
+		metadata := descriptorMetadata(desc)
+		if allow == nil || allow(metadata) {
+			out = append(out, metadata)
+		}
+	}
+	return out
+}
+
+// SelectSchemas filters before cloning when the registry supports projections.
+func SelectSchemas(registry Registry, allow func(DescriptorMetadata) bool) []ToolSchema {
+	if registry == nil {
+		return nil
+	}
+	if projected, ok := registry.(interface {
+		SelectSchemas(func(DescriptorMetadata) bool) []ToolSchema
+	}); ok {
+		return projected.SelectSchemas(allow)
+	}
+	out := make([]ToolSchema, 0)
+	for _, desc := range registry.Descriptors() {
+		if allow == nil || allow(descriptorMetadata(desc)) {
+			out = append(out, desc.Schema)
+		}
+	}
+	return out
+}
+
+func selectDescriptors(registry Registry, allow func(DescriptorMetadata) bool) []ToolDescriptor {
+	if projected, ok := registry.(interface {
+		SelectDescriptors(func(DescriptorMetadata) bool) []ToolDescriptor
+	}); ok {
+		return projected.SelectDescriptors(allow)
+	}
+	out := make([]ToolDescriptor, 0)
+	for _, desc := range registry.Descriptors() {
+		if allow == nil || allow(descriptorMetadata(desc)) {
+			out = append(out, desc)
+		}
+	}
+	return out
+}
+
 func cloneDescriptor(desc ToolDescriptor) ToolDescriptor {
 	desc.Schema = cloneSchema(desc.Schema)
 	desc.Capabilities = cloneStrings(desc.Capabilities)
@@ -533,15 +698,12 @@ func cloneStrings(in []string) []string {
 // descriptor metadata. Tool implementations are shared; the registry map and
 // deferred metadata are not. Callers must only share implementations whose Run
 // method is concurrency-safe.
-func CloneRegistry(src Registry, allow func(ToolDescriptor) bool) (*SimpleRegistry, error) {
+func CloneRegistry(src Registry, allow func(DescriptorMetadata) bool) (*SimpleRegistry, error) {
 	if src == nil {
 		return nil, fmt.Errorf("source registry is nil")
 	}
 	out := NewRegistry()
-	for _, desc := range src.Descriptors() {
-		if allow != nil && !allow(desc) {
-			continue
-		}
+	for _, desc := range selectDescriptors(src, allow) {
 		if err := out.RegisterDescriptor(desc); err != nil {
 			return nil, err
 		}

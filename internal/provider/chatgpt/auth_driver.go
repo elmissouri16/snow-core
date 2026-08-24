@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/auth"
@@ -11,9 +12,43 @@ import (
 
 // AuthDriver adapts ChatGPT OAuth to the provider-independent auth lifecycle.
 // OAuth endpoints, scopes, claims, and workspace checks remain in this package.
-type AuthDriver struct{ provider *Provider }
+type AuthDriver struct {
+	provider      *Provider
+	providerBuild func() (*Provider, error)
+	providerOnce  sync.Once
+	providerErr   error
+}
 
 func NewAuthDriver(provider *Provider) *AuthDriver { return &AuthDriver{provider: provider} }
+
+// NewLazyAuthDriver defers construction of the ChatGPT HTTP adapter until an
+// OAuth login or refresh actually needs it. Descriptor and credential
+// inspection remain allocation-only local operations.
+func NewLazyAuthDriver(build func() (*Provider, error)) *AuthDriver {
+	return &AuthDriver{providerBuild: build}
+}
+
+func (d *AuthDriver) configuredProvider() (*Provider, error) {
+	if d == nil {
+		return nil, fmt.Errorf("chatgpt: OAuth driver is not configured")
+	}
+	if d.providerBuild == nil {
+		if d.provider == nil {
+			return nil, fmt.Errorf("chatgpt: OAuth driver is not configured")
+		}
+		return d.provider, nil
+	}
+	d.providerOnce.Do(func() {
+		d.provider, d.providerErr = d.providerBuild()
+		if d.providerErr == nil && d.provider == nil {
+			d.providerErr = fmt.Errorf("chatgpt: OAuth driver is not configured")
+		}
+	})
+	if d.providerErr != nil {
+		return nil, fmt.Errorf("chatgpt: initialize OAuth client: %w", d.providerErr)
+	}
+	return d.provider, nil
+}
 
 func (*AuthDriver) Descriptor() auth.Descriptor {
 	return auth.Descriptor{
@@ -54,25 +89,27 @@ func (*AuthDriver) NeedsRefresh(credential auth.Credential, now time.Time) bool 
 }
 
 func (d *AuthDriver) Refresh(ctx context.Context, current auth.Credential, _ auth.RefreshReason) (auth.Credential, error) {
-	if d.provider == nil {
-		return auth.Credential{}, fmt.Errorf("chatgpt: OAuth driver is not configured")
-	}
 	if strings.TrimSpace(current.Refresh) == "" {
 		return auth.Credential{}, fmt.Errorf("%w: OAuth refresh token is missing; sign in again", ErrLoginRequired)
 	}
-	return d.provider.refresh(ctx, current)
+	provider, err := d.configuredProvider()
+	if err != nil {
+		return auth.Credential{}, err
+	}
+	return provider.refresh(ctx, current)
 }
 
 func (d *AuthDriver) Login(ctx context.Context, request auth.LoginRequest, interaction auth.Interaction) (auth.Credential, error) {
-	if d.provider == nil {
-		return auth.Credential{}, fmt.Errorf("chatgpt: OAuth driver is not configured")
-	}
 	method := LoginMethod(request.Method)
 	if method == "" {
 		method = LoginBrowser
 	}
 	if method != LoginBrowser && method != LoginDevice {
 		return auth.Credential{}, fmt.Errorf("chatgpt: unsupported login method %q", request.Method)
+	}
+	provider, err := d.configuredProvider()
+	if err != nil {
+		return auth.Credential{}, err
 	}
 	if interaction == nil {
 		interaction = auth.NopInteraction{}
@@ -85,7 +122,7 @@ func (d *AuthDriver) Login(ctx context.Context, request auth.LoginRequest, inter
 		}
 	}
 	return LoginCredential(ctx, LoginOptions{
-		Method: method, HTTPClient: d.provider.client, AuthBaseURL: d.provider.authBaseURL, Now: d.provider.now,
+		Method: method, HTTPClient: provider.client, AuthBaseURL: provider.authBaseURL, Now: provider.now,
 		AllowedWorkspaceIDs: append([]string(nil), request.Params["allowed_workspace_id"]...),
 		OpenBrowser:         interaction.OpenURL,
 		PasteCallback:       pasteCallback,

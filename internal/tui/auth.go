@@ -648,61 +648,60 @@ func (m *Model) renderThinkingPicker() string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// startModelPick opens the interactive model picker from the app's current
-// combined provider catalog. The fallback fetch is only for tests/SDKs without
-// an app catalog snapshot.
+// startModelPick opens immediately from cached catalogs, then resolves missing
+// inactive catalogs asynchronously so ordinary startup does not wait for them.
 func (m *Model) startModelPick() (tea.Model, tea.Cmd) {
 	if m.compatibleLoginPending {
 		m.lastStatus = "waiting for openai-compatible model discovery"
 		m.pushLine(styleFooter.Render(m.lastStatus))
 		return m, nil
 	}
-	var models []protocol.Model
-	if m.app != nil {
-		models = append([]protocol.Model(nil), m.app.AllModels...)
-		if len(models) == 0 {
-			models = append([]protocol.Model(nil), m.app.Models...)
-		}
-	}
-	if len(models) == 0 && m.app != nil {
-		if m.asyncIO {
-			m.pickModel = true
-			m.modelLoading = true
-			m.modelList = nil
-			m.modelQuery = ""
-			m.modelSearchActive = false
-			m.pickerGeneration++
-			generation := m.pickerGeneration
-			return m, func() tea.Msg {
-				fetched, err := m.app.Provider.ListModels(m.ctx)
-				return modelListMsg{generation: generation, models: fetched, err: err}
-			}
-		}
-		fetched, err := m.app.Provider.ListModels(m.ctx)
-		if err != nil {
-			m.pushLine(styleError.Render("model list: " + err.Error()))
-			return m, nil
-		}
-		models = fetched
-		m.app.Models = uniquePickerModels(models, m.app.ProviderID)
-	}
-	models = uniquePickerModels(models, m.app.ProviderID)
-	if len(models) == 0 {
-		m.pushLine(styleError.Render("no models available"))
+	if m.app == nil {
+		m.pushLine(styleError.Render("model catalog unavailable"))
 		return m, nil
 	}
+	models := append([]protocol.Model(nil), m.app.AllModels...)
+	if len(models) == 0 {
+		models = append(models, m.app.Models...)
+	}
+	models = uniquePickerModels(models, m.app.ProviderID)
 	m.modelList = models
 	m.modelIndex = 0
 	m.modelQuery = ""
 	m.modelSearchActive = false
-	for i, mm := range models {
-		if mm.Provider == m.app.Model.Provider && mm.ID == m.app.Model.ID {
+	for i, candidate := range models {
+		if candidate.Provider == m.app.Model.Provider && candidate.ID == m.app.Model.ID {
 			m.modelIndex = i
 			break
 		}
 	}
 	m.pickModel = true
 	m.compVisible = false
+	m.pickerGeneration++
+	generation := m.pickerGeneration
+	if m.asyncIO {
+		m.modelLoading = true
+		return m, func() tea.Msg {
+			fetched, err := m.app.LoadProviderCatalogs(m.ctx)
+			return modelListMsg{generation: generation, models: fetched, err: err}
+		}
+	}
+	if len(models) > 0 {
+		return m, nil
+	}
+	fetched, err := m.app.LoadProviderCatalogs(m.ctx)
+	if len(fetched) > 0 {
+		m.modelList = uniquePickerModels(fetched, m.app.ProviderID)
+	}
+	if err != nil && len(m.modelList) == 0 {
+		m.pickModel = false
+		m.pushLine(styleError.Render("model list: " + err.Error()))
+		return m, nil
+	}
+	if len(m.modelList) == 0 {
+		m.pickModel = false
+		m.pushLine(styleError.Render("no models available"))
+	}
 	return m, nil
 }
 

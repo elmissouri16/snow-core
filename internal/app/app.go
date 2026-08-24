@@ -72,20 +72,21 @@ type App struct {
 	ProjectAllowed   bool
 	ProjectInputRoot string
 
-	stateMu             sync.Mutex
-	diagnosticsMu       sync.Mutex
-	diagnosticsCacheKey string
-	diagnosticsCache    []protocol.ConfigDiagnostic
-	permissionDefault   permission.Mode
-	permissionOverride  bool
-	modelCatalog        map[string][]protocol.Model
-	runtimeSelection    *liveRuntimeSelection
-	cwd                 string
-	userInput           *userinput.Broker
-	toolGuard           *builtin.PathGuard
-	sessionHistory      *builtin.SessionBinding
-	sessionQuery        *session.QueryEngine
-	artifacts           artifact.Store
+	stateMu              sync.Mutex
+	providerTransitionMu sync.Mutex
+	diagnosticsMu        sync.Mutex
+	diagnosticsCacheKey  string
+	diagnosticsCache     []protocol.ConfigDiagnostic
+	permissionDefault    permission.Mode
+	permissionOverride   bool
+	modelCatalog         map[string][]protocol.Model
+	runtimeSelection     *liveRuntimeSelection
+	cwd                  string
+	userInput            *userinput.Broker
+	toolGuard            *builtin.PathGuard
+	sessionHistory       *builtin.SessionBinding
+	sessionQuery         *session.QueryEngine
+	artifacts            artifact.Store
 }
 
 // SessionDeleteCleanupError reports that the durable session was deleted but
@@ -93,11 +94,19 @@ type App struct {
 type SessionDeleteCleanupError struct{ Err error }
 
 type liveRuntimeSelection struct {
-	mu        sync.RWMutex
-	provider  string
-	model     protocol.Model
-	providers map[string]provider.Provider
-	catalogs  map[string][]protocol.Model
+	mu                sync.RWMutex
+	provider          string
+	model             protocol.Model
+	providers         map[string]provider.Provider
+	catalogs          map[string][]protocol.Model
+	catalogErrors     map[string]error
+	catalogLoads      map[string]*catalogLoad
+	catalogGeneration map[string]uint64
+}
+
+type catalogLoad struct {
+	done       chan struct{}
+	generation uint64
 }
 
 // Options control app assembly.

@@ -12,6 +12,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/permission"
 	managedprocess "github.com/elmissouri16/snow-core/internal/process"
 	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func TestRegisterProcessToolsContractsAndRisks(t *testing.T) {
@@ -33,7 +34,7 @@ func TestRegisterProcessToolsContractsAndRisks(t *testing.T) {
 	}
 	for name, risk := range want {
 		descriptor, ok := registry.Descriptor(name)
-		if !ok || descriptor.Risk != risk || descriptor.Schema.Discovery != nil {
+		if !ok || descriptor.Risk != risk || descriptor.Schema.Discovery == nil || descriptor.Schema.Discovery.Mode != protocol.ToolDiscoveryDeferred || descriptor.Schema.Discovery.Namespace != "managed_process" {
 			t.Fatalf("descriptor %s = %+v", name, descriptor)
 		}
 	}

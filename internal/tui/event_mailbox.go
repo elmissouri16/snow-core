@@ -28,30 +28,54 @@ type queuedAgentEvent struct {
 	bytes     int
 }
 
-// coalesceRootSessionUpdates keeps only the latest root-session invalidation in
-// one UI batch. Session updates carry no payload: reading the latest store state
-// satisfies every earlier invalidation, while child-session lifecycle events
-// remain independently observable.
-func coalesceRootSessionUpdates(events []protocol.AgentEvent) []protocol.AgentEvent {
-	last := -1
-	count := 0
-	for i, event := range events {
-		if event.Type == protocol.EvSessionUpdated && event.Agent == nil {
-			last = i
-			count++
-		}
-	}
-	if count < 2 {
-		return events
-	}
-	coalesced := make([]protocol.AgentEvent, 0, len(events)-count+1)
-	for i, event := range events {
-		if event.Type == protocol.EvSessionUpdated && event.Agent == nil && i != last {
+// coalesceTUISnapshotEvents keeps only root snapshots superseded within one UI
+// batch. Session updates carry no payload; usage and model events are current
+// state snapshots. Child events remain independently observable, turn IDs keep
+// accounting boundaries intact, and debug usage history remains complete.
+// Compaction is in-place because the batch is owned by the Bubble Tea message.
+func coalesceTUISnapshotEvents(events []protocol.AgentEvent, preserveUsageHistory bool) []protocol.AgentEvent {
+	writeAt := 0
+	for i := range events {
+		if tuiSnapshotSuperseded(events[i], events[i+1:], preserveUsageHistory) {
 			continue
 		}
-		coalesced = append(coalesced, event)
+		events[writeAt] = events[i]
+		writeAt++
 	}
-	return coalesced
+	clear(events[writeAt:])
+	return events[:writeAt]
+}
+
+func tuiSnapshotSuperseded(event protocol.AgentEvent, later []protocol.AgentEvent, preserveUsageHistory bool) bool {
+	if event.Agent != nil {
+		return false
+	}
+	switch event.Type {
+	case protocol.EvSessionUpdated:
+		for _, candidate := range later {
+			if candidate.Type == protocol.EvSessionUpdated && candidate.Agent == nil {
+				return true
+			}
+		}
+	case protocol.EvUsage:
+		if preserveUsageHistory {
+			return false
+		}
+		for _, candidate := range later {
+			if candidate.Type == protocol.EvUsage && candidate.Agent == nil &&
+				candidate.TurnID == event.TurnID && candidate.RootEpoch == event.RootEpoch {
+				return true
+			}
+		}
+	case protocol.EvModelChanged:
+		for _, candidate := range later {
+			if candidate.Type == protocol.EvModelChanged && candidate.Agent == nil &&
+				candidate.TurnID == event.TurnID && candidate.RootEpoch == event.RootEpoch {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // agentEventMailbox is an ordered handoff from agent callbacks to the Bubble
@@ -328,11 +352,44 @@ func compatibleStreamDeltas(previous, next protocol.AgentEvent) bool {
 	if previous.Type != next.Type || !isCoalescibleStreamDelta(next.Type) {
 		return false
 	}
+	// Root and attributed stream deltas normally carry only scalar correlation
+	// fields plus an optional AgentRef. Avoid boxing two large AgentEvent values
+	// through reflect.DeepEqual for every token; the reflective path remains for
+	// unusual extension payloads so coalescing never drops metadata.
+	if simpleStreamDeltaEnvelope(previous) && simpleStreamDeltaEnvelope(next) {
+		return previous.ToolCallID == next.ToolCallID &&
+			previous.ToolName == next.ToolName &&
+			previous.Message == next.Message &&
+			previous.ToolOutput == next.ToolOutput &&
+			previous.ToolDurationMS == next.ToolDurationMS &&
+			previous.TurnID == next.TurnID &&
+			previous.TurnOrigin == next.TurnOrigin &&
+			previous.TurnSequence == next.TurnSequence &&
+			previous.RootEpoch == next.RootEpoch &&
+			previous.GoalContinuing == next.GoalContinuing &&
+			previous.IsError == next.IsError &&
+			equalAgentRef(previous.Agent, next.Agent)
+	}
 	// Coalesce only the Text field. Every other envelope field must be exactly
 	// equivalent so metadata is never silently replaced or discarded.
 	previous.Text = ""
 	next.Text = ""
 	return reflect.DeepEqual(previous, next)
+}
+
+func simpleStreamDeltaEnvelope(event protocol.AgentEvent) bool {
+	return event.ToolProgress == nil && event.ToolRouting == nil && event.ProviderRetry == nil &&
+		event.Usage == nil && event.Model == nil && event.Mode == nil && event.Plan == nil &&
+		event.PlanUpdate == nil && event.Compaction == nil && event.Permission == nil &&
+		event.UserInput == nil && event.Queue == nil && event.ThreadGoal == nil &&
+		event.Subagent == nil && event.AgentMessage == nil
+}
+
+func equalAgentRef(left, right *protocol.AgentRef) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func waitForEvent(q *agentEventMailbox) tea.Cmd {

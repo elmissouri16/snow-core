@@ -31,7 +31,6 @@ func TestCompactionAutoThresholdDefaultsDisablesAndValidates(t *testing.T) {
 	for _, value := range []int{49, 100} {
 		candidate := DefaultCompaction()
 		candidate.AutoThresholdPercent = value
-		candidate.GoalAutoThresholdPercent = 0
 		if err := candidate.Validate(); err == nil {
 			t.Fatalf("threshold %d was accepted", value)
 		}

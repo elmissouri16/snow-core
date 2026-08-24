@@ -145,8 +145,8 @@ type Manager struct {
 	evictionRequested bool
 	closeDone         chan struct{}
 	wg                sync.WaitGroup
-	modelCatalog      func() []protocol.Model
-	modelSelection    func(provider, model string) (protocol.Model, error)
+	modelCatalog      func(context.Context) ([]protocol.Model, error)
+	modelSelection    func(context.Context, string, string) (protocol.Model, error)
 }
 
 type detachedRuntime struct {

@@ -121,6 +121,7 @@ A representative configuration:
     "retained_output_bytes": 1048576
   },
   "context_cap_bytes": 102400,
+  "fixed_context_budget_percent": 25,
   "system_prompt_file": "system.md",
   "providers": {
     "opencode-go": {
@@ -224,7 +225,19 @@ fills required zero-value defaults before validation.
 | `processes.max_records` | `32` | Maximum running and terminal runtime records; must be at least `max_running` and at most `256` |
 | `processes.retained_output_bytes` | `1048576` | Newest combined stdout/stderr bytes retained per process (`65536..16777216`) |
 | `context_cap_bytes` | `102400` | Hard cap for loaded project instructions and maximum configured system-prompt file size |
+| `fixed_context_budget_percent` | `25` (`10..50`) | Operator-owned admission budget for recurring system instructions, active skills, conditional guidance, and exposed tool schemas as a share of the selected model window; unknown windows use a 32,768-token fallback |
 | `system_prompt_file` | unset | Markdown/text file replacing the embedded base preamble; relative paths resolve from the loaded config file's directory (normally the global config directory; `--config`/`ConfigPath` can override it) and `~` is supported |
+
+The fixed-context budget measures the final serialized system prompt and exposed
+schemas; it does not count conversation messages or internal turn fragments.
+Snow never trims tools or skill instructions to meet it. New skill activation
+and model changes that would increase the runtime above the budget are rejected
+with an actionable error. Routed or explicitly discovered schema expansion is
+checked again before every provider continuation and cannot increase a request
+past the budget. Existing resumed branches are grandfathered without
+data loss and `/context` reports their over-budget state so the operator can
+clear skills, reduce configured guidance, or select a larger-window model.
+Project configuration cannot raise this global operator limit.
 
 Model capabilities remain authoritative. An explicit CLI/SDK reasoning level
 that is not advertised by the selected model is rejected. If refreshed backend
@@ -269,6 +282,13 @@ also have fixed runtime bounds.
   "stream_idle_timeout_ms": 600000
 }
 ```
+
+Snow constructs the active provider adapter and any explicitly configured
+subagent adapters during startup. Other configured adapters retain only a lazy
+constructor until their catalog, login flow, or provider selection is used.
+Their authentication descriptors remain available without allocating an HTTP
+client. Static configuration errors for the active provider still fail startup;
+an invalid inactive endpoint is reported when that provider is first used.
 
 `stream_idle_timeout_ms` bounds silence between bytes on a live streaming
 response without imposing a total turn deadline. Omit it or set `0` for the

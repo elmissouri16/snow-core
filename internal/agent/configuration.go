@@ -52,6 +52,12 @@ func New(opts Options) (*Agent, error) {
 	if opts.Retry == (RetryOptions{}) {
 		opts.Retry = DefaultRetryOptions()
 	}
+	if opts.FixedContextBudgetPercent == 0 {
+		opts.FixedContextBudgetPercent = defaultFixedContextBudgetPercent
+	}
+	if opts.FixedContextBudgetPercent < 10 || opts.FixedContextBudgetPercent > 50 {
+		return nil, errors.New("agent: fixed context budget percent must be 10..50")
+	}
 	if err := opts.Retry.validate(); err != nil {
 		return nil, err
 	}
@@ -103,6 +109,17 @@ func New(opts Options) (*Agent, error) {
 		}
 		opts.SkillNames = names
 	}
+	bundles := append([]DeferredBundle(nil), opts.DeferredBundles...)
+	for i := range bundles {
+		bundles[i].Members = append([]string(nil), bundles[i].Members...)
+	}
+	opts.DeferredBundles = bundles
+	guidance := append([]ToolGuidance(nil), opts.ToolGuidance...)
+	for i := range guidance {
+		guidance[i].AnyOf = append([]string(nil), guidance[i].AnyOf...)
+		guidance[i].UnlessAny = append([]string(nil), guidance[i].UnlessAny...)
+	}
+	opts.ToolGuidance = guidance
 	repair, err := repairInterruptedToolCallsReport(opts.Session, opts.Registry)
 	if err != nil {
 		return nil, fmt.Errorf("agent: recover interrupted tool calls: %w", err)
@@ -459,6 +476,10 @@ func (a *Agent) SetProviderAndModel(p provider.Provider, m protocol.Model) error
 	}
 	m = m.Clone()
 	unlock := a.LockAdmission()
+	if err := a.validateModelFixedContext(m); err != nil {
+		unlock()
+		return err
+	}
 	a.mu.Lock()
 	if a.running {
 		a.mu.Unlock()
@@ -501,6 +522,10 @@ func (a *Agent) SetProviderModelThinking(p provider.Provider, m protocol.Model, 
 		return unsupportedThinkingError(m, parsed)
 	}
 	unlock := a.LockAdmission()
+	if err := a.validateModelFixedContext(m); err != nil {
+		unlock()
+		return err
+	}
 	a.mu.Lock()
 	if a.running {
 		a.mu.Unlock()
@@ -540,6 +565,10 @@ func (a *Agent) SetModel(m protocol.Model) error {
 	}
 	m = m.Clone()
 	unlock := a.LockAdmission()
+	if err := a.validateModelFixedContext(m); err != nil {
+		unlock()
+		return err
+	}
 	a.mu.Lock()
 	if a.running {
 		a.mu.Unlock()

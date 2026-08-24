@@ -20,7 +20,7 @@ func TestPlannerKeepsTail(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		msgs = append(msgs, mkMsg(string(rune('a'+i)), "", "message "+string(rune('a'+i))))
 	}
-	plan := Planner(msgs, 1000)
+	plan := PlannerWithOptions(msgs, PlannerOptions{RetainTokens: 1000, MinRetainedTurns: 2})
 	if len(plan.CompactionCandidates) == 0 {
 		t.Fatal("expected some candidates")
 	}
@@ -39,7 +39,7 @@ func TestPlannerKeepsMinimumTail(t *testing.T) {
 		mkMsg("4", "", "bar"),
 		mkMsg("5", "", "baz"),
 	}
-	plan := Planner(msgs, 1<<30)
+	plan := PlannerWithOptions(msgs, PlannerOptions{RetainTokens: 1 << 30, MinRetainedTurns: 2})
 	if tail := len(msgs) - plan.KeepFrom; tail < 4 {
 		t.Fatalf("tail = %d messages, want >= 4 (KeepFrom=%d)", tail, plan.KeepFrom)
 	}
@@ -182,7 +182,7 @@ func TestPlannerSmallConversation(t *testing.T) {
 		mkMsg("1", "", "hello"),
 		mkMsg("2", "", "world"),
 	}
-	plan := Planner(msgs, 1000)
+	plan := PlannerWithOptions(msgs, PlannerOptions{RetainTokens: 1000, MinRetainedTurns: 2})
 	if plan.KeepFrom != 0 {
 		t.Fatalf("small conversation should not compact, KeepFrom=%d", plan.KeepFrom)
 	}
@@ -195,7 +195,7 @@ func TestApplyAppendsSummary(t *testing.T) {
 		_ = st.Append(session.Entry{Type: session.EntryMessage, ID: m.ID, Message: &m})
 	}
 	msgs, _ := st.Messages()
-	plan := Planner(msgs, 20)
+	plan := PlannerWithOptions(msgs, PlannerOptions{RetainTokens: 20, MinRetainedTurns: 2})
 	res, err := Apply(context.Background(), st, DefaultSummarizer, plan)
 	if err != nil {
 		t.Fatal(err)
@@ -455,6 +455,45 @@ func TestDefaultSummarizerPreservesPriorCheckpointAndAgentUpdate(t *testing.T) {
 	retrievalEnd := strings.Index(summary, "## Unresolved next steps")
 	if retrievalStart < 0 || retrievalEnd < retrievalStart || strings.Contains(summary[retrievalStart:retrievalEnd], "artifact-") {
 		t.Fatalf("unverified bare artifact token was promoted to retrieval evidence:\n%s", summary)
+	}
+}
+
+func TestDeduplicateCheckpointBulletsPreservesSemanticSections(t *testing.T) {
+	checkpoint := WorkingStateTitle + `
+
+## Current working state
+- shared fact
+- shared fact
+
+## Commands and verification
+- shared fact
+- shared fact`
+	got := deduplicateCheckpointBullets(checkpoint)
+	if strings.Count(got, "- shared fact") != 2 {
+		t.Fatalf("cross-section fact was lost or within-section duplicate survived:\n%s", got)
+	}
+}
+
+func TestDefaultSummarizerDoesNotRepeatEvidencePayloads(t *testing.T) {
+	assistant := protocol.NewAssistantMessage("assistant", "user", "test", "m", []protocol.ContentBlock{protocol.NewTextBlock("implementation is partially complete")}, protocol.StopToolUse, nil)
+	assistant.Content = append(assistant.Content, protocol.ContentBlock{Type: protocol.BlockToolCall, Name: "bash", ToolCallID: "call-1", Arguments: json.RawMessage(`{"command":"go test ./..."}`)})
+	tool := protocol.NewToolResultMessage("tool", "assistant", "call-1", "bash", []protocol.ContentBlock{protocol.NewTextBlock("FAIL package example")}, true)
+	messages := []protocol.Message{assistant, tool}
+	for i := range 10 {
+		messages = append(messages, protocol.NewToolResultMessage("later-"+fmtID(i), "assistant", "later-call-"+fmtID(i), "bash", []protocol.ContentBlock{protocol.NewTextBlock("PASS later check " + fmtID(i) + " " + strings.Repeat("x", 600))}, false))
+	}
+	summary, err := DefaultSummarizer(context.Background(), messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(summary, "FAIL package example"); got != 1 {
+		t.Fatalf("failure payload repeated %d times:\n%s", got, summary)
+	}
+	if got := strings.Count(summary, "implementation is partially complete"); got != 1 {
+		t.Fatalf("assistant evidence repeated %d times:\n%s", got, summary)
+	}
+	if !strings.Contains(summary, "See Commands and verification entry bash/call-1") {
+		t.Fatalf("failure reference missing:\n%s", summary)
 	}
 }
 

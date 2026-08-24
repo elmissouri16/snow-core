@@ -186,6 +186,14 @@ func (m *Manager) HasRunning() bool {
 	return m.hasRunningLocked()
 }
 
+// HasRecords reports whether the active session retains any managed-process
+// lifecycle state, including exited processes whose logs remain readable.
+func (m *Manager) HasRecords() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.records) > 0
+}
+
 func (m *Manager) hasRunningLocked() bool {
 	for _, record := range m.records {
 		if record.hasLiveGroup() {

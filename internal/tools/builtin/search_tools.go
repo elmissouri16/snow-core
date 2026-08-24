@@ -71,27 +71,36 @@ func (s *SearchTools) Run(ctx context.Context, raw json.RawMessage, host tools.T
 	}
 
 	started := time.Now()
-	candidateLimit := max(toolSearchCandidates, s.Router.DeferredCount())
-	candidates, err := s.Router.Search(ctx, args.Query, candidateLimit)
-	latency := time.Since(started).Milliseconds()
-	if err != nil {
-		return tools.ErrorResult(err), nil
-	}
-	selected := make([]tools.ToolMatch, 0, args.Limit)
-	for _, match := range candidates {
-		desc, ok := s.Registry.Descriptor(match.ID)
-		if !ok || !tools.IsDeferred(desc) {
-			continue
+	count := s.Router.DeferredCount()
+	candidateLimit := min(count, max(toolSearchCandidates, args.Limit))
+	var candidates, selected []tools.ToolMatch
+	for candidateLimit > 0 {
+		matches, err := s.Router.Search(ctx, args.Query, candidateLimit)
+		if err != nil {
+			return tools.ErrorResult(err), nil
 		}
-		if host != nil && !tools.CanExpose(host.Permission(), desc) {
-			continue
+		candidates = matches
+		selected = selected[:0]
+		for _, match := range matches {
+			desc, ok := tools.Metadata(s.Registry, match.ID)
+			if !ok || !desc.Deferred {
+				continue
+			}
+			if host != nil && !tools.CanExposeMetadata(host.Permission(), desc) {
+				continue
+			}
+			match.Description = boundRunes(match.Description, 240)
+			selected = append(selected, match)
+			if len(selected) == args.Limit {
+				break
+			}
 		}
-		match.Description = boundRunes(match.Description, 240)
-		selected = append(selected, match)
-		if len(selected) == args.Limit {
+		if len(selected) >= args.Limit || candidateLimit >= count {
 			break
 		}
+		candidateLimit = min(count, candidateLimit*2)
 	}
+	latency := time.Since(started).Milliseconds()
 
 	content := struct {
 		Tools []tools.ToolMatch `json:"tools"`

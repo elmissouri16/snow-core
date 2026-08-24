@@ -11,11 +11,9 @@ func TestDefaultPreambleIsEmbeddedMarkdown(t *testing.T) {
 	preamble := strings.Join(strings.Fields(DefaultPreamble), " ")
 	for _, want := range []string{
 		"You are snow",
-		"Use process_start instead of bash for development servers",
-		"check process_list to avoid duplicates",
-		"stable startup log marker is sufficient readiness evidence",
-		"do not reconfirm it with an HTTP or TCP probe",
-		"never claim readiness without evidence",
+		"Prefer read / grep / glob before bash",
+		"Respect permission denials",
+		"Explain briefly when done",
 	} {
 		if !strings.Contains(preamble, want) {
 			t.Fatalf("embedded preamble missing %q: %q", want, DefaultPreamble)

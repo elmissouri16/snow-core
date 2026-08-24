@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -223,7 +224,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// schedule a render separately so input is never queued behind reflow.
 		m.batchingEvents = true
 		immediate := false
-		for _, ev := range coalesceRootSessionUpdates(msg.events) {
+		for _, ev := range coalesceTUISnapshotEvents(msg.events, os.Getenv("SNOW_DEBUG") != "") {
 			m.handleAgentEvent(ev)
 			immediate = immediate || eventNeedsImmediateTranscript(ev.Type)
 		}
@@ -518,12 +519,17 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.modelLoading = false
-		if msg.err != nil {
+		if msg.err != nil && len(msg.models) == 0 && len(m.modelList) == 0 {
 			m.pickModel = false
 			m.pushLine(styleError.Render("model list: " + msg.err.Error()))
 			return m, nil
 		}
-		m.modelList = uniquePickerModels(msg.models, m.app.ProviderID)
+		if msg.err != nil {
+			m.lastStatus = "some provider catalogs could not be loaded"
+		}
+		if len(msg.models) > 0 {
+			m.modelList = uniquePickerModels(msg.models, m.app.ProviderID)
+		}
 		m.modelQuery = ""
 		m.modelSearchActive = false
 		if len(m.modelList) == 0 {

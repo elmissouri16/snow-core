@@ -16,7 +16,7 @@ import (
 // handleModelPick navigates and searches the /model picker. Slash enters search
 // mode so the usual j/k picker bindings remain available until text entry starts.
 func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.modelLoading {
+	if m.modelLoading && len(m.modelList) == 0 {
 		msg = normalizePickerKeyWithMap(msg, m.keys)
 		if msg.Type == tea.KeyEsc {
 			m.pickModel = false
@@ -145,7 +145,7 @@ func (m *Model) renderModelPicker() string {
 	if !m.pickModel {
 		return ""
 	}
-	if m.modelLoading {
+	if m.modelLoading && len(m.modelList) == 0 {
 		return styleHeaderDim.Render("models\n  loading models…")
 	}
 	if len(m.modelList) == 0 {
@@ -156,6 +156,9 @@ func (m *Model) renderModelPicker() string {
 	var b strings.Builder
 	b.WriteString(styleHeader.Render("models"))
 	b.WriteString(styleHeaderDim.Render(fmt.Sprintf("  ·  %d available", len(m.modelList))))
+	if m.modelLoading {
+		b.WriteString(styleHeaderDim.Render("  ·  refreshing…"))
+	}
 	b.WriteString("\n")
 	if m.modelSearchActive || m.modelQuery != "" {
 		cursor := ""

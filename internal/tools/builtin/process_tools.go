@@ -10,7 +10,15 @@ import (
 	"github.com/elmissouri16/snow-core/internal/permission"
 	managedprocess "github.com/elmissouri16/snow-core/internal/process"
 	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
+
+var managedProcessToolNames = [...]string{"process_start", "process_status", "process_logs", "process_stop", "process_list"}
+
+// ManagedProcessToolNames returns the lifecycle bundle in stable exposure order.
+func ManagedProcessToolNames() []string {
+	return append([]string(nil), managedProcessToolNames[:]...)
+}
 
 // RegisterProcessTools adds the app-owned managed-process control surface.
 func RegisterProcessTools(reg tools.Registry, manager *managedprocess.Manager) error {
@@ -33,7 +41,16 @@ func RegisterProcessTools(reg tools.Registry, manager *managedprocess.Manager) e
 }
 
 func processDescriptor(tool tools.Tool, risk permission.Risk) tools.ToolDescriptor {
-	return tools.ToolDescriptor{Schema: tool.Schema(), Tool: tool, Source: tools.SourceBuiltin, Owner: "builtin", Risk: risk}
+	schema := tool.Schema()
+	keywords := map[string][]string{
+		"process_start":  {"server", "preview", "watcher", "worker", "long-running", "background", "readiness", "start"},
+		"process_status": {"server", "process", "status", "readiness", "running"},
+		"process_logs":   {"server", "process", "logs", "output", "readiness"},
+		"process_stop":   {"server", "process", "stop", "terminate", "shutdown"},
+		"process_list":   {"server", "process", "list", "inventory", "duplicate"},
+	}
+	schema.Discovery = &protocol.ToolDiscovery{Mode: protocol.ToolDiscoveryDeferred, Namespace: "managed_process", Keywords: keywords[schema.Name]}
+	return tools.ToolDescriptor{Schema: schema, Tool: tool, Source: tools.SourceBuiltin, Owner: "builtin", Risk: risk}
 }
 
 type processStartTool struct{ manager *managedprocess.Manager }

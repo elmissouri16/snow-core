@@ -302,38 +302,13 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		permBroker.SetHandler(opts.PermissionHandler)
 	}
 
-	// Fetch every available provider catalog during startup. Providers may return
-	// cached/bundled fallbacks; authenticated refreshes replace these snapshots.
+	// Only the active provider catalog is readiness-critical. Picker-only and
+	// ad-hoc subagent catalogs are loaded on demand through liveRuntimeSelection.
 	modelCatalog := make(map[string][]protocol.Model, len(providers))
 	modelCatalogErrors := make(map[string]error, len(providers))
-	// Resolve the active catalog first because default-model validation depends
-	// on it. Independent picker catalogs then refresh concurrently instead of
-	// adding their network timeouts serially to every startup.
 	activeModels, activeListErr := providers[providerID].ListModels(ctx)
 	modelCatalog[providerID] = normalizeProviderModels(providerID, activeModels)
 	modelCatalogErrors[providerID] = activeListErr
-	type catalogResult struct {
-		id     string
-		models []protocol.Model
-		err    error
-	}
-	catalogResults := make(chan catalogResult, max(0, len(providers)-1))
-	pendingCatalogs := 0
-	for id, p := range providers {
-		if id == providerID {
-			continue
-		}
-		pendingCatalogs++
-		go func(id string, p provider.Provider) {
-			listed, listErr := p.ListModels(ctx)
-			catalogResults <- catalogResult{id: id, models: listed, err: listErr}
-		}(id, p)
-	}
-	for range pendingCatalogs {
-		result := <-catalogResults
-		modelCatalog[result.id] = normalizeProviderModels(result.id, result.models)
-		modelCatalogErrors[result.id] = result.err
-	}
 	models := modelCatalog[providerID]
 	if rejectsUnknownModels(prov) && len(models) == 0 {
 		if listErr := modelCatalogErrors[providerID]; listErr != nil {
@@ -444,7 +419,23 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 	}
 
-	runtimeSelection := &liveRuntimeSelection{provider: providerID, model: model, providers: providers, catalogs: modelCatalog}
+	runtimeProviders := make(map[string]provider.Provider, len(providers))
+	for id, candidate := range providers {
+		runtimeProviders[id] = candidate
+	}
+	runtimeCatalogs := make(map[string][]protocol.Model, len(modelCatalog))
+	for id, catalog := range modelCatalog {
+		runtimeCatalogs[id] = cloneModels(catalog)
+	}
+	runtimeCatalogErrors := make(map[string]error, len(modelCatalogErrors))
+	for id, catalogErr := range modelCatalogErrors {
+		runtimeCatalogErrors[id] = catalogErr
+	}
+	runtimeSelection := &liveRuntimeSelection{
+		provider: providerID, model: model, providers: runtimeProviders, catalogs: runtimeCatalogs,
+		catalogErrors: runtimeCatalogErrors, catalogLoads: make(map[string]*catalogLoad),
+		catalogGeneration: make(map[string]uint64),
+	}
 
 	// Host (path roots + progress bridge).
 	inputBroker = userinput.New(opts.UserInputHandler)
@@ -513,6 +504,10 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	// Collaboration tools are direct and registered before deferred-router
 	// indexing so the model always receives the complete control set together.
 	if cfg.Subagents.Enabled {
+		if err := runtimeSelection.preloadCatalogs(ctx, requiredSubagentProviders(cfg.Subagents, providerID)); err != nil {
+			return nil, fmt.Errorf("app: discover configured subagent providers: %w", err)
+		}
+
 		validateChildSelection := func(label, providerOverride, modelID string) error {
 			if providerOverride == "" && modelID == "" {
 				return nil
@@ -521,7 +516,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			if childProvider == "" {
 				childProvider = providerID
 			}
-			if _, _, err := runtimeSelection.childSelection(childProvider, modelID); err != nil {
+			if _, _, err := runtimeSelection.childSelection(ctx, childProvider, modelID); err != nil {
 				return fmt.Errorf("app: %s references unavailable selection %s/%s: %w", label, childProvider, modelID, err)
 			}
 			return nil
@@ -551,8 +546,8 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			ExposeChildToolEvents: cfg.Subagents.ExposeChildToolEvents, DefaultProvider: cfg.Subagents.DefaultProvider, DefaultModel: cfg.Subagents.DefaultModel, DefaultRole: cfg.Subagents.DefaultRole, Roles: roles,
 		})
 		subManager.SetModelCatalog(runtimeSelection.availableModels)
-		subManager.SetModelSelection(func(providerID, modelID string) (protocol.Model, error) {
-			_, selected, err := runtimeSelection.childSelection(providerID, modelID)
+		subManager.SetModelSelection(func(ctx context.Context, providerID, modelID string) (protocol.Model, error) {
+			_, selected, err := runtimeSelection.childSelection(ctx, providerID, modelID)
 			return selected, err
 		})
 		for _, tool := range subagent.Tools(subManager, subagent.Caller{Path: protocol.RootAgentPath}) {
@@ -564,10 +559,10 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 
 	// Deferred schemas are indexed only after every startup registrar has
 	// completed. Existing tools have no discovery metadata and remain direct.
-	descriptors := reg.Descriptors()
+	routeMetadata := tools.SelectMetadata(reg, nil)
 	needsRouter := false
-	for _, desc := range descriptors {
-		if tools.IsDeferred(desc) {
+	for _, desc := range routeMetadata {
+		if desc.Deferred {
 			needsRouter = true
 			break
 		}
@@ -584,13 +579,22 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 	}
 	if needsRouter {
-		router = toolrouter.New(descriptors)
+		router = toolrouter.NewMetadata(routeMetadata)
 		if err := reg.Register(builtin.NewSearchTools(router, reg)); err != nil {
 			return nil, fmt.Errorf("app: register search_tools: %w", err)
 		}
 	}
 	if mcpManager != nil && router != nil {
 		catalogChanged := func(candidate []tools.ToolDescriptor) error {
+			if refreshable, ok := router.(interface {
+				RefreshMetadata([]tools.DescriptorMetadata) error
+			}); ok {
+				metadata := make([]tools.DescriptorMetadata, 0, len(candidate))
+				for _, desc := range candidate {
+					metadata = append(metadata, tools.MetadataFromDescriptor(desc))
+				}
+				return refreshable.RefreshMetadata(metadata)
+			}
 			if refreshable, ok := router.(tools.RefreshableRouter); ok {
 				return refreshable.Refresh(candidate)
 			}
@@ -624,16 +628,14 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	}
 	loader := ctxpkg.NewLoader(cfg.ContextCapBytes, false)
 	assembly := loader.Assemble(absCWD, preamble, "")
-	baseSystemPrompt := assembly.Render()
+	projectBasePrompt := assembly.Render()
+	rootSystemPrompt := projectBasePrompt
 	if mcpManager != nil {
 		if catalog := mcpManager.CatalogPrompt(); catalog != "" {
-			baseSystemPrompt += "\n\n" + catalog
+			rootSystemPrompt += "\n\n" + catalog
 		}
 	}
-	if subManager != nil {
-		baseSystemPrompt += "\n\n" + subagentPromptGuidance
-	}
-	systemPrompt := baseSystemPrompt
+	systemPrompt := rootSystemPrompt
 	skillNames := skillNamesForRegistry(skillCatalog, reg)
 	if catalog := skillPromptForRegistry(skillCatalog, reg); catalog != "" {
 		systemPrompt += "\n\n" + catalog
@@ -644,23 +646,28 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		initialMode = "" // restore the persisted active-branch mode
 	}
 	ag, err = agent.New(agent.Options{
-		Provider:          prov,
-		Registry:          reg,
-		Session:           st,
-		Permission:        perm,
-		ToolHost:          host,
-		Router:            router,
-		SystemPrompt:      systemPrompt,
-		Model:             model,
-		Thinking:          thinking,
-		ReasoningSummary:  reasoningSummary,
-		TextVerbosity:     textVerbosity,
-		CollaborationMode: initialMode,
-		PlanThinking:      planThinking,
-		Goal:              goalController,
-		SkillNames:        skillNames,
-		Artifacts:         artifactStore,
-		Retry:             agentRetryOptions(cfg.Retry),
+		Provider:   prov,
+		Registry:   reg,
+		Session:    st,
+		Permission: perm,
+		ToolHost:   host,
+		Router:     router,
+		DeferredBundles: []agent.DeferredBundle{{
+			Members: builtin.ManagedProcessToolNames(), Sticky: processManager.HasRecords,
+		}},
+		ToolGuidance:              runtimeToolGuidance(),
+		FixedContextBudgetPercent: cfg.FixedContextBudgetPercent,
+		SystemPrompt:              systemPrompt,
+		Model:                     model,
+		Thinking:                  thinking,
+		ReasoningSummary:          reasoningSummary,
+		TextVerbosity:             textVerbosity,
+		CollaborationMode:         initialMode,
+		PlanThinking:              planThinking,
+		Goal:                      goalController,
+		SkillNames:                skillNames,
+		Artifacts:                 artifactStore,
+		Retry:                     agentRetryOptions(cfg.Retry),
 		Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
 			SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance,
 			AutoThresholdPercent: cfg.Compaction.AutoThresholdPercent, ToolHistoryBudgetPercent: cfg.Compaction.ToolHistoryBudgetPercent,
@@ -756,13 +763,13 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			// safe while preserving normal TUI attribution for bash approvals.
 			childPerm := childPermissionService(perm, capabilities, cfg.Subagents.Recursive)
 			childHost := &toolHost{cwd: absCWD, roots: []string{absCWD}, perm: childPerm, reg: childReg}
-			childProvider, childModel, err := runtimeSelection.childSelection(spec.State.Provider, spec.State.Model)
+			childProvider, childModel, err := runtimeSelection.childSelection(childCtx, spec.State.Provider, spec.State.Model)
 			if err != nil {
 				_ = childStore.Close()
 				return nil, err
 			}
 			childSkillNames := skillNamesForRegistry(skillCatalog, childReg)
-			childSystem := baseSystemPrompt
+			childSystem := projectBasePrompt
 			if catalog := skillPromptForRegistry(skillCatalog, childReg); catalog != "" {
 				childSystem += "\n\n" + catalog
 			}
@@ -772,7 +779,8 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			}
 			childSystem += "</subagent>"
 			child, err := agent.New(agent.Options{Provider: childProvider, Registry: childReg, Session: childStore, Permission: childPerm, ToolHost: childHost,
-				SystemPrompt: childSystem, Model: childModel, Thinking: spec.State.Thinking, ReasoningSummary: reasoningSummary,
+				SystemPrompt: childSystem, ToolGuidance: runtimeToolGuidance(), FixedContextBudgetPercent: cfg.FixedContextBudgetPercent,
+				Model: childModel, Thinking: spec.State.Thinking, ReasoningSummary: reasoningSummary,
 				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Identity: spec.State.Agent.Clone(),
 				SkillNames: childSkillNames, Artifacts: artifactStore, Retry: agentRetryOptions(cfg.Retry), Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
 					SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance,

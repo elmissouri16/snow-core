@@ -114,15 +114,12 @@ func (c RetryProfileConfig) validate(name string) error {
 func DefaultCompaction() CompactionConfig {
 	return CompactionConfig{
 		MinRetainedTurns: 2, SummaryMaxTokens: 2000, Fallback: "local",
-		AutoThresholdPercent: 80, ToolHistoryBudgetPercent: 20, GoalAutoThresholdPercent: 80, ToolResultInlineBytes: 16 << 10,
+		AutoThresholdPercent: 80, ToolHistoryBudgetPercent: 20, ToolResultInlineBytes: 16 << 10,
 		ArtifactMaxBytes: 4 << 20, HistoricalToolResultThreshold: 8 << 10,
 	}
 }
 
 func (c CompactionConfig) Validate() error {
-	if c.AutoThresholdPercent == 0 && c.GoalAutoThresholdPercent != 0 {
-		c.AutoThresholdPercent = c.GoalAutoThresholdPercent
-	}
 	if c.RetainTokens < 0 || c.RetainTokens > 1_000_000 {
 		return errors.New("config: compaction retain_tokens must be 0..1000000")
 	}
@@ -285,17 +282,18 @@ func (c SubagentConfig) ValidateSubagents() error {
 // Default returns the default configuration.
 func Default() Config {
 	return Config{
-		DefaultProvider:     "opencode-go",
-		PermissionMode:      "ask",
-		DefaultProjectTrust: "ask",
-		Thinking:            "off",
-		ReasoningSummary:    "auto",
-		TextVerbosity:       "low",
-		CollaborationMode:   "default",
-		ToolOutputBytes:     DefaultToolOutputBytes,
-		BashTimeoutMS:       int(DefaultBashTimeout / time.Millisecond),
-		ContextCapBytes:     DefaultContextCapBytes,
-		ProjectSelections:   map[string]ProjectSelection{},
+		DefaultProvider:           "opencode-go",
+		PermissionMode:            "ask",
+		DefaultProjectTrust:       "ask",
+		Thinking:                  "off",
+		ReasoningSummary:          "auto",
+		TextVerbosity:             "low",
+		CollaborationMode:         "default",
+		ToolOutputBytes:           DefaultToolOutputBytes,
+		BashTimeoutMS:             int(DefaultBashTimeout / time.Millisecond),
+		ContextCapBytes:           DefaultContextCapBytes,
+		FixedContextBudgetPercent: DefaultFixedContextBudgetPercent,
+		ProjectSelections:         map[string]ProjectSelection{},
 		Providers: map[string]ProviderConfig{
 			"opencode-go":       {},
 			"opencode-zen":      {},
@@ -380,6 +378,9 @@ func Load(path string) (Config, error) {
 	if cfg.TUI.Theme == "" {
 		cfg.TUI.Theme = defaultTUITheme
 	}
+	if cfg.FixedContextBudgetPercent == 0 {
+		cfg.FixedContextBudgetPercent = DefaultFixedContextBudgetPercent
+	}
 	defaults := DefaultCompaction()
 	var rawConfig struct {
 		Compaction map[string]json.RawMessage `json:"compaction"`
@@ -403,7 +404,6 @@ func Load(path string) (Config, error) {
 			cfg.Compaction.ToolHistoryBudgetPercent = defaults.ToolHistoryBudgetPercent
 		}
 	}
-	cfg.Compaction.GoalAutoThresholdPercent = cfg.Compaction.AutoThresholdPercent
 	if cfg.Compaction.MinRetainedTurns == 0 {
 		cfg.Compaction.MinRetainedTurns = defaults.MinRetainedTurns
 	}
@@ -442,6 +442,9 @@ func Load(path string) (Config, error) {
 		if providerConfig.StreamIdleTimeoutMS < -1 || providerConfig.StreamIdleTimeoutMS > int((24*time.Hour)/time.Millisecond) {
 			return cfg, fmt.Errorf("config: provider %q stream_idle_timeout_ms must be -1, 0, or at most 86400000", providerID)
 		}
+	}
+	if cfg.FixedContextBudgetPercent < 10 || cfg.FixedContextBudgetPercent > 50 {
+		return cfg, errors.New("config: fixed_context_budget_percent must be 10..50")
 	}
 	if err := ValidateTUITheme(cfg.TUI.Theme); err != nil {
 		return cfg, err

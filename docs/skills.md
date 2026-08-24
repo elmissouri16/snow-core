@@ -166,7 +166,14 @@ Activated instructions are tracked by the agent and reattached to every later
 provider request. They are reconstructed from persisted activation results on
 resume, so manual compaction cannot silently remove active behavioral guidance.
 Repeated activation replaces the in-memory copy rather than multiplying it in
-the system context. A successful direct `$skill-name` activation writes a
+the system context. Before either a model-called or direct `$skill-name`
+activation is persisted, Snow serializes the projected final system prompt and
+exposed schemas against `fixed_context_budget_percent`. An activation that
+would increase the runtime above that model-aware budget returns an actionable
+tool error; the body, activation marker, and active set remain unchanged. Snow
+never partially truncates a skill. Existing resumed active sets are preserved
+for compatibility and shown as over budget by `/context` until the operator
+clears or reduces them. A successful direct `$skill-name` activation writes a
 branch-scoped, provider-hidden marker and emits ordinary tool lifecycle events;
 resume rehydrates only those markers, never historical text that merely happens
 to contain a matching token.

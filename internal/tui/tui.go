@@ -570,6 +570,18 @@ type Model struct {
 	transcriptSelection              transcriptSelectionState
 	transcriptSelectionMenu          transcriptSelectionContextMenu
 	transcriptSelectionLines         []string
+	transcriptViewRevision           uint64
+	transcriptViewCacheRevision      uint64
+	transcriptViewCacheOffset        int
+	transcriptViewCacheWidth         int
+	transcriptViewCacheHeight        int
+	transcriptViewCache              string
+	transcriptViewCacheValid         bool
+	managedFrameCacheInput           string
+	managedFrameCacheOutput          string
+	managedFrameCacheWidth           int
+	managedFrameCacheHeight          int
+	managedFrameCacheValid           bool
 	transcriptSelectionView          string
 	transcriptSelectionViewRow       int
 	transcriptSelectionViewValid     bool

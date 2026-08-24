@@ -50,6 +50,14 @@ type namespaceAccumulator struct {
 	descriptions []string
 }
 
+type routeDescriptor struct {
+	name        string
+	original    string
+	description string
+	namespace   string
+	keywords    []string
+}
+
 type scoredHit struct {
 	id    string
 	score float64
@@ -57,89 +65,132 @@ type scoredHit struct {
 
 type indexFactory func(blevemapping.IndexMapping) (bleve.Index, error)
 
-// Bleve is an in-memory, namespace-first BM25 router. Initialization failures
-// are retained so the agent can fail open on each turn instead of making
-// application startup depend on optional discovery infrastructure.
-type Bleve struct {
-	mu             sync.RWMutex
-	index          bleve.Index
-	namespaceIndex bleve.Index
-	metadata       map[string]tools.ToolMatch
-	count          int
-	namespaceCount int
-	initErr        error
-	closed         bool
-	factory        indexFactory
+type indexInitialization struct {
+	done       chan struct{}
+	generation uint64
+	once       sync.Once
 }
 
-// New builds in-memory namespace and tool indexes from the deferred descriptors
-// in catalog.
+func (i *indexInitialization) finish() {
+	if i != nil {
+		i.once.Do(func() { close(i.done) })
+	}
+}
+
+// Bleve is an in-memory, namespace-first BM25 router. Initialization failures
+// are retained so the agent can use its bounded metadata fallback on each turn
+// instead of making application startup depend on discovery infrastructure.
+type Bleve struct {
+	mu                sync.RWMutex
+	refreshMu         sync.Mutex
+	index             bleve.Index
+	namespaceIndex    bleve.Index
+	metadata          map[string]tools.ToolMatch
+	catalog           []routeDescriptor
+	count             int
+	namespaceCount    int
+	init              *indexInitialization
+	catalogGeneration uint64
+	initErr           error
+	closed            bool
+	factory           indexFactory
+}
+
+// New retains compact deferred metadata. Bleve indexes are built lazily by the
+// first real search so startup does not pay indexing cost merely because a
+// deferred tool exists.
 func New(catalog []tools.ToolDescriptor) *Bleve {
-	return newWithFactory(catalog, bleve.NewMemOnly)
+	metadata := make([]tools.DescriptorMetadata, 0, len(catalog))
+	for _, desc := range catalog {
+		metadata = append(metadata, tools.MetadataFromDescriptor(desc))
+	}
+	return NewMetadata(metadata)
+}
+
+// NewMetadata avoids cloning parameter schemas when the caller has a projected
+// registry view.
+func NewMetadata(catalog []tools.DescriptorMetadata) *Bleve {
+	return newWithMetadataFactory(catalog, bleve.NewMemOnly)
 }
 
 func newWithFactory(catalog []tools.ToolDescriptor, factory indexFactory) *Bleve {
+	metadata := make([]tools.DescriptorMetadata, 0, len(catalog))
+	for _, desc := range catalog {
+		metadata = append(metadata, tools.MetadataFromDescriptor(desc))
+	}
+	return newWithMetadataFactory(metadata, factory)
+}
+
+func newWithMetadataFactory(catalog []tools.DescriptorMetadata, factory indexFactory) *Bleve {
 	if factory == nil {
 		factory = bleve.NewMemOnly
 	}
-	r := &Bleve{metadata: make(map[string]tools.ToolMatch), factory: factory}
-	deferred := make([]tools.ToolDescriptor, 0, len(catalog))
+	deferred := deferredCatalog(catalog)
+	return &Bleve{catalog: deferred, count: len(deferred), factory: factory}
+}
+
+func deferredCatalog(catalog []tools.DescriptorMetadata) []routeDescriptor {
+	deferred := make([]routeDescriptor, 0, len(catalog))
 	for _, desc := range catalog {
-		if tools.IsDeferred(desc) {
-			deferred = append(deferred, desc)
+		if !desc.Deferred {
+			continue
 		}
+		deferred = append(deferred, routeDescriptor{
+			name: desc.Name, original: desc.OriginalName, description: desc.Description,
+			namespace: desc.Namespace, keywords: append([]string(nil), desc.Keywords...),
+		})
 	}
 	sort.SliceStable(deferred, func(i, j int) bool {
-		return deferred[i].Schema.Name < deferred[j].Schema.Name
+		return deferred[i].name < deferred[j].name
 	})
-	r.count = len(deferred)
+	return deferred
+}
 
+func buildIndexes(catalog []routeDescriptor, factory indexFactory) (bleve.Index, bleve.Index, map[string]tools.ToolMatch, int, error) {
+	return buildIndexesContext(context.Background(), catalog, factory)
+}
+
+func buildIndexesContext(ctx context.Context, catalog []routeDescriptor, factory indexFactory) (bleve.Index, bleve.Index, map[string]tools.ToolMatch, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, nil, 0, err
+	}
+	metadata := make(map[string]tools.ToolMatch, len(catalog))
 	idx, err := factory(newIndexMapping())
 	if err != nil {
-		r.initErr = fmt.Errorf("tool router: create tool index: %w", err)
-		return r
+		return nil, nil, nil, 0, fmt.Errorf("tool router: create tool index: %w", err)
 	}
-	r.index = idx
 	toolBatch := idx.NewBatch()
-	for _, desc := range deferred {
-		discovery := desc.Schema.Discovery
-		name := strings.TrimSpace(strings.Join([]string{
-			desc.Schema.Name,
-			desc.OriginalName,
-			normalizeIdentifier(desc.Schema.Name),
-			normalizeIdentifier(desc.OriginalName),
-		}, " "))
-		doc := indexDocument{
-			NamespaceID: discovery.Namespace,
-			Namespace:   discovery.Namespace,
-			Name:        name,
-			Description: desc.Schema.Description,
-			Keywords:    append([]string(nil), discovery.Keywords...),
+	for _, desc := range catalog {
+		if err := ctx.Err(); err != nil {
+			_ = idx.Close()
+			return nil, nil, nil, 0, err
 		}
-		if err := toolBatch.Index(desc.Schema.Name, doc); err != nil {
-			r.failInitialization(fmt.Errorf("tool router: index %s: %w", desc.Schema.Name, err))
-			return r
+		name := strings.TrimSpace(strings.Join([]string{desc.name, desc.original, normalizeIdentifier(desc.name), normalizeIdentifier(desc.original)}, " "))
+		doc := indexDocument{NamespaceID: desc.namespace, Namespace: desc.namespace, Name: name, Description: desc.description, Keywords: append([]string(nil), desc.keywords...)}
+		if err := toolBatch.Index(desc.name, doc); err != nil {
+			_ = idx.Close()
+			return nil, nil, nil, 0, fmt.Errorf("tool router: index %s: %w", desc.name, err)
 		}
-		r.metadata[desc.Schema.Name] = tools.ToolMatch{
-			ID:          desc.Schema.Name,
-			Namespace:   discovery.Namespace,
-			Name:        desc.OriginalName,
-			Description: desc.Schema.Description,
-		}
+		metadata[desc.name] = tools.ToolMatch{ID: desc.name, Namespace: desc.namespace, Name: desc.original, Description: desc.description}
+	}
+	if err := ctx.Err(); err != nil {
+		_ = idx.Close()
+		return nil, nil, nil, 0, err
 	}
 	if err := idx.Batch(toolBatch); err != nil {
-		r.failInitialization(fmt.Errorf("tool router: commit tool index: %w", err))
-		return r
+		_ = idx.Close()
+		return nil, nil, nil, 0, fmt.Errorf("tool router: commit tool index: %w", err)
 	}
-
-	namespaceDocs := buildNamespaceDocuments(deferred)
-	r.namespaceCount = len(namespaceDocs)
+	namespaceDocs, err := buildNamespaceRouteDocumentsContext(ctx, catalog)
+	if err != nil {
+		_ = idx.Close()
+		return nil, nil, nil, 0, err
+	}
 	namespaceIdx, err := factory(newIndexMapping())
 	if err != nil {
-		r.failInitialization(fmt.Errorf("tool router: create namespace index: %w", err))
-		return r
+		_ = idx.Close()
+		return nil, nil, nil, 0, fmt.Errorf("tool router: create namespace index: %w", err)
 	}
-	r.namespaceIndex = namespaceIdx
 	namespaceBatch := namespaceIdx.NewBatch()
 	namespaces := make([]string, 0, len(namespaceDocs))
 	for namespace := range namespaceDocs {
@@ -147,15 +198,24 @@ func newWithFactory(catalog []tools.ToolDescriptor, factory indexFactory) *Bleve
 	}
 	sort.Strings(namespaces)
 	for _, namespace := range namespaces {
+		if err := ctx.Err(); err != nil {
+			_ = closeIndexes(idx, namespaceIdx)
+			return nil, nil, nil, 0, err
+		}
 		if err := namespaceBatch.Index(namespace, namespaceDocs[namespace]); err != nil {
-			r.failInitialization(fmt.Errorf("tool router: index namespace %s: %w", namespace, err))
-			return r
+			_ = closeIndexes(idx, namespaceIdx)
+			return nil, nil, nil, 0, fmt.Errorf("tool router: index namespace %s: %w", namespace, err)
 		}
 	}
-	if err := namespaceIdx.Batch(namespaceBatch); err != nil {
-		r.failInitialization(fmt.Errorf("tool router: commit namespace index: %w", err))
+	if err := ctx.Err(); err != nil {
+		_ = closeIndexes(idx, namespaceIdx)
+		return nil, nil, nil, 0, err
 	}
-	return r
+	if err := namespaceIdx.Batch(namespaceBatch); err != nil {
+		_ = closeIndexes(idx, namespaceIdx)
+		return nil, nil, nil, 0, fmt.Errorf("tool router: commit namespace index: %w", err)
+	}
+	return idx, namespaceIdx, metadata, len(namespaceDocs), nil
 }
 
 func newIndexMapping() blevemapping.IndexMapping {
@@ -180,12 +240,25 @@ func newIndexMapping() blevemapping.IndexMapping {
 }
 
 func buildNamespaceDocuments(deferred []tools.ToolDescriptor) map[string]indexDocument {
+	metadata := make([]tools.DescriptorMetadata, 0, len(deferred))
+	for _, desc := range deferred {
+		metadata = append(metadata, tools.MetadataFromDescriptor(desc))
+	}
+	return buildNamespaceRouteDocuments(deferredCatalog(metadata))
+}
+
+func buildNamespaceRouteDocuments(deferred []routeDescriptor) map[string]indexDocument {
+	documents, _ := buildNamespaceRouteDocumentsContext(context.Background(), deferred)
+	return documents
+}
+
+func buildNamespaceRouteDocumentsContext(ctx context.Context, deferred []routeDescriptor) (map[string]indexDocument, error) {
 	accumulators := make(map[string]*namespaceAccumulator)
 	for _, desc := range deferred {
-		if !tools.IsDeferred(desc) || desc.Schema.Discovery == nil {
-			continue
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		namespace := strings.TrimSpace(desc.Schema.Discovery.Namespace)
+		namespace := strings.TrimSpace(desc.namespace)
 		// Registry validation normally limits namespaces to 64 lowercase ASCII
 		// bytes. Keep the summary builder independently bounded for callers that
 		// supply raw descriptors; invalid/oversized namespaces remain globally
@@ -199,58 +272,128 @@ func buildNamespaceDocuments(deferred []tools.ToolDescriptor) map[string]indexDo
 			accumulators[namespace] = acc
 		}
 		acc.names = append(acc.names,
-			desc.Schema.Name,
-			desc.OriginalName,
-			normalizeIdentifier(desc.Schema.Name),
-			normalizeIdentifier(desc.OriginalName),
+			desc.name,
+			desc.original,
+			normalizeIdentifier(desc.name),
+			normalizeIdentifier(desc.original),
 		)
-		acc.keywords = append(acc.keywords, desc.Schema.Discovery.Keywords...)
-		acc.descriptions = append(acc.descriptions, desc.Schema.Description)
+		acc.keywords = append(acc.keywords, desc.keywords...)
+		acc.descriptions = append(acc.descriptions, desc.description)
 	}
 
 	documents := make(map[string]indexDocument, len(accumulators))
 	for namespace, acc := range accumulators {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		names, err := uniqueSortedContext(ctx, acc.names)
+		if err != nil {
+			return nil, err
+		}
+		keywords, err := uniqueSortedContext(ctx, acc.keywords)
+		if err != nil {
+			return nil, err
+		}
+		descriptions, err := uniqueSortedContext(ctx, acc.descriptions)
+		if err != nil {
+			return nil, err
+		}
+		namespaceText, err := uniqueSortedContext(ctx, []string{namespace, normalizeIdentifier(namespace)})
+		if err != nil {
+			return nil, err
+		}
 		namespaceTextBudget := max(0, namespaceFieldMaxSize-len(namespace))
 		documents[namespace] = indexDocument{
 			NamespaceID: namespace,
-			Namespace: boundedJoin(uniqueSorted([]string{
-				namespace,
-				normalizeIdentifier(namespace),
-			}), namespaceTextBudget, false),
-			Name: boundedJoin(uniqueSorted(acc.names), namespaceNamesMaxSize, false),
+			Namespace:   boundedJoin(namespaceText, namespaceTextBudget, false),
+			Name:        boundedJoin(names, namespaceNamesMaxSize, false),
 			Keywords: []string{boundedJoin(
-				uniqueSorted(acc.keywords), namespaceKeywordsMaxSize, false,
+				keywords, namespaceKeywordsMaxSize, false,
 			)},
-			Description: boundedJoin(uniqueSorted(acc.descriptions), namespaceDescriptionsMaxSize, true),
+			Description: boundedJoin(descriptions, namespaceDescriptionsMaxSize, true),
 		}
 	}
-	return documents
+	return documents, nil
 }
 
 func uniqueSorted(values []string) []string {
-	values = append([]string(nil), values...)
-	sort.SliceStable(values, func(i, j int) bool {
-		left, right := strings.ToLower(strings.TrimSpace(values[i])), strings.ToLower(strings.TrimSpace(values[j]))
-		if left == right {
-			return strings.TrimSpace(values[i]) < strings.TrimSpace(values[j])
-		}
-		return left < right
-	})
-	out := values[:0]
-	last := ""
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		key := strings.ToLower(value)
-		if len(out) > 0 && key == last {
-			continue
-		}
-		out = append(out, value)
-		last = key
-	}
+	out, _ := uniqueSortedContext(context.Background(), values)
 	return out
+}
+
+func uniqueSortedContext(ctx context.Context, values []string) ([]string, error) {
+	type sortableValue struct {
+		value string
+		key   string
+	}
+	items := make([]sortableValue, 0, len(values))
+	for _, value := range values {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		value = strings.TrimSpace(value)
+		items = append(items, sortableValue{value: value, key: strings.ToLower(value)})
+	}
+	less := func(left, right sortableValue) bool {
+		if left.key == right.key {
+			return left.value < right.value
+		}
+		return left.key < right.key
+	}
+	const sortChunk = 256
+	for start := 0; start < len(items); start += sortChunk {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		end := min(start+sortChunk, len(items))
+		sort.SliceStable(items[start:end], func(i, j int) bool {
+			return less(items[start+i], items[start+j])
+		})
+	}
+	buffer := make([]sortableValue, len(items))
+	for width := sortChunk; width < len(items); width *= 2 {
+		for start := 0; start < len(items); start += 2 * width {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			middle := min(start+width, len(items))
+			end := min(start+2*width, len(items))
+			left, right, output := start, middle, start
+			for left < middle && right < end {
+				if output%64 == 0 {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
+				}
+				if less(items[right], items[left]) {
+					buffer[output] = items[right]
+					right++
+				} else {
+					buffer[output] = items[left]
+					left++
+				}
+				output++
+			}
+			output += copy(buffer[output:end], items[left:middle])
+			copy(buffer[output:end], items[right:end])
+		}
+		items, buffer = buffer, items
+	}
+	out := make([]string, 0, len(items))
+	last := ""
+	for i, item := range items {
+		if i%256 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		if item.value == "" || (len(out) > 0 && item.key == last) {
+			continue
+		}
+		out = append(out, item.value)
+		last = item.key
+	}
+	return out, nil
 }
 
 func boundedJoin(values []string, maxBytes int, truncateLast bool) string {
@@ -310,11 +453,87 @@ func namespaceDocumentSize(doc indexDocument) int {
 	return size
 }
 
-func (r *Bleve) failInitialization(err error) {
-	r.initErr = err
-	toolIndex, namespaceIndex := r.index, r.namespaceIndex
-	r.index, r.namespaceIndex = nil, nil
-	_ = closeIndexes(toolIndex, namespaceIndex)
+func (r *Bleve) ensureInitialized(ctx context.Context) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		r.mu.Lock()
+		if r.closed {
+			r.mu.Unlock()
+			return errors.New("tool router: closed")
+		}
+		if r.index != nil || r.count == 0 {
+			r.mu.Unlock()
+			return nil
+		}
+		if r.initErr != nil {
+			err := r.initErr
+			r.mu.Unlock()
+			return err
+		}
+		generation := r.catalogGeneration
+		if current := r.init; current != nil && current.generation == generation {
+			done := current.done
+			r.mu.Unlock()
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		initialization := &indexInitialization{done: make(chan struct{}), generation: generation}
+		r.init = initialization
+		catalog := append([]routeDescriptor(nil), r.catalog...)
+		factory := r.factory
+		r.mu.Unlock()
+
+		index, namespaceIndex, metadata, namespaceCount, err := buildIndexesContext(ctx, catalog, factory)
+		r.mu.Lock()
+		if r.init == initialization {
+			r.init = nil
+		}
+		initialization.finish()
+		if err != nil {
+			stale := r.catalogGeneration != generation
+			closed := r.closed
+			if !stale && !closed && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				r.initErr = err
+			}
+			r.mu.Unlock()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if stale {
+				continue
+			}
+			if closed {
+				return errors.New("tool router: closed")
+			}
+			return err
+		}
+		if r.closed || r.catalogGeneration != generation || r.index != nil {
+			closed := r.closed
+			initialized := r.index != nil
+			r.mu.Unlock()
+			_ = closeIndexes(index, namespaceIndex)
+			if closed {
+				return errors.New("tool router: closed")
+			}
+			if initialized {
+				return nil
+			}
+			continue
+		}
+		r.index = index
+		r.namespaceIndex = namespaceIndex
+		r.metadata = metadata
+		r.namespaceCount = namespaceCount
+		r.initErr = nil
+		r.mu.Unlock()
+		return nil
+	}
 }
 
 // DeferredCount returns the number of opt-in tools represented by the router.
@@ -330,7 +549,7 @@ func (r *Bleve) DeferredCount() int {
 // Search selects likely namespaces, runs global and namespace-scoped BM25 tool
 // searches, and fuses both ranked lists. A namespace-only failure degrades to
 // the original global ranking; a tool-index failure remains a total failure so
-// the agent can preserve its existing fail-open behavior.
+// the agent can invoke its bounded schema-free metadata fallback.
 func (r *Bleve) Search(ctx context.Context, text string, limit int) ([]tools.ToolMatch, error) {
 	if r == nil {
 		return nil, errors.New("tool router: unavailable")
@@ -341,6 +560,9 @@ func (r *Bleve) Search(ctx context.Context, text string, limit int) ([]tools.Too
 	text = strings.TrimSpace(text)
 	if text == "" || limit <= 0 {
 		return nil, nil
+	}
+	if err := r.ensureInitialized(ctx); err != nil {
+		return nil, err
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -520,28 +742,69 @@ func fuseRankings(global, scoped []tools.ToolMatch, limit int) []tools.ToolMatch
 	return matches
 }
 
-// Refresh atomically replaces both in-memory indexes from the current registry.
+// Refresh atomically replaces deferred metadata. An uninitialized router stays
+// lazy; once searches have begun, refreshed indexes are built before swapping.
 func (r *Bleve) Refresh(catalog []tools.ToolDescriptor) error {
+	metadata := make([]tools.DescriptorMetadata, 0, len(catalog))
+	for _, desc := range catalog {
+		metadata = append(metadata, tools.MetadataFromDescriptor(desc))
+	}
+	return r.RefreshMetadata(metadata)
+}
+
+// RefreshMetadata replaces the compact catalog without retaining schemas.
+func (r *Bleve) RefreshMetadata(catalog []tools.DescriptorMetadata) error {
 	if r == nil {
 		return errors.New("tool router: unavailable")
 	}
-	fresh := newWithFactory(catalog, r.factory)
-	if fresh.initErr != nil {
-		return fresh.initErr
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	deferred := deferredCatalog(catalog)
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return errors.New("tool router: closed")
+	}
+	initialized := r.index != nil || r.initErr != nil
+	factory := r.factory
+	if !initialized {
+		initialization := r.init
+		r.init = nil
+		initialization.finish()
+		r.catalog = deferred
+		r.catalogGeneration++
+		r.count = len(deferred)
+		r.namespaceCount = 0
+		r.metadata = nil
+		r.mu.Unlock()
+		return nil
+	}
+	r.mu.Unlock()
+
+	var index, namespaceIndex bleve.Index
+	var metadata map[string]tools.ToolMatch
+	var namespaceCount int
+	var err error
+	if len(deferred) > 0 {
+		index, namespaceIndex, metadata, namespaceCount, err = buildIndexes(deferred, factory)
+		if err != nil {
+			return err
+		}
 	}
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		_ = fresh.Close()
+		_ = closeIndexes(index, namespaceIndex)
 		return errors.New("tool router: closed")
 	}
 	oldIndex, oldNamespaceIndex := r.index, r.namespaceIndex
-	r.index, r.namespaceIndex = fresh.index, fresh.namespaceIndex
-	r.metadata = fresh.metadata
-	r.count = fresh.count
-	r.namespaceCount = fresh.namespaceCount
+	r.catalogGeneration++
+	r.index, r.namespaceIndex = index, namespaceIndex
+	r.metadata = metadata
+	r.catalog = deferred
+	r.count = len(deferred)
+	r.namespaceCount = namespaceCount
 	r.initErr = nil
-	fresh.index, fresh.namespaceIndex = nil, nil
 	r.mu.Unlock()
 	// The new pair is already committed. Old-index cleanup failure cannot be
 	// reported as a refresh failure because callers would retain an old registry
@@ -561,8 +824,13 @@ func (r *Bleve) Close() error {
 		return nil
 	}
 	r.closed = true
+	initialization := r.init
+	r.init = nil
+	initialization.finish()
 	toolIndex, namespaceIndex := r.index, r.namespaceIndex
 	r.index, r.namespaceIndex = nil, nil
+	r.catalog = nil
+	r.metadata = nil
 	r.mu.Unlock()
 	return closeIndexes(toolIndex, namespaceIndex)
 }

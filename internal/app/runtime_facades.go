@@ -23,6 +23,22 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+func (a *App) beginProviderTransition(operation string) (func(), error) {
+	if !a.providerTransitionMu.TryLock() {
+		return nil, fmt.Errorf("app: cannot %s while another provider transition is in progress", operation)
+	}
+	return a.providerTransitionMu.Unlock, nil
+}
+
+func (a *App) checkProviderTransitionAvailable(operation string) error {
+	unlock, err := a.beginProviderTransition(operation)
+	if err != nil {
+		return err
+	}
+	unlock()
+	return nil
+}
+
 func auxiliaryConfigFingerprint(globalDir, projectRoot string, projectAllowed bool) string {
 	h := sha256.New()
 	paths := []string{filepath.Join(globalDir, "keybindings.yaml"), filepath.Join(globalDir, "themes")}
@@ -96,35 +112,62 @@ func (a *App) ConfigDiagnostics() []protocol.ConfigDiagnostic {
 // RefreshProviderModels forces an authenticated catalog refresh when the
 // provider supports it and atomically replaces app/picker snapshots.
 func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := a.checkProviderTransitionAvailable("refresh provider models"); err != nil {
+		return err
+	}
 	a.stateMu.Lock()
 	p, ok := a.Providers[id]
 	a.stateMu.Unlock()
 	if !ok {
 		return fmt.Errorf("app: provider %q is not available", id)
 	}
+
+	useRuntimeCatalog := false
+	if a.runtimeSelection != nil {
+		a.runtimeSelection.mu.RLock()
+		useRuntimeCatalog = a.runtimeSelection.providers[id] == p
+		a.runtimeSelection.mu.RUnlock()
+	}
 	var models []protocol.Model
 	var err error
-	if refreshable, ok := p.(interface {
+	if useRuntimeCatalog {
+		models, err = a.runtimeSelection.ensureCatalog(ctx, id, true)
+		if errors.Is(err, errCatalogConfigurationChanged) {
+			return fmt.Errorf("app: provider %q configuration changed during model refresh", id)
+		}
+	} else if refreshable, ok := p.(interface {
 		RefreshModels(context.Context) ([]protocol.Model, error)
 	}); ok {
 		models, err = refreshable.RefreshModels(ctx)
 	} else {
 		models, err = p.ListModels(ctx)
 	}
+	models = normalizeProviderModels(id, models)
 	if len(models) == 0 {
 		if err != nil {
 			return err
 		}
 		return fmt.Errorf("app: provider %q returned an empty model catalog", id)
 	}
-	models = normalizeProviderModels(id, models)
+
+	unlockTransition, transitionErr := a.beginProviderTransition("refresh provider models")
+	if transitionErr != nil {
+		return transitionErr
+	}
+	defer unlockTransition()
 	a.stateMu.Lock()
-	defer a.stateMu.Unlock()
-	if current, ok := a.Providers[id]; !ok || current != p {
+	currentProvider, stillConfigured := a.Providers[id]
+	active := a.ProviderID == id
+	a.stateMu.Unlock()
+	if !stillConfigured || currentProvider != p {
 		return fmt.Errorf("app: provider %q configuration changed during model refresh", id)
 	}
+
 	var refreshedActive *protocol.Model
-	if a.ProviderID == id {
+	if active {
 		current := a.Agent.Model()
 		level := a.Agent.Thinking()
 		for i := range models {
@@ -135,14 +178,8 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 			if !model.SupportsThinkingLevel(level) {
 				return fmt.Errorf("app: refreshed metadata for active model %q is incompatible with current settings: thinking level %q is not supported (supported: %v)", model.ID, level, model.SupportedThinkingLevels())
 			}
-			a.stateMu.Unlock()
-			setErr := a.Agent.SetModel(model)
-			a.stateMu.Lock()
-			if setErr != nil {
+			if setErr := a.Agent.SetModel(model); setErr != nil {
 				return fmt.Errorf("app: apply refreshed metadata for active model %q: %w", model.ID, setErr)
-			}
-			if currentProvider, ok := a.Providers[id]; !ok || currentProvider != p {
-				return fmt.Errorf("app: provider %q configuration changed during model refresh", id)
 			}
 			refreshedActive = &model
 			break
@@ -153,14 +190,8 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 					continue
 				}
 				fallback := models[i]
-				a.stateMu.Unlock()
-				setErr := a.Agent.SetModel(fallback)
-				a.stateMu.Lock()
-				if setErr != nil {
+				if setErr := a.Agent.SetModel(fallback); setErr != nil {
 					return fmt.Errorf("app: replace unavailable active model %q with %q: %w", current.ID, fallback.ID, setErr)
-				}
-				if currentProvider, ok := a.Providers[id]; !ok || currentProvider != p {
-					return fmt.Errorf("app: provider %q configuration changed during model refresh", id)
 				}
 				refreshedActive = &fallback
 				break
@@ -170,24 +201,30 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 			}
 		}
 	}
-	a.modelCatalog[id] = append([]protocol.Model(nil), models...)
-	if a.runtimeSelection != nil {
+
+	a.stateMu.Lock()
+	a.modelCatalog[id] = cloneModels(models)
+	if a.runtimeSelection != nil && !useRuntimeCatalog {
 		a.runtimeSelection.mu.Lock()
-		a.runtimeSelection.catalogs[id] = append([]protocol.Model(nil), models...)
+		if a.runtimeSelection.providers[id] == p {
+			a.runtimeSelection.catalogs[id] = cloneModels(models)
+			a.runtimeSelection.catalogErrors[id] = err
+		}
 		a.runtimeSelection.mu.Unlock()
 	}
 	a.rebuildAllModelsLocked()
-	if a.ProviderID == id {
-		a.Models = append([]protocol.Model(nil), models...)
+	if active {
+		a.Models = cloneModels(models)
 		if refreshedActive != nil {
-			a.Model = *refreshedActive
+			a.Model = refreshedActive.Clone()
 			if a.runtimeSelection != nil {
 				a.runtimeSelection.mu.Lock()
-				a.runtimeSelection.model = *refreshedActive
+				a.runtimeSelection.model = refreshedActive.Clone()
 				a.runtimeSelection.mu.Unlock()
 			}
 		}
 	}
+	a.stateMu.Unlock()
 	return err
 }
 
@@ -230,79 +267,154 @@ func normalizeProviderModels(providerID string, models []protocol.Model) []proto
 
 // SetProvider switches the active provider and model for subsequent turns.
 func (a *App) SetProvider(id string) error {
-	p, ok := a.Providers[id]
-	if !ok {
-		return fmt.Errorf("app: provider %q is not available", id)
+	return a.SetProviderContext(context.Background(), id)
+}
+
+// SetProviderContext is SetProvider with cancellation for lazy catalog
+// discovery. The compatibility SetProvider method uses a background context.
+func (a *App) SetProviderContext(ctx context.Context, id string) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	catalog := a.modelCatalog[id]
-	if rejectsUnknownModels(p) && len(catalog) == 0 {
-		return fmt.Errorf("app: provider %s has no maintained models currently available", id)
+	if err := a.checkProviderTransitionAvailable("set provider"); err != nil {
+		return err
 	}
-	target := a.Model
-	if a.Agent != nil {
-		target = a.Agent.Model()
-	}
-	valid := target.Provider == id
-	if valid {
-		valid = false
-		for _, m := range catalog {
-			if m.ID == target.ID {
-				valid = true
-				target = m
-				break
-			}
+	for {
+		var loadErr error
+		if a.runtimeSelection != nil {
+			_, loadErr = a.runtimeSelection.ensureCatalog(ctx, id, false)
 		}
-	}
-	if !valid {
-		target = protocol.Model{Provider: id, SupportsTools: true}
-		if dm, ok := p.(interface{ DefaultModel() protocol.Model }); ok {
-			d := dm.DefaultModel()
+		unlockTransition, err := a.beginProviderTransition("set provider")
+		if err != nil {
+			return err
+		}
+
+		a.stateMu.Lock()
+		p, ok := a.Providers[id]
+		catalog, loaded := a.modelCatalog[id]
+		if a.runtimeSelection != nil {
+			a.runtimeSelection.mu.RLock()
+			runtimeProvider, runtimeOK := a.runtimeSelection.providers[id]
+			if runtimeOK && runtimeProvider == p {
+				catalog, loaded = a.runtimeSelection.catalogs[id]
+				loadErr = a.runtimeSelection.catalogErrors[id]
+				if loaded {
+					a.modelCatalog[id] = cloneModels(catalog)
+				}
+			}
+			a.runtimeSelection.mu.RUnlock()
+		}
+		catalog = cloneModels(catalog)
+		target := a.Model
+		a.stateMu.Unlock()
+		if !ok {
+			unlockTransition()
+			return fmt.Errorf("app: provider %q is not available", id)
+		}
+		if a.runtimeSelection != nil && !loaded {
+			unlockTransition()
+			if loadErr != nil {
+				return fmt.Errorf("app: discover models for provider %s: %w", id, loadErr)
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			continue
+		}
+		if provider.IsTransportInitializationError(loadErr) {
+			unlockTransition()
+			return fmt.Errorf("app: initialize provider %s: %w", id, loadErr)
+		}
+		if rejectsUnknownModels(p) && len(catalog) == 0 {
+			unlockTransition()
+			if loadErr != nil {
+				return fmt.Errorf("app: provider %s has no maintained models currently available: %w", id, loadErr)
+			}
+			return fmt.Errorf("app: provider %s has no maintained models currently available", id)
+		}
+		if a.Agent != nil {
+			target = a.Agent.Model()
+		}
+		valid := target.Provider == id
+		if valid {
+			valid = false
 			for _, m := range catalog {
-				if m.ID == d.ID {
+				if m.ID == target.ID {
+					valid = true
 					target = m
 					break
 				}
 			}
 		}
-		if target.ID == "" && len(catalog) > 0 {
-			target = catalog[0]
+		if !valid {
+			target = protocol.Model{Provider: id, SupportsTools: true}
+			if dm, ok := p.(interface{ DefaultModel() protocol.Model }); ok {
+				d := dm.DefaultModel()
+				for _, m := range catalog {
+					if m.ID == d.ID {
+						target = m
+						break
+					}
+				}
+			}
+			if target.ID == "" && len(catalog) > 0 {
+				target = catalog[0]
+			}
+			if target.ID == "" {
+				unlockTransition()
+				if loadErr != nil {
+					return fmt.Errorf("app: discover models for provider %s: %w", id, loadErr)
+				}
+				return fmt.Errorf("app: provider %s has no default or discovered model", id)
+			}
 		}
-		if target.ID == "" {
-			target.ID = "default"
+		target.Provider = id
+		if err := a.Agent.SetProviderAndModel(p, target); err != nil {
+			unlockTransition()
+			return err
 		}
+		a.stateMu.Lock()
+		a.ProviderID, a.Provider = id, p
+		a.Models = cloneModels(catalog)
+		a.Model = target
+		if a.runtimeSelection != nil {
+			a.runtimeSelection.mu.Lock()
+			a.runtimeSelection.provider = id
+			a.runtimeSelection.model = target
+			a.runtimeSelection.mu.Unlock()
+		}
+		a.stateMu.Unlock()
+		unlockTransition()
+		return nil
 	}
-	target.Provider = id
-	if err := a.Agent.SetProviderAndModel(p, target); err != nil {
-		return err
-	}
-	a.ProviderID, a.Provider = id, p
-	a.Models = append([]protocol.Model(nil), catalog...)
-	a.Model = target
-	if a.runtimeSelection != nil {
-		a.runtimeSelection.mu.Lock()
-		a.runtimeSelection.provider = id
-		a.runtimeSelection.model = target
-		a.runtimeSelection.mu.Unlock()
-	}
-	return nil
 }
 
 // SetModel updates the active model and its app mirror. Unknown models remain
 // permitted for providers that accept custom model identifiers.
 func (a *App) SetModel(m protocol.Model) error {
+	unlockTransition, err := a.beginProviderTransition("set model")
+	if err != nil {
+		return err
+	}
+	defer unlockTransition()
 	if strings.TrimSpace(m.ID) == "" {
 		return errors.New("app: model id is required")
 	}
+	a.stateMu.Lock()
+	providerID := a.ProviderID
+	activeProvider := a.Provider
+	catalog := cloneModels(a.modelCatalog[providerID])
+	a.stateMu.Unlock()
 	if m.Provider == "" {
-		m.Provider = a.ProviderID
+		m.Provider = providerID
 	}
 	m = m.Clone()
-	if m.Provider != a.ProviderID {
-		return fmt.Errorf("app: model provider %q does not match active provider %q", m.Provider, a.ProviderID)
+	if m.Provider != providerID {
+		return fmt.Errorf("app: model provider %q does not match active provider %q", m.Provider, providerID)
 	}
-	if rejectsUnknownModels(a.Provider) {
+	if rejectsUnknownModels(activeProvider) {
 		found := false
-		for _, candidate := range a.modelCatalog[a.ProviderID] {
+		for _, candidate := range catalog {
 			if candidate.ID == m.ID {
 				m = candidate.Clone()
 				found = true
@@ -310,16 +422,21 @@ func (a *App) SetModel(m protocol.Model) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("app: model %q is not available for provider %s", m.ID, a.ProviderID)
+			return fmt.Errorf("app: model %q is not available for provider %s", m.ID, providerID)
 		}
 	}
 	if err := a.Agent.SetModel(m); err != nil {
 		return err
 	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	if a.ProviderID != providerID || a.Provider != activeProvider {
+		return errors.New("app: active provider changed while setting model")
+	}
 	a.Model = m
 	if a.runtimeSelection != nil {
 		a.runtimeSelection.mu.Lock()
-		a.runtimeSelection.provider = a.ProviderID
+		a.runtimeSelection.provider = providerID
 		a.runtimeSelection.model = m
 		a.runtimeSelection.mu.Unlock()
 	}
@@ -329,43 +446,105 @@ func (a *App) SetModel(m protocol.Model) error {
 // SetProviderModelThinking updates the active provider, model, and effort as
 // one admitted Agent transaction and refreshes the App/runtime mirrors.
 func (a *App) SetProviderModelThinking(providerID string, model protocol.Model, level protocol.ThinkingLevel) error {
-	p, ok := a.Providers[providerID]
-	if !ok {
-		return fmt.Errorf("app: provider %q is not available", providerID)
+	return a.SetProviderModelThinkingContext(context.Background(), providerID, model, level)
+}
+
+// SetProviderModelThinkingContext is the cancellation-aware variant used when
+// an inactive provider catalog may need lazy discovery.
+func (a *App) SetProviderModelThinkingContext(ctx context.Context, providerID string, model protocol.Model, level protocol.ThinkingLevel) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if model.Provider == "" {
-		model.Provider = providerID
-	}
-	if model.Provider != providerID {
-		return fmt.Errorf("app: model provider %q does not match selected provider %q", model.Provider, providerID)
-	}
-	model = model.Clone()
-	if rejectsUnknownModels(p) {
-		found := false
-		for _, candidate := range a.modelCatalog[providerID] {
-			if candidate.ID == model.ID {
-				model = candidate.Clone()
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("app: model %q is not available for provider %s", model.ID, providerID)
-		}
-	}
-	if err := a.Agent.SetProviderModelThinking(p, model, level); err != nil {
+	if err := a.checkProviderTransitionAvailable("set provider model"); err != nil {
 		return err
 	}
-	a.ProviderID, a.Provider = providerID, p
-	a.Models = append([]protocol.Model(nil), a.modelCatalog[providerID]...)
-	a.Model = model
-	if a.runtimeSelection != nil {
-		a.runtimeSelection.mu.Lock()
-		a.runtimeSelection.provider = providerID
-		a.runtimeSelection.model = model
-		a.runtimeSelection.mu.Unlock()
+	for {
+		var loadErr error
+		if a.runtimeSelection != nil {
+			_, loadErr = a.runtimeSelection.ensureCatalog(ctx, providerID, false)
+		}
+		unlockTransition, err := a.beginProviderTransition("set provider model")
+		if err != nil {
+			return err
+		}
+		a.stateMu.Lock()
+		p, ok := a.Providers[providerID]
+		catalog, loaded := a.modelCatalog[providerID]
+		if a.runtimeSelection != nil {
+			a.runtimeSelection.mu.RLock()
+			runtimeProvider, runtimeOK := a.runtimeSelection.providers[providerID]
+			if runtimeOK && runtimeProvider == p {
+				catalog, loaded = a.runtimeSelection.catalogs[providerID]
+				loadErr = a.runtimeSelection.catalogErrors[providerID]
+				if loaded {
+					a.modelCatalog[providerID] = cloneModels(catalog)
+				}
+			}
+			a.runtimeSelection.mu.RUnlock()
+		}
+		catalog = cloneModels(catalog)
+		a.stateMu.Unlock()
+		if !ok {
+			unlockTransition()
+			return fmt.Errorf("app: provider %q is not available", providerID)
+		}
+		if a.runtimeSelection != nil && !loaded {
+			unlockTransition()
+			if loadErr != nil {
+				return fmt.Errorf("app: discover models for provider %s: %w", providerID, loadErr)
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			continue
+		}
+		if provider.IsTransportInitializationError(loadErr) {
+			unlockTransition()
+			return fmt.Errorf("app: initialize provider %s: %w", providerID, loadErr)
+		}
+		candidate := model.Clone()
+		if candidate.Provider == "" {
+			candidate.Provider = providerID
+		}
+		if candidate.Provider != providerID {
+			unlockTransition()
+			return fmt.Errorf("app: model provider %q does not match selected provider %q", candidate.Provider, providerID)
+		}
+		if rejectsUnknownModels(p) {
+			found := false
+			for _, available := range catalog {
+				if available.ID == candidate.ID {
+					candidate = available.Clone()
+					found = true
+					break
+				}
+			}
+			if !found {
+				unlockTransition()
+				if loadErr != nil {
+					return fmt.Errorf("app: model %q is not available for provider %s: %w", candidate.ID, providerID, loadErr)
+				}
+				return fmt.Errorf("app: model %q is not available for provider %s", candidate.ID, providerID)
+			}
+		}
+		if err := a.Agent.SetProviderModelThinking(p, candidate, level); err != nil {
+			unlockTransition()
+			return err
+		}
+		a.stateMu.Lock()
+		a.ProviderID, a.Provider = providerID, p
+		a.Models = cloneModels(catalog)
+		a.Model = candidate
+		if a.runtimeSelection != nil {
+			a.runtimeSelection.mu.Lock()
+			a.runtimeSelection.provider = providerID
+			a.runtimeSelection.model = candidate
+			a.runtimeSelection.mu.Unlock()
+		}
+		a.stateMu.Unlock()
+		unlockTransition()
+		return nil
 	}
-	return nil
 }
 
 // SetPermissionDefault updates both the active session mode and the baseline
@@ -764,6 +943,40 @@ func (a *App) ActiveModelsSnapshot() (string, protocol.Model, []protocol.Model) 
 	return a.ProviderID, a.Model.Clone(), out
 }
 
+// LoadProviderCatalogs resolves every currently available provider catalog on
+// demand and refreshes the combined picker snapshot. Partial results are kept
+// when one inactive provider cannot be listed.
+func (a *App) LoadProviderCatalogs(ctx context.Context) ([]protocol.Model, error) {
+	if a == nil || a.runtimeSelection == nil {
+		return nil, errors.New("app: provider catalogs unavailable")
+	}
+	_, loadErr := a.runtimeSelection.availableModels(ctx)
+	// Publish one generation-consistent snapshot. Profile reconfiguration uses
+	// the same stateMu -> runtimeSelection.mu lock order, so an obsolete lazy
+	// load cannot restore the replaced provider's catalog in App mirrors.
+	a.stateMu.Lock()
+	a.runtimeSelection.mu.RLock()
+	providerIDs := make([]string, 0, len(a.runtimeSelection.catalogs))
+	catalogs := make(map[string][]protocol.Model, len(a.runtimeSelection.catalogs))
+	for id, catalog := range a.runtimeSelection.catalogs {
+		providerIDs = append(providerIDs, id)
+		catalogs[id] = cloneModels(catalog)
+	}
+	a.runtimeSelection.mu.RUnlock()
+	sort.Strings(providerIDs)
+	var models []protocol.Model
+	for _, id := range providerIDs {
+		models = append(models, cloneModels(catalogs[id])...)
+	}
+	a.modelCatalog = catalogs
+	a.AllModels = cloneModels(models)
+	if active, ok := catalogs[a.ProviderID]; ok {
+		a.Models = cloneModels(active)
+	}
+	a.stateMu.Unlock()
+	return cloneModels(models), loadErr
+}
+
 // ModelsSnapshot returns a defensive copy of the active provider catalog.
 func (a *App) ModelsSnapshot() []protocol.Model {
 	_, _, models := a.ActiveModelsSnapshot()
@@ -775,7 +988,7 @@ func (a *App) SubagentModels() []protocol.Model {
 	if a == nil || a.runtimeSelection == nil {
 		return nil
 	}
-	return a.runtimeSelection.availableModels()
+	return a.runtimeSelection.cachedModels()
 }
 
 func (a *App) SubagentUsage() (protocol.Usage, error) {

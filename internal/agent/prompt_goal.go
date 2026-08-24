@@ -161,19 +161,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 		}
 	}
 	a.turnStarted = time.Now()
-	a.turnPlanSeen = false
-	a.pending = make(map[string]protocol.ContentBlock)
-	a.pendingOrder = a.pendingOrder[:0]
-	a.pendingToolError = ""
-	a.toolStarts = make(map[string]time.Time)
-	a.toolDisplays = make(map[string]toolDisplayState)
-	a.repeatedTool = repeatedToolCallState{}
-	a.turnToolCalls = 0
-	a.turnUsage = protocol.Usage{}
-	a.usageSet = false
-	a.turnProgress = false
-	a.baseDeferred = nil
-	a.searchedDeferred = nil
+	a.resetTurnExecutionLocked()
 	modeChanged := requestedMode != nil
 	mode := a.mode
 	a.mu.Unlock()
@@ -203,13 +191,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 		var usage *protocol.Usage
 		retErr = errors.Join(retErr, a.finishTurnMailbox(func() {
 			origin, turnID, usage = a.turnCompletionLocked()
-			a.running = false
-			a.activeCancel = nil
-			a.goalAtTurn = nil
-			if a.activeDone != nil {
-				close(a.activeDone)
-				a.activeDone = nil
-			}
+			a.markTurnIdleLocked()
 		}))
 		// Queue completion before a continuation can overwrite turn metadata.
 		a.publishTurnDone(continuing, origin, turnID, usage)
@@ -260,6 +242,34 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 
 	retErr = a.run(runCtx)
 	return retErr
+}
+
+func (a *Agent) resetTurnExecutionLocked() {
+	a.turnPlanSeen = false
+	a.pending = make(map[string]protocol.ContentBlock)
+	a.pendingOrder = a.pendingOrder[:0]
+	a.pendingToolError = ""
+	a.toolStarts = make(map[string]time.Time)
+	a.toolDisplays = make(map[string]toolDisplayState)
+	a.repeatedTool = repeatedToolCallState{}
+	a.turnToolCalls = 0
+	a.turnUsage = protocol.Usage{}
+	a.usageSet = false
+	a.turnProgress = false
+	a.baseDeferred = nil
+	a.searchedDeferred = nil
+}
+
+func (a *Agent) markTurnIdleLocked() {
+	a.running = false
+	a.baseDeferred = nil
+	a.searchedDeferred = nil
+	a.activeCancel = nil
+	a.goalAtTurn = nil
+	if a.activeDone != nil {
+		close(a.activeDone)
+		a.activeDone = nil
+	}
 }
 
 func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error) {
@@ -319,17 +329,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	runCtx, cancel := context.WithCancel(ctx)
 	a.activeCancel = cancel
 	a.activeDone = make(chan struct{})
-	a.turnPlanSeen = false
-	a.pending = make(map[string]protocol.ContentBlock)
-	a.pendingOrder = a.pendingOrder[:0]
-	a.pendingToolError = ""
-	a.toolStarts = make(map[string]time.Time)
-	a.toolDisplays = make(map[string]toolDisplayState)
-	a.repeatedTool = repeatedToolCallState{}
-	a.turnToolCalls = 0
-	a.turnUsage = protocol.Usage{}
-	a.usageSet = false
-	a.turnProgress = false
+	a.resetTurnExecutionLocked()
 	a.mu.Unlock()
 	a.publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g.Clone()}, TurnOrigin: "goal", TurnID: a.turnID, GoalContinuing: true})
 	defer func() {
@@ -342,13 +342,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 		var usage *protocol.Usage
 		retErr = errors.Join(retErr, a.finishTurnMailbox(func() {
 			origin, turnID, usage = a.turnCompletionLocked()
-			a.running = false
-			a.activeCancel = nil
-			a.goalAtTurn = nil
-			if a.activeDone != nil {
-				close(a.activeDone)
-				a.activeDone = nil
-			}
+			a.markTurnIdleLocked()
 		}))
 		a.publishTurnDone(continuing, origin, turnID, usage)
 		a.clearCompletedTurnIdentity(turnID)

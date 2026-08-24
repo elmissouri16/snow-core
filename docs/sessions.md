@@ -190,7 +190,13 @@ the active branch, so opening a large session does not deserialize every
 historical branch into memory.
 `ContextMessages()` applies the latest compaction marker logically: providers
 receive one structured working-state checkpoint plus the retained tail, while
-`Messages()` continues to return the complete historical branch. Checkpoints
+`Messages()` continues to return the complete historical branch. SQLite keeps
+one private decoded active-chain cache; ordinary uncompacted projections skip
+compaction-index construction, pre-size the result, and pack independently
+capped mutable fields into a bounded set of backing allocations. Returned
+messages remain defensive: callers may mutate or append to their content,
+provider data, usage, cost, and tool-display fields without changing durable
+history or another message. Checkpoints
 carry objectives, decisions, files, verification, failures, collaboration
 updates, retrieval references, and pending work. Compaction boundaries preserve
 complete tool call/result pairs; provider-private continuity leaves projected

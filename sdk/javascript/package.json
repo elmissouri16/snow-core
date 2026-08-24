@@ -21,9 +21,13 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check src/client.js && node --check src/errors.js && node --check src/index.js",
-    "test": "npm run check && node --test test/client.test.js",
+    "check": "node --check src/client.js && node --check src/errors.js && node --check src/index.js && npm run check:types",
+    "check:types": "tsc --project tsconfig.types.json",
+    "test": "npm run check && node --test test/client.test.js test/types.test.js",
     "test:integration": "node --test test/integration.test.js",
     "pack:check": "npm pack --dry-run"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
   }
 }

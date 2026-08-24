@@ -128,7 +128,8 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 		baseContent = styleFooter.Render("── older transcript hidden while streaming; scroll up to load ──") + "\n" + boundedRenderedTail(baseContent, maxStreamingTranscriptSnapshotBytes)
 	}
 	content := joinTranscriptContent(baseContent, live)
-	if !m.transcriptDirty && content == m.transcriptContent {
+	if content == m.transcriptContent {
+		m.transcriptDirty = false
 		return
 	}
 	// Selection points refer to the current wrapped transcript snapshot. A live
@@ -143,6 +144,8 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 	}
 	wasAtBottom := m.transcript.AtBottom()
 	m.transcript.SetContent(content)
+	m.transcriptViewRevision++
+	m.transcriptViewCacheValid = false
 	// Follow new output only when the user was already following the tail.
 	// Preserve an intentional scroll position while a stream continues.
 	if wasAtBottom {

@@ -44,7 +44,7 @@ func TestAutoCompactAdmittedBoundaryRequiresMatchingGoalSnapshot(t *testing.T) {
 	p := &scriptedProvider{}
 	a, c, _ := goalAgent(t, p)
 	a.model.ContextWindow = 100
-	a.opts.Compaction = CompactionOptions{GoalAutoThresholdPercent: 90}
+	a.opts.Compaction = CompactionOptions{AutoThresholdPercent: 90}
 	first, _ := c.Create("first", nil, false)
 	a.mu.Lock()
 	a.goalAtTurn = first
@@ -53,7 +53,7 @@ func TestAutoCompactAdmittedBoundaryRequiresMatchingGoalSnapshot(t *testing.T) {
 	if _, err := c.Create("replacement", nil, true); err != nil {
 		t.Fatal(err)
 	}
-	compacted, err := a.autoCompactAdmittedGoalBoundary(context.Background(), nil)
+	compacted, err := a.autoCompactAdmittedBoundary(context.Background(), nil)
 	if err != nil || compacted {
 		t.Fatalf("mismatched goal compacted=%v err=%v", compacted, err)
 	}
@@ -93,7 +93,7 @@ func TestGoalAutoCompactsAtConfiguredContextThreshold(t *testing.T) {
 	p := &scriptedProvider{}
 	a, c, st := goalAgent(t, p)
 	a.model.ContextWindow = 100
-	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 128, Fallback: "local", GoalAutoThresholdPercent: 90}
+	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 128, Fallback: "local", AutoThresholdPercent: 90}
 	for i := 0; i < 6; i++ {
 		msg := protocol.NewUserMessage(fmt.Sprintf("auto-compact-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
@@ -144,7 +144,7 @@ func TestGoalAutoCompactsInsideSingleToolChain(t *testing.T) {
 	p := &scriptedProvider{}
 	a, c, st := goalAgent(t, p)
 	a.model.ContextWindow = 100
-	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 128, Fallback: "local", GoalAutoThresholdPercent: 90}
+	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 128, Fallback: "local", AutoThresholdPercent: 90}
 	for i := 0; i < 6; i++ {
 		msg := protocol.NewUserMessage(fmt.Sprintf("chain-history-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
@@ -186,7 +186,7 @@ func TestGoalAutoCompactionBlocksWhenNoTurnsCanBeCompacted(t *testing.T) {
 	}}}
 	a, c, _ := goalAgent(t, p)
 	a.model.ContextWindow = 100
-	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, Fallback: "local", GoalAutoThresholdPercent: 90}
+	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, Fallback: "local", AutoThresholdPercent: 90}
 	g, _ := c.Create("cannot compact yet", nil, false)
 	a.ContinueGoal()
 	deadline := time.Now().Add(2 * time.Second)
@@ -206,7 +206,7 @@ func TestGoalAutoCompactionIgnoresBelowThresholdStaleUsageWhenLatestRequestOmits
 	p := &scriptedProvider{}
 	a, c, _ := goalAgent(t, p)
 	a.model.ContextWindow = 100
-	a.opts.Compaction = CompactionOptions{GoalAutoThresholdPercent: 99}
+	a.opts.Compaction = CompactionOptions{AutoThresholdPercent: 99}
 	g, _ := c.Create("latest request has no usage", nil, false)
 	p.scripts = [][]protocol.StreamEvent{
 		{{Type: protocol.EvStreamUsage, Usage: &protocol.Usage{Total: 90}}, {Type: protocol.EvStreamToolCallDone, ToolCallID: "read", ToolName: "get_goal", Arguments: []byte(`{}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
@@ -232,7 +232,7 @@ func TestAbortDuringGoalAutoCompactionDefersWithoutBlocking(t *testing.T) {
 	a, c, st := goalAgent(t, &scriptedProvider{})
 	a.opts.Provider = provider
 	a.model = protocol.Model{Provider: provider.ID(), ID: "m", SupportsTools: true, ContextWindow: 100}
-	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, Fallback: "local", GoalAutoThresholdPercent: 90}
+	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, Fallback: "local", AutoThresholdPercent: 90}
 	for i := 0; i < 6; i++ {
 		msg := protocol.NewUserMessage(fmt.Sprintf("abort-auto-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
@@ -276,7 +276,7 @@ func TestGoalAutoCompactionCanBeDisabled(t *testing.T) {
 	p := &scriptedProvider{}
 	a, c, _ := goalAgent(t, p)
 	a.model.ContextWindow = 100
-	a.opts.Compaction.GoalAutoThresholdPercent = 0
+	a.opts.Compaction.AutoThresholdPercent = 0
 	g, _ := c.Create("complete without compacting", nil, false)
 	p.scripts = [][]protocol.StreamEvent{{
 		{Type: protocol.EvStreamUsage, Usage: &protocol.Usage{Total: 100}},

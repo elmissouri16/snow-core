@@ -15,6 +15,16 @@ import (
 	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 )
 
+func TestLoadRejectsFixedContextBudgetOutsideRange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"fixed_context_budget_percent":9}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "fixed_context_budget_percent") {
+		t.Fatalf("budget validation error=%v", err)
+	}
+}
+
 func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	cfg, err := Load(filepath.Join(t.TempDir(), "nope.json"))
 	if err != nil {

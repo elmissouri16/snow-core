@@ -30,15 +30,17 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 	if providerID == "" {
 		providerID = "opencode-go"
 	}
-	newOpenCode := func() (provider.Transport, error) {
-		ocCfg := opencodego.Config{CacheRoot: filepath.Join(config.GlobalDir(), "cache", "opencode-models")}
-		if pc, ok := cfg.Providers["opencode-go"]; ok {
-			ocCfg.BaseURL = pc.BaseURL
-			ocCfg.DefaultModel = pc.DefaultModel
-			ocCfg.StreamIdleTimeout = configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS)
+	cacheRoot := filepath.Join(config.GlobalDir(), "cache")
+	baseURLOverride := opts.BaseURL
+	newOpenCode := func(pc config.ProviderConfig) (provider.Transport, error) {
+		ocCfg := opencodego.Config{
+			CacheRoot:         filepath.Join(cacheRoot, "opencode-models"),
+			BaseURL:           pc.BaseURL,
+			DefaultModel:      pc.DefaultModel,
+			StreamIdleTimeout: configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS),
 		}
-		if opts.BaseURL != "" && providerID == "opencode-go" {
-			ocCfg.BaseURL = opts.BaseURL
+		if baseURLOverride != "" && providerID == "opencode-go" {
+			ocCfg.BaseURL = baseURLOverride
 		}
 		oc, err := opencodego.New(ocCfg)
 		if err != nil {
@@ -47,15 +49,15 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 		return oc, nil
 	}
 
-	newOpenCodeZen := func() (provider.Transport, error) {
-		zenCfg := opencodezen.Config{CacheRoot: filepath.Join(config.GlobalDir(), "cache", "opencode-zen-models")}
-		if pc, ok := cfg.Providers[opencodezen.ProviderID]; ok {
-			zenCfg.BaseURL = pc.BaseURL
-			zenCfg.DefaultModel = pc.DefaultModel
-			zenCfg.StreamIdleTimeout = configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS)
+	newOpenCodeZen := func(pc config.ProviderConfig) (provider.Transport, error) {
+		zenCfg := opencodezen.Config{
+			CacheRoot:         filepath.Join(cacheRoot, "opencode-zen-models"),
+			BaseURL:           pc.BaseURL,
+			DefaultModel:      pc.DefaultModel,
+			StreamIdleTimeout: configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS),
 		}
-		if opts.BaseURL != "" && providerID == opencodezen.ProviderID {
-			zenCfg.BaseURL = opts.BaseURL
+		if baseURLOverride != "" && providerID == opencodezen.ProviderID {
+			zenCfg.BaseURL = baseURLOverride
 		}
 		zen, err := opencodezen.New(zenCfg)
 		if err != nil {
@@ -64,27 +66,29 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 		return zen, nil
 	}
 
-	newChatGPT := func() *chatgpt.Provider {
-		cgCfg := chatgpt.Config{Store: authStore, CacheRoot: filepath.Join(config.GlobalDir(), "cache", "chatgpt-models")}
-		if pc, ok := cfg.Providers["chatgpt"]; ok {
-			cgCfg.BaseURL = pc.BaseURL
-			cgCfg.StreamIdleTimeout = configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS)
+	newChatGPT := func(pc config.ProviderConfig) *chatgpt.Provider {
+		cgCfg := chatgpt.Config{
+			Store:             authStore,
+			CacheRoot:         filepath.Join(cacheRoot, "chatgpt-models"),
+			BaseURL:           pc.BaseURL,
+			StreamIdleTimeout: configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS),
 		}
-		if providerID == "chatgpt" && opts.BaseURL != "" {
-			cgCfg.BaseURL = opts.BaseURL
+		if providerID == "chatgpt" && baseURLOverride != "" {
+			cgCfg.BaseURL = baseURLOverride
 		}
 		return chatgpt.New(cgCfg)
 	}
 
-	newOpenAICompatible := func(id string) (*openaicompat.Provider, error) {
-		compatibleCfg := openaicompat.Config{ProviderID: id, DisableEnvAPIKey: true}
-		if pc, ok := cfg.Providers[id]; ok {
-			compatibleCfg.BaseURL = pc.BaseURL
-			compatibleCfg.DefaultModel = pc.DefaultModel
-			compatibleCfg.StreamIdleTimeout = configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS)
+	newOpenAICompatible := func(id string, pc config.ProviderConfig) (*openaicompat.Provider, error) {
+		compatibleCfg := openaicompat.Config{
+			ProviderID:        id,
+			DisableEnvAPIKey:  true,
+			BaseURL:           pc.BaseURL,
+			DefaultModel:      pc.DefaultModel,
+			StreamIdleTimeout: configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS),
 		}
-		if providerID == id && opts.BaseURL != "" {
-			compatibleCfg.BaseURL = opts.BaseURL
+		if providerID == id && baseURLOverride != "" {
+			compatibleCfg.BaseURL = baseURLOverride
 		}
 		return openaicompat.New(compatibleCfg)
 	}
@@ -95,22 +99,41 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 		build   func() (provider.Transport, error)
 		authFor func(provider.Transport) (auth.Driver, error)
 	}
+	openCodeConfig := cfg.Providers["opencode-go"]
+	zenConfig := cfg.Providers[opencodezen.ProviderID]
+	compatibleConfig := cfg.Providers[openaicompat.ProviderID]
+	chatGPTConfig := cfg.Providers[chatgpt.ProviderID]
 	builtIns := []builtInModule{
-		{id: "opencode-go", order: 10, build: newOpenCode, authFor: func(provider.Transport) (auth.Driver, error) {
+		{id: "opencode-go", order: 10, build: func() (provider.Transport, error) { return newOpenCode(openCodeConfig) }, authFor: func(provider.Transport) (auth.Driver, error) {
 			return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: "opencode-go", DisplayName: "OpenCode Go", Required: true, Environment: []string{opencodego.EnvAPIKey}}), nil
 		}},
-		{id: opencodezen.ProviderID, order: 15, build: newOpenCodeZen, authFor: func(provider.Transport) (auth.Driver, error) {
+		{id: opencodezen.ProviderID, order: 15, build: func() (provider.Transport, error) { return newOpenCodeZen(zenConfig) }, authFor: func(provider.Transport) (auth.Driver, error) {
 			return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: opencodezen.ProviderID, DisplayName: "OpenCode Zen", Required: false, Environment: []string{opencodezen.EnvAPIKey}}), nil
 		}},
-		{id: openaicompat.ProviderID, order: 20, build: func() (provider.Transport, error) { return newOpenAICompatible(openaicompat.ProviderID) }, authFor: func(provider.Transport) (auth.Driver, error) {
+		{id: openaicompat.ProviderID, order: 20, build: func() (provider.Transport, error) {
+			return newOpenAICompatible(openaicompat.ProviderID, compatibleConfig)
+		}, authFor: func(provider.Transport) (auth.Driver, error) {
 			return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: openaicompat.ProviderID, DisplayName: "OpenAI-compatible", Required: false, Environment: []string{openaicompat.EnvAPIKey}}), nil
 		}},
-		{id: chatgpt.ProviderID, order: 30, build: func() (provider.Transport, error) { return newChatGPT(), nil }, authFor: func(raw provider.Transport) (auth.Driver, error) {
-			chatgptTransport, ok := raw.(*chatgpt.Provider)
-			if !ok {
+		{id: chatgpt.ProviderID, order: 30, build: func() (provider.Transport, error) { return newChatGPT(chatGPTConfig), nil }, authFor: func(raw provider.Transport) (auth.Driver, error) {
+			switch transport := raw.(type) {
+			case *chatgpt.Provider:
+				return chatgpt.NewAuthDriver(transport), nil
+			case *provider.LazyTransport:
+				return chatgpt.NewLazyAuthDriver(func() (*chatgpt.Provider, error) {
+					materialized, err := transport.Materialize()
+					if err != nil {
+						return nil, err
+					}
+					chatgptTransport, ok := materialized.(*chatgpt.Provider)
+					if !ok {
+						return nil, errors.New("app: chatgpt transport has unexpected type")
+					}
+					return chatgptTransport, nil
+				}), nil
+			default:
 				return nil, errors.New("app: chatgpt transport has unexpected type")
 			}
-			return chatgpt.NewAuthDriver(chatgptTransport), nil
 		}},
 		{id: "fake", order: 40, build: func() (provider.Transport, error) {
 			return provider.NoAuthTransport{Provider: fake.NewWithModels(nil)}, nil
@@ -127,9 +150,10 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 	sort.Strings(profileIDs)
 	for index, profileID := range profileIDs {
 		id := profileID
+		profileConfig := cfg.Providers[id]
 		builtIns = append(builtIns, builtInModule{
 			id: id, order: 21 + index,
-			build: func() (provider.Transport, error) { return newOpenAICompatible(id) },
+			build: func() (provider.Transport, error) { return newOpenAICompatible(id, profileConfig) },
 			authFor: func(provider.Transport) (auth.Driver, error) {
 				return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: id, DisplayName: id, Required: false}), nil
 			},
@@ -144,35 +168,31 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 	}
 
 	providerModules := provider.NewRegistry()
-	var err error
 	for _, spec := range builtIns {
-		selected := (providerID == "fake" && spec.id == "fake") || (providerID != "fake" && spec.id != "fake")
+		runtimeEnabled := (providerID == "fake" && spec.id == "fake") || (providerID != "fake" && spec.id != "fake")
+		active := spec.id == providerID
 		var raw provider.Transport
-		if selected {
+		if active {
+			var err error
 			raw, err = spec.build()
 			if err != nil {
 				return startupProvider{}, fmt.Errorf("app: initialize provider %s: %w", spec.id, err)
 			}
-			if compatible, ok := raw.(*openaicompat.Provider); ok && spec.id == providerID && !compatible.Configured() {
+			if compatible, ok := raw.(*openaicompat.Provider); ok && !compatible.Configured() {
 				if spec.id == openaicompat.ProviderID {
 					return startupProvider{}, errors.New("app: openai-compatible base URL is required; pass --base-url or configure providers.openai-compatible.base_url")
 				}
 				return startupProvider{}, fmt.Errorf("app: OpenAI-compatible profile %q requires a base URL; pass --base-url or configure providers.%s.base_url", spec.id, spec.id)
 			}
-		} else if spec.id == chatgpt.ProviderID {
-			// ChatGPT construction is local and supplies the OAuth driver even when
-			// fake mode deliberately suppresses provider catalogs.
-			raw = newChatGPT()
-		}
-		if raw == nil {
-			driver, driverErr := spec.authFor(nil)
-			if driverErr != nil {
-				return startupProvider{}, driverErr
-			}
-			if err := authService.Register(driver); err != nil {
+		} else if runtimeEnabled || spec.id == chatgpt.ProviderID {
+			// Inactive runtime providers retain only their immutable constructor.
+			// ChatGPT also needs a deferred constructor in fake mode so OAuth login
+			// remains available without allocating its HTTP adapter at startup.
+			var err error
+			raw, err = provider.NewLazyTransport(spec.id, spec.build)
+			if err != nil {
 				return startupProvider{}, err
 			}
-			continue
 		}
 		driver, driverErr := spec.authFor(raw)
 		if driverErr != nil {
@@ -181,7 +201,7 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 		if err := authService.Register(driver); err != nil {
 			return startupProvider{}, err
 		}
-		if selected {
+		if runtimeEnabled {
 			if err := providerModules.Register(provider.Module{ID: spec.id, Order: spec.order, Transport: raw, Auth: driver}); err != nil {
 				return startupProvider{}, err
 			}

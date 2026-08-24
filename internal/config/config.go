@@ -19,6 +19,10 @@ const DefaultBashTimeout = 120 * time.Second
 // DefaultContextCapBytes is the hard cap for injected project context (100 KiB).
 const DefaultContextCapBytes = 100 * 1024
 
+// DefaultFixedContextBudgetPercent reserves most of a model window for task
+// messages while bounding recurring system instructions and tool schemas.
+const DefaultFixedContextBudgetPercent = 25
+
 const (
 	DefaultProcessMaxRunning          = 4
 	DefaultProcessMaxRecords          = 32
@@ -80,10 +84,7 @@ type CompactionConfig struct {
 	AutoThresholdPercent int    `json:"auto_threshold_percent"`
 	// ToolHistoryBudgetPercent triggers safe whole-turn compaction when completed
 	// tool calls/results exceed this share of the model window. Zero disables it.
-	ToolHistoryBudgetPercent int `json:"tool_history_budget_percent"`
-	// GoalAutoThresholdPercent is a deprecated source-compatibility alias. New
-	// JSON is emitted through auto_threshold_percent; legacy JSON is accepted by Load.
-	GoalAutoThresholdPercent      int `json:"-"`
+	ToolHistoryBudgetPercent      int `json:"tool_history_budget_percent"`
 	ToolResultInlineBytes         int `json:"tool_result_inline_bytes,omitempty"`
 	ArtifactMaxBytes              int `json:"artifact_max_bytes,omitempty"`
 	HistoricalToolResultThreshold int `json:"historical_tool_result_threshold_bytes,omitempty"`
@@ -191,29 +192,30 @@ type ProcessConfig struct {
 
 // Config is the global snow configuration.
 type Config struct {
-	DefaultProvider         string                          `json:"default_provider,omitempty"`
-	DefaultModel            string                          `json:"default_model,omitempty"`
-	ProjectSelections       map[string]ProjectSelection     `json:"project_selections,omitempty"`
-	PermissionMode          string                          `json:"permission_mode,omitempty"`            // ask|allow|deny
-	DefaultProjectTrust     string                          `json:"default_project_trust,omitempty"`      // ask|allow|deny (always|never aliases)
-	Thinking                string                          `json:"thinking,omitempty"`                   // off|minimal|low|medium|high|xhigh|max|ultra
-	ReasoningSummary        string                          `json:"reasoning_summary,omitempty"`          // off|auto|concise|detailed
-	TextVerbosity           string                          `json:"text_verbosity,omitempty"`             // low|medium|high
-	CollaborationMode       string                          `json:"collaboration_mode,omitempty"`         // default|plan
-	PlanModeReasoningEffort string                          `json:"plan_mode_reasoning_effort,omitempty"` // optional off|minimal|low|medium|high|xhigh|max|ultra
-	ToolOutputBytes         int                             `json:"tool_output_bytes,omitempty"`
-	BashTimeoutMS           int                             `json:"bash_timeout_ms,omitempty"`
-	ContextCapBytes         int                             `json:"context_cap_bytes,omitempty"`
-	SystemPromptFile        string                          `json:"system_prompt_file,omitempty"`
-	Providers               map[string]ProviderConfig       `json:"providers,omitempty"`
-	TUI                     TUIConfig                       `json:"tui,omitempty"`
-	Plugins                 []plugin.PluginSpec             `json:"plugins,omitempty"`
-	MCPServers              map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
-	Skills                  SkillsConfig                    `json:"skills,omitempty"`
-	Subagents               SubagentConfig                  `json:"subagents,omitempty"`
-	Processes               ProcessConfig                   `json:"processes,omitempty"`
-	Retry                   RetryConfig                     `json:"retry,omitempty"`
-	Compaction              CompactionConfig                `json:"compaction,omitempty"`
+	DefaultProvider           string                          `json:"default_provider,omitempty"`
+	DefaultModel              string                          `json:"default_model,omitempty"`
+	ProjectSelections         map[string]ProjectSelection     `json:"project_selections,omitempty"`
+	PermissionMode            string                          `json:"permission_mode,omitempty"`            // ask|allow|deny
+	DefaultProjectTrust       string                          `json:"default_project_trust,omitempty"`      // ask|allow|deny (always|never aliases)
+	Thinking                  string                          `json:"thinking,omitempty"`                   // off|minimal|low|medium|high|xhigh|max|ultra
+	ReasoningSummary          string                          `json:"reasoning_summary,omitempty"`          // off|auto|concise|detailed
+	TextVerbosity             string                          `json:"text_verbosity,omitempty"`             // low|medium|high
+	CollaborationMode         string                          `json:"collaboration_mode,omitempty"`         // default|plan
+	PlanModeReasoningEffort   string                          `json:"plan_mode_reasoning_effort,omitempty"` // optional off|minimal|low|medium|high|xhigh|max|ultra
+	ToolOutputBytes           int                             `json:"tool_output_bytes,omitempty"`
+	BashTimeoutMS             int                             `json:"bash_timeout_ms,omitempty"`
+	ContextCapBytes           int                             `json:"context_cap_bytes,omitempty"`
+	FixedContextBudgetPercent int                             `json:"fixed_context_budget_percent,omitempty"`
+	SystemPromptFile          string                          `json:"system_prompt_file,omitempty"`
+	Providers                 map[string]ProviderConfig       `json:"providers,omitempty"`
+	TUI                       TUIConfig                       `json:"tui,omitempty"`
+	Plugins                   []plugin.PluginSpec             `json:"plugins,omitempty"`
+	MCPServers                map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
+	Skills                    SkillsConfig                    `json:"skills,omitempty"`
+	Subagents                 SubagentConfig                  `json:"subagents,omitempty"`
+	Processes                 ProcessConfig                   `json:"processes,omitempty"`
+	Retry                     RetryConfig                     `json:"retry,omitempty"`
+	Compaction                CompactionConfig                `json:"compaction,omitempty"`
 }
 
 // ProjectExtensions are the only project configuration fields loaded after a

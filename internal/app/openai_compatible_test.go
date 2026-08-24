@@ -199,14 +199,20 @@ func TestConfigureOpenAICompatibleAtRuntime(t *testing.T) {
 	if err := a.ConfigureOpenAICompatible(pc.BaseURL); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.RefreshProviderModels(context.Background(), openaicompat.ProviderID); err != nil {
-		t.Fatal(err)
-	}
 	if err := a.SetProvider(openaicompat.ProviderID); err != nil {
 		t.Fatal(err)
 	}
 	if a.Agent.Model().ID != "runtime-model" {
 		t.Fatalf("model=%+v", a.Agent.Model())
+	}
+	if err := a.SetProvider("fake"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ConfigureOpenAICompatible(pc.BaseURL); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetProviderModelThinking(openaicompat.ProviderID, protocol.Model{Provider: openaicompat.ProviderID, ID: "runtime-model"}, protocol.ThinkingOff); err != nil {
+		t.Fatal(err)
 	}
 	if err := a.Agent.Prompt(context.Background(), "hello"); err != nil {
 		t.Fatal(err)

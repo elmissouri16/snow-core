@@ -499,7 +499,7 @@ func (m *Manager) requireReadyLocked() error {
 
 // SetModelCatalog provides a secret-free live provider/model catalog to the
 // manager-bound discovery tool.
-func (m *Manager) SetModelCatalog(catalog func() []protocol.Model) {
+func (m *Manager) SetModelCatalog(catalog func(context.Context) ([]protocol.Model, error)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.modelCatalog = catalog
@@ -507,20 +507,20 @@ func (m *Manager) SetModelCatalog(catalog func() []protocol.Model) {
 
 // SetModelSelection validates and resolves provider/model pairs before a child
 // identity is committed. The callback must not call back into Manager.
-func (m *Manager) SetModelSelection(resolve func(provider, model string) (protocol.Model, error)) {
+func (m *Manager) SetModelSelection(resolve func(context.Context, string, string) (protocol.Model, error)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.modelSelection = resolve
 }
 
-func (m *Manager) Models() []protocol.Model {
+func (m *Manager) Models(ctx context.Context) ([]protocol.Model, error) {
 	m.mu.RLock()
 	catalog := m.modelCatalog
 	m.mu.RUnlock()
 	if catalog == nil {
-		return nil
+		return nil, nil
 	}
-	return catalog()
+	return catalog(ctx)
 }
 
 func (m *Manager) RootCaller() Caller {
@@ -658,16 +658,24 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 			thinking = parentState.Thinking
 		}
 	}
-	if resolve := m.modelSelection; resolve != nil {
-		resolved, resolveErr := resolve(provider, model)
+	resolve := m.modelSelection
+	m.reserved[path] = struct{}{}
+	m.mu.Unlock()
+	releaseReservation := func() {
+		m.mu.Lock()
+		delete(m.reserved, path)
+		m.mu.Unlock()
+	}
+	if resolve != nil {
+		resolved, resolveErr := resolve(ctx, provider, model)
 		if resolveErr != nil {
-			m.mu.Unlock()
+			releaseReservation()
 			return protocol.SubagentState{}, resolveErr
 		}
 		provider, model = resolved.Provider, resolved.ID
 		if !resolved.SupportsThinkingLevel(thinking) {
 			if thinkingExplicit {
-				m.mu.Unlock()
+				releaseReservation()
 				return protocol.SubagentState{}, fmt.Errorf("subagents: model %s/%s does not support explicitly requested reasoning effort %q (supported: %v)", provider, model, thinking, resolved.SupportedThinkingLevels())
 			}
 			thinking = protocol.NormalizeThinkingLevel(resolved.DefaultThinking)
@@ -676,13 +684,18 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 			}
 		}
 	}
+	m.mu.Lock()
+	if m.closed {
+		delete(m.reserved, path)
+		m.mu.Unlock()
+		return protocol.SubagentState{}, ErrClosed
+	}
 	id := newThreadID()
 	now := time.Now().UnixMilli()
 	state := protocol.SubagentState{Agent: protocol.AgentRef{ThreadID: id, ParentThreadID: parentRef.ThreadID, Path: path, ParentPath: caller.Path, Role: roleName, Depth: path.Depth()}, Status: protocol.AgentPendingInit, Model: model, Provider: provider, Thinking: thinking, CreatedAt: now, Generation: 1}
 	record := session.SubagentRecord{State: state, ParentBranchID: m.activeBranchLocked(), ChildSessionPath: m.childPathLocked(id), RoleFingerprint: roleFingerprint(role)}
 	topologyStore := m.store
 	r := &runtime{state: state, record: record, tasks: make(chan childTask, 64), lastUsed: time.Now()}
-	m.reserved[path] = struct{}{}
 	if record.ChildSessionPath != "" {
 		if info, statErr := os.Lstat(record.ChildSessionPath); statErr == nil || (info != nil && info.Mode()&os.ModeSymlink != 0) {
 			delete(m.reserved, path)

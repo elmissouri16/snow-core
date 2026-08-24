@@ -38,7 +38,7 @@ func TestAgentEventMailboxCoalescesWithoutBlockingProducer(t *testing.T) {
 	}
 }
 
-func TestCoalesceRootSessionUpdatesKeepsLatestAndPreservesChildEvents(t *testing.T) {
+func TestCoalesceTUISnapshotEventsKeepsLatestAndPreservesChildEvents(t *testing.T) {
 	child := &protocol.AgentRef{ThreadID: "child", Path: "/root/child"}
 	events := []protocol.AgentEvent{
 		{Type: protocol.EvSessionUpdated, TurnID: "old"},
@@ -47,12 +47,55 @@ func TestCoalesceRootSessionUpdatesKeepsLatestAndPreservesChildEvents(t *testing
 		{Type: protocol.EvSessionUpdated, TurnID: "latest"},
 		{Type: protocol.EvTurnDone, TurnID: "turn"},
 	}
-	got := coalesceRootSessionUpdates(events)
+	got := coalesceTUISnapshotEvents(events, false)
 	if len(got) != 4 {
 		t.Fatalf("events=%+v", got)
 	}
 	if got[0].Type != protocol.EvToolStart || got[1].Agent != child || got[2].TurnID != "latest" || got[3].Type != protocol.EvTurnDone {
 		t.Fatalf("ordering=%+v", got)
+	}
+}
+
+func TestCoalesceTUISnapshotEventsRespectsTurnAndDebugBoundaries(t *testing.T) {
+	modelOne := protocol.Model{Provider: "p", ID: "one"}
+	modelTwo := protocol.Model{Provider: "p", ID: "two"}
+	events := []protocol.AgentEvent{
+		{Type: protocol.EvUsage, TurnID: "turn-one", RootEpoch: 1, Usage: &protocol.Usage{Input: 1}},
+		{Type: protocol.EvUsage, TurnID: "turn-one", RootEpoch: 1, Usage: &protocol.Usage{Input: 2}},
+		{Type: protocol.EvTurnDone, TurnID: "turn-one", RootEpoch: 1},
+		{Type: protocol.EvUsage, TurnID: "turn-two", RootEpoch: 1, Usage: &protocol.Usage{Input: 3}},
+		{Type: protocol.EvModelChanged, RootEpoch: 1, Model: &modelOne},
+		{Type: protocol.EvModelChanged, RootEpoch: 1, Model: &modelTwo},
+	}
+	got := coalesceTUISnapshotEvents(append([]protocol.AgentEvent(nil), events...), false)
+	if len(got) != 4 || got[0].Usage.Input != 2 || got[1].Type != protocol.EvTurnDone || got[2].Usage.Input != 3 || got[3].Model.ID != "two" {
+		t.Fatalf("snapshot coalescing crossed a boundary: %+v", got)
+	}
+	debug := coalesceTUISnapshotEvents(append([]protocol.AgentEvent(nil), events...), true)
+	usageEvents := 0
+	for _, event := range debug {
+		if event.Type == protocol.EvUsage {
+			usageEvents++
+		}
+	}
+	if usageEvents != 3 {
+		t.Fatalf("debug usage snapshots=%d want 3: %+v", usageEvents, debug)
+	}
+}
+
+func TestAgentEventMailboxFastPathPreservesAttributedBoundaries(t *testing.T) {
+	q := newAgentEventMailbox()
+	first := &protocol.AgentRef{ThreadID: "one", Path: "/root/one", Role: "explorer", Depth: 1}
+	same := *first
+	other := *first
+	other.ThreadID = "two"
+	other.Path = "/root/two"
+	q.Push(protocol.AgentEvent{Type: protocol.EvThinkingDelta, Text: "a", Agent: first, TurnID: "turn"})
+	q.Push(protocol.AgentEvent{Type: protocol.EvThinkingDelta, Text: "b", Agent: &same, TurnID: "turn"})
+	q.Push(protocol.AgentEvent{Type: protocol.EvThinkingDelta, Text: "c", Agent: &other, TurnID: "turn"})
+	batch := q.popBatch(maxAgentEventsPerUpdate)
+	if len(batch) != 2 || batch[0].Text != "ab" || batch[0].Agent.ThreadID != "one" || batch[1].Text != "c" || batch[1].Agent.ThreadID != "two" {
+		t.Fatalf("attributed stream boundaries changed: %+v", batch)
 	}
 }
 

@@ -475,7 +475,7 @@ func TestAppRejectsBlankModelIDWithoutChangingSelection(t *testing.T) {
 	if after.ID != before.ID || a.Model.ID != before.ID {
 		t.Fatalf("selection changed: before=%+v app=%+v agent=%+v", before, a.Model, after)
 	}
-	_, childModel, err := a.runtimeSelection.childSelection("", "")
+	_, childModel, err := a.runtimeSelection.childSelection(context.Background(), "", "")
 	if err != nil || childModel.ID != before.ID {
 		t.Fatalf("child selection=%+v err=%v", childModel, err)
 	}
@@ -522,6 +522,34 @@ func TestSetSessionWaitsForActiveSessionReadBeforeClosingOldStore(t *testing.T) 
 	case <-old.closed:
 	case <-time.After(time.Second):
 		t.Fatal("old store was not closed after read completed")
+	}
+}
+
+func TestProviderTransitionRejectsReentrantMutationWithoutBlocking(t *testing.T) {
+	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	result := make(chan error, 1)
+	unsubscribe := a.Agent.Subscribe(func(event protocol.AgentEvent) {
+		if event.Type == protocol.EvModelChanged {
+			result <- a.SetModel(a.Agent.Model())
+		}
+	})
+	defer unsubscribe()
+	model := a.Agent.Model()
+	model.DisplayName = "updated"
+	if err := a.SetModel(model); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "provider transition") {
+			t.Fatalf("reentrant transition error=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reentrant provider mutation blocked event delivery")
 	}
 }
 

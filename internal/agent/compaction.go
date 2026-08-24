@@ -47,11 +47,7 @@ func latestPersistedContextTokens(messages []protocol.Message) int {
 }
 
 func (a *Agent) autoThresholdPercent() int {
-	threshold := a.opts.Compaction.AutoThresholdPercent
-	if threshold == 0 && a.opts.Compaction.GoalAutoThresholdPercent > 0 {
-		threshold = a.opts.Compaction.GoalAutoThresholdPercent
-	}
-	return threshold
+	return a.opts.Compaction.AutoThresholdPercent
 }
 
 func (a *Agent) pressureCompactionDue(messages []protocol.Message) bool {
@@ -60,7 +56,8 @@ func (a *Agent) pressureCompactionDue(messages []protocol.Message) bool {
 	if threshold == 0 || model.ContextWindow <= 0 {
 		return false
 	}
-	estimated := estimateRequestTokens(messages, a.requestSystemPrompt(), a.requestToolSchemas())
+	requestTools := a.requestToolSchemas()
+	estimated := estimateRequestTokens(messages, a.requestSystemPromptForTools(requestTools), requestTools)
 	a.mu.Lock()
 	if a.latestContextTokens <= 0 {
 		a.latestContextTokens = latestPersistedContextTokens(messages)
@@ -177,11 +174,6 @@ func (a *Agent) autoCompactAdmittedBoundary(ctx context.Context, messages []prot
 		a.mu.Unlock()
 	}
 	return true, nil
-}
-
-// Deprecated compatibility wrapper for internal embedders and older tests.
-func (a *Agent) autoCompactAdmittedGoalBoundary(ctx context.Context, messages []protocol.Message) (bool, error) {
-	return a.autoCompactAdmittedBoundary(ctx, messages)
 }
 
 func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {

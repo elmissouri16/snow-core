@@ -51,7 +51,10 @@ func (m *Model) switchSession(st session.Store) error {
 	m.modeSwitching = false
 	m.setRunIdle()
 	m.transcript.GotoBottom()
+	m.transcript.SetContent("")
 	m.transcriptContent = ""
+	m.transcriptViewRevision++
+	m.transcriptViewCacheValid = false
 	m.transcriptSelectionLines = nil
 	m.transcriptSelectionView = ""
 	m.transcriptSelectionViewValid = false
@@ -541,6 +544,13 @@ func formatContextReport(report agent.ContextReport, currentTokens int, currentE
 		fmt.Fprintf(&b, "  Latest provider input   %s\n", formatTokenCount(int64(report.Usage.Input)))
 	}
 	fmt.Fprintf(&b, "  Snapshot                %d messages · %d tools\n", report.MessageCount, report.ToolCount)
+	if report.FixedContextBudgetTokens > 0 {
+		status := ""
+		if report.FixedContextOverBudget {
+			status = " · over budget"
+		}
+		fmt.Fprintf(&b, "  Fixed context           ~%s / %s%s\n", formatTokenCount(int64(report.FixedContextTokens)), formatTokenCount(int64(report.FixedContextBudgetTokens)), status)
+	}
 
 	if calibrated {
 		b.WriteString("\nEstimated composition (provider-calibrated)\n")

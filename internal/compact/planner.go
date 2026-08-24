@@ -13,11 +13,6 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-// Planner preserves the legacy entry point while using turn-aware planning.
-func Planner(msgs []protocol.Message, maxTokens int) Plan {
-	return PlannerWithOptions(msgs, PlannerOptions{RetainTokens: maxTokens, MinRetainedTurns: 2})
-}
-
 // PlannerWithOptions finds a prefix to compact while retaining complete recent
 // user turns. Tool calls and results remain in the same turn by construction.
 func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
@@ -431,7 +426,34 @@ func NormalizeWorkingStateCheckpoint(ctx context.Context, summary string, msgs [
 			checkpoint = replaceCheckpointSection(checkpoint, "Commands and verification", current+"\n"+warning)
 		}
 	}
-	return checkpoint, false, nil
+	return deduplicateCheckpointBullets(checkpoint), false, nil
+}
+
+func deduplicateCheckpointBullets(checkpoint string) string {
+	for _, section := range []string{"Current working state", "Decisions and rationale", "Commands and verification", "Important tool results", "Errors and failed approaches", "Unresolved next steps"} {
+		seen := make(map[string]bool)
+		body := checkpointSection(checkpoint, section)
+		if checkpointBodyEmpty(body) {
+			continue
+		}
+		lines := strings.Split(body, "\n")
+		filtered := lines[:0]
+		for _, line := range lines {
+			key := strings.TrimSpace(line)
+			if strings.HasPrefix(key, "- ") && key != "- None recorded." {
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+			}
+			filtered = append(filtered, line)
+		}
+		if len(filtered) == 0 {
+			filtered = append(filtered, "- None recorded.")
+		}
+		checkpoint = replaceCheckpointSection(checkpoint, section, strings.Join(filtered, "\n"))
+	}
+	return checkpoint
 }
 
 func containsProviderToolMarkup(summary string) bool {
@@ -517,9 +539,18 @@ func replaceCheckpointSection(summary, section, body string) string {
 }
 
 // DefaultSummarizer produces a bounded role/tool-aware continuation checkpoint.
+func commandEvidenceTool(name string) bool {
+	return name == "bash" || strings.HasPrefix(name, "process_")
+}
+
 func DefaultSummarizer(ctx context.Context, msgs []protocol.Message) (string, error) {
 	const maxRunes = 8000
-	var users, assistants, toolsOut, failures, priorCheckpoints, agentUpdates, filesSymbols []string
+	type pinnedFailure struct {
+		command bool
+		line    string
+	}
+	var users, assistants, commands, important, failures, priorCheckpoints, agentUpdates, filesSymbols []string
+	var failurePins []pinnedFailure
 	fileSymbolSeen := make(map[string]bool)
 	for _, m := range msgs {
 		if err := ctx.Err(); err != nil {
@@ -551,19 +582,40 @@ func DefaultSummarizer(ctx context.Context, msgs []protocol.Message) (string, er
 			}
 			text = compactText(text, 500)
 			if m.Role == protocol.RoleAssistant && c.Type == protocol.BlockToolCall {
-				command := strings.TrimSpace(c.Name + " " + text)
-				if command != "" {
-					toolsOut = append(toolsOut, command)
+				ref := c.Name
+				if c.ToolCallID != "" {
+					ref += "/" + c.ToolCallID
 				}
+				call := strings.TrimSpace(ref + " " + text)
+				if call != "" {
+					if commandEvidenceTool(c.Name) {
+						commands = append(commands, call)
+					} else {
+						important = append(important, call)
+					}
+				}
+				continue
 			}
 			switch m.Role {
 			case protocol.RoleUser:
 				users = append(users, text)
 			case protocol.RoleTool:
-				line := m.ToolName + ": " + text
-				toolsOut = append(toolsOut, line)
+				ref := m.ToolName
+				if m.ToolCallID != "" {
+					ref += "/" + m.ToolCallID
+				}
+				line := ref + ": " + compactText(text, 260)
+				section := "Important tool results"
+				commandEvidence := commandEvidenceTool(m.ToolName)
+				if commandEvidence {
+					commands = append(commands, line)
+					section = "Commands and verification"
+				} else {
+					important = append(important, line)
+				}
 				if m.IsError || strings.Contains(strings.ToLower(text), "error") || strings.Contains(strings.ToLower(text), "failed") {
-					failures = append(failures, line)
+					failures = append(failures, "See "+section+" entry "+ref+" for the recorded failure.")
+					failurePins = append(failurePins, pinnedFailure{command: commandEvidence, line: line})
 				}
 			case protocol.RoleAssistant:
 				assistants = append(assistants, text)
@@ -574,6 +626,41 @@ func DefaultSummarizer(ctx context.Context, msgs []protocol.Message) (string, er
 			}
 		}
 	}
+	if len(failurePins) > 4 {
+		failurePins = failurePins[len(failurePins)-4:]
+	}
+	var failedCommands, failedImportant []string
+	for _, pinned := range failurePins {
+		if pinned.command {
+			failedCommands = append(failedCommands, pinned.line)
+		} else {
+			failedImportant = append(failedImportant, pinned.line)
+		}
+	}
+	pinEvidence := func(values, pinned []string) []string {
+		pinnedSet := make(map[string]bool, len(pinned))
+		for _, value := range pinned {
+			pinnedSet[value] = true
+		}
+		out := values[:0]
+		for _, value := range values {
+			if !pinnedSet[value] {
+				out = append(out, value)
+			}
+		}
+		remaining := 8 - len(pinned)
+		if remaining < 0 {
+			remaining = 0
+		}
+		if len(out) > remaining {
+			out = out[len(out)-remaining:]
+		}
+		prioritized := append([]string(nil), pinned...)
+		return append(prioritized, out...)
+	}
+	commands = pinEvidence(commands, failedCommands)
+	important = pinEvidence(important, failedImportant)
+
 	var b strings.Builder
 	b.WriteString(WorkingStateTitle + "\n\nGenerated by the bounded local fallback. Exact history remains durable.\n")
 	writeRecent := func(title string, values []string, maxItems, sectionRunes int) {
@@ -608,17 +695,17 @@ func DefaultSummarizer(ctx context.Context, msgs []protocol.Message) (string, er
 	}
 	writeRecent("Objective and constraints", users, 4, 700)
 	writeRecent("Current working state", assistants, 4, 800)
-	writeRecent("Decisions and rationale", assistants, 3, 600)
+	writeRecent("Decisions and rationale", []string{"Local fallback does not infer decisions; inspect Current working state and exact durable history."}, 1, 180)
 	writeRecent("Files and symbols", filesSymbols, 8, 600)
-	writeRecent("Commands and verification", toolsOut, 4, 700)
-	writeRecent("Important tool results", toolsOut, 4, 700)
+	writeRecent("Commands and verification", commands, 8, 1300)
+	writeRecent("Important tool results", important, 8, 1300)
 	writeRecent("Errors and failed approaches", failures, 4, 600)
 	writeRecent("Attributed agent updates", agentUpdates, 4, 500)
 	writeRecent("Prior working-state checkpoints", priorCheckpoints, 2, 700)
 	// Retrieval markers are appended only after session-scoped ownership
 	// verification in agent.compactActiveContext.
 	writeRecent("Retrieval references", nil, 0, 0)
-	writeRecent("Unresolved next steps", assistants, 2, 500)
+	writeRecent("Unresolved next steps", []string{"Local fallback does not infer next steps; inspect Current working state and exact durable history."}, 1, 180)
 	writeRecent("Active tool batch", nil, 0, 0)
 	out := []rune(b.String())
 	if len(out) > maxRunes {

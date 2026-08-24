@@ -206,8 +206,8 @@ func TestSpawnAgentToolCanonicalizesHyphenatedRawName(t *testing.T) {
 
 func TestListSubagentModelsReturnsExactPairs(t *testing.T) {
 	m := New(context.Background(), Limits{})
-	m.SetModelCatalog(func() []protocol.Model {
-		return []protocol.Model{{Provider: "chatgpt", ID: "gpt-x", DisplayName: "GPT X", SupportsTools: true}, {Provider: "opencode-go", ID: "deepseek-v3"}}
+	m.SetModelCatalog(func(context.Context) ([]protocol.Model, error) {
+		return []protocol.Model{{Provider: "chatgpt", ID: "gpt-x", DisplayName: "GPT X", SupportsTools: true}, {Provider: "opencode-go", ID: "deepseek-v3"}}, nil
 	})
 	var catalog tools.Tool
 	for _, candidate := range Tools(m, Caller{Path: protocol.RootAgentPath}) {

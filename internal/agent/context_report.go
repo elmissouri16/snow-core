@@ -24,13 +24,16 @@ type ContextCategory struct {
 // ContextReport describes either the latest provider request or, before the
 // current runtime has sent one on the active branch, what Snow would send next.
 type ContextReport struct {
-	LatestRequest        bool
-	Categories           []ContextCategory
-	EstimatedInputTokens int
-	MessageCount         int
-	ToolCount            int
-	ContextWindow        int
-	Usage                *protocol.Usage
+	LatestRequest            bool
+	Categories               []ContextCategory
+	EstimatedInputTokens     int
+	FixedContextTokens       int
+	FixedContextBudgetTokens int
+	FixedContextOverBudget   bool
+	MessageCount             int
+	ToolCount                int
+	ContextWindow            int
+	Usage                    *protocol.Usage
 }
 
 // Clone returns an independent report suitable for another surface.
@@ -70,13 +73,16 @@ func (a *Agent) ContextReport() (ContextReport, error) {
 	if err != nil {
 		return ContextReport{}, err
 	}
+	requestTools := a.requestToolSchemas()
 	req := protocol.ChatRequest{
 		Model:    a.Model(),
 		Messages: messages,
-		Tools:    a.requestToolSchemas(),
-		System:   a.requestSystemPrompt(),
+		Tools:    requestTools,
+		System:   a.requestSystemPromptForTools(requestTools),
 	}
-	return buildContextReport(req, false), nil
+	report := buildContextReport(req, false)
+	a.applyFixedContextBudget(&report, req.Model)
+	return report, nil
 }
 
 func buildContextReport(req protocol.ChatRequest, latestRequest bool) ContextReport {
@@ -177,10 +183,11 @@ func buildContextReport(req protocol.ChatRequest, latestRequest bool) ContextRep
 	}
 
 	report := ContextReport{
-		LatestRequest: latestRequest,
-		MessageCount:  len(req.Messages),
-		ToolCount:     len(req.Tools),
-		ContextWindow: req.Model.ContextWindow,
+		LatestRequest:      latestRequest,
+		FixedContextTokens: estimatedTokensForBytes(len(req.System) + providerSchemaBytes(req.Tools)),
+		MessageCount:       len(req.Messages),
+		ToolCount:          len(req.Tools),
+		ContextWindow:      req.Model.ContextWindow,
 	}
 	totalBytes := 0
 	for _, name := range order {
@@ -194,6 +201,21 @@ func buildContextReport(req protocol.ChatRequest, latestRequest bool) ContextRep
 	}
 	report.EstimatedInputTokens = estimatedTokensForBytes(totalBytes)
 	return report
+}
+
+func (a *Agent) fixedContextBudgetTokens(model protocol.Model) int {
+	if model.ContextWindow <= 0 {
+		return unknownModelFixedContextTokens
+	}
+	return max(1, model.ContextWindow*a.opts.FixedContextBudgetPercent/100)
+}
+
+func (a *Agent) applyFixedContextBudget(report *ContextReport, model protocol.Model) {
+	if report == nil {
+		return
+	}
+	report.FixedContextBudgetTokens = a.fixedContextBudgetTokens(model)
+	report.FixedContextOverBudget = report.FixedContextTokens > report.FixedContextBudgetTokens
 }
 
 func messageBaseCategory(message protocol.Message) string {

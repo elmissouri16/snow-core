@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -145,6 +147,30 @@ func TestRoutingFailureFallsBackToEligibleCatalog(t *testing.T) {
 	}
 }
 
+func TestRoutingFallbackMatchesOriginalToolName(t *testing.T) {
+	registry := tools.NewRegistry()
+	for i := range 6 {
+		name := fmt.Sprintf("unrelated_%d", i)
+		if err := registry.Register(routingTool(name, deferredDiscovery("misc"), tools.TextResult("ok"))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := routingTool("plugin_test_plugin_alias", deferredDiscovery("misc"), tools.TextResult("ok"))
+	if err := registry.RegisterDescriptor(tools.ToolDescriptor{
+		Schema: target.schema, Tool: target, Source: tools.SourceExternal, Owner: "plugin:test", PluginID: "test", OriginalName: "legacy-special-command", Risk: permission.RiskRead,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	agent := newRoutingAgent(t, provider, registry, &fakeRouter{count: 7, err: errors.New("index unavailable")}, permission.ModeAllow)
+	if err := agent.Prompt(context.Background(), "legacy-special-command"); err != nil {
+		t.Fatal(err)
+	}
+	if got := schemaNames(provider.requests[0].Tools); len(got) == 0 || got[0] != "plugin_test_plugin_alias" {
+		t.Fatalf("fallback schemas=%v", got)
+	}
+}
+
 func TestSearchToolsExpandsNextContinuation(t *testing.T) {
 	registry := tools.NewRegistry()
 	base := routingTool("base_tool", deferredDiscovery("catalog"), tools.TextResult("ok"))
@@ -179,6 +205,70 @@ func TestSearchToolsExpandsNextContinuation(t *testing.T) {
 	}
 	if got := schemaNames(provider.requests[1].Tools); !equalStrings(got, wantSecond) {
 		t.Fatalf("second schemas = %v, want %v", got, wantSecond)
+	}
+}
+
+func TestDeferredBundleExposureAndConditionalGuidance(t *testing.T) {
+	registry := tools.NewRegistry()
+	members := []string{"process_start", "process_status", "process_logs", "process_stop", "process_list"}
+	for _, name := range members {
+		if err := registry.Register(routingTool(name, deferredDiscovery("managed_process"), tools.TextResult("ok"))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	provider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	a := newRoutingAgent(t, provider, registry, &fakeRouter{count: len(members), matches: []tools.ToolMatch{{ID: "process_start"}}}, permission.ModeAllow)
+	a.opts.DeferredBundles = []DeferredBundle{{Members: members}}
+	a.opts.ToolGuidance = []ToolGuidance{{AnyOf: members, Text: "managed process policy marker"}}
+	if err := a.Prompt(context.Background(), "start the preview server"); err != nil {
+		t.Fatal(err)
+	}
+	if got := schemaNames(provider.requests[0].Tools); !equalStrings(got, members) {
+		t.Fatalf("bundle schemas=%v, want %v", got, members)
+	}
+	if !strings.Contains(provider.requests[0].System, "managed process policy marker") {
+		t.Fatalf("conditional guidance missing: %q", provider.requests[0].System)
+	}
+
+	stickyProvider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	sticky := newRoutingAgent(t, stickyProvider, registry, &fakeRouter{count: len(members)}, permission.ModeAllow)
+	sticky.opts.DeferredBundles = []DeferredBundle{{Members: members, Sticky: func() bool { return true }}}
+	if err := sticky.Prompt(context.Background(), "continue editing"); err != nil {
+		t.Fatal(err)
+	}
+	if got := schemaNames(stickyProvider.requests[0].Tools); !equalStrings(got, members) {
+		t.Fatalf("sticky bundle schemas=%v, want %v", got, members)
+	}
+
+	deniedProvider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	denied := newRoutingAgent(t, deniedProvider, registry, &fakeRouter{count: len(members), matches: []tools.ToolMatch{{ID: "process_list"}}}, permission.ModeDeny)
+	denied.opts.DeferredBundles = []DeferredBundle{{Members: members}}
+	var deniedEvent protocol.ToolRouting
+	denied.Subscribe(func(event protocol.AgentEvent) {
+		if event.ToolRouting != nil {
+			deniedEvent = *event.ToolRouting
+		}
+	})
+	if err := denied.Prompt(context.Background(), "start the server"); err != nil {
+		t.Fatal(err)
+	}
+	allowedReadOnly := []string{"process_list", "process_status", "process_logs"}
+	if got := deniedEvent.ToolIDs; !equalStrings(got, allowedReadOnly) {
+		t.Fatalf("denied bundle event IDs=%v", got)
+	}
+	if got := schemaNames(deniedProvider.requests[0].Tools); !equalStrings(got, allowedReadOnly) {
+		t.Fatalf("denied bundle schemas=%v", got)
+	}
+
+	plainProvider := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
+	plain := newRoutingAgent(t, plainProvider, registry, &fakeRouter{count: len(members)}, permission.ModeAllow)
+	plain.opts.DeferredBundles = []DeferredBundle{{Members: members}}
+	plain.opts.ToolGuidance = []ToolGuidance{{AnyOf: members, Text: "managed process policy marker"}}
+	if err := plain.Prompt(context.Background(), "explain this function"); err != nil {
+		t.Fatal(err)
+	}
+	if len(plainProvider.requests[0].Tools) != 0 || strings.Contains(plainProvider.requests[0].System, "managed process policy marker") {
+		t.Fatalf("irrelevant process capability leaked: tools=%v system=%q", schemaNames(plainProvider.requests[0].Tools), plainProvider.requests[0].System)
 	}
 }
 

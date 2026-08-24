@@ -29,14 +29,14 @@ func cloneChildRegistry(parent tools.Registry, role subagent.Role, globalMutatio
 	}
 	mutation := globalMutation && role.AllowMutation
 
-	childReg, err := tools.CloneRegistry(parent, func(desc tools.ToolDescriptor) bool {
+	childReg, err := tools.CloneRegistry(parent, func(desc tools.DescriptorMetadata) bool {
 		if desc.Owner == "subagents" || desc.Source == tools.SourceMCP || desc.Source == tools.SourceGoPlugin || desc.Source == tools.SourceExternal || desc.Source == tools.SourceSDK {
 			return false
 		}
-		if !childToolAllowed(desc.Schema.Name, mutation) {
+		if !childToolAllowed(desc.Name, mutation) {
 			return false
 		}
-		return len(roleAllowed) == 0 || roleAllowed[desc.Schema.Name]
+		return len(roleAllowed) == 0 || roleAllowed[desc.Name]
 	})
 	if err != nil {
 		return nil, childToolCapabilities{}, err

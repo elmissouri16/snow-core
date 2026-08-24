@@ -17,17 +17,21 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-func (a *Agent) applySkillActivationDetails(details any) {
-	var activation tools.SkillActivationDetails
+func skillActivationDetails(details any) (tools.SkillActivationDetails, bool) {
 	switch value := details.(type) {
 	case tools.SkillActivationDetails:
-		activation = value
+		return value, true
 	case *tools.SkillActivationDetails:
-		if value == nil {
-			return
+		if value != nil {
+			return *value, true
 		}
-		activation = *value
-	default:
+	}
+	return tools.SkillActivationDetails{}, false
+}
+
+func (a *Agent) applySkillActivationDetails(details any) {
+	activation, ok := skillActivationDetails(details)
+	if !ok {
 		return
 	}
 	if activation.Name == "" || activation.Content == "" || !skillNameAllowed(a.opts.SkillNames, activation.Name) {
@@ -107,22 +111,59 @@ func (a *Agent) goalInternalContext() ([]protocol.InternalContextFragment, error
 }
 
 func (a *Agent) requestSystemPrompt() string {
+	return a.requestSystemPromptForTools(a.requestToolSchemas())
+}
+
+func (a *Agent) requestSystemPromptForTools(schemas []protocol.ToolSchema) string {
+	a.mu.RLock()
+	active := make(map[string]string, len(a.activeSkills))
+	for name, content := range a.activeSkills {
+		active[name] = content
+	}
+	a.mu.RUnlock()
+	return a.systemPromptForToolsAndSkills(schemas, active)
+}
+
+func (a *Agent) systemPromptForToolsAndSkills(schemas []protocol.ToolSchema, active map[string]string) string {
 	a.mu.RLock()
 	base := a.opts.SystemPrompt
 	mode := a.turnMode
 	if !a.running {
 		mode = a.mode
 	}
-	names := make([]string, 0, len(a.activeSkills))
-	for name := range a.activeSkills {
+	guidance := append([]ToolGuidance(nil), a.opts.ToolGuidance...)
+	a.mu.RUnlock()
+	names := make([]string, 0, len(active))
+	for name := range active {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	contents := make([]string, 0, len(names))
 	for _, name := range names {
-		contents = append(contents, a.activeSkills[name])
+		contents = append(contents, active[name])
 	}
-	a.mu.RUnlock()
+	exposed := make(map[string]bool, len(schemas))
+	for _, schema := range schemas {
+		exposed[schema.Name] = true
+	}
+	for _, fragment := range guidance {
+		include := false
+		for _, name := range fragment.AnyOf {
+			if exposed[name] {
+				include = true
+				break
+			}
+		}
+		for _, name := range fragment.UnlessAny {
+			if exposed[name] {
+				include = false
+				break
+			}
+		}
+		if include && strings.TrimSpace(fragment.Text) != "" {
+			base += "\n\n" + strings.TrimSpace(fragment.Text)
+		}
+	}
 	if mode == protocol.ModePlan {
 		base += "\n\n<collaboration_mode>\n" + planpkg.Instructions + "\n</collaboration_mode>"
 	} else {
@@ -132,6 +173,46 @@ func (a *Agent) requestSystemPrompt() string {
 		return base
 	}
 	return base + "\n\n<active_agent_skills>\n" + strings.Join(contents, "\n") + "\n</active_agent_skills>"
+}
+
+func fixedContextTokens(system string, schemas []protocol.ToolSchema) int {
+	return estimatedTokensForBytes(len(system) + providerSchemaBytes(schemas))
+}
+
+func fixedContextBudgetError(used, limit int, percent int) error {
+	return fmt.Errorf("agent: request would use %d fixed-context tokens, above the %d-token budget (%d%% of the model window); deactivate skills, reduce configured instructions, narrow exposed capabilities, or choose a model with a larger context window", used, limit, percent)
+}
+
+func (a *Agent) validateSkillActivation(activation tools.SkillActivationDetails) error {
+	if activation.Name == "" || activation.Content == "" {
+		return errors.New("agent: skill activation has no durable content")
+	}
+	schemas := a.requestToolSchemas()
+	a.mu.RLock()
+	active := make(map[string]string, len(a.activeSkills)+1)
+	for name, content := range a.activeSkills {
+		active[name] = content
+	}
+	model := a.model.Clone()
+	a.mu.RUnlock()
+	current := fixedContextTokens(a.systemPromptForToolsAndSkills(schemas, active), schemas)
+	active[activation.Name] = activation.Content
+	projected := fixedContextTokens(a.systemPromptForToolsAndSkills(schemas, active), schemas)
+	limit := a.fixedContextBudgetTokens(model)
+	if projected > limit && projected > current {
+		return fmt.Errorf("agent: activating skill %q would use %d fixed-context tokens, above the %d-token budget; deactivate another skill, shorten its instructions, or choose a model with a larger context window", activation.Name, projected, limit)
+	}
+	return nil
+}
+
+func (a *Agent) validateModelFixedContext(model protocol.Model) error {
+	schemas := a.requestToolSchemasWithTurnRouting(false)
+	used := fixedContextTokens(a.requestSystemPromptForTools(schemas), schemas)
+	limit := a.fixedContextBudgetTokens(model)
+	if used > limit {
+		return fmt.Errorf("agent: model %s/%s allows %d fixed-context tokens under the configured budget, but the current runtime needs %d; deactivate skills, reduce configured instructions, or choose a model with a larger context window", model.Provider, model.ID, limit, used)
+	}
+	return nil
 }
 
 // clearActiveSkillsDurably removes every branch-active Agent Skill while the
@@ -294,6 +375,9 @@ func (a *Agent) activateExplicitSkillMentions(ctx context.Context, text string) 
 		startMessage := "activating explicitly requested skill " + name
 		a.publish(protocol.AgentEvent{Type: protocol.EvToolStart, ToolCallID: callID, ToolName: "activate_skill", Message: startMessage})
 		activation, activationErr := runSkillActivation(ctx, a.opts.Registry, a.opts.ToolHost, name)
+		if activationErr == nil {
+			activationErr = a.validateSkillActivation(activation)
+		}
 		durationMS := time.Since(started).Milliseconds()
 		output := "activated skill " + name
 		if activationErr != nil {
@@ -719,11 +803,9 @@ func rebuildCompactionRetrievalSection(summary string, refs []string) string {
 		canonical = append(canonical, "- None recorded.")
 	} else {
 		for _, ref := range refs {
-			canonical = append(canonical,
-				marker+" "+ref,
-				"Use artifact_read or artifact_grep to inspect retained compacted tool evidence.",
-			)
+			canonical = append(canonical, marker+" "+ref)
 		}
+		canonical = append(canonical, "Use artifact_read or artifact_grep to inspect any retained compacted tool evidence above.")
 	}
 	insertAt := len(filtered)
 	for i, line := range filtered {

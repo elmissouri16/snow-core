@@ -88,8 +88,12 @@ wheel events cannot coexist.
 ### Streaming and coalescing
 
 Agent callbacks enter an ordered mailbox. Adjacent text, thinking, and plan
-deltas coalesce, and updates consume at most 256 logical events. Lifecycle
-events are not dropped or reordered.
+deltas coalesce, and updates consume at most 256 logical events. The common
+root/attributed delta envelope uses explicit scalar correlation instead of
+reflectively boxing the complete event for every token. Root session snapshots
+and same-turn usage/model snapshots coalesce in-place within one UI batch;
+debug usage history and child events remain complete. Lifecycle, interaction,
+queue, and tool-progress events are not dropped or reordered.
 
 Ordinary live deltas schedule one refresh on a bounded cadence: 33 ms for
 content at or below 64 KiB, 75 ms above 64 KiB, 150 ms above 256 KiB, and
@@ -99,7 +103,14 @@ content at or below 64 KiB, 75 ms above 64 KiB, 150 ms above 256 KiB, and
 
 Stable transcript rendering is cached by content and width. Markdown and
 thinking renderers are reused; streaming text stays cheap and receives final
-Markdown rendering at a boundary.
+Markdown rendering at a boundary. The normal Bubbles viewport string is reused
+until content generation, scroll offset, width, or height changes. The final
+managed-frame fit is also reused only when its exact composed input and
+terminal dimensions match, avoiding repeated ANSI width/grapheme parsing for
+status updates that do not change the frame. Retained viewport strings and the
+frame input/output pair are each capped at 256 KiB; larger PTYs render without
+those caches. Content publication, resize,
+scroll, selection, and session replacement invalidate the relevant cache.
 
 New output follows only when the viewport is already at bottom. While the user
 reads earlier content, source state keeps updating without replacing the
@@ -107,8 +118,9 @@ snapshot; returning to bottom catches up once.
 
 ### Async domain work
 
-`Update` mutates state and schedules commands; `View` only composes strings.
-Provider, file, session, and model discovery work runs asynchronously with
+`Update` mutates domain state and schedules commands; `View` performs no domain
+I/O and mutates only exact render caches while composing strings. Provider,
+file, session, and model discovery work runs asynchronously with
 generation-tagged results. Composer hints use the cached active branch identity
 rather than rich branch listings, and the spinner timer is armed only while an
 animation is visible.

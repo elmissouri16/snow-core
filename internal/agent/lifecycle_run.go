@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -66,15 +68,13 @@ func (a *Agent) prepareToolRouting(ctx context.Context, query string) {
 		return
 	}
 	started := time.Now()
-	candidateLimit := max(deferredCandidateK, router.DeferredCount())
-	candidates, err := router.Search(ctx, query, candidateLimit)
+	candidates, selected, err := a.searchPermittedDeferred(ctx, query, defaultDeferredTopK)
 	latency := time.Since(started).Milliseconds()
 	fallback := err != nil
-	selected := a.selectPermittedMatches(candidates, defaultDeferredTopK)
 	if fallback {
-		selected = a.allPermittedDeferred()
+		selected = a.fallbackDeferred(query, defaultDeferredTopK)
 	}
-	ids := matchIDs(selected)
+	ids := a.filterRequestDeferredIDs(a.expandDeferredIDs(matchIDs(selected), true))
 	a.mu.Lock()
 	a.baseDeferred = append([]string(nil), ids...)
 	a.searchedDeferred = nil
@@ -96,7 +96,7 @@ func (a *Agent) applyDiscoveryDetails(details any) {
 		return
 	}
 	selected := a.selectPermittedMatches(discovery.Matches, defaultDeferredTopK)
-	ids := matchIDs(selected)
+	ids := a.filterRequestDeferredIDs(a.expandDeferredIDs(matchIDs(selected), true))
 	a.mu.Lock()
 	a.searchedDeferred = append([]string(nil), ids...)
 	a.mu.Unlock()
@@ -110,8 +110,8 @@ func (a *Agent) selectPermittedMatches(matches []tools.ToolMatch, limit int) []t
 		if seen[match.ID] {
 			continue
 		}
-		desc, ok := a.opts.Registry.Descriptor(match.ID)
-		if !ok || !tools.IsDeferred(desc) || !tools.CanExpose(a.opts.Permission, desc) {
+		desc, ok := tools.Metadata(a.opts.Registry, match.ID)
+		if !ok || !desc.Deferred || !tools.CanExposeMetadata(a.opts.Permission, desc) {
 			continue
 		}
 		seen[match.ID] = true
@@ -123,11 +123,88 @@ func (a *Agent) selectPermittedMatches(matches []tools.ToolMatch, limit int) []t
 	return selected
 }
 
-func (a *Agent) allPermittedDeferred() []tools.ToolMatch {
-	selected := make([]tools.ToolMatch, 0, a.opts.Router.DeferredCount())
-	for _, desc := range a.opts.Registry.Descriptors() {
-		if tools.IsDeferred(desc) && tools.CanExpose(a.opts.Permission, desc) {
-			selected = append(selected, tools.ToolMatch{ID: desc.Schema.Name})
+func (a *Agent) searchPermittedDeferred(ctx context.Context, query string, limit int) ([]tools.ToolMatch, []tools.ToolMatch, error) {
+	count := a.opts.Router.DeferredCount()
+	candidateLimit := min(count, max(deferredCandidateK, limit))
+	var candidates, selected []tools.ToolMatch
+	for candidateLimit > 0 {
+		matches, err := a.opts.Router.Search(ctx, query, candidateLimit)
+		candidates = matches
+		if err != nil {
+			return candidates, nil, err
+		}
+		selected = a.selectPermittedMatches(matches, limit)
+		if len(selected) >= limit || candidateLimit >= count {
+			return candidates, selected, nil
+		}
+		candidateLimit = min(count, candidateLimit*2)
+	}
+	return nil, nil, nil
+}
+
+func (a *Agent) fallbackDeferred(query string, limit int) []tools.ToolMatch {
+	terms := strings.Fields(strings.ToLower(query))
+	type ranked struct {
+		match tools.ToolMatch
+		score float64
+	}
+	var rankedMatches []ranked
+	for _, desc := range tools.SelectMetadata(a.opts.Registry, func(desc tools.DescriptorMetadata) bool {
+		return desc.Deferred && tools.CanExposeMetadata(a.opts.Permission, desc)
+	}) {
+		name := strings.ToLower(desc.Name)
+		originalName := strings.ToLower(desc.OriginalName)
+		namespace := strings.ToLower(desc.Namespace)
+		description := strings.ToLower(desc.Description)
+		keywords := strings.ToLower(strings.Join(desc.Keywords, " "))
+		score := 0.0
+		normalizedQuery := strings.TrimSpace(strings.ToLower(query))
+		if normalizedQuery == name {
+			score += 20
+		}
+		if originalName != "" && normalizedQuery == originalName {
+			score += 20
+		}
+		for _, term := range terms {
+			if strings.Contains(name, term) {
+				score += 8
+			}
+			if strings.Contains(originalName, term) {
+				score += 8
+			}
+			if strings.Contains(namespace, term) {
+				score += 6
+			}
+			if strings.Contains(keywords, term) {
+				score += 5
+			}
+			if strings.Contains(description, term) {
+				score++
+			}
+		}
+		rankedMatches = append(rankedMatches, ranked{match: tools.ToolMatch{ID: desc.Name, Namespace: desc.Namespace, Description: desc.Description, Score: score}, score: score})
+	}
+	sort.SliceStable(rankedMatches, func(i, j int) bool {
+		if rankedMatches[i].score == rankedMatches[j].score {
+			return rankedMatches[i].match.ID < rankedMatches[j].match.ID
+		}
+		return rankedMatches[i].score > rankedMatches[j].score
+	})
+	selected := make([]tools.ToolMatch, 0, min(limit, len(rankedMatches)))
+	schemaBytes := 0
+	for _, candidate := range rankedMatches {
+		desc, ok := a.opts.Registry.Descriptor(candidate.match.ID)
+		if !ok {
+			continue
+		}
+		candidateBytes := providerSchemaBytes([]protocol.ToolSchema{desc.Schema})
+		if schemaBytes+candidateBytes > maxDeferredFallbackSchemaBytes {
+			continue
+		}
+		schemaBytes += candidateBytes
+		selected = append(selected, candidate.match)
+		if len(selected) == limit {
+			break
 		}
 	}
 	return selected
@@ -141,7 +218,37 @@ func matchIDs(matches []tools.ToolMatch) []string {
 	return ids
 }
 
-func (a *Agent) requestToolSchemas() []protocol.ToolSchema {
+func (a *Agent) expandDeferredIDs(ids []string, includeSticky bool) []string {
+	out := append([]string(nil), ids...)
+	seen := make(map[string]bool, len(out))
+	for _, id := range out {
+		seen[id] = true
+	}
+	for _, bundle := range a.opts.DeferredBundles {
+		active := includeSticky && bundle.Sticky != nil && bundle.Sticky()
+		if !active {
+			for _, member := range bundle.Members {
+				if seen[member] {
+					active = true
+					break
+				}
+			}
+		}
+		if !active {
+			continue
+		}
+		for _, member := range bundle.Members {
+			if member == "" || seen[member] {
+				continue
+			}
+			seen[member] = true
+			out = append(out, member)
+		}
+	}
+	return out
+}
+
+func (a *Agent) requestToolPolicy() func(tools.DescriptorMetadata) bool {
 	a.mu.RLock()
 	mode := a.turnMode
 	origin := a.turnOrigin
@@ -150,11 +257,12 @@ func (a *Agent) requestToolSchemas() []protocol.ToolSchema {
 		origin = ""
 	}
 	a.mu.RUnlock()
-	allowed := func(name string) bool {
+	return func(desc tools.DescriptorMetadata) bool {
+		name := desc.Name
 		if origin == "goal" && (name == "ask_user" || name == "request_user_input") {
 			return false
 		}
-		if desc, ok := a.opts.Registry.Descriptor(name); ok && desc.Risk == permission.RiskDelegate && !tools.CanExpose(a.opts.Permission, desc) {
+		if desc.Risk == permission.RiskDelegate && !tools.CanExposeMetadata(a.opts.Permission, desc) {
 			return false
 		}
 		if mode == protocol.ModePlan {
@@ -162,41 +270,54 @@ func (a *Agent) requestToolSchemas() []protocol.ToolSchema {
 		}
 		return name != "request_user_input"
 	}
-	if a.opts.Router == nil {
-		all := a.opts.Registry.Schemas()
-		out := all[:0]
-		for _, schema := range all {
-			if allowed(schema.Name) {
-				out = append(out, schema)
-			}
-		}
-		return out
-	}
-	a.mu.RLock()
-	base := append([]string(nil), a.baseDeferred...)
-	searched := append([]string(nil), a.searchedDeferred...)
-	a.mu.RUnlock()
+}
 
-	descriptors := a.opts.Registry.Descriptors()
-	schemas := make([]protocol.ToolSchema, 0, len(descriptors))
-	for _, desc := range descriptors {
-		if !tools.IsDeferred(desc) && allowed(desc.Schema.Name) {
-			schemas = append(schemas, desc.Schema)
-		}
-	}
-	seen := make(map[string]bool, len(base)+len(searched))
-	for _, name := range append(base, searched...) {
+func (a *Agent) filterRequestDeferredIDs(ids []string) []string {
+	allowed := a.requestToolPolicy()
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, name := range ids {
 		if seen[name] {
 			continue
 		}
-		desc, ok := a.opts.Registry.Descriptor(name)
-		if !ok || !tools.IsDeferred(desc) || !tools.CanExpose(a.opts.Permission, desc) || !allowed(desc.Schema.Name) {
+		metadata, ok := tools.Metadata(a.opts.Registry, name)
+		if !ok || !metadata.Deferred || !allowed(metadata) || !tools.CanExposeMetadata(a.opts.Permission, metadata) {
 			continue
 		}
 		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+func (a *Agent) requestToolSchemasWithTurnRouting(includeTurnRouting bool) []protocol.ToolSchema {
+	a.mu.RLock()
+	var base, searched []string
+	if includeTurnRouting {
+		base = append([]string(nil), a.baseDeferred...)
+		searched = append([]string(nil), a.searchedDeferred...)
+	}
+	a.mu.RUnlock()
+	allowed := a.requestToolPolicy()
+	if a.opts.Router == nil {
+		return tools.SelectSchemas(a.opts.Registry, allowed)
+	}
+	schemas := tools.SelectSchemas(a.opts.Registry, func(desc tools.DescriptorMetadata) bool {
+		return !desc.Deferred && allowed(desc)
+	})
+	deferred := a.filterRequestDeferredIDs(a.expandDeferredIDs(append(base, searched...), true))
+	for _, name := range deferred {
+		desc, ok := a.opts.Registry.Descriptor(name)
+		if !ok {
+			continue
+		}
 		schemas = append(schemas, desc.Schema)
 	}
 	return schemas
+}
+
+func (a *Agent) requestToolSchemas() []protocol.ToolSchema {
+	return a.requestToolSchemasWithTurnRouting(true)
 }
 
 func (a *Agent) publishToolRouting(trigger string, ids []string, candidates int, latency int64, fallback bool, routeErr error) {
@@ -247,6 +368,8 @@ func boundRoutingMessage(message string, max int) string {
 }
 
 func (a *Agent) run(ctx context.Context) error {
+	stableTools := a.requestToolSchemasWithTurnRouting(false)
+	admittedFixedTokens := fixedContextTokens(a.requestSystemPromptForTools(stableTools), stableTools)
 	turn := 0
 	overflowRecovered := false
 	providerAttempts := 0
@@ -294,11 +417,12 @@ func (a *Agent) run(ctx context.Context) error {
 		if retryRecovery {
 			internalContext = append(internalContext, protocol.InternalContextFragment{Source: "provider-recovery", Text: "The previous provider response was interrupted. Continue from the durable conversation and tool results. Do not assume unrecorded work completed, and do not repeat completed side effects unless the recorded result proves a retry is needed."})
 		}
+		requestTools := a.requestToolSchemas()
 		req := protocol.ChatRequest{
 			Model:              a.Model(),
 			Messages:           providerMessages(msgs),
-			Tools:              a.requestToolSchemas(),
-			System:             a.requestSystemPrompt(),
+			Tools:              requestTools,
+			System:             a.requestSystemPromptForTools(requestTools),
 			Thinking:           a.requestThinking(),
 			ReasoningSummary:   a.ReasoningSummary(),
 			TextVerbosity:      a.TextVerbosity(),
@@ -306,8 +430,17 @@ func (a *Agent) run(ctx context.Context) error {
 			SessionAffinityKey: a.requestAffinityKey("turn"),
 		}
 
+		fixedTokens := fixedContextTokens(req.System, req.Tools)
+		if budget := a.fixedContextBudgetTokens(req.Model); budget > 0 && fixedTokens > budget && fixedTokens > admittedFixedTokens {
+			return fixedContextBudgetError(fixedTokens, budget, a.opts.FixedContextBudgetPercent)
+		}
+		if fixedTokens > admittedFixedTokens {
+			admittedFixedTokens = fixedTokens
+		}
+
 		requestEstimate := estimateRequestTokens(req.Messages, req.System, req.Tools)
 		contextReport := buildContextReport(req, true)
+		a.applyFixedContextBudget(&contextReport, req.Model)
 		a.mu.Lock()
 		a.latestRequestEstimate = requestEstimate
 		a.latestContextReport = &contextReport

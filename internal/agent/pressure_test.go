@@ -251,6 +251,19 @@ func TestCompactedArtifactReferencesRequireTrustedMarker(t *testing.T) {
 	}
 }
 
+func TestRebuildCompactionRetrievalSectionWritesOneHelperForManyReferences(t *testing.T) {
+	refs := []string{"artifact-0123456789abcdef0123456789abcdef", "artifact-fedcba9876543210fedcba9876543210"}
+	checkpoint := rebuildCompactionRetrievalSection(compact.FormatWorkingStateCheckpoint("state"), refs)
+	if got := strings.Count(checkpoint, "Use artifact_read or artifact_grep"); got != 1 {
+		t.Fatalf("retrieval helper count=%d:\n%s", got, checkpoint)
+	}
+	for _, ref := range refs {
+		if strings.Count(checkpoint, "Full retained tool result: "+ref) != 1 {
+			t.Fatalf("reference %s missing or repeated:\n%s", ref, checkpoint)
+		}
+	}
+}
+
 func TestVerifiedCompactedArtifactReferencesAreOwnedAndBounded(t *testing.T) {
 	a, store := setup(t, &scriptedProvider{}, nil, permission.ModeDeny)
 	artifacts, err := artifact.NewLocalStore(t.TempDir(), 1<<20)

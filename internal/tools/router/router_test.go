@@ -9,7 +9,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	bleve "github.com/blevesearch/bleve/v2"
@@ -113,6 +115,103 @@ func TestSearchHonorsLimitAndOmitsSchemasFromIndex(t *testing.T) {
 	}
 }
 
+func TestNewDefersIndexConstructionUntilFirstSearch(t *testing.T) {
+	calls := 0
+	factory := func(mapping blevemapping.IndexMapping) (bleve.Index, error) {
+		calls++
+		return bleve.NewMemOnly(mapping)
+	}
+	router := newWithFactory([]tools.ToolDescriptor{deferredDescriptor("one", "catalog", "Find catalog data.")}, factory)
+	defer router.Close()
+	if calls != 0 || router.index != nil || router.namespaceIndex != nil {
+		t.Fatalf("eager index construction calls=%d tool=%v namespace=%v", calls, router.index, router.namespaceIndex)
+	}
+	if _, err := router.Search(context.Background(), "catalog", 5); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("first search factory calls=%d, want 2", calls)
+	}
+	if _, err := router.Search(context.Background(), "catalog", 5); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("steady search rebuilt indexes: calls=%d", calls)
+	}
+}
+
+func TestConcurrentFirstSearchesShareLazyIndexBuild(t *testing.T) {
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	factory := func(mapping blevemapping.IndexMapping) (bleve.Index, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return bleve.NewMemOnly(mapping)
+	}
+	router := newWithFactory([]tools.ToolDescriptor{deferredDescriptor("one", "catalog", "Find catalog data.")}, factory)
+	defer router.Close()
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := router.Search(context.Background(), "catalog", 5)
+			errs <- err
+		}()
+	}
+	<-started
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("index factory calls=%d, want one shared tool/namespace pair", got)
+	}
+}
+
+func TestCloseDoesNotWaitForLazyIndexBuild(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	factory := func(mapping blevemapping.IndexMapping) (bleve.Index, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return bleve.NewMemOnly(mapping)
+	}
+	router := newWithFactory([]tools.ToolDescriptor{deferredDescriptor("one", "catalog", "Find catalog data.")}, factory)
+	searchDone := make(chan error, 1)
+	go func() {
+		_, err := router.Search(context.Background(), "catalog", 5)
+		searchDone <- err
+	}()
+	<-started
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- router.Close() }()
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("Close blocked on lazy index construction")
+	}
+	close(release)
+	if err := <-searchDone; err == nil {
+		t.Fatal("search succeeded after router closed during index construction")
+	}
+}
+
 func TestSearchCancellationAndClose(t *testing.T) {
 	router := New([]tools.ToolDescriptor{deferredDescriptor("one", "catalog", "Find catalog data.")})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -128,6 +227,33 @@ func TestSearchCancellationAndClose(t *testing.T) {
 	}
 	if err := router.Close(); err != nil {
 		t.Fatalf("second close: %v", err)
+	}
+}
+
+type cancelAfterChecks struct{ remaining atomic.Int32 }
+
+func (c *cancelAfterChecks) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *cancelAfterChecks) Done() <-chan struct{}       { return nil }
+func (c *cancelAfterChecks) Value(any) any               { return nil }
+func (c *cancelAfterChecks) Err() error {
+	if c.remaining.Add(-1) <= 0 {
+		return context.Canceled
+	}
+	return nil
+}
+
+func TestNamespaceAggregationHonorsCancellation(t *testing.T) {
+	catalog := make([]routeDescriptor, 0, 1000)
+	for i := range 1000 {
+		catalog = append(catalog, routeDescriptor{
+			name: fmt.Sprintf("tool_%04d", i), namespace: "large",
+			keywords: []string{fmt.Sprintf("keyword_%04d", 1000-i)},
+		})
+	}
+	ctx := &cancelAfterChecks{}
+	ctx.remaining.Store(5005)
+	if _, err := buildNamespaceRouteDocumentsContext(ctx, catalog); !errors.Is(err, context.Canceled) {
+		t.Fatalf("namespace aggregation error=%v, want canceled", err)
 	}
 }
 
@@ -162,6 +288,9 @@ func TestCloseClosesBothIndexesExactlyOnce(t *testing.T) {
 		deferredDescriptor("one", "one", "Find one."),
 		deferredDescriptor("two", "two", "Find two."),
 	})
+	if _, err := router.Search(context.Background(), "one", 1); err != nil {
+		t.Fatal(err)
+	}
 	toolIndex := &closeCountingIndex{embeddedBleveIndex: router.index}
 	namespaceIndex := &closeCountingIndex{embeddedBleveIndex: router.namespaceIndex}
 	router.index = toolIndex
@@ -245,6 +374,9 @@ func TestNamespaceFilterDoesNotChangeMetadataScores(t *testing.T) {
 	}
 	router := New(catalog)
 	defer router.Close()
+	if err := router.ensureInitialized(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	router.mu.RLock()
 	matches, err := router.searchToolIndex(context.Background(), "needle", []string{"large", "small"}, 20)
@@ -267,6 +399,9 @@ func TestOneNamespaceAndNamespaceFailurePreserveGlobalOrder(t *testing.T) {
 	}
 	router := New(catalog)
 	defer router.Close()
+	if err := router.ensureInitialized(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	router.mu.RLock()
 	global, err := router.searchToolIndex(context.Background(), "catalog data", nil, 20)
@@ -284,6 +419,9 @@ func TestOneNamespaceAndNamespaceFailurePreserveGlobalOrder(t *testing.T) {
 
 	multi := New(append(catalog, deferredDescriptor("github_find", "github", "Find source records.", "repo")))
 	defer multi.Close()
+	if err := multi.ensureInitialized(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	multi.mu.RLock()
 	global, err = multi.searchToolIndex(context.Background(), "find records", nil, 20)
 	multi.mu.RUnlock()
@@ -384,8 +522,8 @@ func TestRefreshFailureRetainsPreviousIndexPair(t *testing.T) {
 		deferredDescriptor("other_find", "other", "Find other records."),
 	}, factory)
 	defer router.Close()
-	if router.initErr != nil {
-		t.Fatal(router.initErr)
+	if _, err := router.Search(context.Background(), "legacy", 20); err != nil {
+		t.Fatal(err)
 	}
 
 	err := router.Refresh([]tools.ToolDescriptor{
@@ -474,6 +612,9 @@ func BenchmarkSearch(b *testing.B) {
 			}
 			router := New(catalog)
 			defer router.Close()
+			if err := router.ensureInitialized(context.Background()); err != nil {
+				b.Fatal(err)
+			}
 
 			b.Run("global", func(b *testing.B) {
 				b.ReportAllocs()

@@ -330,9 +330,9 @@ func (m *Model) View() string {
 		// Keep a constant logical row count. Growing a normal-screen Bubble Tea
 		// frame at the terminal bottom scrolls old chrome into native history;
 		// only tea.Println transcript commits are allowed to move scrollback.
-		return clipboardSequence + fitFrame(frame, frameWidth, m.managedFrameHeight())
+		return clipboardSequence + m.fitManagedFrame(frame, frameWidth, m.managedFrameHeight())
 	}
-	frame = fitFrame(frame, frameWidth, m.height)
+	frame = m.fitManagedFrame(frame, frameWidth, m.height)
 	return clipboardSequence + overlayTranscriptSelectionContextMenu(frame, m.transcriptSelectionMenu)
 }
 
@@ -371,6 +371,41 @@ func (m *Model) renderTrustPrompt() string {
 		body = append(body, styleError.Render("trust: "+m.trustError))
 	}
 	return fitFrame(lipgloss.NewStyle().Padding(1, 3).Render(strings.Join(body, "\n")), m.width, m.height)
+}
+
+const maxManagedFrameCacheBytes = 256 << 10
+
+func (m *Model) fitManagedFrame(frame string, width, height int) string {
+	if m.managedFrameCacheValid && m.managedFrameCacheWidth == width &&
+		m.managedFrameCacheHeight == height && m.managedFrameCacheInput == frame {
+		return m.managedFrameCacheOutput
+	}
+	if len(frame) > maxManagedFrameCacheBytes {
+		m.clearManagedFrameCache()
+		return fitFrame(frame, width, height)
+	}
+	output := fitFrame(frame, width, height)
+	// Retain at most one bounded input/output pair. Extremely large PTYs still
+	// render correctly but cannot turn the stable-frame optimization into an
+	// unbounded steady-state heap cost.
+	if len(output) > maxManagedFrameCacheBytes-len(frame) {
+		m.clearManagedFrameCache()
+		return output
+	}
+	m.managedFrameCacheInput = frame
+	m.managedFrameCacheOutput = output
+	m.managedFrameCacheWidth = width
+	m.managedFrameCacheHeight = height
+	m.managedFrameCacheValid = true
+	return output
+}
+
+func (m *Model) clearManagedFrameCache() {
+	m.managedFrameCacheInput = ""
+	m.managedFrameCacheOutput = ""
+	m.managedFrameCacheWidth = 0
+	m.managedFrameCacheHeight = 0
+	m.managedFrameCacheValid = false
 }
 
 func fitFrame(frame string, width, height int) string {

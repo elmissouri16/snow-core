@@ -317,54 +317,6 @@ func linearize(entries []Entry, byID map[string]int, tip string) ([]protocol.Mes
 	return msgs, nil
 }
 
-// contextMessagesFromEntries projects a branch after its latest compaction
-// marker. History remains append-only; only the provider-facing projection
-// replaces the compacted prefix with one harness summary message.
-func contextMessagesFromEntries(entries []Entry) []protocol.Message {
-	positions := make(map[string]int, len(entries))
-	for i := range entries {
-		positions[entries[i].ID] = i
-	}
-	lastCompaction := -1
-	boundaryPos := -1
-	for i, entry := range entries {
-		if entry.Type != EntryCompaction || strings.TrimSpace(entry.Summary) == "" {
-			continue
-		}
-		resolved := i - 1
-		if pos, ok := positions[entry.CompactedThrough]; ok && pos < i {
-			resolved = pos
-		}
-		// Prefer the marker that hides the greatest valid prefix. A newer marker
-		// wins ties, while corrupt forward/unknown references are clamped at the
-		// marker so they can never resurface an older prefix.
-		if resolved > boundaryPos || (resolved == boundaryPos && i > lastCompaction) {
-			lastCompaction = i
-			boundaryPos = resolved
-		}
-	}
-
-	start := 0
-	var msgs []protocol.Message
-	if lastCompaction >= 0 {
-		entry := entries[lastCompaction]
-		msgs = append(msgs, protocol.Message{
-			ID:        "compaction-" + entry.ID,
-			ParentID:  entry.ParentID,
-			Role:      protocol.RoleCustom,
-			Content:   []protocol.ContentBlock{protocol.NewTextBlock("Working-state checkpoint for compacted history:\n" + entry.Summary)},
-			Timestamp: time.Now().UnixMilli(),
-		})
-		start = boundaryPos + 1
-	}
-	for _, entry := range entries[start:] {
-		if entry.Type == EntryMessage && entry.Message != nil {
-			msgs = append(msgs, entry.Message.Clone())
-		}
-	}
-	return msgs
-}
-
 // NewJSONLStore creates a store backed by a file. If the file does not exist
 // it is created with header metadata from opts.
 func NewJSONLStore(path, cwd string, opts Options) (*JSONLStore, error) {
