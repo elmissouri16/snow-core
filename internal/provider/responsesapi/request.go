@@ -1,8 +1,11 @@
 package responsesapi
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -52,29 +55,106 @@ type responsesTool struct {
 	Strict      bool            `json:"strict"`
 }
 
+// The field order in these wire types matches the deterministic order emitted
+// by the maps they replace. Keeping concrete shapes avoids map construction and
+// sorting during every provider request without changing the JSON object shape.
+type responseInputContent struct {
+	Detail   string `json:"detail,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Type     string `json:"type"`
+}
+
+type responseMessageInput struct {
+	Content []responseInputContent `json:"content"`
+	Role    string                 `json:"role"`
+	Status  string                 `json:"status,omitempty"`
+	Type    string                 `json:"type,omitempty"`
+}
+
+type responseSingleMessageInput struct {
+	Content [1]responseInputContent `json:"content"`
+	Role    string                  `json:"role"`
+	Status  string                  `json:"status,omitempty"`
+	Type    string                  `json:"type,omitempty"`
+}
+
+type responseFunctionCallInput struct {
+	Arguments string `json:"arguments"`
+	CallID    string `json:"call_id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	Type      string `json:"type"`
+}
+
+type responseFunctionCallOutputText struct {
+	CallID string `json:"call_id"`
+	Output string `json:"output"`
+	Type   string `json:"type"`
+}
+
+type responseFunctionCallOutputContent struct {
+	CallID string                 `json:"call_id"`
+	Output []responseInputContent `json:"output"`
+	Type   string                 `json:"type"`
+}
+
+type responseLegacyReasoningInput struct {
+	EncryptedContent string      `json:"encrypted_content"`
+	ID               string      `json:"id"`
+	Summary          [0]struct{} `json:"summary"`
+	Type             string      `json:"type"`
+}
+
+type persistedReasoningEnvelope struct {
+	Type             string                   `json:"type"`
+	ID               string                   `json:"id"`
+	Summary          []persistedReasoningPart `json:"summary"`
+	Content          json.RawMessage          `json:"content,omitempty"`
+	EncryptedContent json.RawMessage          `json:"encrypted_content,omitempty"`
+}
+
+type persistedReasoningPart struct {
+	Type string  `json:"type"`
+	Text *string `json:"text"`
+}
+
+var persistedReasoningDecodeOptions = jsonv2.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+)
+
 func BuildRequest(req protocol.ChatRequest, opts RequestOptions) ([]byte, error) {
+	body, err := buildRequestBody(req, opts)
+	if err != nil {
+		return nil, err
+	}
+	return marshalRequestBody(body)
+}
+
+func buildRequestBody(req protocol.ChatRequest, opts RequestOptions) (responsesRequest, error) {
 	model := req.Model.ID
 	if model == "" {
-		return nil, errors.New("model is required")
+		return responsesRequest{}, errors.New("model is required")
 	}
 	level := protocol.NormalizeThinkingLevel(req.Thinking)
 	summary, err := protocol.ParseReasoningSummary(string(req.ReasoningSummary))
 	if err != nil {
-		return nil, err
+		return responsesRequest{}, err
 	}
 	verbosity, err := protocol.ParseTextVerbosity(string(req.TextVerbosity))
 	if err != nil {
-		return nil, err
+		return responsesRequest{}, err
 	}
 	if !req.Model.SupportsThinkingLevel(level) {
-		return nil, unsupportedThinkingError(opts.ProviderID, req.Model, model, level)
+		return responsesRequest{}, unsupportedThinkingError(opts.ProviderID, req.Model, model, level)
 	}
 	body := responsesRequest{
 		Model:             model,
 		Store:             false,
 		Stream:            true,
 		Instructions:      req.System,
-		Input:             make([]any, 0, len(req.Messages)),
+		Input:             make([]any, 0, requestInputCount(req.Messages, len(req.InternalContext), opts.ProviderID)),
 		PromptCacheKey:    opts.PromptCacheKey,
 		ToolChoice:        opts.ToolChoice,
 		ParallelToolCalls: opts.ParallelToolCalls,
@@ -98,19 +178,22 @@ func BuildRequest(req protocol.ChatRequest, opts RequestOptions) ([]byte, error)
 		body.Instructions = "You are a helpful assistant."
 	}
 	for _, msg := range req.Messages {
-		input, err := responseInput(msg, opts.ProviderID)
+		body.Input, err = appendResponseInput(body.Input, msg, opts.ProviderID, false)
 		if err != nil {
-			return nil, err
+			return responsesRequest{}, err
 		}
-		body.Input = append(body.Input, input...)
 	}
 	for _, fragment := range req.InternalContext {
 		if err := fragment.Validate(); err != nil {
-			return nil, err
+			return responsesRequest{}, err
 		}
-		body.Input = append(body.Input, map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": renderInternalFragment(fragment)}}})
+		body.Input = append(body.Input, &responseSingleMessageInput{
+			Content: [1]responseInputContent{{Text: renderInternalFragment(fragment), Type: "input_text"}},
+			Role:    "user",
+		})
 	}
-	if req.Model.SupportsTools {
+	if req.Model.SupportsTools && len(req.Tools) > 0 {
+		body.Tools = make([]responsesTool, 0, len(req.Tools))
 		for _, tool := range req.Tools {
 			params := tool.Parameters
 			if len(params) == 0 {
@@ -133,7 +216,7 @@ func BuildRequest(req protocol.ChatRequest, opts RequestOptions) ([]byte, error)
 			}
 		}
 	}
-	return json.Marshal(body)
+	return body, nil
 }
 
 func mapThinkingEffort(level protocol.ThinkingLevel) (string, bool) {
@@ -160,25 +243,42 @@ func renderInternalFragment(fragment protocol.InternalContextFragment) string {
 }
 
 // MessageInput exposes the provider-neutral history encoder to sibling
-// Responses adapters and package regression tests.
+// Responses adapters and package regression tests. It retains defensive
+// ownership of provider-private bytes because callers may retain the result.
 func MessageInput(msg protocol.Message, providerID string) ([]any, error) {
 	return responseInput(msg, providerID)
 }
 
 func responseInput(msg protocol.Message, providerID string) ([]any, error) {
-	text := messageText(msg)
+	count := responseInputItemCount(msg, providerID)
+	if count == 0 {
+		return nil, nil
+	}
+	out := make([]any, 0, count)
+	return appendResponseInput(out, msg, providerID, true)
+}
+
+func appendResponseInput(out []any, msg protocol.Message, providerID string, cloneProviderData bool) ([]any, error) {
 	switch msg.Role {
 	case protocol.RoleUser, protocol.RoleAgent:
-		content, err := userInputContent(msg.Content)
-		if err != nil {
-			return nil, err
+		contentCount := userInputContentCount(msg.Content)
+		if contentCount == 1 {
+			content, err := singleUserInputContent(msg.Content)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, &responseSingleMessageInput{
+				Content: [1]responseInputContent{content},
+				Role:    "user",
+			})
+		} else if contentCount > 1 {
+			content, err := userInputContent(msg.Content)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, &responseMessageInput{Content: content, Role: "user"})
 		}
-		if len(content) == 0 {
-			return nil, nil
-		}
-		return []any{map[string]any{"role": "user", "content": content}}, nil
 	case protocol.RoleAssistant:
-		var out []any
 		for _, block := range msg.Content {
 			switch block.Type {
 			case protocol.BlockProviderData:
@@ -188,158 +288,307 @@ func responseInput(msg protocol.Message, providerID string) ([]any, error) {
 				// provider did not complete successfully. Failed/aborted Responses
 				// may emit encrypted reasoning before their terminal event; omit it
 				// conservatively so a later retry does not depend on failed history.
-				if providerID == "" || msg.Provider != providerID || msg.StopReason == protocol.StopError || msg.StopReason == protocol.StopAborted {
+				if !canReplayProviderData(msg, providerID) {
 					continue
 				}
-				item, err := replayProviderReasoning(block)
+				item, err := replayProviderReasoning(block, cloneProviderData)
 				if err != nil {
 					return nil, err
 				}
 				out = append(out, item)
 			case protocol.BlockToolCall:
-				args := strings.TrimSpace(string(block.Arguments))
-				if args == "" {
-					args = "{}"
+				args := bytes.TrimSpace(block.Arguments)
+				argumentText := "{}"
+				if len(args) > 0 {
+					argumentText = string(args)
 				}
-				out = append(out, map[string]any{
-					"type":      "function_call",
-					"call_id":   block.ToolCallID,
-					"name":      block.Name,
-					"arguments": args,
-					"status":    "completed",
+				out = append(out, &responseFunctionCallInput{
+					Arguments: argumentText,
+					CallID:    block.ToolCallID,
+					Name:      block.Name,
+					Status:    "completed",
+					Type:      "function_call",
 				})
 			}
 		}
-		if text != "" {
-			out = append(out, map[string]any{
-				"type": "message", "role": "assistant", "status": "completed",
-				"content": []any{map[string]any{"type": "output_text", "text": text}},
+		if text := messageText(msg); text != "" {
+			out = append(out, &responseSingleMessageInput{
+				Content: [1]responseInputContent{{Text: text, Type: "output_text"}},
+				Role:    "assistant",
+				Status:  "completed",
+				Type:    "message",
 			})
 		}
-		return out, nil
 	case protocol.RoleTool:
-		output, err := responseToolOutput(msg.Content, text)
-		if err != nil {
-			return nil, err
+		hasImage := false
+		for _, block := range msg.Content {
+			if block.Type == protocol.BlockImage {
+				hasImage = true
+				break
+			}
 		}
-		return []any{map[string]any{
-			"type": "function_call_output", "call_id": msg.ToolCallID, "output": output,
-		}}, nil
+		if hasImage {
+			content, err := userInputContent(msg.Content)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, &responseFunctionCallOutputContent{
+				CallID: msg.ToolCallID,
+				Output: content,
+				Type:   "function_call_output",
+			})
+		} else {
+			text := messageText(msg)
+			if text == "" {
+				text = "(no tool output)"
+			}
+			out = append(out, &responseFunctionCallOutputText{
+				CallID: msg.ToolCallID,
+				Output: text,
+				Type:   "function_call_output",
+			})
+		}
 	case protocol.RoleCustom:
-		if text != "" {
-			return []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": text}}}}, nil
+		if text := messageText(msg); text != "" {
+			out = append(out, &responseSingleMessageInput{
+				Content: [1]responseInputContent{{Text: text, Type: "input_text"}},
+				Role:    "user",
+			})
 		}
 	}
-	return nil, nil
+	return out, nil
 }
 
-func replayProviderReasoning(block protocol.ContentBlock) (any, error) {
-	if block.Name == "" || len(block.Data) == 0 {
-		return nil, errors.New("persisted provider reasoning data is malformed")
+func requestInputCount(messages []protocol.Message, internalCount int, providerID string) int {
+	count := internalCount
+	for _, msg := range messages {
+		count += responseInputItemCount(msg, providerID)
 	}
-	if !json.Valid(block.Data) {
-		// Backward compatibility for the original persistence format, where Data
-		// held only encrypted_content and Name held the reasoning item ID. Upgrade
-		// it to the current wire shape because summary is required by Responses.
-		return map[string]any{"type": "reasoning", "id": block.Name, "summary": []any{}, "encrypted_content": string(block.Data)}, nil
-	}
-	var item persistedReasoningItem
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(block.Data, &item) != nil || json.Unmarshal(block.Data, &fields) != nil ||
-		item.Type != "reasoning" || item.ID == "" || item.ID != block.Name || item.Summary == nil {
-		return nil, errors.New("persisted provider reasoning data is malformed")
-	}
-	for name := range fields {
-		switch name {
-		case "type", "id", "summary", "content", "encrypted_content":
-		default:
-			return nil, errors.New("persisted provider reasoning data is malformed")
-		}
-	}
-	if _, ok := fields["summary"]; !ok {
-		return nil, errors.New("persisted provider reasoning data is malformed")
-	}
-	if _, valid := sanitizeReasoningParts(item.Summary, "summary_text"); !valid {
-		return nil, errors.New("persisted provider reasoning data is malformed")
-	}
-	if raw, ok := fields["content"]; ok {
-		if item.Content == nil || string(raw) == "null" {
-			return nil, errors.New("persisted provider reasoning data is malformed")
-		}
-		if _, valid := sanitizeReasoningParts(*item.Content, "reasoning_text"); !valid {
-			return nil, errors.New("persisted provider reasoning data is malformed")
-		}
-	}
-	if raw, ok := fields["encrypted_content"]; ok && (item.EncryptedContent == nil || string(raw) == "null") {
-		return nil, errors.New("persisted provider reasoning data is malformed")
-	}
-	return json.RawMessage(append([]byte(nil), block.Data...)), nil
+	return count
 }
 
-func responseToolOutput(blocks []protocol.ContentBlock, text string) (any, error) {
-	hasImage := false
-	for _, block := range blocks {
-		if block.Type == protocol.BlockImage {
-			hasImage = true
-			break
+func responseInputItemCount(msg protocol.Message, providerID string) int {
+	switch msg.Role {
+	case protocol.RoleUser, protocol.RoleAgent:
+		if userInputContentCount(msg.Content) > 0 {
+			return 1
+		}
+	case protocol.RoleAssistant:
+		count := 0
+		replayProviderData := canReplayProviderData(msg, providerID)
+		for _, block := range msg.Content {
+			switch block.Type {
+			case protocol.BlockProviderData:
+				if replayProviderData {
+					count++
+				}
+			case protocol.BlockToolCall:
+				count++
+			}
+		}
+		if messageTextPresent(msg.Content) {
+			count++
+		}
+		return count
+	case protocol.RoleTool:
+		return 1
+	case protocol.RoleCustom:
+		if messageTextPresent(msg.Content) {
+			return 1
 		}
 	}
-	if !hasImage {
-		if text == "" {
-			text = "(no tool output)"
-		}
-		return text, nil
-	}
-	return userInputContent(blocks)
+	return 0
 }
 
-func userInputContent(blocks []protocol.ContentBlock) ([]any, error) {
-	var content []any
+func canReplayProviderData(msg protocol.Message, providerID string) bool {
+	return providerID != "" && msg.Provider == providerID &&
+		msg.StopReason != protocol.StopError && msg.StopReason != protocol.StopAborted
+}
+
+func userInputContentCount(blocks []protocol.ContentBlock) int {
+	count := 0
 	for _, block := range blocks {
 		switch block.Type {
 		case protocol.BlockText:
 			if block.Text != "" {
-				content = append(content, map[string]any{"type": "input_text", "text": block.Text})
+				count++
 			}
 		case protocol.BlockPlan:
-			text := messageText(protocol.Message{Content: []protocol.ContentBlock{block}})
-			if text != "" {
-				content = append(content, map[string]any{"type": "input_text", "text": text})
+			if block.PlanComplete || block.Text != "" {
+				count++
 			}
 		case protocol.BlockImage:
-			image, err := responseImageInput(block)
-			if err != nil {
-				return nil, err
+			count++
+		}
+	}
+	return count
+}
+
+func messageTextPresent(blocks []protocol.ContentBlock) bool {
+	for _, block := range blocks {
+		switch block.Type {
+		case protocol.BlockText:
+			if block.Text != "" {
+				return true
 			}
-			content = append(content, image)
+		case protocol.BlockPlan:
+			if block.PlanComplete || block.Text != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func replayProviderReasoning(block protocol.ContentBlock, cloneData bool) (any, error) {
+	if block.Name == "" || len(block.Data) == 0 {
+		return nil, errors.New("persisted provider reasoning data is malformed")
+	}
+	var item persistedReasoningEnvelope
+	if err := jsonv2.Unmarshal(block.Data, &item, persistedReasoningDecodeOptions, jsonv2.RejectUnknownMembers(true)); err != nil {
+		if !json.Valid(block.Data) {
+			// Backward compatibility for the original persistence format, where
+			// Data held only encrypted_content and Name held the reasoning item ID.
+			// Upgrade it because summary is required by Responses.
+			return &responseLegacyReasoningInput{
+				EncryptedContent: string(block.Data),
+				ID:               block.Name,
+				Type:             "reasoning",
+			}, nil
+		}
+		return nil, errors.New("persisted provider reasoning data is malformed")
+	}
+	if item.Type != "reasoning" || item.ID == "" || item.ID != block.Name ||
+		item.Summary == nil || !validReasoningPartValues(item.Summary, "summary_text") ||
+		(len(item.Content) > 0 && !validReasoningParts(item.Content, "reasoning_text")) ||
+		(len(item.EncryptedContent) > 0 && !validJSONString(item.EncryptedContent)) {
+		return nil, errors.New("persisted provider reasoning data is malformed")
+	}
+	raw := json.RawMessage(block.Data)
+	if cloneData {
+		raw = append(json.RawMessage(nil), block.Data...)
+	}
+	return raw, nil
+}
+
+func validReasoningParts(raw json.RawMessage, expectedType string) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var parts []persistedReasoningPart
+	if jsonv2.Unmarshal(raw, &parts, persistedReasoningDecodeOptions) != nil || parts == nil {
+		return false
+	}
+	return validReasoningPartValues(parts, expectedType)
+}
+
+// Nested reasoning parts intentionally allow additional provider fields for
+// forward compatibility, matching the prior sanitizer; required type/text
+// fields remain strict while the root reasoning envelope rejects unknown fields.
+func validReasoningPartValues(parts []persistedReasoningPart, expectedType string) bool {
+	for _, part := range parts {
+		if part.Type != expectedType || part.Text == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func validJSONString(raw json.RawMessage) bool {
+	// The successful envelope decode already established syntactic validity;
+	// checking the value kind avoids decoding opaque encrypted content again.
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) >= 2 && trimmed[0] == '"'
+}
+
+func userInputContent(blocks []protocol.ContentBlock) ([]responseInputContent, error) {
+	content := make([]responseInputContent, 0, userInputContentCount(blocks))
+	for _, block := range blocks {
+		item, include, err := userInputContentBlock(block)
+		if err != nil {
+			return nil, err
+		}
+		if include {
+			content = append(content, item)
 		}
 	}
 	return content, nil
 }
 
-func responseImageInput(block protocol.ContentBlock) (map[string]any, error) {
+func singleUserInputContent(blocks []protocol.ContentBlock) (responseInputContent, error) {
+	for _, block := range blocks {
+		item, include, err := userInputContentBlock(block)
+		if err != nil {
+			return responseInputContent{}, err
+		}
+		if include {
+			return item, nil
+		}
+	}
+	return responseInputContent{}, errors.New("responses input content count changed")
+}
+
+func userInputContentBlock(block protocol.ContentBlock) (responseInputContent, bool, error) {
+	switch block.Type {
+	case protocol.BlockText:
+		if block.Text != "" {
+			return responseInputContent{Text: block.Text, Type: "input_text"}, true, nil
+		}
+	case protocol.BlockPlan:
+		if text := planBlockText(block); text != "" {
+			return responseInputContent{Text: text, Type: "input_text"}, true, nil
+		}
+	case protocol.BlockImage:
+		image, err := responseImageInput(block)
+		return image, err == nil, err
+	}
+	return responseInputContent{}, false, nil
+}
+
+func responseImageInput(block protocol.ContentBlock) (responseInputContent, error) {
 	mime := strings.ToLower(strings.TrimSpace(block.MIMEType))
 	switch mime {
 	case "image/png", "image/jpeg", "image/gif", "image/webp":
 	default:
-		return nil, fmt.Errorf("unsupported image MIME type %q", block.MIMEType)
+		return responseInputContent{}, fmt.Errorf("unsupported image MIME type %q", block.MIMEType)
 	}
 	if len(block.Data) == 0 {
-		return nil, errors.New("image content is empty")
+		return responseInputContent{}, errors.New("image content is empty")
 	}
 	if len(block.Data) > 20<<20 {
-		return nil, errors.New("image content exceeds 20 MiB limit")
+		return responseInputContent{}, errors.New("image content exceeds 20 MiB limit")
 	}
-	return map[string]any{
-		"type": "input_image", "image_url": "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(block.Data), "detail": "high",
-	}, nil
+	return responseInputContent{Detail: "high", ImageURL: encodeImageDataURI(mime, block.Data), Type: "input_image"}, nil
+}
+
+func encodeImageDataURI(mime string, data []byte) string {
+	const inputChunkBytes = 24 << 10
+	var encoded [32 << 10]byte
+	var imageURL strings.Builder
+	imageURL.Grow(len("data:") + len(mime) + len(";base64,") + base64.StdEncoding.EncodedLen(len(data)))
+	imageURL.WriteString("data:")
+	imageURL.WriteString(mime)
+	imageURL.WriteString(";base64,")
+	for len(data) > inputChunkBytes {
+		base64.StdEncoding.Encode(encoded[:], data[:inputChunkBytes])
+		imageURL.Write(encoded[:])
+		data = data[inputChunkBytes:]
+	}
+	encodedBytes := base64.StdEncoding.EncodedLen(len(data))
+	base64.StdEncoding.Encode(encoded[:encodedBytes], data)
+	imageURL.Write(encoded[:encodedBytes])
+	return imageURL.String()
 }
 
 // MessageText returns the text/plan representation used by Responses input.
 func MessageText(msg protocol.Message) string { return messageText(msg) }
 
 func messageText(msg protocol.Message) string {
+	if text, ok := singleMessageText(msg.Content); ok {
+		return text
+	}
 	var b strings.Builder
+	b.Grow(messageTextGrowSize(msg.Content))
 	for _, block := range msg.Content {
 		switch block.Type {
 		case protocol.BlockText:
@@ -360,5 +609,62 @@ func messageText(msg protocol.Message) string {
 			b.WriteString("</proposed_plan>\n")
 		}
 	}
+	return b.String()
+}
+
+func singleMessageText(blocks []protocol.ContentBlock) (string, bool) {
+	var text string
+	found := false
+	for _, block := range blocks {
+		switch block.Type {
+		case protocol.BlockText:
+		case protocol.BlockPlan:
+			if block.PlanComplete {
+				return "", false
+			}
+		default:
+			continue
+		}
+		if block.Text == "" {
+			continue
+		}
+		if found {
+			return "", false
+		}
+		text = block.Text
+		found = true
+	}
+	return text, true
+}
+
+func messageTextGrowSize(blocks []protocol.ContentBlock) int {
+	const planMarkupBytes = len("<proposed_plan>\n") + len("</proposed_plan>\n") + 2
+	size := 0
+	for _, block := range blocks {
+		switch block.Type {
+		case protocol.BlockText:
+			size += len(block.Text)
+		case protocol.BlockPlan:
+			size += len(block.Text)
+			if block.PlanComplete {
+				size += planMarkupBytes
+			}
+		}
+	}
+	return size
+}
+
+func planBlockText(block protocol.ContentBlock) string {
+	if !block.PlanComplete {
+		return block.Text
+	}
+	var b strings.Builder
+	b.Grow(len(block.Text) + len("<proposed_plan>\n") + len("</proposed_plan>\n") + 1)
+	b.WriteString("<proposed_plan>\n")
+	b.WriteString(block.Text)
+	if !strings.HasSuffix(block.Text, "\n") {
+		b.WriteByte('\n')
+	}
+	b.WriteString("</proposed_plan>\n")
 	return b.String()
 }

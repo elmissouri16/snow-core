@@ -509,9 +509,14 @@ derives sibling `GET /models`, and has an isolated auth/config key. Optional
 Bearer auth comes from explicit options or `auth.json`; `OPENAI_API_KEY` is a
 fallback for the legacy profile only. Responses is preferred and uses the
 bounded request/SSE codec shared with ChatGPT through
-`internal/provider/responsesapi`. An HTTP 404/405/501 from Responses selects
-and caches a Chat Completions/SSE fallback. OAuth, Codex headers, refresh, and
-catalog behavior remain isolated. There is no default endpoint; discovery is
+`internal/provider/responsesapi`. The request side expands normalized history
+into pre-sized concrete wire items and appends the final JSON into one owned
+output buffer; parity tests compare escaping, omission, ordering, raw-value
+formatting, and non-finite-number errors with `encoding/json`. Valid
+provider-private continuity is reused synchronously while the exported
+compatibility projection retains a defensive clone. An HTTP 404/405/501 from
+Responses selects and caches a Chat Completions/SSE fallback. OAuth, Codex
+headers, refresh, and catalog behavior remain isolated. There is no default endpoint; discovery is
 nonfatal when unavailable. Custom/Azure headers and query parameters are
 excluded, and provider errors redact active keys.
 
@@ -615,6 +620,22 @@ tradeoffs auditable rather than contractual:
   allocated bytes in that startup component. The per-start allocation saving is
   2,712 bytes with the default provider inventory, so whole-process RSS remained
   below the resolution of repeatable measurement.
+- Shared Responses request construction now uses typed, exactly pre-sized wire
+  items and a profiled single-output-allocation JSON appender. For 1,500
+  messages and 20 tool schemas, plain history fell from a 1.158 ms median /
+  2,408,961 B / 15,036 allocations to 0.396 ms / 522,560 B / 1,505 allocations;
+  tool-heavy history fell from 0.815 ms / 1,546,497 B / 11,279 allocations to
+  0.287 ms / 386,473 B / 2,254 allocations; and provider-continuity history
+  fell from 3.627 ms / 4,963,204 B / 40,635 allocations to 1.207 ms / 973,374 B /
+  7,517 allocations. Those medians are 64.8–66.7% less time, 75.0–80.4%
+  fewer allocated bytes, and 80.0–90.0% fewer allocations. A separate 2 MiB
+  image case fell from
+  2.446 ms / 12,050,535 B / 30 allocations to 0.916 ms / 5,603,553 B / 5
+  allocations; its remaining bytes are the unavoidable encoded data URI and
+  owned request output. Stage profiles identified dynamic maps and temporary
+  message slices in transformation, then reflective interface handling and the
+  output clone in `encoding/json`; the final appender retains exact wire parity
+  and allocates its output buffer once.
 - A warm 1,500-message SQLite `ContextMessages` projection reduced from a
   201.824 µs median / 1,359,489 B / 1,518 allocations to 75.457 µs / 526,209 B /
   26 allocations by skipping the unused compaction index and packing defensive
@@ -629,8 +650,8 @@ tradeoffs auditable rather than contractual:
   24,342 B / 144 allocations (70.0% less time, 78.4% fewer bytes). The cache is
   keyed by content generation, scroll, dimensions, and exact frame input; live
   changes still render normally.
-- The stripped binary is 66,196,018 bytes (20,708,174 bytes at gzip `-9`),
-  134,944 bytes / 0.20% above the 66,061,074-byte baseline. Surf and Bleve remain
+- The stripped binary is 66,229,922 bytes (20,728,353 bytes at gzip `-9`),
+  168,848 bytes / 0.26% above the 66,061,074-byte baseline. Surf and Bleve remain
   the dominant linked binary-size hotspots; this work keeps them for behavior
   compatibility and removes their eager recurring work instead.
 - At 1,000 tools, steady-state router samples were 1.93–1.94 ms / about 42 KB /
@@ -640,10 +661,12 @@ tradeoffs auditable rather than contractual:
 
 Reproduction uses `go build -trimpath -ldflags='-s -w'`, `/usr/bin/time -l`,
 the fake-provider JSON `tool_routing` event, and `go test` benchmarks
-`BenchmarkSQLiteContextMessages`, `BenchmarkMailboxIngestion`,
-`BenchmarkViewNormalAndNarrow`, and `BenchmarkSearch/tools_1000`, all with
-`-benchmem` and repeated counts. Numbers vary by host and should be compared
-only with the same command and checkout conditions.
+`BenchmarkBuildRequest`, `BenchmarkBuildRequestStages`,
+`BenchmarkBuildRequestImages`, `BenchmarkSQLiteContextMessages`,
+`BenchmarkMailboxIngestion`, `BenchmarkViewNormalAndNarrow`, and
+`BenchmarkSearch/tools_1000`, all with `-benchmem` and repeated counts. Numbers
+vary by host and should be compared only with the same command and checkout
+conditions.
 
 ### Tool interfaces
 
