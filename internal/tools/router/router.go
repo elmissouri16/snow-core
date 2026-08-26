@@ -316,11 +316,6 @@ func buildNamespaceRouteDocumentsContext(ctx context.Context, deferred []routeDe
 	return documents, nil
 }
 
-func uniqueSorted(values []string) []string {
-	out, _ := uniqueSortedContext(context.Background(), values)
-	return out
-}
-
 func uniqueSortedContext(ctx context.Context, values []string) ([]string, error) {
 	type sortableValue struct {
 		value string

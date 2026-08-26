@@ -12,7 +12,8 @@ from this directory and reject network fallback.
 - `agent-event.schema.json` defines normalized event frames.
 - `output.schema.json` is the stdout-frame union.
 - `model.schema.json`, `message.schema.json`, `session-branch.schema.json`,
-  `session-info.schema.json`, and `common.schema.json` contain shared public DTO
+  `session-info.schema.json`, `session-fork.schema.json`,
+  `worktree.schema.json`, and `common.schema.json` contain shared public DTO
   shapes.
 
 The v1 schemas are strict (`additionalProperties: false`) so Go conformance tests

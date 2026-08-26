@@ -71,10 +71,17 @@ func TestSubagentSettingPreservesRuntimeOnlyOverrides(t *testing.T) {
 	}
 }
 
-func TestSettingsPanelNavigationModelReturnAndPermissionPersistence(t *testing.T) {
+func TestSettingsPanelNavigationAndSessionPermission(t *testing.T) {
 	home := testHome(t)
 	m := newModel(context.Background(), app.Options{})
-	buildAppForTest(t, m)
+	a, err := app.New(context.Background(), app.Options{
+		Provider: "fake", NoSession: true, CWD: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.app = a
+	t.Cleanup(func() { _ = a.Close() })
 	m.width, m.height = 100, 30
 	m.inlineTranscript = true
 	m.layout()
@@ -84,7 +91,7 @@ func TestSettingsPanelNavigationModelReturnAndPermissionPersistence(t *testing.T
 		t.Fatal("/settings did not open the panel")
 	}
 	view := stripANSI(m.renderSettings())
-	for _, want := range []string{"Model", "Thinking effort", "Reasoning summary", "Text verbosity", "Permission mode", "Subagents", "Concurrent subagents", "Agent Skills", "ChatGPT only"} {
+	for _, want := range []string{"Model", "Thinking effort", "Reasoning summary", "Text verbosity", "Session permission", "Subagents", "Concurrent subagents", "Agent Skills", "ChatGPT only"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("settings panel missing %q: %q", want, view)
 		}
@@ -122,12 +129,12 @@ func TestSettingsPanelNavigationModelReturnAndPermissionPersistence(t *testing.T
 		t.Fatalf("disabled summary changed to %q", got)
 	}
 
-	// Permission changes apply now, persist globally, and become the baseline
-	// for a subsequently attached session.
+	// Permission changes apply to the active session without changing the
+	// ask-mode baseline for a subsequently attached session.
 	m.settingsIndex = settingsPermission
-	m.cycleSetting(1) // allow -> deny
-	if m.app.Perm.Mode() != permission.ModeDeny {
-		t.Fatalf("permission mode = %q, want deny", m.app.Perm.Mode())
+	m.cycleSetting(1) // ask -> allow
+	if m.app.Perm.Mode() != permission.ModeAllow {
+		t.Fatalf("permission mode = %q, want allow", m.app.Perm.Mode())
 	}
 	m.settingsIndex = settingsSubagents
 	m.cycleSetting(1)
@@ -144,16 +151,24 @@ func TestSettingsPanelNavigationModelReturnAndPermissionPersistence(t *testing.T
 	if !m.app.Cfg.Skills.Disabled || m.settingsError != "" {
 		t.Fatalf("skills disabled=%v error=%q", m.app.Cfg.Skills.Disabled, m.settingsError)
 	}
-	cfg, err := config.Load(filepath.Join(home, "config.json"))
-	if err != nil || cfg.PermissionMode != "deny" || !cfg.Subagents.Enabled || cfg.Subagents.MaxConcurrentThreads != 5 || !cfg.Skills.Disabled {
-		t.Fatalf("persisted settings permission=%q subagents=%v concurrency=%d skills_disabled=%v err=%v", cfg.PermissionMode, cfg.Subagents.Enabled, cfg.Subagents.MaxConcurrentThreads, cfg.Skills.Disabled, err)
+	configPath := filepath.Join(home, "config.json")
+	cfg, err := config.Load(configPath)
+	if err != nil || !cfg.Subagents.Enabled || cfg.Subagents.MaxConcurrentThreads != 5 || !cfg.Skills.Disabled {
+		t.Fatalf("persisted settings subagents=%v concurrency=%d skills_disabled=%v err=%v", cfg.Subagents.Enabled, cfg.Subagents.MaxConcurrentThreads, cfg.Skills.Disabled, err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "permission_mode") {
+		t.Fatalf("session permission leaked into global config: %s", data)
 	}
 	replacement := session.NewMemoryStore(session.Options{CWD: m.app.CWD()})
 	if err := m.app.SetSession(replacement); err != nil {
 		t.Fatal(err)
 	}
-	if m.app.Perm.Mode() != permission.ModeDeny {
-		t.Fatalf("new-session baseline = %q, want deny", m.app.Perm.Mode())
+	if m.app.Perm.Mode() != permission.ModeAsk {
+		t.Fatalf("new-session baseline = %q, want ask", m.app.Perm.Mode())
 	}
 }
 
@@ -234,8 +249,8 @@ func TestSettingsSaveFailureRollsBackAndStaysOpen(t *testing.T) {
 
 	m.settingsIndex = settingsPermission
 	m.cycleSetting(1)
-	if m.app.Perm.Mode() != permission.ModeAllow || m.app.Cfg.PermissionMode != "allow" {
-		t.Fatalf("failed save changed permission runtime=%q config=%q", m.app.Perm.Mode(), m.app.Cfg.PermissionMode)
+	if m.app.Perm.Mode() != permission.ModeDeny || m.settingsError != "" {
+		t.Fatalf("session permission depended on global config save: runtime=%q error=%q", m.app.Perm.Mode(), m.settingsError)
 	}
 
 	oldModel := m.app.Agent.Model()

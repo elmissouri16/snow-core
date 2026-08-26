@@ -327,35 +327,3 @@ func truncateRunes(s string, maxBytes int) string {
 	prefix, _ := validUTF8Prefix([]byte(s), maxBytes)
 	return string(prefix)
 }
-
-// isBinary detects NUL bytes in the first 8KiB of an already-read buffer.
-func isBinary(data []byte) bool {
-	probe := data
-	if len(probe) > 8192 {
-		probe = probe[:8192]
-	}
-	return bytes.IndexByte(probe, 0) >= 0
-}
-
-// sliceLines is retained for package-level callers and tests that need the
-// simple in-memory equivalent of readLineWindow.
-func sliceLines(content string, offset, limit *int) string {
-	lines := strings.Split(content, "\n")
-	start := 0
-	if offset != nil && *offset > 1 {
-		start = *offset - 1
-		if start > len(lines) {
-			start = len(lines)
-		}
-	}
-	end := len(lines)
-	if limit != nil && *limit >= 0 {
-		if l := start + *limit; l < end {
-			end = l
-		}
-	}
-	if start > end {
-		start = end
-	}
-	return strings.Join(lines[start:end], "\n")
-}

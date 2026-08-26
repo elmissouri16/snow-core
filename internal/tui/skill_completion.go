@@ -62,10 +62,6 @@ func replaceSkillCompletionToken(text string, start int, name string) string {
 	return text[:start] + "$" + name + " "
 }
 
-func (m *Model) refreshSkillCompletions() {
-	m.refreshSkillCompletionsFor(m.editor.Value())
-}
-
 func (m *Model) refreshSkillCompletionsFor(text string) {
 	m.skillVisible = false
 	m.skillMatches = nil

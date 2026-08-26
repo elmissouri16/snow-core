@@ -111,10 +111,6 @@ func (c commandSpec) needsArgs() bool {
 	return c.requiresArg
 }
 
-// formatCommandList renders a readable grouped reference for /help. Each
-// command gets its own row so the list remains useful on narrow terminals.
-func formatCommandList() string { return formatCommandListWithKeys(tuiKeys) }
-
 func formatCommandListWithKeys(keys tuiKeyMap) string {
 	var b strings.Builder
 	b.WriteString("Commands\n")

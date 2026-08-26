@@ -21,9 +21,8 @@ type guardedRoot struct {
 }
 
 type rootedPath struct {
-	root     *os.Root
-	name     string
-	resolved string
+	root *os.Root
+	name string
 }
 
 // NewPathGuard creates a guard. Roots are normalized to absolute cleaned
@@ -140,7 +139,7 @@ func (g *PathGuard) rooted(path string) (rootedPath, error) {
 		if err != nil {
 			return rootedPath{}, err
 		}
-		return rootedPath{root: root.root, name: rel, resolved: resolved}, nil
+		return rootedPath{root: root.root, name: rel}, nil
 	}
 	return rootedPath{}, fmt.Errorf("path %q has no open allowed root", path)
 }

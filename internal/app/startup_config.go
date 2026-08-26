@@ -99,9 +99,6 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 	if cfg.DefaultModel != "" && strings.TrimSpace(cfg.DefaultModel) == "" {
 		return startupConfig{}, errors.New("app: model id must not be blank")
 	}
-	if opts.Permission != "" {
-		cfg.PermissionMode = opts.Permission
-	}
 	if opts.Thinking != "" {
 		cfg.Thinking = opts.Thinking
 	}
@@ -141,9 +138,15 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 	if err := cfg.Subagents.ValidateSubagents(); err != nil {
 		return startupConfig{}, err
 	}
-	permMode := permission.Mode(cfg.PermissionMode)
+	// Permissions are launch/session state rather than operator-global config.
+	// Every fresh session starts in ask mode unless the caller supplies an
+	// explicit runtime override; resumed sessions restore their own state later.
+	permMode := permission.ModeAsk
+	if opts.Permission != "" {
+		permMode = permission.Mode(opts.Permission)
+	}
 	if permMode != permission.ModeAsk && permMode != permission.ModeAllow && permMode != permission.ModeDeny {
-		return startupConfig{}, fmt.Errorf("app: invalid permission mode %q (want ask, allow, or deny)", cfg.PermissionMode)
+		return startupConfig{}, fmt.Errorf("app: invalid permission mode %q (want ask, allow, or deny)", opts.Permission)
 	}
 	if opts.BaseURL != "" {
 		if cfg.Providers == nil {

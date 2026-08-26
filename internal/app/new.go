@@ -841,7 +841,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		SearchPolicy:       searchPolicy,
 		ProjectAllowed:     projectAllowed,
 		ProjectInputRoot:   projectInputRoot,
-		permissionDefault:  permMode,
+		permissionBaseline: permMode,
 		permissionOverride: opts.Permission != "",
 		PermBroker:         permBroker,
 		cwd:                absCWD,

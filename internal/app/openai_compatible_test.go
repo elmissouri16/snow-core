@@ -23,7 +23,6 @@ func compatibleConfig(t *testing.T, serverURL, defaultModel string) string {
 	path := filepath.Join(t.TempDir(), "config.json")
 	body := map[string]any{
 		"default_provider": openaicompat.ProviderID,
-		"permission_mode":  "allow",
 		"providers": map[string]any{
 			openaicompat.ProviderID: map[string]any{"base_url": serverURL + "/v1", "default_model": defaultModel},
 			"opencode-go":           map[string]any{"base_url": serverURL + "/opencode"},
@@ -56,7 +55,7 @@ func TestNamedOpenAICompatibleProfileStartupAndAuthIsolation(t *testing.T) {
 	defer server.Close()
 
 	configPath := filepath.Join(t.TempDir(), "config.json")
-	body := fmt.Sprintf(`{"default_provider":"x-provider","default_model":"x-model","permission_mode":"allow","providers":{"x-provider":{"type":"openai-compatible","base_url":%q},"opencode-go":{"base_url":%q}}}`, server.URL+"/v1", server.URL+"/opencode")
+	body := fmt.Sprintf(`{"default_provider":"x-provider","default_model":"x-model","providers":{"x-provider":{"type":"openai-compatible","base_url":%q},"opencode-go":{"base_url":%q}}}`, server.URL+"/v1", server.URL+"/opencode")
 	if err := os.WriteFile(configPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -139,10 +139,6 @@ func (a *Agent) autoCompactionTriggerFor(messages []protocol.Message) compaction
 	return ""
 }
 
-func (a *Agent) autoCompactionDue(messages []protocol.Message) bool {
-	return a.autoCompactionTriggerFor(messages) != ""
-}
-
 // autoCompactAdmittedBoundary compacts at the safe top-of-cycle boundary of
 // any admitted turn. If the turn captured a goal, the goal snapshot must still
 // be active and matching before its context may be replaced.

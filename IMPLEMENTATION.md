@@ -804,9 +804,16 @@ type Service interface {
     Mode() Mode
     SetMode(Mode)
     Authorize(ctx context.Context, req Request) (Decision, error)
-    Remember(req Request, d Decision) // session or persistent scope
+    Remember(req Request, d Decision) // active-session rule
 }
 ```
+
+Every fresh interactive session starts in `ask`; `--permission` is an explicit
+launch-only baseline override. TUI `/permissions` and Settings changes flow
+through the permission service's session metadata handler, so they survive
+resume but never become a default for a new session or project. Global and
+project configurations containing the removed `permission_mode` field are
+rejected rather than silently accepting an ineffective security setting.
 
 The interactive TUI supplies an `Asker`; headless SDK defaults to `deny` for
 mutating tools unless the caller deliberately opts into `allow`/`AutoApprove`
@@ -825,8 +832,9 @@ and `~/.snow/themes/*.yaml`. Project-scoped overrides use
 `<project>/.snow/config.json` and are trust-gated. See
 `docs/configuration.md`.
 
-Defaults include provider `opencode-go`, permission `ask` (headless SDK
-defaults to deny), thinking `off`, 256 KiB tool output, a 120 s bash timeout,
+Defaults include provider `opencode-go`, fresh interactive-session permission
+`ask` (headless SDK defaults to deny), thinking `off`, 256 KiB tool output, a
+120 s bash timeout,
 a 10-minute stream-silence watchdog, and a 100 KiB project-context cap.
 
 ### Context assembly

@@ -25,6 +25,26 @@ func TestLoadRejectsFixedContextBudgetOutsideRange(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsRemovedPermissionMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"permission_mode":"allow"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), `field "permission_mode" was removed`) {
+		t.Fatalf("removed permission field error=%v", err)
+	}
+}
+
+func TestLoadProjectExtensionsRejectsRemovedPermissionMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"permission_mode":null}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadProjectExtensions(path); err == nil || !strings.Contains(err.Error(), `field "permission_mode" was removed`) {
+		t.Fatalf("removed project permission field error=%v", err)
+	}
+}
+
 func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	cfg, err := Load(filepath.Join(t.TempDir(), "nope.json"))
 	if err != nil {
@@ -32,9 +52,6 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	}
 	if cfg.DefaultProvider != "opencode-go" {
 		t.Fatalf("default provider = %q", cfg.DefaultProvider)
-	}
-	if cfg.PermissionMode != "ask" {
-		t.Fatalf("default permission = %q", cfg.PermissionMode)
 	}
 	if cfg.ReasoningSummary != "auto" || cfg.TextVerbosity != "low" {
 		t.Fatalf("response defaults = summary:%q verbosity:%q", cfg.ReasoningSummary, cfg.TextVerbosity)
@@ -365,7 +382,6 @@ func TestLoadAndSaveRoundTrip(t *testing.T) {
 	cfg := Default()
 	cfg.DefaultProvider = "fake"
 	cfg.DefaultModel = "m2"
-	cfg.PermissionMode = "deny"
 	cfg.SystemPromptFile = "system.md"
 	cfg.Providers = map[string]ProviderConfig{
 		"opencode-go": {BaseURL: "https://example.com/v1", DefaultModel: "kimi-k2.6", StreamIdleTimeoutMS: 123000},
@@ -378,7 +394,7 @@ func TestLoadAndSaveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.DefaultProvider != "fake" || got.DefaultModel != "m2" || got.PermissionMode != "deny" || got.SystemPromptFile != "system.md" {
+	if got.DefaultProvider != "fake" || got.DefaultModel != "m2" || got.SystemPromptFile != "system.md" {
 		t.Fatalf("round trip mismatch: %+v", got)
 	}
 	pc, ok := got.Providers["opencode-go"]
@@ -591,7 +607,7 @@ func TestUpdateMergesConcurrentProjectAndGlobalChanges(t *testing.T) {
 		}()
 	}
 	mutations := []func(*Config){
-		func(cfg *Config) { cfg.PermissionMode = "deny" },
+		func(cfg *Config) { cfg.TextVerbosity = "high" },
 		func(cfg *Config) { cfg.ReasoningSummary = "detailed" },
 		func(cfg *Config) { cfg.TUI.Theme = "dark" },
 	}
@@ -620,8 +636,8 @@ func TestUpdateMergesConcurrentProjectAndGlobalChanges(t *testing.T) {
 	if len(cfg.ProjectSelections) != projects {
 		t.Fatalf("project selections = %d, want %d: %+v", len(cfg.ProjectSelections), projects, cfg.ProjectSelections)
 	}
-	if cfg.PermissionMode != "deny" || cfg.ReasoningSummary != "detailed" || cfg.TUI.Theme != "dark" {
-		t.Fatalf("concurrent global settings were lost: permission=%q summary=%q theme=%q", cfg.PermissionMode, cfg.ReasoningSummary, cfg.TUI.Theme)
+	if cfg.TextVerbosity != "high" || cfg.ReasoningSummary != "detailed" || cfg.TUI.Theme != "dark" {
+		t.Fatalf("concurrent global settings were lost: verbosity=%q summary=%q theme=%q", cfg.TextVerbosity, cfg.ReasoningSummary, cfg.TUI.Theme)
 	}
 }
 

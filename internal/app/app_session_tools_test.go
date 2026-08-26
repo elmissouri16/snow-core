@@ -158,6 +158,41 @@ func TestAppEmptySessionIsNotPersisted(t *testing.T) {
 	}
 }
 
+func TestAppPermissionModeUsesLaunchBaselineForNewSessions(t *testing.T) {
+	t.Setenv("SNOW_HOME", t.TempDir())
+	for _, tc := range []struct {
+		name       string
+		override   string
+		initial    permission.Mode
+		manual     permission.Mode
+		newSession permission.Mode
+	}{
+		{name: "default ask", initial: permission.ModeAsk, manual: permission.ModeAllow, newSession: permission.ModeAsk},
+		{name: "explicit launch allow", override: "allow", initial: permission.ModeAllow, manual: permission.ModeDeny, newSession: permission.ModeAllow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: tc.override, CWD: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer a.Close()
+			if got := a.Perm.Mode(); got != tc.initial {
+				t.Fatalf("initial mode = %q, want %q", got, tc.initial)
+			}
+			if err := a.SetPermissionMode(tc.manual); err != nil {
+				t.Fatal(err)
+			}
+			replacement := session.NewMemoryStore(session.Options{CWD: a.CWD()})
+			if err := a.SetSession(replacement); err != nil {
+				t.Fatal(err)
+			}
+			if got := a.Perm.Mode(); got != tc.newSession {
+				t.Fatalf("new-session mode = %q, want %q", got, tc.newSession)
+			}
+		})
+	}
+}
+
 func TestAppPermissionStatePersistsPerSession(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SNOW_HOME", home)
@@ -168,7 +203,9 @@ func TestAppPermissionStatePersistsPerSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.Perm.SetMode(permission.ModeAllow)
+	if err := a.SetPermissionMode(permission.ModeAllow); err != nil {
+		t.Fatal(err)
+	}
 	message := protocol.NewUserMessage("keep", "", "keep session")
 	if err := a.Session.Append(session.Entry{Type: session.EntryMessage, Message: &message}); err != nil {
 		t.Fatal(err)

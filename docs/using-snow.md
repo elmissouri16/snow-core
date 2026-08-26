@@ -329,14 +329,17 @@ meaningful. Interactive provider/model/thinking changes are remembered by
 absolute working directory, so restarting Snow in project A restores project
 A's tuple without changing project B. Global defaults apply only when a project
 has no remembered tuple; explicit startup flags override it for that process.
+Permission mode is different: each fresh session starts in `ask`, an explicit
+`--permission` flag overrides the current launch, and interactive changes are
+stored only with the active session for resume.
 
 | Command | Purpose |
 |---|---|
 | `/help` | Show commands and active keybindings |
 | `/model [id]` | Open the model picker or select a model; provider/model/effort persist for the current project folder |
 | `/thinking [level]` | Choose and persist a model-supported effort for the current project folder |
-| `/settings` | Configure model, theme, response controls, permission mode, subagents, and skills |
-| `/permissions [ask|allow|deny]` | Open or directly change permission mode |
+| `/settings` | Configure model, theme, response controls, session permission, subagents, and skills |
+| `/permissions [ask|allow|deny]` | Open or change the active session's persisted permission mode |
 | `/allow [always]` | Resolve a pending tool request; optional session rule |
 | `/deny` | Deny a pending tool request |
 | `/login [provider] [profile-name]` | Open login flow/provider picker; compatible profiles can be named |

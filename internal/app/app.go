@@ -77,7 +77,7 @@ type App struct {
 	diagnosticsMu        sync.Mutex
 	diagnosticsCacheKey  string
 	diagnosticsCache     []protocol.ConfigDiagnostic
-	permissionDefault    permission.Mode
+	permissionBaseline   permission.Mode
 	permissionOverride   bool
 	modelCatalog         map[string][]protocol.Model
 	runtimeSelection     *liveRuntimeSelection

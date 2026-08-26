@@ -547,14 +547,13 @@ func (a *App) SetProviderModelThinkingContext(ctx context.Context, providerID st
 	}
 }
 
-// SetPermissionDefault updates both the active session mode and the baseline
-// restored for subsequently opened sessions. Config persistence remains the
-// caller's responsibility so it can save first and avoid partial updates.
-func (a *App) SetPermissionDefault(mode permission.Mode) error {
+// SetPermissionMode updates the active session mode. The permission service's
+// change handler persists it with that session; the launch baseline used by a
+// newly opened session remains unchanged.
+func (a *App) SetPermissionMode(mode permission.Mode) error {
 	if mode != permission.ModeAsk && mode != permission.ModeAllow && mode != permission.ModeDeny {
 		return fmt.Errorf("app: invalid permission mode %q", mode)
 	}
-	a.permissionDefault = mode
 	a.Perm.SetMode(mode)
 	return nil
 }
@@ -614,15 +613,6 @@ func mergeDisabledPluginSpecs(global, project, explicit []publicplugin.PluginSpe
 	out := make([]publicplugin.PluginSpec, 0, len(order))
 	for _, id := range order {
 		out = append(out, merged[id])
-	}
-	return out
-}
-
-func mergeMCPServers(global, project map[string]publicmcp.ServerSpec, explicit []publicmcp.ServerSpec) []publicmcp.ServerSpec {
-	declarations := mergeMCPDeclarations(global, project, explicit, "")
-	out := make([]publicmcp.ServerSpec, 0, len(declarations))
-	for _, declaration := range declarations {
-		out = append(out, declaration.Spec)
 	}
 	return out
 }

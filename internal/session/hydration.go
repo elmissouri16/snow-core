@@ -278,15 +278,6 @@ func legacyToolResultWasDispatched(isError bool, messageText string) bool {
 	return !strings.Contains(text, " is unavailable in ")
 }
 
-func hydrationMessageContextChars(message protocol.Message) int {
-	chars := len(message.Role) + 8
-	for _, block := range message.Content {
-		chars += len(block.Type) + len(block.Text) + len(block.Name) +
-			len(block.ToolCallID) + len(block.Arguments) + 8
-	}
-	return chars
-}
-
 func compactedCheckpointContextChars(summary string) int {
 	return len(protocol.RoleCustom) + 8 + len(protocol.BlockText) +
 		len(compactedCheckpointPrefix) + len(summary) + 8

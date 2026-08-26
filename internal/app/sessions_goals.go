@@ -27,7 +27,7 @@ func (a *App) bindPermissionSession(st session.Store) error {
 	a.Perm.SetChangeHandler(nil)
 	// Start each session from the configured baseline so switching away from a
 	// session cannot leak its remembered rules into the next one.
-	a.Perm.RestoreState(permission.State{Mode: a.permissionDefault})
+	a.Perm.RestoreState(permission.State{Mode: a.permissionBaseline})
 
 	meta, ok := st.(session.MetadataStore)
 	if !ok {

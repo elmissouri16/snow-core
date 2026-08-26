@@ -195,7 +195,6 @@ type Config struct {
 	DefaultProvider           string                          `json:"default_provider,omitempty"`
 	DefaultModel              string                          `json:"default_model,omitempty"`
 	ProjectSelections         map[string]ProjectSelection     `json:"project_selections,omitempty"`
-	PermissionMode            string                          `json:"permission_mode,omitempty"`            // ask|allow|deny
 	DefaultProjectTrust       string                          `json:"default_project_trust,omitempty"`      // ask|allow|deny (always|never aliases)
 	Thinking                  string                          `json:"thinking,omitempty"`                   // off|minimal|low|medium|high|xhigh|max|ultra
 	ReasoningSummary          string                          `json:"reasoning_summary,omitempty"`          // off|auto|concise|detailed

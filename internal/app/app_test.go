@@ -16,6 +16,7 @@ import (
 
 	"github.com/elmissouri16/snow-core/internal/buildinfo"
 	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/permission"
 	"github.com/elmissouri16/snow-core/internal/provider/fake"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/userinput"
@@ -242,30 +243,31 @@ func TestAppTrustStoreUsesTrustFileNotAuthFile(t *testing.T) {
 	}
 }
 
-func TestAppRejectsInvalidPermissionMode(t *testing.T) {
+func TestAppRejectsInvalidPermissionModeBeforePluginStartup(t *testing.T) {
 	t.Setenv("SNOW_HOME", t.TempDir())
+	closed := 0
 	_, err := New(context.Background(), Options{
 		Provider: "fake", NoSession: true, Permission: "alow", CWD: t.TempDir(),
+		GoPlugins: []publicplugin.Plugin{appCloseTrackingPlugin{closed: &closed}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "invalid permission mode") {
 		t.Fatalf("invalid permission error = %v", err)
 	}
+	if closed != 0 {
+		t.Fatalf("plugin was acquired before permission validation; close count=%d", closed)
+	}
 }
 
-func TestAppRejectsInvalidPermissionFromConfigBeforePluginStartup(t *testing.T) {
+func TestAppRejectsRemovedGlobalPermissionMode(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SNOW_HOME", home)
 	configPath := filepath.Join(home, "config.json")
-	if err := os.WriteFile(configPath, []byte(`{"permission_mode":"alow"}`), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(`{"permission_mode":"allow"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	closed := 0
-	_, err := New(context.Background(), Options{Provider: "fake", NoSession: true, CWD: t.TempDir(), ConfigPath: configPath, GoPlugins: []publicplugin.Plugin{appCloseTrackingPlugin{closed: &closed}}})
-	if err == nil || !strings.Contains(err.Error(), "invalid permission mode") {
-		t.Fatalf("invalid config error = %v", err)
-	}
-	if closed != 0 {
-		t.Fatalf("plugin was acquired before permission validation; close count=%d", closed)
+	_, err := New(context.Background(), Options{Provider: "fake", NoSession: true, CWD: t.TempDir(), ConfigPath: configPath})
+	if err == nil || !strings.Contains(err.Error(), `field "permission_mode" was removed`) {
+		t.Fatalf("removed permission field error=%v", err)
 	}
 }
 
@@ -448,8 +450,8 @@ func TestAppRestoresIndependentProjectModelSelections(t *testing.T) {
 	if a.PersistedCfg.DefaultModel != "global-model" || b.PersistedCfg.DefaultModel != "global-model" {
 		t.Fatalf("global model default was replaced: A=%q B=%q", a.PersistedCfg.DefaultModel, b.PersistedCfg.DefaultModel)
 	}
-	if a.Cfg.PermissionMode != "allow" || a.PersistedCfg.PermissionMode != "ask" {
-		t.Fatalf("runtime permission leaked into persisted config: runtime=%q persisted=%q", a.Cfg.PermissionMode, a.PersistedCfg.PermissionMode)
+	if a.Perm.Mode() != permission.ModeAllow || b.Perm.Mode() != permission.ModeAllow {
+		t.Fatalf("explicit runtime permission = A:%q B:%q, want allow", a.Perm.Mode(), b.Perm.Mode())
 	}
 
 	overridden := open(projectA, Options{Provider: "fake", Model: "cli-model", Thinking: "off", BaseURL: "https://runtime.example"})

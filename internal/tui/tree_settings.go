@@ -270,23 +270,11 @@ func (m *Model) setPermissionMode(mode permission.Mode, announce bool) error {
 	if m.app == nil {
 		return fmt.Errorf("permissions: app is not ready")
 	}
-	if mode != permission.ModeAsk && mode != permission.ModeAllow && mode != permission.ModeDeny {
-		return fmt.Errorf("invalid permission mode %q", mode)
-	}
-	candidate, err := m.persistConfig(func(latest *config.Config) error {
-		latest.PermissionMode = string(mode)
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("persist permissions: %w", err)
-	}
-	if err := m.app.SetPermissionDefault(mode); err != nil {
+	if err := m.app.SetPermissionMode(mode); err != nil {
 		return err
 	}
-	m.app.PersistedCfg = candidate
-	m.app.Cfg.PermissionMode = candidate.PermissionMode
 	if announce {
-		m.pushLine(styleFooter.Render("permission mode: " + string(mode)))
+		m.pushLine(styleFooter.Render("session permission mode: " + string(mode)))
 	}
 	return nil
 }
@@ -408,7 +396,7 @@ func (m *Model) cycleSetting(direction int) {
 		next := cycleValue(values, m.app.Perm.Mode(), direction)
 		err = m.setPermissionMode(next, false)
 		if err == nil {
-			m.settingsStatus = "permission mode saved"
+			m.settingsStatus = "session permission mode saved"
 		}
 	case settingsSubagents:
 		next := cycleValue([]bool{false, true}, m.app.Cfg.Subagents.Enabled, direction)
@@ -649,7 +637,7 @@ func (m *Model) renderSettings() string {
 		"Thinking effort  " + string(m.app.Agent.Thinking()),
 		"Reasoning summary  " + string(m.app.Agent.ReasoningSummary()),
 		"Text verbosity  " + string(m.app.Agent.TextVerbosity()),
-		"Permission mode  " + string(m.app.Perm.Mode()),
+		"Session permission  " + string(m.app.Perm.Mode()),
 		"Subagents  " + onOff(m.app.Cfg.Subagents.Enabled) + " (restart to apply)",
 		fmt.Sprintf("Concurrent subagents  %d (restart to apply)", m.app.Cfg.Subagents.MaxConcurrentThreads),
 		"Agent Skills  " + onOff(!m.app.Cfg.Skills.Disabled) + " (restart to apply)",

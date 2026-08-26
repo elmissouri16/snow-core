@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .errors import ToolError
 
-__all__ = ["Plugin", "ToolError", "ToolContext", "error_result", "result", "text_result"]
+__all__ = ["Plugin", "ToolError", "serve_plugin"]
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _TOOL_RE = re.compile(r"^[a-z][a-z0-9_-]{0,127}$")

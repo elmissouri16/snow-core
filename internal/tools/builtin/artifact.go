@@ -107,13 +107,6 @@ func artifactLineWindow(text string, offset, limit int) (string, int, int, int) 
 	return text[startByte:endByte], startLine, endLine, total
 }
 
-func (t *ArtifactRead) read(ctx context.Context, id string) (string, error) {
-	if t == nil || t.Store == nil || t.Current == nil || t.Current.Current() == nil {
-		return "", errors.New("artifact: unavailable")
-	}
-	return t.Store.ReadText(ctx, t.Current.Current().ID(), id)
-}
-
 func (t *ArtifactRead) open(ctx context.Context, id string) (io.ReadCloser, error) {
 	if t == nil || t.Store == nil || t.Current == nil || t.Current.Current() == nil {
 		return nil, errors.New("artifact: unavailable")

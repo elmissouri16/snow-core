@@ -87,8 +87,15 @@ Model discovery and inference therefore use the same resolved provider
 credential. OAuth endpoint, scope, claim, and token-exchange details remain
 isolated in the provider's auth driver.
 
-The SDK intentionally defaults `PermissionMode` to `deny` when omitted, even if
-the global interactive default is `ask`. See
+Every fresh interactive session starts in permission mode `ask`. An explicit
+`--permission ask|allow|deny` overrides that baseline for the current launch.
+`/permissions` and the TUI Settings permission row change only the active
+session; that state and remembered rules are restored when the same session is
+resumed, but are not inherited by a new session or project. The removed
+`permission_mode` field is rejected in both global and project configuration;
+delete it and use `--permission` or the active-session TUI controls instead.
+
+The SDK intentionally defaults `PermissionMode` to `deny` when omitted. See
 [SDK permissions](sdk.md#permissions-and-security).
 
 ## Global config.json
@@ -99,7 +106,6 @@ A representative configuration:
 {
   "default_provider": "opencode-go",
   "default_model": "kimi-k2.6",
-  "permission_mode": "ask",
   "default_project_trust": "ask",
   "thinking": "off",
   "project_selections": {
@@ -211,7 +217,6 @@ fills required zero-value defaults before validation.
 |---|---|---|
 | `default_provider` | `opencode-go` | Global fallback provider ID for projects without a remembered selection |
 | `default_model` | provider default | Global fallback model ID; provider-specific config may also declare a default |
-| `permission_mode` | `ask` | Interactive default: `ask`, `allow`, or `deny`; unknown nonempty values are startup errors |
 | `default_project_trust` | `ask` | `ask`, `allow`, or `deny`; legacy `always`/`never` are aliases |
 | `thinking` | `off` | Global fallback effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` |
 | `project_selections` | `{}` | Operator-owned absolute working-directory map populated by interactive model/thinking changes; each entry stores `provider`, `model`, and `thinking` |

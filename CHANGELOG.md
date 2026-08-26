@@ -33,6 +33,14 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- Changed interactive permission policy so every fresh session starts in
+  `ask`, unless `--permission` explicitly overrides that launch. TUI
+  `/permissions` and Settings changes now persist only with the active session
+  for resume and no longer write a global default inherited by new projects.
+  Configurations containing the removed `permission_mode` field are rejected
+  with guidance to use the launch flag or active-session controls instead.
+- Removed unreachable private helpers and the unused container-registry
+  dependency tree, and corrected the Python plugin module's exported names.
 - Reduced CPU and transient memory for long-session reopen, compacted in-memory
   context assembly, TUI hydration, OpenAI-compatible request/SSE handling,
   event delivery, artifact pruning, and subagent forks without changing

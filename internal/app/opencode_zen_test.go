@@ -43,7 +43,7 @@ func TestOpenCodeZenAnonymousEndToEndAndFreeCatalog(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SNOW_HOME", home)
 	configPath := filepath.Join(home, "config.json")
-	body := fmt.Sprintf(`{"default_provider":"opencode-zen","permission_mode":"allow","providers":{"opencode-zen":{"base_url":%q},"opencode-go":{"base_url":%q}}}`, server.URL+"/zen", server.URL+"/go")
+	body := fmt.Sprintf(`{"default_provider":"opencode-zen","providers":{"opencode-zen":{"base_url":%q},"opencode-go":{"base_url":%q}}}`, server.URL+"/zen", server.URL+"/go")
 	if err := os.WriteFile(configPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

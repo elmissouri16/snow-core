@@ -74,6 +74,11 @@ Snow classifies tool actions by risk:
 | `ask` | Allowed | Prompt if an interactive asker exists; remembered session rules may apply, and remembered denials hide matching deferred tools |
 | `allow` | Allowed | Allowed |
 
+Every fresh interactive session starts in `ask`; global/project configuration
+cannot opt all future projects into `allow`. An explicit `--permission` flag
+changes the baseline for that launch. TUI `/permissions` and Settings changes
+are stored with the active session and restored only when that session resumes.
+
 The TUI supplies an interactive asker and exposes `/allow [always]`, `/deny`,
 and `/permissions`. The Go SDK and RPC can opt into a trusted-host interactive
 permission broker: a `PermissionHandler` (Go SDK) or the `permission_reply` /

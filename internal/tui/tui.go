@@ -69,10 +69,6 @@ type trustDecisionMsg struct {
 	app *app.App
 	err error
 }
-type appendLineMsg struct {
-	line string
-}
-
 type fixedAuthInteraction struct{ value string }
 
 type tuiOAuthInteraction struct{ events chan<- tea.Msg }
@@ -352,7 +348,6 @@ type Model struct {
 	compactGeneration             uint64
 	runStartedAt                  time.Time
 	now                           func() time.Time
-	done                          bool
 	closeOnce                     sync.Once
 	closeErr                      error
 	startupMu                     sync.Mutex

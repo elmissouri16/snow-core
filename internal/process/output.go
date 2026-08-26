@@ -48,7 +48,6 @@ type outputRead struct {
 	data      []byte
 	next      int64
 	omitted   int64
-	start     int64
 	end       int64
 	notify    <-chan struct{}
 	hasOutput bool
@@ -100,7 +99,7 @@ func (r *outputRing) read(cursor *int64, maxBytes int, allowIncomplete bool) (ou
 	data := append([]byte(nil), r.data[offset:offset+available]...)
 	return outputRead{
 		data: data, next: at + int64(available), omitted: omitted,
-		start: r.start, end: r.end, notify: r.notify, hasOutput: available > 0,
+		end: r.end, notify: r.notify, hasOutput: available > 0,
 	}, nil
 }
 

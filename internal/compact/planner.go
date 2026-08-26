@@ -520,10 +520,6 @@ func checkpointBodyEmpty(body string) bool {
 	return body == "" || body == "- None recorded." || body == "None recorded."
 }
 
-func checkpointSectionEmpty(summary, section string) bool {
-	return checkpointBodyEmpty(checkpointSection(summary, section))
-}
-
 func replaceCheckpointSection(summary, section, body string) string {
 	heading := "\n## " + section + "\n"
 	start := strings.Index(summary, heading)

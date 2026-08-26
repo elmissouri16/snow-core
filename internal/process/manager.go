@@ -428,12 +428,6 @@ func (m *Manager) lookup(processID string) (*runtimeProcess, error) {
 	return record, nil
 }
 
-func (m *Manager) remove(id string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.removeLocked(id)
-}
-
 func (m *Manager) removeLocked(id string) {
 	delete(m.records, id)
 	for i, existing := range m.order {

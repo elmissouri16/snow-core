@@ -525,13 +525,6 @@ func relativeSearchPath(root, path string, rootIsFile bool) string {
 	return filepath.ToSlash(rel)
 }
 
-// validateGlob validates all ordinary path segments using path.Match. A **
-// segment is handled by globMatcher and matches zero or more path components.
-func validateGlob(pattern string) error {
-	_, err := compileGlob(pattern)
-	return err
-}
-
 func compileGlob(pattern string) (globMatcher, error) {
 	pattern = normalizeGlob(pattern)
 	if pattern == "" {
@@ -560,13 +553,6 @@ func matchGlobPath(rel, pattern string) (bool, error) {
 		return false, err
 	}
 	return matcher.Match(rel)
-}
-
-// matchRecursive is retained for compatibility with the original package
-// helper and treats ** segments as recursive path components.
-func matchRecursive(rel, pattern string) bool {
-	matched, err := matchGlobPath(rel, pattern)
-	return err == nil && matched
 }
 
 func (m globMatcher) Match(rel string) (bool, error) {
@@ -644,16 +630,6 @@ func isTextReader(f io.Reader) bool {
 		}
 	}
 	return true
-}
-
-// lineNumber remains available to package tests and callers that need the
-// first occurrence of a line in an in-memory string.
-func lineNumber(data, line string) int {
-	idx := strings.Index(data, line)
-	if idx < 0 {
-		return 0
-	}
-	return strings.Count(data[:idx], "\n") + 1
 }
 
 func truncate(s string, n int) string {

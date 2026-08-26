@@ -327,8 +327,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setRunIdle()
 		}
 		m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvError, TurnID: msg.turnID, Message: msg.err.Error()})
-	case appendLineMsg:
-		m.pushLine(msg.line)
 	case oauthProgressMsg:
 		if m.oauthLoading {
 			m.oauthProgress = msg.progress

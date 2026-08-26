@@ -1,5 +1,6 @@
 import unittest
 
+import snow_plugin.plugin as plugin_module
 from snow_plugin import Plugin, ToolContext
 from snow_plugin.errors import ToolError
 
@@ -57,6 +58,11 @@ class PluginDefinitionTests(unittest.TestCase):
             Plugin("ok", "", "1.0.0")
         with self.assertRaises(ValueError):
             Plugin("ok", "Ok", "")
+
+    def test_plugin_module_exports_resolve(self):
+        self.assertEqual(plugin_module.__all__, ["Plugin", "ToolError", "serve_plugin"])
+        for name in plugin_module.__all__:
+            self.assertTrue(hasattr(plugin_module, name), name)
 
     def test_allowed_tools_and_capabilities_are_strings(self):
         plugin = Plugin("audit-python", "Audit", "1.0.0", capabilities=["x"], allowed_tools=["echo"])

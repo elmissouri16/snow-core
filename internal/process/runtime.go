@@ -30,7 +30,6 @@ type runtimeProcess struct {
 	signal     string
 	reason     string
 	ready      bool
-	waitErr    error
 	stopGate   chan struct{}
 }
 
@@ -62,9 +61,8 @@ func (p *runtimeProcess) start() error {
 }
 
 func (p *runtimeProcess) wait() {
-	err := p.cmd.Wait()
+	_ = p.cmd.Wait()
 	p.mu.Lock()
-	p.waitErr = err
 	p.finishedAt = time.Now().UnixMilli()
 	if p.reason == "" {
 		p.reason = "natural"
