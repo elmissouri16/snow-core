@@ -269,38 +269,10 @@ func (m *Model) applyTranscriptSelectionContextMenuKey(msg tea.KeyMsg) (bool, te
 }
 
 func overlayTranscriptSelectionContextMenu(frame string, menu transcriptSelectionContextMenu) string {
-	if !menu.open || menu.width <= 0 || frame == "" {
+	if !menu.open {
 		return frame
 	}
-	popup := transcriptSelectionContextMenuView()
-	baseLines := strings.Split(frame, "\n")
-	popupLines := strings.Split(popup, "\n")
-	for index, popupLine := range popupLines {
-		row := menu.y + index
-		if row < 0 || row >= len(baseLines) {
-			continue
-		}
-		line := baseLines[row]
-		lineWidth := xansi.StringWidth(line)
-		needed := menu.x + menu.width
-		if lineWidth < needed {
-			line += strings.Repeat(" ", needed-lineWidth)
-			lineWidth = needed
-		}
-		popupWidth := xansi.StringWidth(popupLine)
-		if popupWidth < menu.width {
-			popupLine += strings.Repeat(" ", menu.width-popupWidth)
-		} else if popupWidth > menu.width {
-			popupLine = xansi.Cut(popupLine, 0, menu.width)
-		}
-		before := xansi.Cut(line, 0, menu.x)
-		after := xansi.Cut(line, min(lineWidth, menu.x+menu.width), lineWidth)
-		// The underlying transcript may be in reverse-video selection mode.
-		// Reset around each popup row so that style cannot bleed across the frame;
-		// xansi.Cut restores the source style at the start of after.
-		baseLines[row] = before + "\x1b[0m" + popupLine + "\x1b[0m" + after
-	}
-	return strings.Join(baseLines, "\n")
+	return overlayFrameBlock(frame, transcriptSelectionContextMenuView(), menu.x, menu.y, menu.width)
 }
 
 func (m *Model) catchUpTranscriptAfterSelection() {

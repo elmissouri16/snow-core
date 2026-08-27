@@ -16,6 +16,30 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+func (m *Model) dispatchMouse(msg tea.MouseMsg) tea.Cmd {
+	if m.permPending || m.userInputPending {
+		m.closeTranscriptSelectionContextMenu()
+		return nil
+	}
+	if m.processFleetOpen {
+		m.handleProcessFleetMouse(msg)
+		return nil
+	}
+	if m.subagentFleetOpen {
+		m.handleSubagentFleetMouse(msg)
+		return nil
+	}
+	if m.loginModalVisible() {
+		return nil
+	}
+	if handled, cmd := m.handleModelMouse(msg); handled {
+		return cmd
+	}
+	// Application-owned drag selection and viewport wheel scrolling share the
+	// same cell-motion mouse stream.
+	return m.applyMouse(msg)
+}
+
 func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -30,18 +54,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		m.refreshTranscriptForced()
 	case tea.MouseMsg:
-		if m.processFleetOpen {
-			m.handleProcessFleetMouse(msg)
-			return m, nil
-		}
-		if m.subagentFleetOpen {
-			m.handleSubagentFleetMouse(msg)
-			return m, nil
-		}
-		// Application-owned drag selection and viewport wheel scrolling share
-		// the same cell-motion mouse stream.
-		cmd := m.applyMouse(msg)
-		return m, cmd
+		return m, m.dispatchMouse(msg)
 	case transcriptSelectionAutoScrollMsg:
 		return m, m.handleTranscriptSelectionAutoScroll(uint64(msg))
 	case transcriptSelectionCopiedMsg:
@@ -65,6 +78,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
+		if m.permPending || m.userInputPending {
+			m.closeTranscriptSelectionContextMenu()
+			if handled, cmd := m.normalizeTerminalKey(msg); handled {
+				m.layout()
+				return m, cmd
+			}
+			model, cmd := m.handleKey(msg)
+			m.layout()
+			return model, cmd
+		}
 		if handled, cmd := m.applyTranscriptSelectionContextMenuKey(msg); handled {
 			return m, cmd
 		}
@@ -74,7 +97,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
 		// transcript when not in a picker.
-		if !m.loginMode && !m.loginProfileMode && !m.loginEndpointMode && !m.pickProvider && !m.pickChatGPTAuth && !m.pickModel && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.processFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
+		if !m.loginModalVisible() && !m.pickModel && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.processFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
 			switch {
 			case keyMatches(msg, m.keys.PageUp):
 				m.refreshTranscriptForced()
@@ -334,13 +357,22 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case oauthDoneMsg:
 		if m.oauthLoading {
+			backRequested := m.oauthBackRequested
 			m.oauthLoading = false
+			m.oauthBackRequested = false
 			if m.oauthCancel != nil {
 				m.oauthCancel()
 			}
 			m.oauthCancel = nil
 			m.oauthEvents = nil
+			m.oauthProgress = chatgpt.LoginProgress{}
+			m.loginError = ""
+			if backRequested && msg.err != nil {
+				m.pickChatGPTAuth = true
+				break
+			}
 			m.pickChatGPTAuth = false
+			m.clearLoginNavigation()
 			if msg.err != nil {
 				m.pushLine(styleError.Render(msg.err.Error()))
 			} else {
@@ -348,6 +380,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case logoutDoneMsg:
+		if msg.generation != m.logoutGeneration {
+			break
+		}
+		m.logoutPending = false
+		m.logoutProvider = ""
 		if msg.err != nil {
 			m.pushLine(styleError.Render("logout: " + msg.err.Error()))
 		} else {
@@ -358,11 +395,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.compatibleLoginPending = false
+		m.compatibleLoginProvider = ""
 		m.modelList = uniquePickerModels(m.app.AllModels, m.app.ProviderID)
 		if msg.err != nil {
 			m.pushLine(styleError.Render(msg.provider + " configured; model discovery failed: " + msg.err.Error()))
 		} else {
-			m.pushLine(styleFooter.Render(msg.provider + " configured for " + msg.endpoint + " · choose /model to switch"))
+			m.pushLine(styleFooter.Render(msg.provider + " configured · choose /model to switch"))
 		}
 	case inlineHistoryAckMsg:
 		if msg.generation == m.inlinePrintGeneration && m.inlinePrintInFlight && msg.end == m.inlinePrintEnd {
@@ -513,12 +551,18 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.layout()
 	case modelListMsg:
-		if msg.generation != m.pickerGeneration || !m.pickModel {
+		if msg.generation != m.pickerGeneration || !m.modelModalVisible() {
 			return m, nil
+		}
+		selectedProvider, selectedID := "", ""
+		before := m.filteredModels()
+		if len(before) > 0 {
+			selected := before[clampPickerIndex(m.modelIndex, len(before))]
+			selectedProvider, selectedID = selected.Provider, selected.ID
 		}
 		m.modelLoading = false
 		if msg.err != nil && len(msg.models) == 0 && len(m.modelList) == 0 {
-			m.pickModel = false
+			m.clearModelPick()
 			m.pushLine(styleError.Render("model list: " + msg.err.Error()))
 			return m, nil
 		}
@@ -528,19 +572,23 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(msg.models) > 0 {
 			m.modelList = uniquePickerModels(msg.models, m.app.ProviderID)
 		}
-		m.modelQuery = ""
-		m.modelSearchActive = false
 		if len(m.modelList) == 0 {
-			m.pickModel = false
+			m.clearModelPick()
 			m.pushLine(styleError.Render("no models available"))
 			return m, nil
 		}
+		models := m.filteredModels()
 		m.modelIndex = 0
-		for i, model := range m.modelList {
-			if m.app != nil && model.Provider == m.app.Model.Provider && model.ID == m.app.Model.ID {
+		selectedFound := false
+		for i, model := range models {
+			if model.Provider == selectedProvider && model.ID == selectedID {
 				m.modelIndex = i
+				selectedFound = true
 				break
 			}
+		}
+		if !selectedFound && m.app != nil {
+			m.resetModelIndexToActive(models)
 		}
 		m.layout()
 	case subagentFleetListMsg:

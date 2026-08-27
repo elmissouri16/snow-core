@@ -18,6 +18,26 @@ func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cm
 		return m, nil
 	}
 	switch result.target {
+	case textareaTargetLoginProfile, textareaTargetLoginEndpoint:
+		profileTarget := result.target == textareaTargetLoginProfile
+		activeTarget := profileTarget && m.loginProfileMode || !profileTarget && m.loginEndpointMode
+		if result.pasteGeneration != m.loginFieldGeneration || !activeTarget {
+			return m, nil
+		}
+		previous := m.editor.Value()
+		var cmd tea.Cmd
+		m.editor, cmd = m.editor.Update(result.msg)
+		if value := sanitizeTerminalLine(m.editor.Value()); value != m.editor.Value() {
+			m.editor.SetValue(value)
+			m.editor.CursorEnd()
+		}
+		if m.editor.Err != nil {
+			m.loginError = "paste: " + m.editor.Err.Error()
+		} else if m.editor.Value() != previous {
+			m.loginError = ""
+		}
+		m.layout()
+		return m, cmd
 	case textareaTargetUserInput:
 		question := m.currentUserInputQuestion()
 		if !m.userInputPending || !m.userInputEditing || m.userInputRequest == nil || question == nil ||
@@ -403,6 +423,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 				m.busy = true
 			}
 			req := ev.Permission.Request
+			m.closeTranscriptSelectionContextMenu()
 			m.permPending = true
 			m.permRequest = &req
 			m.permAgent = ev.Agent.Clone()

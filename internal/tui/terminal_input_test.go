@@ -60,6 +60,25 @@ func TestLeakedSGRWheelReportsScrollWithoutEditing(t *testing.T) {
 	}
 }
 
+func TestLeakedSGRReportDoesNotEnterBlockingUserInput(t *testing.T) {
+	m := prepareScrollableModel(t)
+	m.startUserInput(protocol.UserInputRequest{ID: "terminal", Questions: []protocol.UserInputQuestion{{
+		ID: "answer", Header: "Answer", Question: "Type an answer",
+	}}})
+	before := m.transcript.YOffset
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<65;42;7M")})
+	deliverTerminalCmd(t, m, cmd)
+	if got := m.userInputEditor.Value(); got != "" {
+		t.Fatalf("mouse report leaked into user input: %q", got)
+	}
+	if got := m.transcript.YOffset; got != before {
+		t.Fatalf("mouse report scrolled behind user input: offset=%d want %d", got, before)
+	}
+	if m.transcriptSelection.anchor != nil || m.transcriptSelection.pressActive {
+		t.Fatalf("mouse report selected behind user input: %+v", m.transcriptSelection)
+	}
+}
+
 func TestLeakedSGRFragmentsRecoverAcrossInputMessages(t *testing.T) {
 	tests := []struct {
 		name  string

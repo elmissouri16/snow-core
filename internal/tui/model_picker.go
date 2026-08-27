@@ -13,50 +13,46 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-// handleModelPick navigates and searches the /model picker. Slash enters search
-// mode so the usual j/k picker bindings remain available until text entry starts.
+// handleModelPick gives ordinary rune input to search immediately while the
+// non-rune picker bindings continue to navigate the filtered catalog.
 func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.modelLoading && len(m.modelList) == 0 {
-		msg = normalizePickerKeyWithMap(msg, m.keys)
-		if msg.Type == tea.KeyEsc {
-			m.pickModel = false
-			m.modelLoading = false
-			m.pickerGeneration++
-		}
-		return m, nil
+	if keyMatches(msg, m.keys.Close) {
+		msg = tea.KeyMsg{Type: tea.KeyEsc}
+	} else if keyMatches(msg, m.keys.Accept) {
+		msg = tea.KeyMsg{Type: tea.KeyEnter}
 	}
 
-	if m.modelSearchActive {
-		switch msg.Type {
-		case tea.KeyRunes:
-			m.modelQuery += string(msg.Runes)
-			m.modelIndex = 0
-			m.layout()
-			return m, nil
-		case tea.KeyBackspace:
-			runes := []rune(m.modelQuery)
-			if len(runes) > 0 {
-				m.modelQuery = string(runes[:len(runes)-1])
-			}
-			m.modelIndex = 0
-			m.layout()
-			return m, nil
-		case tea.KeyCtrlU:
+	switch msg.Type {
+	case tea.KeyRunes, tea.KeySpace:
+		text := string(msg.Runes)
+		if msg.Type == tea.KeySpace && text == "" {
+			text = " "
+		}
+		m.modelQuery += text
+		m.modelIndex = 0
+		return m, nil
+	case tea.KeyBackspace:
+		runes := []rune(m.modelQuery)
+		if len(runes) > 0 {
+			m.modelQuery = string(runes[:len(runes)-1])
+		}
+		m.modelIndex = 0
+		return m, nil
+	case tea.KeyCtrlU:
+		m.modelQuery = ""
+		m.resetModelIndexToActive(m.filteredModels())
+		return m, nil
+	case tea.KeyEsc:
+		if m.modelQuery != "" {
 			m.modelQuery = ""
-			m.modelIndex = 0
-			m.layout()
-			return m, nil
-		case tea.KeyEsc:
-			m.modelQuery = ""
-			m.modelIndex = 0
-			m.modelSearchActive = false
-			m.layout()
+			m.resetModelIndexToActive(m.filteredModels())
 			return m, nil
 		}
-	} else if msg.Type == tea.KeyRunes && string(msg.Runes) == "/" {
-		m.modelSearchActive = true
-		m.modelIndex = 0
-		m.layout()
+		m.clearModelPick()
+		if m.settingsReturnToPanel {
+			m.settingsReturnToPanel = false
+			m.pickSettings = true
+		}
 		return m, nil
 	}
 
@@ -66,165 +62,86 @@ func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.modelIndex = next
 		return m, nil
 	}
-	switch msg.Type {
-	case tea.KeyEsc:
-		m.clearModelPick()
-		if m.settingsReturnToPanel {
-			m.settingsReturnToPanel = false
-			m.pickSettings = true
-		}
-	case tea.KeyEnter:
-		if len(models) == 0 {
-			return m, nil
-		}
-		model := models[m.modelIndex]
-		if len(model.SupportedThinkingLevels()) > 1 {
-			m.pickModel = false
-			m.startThinkingPickForModel(model, true)
-			return m, nil
-		}
-		m.clearModelPick()
-		if m.settingsReturnToPanel {
-			m.settingsReturnToPanel = false
-			m.pickSettings = true
-			resetThinking := m.app != nil && !model.SupportsThinkingLevel(m.app.Agent.Thinking())
-			if err := m.applyModel(model); err != nil {
-				m.settingsError = err.Error()
-				m.settingsStatus = ""
-			} else {
-				m.settingsError = ""
-				m.settingsStatus = "model saved"
-				if resetThinking {
-					m.settingsStatus = "model saved; thinking reset to off"
-				}
-			}
+	if msg.Type != tea.KeyEnter || len(models) == 0 {
+		return m, nil
+	}
+	m.modelIndex = clampPickerIndex(m.modelIndex, len(models))
+	model := models[m.modelIndex]
+	if len(model.SupportedThinkingLevels()) > 1 {
+		m.pickModel = false
+		m.startThinkingPickForModel(model, true)
+		return m, nil
+	}
+	m.clearModelPick()
+	if m.settingsReturnToPanel {
+		m.settingsReturnToPanel = false
+		m.pickSettings = true
+		resetThinking := m.app != nil && !model.SupportsThinkingLevel(m.app.Agent.Thinking())
+		if err := m.applyModel(model); err != nil {
+			m.settingsError = err.Error()
+			m.settingsStatus = ""
 		} else {
-			m.setModel(model)
+			m.settingsError = ""
+			m.settingsStatus = "model saved"
+			if resetThinking {
+				m.settingsStatus = "model saved; thinking reset to off"
+			}
 		}
+	} else {
+		m.setModel(model)
 	}
 	return m, nil
 }
 
-func (m *Model) modelPickerVisibleModels() int {
-	// An inline modal has ten total rows. Two models leave worst-case room for
-	// separate provider headings, search chrome, scroll markers, details, and
-	// controls while keeping the selected model visible.
-	if m.inlineModalOverlay() {
-		return 2
+func (m *Model) resetModelIndexToActive(models []protocol.Model) {
+	m.modelIndex = 0
+	if m.app == nil {
+		return
 	}
-	// Search makes a short list more useful than filling the whole transcript.
-	// Keep enough space for headings, search state, details, and controls.
-	visible := m.availableOverlayHeight() - 9
-	if visible < 4 {
-		visible = 4
+	for i, model := range models {
+		if model.Provider == m.app.Model.Provider && model.ID == m.app.Model.ID {
+			m.modelIndex = i
+			return
+		}
 	}
-	if visible > 10 {
-		visible = 10
-	}
-	return visible
 }
 
-func (m *Model) modelWindow(models []protocol.Model) (start, end int) {
-	end = len(models)
-	visible := m.modelPickerVisibleModels()
-	if end <= visible {
-		return 0, end
+func (m *Model) handleModelMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
+	// A keyboard-driven model flow owns the frame once open. Do not let pointer
+	// events scroll or select the transcript behind the centered card.
+	if m.modelModalVisible() {
+		return true, nil
 	}
-	start = m.modelIndex - visible/2
-	if start < 0 {
-		start = 0
+	if m.app == nil || m.app.Agent == nil || !m.app.Cfg.TUI.Mouse {
+		return false, nil
 	}
-	if start+visible > end {
-		start = end - visible
+	event := tea.MouseEvent(msg)
+	if event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft || event.Y != 0 {
+		return false, nil
 	}
-	return start, start + visible
+	header := m.renderHeaderLayout(m.currentHeaderStatus())
+	if header.modelEnd <= header.modelStart || event.X < header.modelStart || event.X >= header.modelEnd {
+		return false, nil
+	}
+	if m.modelHeaderBlocked() {
+		return true, nil
+	}
+	if m.busy || m.app.Agent.IsRunning() {
+		m.lastStatus = "model: wait for the current turn to finish"
+		return true, nil
+	}
+	m.closeTranscriptSelectionContextMenu()
+	_, cmd := m.startModelPick()
+	m.layout()
+	return true, cmd
 }
 
-// renderModelPicker renders a compact, searchable, provider-grouped /model list.
-func (m *Model) renderModelPicker() string {
-	if !m.pickModel {
-		return ""
-	}
-	if m.modelLoading && len(m.modelList) == 0 {
-		return styleHeaderDim.Render("models\n  loading models…")
-	}
-	if len(m.modelList) == 0 {
-		return ""
-	}
-	models := m.filteredModels()
-	start, end := m.modelWindow(models)
-	var b strings.Builder
-	b.WriteString(styleHeader.Render("models"))
-	b.WriteString(styleHeaderDim.Render(fmt.Sprintf("  ·  %d available", len(m.modelList))))
-	if m.modelLoading {
-		b.WriteString(styleHeaderDim.Render("  ·  refreshing…"))
-	}
-	b.WriteString("\n")
-	if m.modelSearchActive || m.modelQuery != "" {
-		cursor := ""
-		if m.modelSearchActive {
-			cursor = "_"
-		}
-		b.WriteString(styleHeaderDim.Render(fmt.Sprintf("  search: %s%s  ·  %d matches", m.modelQuery, cursor, len(models))))
-	} else {
-		b.WriteString(styleHeaderDim.Render("  press / to search"))
-	}
-	b.WriteString("\n")
-	if len(models) == 0 {
-		b.WriteString(styleFooter.Render("  no matching models"))
-		b.WriteString("\n")
-	} else {
-		if start > 0 {
-			b.WriteString(styleHeaderDim.Render("  ↑ more"))
-			b.WriteString("\n")
-		}
-		for i := start; i < end; i++ {
-			mm := models[i]
-			if i == start || mm.Provider != models[i-1].Provider {
-				b.WriteString(styleHeaderDim.Render("  " + mm.Provider))
-				b.WriteString("\n")
-			}
-			line := mm.ID
-			if mm.DisplayName != "" && !strings.EqualFold(mm.DisplayName, mm.ID) {
-				line += "  (" + mm.DisplayName + ")"
-			}
-			if m.app != nil && mm.Provider == m.app.Model.Provider && mm.ID == m.app.Model.ID {
-				line += "  ✓ current"
-			}
-			if i == m.modelIndex {
-				b.WriteString(styleCompletionSelected.Render("› " + line))
-			} else {
-				b.WriteString(styleCompletion.Render("  " + line))
-			}
-			b.WriteString("\n")
-		}
-		if end < len(models) {
-			b.WriteString(styleHeaderDim.Render("  ↓ more"))
-			b.WriteString("\n")
-		}
-		selected := models[m.modelIndex]
-		var details []string
-		if selected.ContextWindow > 0 {
-			details = append(details, "ctx "+formatTokenCount(int64(selected.ContextWindow)))
-		}
-		if levels := selected.SupportedThinkingLevels(); len(levels) > 1 {
-			parts := make([]string, 0, len(levels)-1)
-			for _, level := range levels[1:] {
-				parts = append(parts, string(level))
-			}
-			details = append(details, "thinking "+strings.Join(parts, "/"))
-		}
-		if len(details) > 0 {
-			b.WriteString(styleHeaderDim.Render("  " + strings.Join(details, "  ·  ")))
-			b.WriteString("\n")
-		}
-		if selected.Description != "" {
-			b.WriteString(styleFooter.Render("  " + selected.Description))
-			b.WriteString("\n")
-		}
-	}
-	b.WriteString(styleFooter.Render("(↑/↓ choose · / search · Enter apply · Esc cancel)"))
-	return strings.TrimSuffix(b.String(), "\n")
+func (m *Model) modelHeaderBlocked() bool {
+	return m.trustPending || m.sessionOpLoading || m.loginModalVisible() ||
+		m.pickThinking || m.pickSettings || m.pickFork ||
+		m.pickSession || m.pickTree || m.pickInfo || m.pickPermissionMode || m.permPending ||
+		m.userInputPending || m.confirmGoalReplace || m.planPrompt || m.compVisible || m.skillVisible ||
+		m.mentionVisible || m.mentionLoading || m.processFleetOpen || m.subagentFleetOpen
 }
 
 // setModel switches the active provider/model and persists the complete choice

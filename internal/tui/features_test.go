@@ -449,6 +449,37 @@ func TestModelPermissionPickerAllowResponds(t *testing.T) {
 	}
 }
 
+func TestBlockingPermissionPreemptsTranscriptContextMenu(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	got := make(chan string, 1)
+	go func() {
+		decision, err := m.asker.Ask(context.Background(), permissionRequest())
+		if err != nil {
+			got <- "err:" + err.Error()
+			return
+		}
+		got <- string(decision)
+	}()
+	waitAskerPending(t, m.asker)
+
+	m.openTranscriptSelectionContextMenu(1, 1, "must not copy")
+	m.handleAgentEvent(permRequestEvent("bash"))
+	if m.transcriptSelectionMenu.open {
+		t.Fatal("permission arrival did not close context menu")
+	}
+	// Even a stale/reopened menu must not steal Enter from the visible host
+	// request; reducer precedence remains authoritative.
+	m.openTranscriptSelectionContextMenu(1, 1, "must not copy")
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.permPending || m.transcriptSelectionMenu.open {
+		t.Fatalf("permission=%v menu=%v", m.permPending, m.transcriptSelectionMenu.open)
+	}
+	if decision := <-got; decision != "allow" {
+		t.Fatalf("decision=%q want allow", decision)
+	}
+}
+
 func TestModelPermissionPickerEscDenies(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
@@ -656,14 +687,13 @@ func TestModelPickerDeduplicatesAndSearches(t *testing.T) {
 	if len(m.modelList) != 2 {
 		t.Fatalf("deduplicated models = %d, want 2: %+v", len(m.modelList), m.modelList)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("spark")})
 	matches := m.filteredModels()
 	if len(matches) != 1 || matches[0].ID != "fake-spark" {
 		t.Fatalf("search matches = %+v, want fake-spark", matches)
 	}
 	view := stripANSI(m.renderModelPicker())
-	if !strings.Contains(view, "search: spark") || strings.Contains(view, "fake-1") {
+	if !strings.Contains(view, "Search: spark") || strings.Contains(view, "fake-1") {
 		t.Fatalf("filtered picker = %q", view)
 	}
 	if strings.Contains(view, "fake/fake-spark") {
@@ -680,14 +710,13 @@ func TestModelPickerSearchCanShowNoMatchesAndClear(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	_, _ = m.startModelPick()
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("missing")})
 	if got := stripANSI(m.renderModelPicker()); !strings.Contains(got, "no matching models") {
 		t.Fatalf("no-match picker = %q", got)
 	}
 	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEsc})
-	if !m.pickModel || m.modelQuery != "" || m.modelSearchActive {
-		t.Fatalf("search clear picker=%v query=%q active=%v", m.pickModel, m.modelQuery, m.modelSearchActive)
+	if !m.pickModel || m.modelQuery != "" {
+		t.Fatalf("search clear picker=%v query=%q", m.pickModel, m.modelQuery)
 	}
 	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.pickModel {

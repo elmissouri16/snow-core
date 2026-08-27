@@ -50,17 +50,27 @@ func (m *Model) updateComposerEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.Type == tea.KeyCtrlV {
 		m.editor.Err = nil
-		if m.pasteCmdOverride != nil {
-			cmd = m.pasteCmdOverride
-			return m, tea.Batch(routeTextareaCmd(textareaTargetComposer, "", "", cmd), mentionCmd)
-		}
 		m.imagePasteGeneration++
 		generation := m.imagePasteGeneration
+		if m.pasteCmdOverride != nil {
+			cmd = m.pasteCmdOverride
+			return m, tea.Batch(routeTextareaCmdGeneration(textareaTargetComposer, "", "", generation, cmd), mentionCmd)
+		}
 		imageCmd := m.imagePasteCmdOverride
 		if imageCmd == nil {
 			imageCmd = func() tea.Msg {
 				block, err := readClipboardImageFunc()
 				return clipboardImageMsg{generation: generation, block: block, err: err}
+			}
+		} else {
+			override := imageCmd
+			imageCmd = func() tea.Msg {
+				msg := override()
+				if result, ok := msg.(clipboardImageMsg); ok {
+					result.generation = generation
+					return result
+				}
+				return msg
 			}
 		}
 		return m, tea.Batch(imageCmd, mentionCmd)
@@ -208,37 +218,46 @@ func (m *Model) insertMention(path string) (tea.Model, tea.Cmd) {
 func (m *Model) handleLoginProfileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.loginProfileMode = false
-		m.loginProvider = ""
-		m.editor.Reset()
-		m.editor.Placeholder = "Type a message…"
-		m.pushLine(styleFooter.Render("login cancelled"))
+		if !m.restorePreviousLoginStep() {
+			m.cancelLoginFlow()
+		}
 		return m, nil
 	case tea.KeyEnter:
-		profileID := strings.TrimSpace(m.editor.Value())
+		profileDraft := sanitizeTerminalLine(m.editor.Value())
+		profileID := strings.TrimSpace(profileDraft)
 		if profileID == "" {
 			profileID = openaicompat.ProviderID
 		}
 		if err := config.ValidateProviderProfileID(profileID); err != nil {
-			m.pushLine(styleError.Render("login: " + err.Error()))
+			m.loginError = err.Error()
 			return m, nil
 		}
 		if configured, exists := m.app.PersistedCfg.Providers[profileID]; exists && !config.IsOpenAICompatibleProfile(profileID, configured) {
-			m.pushLine(styleError.Render("login: provider name " + profileID + " is already used by another provider type"))
+			m.loginError = "provider name " + profileID + " is already used by another provider type"
 			return m, nil
 		}
+		m.loginError = ""
 		m.loginProfileMode = false
+		m.rememberLoginStep(loginNavigationProfile, openaicompat.ProviderID, profileDraft)
 		m.beginCompatibleEndpointCapture(profileID)
 		return m, nil
 	}
+	previous := m.editor.Value()
 	var cmd tea.Cmd
 	m.editor, cmd = m.editor.Update(msg)
+	if value := sanitizeTerminalLine(m.editor.Value()); value != m.editor.Value() {
+		m.editor.SetValue(value)
+		m.editor.CursorEnd()
+	}
+	if m.editor.Value() != previous {
+		m.loginError = ""
+	}
 	if msg.Type == tea.KeyCtrlV {
 		m.editor.Err = nil
 		if m.pasteCmdOverride != nil {
 			cmd = m.pasteCmdOverride
 		}
-		return m, routeTextareaCmd(textareaTargetComposer, "", "", cmd)
+		return m, routeTextareaCmdGeneration(textareaTargetLoginProfile, "", "", m.loginFieldGeneration, cmd)
 	}
 	return m, cmd
 }
@@ -246,38 +265,46 @@ func (m *Model) handleLoginProfileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) handleLoginEndpointKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.loginEndpointMode = false
-		m.loginEndpoint = ""
-		m.loginProvider = ""
-		m.editor.Reset()
-		m.editor.Placeholder = "Type a message…"
-		m.pushLine(styleFooter.Render("login cancelled"))
+		if !m.restorePreviousLoginStep() {
+			m.cancelLoginFlow()
+		}
 		return m, nil
 	case tea.KeyEnter:
-		endpoint := strings.TrimSpace(m.editor.Value())
+		endpoint := strings.TrimSpace(sanitizeTerminalLine(m.editor.Value()))
 		compatible, err := openaicompat.New(openaicompat.Config{BaseURL: endpoint})
 		if err != nil || !compatible.Configured() {
 			if err == nil {
 				err = errors.New("endpoint is required")
 			}
-			m.pushLine(styleError.Render("login: invalid openai-compatible endpoint: " + err.Error()))
+			m.loginError = "invalid endpoint: " + err.Error()
 			return m, nil
 		}
+		m.loginError = ""
+		provider := m.loginProvider
 		m.loginEndpoint = endpoint
 		m.loginEndpointMode = false
 		m.editor.Reset()
 		m.editor.Placeholder = "Type a message…"
-		m.beginKeyCapture(m.loginProvider)
+		m.rememberLoginStep(loginNavigationEndpoint, provider, endpoint)
+		m.beginKeyCapture(provider)
 		return m, nil
 	}
+	previous := m.editor.Value()
 	var cmd tea.Cmd
 	m.editor, cmd = m.editor.Update(msg)
+	if value := sanitizeTerminalLine(m.editor.Value()); value != m.editor.Value() {
+		m.editor.SetValue(value)
+		m.editor.CursorEnd()
+	}
+	if m.editor.Value() != previous {
+		m.loginError = ""
+	}
 	if msg.Type == tea.KeyCtrlV {
 		m.editor.Err = nil
 		if m.pasteCmdOverride != nil {
 			cmd = m.pasteCmdOverride
 		}
-		return m, routeTextareaCmd(textareaTargetComposer, "", "", cmd)
+		return m, routeTextareaCmdGeneration(textareaTargetLoginEndpoint, "", "", m.loginFieldGeneration, cmd)
 	}
 	return m, cmd
 }
@@ -286,61 +313,71 @@ func (m *Model) handleLoginEndpointKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.loginMode = false
-		m.loginEndpoint = ""
-		m.loginProvider = ""
-		m.secretBuf.Reset()
-		m.editor.Reset()
-		m.pushLine(styleFooter.Render("login cancelled"))
+		if !m.restorePreviousLoginStep() {
+			m.cancelLoginFlow()
+		}
 		return m, nil
 	case tea.KeyEnter:
 		secret := m.secretBuf.String()
-		m.loginMode = false
-		m.secretBuf.Reset()
-		m.editor.Reset()
+		provider := m.loginProvider
 		if m.loginEndpoint != "" {
+			m.loginMode = false
+			m.loginError = ""
+			m.clearLoginNavigation()
+			m.secretBuf.Reset()
+			m.editor.Reset()
 			return m.finishCompatibleLogin(secret)
 		}
 		if strings.TrimSpace(secret) == "" {
-			if m.providerAuthOptional(m.loginProvider) {
-				if credential, ok := m.app.Auth.Get(m.loginProvider); ok && credential.Valid() {
-					m.pushLine(styleFooter.Render("kept stored API key for " + m.loginProvider))
-				} else if status, err := m.app.AuthStatus(m.ctx, m.loginProvider); err == nil && status.Configured() {
-					m.pushLine(styleFooter.Render(m.loginProvider + ": no stored key; explicit or environment credential remains active"))
-				} else {
-					m.pushLine(styleFooter.Render(m.loginProvider + ": using anonymous/keyless access"))
-				}
+			if !m.providerAuthOptional(provider) {
+				m.loginError = "API key is required"
 				return m, nil
 			}
-			m.pushLine(styleError.Render("login: empty API key"))
+			m.loginMode = false
+			m.loginError = ""
+			m.loginProvider = ""
+			m.clearLoginNavigation()
+			m.secretBuf.Reset()
+			m.editor.Reset()
+			if credential, ok := m.app.Auth.Get(provider); ok && credential.Valid() {
+				m.pushLine(styleFooter.Render("kept stored API key for " + provider))
+			} else if status, err := m.app.AuthStatus(m.ctx, provider); err == nil && status.Configured() {
+				m.pushLine(styleFooter.Render(provider + ": no stored key; explicit or environment credential remains active"))
+			} else {
+				m.pushLine(styleFooter.Render(provider + ": using anonymous/keyless access"))
+			}
 			return m, nil
 		}
-		if _, err := m.app.Login(m.ctx, m.loginProvider, auth.LoginRequest{Method: "api_key"}, fixedAuthInteraction{value: secret}); err != nil {
-			m.pushLine(styleError.Render("login: " + err.Error()))
+		if _, err := m.app.Login(m.ctx, provider, auth.LoginRequest{Method: "api_key"}, fixedAuthInteraction{value: secret}); err != nil {
+			m.loginError = err.Error()
 			return m, nil
 		}
-		m.pushLine(styleFooter.Render("stored API key for " + m.loginProvider + " (0600)"))
+		m.loginMode = false
+		m.loginError = ""
+		m.loginProvider = ""
+		m.clearLoginNavigation()
+		m.secretBuf.Reset()
+		m.editor.Reset()
+		m.pushLine(styleFooter.Render("stored API key for " + provider + " (0600)"))
 		return m, nil
 	case tea.KeyBackspace:
-		b := m.secretBuf.String()
-		if len(b) > 0 {
+		runes := []rune(m.secretBuf.String())
+		if len(runes) > 0 {
 			m.secretBuf.Reset()
-			m.secretBuf.WriteString(b[:len(b)-1])
+			m.secretBuf.WriteString(string(runes[:len(runes)-1]))
+			m.loginError = ""
 		}
 		return m, nil
 	case tea.KeyCtrlC:
-		m.loginMode = false
-		m.loginEndpoint = ""
-		m.loginProvider = ""
-		m.secretBuf.Reset()
-		m.editor.Reset()
-		m.pushLine(styleFooter.Render("login cancelled"))
+		m.cancelLoginFlow()
 		return m, nil
 	}
 	if msg.Type == tea.KeyRunes {
 		m.secretBuf.WriteString(string(msg.Runes))
+		m.loginError = ""
 	} else if msg.Type == tea.KeySpace {
 		m.secretBuf.WriteString(" ")
+		m.loginError = ""
 	}
 	return m, nil
 }
@@ -422,11 +459,11 @@ func (m *Model) finishCompatibleLogin(secret string) (tea.Model, tea.Cmd) {
 	m.compatibleLoginGeneration++
 	generation := m.compatibleLoginGeneration
 	m.compatibleLoginPending = true
-	m.pushLine(styleFooter.Render(profileID + " endpoint saved · discovering models…"))
+	m.compatibleLoginProvider = profileID
 	app := m.app
 	ctx := m.ctx
 	return m, func() tea.Msg {
-		return compatibleLoginDoneMsg{generation: generation, provider: profileID, endpoint: endpoint, err: app.RefreshProviderModels(ctx, profileID)}
+		return compatibleLoginDoneMsg{generation: generation, provider: profileID, err: app.RefreshProviderModels(ctx, profileID)}
 	}
 }
 

@@ -90,9 +90,12 @@ polling window.
 
 ### TUI picker
 
-In the TUI, `/login` then `chatgpt` offers known local account/workspace IDs
-first, then unrestricted browser login (with device fallback) and device-code
-login.
+In the TUI, `/login` opens a centered authentication card. Choosing `chatgpt`
+keeps known local account/workspace IDs, unrestricted browser login (with device
+fallback), device-code login, and authorization progress in that same card. Esc
+from the account/method list returns to the provider list when it was opened from
+there. Esc during authorization cancels that attempt and restores the
+account/method list instead of dismissing the complete login flow.
 
 The picker groups duplicate source entries by account ID and displays source
 names without tokens. Selecting a known account starts a fresh Snow browser

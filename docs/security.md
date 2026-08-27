@@ -260,13 +260,21 @@ Clipboard images attached with TUI `Ctrl+V` are copied into the durable session
 database and sent to the selected provider; clipboard access is local to the
 machine running Snow. The TUI `/login openai-compatible` flow displays and
 persists the profile name and endpoint in `config.json` while capturing its key
-separately through masked input into `auth.json`. Profile names isolate
-credentials; they are labels, not security boundaries. URLs must be absolute
-HTTP(S) without userinfo, query, or fragment; cross-origin redirects are
-rejected and active keys are redacted from bounded provider errors. HTTP and
-private/local endpoints are allowed deliberately, so transport security and
-service behavior remain the operator's responsibility. Snow does not sandbox or
-certify the endpoint.
+separately through masked input into `auth.json`. Single-line auth fields strip
+terminal/layout controls, and asynchronous clipboard results are accepted only
+for the field generation that requested them. Login back-navigation retains only
+provider/profile/endpoint selections; masked key drafts are cleared before the
+previous card is restored. Entering a slash command or login flow also
+invalidates pending composer text/image paste results before that
+editor is reused. After submission, the login progress card and completion
+transcript do not echo the full endpoint because an accepted URL path may
+itself carry operator-sensitive routing data. Profile names isolate credentials;
+they are labels, not security boundaries. URLs must
+be absolute HTTP(S) without userinfo, query, or fragment; cross-origin
+redirects are rejected and active keys are redacted from bounded provider
+errors. HTTP and private/local endpoints are allowed deliberately, so transport
+security and service behavior remain the operator's responsibility. Snow does
+not sandbox or certify the endpoint.
 
 OpenCode Zen is also an external provider boundary. Its promotional free models
 have materially different retention and training terms: Ox Alpha Free is

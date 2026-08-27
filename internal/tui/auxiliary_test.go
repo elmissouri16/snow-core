@@ -76,14 +76,14 @@ func TestStartupThemeApplicationDoesNotPersistEffectiveProjectConfig(t *testing.
 func TestCustomPickerBindingDrivesRuntimeModelPicker(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
-	keys, err := applyKeybindingOverrides(tuiKeys, map[string][]string{"picker_down": {"x"}})
+	keys, err := applyKeybindingOverrides(tuiKeys, map[string][]string{"picker_down": {"ctrl+y"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	m.keys = keys
 	m.pickModel = true
 	m.modelList = []protocol.Model{{ID: "a"}, {ID: "b"}}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyCtrlY})
 	if m.modelIndex != 1 {
 		t.Fatalf("model index=%d", m.modelIndex)
 	}

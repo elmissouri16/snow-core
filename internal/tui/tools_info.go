@@ -209,6 +209,18 @@ func sanitizeTerminalText(value string) string {
 	return sanitizeTerminalTextLimit(value, -1)
 }
 
+// sanitizeTerminalLine additionally flattens layout controls so untrusted
+// labels and single-line fields cannot inject rows or columns into a frame.
+func sanitizeTerminalLine(value string) string {
+	value = strings.ReplaceAll(value, "\r", " ")
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, sanitizeTerminalText(value))
+}
+
 // sanitizeToolPreview removes terminal controls and bounds tool output before
 // it is rendered in the TUI. Tool output is untrusted repository/process data.
 func sanitizeToolPreview(value string, maxBytes int) string {

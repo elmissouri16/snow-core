@@ -106,7 +106,7 @@ func (m *Model) replayTerminalMessages(messages []tea.Msg, cmds *[]tea.Cmd) {
 	for _, message := range messages {
 		switch msg := message.(type) {
 		case tea.MouseMsg:
-			if cmd := m.applyMouse(msg); cmd != nil {
+			if cmd := m.dispatchMouse(msg); cmd != nil {
 				*cmds = append(*cmds, cmd)
 			}
 		case tea.KeyMsg:

@@ -94,9 +94,22 @@ snow logout chatgpt
 snow auth check chatgpt
 ```
 
-The no-argument TUI `/login` and `/logout` commands open provider pickers.
-`opencode-zen` works without login and omits the authorization header when no
-key resolves. An optional key can come from `OPENCODE_API_KEY`, `--api-key`, or
+The no-argument TUI `/login` and `/logout` commands open centered provider
+cards. Login keeps every subsequent step in that fixed-frame card, including
+OpenAI-compatible profile/endpoint fields and masked key capture, ChatGPT
+account/method choice and OAuth progress, and compatible model discovery.
+Validation appears in-place. Within a nested login, Esc returns to the previous
+field or selection card and restores non-secret field values; the provider card
+is the root, where Esc cancels the flow. Backing out of masked key capture always
+discards the typed key, and canceling OAuth returns to the ChatGPT method list.
+Single-line auth fields flatten pasted layout controls and ignore delayed
+clipboard results after a step transition.
+Required device codes and errors stay visible on short cards, compatible
+endpoint paths are not echoed into the transcript, and a pending logout blocks
+another authentication action until its credential deletion finishes.
+`opencode-zen` works without login and
+omits the authorization header when no key resolves. An optional key can come
+from `OPENCODE_API_KEY`, `--api-key`, or
 the masked login flow. Logout removes only Snow's stored key; an explicit flag
 or environment fallback remains active until cleared. Zen exposes only the
 maintained promotional free catalog and never switches to a paid model.
@@ -148,11 +161,15 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
    in the viewport. Scrolling never enters terminal scrollback, so it cannot
    expose stale headers, separators, or prior composer frames.
 3. The sticky header shows the current provider/model, collaboration mode,
-   reasoning effort, working directory, and status. The run-status row shows
-   activity and queued-input count. Provider waits use a pulsing-points thinking
-   animation distinct from the rotating working indicator in the run-status row.
-   The footer shows permission mode, mode/goal
-   state, context usage, and the latest request's prompt-cache hit rate as
+   reasoning effort, working directory, and status. In app mouse mode the
+   accented `provider/model ▾` segment opens the centered model picker; F6/native
+   mode restores the non-clickable dim label, with `/model` and Settings as
+   fallbacks. `/login` and `/logout` use the same centered, frame-preserving card
+   for their complete interactive flows. The run-status row shows activity and
+   queued-input count. Provider waits use a pulsing-points thinking animation
+   distinct from the rotating working indicator in the run-status row. The
+   footer shows permission mode, mode/goal state, context usage, and the latest
+   request's prompt-cache hit rate as
    `CH<n>%`; inline mode may compact provider/model/effort into that footer.
 
 Bash activity uses the sticky run-status row while executing, then adds one
@@ -236,10 +253,11 @@ described in [Configuration](configuration.md).
 | `Up` / `Down` | Browse prompts from the active session branch; Down past the newest restores the current draft | Same; recalled text can be submitted as steering or follow-up input |
 | `Shift+Tab` | Toggle Default/Plan mode | Queue mode change until `turn_done` |
 | `Ctrl+T` | Cycle through the active model's supported thinking efforts | Cycle the effort; the header/footer briefly highlights the new value without adding a transcript entry |
+| Click `provider/model ▾` (`tui.mouse: true`) | Open the centered model picker | Report that model changes must wait for the current turn |
 | `Alt+A` | Open the subagent fleet inspector | Open the inspector without interrupting the active turn |
 | `Alt+P` | Open the managed-process fleet inspector | Open the inspector without interrupting the active turn |
 | `Ctrl+C` | Quit | Abort, clear queued work, restore queued composer text, and defer active goal continuation |
-| `Esc` | Close modal/picker | Abort active work and defer active goal continuation, or reject the active input modal |
+| `Esc` | Return one nested login/model step, otherwise close the modal/picker | Abort active work and defer active goal continuation, or reject the active input modal |
 | `Ctrl+D` | Quit when the composer is empty | — |
 | Wheel/trackpad (`tui.mouse: true`) | Scroll transcript viewport | Same |
 | Primary-button drag (`tui.mouse: true`) | Select and copy transcript text | Same |
@@ -257,19 +275,28 @@ history browsing starts, Up and Down traverse multiline entries too, and Down
 past the newest entry restores the draft that was present before browsing.
 
 Choice pickers accept arrows, `j`/`k`, Tab/Shift+Tab, Home/End, and Enter. The
-model picker also accepts `/` to search provider IDs, model IDs, display names,
-and descriptions. It opens immediately from the active/cached catalog, loads
-missing inactive provider catalogs asynchronously, and keeps the cached list
-interactive while that refresh completes. Snow constructs only the active and
-explicitly configured subagent provider adapters at startup; other adapters and
-their HTTP clients materialize on first catalog, login, or selection use.
-Consequently, an invalid inactive-provider endpoint is reported when that
-provider is first used rather than blocking an unrelated provider's startup.
-Selecting a model with controllable reasoning opens a second
-picker with that model's advertised effort levels, including `off`, before
-applying and persisting both. `off` means Snow omits the provider effort
-override; an inherently reasoning model may still use its provider-default
-reasoning behavior. Blocking permission and model-requested input overlays
+centered model picker is the exception: ordinary typing immediately filters
+provider IDs, model IDs, display names, and descriptions, so `j` and `k` are
+search text there. Backspace edits and Ctrl+U clears the query. Arrows,
+Tab/Shift+Tab, PageUp/PageDown, Home/End, and Enter navigate and apply; Esc
+clears a non-empty query before a second Esc closes the card. Open it by
+clicking the accented header model in app mouse mode, with
+`/model` and the Model row in `/settings` available as keyboard/native-mouse
+fallbacks.
+
+The card opens immediately from the active/cached catalog, loads missing
+inactive provider catalogs asynchronously, and keeps both the current query and
+stable provider/model selection while that refresh completes. Snow constructs
+only the active and explicitly configured subagent provider adapters at startup;
+other adapters and their HTTP clients materialize on first catalog, login, or
+selection use. Consequently, an invalid inactive-provider endpoint is reported
+when that provider is first used rather than blocking an unrelated provider's
+startup. Selecting a model with controllable reasoning keeps the model's
+advertised effort levels, including `off`, in the same centered card before
+applying and persisting both. Esc returns from that effort step to the filtered
+model list. `off` means Snow omits the provider effort override; an inherently
+reasoning model may still use its provider-default reasoning behavior. Blocking
+permission and model-requested input overlays
 take keyboard and visual precedence over ordinary pickers, including requests
 from subagents.
 

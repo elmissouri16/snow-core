@@ -317,8 +317,8 @@ func TestOpenCodeZenLoginAllowsAnonymousMode(t *testing.T) {
 	if !m.loginMode || m.loginProvider != "opencode-zen" {
 		t.Fatalf("login mode=%v provider=%q", m.loginMode, m.loginProvider)
 	}
-	if got := strings.Join(m.lines, "\n"); !strings.Contains(got, "optional key") {
-		t.Fatalf("optional hint missing: %q", got)
+	if got := stripANSI(m.renderLoginModal()); !strings.Contains(got, "key is optional") {
+		t.Fatalf("optional hint missing from login card: %q", got)
 	}
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.loginMode {
@@ -453,7 +453,8 @@ func TestModelLoginPickerDirectArg(t *testing.T) {
 	if !m.loginEndpointMode || m.editor.Value() != server.URL+"/v1" {
 		t.Fatalf("saved endpoint was not prefilled: mode=%v value=%q", m.loginEndpointMode, m.editor.Value())
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc}) // endpoint -> profile
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc}) // profile -> close
 	m.editor.SetValue("/logout openai-compatible")
 	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
@@ -589,11 +590,11 @@ func TestOpenAICompatibleLoginIgnoresStaleDiscoveryCompletion(t *testing.T) {
 	if after := m.app.Agent.Model(); after.ID != before.ID || after.Provider != before.Provider {
 		t.Fatalf("direct model command changed selection during discovery: before=%+v after=%+v", before, after)
 	}
-	m.Update(compatibleLoginDoneMsg{generation: 1, endpoint: "https://old.invalid", err: errors.New("old failure")})
+	m.Update(compatibleLoginDoneMsg{generation: 1, provider: "old-provider", err: errors.New("old failure")})
 	if !m.compatibleLoginPending || strings.Contains(strings.Join(m.lines, "\n"), "old failure") {
 		t.Fatalf("stale completion changed state: pending=%v lines=%q", m.compatibleLoginPending, m.lines)
 	}
-	m.Update(compatibleLoginDoneMsg{generation: 2, endpoint: "https://new.invalid"})
+	m.Update(compatibleLoginDoneMsg{generation: 2, provider: "new-provider"})
 	if m.compatibleLoginPending {
 		t.Fatal("current completion did not clear pending state")
 	}
@@ -741,15 +742,25 @@ func TestModelLogoutFlow(t *testing.T) {
 	if !m.pickProvider || !m.providerLogout || len(m.providers) != 2 {
 		t.Fatalf("logout picker open=%v purpose=%v providers=%v", m.pickProvider, m.providerLogout, m.providers)
 	}
-	if got := stripANSI(m.renderProviderPicker()); !strings.Contains(got, "logout provider") || !strings.Contains(got, "opencode-go") || !strings.Contains(got, "chatgpt") {
+	if got := stripANSI(m.renderProviderPicker()); !strings.Contains(got, "Logout") || !strings.Contains(got, "opencode-go") || !strings.Contains(got, "chatgpt") {
 		t.Fatalf("logout picker = %q", got)
 	}
 	m.provIndex = 0
 	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil || m.pickProvider || m.providerLogout {
-		t.Fatalf("picker selection cmd=%v open=%v purpose=%v", cmd != nil, m.pickProvider, m.providerLogout)
+	if cmd == nil || m.pickProvider || m.providerLogout || !m.logoutPending {
+		t.Fatalf("picker selection cmd=%v open=%v purpose=%v pending=%v", cmd != nil, m.pickProvider, m.providerLogout, m.logoutPending)
+	}
+	if card := stripANSI(m.renderLoginModal()); !strings.Contains(card, "Removing stored credential") {
+		t.Fatalf("logout progress card=%q", card)
+	}
+	_, blockedCmd := m.startLogin(nil)
+	if blockedCmd != nil || m.pickProvider {
+		t.Fatalf("login raced pending logout: cmd=%v picker=%v", blockedCmd != nil, m.pickProvider)
 	}
 	m.Update(cmd())
+	if m.logoutPending || m.loginModalVisible() {
+		t.Fatalf("logout completion pending=%v modal=%v", m.logoutPending, m.loginModalVisible())
+	}
 	if _, ok := m.app.Auth.Get("opencode-go"); ok {
 		t.Fatal("selected credential should be removed after logout")
 	}

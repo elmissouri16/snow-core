@@ -36,6 +36,7 @@ func (m *Model) startUserInput(req protocol.UserInputRequest) {
 		copy.Questions[i] = question
 		copy.Questions[i].Options = append([]protocol.UserInputOption(nil), question.Options...)
 	}
+	m.closeTranscriptSelectionContextMenu()
 	m.userInputPending = true
 	m.userInputRequest = &copy
 	m.userInputIndex = 0

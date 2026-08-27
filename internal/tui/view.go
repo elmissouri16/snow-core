@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/internal/permission"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -61,22 +62,7 @@ func (m *Model) renderOverlays() string {
 			overlays = append(overlays, r)
 		}
 	}
-	if m.pickProvider {
-		if r := m.renderProviderPicker(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
-	if m.pickChatGPTAuth {
-		if r := m.renderChatGPTAuthPicker(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
-	if m.pickModel {
-		if r := m.renderModelPicker(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
-	if m.pickThinking {
+	if m.pickThinking && !m.thinkingReturnToModel {
 		if r := m.renderThinkingPicker(); r != "" {
 			overlays = append(overlays, r)
 		}
@@ -220,6 +206,60 @@ func (m *Model) handlePlanImplementationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	return m, nil
 }
 
+func (m *Model) currentHeaderStatus() string {
+	status := "starting…"
+	if m.lastErr != nil {
+		return "error"
+	}
+	if m.app == nil {
+		return status
+	}
+	status = "idle"
+	if m.busy {
+		if m.showRunStatus() {
+			status = ""
+		} else {
+			status = m.spinner.View() + " working"
+		}
+	}
+	if m.compacting {
+		status = m.spinner.View() + " compacting"
+	}
+	if m.sessionOpLoading {
+		status = "session…"
+	}
+	if m.pickSettings || m.settingsReturnToPanel {
+		status = "settings"
+	}
+	if m.modelModalVisible() {
+		status = "models"
+	} else if m.pickThinking {
+		status = "thinking"
+	}
+	if m.loginModalVisible() {
+		status = "login"
+		if m.logoutPending {
+			status = "logout…"
+		} else if m.providerLogout {
+			status = "logout"
+		} else if m.oauthLoading || m.compatibleLoginPending {
+			status = "login…"
+		}
+	}
+	if m.pickInfo {
+		status = "inspect"
+	}
+	// Blocking host requests own both the visible overlay and the status label,
+	// even when an ordinary modal remains suspended underneath.
+	if m.permPending {
+		status = "permission"
+	}
+	if m.userInputPending {
+		status = "input needed"
+	}
+	return status
+}
+
 // View implements tea.Model as one full-window frame: sticky header, scrollable
 // transcript viewport, overlays/run status, composer, and footer.
 func (m *Model) View() string {
@@ -245,50 +285,7 @@ func (m *Model) View() string {
 		return clipboardSequence + fitFrame(m.renderSubagentFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
 	}
 
-	status := "starting…"
-	if m.lastErr != nil {
-		status = "error"
-	} else if m.app != nil {
-		status = "idle"
-		if m.busy {
-			if m.showRunStatus() {
-				status = ""
-			} else {
-				status = m.spinner.View() + " working"
-			}
-		}
-		if m.compacting {
-			status = m.spinner.View() + " compacting"
-		}
-		if m.permPending {
-			status = "permission"
-		}
-		if m.userInputPending {
-			status = "input needed"
-		}
-		if m.sessionOpLoading {
-			status = "session…"
-		}
-		if m.compatibleLoginPending {
-			status = "models…"
-		}
-		if m.loginMode || m.loginProfileMode || m.loginEndpointMode {
-			status = "login"
-		}
-		if m.pickChatGPTAuth {
-			status = "import auth"
-		}
-		if m.pickThinking {
-			status = "thinking"
-		}
-		if m.pickSettings || m.settingsReturnToPanel {
-			status = "settings"
-		}
-		if m.pickInfo {
-			status = "inspect"
-		}
-	}
-
+	status := m.currentHeaderStatus()
 	header := m.renderHeader(status)
 	frameWidth := m.managedFrameWidth()
 	sep := styleSep.Render(strings.Repeat("─", frameWidth))
@@ -330,10 +327,19 @@ func (m *Model) View() string {
 		// Keep a constant logical row count. Growing a normal-screen Bubble Tea
 		// frame at the terminal bottom scrolls old chrome into native history;
 		// only tea.Println transcript commits are allowed to move scrollback.
-		return clipboardSequence + m.fitManagedFrame(frame, frameWidth, m.managedFrameHeight())
+		frame = m.fitManagedFrame(frame, frameWidth, m.managedFrameHeight())
+	} else {
+		frame = m.fitManagedFrame(frame, frameWidth, m.height)
+		if !m.permPending && !m.userInputPending {
+			frame = overlayTranscriptSelectionContextMenu(frame, m.transcriptSelectionMenu)
+		}
 	}
-	frame = m.fitManagedFrame(frame, frameWidth, m.height)
-	return clipboardSequence + overlayTranscriptSelectionContextMenu(frame, m.transcriptSelectionMenu)
+	if m.loginModalVisible() && !m.permPending && !m.userInputPending {
+		frame = m.overlayLoginModal(frame)
+	} else if m.modelModalVisible() && !m.permPending && !m.userInputPending {
+		frame = m.overlayModelModal(frame)
+	}
+	return clipboardSequence + frame
 }
 
 func (m *Model) renderTrustPrompt() string {
@@ -431,20 +437,41 @@ func fitFrameBottom(frame string, width, height int) string {
 		Render(frame)
 }
 
+type headerRender struct {
+	view                 string
+	modelStart, modelEnd int
+}
+
 // renderHeader is the sticky top bar: brand · provider/model · thinking · runtime · cwd · status.
 func (m *Model) renderHeader(status string) string {
+	return m.renderHeaderLayout(status).view
+}
+
+// renderHeaderLayout owns both the rendered selector and its mouse hit bounds,
+// so truncation can never leave an approximate or stale clickable region.
+func (m *Model) renderHeaderLayout(status string) headerRender {
 	w := m.managedFrameWidth()
-	brand := styleBrand.Render(" ❄ snow ")
+	fullBrand := styleBrand.Render(" ❄ snow ")
+	brandWidth := min(w, lipgloss.Width(fullBrand))
+	brand := xansi.Truncate(fullBrand, brandWidth, "")
+	brandWidth = lipgloss.Width(brand)
 	midText := "booting"
+	selectorText := ""
+	selectorEnabled := false
 	if m.lastErr != nil {
 		midText = "startup failed"
-	} else if m.app != nil {
+	} else if m.app != nil && m.app.Agent != nil {
 		model := m.app.Agent.Model()
 		goalText := ""
 		if m.goal != nil {
 			goalText = fmt.Sprintf("  ·  goal:%s %s", m.goal.Status, formatGoalTokenUsage(m.goal))
 		}
-		midText = m.app.ProviderID + "/" + model.ID
+		selectorEnabled = m.app.Cfg.TUI.Mouse
+		selectorText = m.app.ProviderID + "/" + model.ID
+		if selectorEnabled {
+			selectorText += " ▾"
+		}
+		midText = selectorText
 		if w >= 80 {
 			midText += "  ·  thinking:" + string(m.app.Agent.Thinking()) +
 				"  ·  mode:" + m.collaborationModeLabel() + goalText +
@@ -453,43 +480,55 @@ func (m *Model) renderHeader(status string) string {
 			midText += "  ·  mode:" + m.collaborationModeLabel() + "  ·  " + shortPath(m.app.CWD(), max(10, w/4))
 		}
 	}
-	right := styleHeaderDim.Render(status + " ")
-	// Fill the middle so brand sticks left and status sticks right.
-	maxMid := w - lipgloss.Width(brand) - lipgloss.Width(right) - 1
-	if maxMid < 4 {
-		maxMid = 4
+
+	remaining := max(0, w-brandWidth)
+	fullRight := styleHeaderDim.Render(status + " ")
+	// Preserve four cells for the selector before adding the right-aligned
+	// status. Extremely narrow frames therefore omit status before model state.
+	rightWidth := min(lipgloss.Width(fullRight), max(0, remaining-4))
+	right := xansi.Truncate(fullRight, rightWidth, "")
+	rightWidth = lipgloss.Width(right)
+	midArea := max(0, remaining-rightWidth)
+	maxMid := midArea
+	if rightWidth > 0 && maxMid > 0 {
+		maxMid-- // retain one separating cell before status
 	}
-	midText = truncateRunes(midText, maxMid)
+
 	midStyle := styleHeaderDim
 	if m.thinkingFlash {
 		midStyle = styleBrand
 	}
-	mid := midStyle.Render(midText)
-	used := lipgloss.Width(brand) + lipgloss.Width(mid) + lipgloss.Width(right)
-	pad := max(1, w-used)
-	return brand + mid + strings.Repeat(" ", pad) + right
+	mid := ""
+	modelStart, modelEnd := 0, 0
+	if selectorEnabled && selectorText != "" {
+		visibleSelector := truncateDisplayText(selectorText, maxMid)
+		metadata := strings.TrimPrefix(midText, selectorText)
+		metadataWidth := max(0, maxMid-xansi.StringWidth(visibleSelector))
+		visibleMetadata := truncateDisplayText(metadata, metadataWidth)
+		styledSelector := styleCompletionSelected.Render(visibleSelector)
+		mid = styledSelector + midStyle.Render(visibleMetadata)
+		if visibleSelector != "" {
+			modelStart = min(w, brandWidth)
+			modelEnd = min(w, modelStart+xansi.StringWidth(styledSelector))
+			if modelEnd <= modelStart {
+				modelStart, modelEnd = 0, 0
+			}
+		}
+	} else {
+		mid = midStyle.Render(truncateDisplayText(midText, maxMid))
+	}
+	pad := max(0, midArea-lipgloss.Width(mid))
+	return headerRender{
+		view:       brand + mid + strings.Repeat(" ", pad) + right,
+		modelStart: modelStart, modelEnd: modelEnd,
+	}
 }
 
 // renderEditor draws a composer that grows from three to six rows.
 func (m *Model) renderEditor() string {
 	var input string
-	if m.loginProfileMode {
-		input = stylePrompt.Render("NAME ") + m.editor.View()
-	} else if m.loginEndpointMode {
-		input = stylePrompt.Render("URL ") + m.editor.View()
-	} else if m.loginMode {
-		n := m.secretBuf.Len()
-		masked := strings.Repeat("•", n)
-		if n == 0 {
-			hint := "type API key, Enter to save, Esc to cancel"
-			if m.isOpenAICompatibleProfile(m.loginProvider) || m.loginEndpoint != "" {
-				hint = "optional API key; Enter keeps existing/fallback or uses keyless"
-			}
-			masked = styleHeaderDim.Render("(" + hint + ")")
-		} else {
-			masked = styleAssistant.Render(masked)
-		}
-		input = stylePrompt.Render("🔑 ") + styleHeaderDim.Render(m.loginProvider+": ") + masked
+	if m.loginModalVisible() {
+		input = stylePrompt.Render("› ")
 	} else {
 		editorView := m.editor.View()
 		for i := range m.promptImages {

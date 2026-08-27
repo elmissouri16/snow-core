@@ -112,7 +112,7 @@ func TestHeaderShowsThinkingImmediatelyAfterModel(t *testing.T) {
 	m.width = 160
 
 	model := m.app.Agent.Model()
-	want := m.app.ProviderID + "/" + model.ID + "  ·  thinking:" + string(m.app.Agent.Thinking())
+	want := m.app.ProviderID + "/" + model.ID + " ▾  ·  thinking:" + string(m.app.Agent.Thinking())
 	if header := stripANSI(m.renderHeader("ready")); !strings.Contains(header, want) {
 		t.Fatalf("header does not place thinking after model; want %q in %q", want, header)
 	}

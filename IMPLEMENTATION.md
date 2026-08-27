@@ -1153,7 +1153,25 @@ The TUI uses Bubble Tea's alternate-screen, app-owned viewport so scrolling
 cannot reveal stale frame chrome. `tui.mouse` defaults to `true` so wheel and
 trackpad gestures stay inside Snow's viewport; primary drag uses Snow
 selection/copy, F6 toggles app/native mouse mode, and right-click opens Snow's
-bounded **Copy selection** menu without disabling viewport mouse reporting. `Ctrl+V` attaches supported
+bounded **Copy selection** menu without disabling viewport mouse reporting. In
+app mouse mode the accented `provider/model ▾` header segment opens a centered
+model card layered into that same frame. Typing filters immediately, cached
+catalog refresh preserves the query and stable model selection, and a selected
+model's thinking-effort step remains in the card. The complete TUI
+authentication flow reuses that fixed-frame card: provider/logout selection,
+serialized logout progress, compatible profile and endpoint fields, masked key
+capture, ChatGPT account/method selection and OAuth progress, and compatible
+model discovery. Nested auth cards retain a bounded non-secret navigation stack:
+Esc restores the prior field or selection card, while the root Esc cancels and
+masked key drafts are discarded rather than retained. Required device codes and
+validation errors win constrained card rows, and endpoint paths are not echoed
+into post-submit progress or the completion transcript. Single-line auth fields
+strip terminal/layout controls, and delayed clipboard results are scoped to
+their originating field generation.
+Slash-command/login transitions invalidate outstanding composer text and image
+paste results before the shared editor is reused. Blocking host requests preempt
+both centered flows and transcript context menus
+without discarding suspended modal state. `Ctrl+V` attaches supported
 clipboard images in the agent composer or falls back to textarea paste.
 
 ### Slash commands

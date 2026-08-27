@@ -33,6 +33,26 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- Reworked TUI model selection into a centered, searchable card. With app mouse
+  mode enabled, the accented `provider/model ▾` header control opens it without
+  a slash command; typing filters immediately, catalog refreshes preserve the
+  active query and selection, and model-specific thinking effort stays in the
+  same modal flow. `/model` and Settings remain available in native mouse mode.
+- Moved the complete TUI `/login` flow into the same centered-card treatment:
+  provider selection, OpenAI-compatible profile and endpoint fields, masked API
+  key capture, ChatGPT account/method selection and OAuth progress, and model
+  discovery after compatible-provider setup. `/logout` uses matching provider
+  and progress cards, serializes credential deletion against new auth actions,
+  and field validation remains visible in-place. Esc now moves back one login
+  step, preserving non-secret field values and returning child cards to their
+  previous selection list; Esc only cancels at the root provider/direct-login
+  step, while discarded masked keys are never restored. Short cards retain
+  required device codes/errors, and compatible endpoint paths are not echoed
+  into the post-submit progress card or completion transcript. Single-line auth
+  fields strip terminal/layout controls, and delayed clipboard results are
+  scoped to the field generation that requested them. Slash-command and login
+  transitions invalidate pending composer text or image paste results before
+  reusing the editor.
 - Changed interactive permission policy so every fresh session starts in
   `ask`, unless `--permission` explicitly overrides that launch. TUI
   `/permissions` and Settings changes now persist only with the active session

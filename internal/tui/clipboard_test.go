@@ -63,7 +63,7 @@ func TestComposerCtrlVPasteResultIsNotDropped(t *testing.T) {
 		t.Fatal("Ctrl+V discarded the textarea clipboard command")
 	}
 	result, ok := cmd().(textareaResultMsg)
-	if !ok || result.target != textareaTargetComposer || result.requestID != "" || result.questionID != "" {
+	if !ok || result.target != textareaTargetComposer || result.requestID != "" || result.questionID != "" || result.pasteGeneration == 0 {
 		t.Fatalf("composer paste result metadata = %#v", result)
 	}
 	_, _ = m.Update(result)

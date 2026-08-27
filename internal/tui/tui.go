@@ -79,13 +79,13 @@ type oauthDoneMsg struct {
 	err    error
 }
 type logoutDoneMsg struct {
-	provider string
-	err      error
+	generation uint64
+	provider   string
+	err        error
 }
 type compatibleLoginDoneMsg struct {
 	generation uint64
 	provider   string
-	endpoint   string
 	err        error
 }
 
@@ -141,6 +141,8 @@ type textareaTarget uint8
 const (
 	textareaTargetComposer textareaTarget = iota
 	textareaTargetUserInput
+	textareaTargetLoginProfile
+	textareaTargetLoginEndpoint
 )
 
 type textareaResultMsg struct {
@@ -260,6 +262,20 @@ type subagentInspectMsg struct {
 	messages   []protocol.Message
 	messageErr error
 	err        error
+}
+
+type loginNavigationStep uint8
+
+const (
+	loginNavigationProvider loginNavigationStep = iota + 1
+	loginNavigationProfile
+	loginNavigationEndpoint
+)
+
+type loginNavigationEntry struct {
+	step     loginNavigationStep
+	provider string
+	value    string
 }
 
 // Model is the TUI state.
@@ -456,20 +472,20 @@ type Model struct {
 	provIndex      int
 
 	// ChatGPT login actions and compatible credential imports.
-	pickChatGPTAuth bool
-	authAccounts    []chatGPTAccountChoice
-	authIndex       int
-	oauthLoading    bool
-	oauthProgress   chatgpt.LoginProgress
-	oauthCancel     context.CancelFunc
-	oauthEvents     chan tea.Msg
+	pickChatGPTAuth    bool
+	authAccounts       []chatGPTAccountChoice
+	authIndex          int
+	oauthLoading       bool
+	oauthProgress      chatgpt.LoginProgress
+	oauthCancel        context.CancelFunc
+	oauthEvents        chan tea.Msg
+	oauthBackRequested bool
 
 	// Model picker state (for /model).
-	pickModel         bool
-	modelList         []protocol.Model
-	modelIndex        int
-	modelQuery        string
-	modelSearchActive bool
+	pickModel  bool
+	modelList  []protocol.Model
+	modelIndex int
+	modelQuery string
 
 	// Thinking picker state (for /thinking and the second stage of /model).
 	pickThinking          bool
@@ -544,10 +560,17 @@ type Model struct {
 	loginMode                 bool
 	loginProfileMode          bool
 	loginEndpointMode         bool
+	loginFieldGeneration      uint64
 	loginProvider             string
 	loginEndpoint             string
+	loginError                string
+	loginNavigation           []loginNavigationEntry
 	compatibleLoginGeneration uint64
 	compatibleLoginPending    bool
+	compatibleLoginProvider   string
+	logoutGeneration          uint64
+	logoutPending             bool
+	logoutProvider            string
 	secretBuf                 strings.Builder
 
 	cancelRun context.CancelFunc

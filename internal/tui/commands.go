@@ -21,6 +21,7 @@ func (m *Model) runCommand(line string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.Cmd) {
+	m.imagePasteGeneration++
 	m.editor.Reset()
 	m.pastedTexts = nil
 	m.resetInputHistoryNavigation()
@@ -403,14 +404,23 @@ func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.
 }
 
 func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
+	if m.authOperationPending() {
+		m.pushLine(styleError.Render("login: wait for the current authentication operation to finish"))
+		return m, nil
+	}
+	// Login reuses the composer textarea for single-line fields. Invalidate any
+	// clipboard/image result that was requested by the prior composer state.
+	m.imagePasteGeneration++
+	m.clearLoginNavigation()
+	m.oauthBackRequested = false
 	if len(args) == 0 {
 		m.providers = m.supportedProviders()
 		m.provIndex = 0
 		m.providerLogout = false
 		m.pickProvider = true
+		m.loginError = ""
 		m.compVisible = false
 		m.editor.Reset()
-		m.pushLine(styleFooter.Render("select a login provider (↑/↓ navigate, Enter to pick, Esc to cancel)"))
 		return m, nil
 	}
 	if len(args) > 2 {

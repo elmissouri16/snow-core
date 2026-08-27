@@ -18,26 +18,104 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+func (m *Model) authOperationPending() bool {
+	return m.oauthLoading || m.compatibleLoginPending || m.logoutPending
+}
+
+func (m *Model) rememberLoginStep(step loginNavigationStep, provider, value string) {
+	m.loginNavigation = append(m.loginNavigation, loginNavigationEntry{
+		step:     step,
+		provider: provider,
+		value:    value,
+	})
+}
+
+func (m *Model) loginEscapeAction() string {
+	if len(m.loginNavigation) > 0 {
+		return "back"
+	}
+	return "cancel"
+}
+
+func (m *Model) clearLoginNavigation() {
+	clear(m.loginNavigation)
+	m.loginNavigation = nil
+}
+
+func (m *Model) clearLoginStepState() {
+	m.loginFieldGeneration++
+	m.pickProvider = false
+	m.providerLogout = false
+	m.providers = nil
+	m.pickChatGPTAuth = false
+	m.authAccounts = nil
+	m.authIndex = 0
+	m.loginProfileMode = false
+	m.loginEndpointMode = false
+	m.loginMode = false
+	m.loginProvider = ""
+	m.loginEndpoint = ""
+	m.loginError = ""
+	m.secretBuf.Reset()
+	m.editor.Reset()
+	m.editor.Placeholder = "Type a message…"
+}
+
+func (m *Model) cancelLoginFlow() {
+	m.clearLoginStepState()
+	m.clearLoginNavigation()
+	m.oauthBackRequested = false
+}
+
+func (m *Model) restorePreviousLoginStep() bool {
+	if len(m.loginNavigation) == 0 {
+		return false
+	}
+	last := len(m.loginNavigation) - 1
+	entry := m.loginNavigation[last]
+	m.loginNavigation[last] = loginNavigationEntry{}
+	m.loginNavigation = m.loginNavigation[:last]
+	m.clearLoginStepState()
+
+	switch entry.step {
+	case loginNavigationProvider:
+		m.providers = m.supportedProviders()
+		if len(m.providers) == 0 {
+			m.clearLoginNavigation()
+			return true
+		}
+		m.provIndex = 0
+		for i, provider := range m.providers {
+			if provider == entry.provider {
+				m.provIndex = i
+				break
+			}
+		}
+		m.pickProvider = true
+	case loginNavigationProfile:
+		m.beginCompatibleProfileCapture()
+		m.editor.SetValue(entry.value)
+		m.editor.CursorEnd()
+	case loginNavigationEndpoint:
+		m.beginCompatibleEndpointCapture(entry.provider)
+		m.editor.SetValue(entry.value)
+		m.editor.CursorEnd()
+	default:
+		m.clearLoginNavigation()
+	}
+	return true
+}
+
 // handleProviderPick navigates the /login provider list.
 func (m *Model) handleProviderPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
+	if next, handled := movePicker(m.provIndex, len(m.providers), pickerKeyAction(msg), m.loginPickerVisibleChoices()); handled {
+		m.provIndex = next
+		return m, nil
+	}
 	switch msg.Type {
-	case tea.KeyUp:
-		if len(m.providers) > 0 {
-			m.provIndex = (m.provIndex - 1 + len(m.providers)) % len(m.providers)
-		}
-	case tea.KeyDown:
-		if len(m.providers) > 0 {
-			m.provIndex = (m.provIndex + 1) % len(m.providers)
-		}
-	case tea.KeyTab:
-		if len(m.providers) > 0 {
-			m.provIndex = (m.provIndex + 1) % len(m.providers)
-		}
 	case tea.KeyEsc:
-		m.pickProvider = false
-		m.providerLogout = false
-		m.providers = nil
+		m.cancelLoginFlow()
 	case tea.KeyEnter:
 		if len(m.providers) == 0 {
 			m.pickProvider = false
@@ -51,12 +129,13 @@ func (m *Model) handleProviderPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if logout {
 			return m.doLogout([]string{provider})
 		}
-		if provider == chatgpt.ProviderID {
-			return m.startChatGPTAuthPick()
-		}
 		if !m.isSupportedProvider(provider) {
 			m.pushLine(styleError.Render("login: " + provider + " is not supported yet"))
 			return m, nil
+		}
+		m.rememberLoginStep(loginNavigationProvider, provider, "")
+		if provider == chatgpt.ProviderID {
+			return m.startChatGPTAuthPick()
 		}
 		if provider == openaicompat.ProviderID {
 			m.beginCompatibleProfileCapture()
@@ -103,9 +182,9 @@ func (m *Model) startChatGPTAuthPick() (tea.Model, tea.Cmd) {
 	m.authAccounts = chatGPTAccountChoices(chatgpt.DiscoverAuthSources())
 	m.authIndex = 0
 	m.pickChatGPTAuth = true
+	m.loginError = ""
 	m.compVisible = false
 	m.editor.Reset()
-	m.pushLine(styleFooter.Render("select an existing ChatGPT account or sign-in method (↑/↓ navigate, Enter select, Esc cancel)"))
 	return m, nil
 }
 
@@ -114,19 +193,21 @@ func (m *Model) handleChatGPTAuthPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	if m.oauthLoading {
 		if msg.Type == tea.KeyEsc && m.oauthCancel != nil {
+			m.oauthBackRequested = true
 			m.oauthCancel()
 		}
 		return m, nil
 	}
 	count := len(m.authAccounts) + 2
+	if next, handled := movePicker(m.authIndex, count, pickerKeyAction(msg), m.loginPickerVisibleChoices()); handled {
+		m.authIndex = next
+		return m, nil
+	}
 	switch msg.Type {
-	case tea.KeyUp, tea.KeyShiftTab:
-		m.authIndex = (m.authIndex - 1 + count) % count
-	case tea.KeyDown, tea.KeyTab:
-		m.authIndex = (m.authIndex + 1) % count
 	case tea.KeyEsc:
-		m.pickChatGPTAuth = false
-		m.authAccounts = nil
+		if !m.restorePreviousLoginStep() {
+			m.cancelLoginFlow()
+		}
 	case tea.KeyEnter:
 		if m.authIndex < len(m.authAccounts) {
 			account := m.authAccounts[m.authIndex]
@@ -145,6 +226,9 @@ func (m *Model) startChatGPTOAuth(method chatgpt.LoginMethod, allowedWorkspaceID
 	ctx, cancel := context.WithCancel(m.ctx)
 	events := make(chan tea.Msg, 8)
 	m.oauthLoading, m.oauthCancel, m.oauthEvents = true, cancel, events
+	m.oauthBackRequested = false
+	m.oauthProgress = chatgpt.LoginProgress{}
+	m.loginError = ""
 	go func() {
 		request := auth.LoginRequest{Method: string(method), Params: map[string][]string{"allowed_workspace_id": allowedWorkspaceIDs}}
 		resolved, err := m.app.Login(ctx, chatgpt.ProviderID, request, tuiOAuthInteraction{events: events})
@@ -188,99 +272,59 @@ func openOAuthBrowser(ctx context.Context, target string) error {
 	return nil
 }
 
-// renderChatGPTAuthPicker renders discovered source names and secret-free
-// status metadata. Tokens are never included in this string.
+// renderChatGPTAuthPicker renders the centered, secret-free account/method
+// chooser or OAuth progress state. Tokens are never included in this string.
 func (m *Model) renderChatGPTAuthPicker() string {
-	if !m.pickChatGPTAuth {
-		return ""
-	}
-	if m.oauthLoading {
-		line := m.oauthProgress.Message
-		if m.oauthProgress.URL != "" {
-			line += "\n" + m.oauthProgress.URL
-		}
-		if m.oauthProgress.UserCode != "" {
-			line += "\nDevice code: " + m.oauthProgress.UserCode
-		}
-		return styleCompletionSelected.Render(line + "\n\nEsc cancel")
-	}
-	lines := make([]string, 0, len(m.authAccounts)+2)
-	for _, account := range m.authAccounts {
-		lines = append(lines, "Authorize account "+account.AccountID+" for Snow  (used by "+strings.Join(account.Sources, ", ")+")")
-	}
-	lines = append(lines, "Sign in with browser (any ChatGPT account)", "Sign in with device code")
-	var b strings.Builder
-	b.WriteString(styleHeader.Render("ChatGPT account"))
-	b.WriteByte('\n')
-	for i, line := range lines {
-		if i == m.authIndex {
-			b.WriteString(styleCompletionSelected.Render("› " + line))
-		} else {
-			b.WriteString(styleCompletion.Render("  " + line))
-		}
-		b.WriteByte('\n')
-	}
-	b.WriteString(styleFooter.Render("(Snow obtains its own OAuth token · Enter authorize · Esc cancel)"))
-	return strings.TrimSuffix(b.String(), "\n")
+	return m.renderChatGPTAuthPickerCard()
 }
 
 func (m *Model) beginCompatibleProfileCapture() {
+	m.loginFieldGeneration++
 	m.loginProfileMode = true
 	m.loginEndpointMode = false
 	m.loginMode = false
 	m.loginProvider = openaicompat.ProviderID
 	m.loginEndpoint = ""
+	m.loginError = ""
 	m.secretBuf.Reset()
 	m.editor.Reset()
 	m.editor.Placeholder = "x-provider"
 	m.compVisible = false
 	m.pickProvider = false
-	m.pushLine(styleFooter.Render("OpenAI-compatible profile name: lowercase letters, digits, ._- · Enter uses openai-compatible · Esc cancel"))
 }
 
 func (m *Model) beginCompatibleEndpointCapture(profileID string) {
+	m.loginFieldGeneration++
 	m.loginEndpointMode = true
 	m.loginProfileMode = false
 	m.loginMode = false
 	m.loginProvider = profileID
 	m.loginEndpoint = ""
+	m.loginError = ""
 	m.secretBuf.Reset()
 	m.editor.Reset()
 	if m.app != nil {
 		if configured, ok := m.app.Cfg.Providers[profileID]; ok {
-			m.editor.SetValue(configured.BaseURL)
+			m.editor.SetValue(sanitizeTerminalLine(configured.BaseURL))
 			m.editor.CursorEnd()
 		}
 	}
 	m.editor.Placeholder = "https://gateway.example/v1"
 	m.compVisible = false
 	m.pickProvider = false
-	m.pushLine(styleFooter.Render(profileID + " endpoint: enter API root, /responses, or /chat/completions URL · Enter continue · Esc cancel"))
 }
 
 // beginKeyCapture switches the editor into masked API-key capture mode.
 func (m *Model) beginKeyCapture(provider string) {
+	m.loginFieldGeneration++
 	m.loginMode = true
 	m.loginProvider = provider
+	m.loginError = ""
 	m.secretBuf.Reset()
 	m.editor.Reset()
 	m.editor.Placeholder = "Type a message…"
 	m.compVisible = false
 	m.pickProvider = false
-	hint := "type key then Enter · Esc to cancel"
-	optional := m.isOpenAICompatibleProfile(provider) || m.loginEndpoint != ""
-	if m.app != nil {
-		for _, descriptor := range m.app.AuthProviders() {
-			if descriptor.ProviderID == provider && !descriptor.Required {
-				optional = true
-				break
-			}
-		}
-	}
-	if optional {
-		hint = "type optional key, or press Enter to keep existing/fallback/keyless · Esc to cancel"
-	}
-	m.pushLine(styleFooter.Render("API key for " + provider + " (hidden): " + hint))
 }
 
 // supportedProviders is registry-driven; adding a module with login methods
@@ -385,35 +429,17 @@ func (m *Model) providerStatus(providerID string) string {
 	return providerID + "  (" + summary + ")"
 }
 
-// renderProviderPicker renders the /login or /logout provider list.
+// renderProviderPicker renders the centered /login or /logout provider list.
 func (m *Model) renderProviderPicker() string {
-	if !m.pickProvider || len(m.providers) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	title := "login provider"
-	hint := "(↑/↓ choose · Enter sign in · Esc cancel)"
-	if m.providerLogout {
-		title = "logout provider"
-		hint = "(↑/↓ choose · Enter log out · Esc cancel)"
-	}
-	b.WriteString(styleHeader.Render(title))
-	b.WriteString("\n")
-	for i, p := range m.providers {
-		line := m.providerStatus(p)
-		if i == m.provIndex {
-			b.WriteString(styleCompletionSelected.Render("› " + line))
-		} else {
-			b.WriteString(styleCompletion.Render("  " + line))
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString(styleFooter.Render(hint))
-	return strings.TrimSuffix(b.String(), "\n")
+	return m.renderProviderPickerCard()
 }
 
 // doLogout opens a picker for /logout or directly removes /logout <provider>.
 func (m *Model) doLogout(args []string) (tea.Model, tea.Cmd) {
+	if m.authOperationPending() {
+		m.pushLine(styleError.Render("logout: wait for the current authentication operation to finish"))
+		return m, nil
+	}
 	if len(args) == 0 {
 		m.providers = m.storedCredentialProviders()
 		if len(m.providers) == 0 {
@@ -423,6 +449,7 @@ func (m *Model) doLogout(args []string) (tea.Model, tea.Cmd) {
 		m.provIndex = 0
 		m.providerLogout = true
 		m.pickProvider = true
+		m.loginError = ""
 		m.compVisible = false
 		return m, nil
 	}
@@ -431,10 +458,15 @@ func (m *Model) doLogout(args []string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	provider := args[0]
+	m.logoutGeneration++
+	generation := m.logoutGeneration
+	m.logoutPending = true
+	m.logoutProvider = provider
+	m.loginError = ""
 	app := m.app
 	ctx := m.ctx
 	return m, func() tea.Msg {
-		return logoutDoneMsg{provider: provider, err: app.Logout(ctx, provider)}
+		return logoutDoneMsg{generation: generation, provider: provider, err: app.Logout(ctx, provider)}
 	}
 }
 
@@ -556,9 +588,10 @@ func (m *Model) handleThinkingPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) clearModelPick() {
 	m.pickModel = false
+	m.modelLoading = false
 	m.modelList = nil
 	m.modelQuery = ""
-	m.modelSearchActive = false
+	m.pickerGeneration++
 }
 
 func (m *Model) clearThinkingPick() {
@@ -668,7 +701,6 @@ func (m *Model) startModelPick() (tea.Model, tea.Cmd) {
 	m.modelList = models
 	m.modelIndex = 0
 	m.modelQuery = ""
-	m.modelSearchActive = false
 	for i, candidate := range models {
 		if candidate.Provider == m.app.Model.Provider && candidate.ID == m.app.Model.ID {
 			m.modelIndex = i
@@ -676,6 +708,7 @@ func (m *Model) startModelPick() (tea.Model, tea.Cmd) {
 		}
 	}
 	m.pickModel = true
+	m.modelLoading = false
 	m.compVisible = false
 	m.pickerGeneration++
 	generation := m.pickerGeneration

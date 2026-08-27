@@ -72,7 +72,11 @@ func TestComposerCtrlVAttachesImageAndSubmitPersistsMixedContent(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("image paste returned no command")
 	}
-	_, _ = m.Update(cmd())
+	paste, ok := cmd().(clipboardImageMsg)
+	if !ok || paste.generation == 0 {
+		t.Fatalf("image paste result was not generation-scoped: %#v", paste)
+	}
+	_, _ = m.Update(paste)
 	if len(m.promptImages) != 1 || m.editor.Value() != "describe this [Image #1] " {
 		t.Fatalf("attachment state/editor = %d %q", len(m.promptImages), m.editor.Value())
 	}
