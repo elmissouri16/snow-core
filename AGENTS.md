@@ -107,22 +107,6 @@ snowsdk → app + protocol; never bubbletea
    move a published tag or improvise a separate packaging path.
 8. Report changed files, verification commands, and environment blockers.
 
-## Temporary GitHub Actions state
-
-As of 2026-08-20, `.github/workflows/ci.yml` and
-`.github/workflows/release-alpha.yml` are disabled in GitHub because the
-account's Actions billing/spending allowance is exhausted. Do not tag or publish
-a release while they are disabled. Before the next remote CI run or release:
-
-```sh
-gh workflow enable ci.yml
-gh workflow enable release-alpha.yml
-gh workflow run ci.yml --ref main
-```
-
-Require that dispatched CI run to pass before tagging. Remove this temporary
-notice after both workflows are enabled and CI is green.
-
 ## Verification
 
 There is no Makefile or Taskfile. Run from the repository root:
