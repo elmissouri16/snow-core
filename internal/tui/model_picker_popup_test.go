@@ -46,6 +46,62 @@ func TestHeaderModelHitTargetOpensPicker(t *testing.T) {
 	}
 }
 
+func TestHeaderThinkingAndModeHitTargets(t *testing.T) {
+	thinking := modelPickerTestModel(t, 120, 30)
+	header := thinking.renderHeaderLayout(thinking.currentHeaderStatus())
+	if header.thinkingEnd <= header.thinkingStart || header.modeEnd <= header.modeStart {
+		t.Fatalf("header control bounds: thinking=[%d,%d) mode=[%d,%d) view=%q", header.thinkingStart, header.thinkingEnd, header.modeStart, header.modeEnd, stripANSI(header.view))
+	}
+	_, cmd := thinking.Update(tea.MouseMsg{X: header.thinkingStart, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if !thinking.pickThinking || thinking.thinkingReturnToModel || cmd != nil {
+		t.Fatalf("thinking click: open=%v return_to_model=%v cmd=%v", thinking.pickThinking, thinking.thinkingReturnToModel, cmd != nil)
+	}
+
+	mode := modelPickerTestModel(t, 120, 30)
+	header = mode.renderHeaderLayout(mode.currentHeaderStatus())
+	_, cmd = mode.Update(tea.MouseMsg{X: header.modeEnd - 1, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if cmd == nil || !mode.modeSwitching || mode.pendingMode == nil || *mode.pendingMode != protocol.ModePlan {
+		t.Fatalf("mode click: cmd=%v switching=%v pending=%v", cmd != nil, mode.modeSwitching, mode.pendingMode)
+	}
+	msg := cmd()
+	_, _ = mode.Update(msg)
+	if got := mode.app.Agent.Mode(); got != protocol.ModePlan {
+		t.Fatalf("mode after click=%q", got)
+	}
+}
+
+func TestHeaderModeClickQueuesDuringActiveTurn(t *testing.T) {
+	m := modelPickerTestModel(t, 120, 30)
+	m.busy = true
+	header := m.renderHeaderLayout(m.currentHeaderStatus())
+	_, cmd := m.Update(tea.MouseMsg{X: header.modeStart, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if cmd != nil || m.pendingMode == nil || *m.pendingMode != protocol.ModePlan {
+		t.Fatalf("busy mode click: cmd=%v pending=%v", cmd != nil, m.pendingMode)
+	}
+	if m.lastStatus != "mode switches after current turn" {
+		t.Fatalf("busy mode status=%q", m.lastStatus)
+	}
+}
+
+func TestAltMOpensModelPickerAndRespectsActiveTurn(t *testing.T) {
+	altM := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true}
+	m := modelPickerTestModel(t, 80, 24)
+	_, cmd := m.handleKey(altM)
+	if !m.pickModel || cmd != nil {
+		t.Fatalf("idle Alt+M: picker=%v cmd=%v", m.pickModel, cmd != nil)
+	}
+
+	busy := modelPickerTestModel(t, 80, 24)
+	busy.busy = true
+	_, cmd = busy.handleKey(altM)
+	if busy.pickModel || cmd != nil {
+		t.Fatalf("busy Alt+M: picker=%v cmd=%v", busy.pickModel, cmd != nil)
+	}
+	if want := "model: wait for the current turn to finish"; busy.lastStatus != want {
+		t.Fatalf("busy Alt+M status=%q want=%q", busy.lastStatus, want)
+	}
+}
+
 func TestHeaderModelHitTargetMatchesRenderedModes(t *testing.T) {
 	for _, width := range []int{28, 60, 120} {
 		t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
@@ -54,6 +110,12 @@ func TestHeaderModelHitTargetMatchesRenderedModes(t *testing.T) {
 			if header.modelEnd > m.managedFrameWidth() || header.modelEnd <= header.modelStart {
 				t.Fatalf("width=%d bounds=[%d,%d) frame=%d header=%q", width, header.modelStart, header.modelEnd, m.managedFrameWidth(), stripANSI(header.view))
 			}
+			if width >= 48 && header.modeEnd <= header.modeStart {
+				t.Fatalf("width=%d missing visible mode hit target: %+v", width, header)
+			}
+			if width >= 80 && header.thinkingEnd <= header.thinkingStart {
+				t.Fatalf("width=%d missing visible thinking hit target: %+v", width, header)
+			}
 			_, _ = m.Update(tea.MouseMsg{X: header.modelEnd, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 			if m.pickModel {
 				t.Fatalf("width=%d click outside rendered selector opened picker", width)
@@ -61,8 +123,8 @@ func TestHeaderModelHitTargetMatchesRenderedModes(t *testing.T) {
 
 			m.app.Cfg.TUI.Mouse = false
 			native := m.renderHeaderLayout("idle")
-			if native.modelStart != 0 || native.modelEnd != 0 || strings.Contains(stripANSI(native.view), "▾") {
-				t.Fatalf("native header retained selector: bounds=[%d,%d) view=%q", native.modelStart, native.modelEnd, stripANSI(native.view))
+			if native.modelStart != 0 || native.modelEnd != 0 || native.thinkingStart != 0 || native.thinkingEnd != 0 || native.modeStart != 0 || native.modeEnd != 0 || strings.Contains(stripANSI(native.view), "▾") {
+				t.Fatalf("native header retained controls: model=[%d,%d) thinking=[%d,%d) mode=[%d,%d) view=%q", native.modelStart, native.modelEnd, native.thinkingStart, native.thinkingEnd, native.modeStart, native.modeEnd, stripANSI(native.view))
 			}
 			_, _ = m.Update(tea.MouseMsg{X: header.modelStart, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 			if m.pickModel {
@@ -163,6 +225,53 @@ func TestModelPickerWindowKeepsSelectionVisibleAndBounded(t *testing.T) {
 				t.Fatalf("selection %d row %d width=%d", selected, row, width)
 			}
 		}
+	}
+}
+
+func TestStandaloneThinkingPickerUsesCenteredFixedFrameCard(t *testing.T) {
+	for _, inline := range []bool{false, true} {
+		t.Run(fmt.Sprintf("inline_%v", inline), func(t *testing.T) {
+			m := modelPickerTestModel(t, 70, 18)
+			m.inlineTranscript = inline
+			model := m.app.Agent.Model()
+			model.SupportsThinking = true
+			model.ThinkingLevels = []protocol.ThinkingLevel{protocol.ThinkingLow, protocol.ThinkingHigh}
+			if err := m.app.Agent.SetModel(model); err != nil {
+				t.Fatal(err)
+			}
+			m.app.Model = model
+			m.layout()
+			beforeTranscriptHeight := m.transcript.Height
+			_, _ = m.startThinkingPick()
+			m.layout()
+			if !m.thinkingModalVisible() || m.modelModalVisible() {
+				t.Fatalf("thinking modal=%v model modal=%v", m.thinkingModalVisible(), m.modelModalVisible())
+			}
+			if m.transcript.Height != beforeTranscriptHeight {
+				t.Fatalf("transcript height changed %d -> %d", beforeTranscriptHeight, m.transcript.Height)
+			}
+			if overlay := stripANSI(m.renderOverlays()); strings.Contains(overlay, "Thinking effort") {
+				t.Fatalf("thinking picker still participates in overlay layout: %q", overlay)
+			}
+			card := m.renderThinkingModal()
+			plainCard := stripANSI(card)
+			for _, want := range []string{"Thinking effort", "subsequent provider requests", "Esc close", "› off"} {
+				if !strings.Contains(plainCard, want) {
+					t.Fatalf("card missing %q: %q", want, plainCard)
+				}
+			}
+			view := m.View()
+			if got := lipgloss.Height(view); got != m.managedFrameHeight() {
+				t.Fatalf("view height=%d want=%d", got, m.managedFrameHeight())
+			}
+			cardWidth, cardHeight := transcriptSelectionBlockWidth(card), lipgloss.Height(card)
+			x := (m.managedFrameWidth() - cardWidth) / 2
+			y := (m.managedFrameHeight() - cardHeight) / 2
+			lines := strings.Split(stripANSI(view), "\n")
+			if y >= len(lines) || stripANSI(xansi.Cut(lines[y], x, x+1)) != "╭" {
+				t.Fatalf("centered thinking border missing at (%d,%d): %q", x, y, lines[y])
+			}
+		})
 	}
 }
 

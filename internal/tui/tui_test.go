@@ -85,9 +85,10 @@ func TestModelSlashCommands(t *testing.T) {
 	if quit != nil {
 		t.Fatal("help should not quit")
 	}
-	if len(m.lines) == 0 {
-		t.Fatal("expected help output")
+	if !m.pickHelp || m.renderHelp() == "" {
+		t.Fatal("expected help popup")
 	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 
 	m.editor.SetValue("/quit")
 	_, quit = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -311,8 +312,8 @@ func TestModelThinkingPickerFiltersAndPersists(t *testing.T) {
 	if !m.pickThinking || len(m.thinkingList) != 2 || m.thinkingList[0] != protocol.ThinkingOff || m.thinkingList[1] != protocol.ThinkingLow {
 		t.Fatalf("thinking picker = open=%v levels=%v", m.pickThinking, m.thinkingList)
 	}
-	if strings.Contains(m.renderThinkingPicker(), "high") {
-		t.Fatalf("picker exposed unsupported level: %q", m.renderThinkingPicker())
+	if strings.Contains(m.renderThinkingModal(), "high") {
+		t.Fatalf("picker exposed unsupported level: %q", m.renderThinkingModal())
 	}
 	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyEnter})
@@ -367,7 +368,7 @@ func TestModelPickerSelectsModelThenThinkingEffort(t *testing.T) {
 	if !slices.Equal(m.thinkingList, want) || m.thinkingList[m.thinkingIndex] != protocol.ThinkingXHigh {
 		t.Fatalf("thinking list=%v index=%d", m.thinkingList, m.thinkingIndex)
 	}
-	view := stripANSI(m.renderThinkingPicker())
+	view := stripANSI(m.renderThinkingModal())
 	for _, label := range []string{"reasoner", "xhigh", "max", "ultra"} {
 		if !strings.Contains(view, label) {
 			t.Fatalf("picker missing %q: %q", label, view)

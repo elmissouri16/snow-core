@@ -106,7 +106,7 @@ func (m *Model) resetModelIndexToActive(models []protocol.Model) {
 	}
 }
 
-func (m *Model) handleModelMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
+func (m *Model) handleHeaderMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 	// A keyboard-driven model flow owns the frame once open. Do not let pointer
 	// events scroll or select the transcript behind the centered card.
 	if m.modelModalVisible() {
@@ -120,25 +120,39 @@ func (m *Model) handleModelMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 		return false, nil
 	}
 	header := m.renderHeaderLayout(m.currentHeaderStatus())
-	if header.modelEnd <= header.modelStart || event.X < header.modelStart || event.X >= header.modelEnd {
+	clicked := func(start, end int) bool {
+		return end > start && event.X >= start && event.X < end
+	}
+	modelClicked := clicked(header.modelStart, header.modelEnd)
+	thinkingClicked := clicked(header.thinkingStart, header.thinkingEnd)
+	modeClicked := clicked(header.modeStart, header.modeEnd)
+	if !modelClicked && !thinkingClicked && !modeClicked {
 		return false, nil
 	}
-	if m.modelHeaderBlocked() {
-		return true, nil
-	}
-	if m.busy || m.app.Agent.IsRunning() {
-		m.lastStatus = "model: wait for the current turn to finish"
+	if m.headerControlsBlocked() {
 		return true, nil
 	}
 	m.closeTranscriptSelectionContextMenu()
-	_, cmd := m.startModelPick()
+	var cmd tea.Cmd
+	switch {
+	case modelClicked:
+		if m.busy || m.app.Agent.IsRunning() {
+			m.lastStatus = "model: wait for the current turn to finish"
+			return true, nil
+		}
+		_, cmd = m.startModelPick()
+	case thinkingClicked:
+		_, cmd = m.startThinkingPick()
+	case modeClicked:
+		cmd = m.toggleCollaborationMode()
+	}
 	m.layout()
 	return true, cmd
 }
 
-func (m *Model) modelHeaderBlocked() bool {
+func (m *Model) headerControlsBlocked() bool {
 	return m.trustPending || m.sessionOpLoading || m.loginModalVisible() ||
-		m.pickThinking || m.pickSettings || m.pickFork ||
+		m.pickThinking || m.pickSettings || m.pickHelp || m.pickFork ||
 		m.pickSession || m.pickTree || m.pickInfo || m.pickPermissionMode || m.permPending ||
 		m.userInputPending || m.confirmGoalReplace || m.planPrompt || m.compVisible || m.skillVisible ||
 		m.mentionVisible || m.mentionLoading || m.processFleetOpen || m.subagentFleetOpen

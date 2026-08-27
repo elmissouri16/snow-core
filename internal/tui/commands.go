@@ -33,11 +33,7 @@ func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.
 	case "/quit", "/q":
 		return m, m.quitCmd()
 	case "/help":
-		mouseHelp := "mouse: native terminal selection · F6 enables wheel + app drag-copy"
-		if m.app.Cfg.TUI.Mouse {
-			mouseHelp = "mouse: wheel + app drag-copy · F6 restores native terminal selection"
-		}
-		m.pushLine(styleFooter.Render(formatCommandListWithKeys(m.keys) + "\n(while working: submit queues steer, follow-up uses its configured binding)\n(" + mouseHelp + ")"))
+		return m.startHelp()
 	case "/goal":
 		if len(args) == 0 {
 			g, err := m.app.GoalState()

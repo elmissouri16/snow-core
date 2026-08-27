@@ -282,8 +282,8 @@ func (m *Model) managedFrameWidth() int {
 // constant height (so native scrollback is untouched) while giving modal lists
 // enough rows to show more than their selected item.
 func (m *Model) inlineModalOverlay() bool {
-	return m.inlineTranscript && (m.pickThinking && !m.thinkingReturnToModel || m.pickSession || m.pickTree ||
-		m.pickInfo || m.pickPermissionMode || m.permPending || m.userInputPending ||
+	return m.inlineTranscript && (m.pickSession || m.pickTree || m.pickInfo ||
+		m.pickPermissionMode || m.permPending || m.userInputPending ||
 		m.confirmGoalReplace || m.planPrompt)
 }
 
@@ -354,6 +354,18 @@ func (m *Model) quitCmd() tea.Cmd {
 		m.inlineExiting = true
 	}
 	return tea.Quit
+}
+
+func (m *Model) handleModelShortcut(msg tea.KeyMsg) (bool, tea.Cmd) {
+	if !keyMatches(msg, m.keys.Models) {
+		return false, nil
+	}
+	if m.busy || (m.app != nil && m.app.Agent != nil && m.app.Agent.IsRunning()) {
+		m.lastStatus = "model: wait for the current turn to finish"
+		return true, nil
+	}
+	_, cmd := m.startModelPick()
+	return true, cmd
 }
 
 func (m *Model) handleFleetShortcut(msg tea.KeyMsg) (bool, tea.Cmd) {
@@ -579,6 +591,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSettingsKey(msg)
 	}
 
+	// --- Centered help viewer ---
+	if m.pickHelp {
+		return m.handleHelpKey(msg)
+	}
+
 	// --- Thinking picker (for /thinking) ---
 	if m.pickThinking {
 		return m.handleThinkingPick(msg)
@@ -700,9 +717,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Top-level shortcuts open fleet inspectors, cycle thinking effort, or cycle
-	// collaboration mode. Every modal/completion path above retains its existing
-	// navigation semantics.
+	// Top-level shortcuts open model/fleet inspectors, cycle thinking effort, or
+	// cycle collaboration mode. Every modal/completion path above retains its
+	// existing navigation semantics.
+	if handled, cmd := m.handleModelShortcut(msg); handled {
+		return m, cmd
+	}
 	if handled, cmd := m.handleFleetShortcut(msg); handled {
 		return m, cmd
 	}

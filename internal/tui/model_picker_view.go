@@ -29,6 +29,14 @@ func (m *Model) overlayModelModal(frame string) string {
 	return m.overlayCenteredModal(frame, m.renderModelModal())
 }
 
+func (m *Model) thinkingModalVisible() bool {
+	return m.pickThinking && !m.thinkingReturnToModel
+}
+
+func (m *Model) overlayThinkingModal(frame string) string {
+	return m.overlayCenteredModal(frame, m.renderThinkingModal())
+}
+
 func (m *Model) modelPickerVisibleModels() int {
 	models := m.filteredModels()
 	start, end := m.modelWindow(models)
@@ -229,12 +237,34 @@ func (m *Model) renderModelDetails(models []protocol.Model, width, height int) s
 }
 
 func (m *Model) renderModelThinkingPicker() string {
-	if !m.pickThinking || !m.thinkingReturnToModel || m.thinkingModel == nil {
+	if !m.pickThinking || !m.thinkingReturnToModel {
+		return ""
+	}
+	return m.renderThinkingModal()
+}
+
+func (m *Model) renderThinkingModal() string {
+	if !m.pickThinking {
+		return ""
+	}
+	var model protocol.Model
+	switch {
+	case m.thinkingModel != nil:
+		model = m.thinkingModel.Clone()
+	case m.app != nil && m.app.Agent != nil:
+		model = m.app.Agent.Model()
+	default:
 		return ""
 	}
 	geometry := m.pickerCardGeometry()
-	header := renderPickerCardHeader("Thinking effort", "for "+m.thinkingModel.Provider+"/"+m.thinkingModel.ID, geometry.innerWidth)
-	instruction := styleHeaderDim.Render(truncateDisplayText(" Select the effort to apply with this model", geometry.innerWidth))
+	header := renderPickerCardHeader("Thinking effort", "for "+model.Provider+"/"+model.ID, geometry.innerWidth)
+	instructionText := " Select the effort to apply with this model"
+	footerText := " ↑/↓ navigate · Enter apply · Esc back "
+	if !m.thinkingReturnToModel {
+		instructionText = " Select the effort for subsequent provider requests"
+		footerText = " ↑/↓ navigate · Enter apply · Esc close "
+	}
+	instruction := styleHeaderDim.Render(truncateDisplayText(instructionText, geometry.innerWidth))
 	separator := styleSep.Render(strings.Repeat("─", geometry.innerWidth))
 	start, end := 0, len(m.thinkingList)
 	if end > geometry.listHeight {
@@ -262,8 +292,8 @@ func (m *Model) renderModelThinkingPicker() string {
 		Render(strings.Join(rows, "\n"))
 	parts := []string{header, instruction, separator, list}
 	if geometry.detailHeight > 0 {
-		parts = append(parts, separator, m.renderModelDetails([]protocol.Model{*m.thinkingModel}, geometry.innerWidth, geometry.detailHeight))
+		parts = append(parts, separator, m.renderModelDetails([]protocol.Model{model}, geometry.innerWidth, geometry.detailHeight))
 	}
-	parts = append(parts, styleFooter.Render(truncateDisplayText(" ↑/↓ navigate · Enter apply · Esc back ", geometry.innerWidth)))
+	parts = append(parts, styleFooter.Render(truncateDisplayText(footerText, geometry.innerWidth)))
 	return renderPickerCard(lipgloss.JoinVertical(lipgloss.Left, parts...), geometry)
 }

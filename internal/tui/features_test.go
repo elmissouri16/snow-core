@@ -173,7 +173,7 @@ func TestModelFrameAlwaysFitsWindow(t *testing.T) {
 		m.layout()
 		assertExactFrame(t, m)
 		plain := stripANSI(m.View())
-		if !strings.Contains(plain, "thinking effort") || !strings.Contains(plain, "high") {
+		if !strings.Contains(plain, "Thinking effort") || !strings.Contains(plain, "high") {
 			t.Fatalf("thinking picker clipped unexpectedly: %q", plain)
 		}
 	})

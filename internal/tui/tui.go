@@ -525,6 +525,10 @@ type Model struct {
 	settingsStatus        string
 	settingsError         string
 
+	// Centered /help viewer state.
+	pickHelp   bool
+	helpOffset int
+
 	// Session picker state.
 	pickSession           bool
 	pickSessionOnStart    bool

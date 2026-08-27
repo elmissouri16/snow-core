@@ -163,15 +163,15 @@ func TestConfiguredHelpAndEmergencyEscape(t *testing.T) {
 }
 
 func TestKeybindingOverridesEmergencyAndValidation(t *testing.T) {
-	keys, err := applyKeybindingOverrides(tuiKeys, map[string][]string{"submit": {"ctrl+s"}, "agents": {"ctrl+g"}, "processes": {"ctrl+p"}, "close": {"q"}})
+	keys, err := applyKeybindingOverrides(tuiKeys, map[string][]string{"submit": {"ctrl+s"}, "models": {"alt+z"}, "agents": {"ctrl+g"}, "processes": {"ctrl+p"}, "close": {"q"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if keys.Submit.Keys()[0] != "ctrl+s" {
 		t.Fatalf("submit=%v", keys.Submit.Keys())
 	}
-	if keys.Agents.Keys()[0] != "ctrl+g" || keys.Processes.Keys()[0] != "ctrl+p" {
-		t.Fatalf("fleet shortcuts: agents=%v processes=%v", keys.Agents.Keys(), keys.Processes.Keys())
+	if keys.Models.Keys()[0] != "alt+z" || keys.Agents.Keys()[0] != "ctrl+g" || keys.Processes.Keys()[0] != "ctrl+p" {
+		t.Fatalf("shortcuts: models=%v agents=%v processes=%v", keys.Models.Keys(), keys.Agents.Keys(), keys.Processes.Keys())
 	}
 	foundEsc := false
 	for _, value := range keys.Close.Keys() {

@@ -666,33 +666,6 @@ func (m *Model) setThinking(level protocol.ThinkingLevel, announce bool) error {
 	return nil
 }
 
-func (m *Model) renderThinkingPicker() string {
-	if !m.pickThinking || len(m.thinkingList) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	title := "thinking effort"
-	if m.thinkingModel != nil {
-		title += " for " + m.thinkingModel.ID
-	}
-	b.WriteString(styleHeaderDim.Render(title) + "\n")
-	for i, level := range m.thinkingList {
-		line := string(level)
-		if i == m.thinkingIndex {
-			b.WriteString(styleCompletionSelected.Render("› " + line))
-		} else {
-			b.WriteString(styleCompletion.Render("  " + line))
-		}
-		b.WriteString("\n")
-	}
-	hint := "(↑/↓ choose, Enter apply, Esc cancel)"
-	if m.thinkingReturnToModel {
-		hint = "(↑/↓ choose, Enter apply, Esc back)"
-	}
-	b.WriteString(styleFooter.Render(hint))
-	return strings.TrimSuffix(b.String(), "\n")
-}
-
 // startModelPick opens immediately from cached catalogs, then resolves missing
 // inactive catalogs asynchronously so ordinary startup does not wait for them.
 func (m *Model) startModelPick() (tea.Model, tea.Cmd) {

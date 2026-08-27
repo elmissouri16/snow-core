@@ -829,12 +829,16 @@ func TestHelpUsesRegistry(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 
+	beforeLines := len(m.lines)
 	m.editor.SetValue("/help")
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	joined := strings.Join(m.lines, "\n")
+	joined := strings.Join(m.helpLines(), "\n")
+	if !m.pickHelp || len(m.lines) != beforeLines {
+		t.Fatalf("help popup=%v transcript lines=%d want=%d", m.pickHelp, len(m.lines), beforeLines)
+	}
 	for _, c := range commands {
 		if !strings.Contains(joined, c.name) {
-			t.Errorf("/help output missing command %s", c.name)
+			t.Errorf("/help popup missing command %s", c.name)
 		}
 	}
 }

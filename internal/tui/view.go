@@ -62,11 +62,6 @@ func (m *Model) renderOverlays() string {
 			overlays = append(overlays, r)
 		}
 	}
-	if m.pickThinking && !m.thinkingReturnToModel {
-		if r := m.renderThinkingPicker(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
 	if m.pickFork {
 		if r := m.renderForkPicker(); r != "" {
 			overlays = append(overlays, r)
@@ -226,6 +221,9 @@ func (m *Model) currentHeaderStatus() string {
 	if m.pickSettings || m.settingsReturnToPanel {
 		status = "settings"
 	}
+	if m.pickHelp {
+		status = "help"
+	}
 	if m.modelModalVisible() {
 		status = "models"
 	} else if m.pickThinking {
@@ -333,8 +331,12 @@ func (m *Model) View() string {
 		frame = m.overlayLoginModal(frame)
 	} else if m.modelModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlayModelModal(frame)
+	} else if m.thinkingModalVisible() && !m.permPending && !m.userInputPending {
+		frame = m.overlayThinkingModal(frame)
 	} else if m.settingsModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlaySettingsModal(frame)
+	} else if m.helpModalVisible() && !m.permPending && !m.userInputPending {
+		frame = m.overlayHelpModal(frame)
 	}
 	return clipboardSequence + frame
 }
@@ -435,8 +437,10 @@ func fitFrameBottom(frame string, width, height int) string {
 }
 
 type headerRender struct {
-	view                 string
-	modelStart, modelEnd int
+	view                       string
+	modelStart, modelEnd       int
+	thinkingStart, thinkingEnd int
+	modeStart, modeEnd         int
 }
 
 // renderHeader is the sticky top bar: brand · provider/model · thinking · runtime · cwd · status.
@@ -454,6 +458,8 @@ func (m *Model) renderHeaderLayout(status string) headerRender {
 	brandWidth = lipgloss.Width(brand)
 	midText := "booting"
 	selectorText := ""
+	thinkingText := ""
+	modeText := ""
 	selectorEnabled := false
 	if m.lastErr != nil {
 		midText = "startup failed"
@@ -469,12 +475,14 @@ func (m *Model) renderHeaderLayout(status string) headerRender {
 			selectorText += " ▾"
 		}
 		midText = selectorText
+		modeText = "mode:" + m.collaborationModeLabel()
 		if w >= 80 {
-			midText += "  ·  thinking:" + string(m.app.Agent.Thinking()) +
-				"  ·  mode:" + m.collaborationModeLabel() + goalText +
+			thinkingText = "thinking:" + string(m.app.Agent.Thinking())
+			midText += "  ·  " + thinkingText +
+				"  ·  " + modeText + goalText +
 				"  ·  " + shortPath(m.app.CWD(), max(12, w/3))
 		} else if w >= 48 {
-			midText += "  ·  mode:" + m.collaborationModeLabel() + "  ·  " + shortPath(m.app.CWD(), max(10, w/4))
+			midText += "  ·  " + modeText + "  ·  " + shortPath(m.app.CWD(), max(10, w/4))
 		}
 	}
 
@@ -497,13 +505,14 @@ func (m *Model) renderHeaderLayout(status string) headerRender {
 	}
 	mid := ""
 	modelStart, modelEnd := 0, 0
+	thinkingStart, thinkingEnd := 0, 0
+	modeStart, modeEnd := 0, 0
 	if selectorEnabled && selectorText != "" {
 		visibleSelector := truncateDisplayText(selectorText, maxMid)
 		metadata := strings.TrimPrefix(midText, selectorText)
 		metadataWidth := max(0, maxMid-xansi.StringWidth(visibleSelector))
 		visibleMetadata := truncateDisplayText(metadata, metadataWidth)
 		styledSelector := styleCompletionSelected.Render(visibleSelector)
-		mid = styledSelector + midStyle.Render(visibleMetadata)
 		if visibleSelector != "" {
 			modelStart = min(w, brandWidth)
 			modelEnd = min(w, modelStart+xansi.StringWidth(styledSelector))
@@ -511,14 +520,76 @@ func (m *Model) renderHeaderLayout(status string) headerRender {
 				modelStart, modelEnd = 0, 0
 			}
 		}
+		styledMetadata, thinkingBounds, modeBounds := renderHeaderMetadataControls(
+			visibleMetadata, modelEnd, thinkingText, modeText, m.thinkingFlash,
+		)
+		thinkingStart, thinkingEnd = thinkingBounds[0], thinkingBounds[1]
+		modeStart, modeEnd = modeBounds[0], modeBounds[1]
+		mid = styledSelector + styledMetadata
 	} else {
 		mid = midStyle.Render(truncateDisplayText(midText, maxMid))
 	}
 	pad := max(0, midArea-lipgloss.Width(mid))
 	return headerRender{
-		view:       brand + mid + strings.Repeat(" ", pad) + right,
-		modelStart: modelStart, modelEnd: modelEnd,
+		view:          brand + mid + strings.Repeat(" ", pad) + right,
+		modelStart:    modelStart,
+		modelEnd:      modelEnd,
+		thinkingStart: thinkingStart,
+		thinkingEnd:   thinkingEnd,
+		modeStart:     modeStart,
+		modeEnd:       modeEnd,
 	}
+}
+
+func renderHeaderMetadataControls(metadata string, base int, thinkingText, modeText string, thinkingFlash bool) (string, [2]int, [2]int) {
+	type control struct {
+		name       string
+		start, end int
+	}
+	controls := make([]control, 0, 2)
+	for name, text := range map[string]string{"thinking": thinkingText, "mode": modeText} {
+		if text == "" {
+			continue
+		}
+		if start := strings.Index(metadata, text); start >= 0 {
+			controls = append(controls, control{name: name, start: start, end: start + len(text)})
+		}
+	}
+	if len(controls) == 0 {
+		style := styleHeaderDim
+		if thinkingFlash {
+			style = styleBrand
+		}
+		return style.Render(metadata), [2]int{}, [2]int{}
+	}
+	sort.Slice(controls, func(i, j int) bool { return controls[i].start < controls[j].start })
+	baseStyle := styleHeaderDim
+	if thinkingFlash {
+		baseStyle = styleBrand
+	}
+	var view strings.Builder
+	cursor := 0
+	thinkingBounds, modeBounds := [2]int{}, [2]int{}
+	for _, item := range controls {
+		view.WriteString(baseStyle.Render(metadata[cursor:item.start]))
+		style := styleCompletionSelected
+		if item.name == "thinking" && thinkingFlash {
+			style = styleBrand
+		}
+		view.WriteString(style.Render(metadata[item.start:item.end]))
+		bounds := [2]int{
+			base + xansi.StringWidth(metadata[:item.start]),
+			base + xansi.StringWidth(metadata[:item.end]),
+		}
+		if item.name == "thinking" {
+			thinkingBounds = bounds
+		} else {
+			modeBounds = bounds
+		}
+		cursor = item.end
+	}
+	view.WriteString(baseStyle.Render(metadata[cursor:]))
+	return view.String(), thinkingBounds, modeBounds
 }
 
 // renderEditor draws a composer that grows from three to six rows.
