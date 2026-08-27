@@ -130,19 +130,30 @@ func (p *runtimeProcess) stop(ctx context.Context, grace time.Duration, reason s
 		return errors.New("managed process was not started")
 	}
 	if !procgroup.Exists(cmd.Process) {
-		return nil
+		return p.waitForCompletion(DefaultStopGrace)
 	}
 	terminateErr := procgroup.Terminate(cmd.Process)
 	exited, cancelErr := waitForProcessGroupExit(ctx, cmd.Process, grace)
 	if exited {
-		return ignoreExpectedExitError(terminateErr)
+		return errors.Join(ignoreExpectedExitError(terminateErr), p.waitForCompletion(DefaultStopGrace))
 	}
 	killErr := procgroup.Kill(cmd.Process)
 	exited, _ = waitForProcessGroupExit(context.Background(), cmd.Process, DefaultStopGrace)
 	if !exited {
 		return errors.Join(cancelErr, ignoreExpectedExitError(terminateErr), ignoreExpectedExitError(killErr), fmt.Errorf("managed process %s did not exit after kill", p.id))
 	}
-	return errors.Join(cancelErr, ignoreExpectedExitError(terminateErr), ignoreExpectedExitError(killErr))
+	return errors.Join(cancelErr, ignoreExpectedExitError(terminateErr), ignoreExpectedExitError(killErr), p.waitForCompletion(DefaultStopGrace))
+}
+
+func (p *runtimeProcess) waitForCompletion(timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-p.done:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("managed process %s was not reaped after exit", p.id)
+	}
 }
 
 func waitForProcessGroupExit(ctx context.Context, process *os.Process, timeout time.Duration) (bool, error) {

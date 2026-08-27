@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -308,24 +309,42 @@ func (h *ExternalHost) call(ctx context.Context, method string, params []byte, c
 		h.removePending(id)
 		return ctx.Err()
 	}
-	select {
-	case resp := <-p.result:
-		if resp.Error != nil {
-			return fmt.Errorf("plugin %s %s: %s", h.spec.ID, method, resp.Error.Message)
+	resp, ok := receivePluginResponse(ctx, p.result, h.done)
+	if !ok {
+		if err := ctx.Err(); err != nil {
+			h.removePending(id)
+			_ = h.notify("notifications/cancelled", map[string]any{"call_id": callID, "request_id": id, "reason": err.Error()})
+			return err
 		}
-		if out == nil || len(resp.Result) == 0 {
-			return nil
-		}
-		if err := json.Unmarshal(resp.Result, out); err != nil {
-			return fmt.Errorf("plugin %s: invalid %s result: %w", h.spec.ID, method, err)
-		}
-		return nil
-	case <-ctx.Done():
-		h.removePending(id)
-		_ = h.notify("notifications/cancelled", map[string]any{"call_id": callID, "request_id": id, "reason": ctx.Err().Error()})
-		return ctx.Err()
-	case <-h.done:
 		return h.failureError()
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("plugin %s %s: %s", h.spec.ID, method, resp.Error.Message)
+	}
+	if out == nil || len(resp.Result) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(resp.Result, out); err != nil {
+		return fmt.Errorf("plugin %s: invalid %s result: %w", h.spec.ID, method, err)
+	}
+	return nil
+}
+
+func receivePluginResponse(ctx context.Context, result <-chan rpcResponseV2, done <-chan struct{}) (rpcResponseV2, bool) {
+	select {
+	case resp := <-result:
+		return resp, true
+	case <-ctx.Done():
+		return rpcResponseV2{}, false
+	case <-done:
+		// A plugin may exit immediately after writing a valid shutdown response.
+		// Prefer that already-buffered response over the subsequent EOF signal.
+		select {
+		case resp := <-result:
+			return resp, true
+		default:
+			return rpcResponseV2{}, false
+		}
 	}
 }
 
@@ -576,7 +595,7 @@ func (h *ExternalHost) Close(ctx context.Context) error {
 				shutdownOK = true
 			}
 		}
-		if err := h.in.Close(); err != nil {
+		if err := h.in.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 			errs = append(errs, err)
 		}
 		leaderDone := false

@@ -37,6 +37,19 @@ func buildV2Plugin(t *testing.T) string {
 	return bin
 }
 
+func TestReceivePluginResponsePrefersBufferedResponseAfterExit(t *testing.T) {
+	for range 1000 {
+		result := make(chan rpcResponseV2, 1)
+		result <- rpcResponseV2{Result: json.RawMessage(`{"ok":true}`)}
+		done := make(chan struct{})
+		close(done)
+		got, ok := receivePluginResponse(context.Background(), result, done)
+		if !ok || string(got.Result) != `{"ok":true}` {
+			t.Fatalf("response ok=%v result=%s", ok, got.Result)
+		}
+	}
+}
+
 func TestExternalHostV2ConcurrentStringCorrelation(t *testing.T) {
 	bin := buildV2Plugin(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
