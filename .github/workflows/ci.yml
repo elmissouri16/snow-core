@@ -104,6 +104,7 @@ jobs:
         env:
           SNOW_TEST_BINARY: ${{ runner.temp }}/snow
         run: |
+          npm ci
           npm test
           npm run test:integration
           npm run pack:check
