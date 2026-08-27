@@ -812,8 +812,8 @@ Every fresh interactive session starts in `ask`; `--permission` is an explicit
 launch-only baseline override. TUI `/permissions` and Settings changes flow
 through the permission service's session metadata handler, so they survive
 resume but never become a default for a new session or project. Global and
-project configurations containing the removed `permission_mode` field are
-rejected rather than silently accepting an ineffective security setting.
+project configurations ignore the removed `permission_mode` field for upgrade
+compatibility; it cannot alter the launch baseline or active-session state.
 
 The interactive TUI supplies an `Asker`; headless SDK defaults to `deny` for
 mutating tools unless the caller deliberately opts into `allow`/`AutoApprove`

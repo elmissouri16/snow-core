@@ -37,8 +37,9 @@ also include the generated GitHub comparison for the tagged commit.
   `ask`, unless `--permission` explicitly overrides that launch. TUI
   `/permissions` and Settings changes now persist only with the active session
   for resume and no longer write a global default inherited by new projects.
-  Configurations containing the removed `permission_mode` field are rejected
-  with guidance to use the launch flag or active-session controls instead.
+  The removed `permission_mode` field is ignored for upgrade compatibility and
+  cannot alter that baseline; use the launch flag or active-session controls
+  instead.
 - Removed unreachable private helpers and the unused container-registry
   dependency tree, and corrected the Python plugin module's exported names.
 - Reduced CPU and transient memory for long-session reopen, compacted in-memory

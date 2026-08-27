@@ -258,16 +258,20 @@ func TestAppRejectsInvalidPermissionModeBeforePluginStartup(t *testing.T) {
 	}
 }
 
-func TestAppRejectsRemovedGlobalPermissionMode(t *testing.T) {
+func TestAppIgnoresRemovedGlobalPermissionMode(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SNOW_HOME", home)
 	configPath := filepath.Join(home, "config.json")
 	if err := os.WriteFile(configPath, []byte(`{"permission_mode":"allow"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := New(context.Background(), Options{Provider: "fake", NoSession: true, CWD: t.TempDir(), ConfigPath: configPath})
-	if err == nil || !strings.Contains(err.Error(), `field "permission_mode" was removed`) {
-		t.Fatalf("removed permission field error=%v", err)
+	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, CWD: t.TempDir(), ConfigPath: configPath})
+	if err != nil {
+		t.Fatalf("app start with removed permission field: %v", err)
+	}
+	defer a.Close()
+	if got := a.Perm.Mode(); got != permission.ModeAsk {
+		t.Fatalf("permission mode = %q, want ask", got)
 	}
 }
 

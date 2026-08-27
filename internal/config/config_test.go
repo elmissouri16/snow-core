@@ -25,23 +25,31 @@ func TestLoadRejectsFixedContextBudgetOutsideRange(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsRemovedPermissionMode(t *testing.T) {
+func TestLoadIgnoresRemovedPermissionMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"permission_mode":"allow"}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"permission_mode":"allow","thinking":"high"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), `field "permission_mode" was removed`) {
-		t.Fatalf("removed permission field error=%v", err)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config with removed permission field: %v", err)
+	}
+	if cfg.Thinking != "high" {
+		t.Fatalf("thinking = %q, want high", cfg.Thinking)
 	}
 }
 
-func TestLoadProjectExtensionsRejectsRemovedPermissionMode(t *testing.T) {
+func TestLoadProjectExtensionsIgnoresRemovedPermissionMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"permission_mode":null}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"permission_mode":null,"tui":{"theme":"dark"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadProjectExtensions(path); err == nil || !strings.Contains(err.Error(), `field "permission_mode" was removed`) {
-		t.Fatalf("removed project permission field error=%v", err)
+	extensions, err := LoadProjectExtensions(path)
+	if err != nil {
+		t.Fatalf("load project config with removed permission field: %v", err)
+	}
+	if extensions.TUI.Theme == nil || *extensions.TUI.Theme != "dark" {
+		t.Fatalf("project theme = %v, want dark", extensions.TUI.Theme)
 	}
 }
 

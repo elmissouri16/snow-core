@@ -91,9 +91,10 @@ Every fresh interactive session starts in permission mode `ask`. An explicit
 `--permission ask|allow|deny` overrides that baseline for the current launch.
 `/permissions` and the TUI Settings permission row change only the active
 session; that state and remembered rules are restored when the same session is
-resumed, but are not inherited by a new session or project. The removed
-`permission_mode` field is rejected in both global and project configuration;
-delete it and use `--permission` or the active-session TUI controls instead.
+resumed, but are not inherited by a new session or project. For upgrade
+compatibility, the removed `permission_mode` field is ignored in both global
+and project configuration and cannot change the launch baseline. Delete it when
+convenient; use `--permission` or the active-session TUI controls instead.
 
 The SDK intentionally defaults `PermissionMode` to `deny` when omitted. See
 [SDK permissions](sdk.md#permissions-and-security).

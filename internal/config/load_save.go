@@ -36,17 +36,6 @@ func readConfigFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-func rejectRemovedConfigFields(data []byte) error {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	if _, present := fields["permission_mode"]; present {
-		return errors.New(`field "permission_mode" was removed; use --permission for a launch override or change the active session permission in the TUI`)
-	}
-	return nil
-}
-
 // TUIConfig holds TUI preferences.
 // ValidateProviderProfileID keeps profile IDs safe for config/auth map keys and
 // unambiguous in CLI/TUI provider selectors.
@@ -367,9 +356,6 @@ func Load(path string) (Config, error) {
 		}
 		return cfg, fmt.Errorf("config: read %s: %w", path, err)
 	}
-	if err := rejectRemovedConfigFields(data); err != nil {
-		return cfg, fmt.Errorf("config: parse %s: %w", path, err)
-	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("config: parse %s: %w", path, err)
 	}
@@ -653,9 +639,6 @@ func LoadProjectExtensions(path string) (ProjectExtensions, error) {
 			return ProjectExtensions{}, nil
 		}
 		return ProjectExtensions{}, fmt.Errorf("config: read project %s: %w", path, err)
-	}
-	if err := rejectRemovedConfigFields(data); err != nil {
-		return ProjectExtensions{}, fmt.Errorf("config: parse project %s: %w", path, err)
 	}
 	var raw ProjectExtensions
 	if err := json.Unmarshal(data, &raw); err != nil {
