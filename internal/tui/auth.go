@@ -594,6 +594,18 @@ func (m *Model) clearModelPick() {
 	m.pickerGeneration++
 }
 
+func (m *Model) failModelPick(message string) {
+	m.clearModelPick()
+	if m.settingsReturnToPanel {
+		m.settingsReturnToPanel = false
+		m.pickSettings = true
+		m.settingsStatus = ""
+		m.settingsError = message
+		return
+	}
+	m.pushLine(styleError.Render(message))
+}
+
 func (m *Model) clearThinkingPick() {
 	m.pickThinking = false
 	m.thinkingList = nil
@@ -727,13 +739,11 @@ func (m *Model) startModelPick() (tea.Model, tea.Cmd) {
 		m.modelList = uniquePickerModels(fetched, m.app.ProviderID)
 	}
 	if err != nil && len(m.modelList) == 0 {
-		m.pickModel = false
-		m.pushLine(styleError.Render("model list: " + err.Error()))
+		m.failModelPick("model list: " + err.Error())
 		return m, nil
 	}
 	if len(m.modelList) == 0 {
-		m.pickModel = false
-		m.pushLine(styleError.Render("no models available"))
+		m.failModelPick("no models available")
 	}
 	return m, nil
 }

@@ -1157,8 +1157,12 @@ bounded **Copy selection** menu without disabling viewport mouse reporting. In
 app mouse mode the accented `provider/model ▾` header segment opens a centered
 model card layered into that same frame. Typing filters immediately, cached
 catalog refresh preserves the query and stable model selection, and a selected
-model's thinking-effort step remains in the card. The complete TUI
-authentication flow reuses that fixed-frame card: provider/logout selection,
+model's thinking-effort step remains in the card. `/settings` uses the same
+centered compositor instead of participating in transcript/chrome layout; its
+selected-row window, save status, and errors update inside fixed geometry, and
+nested model selection or catalog failure returns to the settings card. The
+complete TUI authentication flow also reuses that fixed-frame card:
+provider/logout selection,
 serialized logout progress, compatible profile and endpoint fields, masked key
 capture, ChatGPT account/method selection and OAuth progress, and compatible
 model discovery. Nested auth cards retain a bounded non-secret navigation stack:
@@ -1170,8 +1174,8 @@ strip terminal/layout controls, and delayed clipboard results are scoped to
 their originating field generation.
 Slash-command/login transitions invalidate outstanding composer text and image
 paste results before the shared editor is reused. Blocking host requests preempt
-both centered flows and transcript context menus
-without discarding suspended modal state. `Ctrl+V` attaches supported
+all centered cards and transcript context menus without discarding suspended
+modal state. `Ctrl+V` attaches supported
 clipboard images in the agent composer or falls back to textarea paste.
 
 ### Slash commands

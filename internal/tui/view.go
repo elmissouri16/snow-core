@@ -67,11 +67,6 @@ func (m *Model) renderOverlays() string {
 			overlays = append(overlays, r)
 		}
 	}
-	if m.pickSettings {
-		if r := m.renderSettings(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
 	if m.pickFork {
 		if r := m.renderForkPicker(); r != "" {
 			overlays = append(overlays, r)
@@ -338,6 +333,8 @@ func (m *Model) View() string {
 		frame = m.overlayLoginModal(frame)
 	} else if m.modelModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlayModelModal(frame)
+	} else if m.settingsModalVisible() && !m.permPending && !m.userInputPending {
+		frame = m.overlaySettingsModal(frame)
 	}
 	return clipboardSequence + frame
 }

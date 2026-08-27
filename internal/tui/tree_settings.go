@@ -307,6 +307,7 @@ func (m *Model) startSettings() (tea.Model, tea.Cmd) {
 		m.pushLine(styleError.Render("settings: wait for the current turn to finish"))
 		return m, nil
 	}
+	m.closeTranscriptSelectionContextMenu()
 	m.pickSettings = true
 	m.settingsIndex = 0
 	m.settingsStatus = ""
@@ -316,6 +317,21 @@ func (m *Model) startSettings() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Left/Right adjust the selected value rather than navigate rows. Handle
+	// them before generic picker normalization, whose default bindings also map
+	// horizontal arrows to previous/next list items.
+	if msg.Type == tea.KeyLeft {
+		if m.settingsIndex != settingsModel {
+			m.cycleSetting(-1)
+		}
+		return m, nil
+	}
+	if msg.Type == tea.KeyRight {
+		if m.settingsIndex != settingsModel {
+			m.cycleSetting(1)
+		}
+		return m, nil
+	}
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	switch msg.Type {
 	case tea.KeyUp, tea.KeyShiftTab:
@@ -337,14 +353,6 @@ func (m *Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.startModelPick()
 		}
 		m.cycleSetting(1)
-	case tea.KeyLeft:
-		if m.settingsIndex != settingsModel {
-			m.cycleSetting(-1)
-		}
-	case tea.KeyRight:
-		if m.settingsIndex != settingsModel {
-			m.cycleSetting(1)
-		}
 	}
 	return m, nil
 }
@@ -624,75 +632,4 @@ func (m *Model) setSkillsEnabled(enabled bool) error {
 	m.app.PersistedCfg = candidate
 	m.app.Cfg.Skills.Disabled = candidate.Skills.Disabled
 	return nil
-}
-
-func (m *Model) renderSettings() string {
-	if !m.pickSettings || m.app == nil {
-		return ""
-	}
-	model := m.app.Agent.Model()
-	rows := []string{
-		"Model  " + model.Provider + "/" + model.ID,
-		"Theme  " + m.themeName,
-		"Thinking effort  " + string(m.app.Agent.Thinking()),
-		"Reasoning summary  " + string(m.app.Agent.ReasoningSummary()),
-		"Text verbosity  " + string(m.app.Agent.TextVerbosity()),
-		"Session permission  " + string(m.app.Perm.Mode()),
-		"Subagents  " + onOff(m.app.Cfg.Subagents.Enabled) + " (restart to apply)",
-		fmt.Sprintf("Concurrent subagents  %d (restart to apply)", m.app.Cfg.Subagents.MaxConcurrentThreads),
-		"Agent Skills  " + onOff(!m.app.Cfg.Skills.Disabled) + " (restart to apply)",
-	}
-	if !m.chatGPTSettingsEnabled() {
-		rows[settingsReasoningSummary] += "  (ChatGPT only)"
-		rows[settingsTextVerbosity] += "  (ChatGPT only)"
-	}
-	var b strings.Builder
-	header := styleHeaderDim.Render("settings")
-	if m.inlineTranscript {
-		header = styleHeaderDim.Render("settings  (↑/↓ row · ←/→ change · Enter select · Esc close)")
-		if m.settingsError != "" {
-			header = styleError.Render("settings: " + m.settingsError)
-		} else if m.settingsStatus != "" {
-			header = styleFooter.Render("settings: " + m.settingsStatus)
-		}
-	}
-	b.WriteString(header + "\n")
-	start, end := 0, len(rows)
-	if m.inlineTranscript {
-		// Header consumes one row; keep a selected-row-centered window for short
-		// terminals rather than clipping the bottom of the fixed list.
-		visible := max(1, m.availableOverlayHeight()-1)
-		if end > visible {
-			start = m.settingsIndex - visible/2
-			if start < 0 {
-				start = 0
-			}
-			if start+visible > end {
-				start = end - visible
-			}
-			end = start + visible
-		}
-	}
-	for i := start; i < end; i++ {
-		row := rows[i]
-		prefix := "  "
-		style := styleCompletion
-		if i == m.settingsIndex {
-			prefix = "› "
-			style = styleCompletionSelected
-		} else if !m.chatGPTSettingsEnabled() && (i == settingsReasoningSummary || i == settingsTextVerbosity) {
-			style = styleHeaderDim
-		}
-		b.WriteString(style.Render(prefix + row))
-		b.WriteString("\n")
-	}
-	if !m.inlineTranscript {
-		b.WriteString(styleFooter.Render("(↑/↓ row, ←/→ change, Enter select, Esc close)"))
-		if m.settingsError != "" {
-			b.WriteString("\n" + styleError.Render(m.settingsError))
-		} else if m.settingsStatus != "" {
-			b.WriteString("\n" + styleFooter.Render(m.settingsStatus))
-		}
-	}
-	return strings.TrimSuffix(b.String(), "\n")
 }

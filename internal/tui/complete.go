@@ -43,9 +43,8 @@ var commands = []commandSpec{
 }
 
 // completeCommand returns exact/prefix matches first, followed by stable
-// subsequence matches. Empty prefix returns the complete registry so /help
-// and tests can still enumerate every command; the palette applies its own
-// display cap.
+// subsequence matches. Empty prefix returns the complete registry; rendering
+// applies a selection-following viewport without removing navigable matches.
 func completeCommand(prefix string) []string {
 	prefix = strings.ToLower(strings.TrimPrefix(prefix, "/"))
 	if prefix == "" {

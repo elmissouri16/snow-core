@@ -38,6 +38,11 @@ also include the generated GitHub comparison for the tagged commit.
   a slash command; typing filters immediately, catalog refreshes preserve the
   active query and selection, and model-specific thinking effort stays in the
   same modal flow. `/model` and Settings remain available in native mouse mode.
+- Moved `/settings` into the shared centered, frame-preserving card treatment.
+  Its complete option list stays keyboard-navigable through a selection-following
+  window on short terminals, status and save errors remain inside the fixed card,
+  nested model selection returns to Settings, and blocking host requests still
+  take visual and input precedence.
 - Moved the complete TUI `/login` flow into the same centered-card treatment:
   provider selection, OpenAI-compatible profile and endpoint fields, masked API
   key capture, ChatGPT account/method selection and OAuth progress, and model
@@ -89,6 +94,12 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Fixed
 
+- Made the TUI slash-command palette retain the complete command registry so
+  Up/Down navigation scrolls beyond the first visible page instead of wrapping
+  after `/login`.
+- Restored Left/Right value changes in Settings, blocked transcript paging behind
+  thinking cards, and returned model-catalog failures to the Settings card
+  instead of leaving the nested flow without a visible modal.
 - Prevented restored subagent status snapshots from appearing as fresh
   lifecycle rows at the end of resumed TUI and print-mode transcripts. Snapshot
   events still initialize the fleet inspector and remain observable to SDK,

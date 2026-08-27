@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/elmissouri16/snow-core/internal/agent"
 	"github.com/elmissouri16/snow-core/internal/app"
@@ -252,9 +253,12 @@ func TestShortInlineSettingsKeepsSelectionVisible(t *testing.T) {
 	m.pickSettings = true
 	m.settingsIndex = settingsSkills
 	m.layout()
-	view := stripANSI(m.renderOverlays())
+	view := stripANSI(m.View())
 	if !strings.Contains(view, "Agent Skills") {
-		t.Fatalf("selected setting clipped on short terminal: %q", view)
+		t.Fatalf("selected setting clipped in short centered card: %q", view)
+	}
+	if got := lipgloss.Height(view); got != m.managedFrameHeight() {
+		t.Fatalf("short centered settings frame height=%d want=%d", got, m.managedFrameHeight())
 	}
 }
 

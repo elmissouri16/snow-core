@@ -29,7 +29,7 @@ func (m *Model) dispatchMouse(msg tea.MouseMsg) tea.Cmd {
 		m.handleSubagentFleetMouse(msg)
 		return nil
 	}
-	if m.loginModalVisible() {
+	if m.loginModalVisible() || m.settingsModalVisible() {
 		return nil
 	}
 	if handled, cmd := m.handleModelMouse(msg); handled {
@@ -97,7 +97,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
 		// transcript when not in a picker.
-		if !m.loginModalVisible() && !m.pickModel && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.processFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
+		if !m.loginModalVisible() && !m.settingsModalVisible() && !m.pickModel && !m.pickThinking && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.processFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
 			switch {
 			case keyMatches(msg, m.keys.PageUp):
 				m.refreshTranscriptForced()
@@ -562,8 +562,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.modelLoading = false
 		if msg.err != nil && len(msg.models) == 0 && len(m.modelList) == 0 {
-			m.clearModelPick()
-			m.pushLine(styleError.Render("model list: " + msg.err.Error()))
+			m.failModelPick("model list: " + msg.err.Error())
 			return m, nil
 		}
 		if msg.err != nil {
@@ -573,8 +572,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelList = uniquePickerModels(msg.models, m.app.ProviderID)
 		}
 		if len(m.modelList) == 0 {
-			m.clearModelPick()
-			m.pushLine(styleError.Render("no models available"))
+			m.failModelPick("no models available")
 			return m, nil
 		}
 		models := m.filteredModels()

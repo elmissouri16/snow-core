@@ -151,6 +151,38 @@ func TestModelPaletteNavigation(t *testing.T) {
 	}
 }
 
+func TestModelPaletteNavigationReachesAllCommands(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width, m.height = 100, 16
+	m.editor.SetValue("/")
+	m.refreshPalette()
+	m.layout()
+
+	if got, want := len(m.compMatches), len(commands); got != want {
+		t.Fatalf("palette matches=%d want complete registry of %d", got, want)
+	}
+	if len(m.compMatches) <= 10 {
+		t.Fatalf("test requires more than one legacy palette page, got %d commands", len(m.compMatches))
+	}
+
+	for range len(m.compMatches) - 1 {
+		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	last := m.compMatches[len(m.compMatches)-1]
+	if m.compIndex != len(m.compMatches)-1 {
+		t.Fatalf("down navigation stopped at index %d want %d (%s)", m.compIndex, len(m.compMatches)-1, last)
+	}
+	if overlay := stripANSI(m.renderOverlays()); !strings.Contains(overlay, last) {
+		t.Fatalf("selection-following palette did not render %s: %q", last, overlay)
+	}
+
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	if m.compIndex != 0 {
+		t.Fatalf("down from final command index=%d want wrapped index 0", m.compIndex)
+	}
+}
+
 func TestModelPaletteLogoutRunsPickerWithoutArgument(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)

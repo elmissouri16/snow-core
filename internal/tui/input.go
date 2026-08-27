@@ -130,10 +130,10 @@ func (m *Model) refreshPalette() {
 
 func (m *Model) refreshPaletteFor(text string) {
 	if isCommandPrefix(text) {
+		// Keep the complete match set navigable. renderOverlays applies a
+		// selection-following viewport, so truncating here would make commands
+		// beyond the first visible page unreachable with the arrow keys.
 		m.compMatches = completeCommand(text[1:])
-		if len(m.compMatches) > 10 {
-			m.compMatches = m.compMatches[:10]
-		}
 		m.compVisible = true
 		if m.compIndex >= len(m.compMatches) {
 			m.compIndex = 0

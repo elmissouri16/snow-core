@@ -282,7 +282,7 @@ func (m *Model) managedFrameWidth() int {
 // constant height (so native scrollback is untouched) while giving modal lists
 // enough rows to show more than their selected item.
 func (m *Model) inlineModalOverlay() bool {
-	return m.inlineTranscript && (m.pickThinking && !m.thinkingReturnToModel || m.pickSettings || m.pickSession || m.pickTree ||
+	return m.inlineTranscript && (m.pickThinking && !m.thinkingReturnToModel || m.pickSession || m.pickTree ||
 		m.pickInfo || m.pickPermissionMode || m.permPending || m.userInputPending ||
 		m.confirmGoalReplace || m.planPrompt)
 }

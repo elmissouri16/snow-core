@@ -164,8 +164,11 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
    reasoning effort, working directory, and status. In app mouse mode the
    accented `provider/model ▾` segment opens the centered model picker; F6/native
    mode restores the non-clickable dim label, with `/model` and Settings as
-   fallbacks. `/login` and `/logout` use the same centered, frame-preserving card
-   for their complete interactive flows. The run-status row shows activity and
+   fallbacks. `/settings`, `/login`, and `/logout` use the same centered,
+   frame-preserving card treatment for their interactive flows. Settings keeps
+   its fixed geometry while the selected-row window, save status, and errors
+   update in place; use Up/Down to choose a row, Left/Right to change its value,
+   and Enter to open nested model selection. The run-status row shows activity and
    queued-input count. Provider waits use a pulsing-points thinking animation
    distinct from the rotating working indicator in the run-status row. The
    footer shows permission mode, mode/goal state, context usage, and the latest
@@ -351,8 +354,10 @@ SDK and RPC callers get the same behavior through `Steer`/`FollowUp` and
 
 ## Slash commands
 
-Type `/` to open completion. Enter runs commands whose no-argument form is
-meaningful. Interactive provider/model/thinking changes are remembered by
+Type `/` to open completion. Use Up/Down to move through the complete command
+list; the visible window follows the selection when the list is taller than the
+available frame. Enter runs commands whose no-argument form is meaningful.
+Interactive provider/model/thinking changes are remembered by
 absolute working directory, so restarting Snow in project A restores project
 A's tuple without changing project B. Global defaults apply only when a project
 has no remembered tuple; explicit startup flags override it for that process.
@@ -365,7 +370,7 @@ stored only with the active session for resume.
 | `/help` | Show commands and active keybindings |
 | `/model [id]` | Open the model picker or select a model; provider/model/effort persist for the current project folder |
 | `/thinking [level]` | Choose and persist a model-supported effort for the current project folder |
-| `/settings` | Configure model, theme, response controls, session permission, subagents, and skills |
+| `/settings` | Open the centered settings card for model, theme, response controls, session permission, subagents, and skills |
 | `/permissions [ask|allow|deny]` | Open or change the active session's persisted permission mode |
 | `/allow [always]` | Resolve a pending tool request; optional session rule |
 | `/deny` | Deny a pending tool request |
