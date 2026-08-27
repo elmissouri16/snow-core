@@ -1157,11 +1157,14 @@ bounded **Copy selection** menu without disabling viewport mouse reporting. In
 app mouse mode the accented `provider/model ▾` header segment opens a centered
 model card layered into that same frame. Typing filters immediately, cached
 catalog refresh preserves the query and stable model selection, and a selected
-model's thinking-effort step remains in the card. `/settings` uses the same
-centered compositor instead of participating in transcript/chrome layout; its
+model's thinking-effort step remains in the card. Standalone `/thinking` and
+its header control use the same centered fixed-frame card rather than consuming
+transcript/chrome layout. `/settings` uses the shared centered compositor; its
 selected-row window, save status, and errors update inside fixed geometry, and
-nested model selection or catalog failure returns to the settings card. The
-complete TUI authentication flow also reuses that fixed-frame card:
+nested model selection or catalog failure returns to the settings card. `/help`
+uses the compositor for a scrollable complete command and active-keybinding
+reference instead of appending that reference to the transcript. The complete
+TUI authentication flow also reuses that fixed-frame card:
 provider/logout selection,
 serialized logout progress, compatible profile and endpoint fields, masked key
 capture, ChatGPT account/method selection and OAuth progress, and compatible

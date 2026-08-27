@@ -162,15 +162,18 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
    expose stale headers, separators, or prior composer frames.
 3. The sticky header shows the current provider/model, collaboration mode,
    reasoning effort, working directory, and status. In app mouse mode the
-   accented `provider/model ▾` segment opens the centered model picker; F6/native
-   mode restores the non-clickable dim label, with `/model` and Settings as
-   fallbacks. `/settings`, `/login`, and `/logout` use the same centered,
-   frame-preserving card treatment for their interactive flows. Settings keeps
-   its fixed geometry while the selected-row window, save status, and errors
-   update in place; use Up/Down to choose a row, Left/Right to change its value,
-   and Enter to open nested model selection. The run-status row shows activity and
-   queued-input count. Provider waits use a pulsing-points thinking animation
-   distinct from the rotating working indicator in the run-status row. The
+   accented `provider/model ▾` and `thinking:<effort>` segments open their
+   pickers, while `mode:<mode>` toggles Default/Plan; F6/native mode restores
+   non-clickable dim labels, with `Alt+M`, `/model`, and
+   Settings as fallbacks. `/help`, `/settings`, `/login`, and `/logout` use the same
+   centered, frame-preserving card treatment for their interactive flows. Help
+   keeps the complete command and active-keybinding reference in a scrollable
+   fixed frame. Settings keeps its geometry while the selected-row window, save
+   status, and errors update in place; use Up/Down to choose a row, Left/Right
+   to change its value, and Enter to open nested model selection. The run-status
+   row shows activity and queued-input count. Provider waits use a
+   pulsing-points thinking animation distinct from the rotating working
+   indicator in the run-status row. The
    footer shows permission mode, mode/goal state, context usage, and the latest
    request's prompt-cache hit rate as
    `CH<n>%`; inline mode may compact provider/model/effort into that footer.
@@ -254,9 +257,10 @@ described in [Configuration](configuration.md).
 | `Ctrl+J` | Insert a reliable newline | Insert a reliable newline |
 | `Ctrl+V` | Paste through the active textarea | Paste through the active textarea |
 | `Up` / `Down` | Browse prompts from the active session branch; Down past the newest restores the current draft | Same; recalled text can be submitted as steering or follow-up input |
-| `Shift+Tab` | Toggle Default/Plan mode | Queue mode change until `turn_done` |
+| `Shift+Tab` or click `mode:<mode>` (`tui.mouse: true`) | Toggle Default/Plan mode | Queue mode change until `turn_done` |
 | `Ctrl+T` | Cycle through the active model's supported thinking efforts | Cycle the effort; the header/footer briefly highlights the new value without adding a transcript entry |
-| Click `provider/model ▾` (`tui.mouse: true`) | Open the centered model picker | Report that model changes must wait for the current turn |
+| Click `thinking:<effort>` (`tui.mouse: true`) | Open the centered thinking-effort card | Open the card; the selected effort applies to subsequent provider requests |
+| `Alt+M` or click `provider/model ▾` (`tui.mouse: true`) | Open the centered model picker | Report that model changes must wait for the current turn |
 | `Alt+A` | Open the subagent fleet inspector | Open the inspector without interrupting the active turn |
 | `Alt+P` | Open the managed-process fleet inspector | Open the inspector without interrupting the active turn |
 | `Ctrl+C` | Quit | Abort, clear queued work, restore queued composer text, and defer active goal continuation |
@@ -283,9 +287,8 @@ provider IDs, model IDs, display names, and descriptions, so `j` and `k` are
 search text there. Backspace edits and Ctrl+U clears the query. Arrows,
 Tab/Shift+Tab, PageUp/PageDown, Home/End, and Enter navigate and apply; Esc
 clears a non-empty query before a second Esc closes the card. Open it by
-clicking the accented header model in app mouse mode, with
-`/model` and the Model row in `/settings` available as keyboard/native-mouse
-fallbacks.
+pressing `Alt+M` or clicking the accented header model in app mouse mode, with
+`/model` and the Model row in `/settings` available as additional fallbacks.
 
 The card opens immediately from the active/cached catalog, loads missing
 inactive provider catalogs asynchronously, and keeps both the current query and
@@ -367,9 +370,9 @@ stored only with the active session for resume.
 
 | Command | Purpose |
 |---|---|
-| `/help` | Show commands and active keybindings |
+| `/help` | Open a centered, scrollable reference for commands and active keybindings |
 | `/model [id]` | Open the model picker or select a model; provider/model/effort persist for the current project folder |
-| `/thinking [level]` | Choose and persist a model-supported effort for the current project folder |
+| `/thinking [level]` | Open the centered effort card or directly choose and persist a model-supported effort for the current project folder |
 | `/settings` | Open the centered settings card for model, theme, response controls, session permission, subagents, and skills |
 | `/permissions [ask|allow|deny]` | Open or change the active session's persisted permission mode |
 | `/allow [always]` | Resolve a pending tool request; optional session rule |

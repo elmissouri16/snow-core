@@ -658,6 +658,7 @@ bindings:
   follow_up: [alt+enter]
   toggle_mode: [shift+tab]
   thinking: [ctrl+t]
+  models: [alt+m]
   agents: [alt+a]
   processes: [alt+p]
   picker_up: [up, k]
@@ -667,7 +668,7 @@ bindings:
 Supported actions:
 
 ```text
-submit follow_up newline paste abort quit toggle_mode thinking agents processes
+submit follow_up newline paste abort quit toggle_mode thinking models agents processes
 page_up page_down top bottom line_up line_down
 picker_up picker_down picker_previous picker_next
 picker_page_up picker_page_down picker_top picker_bottom

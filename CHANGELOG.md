@@ -33,16 +33,22 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
-- Reworked TUI model selection into a centered, searchable card. With app mouse
-  mode enabled, the accented `provider/model ▾` header control opens it without
-  a slash command; typing filters immediately, catalog refreshes preserve the
-  active query and selection, and model-specific thinking effort stays in the
-  same modal flow. `/model` and Settings remain available in native mouse mode.
+- Reworked TUI model selection into a centered, searchable card. `Alt+M` now
+  opens it directly, and with app mouse mode enabled the accented
+  `provider/model ▾` header control does the same. Typing filters immediately,
+  catalog refreshes preserve the active query and selection, and model-specific
+  thinking effort stays in the same modal flow. Standalone `/thinking` and the
+  adjacent thinking header control now open a centered fixed-frame effort card;
+  the mode control toggles Default/Plan in app mouse mode. `/model` and Settings
+  remain available in native mouse mode.
 - Moved `/settings` into the shared centered, frame-preserving card treatment.
   Its complete option list stays keyboard-navigable through a selection-following
   window on short terminals, status and save errors remain inside the fixed card,
   nested model selection returns to Settings, and blocking host requests still
   take visual and input precedence.
+- Moved `/help` from transcript output into a centered, fixed-frame card. The
+  complete command registry, composer directives, active keybindings, and mouse
+  guidance remain scrollable on short terminals without moving the transcript.
 - Moved the complete TUI `/login` flow into the same centered-card treatment:
   provider selection, OpenAI-compatible profile and endpoint fields, masked API
   key capture, ChatGPT account/method selection and OAuth progress, and model
