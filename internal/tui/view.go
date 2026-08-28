@@ -659,15 +659,15 @@ func (m *Model) renderFooter() string {
 		goalText = fmt.Sprintf(" · goal:%s %s", m.goal.Status, formatGoalTokenUsage(m.goal))
 	}
 	contextUsage := m.renderContextUsage()
-	cacheHit := m.renderCacheHit()
+	cachedInput := m.renderCachedInputShare()
 	runtimeText := "mode:" + mode
 	if m.inlineTranscript && m.app != nil && m.app.Agent != nil && available >= 72 {
 		model := m.app.Agent.Model()
 		runtimeText = model.Provider + "/" + model.ID + " · " + runtimeText + " · thinking:" + string(m.app.Agent.Thinking())
 	}
 	rightPrefix := "· " + runtimeText + goalText + " · "
-	if cacheHit != "" {
-		rightPrefix += cacheHit + " · "
+	if cachedInput != "" {
+		rightPrefix += cachedInput + " · "
 	}
 	right := rightPrefix + contextUsage
 	// Add width-aware help only when it fits beside the persistent context
@@ -692,13 +692,13 @@ func (m *Model) renderFooter() string {
 			runtimeText = model.ID + " · " + mode + "/" + string(m.app.Agent.Thinking())
 			compactRightPrefix = "· " + runtimeText + " · "
 			rightPrefix = compactRightPrefix
-			if cacheHit != "" {
-				rightPrefix += cacheHit + " · "
+			if cachedInput != "" {
+				rightPrefix += cachedInput + " · "
 			}
 			right = rightPrefix + contextUsage
 		}
-		if lipgloss.Width(right) > maxRight && cacheHit != "" {
-			cacheHit = ""
+		if lipgloss.Width(right) > maxRight && cachedInput != "" {
+			cachedInput = ""
 			if compactRightPrefix != "" {
 				rightPrefix = compactRightPrefix
 			} else {
@@ -762,14 +762,21 @@ func (m *Model) contextUsageStyle() lipgloss.Style {
 	}
 }
 
-func (m *Model) renderCacheHit() string {
+// renderCachedInputShare reports the share of the latest request's input
+// tokens that the provider says were read from its prompt cache. It is token
+// coverage, not a request-level cache-hit frequency.
+func (m *Model) renderCachedInputShare() string {
 	usage := m.lastRequestUsage
 	if usage == nil || (!usage.CacheReadKnown && usage.CacheRead <= 0) || usage.Input <= 0 {
 		return ""
 	}
+	// Invalid provider accounting must not be normalized into a plausible
+	// percentage. Omit the metric instead of masking it as 0% or 100%.
+	if usage.CacheRead < 0 || usage.CacheRead > usage.Input {
+		return ""
+	}
 	percent := 100 * float64(usage.CacheRead) / float64(usage.Input)
-	percent = min(100, max(0, percent))
-	return fmt.Sprintf("CH%.1f%%", percent)
+	return fmt.Sprintf("cached:%.1f%%", percent)
 }
 
 func (m *Model) renderContextUsage() string {

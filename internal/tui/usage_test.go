@@ -30,7 +30,7 @@ func TestFooterAlwaysShowsContextUsageOnRight(t *testing.T) {
 	}
 }
 
-func TestFooterShowsLatestKnownCacheHitRateBesideContext(t *testing.T) {
+func TestFooterShowsLatestKnownCachedInputShareBesideContext(t *testing.T) {
 	m := &Model{
 		app:   &app.App{Model: protocol.Model{ContextWindow: 128000}},
 		width: 100,
@@ -39,12 +39,12 @@ func TestFooterShowsLatestKnownCacheHitRateBesideContext(t *testing.T) {
 		Input: 1000, Output: 50, CacheRead: 750, CacheReadKnown: true, Total: 1050,
 	}})
 	footer := stripANSI(m.renderFooter())
-	if !strings.Contains(footer, "CH75.0% · context: 1.1k/128k") {
+	if !strings.Contains(footer, "cached:75.0% · context: 1.1k/128k") {
 		t.Fatalf("footer = %q", footer)
 	}
 }
 
-func TestFooterCacheHitUsesLatestRequestNotTurnAggregate(t *testing.T) {
+func TestFooterCachedInputShareUsesLatestRequestNotTurnAggregate(t *testing.T) {
 	m := &Model{
 		app:   &app.App{Model: protocol.Model{ContextWindow: 128000}},
 		width: 100,
@@ -55,12 +55,12 @@ func TestFooterCacheHitUsesLatestRequestNotTurnAggregate(t *testing.T) {
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, Usage: &protocol.Usage{
 		Input: 4000, CacheRead: 3000, CacheReadKnown: true, Total: 4000, Requests: 2,
 	}})
-	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "CH25.0% · context:") {
+	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "cached:25.0% · context:") {
 		t.Fatalf("footer = %q", footer)
 	}
 }
 
-func TestFooterTreatsPositiveLegacyCacheReadAsKnown(t *testing.T) {
+func TestFooterCachedInputShareTreatsPositiveLegacyReadAsKnown(t *testing.T) {
 	m := &Model{
 		app:   &app.App{Model: protocol.Model{ContextWindow: 128000}},
 		width: 100,
@@ -68,23 +68,23 @@ func TestFooterTreatsPositiveLegacyCacheReadAsKnown(t *testing.T) {
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvUsage, Usage: &protocol.Usage{
 		Input: 1000, CacheRead: 500, Total: 1000,
 	}})
-	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "CH50.0% · context:") {
+	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "cached:50.0% · context:") {
 		t.Fatalf("footer = %q", footer)
 	}
 }
 
-func TestFooterOmitsUnknownCacheHitRate(t *testing.T) {
+func TestFooterOmitsUnknownCachedInputShare(t *testing.T) {
 	m := &Model{
 		app:   &app.App{Model: protocol.Model{ContextWindow: 128000}},
 		width: 100,
 	}
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvUsage, Usage: &protocol.Usage{Input: 1000, Total: 1000}})
-	if footer := stripANSI(m.renderFooter()); strings.Contains(footer, "CH") {
+	if footer := stripANSI(m.renderFooter()); strings.Contains(footer, "cached:") {
 		t.Fatalf("footer = %q", footer)
 	}
 }
 
-func TestFooterShowsKnownCacheMissAsZeroPercent(t *testing.T) {
+func TestFooterShowsKnownZeroCachedInputShare(t *testing.T) {
 	m := &Model{
 		app:   &app.App{Model: protocol.Model{ContextWindow: 128000}},
 		width: 100,
@@ -92,8 +92,24 @@ func TestFooterShowsKnownCacheMissAsZeroPercent(t *testing.T) {
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvUsage, Usage: &protocol.Usage{
 		Input: 1000, CacheReadKnown: true, Total: 1000,
 	}})
-	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "CH0.0% · context:") {
+	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "cached:0.0% · context:") {
 		t.Fatalf("footer = %q", footer)
+	}
+}
+
+func TestFooterOmitsInvalidCachedInputShare(t *testing.T) {
+	for _, usage := range []protocol.Usage{
+		{Input: 1000, CacheRead: -1, CacheReadKnown: true},
+		{Input: 1000, CacheRead: 1001, CacheReadKnown: true},
+	} {
+		m := &Model{
+			app:              &app.App{Model: protocol.Model{ContextWindow: 128000}},
+			width:            100,
+			lastRequestUsage: usage.Clone(),
+		}
+		if footer := stripANSI(m.renderFooter()); strings.Contains(footer, "cached:") {
+			t.Fatalf("invalid usage %+v produced footer %q", usage, footer)
+		}
 	}
 }
 
@@ -197,7 +213,7 @@ func TestFooterShowsZeroContextBeforeFirstTurn(t *testing.T) {
 	}
 }
 
-func TestInlineFooterDropsCacheHitWithoutRestoringLongGoalPrefix(t *testing.T) {
+func TestInlineFooterDropsCachedInputShareWithoutRestoringLongGoalPrefix(t *testing.T) {
 	m := newModel(t.Context(), app.Options{})
 	buildAppForTest(t, m)
 	m.inlineTranscript = true
@@ -207,8 +223,8 @@ func TestInlineFooterDropsCacheHitWithoutRestoringLongGoalPrefix(t *testing.T) {
 		Input: 1000, CacheRead: 500, CacheReadKnown: true, Total: 1000,
 	}})
 	footer := stripANSI(m.renderFooter())
-	if strings.Contains(footer, "CH50.0%") {
-		t.Fatalf("narrow footer retained cache hit: %q", footer)
+	if strings.Contains(footer, "cached:50.0%") {
+		t.Fatalf("narrow footer retained cached-input share: %q", footer)
 	}
 	if !strings.Contains(footer, "fake-1 · default/off · context:") {
 		t.Fatalf("narrow footer lost compact runtime prefix: %q", footer)

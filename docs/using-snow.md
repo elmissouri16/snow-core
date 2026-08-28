@@ -176,9 +176,11 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
    row shows activity and queued-input count. Provider waits use a
    pulsing-points thinking animation distinct from the rotating working
    indicator in the run-status row. The
-   footer shows permission mode, mode/goal state, context usage, and the latest
-   request's prompt-cache hit rate as
-   `CH<n>%`; inline mode may compact provider/model/effort into that footer.
+   footer shows permission mode, mode/goal state, context usage, and the share
+   of the latest request's input tokens served from the prompt cache as
+   `cached:<n>%`; inline mode may compact provider/model/effort into that footer.
+   This is token coverage for one request, not a request-level cache-hit
+   frequency, turn aggregate, session average, or cost-savings percentage.
 
 Bash activity uses the sticky run-status row while executing, then adds one
 compact `✓ <command> · <duration>` transcript summary followed by any command
