@@ -206,6 +206,15 @@ overwriting a newer tip.
 `Messages()` uses a recursive common table expression (CTE) to walk only
 the active branch, so opening a large session does not deserialize every
 historical branch into memory.
+
+Before provider execution, each durably admitted user, automatic-goal, or
+child-agent run appends an `agent_turn_v1` metadata entry. These explicit
+markers provide the TUI's branch-local `turns:<n>` total without guessing from
+message shapes. Provider requests after tools, provider retries, and compaction
+do not add markers. Branch rewinds and forks naturally include only markers in
+the selected ancestry. Sessions from before this feature are not retroactively
+backfilled, and child session counts are not added to the active root branch.
+
 `ContextMessages()` applies the latest compaction marker logically: providers
 receive one structured working-state checkpoint plus the retained tail, while
 `Messages()` continues to return the complete historical branch. SQLite keeps

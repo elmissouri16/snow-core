@@ -44,6 +44,10 @@ func TestManualCompactUsesSummaryAndPreservesHistory(t *testing.T) {
 	if err != nil || len(projected) != result.RetainedMessages+1 || projected[0].Role != protocol.RoleCustom {
 		t.Fatalf("projected context = %+v, result=%+v, err=%v", projected, result, err)
 	}
+	turns, turnErr := a.TurnCount()
+	if turnErr != nil || turns != 0 {
+		t.Fatalf("manual compaction turn count=%d err=%v, want 0", turns, turnErr)
+	}
 }
 
 func TestManualCompactPublishesSessionUpdateBeforeTerminalDone(t *testing.T) {

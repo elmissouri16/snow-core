@@ -204,6 +204,9 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 			a.drainEventsBestEffort()
 		}
 	}()
+	if err := a.persistTurnMarker(); err != nil {
+		return err
+	}
 
 	content := make([]protocol.ContentBlock, 0, 1+len(attachments))
 	if text != "" {
@@ -331,7 +334,6 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	a.activeDone = make(chan struct{})
 	a.resetTurnExecutionLocked()
 	a.mu.Unlock()
-	a.publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g.Clone()}, TurnOrigin: "goal", TurnID: a.turnID, GoalContinuing: true})
 	defer func() {
 		a.closeInputQueue(retErr == nil || ctx.Err() != nil)
 		cancel()
@@ -348,6 +350,10 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 		a.clearCompletedTurnIdentity(turnID)
 		a.turnWG.Done()
 	}()
+	if err := a.persistTurnMarker(); err != nil {
+		return err
+	}
+	a.publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g.Clone()}, TurnOrigin: "goal", TurnID: a.turnID, GoalContinuing: true})
 	retErr = a.run(runCtx)
 	return retErr
 }

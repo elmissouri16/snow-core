@@ -429,6 +429,9 @@ func sqliteBranchHydrationSummaries(db *sql.DB, tip string) (BranchHydrationSnap
 	if tip != "" && len(snapshot.Entries) == 0 {
 		return BranchHydrationSnapshot{}, ErrNotFound
 	}
+	if err := db.QueryRow(agentTurnCountSQL, tip, EntryMeta, MetaAgentTurn).Scan(&snapshot.TurnCount); err != nil {
+		return BranchHydrationSnapshot{}, fmt.Errorf("session: sqlite hydration turn count: %w", err)
+	}
 	return snapshot, nil
 }
 

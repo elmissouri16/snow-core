@@ -125,6 +125,12 @@ type contextUsageRefreshMsg struct {
 	err      error
 }
 
+type turnCountRefreshMsg struct {
+	version uint64
+	count   uint64
+	err     error
+}
+
 type contextReportMsg struct {
 	epoch  uint64
 	report agent.ContextReport
@@ -393,6 +399,10 @@ type Model struct {
 	contextRefreshNeeded          bool
 	contextRefreshPending         bool
 	contextRefreshVersion         uint64
+	turnCount                     uint64
+	turnCountRefreshNeeded        bool
+	turnCountRefreshPending       bool
+	turnCountRefreshVersion       uint64
 	compacting                    bool
 	compactStatus                 string
 	events                        *agentEventMailbox

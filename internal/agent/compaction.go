@@ -11,6 +11,7 @@ import (
 
 	"github.com/elmissouri16/snow-core/internal/compact"
 	"github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -485,6 +486,26 @@ func readCompactionSummary(ctx context.Context, stream protocol.EventStream) (st
 	}
 }
 
+func (a *Agent) persistTurnMarker() error {
+	a.mu.RLock()
+	store := a.opts.Session
+	origin, turnID := a.turnOrigin, a.turnID
+	a.mu.RUnlock()
+	if store == nil || turnID == "" {
+		return errors.New("agent: turn marker has no active session or identity")
+	}
+	// A prior turn may already be idle while its final mailbox batch is still
+	// committing. Use the same persistence mutex as the first user append so the
+	// new marker cannot race that flush or observe a stale branch tip.
+	a.mailboxPersistMu.Lock()
+	defer a.mailboxPersistMu.Unlock()
+	marker := session.Entry{Type: session.EntryMeta, ID: turnID, Key: session.MetaAgentTurn, Value: origin}
+	if err := store.Append(marker); err != nil {
+		return fmt.Errorf("agent: persist turn marker: %w", err)
+	}
+	return nil
+}
+
 func (a *Agent) turnCompletionLocked() (string, string, *protocol.Usage) {
 	var usage *protocol.Usage
 	if a.usageSet {
@@ -566,7 +587,11 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 	a.activeCancel = cancel
 	a.activeDone = make(chan struct{})
 	a.mu.Unlock()
-	if err := a.drainMailboxForProvider(); err != nil {
+	prepareErr := a.persistTurnMarker()
+	if prepareErr == nil {
+		prepareErr = a.drainMailboxForProvider()
+	}
+	if prepareErr != nil {
 		a.mu.Lock()
 		a.running = false
 		a.queueAccepting = false
@@ -576,7 +601,7 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 		a.mu.Unlock()
 		a.turnWG.Done()
 		cancel()
-		return err
+		return prepareErr
 	}
 	unlock()
 	admissionHeld = false

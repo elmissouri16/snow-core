@@ -231,6 +231,88 @@ func TestInlineFooterDropsCachedInputShareWithoutRestoringLongGoalPrefix(t *test
 	}
 }
 
+func TestFooterShowsDurableTurnCountAndDropsItAtNarrowWidths(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 100
+	m.applyTurnCount(12)
+	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "turns:12") {
+		t.Fatalf("footer = %q", footer)
+	}
+	m.width = 40
+	footer := stripANSI(m.renderFooter())
+	if strings.Contains(footer, "turns:12") {
+		t.Fatalf("narrow footer retained turn count: %q", footer)
+	}
+	if len([]rune(footer)) > 40 {
+		t.Fatalf("footer exceeds terminal width: %q (%d runes)", footer, len([]rune(footer)))
+	}
+}
+
+func TestSessionHydrationRestoresDurableTurnCount(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	buildAppForTest(t, m)
+	for _, entry := range []session.Entry{
+		{Type: session.EntryMeta, ID: "turn-user", Key: session.MetaAgentTurn, Value: "user"},
+		{Type: session.EntryMeta, ID: "ignored", Key: session.MetaAgentTurn, Value: "compact"},
+		{Type: session.EntryMeta, ID: "turn-goal", Key: session.MetaAgentTurn, Value: "goal"},
+	} {
+		if err := m.app.Session.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.hydrateSession()
+	if m.turnCount != 2 {
+		t.Fatalf("hydrated turn count=%d want 2", m.turnCount)
+	}
+}
+
+func TestTurnDoneRefreshesDurableTurnCount(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	buildAppForTest(t, m)
+	if err := m.app.Session.Append(session.Entry{Type: session.EntryMeta, ID: "tracked-turn", Key: session.MetaAgentTurn, Value: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: "tracked-turn", TurnOrigin: "user"})
+	cmd := m.scheduleTurnCountRefresh()
+	if cmd == nil {
+		t.Fatal("turn completion did not schedule durable count refresh")
+	}
+	msg := cmd().(turnCountRefreshMsg)
+	_, _ = m.update(msg)
+	if m.turnCount != 1 {
+		t.Fatalf("turn count=%d want 1", m.turnCount)
+	}
+	// Replaying the same terminal event refreshes from storage rather than
+	// optimistically incrementing the count.
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: "tracked-turn", TurnOrigin: "user"})
+	cmd = m.scheduleTurnCountRefresh()
+	msg = cmd().(turnCountRefreshMsg)
+	_, _ = m.update(msg)
+	if m.turnCount != 1 {
+		t.Fatalf("replayed completion changed turn count=%d", m.turnCount)
+	}
+}
+
+func TestStaleTurnCountRefreshDoesNotOverwriteHydratedSession(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	buildAppForTest(t, m)
+	if err := m.app.Session.Append(session.Entry{Type: session.EntryMeta, ID: "old-turn", Key: session.MetaAgentTurn, Value: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	m.turnCountRefreshNeeded = true
+	cmd := m.scheduleTurnCountRefresh()
+	if cmd == nil {
+		t.Fatal("turn count refresh was not scheduled")
+	}
+	msg := cmd().(turnCountRefreshMsg)
+	m.applyTurnCount(7)
+	_, _ = m.update(msg)
+	if m.turnCount != 7 {
+		t.Fatalf("stale refresh overwrote hydrated count=%d", m.turnCount)
+	}
+}
+
 func TestFooterTruncatesAtNarrowWidths(t *testing.T) {
 	m := &Model{
 		app:           &app.App{Model: protocol.Model{ContextWindow: 400000}},

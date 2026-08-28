@@ -676,12 +676,13 @@ func (m *Model) renderFooter() string {
 	}
 	contextUsage := m.renderContextUsage()
 	cachedInput := m.renderCachedInputShare()
+	turnText := fmt.Sprintf("turns:%d", m.turnCount)
 	runtimeText := "mode:" + mode
 	if m.inlineTranscript && m.app != nil && m.app.Agent != nil && available >= 72 {
 		model := m.app.Agent.Model()
 		runtimeText = model.Provider + "/" + model.ID + " · " + runtimeText + " · thinking:" + string(m.app.Agent.Thinking())
 	}
-	rightPrefix := "· " + runtimeText + goalText + " · "
+	rightPrefix := "· " + runtimeText + goalText + " · " + turnText + " · "
 	if cachedInput != "" {
 		rightPrefix += cachedInput + " · "
 	}
@@ -707,7 +708,19 @@ func (m *Model) renderFooter() string {
 			model := m.app.Agent.Model()
 			runtimeText = model.ID + " · " + mode + "/" + string(m.app.Agent.Thinking())
 			compactRightPrefix = "· " + runtimeText + " · "
-			rightPrefix = compactRightPrefix
+			rightPrefix = compactRightPrefix + turnText + " · "
+			if cachedInput != "" {
+				rightPrefix += cachedInput + " · "
+			}
+			right = rightPrefix + contextUsage
+		}
+		if lipgloss.Width(right) > maxRight && turnText != "" {
+			turnText = ""
+			if compactRightPrefix != "" {
+				rightPrefix = compactRightPrefix
+			} else {
+				rightPrefix = "· " + runtimeText + goalText + " · "
+			}
 			if cachedInput != "" {
 				rightPrefix += cachedInput + " · "
 			}

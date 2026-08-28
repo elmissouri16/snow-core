@@ -72,6 +72,10 @@ func TestInternalGoalTurnNoUserMessageAndAccountsOnce(t *testing.T) {
 	if len(p.requests) != 2 || len(p.requests[0].InternalContext) != 1 || !strings.Contains(p.requests[0].InternalContext[0].Text, "finish objective") {
 		t.Fatalf("requests=%+v", p.requests)
 	}
+	turns, turnErr := a.TurnCount()
+	if turnErr != nil || turns != 1 {
+		t.Fatalf("goal turn count=%d err=%v, want 1", turns, turnErr)
+	}
 }
 func TestAutomaticGoalTurnsCannotRequestInteractiveInput(t *testing.T) {
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{

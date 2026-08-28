@@ -138,6 +138,7 @@ func (m *Model) hydrateSessionLegacy() {
 		m.inlinePrintInFlight = false
 		m.inlinePrintGeneration++
 		m.inlineHeaderPending = false
+		m.applyTurnCount(0)
 		m.transcriptBaseDirty = true
 		m.transcriptDirty = true
 		m.refreshTranscript()
@@ -149,6 +150,7 @@ func (m *Model) hydrateSessionLegacy() {
 	// exact branch once through Messages and again through BranchEntries.
 	var messages, renderMessages, branchContext []protocol.Message
 	var durableIDs []string
+	var turnCount uint64
 	loadedBranch := false
 	projectedBranch := false
 	branchCompacted := false
@@ -162,6 +164,9 @@ func (m *Model) hydrateSessionLegacy() {
 			for _, entry := range branch {
 				if m.inlineTranscript {
 					durableIDs = append(durableIDs, entry.ID)
+				}
+				if session.IsAgentTurnMarker(entry) {
+					turnCount++
 				}
 				switch {
 				case entry.Type == session.EntryMessage && entry.Message != nil:
@@ -210,7 +215,11 @@ func (m *Model) hydrateSessionLegacy() {
 				durableIDs = append(durableIDs, message.ID)
 			}
 		}
+		if count, countErr := m.app.Agent.TurnCount(); countErr == nil {
+			turnCount = count
+		}
 	}
+	m.applyTurnCount(turnCount)
 	m.hydrateInputHistory(messages)
 	refreshUsage := func() {
 		if projectedBranch {
@@ -558,6 +567,26 @@ func (m *Model) scheduleContextUsageRefresh() tea.Cmd {
 		projected, err := a.ContextMessages()
 		compacted := len(projected) > 0 && projected[0].Role == protocol.RoleCustom
 		return contextUsageRefreshMsg{version: version, snapshot: projectedContextUsage(projected, compacted), err: err}
+	}
+}
+
+func (m *Model) applyTurnCount(count uint64) {
+	m.turnCount = count
+	m.turnCountRefreshNeeded = false
+	m.turnCountRefreshVersion++
+}
+
+func (m *Model) scheduleTurnCountRefresh() tea.Cmd {
+	if !m.turnCountRefreshNeeded || m.turnCountRefreshPending || m.app == nil || m.app.Agent == nil {
+		return nil
+	}
+	m.turnCountRefreshNeeded = false
+	m.turnCountRefreshPending = true
+	version := m.turnCountRefreshVersion
+	a := m.app.Agent
+	return func() tea.Msg {
+		count, err := a.TurnCount()
+		return turnCountRefreshMsg{version: version, count: count, err: err}
 	}
 }
 

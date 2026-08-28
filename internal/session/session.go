@@ -38,6 +38,11 @@ const (
 	// MetaToolTranscript stores branch-scoped, provider-excluded presentation
 	// metadata for harness tool activity without a matching tool-result message.
 	MetaToolTranscript = "tool_transcript_v1"
+	// MetaAgentTurn records one durably admitted agent run. The entry value is
+	// the run origin (user, goal, or subagent); compaction is deliberately not a
+	// tracked agent turn. Keeping markers in the append-only entry chain makes
+	// counts naturally branch- and fork-local.
+	MetaAgentTurn = "agent_turn_v1"
 )
 
 // Entry is one line in a session file.
@@ -52,6 +57,21 @@ type Entry struct {
 	// Meta
 	Key   string `json:"key,omitempty"`
 	Value string `json:"value,omitempty"`
+}
+
+// IsAgentTurnMarker reports whether an entry is a valid explicit turn marker.
+// Unknown values are ignored so corrupt or future metadata cannot inflate the
+// current format's count.
+func IsAgentTurnMarker(entry Entry) bool {
+	if entry.Type != EntryMeta || entry.Key != MetaAgentTurn || entry.ID == "" {
+		return false
+	}
+	switch entry.Value {
+	case "user", "goal", "subagent":
+		return true
+	default:
+		return false
+	}
 }
 
 // Store is the session abstraction used by the agent.
@@ -89,6 +109,12 @@ type TitleStore interface {
 
 type ContextStore interface {
 	ContextMessages() ([]protocol.Message, error)
+}
+
+// TurnCountStore counts explicit agent-turn markers on the active branch.
+// It never infers historical turns from message shapes.
+type TurnCountStore interface {
+	CountAgentTurns() (uint64, error)
 }
 
 // TailMessageStore returns only the final non-tool message and any tool results

@@ -236,6 +236,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.scheduleContextUsageRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case turnCountRefreshMsg:
+		m.turnCountRefreshPending = false
+		if msg.err == nil && msg.version == m.turnCountRefreshVersion {
+			m.turnCount = msg.count
+		}
+		if cmd := m.scheduleTurnCountRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case contextReportMsg:
 		if m.app == nil || m.app.Agent == nil || msg.epoch != m.app.Agent.RootEpoch() {
 			break
@@ -277,6 +285,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if cmd := m.scheduleContextUsageRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if cmd := m.scheduleTurnCountRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		// Re-arm immediately; the mailbox self-signals while more batches wait.

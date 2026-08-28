@@ -176,11 +176,18 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
    row shows activity and queued-input count. Provider waits use a
    pulsing-points thinking animation distinct from the rotating working
    indicator in the run-status row. The
-   footer shows permission mode, mode/goal state, context usage, and the share
-   of the latest request's input tokens served from the prompt cache as
-   `cached:<n>%`; inline mode may compact provider/model/effort into that footer.
-   This is token coverage for one request, not a request-level cache-hit
-   frequency, turn aggregate, session average, or cost-savings percentage.
+   footer shows permission mode, mode/goal state, tracked branch-local agent
+   runs as `turns:<n>`, context usage, and the share of the latest request's
+   input tokens served from the prompt cache as `cached:<n>%`; inline mode may
+   compact provider/model/effort into that footer. A tracked turn is one
+   durably admitted user or automatic-goal run, regardless of how many model
+   requests or tool continuations it needs. Compaction and descendant subagent
+   work do not increase the active root branch's count. Sessions created before
+   turn tracking start at zero rather than receiving an inexact reconstruction.
+   Narrow terminals may omit the turn and cache segments to preserve permission
+   and context indicators. The cache percentage is token coverage for one
+   request, not a request-level cache-hit frequency, turn aggregate, session
+   average, or cost-savings percentage.
 
 Bash activity uses the sticky run-status row while executing, then adds one
 compact `✓ <command> · <duration>` transcript summary followed by any command

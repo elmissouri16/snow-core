@@ -469,6 +469,10 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.pushLine(styleError.Render("✖ " + message))
 		}
 	case protocol.EvTurnDone:
+		if ev.TurnOrigin != "compact" {
+			m.turnCountRefreshVersion++
+			m.turnCountRefreshNeeded = true
+		}
 		if !m.turnUsageSeen {
 			m.contextRefreshVersion++
 			m.contextRefreshNeeded = true
@@ -524,6 +528,10 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		}
 		m.refreshTranscript()
 	case protocol.EvAborted:
+		if ev.TurnOrigin != "compact" {
+			m.turnCountRefreshVersion++
+			m.turnCountRefreshNeeded = true
+		}
 		if !m.turnUsageSeen {
 			m.contextRefreshVersion++
 			m.contextRefreshNeeded = true

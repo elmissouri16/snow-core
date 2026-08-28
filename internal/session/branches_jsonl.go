@@ -509,6 +509,22 @@ func (s *JSONLStore) Messages() ([]protocol.Message, error) {
 	return linearize(s.entries, s.byID, s.tip)
 }
 
+// CountAgentTurns counts explicit turn markers for legacy fixtures.
+func (s *JSONLStore) CountAgentTurns() (uint64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return 0, errors.New("session: store closed")
+	}
+	var count uint64
+	for _, entry := range pathFrom(s.entries, s.byID, s.tip) {
+		if IsAgentTurnMarker(entry) {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // ContextMessages implements ContextStore for legacy fixtures.
 func (s *JSONLStore) ContextMessages() ([]protocol.Message, error) {
 	s.mu.RLock()

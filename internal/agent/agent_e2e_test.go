@@ -340,6 +340,10 @@ func TestAgentEndToEndBuiltinWorkflow(t *testing.T) {
 	if usage.Total != 18 || usage.Requests != 1 {
 		t.Fatalf("session usage = %+v, want persisted total=18 requests=1", usage)
 	}
+	turns, err := a.TurnCount()
+	if err != nil || turns != 1 {
+		t.Fatalf("session turns = %d, want one admitted run across two provider requests (err=%v)", turns, err)
+	}
 }
 
 type e2eAsker struct {
@@ -478,6 +482,39 @@ func TestAgentEndToEndJSONLResumeAndContinuation(t *testing.T) {
 	}
 }
 
+type failTurnMarkerStore struct{ *session.MemoryStore }
+
+func (s *failTurnMarkerStore) Append(entry session.Entry) error {
+	if entry.Key == session.MetaAgentTurn {
+		return errors.New("turn ledger unavailable")
+	}
+	return s.MemoryStore.Append(entry)
+}
+
+func TestAgentTurnMarkerFailurePreventsProviderExecution(t *testing.T) {
+	root := t.TempDir()
+	provider := &e2eProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamTextDelta, Text: "must not run"},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+	}}}
+	store := &failTurnMarkerStore{MemoryStore: session.NewMemoryStore(session.Options{CWD: root})}
+	a := newBuiltinE2EAgent(t, root, provider, store, permission.ModeAllow, nil)
+	err := a.Prompt(t.Context(), "do not dispatch")
+	if err == nil || !strings.Contains(err.Error(), "turn ledger unavailable") {
+		t.Fatalf("Prompt error=%v", err)
+	}
+	if len(provider.Requests()) != 0 {
+		t.Fatalf("provider requests=%d want 0", len(provider.Requests()))
+	}
+	if a.IsRunning() {
+		t.Fatal("agent remained running after turn-marker failure")
+	}
+	turns, countErr := a.TurnCount()
+	if countErr != nil || turns != 0 {
+		t.Fatalf("turn count=%d err=%v, want 0", turns, countErr)
+	}
+}
+
 // TestAgentEndToEndProviderFailureCases covers failures at each provider
 // boundary. These are intentionally end-to-end assertions: the public Prompt
 // call must return the error, publish turn_done, and persist an actionable
@@ -544,6 +581,10 @@ func TestAgentEndToEndProviderFailureCases(t *testing.T) {
 			} else if len(msgs) != 1 {
 				t.Fatalf("messages after pre-stream failure = %+v, want only user", msgs)
 			}
+			turns, turnErr := a.TurnCount()
+			if turnErr != nil || turns != 1 {
+				t.Fatalf("failed run turn count=%d err=%v, want 1", turns, turnErr)
+			}
 		})
 	}
 }
@@ -576,6 +617,10 @@ func TestAgentEndToEndAbortDuringBash(t *testing.T) {
 	}
 	if len(msgs) != 4 || !msgs[2].IsError {
 		t.Fatalf("canceled session = %+v, want tool-call plus tool error", msgs)
+	}
+	turns, turnErr := a.TurnCount()
+	if turnErr != nil || turns != 1 {
+		t.Fatalf("canceled run turn count=%d err=%v, want 1", turns, turnErr)
 	}
 }
 

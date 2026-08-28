@@ -44,6 +44,7 @@ type BranchHydrationSnapshot struct {
 	UserInputs   []string
 	LatestPlan   string
 	ContextUsage BranchContextUsage
+	TurnCount    uint64
 }
 
 // BranchEntrySummary contains the bounded scalar state needed to count exact
@@ -289,6 +290,9 @@ func buildBranchHydrationSnapshot(tip string, entries []Entry) BranchHydrationSn
 		Entries: make([]BranchEntrySummary, 0, len(entries)),
 	}
 	for _, entry := range entries {
+		if IsAgentTurnMarker(entry) {
+			snapshot.TurnCount++
+		}
 		record := summarizeHydrationEntry(entry)
 		snapshot.Entries = append(snapshot.Entries, record.summary)
 		if record.userInput != "" {

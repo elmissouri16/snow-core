@@ -177,6 +177,26 @@ func (s *SQLiteStore) Close() error {
 	return errors.Join(errs...)
 }
 
+const agentTurnCountSQL = `WITH RECURSIVE branch(id, parent_id, entry_type, meta_key, meta_value) AS (
+	SELECT id, parent_id, entry_type, meta_key, meta_value FROM entries WHERE id=?
+	UNION ALL
+	SELECT e.id, e.parent_id, e.entry_type, e.meta_key, e.meta_value FROM entries e JOIN branch b ON e.id=b.parent_id
+) SELECT count(*) FROM branch WHERE entry_type=? AND meta_key=?
+	AND meta_value IN ('user', 'goal', 'subagent')`
+
+// CountAgentTurns counts valid explicit turn markers on the active branch
+// without decoding message payloads.
+func (s *SQLiteStore) CountAgentTurns() (uint64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return 0, errors.New("session: store closed")
+	}
+	var count uint64
+	err := s.db.QueryRow(agentTurnCountSQL, s.tip, EntryMeta, MetaAgentTurn).Scan(&count)
+	return count, err
+}
+
 // AggregateUsage sums persisted usage without decoding complete messages.
 func (s *SQLiteStore) AggregateUsage() (protocol.Usage, error) {
 	s.mu.RLock()
