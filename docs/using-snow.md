@@ -380,7 +380,8 @@ stored only with the active session for resume.
 | `/init` | Inspect the current project and create a tailored `AGENTS.md` contributor guide without overwriting an existing one |
 | `/model [id]` | Open the model picker or select a model; provider/model/effort persist for the current project folder |
 | `/thinking [level]` | Open the centered effort card or directly choose and persist a model-supported effort for the current project folder |
-| `/settings` | Open the centered settings card for model, theme, response controls, session permission, subagents, and skills |
+| `/settings` | Open the centered settings card for model, theme, response controls, session permission, subagents, skills, and keybindings |
+| `/keybindings` | Open the interactive global/project shortcut editor; changes save and apply immediately |
 | `/permissions [ask|allow|deny]` | Open or change the active session's persisted permission mode |
 | `/allow [always]` | Resolve a pending tool request; optional session rule |
 | `/deny` | Deny a pending tool request |
@@ -416,6 +417,29 @@ Repository inspection and creation use the normal tools, permission policy,
 configured path roots, and symlink protections; `/init` does not bypass a
 permission denial. A newly created guide is loaded as project context the next
 time Snow starts in its scope.
+
+### Interactive keybindings
+
+Open `/keybindings`, or choose **Keybindings** from `/settings`, to inspect and
+edit every supported TUI action. The centered card shows the effective keys and
+their source (`default`, `global`, or `project`). Global scope writes
+`$SNOW_HOME/keybindings.yaml`; press `S` to edit a trusted project's
+`.snow/keybindings.yaml` overrides instead.
+
+Select an action with the arrows and Enter. In the action editor, select an
+existing key to replace it, **Replace all** to start a new list, or **Add key**
+to append another shortcut. The next key event is captured directly, including
+Enter or Esc. Backspace/Delete removes a draft key, `R` restores the inherited
+or built-in keys, `Ctrl+S` validates and saves, and Esc discards the draft.
+Resetting from the main list removes that scope's override: global actions return
+to built-in defaults, while project actions inherit the global/default value.
+
+Snow applies successful changes immediately to the composer, transcript,
+pickers, help, and shortcut hints. Invalid names, empty binding lists, and keys
+that collide in the same interaction context remain unsaved and are reported in
+the popup. Emergency Ctrl+C and modal Esc behavior cannot be removed. Project
+scope is unavailable until the project is trusted. The popup does not open
+while an agent turn is active.
 
 ## Composer completions
 

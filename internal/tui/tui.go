@@ -520,11 +520,23 @@ type Model struct {
 
 	// Settings panel state. Model selection temporarily hands control to the
 	// existing model picker and returns here afterward.
-	pickSettings          bool
-	settingsIndex         int
-	settingsReturnToPanel bool
-	settingsStatus        string
-	settingsError         string
+	pickSettings                bool
+	settingsIndex               int
+	settingsReturnToPanel       bool
+	settingsStatus              string
+	settingsError               string
+	pickKeybindings             bool
+	keybindingsReturnToSettings bool
+	keybindingsScope            keybindingScope
+	keybindingsIndex            int
+	keybindingsEditing          bool
+	keybindingsEditIndex        int
+	keybindingsDraft            []string
+	keybindingsCapture          keybindingCaptureMode
+	keybindingsStatus           string
+	keybindingsError            string
+	keybindingsGlobalOverrides  map[string][]string
+	keybindingsProjectOverrides map[string][]string
 
 	// Centered /help viewer state.
 	pickHelp   bool
@@ -680,5 +692,6 @@ const (
 	settingsSubagents
 	settingsSubagentConcurrency
 	settingsSkills
+	settingsKeybindings
 	settingsCount
 )

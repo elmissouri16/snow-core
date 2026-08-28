@@ -308,6 +308,12 @@ func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.
 			return m, nil
 		}
 		return m.startSettings()
+	case "/keybindings":
+		if len(args) > 0 {
+			m.pushLine(styleError.Render("/keybindings takes no arguments"))
+			return m, nil
+		}
+		return m.startKeybindings(false)
 	case "/skills":
 		if len(args) == 0 {
 			return m.startSkillsInfo()

@@ -221,6 +221,9 @@ func (m *Model) currentHeaderStatus() string {
 	if m.pickSettings || m.settingsReturnToPanel {
 		status = "settings"
 	}
+	if m.pickKeybindings {
+		status = "keybindings"
+	}
 	if m.pickHelp {
 		status = "help"
 	}
@@ -333,6 +336,8 @@ func (m *Model) View() string {
 		frame = m.overlayModelModal(frame)
 	} else if m.thinkingModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlayThinkingModal(frame)
+	} else if m.keybindingsModalVisible() && !m.permPending && !m.userInputPending {
+		frame = m.overlayKeybindingsModal(frame)
 	} else if m.settingsModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlaySettingsModal(frame)
 	} else if m.helpModalVisible() && !m.permPending && !m.userInputPending {

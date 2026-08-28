@@ -53,7 +53,7 @@ func (m *Model) handleComposerSelectionKey(msg tea.KeyMsg) (handled bool, cmd te
 
 func (m *Model) composerCoveredByModal() bool {
 	return m.loginModalVisible() || m.pickModel || m.pickThinking ||
-		m.pickSettings || m.pickHelp || m.pickFork || m.pickSession || m.pickTree ||
+		m.pickSettings || m.pickKeybindings || m.pickHelp || m.pickFork || m.pickSession || m.pickTree ||
 		m.pickInfo || m.pickPermissionMode || m.permPending || m.userInputPending ||
 		m.confirmGoalReplace || m.planPrompt || m.processFleetOpen || m.subagentFleetOpen ||
 		m.sessionOpLoading

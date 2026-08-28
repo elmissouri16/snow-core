@@ -624,6 +624,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleModelPick(msg)
 	}
 
+	// --- Interactive keybinding editor ---
+	if m.pickKeybindings {
+		return m.handleKeybindingsKey(msg)
+	}
+
 	// --- Unified settings panel ---
 	if m.pickSettings {
 		return m.handleSettingsKey(msg)
@@ -838,8 +843,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	goalControl := m.busy && (strings.HasPrefix(trimmed, "/goal pause") || strings.HasPrefix(trimmed, "/goal clear") || strings.HasPrefix(trimmed, "/goal edit"))
 	initControl := m.busy && (trimmed == "/init" || strings.HasPrefix(trimmed, "/init "))
+	keybindingsControl := m.busy && (trimmed == "/keybindings" || strings.HasPrefix(trimmed, "/keybindings "))
 	processInspectorControl := m.busy && (trimmed == "/processes" || strings.HasPrefix(trimmed, "/processes "))
-	busyControl := goalControl || initControl || processInspectorControl
+	busyControl := goalControl || initControl || keybindingsControl || processInspectorControl
 	if abortKey && m.busy {
 		m.requestAbort()
 		return m, nil

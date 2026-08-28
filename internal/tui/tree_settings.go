@@ -321,13 +321,13 @@ func (m *Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// them before generic picker normalization, whose default bindings also map
 	// horizontal arrows to previous/next list items.
 	if msg.Type == tea.KeyLeft {
-		if m.settingsIndex != settingsModel {
+		if m.settingsIndex != settingsModel && m.settingsIndex != settingsKeybindings {
 			m.cycleSetting(-1)
 		}
 		return m, nil
 	}
 	if msg.Type == tea.KeyRight {
-		if m.settingsIndex != settingsModel {
+		if m.settingsIndex != settingsModel && m.settingsIndex != settingsKeybindings {
 			m.cycleSetting(1)
 		}
 		return m, nil
@@ -351,6 +351,9 @@ func (m *Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pickSettings = false
 			m.settingsReturnToPanel = true
 			return m.startModelPick()
+		}
+		if m.settingsIndex == settingsKeybindings {
+			return m.startKeybindings(true)
 		}
 		m.cycleSetting(1)
 	}
@@ -486,7 +489,7 @@ func (m *Model) loadAuxiliaryTUIConfig() {
 	themes, themeDiagnostics := config.LoadThemes(config.GlobalDir(), m.app.ProjectInputRoot, m.app.ProjectAllowed)
 	scopes, keyDiagnostics := config.LoadKeybindingScopes(config.GlobalDir(), m.app.ProjectInputRoot, m.app.ProjectAllowed)
 	m.customThemes = themes
-	m.auxDiagnostics = append(themeDiagnostics, keyDiagnostics...)
+	m.auxDiagnostics = append(append([]config.Diagnostic(nil), themeDiagnostics...), keyDiagnostics...)
 	m.keys = tuiKeys
 	for _, scope := range scopes {
 		keys, err := applyKeybindingOverrides(m.keys, scope.File.Bindings)

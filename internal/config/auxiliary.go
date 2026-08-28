@@ -249,9 +249,25 @@ func LoadThemes(globalDir, projectRoot string, projectAllowed bool) (map[string]
 	return themes, diagnostics
 }
 
+// KeybindingActions is the stable inventory accepted by auxiliary keybinding
+// files and exposed by the interactive TUI editor.
+var KeybindingActions = []string{
+	"submit", "follow_up", "newline", "paste", "abort", "quit", "toggle_mode", "thinking", "models", "agents", "processes",
+	"page_up", "page_down", "top", "bottom", "line_up", "line_down",
+	"picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom",
+	"accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm",
+}
+
+// DefaultKeybindings returns a detached copy of Snow's built-in bindings.
+func DefaultKeybindings() map[string][]string {
+	return cloneBindings(defaultAuxBindings())
+}
+
 func defaultAuxBindings() map[string][]string {
 	return map[string][]string{
 		"submit": {"enter"}, "follow_up": {"alt+enter"}, "newline": {"ctrl+j", "alt+enter"}, "paste": {"ctrl+v"}, "abort": {"ctrl+c", "esc"}, "quit": {"ctrl+c", "ctrl+d"}, "toggle_mode": {"shift+tab"}, "thinking": {"ctrl+t"},
+		"models": {"alt+m"}, "agents": {"alt+a"}, "processes": {"alt+p"},
+		"page_up": {"pgup"}, "page_down": {"pgdown"}, "top": {"home"}, "bottom": {"end"}, "line_up": {"ctrl+up"}, "line_down": {"ctrl+down"},
 		"picker_up": {"up", "left", "k"}, "picker_down": {"down", "right", "j"}, "picker_previous": {"shift+tab"}, "picker_next": {"tab"}, "picker_page_up": {"pgup"}, "picker_page_down": {"pgdown"}, "picker_top": {"home"}, "picker_bottom": {"end"},
 		"accept": {"enter"}, "close": {"esc"}, "branch_fork": {"f"}, "branch_rename": {"r"}, "branch_delete": {"d"}, "confirm": {"y"},
 	}
@@ -276,9 +292,10 @@ func appendUnique(values []string, value string) []string {
 
 func validateEffectiveAuxBindings(bindings map[string][]string) error {
 	for _, context := range [][]string{
-		{"submit", "newline", "paste", "toggle_mode", "thinking", "abort"},
-		{"submit", "follow_up", "thinking", "abort"},
-		{"picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm"},
+		{"submit", "newline", "paste", "toggle_mode", "thinking", "models", "agents", "processes", "abort"},
+		{"submit", "follow_up", "thinking", "models", "agents", "processes", "abort"},
+		{"models", "agents", "processes", "quit"},
+		{"picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm", "models", "agents", "processes"},
 	} {
 		seen := map[string]string{}
 		for _, action := range context {
@@ -296,7 +313,7 @@ func validateEffectiveAuxBindings(bindings map[string][]string) error {
 
 func validateKeybindingFile(file KeybindingsFile) error {
 	allowed := map[string]bool{}
-	for _, name := range []string{"submit", "follow_up", "newline", "paste", "abort", "quit", "toggle_mode", "thinking", "page_up", "page_down", "top", "bottom", "line_up", "line_down", "picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm"} {
+	for _, name := range KeybindingActions {
 		allowed[name] = true
 	}
 	clean := map[string][]string{}
@@ -316,9 +333,10 @@ func validateKeybindingFile(file KeybindingsFile) error {
 		}
 	}
 	for _, context := range [][]string{
-		{"submit", "newline", "paste", "toggle_mode", "thinking", "abort"},
-		{"submit", "follow_up", "thinking", "abort"},
-		{"picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm"},
+		{"submit", "newline", "paste", "toggle_mode", "thinking", "models", "agents", "processes", "abort"},
+		{"submit", "follow_up", "thinking", "models", "agents", "processes", "abort"},
+		{"models", "agents", "processes", "quit"},
+		{"picker_up", "picker_down", "picker_previous", "picker_next", "picker_page_up", "picker_page_down", "picker_top", "picker_bottom", "accept", "close", "branch_fork", "branch_rename", "branch_delete", "confirm", "models", "agents", "processes"},
 	} {
 		seen := map[string]string{}
 		for _, action := range context {

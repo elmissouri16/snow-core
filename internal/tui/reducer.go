@@ -29,7 +29,7 @@ func (m *Model) dispatchMouse(msg tea.MouseMsg) tea.Cmd {
 		m.handleSubagentFleetMouse(msg)
 		return nil
 	}
-	if m.loginModalVisible() || m.settingsModalVisible() || m.helpModalVisible() || m.thinkingModalVisible() {
+	if m.loginModalVisible() || m.keybindingsModalVisible() || m.settingsModalVisible() || m.helpModalVisible() || m.thinkingModalVisible() {
 		return nil
 	}
 	if handled, cmd := m.handleHeaderMouse(msg); handled {
@@ -100,7 +100,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
 		// transcript when not in a picker.
-		if !m.loginModalVisible() && !m.settingsModalVisible() && !m.helpModalVisible() && !m.pickModel && !m.pickThinking && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.processFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
+		if !m.loginModalVisible() && !m.keybindingsModalVisible() && !m.settingsModalVisible() && !m.helpModalVisible() && !m.pickModel && !m.pickThinking && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.processFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
 			switch {
 			case keyMatches(msg, m.keys.PageUp):
 				m.refreshTranscriptForced()

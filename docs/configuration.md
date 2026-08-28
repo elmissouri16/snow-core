@@ -658,6 +658,14 @@ Global: `$SNOW_HOME/keybindings.yaml`
 
 Project: `<project>/.snow/keybindings.yaml` after trust
 
+Use `/keybindings` in the TUI, or select **Keybindings** from `/settings`, to
+edit these files interactively. The popup defaults to global scope; `S` toggles
+to trusted-project overrides. Changes are validated, saved atomically, and
+applied to the running TUI immediately. Resetting a global action removes its
+override and restores the built-in default; resetting a project action removes
+the project override so it inherits the global/default value. Manual YAML
+editing remains supported.
+
 ```yaml
 version: 1
 bindings:
