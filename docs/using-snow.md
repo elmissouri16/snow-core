@@ -373,6 +373,7 @@ stored only with the active session for resume.
 | Command | Purpose |
 |---|---|
 | `/help` | Open a centered, scrollable reference for commands and active keybindings |
+| `/init` | Inspect the current project and create a tailored `AGENTS.md` contributor guide without overwriting an existing one |
 | `/model [id]` | Open the model picker or select a model; provider/model/effort persist for the current project folder |
 | `/thinking [level]` | Open the centered effort card or directly choose and persist a model-supported effort for the current project folder |
 | `/settings` | Open the centered settings card for model, theme, response controls, session permission, subagents, and skills |
@@ -402,6 +403,15 @@ stored only with the active session for resume.
 | `/skills [clear]` | Inspect discovered Agent Skills, or durably clear session-active skills |
 | `/trust [allow|deny]` | Show or persist exact-project trust for the next launch |
 | `/quit` | Exit Snow |
+
+`/init` runs a normal model-driven agent turn in Default mode. The agent first
+checks for `AGENTS.md` in Snow's current working directory, then inspects the
+checkout and writes a concise, repository-specific guide only when that target
+does not already exist. It never intentionally overwrites an existing guide.
+Repository inspection and creation use the normal tools, permission policy,
+configured path roots, and symlink protections; `/init` does not bypass a
+permission denial. A newly created guide is loaded as project context the next
+time Snow starts in its scope.
 
 ## Composer completions
 

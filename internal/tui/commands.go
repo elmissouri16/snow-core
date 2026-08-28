@@ -34,6 +34,12 @@ func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.
 		return m, m.quitCmd()
 	case "/help":
 		return m.startHelp()
+	case "/init":
+		if len(args) > 0 {
+			m.pushLine(styleError.Render("/init takes no arguments"))
+			return m, nil
+		}
+		return m.startInitCommand(displayLine)
 	case "/goal":
 		if len(args) == 0 {
 			g, err := m.app.GoalState()

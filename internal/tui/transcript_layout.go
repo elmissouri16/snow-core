@@ -795,8 +795,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	goalControl := m.busy && (strings.HasPrefix(trimmed, "/goal pause") || strings.HasPrefix(trimmed, "/goal clear") || strings.HasPrefix(trimmed, "/goal edit"))
+	initControl := m.busy && (trimmed == "/init" || strings.HasPrefix(trimmed, "/init "))
 	processInspectorControl := m.busy && (trimmed == "/processes" || strings.HasPrefix(trimmed, "/processes "))
-	busyControl := goalControl || processInspectorControl
+	busyControl := goalControl || initControl || processInspectorControl
 	if abortKey && m.busy {
 		m.requestAbort()
 		return m, nil

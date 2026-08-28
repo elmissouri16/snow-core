@@ -47,6 +47,10 @@ func TestCompleteCommand(t *testing.T) {
 	if len(permissions) != 1 || permissions[0] != "/permissions" {
 		t.Fatalf("prefix 'permissions' = %v, want [/permissions]", permissions)
 	}
+	init := completeCommand("in")
+	if len(init) != 1 || init[0] != "/init" {
+		t.Fatalf("prefix 'in' = %v, want [/init]", init)
+	}
 	if got := completeCommand("xx"); len(got) != 0 {
 		t.Fatalf("prefix 'xx' = %v, want none", got)
 	}
@@ -68,7 +72,7 @@ func TestCommandRegistryIsCanonical(t *testing.T) {
 		}
 		seen[command.name] = true
 	}
-	for _, name := range []string{"/compact", "/context", "/mcp", "/sessions", "/resume", "/new", "/permissions", "/settings", "/skills", "/tree", "/thinking"} {
+	for _, name := range []string{"/compact", "/context", "/init", "/mcp", "/sessions", "/resume", "/new", "/permissions", "/settings", "/skills", "/tree", "/thinking"} {
 		if _, ok := commandByExact(name); !ok {
 			t.Errorf("missing canonical command %s", name)
 		}

@@ -1183,11 +1183,17 @@ clipboard images in the agent composer or falls back to textarea paste.
 
 ### Slash commands
 
-`/allow [always]`, `/default`, `/deny`, `/fork`, `/help`, `/login`,
+`/allow [always]`, `/default`, `/deny`, `/fork`, `/help`, `/init`, `/login`,
 `/logout [provider]`, `/model`, `/plan [message]`, `/thinking`, `/new`,
 `/permissions`, `/resume`, `/agent [path]`, `/agent concurrency N`,
 `/processes [id|name]`, `/sessions`, `/settings`, `/compact`, `/mcp`, `/skills`,
 `/tree`, `/quit`, and `/trust [allow|deny]`.
+
+`/init` is a model-driven Default-mode turn that inspects the checkout and asks
+the existing permissioned tool loop to create a repository-specific `AGENTS.md`
+in the current working directory. Its embedded task prompt forbids overwriting
+an existing target; the command does not add a second tool loop or bypass file
+roots, permission checks, or symlink protections.
 
 `/processes` is a first-party TUI projection over the app-owned process manager,
 not a second lifecycle implementation or a public RPC/SDK process API. It polls

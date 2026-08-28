@@ -596,6 +596,13 @@ func (m *Model) takePromptImages() []protocol.ContentBlock {
 }
 
 func (m *Model) startPrompt(text string) tea.Cmd {
+	return m.startPromptWithDisplay(text, text)
+}
+
+// startPromptWithDisplay submits prompt to the agent while retaining displayText
+// for input history and pre-admission error recovery. Slash commands use this to
+// keep their internal task prompt out of the composer and live transcript.
+func (m *Model) startPromptWithDisplay(promptText, displayText string) tea.Cmd {
 	generation := m.beginOptimisticRun()
 	if m.cancelRun != nil {
 		m.cancelRun()
@@ -603,9 +610,11 @@ func (m *Model) startPrompt(text string) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
 	pastedTexts := m.takePastedTextAttachments()
-	historyText := stripImageAttachmentTokens(expandPastedTextAttachments(text, pastedTexts), len(m.promptImages))
+	imageCount := len(m.promptImages)
+	historyText := stripImageAttachmentTokens(expandPastedTextAttachments(displayText, pastedTexts), imageCount)
 	m.rememberInputHistory(historyText)
-	prompt := m.expandedPrompt(historyText)
+	promptText = stripImageAttachmentTokens(expandPastedTextAttachments(promptText, pastedTexts), imageCount)
+	prompt := m.expandedPrompt(promptText)
 	images := m.takePromptImages()
 	return func() tea.Msg {
 		err := m.app.Agent.PromptContent(ctx, prompt, images)
@@ -613,7 +622,7 @@ func (m *Model) startPrompt(text string) tea.Cmd {
 		admitted := err == nil || !errors.Is(err, agent.ErrPromptRejected)
 		return promptDoneMsg{
 			generation: generation, turnID: turnID, admitted: admitted,
-			text: text, historyText: historyText, attachments: images, pastedTexts: pastedTexts, err: err,
+			text: displayText, historyText: historyText, attachments: images, pastedTexts: pastedTexts, err: err,
 		}
 	}
 }

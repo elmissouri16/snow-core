@@ -24,6 +24,7 @@ var commands = []commandSpec{
 	{name: "/fork", desc: "fork into this workspace or a Git worktree"},
 	{name: "/help", desc: "show command help"},
 	{name: "/goal", desc: "show or control a persistent thread goal", argHint: "[objective|edit|pause|resume|clear]"},
+	{name: "/init", desc: "create an AGENTS.md guide for this project"},
 	{name: "/login", desc: "configure a provider endpoint or credentials", argHint: "<provider>"},
 	{name: "/logout", desc: "choose and remove a stored credential", argHint: "[provider]"},
 	{name: "/mcp", desc: "inspect configured MCP server status"},
