@@ -47,17 +47,40 @@ type CredentialCatalogTransport interface {
 }
 
 func (p *Authenticated) ListModels(ctx context.Context) ([]protocol.Model, error) {
-	catalog, ok := p.transport.(CredentialCatalogTransport)
-	if !ok {
-		return p.transport.ListModels(ctx)
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	credential, available, err := p.catalogCredential(ctx)
+	if err != nil || !available {
+		return nil, err
+	}
+	if catalog, ok := p.transport.(CredentialCatalogTransport); ok {
+		return catalog.ListModelsWithCredential(ctx, credential)
+	}
+	return p.transport.ListModels(ctx)
+}
+
+// catalogCredential keeps required-auth provider inventories hidden until a
+// usable credential resolves. Optional-auth providers continue with an empty
+// credential so anonymous catalogs remain available.
+func (p *Authenticated) catalogCredential(ctx context.Context) (auth.Credential, bool, error) {
 	credential, err := p.auth.Resolve(ctx, p.ID())
-	if err != nil {
-		// Required-auth providers may still expose a safe static/offline catalog
-		// before login.
-		return p.transport.ListModels(ctx)
+	if err == nil {
+		return credential, true, nil
 	}
-	return catalog.ListModelsWithCredential(ctx, credential)
+	if ctx != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return auth.Credential{}, false, ctxErr
+		}
+	}
+	descriptor, descriptorErr := p.auth.Descriptor(p.ID())
+	if descriptorErr != nil {
+		return auth.Credential{}, false, descriptorErr
+	}
+	if descriptor.Required {
+		return auth.Credential{}, false, nil
+	}
+	return auth.Credential{Provider: p.ID()}, true, nil
 }
 
 func (p *Authenticated) Chat(ctx context.Context, request protocol.ChatRequest) (protocol.EventStream, error) {
@@ -77,20 +100,27 @@ func (p *Authenticated) DefaultModel() protocol.Model {
 }
 
 func (p *Authenticated) RefreshModels(ctx context.Context) ([]protocol.Model, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	credential, available, err := p.catalogCredential(ctx)
+	if err != nil || !available {
+		return nil, err
+	}
 	if value, ok := p.transport.(interface {
 		RefreshModelsWithCredential(context.Context, auth.Credential) ([]protocol.Model, error)
 	}); ok {
-		credential, err := p.auth.Resolve(ctx, p.ID())
-		if err == nil {
-			return value.RefreshModelsWithCredential(ctx, credential)
-		}
+		return value.RefreshModelsWithCredential(ctx, credential)
 	}
 	if value, ok := p.transport.(interface {
 		RefreshModels(context.Context) ([]protocol.Model, error)
 	}); ok {
 		return value.RefreshModels(ctx)
 	}
-	return p.ListModels(ctx)
+	if catalog, ok := p.transport.(CredentialCatalogTransport); ok {
+		return catalog.ListModelsWithCredential(ctx, credential)
+	}
+	return p.transport.ListModels(ctx)
 }
 
 func (p *Authenticated) ModelCatalogAuthoritative() bool {

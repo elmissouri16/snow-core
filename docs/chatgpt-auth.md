@@ -161,10 +161,11 @@ Authenticated account catalogs are authoritative: a model missing from the
 selected account is not merged back from the bundled snapshot, and an
 unavailable active model is replaced by a compatible account model.
 Authenticated sessions fall back only to a same-account cache; they never inject
-a bundled model after account discovery fails. The bundled snapshot is used only
-before a ChatGPT account is configured and intentionally carries no thinking
-levels or default effort. Until authenticated backend discovery succeeds, those
-models expose only Snow's `off` setting rather than guessed capabilities.
+a bundled model after account discovery fails. The adapter retains a bundled
+snapshot for isolated transport fallback and tests, but Snow's authenticated
+runtime does not publish ChatGPT models to the TUI, SDK, RPC, or subagent
+inventories before a usable OAuth credential resolves. Logout removes the
+account catalog from those inventories immediately.
 
 ## Codex inference and SSE
 

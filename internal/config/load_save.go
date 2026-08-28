@@ -282,7 +282,7 @@ func (c SubagentConfig) ValidateSubagents() error {
 // Default returns the default configuration.
 func Default() Config {
 	return Config{
-		DefaultProvider:           "opencode-go",
+		DefaultProvider:           "opencode-zen",
 		DefaultProjectTrust:       "ask",
 		Thinking:                  "off",
 		ReasoningSummary:          "auto",

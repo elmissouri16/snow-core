@@ -107,8 +107,10 @@ clipboard results after a step transition.
 Required device codes and errors stay visible on short cards, compatible
 endpoint paths are not echoed into the transcript, and a pending logout blocks
 another authentication action until its credential deletion finishes.
-`opencode-zen` works without login and
-omits the authorization header when no key resolves. An optional key can come
+Required-auth providers such as `opencode-go` and `chatgpt` do not appear in
+model inventories until their credential resolves; logout removes their models
+again. `opencode-zen` works without login and omits the authorization header
+when no key resolves. An optional key can come
 from `OPENCODE_API_KEY`, `--api-key`, or
 the masked login flow. Logout removes only Snow's stored key; an explicit flag
 or environment fallback remains active until cleared. Zen exposes only the

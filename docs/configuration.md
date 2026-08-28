@@ -105,8 +105,8 @@ A representative configuration:
 
 ```json
 {
-  "default_provider": "opencode-go",
-  "default_model": "kimi-k2.6",
+  "default_provider": "opencode-zen",
+  "default_model": "big-pickle",
   "default_project_trust": "ask",
   "thinking": "off",
   "project_selections": {
@@ -216,7 +216,7 @@ fills required zero-value defaults before validation.
 
 | JSON field | Values / default | Meaning |
 |---|---|---|
-| `default_provider` | `opencode-go` | Global fallback provider ID for projects without a remembered selection |
+| `default_provider` | `opencode-zen` | Global fallback provider ID for projects without a remembered selection; works anonymously |
 | `default_model` | provider default | Global fallback model ID; provider-specific config may also declare a default |
 | `default_project_trust` | `ask` | `ask`, `allow`, or `deny`; legacy `always`/`never` are aliases |
 | `thinking` | `off` | Global fallback effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` |
@@ -295,6 +295,11 @@ constructor until their catalog, login flow, or provider selection is used.
 Their authentication descriptors remain available without allocating an HTTP
 client. Static configuration errors for the active provider still fail startup;
 an invalid inactive endpoint is reported when that provider is first used.
+Providers whose authentication descriptor is required do not publish static,
+cached, or remote models to user-facing inventories until a usable credential
+resolves. Logging out removes their cached picker entries immediately. Optional
+or keyless providers continue to publish models; the fresh-install default,
+`opencode-zen`, is intentionally anonymous.
 
 `stream_idle_timeout_ms` bounds silence between bytes on a live streaming
 response without imposing a total turn deadline. Omit it or set `0` for the

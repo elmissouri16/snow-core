@@ -41,6 +41,25 @@ type rejectingTransport struct {
 	seen    string
 }
 
+type staticCatalogTransport struct {
+	id           string
+	listCalls    int
+	refreshCalls int
+}
+
+func (t *staticCatalogTransport) ID() string { return t.id }
+func (t *staticCatalogTransport) ListModels(context.Context) ([]protocol.Model, error) {
+	t.listCalls++
+	return []protocol.Model{{Provider: t.id, ID: "offline"}}, nil
+}
+func (t *staticCatalogTransport) RefreshModels(context.Context) ([]protocol.Model, error) {
+	t.refreshCalls++
+	return []protocol.Model{{Provider: t.id, ID: "refreshed"}}, nil
+}
+func (*staticCatalogTransport) Chat(context.Context, auth.Credential, protocol.ChatRequest) (protocol.EventStream, error) {
+	return registryStream{}, nil
+}
+
 func (*rejectingTransport) ID() string                                           { return "oauth-runtime" }
 func (*rejectingTransport) ListModels(context.Context) ([]protocol.Model, error) { return nil, nil }
 func (t *rejectingTransport) SetAuthRefresh(refresh func(context.Context, auth.Credential) (auth.Credential, error)) {
@@ -55,6 +74,53 @@ func (t *rejectingTransport) Chat(ctx context.Context, credential auth.Credentia
 	t.seen = fresh.Access
 	t.mu.Unlock()
 	return registryStream{}, nil
+}
+
+func TestAuthenticatedHidesRequiredCatalogWithoutCredential(t *testing.T) {
+	service := auth.NewService(auth.NewMemoryStore())
+	driver := auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: "required", Required: true})
+	if err := service.Register(driver); err != nil {
+		t.Fatal(err)
+	}
+	transport := &staticCatalogTransport{id: "required"}
+	runtime, err := NewAuthenticated(transport, service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := runtime.ListModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 0 || transport.listCalls != 0 {
+		t.Fatalf("models=%+v list calls=%d, want hidden catalog", models, transport.listCalls)
+	}
+	models, err = runtime.RefreshModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 0 || transport.refreshCalls != 0 {
+		t.Fatalf("refreshed models=%+v refresh calls=%d, want hidden catalog", models, transport.refreshCalls)
+	}
+}
+
+func TestAuthenticatedKeepsOptionalAnonymousCatalog(t *testing.T) {
+	service := auth.NewService(auth.NewMemoryStore())
+	driver := auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: "optional", Required: false})
+	if err := service.Register(driver); err != nil {
+		t.Fatal(err)
+	}
+	transport := &staticCatalogTransport{id: "optional"}
+	runtime, err := NewAuthenticated(transport, service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := runtime.ListModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != "offline" || transport.listCalls != 1 {
+		t.Fatalf("models=%+v list calls=%d, want anonymous catalog", models, transport.listCalls)
+	}
 }
 
 func TestAuthenticatedBindsRejectedRefreshToService(t *testing.T) {

@@ -252,15 +252,26 @@ func (m *Model) applyModel(selected protocol.Model) error {
 	oldProvider := m.app.ProviderID
 	oldModel := m.app.Agent.Model()
 	oldAppModel := m.app.Model
+	oldThinking := m.app.Agent.Thinking()
 	oldCfg := m.app.Cfg
+	oldPersistedCfg := m.app.PersistedCfg
+	rollback := func() error {
+		if err := m.app.SetProviderModelThinking(oldProvider, oldModel, oldThinking); err != nil {
+			return err
+		}
+		m.app.Model = oldAppModel
+		m.app.Cfg = oldCfg
+		m.app.PersistedCfg = oldPersistedCfg
+		return nil
+	}
 	if selected.Provider != m.app.ProviderID {
 		if err := m.app.SetProvider(selected.Provider); err != nil {
 			return err
 		}
 	}
 	if err := m.app.SetModel(selected); err != nil {
-		if oldProvider != m.app.ProviderID {
-			_ = m.app.SetProvider(oldProvider)
+		if rollbackErr := rollback(); rollbackErr != nil {
+			return fmt.Errorf("set model: %w (rollback failed: %v)", err, rollbackErr)
 		}
 		return err
 	}
@@ -270,12 +281,9 @@ func (m *Model) applyModel(selected protocol.Model) error {
 		Thinking: string(m.app.Agent.Thinking()),
 	})
 	if err != nil {
-		if oldProvider != m.app.ProviderID {
-			_ = m.app.SetProvider(oldProvider)
+		if rollbackErr := rollback(); rollbackErr != nil {
+			return fmt.Errorf("persist model: %w (rollback failed: %v)", err, rollbackErr)
 		}
-		_ = m.app.SetModel(oldModel)
-		m.app.Model = oldAppModel
-		m.app.Cfg = oldCfg
 		return fmt.Errorf("persist model: %w", err)
 	}
 	m.app.Model = selected

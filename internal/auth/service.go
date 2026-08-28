@@ -165,6 +165,15 @@ func (s *Service) Providers() []Descriptor {
 	return out
 }
 
+// Descriptor returns safe authentication metadata for one registered provider.
+func (s *Service) Descriptor(providerID string) (Descriptor, error) {
+	driver, err := s.driver(providerID)
+	if err != nil {
+		return Descriptor{}, err
+	}
+	return normalizeDescriptor(driver.Descriptor()), nil
+}
+
 // SetExplicit binds a credential to exactly one provider. Passing an invalid
 // credential clears the override.
 func (s *Service) SetExplicit(providerID string, credential Credential) {

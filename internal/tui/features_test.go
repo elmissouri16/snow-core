@@ -745,7 +745,7 @@ func TestModelSetModelPersists(t *testing.T) {
 	if !ok || selection.Provider != "fake" || selection.Model != "some-other-model" || selection.Thinking != "off" {
 		t.Fatalf("project selection = %+v found=%v", selection, ok)
 	}
-	if persisted.DefaultProvider != "opencode-go" || persisted.DefaultModel != "" || persisted.Thinking != "off" {
+	if persisted.DefaultProvider != "opencode-zen" || persisted.DefaultModel != "" || persisted.Thinking != "off" {
 		t.Fatalf("global defaults changed = %s/%s thinking:%s", persisted.DefaultProvider, persisted.DefaultModel, persisted.Thinking)
 	}
 }

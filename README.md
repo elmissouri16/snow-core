@@ -70,8 +70,10 @@ launched as the active project.
 
 ### Try it without credentials
 
-Smoke-test the harness with the deterministic `fake` provider, which needs no
-API key and no network access:
+A fresh configuration defaults to anonymous `opencode-zen`; its maintained
+promotional free models are the only built-in hosted models shown before login.
+Smoke-test the harness without any provider network access by using the
+deterministic `fake` provider:
 
 ```sh
 ./snow --provider fake --no-session -p "hello"
@@ -83,7 +85,7 @@ OpenCode Go — export a key or store it with Snow:
 
 ```sh
 export OPENCODE_API_KEY=oc-...
-snow -p "summarize this repository"
+snow --provider opencode-go -p "summarize this repository"
 
 # or persist the key in Snow's credential store
 snow login opencode-go
@@ -153,8 +155,11 @@ store, then a known environment fallback such as `OPENCODE_API_KEY` or
 persistence, refresh locking, and logout; the agent consumes a credential-free
 provider runtime, so new built-in providers stay out of agent and UI auth logic.
 Secrets are stored separately from configuration and are never printed by
-inventory commands. See [ChatGPT authentication](docs/chatgpt-auth.md) for
-OAuth, refresh, imports, and account-scoped catalogs.
+inventory commands. Required-auth provider catalogs, including OpenCode Go and
+ChatGPT, stay out of model inventories until a usable credential resolves and
+are removed again after logout. Anonymous OpenCode Zen remains visible. See
+[ChatGPT authentication](docs/chatgpt-auth.md) for OAuth, refresh, imports, and
+account-scoped catalogs.
 
 ### Start the TUI
 

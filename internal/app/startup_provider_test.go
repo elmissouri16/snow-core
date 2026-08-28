@@ -15,6 +15,7 @@ var benchmarkStartupProvider startupProvider
 
 func TestInitializeProviderDefersInactiveAdapters(t *testing.T) {
 	cfg := config.Default()
+	cfg.DefaultProvider = "opencode-go"
 	store := auth.NewMemoryStore()
 	service := auth.NewService(store)
 	startup, err := initializeProvider(Options{}, cfg, store, service)
@@ -58,6 +59,7 @@ func TestInitializeProviderDefersInactiveAdapters(t *testing.T) {
 
 func TestInactiveProviderConstructionErrorIsDeferredUntilUse(t *testing.T) {
 	cfg := config.Default()
+	cfg.DefaultProvider = "opencode-go"
 	zenConfig := cfg.Providers[opencodezen.ProviderID]
 	zenConfig.BaseURL = "://invalid"
 	cfg.Providers[opencodezen.ProviderID] = zenConfig

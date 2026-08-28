@@ -66,6 +66,10 @@ func (a *App) Logout(ctx context.Context, providerID string) error {
 	if a == nil || a.AuthService == nil {
 		return fmt.Errorf("app: auth service is unavailable")
 	}
+	descriptor, err := a.AuthService.Descriptor(providerID)
+	if err != nil {
+		return err
+	}
 	refreshCatalog := false
 	if runtime, ok := a.Providers[providerID]; ok {
 		if authoritative, ok := runtime.(interface{ ModelCatalogAuthoritative() bool }); ok {
@@ -75,10 +79,38 @@ func (a *App) Logout(ctx context.Context, providerID string) error {
 	if err := a.AuthService.Logout(ctx, providerID); err != nil {
 		return err
 	}
-	// Account-scoped providers replace their inventory with an offline fallback
-	// after logout; ordinary API-key providers keep their current catalog.
+	if descriptor.Required {
+		if _, resolveErr := a.AuthService.Resolve(ctx, providerID); resolveErr != nil {
+			a.clearProviderCatalog(providerID)
+			return nil
+		}
+		refreshCatalog = true
+	}
 	if refreshCatalog {
 		_ = a.RefreshProviderModels(ctx, providerID)
 	}
 	return nil
+}
+
+// clearProviderCatalog immediately removes stale models after the last usable
+// credential for a required-auth provider is removed. The next explicit login
+// or catalog load can repopulate it.
+func (a *App) clearProviderCatalog(providerID string) {
+	a.stateMu.Lock()
+	delete(a.modelCatalog, providerID)
+	if a.runtimeSelection != nil {
+		a.runtimeSelection.mu.Lock()
+		if a.runtimeSelection.catalogGeneration == nil {
+			a.runtimeSelection.catalogGeneration = make(map[string]uint64)
+		}
+		a.runtimeSelection.catalogGeneration[providerID]++
+		delete(a.runtimeSelection.catalogs, providerID)
+		delete(a.runtimeSelection.catalogErrors, providerID)
+		a.runtimeSelection.mu.Unlock()
+	}
+	a.rebuildAllModelsLocked()
+	if a.ProviderID == providerID {
+		a.Models = nil
+	}
+	a.stateMu.Unlock()
 }

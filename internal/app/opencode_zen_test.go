@@ -43,7 +43,7 @@ func TestOpenCodeZenAnonymousEndToEndAndFreeCatalog(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SNOW_HOME", home)
 	configPath := filepath.Join(home, "config.json")
-	body := fmt.Sprintf(`{"default_provider":"opencode-zen","providers":{"opencode-zen":{"base_url":%q},"opencode-go":{"base_url":%q}}}`, server.URL+"/zen", server.URL+"/go")
+	body := fmt.Sprintf(`{"providers":{"opencode-zen":{"base_url":%q},"opencode-go":{"base_url":%q}}}`, server.URL+"/zen", server.URL+"/go")
 	if err := os.WriteFile(configPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +57,13 @@ func TestOpenCodeZenAnonymousEndToEndAndFreeCatalog(t *testing.T) {
 	}
 	if len(a.Models) != 2 || a.Models[0].ID != "big-pickle" || a.Models[1].ID != "muse-spark-1.2-contributor-free" {
 		t.Fatalf("models=%+v", a.Models)
+	}
+	allModels, err := a.LoadProviderCatalogs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allModels) != 2 || allModels[0].Provider != "opencode-zen" || allModels[1].Provider != "opencode-zen" {
+		t.Fatalf("unauthenticated provider catalogs=%+v, want anonymous Zen only", allModels)
 	}
 	var text strings.Builder
 	a.Agent.Subscribe(func(event protocol.AgentEvent) {

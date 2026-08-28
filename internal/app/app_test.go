@@ -826,19 +826,55 @@ func TestAppCreatesRouterForInitiallyEmptyMutableMCPCatalog(t *testing.T) {
 	}
 }
 
-func TestAppChatGPTCatalogProvider(t *testing.T) {
+func TestAppHidesChatGPTCatalogBeforeLogin(t *testing.T) {
+	home := t.TempDir()
 	a, err := New(context.Background(), Options{
 		Provider:   "chatgpt",
 		NoSession:  true,
 		Permission: "allow",
 		CWD:        t.TempDir(),
+		ConfigPath: filepath.Join(home, "config.json"),
+		AuthPath:   filepath.Join(home, "auth.json"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	if len(a.Models) == 0 || a.Models[0].Provider != "chatgpt" {
-		t.Fatalf("chatgpt catalog = %+v", a.Models)
+	if len(a.Models) != 0 || len(a.AllModels) != 0 {
+		t.Fatalf("unauthenticated chatgpt catalogs: active=%+v all=%+v", a.Models, a.AllModels)
+	}
+}
+
+func TestLogoutClearsRequiredProviderCatalog(t *testing.T) {
+	home := t.TempDir()
+	a, err := New(context.Background(), Options{
+		Provider:   "chatgpt",
+		NoSession:  true,
+		Permission: "allow",
+		CWD:        t.TempDir(),
+		ConfigPath: filepath.Join(home, "config.json"),
+		AuthPath:   filepath.Join(home, "auth.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	stale := []protocol.Model{{Provider: "chatgpt", ID: "stale"}}
+	a.stateMu.Lock()
+	a.modelCatalog["chatgpt"] = cloneModels(stale)
+	a.Models = cloneModels(stale)
+	a.AllModels = cloneModels(stale)
+	a.runtimeSelection.mu.Lock()
+	a.runtimeSelection.catalogs["chatgpt"] = cloneModels(stale)
+	a.runtimeSelection.mu.Unlock()
+	a.stateMu.Unlock()
+
+	if err := a.Logout(context.Background(), "chatgpt"); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Models) != 0 || len(a.AllModels) != 0 || len(a.runtimeSelection.cachedModels()) != 0 {
+		t.Fatalf("catalog remained after logout: active=%+v all=%+v cached=%+v", a.Models, a.AllModels, a.runtimeSelection.cachedModels())
 	}
 }
 
