@@ -40,7 +40,8 @@ func TestConfigDiagnosticsFingerprintIgnoresUnrelatedThemeEntries(t *testing.T) 
 
 func TestConfigDiagnosticsAcceptsEveryBuiltInTheme(t *testing.T) {
 	t.Setenv("SNOW_HOME", t.TempDir())
-	for _, theme := range config.BuiltInTUIThemes() {
+	themes := append(config.BuiltInTUIThemes(), "dark", "light", "high-contrast", "nord", "dracula", "gruvbox")
+	for _, theme := range themes {
 		t.Run(theme, func(t *testing.T) {
 			a := &App{Cfg: config.Default(), ProjectInputRoot: t.TempDir()}
 			a.Cfg.TUI.Theme = theme

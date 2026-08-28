@@ -60,7 +60,7 @@ func (m *Model) settingsCardRows() []settingsCardRow {
 	concurrency := fmt.Sprintf("Concurrent subagents  %d (restart to apply)", m.app.Cfg.Subagents.MaxConcurrentThreads)
 	return []settingsCardRow{
 		{text: "Model  " + model.Provider + "/" + model.ID, available: true},
-		{text: "Theme  " + m.themeName, available: true},
+		{text: "Theme  " + themeDisplayName(m.themeName), available: true},
 		{text: "Thinking effort  " + string(m.app.Agent.Thinking()), available: true},
 		{text: reasoning, available: chatGPT},
 		{text: verbosity, available: chatGPT},

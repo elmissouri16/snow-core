@@ -55,7 +55,8 @@ func TestAuxiliaryThemesPrecedenceReservedAndBounded(t *testing.T) {
 }
 
 func TestBuiltInThemesAreReservedCustomBases(t *testing.T) {
-	for _, name := range BuiltInTUIThemes() {
+	names := append(BuiltInTUIThemes(), legacyTUIThemes[:]...)
+	for _, name := range names {
 		if err := validateTheme(ThemeFile{Version: 1, Name: name}); err == nil {
 			t.Errorf("built-in theme name %q was not reserved", name)
 		}

@@ -94,6 +94,14 @@ const defaultTUITheme = "default"
 
 var builtInTUIThemes = [...]string{
 	"default",
+	"frost",
+	"ember",
+	"aurora",
+}
+
+// legacyTUIThemes remain reserved and valid configuration/custom-theme bases,
+// but are intentionally omitted from the Settings picker.
+var legacyTUIThemes = [...]string{
 	"dark",
 	"light",
 	"high-contrast",

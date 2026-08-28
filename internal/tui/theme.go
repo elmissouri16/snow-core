@@ -9,8 +9,8 @@ import (
 )
 
 // tuiTheme is intentionally small: semantic roles keep meaning readable even
-// when a terminal has limited color support. Adaptive palettes cover both
-// background modes; named light/dark palettes target their documented mode.
+// when a terminal has limited color support. Every selectable palette is
+// adaptive so it remains coherent on both light and dark terminal backgrounds.
 type tuiTheme struct {
 	name   string
 	accent lipgloss.TerminalColor
@@ -22,53 +22,91 @@ type tuiTheme struct {
 	sep    lipgloss.TerminalColor
 }
 
+func adaptive(light, dark string) lipgloss.TerminalColor {
+	return lipgloss.AdaptiveColor{Light: light, Dark: dark}
+}
+
+func snowTheme() tuiTheme {
+	return tuiTheme{
+		name:   "default",
+		accent: adaptive("#0969DA", "#58A6FF"),
+		muted:  adaptive("#57606A", "#8B949E"),
+		soft:   adaptive("#24292F", "#F0F6FC"),
+		warn:   adaptive("#9A6700", "#E3B341"),
+		err:    adaptive("#CF222E", "#FF7B72"),
+		ok:     adaptive("#1A7F37", "#7EE787"),
+		sep:    adaptive("#8C959F", "#6E7681"),
+	}
+}
+
+var activeTUITheme = snowTheme()
+
 func makeTUITheme(name string) (tuiTheme, error) {
 	if name == "" {
 		name = "default"
 	}
-	t := tuiTheme{name: name}
+	canonical := name
 	switch name {
-	case "default":
-		t.accent = lipgloss.AdaptiveColor{Light: "#0969da", Dark: "#58a6ff"}
-		t.muted = lipgloss.AdaptiveColor{Light: "#57606a", Dark: "#8b949e"}
-		t.soft = lipgloss.AdaptiveColor{Light: "#24292f", Dark: "#f0f6fc"}
-		t.warn = lipgloss.AdaptiveColor{Light: "#9a6700", Dark: "#e3b341"}
-		t.err = lipgloss.AdaptiveColor{Light: "#cf222e", Dark: "#ff7b72"}
-		t.ok = lipgloss.AdaptiveColor{Light: "#1a7f37", Dark: "#7ee787"}
-		t.sep = lipgloss.AdaptiveColor{Light: "#8c959f", Dark: "#6e7681"}
-	case "dark":
-		// High-luminance semantic colors stay legible on common near-black
-		// terminal backgrounds instead of depending on the terminal's ANSI map.
-		t.accent, t.muted, t.soft = lipgloss.Color("#5EA1FF"), lipgloss.Color("#A8B3C2"), lipgloss.Color("#F2F5F8")
-		t.warn, t.err, t.ok = lipgloss.Color("#FFD166"), lipgloss.Color("#FF7B72"), lipgloss.Color("#56D364")
-		t.sep = lipgloss.Color("#6E7681")
-	case "light":
-		t.accent, t.muted, t.soft = lipgloss.Color("#005CC5"), lipgloss.Color("#57606A"), lipgloss.Color("#1F2328")
-		t.warn, t.err, t.ok = lipgloss.Color("#7A4D00"), lipgloss.Color("#B42318"), lipgloss.Color("#116329")
-		t.sep = lipgloss.Color("#8C959F")
-	case "high-contrast":
-		t.accent = lipgloss.AdaptiveColor{Light: "#004FB3", Dark: "#00D7FF"}
-		t.muted = lipgloss.AdaptiveColor{Light: "#30363D", Dark: "#FFFFFF"}
-		t.soft = lipgloss.AdaptiveColor{Light: "#000000", Dark: "#FFFFFF"}
-		t.warn = lipgloss.AdaptiveColor{Light: "#6F4E00", Dark: "#FFFF00"}
-		t.err = lipgloss.AdaptiveColor{Light: "#A4001D", Dark: "#FF6B6B"}
-		t.ok = lipgloss.AdaptiveColor{Light: "#006B2D", Dark: "#00FF66"}
-		t.sep = lipgloss.AdaptiveColor{Light: "#000000", Dark: "#FFFFFF"}
+	case "dark", "light":
+		canonical = "default"
 	case "nord":
-		t.accent, t.muted, t.soft = lipgloss.Color("#88C0D0"), lipgloss.Color("#AAB2C0"), lipgloss.Color("#ECEFF4")
-		t.warn, t.err, t.ok = lipgloss.Color("#EBCB8B"), lipgloss.Color("#F08088"), lipgloss.Color("#A3BE8C")
-		t.sep = lipgloss.Color("#7F899C")
-	case "dracula":
-		t.accent, t.muted, t.soft = lipgloss.Color("#BD93F9"), lipgloss.Color("#B9BAC5"), lipgloss.Color("#F8F8F2")
-		t.warn, t.err, t.ok = lipgloss.Color("#F1FA8C"), lipgloss.Color("#FF6E6E"), lipgloss.Color("#50FA7B")
-		t.sep = lipgloss.Color("#858BAA")
+		canonical = "frost"
 	case "gruvbox":
-		t.accent, t.muted, t.soft = lipgloss.Color("#83A598"), lipgloss.Color("#BDAE93"), lipgloss.Color("#EBDBB2")
-		t.warn, t.err, t.ok = lipgloss.Color("#FABD2F"), lipgloss.Color("#FB6655"), lipgloss.Color("#B8BB26")
-		t.sep = lipgloss.Color("#928374")
+		canonical = "ember"
+	case "dracula":
+		canonical = "aurora"
+	}
+
+	var t tuiTheme
+	switch canonical {
+	case "default":
+		t = snowTheme()
+	case "frost":
+		t = tuiTheme{
+			accent: adaptive("#006A7A", "#67E8F9"),
+			muted:  adaptive("#52606D", "#94A3B8"),
+			soft:   adaptive("#172B4D", "#E6F6FF"),
+			warn:   adaptive("#8A4B00", "#FBBF24"),
+			err:    adaptive("#B42318", "#FDA4AF"),
+			ok:     adaptive("#166534", "#86EFAC"),
+			sep:    adaptive("#8091A5", "#64748B"),
+		}
+	case "ember":
+		t = tuiTheme{
+			accent: adaptive("#9A3412", "#FDBA74"),
+			muted:  adaptive("#62564B", "#B8A99A"),
+			soft:   adaptive("#29211A", "#FFF7ED"),
+			warn:   adaptive("#7C4A03", "#FDE047"),
+			err:    adaptive("#B42318", "#FB7185"),
+			ok:     adaptive("#166534", "#86EFAC"),
+			sep:    adaptive("#8A7968", "#7C6F64"),
+		}
+	case "aurora":
+		t = tuiTheme{
+			accent: adaptive("#6D28D9", "#C4B5FD"),
+			muted:  adaptive("#5B5668", "#A7A0B8"),
+			soft:   adaptive("#211B2E", "#FAF5FF"),
+			warn:   adaptive("#854D0E", "#FDE047"),
+			err:    adaptive("#BE123C", "#FDA4AF"),
+			ok:     adaptive("#166534", "#86EFAC"),
+			sep:    adaptive("#877F96", "#756E86"),
+		}
+	case "high-contrast":
+		// Retained as a hidden compatibility theme for saved selections and
+		// custom theme inheritance.
+		t = tuiTheme{
+			accent: adaptive("#004FB3", "#00D7FF"),
+			muted:  adaptive("#30363D", "#FFFFFF"),
+			soft:   adaptive("#000000", "#FFFFFF"),
+			warn:   adaptive("#6F4E00", "#FFFF00"),
+			err:    adaptive("#A4001D", "#FF6B6B"),
+			ok:     adaptive("#006B2D", "#00FF66"),
+			sep:    adaptive("#000000", "#FFFFFF"),
+		}
 	default:
 		return tuiTheme{}, fmt.Errorf("unsupported TUI theme %q", name)
 	}
+	t.name = name
 	return t, nil
 }
 
@@ -120,6 +158,7 @@ func applyCustomTUITheme(custom config.ThemeFile) error {
 }
 
 func applyResolvedTheme(t tuiTheme) {
+	activeTUITheme = t
 	colorAccent, colorMuted, colorSoft = t.accent, t.muted, t.soft
 	colorWarn, colorErr, colorOk = t.warn, t.err, t.ok
 	styleUser = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
@@ -145,4 +184,19 @@ func applyResolvedTheme(t tuiTheme) {
 
 func themeChoices() []string {
 	return config.BuiltInTUIThemes()
+}
+
+func themeDisplayName(name string) string {
+	switch name {
+	case "default":
+		return "Snow"
+	case "frost":
+		return "Frost"
+	case "ember":
+		return "Ember"
+	case "aurora":
+		return "Aurora"
+	default:
+		return name
+	}
 }

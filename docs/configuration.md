@@ -397,11 +397,14 @@ or query parameters. ChatGPT/Codex retains its dedicated backend and OAuth flow.
 }
 ```
 
-Built-in themes are `default`, `dark`, `light`, `high-contrast`, `nord`,
-`dracula`, and `gruvbox`. `default` and `high-contrast` adapt to the terminal's
-reported light/dark background; `dark`, `nord`, `dracula`, and `gruvbox` target
-dark terminal backgrounds, while `light` targets a light background. Any other
-valid name refers to a custom theme file. Snow always uses Bubble Tea's
+The four selectable built-in themes are Snow (`default`), Frost (`frost`),
+Ember (`ember`), and Aurora (`aurora`). Every built-in adapts its complete
+semantic palette to the terminal's reported light/dark background, including
+Markdown rendered inside the transcript. Snow keeps terminal backgrounds
+transparent. Legacy names (`dark`, `light`, `high-contrast`, `nord`, `dracula`,
+and `gruvbox`) remain accepted for saved configurations and custom-theme
+inheritance but are hidden from the Settings cycle. Any other valid name refers
+to a custom theme file. Snow always uses Bubble Tea's
 alternate-screen, app-owned transcript viewport so scrolling cannot expose
 stale rendered headers or composer chrome. The default `mouse: true` keeps
 wheel/trackpad gestures inside Snow's transcript viewport and provides
@@ -707,10 +710,12 @@ colors:
 ```
 
 `extends` is optional and defaults to `default`; when supplied, it must name one
-of the built-ins listed above. Custom names cannot replace built-in names,
-exceed 64 runes, contain control characters, or contain `/` or `\\`. Colors are
-optional semantic overrides using `#RRGGBB` or ANSI `0..255`. Project themes replace
-same-named global themes.
+of the four selectable built-ins or a supported legacy built-in listed above.
+Custom names cannot replace current or legacy built-in names, exceed 64 runes,
+contain control characters, or contain `/` or `\\`. Colors are optional
+semantic overrides using `#RRGGBB` or ANSI `0..255`. Each light/dark value styles
+both TUI chrome and Markdown while backgrounds remain terminal-owned. Project
+themes replace same-named global themes.
 
 ## Diagnostics and failure behavior
 

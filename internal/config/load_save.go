@@ -154,14 +154,22 @@ func (c CompactionConfig) Validate() error {
 }
 
 // BuiltInTUIThemes returns the selectable built-in themes in display order.
+// Hidden legacy themes remain accepted by IsBuiltInTUITheme for compatibility.
 func BuiltInTUIThemes() []string {
 	return append([]string(nil), builtInTUIThemes[:]...)
 }
 
-// IsBuiltInTUITheme reports whether name is reserved for a built-in palette.
+// IsBuiltInTUITheme reports whether name is reserved for a current or legacy
+// built-in palette. Legacy names remain valid for persisted selections and as
+// custom-theme bases, but are not returned by BuiltInTUIThemes.
 func IsBuiltInTUITheme(name string) bool {
 	for _, builtIn := range builtInTUIThemes {
 		if name == builtIn {
+			return true
+		}
+	}
+	for _, legacy := range legacyTUIThemes {
+		if name == legacy {
 			return true
 		}
 	}

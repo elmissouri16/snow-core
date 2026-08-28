@@ -364,7 +364,7 @@ func (m *Model) cycleSetting(direction int) {
 	switch m.settingsIndex {
 	case settingsTheme:
 		values := m.themeChoices()
-		next := cycleValue(values, m.themeName, direction)
+		next := cycleThemeValue(values, m.themeName, direction)
 		err = m.setTheme(next, false)
 		if err == nil {
 			m.settingsStatus = "theme saved"
@@ -460,6 +460,21 @@ func cycleValue[T comparable](values []T, current T, direction int) T {
 	return values[index]
 }
 
+func cycleThemeValue(values []string, current string, direction int) string {
+	for _, value := range values {
+		if value == current {
+			return cycleValue(values, current, direction)
+		}
+	}
+	if len(values) == 0 {
+		return current
+	}
+	if direction < 0 {
+		return values[len(values)-1]
+	}
+	return values[0]
+}
+
 func (m *Model) chatGPTSettingsEnabled() bool {
 	return m.app != nil && m.app.ProviderID == "chatgpt"
 }
@@ -504,6 +519,30 @@ func (m *Model) refreshThemeStyles() {
 	normalizeTextareaStyles(&m.userInputEditor)
 	m.spinner.Style = lipgloss.NewStyle().Foreground(colorAccent)
 	m.thinkingSpinner.Style = lipgloss.NewStyle().Foreground(colorAccent)
+	m.md.applyTheme(activeTUITheme)
+	m.thinkingMD.applyTheme(activeTUITheme)
+	m.subagentFleetMD.applyTheme(activeTUITheme)
+}
+
+func (m *Model) rerenderThemedTranscript() {
+	if m.app == nil || m.app.Agent == nil || m.inlineTranscript {
+		m.transcriptBaseDirty = true
+		m.transcriptDirty = true
+		m.refreshTranscriptForced()
+		return
+	}
+	wasAtBottom := m.transcript.AtBottom()
+	offset := m.transcript.YOffset
+	m.clearTranscriptSelection()
+	m.hydrateSession()
+	m.transcriptBaseDirty = true
+	m.transcriptDirty = true
+	m.refreshTranscriptForced()
+	if wasAtBottom {
+		m.transcript.GotoBottom()
+	} else {
+		m.transcript.SetYOffset(offset)
+	}
 }
 
 func (m *Model) applyThemeSelection(name string, announce, persist bool) error {
@@ -543,9 +582,13 @@ func (m *Model) applyThemeSelection(name string, announce, persist bool) error {
 		m.app.PersistedCfg = candidate
 		m.app.Cfg.TUI.Theme = name
 	}
+	changed := old != name
 	m.themeName = name
+	if changed && persist {
+		m.rerenderThemedTranscript()
+	}
 	if announce {
-		m.pushLine(styleFooter.Render("theme: " + name))
+		m.pushLine(styleFooter.Render("theme: " + themeDisplayName(name)))
 	}
 	return nil
 }
