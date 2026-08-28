@@ -289,6 +289,7 @@ type Model struct {
 
 	transcript        viewport.Model
 	editor            textarea.Model
+	composerSelectAll bool
 	pastedTexts       []pastedTextAttachment
 	nextPastedTextID  uint64
 	inputHistory      []string

@@ -259,7 +259,8 @@ described in [Configuration](configuration.md).
 | `Enter` | Submit prompt/accept picker | Queue steering for the next safe boundary |
 | `Alt+Enter` | Insert newline where reported as Meta/Alt | Queue a follow-up after steering and ordinary work settle |
 | `Ctrl+J` | Insert a reliable newline | Insert a reliable newline |
-| `Ctrl+V` | Paste through the active textarea | Paste through the active textarea |
+| `Ctrl+A` | Select only the ordinary composer's current draft; typing, paste, or deletion replaces it, and Ctrl+C copies it | Same, except Ctrl+C retains its active-turn abort behavior |
+| `Ctrl+V` | Paste through the active textarea; replaces a selected composer draft | Same |
 | `Up` / `Down` | Browse prompts from the active session branch; Down past the newest restores the current draft | Same; recalled text can be submitted as steering or follow-up input |
 | `Shift+Tab` or click `mode:<mode>` (`tui.mouse: true`) | Toggle Default/Plan mode | Queue mode change until `turn_done` |
 | `Ctrl+T` | Cycle through the active model's supported thinking efforts | Cycle the effort; the header/footer briefly highlights the new value without adding a transcript entry |
@@ -267,11 +268,12 @@ described in [Configuration](configuration.md).
 | `Alt+M` or click `provider/model ▾` (`tui.mouse: true`) | Open the centered model picker | Report that model changes must wait for the current turn |
 | `Alt+A` | Open the subagent fleet inspector | Open the inspector without interrupting the active turn |
 | `Alt+P` | Open the managed-process fleet inspector | Open the inspector without interrupting the active turn |
-| `Ctrl+C` | Quit | Abort, clear queued work, restore queued composer text, and defer active goal continuation |
+| `Ctrl+C` | Copy a Ctrl+A-selected composer draft; otherwise quit | Abort, clear queued work, restore queued composer text, and defer active goal continuation |
 | `Esc` | Return one nested login/model step, otherwise close the modal/picker | Abort active work and defer active goal continuation, or reject the active input modal |
 | `Ctrl+D` | Quit when the composer is empty | — |
 | Wheel/trackpad (`tui.mouse: true`) | Scroll transcript viewport | Same |
 | Primary-button drag (`tui.mouse: true`) | Select and copy transcript text | Same |
+| Click `Working` (`tui.mouse: true`) | — | Jump directly to the live transcript bottom |
 | Right-click (`tui.mouse: true`) | Open Snow context menu for the current selection; Copy selection preserves viewport mouse mode | Same |
 | `F6` | Toggle app mouse handling/native terminal selection and context menu | Same |
 | `r` in `/sessions` or `/resume` picker | Rename selected session | Same |

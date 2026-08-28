@@ -71,6 +71,7 @@ func (m *Model) helpLines() []string {
 		"\n\nBehavior\n" +
 		"  While working, submit queues steer; follow-up uses its configured binding\n" +
 		"  Header: app mouse clicks open models/thinking or toggle mode\n" +
+		"  Working: app mouse click jumps to live output\n" +
 		"  " + mouseHelp
 	return strings.Split(content, "\n")
 }

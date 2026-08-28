@@ -35,6 +35,9 @@ func (m *Model) dispatchMouse(msg tea.MouseMsg) tea.Cmd {
 	if handled, cmd := m.handleHeaderMouse(msg); handled {
 		return cmd
 	}
+	if handled, cmd := m.handleRunStatusMouse(msg); handled {
+		return cmd
+	}
 	// Application-owned drag selection and viewport wheel scrolling share the
 	// same cell-motion mouse stream.
 	return m.applyMouse(msg)

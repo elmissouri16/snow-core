@@ -16,6 +16,49 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+// handleComposerSelectionKey implements select-all for the ordinary composer.
+// Bubbles' textarea does not expose a selection model, so Snow tracks the
+// whole-draft selection explicitly and applies normal replacement semantics to
+// the next text edit. Modal textareas are handled before this path.
+func (m *Model) handleComposerSelectionKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
+	if msg.Type == tea.KeyCtrlA {
+		m.composerSelectAll = m.editor.Value() != ""
+		return true, nil
+	}
+	if !m.composerSelectAll {
+		return false, nil
+	}
+	m.composerSelectAll = false
+	deleteSelection := key.Matches(msg, m.editor.KeyMap.DeleteCharacterBackward) ||
+		key.Matches(msg, m.editor.KeyMap.DeleteCharacterForward) ||
+		key.Matches(msg, m.editor.KeyMap.DeleteAfterCursor) ||
+		key.Matches(msg, m.editor.KeyMap.DeleteBeforeCursor) ||
+		key.Matches(msg, m.editor.KeyMap.DeleteWordBackward) ||
+		key.Matches(msg, m.editor.KeyMap.DeleteWordForward)
+	replaceSelection := msg.Type == tea.KeyRunes || keyMatches(msg, m.keys.Paste) ||
+		(keyMatches(msg, m.keys.Newline) && !(m.busy && keyMatches(msg, m.keys.FollowUp)))
+	if !deleteSelection && !replaceSelection {
+		return false, nil
+	}
+
+	m.editor.Reset()
+	m.promptImages = nil
+	m.pastedTexts = nil
+	m.resetInputHistoryNavigation()
+	if deleteSelection {
+		return true, m.refreshInputCompletions()
+	}
+	return false, nil
+}
+
+func (m *Model) composerCoveredByModal() bool {
+	return m.loginModalVisible() || m.pickModel || m.pickThinking ||
+		m.pickSettings || m.pickHelp || m.pickFork || m.pickSession || m.pickTree ||
+		m.pickInfo || m.pickPermissionMode || m.permPending || m.userInputPending ||
+		m.confirmGoalReplace || m.planPrompt || m.processFleetOpen || m.subagentFleetOpen ||
+		m.sessionOpLoading
+}
+
 func (m *Model) updateComposerEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Forward to the editor, then refresh the palette from the new text. Keep
 	// the returned command: textarea uses it to read the clipboard for paste.

@@ -598,13 +598,24 @@ func (m *Model) renderEditor() string {
 	if m.loginModalVisible() {
 		input = stylePrompt.Render("› ")
 	} else {
-		editorView := m.editor.View()
-		for i := range m.promptImages {
-			token := imageAttachmentToken(i)
-			editorView = strings.ReplaceAll(editorView, token, stylePrompt.Render(token))
+		editor := m.editor
+		selectAll := m.composerSelectAll && editor.Value() != ""
+		if selectAll {
+			// Reverse video mirrors native terminal selection without imposing a
+			// permanent background color on Snow's transparent composer.
+			editor.FocusedStyle.Text = editor.FocusedStyle.Text.Reverse(true)
+			editor.BlurredStyle.Text = editor.BlurredStyle.Text.Reverse(true)
+			editor.Cursor.Blur()
 		}
-		for _, attachment := range m.pastedTexts {
-			editorView = strings.ReplaceAll(editorView, attachment.token, stylePrompt.Render(attachment.token))
+		editorView := editor.View()
+		if !selectAll {
+			for i := range m.promptImages {
+				token := imageAttachmentToken(i)
+				editorView = strings.ReplaceAll(editorView, token, stylePrompt.Render(token))
+			}
+			for _, attachment := range m.pastedTexts {
+				editorView = strings.ReplaceAll(editorView, attachment.token, stylePrompt.Render(attachment.token))
+			}
 		}
 		input = stylePrompt.Render("› ") + editorView
 	}

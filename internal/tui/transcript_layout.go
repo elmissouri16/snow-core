@@ -261,6 +261,40 @@ func (m *Model) renderRunStatus() string {
 		styleHeaderDim.Render(" ("+detail+")")
 }
 
+func (m *Model) runStatusMouseBounds() (y, start, end int, ok bool) {
+	if !m.showRunStatus() {
+		return 0, 0, 0, false
+	}
+	y = 2 + m.transcript.Height // header + separator + transcript
+	if overlay := m.renderOverlays(); overlay != "" {
+		y += lipgloss.Height(overlay)
+	}
+	start = xansi.StringWidth(m.spinner.View() + " ")
+	end = start + xansi.StringWidth("Working")
+	return y, start, end, true
+}
+
+// handleRunStatusMouse turns the persistent Working label into a quick return
+// to live output. This is available only in application mouse mode; native
+// terminal mouse mode remains owned by the terminal emulator.
+func (m *Model) handleRunStatusMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
+	if m.app == nil || !m.app.Cfg.TUI.Mouse {
+		return false, nil
+	}
+	event := tea.MouseEvent(msg)
+	if event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft {
+		return false, nil
+	}
+	y, start, end, ok := m.runStatusMouseBounds()
+	if !ok || event.Y != y || event.X < start || event.X >= end {
+		return false, nil
+	}
+	m.clearTranscriptSelection()
+	m.transcript.GotoBottom()
+	m.catchUpTranscriptAtBottom()
+	return true, nil
+}
+
 func (m *Model) managedFrameHeight() int {
 	// The normal-screen renderer still owns one terminal-height live frame. Its
 	// transcript viewport absorbs unused rows so the composer/footer remain
@@ -460,8 +494,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// submit/accept binding can never shadow terminal recovery.
 	if msg.Type == tea.KeyCtrlC {
 		if m.busy {
+			m.composerSelectAll = false
 			m.requestAbort()
 			return m, nil
+		}
+		if m.composerSelectAll && m.editor.Value() != "" && !m.composerCoveredByModal() {
+			return m, m.copyTranscriptSelectionCmd(m.editor.Value())
 		}
 		return m, m.quitCmd()
 	}
@@ -731,6 +769,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if keyMatches(msg, m.keys.Mode) {
 		return m, m.toggleCollaborationMode()
+	}
+
+	if handled, cmd := m.handleComposerSelectionKey(msg); handled {
+		return m, cmd
 	}
 
 	if !m.busy && len(m.pastedTexts) > 0 &&
