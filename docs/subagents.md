@@ -67,7 +67,20 @@ each model's supported reasoning levels and the exact available provider IDs.
 If an inherited parent effort is unsupported by the selected child model, Snow
 automatically uses that model's supported default (falling back to `off`); an
 explicitly requested per-spawn or role effort remains strict and returns a
-supported-level diagnostic.
+supported-level diagnostic. Before setting an explicit `reasoning_effort`,
+call `list_subagent_models`, then use a level that the `spawn_agent` schema
+accepts and that exact provider/model pair advertises. When no specific effort
+is required, omit the field so Snow can apply a supported fallback instead of
+rejecting a guessed level.
+
+Roles are configured authority and tool-capability profiles, not task labels
+or output styles. Put task-specific behavior and output requirements in `task`
+and select a compatible configured role. For example, a terse read-only review
+should use `role: "explorer"` and encode its findings-only output contract in
+`task`; it should not pass an unconfigured label such as `reviewer` as the role.
+With the built-in profiles, use `explorer` for read-only review or investigation,
+`general` for shell-assisted non-mutating investigation, and `implementer` for
+implementation subject to the mutation policy below.
 
 Snow no longer fetches every unrelated provider catalog during root startup.
 The active provider and providers explicitly referenced by configured defaults

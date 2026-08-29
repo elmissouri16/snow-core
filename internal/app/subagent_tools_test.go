@@ -114,7 +114,7 @@ func TestCloneChildRegistryRoleCapabilities(t *testing.T) {
 }
 
 func TestSubagentPromptExplainsRoleAndPermissionPolicy(t *testing.T) {
-	for _, want := range []string{"list_subagent_models", "never guess model IDs", "name for the child's identity", "task for its assignment", "role for its capability profile", "general role", "explorer role", "implementer role", "permission-gated bash", "ask/allow/deny", "not sandboxed", "do not finish while relevant children are queued or running", "wait_agent with until=all", "one concise line per child"} {
+	for _, want := range []string{"list_subagent_models", "never guess model IDs or effort support", "before setting an explicit reasoning_effort", "otherwise omit reasoning_effort", "name for the child's identity", "task for its assignment", "role for its capability profile", "configured capability profile, not a task label", "read-only review or investigation tasks to explorer", "do not probe unknown roles by spawning", "general role", "explorer role", "implementer role", "permission-gated bash", "ask/allow/deny", "not sandboxed", "do not finish while relevant children are queued or running", "wait_agent with until=all", "one concise line per child"} {
 		if !strings.Contains(subagentPromptGuidance, want) {
 			t.Fatalf("subagent prompt missing %q", want)
 		}
