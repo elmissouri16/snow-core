@@ -486,6 +486,27 @@ func readCompactionSummary(ctx context.Context, stream protocol.EventStream) (st
 	}
 }
 
+func (a *Agent) persistStepMarker(stepID string) error {
+	if stepID == "" {
+		return errors.New("agent: step marker has no identity")
+	}
+	a.mu.RLock()
+	store := a.opts.Session
+	a.mu.RUnlock()
+	if store == nil {
+		return errors.New("agent: step marker has no active session")
+	}
+	// Use the same persistence mutex as messages, turn markers, and mailbox
+	// delivery so the step boundary remains ordered in the append-only branch.
+	a.mailboxPersistMu.Lock()
+	defer a.mailboxPersistMu.Unlock()
+	marker := session.Entry{Type: session.EntryMeta, ID: stepID, Key: session.MetaAgentStep, Value: "provider"}
+	if err := store.Append(marker); err != nil {
+		return fmt.Errorf("agent: persist step marker: %w", err)
+	}
+	return nil
+}
+
 func (a *Agent) persistTurnMarker() error {
 	a.mu.RLock()
 	store := a.opts.Session

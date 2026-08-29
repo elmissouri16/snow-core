@@ -177,24 +177,57 @@ func (s *SQLiteStore) Close() error {
 	return errors.Join(errs...)
 }
 
-const agentTurnCountSQL = `WITH RECURSIVE branch(id, parent_id, entry_type, meta_key, meta_value) AS (
-	SELECT id, parent_id, entry_type, meta_key, meta_value FROM entries WHERE id=?
+const agentRunStatsSQL = `WITH RECURSIVE branch(seq, id, parent_id, entry_type, meta_key, meta_value) AS (
+	SELECT seq, id, parent_id, entry_type, meta_key, meta_value FROM entries WHERE id=?
 	UNION ALL
-	SELECT e.id, e.parent_id, e.entry_type, e.meta_key, e.meta_value FROM entries e JOIN branch b ON e.id=b.parent_id
-) SELECT count(*) FROM branch WHERE entry_type=? AND meta_key=?
-	AND meta_value IN ('user', 'goal', 'subagent')`
+	SELECT e.seq, e.id, e.parent_id, e.entry_type, e.meta_key, e.meta_value
+	FROM entries e JOIN branch b ON e.id=b.parent_id
+), cutoffs AS (
+	SELECT
+		min(CASE WHEN entry_type='meta' AND meta_key='agent_turn_v1'
+			AND meta_value IN ('user', 'goal', 'subagent') THEN seq END) AS first_turn_marker,
+		min(CASE WHEN entry_type='meta' AND meta_key='agent_step_v1'
+			AND meta_value='provider' THEN seq END) AS first_step_marker
+	FROM branch
+) SELECT
+	coalesce(sum(CASE WHEN b.entry_type='meta' AND b.meta_key='agent_turn_v1'
+		AND b.meta_value IN ('user', 'goal', 'subagent') THEN 1 ELSE 0 END), 0),
+	coalesce(sum(CASE WHEN b.entry_type='message' AND (first_turn_marker IS NULL OR b.seq < first_turn_marker)
+		AND h.role='user' THEN 1 ELSE 0 END), 0),
+	coalesce(sum(CASE WHEN b.entry_type='meta' AND b.meta_key='agent_step_v1'
+		AND b.meta_value='provider' THEN 1 ELSE 0 END), 0),
+	coalesce(sum(CASE WHEN b.entry_type='message' AND (first_step_marker IS NULL OR b.seq < first_step_marker)
+		AND h.role='assistant' THEN 1 ELSE 0 END), 0)
+FROM branch b CROSS JOIN cutoffs
+LEFT JOIN entry_hydration_projection h ON h.entry_id=b.id`
 
-// CountAgentTurns counts valid explicit turn markers on the active branch
-// without decoding message payloads.
-func (s *SQLiteStore) CountAgentTurns() (uint64, error) {
+type agentRunStatsScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanAgentRunStats(row agentRunStatsScanner) (AgentRunStats, error) {
+	var explicitTurns, legacyUsers, explicitSteps, legacySteps uint64
+	if err := row.Scan(&explicitTurns, &legacyUsers, &explicitSteps, &legacySteps); err != nil {
+		return AgentRunStats{}, err
+	}
+	return AgentRunStats{Turns: explicitTurns + legacyUsers, Steps: explicitSteps + legacySteps}, nil
+}
+
+// AgentRunStats returns whole-branch turn/step counts without decoding message
+// payloads in Go. Legacy prefixes are inferred from their durable JSON roles.
+func (s *SQLiteStore) AgentRunStats() (AgentRunStats, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
-		return 0, errors.New("session: store closed")
+		return AgentRunStats{}, errors.New("session: store closed")
 	}
-	var count uint64
-	err := s.db.QueryRow(agentTurnCountSQL, s.tip, EntryMeta, MetaAgentTurn).Scan(&count)
-	return count, err
+	return scanAgentRunStats(s.db.QueryRow(agentRunStatsSQL, s.tip))
+}
+
+// CountAgentTurns retains the legacy count-only interface.
+func (s *SQLiteStore) CountAgentTurns() (uint64, error) {
+	stats, err := s.AgentRunStats()
+	return stats.Turns, err
 }
 
 // AggregateUsage sums persisted usage without decoding complete messages.

@@ -1118,7 +1118,7 @@ After the `rpc_ready` handshake, frames other than `response` and
 | Streaming | `text_delta`, `thinking_delta`, `usage`, `provider_retry` |
 | Tools | `tool_start`, `tool_progress`, `tool_end`, `tool_routing` |
 | Interaction | `user_input_request`, `queue_updated` |
-| Lifecycle/state | `session_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
+| Lifecycle/state | `session_updated`, `run_stats_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
 | Plan | `plan_started`, `plan_delta`, `plan_completed`, `plan_update` |
 | Compaction | `compaction_started`, `compaction_done` |
 | Goals | `thread_goal_updated` |
@@ -1186,6 +1186,7 @@ tags.
 | Event type | Payload fields | Ordering |
 |---|---|---|
 | `session_updated` | correlation/state fields; `message` may hold detail | On session metadata changes |
+| `run_stats_updated` | correlation fields | After a durable turn or provider-step marker is appended; consumers may refresh branch-local statistics |
 | `turn_done` | correlation/state fields; `usage` may be present | At the end of an agent turn |
 | `error` | `message` | On recoverable and non-fatal errors |
 | `aborted` | correlation/state fields; `message` may hold detail | On cancellation of active work |

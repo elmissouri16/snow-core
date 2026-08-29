@@ -504,6 +504,10 @@ func TestAbort(t *testing.T) {
 	if asst.Role != protocol.RoleAssistant || asst.StopReason != protocol.StopAborted {
 		t.Fatalf("expected aborted assistant: %+v", asst)
 	}
+	stats, err := a.RunStats()
+	if err != nil || stats != (session.AgentRunStats{Turns: 1, Steps: 1}) {
+		t.Fatalf("pre-request cancellation stats=%+v err=%v, want 1/1", stats, err)
+	}
 }
 
 // blockingProvider returns a stream that never yields, so ctx cancellation

@@ -259,6 +259,12 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			}
 		}
 		m.refreshContextUsageFromSession()
+	case protocol.EvRunStatsUpdated:
+		// Marker persistence precedes this event. Refresh from the active branch
+		// instead of incrementing optimistically so replay and branch changes cannot
+		// duplicate counts.
+		m.runStatsRefreshVersion++
+		m.runStatsRefreshNeeded = true
 	case protocol.EvSessionUpdated:
 		// Assistant/tool persistence happens before turn_done. Rehydrating or
 		// rescanning the full SQLite branch here both duplicates live transcript
@@ -470,8 +476,8 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		}
 	case protocol.EvTurnDone:
 		if ev.TurnOrigin != "compact" {
-			m.turnCountRefreshVersion++
-			m.turnCountRefreshNeeded = true
+			m.runStatsRefreshVersion++
+			m.runStatsRefreshNeeded = true
 		}
 		if !m.turnUsageSeen {
 			m.contextRefreshVersion++
@@ -529,8 +535,8 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		m.refreshTranscript()
 	case protocol.EvAborted:
 		if ev.TurnOrigin != "compact" {
-			m.turnCountRefreshVersion++
-			m.turnCountRefreshNeeded = true
+			m.runStatsRefreshVersion++
+			m.runStatsRefreshNeeded = true
 		}
 		if !m.turnUsageSeen {
 			m.contextRefreshVersion++

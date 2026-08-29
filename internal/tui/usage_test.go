@@ -231,66 +231,74 @@ func TestInlineFooterDropsCachedInputShareWithoutRestoringLongGoalPrefix(t *test
 	}
 }
 
-func TestFooterShowsDurableTurnCountAndDropsItAtNarrowWidths(t *testing.T) {
+func TestFooterShowsDurableTurnAndStepCountsAndDropsThemAtNarrowWidths(t *testing.T) {
 	m := newModel(t.Context(), app.Options{})
 	buildAppForTest(t, m)
 	m.width = 100
-	m.applyTurnCount(12)
-	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "turns:12") {
+	m.applyRunStats(session.AgentRunStats{Turns: 12, Steps: 47})
+	if footer := stripANSI(m.renderFooter()); !strings.Contains(footer, "turns:12 · steps:47") {
 		t.Fatalf("footer = %q", footer)
 	}
 	m.width = 40
 	footer := stripANSI(m.renderFooter())
-	if strings.Contains(footer, "turns:12") {
-		t.Fatalf("narrow footer retained turn count: %q", footer)
+	if strings.Contains(footer, "turns:12") || strings.Contains(footer, "steps:47") {
+		t.Fatalf("narrow footer retained run stats: %q", footer)
 	}
 	if len([]rune(footer)) > 40 {
 		t.Fatalf("footer exceeds terminal width: %q (%d runes)", footer, len([]rune(footer)))
 	}
 }
 
-func TestSessionHydrationRestoresDurableTurnCount(t *testing.T) {
+func TestSessionHydrationRestoresDurableRunStats(t *testing.T) {
 	m := newModel(t.Context(), app.Options{})
 	buildAppForTest(t, m)
 	for _, entry := range []session.Entry{
 		{Type: session.EntryMeta, ID: "turn-user", Key: session.MetaAgentTurn, Value: "user"},
 		{Type: session.EntryMeta, ID: "ignored", Key: session.MetaAgentTurn, Value: "compact"},
 		{Type: session.EntryMeta, ID: "turn-goal", Key: session.MetaAgentTurn, Value: "goal"},
+		{Type: session.EntryMeta, ID: "step-1", Key: session.MetaAgentStep, Value: "provider"},
+		{Type: session.EntryMeta, ID: "step-2", Key: session.MetaAgentStep, Value: "provider"},
+		{Type: session.EntryMeta, ID: "ignored-step", Key: session.MetaAgentStep, Value: "retry"},
 	} {
 		if err := m.app.Session.Append(entry); err != nil {
 			t.Fatal(err)
 		}
 	}
 	m.hydrateSession()
-	if m.turnCount != 2 {
-		t.Fatalf("hydrated turn count=%d want 2", m.turnCount)
+	if m.turnCount != 2 || m.stepCount != 2 {
+		t.Fatalf("hydrated run stats turns=%d steps=%d, want 2/2", m.turnCount, m.stepCount)
 	}
 }
 
-func TestTurnDoneRefreshesDurableTurnCount(t *testing.T) {
+func TestRunStatsEventRefreshesDurableCountsWithoutTerminalDuplication(t *testing.T) {
 	m := newModel(t.Context(), app.Options{})
 	buildAppForTest(t, m)
-	if err := m.app.Session.Append(session.Entry{Type: session.EntryMeta, ID: "tracked-turn", Key: session.MetaAgentTurn, Value: "user"}); err != nil {
-		t.Fatal(err)
+	for _, entry := range []session.Entry{
+		{Type: session.EntryMeta, ID: "tracked-turn", Key: session.MetaAgentTurn, Value: "user"},
+		{Type: session.EntryMeta, ID: "tracked-step", Key: session.MetaAgentStep, Value: "provider"},
+	} {
+		if err := m.app.Session.Append(entry); err != nil {
+			t.Fatal(err)
+		}
 	}
-	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: "tracked-turn", TurnOrigin: "user"})
-	cmd := m.scheduleTurnCountRefresh()
+	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvRunStatsUpdated, TurnID: "tracked-turn", TurnOrigin: "user"})
+	cmd := m.scheduleRunStatsRefresh()
 	if cmd == nil {
-		t.Fatal("turn completion did not schedule durable count refresh")
+		t.Fatal("run-stats update did not schedule durable count refresh")
 	}
-	msg := cmd().(turnCountRefreshMsg)
+	msg := cmd().(runStatsRefreshMsg)
 	_, _ = m.update(msg)
-	if m.turnCount != 1 {
-		t.Fatalf("turn count=%d want 1", m.turnCount)
+	if m.turnCount != 1 || m.stepCount != 1 {
+		t.Fatalf("run stats turns=%d steps=%d, want 1/1", m.turnCount, m.stepCount)
 	}
 	// Replaying the same terminal event refreshes from storage rather than
 	// optimistically incrementing the count.
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: "tracked-turn", TurnOrigin: "user"})
-	cmd = m.scheduleTurnCountRefresh()
-	msg = cmd().(turnCountRefreshMsg)
+	cmd = m.scheduleRunStatsRefresh()
+	msg = cmd().(runStatsRefreshMsg)
 	_, _ = m.update(msg)
-	if m.turnCount != 1 {
-		t.Fatalf("replayed completion changed turn count=%d", m.turnCount)
+	if m.turnCount != 1 || m.stepCount != 1 {
+		t.Fatalf("replayed completion changed run stats turns=%d steps=%d", m.turnCount, m.stepCount)
 	}
 }
 
@@ -300,16 +308,16 @@ func TestStaleTurnCountRefreshDoesNotOverwriteHydratedSession(t *testing.T) {
 	if err := m.app.Session.Append(session.Entry{Type: session.EntryMeta, ID: "old-turn", Key: session.MetaAgentTurn, Value: "user"}); err != nil {
 		t.Fatal(err)
 	}
-	m.turnCountRefreshNeeded = true
-	cmd := m.scheduleTurnCountRefresh()
+	m.runStatsRefreshNeeded = true
+	cmd := m.scheduleRunStatsRefresh()
 	if cmd == nil {
 		t.Fatal("turn count refresh was not scheduled")
 	}
-	msg := cmd().(turnCountRefreshMsg)
-	m.applyTurnCount(7)
+	msg := cmd().(runStatsRefreshMsg)
+	m.applyRunStats(session.AgentRunStats{Turns: 7, Steps: 19})
 	_, _ = m.update(msg)
-	if m.turnCount != 7 {
-		t.Fatalf("stale refresh overwrote hydrated count=%d", m.turnCount)
+	if m.turnCount != 7 || m.stepCount != 19 {
+		t.Fatalf("stale refresh overwrote hydrated stats turns=%d steps=%d", m.turnCount, m.stepCount)
 	}
 }
 

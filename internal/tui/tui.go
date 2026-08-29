@@ -125,9 +125,9 @@ type contextUsageRefreshMsg struct {
 	err      error
 }
 
-type turnCountRefreshMsg struct {
+type runStatsRefreshMsg struct {
 	version uint64
-	count   uint64
+	stats   session.AgentRunStats
 	err     error
 }
 
@@ -400,9 +400,10 @@ type Model struct {
 	contextRefreshPending         bool
 	contextRefreshVersion         uint64
 	turnCount                     uint64
-	turnCountRefreshNeeded        bool
-	turnCountRefreshPending       bool
-	turnCountRefreshVersion       uint64
+	stepCount                     uint64
+	runStatsRefreshNeeded         bool
+	runStatsRefreshPending        bool
+	runStatsRefreshVersion        uint64
 	compacting                    bool
 	compactStatus                 string
 	events                        *agentEventMailbox

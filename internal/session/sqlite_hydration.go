@@ -377,13 +377,21 @@ func repairHydrationProjectionEntry(db *sql.DB, entryID string) error {
 
 func sqliteBranchHydrationSummaries(db *sql.DB, tip string) (BranchHydrationSnapshot, error) {
 	rows, err := db.Query(`
-		WITH RECURSIVE branch(seq, id, parent_id) AS (
-			SELECT seq, id, parent_id FROM entries WHERE id = ?
+		WITH RECURSIVE branch(seq, id, parent_id, entry_type, meta_key, meta_value) AS (
+			SELECT seq, id, parent_id, entry_type, meta_key, meta_value FROM entries WHERE id = ?
 			UNION ALL
-			SELECT e.seq, e.id, e.parent_id
+			SELECT e.seq, e.id, e.parent_id, e.entry_type, e.meta_key, e.meta_value
 			FROM entries e JOIN branch b ON e.id = b.parent_id
 		)
-		SELECT b.id, COALESCE(h.projection_version, 0), h.projection
+		SELECT b.id,
+			CASE
+				WHEN b.entry_type='meta' AND b.meta_key='agent_turn_v1'
+					AND b.meta_value IN ('user', 'goal', 'subagent') THEN 1
+				WHEN b.entry_type='meta' AND b.meta_key='agent_step_v1'
+					AND b.meta_value='provider' THEN 2
+				ELSE 0
+			END,
+			COALESCE(h.projection_version, 0), h.projection
 		FROM branch b
 		LEFT JOIN entry_hydration_projection h ON h.entry_id = b.id
 		ORDER BY b.seq`, tip)
@@ -393,9 +401,9 @@ func sqliteBranchHydrationSummaries(db *sql.DB, tip string) (BranchHydrationSnap
 	snapshot := BranchHydrationSnapshot{TipID: tip}
 	for rows.Next() {
 		var id string
-		var projectionVersion int
+		var markerKind, projectionVersion int
 		var projection sql.RawBytes
-		if err := rows.Scan(&id, &projectionVersion, &projection); err != nil {
+		if err := rows.Scan(&id, &markerKind, &projectionVersion, &projection); err != nil {
 			_ = rows.Close()
 			return BranchHydrationSnapshot{}, fmt.Errorf("session: sqlite hydration scan: %w", err)
 		}
@@ -411,6 +419,12 @@ func sqliteBranchHydrationSummaries(db *sql.DB, tip string) (BranchHydrationSnap
 			return BranchHydrationSnapshot{}, &hydrationProjectionEntryError{entryID: id, cause: err}
 		}
 		record.summary.ID = id
+		switch markerKind {
+		case 1:
+			record.summary.AgentRunMarker = agentRunMarkerTurn
+		case 2:
+			record.summary.AgentRunMarker = agentRunMarkerStep
+		}
 		snapshot.Entries = append(snapshot.Entries, record.summary)
 		if record.userInput != "" {
 			snapshot.UserInputs = append(snapshot.UserInputs, record.userInput)
@@ -429,9 +443,9 @@ func sqliteBranchHydrationSummaries(db *sql.DB, tip string) (BranchHydrationSnap
 	if tip != "" && len(snapshot.Entries) == 0 {
 		return BranchHydrationSnapshot{}, ErrNotFound
 	}
-	if err := db.QueryRow(agentTurnCountSQL, tip, EntryMeta, MetaAgentTurn).Scan(&snapshot.TurnCount); err != nil {
-		return BranchHydrationSnapshot{}, fmt.Errorf("session: sqlite hydration turn count: %w", err)
-	}
+	stats := agentRunStatsFromSummaries(snapshot.Entries)
+	snapshot.TurnCount = stats.Turns
+	snapshot.StepCount = stats.Steps
 	return snapshot, nil
 }
 

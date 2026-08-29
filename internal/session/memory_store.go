@@ -725,27 +725,20 @@ func (s *MemoryStore) LatestAssistantMessage() (protocol.Message, bool, error) {
 	return protocol.Message{}, false, nil
 }
 
-// CountAgentTurns counts explicit turn markers on the active branch.
-func (s *MemoryStore) CountAgentTurns() (uint64, error) {
+// AgentRunStats returns durable turn/step counts on the active branch.
+func (s *MemoryStore) AgentRunStats() (AgentRunStats, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
-		return 0, errors.New("session: store closed")
+		return AgentRunStats{}, errors.New("session: store closed")
 	}
-	var count uint64
-	current := s.tip
-	for steps := 0; current != "" && steps <= len(s.entries); steps++ {
-		index, ok := s.byID[current]
-		if !ok {
-			break
-		}
-		entry := s.entries[index]
-		if IsAgentTurnMarker(entry) {
-			count++
-		}
-		current = entry.ParentID
-	}
-	return count, nil
+	return agentRunStatsFromEntries(pathFrom(s.entries, s.byID, s.tip)), nil
+}
+
+// CountAgentTurns retains the legacy count-only interface.
+func (s *MemoryStore) CountAgentTurns() (uint64, error) {
+	stats, err := s.AgentRunStats()
+	return stats.Turns, err
 }
 
 // AggregateUsage sums the active branch without constructing message clones.

@@ -377,6 +377,7 @@ func (a *Agent) run(ctx context.Context) error {
 	var retryStarted time.Time
 	retryRecovery := false
 	syntheticOnlyBatches := 0
+	stepID := ""
 	for {
 		if a.opts.MaxTurns > 0 && turn >= a.opts.MaxTurns {
 			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "max turns reached"})
@@ -448,6 +449,16 @@ func (a *Agent) run(ctx context.Context) error {
 		a.latestContextReport = &contextReport
 		a.mu.Unlock()
 
+		// Persist one crash-durable logical step boundary immediately before the
+		// first provider attempt. Overflow recovery and transport retries reuse the
+		// same ID; ordinary tool-result continuations allocate a new step.
+		if stepID == "" {
+			stepID = newID()
+			if err := a.persistStepMarker(stepID); err != nil {
+				return err
+			}
+			a.publish(protocol.AgentEvent{Type: protocol.EvRunStatsUpdated})
+		}
 		providerAttempts++
 		stop, err := a.streamTurnWithErrors(ctx, req, false)
 		if err != nil {
@@ -517,12 +528,14 @@ func (a *Agent) run(ctx context.Context) error {
 					retryStarted = time.Time{}
 					retryRecovery = false
 					syntheticOnlyBatches = 0
+					stepID = ""
 					continue
 				}
 			}
 			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
 			return err
 		}
+		stepID = ""
 		providerAttempts = 0
 		retryStarted = time.Time{}
 		retryRecovery = false

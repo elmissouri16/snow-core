@@ -407,7 +407,7 @@ func coalescibleBusEvent(kind protocol.AgentEventType) bool {
 
 func protectedBusEvent(kind protocol.AgentEventType) bool {
 	switch kind {
-	case protocol.EvToolStart, protocol.EvToolEnd,
+	case protocol.EvToolStart, protocol.EvToolEnd, protocol.EvRunStatsUpdated,
 		protocol.EvTurnDone, protocol.EvProviderRetry, protocol.EvError, protocol.EvAborted,
 		protocol.EvPermissionRequest, protocol.EvUserInputRequest,
 		protocol.EvPlanStarted, protocol.EvPlanCompleted,

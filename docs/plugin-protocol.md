@@ -382,7 +382,7 @@ reorder Snow's agent loop.
 Known event types:
 
 ```text
-session_updated text_delta thinking_delta
+session_updated run_stats_updated text_delta thinking_delta
 tool_start tool_progress tool_end tool_routing
 permission_request user_input_request usage queue_updated
 turn_done error aborted model_changed mode_changed

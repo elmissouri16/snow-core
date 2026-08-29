@@ -896,7 +896,7 @@ type SessionIndex interface {
 
 The current on-disk schema version is 11. Tables include `session_meta`
 (header, title, provenance), `entries` (append-only messages, compaction
-entries, and branch-local agent-turn markers), `session_branches` (branch tips
+entries, and branch-local agent turn/step markers), `session_branches` (branch tips
 and lineage), `thread_state`
 (collaboration mode per branch), `thread_goals` and related cost/deferral
 tables (persistent Thread Goals), and `subagent_threads` (child topology).
@@ -905,15 +905,21 @@ subagent topology where applicable. WAL transactions and indexed branch
 queries keep open and reload bounded; opening never performs a full scan.
 
 Each durably admitted user, automatic-goal, or child-agent run appends one
-`agent_turn_v1` metadata marker before provider execution. Counting those
-markers through the active tip gives an exact tracked total that follows branch
-rewinds and forks without a mutable session-wide counter. Provider requests,
-tool continuations, retries, and compaction do not add markers. The root TUI
-footer shows only the active root branch's count; descendant child databases
-remain independent. Older sessions are not heuristically backfilled because
-message shapes cannot recover automatic and queued-run boundaries exactly.
-`AgentEvent.TurnSequence` remains a separate process-local correlation order
-that restarts with the process.
+`agent_turn_v1` metadata marker before provider execution. Each logical
+provider-loop iteration appends one `agent_step_v1` marker immediately before
+its first provider attempt. Tool-result continuations start new steps;
+transport retries and overflow recovery retain the active step ID, while
+compaction and auxiliary provider requests add no step. Counting both marker
+classes through the active tip gives exact branch- and fork-local totals without
+a mutable session-wide counter. The root TUI renders `turns:<n> · steps:<n>` for
+only the active root branch; descendant child databases remain independent.
+For historical prefixes written before a marker class existed, built-in stores
+conservatively infer user turns from durable user messages and infer steps from
+durable assistant messages; pre-marker automatic-goal boundaries remain
+unknown rather than being guessed. Explicit markers become authoritative at
+their first appearance, so new work remains exact without rewriting append-only
+history. `AgentEvent.TurnSequence` remains
+a separate process-local correlation order that restarts with the process.
 
 ### Provider-facing compaction
 

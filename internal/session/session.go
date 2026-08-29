@@ -38,11 +38,15 @@ const (
 	// MetaToolTranscript stores branch-scoped, provider-excluded presentation
 	// metadata for harness tool activity without a matching tool-result message.
 	MetaToolTranscript = "tool_transcript_v1"
-	// MetaAgentTurn records one durably admitted agent run. The entry value is
-	// the run origin (user, goal, or subagent); compaction is deliberately not a
-	// tracked agent turn. Keeping markers in the append-only entry chain makes
-	// counts naturally branch- and fork-local.
+	// MetaAgentTurn records one durably admitted high-level agent run. The entry
+	// value is the run origin (user, goal, or subagent); compaction is deliberately
+	// not a tracked turn.
 	MetaAgentTurn = "agent_turn_v1"
+	// MetaAgentStep records one logical provider-loop iteration. Transport retries
+	// and overflow recovery remain inside the same step, while a continuation after
+	// tool results starts another. Compaction and auxiliary provider requests are
+	// deliberately excluded.
+	MetaAgentStep = "agent_step_v1"
 )
 
 // Entry is one line in a session file.
@@ -72,6 +76,18 @@ func IsAgentTurnMarker(entry Entry) bool {
 	default:
 		return false
 	}
+}
+
+// IsAgentStepMarker reports whether an entry records one logical provider step.
+func IsAgentStepMarker(entry Entry) bool {
+	return entry.Type == EntryMeta && entry.Key == MetaAgentStep && entry.Value == "provider" && entry.ID != ""
+}
+
+// AgentRunStats is the durable whole-branch high-level turn and provider-step
+// projection shown by interactive surfaces.
+type AgentRunStats struct {
+	Turns uint64
+	Steps uint64
 }
 
 // Store is the session abstraction used by the agent.
@@ -111,8 +127,15 @@ type ContextStore interface {
 	ContextMessages() ([]protocol.Message, error)
 }
 
-// TurnCountStore counts explicit agent-turn markers on the active branch.
-// It never infers historical turns from message shapes.
+// AgentRunStatsStore returns whole-active-branch turn and step counts. For the
+// historical prefix created before explicit markers existed, built-in stores
+// infer turns from durable user messages and steps from durable assistant
+// messages; entries after the first marker use explicit counts only.
+type AgentRunStatsStore interface {
+	AgentRunStats() (AgentRunStats, error)
+}
+
+// TurnCountStore is retained for internal/custom-store compatibility.
 type TurnCountStore interface {
 	CountAgentTurns() (uint64, error)
 }

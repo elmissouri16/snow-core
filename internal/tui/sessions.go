@@ -150,7 +150,7 @@ func (m *Model) hydrateSessionLegacy() {
 	// exact branch once through Messages and again through BranchEntries.
 	var messages, renderMessages, branchContext []protocol.Message
 	var durableIDs []string
-	var turnCount uint64
+	var runStats session.AgentRunStats
 	loadedBranch := false
 	projectedBranch := false
 	branchCompacted := false
@@ -164,9 +164,6 @@ func (m *Model) hydrateSessionLegacy() {
 			for _, entry := range branch {
 				if m.inlineTranscript {
 					durableIDs = append(durableIDs, entry.ID)
-				}
-				if session.IsAgentTurnMarker(entry) {
-					turnCount++
 				}
 				switch {
 				case entry.Type == session.EntryMessage && entry.Message != nil:
@@ -215,11 +212,11 @@ func (m *Model) hydrateSessionLegacy() {
 				durableIDs = append(durableIDs, message.ID)
 			}
 		}
-		if count, countErr := m.app.Agent.TurnCount(); countErr == nil {
-			turnCount = count
-		}
 	}
-	m.applyTurnCount(turnCount)
+	if stats, statsErr := m.app.Agent.RunStats(); statsErr == nil {
+		runStats = stats
+	}
+	m.applyRunStats(runStats)
 	m.hydrateInputHistory(messages)
 	refreshUsage := func() {
 		if projectedBranch {
@@ -570,23 +567,28 @@ func (m *Model) scheduleContextUsageRefresh() tea.Cmd {
 	}
 }
 
-func (m *Model) applyTurnCount(count uint64) {
-	m.turnCount = count
-	m.turnCountRefreshNeeded = false
-	m.turnCountRefreshVersion++
+func (m *Model) applyRunStats(stats session.AgentRunStats) {
+	m.turnCount = stats.Turns
+	m.stepCount = stats.Steps
+	m.runStatsRefreshNeeded = false
+	m.runStatsRefreshVersion++
 }
 
-func (m *Model) scheduleTurnCountRefresh() tea.Cmd {
-	if !m.turnCountRefreshNeeded || m.turnCountRefreshPending || m.app == nil || m.app.Agent == nil {
+func (m *Model) applyTurnCount(count uint64) {
+	m.applyRunStats(session.AgentRunStats{Turns: count})
+}
+
+func (m *Model) scheduleRunStatsRefresh() tea.Cmd {
+	if !m.runStatsRefreshNeeded || m.runStatsRefreshPending || m.app == nil || m.app.Agent == nil {
 		return nil
 	}
-	m.turnCountRefreshNeeded = false
-	m.turnCountRefreshPending = true
-	version := m.turnCountRefreshVersion
+	m.runStatsRefreshNeeded = false
+	m.runStatsRefreshPending = true
+	version := m.runStatsRefreshVersion
 	a := m.app.Agent
 	return func() tea.Msg {
-		count, err := a.TurnCount()
-		return turnCountRefreshMsg{version: version, count: count, err: err}
+		stats, err := a.RunStats()
+		return runStatsRefreshMsg{version: version, stats: stats, err: err}
 	}
 }
 

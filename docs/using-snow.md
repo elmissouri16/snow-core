@@ -176,16 +176,21 @@ Snow follows Bubble Tea's supported full-window pager/chat pattern:
    row shows activity and queued-input count. Provider waits use a
    pulsing-points thinking animation distinct from the rotating working
    indicator in the run-status row. The
-   footer shows permission mode, mode/goal state, tracked branch-local agent
-   runs as `turns:<n>`, context usage, and the share of the latest request's
+   footer shows permission mode, mode/goal state, durable branch-local work as
+   `turns:<n> · steps:<n>`, context usage, and the share of the latest request's
    input tokens served from the prompt cache as `cached:<n>%`; inline mode may
-   compact provider/model/effort into that footer. A tracked turn is one
-   durably admitted user or automatic-goal run, regardless of how many model
-   requests or tool continuations it needs. Compaction and descendant subagent
-   work do not increase the active root branch's count. Sessions created before
-   turn tracking start at zero rather than receiving an inexact reconstruction.
-   Narrow terminals may omit the turn and cache segments to preserve permission
-   and context indicators. The cache percentage is token coverage for one
+   compact provider/model/effort into that footer. A turn is one durably
+   admitted user or automatic-goal run. A step is one logical provider-loop
+   iteration, so an initial model response and each continuation after tools
+   count separately; transport retries and overflow recovery remain inside the
+   same step. Compaction and descendant subagent work increase neither count on
+   the active root branch. Each child session owns its own counts. For sessions
+   created before these markers existed, Snow reconstructs legacy user turns
+   from durable user messages and steps from durable assistant messages, then
+   uses exact markers for new work. Pre-marker automatic-goal boundaries cannot
+   be reconstructed exactly and are not guessed. Narrow terminals may omit the turn,
+   step, and cache segments to preserve permission and context indicators. The
+   cache percentage is token coverage for one
    request, not a request-level cache-hit frequency, turn aggregate, session
    average, or cost-savings percentage.
 

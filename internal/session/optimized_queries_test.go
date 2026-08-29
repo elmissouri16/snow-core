@@ -97,7 +97,7 @@ func TestBranchStateEntriesFiltersAndPreservesOrder(t *testing.T) {
 	}
 }
 
-func TestCountAgentTurnsTracksExplicitBranchMarkers(t *testing.T) {
+func TestAgentRunStatsTrackExplicitBranchMarkers(t *testing.T) {
 	for name, store := range optimizedQueryStores(t) {
 		t.Run(name, func(t *testing.T) {
 			defer store.Close()
@@ -107,6 +107,8 @@ func TestCountAgentTurnsTracksExplicitBranchMarkers(t *testing.T) {
 				{Type: EntryMeta, ID: "invalid-turn", Key: MetaAgentTurn, Value: "compact"},
 				{Type: EntryCompaction, ID: "compact", Summary: "checkpoint", CompactedThrough: "root"},
 				{Type: EntryMeta, ID: "turn-goal", Key: MetaAgentTurn, Value: "goal"},
+				{Type: EntryMeta, ID: "step-provider", Key: MetaAgentStep, Value: "provider"},
+				{Type: EntryMeta, ID: "step-invalid", Key: MetaAgentStep, Value: "retry"},
 			}
 			for _, entry := range entries {
 				if err := store.Append(entry); err != nil {
@@ -118,8 +120,12 @@ func TestCountAgentTurnsTracksExplicitBranchMarkers(t *testing.T) {
 				t.Fatalf("count=%d err=%v", count, err)
 			}
 			snapshot, err := store.(BranchHydrationStore).BranchHydration()
-			if err != nil || snapshot.TurnCount != count {
-				t.Fatalf("hydration count=%d err=%v", snapshot.TurnCount, err)
+			if err != nil || snapshot.TurnCount != count || snapshot.StepCount != 1 {
+				t.Fatalf("hydration stats turns=%d steps=%d err=%v", snapshot.TurnCount, snapshot.StepCount, err)
+			}
+			stats, err := store.(AgentRunStatsStore).AgentRunStats()
+			if err != nil || stats != (AgentRunStats{Turns: 2, Steps: 1}) {
+				t.Fatalf("run stats=%+v err=%v", stats, err)
 			}
 			if err := store.SetBranchTip("turn-user"); err != nil {
 				t.Fatal(err)

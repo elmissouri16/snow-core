@@ -8,6 +8,7 @@ type AgentEventType string
 
 const (
 	EvSessionUpdated    AgentEventType = "session_updated"
+	EvRunStatsUpdated   AgentEventType = "run_stats_updated"
 	EvTextDelta         AgentEventType = "text_delta"
 	EvThinkingDelta     AgentEventType = "thinking_delta"
 	EvToolStart         AgentEventType = "tool_start"
@@ -41,6 +42,7 @@ const (
 func KnownAgentEventTypes() []AgentEventType {
 	return []AgentEventType{
 		EvSessionUpdated,
+		EvRunStatsUpdated,
 		EvTextDelta,
 		EvThinkingDelta,
 		EvToolStart,

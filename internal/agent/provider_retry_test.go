@@ -12,6 +12,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/permission"
 	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/provider/responsesapi"
+	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/tools"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -66,6 +67,10 @@ func TestProviderRetryRecoversRepeatedStartupFailuresAndEmitsNonterminalEvents(t
 	if p.calls != 4 || retries != 3 || finalErrors != 0 {
 		t.Fatalf("calls=%d retries=%d errors=%d", p.calls, retries, finalErrors)
 	}
+	stats, err := a.RunStats()
+	if err != nil || stats != (session.AgentRunStats{Turns: 1, Steps: 1}) {
+		t.Fatalf("retry run stats=%+v err=%v, want one turn and one logical step", stats, err)
+	}
 }
 
 func TestRetryAfterBeyondRemainingBudgetStopsWithoutRetryingEarly(t *testing.T) {
@@ -77,6 +82,10 @@ func TestRetryAfterBeyondRemainingBudgetStopsWithoutRetryingEarly(t *testing.T) 
 	}
 	if p.calls != 1 {
 		t.Fatalf("provider calls=%d", p.calls)
+	}
+	stats, err := a.RunStats()
+	if err != nil || stats != (session.AgentRunStats{Turns: 1, Steps: 1}) {
+		t.Fatalf("failed run stats=%+v err=%v, want one turn and one attempted step", stats, err)
 	}
 }
 
@@ -108,6 +117,10 @@ func TestSuccessfulProviderRoundResetsConsecutiveFailureBackoff(t *testing.T) {
 	}
 	if len(attempts) != 2 || attempts[0] != 2 || attempts[1] != 2 {
 		t.Fatalf("retry attempts=%v", attempts)
+	}
+	stats, err := a.RunStats()
+	if err != nil || stats != (session.AgentRunStats{Turns: 1, Steps: 2}) {
+		t.Fatalf("run stats=%+v err=%v, want two logical steps across four attempts", stats, err)
 	}
 }
 
@@ -207,6 +220,10 @@ func TestPartialStreamRecoveryNeverDispatchesIncompleteToolCall(t *testing.T) {
 	if !foundRecovery {
 		t.Fatalf("missing recovery context: %+v", p.requests[1].InternalContext)
 	}
+	stats, err := a.RunStats()
+	if err != nil || stats != (session.AgentRunStats{Turns: 1, Steps: 1}) {
+		t.Fatalf("partial-stream recovery stats=%+v err=%v, want one retried logical step", stats, err)
+	}
 }
 
 func TestCompletedMutatingToolIsNotHostReplayedAfterLaterProviderFailure(t *testing.T) {
@@ -240,5 +257,9 @@ func TestCompletedMutatingToolIsNotHostReplayedAfterLaterProviderFailure(t *test
 	}
 	if !foundResult {
 		t.Fatalf("completed tool result missing from recovery request: %+v", p.requests[2].Messages)
+	}
+	stats, err := a.RunStats()
+	if err != nil || stats != (session.AgentRunStats{Turns: 1, Steps: 2}) {
+		t.Fatalf("post-tool retry stats=%+v err=%v, want two logical steps", stats, err)
 	}
 }

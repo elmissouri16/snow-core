@@ -428,7 +428,7 @@ collaboration-mode snapshot for initial host state.
 | Streaming | `text_delta`, `thinking_delta`, `usage`, `provider_retry` |
 | Tools | `tool_start`, `tool_progress`, `tool_end`, `tool_routing` |
 | Interaction | `user_input_request`, `queue_updated`; `permission_request` exists in the cross-surface protocol but the public headless SDK has no permission asker that emits it |
-| Lifecycle and state | `session_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
+| Lifecycle and state | `session_updated`, `run_stats_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
 | Plan | `plan_started`, `plan_delta`, `plan_completed`, `plan_update` |
 | Compaction | `compaction_started`, `compaction_done`; `Compaction.Automatic` distinguishes non-manual pressure and overflow-repair runs |
 | Goals | `thread_goal_updated` |

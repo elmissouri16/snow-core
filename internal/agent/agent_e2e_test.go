@@ -330,6 +330,15 @@ func TestAgentEndToEndBuiltinWorkflow(t *testing.T) {
 	if len(events) == 0 || events[len(events)-1].Type != protocol.EvTurnDone {
 		t.Fatalf("last event = %+v, want turn_done", events)
 	}
+	statsEvents := 0
+	for _, event := range events {
+		if event.Type == protocol.EvRunStatsUpdated {
+			statsEvents++
+		}
+	}
+	if statsEvents != 3 {
+		t.Fatalf("run-stats events=%d want turn marker plus two step markers", statsEvents)
+	}
 	if events[len(events)-1].Usage == nil || events[len(events)-1].Usage.Total != 18 || events[len(events)-1].Usage.Requests != 1 {
 		t.Fatalf("turn usage = %+v, want total=18 requests=1", events[len(events)-1].Usage)
 	}
@@ -340,9 +349,23 @@ func TestAgentEndToEndBuiltinWorkflow(t *testing.T) {
 	if usage.Total != 18 || usage.Requests != 1 {
 		t.Fatalf("session usage = %+v, want persisted total=18 requests=1", usage)
 	}
-	turns, err := a.TurnCount()
-	if err != nil || turns != 1 {
-		t.Fatalf("session turns = %d, want one admitted run across two provider requests (err=%v)", turns, err)
+	stats, err := a.RunStats()
+	if err != nil || stats != (session.AgentRunStats{Turns: 1, Steps: 2}) {
+		t.Fatalf("session run stats = %+v, want one admitted turn and two provider steps (err=%v)", stats, err)
+	}
+	entries, err := st.BranchEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) < 5 || !session.IsAgentTurnMarker(entries[1]) || entries[2].Message == nil || entries[2].Message.Role != protocol.RoleUser || !session.IsAgentStepMarker(entries[3]) {
+		t.Fatalf("initial marker order = %+v", entries[:min(5, len(entries))])
+	}
+	byID := make(map[string]session.Entry, len(entries))
+	for _, entry := range entries {
+		byID[entry.ID] = entry
+		if entry.Message != nil && entry.Message.Role == protocol.RoleAssistant && !session.IsAgentStepMarker(byID[entry.ParentID]) {
+			t.Fatalf("assistant %q is not directly enclosed by a step marker: parent=%+v", entry.ID, byID[entry.ParentID])
+		}
 	}
 }
 
@@ -515,6 +538,36 @@ func TestAgentTurnMarkerFailurePreventsProviderExecution(t *testing.T) {
 	}
 }
 
+type failStepMarkerStore struct{ *session.MemoryStore }
+
+func (s *failStepMarkerStore) Append(entry session.Entry) error {
+	if entry.Key == session.MetaAgentStep {
+		return errors.New("step ledger unavailable")
+	}
+	return s.MemoryStore.Append(entry)
+}
+
+func TestAgentStepMarkerFailurePreventsProviderExecution(t *testing.T) {
+	root := t.TempDir()
+	provider := &e2eProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamTextDelta, Text: "must not run"},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+	}}}
+	store := &failStepMarkerStore{MemoryStore: session.NewMemoryStore(session.Options{CWD: root})}
+	a := newBuiltinE2EAgent(t, root, provider, store, permission.ModeAllow, nil)
+	err := a.Prompt(t.Context(), "do not dispatch")
+	if err == nil || !strings.Contains(err.Error(), "step ledger unavailable") {
+		t.Fatalf("Prompt error=%v", err)
+	}
+	if len(provider.Requests()) != 0 {
+		t.Fatalf("provider requests=%d want 0", len(provider.Requests()))
+	}
+	stats, statsErr := a.RunStats()
+	if statsErr != nil || stats != (session.AgentRunStats{Turns: 1}) {
+		t.Fatalf("run stats=%+v err=%v, want admitted turn without a step", stats, statsErr)
+	}
+}
+
 // TestAgentEndToEndProviderFailureCases covers failures at each provider
 // boundary. These are intentionally end-to-end assertions: the public Prompt
 // call must return the error, publish turn_done, and persist an actionable
@@ -581,9 +634,9 @@ func TestAgentEndToEndProviderFailureCases(t *testing.T) {
 			} else if len(msgs) != 1 {
 				t.Fatalf("messages after pre-stream failure = %+v, want only user", msgs)
 			}
-			turns, turnErr := a.TurnCount()
-			if turnErr != nil || turns != 1 {
-				t.Fatalf("failed run turn count=%d err=%v, want 1", turns, turnErr)
+			stats, statsErr := a.RunStats()
+			if statsErr != nil || stats != (session.AgentRunStats{Turns: 1, Steps: 1}) {
+				t.Fatalf("failed run stats=%+v err=%v, want 1/1", stats, statsErr)
 			}
 		})
 	}
@@ -618,9 +671,9 @@ func TestAgentEndToEndAbortDuringBash(t *testing.T) {
 	if len(msgs) != 4 || !msgs[2].IsError {
 		t.Fatalf("canceled session = %+v, want tool-call plus tool error", msgs)
 	}
-	turns, turnErr := a.TurnCount()
-	if turnErr != nil || turns != 1 {
-		t.Fatalf("canceled run turn count=%d err=%v, want 1", turns, turnErr)
+	stats, statsErr := a.RunStats()
+	if statsErr != nil || stats != (session.AgentRunStats{Turns: 1, Steps: 1}) {
+		t.Fatalf("canceled run stats=%+v err=%v, want 1/1", stats, statsErr)
 	}
 }
 

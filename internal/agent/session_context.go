@@ -236,19 +236,30 @@ func (a *Agent) finishTurnMailbox(mark func()) error {
 	return a.persistMailboxBatchLocked(batch)
 }
 
-// TurnCount returns the number of explicit agent-run markers on the active
-// session branch. Historical turns are never inferred from message shapes.
-func (a *Agent) TurnCount() (count uint64, err error) {
+// RunStats returns durable whole-branch high-level turn and provider-step
+// counts. Built-in stores include the inferable prefix from sessions that
+// predate explicit markers.
+func (a *Agent) RunStats() (stats session.AgentRunStats, err error) {
 	err = a.withSessionRead(func(store session.Store) error {
-		counter, ok := store.(session.TurnCountStore)
-		if !ok {
-			return nil
+		if counter, ok := store.(session.AgentRunStatsStore); ok {
+			var statsErr error
+			stats, statsErr = counter.AgentRunStats()
+			return statsErr
 		}
-		var countErr error
-		count, countErr = counter.CountAgentTurns()
-		return countErr
+		if counter, ok := store.(session.TurnCountStore); ok {
+			var countErr error
+			stats.Turns, countErr = counter.CountAgentTurns()
+			return countErr
+		}
+		return nil
 	})
-	return count, err
+	return stats, err
+}
+
+// TurnCount retains the count-only facade used by older internal consumers.
+func (a *Agent) TurnCount() (uint64, error) {
+	stats, err := a.RunStats()
+	return stats.Turns, err
 }
 
 // Usage returns the aggregate usage for the active session branch.

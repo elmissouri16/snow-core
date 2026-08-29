@@ -56,7 +56,7 @@ func (m *Model) hydrateSessionPaginated() bool {
 		m.hydrateInputHistoryValues(snapshot.UserInputs)
 		m.inlineDurableMessageIDs = durableIDs
 		m.applyContextUsageSnapshot(usageSnapshot)
-		m.applyTurnCount(snapshot.TurnCount)
+		m.applyRunStats(session.AgentRunStats{Turns: snapshot.TurnCount, Steps: snapshot.StepCount})
 		return true
 	}
 
@@ -203,7 +203,7 @@ func (m *Model) hydrateSessionPaginated() bool {
 	m.transcriptBaseDirty = true
 	m.transcriptDirty = true
 	m.applyContextUsageSnapshot(usageSnapshot)
-	m.applyTurnCount(snapshot.TurnCount)
+	m.applyRunStats(session.AgentRunStats{Turns: snapshot.TurnCount, Steps: snapshot.StepCount})
 
 	hydrated := make([]string, 0, min(actualRows, maxTranscriptEntries))
 	skipRows := localSkipRows

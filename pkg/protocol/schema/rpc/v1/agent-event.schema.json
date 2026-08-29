@@ -7,7 +7,7 @@
   "properties": {
     "type": {
       "type": "string",
-      "enum": ["session_updated", "text_delta", "thinking_delta", "tool_start", "tool_progress", "tool_end", "tool_routing", "permission_request", "user_input_request", "usage", "provider_retry", "queue_updated", "turn_done", "error", "aborted", "model_changed", "mode_changed", "plan_started", "plan_delta", "plan_completed", "plan_update", "compaction_started", "compaction_done", "thread_goal_updated", "subagent_started", "subagent_status", "subagent_message", "subagent_activity"]
+      "enum": ["session_updated", "run_stats_updated", "text_delta", "thinking_delta", "tool_start", "tool_progress", "tool_end", "tool_routing", "permission_request", "user_input_request", "usage", "provider_retry", "queue_updated", "turn_done", "error", "aborted", "model_changed", "mode_changed", "plan_started", "plan_delta", "plan_completed", "plan_update", "compaction_started", "compaction_done", "thread_goal_updated", "subagent_started", "subagent_status", "subagent_message", "subagent_activity"]
     },
     "text": {"type": "string"},
     "tool_call_id": {"type": "string"},

@@ -45,6 +45,7 @@ type BranchHydrationSnapshot struct {
 	LatestPlan   string
 	ContextUsage BranchContextUsage
 	TurnCount    uint64
+	StepCount    uint64
 }
 
 // BranchEntrySummary contains the bounded scalar state needed to count exact
@@ -55,6 +56,7 @@ type BranchEntrySummary struct {
 	CompactedThrough string
 
 	Role               protocol.Role
+	AgentRunMarker     uint8
 	UserVisible        bool
 	ThinkingVisible    bool
 	BodyRows           int
@@ -99,6 +101,12 @@ func summarizeHydrationEntry(entry Entry) entryHydrationRecord {
 			CompactedThrough: entry.CompactedThrough,
 		},
 		latestPlanIndex: -1,
+	}
+	switch {
+	case IsAgentTurnMarker(entry):
+		record.summary.AgentRunMarker = agentRunMarkerTurn
+	case IsAgentStepMarker(entry):
+		record.summary.AgentRunMarker = agentRunMarkerStep
 	}
 	if entry.Type == EntryCompaction && strings.TrimSpace(entry.Summary) != "" {
 		record.summary.CompactionActive = true
@@ -285,14 +293,14 @@ func compactedCheckpointContextChars(summary string) int {
 }
 
 func buildBranchHydrationSnapshot(tip string, entries []Entry) BranchHydrationSnapshot {
+	stats := agentRunStatsFromEntries(entries)
 	snapshot := BranchHydrationSnapshot{
-		TipID:   tip,
-		Entries: make([]BranchEntrySummary, 0, len(entries)),
+		TipID:     tip,
+		Entries:   make([]BranchEntrySummary, 0, len(entries)),
+		TurnCount: stats.Turns,
+		StepCount: stats.Steps,
 	}
 	for _, entry := range entries {
-		if IsAgentTurnMarker(entry) {
-			snapshot.TurnCount++
-		}
 		record := summarizeHydrationEntry(entry)
 		snapshot.Entries = append(snapshot.Entries, record.summary)
 		if record.userInput != "" {

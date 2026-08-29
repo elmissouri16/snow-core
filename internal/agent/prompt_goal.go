@@ -207,6 +207,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	if err := a.persistTurnMarker(); err != nil {
 		return err
 	}
+	a.publish(protocol.AgentEvent{Type: protocol.EvRunStatsUpdated})
 
 	content := make([]protocol.ContentBlock, 0, 1+len(attachments))
 	if text != "" {
@@ -353,6 +354,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	if err := a.persistTurnMarker(); err != nil {
 		return err
 	}
+	a.publish(protocol.AgentEvent{Type: protocol.EvRunStatsUpdated})
 	a.publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g.Clone()}, TurnOrigin: "goal", TurnID: a.turnID, GoalContinuing: true})
 	retErr = a.run(runCtx)
 	return retErr

@@ -178,9 +178,10 @@ hint.
 Root `session_updated` events are idempotent invalidations. Snow coalesces
 bursts inside each UI batch and never reloads the complete SQLite branch while
 a turn is live; provider `usage` events update the context counter in constant
-time. A usage-less terminal boundary schedules one asynchronous
-projected-context refresh, so SQLite decoding cannot block keyboard handling.
-Idle hydration remains available for external session mutations, while
+time. Durable `run_stats_updated` events schedule an asynchronous lightweight
+branch-statistics refresh as turn and step markers are appended. A usage-less
+terminal boundary schedules one asynchronous projected-context refresh, so
+SQLite decoding cannot block keyboard handling. Idle hydration remains available for external session mutations, while
 explicit context refreshes read the projected branch only once. Built-in stores
 first scan a lightweight root-to-tip hydration projection containing exact row
 counts, input-history state, plan/context scalars, durable IDs, and tool-call

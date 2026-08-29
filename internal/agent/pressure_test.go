@@ -535,6 +535,10 @@ func TestContextOverflowCompactsAndRetriesOnce(t *testing.T) {
 	a.opts.MaxTurns = 1
 	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 128, Fallback: "local", AutoThresholdPercent: 80}
 	appendCompleteTurns(t, store, 4)
+	beforeStats, err := a.RunStats()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var errorsSeen int
 	a.Subscribe(func(event protocol.AgentEvent) {
 		if event.Type == protocol.EvError {
@@ -569,5 +573,10 @@ func TestContextOverflowCompactsAndRetriesOnce(t *testing.T) {
 	}
 	if !provider.IsContextWindowExceeded(overflow) {
 		t.Fatal("overflow classifier rejected known diagnostic")
+	}
+	afterStats, statsErr := a.RunStats()
+	wantStats := session.AgentRunStats{Turns: beforeStats.Turns + 1, Steps: beforeStats.Steps + 1}
+	if statsErr != nil || afterStats != wantStats {
+		t.Fatalf("overflow recovery stats=%+v want=%+v err=%v", afterStats, wantStats, statsErr)
 	}
 }
