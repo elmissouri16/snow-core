@@ -1,12 +1,10 @@
 // Package session implements durable conversation storage in SQLite with
 // indexed tree branching (id/parentId), plus an in-memory variant for tests and
-// ephemeral SDK use. The legacy JSONL implementation remains only for isolated
-// old unit fixtures; the app and FileIndex use SQLite exclusively.
+// ephemeral SDK use.
 package session
 
 import (
 	"errors"
-	"os"
 	"sync"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -15,7 +13,7 @@ import (
 // SessionVersion is the current on-disk schema version.
 const SessionVersion = 11
 
-// Header is the first line of every session file.
+// Header is the immutable session metadata persisted by built-in stores.
 type Header struct {
 	Version         int    `json:"v"`
 	ID              string `json:"id"`
@@ -333,22 +331,6 @@ type MemoryStore struct {
 	subagents    map[string]SubagentRecord
 	activeBranch string
 	closed       bool
-}
-
-// ---------------------------------------------------------------------------
-// JSONL store
-// ---------------------------------------------------------------------------
-
-// JSONLStore persists entries as JSONL lines. Line 0 is the header.
-type JSONLStore struct {
-	mu      sync.RWMutex
-	path    string
-	header  Header
-	entries []Entry
-	byID    map[string]int
-	tip     string
-	f       *os.File
-	closed  bool
 }
 
 // ---------------------------------------------------------------------------

@@ -474,33 +474,3 @@ func (s *MemoryStore) BranchEntriesByID(ids []string) ([]Entry, error) {
 	}
 	return branchEntriesByID(s.entries, s.byID, ids)
 }
-
-// BranchHydration implements BranchHydrationStore for legacy fixtures.
-func (s *JSONLStore) BranchHydration() (BranchHydrationSnapshot, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
-		return BranchHydrationSnapshot{}, errors.New("session: store closed")
-	}
-	return buildBranchHydrationSnapshot(s.tip, pathFrom(s.entries, s.byID, s.tip)), nil
-}
-
-// BranchEntryPage implements BranchEntryPager for legacy fixtures.
-func (s *JSONLStore) BranchEntryPage(cursor string, limit int) (BranchEntryPage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
-		return BranchEntryPage{}, errors.New("session: store closed")
-	}
-	return branchEntryPage(s.entries, s.byID, cursor, limit)
-}
-
-// BranchEntriesByID implements BranchEntryLookup for legacy fixtures.
-func (s *JSONLStore) BranchEntriesByID(ids []string) ([]Entry, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
-		return nil, errors.New("session: store closed")
-	}
-	return branchEntriesByID(s.entries, s.byID, ids)
-}

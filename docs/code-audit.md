@@ -182,7 +182,7 @@ remain authoritative over this summary.
   topology.
 - **SES-02 — Normalize message topology** (High, closed). Entry ID/parent
   columns now normalize embedded messages on every append path and when
-  historical SQLite/JSONL records are read.
+  historical SQLite records are read.
 - **SES-03 — Eliminate session-directory collisions** (Critical, closed). New
   sessions use fixed-size `cwd-v2-<full-sha256>` directories. Listings search
   legacy slugs, filter by stored normalized CWD, and deduplicate paths.

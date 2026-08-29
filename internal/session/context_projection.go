@@ -85,10 +85,6 @@ func (s *SQLiteStore) ProjectBranchContext(entries []Entry) ([]protocol.Message,
 	return projectCompactedBranchContext(entries)
 }
 
-func (s *JSONLStore) ProjectBranchContext(entries []Entry) ([]protocol.Message, bool) {
-	return projectCompactedBranchContext(entries)
-}
-
 func latestContextCompaction(entries []Entry) (lastCompaction, boundaryPos int) {
 	lastCompaction, boundaryPos = -1, -1
 	hasCompaction := false

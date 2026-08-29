@@ -19,14 +19,9 @@ func hydrationStores(t *testing.T) map[string]Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jsonlStore, err := NewJSONLStore(filepath.Join(dir, "hydration.jsonl"), dir, Options{ID: "jsonl-hydration"})
-	if err != nil {
-		t.Fatal(err)
-	}
 	return map[string]Store{
 		"memory": NewMemoryStore(Options{ID: "memory-hydration"}),
 		"sqlite": sqliteStore,
-		"jsonl":  jsonlStore,
 	}
 }
 
@@ -76,7 +71,7 @@ func appendHydrationFixture(t *testing.T, store Store) {
 func TestBranchHydrationMatchesBuiltInStores(t *testing.T) {
 	stores := hydrationStores(t)
 	var reference BranchHydrationSnapshot
-	for _, name := range []string{"memory", "sqlite", "jsonl"} {
+	for _, name := range []string{"memory", "sqlite"} {
 		store := stores[name]
 		t.Run(name, func(t *testing.T) {
 			t.Cleanup(func() { _ = store.Close() })

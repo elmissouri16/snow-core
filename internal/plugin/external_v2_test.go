@@ -50,6 +50,30 @@ func TestReceivePluginResponsePrefersBufferedResponseAfterExit(t *testing.T) {
 	}
 }
 
+func TestExternalHostReportsPluginExit(t *testing.T) {
+	dir := t.TempDir()
+	bin := dir + "/crash"
+	src := dir + "/main.go"
+	if err := os.WriteFile(src, []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "build", "-o", bin, src).CombinedOutput()
+	if err != nil {
+		t.Fatalf("build: %v %s", err, out)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	host, err := SpawnExternal(ctx, publicplugin.PluginSpec{ID: "crash", Command: []string{bin}, Enabled: true}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close(context.Background())
+	if _, err := host.Initialize(ctx, "test", dir, "session", nil); err == nil {
+		t.Fatal("expected initialization error for exited plugin")
+	}
+}
+
 func TestExternalHostV2ConcurrentStringCorrelation(t *testing.T) {
 	bin := buildV2Plugin(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

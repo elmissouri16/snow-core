@@ -446,18 +446,19 @@ func TestAgentEndToEndPermissionMatrix(t *testing.T) {
 	}
 }
 
-// TestAgentEndToEndJSONLResumeAndContinuation verifies the durable path: a
-// completed turn is closed, reopened from its JSONL file, and then continued
-// by a new agent. It also verifies the provider receives the restored history.
-func TestAgentEndToEndJSONLResumeAndContinuation(t *testing.T) {
+// TestAgentEndToEndSQLiteResumeAndContinuation verifies the durable path: a
+// completed turn is closed, reopened from its SQLite database, and then
+// continued by a new agent. It also verifies the provider receives the
+// restored history.
+func TestAgentEndToEndSQLiteResumeAndContinuation(t *testing.T) {
 	root := t.TempDir()
-	path := filepath.Join(root, "session.jsonl")
+	path := filepath.Join(root, "session.db")
 
 	firstProvider := &e2eProvider{scripts: [][]protocol.StreamEvent{{
 		{Type: protocol.EvStreamTextDelta, Text: "first answer"},
 		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
 	}}}
-	firstStore, err := session.NewJSONLStore(path, root, session.Options{})
+	firstStore, err := session.NewSQLiteStore(path, root, session.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +474,7 @@ func TestAgentEndToEndJSONLResumeAndContinuation(t *testing.T) {
 		{Type: protocol.EvStreamTextDelta, Text: "second answer"},
 		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
 	}}}
-	secondStore, err := session.NewJSONLStore(path, root, session.Options{})
+	secondStore, err := session.OpenSQLiteStore(path, root, session.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

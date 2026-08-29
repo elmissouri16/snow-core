@@ -1,3 +1,5 @@
+// Package plugin contains the external extension lifecycle manager and
+// JSON-RPC protocol-v2 process adapter.
 package plugin
 
 import (
@@ -16,6 +18,12 @@ const (
 	defaultOutputBytes   = 256 * 1024
 	defaultProgressBytes = 16 * 1024
 )
+
+// RPCError mirrors a JSON-RPC error object returned by an external plugin.
+type RPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
 
 // ExternalInitResult is the version-2 initialize result.
 type ExternalInitResult struct {
