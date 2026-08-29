@@ -606,7 +606,10 @@ commands.
 
 ## Trusted project configuration
 
-`<project>/.snow/config.json` accepts only this restricted shape:
+`<project>/.snow/config.json` accepts only this restricted shape. Running the
+TUI `/init` command creates a minimal `{}` file when this project config is
+missing; it never overwrites an existing file or copies global settings and
+credentials into the project.
 
 ```json
 {

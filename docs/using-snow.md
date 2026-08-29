@@ -391,7 +391,7 @@ stored only with the active session for resume.
 | Command | Purpose |
 |---|---|
 | `/help` | Open a centered, scrollable reference for commands and active keybindings |
-| `/init` | Inspect the current project and create a tailored `AGENTS.md` contributor guide without overwriting an existing one |
+| `/init` | Create missing project initialization files: a tailored `AGENTS.md` guide and minimal `.snow/config.json`, without overwriting either target |
 | `/model [id]` | Open the model picker or select a model; provider/model/effort persist for the current project folder |
 | `/thinking [level]` | Open the centered effort card or directly choose and persist a model-supported effort for the current project folder |
 | `/settings` | Open the centered settings card for model, theme, response controls, session permission, subagents, skills, debug diagnostics, and keybindings |
@@ -453,14 +453,17 @@ depth, not a data-loss-prevention guarantee: prompts and tool output can contain
 other sensitive or proprietary data. Every dump carries a sharing warning;
 review it before moving or attaching it to an issue.
 
-`/init` runs a normal model-driven agent turn in Default mode. The agent first
-checks for `AGENTS.md` in Snow's current working directory, then inspects the
-checkout and writes a concise, repository-specific guide only when that target
-does not already exist. It never intentionally overwrites an existing guide.
-Repository inspection and creation use the normal tools, permission policy,
-configured path roots, and symlink protections; `/init` does not bypass a
-permission denial. A newly created guide is loaded as project context the next
-time Snow starts in its scope.
+`/init` runs a normal model-driven agent turn in Default mode. The agent checks
+`AGENTS.md` and `.snow/config.json` independently in Snow's current working
+directory and never intentionally overwrites either target. When `AGENTS.md` is
+missing, it inspects the checkout and writes a concise, repository-specific
+guide. When `.snow/config.json` is missing, it creates the minimal project
+configuration `{}` without copying global settings, provider configuration, or
+credentials. Repository inspection and creation use the normal tools,
+permission policy, configured path roots, and symlink protections; `/init` does
+not bypass a permission denial. The project guide and project configuration are
+loaded the next time Snow starts in their scope, subject to the normal project
+trust decision.
 
 ### Interactive keybindings
 

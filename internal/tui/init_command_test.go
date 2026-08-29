@@ -11,7 +11,7 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-func TestInitCommandStartsRepositoryGuideTurn(t *testing.T) {
+func TestInitCommandStartsProjectInitializationTurn(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 
@@ -45,10 +45,14 @@ func TestInitCommandStartsRepositoryGuideTurn(t *testing.T) {
 	prompt := sessionMessageText(messages[0])
 	for _, want := range []string{
 		"current working directory",
-		"If it exists, do not modify",
+		"`AGENTS.md` and `.snow/config.json` already exist",
+		"Treat the targets independently",
+		"Never modify, replace, append to, rename, or delete",
 		"inspect the repository",
 		"Use only facts verified from the checkout",
 		"200–400 words",
+		"create it with exactly this content",
+		"Do not copy global settings, provider configuration, credentials",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("init prompt missing %q: %q", want, prompt)

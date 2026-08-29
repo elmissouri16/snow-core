@@ -1212,11 +1212,14 @@ clipboard images in the agent composer or falls back to textarea paste.
 `/processes [id|name]`, `/sessions`, `/settings`, `/compact`, `/mcp`, `/skills`,
 `/tree`, `/quit`, and `/trust [allow|deny]`.
 
-`/init` is a model-driven Default-mode turn that inspects the checkout and asks
-the existing permissioned tool loop to create a repository-specific `AGENTS.md`
-in the current working directory. Its embedded task prompt forbids overwriting
-an existing target; the command does not add a second tool loop or bypass file
-roots, permission checks, or symlink protections.
+`/init` is a model-driven Default-mode turn that asks the existing permissioned
+tool loop to initialize two independent targets in the current working
+directory. It inspects the checkout before creating a repository-specific
+`AGENTS.md`, and creates a missing `.snow/config.json` as the minimal `{}`
+project configuration without copying global settings or credentials. Its
+embedded task prompt forbids overwriting either target; the command does not add
+a second tool loop or bypass file roots, permission checks, or symlink
+protections.
 
 `/processes` is a first-party TUI projection over the app-owned process manager,
 not a second lifecycle implementation or a public RPC/SDK process API. It polls
