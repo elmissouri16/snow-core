@@ -40,7 +40,7 @@ func TestRegisterBuiltins_DescriptionsDocumentOperationalBoundaries(t *testing.T
 		t.Fatal(err)
 	}
 	wantPhrases := map[string][]string{
-		"read":               {"regular file", "Rejects invalid UTF-8", "initial NUL-byte probe", "1-based line number"},
+		"read":               {"one exact regular file path", "use glob", "grep to locate content", "nonexistent path returns an error", "is not created", "Rejects invalid UTF-8", "initial NUL-byte probe", "1-based line number"},
 		"write":              {"atomically replace", "complete content", "Preserves existing file permissions"},
 		"edit":               {"literal text", "exactly once", "replace_all", "8 MiB"},
 		"bash":               {"POSIX sh", "OS privileges", "not confined to file-tool roots", "process_start"},
