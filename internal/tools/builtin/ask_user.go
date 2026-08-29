@@ -39,7 +39,7 @@ func (a *AskUser) Schema() tools.ToolSchema {
 	}
 	return tools.ToolSchema{
 		Name:        name,
-		Description: "Ask the user up to three short questions when their preference, clarification, or decision is required. Omit options for free-form input; choice questions automatically allow an Other answer.",
+		Description: "Pause the current turn to ask an interactive user up to three questions needed for a preference, clarification, or decision. Omit options for free-form answers; choice questions permit a custom answer, presented as Other in the TUI. Fails when no interactive input surface is available.",
 		Parameters: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,

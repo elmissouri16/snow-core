@@ -26,7 +26,7 @@ func (t *createTool) Run(_ context.Context, raw json.RawMessage, _ tools.ToolHos
 }
 
 func (*updateTool) Schema() protocol.ToolSchema {
-	return protocol.ToolSchema{Name: "update_goal", Description: "Set goal status only to complete or blocked. Complete requires a full evidence audit. Blocked requires reason describing the true external blocker after it recurs for at least 3 consecutive goal turns; never use blocked for ordinary unfinished work.", Parameters: json.RawMessage(`{"type":"object","required":["goal_id","status"],"properties":{"goal_id":{"type":"string"},"status":{"type":"string","enum":["complete","blocked"]},"reason":{"type":"string","maxLength":8192,"description":"Required when status is blocked; explain the true external blocker."}},"additionalProperties":false}`)}
+	return protocol.ToolSchema{Name: "update_goal", Description: "Set the active persisted goal to complete or blocked. Runtime requires a reason and at least three consecutive goal turns before blocked; blocked goals remain resumable. Call complete only after auditing the evidence, and use blocked only for a genuine recurring external blocker.", Parameters: json.RawMessage(`{"type":"object","required":["goal_id","status"],"properties":{"goal_id":{"type":"string","description":"ID of the current persisted goal."},"status":{"type":"string","enum":["complete","blocked"],"description":"Status to assign: complete is terminal; blocked is resumable."},"reason":{"type":"string","maxLength":8192,"description":"Required for blocked; describe the recurring external blocker."}},"additionalProperties":false}`)}
 }
 
 func (t *updateTool) Run(_ context.Context, raw json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {

@@ -765,7 +765,7 @@ func Tools(c *Controller) []tools.Tool {
 }
 
 func (*getTool) Schema() protocol.ToolSchema {
-	return protocol.ToolSchema{Name: "get_goal", Description: "Get the current persisted thread goal, status, usage, and remaining token budget.", Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}
+	return protocol.ToolSchema{Name: "get_goal", Description: "Get the current persisted thread-goal record, including status, configured token budget, accumulated token/time usage, and estimated costs. When a budget exists, compute remaining tokens as max(0, token_budget minus tokens_used).", Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}
 }
 
 func (t *getTool) Run(_ context.Context, _ json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {
@@ -778,5 +778,5 @@ func (t *getTool) Run(_ context.Context, _ json.RawMessage, _ tools.ToolHost) (t
 }
 
 func (*createTool) Schema() protocol.ToolSchema {
-	return protocol.ToolSchema{Name: "create_goal", Description: "Create a persisted goal only when explicitly requested by the user/system. token_budget is allowed only when explicit. Never silently replace an unfinished goal.", Parameters: json.RawMessage(`{"type":"object","required":["objective"],"properties":{"objective":{"type":"string"},"token_budget":{"type":"integer","minimum":1}},"additionalProperties":false}`)}
+	return protocol.ToolSchema{Name: "create_goal", Description: "Create an active persisted goal in a saved session. A prior terminal goal is replaced; creation fails while an unfinished goal exists. Call only when the user or system requested a goal, and pass token_budget only when an explicit budget was requested.", Parameters: json.RawMessage(`{"type":"object","required":["objective"],"properties":{"objective":{"type":"string","description":"Exact goal requested by the user or system."},"token_budget":{"type":"integer","minimum":1,"description":"Optional explicit token budget; omit when none was requested."}},"additionalProperties":false}`)}
 }

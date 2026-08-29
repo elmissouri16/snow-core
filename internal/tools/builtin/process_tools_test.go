@@ -39,7 +39,7 @@ func TestRegisterProcessToolsContractsAndRisks(t *testing.T) {
 		}
 	}
 	start, _ := registry.Descriptor("process_start")
-	for _, phrase := range []string{"development servers", "watchers", "long-running commands", "stable name", "startup log marker is sufficient", "prefer log readiness", "do not reconfirm"} {
+	for _, phrase := range []string{"development servers", "watchers", "long-running commands", "active session", "session switch or shutdown", "not validated", "detached descendants may escape", "stable name", "startup log marker is sufficient", "prefer log readiness", "do not reconfirm"} {
 		if !strings.Contains(start.Schema.Description, phrase) {
 			t.Fatalf("process_start description missing %q: %q", phrase, start.Schema.Description)
 		}
@@ -55,6 +55,12 @@ func TestRegisterProcessToolsContractsAndRisks(t *testing.T) {
 	httpOption := strings.Index(parameters, `"const":"http"`)
 	if logOption < 0 || tcpOption < 0 || httpOption < 0 || logOption > tcpOption || logOption > httpOption {
 		t.Fatalf("log readiness must be presented first: %s", parameters)
+	}
+	logs, _ := registry.Descriptor("process_logs")
+	for _, phrase := range []string{"next_cursor", "earliest retained byte", "omitted_bytes"} {
+		if !strings.Contains(logs.Schema.Description+string(logs.Schema.Parameters), phrase) {
+			t.Fatalf("process_logs contract missing %q: description=%q parameters=%s", phrase, logs.Schema.Description, logs.Schema.Parameters)
+		}
 	}
 	list, _ := registry.Descriptor("process_list")
 	if !strings.Contains(list.Schema.Description, "avoid duplicates") {

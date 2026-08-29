@@ -38,7 +38,7 @@ func (t *ArtifactRead) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "artifact_read",
 		Description: "Read a bounded line window from a private tool-result artifact in the current Snow session. Artifact IDs appear in pruned tool results; this tool never accepts filesystem paths.",
-		Parameters:  json.RawMessage(`{"type":"object","required":["artifact_id"],"properties":{"artifact_id":{"type":"string"},"offset":{"type":"integer","minimum":1,"default":1},"limit":{"type":"integer","minimum":1,"maximum":1000,"default":200}}}`),
+		Parameters:  json.RawMessage(`{"type":"object","required":["artifact_id"],"properties":{"artifact_id":{"type":"string","description":"Opaque artifact ID shown in a pruned tool result."},"offset":{"type":"integer","minimum":1,"default":1,"description":"1-based first line to return."},"limit":{"type":"integer","minimum":1,"maximum":1000,"default":200,"description":"Maximum lines to return; output is also capped at 64 KiB."}}}`),
 		Discovery:   &protocol.ToolDiscovery{Mode: protocol.ToolDiscoveryDeferred, Namespace: "artifacts", Keywords: []string{"artifact", "full tool result", "truncated output", "omitted output", "read artifact", "spill"}},
 	}
 }
@@ -169,7 +169,7 @@ func (t *ArtifactGrep) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "artifact_grep",
 		Description: "Search a private tool-result artifact in the current Snow session with an RE2 regular expression. Returns bounded matching lines with line numbers.",
-		Parameters:  json.RawMessage(`{"type":"object","required":["artifact_id","pattern"],"properties":{"artifact_id":{"type":"string"},"pattern":{"type":"string"},"ignore_case":{"type":"boolean"},"max_matches":{"type":"integer","minimum":1,"maximum":100,"default":50}}}`),
+		Parameters:  json.RawMessage(`{"type":"object","required":["artifact_id","pattern"],"properties":{"artifact_id":{"type":"string","description":"Opaque artifact ID shown in a pruned tool result."},"pattern":{"type":"string","description":"Go RE2 expression to search for."},"ignore_case":{"type":"boolean","default":false,"description":"Perform case-insensitive matching."},"max_matches":{"type":"integer","minimum":1,"maximum":100,"default":50,"description":"Maximum matching lines to return."}}}`),
 		Discovery:   &protocol.ToolDiscovery{Mode: protocol.ToolDiscoveryDeferred, Namespace: "artifacts", Keywords: []string{"artifact grep", "search artifact", "full tool result", "truncated output", "omitted output", "find in spill"}},
 	}
 }

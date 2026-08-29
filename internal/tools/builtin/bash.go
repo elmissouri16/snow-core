@@ -49,7 +49,7 @@ func (b *Bash) Schema() tools.ToolSchema {
   "required": ["command"],
   "properties": {
     "command": { "type": "string", "description": "Shell command to execute. Must be non-interactive." },
-    "timeout_ms": { "type": "integer", "default": 120000, "description": "Timeout in milliseconds." }
+    "timeout_ms": { "type": "integer", "default": 120000, "description": "Requested timeout in milliseconds, capped by the configured command timeout." }
   }
 }`),
 	}

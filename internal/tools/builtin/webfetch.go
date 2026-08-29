@@ -94,14 +94,14 @@ func NewWebFetch() *WebFetch {
 func (w *WebFetch) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name: "webfetch",
-		Description: "Fetch a public HTTP(S) URL with Surf's Chrome browser impersonation and return bounded readable Markdown or text. " +
-			"This performs a static request and does not execute JavaScript.",
+		Description: "Fetch one public HTTP(S) URL with Surf's Chrome browser impersonation and return bounded readable Markdown or text. " +
+			"Redirects to private or non-HTTP(S) destinations are blocked; this is a static request and does not execute JavaScript.",
 		Parameters: json.RawMessage(`{
   "type": "object",
   "required": ["url"],
   "properties": {
     "url": {"type": "string", "description": "Public absolute HTTP or HTTPS URL to fetch."},
-    "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 30000, "default": 30000}
+    "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 30000, "default": 30000, "description": "Request timeout in milliseconds, capped by the configured tool timeout."}
   }
 }`),
 		Discovery: &protocol.ToolDiscovery{

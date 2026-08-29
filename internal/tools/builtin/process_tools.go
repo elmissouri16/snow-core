@@ -64,13 +64,13 @@ type processStartArgs struct {
 func (t *processStartTool) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "process_start",
-		Description: "Prefer this for development servers, preview servers, watchers, background workers, and other long-running commands. Starts one managed non-interactive process that persists across later turns and stops when Snow closes; use a stable name. A stable startup log marker is sufficient readiness evidence: prefer log readiness and do not reconfirm it with TCP or HTTP.",
+		Description: "Prefer this for development servers, preview servers, watchers, background workers, and other long-running commands. Starts one managed non-interactive POSIX-shell command in the active session. It persists across turns; Snow stops the managed process group on session switch or shutdown. Use a stable name. Do not background or detach the command: this convention is not validated, and detached descendants may escape management. A stable startup log marker is sufficient readiness evidence; prefer log readiness and do not reconfirm it with TCP or HTTP.",
 		Parameters: json.RawMessage(`{
   "type":"object",
   "additionalProperties":false,
   "required":["command"],
   "properties":{
-    "command":{"type":"string","description":"Non-interactive POSIX shell command to run in the project directory without shell backgrounding such as trailing &, nohup, or disown."},
+    "command":{"type":"string","description":"Non-interactive POSIX shell command to run in the project directory without shell backgrounding or detachment such as &, nohup, disown, or setsid. Snow does not validate this convention, and detached descendants may escape management."},
     "name":{"type":"string","pattern":"^[a-z][a-z0-9_-]{0,63}$","description":"Optional stable safe display name, unique among running processes."},
     "readiness":{
       "description":"Optional reliable startup evidence. A stable log marker is sufficient and preferred. Use TCP or HTTP only when the user explicitly requests service/network health or no reliable log marker exists; do not guess ports, URLs, or patterns.",
@@ -109,7 +109,7 @@ type processIDArgs struct {
 }
 
 func (t *processStatusTool) Schema() tools.ToolSchema {
-	return tools.ToolSchema{Name: "process_status", Description: "Get the current state of one managed process by its opaque process ID.", Parameters: processIDSchema()}
+	return tools.ToolSchema{Name: "process_status", Description: "Get one managed process's lifecycle state, readiness, timestamps, and exit details by opaque process ID.", Parameters: processIDSchema()}
 }
 
 func (t *processStatusTool) Run(_ context.Context, args json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {
@@ -136,15 +136,15 @@ type processLogsArgs struct {
 func (t *processLogsTool) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "process_logs",
-		Description: "Read bounded combined stdout/stderr from a managed process using a retry-safe cursor.",
+		Description: "Read bounded combined stdout/stderr from a managed process. Pass the returned next_cursor to continue without replaying output; optionally wait for output or process exit.",
 		Parameters: json.RawMessage(`{
   "type":"object",
   "additionalProperties":false,
   "required":["process_id"],
   "properties":{
-    "process_id":{"type":"string"},
-    "cursor":{"type":"integer","minimum":0},
-    "max_bytes":{"type":"integer","minimum":4},
+    "process_id":{"type":"string","description":"Opaque managed process ID returned by process_start or process_list."},
+    "cursor":{"type":"integer","minimum":0,"description":"Byte cursor returned as next_cursor. If older output was evicted, reading resumes at the earliest retained byte and omitted_bytes reports the gap; omit to start at the earliest retained output."},
+    "max_bytes":{"type":"integer","minimum":4,"description":"Maximum output bytes to return, capped by the process manager."},
     "wait_ms":{"type":"integer","minimum":0,"maximum":30000,"description":"Optionally wait for new output or process exit."}
   }
 }`),
@@ -179,8 +179,8 @@ func (t *processStopTool) Schema() tools.ToolSchema {
   "additionalProperties":false,
   "required":["process_id"],
   "properties":{
-    "process_id":{"type":"string"},
-    "grace_ms":{"type":"integer","minimum":1,"maximum":30000,"default":2000}
+    "process_id":{"type":"string","description":"Opaque managed process ID to stop."},
+    "grace_ms":{"type":"integer","minimum":1,"maximum":30000,"default":2000,"description":"Grace period after graceful termination before force-killing the process group."}
   }
 }`),
 	}
@@ -213,7 +213,7 @@ func (t *processListTool) Run(context.Context, json.RawMessage, tools.ToolHost) 
 }
 
 func processIDSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","additionalProperties":false,"required":["process_id"],"properties":{"process_id":{"type":"string"}}}`)
+	return json.RawMessage(`{"type":"object","additionalProperties":false,"required":["process_id"],"properties":{"process_id":{"type":"string","description":"Opaque managed process ID returned by process_start or process_list."}}}`)
 }
 
 func processStartErrorResult(state managedprocess.State, runErr error) tools.ToolResult {

@@ -33,7 +33,7 @@ func NewSearchTools(router tools.Router, registry tools.Registry) *SearchTools {
 func (s *SearchTools) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "search_tools",
-		Description: "Search deferred tools by capability. Matching tool schemas become available on the next model step.",
+		Description: "Search metadata for currently deferred tools by capability or operation. Selected schemas become callable on the next model step; this does not execute the matched tools.",
 		Parameters: json.RawMessage(`{
   "type": "object",
   "required": ["query"],

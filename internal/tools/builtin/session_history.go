@@ -63,7 +63,7 @@ func (s *SessionSearch) Schema() tools.ToolSchema {
   "required": ["query"],
   "properties": {
     "query": {"type": "string", "description": "Terms that must occur in a matching historical entry."},
-    "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5}
+    "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5, "description": "Maximum historical entry matches to return."}
   }
 }`),
 		Discovery: &protocol.ToolDiscovery{
@@ -130,7 +130,7 @@ func (s *SessionReference) Schema() tools.ToolSchema {
     "session_id": {"type": "string", "description": "Source session ID returned by session_search."},
     "branch_id": {"type": "string", "description": "Source branch ID returned by session_search."},
     "tip_id": {"type": "string", "description": "Captured source tip returned by session_search; capture fails if it changed."},
-    "max_bytes": {"type": "integer", "minimum": 1024, "maximum": 262144, "default": 65536}
+    "max_bytes": {"type": "integer", "minimum": 1024, "maximum": 262144, "default": 65536, "description": "Maximum serialized snapshot bytes to import."}
   }
 }`),
 		Discovery: &protocol.ToolDiscovery{

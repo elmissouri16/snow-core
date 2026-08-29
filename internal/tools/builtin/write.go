@@ -33,7 +33,7 @@ type writeArgs struct {
 func (w *Write) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "write",
-		Description: "Create a new file or atomically overwrite an existing one within allowed roots.",
+		Description: "Create a file or atomically replace an existing regular file within allowed roots using the complete content supplied. Preserves existing file permissions on replacement.",
 		Parameters: json.RawMessage(`{
   "type": "object",
   "required": ["path", "content"],

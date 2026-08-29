@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,36 @@ func TestRegisterBuiltins_RegistersAll(t *testing.T) {
 	ask, ok := reg.Descriptor("ask_user")
 	if !ok || ask.Risk != permission.RiskRead || ask.Schema.Discovery != nil {
 		t.Fatalf("ask_user descriptor = %+v", ask)
+	}
+}
+
+func TestRegisterBuiltins_DescriptionsDocumentOperationalBoundaries(t *testing.T) {
+	reg := tools.NewRegistry()
+	if err := RegisterBuiltins(reg, Options{Roots: []string{t.TempDir()}}); err != nil {
+		t.Fatal(err)
+	}
+	wantPhrases := map[string][]string{
+		"read":               {"regular file", "Rejects invalid UTF-8", "initial NUL-byte probe", "1-based line number"},
+		"write":              {"atomically replace", "complete content", "Preserves existing file permissions"},
+		"edit":               {"literal text", "exactly once", "replace_all", "8 MiB"},
+		"bash":               {"POSIX sh", "OS privileges", "not confined to file-tool roots", "process_start"},
+		"grep":               {"Go RE2", "ignore rules by default", "never follows symlinks"},
+		"glob":               {"regular-file paths", "** matches zero or more directories", "never followed"},
+		"ask_user":           {"interactive user", "free-form answers", "custom answer", "Other in the TUI", "no interactive input surface"},
+		"request_user_input": {"interactive user", "free-form answers", "custom answer", "Other in the TUI", "no interactive input surface"},
+		"update_plan":        {"current task TODO/checklist", "At most one step", "does not enter Plan mode"},
+		"webfetch":           {"public HTTP(S) URL", "private or non-HTTP(S) destinations are blocked", "does not execute JavaScript"},
+	}
+	for name, phrases := range wantPhrases {
+		descriptor, ok := reg.Descriptor(name)
+		if !ok {
+			t.Fatalf("descriptor %q missing", name)
+		}
+		for _, phrase := range phrases {
+			if !strings.Contains(descriptor.Schema.Description, phrase) {
+				t.Errorf("%s description missing %q: %q", name, phrase, descriptor.Schema.Description)
+			}
+		}
 	}
 }
 

@@ -47,7 +47,7 @@ type editArgs struct {
 func (e *Edit) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "edit",
-		Description: "Replace exact text in a bounded file within allowed roots. Existing and resulting files are limited to 8 MiB by default.",
+		Description: "Atomically replace literal text in one existing regular file within allowed roots. old_str must occur exactly once unless replace_all is true; input and output are limited to 8 MiB by default.",
 		Parameters: json.RawMessage(`{
   "type": "object",
   "required": ["path", "old_str", "new_str"],

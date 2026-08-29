@@ -18,15 +18,15 @@ func NewUpdatePlan() *UpdatePlan { return &UpdatePlan{} }
 func (*UpdatePlan) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "update_plan",
-		Description: "Updates the task TODO/checklist. Provide an optional explanation and plan items. At most one item may be in_progress. This tool is not Plan mode.",
+		Description: "In Default mode, replace the current task TODO/checklist with one or more ordered steps and statuses. At most one step may be in_progress. This tool is unavailable in Plan mode and does not enter Plan mode.",
 		Parameters: json.RawMessage(`{
   "type":"object","additionalProperties":false,"required":["plan"],
   "properties":{
-    "explanation":{"type":"string"},
-    "plan":{"type":"array","items":{"type":"object","additionalProperties":false,
+    "explanation":{"type":"string","description":"Optional short reason for this checklist update."},
+    "plan":{"type":"array","minItems":1,"description":"Complete replacement checklist in display order.","items":{"type":"object","additionalProperties":false,
       "required":["step","status"],"properties":{
-        "step":{"type":"string"},
-        "status":{"type":"string","enum":["pending","in_progress","completed"]}
+        "step":{"type":"string","description":"Concrete task step."},
+        "status":{"type":"string","enum":["pending","in_progress","completed"],"description":"Current step state."}
       }}}
   }
 }`),

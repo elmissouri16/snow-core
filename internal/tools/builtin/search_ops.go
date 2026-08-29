@@ -32,7 +32,7 @@ func NewGrep(guard *PathGuard) *Grep {
 func (g *Grep) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "grep",
-		Description: "Search text files with a regular expression within allowed roots. Returns matching lines with paths and line numbers.",
+		Description: "Search one file or recursively search regular text files within allowed roots using a Go RE2 expression. Returns bounded path, line number, and matching text; respects ignore rules by default and never follows symlinks.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"required": ["pattern"],
@@ -41,7 +41,7 @@ func (g *Grep) Schema() tools.ToolSchema {
 				"path": {"type": "string", "description": "File or directory to search. Defaults to cwd."},
 				"glob": {"type": "string", "description": "Filename/path glob filter, for example '*.go' or '**/*.md'. Empty matches all files."},
 				"ignore_case": {"type": "boolean", "default": false},
-				"max_matches": {"type": "integer", "description": "Maximum matching lines to return (default 1000)"},
+				"max_matches": {"type": "integer", "description": "Per-call match cap. Omitted or non-positive uses the configured cap, which defaults to 1000; this can lower but not raise that cap."},
 				"hidden": {"type": "boolean", "description": "Include hidden files/directories for this call"},
 				"include_ignored": {"type": "boolean", "description": "Bypass soft ignore rules (never .git or symlinks)"},
 				"exclude": {"type": "array", "items":{"type":"string"}, "description":"Additional path globs to exclude"}
@@ -201,14 +201,14 @@ func NewGlob(guard *PathGuard) *Glob {
 func (g *Glob) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "glob",
-		Description: "List regular files matching a path glob within allowed roots. Use ** to match zero or more directories.",
+		Description: "List bounded regular-file paths matching a glob within allowed roots. Patterns are relative to path, ** matches zero or more directories, ignore rules apply by default, and symlinks are never followed.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"required": ["pattern"],
 			"properties": {
 				"pattern": {"type": "string", "description": "Glob pattern, for example '*.go', 'src/*.go', or '**/*_test.go'"},
 				"path": {"type": "string", "description": "File or directory to search. Defaults to cwd."},
-				"max_results": {"type": "integer", "description": "Maximum paths to return (default 500)"},
+				"max_results": {"type": "integer", "description": "Per-call result cap. Omitted or non-positive uses the configured cap, which defaults to 500; this can lower but not raise that cap."},
 				"hidden": {"type": "boolean", "description": "Include hidden files/directories for this call"},
 				"include_ignored": {"type": "boolean", "description": "Bypass soft ignore rules (never .git or symlinks)"},
 				"exclude": {"type": "array", "items":{"type":"string"}, "description":"Additional path globs to exclude"}

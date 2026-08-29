@@ -153,7 +153,7 @@ func (t *ReadResourceTool) Schema() tools.ToolSchema {
 			"path": map[string]any{"type": "string", "description": "Skill-root-relative resource path."},
 		},
 	})
-	return tools.ToolSchema{Name: "read_skill_resource", Description: "Read one script, reference, template, or asset from an Agent Skill without granting general filesystem access to the skill directory.", Parameters: params}
+	return tools.ToolSchema{Name: "read_skill_resource", Description: "Read one skill-root-relative resource up to 2 MiB. UTF-8 text is returned directly; binary or NUL-containing content is returned as base64. Paths cannot escape the selected skill directory.", Parameters: params}
 }
 
 func (t *ReadResourceTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {

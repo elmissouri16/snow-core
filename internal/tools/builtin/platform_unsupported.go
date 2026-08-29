@@ -18,7 +18,7 @@ func shellCommand(context.Context, string, []string, string) (*exec.Cmd, error) 
 }
 
 func shellDescription() string {
-	return "Shell execution is available on macOS and Linux."
+	return "Unavailable on this platform: bounded non-interactive POSIX shell execution requires macOS or Linux."
 }
 
 func validatePlatformPath(string) error { return errUnsupportedPlatform }

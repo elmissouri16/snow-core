@@ -437,6 +437,22 @@ func TestManagedObjectiveRejectsPostCreateSymlinkSwap(t *testing.T) {
 	}
 }
 
+func TestGoalToolDescriptionsMatchPersistedLifecycle(t *testing.T) {
+	c, _ := New(persisted(t), t.TempDir(), nil)
+	wantPhrases := map[string][]string{
+		"get_goal":    {"configured token budget", "tokens_used", "estimated costs"},
+		"create_goal": {"saved session", "prior terminal goal is replaced", "unfinished goal exists", "explicit budget"},
+		"update_goal": {"at least three consecutive goal turns", "remain resumable", "auditing the evidence"},
+	}
+	for _, tool := range Tools(c) {
+		for _, phrase := range wantPhrases[tool.Schema().Name] {
+			if !strings.Contains(tool.Schema().Description, phrase) {
+				t.Errorf("%s description missing %q: %q", tool.Schema().Name, phrase, tool.Schema().Description)
+			}
+		}
+	}
+}
+
 func TestGoalToolsPrivateAndOwnership(t *testing.T) {
 	c, _ := New(persisted(t), t.TempDir(), nil)
 	var create, update tools.Tool

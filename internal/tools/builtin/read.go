@@ -44,7 +44,7 @@ type readArgs struct {
 func (r *Read) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "read",
-		Description: "Read a UTF-8 text file within allowed roots. Use offset and limit for large files.",
+		Description: "Read bounded UTF-8 text from one regular file within allowed roots. Rejects invalid UTF-8 and files detected as binary by an initial NUL-byte probe; offset is a 1-based line number and limit is a maximum line count.",
 		Parameters: json.RawMessage(`{
   "type": "object",
   "required": ["path"],

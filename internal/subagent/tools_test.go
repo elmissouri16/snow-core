@@ -102,6 +102,35 @@ func TestManagerToolsDriveLifecycle(t *testing.T) {
 	}
 }
 
+func TestToolDescriptionsDocumentSharedStateAndLifecycle(t *testing.T) {
+	wantPhrases := map[string][]string{
+		"spawn_agent":     {"separate conversation context", "shared working directory", "OS privileges", "disjoint ownership", "configuration may change"},
+		"followup_task":   {"automatically reopening", "active target may consume", "follow-up turn"},
+		"interrupt_agent": {"queued or running work", "no work is changed"},
+		"close_agent":     {"not_loaded", "cannot be closed", "later resume"},
+	}
+	for name, phrases := range wantPhrases {
+		schema := toolSchemas[name]
+		for _, phrase := range phrases {
+			if !strings.Contains(schema.Description, phrase) {
+				t.Errorf("%s description missing %q: %q", name, phrase, schema.Description)
+			}
+		}
+	}
+	spawnParameters := string(toolSchemas["spawn_agent"].Parameters)
+	for _, phrase := range []string{"Sanitized parent conversation", "last N user turns", "incomplete tool pairs are excluded"} {
+		if !strings.Contains(spawnParameters, phrase) {
+			t.Errorf("spawn_agent parameters missing %q: %s", phrase, spawnParameters)
+		}
+	}
+	waitParameters := string(toolSchemas["wait_agent"].Parameters)
+	for _, phrase := range []string{"configured default", "clamped upward", "configured maximum fail"} {
+		if !strings.Contains(waitParameters, phrase) {
+			t.Errorf("wait_agent parameters missing %q: %s", phrase, waitParameters)
+		}
+	}
+}
+
 func TestDecodeStrictAcceptsRawCompatibilityEnvelope(t *testing.T) {
 	var got protocol.SpawnSubagentRequest
 	raw := json.RawMessage(`{"_raw":"{\"name\":\"demo-index\",\"task\":\"inspect\",\"fork_turns\":\"none\"}"}`)
@@ -233,15 +262,15 @@ func TestListSubagentModelsReturnsExactPairs(t *testing.T) {
 	}
 }
 
-func TestSpawnAgentSchemaExplainsBuiltInRoles(t *testing.T) {
+func TestSpawnAgentSchemaExplainsContextAndConfiguredRoles(t *testing.T) {
 	schema := toolSchemas["spawn_agent"]
-	for _, want := range []string{"canonical /root/", "hyphens normalize to underscores", "list_subagent_models", "general role", "explorer", "implementer", "permission-gated bash", "write/edit"} {
+	for _, want := range []string{"canonical /root/", "hyphens normalize to underscores", "list_subagent_models", "separate conversation context", "shared working directory", "OS privileges", "disjoint ownership", "Built-in role defaults", "configuration may change"} {
 		if !strings.Contains(schema.Description, want) {
 			t.Fatalf("spawn_agent description missing %q: %q", want, schema.Description)
 		}
 	}
 	parameters := string(schema.Parameters)
-	for _, want := range []string{`"maxLength":64`, `"pattern":"^[a-z][a-z0-9_-]{0,63}$"`, `"pattern":"^(none|all|[1-9][0-9]*)$"`, "positive integer string", `"description":"Optional role:`, `"provider"`, `"required":["name","task"]`, "configured subagent default model", "Omit to use the configured default role"} {
+	for _, want := range []string{`"maxLength":64`, `"pattern":"^[a-z][a-z0-9_-]{0,63}$"`, `"pattern":"^(none|all|[1-9][0-9]*)$"`, "positive integer string", `"description":"Optional configured role;`, `"provider"`, `"required":["name","task"]`, "configured subagent default model", "configured default", "Sanitized parent conversation", "incomplete tool pairs are excluded"} {
 		if !strings.Contains(parameters, want) {
 			t.Fatalf("spawn_agent schema missing %q: %s", want, schema.Parameters)
 		}
