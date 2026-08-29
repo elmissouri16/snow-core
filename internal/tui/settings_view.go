@@ -68,6 +68,7 @@ func (m *Model) settingsCardRows() []settingsCardRow {
 		{text: "Subagents  " + onOff(m.app.Cfg.Subagents.Enabled) + " (restart to apply)", available: true},
 		{text: concurrency, available: true},
 		{text: "Agent Skills  " + onOff(!m.app.Cfg.Skills.Disabled) + " (restart to apply)", available: true},
+		{text: "Debug diagnostics  " + onOff(m.app.DebugStatus().Enabled) + " (captures sensitive content)", available: true},
 		{text: "Keybindings  configure shortcuts", available: true},
 	}
 }

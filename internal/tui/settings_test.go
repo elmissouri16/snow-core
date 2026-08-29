@@ -91,7 +91,7 @@ func TestSettingsPanelNavigationAndSessionPermission(t *testing.T) {
 		t.Fatal("/settings did not open the panel")
 	}
 	view := stripANSI(m.renderSettings())
-	for _, want := range []string{"Model", "Thinking effort", "Reasoning summary", "Text verbosity", "Session permission", "Subagents", "Concurrent subagents", "Agent Skills", "ChatGPT only"} {
+	for _, want := range []string{"Model", "Thinking effort", "Reasoning summary", "Text verbosity", "Session permission", "Subagents", "Concurrent subagents", "Agent Skills", "Debug diagnostics", "ChatGPT only"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("settings panel missing %q: %q", want, view)
 		}

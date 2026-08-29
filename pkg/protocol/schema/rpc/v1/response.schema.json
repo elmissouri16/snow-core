@@ -411,6 +411,118 @@
           "const": "response"
         },
         "command": {
+          "enum": [
+            "debug_clear",
+            "debug_disable",
+            "debug_enable",
+            "debug_status"
+          ]
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "enabled",
+            "event_count",
+            "retained_bytes",
+            "dropped_events",
+            "max_events",
+            "max_bytes"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "started_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "event_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "dropped_events": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_events": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_bytes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "debug_dump"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "path",
+            "warning"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "warning": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
           "const": "diagnostics"
         },
         "success": {
@@ -583,6 +695,11 @@
               "branches_list",
               "branch_rename",
               "compact",
+              "debug_clear",
+              "debug_disable",
+              "debug_dump",
+              "debug_enable",
+              "debug_status",
               "diagnostics",
               "mcp_servers",
               "messages_list",

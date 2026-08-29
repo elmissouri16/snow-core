@@ -302,6 +302,48 @@ func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.
 			}
 		}
 		m.setModel(selected)
+	case "/debug":
+		if len(args) == 0 {
+			model, next := m.startSettings()
+			m.settingsIndex = settingsDebug
+			return model, next
+		}
+		switch args[0] {
+		case "status":
+			if len(args) != 1 {
+				m.pushLine(styleError.Render("usage: /debug status"))
+				return m, nil
+			}
+			m.pushLine(styleFooter.Render(m.debugStatusLine()))
+		case "on", "off":
+			if len(args) != 1 {
+				m.pushLine(styleError.Render("usage: /debug on|off"))
+				return m, nil
+			}
+			enabled := args[0] == "on"
+			if err := m.setDebugEnabled(enabled); err != nil {
+				m.pushLine(styleError.Render(err.Error()))
+			} else {
+				m.pushLine(styleFooter.Render("debug diagnostics " + onOff(enabled) + "; captured data may be sensitive"))
+			}
+		case "clear":
+			if len(args) != 1 {
+				m.pushLine(styleError.Render("usage: /debug clear"))
+				return m, nil
+			}
+			return m.startDebugClear()
+		case "dump":
+			rawPath := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(line, "/debug")), "dump"))
+			path, err := parseDebugDumpPath(rawPath)
+			if err != nil {
+				m.pushLine(styleError.Render(err.Error()))
+				return m, nil
+			}
+			return m.startDebugDump(path)
+		default:
+			m.pushLine(styleError.Render("usage: /debug [status|on|off|clear|dump [path]]"))
+		}
+		return m, nil
 	case "/settings":
 		if len(args) > 0 {
 			m.pushLine(styleError.Render("/settings takes no arguments"))

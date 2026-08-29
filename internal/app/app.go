@@ -9,6 +9,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/artifact"
 	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/internal/config"
+	"github.com/elmissouri16/snow-core/internal/diagnostics"
 	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
 	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -68,6 +69,8 @@ type App struct {
 	SkillDiagnostics []skills.Diagnostic
 	Subagents        *subagent.Manager
 	Diagnostics      []config.Diagnostic
+	Debugger         *diagnostics.Recorder
+	DebugDumpPath    string
 	SearchPolicy     config.EffectiveSearchPolicy
 	ProjectAllowed   bool
 	ProjectInputRoot string
@@ -77,6 +80,7 @@ type App struct {
 	diagnosticsMu        sync.Mutex
 	diagnosticsCacheKey  string
 	diagnosticsCache     []protocol.ConfigDiagnostic
+	diagnosticSecrets    []string
 	permissionBaseline   permission.Mode
 	permissionOverride   bool
 	modelCatalog         map[string][]protocol.Model
@@ -129,16 +133,20 @@ type Options struct {
 	CollaborationMode       string
 	PlanModeReasoningEffort string
 	// Retry overrides global retry policy for this runtime only.
-	Retry      *config.RetryConfig
-	NoSession  bool   // in-memory session (SDK ephemeral)
-	BaseURL    string // active provider base URL override
-	Plugins    []publicplugin.PluginSpec
-	GoPlugins  []publicplugin.Plugin
-	NoPlugins  bool
-	MCPServers []publicmcp.ServerSpec
-	NoMCP      bool
-	SkillDirs  []string
-	NoSkills   bool
+	Retry *config.RetryConfig
+	// Debug overrides persisted diagnostics enablement for this runtime when set.
+	Debug *bool
+	// DebugDumpPath creates one final diagnostic dump during App.Close.
+	DebugDumpPath string
+	NoSession     bool   // in-memory session (SDK ephemeral)
+	BaseURL       string // active provider base URL override
+	Plugins       []publicplugin.PluginSpec
+	GoPlugins     []publicplugin.Plugin
+	NoPlugins     bool
+	MCPServers    []publicmcp.ServerSpec
+	NoMCP         bool
+	SkillDirs     []string
+	NoSkills      bool
 	// UserInputHandler answers ask_user calls for embedded/headless clients.
 	// Nil keeps the tool directly visible but makes calls fail fast until an
 	// interactive surface enables manual replies.

@@ -39,6 +39,7 @@ and the supported global/project fields.
 | `~/.snow/keybindings.yaml` | Global TUI key overrides | Strict versioned YAML, maximum 64 KiB |
 | `~/.snow/themes/*.yaml` | Global custom themes | Up to 64 regular non-symlink files |
 | `~/.snow/search.yaml` | Global grep/glob policy | Strict versioned YAML |
+| `~/.snow/diagnostics/` | Explicit diagnostic dumps with generated names | Atomic mode-`0600` JSON files; created only on request or configured close-time dump |
 | `<project>/.snow/config.json` | Restricted project extensions/preferences | Read only after project trust is allowed |
 | `<project>/.snow/keybindings.yaml` | Project key overrides | Trusted project only |
 | `<project>/.snow/themes/*.yaml` | Project custom themes | Trusted project only; wins by theme name |
@@ -54,6 +55,10 @@ Environment overrides:
 | `OPENAI_API_KEY` | Optional fallback Bearer credential for the legacy `openai-compatible` profile only |
 | `XDG_DATA_HOME` | Included when discovering compatible OpenCode ChatGPT credentials |
 | `SNOW_DEBUG` | File path for TUI debug logs, for example `SNOW_DEBUG=/tmp/snow.log`; intended for development |
+
+`SNOW_DEBUG` is the pre-existing Bubble Tea development logger and is separate
+from shared diagnostic capture. It does not enable `debug.enabled`, event
+recording, or diagnostic dumps.
 
 ## Precedence
 
@@ -154,6 +159,9 @@ A representative configuration:
     "theme": "default",
     "mouse": true
   },
+  "debug": {
+    "enabled": false
+  },
   "skills": {
     "disabled": false,
     "dirs": [],
@@ -233,6 +241,16 @@ fills required zero-value defaults before validation.
 | `context_cap_bytes` | `102400` | Hard cap for loaded project instructions and maximum configured system-prompt file size |
 | `fixed_context_budget_percent` | `25` (`10..50`) | Operator-owned admission budget for recurring system instructions, active skills, conditional guidance, and exposed tool schemas as a share of the selected model window; unknown windows use a 32,768-token fallback |
 | `system_prompt_file` | unset | Markdown/text file replacing the embedded base preamble; relative paths resolve from the loaded config file's directory (normally the global config directory; `--config`/`ConfigPath` can override it) and `~` is supported |
+| `debug.enabled` | `false` | Persisted opt-in for shared bounded diagnostic event capture across TUI, print/JSON, RPC, and SDK runtimes. The TUI **Debug diagnostics** setting and `/debug on|off` update this global field. |
+
+`--debug` and `--no-debug` override `debug.enabled` for one CLI process without
+rewriting configuration. `--debug-dump PATH` enables capture and writes a
+final dump during normal shutdown; it conflicts with `--no-debug`. An omitted
+or blank dump path creates a unique JSON file under
+`$SNOW_HOME/diagnostics`; relative paths resolve from Snow's working directory.
+The runtime can also create a dump through `/debug dump [PATH]`, RPC, or the Go
+SDK. Capture remains disabled by default, and disabling it retains existing
+records until they are explicitly cleared.
 
 The fixed-context budget measures the final serialized system prompt and exposed
 schemas; it does not count conversation messages or internal turn fragments.

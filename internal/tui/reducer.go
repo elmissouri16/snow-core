@@ -293,6 +293,24 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Re-arm immediately; the mailbox self-signals while more batches wait.
 		cmds = append(cmds, waitForEvent(m.events))
+	case debugClearDoneMsg:
+		m.lastStatus = ""
+		if msg.err != nil {
+			m.pushLine(styleError.Render("debug clear: " + msg.err.Error()))
+			return m, nil
+		}
+		m.pushLine(styleFooter.Render("debug event capture cleared"))
+		return m, nil
+	case debugDumpDoneMsg:
+		if msg.err != nil {
+			m.lastStatus = ""
+			m.pushLine(styleError.Render("debug dump: " + msg.err.Error()))
+			return m, nil
+		}
+		m.lastStatus = "diagnostic dump created"
+		m.pushLine(styleFooter.Render("diagnostic dump: " + msg.path))
+		m.pushLine(styleTool.Render("warning: dump contains full prompts, responses, thinking, tool data, errors, paths, and session state; review before sharing"))
+		return m, nil
 	case compactDoneMsg:
 		if msg.generation != m.compactGeneration {
 			return m, nil

@@ -38,6 +38,17 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	if opts.EnableSubagents && opts.DisableSubagents {
 		return nil, errors.New("snowsdk: EnableSubagents and DisableSubagents conflict")
 	}
+	var debug *bool
+	if opts.EnableDebug || opts.DisableDebug {
+		enabled := opts.EnableDebug && !opts.DisableDebug
+		debug = &enabled
+	}
+	if opts.EnableDebug && opts.DisableDebug {
+		return nil, errors.New("snowsdk: EnableDebug and DisableDebug conflict")
+	}
+	if opts.DisableDebug && opts.DebugDumpPath != "" {
+		return nil, errors.New("snowsdk: DisableDebug and DebugDumpPath conflict")
+	}
 	var retry *config.RetryConfig
 	if opts.Retry != nil {
 		profile := func(value RetryProfile) config.RetryProfileConfig {
@@ -64,6 +75,8 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		CollaborationMode:       opts.CollaborationMode,
 		PlanModeReasoningEffort: opts.PlanModeReasoningEffort,
 		Retry:                   retry,
+		Debug:                   debug,
+		DebugDumpPath:           opts.DebugDumpPath,
 		APIKey:                  opts.APIKey,
 		BaseURL:                 opts.BaseURL,
 		Plugins:                 opts.Plugins,

@@ -703,6 +703,7 @@ const (
 	settingsSubagents
 	settingsSubagentConcurrency
 	settingsSkills
+	settingsDebug
 	settingsKeybindings
 	settingsCount
 )

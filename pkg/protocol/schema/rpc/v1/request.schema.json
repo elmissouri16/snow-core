@@ -38,6 +38,10 @@
             "branch_fork",
             "branches_list",
             "compact",
+            "debug_clear",
+            "debug_disable",
+            "debug_enable",
+            "debug_status",
             "diagnostics",
             "goal_get",
             "goal_pause",
@@ -57,6 +61,16 @@
             "skills",
             "usage"
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "debugDumpParams": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 4096
         }
       },
       "additionalProperties": false
@@ -220,6 +234,24 @@
   "oneOf": [
     {
       "$ref": "#/$defs/noParams"
+    },
+    {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "debug_dump"
+        },
+        "params": {
+          "$ref": "#/$defs/debugDumpParams"
+        }
+      },
+      "additionalProperties": false
     },
     {
       "type": "object",

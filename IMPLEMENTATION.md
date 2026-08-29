@@ -96,6 +96,7 @@ keeps UI dependencies out of core packages.
 │   ├── compact/             # context compaction planner and apply implementation
 │   ├── config/              # global config defaults, load/save, path helpers
 │   ├── context/             # preamble + AGENTS.md system-prompt assembly
+│   ├── diagnostics/         # opt-in bounded event recorder and secure JSON dumps
 │   ├── goal/                # branch-scoped persistent Thread Goals
 │   ├── mcp/                 # official-SDK MCP manager and tool/resource bridges
 │   ├── permission/          # ask/allow/deny service and remembered rules
@@ -143,6 +144,7 @@ keeps UI dependencies out of core packages.
 | `internal/compact` | Context compaction planner and apply implementation |
 | `internal/config` | Global config defaults, load/save, path helpers |
 | `internal/context` | Preamble and `AGENTS.md` system-prompt assembly |
+| `internal/diagnostics` | Opt-in asynchronous normalized-event recorder, sanitization, and atomic private dump writer |
 | `internal/permission` | Ask/allow/deny service and remembered rules |
 | `internal/plugin` | Lifecycle manager and Go/external adapters |
 | `internal/process` | Session-bound app-owned background processes, output rings, readiness, and cleanup |
@@ -206,9 +208,12 @@ replace the symbol through `-ldflags -X`, while untagged builds remain
 4. Tool results are appended to the session and the provider is called again
    until the model stops, errors, or the context is cancelled.
 5. TUI, print, JSON, RPC, and SDK consumers observe the same
-   `protocol.AgentEvent` stream; they do not duplicate loop logic. The TUI
-   footer continuously shows current/model context usage and `/compact` has
-   animated progress.
+   `protocol.AgentEvent` stream; they do not duplicate loop logic. The opt-in
+   diagnostics recorder subscribes to that stream through a nonblocking bounded
+   queue, reports loss, and combines sanitized events with a stable idle-session
+   snapshot only when a dump is explicitly requested. The TUI footer
+   continuously shows current/model context usage and `/compact` has animated
+   progress.
 
 ## Core agent loop
 

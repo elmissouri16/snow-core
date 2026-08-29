@@ -70,6 +70,12 @@ type Options struct {
 	PlanModeReasoningEffort string
 	// Retry overrides the global provider retry policy for this runtime.
 	Retry *RetryOptions
+	// EnableDebug and DisableDebug override persisted shared diagnostics capture.
+	// They are mutually exclusive. Dump creation remains explicit through
+	// CreateDebugDump, or automatic at Close when DebugDumpPath is set.
+	EnableDebug   bool
+	DisableDebug  bool
+	DebugDumpPath string
 	// APIKey provides an explicit credential (overrides auth.json and env).
 	APIKey string
 	// BaseURL overrides the active provider base URL. OpenAI-compatible requires

@@ -20,6 +20,7 @@ var commands = []commandSpec{
 	{name: "/compact", desc: "compact older conversation context"},
 	{name: "/context", desc: "show what is filling the model context"},
 	{name: "/default", desc: "switch to Default collaboration mode"},
+	{name: "/debug", desc: "control diagnostics or create a sensitive dump", argHint: "[status|on|off|clear|dump [path]]"},
 	{name: "/deny", desc: "deny a pending permission request"},
 	{name: "/fork", desc: "fork into this workspace or a Git worktree"},
 	{name: "/help", desc: "show command help"},

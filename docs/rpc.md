@@ -21,6 +21,7 @@ for model-requested input and the Python and JavaScript SDKs lives in
 - [Prompt commands](#prompt-commands)
 - [Model and mode commands](#model-and-mode-commands)
 - [Session commands](#session-commands)
+- [Diagnostic capture commands](#diagnostic-capture-commands)
 - [User input commands](#user-input-commands)
 - [Goal commands](#goal-commands)
 - [Subagent commands](#subagent-commands)
@@ -100,6 +101,7 @@ client for interactive use.
     "active_input",
     "branch_management",
     "compaction",
+    "debug_diagnostics",
     "diagnostics",
     "goals",
     "mcp_servers",
@@ -715,6 +717,32 @@ The following inspection commands take no parameters:
 | `diagnostics` | `{"diagnostics":[...]}` | Non-fatal configuration warnings with `path` and `message` |
 | `mcp_servers` | `{"servers":[...]}` | Secret-free negotiated MCP server status (no credentials, headers, or argv) |
 | `skills` | `{"skills":[...],"diagnostics":[...]}` | Full skill catalog plus discovery diagnostics |
+
+## Diagnostic capture commands
+
+The `debug_diagnostics` capability exposes process-local control of the shared
+bounded recorder. These commands do not rewrite persisted `config.json`:
+
+| Command | Params | Success `data` |
+|---|---|---|
+| `debug_status` | none | `enabled`, `started_at` when enabled, retained `event_count`/`retained_bytes`, `dropped_events`, and recorder limits |
+| `debug_enable` | none | Updated status after enabling capture |
+| `debug_disable` | none | Updated status after disabling new capture; retained records remain |
+| `debug_clear` | none | Updated status after flushing and clearing retained records/drop counters |
+| `debug_dump` | optional `{"path":"..."}` | Resolved absolute `path` plus a sharing `warning` |
+
+A blank or omitted dump path creates a unique file under
+`$SNOW_HOME/diagnostics`; a relative path resolves against the runtime working
+directory. Dump creation fails while the root agent is running so the file uses
+a stable turn boundary. Capture callbacks never block the ordered event
+dispatcher; bounded losses appear in `dropped_events`.
+
+Dumps are private, atomic, encoded `snow-diagnostic-v1` JSON files capped at
+256 MiB. They intentionally preserve full prompt, response, thinking, tool,
+path, error, and active-session content. Snow completely omits
+`provider_data` and redacts known credentials and configured secret-bearing
+transport fields, but unknown sensitive data may remain. Review every dump
+before sharing. See [Security model](security.md#diagnostic-dumps).
 
 ## Permission interaction
 

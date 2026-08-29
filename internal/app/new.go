@@ -14,6 +14,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/buildinfo"
 	"github.com/elmissouri16/snow-core/internal/config"
 	ctxpkg "github.com/elmissouri16/snow-core/internal/context"
+	"github.com/elmissouri16/snow-core/internal/diagnostics"
 	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
 	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -54,6 +55,12 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			return nil, err
 		}
 		cfg.Retry = *opts.Retry
+	}
+	if opts.Debug != nil {
+		cfg.Debug.Enabled = *opts.Debug
+	}
+	if opts.DebugDumpPath != "" {
+		cfg.Debug.Enabled = true
 	}
 	permMode := startup.permMode
 	thinking := startup.thinking
@@ -838,6 +845,8 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		Skills:             skillCatalog,
 		Subagents:          subManager,
 		Diagnostics:        append([]config.Diagnostic(nil), configDiagnostics...),
+		diagnosticSecrets:  collectDiagnosticSecrets(opts, cfg, authStore, authService),
+		DebugDumpPath:      opts.DebugDumpPath,
 		SearchPolicy:       searchPolicy,
 		ProjectAllowed:     projectAllowed,
 		ProjectInputRoot:   projectInputRoot,
@@ -857,6 +866,8 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	if err := a.bindPermissionSession(st); err != nil {
 		return nil, fmt.Errorf("app: permission state: %w", err)
 	}
+	a.Debugger = diagnostics.New(cfg.Debug.Enabled)
+	ag.Subscribe(a.Debugger.Record)
 	committed = true
 	guardCommitted = true
 	return a, nil

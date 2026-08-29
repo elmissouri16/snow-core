@@ -355,6 +355,39 @@ possible and use narrow environment injection.
 
 Provider continuity blocks (`provider_data`) are durable, non-rendered state.
 SDK, RPC, TUI, and plugin event consumers must not display or log them.
+Diagnostic dumps remove these blocks completely from normalized events and
+session messages rather than replacing their contents with a placeholder.
+
+### Diagnostic dumps
+
+Shared diagnostic capture is disabled by default and must be enabled by a
+runtime flag, the persisted TUI setting, RPC, or the Go SDK. The event recorder
+uses a nonblocking bounded queue so diagnostics cannot stall the ordered agent
+event dispatcher. It bounds retained event count and bytes and reports dropped
+events; dumps have a separate 256 MiB encoded limit. Dump creation is allowed
+only while the root agent is idle, at a stable turn boundary.
+
+A dump intentionally contains complete debugging context: prompts, responses,
+thinking, tool calls and results, error text, paths, runtime/model state,
+normalized events, and active-branch session entries/messages. Treat the file
+as at least as sensitive as its session database and source checkout. Dumps are
+written atomically, reject a symlink or non-regular destination, and have mode
+`0600`; a generated destination lives
+under `$SNOW_HOME/diagnostics`.
+
+Before encoding, Snow recursively removes `provider_data` and redacts known
+credential-bearing keys and text patterns, including API keys, OAuth/bearer
+tokens, authorization and proxy-authorization headers, passwords, client
+secrets, private keys, auth-store data, configured MCP/plugin transport headers,
+and configured environment values. Runtime metadata exposes only credential-safe
+MCP status rather than server declarations. Sanitization runs again immediately
+before the atomic write.
+
+> **Warning:** Diagnostic redaction is best effort, not a DLP boundary. Unknown
+> secret formats or sensitive data deliberately included in prompts, responses,
+> filenames, source, or tool output may remain. Every dump includes a warning;
+> review it before sharing, attaching it to a bug report, or moving it to a less
+> protected system.
 
 > **Warning:** Oversized plain-text tool results may be spilled beneath
 > `$SNOW_HOME/artifacts`. These artifacts can contain sensitive command or file

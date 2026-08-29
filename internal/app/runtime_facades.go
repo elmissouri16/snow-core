@@ -658,8 +658,26 @@ func (a *App) Close() error {
 		}
 		cancel()
 	}
+	if a.DebugDumpPath != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if a.Agent != nil {
+			if err := a.Agent.AbortContext(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("diagnostics: stop active turn before final dump: %w", err))
+			}
+			if err := a.Agent.WaitIdle(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("diagnostics: wait for final dump boundary: %w", err))
+			}
+		}
+		if _, err := a.CreateDebugDump(ctx, a.DebugDumpPath); err != nil {
+			errs = append(errs, err)
+		}
+		cancel()
+	}
 	if a.Agent != nil {
 		a.Agent.Close()
+	}
+	if a.Debugger != nil {
+		a.Debugger.Close()
 	}
 	if a.ProcessManager != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -14,10 +14,19 @@ import (
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/diagnostics"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/worktree"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
+
+func rpcDebugStatus(status app.DebugStatus) protocol.RPCDebugStatus {
+	return protocol.RPCDebugStatus{
+		Enabled: status.Enabled, StartedAt: status.StartedAt, EventCount: status.EventCount,
+		RetainedBytes: status.RetainedBytes, DroppedEvents: status.DroppedEvents,
+		MaxEvents: status.MaxEvents, MaxBytes: status.MaxBytes,
+	}
+}
 
 // New creates an RPC server using the assembled app's build metadata.
 func New(ctx context.Context, a *app.App, in io.Reader, out io.Writer) *Server {
@@ -507,6 +516,32 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 	case "diagnostics":
 		diagnostics := s.app.ConfigDiagnostics()
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: protocol.RPCDiagnosticsList{Diagnostics: diagnostics}})
+		return nil
+	case "debug_status":
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: rpcDebugStatus(s.app.DebugStatus())})
+		return nil
+	case "debug_enable", "debug_disable":
+		s.app.SetDebugEnabled(req.Type == "debug_enable")
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: rpcDebugStatus(s.app.DebugStatus())})
+		return nil
+	case "debug_clear":
+		if err := s.app.ClearDebugEvents(ctx); err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: rpcDebugStatus(s.app.DebugStatus())})
+		return nil
+	case "debug_dump":
+		var params protocol.RPCDebugDumpParams
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				return fmt.Errorf("debug_dump params: %w", err)
+			}
+		}
+		path, err := s.app.CreateDebugDump(ctx, params.Path)
+		if err != nil {
+			return err
+		}
+		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: protocol.RPCDebugDumpResult{Path: path, Warning: diagnostics.SharingWarning}})
 		return nil
 	case "mcp_servers":
 		return s.handleMCPServers(req)

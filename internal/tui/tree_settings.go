@@ -430,6 +430,12 @@ func (m *Model) cycleSetting(direction int) {
 		if err == nil {
 			m.settingsStatus = "skills setting saved; restart Snow to apply"
 		}
+	case settingsDebug:
+		next := cycleValue([]bool{false, true}, m.app.DebugStatus().Enabled, direction)
+		err = m.setDebugEnabled(next)
+		if err == nil {
+			m.settingsStatus = "debug diagnostics saved; dumps contain sensitive content"
+		}
 	}
 	if err != nil {
 		m.settingsError = err.Error()

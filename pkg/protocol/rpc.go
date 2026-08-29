@@ -23,6 +23,11 @@ var rpcCommands = []string{
 	"branch_select",
 	"branches_list",
 	"compact",
+	"debug_clear",
+	"debug_disable",
+	"debug_dump",
+	"debug_enable",
+	"debug_status",
 	"diagnostics",
 	"follow_up",
 	"goal_clear",
@@ -77,6 +82,7 @@ var rpcCapabilities = []string{
 	"active_input",
 	"branch_management",
 	"compaction",
+	"debug_diagnostics",
 	"diagnostics",
 	"goals",
 	"mcp_servers",
@@ -235,6 +241,29 @@ type RPCMessagesList struct {
 // RPCDiagnosticsList is the response data for diagnostics.
 type RPCDiagnosticsList struct {
 	Diagnostics []ConfigDiagnostic `json:"diagnostics"`
+}
+
+// RPCDebugStatus describes process-local shared diagnostic capture.
+type RPCDebugStatus struct {
+	Enabled       bool      `json:"enabled"`
+	StartedAt     time.Time `json:"started_at,omitempty"`
+	EventCount    int       `json:"event_count"`
+	RetainedBytes int       `json:"retained_bytes"`
+	DroppedEvents uint64    `json:"dropped_events"`
+	MaxEvents     int       `json:"max_events"`
+	MaxBytes      int       `json:"max_bytes"`
+}
+
+// RPCDebugDumpParams selects a diagnostic dump destination. A blank path asks
+// Snow to create a unique file under its private diagnostics directory.
+type RPCDebugDumpParams struct {
+	Path string `json:"path,omitempty"`
+}
+
+// RPCDebugDumpResult reports the resolved dump path and sharing warning.
+type RPCDebugDumpResult struct {
+	Path    string `json:"path"`
+	Warning string `json:"warning"`
 }
 
 // RPCMCPServer is a secret-free snapshot of a negotiated MCP connection.

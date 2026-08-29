@@ -66,6 +66,8 @@ startup errors rather than silently falling back.
 | `--mcp VALUE` | Add an MCP manifest, URL, or executable; repeatable |
 | `--skill-dir PATH` | Add a trusted Agent Skills directory; repeatable |
 | `--no-plugins`, `--no-mcp`, `--no-skills` | Disable an extension family for this launch |
+| `--debug` / `--no-debug` | Override persisted shared diagnostic capture for this launch |
+| `--debug-dump PATH` | Enable diagnostic capture and atomically write a final dump during normal shutdown |
 | `--subagents` / `--no-subagents` | Override configured subagent enablement |
 | `--subagent-provider ID` / `--subagent-model MODEL` | Set automatic provider/model defaults for child agents |
 | `--subagent-max-concurrency N` | Override simultaneously running child agents |
@@ -392,7 +394,8 @@ stored only with the active session for resume.
 | `/init` | Inspect the current project and create a tailored `AGENTS.md` contributor guide without overwriting an existing one |
 | `/model [id]` | Open the model picker or select a model; provider/model/effort persist for the current project folder |
 | `/thinking [level]` | Open the centered effort card or directly choose and persist a model-supported effort for the current project folder |
-| `/settings` | Open the centered settings card for model, theme, response controls, session permission, subagents, skills, and keybindings |
+| `/settings` | Open the centered settings card for model, theme, response controls, session permission, subagents, skills, debug diagnostics, and keybindings |
+| `/debug [status|on|off|clear|dump [path]]` | Open the diagnostics setting or inspect/control capture and create a sensitive diagnostic dump |
 | `/keybindings` | Open the interactive global/project shortcut editor; changes save and apply immediately |
 | `/permissions [ask|allow|deny]` | Open or change the active session's persisted permission mode |
 | `/allow [always]` | Resolve a pending tool request; optional session rule |
@@ -420,6 +423,35 @@ stored only with the active session for resume.
 | `/skills [clear]` | Inspect discovered Agent Skills, or durably clear session-active skills |
 | `/trust [allow|deny]` | Show or persist exact-project trust for the next launch |
 | `/quit` | Exit Snow |
+
+### Diagnostic capture and dumps
+
+Shared diagnostics are opt-in and disabled by default. Enable them for one
+process with `--debug`, persist the TUI setting through **Debug diagnostics** in
+`/settings` or `/debug on`, and override a persisted setting for one launch with
+`--no-debug`. Capture subscribes to the same normalized ordered event stream
+used by TUI, print/JSON, RPC, and SDK consumers. Its callback is nonblocking; a
+bounded queue and retained limits protect the agent event dispatcher, and the
+reported status includes any events dropped under pressure.
+
+Use `/debug status`, `/debug clear`, or `/debug dump [path]` to inspect, clear,
+or dump capture. A blank dump path creates a unique file beneath
+`$SNOW_HOME/diagnostics`; a relative path is resolved against Snow's working
+directory. Dumping requires an idle root agent so session state and recorded
+events represent a stable turn boundary. Existing records remain available
+after `/debug off` until cleared. `--debug-dump PATH` enables capture and writes
+one final dump during normal process shutdown.
+
+Dumps use the `snow-diagnostic-v1` JSON format, are capped at 256 MiB encoded,
+and are atomically created as private mode-`0600` regular files. They preserve
+prompts, responses, thinking, tool calls/results, paths, normalized events, and
+active-branch session state for debugging. Snow removes provider-private
+`provider_data` blocks and recursively redacts known API keys, tokens,
+authorization headers, passwords, client secrets, private keys, auth stores,
+configured environment values, and configured transport headers. Redaction is defense in
+depth, not a data-loss-prevention guarantee: prompts and tool output can contain
+other sensitive or proprietary data. Every dump carries a sharing warning;
+review it before moving or attaching it to an issue.
 
 `/init` runs a normal model-driven agent turn in Default mode. The agent first
 checks for `AGENTS.md` in Snow's current working directory, then inspects the

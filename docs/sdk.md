@@ -166,6 +166,9 @@ separates inheritance from clean-install defaults.
 | `NoMCP` | Disable configured and explicit MCP servers. |
 | `SkillDirs` | Additional trusted Agent Skills discovery roots. |
 | `NoSkills` | Disable skill discovery and activation tools. |
+| `EnableDebug` | Force shared diagnostic capture on for this SDK runtime. |
+| `DisableDebug` | Force shared diagnostic capture off even when persisted config enables it. Setting both debug overrides is an error. |
+| `DebugDumpPath` | Enable capture and write a final diagnostic dump during normal `Close`; an empty value disables automatic dumping. Relative paths resolve against `CWD`. |
 | `EnableSubagents` | Force subagents on for this session. Does not enable mutation or recursion. |
 | `DisableSubagents` | Force subagents off. Setting both enable and disable is an error. |
 | `SubagentProvider` / `SubagentModel` | Override the automatic provider and model defaults for child agents. |
@@ -676,6 +679,17 @@ safe; they also avoid deadlock when invoked from event callback context.
 | `Skills()` | Return enabled skill metadata exposed to provider context |
 | `SkillInventory()` | Return enabled and policy-disabled discovered skills |
 | `Diagnostics()` | Return non-fatal theme, keybinding, and search configuration warnings |
+| `DebugStatus()` | Return runtime capture state, retained count/bytes, limits, and dropped-event count |
+| `SetDebugEnabled(enabled)` | Enable or disable capture for this runtime without rewriting persistent configuration |
+| `ClearDebugEvents(ctx)` | Flush pending capture and clear retained events and drop counters |
+| `CreateDebugDump(ctx, path)` | Write an idle-boundary `snow-diagnostic-v1` dump; blank path generates one under `$SNOW_HOME/diagnostics` |
+
+Diagnostic capture is disabled by default unless config or an SDK override
+enables it. Recorder callbacks are nonblocking and bounded. Dumps contain full
+session, prompt, thinking, tool, path, and error content; they omit
+`provider_data` and redact known credentials, but must still be reviewed as
+sensitive before sharing. `CreateDebugDump` fails while the root agent is
+running. See [Security model](security.md#diagnostic-dumps).
 
 `Diagnostics()` does not currently include plugin startup failures or detailed
 Agent Skill parse diagnostics; inspect extension inventory and status through

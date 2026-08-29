@@ -72,6 +72,9 @@ func run() error {
 	root.PersistentFlags().StringArray("skill-dir", nil, "add a trusted Agent Skills directory (repeatable)")
 	root.PersistentFlags().Bool("no-skills", false, "disable Agent Skills discovery")
 	root.PersistentFlags().Bool("usage", false, "print token/cache usage after print-mode prompts")
+	root.PersistentFlags().Bool("debug", false, "enable shared runtime diagnostics for this run")
+	root.PersistentFlags().Bool("no-debug", false, "disable persisted runtime diagnostics for this run")
+	root.PersistentFlags().String("debug-dump", "", "write a diagnostic JSON dump on exit (implies --debug)")
 	root.PersistentFlags().Bool("subagents", false, "enable role-scoped Codex-style subagents")
 	root.PersistentFlags().Bool("no-subagents", false, "disable configured subagents")
 	root.PersistentFlags().String("subagent-provider", "", "default provider for subagents")
@@ -363,6 +366,19 @@ func buildOptions(cmd *cobra.Command) (app.Options, error) {
 	opts.NoMCP, _ = cmd.Flags().GetBool("no-mcp")
 	opts.SkillDirs, _ = cmd.Flags().GetStringArray("skill-dir")
 	opts.NoSkills, _ = cmd.Flags().GetBool("no-skills")
+	enableDebug, _ := cmd.Flags().GetBool("debug")
+	disableDebug, _ := cmd.Flags().GetBool("no-debug")
+	opts.DebugDumpPath, _ = cmd.Flags().GetString("debug-dump")
+	if enableDebug && disableDebug {
+		return opts, errors.New("--debug and --no-debug are mutually exclusive")
+	}
+	if disableDebug && opts.DebugDumpPath != "" {
+		return opts, errors.New("--no-debug and --debug-dump are mutually exclusive")
+	}
+	if cmd.Flags().Changed("debug") || cmd.Flags().Changed("no-debug") || opts.DebugDumpPath != "" {
+		enabled := (enableDebug || opts.DebugDumpPath != "") && !disableDebug
+		opts.Debug = &enabled
+	}
 	enableSubagents, _ := cmd.Flags().GetBool("subagents")
 	disableSubagents, _ := cmd.Flags().GetBool("no-subagents")
 	if enableSubagents && disableSubagents {

@@ -57,6 +57,12 @@ type TUIConfig struct {
 	Mouse bool   `json:"mouse"`
 }
 
+// DebugConfig controls the shared opt-in runtime diagnostics recorder. Dumps
+// are still created only by an explicit command, SDK/RPC call, or CLI path.
+type DebugConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 // RetryProfileConfig bounds one consecutive provider outage. It is global-only
 // operator policy and is never loaded from trust-gated project configuration.
 type RetryProfileConfig struct {
@@ -216,6 +222,7 @@ type Config struct {
 	SystemPromptFile          string                          `json:"system_prompt_file,omitempty"`
 	Providers                 map[string]ProviderConfig       `json:"providers,omitempty"`
 	TUI                       TUIConfig                       `json:"tui,omitempty"`
+	Debug                     DebugConfig                     `json:"debug,omitempty"`
 	Plugins                   []plugin.PluginSpec             `json:"plugins,omitempty"`
 	MCPServers                map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
 	Skills                    SkillsConfig                    `json:"skills,omitempty"`

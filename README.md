@@ -17,6 +17,7 @@ events behind every surface.
   endpoints, and ChatGPT/Codex OAuth
 - SQLite sessions with resume, branches, compaction, and persistent goals
 - Built-in coding tools, MCP, plugins, Agent Skills, and optional subagents
+- Opt-in bounded diagnostics with private, credential-redacted session dumps
 - Pure-Go SDK under [`pkg/snowsdk`](pkg/snowsdk)
 
 ## On this page
