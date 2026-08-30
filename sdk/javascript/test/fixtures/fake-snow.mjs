@@ -11,7 +11,7 @@ emit({
   type: "rpc_ready",
   protocol_version: scenario === "bad_version_type" ? 1 : (scenario === "bad_version" ? "2" : "1"),
   snow_version: scenario === "bad_snow_type" ? 1 : "fixture",
-  capabilities: scenario === "bad_caps_type" ? [1] : ["models_list", "multimodal_prompts", "permission_interaction", "prompt_completion", "session_info", "subagent_models", "user_input"],
+  capabilities: scenario === "bad_caps_type" ? [1] : ["debug_diagnostics", "models_list", "multimodal_prompts", "permission_interaction", "prompt_completion", "session_info", "subagent_models", "user_input"],
   max_input_bytes: scenario === "bad_max_type" ? "128" : (scenario === "small_limit" ? 128 : 16777216),
 });
 emit({ type: "mode_changed", mode: { mode: "default", reasoning_effort: "off" } });
@@ -28,6 +28,19 @@ let held = null;
 let askingPrompt = null;
 let permissionPrompt = null;
 let waitingPrompt = null;
+let debugEnabled = false;
+
+function debugStatus() {
+  return {
+    enabled: debugEnabled,
+    ...(debugEnabled ? { started_at: "2026-01-01T00:00:00Z" } : {}),
+    event_count: 2,
+    retained_bytes: 128,
+    dropped_events: 0,
+    max_events: 4096,
+    max_bytes: 4194304,
+  };
+}
 const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
 for await (const line of lines) {
   if (line.length === 0) continue;
@@ -43,7 +56,7 @@ for await (const line of lines) {
       process.exit(7);
       break;
     case "fail_command":
-      emit({ id, type: "response", command: request.type, success: false, error: "fixture command failure" });
+      emit({ id, type: "response", command: request.type, success: false, error: "fixture command failure", error_code: "invalid", data: { detail: "fixture detail" } });
       break;
     case "hold":
       held = request;
@@ -85,6 +98,23 @@ for await (const line of lines) {
       break;
     case "diagnostics":
       emit({ id, type: "response", command: request.type, success: true, data: { diagnostics: [{ path: "tui.theme", message: "fixture theme missing" }] } });
+      break;
+    case "debug_status":
+      emit({ id, type: "response", command: request.type, success: true, data: debugStatus() });
+      break;
+    case "debug_enable":
+      debugEnabled = true;
+      emit({ id, type: "response", command: request.type, success: true, data: debugStatus() });
+      break;
+    case "debug_disable":
+      debugEnabled = false;
+      emit({ id, type: "response", command: request.type, success: true, data: debugStatus() });
+      break;
+    case "debug_clear":
+      emit({ id, type: "response", command: request.type, success: true, data: { ...debugStatus(), event_count: 0, retained_bytes: 0 } });
+      break;
+    case "debug_dump":
+      emit({ id, type: "response", command: request.type, success: true, data: { path: request.params?.path || "/tmp/snow-debug.json", warning: "diagnostic dumps may contain sensitive data" } });
       break;
     case "set_reasoning_summary":
     case "set_text_verbosity":

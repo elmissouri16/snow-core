@@ -61,13 +61,15 @@ export interface PermissionRequest {
 
 export type PermissionDecision = "allow" | "allow_session" | "allow_always" | "deny";
 
+export type RPCErrorCode = "canceled" | "conflict" | "destination_exists" | "git_dirty" | "git_failure" | "invalid" | "not_found" | "not_git_repository" | "session_busy" | "subagents_active" | "unsupported";
+
 export interface RPCResponse<T = unknown> {
   id?: string;
   type: "response";
   command?: string;
   success: boolean;
   error?: string;
-  error_code?: "canceled" | "conflict" | "destination_exists" | "git_dirty" | "git_failure" | "invalid" | "not_found" | "not_git_repository" | "session_busy" | "subagents_active" | "unsupported";
+  error_code?: RPCErrorCode;
   data?: T;
 }
 
@@ -235,6 +237,21 @@ export interface ConfigDiagnostic {
   [key: string]: unknown;
 }
 
+export interface DebugStatus {
+  enabled: boolean;
+  started_at?: string;
+  event_count: number;
+  retained_bytes: number;
+  dropped_events: number;
+  max_events: number;
+  max_bytes: number;
+}
+
+export interface DebugDumpResult {
+  path: string;
+  warning: string;
+}
+
 export type ReasoningSummaryLevel = "off" | "auto" | "concise" | "detailed";
 export type TextVerbosityLevel = "low" | "medium" | "high";
 
@@ -340,6 +357,8 @@ export declare class Snow {
   followUp(message: string): Promise<RPCResponse>;
   goalGet(): Promise<RPCResponse>;
   goalCreate(objective: string, options?: {tokenBudget?: number; replace?: boolean}): Promise<RPCResponse>;
+  /** Compatibility alias for goalCreate using the goal_set RPC command. */
+  goalSet(objective: string, options?: {tokenBudget?: number; replace?: boolean}): Promise<RPCResponse>;
   goalEdit(objective: string): Promise<RPCResponse>;
   goalPause(): Promise<RPCResponse>;
   goalResume(): Promise<RPCResponse>;
@@ -374,6 +393,11 @@ export declare class Snow {
   pendingInputs(): Promise<RPCResponse<InputQueue>>;
   clearPendingInputs(): Promise<RPCResponse<InputQueue>>;
   configurationDiagnostics(): Promise<RPCResponse<{diagnostics: ConfigDiagnostic[]; [key: string]: unknown}>>;
+  debugStatus(): Promise<RPCResponse<DebugStatus>>;
+  debugEnable(): Promise<RPCResponse<DebugStatus>>;
+  debugDisable(): Promise<RPCResponse<DebugStatus>>;
+  debugClear(): Promise<RPCResponse<DebugStatus>>;
+  debugDump(path?: string): Promise<RPCResponse<DebugDumpResult>>;
   mcpServers(): Promise<RPCResponse<{servers: MCPServerStatus[]; [key: string]: unknown}>>;
   skills(): Promise<RPCResponse<{skills: SkillMetadata[]; diagnostics: SkillDiagnostic[]; [key: string]: unknown}>>;
   setReasoningSummary(reasoningSummary: ReasoningSummaryLevel): Promise<RPCResponse>;
@@ -389,5 +413,10 @@ export declare class SnowVersionError extends SnowProtocolError {}
 export declare class SnowTimeoutError extends SnowError {}
 export declare class SnowCancelledError extends SnowError {}
 export declare class SnowSubscriptionOverflowError extends SnowError {}
-export declare class SnowCommandError extends SnowError { readonly command: string; readonly requestId: string; }
+export declare class SnowCommandError extends SnowError {
+  readonly command: string;
+  readonly requestId: string;
+  readonly errorCode?: RPCErrorCode;
+  readonly response: RPCResponse<unknown>;
+}
 export declare class SnowPromptError extends SnowError { readonly requestId: string; }

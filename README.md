@@ -485,9 +485,10 @@ Snow is a harness, **not a whole-process sandbox**:
 - Snow, `bash`, plugins, stdio MCP servers, and subagents run with the user's
   OS privileges. Snow has no built-in process sandbox; use an external
   container, VM, or OS policy when containment is required.
-- Headless SDK/RPC/print callers should normally use `deny`; `ask` has no
-  interactive permission reply channel outside the TUI and therefore fails
-  closed.
+- Headless SDK/RPC/print callers should normally use `deny`. Print mode has no
+  interactive permission reply channel and denies in `ask`; trusted Go SDK and
+  RPC hosts can deliberately install a permission handler or resolve correlated
+  `permission_request` events with `permission_reply`/`permission_reject`.
 - Project trust permits loading project-local configuration and extensions. It
   does not constrain what an enabled process can do.
 - Plan Mode is a collaboration contract, not an OS enforcement boundary.

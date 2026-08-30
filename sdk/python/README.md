@@ -90,6 +90,12 @@ usage = await snow.usage()
 pending = await snow.pending_inputs()
 cleared = await snow.pending_inputs_clear()
 diagnostics = await snow.configuration_diagnostics()   # command: "diagnostics"
+debug = await snow.debug_status()
+await snow.debug_enable()
+await snow.debug_clear()
+dump = await snow.debug_dump()                          # optional destination path
+await snow.debug_disable()
+await snow.goal_set("Ship the RPC client")              # goal_create compatibility alias
 await snow.set_reasoning_summary("concise")            # off|auto|concise|detailed
 await snow.set_text_verbosity("high")                  # low|medium|high
 ```
@@ -102,21 +108,26 @@ Typed response helpers are available for the richer payloads and accept the
 raw response dictionary from the matching method:
 
 ```python
-from snow_sdk import CompactionResult, BranchesList, MessagesList, UsageSnapshot, PendingInputs, DiagnosticsList
+from snow_sdk import (
+    BranchesList, CompactionResult, DebugDumpResult, DebugStatus,
+    DiagnosticsList, MessagesList, PendingInputs, UsageCost, UsageSnapshot,
+)
 
 result = CompactionResult.from_response(await snow.compact())
 branches = BranchesList.from_response(await snow.branches_list())
 messages = MessagesList.from_response(await snow.messages_list())
-usage = UsageSnapshot.from_response(await snow.usage())
+usage = UsageSnapshot.from_response(await snow.usage())  # includes cache_read_known and UsageCost
 pending = PendingInputs.from_response(await snow.pending_inputs())
 diagnostics = DiagnosticsList.from_response(await snow.configuration_diagnostics())
+debug = DebugStatus.from_response(await snow.debug_status())
+dump = DebugDumpResult.from_response(await snow.debug_dump())
 ```
 
 All wrappers return the raw response dict, preserve unknown additive fields,
 and remain dependency-free. Before using these methods with an older Snow
 binary, inspect `snow.ready.capabilities` for `compaction`,
 `branch_management`, `messages_list`, `usage`, `pending_inputs`, `diagnostics`,
-and `response_controls` as applicable.
+`debug_diagnostics`, and `response_controls` as applicable.
 
 ## Interactive permissions
 
@@ -134,8 +145,15 @@ snow = await SnowClient.start(
 
 The correlated `permission_request` event is published before the handler runs.
 Handler errors or invalid decisions send `permission_reject`. Event-loop hosts
-can instead call `reply_permission(request_id, decision)` or
-`reject_permission(request_id)`.
+can omit the handler, observe the event, and call
+`reply_permission(request_id, decision)` or `reject_permission(request_id)`
+manually. Without either a handler or a manual reply, the request remains
+pending until the prompt is canceled or the process closes; it is never
+implicitly approved.
+
+Failed RPC commands raise `SnowCommandError`. Its `error_code` property retains
+Snow's stable machine-readable code when present, while `response` (also
+available as `raw`) retains the complete additive failure frame.
 
 ## Development
 

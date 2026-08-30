@@ -325,6 +325,8 @@ export class Snow {
   }
 
   async prompt(message = "", { content, mode = "", timeoutMs = this.options.requestTimeoutMs, signal } = {}) {
+    this._ensureOpen();
+    if (signal?.aborted) throw new SnowCancelledError("prompt was canceled before admission");
     const id = `prompt-${randomUUID()}`;
     const terminal = deferred();
     this.prompts.set(id, terminal);
@@ -374,7 +376,11 @@ export class Snow {
   followUp(message) { return this.request("follow_up", { message }); }
   goalGet() { return this.request("goal_get"); }
   goalCreate(objective, { tokenBudget, replace = false } = {}) {
-    return this.request("goal_create", { params: { objective, ...(tokenBudget === undefined ? {} : { token_budget: tokenBudget }), ...(replace ? { replace: true } : {}) } });
+    return this._goalCreateCommand("goal_create", objective, { tokenBudget, replace });
+  }
+  goalSet(objective, options = {}) { return this._goalCreateCommand("goal_set", objective, options); }
+  _goalCreateCommand(command, objective, { tokenBudget, replace = false } = {}) {
+    return this.request(command, { params: { objective, ...(tokenBudget === undefined ? {} : { token_budget: tokenBudget }), ...(replace ? { replace: true } : {}) } });
   }
   goalEdit(objective) { return this.request("goal_edit", { params: { objective } }); }
   goalPause() { return this.request("goal_pause"); }
@@ -405,6 +411,11 @@ export class Snow {
   pendingInputs() { return this.request("pending_inputs"); }
   clearPendingInputs() { return this.request("pending_inputs_clear"); }
   configurationDiagnostics() { return this.request("diagnostics"); }
+  debugStatus() { return this.request("debug_status"); }
+  debugEnable() { return this.request("debug_enable"); }
+  debugDisable() { return this.request("debug_disable"); }
+  debugClear() { return this.request("debug_clear"); }
+  debugDump(path = "") { return this.request("debug_dump", path ? { params: { path } } : {}); }
   mcpServers() { return this.request("mcp_servers"); }
   skills() { return this.request("skills"); }
   setReasoningSummary(reasoningSummary) { return this.request("set_reasoning_summary", { reasoning_summary: reasoningSummary }); }
@@ -544,7 +555,7 @@ export class Snow {
       }
       this.pending.delete(id);
       if (message.success === true) state.resolve(message);
-      else state.reject(new SnowCommandError(String(message.command ?? "unknown"), id, String(message.error ?? "command failed")));
+      else state.reject(new SnowCommandError(String(message.command ?? "unknown"), id, String(message.error ?? "command failed"), message));
       return;
     }
     if (message.type === "prompt_completed") {

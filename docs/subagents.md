@@ -214,8 +214,9 @@ whose policy remains read-only; other roles are rejected. Bash is not
 sandboxed and can mutate the shared workspace or OS, so `ask` prompts through
 the attributed TUI first-in, first-out (FIFO) broker, `allow` runs it, and
 `deny` rejects it.
-Headless ask mode remains deny-by-default. Read-only children may use a
-deny-all service because read-risk calls are always allowed. Child `ask_user`
+Headless ask without a trusted SDK/RPC broker or handler remains
+deny-by-default. Read-only children may use a deny-all service because
+read-risk calls are always allowed. Child `ask_user`
 input stays excluded. Recursion similarly requires `recursive=true` and
 remaining depth.
 

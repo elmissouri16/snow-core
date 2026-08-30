@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -76,27 +77,30 @@ func TestRPCPermissionReplyEndToEnd(t *testing.T) {
 	defer a.Close()
 	a.EnablePermissionReplies()
 
-	// Drive an ask-mode authorization in a goroutine; the broker blocks until
-	// the RPC reply resolves it.
+	// Subscribe before starting authorization so a fast broker publication
+	// cannot be missed and leave the test blocked forever.
+	requestIDs := make(chan string, 1)
+	unsub := a.Agent.Subscribe(func(ev protocol.AgentEvent) {
+		if ev.Type == protocol.EvPermissionRequest && ev.Permission != nil {
+			requestIDs <- ev.Permission.Request.ID
+		}
+	})
+	defer unsub()
+
 	requirePermission := make(chan error, 1)
 	requireDecision := make(chan string, 1)
 	go func() {
-		d, err := a.Perm.Authorize(context.Background(), permissionRequest("perm-e2e"))
+		d, err := a.Perm.Authorize(t.Context(), permissionRequest("perm-e2e"))
 		requireDecision <- string(d)
 		requirePermission <- err
 	}()
 
-	// Capture the published permission_request id.
 	var reqID string
-	done := make(chan struct{})
-	unsub := a.Agent.Subscribe(func(ev protocol.AgentEvent) {
-		if ev.Type == protocol.EvPermissionRequest && ev.Permission != nil {
-			reqID = ev.Permission.Request.ID
-			close(done)
-		}
-	})
-	<-done
-	unsub()
+	select {
+	case reqID = <-requestIDs:
+	case <-time.After(2 * time.Second):
+		t.Fatal("permission_request was not published")
+	}
 
 	var out bytes.Buffer
 	srv := New(context.Background(), a, strings.NewReader(""), &out)
@@ -104,11 +108,21 @@ func TestRPCPermissionReplyEndToEnd(t *testing.T) {
 	if err := srv.handle(context.Background(), mustRequestPB(t, line)); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if err := <-requirePermission; err != nil {
-		t.Fatalf("authorize err: %v", err)
+	select {
+	case err := <-requirePermission:
+		if err != nil {
+			t.Fatalf("authorize err: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("authorization did not resolve")
 	}
-	if d := <-requireDecision; d != "allow" {
-		t.Fatalf("decision = %s, want allow", d)
+	select {
+	case d := <-requireDecision:
+		if d != "allow" {
+			t.Fatalf("decision = %s, want allow", d)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("authorization decision was not returned")
 	}
 	assertResponseSuccess(t, &out, "rp1")
 }

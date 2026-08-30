@@ -1,5 +1,7 @@
 """Snow SDK exception hierarchy."""
 
+from typing import Any, Dict, Optional
+
 
 class SnowError(Exception):
     """Base error for the Python SDK."""
@@ -24,9 +26,18 @@ class SnowVersionError(SnowProtocolError):
 class SnowCommandError(SnowError):
     """An RPC command returned a failure response."""
 
-    def __init__(self, command: str, request_id: str, message: str):
+    def __init__(
+        self,
+        command: str,
+        request_id: str,
+        message: str,
+        response: Optional[Dict[str, Any]] = None,
+    ):
         self.command = command
         self.request_id = request_id
+        self.response = response if response is not None else {}
+        self.raw = self.response
+        self.error_code = str(self.response.get("error_code", ""))
         super().__init__(f"{command} ({request_id}): {message}")
 
 

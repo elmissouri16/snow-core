@@ -678,31 +678,39 @@ func cloneContentBlocks(blocks []protocol.ContentBlock) []protocol.ContentBlock 
 }
 
 func validateUserAttachments(model protocol.Model, attachments []protocol.ContentBlock) error {
-	if len(attachments) > maxUserImages {
-		return fmt.Errorf("agent: at most %d image attachments are allowed", maxUserImages)
-	}
+	images := 0
 	total := 0
 	for _, block := range attachments {
-		if block.Type != protocol.BlockImage {
-			return fmt.Errorf("agent: unsupported user attachment type %q", block.Type)
-		}
-		if !model.SupportsVision {
-			return fmt.Errorf("agent: model %q does not support image input", model.ID)
-		}
-		switch block.MIMEType {
-		case "image/png", "image/jpeg", "image/gif", "image/webp":
+		switch block.Type {
+		case protocol.BlockText:
+			if block.Text == "" {
+				return errors.New("agent: user text block is empty")
+			}
+		case protocol.BlockImage:
+			images++
+			if images > maxUserImages {
+				return fmt.Errorf("agent: at most %d image attachments are allowed", maxUserImages)
+			}
+			if !model.SupportsVision {
+				return fmt.Errorf("agent: model %q does not support image input", model.ID)
+			}
+			switch block.MIMEType {
+			case "image/png", "image/jpeg", "image/gif", "image/webp":
+			default:
+				return fmt.Errorf("agent: unsupported image MIME type %q", block.MIMEType)
+			}
+			if len(block.Data) == 0 {
+				return errors.New("agent: image attachment is empty")
+			}
+			if len(block.Data) > maxUserImageBytes {
+				return fmt.Errorf("agent: image attachment exceeds %d MiB limit", maxUserImageBytes>>20)
+			}
+			total += len(block.Data)
+			if total > maxUserImageTotalBytes {
+				return fmt.Errorf("agent: image attachments exceed %d MiB aggregate limit", maxUserImageTotalBytes>>20)
+			}
 		default:
-			return fmt.Errorf("agent: unsupported image MIME type %q", block.MIMEType)
-		}
-		if len(block.Data) == 0 {
-			return errors.New("agent: image attachment is empty")
-		}
-		if len(block.Data) > maxUserImageBytes {
-			return fmt.Errorf("agent: image attachment exceeds %d MiB limit", maxUserImageBytes>>20)
-		}
-		total += len(block.Data)
-		if total > maxUserImageTotalBytes {
-			return fmt.Errorf("agent: image attachments exceed %d MiB aggregate limit", maxUserImageTotalBytes>>20)
+			return fmt.Errorf("agent: unsupported user attachment type %q", block.Type)
 		}
 	}
 	return nil

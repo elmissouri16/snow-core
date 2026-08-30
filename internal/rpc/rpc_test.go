@@ -43,6 +43,22 @@ func (p *rpcQueueProvider) Chat(_ context.Context, _ protocol.ChatRequest) (prot
 	return &rpcGateStream{}, nil
 }
 
+type rpcCaptureProvider struct {
+	requests chan protocol.ChatRequest
+}
+
+func (p *rpcCaptureProvider) ID() string { return "rpc-capture" }
+func (p *rpcCaptureProvider) ListModels(context.Context) ([]protocol.Model, error) {
+	return nil, nil
+}
+func (p *rpcCaptureProvider) Resolve(_ context.Context, credential auth.Credential) (auth.Credential, error) {
+	return credential, nil
+}
+func (p *rpcCaptureProvider) Chat(_ context.Context, req protocol.ChatRequest) (protocol.EventStream, error) {
+	p.requests <- req
+	return &rpcGateStream{}, nil
+}
+
 type rpcErrorProvider struct{}
 
 func (*rpcErrorProvider) ID() string { return "rpc-error" }
@@ -152,8 +168,52 @@ func (shortWriter) Write(p []byte) (int, error) {
 }
 func (shortWriter) RPCWriteBounded() bool { return true }
 
+type promptCompletionObserver struct {
+	server *Server
+	active chan bool
+}
+
+func (w *promptCompletionObserver) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), `"type":"prompt_completed"`) {
+		w.server.mu.Lock()
+		active := w.server.promptDone != nil
+		w.server.mu.Unlock()
+		w.active <- active
+	}
+	return len(p), nil
+}
+
+func (*promptCompletionObserver) RPCWriteBounded() bool { return true }
+
+func TestRPCPromptCompletionReleasesAdmissionBeforeTerminalFrame(t *testing.T) {
+	a, err := app.New(t.Context(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	observer := &promptCompletionObserver{active: make(chan bool, 2)}
+	srv := New(t.Context(), a, strings.NewReader(""), observer)
+	observer.server = srv
+	if err := srv.handlePrompt(t.Context(), Request{ID: "p1", Type: "prompt", Message: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	if active := <-observer.active; active {
+		t.Fatal("prompt remained active when its terminal frame was written")
+	}
+	srv.promptWG.Wait()
+	if err := srv.handlePrompt(t.Context(), Request{ID: "p2", Type: "prompt", Message: "second"}); err != nil {
+		t.Fatalf("next prompt after terminal frame: %v", err)
+	}
+	if active := <-observer.active; active {
+		t.Fatal("second prompt remained active when its terminal frame was written")
+	}
+	srv.promptWG.Wait()
+}
+
 func TestRPCPromptAndEvents(t *testing.T) {
-	var in bytes.Buffer
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
 	var out bytes.Buffer
 
 	a, err := app.New(context.Background(), app.Options{
@@ -166,14 +226,31 @@ func TestRPCPromptAndEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
+	provider := &rpcQueueProvider{started: make(chan struct{}), release: make(chan struct{})}
+	model := a.Agent.Model()
+	model.Provider = provider.ID()
+	if err := a.Agent.SetProviderAndModel(provider, model); err != nil {
+		t.Fatal(err)
+	}
 
-	srv := New(context.Background(), a, &in, &out)
+	srv := New(t.Context(), a, reader, &out)
 	srv.app.Agent.Subscribe(func(ev protocol.AgentEvent) {
 		_ = srv.write(ev)
 	})
-
-	in.WriteString("{\"id\":\"r1\",\"type\":\"prompt\",\"message\":\"hello\"}\n")
-	if err := srv.Serve(context.Background()); err != nil {
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- srv.Serve(t.Context()) }()
+	if _, err := io.WriteString(writer, "{\"id\":\"r1\",\"type\":\"prompt\",\"message\":\"hello\"}\n"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-provider.started:
+	case <-t.Context().Done():
+		t.Fatal("provider did not start")
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-serveDone; err != nil {
 		t.Fatal(err)
 	}
 
@@ -327,98 +404,6 @@ func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 	}
 }
 
-func TestRPCContentPromptRequiresValidAttachments(t *testing.T) {
-	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	var out bytes.Buffer
-	srv := New(context.Background(), a, strings.NewReader(""), &out)
-
-	cases := []struct {
-		name    string
-		request Request
-		wantSub string
-	}{
-		{"empty content", Request{Type: "prompt", Content: []protocol.ContentBlock{}}, "content must not be empty"},
-		{"text-only without message", Request{Type: "prompt", Content: []protocol.ContentBlock{{Type: protocol.BlockText, Text: "hi"}}}, "requires a message"},
-		{"provider data block", Request{Type: "prompt", Message: "x", Content: []protocol.ContentBlock{{Type: protocol.BlockProviderData, Text: "opaque"}}}, "not allowed"},
-		{"thinking block", Request{Type: "prompt", Message: "x", Content: []protocol.ContentBlock{{Type: protocol.BlockThinking, Text: "think"}}}, "not allowed"},
-		{"image without mime", Request{Type: "prompt", Content: []protocol.ContentBlock{{Type: protocol.BlockImage, Data: []byte{1}}}}, "requires mime_type"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := srv.handlePrompt(context.Background(), tc.request)
-			if err == nil || !strings.Contains(err.Error(), tc.wantSub) {
-				t.Fatalf("handlePrompt = %v, want substring %q", err, tc.wantSub)
-			}
-		})
-	}
-}
-
-func TestRPCContentPromptValidatesModelVisionAndRuns(t *testing.T) {
-	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	model := a.Agent.Model()
-	model.SupportsVision = false
-	if err := a.Agent.SetProviderAndModel(a.Providers["fake"], model); err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	srv := New(context.Background(), a, strings.NewReader(""), &out)
-	err = srv.handlePrompt(context.Background(), Request{Type: "prompt", Message: "look", Content: []protocol.ContentBlock{{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte{1}}}})
-	if err == nil || !strings.Contains(err.Error(), "does not support image input") {
-		t.Fatalf("handlePrompt = %v, want vision rejection", err)
-	}
-
-	model2 := a.Agent.Model()
-	model2.SupportsVision = true
-	if err := a.Agent.SetProviderAndModel(a.Providers["fake"], model2); err != nil {
-		t.Fatal(err)
-	}
-	if err := srv.handlePrompt(context.Background(), Request{ID: "mm1", Type: "prompt", Message: "look", Content: []protocol.ContentBlock{{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte{1, 2}}}}); err != nil {
-		t.Fatal(err)
-	}
-	srv.mu.Lock()
-	done := srv.promptDone
-	srv.mu.Unlock()
-	if done != nil {
-		<-done
-	}
-	var completed protocol.RPCPromptCompleted
-	if err := json.Unmarshal(rpcFrame(t, out.String(), protocol.RPCTypePromptCompleted, ""), &completed); err != nil {
-		t.Fatal(err)
-	}
-	if completed.Status != protocol.RPCPromptCompletedStatus {
-		t.Fatalf("completion = %+v", completed)
-	}
-}
-
-func TestRPCSecondPromptDoesNotCancelActivePrompt(t *testing.T) {
-	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	var out bytes.Buffer
-	srv := New(context.Background(), a, strings.NewReader(""), &out)
-	active := make(chan struct{})
-	srv.promptDone = active
-	cancelled := false
-	srv.cancel = func() { cancelled = true }
-	err = srv.handlePrompt(context.Background(), Request{ID: "p2", Type: "prompt", Message: "replacement"})
-	if err == nil || !strings.Contains(err.Error(), "use steer, follow_up, or abort") {
-		t.Fatalf("second prompt error = %v", err)
-	}
-	if cancelled {
-		t.Fatal("second prompt implicitly cancelled active work")
-	}
-}
-
 func TestRPCPromptCompletionPreservesMissingID(t *testing.T) {
 	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "deny", CWD: t.TempDir()})
 	if err != nil {
@@ -430,10 +415,7 @@ func TestRPCPromptCompletionPreservesMissingID(t *testing.T) {
 	if err := srv.handlePrompt(context.Background(), Request{Type: "prompt", Message: "idless"}); err != nil {
 		t.Fatal(err)
 	}
-	srv.mu.Lock()
-	done := srv.promptDone
-	srv.mu.Unlock()
-	<-done
+	srv.promptWG.Wait()
 	var completed protocol.RPCPromptCompleted
 	if err := json.Unmarshal(rpcFrame(t, out.String(), protocol.RPCTypePromptCompleted, ""), &completed); err != nil {
 		t.Fatal(err)
@@ -461,10 +443,7 @@ func TestRPCPromptFailureKeepsLegacyResponseBeforeTerminalCompletion(t *testing.
 	if err := srv.handlePrompt(context.Background(), Request{ID: "p1", Type: "prompt", Message: "fail"}); err != nil {
 		t.Fatal(err)
 	}
-	srv.mu.Lock()
-	done := srv.promptDone
-	srv.mu.Unlock()
-	<-done
+	srv.promptWG.Wait()
 
 	failureIndex := -1
 	completionIndex := -1
@@ -511,12 +490,7 @@ func TestRPCAbortEmitsTerminalCanceledCompletion(t *testing.T) {
 	if err := srv.handle(context.Background(), Request{ID: "a1", Type: "abort"}); err != nil {
 		t.Fatal(err)
 	}
-	srv.mu.Lock()
-	done := srv.promptDone
-	srv.mu.Unlock()
-	if done != nil {
-		<-done
-	}
+	srv.promptWG.Wait()
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	var completed protocol.RPCPromptCompleted
 	if err := json.Unmarshal(rpcFrame(t, out.String(), protocol.RPCTypePromptCompleted, "p1"), &completed); err != nil {

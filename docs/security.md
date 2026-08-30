@@ -44,7 +44,8 @@ accidental and injected damage, but they are not an OS-level sandbox.
 ### Quick safety rules
 
 - Use `deny` for read-oriented headless work.
-- Use `ask` only where a real interactive asker exists (the TUI).
+- Use `ask` only where a real interactive asker exists: the TUI or an
+  explicitly configured trusted SDK/RPC permission broker.
 - Use `allow` or SDK `AutoApprove` only inside a deliberately trusted
   environment.
 - Treat project trust as permission to load project input, not as containment.
@@ -86,14 +87,13 @@ permission broker: a `PermissionHandler` (Go SDK) or the `permission_reply` /
 capability). `UserInputHandler` answers model questions and is not a permission
 asker.
 
-> **Warning:** Headless callers that select `ask` without an interactive asker
-> are denied by default. The permission broker still blocks only when the
-> surface is opted in with a handler or manual replies; otherwise ask-mode
-> requests deny without ever blocking. SDK and RPC embedders must use `deny` or
-> deliberately opt into `allow`/`AutoApprove` or an explicit interactive
-> permission broker. Read-only requests never ask and `allow_session` /
-> `allow_always` decisions are remembered on the service and never leave the
-> process.
+> **Warning:** Print mode and Go SDK callers that select `ask` without an
+> interactive handler are denied by default. Raw RPC deliberately enables a
+> manual broker: it emits a correlated request and blocks until the trusted host
+> replies, rejects, cancels the prompt, or closes the transport. Unattended
+> callers should use `deny`; `allow`/`AutoApprove` and interactive brokers are
+> explicit grants of authority. Read-only requests never ask, and
+> `allow_session` / `allow_always` decisions remain process-local.
 
 `deny` still permits read-risk tools. In the default registry that includes
 deferred `session_search`/`session_reference` and

@@ -659,10 +659,10 @@ RPC, one per line. It is an observation stream only; it cannot answer
 `ask_user`, permission prompts, steering, or follow-ups. Use RPC for
 bidirectional control.
 
-> **Warning:** Headless `ask` has no interactive permission asker and fails
-> closed. Prefer an explicit `--permission deny` for inspection or
-> `--permission allow` only in a trusted environment whose tool authority is
-> intentional.
+> **Warning:** Print and JSON `ask` have no interactive permission asker and
+> deny mutating requests. RPC can deliberately broker correlated permission
+> events, but unattended callers should prefer explicit `--permission deny` for
+> inspection or `--permission allow` only when that authority is intentional.
 
 ## Agent Skills activation
 

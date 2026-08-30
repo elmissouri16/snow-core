@@ -9,7 +9,11 @@ import (
 func TestValidateUserAttachments(t *testing.T) {
 	vision := protocol.Model{ID: "vision", SupportsVision: true}
 	valid := protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte{1}}
-	if err := validateUserAttachments(vision, []protocol.ContentBlock{valid}); err != nil {
+	if err := validateUserAttachments(vision, []protocol.ContentBlock{
+		{Type: protocol.BlockText, Text: "before"},
+		valid,
+		{Type: protocol.BlockText, Text: "after"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
@@ -18,7 +22,8 @@ func TestValidateUserAttachments(t *testing.T) {
 		block protocol.ContentBlock
 	}{
 		{"text model", protocol.Model{ID: "text"}, valid},
-		{"wrong block", vision, protocol.ContentBlock{Type: protocol.BlockText, Text: "x"}},
+		{"empty text", vision, protocol.ContentBlock{Type: protocol.BlockText}},
+		{"wrong block", vision, protocol.ContentBlock{Type: protocol.BlockToolCall}},
 		{"wrong MIME", vision, protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: "image/bmp", Data: []byte{1}}},
 		{"empty", vision, protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: "image/png"}},
 		{"too large", vision, protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: "image/png", Data: make([]byte, maxUserImageBytes+1)}},

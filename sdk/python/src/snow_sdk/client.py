@@ -335,6 +335,29 @@ class SnowClient:
         """
         return await self.request("diagnostics")
 
+    async def debug_status(self) -> JSONDict:
+        """Return process-local diagnostic capture status and limits."""
+        return await self.request("debug_status")
+
+    async def debug_enable(self) -> JSONDict:
+        """Enable process-local diagnostic capture."""
+        return await self.request("debug_enable")
+
+    async def debug_disable(self) -> JSONDict:
+        """Disable process-local diagnostic capture without clearing it."""
+        return await self.request("debug_disable")
+
+    async def debug_clear(self) -> JSONDict:
+        """Clear retained diagnostic events."""
+        return await self.request("debug_clear")
+
+    async def debug_dump(self, path: str = "") -> JSONDict:
+        """Write a redacted diagnostic dump, optionally to ``path``."""
+        fields: JSONDict = {}
+        if path:
+            fields["params"] = {"path": path}
+        return await self.request("debug_dump", **fields)
+
     async def mcp_servers(self) -> JSONDict:
         """Return secret-free status for negotiated MCP servers."""
         return await self.request("mcp_servers")
@@ -361,6 +384,15 @@ class SnowClient:
         if replace:
             params["replace"] = True
         return await self.request("goal_create", params=params)
+
+    async def goal_set(self, objective: str, *, token_budget: Optional[int] = None, replace: bool = False) -> JSONDict:
+        """Create a goal through the protocol's ``goal_set`` compatibility alias."""
+        params: JSONDict = {"objective": objective}
+        if token_budget is not None:
+            params["token_budget"] = token_budget
+        if replace:
+            params["replace"] = True
+        return await self.request("goal_set", params=params)
 
     async def goal_edit(self, objective: str) -> JSONDict:
         return await self.request("goal_edit", params={"objective": objective})
@@ -597,7 +629,12 @@ class SnowClient:
                 future.set_result(message)
             else:
                 future.set_exception(
-                    SnowCommandError(str(message.get("command", "unknown")), request_id, str(message.get("error", "command failed")))
+                    SnowCommandError(
+                        str(message.get("command", "unknown")),
+                        request_id,
+                        str(message.get("error", "command failed")),
+                        message,
+                    )
                 )
             return
         if kind == "prompt_completed":

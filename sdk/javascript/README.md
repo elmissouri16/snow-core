@@ -96,15 +96,27 @@ const usage = (await snow.usage()).data;           // {input, output, total_toke
 const pending = (await snow.pendingInputs()).data; // {items: [{kind, text, ...}]}
 await snow.clearPendingInputs();
 const { diagnostics } = (await snow.configurationDiagnostics()).data;
+const capture = (await snow.debugStatus()).data;   // bounded process-local debug capture
+await snow.debugEnable();
+await snow.debugDisable();
+await snow.debugClear();
+const dump = (await snow.debugDump()).data;         // {path, warning}
+await snow.goalSet("Keep compatibility");           // goal_set alias of goalCreate()
 await snow.setReasoningSummary("concise");         // off|auto|concise|detailed
 await snow.setTextVerbosity("high");               // low|medium|high
 ```
 
 Before using these methods with an older Snow binary, inspect
 `snow.ready.capabilities` for `compaction`, `branch_management`,
-`messages_list`, `usage`, `pending_inputs`, `diagnostics`, and
-`response_controls` as applicable. The wrappers reuse the standard `request()`
-correlation and error handling.
+`messages_list`, `usage`, `pending_inputs`, `diagnostics`,
+`debug_diagnostics`, and `response_controls` as applicable. The wrappers reuse
+the standard `request()` correlation and error handling.
+
+Failed command responses reject with `SnowCommandError`. Its `errorCode`
+preserves the stable RPC `error_code` when present, and `response` retains the
+complete failed response for structured handling. A prompt passed an already
+aborted `AbortSignal` rejects with `SnowCancelledError` before any prompt frame
+is sent.
 
 ## Interactive permissions
 

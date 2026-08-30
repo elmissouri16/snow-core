@@ -13,10 +13,12 @@ export class SnowCancelledError extends SnowError {}
 export class SnowSubscriptionOverflowError extends SnowError {}
 
 export class SnowCommandError extends SnowError {
-  constructor(command, requestId, message) {
+  constructor(command, requestId, message, response) {
     super(`${command} (${requestId}): ${message}`);
     this.command = command;
     this.requestId = requestId;
+    this.errorCode = typeof response?.error_code === "string" ? response.error_code : undefined;
+    this.response = structuredClone(response);
   }
 }
 

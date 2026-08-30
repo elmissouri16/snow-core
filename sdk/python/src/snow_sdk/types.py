@@ -64,14 +64,39 @@ class PendingInputs:
 
 
 @dataclass(frozen=True)
+class UsageCost:
+    currency: str
+    input: float
+    output: float
+    cache_read: float
+    cache_write: float
+    total: float
+    raw: JSONDict
+
+    @classmethod
+    def from_raw(cls, raw: JSONDict) -> "UsageCost":
+        return cls(
+            currency=raw.get("currency", ""),
+            input=raw.get("input", 0.0),
+            output=raw.get("output", 0.0),
+            cache_read=raw.get("cache_read", 0.0),
+            cache_write=raw.get("cache_write", 0.0),
+            total=raw.get("total", 0.0),
+            raw=raw,
+        )
+
+
+@dataclass(frozen=True)
 class UsageSnapshot:
     input_tokens: int
     output_tokens: int
     reasoning_tokens: int
     cache_read: int
+    cache_read_known: bool
     cache_write: int
     total_tokens: int
     requests: int
+    cost: UsageCost
     raw: JSONDict
 
     @classmethod
@@ -82,9 +107,11 @@ class UsageSnapshot:
             output_tokens=data.get("output", 0),
             reasoning_tokens=data.get("reasoning", 0),
             cache_read=data.get("cache_read", 0),
+            cache_read_known=data.get("cache_read_known", False),
             cache_write=data.get("cache_write", 0),
             total_tokens=data.get("total_tokens", 0),
             requests=data.get("requests", 0),
+            cost=UsageCost.from_raw(data.get("cost", {})),
             raw=data,
         )
 
@@ -205,6 +232,48 @@ class DiagnosticsList:
             if isinstance(item, dict)
         )
         return cls(diagnostics=items, raw=data)
+
+
+@dataclass(frozen=True)
+class DebugStatus:
+    enabled: bool
+    started_at: str
+    event_count: int
+    retained_bytes: int
+    dropped_events: int
+    max_events: int
+    max_bytes: int
+    raw: JSONDict
+
+    @classmethod
+    def from_response(cls, response: JSONDict) -> "DebugStatus":
+        data = response.get("data", {})
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            started_at=data.get("started_at", ""),
+            event_count=data.get("event_count", 0),
+            retained_bytes=data.get("retained_bytes", 0),
+            dropped_events=data.get("dropped_events", 0),
+            max_events=data.get("max_events", 0),
+            max_bytes=data.get("max_bytes", 0),
+            raw=data,
+        )
+
+
+@dataclass(frozen=True)
+class DebugDumpResult:
+    path: str
+    warning: str
+    raw: JSONDict
+
+    @classmethod
+    def from_response(cls, response: JSONDict) -> "DebugDumpResult":
+        data = response.get("data", {})
+        return cls(
+            path=data.get("path", ""),
+            warning=data.get("warning", ""),
+            raw=data,
+        )
 
 
 @dataclass(frozen=True)

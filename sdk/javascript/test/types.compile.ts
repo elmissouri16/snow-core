@@ -1,8 +1,14 @@
 import type {
   ContentBlock,
+  DebugDumpResult,
+  DebugStatus,
   Message,
   PromptContentBlock,
   PromptOptions,
+  RPCErrorCode,
+  RPCResponse,
+  Snow,
+  SnowCommandError,
 } from "../src/index.js";
 
 const promptBlock: PromptContentBlock = { type: "text", text: "hello" };
@@ -22,3 +28,17 @@ const message: Message = {
 
 void prompt;
 void message;
+
+declare const snow: Snow;
+const debugStatus: Promise<RPCResponse<DebugStatus>> = snow.debugStatus();
+const debugDump: Promise<RPCResponse<DebugDumpResult>> = snow.debugDump("/tmp/debug.json");
+const goalSet: Promise<RPCResponse> = snow.goalSet("compatibility goal", { tokenBudget: 100 });
+declare const commandError: SnowCommandError;
+const errorCode: RPCErrorCode | undefined = commandError.errorCode;
+const failedResponse: RPCResponse = commandError.response;
+
+void debugStatus;
+void debugDump;
+void goalSet;
+void errorCode;
+void failedResponse;

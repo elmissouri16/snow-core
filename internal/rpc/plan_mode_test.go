@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func TestRPCSetModeAndSessionInfo(t *testing.T) {
@@ -32,8 +33,26 @@ func TestRPCPromptAttachedModeValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	s := New(context.Background(), a, &bytes.Buffer{}, &bytes.Buffer{})
-	if err := s.handlePrompt(context.Background(), Request{Type: "prompt", Message: "x", Mode: "bogus"}); err == nil {
-		t.Fatal("invalid attached mode accepted")
+	provider := &rpcCaptureProvider{requests: make(chan protocol.ChatRequest, 1)}
+	model := a.Agent.Model()
+	model.Provider = provider.ID()
+	model.SupportsVision = true
+	if err := a.Agent.SetProviderAndModel(provider, model); err != nil {
+		t.Fatal(err)
+	}
+	s := New(t.Context(), a, &bytes.Buffer{}, &bytes.Buffer{})
+	requests := []Request{
+		{Type: "prompt", Message: "x", Mode: "bogus"},
+		{Type: "prompt", Message: "x", Mode: "bogus", Content: []protocol.ContentBlock{{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte{1}}}},
+	}
+	for _, req := range requests {
+		if err := s.handlePrompt(t.Context(), req); err == nil {
+			t.Fatalf("invalid attached mode accepted for content %+v", req.Content)
+		}
+	}
+	select {
+	case req := <-provider.requests:
+		t.Fatalf("provider called for invalid mode: %+v", req)
+	default:
 	}
 }

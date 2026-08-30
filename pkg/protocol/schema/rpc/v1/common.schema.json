@@ -74,6 +74,7 @@
         "goal_id": {"type": "string"},
         "objective": {"type": "string"},
         "status": {"type": "string", "enum": ["active", "paused", "blocked", "usage_limited", "budget_limited", "complete"]},
+        "blocked_reason": {"type": "string"},
         "token_budget": {"type": ["integer", "null"], "minimum": 1},
         "tokens_used": {"type": "integer", "minimum": 0},
         "seconds_used": {"type": "integer", "minimum": 0},

@@ -22,6 +22,7 @@
       "properties": {
         "goal_id": {"type": "string"},
         "status": {"type": "string", "enum": ["active", "paused", "blocked", "usage_limited", "budget_limited", "complete"]},
+        "blocked_reason": {"type": "string"},
         "tokens_used": {"type": "integer", "minimum": 0},
         "token_budget": {"type": ["integer", "null"], "minimum": 1},
         "estimated_costs": {"type": ["array", "null"], "items": {"$ref": "common.schema.json#/$defs/cost"}}

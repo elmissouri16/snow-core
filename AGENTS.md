@@ -75,8 +75,9 @@ snowsdk → app + protocol; never bubbletea
 - Snow, model-facing Bash, plugins, stdio MCP servers, and subagents run with
   the user's OS privileges. Snow has no built-in process sandbox; external
   containment is the operator's responsibility.
-- Permission gates remain authoritative. Headless `ask` must fail closed; use
-  `deny` unless a caller deliberately grants greater authority.
+- Permission gates remain authoritative. Headless `ask` without an explicit
+  trusted SDK/RPC broker must fail closed; use `deny` unless a caller
+  deliberately grants greater authority.
 - Subagents share the working directory, filesystem, and process side effects
   and incur separate provider usage. Give parallel mutators disjoint ownership.
 - Do not weaken pinned-root, symlink, inode, or atomic-replacement protections

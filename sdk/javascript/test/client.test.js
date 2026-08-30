@@ -138,6 +138,18 @@ test("AbortSignal aborts a prompt and consumes terminal canceled status", async 
   }
 });
 
+test("a pre-aborted signal rejects before prompt admission", async () => {
+  const snow = await Snow.start(fixtureOptions);
+  try {
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(snow.prompt("wait", { signal: controller.signal }), SnowCancelledError);
+    assert.equal((await snow.sessionInfo()).data.model, "fake-1");
+  } finally {
+    await snow.close();
+  }
+});
+
 test("user input is published before the async handler replies", async () => {
   let observed = false;
   let handled = false;
@@ -184,6 +196,26 @@ test("permission request is published before the async handler replies", async (
     assert.equal(event.permission.request.id, "perm-handler-1");
     assert.equal(handled, true);
     release();
+    assert.equal((await prompt).status, "completed");
+  } finally {
+    await events.return();
+    await snow.close();
+  }
+});
+
+test("permission events can be resolved manually without a handler", async () => {
+  const snow = await Snow.start(fixtureOptions);
+  let events = snow.events();
+  try {
+    let prompt = snow.prompt("permission");
+    let event = await nextEvent(events, "permission_request");
+    assert.equal((await snow.replyPermission(event.permission.request.id, "allow")).success, true);
+    assert.equal((await prompt).status, "completed");
+
+    events = snow.events();
+    prompt = snow.prompt("permission");
+    event = await nextEvent(events, "permission_request");
+    assert.equal((await snow.rejectPermission(event.permission.request.id)).success, true);
     assert.equal((await prompt).status, "completed");
   } finally {
     await events.return();
@@ -262,7 +294,16 @@ test("version, protocol, process, and overflow errors are typed", async () => {
 
   const commands = await Snow.start(fixtureOptions);
   try {
-    await assert.rejects(commands.request("fail_command"), SnowCommandError);
+    await assert.rejects(
+      commands.request("fail_command"),
+      (error) => {
+        assert(error instanceof SnowCommandError);
+        assert.equal(error.errorCode, "invalid");
+        assert.equal(error.response.error, "fixture command failure");
+        assert.deepEqual(error.response.data, { detail: "fixture detail" });
+        return true;
+      },
+    );
     await assert.rejects(commands.request("hold", {}, { timeoutMs: 10 }), SnowTimeoutError);
     await commands.request("release");
     await assert.rejects(commands.prompt("wait", { timeoutMs: 10 }), SnowTimeoutError);
@@ -353,6 +394,19 @@ test("parity command wrappers use the expected RPC frames and typed data", async
     assert.equal(diagnostics.command, "diagnostics");
     assert.equal(diagnostics.data.diagnostics[0].path, "tui.theme");
 
+    const initialDebug = await snow.debugStatus();
+    assert.equal(initialDebug.command, "debug_status");
+    assert.equal(initialDebug.data.enabled, false);
+    const enabledDebug = await snow.debugEnable();
+    assert.equal(enabledDebug.data.enabled, true);
+    assert.equal(typeof enabledDebug.data.started_at, "string");
+    assert.equal((await snow.debugDisable()).data.enabled, false);
+    assert.equal((await snow.debugClear()).data.event_count, 0);
+    const dump = await snow.debugDump("/tmp/requested-debug.json");
+    assert.equal(dump.data.path, "/tmp/requested-debug.json");
+    assert.match(dump.data.warning, /sensitive data/);
+
+    assert.equal((await snow.goalSet("compatibility goal", { tokenBudget: 100, replace: true })).command, "goal_set");
     assert.equal((await snow.setReasoningSummary("concise")).command, "set_reasoning_summary");
     assert.equal((await snow.setTextVerbosity("high")).command, "set_text_verbosity");
     assert.equal((await snow.subagentClose("/root/reviewer")).command, "subagent_close");

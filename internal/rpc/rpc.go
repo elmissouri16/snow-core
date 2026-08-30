@@ -37,6 +37,7 @@ type Server struct {
 	outputIndependentBound        bool
 	app                           *app.App
 	mu                            sync.Mutex
+	promptLifecycleMu             sync.Mutex
 	writeMu                       sync.Mutex
 	writeErr                      error
 	writeFailed                   chan struct{}

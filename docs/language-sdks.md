@@ -88,9 +88,11 @@ without crashing the reader.
 The Python client also exposes `request`, `abort`, `session_info`,
 `session_rename`, `branch_fork`, `session_fork`, `session_worktree_fork`,
 `compact`, branch list/select/rename/delete, `messages_list`, `usage`, pending
-input inspection/clearing, `configuration_diagnostics`, `models`,
+input inspection/clearing, `configuration_diagnostics`, `debug_status`,
+`debug_enable`, `debug_disable`, `debug_clear`, `debug_dump`, `models`,
 `subagent_models`, model/mode/reasoning-summary/text-verbosity setters,
-`steer`, `follow_up`, the `goal_*` and `subagent_*` command families, and
+`steer`, `follow_up`, the `goal_*` (including the `goal_set` compatibility
+alias) and `subagent_*` command families, and
 `reply_user_input`/`reject_user_input` plus `reply_permission`/`reject_permission`. `prompt` accepts an optional `mode`
 (`default` or `plan`); a timeout aborts the run and consumes its terminal
 completion before raising `SnowTimeoutError`. Event iterator capacity is
@@ -141,8 +143,10 @@ user input, and the SDK error hierarchy. The command surface includes
 `request`, `abort`, `sessionInfo`, `sessionRename`, `branchFork`, `sessionFork`,
 `sessionWorktreeFork`, `compact`, branch list/select/rename/delete, `messages`,
 `usage`, pending-input inspection/clearing, `configurationDiagnostics`,
+`debugStatus`, `debugEnable`, `debugDisable`, `debugClear`, `debugDump`,
 `models`, `subagentModels`, model/mode/reasoning-summary/text-verbosity
-setters, `steer`/`followUp`, the `goal*` and `subagent*` method families, and
+setters, `steer`/`followUp`, the `goal*` (including `goalSet`) and `subagent*`
+method families, and
 `replyUserInput`/`rejectUserInput` plus `replyPermission`/`rejectPermission`. `prompt` accepts a `mode` option (`default`
 or `plan`); timeout handling aborts and consumes terminal completion before
 raising `SnowTimeoutError`. Iterator and subscription capacities are
@@ -189,6 +193,7 @@ Every process starts with a first frame similar to:
     "active_input",
     "branch_management",
     "compaction",
+    "debug_diagnostics",
     "diagnostics",
     "goals",
     "mcp_servers",
@@ -304,8 +309,8 @@ The event is published to observers before the handler runs. A valid result
 sends `user_input_reply`; validation or handler failure sends
 `user_input_reject`.
 
-This channel answers model questions only. It never approves tool permissions.
-RPC permission mode `ask` remains fail-closed.
+This channel answers model questions only. It never approves tool permissions;
+permission requests use the separate trusted-host broker below.
 
 ## Interactive tool permissions
 
@@ -334,8 +339,9 @@ const snow = await Snow.start({
 The only decisions are `allow`, `allow_session`, `allow_always`, and `deny`.
 Snow publishes the correlated `permission_request` event before invoking the
 handler. Invalid results, handler failures, and client shutdown reject the
-request. A headless `ask` client without a handler still denies immediately;
-it never silently approves or waits forever.
+request. Without a handler or a manual reply, the authorization remains blocked
+until the prompt deadline, explicit abort, or process shutdown; it never
+silently approves.
 
 For hosts that own their event loop, the equivalent manual methods are
 `reply_permission` / `reject_permission` in Python and `replyPermission` /
@@ -362,7 +368,9 @@ Python exposes these through a `SnowError` hierarchy: `SnowClosedError`,
 `SnowProcessError`, `SnowProtocolError`, `SnowVersionError`,
 `SnowCommandError`, `SnowPromptError`, `SnowTimeoutError`,
 `SnowCancelledError`, and `SnowSubscriptionOverflowError`. JavaScript exports
-the same hierarchy from `@snow-core/sdk`.
+the same hierarchy from `@snow-core/sdk`. Command errors preserve the stable
+RPC `error_code` and the complete failed response so callers can branch on the
+code while retaining human-readable diagnostics.
 
 ## Running tests and CI conformance
 

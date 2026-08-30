@@ -20,7 +20,7 @@ emit(
         "type": "rpc_ready",
         "protocol_version": 1 if scenario == "bad_version_type" else ("2" if scenario == "bad_version" else "1"),
         "snow_version": 1 if scenario == "bad_snow_type" else "fixture",
-        "capabilities": [1] if scenario == "bad_caps_type" else ["models_list", "multimodal_prompts", "permission_interaction", "prompt_completion", "session_info", "subagent_models", "user_input"],
+        "capabilities": [1] if scenario == "bad_caps_type" else ["debug_diagnostics", "models_list", "multimodal_prompts", "permission_interaction", "prompt_completion", "session_info", "subagent_models", "user_input"],
         "max_input_bytes": "128" if scenario == "bad_max_type" else (128 if scenario == "small_limit" else 16777216),
     }
 )
@@ -43,6 +43,7 @@ held = None
 asking_prompt = None
 permission_prompt = None
 waiting_prompt = None
+debug_enabled = False
 for line in sys.stdin:
     if not line.strip():
         continue
@@ -58,7 +59,7 @@ for line in sys.stdin:
         print("fixture process failure", file=sys.stderr, flush=True)
         raise SystemExit(7)
     if command == "fail_command":
-        emit({"id": request_id, "type": "response", "command": command, "success": False, "error": "fixture command failure"})
+        emit({"id": request_id, "type": "response", "command": command, "success": False, "error": "fixture command failure", "error_code": "invalid", "fixture_detail": 42})
         continue
     if command == "hold":
         held = request
@@ -161,7 +162,7 @@ for line in sys.stdin:
         emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"messages": [{"id": "msg-1", "parent_id": "", "role": "user", "content": [{"type": "text", "text": "hi"}], "ts": 1}]}})
         continue
     if command == "usage":
-        emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"input": 100, "output": 50, "reasoning": 10, "cache_read": 5, "cache_write": 3, "total_tokens": 150, "requests": 2}})
+        emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"input": 100, "output": 50, "reasoning": 10, "cache_read": 5, "cache_read_known": True, "cache_write": 3, "total_tokens": 150, "requests": 2, "cost": {"currency": "USD", "input": 0.01, "output": 0.02, "cache_read": 0.001, "cache_write": 0.002, "total": 0.033}}})
         continue
     if command in ("pending_inputs", "pending_inputs_clear"):
         emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"items": [{"id": "q-1", "kind": "steer", "text": "focus", "order": 1}]}})
@@ -171,6 +172,24 @@ for line in sys.stdin:
         continue
     if command in ("set_reasoning_summary", "set_text_verbosity"):
         emit({"id": request_id, "type": "response", "command": command, "success": True})
+        continue
+    if command == "debug_status":
+        emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"enabled": debug_enabled, "started_at": "2026-08-27T12:00:00Z" if debug_enabled else "", "event_count": 2 if debug_enabled else 0, "retained_bytes": 128 if debug_enabled else 0, "dropped_events": 1, "max_events": 1000, "max_bytes": 1048576}})
+        continue
+    if command == "debug_enable":
+        debug_enabled = True
+        emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"enabled": True, "started_at": "2026-08-27T12:00:00Z", "event_count": 0, "retained_bytes": 0, "dropped_events": 0, "max_events": 1000, "max_bytes": 1048576}})
+        continue
+    if command == "debug_disable":
+        debug_enabled = False
+        emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"enabled": False, "event_count": 2, "retained_bytes": 128, "dropped_events": 1, "max_events": 1000, "max_bytes": 1048576}})
+        continue
+    if command == "debug_clear":
+        emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"enabled": debug_enabled, "event_count": 0, "retained_bytes": 0, "dropped_events": 0, "max_events": 1000, "max_bytes": 1048576}})
+        continue
+    if command == "debug_dump":
+        path = request.get("params", {}).get("path", "") or "/tmp/snow-debug-fixture.jsonl"
+        emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"path": path, "warning": "Review before sharing."}})
         continue
     if command == "mcp_servers":
         emit({"id": request_id, "type": "response", "command": command, "success": True, "data": {"servers": [{"id": "mcp-1", "transport": "stdio", "connected": True, "tool_count": 2}]}})

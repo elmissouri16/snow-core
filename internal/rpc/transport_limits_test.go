@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,20 +14,34 @@ import (
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 type deadlineOnlyReader struct {
-	once        sync.Once
-	interrupted chan struct{}
+	mu            sync.Mutex
+	deadlines     []time.Time
+	readStarted   chan struct{}
+	interrupted   chan struct{}
+	readOnce      sync.Once
+	interruptOnce sync.Once
 }
 
 func (r *deadlineOnlyReader) Read([]byte) (int, error) {
+	r.readOnce.Do(func() { close(r.readStarted) })
 	<-r.interrupted
 	return 0, io.EOF
 }
 
-func (r *deadlineOnlyReader) SetReadDeadline(time.Time) error {
-	r.once.Do(func() { close(r.interrupted) })
+func (r *deadlineOnlyReader) SetReadDeadline(deadline time.Time) error {
+	r.mu.Lock()
+	r.deadlines = append(r.deadlines, deadline)
+	call := len(r.deadlines)
+	r.mu.Unlock()
+	// Serve probes an expired deadline and clears it before scanning. Only the
+	// later cancellation deadline should unblock the active read.
+	if call >= 3 && !deadline.IsZero() {
+		r.interruptOnce.Do(func() { close(r.interrupted) })
+	}
 	return nil
 }
 
@@ -38,6 +53,21 @@ func (*unavailableDeadlineReader) SetReadDeadline(time.Time) error {
 }
 
 type unavailableDeadlineWriter struct{ wrote bool }
+
+type failAfterWriter struct {
+	writes int
+	err    error
+}
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes == 2 {
+		return 0, w.err
+	}
+	return len(p), nil
+}
+
+func (*failAfterWriter) RPCWriteBounded() bool { return true }
 
 func (w *unavailableDeadlineWriter) Write(p []byte) (int, error) {
 	w.wrote = true
@@ -101,6 +131,32 @@ func TestRPCPropagatesShortWrites(t *testing.T) {
 	}
 }
 
+func TestRPCPromptAdmissionWriteFailurePreventsProviderWork(t *testing.T) {
+	sentinel := errors.New("admission write failed")
+	writer := &failAfterWriter{err: sentinel}
+	provider := &rpcQueueProvider{started: make(chan struct{}), release: make(chan struct{})}
+	a, err := app.New(t.Context(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	model := a.Agent.Model()
+	model.Provider = provider.ID()
+	if err := a.Agent.SetProviderAndModel(provider, model); err != nil {
+		t.Fatal(err)
+	}
+	input := strings.NewReader(`{"id":"p1","type":"prompt","message":"must not run"}` + "\n")
+	err = New(t.Context(), a, input, writer).Serve(t.Context())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("Serve error = %v, want %v", err, sentinel)
+	}
+	select {
+	case <-provider.started:
+		t.Fatal("provider started after prompt admission write failed")
+	default:
+	}
+}
+
 func TestRPCRejectsUnavailableOutputDeadlineBeforeWrite(t *testing.T) {
 	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow"})
 	if err != nil {
@@ -144,6 +200,78 @@ func TestRPCRejectsNegativeWaitTimeoutBeforeStartingWorker(t *testing.T) {
 	}
 }
 
+func paddedRPCFrame(size int) []byte {
+	prefix := []byte(`{"id":"limit","type":"unknown","padding":"`)
+	suffix := []byte(`"}`)
+	padding := size - len(prefix) - len(suffix)
+	frame := make([]byte, 0, size+1)
+	frame = append(frame, prefix...)
+	frame = append(frame, bytes.Repeat([]byte("x"), padding)...)
+	frame = append(frame, suffix...)
+	return append(frame, '\n')
+}
+
+func TestRPCFrameLimitMatchesAdvertisedPayloadSize(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		size       int
+		terminated bool
+		wantErr    error
+	}{
+		{name: "maximum", size: protocol.RPCMaxInputBytes, terminated: true},
+		{name: "over maximum", size: protocol.RPCMaxInputBytes + 1, terminated: true, wantErr: bufio.ErrTooLong},
+		{name: "over maximum without newline", size: protocol.RPCMaxInputBytes + 1, wantErr: bufio.ErrTooLong},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, err := app.New(t.Context(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer a.Close()
+			var out bytes.Buffer
+			frame := paddedRPCFrame(tc.size)
+			if !tc.terminated {
+				frame = frame[:len(frame)-1]
+			}
+			err = New(t.Context(), a, bytes.NewReader(frame), &out).Serve(t.Context())
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Serve error = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr == nil && !strings.Contains(out.String(), `"id":"limit"`) {
+				t.Fatalf("maximum-size frame was not processed: %q", out.String())
+			}
+		})
+	}
+}
+
+func TestRPCRejectsMalformedUTF8BeforeDispatch(t *testing.T) {
+	provider := &rpcQueueProvider{started: make(chan struct{}), release: make(chan struct{})}
+	a, err := app.New(t.Context(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	model := a.Agent.Model()
+	model.Provider = provider.ID()
+	if err := a.Agent.SetProviderAndModel(provider, model); err != nil {
+		t.Fatal(err)
+	}
+	input := append([]byte(`{"id":"bad","type":"prompt","message":"`), 0xff)
+	input = append(input, []byte(`"}`+"\n")...)
+	var out bytes.Buffer
+	if err := New(t.Context(), a, bytes.NewReader(input), &out).Serve(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "input is not valid UTF-8") {
+		t.Fatalf("output = %q", out.String())
+	}
+	select {
+	case <-provider.started:
+		t.Fatal("provider called for malformed UTF-8")
+	default:
+	}
+}
+
 func TestRPCRejectsUnavailableInputDeadlineBeforeScanning(t *testing.T) {
 	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow"})
 	if err != nil {
@@ -170,7 +298,7 @@ func TestRPCRejectsUninterruptiblePlainReader(t *testing.T) {
 }
 
 func TestRPCCancellationInterruptsDeadlineOnlyReader(t *testing.T) {
-	reader := &deadlineOnlyReader{interrupted: make(chan struct{})}
+	reader := &deadlineOnlyReader{readStarted: make(chan struct{}), interrupted: make(chan struct{})}
 	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow"})
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +307,11 @@ func TestRPCCancellationInterruptsDeadlineOnlyReader(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- New(context.Background(), a, reader, io.Discard).Serve(ctx) }()
+	select {
+	case <-reader.readStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not begin the deadline-only read")
+	}
 	cancel()
 	select {
 	case err := <-done:
@@ -187,6 +320,12 @@ func TestRPCCancellationInterruptsDeadlineOnlyReader(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Serve did not interrupt deadline-only reader")
+	}
+	reader.mu.Lock()
+	deadlines := append([]time.Time(nil), reader.deadlines...)
+	reader.mu.Unlock()
+	if len(deadlines) < 3 || deadlines[0].IsZero() || !deadlines[1].IsZero() || deadlines[2].IsZero() {
+		t.Fatalf("read deadlines = %v, want probe, clear, cancellation", deadlines)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/diagnostics"
@@ -128,7 +129,10 @@ func (s *Server) Serve(ctx context.Context) error {
 	go func() {
 		defer close(scanDone)
 		scanner := bufio.NewScanner(s.in)
-		scanner.Buffer(make([]byte, 0, 64*1024), protocol.RPCMaxInputBytes)
+		// Scanner counts the trailing newline toward its buffer limit. Reserve
+		// one extra byte so a frame whose JSON payload is exactly the advertised
+		// maximum remains valid while a larger payload is still rejected.
+		scanner.Buffer(make([]byte, 0, 64*1024), protocol.RPCMaxInputBytes+1)
 		for scanner.Scan() {
 			select {
 			case scans <- scanResult{line: scanner.Text()}:
@@ -169,9 +173,17 @@ func (s *Server) Serve(ctx context.Context) error {
 		if len(line) == 0 {
 			continue
 		}
+		if len(line) > protocol.RPCMaxInputBytes {
+			terminalErr = bufio.ErrTooLong
+			goto finish
+		}
 		var req Request
+		if !utf8.ValidString(line) {
+			_ = s.write(Response{Type: "response", Command: "invalid", Success: false, Error: "invalid JSON: input is not valid UTF-8"})
+			continue
+		}
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
-			s.write(Response{ID: req.ID, Type: "response", Command: "invalid", Success: false, Error: "invalid JSON: " + err.Error()})
+			_ = s.write(Response{ID: req.ID, Type: "response", Command: "invalid", Success: false, Error: "invalid JSON: " + err.Error()})
 			continue
 		}
 		if err := s.handle(serveCtx, req); err != nil {
@@ -179,8 +191,8 @@ func (s *Server) Serve(ctx context.Context) error {
 		}
 	}
 finish:
-	// No more replies can arrive after EOF or cancellation. Release pending/future interaction
-	// and wait commands. Ordinary prompts retain their own documented join path.
+	// No more replies can arrive after EOF or cancellation. Cancel active work,
+	// release pending interaction and wait commands, and join every worker.
 	cancelServe()
 	s.app.CloseUserInput()
 	s.app.ClosePermissionBroker()
@@ -705,60 +717,55 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 	} else if req.Message == "" {
 		return errors.New("prompt requires message")
 	}
-	if hasImageContent(req.Content) {
-		if !s.app.Agent.Model().SupportsVision {
-			return errors.New("model does not support image input")
-		}
-		return s.handleImagePrompt(ctx, req)
-	}
+	var requestedMode *protocol.CollaborationMode
 	if req.Mode != "" {
-		if _, err := protocol.ParseCollaborationMode(req.Mode); err != nil {
+		mode, err := protocol.ParseCollaborationMode(req.Mode)
+		if err != nil {
 			return err
 		}
+		requestedMode = &mode
 	}
+	if hasImageContent(req.Content) && !s.app.Agent.Model().SupportsVision {
+		return errors.New("model does not support image input")
+	}
+
 	// Serve keeps scanning while the prompt runs, enabling explicit queue,
 	// abort, and user-input commands. A second prompt never implicitly cancels
 	// accepted work: callers must choose steer, follow_up, or abort.
-	s.mu.Lock()
-	active := s.promptDone != nil
-	s.mu.Unlock()
-	if active {
-		return errors.New("rpc: prompt already running; use steer, follow_up, or abort")
-	}
-
 	promptCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
+	s.promptLifecycleMu.Lock()
+	defer s.promptLifecycleMu.Unlock()
 	s.mu.Lock()
+	if s.promptDone != nil {
+		s.mu.Unlock()
+		cancel()
+		return errors.New("rpc: prompt already running; use steer, follow_up, or abort")
+	}
 	s.cancel = cancel
 	s.promptDone = done
 	s.mu.Unlock()
 
-	s.write(Response{ID: req.ID, Type: "response", Command: "prompt", Success: true})
+	if err := s.write(Response{ID: req.ID, Type: "response", Command: "prompt", Success: true}); err != nil {
+		cancel()
+		s.releasePrompt(done)
+		return err
+	}
 	s.promptWG.Go(func() {
 		var err error
 		switch {
-		case len(req.Content) > 0 && req.Mode != "":
-			mode, parseErr := protocol.ParseCollaborationMode(req.Mode)
-			if parseErr != nil {
-				err = parseErr
-			} else {
-				err = s.app.Agent.PromptContentWithMode(promptCtx, req.Message, req.Content, mode)
-			}
+		case len(req.Content) > 0 && requestedMode != nil:
+			err = s.app.Agent.PromptContentWithMode(promptCtx, req.Message, req.Content, *requestedMode)
 		case len(req.Content) > 0:
 			err = s.app.Agent.PromptContent(promptCtx, req.Message, req.Content)
-		case req.Mode != "":
-			mode, parseErr := protocol.ParseCollaborationMode(req.Mode)
-			if parseErr != nil {
-				err = parseErr
-			} else {
-				err = s.app.Agent.PromptWithMode(promptCtx, req.Message, mode)
-			}
+		case requestedMode != nil:
+			err = s.app.Agent.PromptWithMode(promptCtx, req.Message, *requestedMode)
 		default:
 			err = s.app.Agent.Prompt(promptCtx, req.Message)
 		}
 		canceled := promptCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 		if err != nil && !canceled {
-			s.write(Response{ID: req.ID, Type: "response", Command: "prompt", Success: false, Error: err.Error()})
+			_ = s.write(Response{ID: req.ID, Type: "response", Command: "prompt", Success: false, Error: err.Error()})
 		}
 		completed := protocol.RPCPromptCompleted{
 			Type:      protocol.RPCTypePromptCompleted,
@@ -769,20 +776,24 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 			completed.Status = protocol.RPCPromptCanceledStatus
 		} else if err != nil {
 			completed.Status = protocol.RPCPromptFailedStatus
-		}
-		if completed.Status == protocol.RPCPromptFailedStatus {
 			completed.Error = err.Error()
 		}
-		s.write(completed)
-		close(done)
-		s.mu.Lock()
-		if s.promptDone == done {
-			s.promptDone = nil
-			s.cancel = nil
-		}
-		s.mu.Unlock()
+		s.promptLifecycleMu.Lock()
+		s.releasePrompt(done)
+		_ = s.write(completed)
+		s.promptLifecycleMu.Unlock()
 	})
 	return nil
+}
+
+func (s *Server) releasePrompt(done chan struct{}) {
+	s.mu.Lock()
+	if s.promptDone == done {
+		s.promptDone = nil
+		s.cancel = nil
+	}
+	s.mu.Unlock()
+	close(done)
 }
 
 func (s *Server) announceReady() error {

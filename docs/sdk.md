@@ -430,7 +430,7 @@ collaboration-mode snapshot for initial host state.
 |---|---|
 | Streaming | `text_delta`, `thinking_delta`, `usage`, `provider_retry` |
 | Tools | `tool_start`, `tool_progress`, `tool_end`, `tool_routing` |
-| Interaction | `user_input_request`, `queue_updated`; `permission_request` exists in the cross-surface protocol but the public headless SDK has no permission asker that emits it |
+| Interaction | `user_input_request`, `permission_request`, `queue_updated`; permission events are emitted only when `ask` uses a configured handler or manual replies |
 | Lifecycle and state | `session_updated`, `run_stats_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
 | Plan | `plan_started`, `plan_delta`, `plan_completed`, `plan_update` |
 | Compaction | `compaction_started`, `compaction_done`; `Compaction.Automatic` distinguishes non-manual pressure and overflow-repair runs |
@@ -621,8 +621,10 @@ cost values come from provider or catalog pricing and are estimates, not invoice
 ## Permissions and security
 
 The SDK has no built-in interactive permission UI. Its omission default is
-`deny`; `ask` uses a deny-by-default asker unless the embedding supplies a
-lower-level interactive host, which `pkg/snowsdk` does not currently expose.
+`deny`; trusted embeddings can deliberately install `PermissionHandler` for
+`ask` mode. The handler receives the already-published correlated request and
+returns an explicit decision; absent or invalid handling never silently grants
+authority.
 
 `AutoApprove` is equivalent to `allow`; it does not add containment. Plugins,
 stdio MCP servers, file tools, Bash, managed-process starts/stops, and subagents
@@ -734,10 +736,10 @@ Concurrency guidance:
 
 ## Limitations
 
-- The SDK does not expose an interactive permission asker; `ask` mode is
-  fail-closed by default.
-- Attachment prompts currently accept normalized `protocol.BlockImage` blocks;
-  provider-specific opaque continuity blocks remain internal.
+- The SDK does not provide a permission UI; trusted hosts must install and own
+  the lifecycle of a `PermissionHandler`, while omission remains deny-by-default.
+- Content prompts accept normalized text and image blocks; provider-specific
+  opaque continuity blocks remain internal.
 - `SessionPath` is open-or-create. There is no strict "must already exist"
   resume option and no saved-session catalog; hosts that require strict resume
   must validate and select the path before `Open`.

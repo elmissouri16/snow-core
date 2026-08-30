@@ -126,6 +126,48 @@ func TestRepresentativeRPCValuesConformToSchemas(t *testing.T) {
 	}
 }
 
+func TestRPCBlockedGoalsConformToSchemas(t *testing.T) {
+	output := resolveRPCSchema(t, "output.schema.json")
+	blockedEvent := AgentEvent{
+		Type: EvThreadGoalUpdated,
+		ThreadGoal: &ThreadGoalUpdate{Goal: &ThreadGoal{
+			SessionID:     "s",
+			BranchID:      "b",
+			GoalID:        "g",
+			Objective:     "ship",
+			Status:        GoalBlocked,
+			BlockedReason: "CI unavailable",
+			TokensUsed:    1,
+			SecondsUsed:   2,
+			CreatedAt:     3,
+			UpdatedAt:     4,
+		}},
+	}
+	if err := output.Validate(jsonValue(t, blockedEvent)); err != nil {
+		t.Fatalf("blocked thread_goal_updated event does not conform: %v", err)
+	}
+
+	info := RPCSessionInfo{
+		SessionID:         "s",
+		CWD:               "/tmp",
+		Provider:          "fake",
+		Model:             "fake-1",
+		Thinking:          ThinkingOff,
+		ThinkingLevels:    []ThinkingLevel{ThinkingOff},
+		ReasoningSummary:  ReasoningSummaryAuto,
+		TextVerbosity:     TextVerbosityLow,
+		CollaborationMode: ModeDefault,
+		Goal: &RPCGoalSummary{
+			GoalID:        "g",
+			Status:        GoalBlocked,
+			BlockedReason: "CI unavailable",
+		},
+	}
+	if err := resolveRPCSchema(t, "session-info.schema.json").Validate(jsonValue(t, info)); err != nil {
+		t.Fatalf("session_info with blocked goal does not conform: %v", err)
+	}
+}
+
 func TestRPCSessionInfoControlFieldsRemainAdditive(t *testing.T) {
 	schema := resolveRPCSchema(t, "session-info.schema.json")
 	legacy := map[string]any{

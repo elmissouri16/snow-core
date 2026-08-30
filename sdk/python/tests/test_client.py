@@ -60,6 +60,15 @@ class SnowClientTests(unittest.IsolatedAsyncioTestCase):
             diagnostics = await snow.configuration_diagnostics()
             self.assertEqual(diagnostics["command"], "diagnostics")
             self.assertEqual(diagnostics["data"]["diagnostics"][0]["path"], "tui.theme")
+
+            self.assertFalse((await snow.debug_status())["data"]["enabled"])
+            self.assertTrue((await snow.debug_enable())["data"]["enabled"])
+            self.assertEqual((await snow.debug_clear())["data"]["event_count"], 0)
+            dump = await snow.debug_dump("/tmp/python-sdk-debug.jsonl")
+            self.assertEqual(dump["data"]["path"], "/tmp/python-sdk-debug.jsonl")
+            self.assertFalse((await snow.debug_disable())["data"]["enabled"])
+
+            self.assertEqual((await snow.goal_set("ship", token_budget=1000, replace=True))["command"], "goal_set")
             self.assertEqual((await snow.set_reasoning_summary("concise"))["command"], "set_reasoning_summary")
             self.assertEqual((await snow.set_text_verbosity("high"))["command"], "set_text_verbosity")
             self.assertEqual((await snow.subagent_close("/root/reviewer"))["command"], "subagent_close")
@@ -92,6 +101,8 @@ class SnowClientTests(unittest.IsolatedAsyncioTestCase):
         from snow_sdk import (
             BranchesList,
             CompactionResult,
+            DebugDumpResult,
+            DebugStatus,
             DiagnosticsList,
             MCPServers,
             MessagesList,
@@ -114,6 +125,9 @@ class SnowClientTests(unittest.IsolatedAsyncioTestCase):
 
             usage = UsageSnapshot.from_response(await snow.usage())
             self.assertEqual(usage.total_tokens, 150)
+            self.assertTrue(usage.cache_read_known)
+            self.assertEqual(usage.cost.currency, "USD")
+            self.assertEqual(usage.cost.total, 0.033)
 
             pending = PendingInputs.from_response(await snow.pending_inputs())
             self.assertEqual(pending.items[0].kind, "steer")
@@ -121,6 +135,14 @@ class SnowClientTests(unittest.IsolatedAsyncioTestCase):
 
             diagnostics = DiagnosticsList.from_response(await snow.configuration_diagnostics())
             self.assertEqual(diagnostics.diagnostics[0].path, "tui.theme")
+
+            debug = DebugStatus.from_response(await snow.debug_enable())
+            self.assertTrue(debug.enabled)
+            self.assertEqual(debug.max_events, 1000)
+            self.assertEqual(debug.raw["started_at"], debug.started_at)
+            dump = DebugDumpResult.from_response(await snow.debug_dump())
+            self.assertEqual(dump.path, "/tmp/snow-debug-fixture.jsonl")
+            self.assertIn("sharing", dump.warning.lower())
 
             mcp = MCPServers.from_response(await snow.mcp_servers())
             self.assertEqual(mcp.servers[0].id, "mcp-1")
@@ -230,6 +252,24 @@ class SnowClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await prompt).status, "completed")
             events.close()
 
+    async def test_permission_events_support_manual_reply_and_reject(self):
+        async with await SnowClient.start(fixture_options()) as snow:
+            for reject in (False, True):
+                events = snow.events()
+                prompt = asyncio.create_task(snow.prompt("permission"))
+                event = await events.__anext__()
+                while event.type != "permission_request":
+                    event = await events.__anext__()
+                request_id = event.raw["permission"]["request"]["id"]
+                if reject:
+                    response = await snow.reject_permission(request_id)
+                    self.assertEqual(response["command"], "permission_reject")
+                else:
+                    response = await snow.reply_permission(request_id, "allow")
+                    self.assertEqual(response["command"], "permission_reply")
+                self.assertEqual((await prompt).status, "completed")
+                events.close()
+
     async def test_version_protocol_process_and_overflow_errors_are_typed(self):
         with self.assertRaises(SnowVersionError):
             await SnowClient.start(fixture_options(environment={"FAKE_SNOW_SCENARIO": "bad_version"}))
@@ -271,8 +311,12 @@ class SnowClientTests(unittest.IsolatedAsyncioTestCase):
 
         snow = await SnowClient.start(fixture_options())
         try:
-            with self.assertRaises(SnowCommandError):
+            with self.assertRaises(SnowCommandError) as command_failure:
                 await snow.request("fail_command")
+            self.assertEqual(command_failure.exception.command, "fail_command")
+            self.assertEqual(command_failure.exception.error_code, "invalid")
+            self.assertEqual(command_failure.exception.response["fixture_detail"], 42)
+            self.assertIs(command_failure.exception.raw, command_failure.exception.response)
             with self.assertRaises(SnowTimeoutError):
                 await snow.request("hold", timeout=0.01)
             await snow.request("release")

@@ -22,6 +22,7 @@ for model-requested input and the Python and JavaScript SDKs lives in
 - [Model and mode commands](#model-and-mode-commands)
 - [Session commands](#session-commands)
 - [Diagnostic capture commands](#diagnostic-capture-commands)
+- [Permission interaction](#permission-interaction)
 - [User input commands](#user-input-commands)
 - [Goal commands](#goal-commands)
 - [Subagent commands](#subagent-commands)
@@ -765,9 +766,10 @@ A client resolves them with `permission_reply` (decision `allow`,
 ```
 
 Remaining security invariants are preserved: the service is deny-by-default,
-reads never ask, allow/deny modes never consult a broker, and ask-mode requests
-block only when the surface is opted in with a handler or manual replies.
-`allow_session` and `allow_always` are remembered for the remainder of the
+reads never ask, and allow/deny modes never consult a broker. Raw RPC `ask`
+deliberately enables manual replies and blocks until the trusted host resolves
+the request, cancels the prompt, or closes the transport. `allow_session` and
+`allow_always` are remembered for the remainder of the
 session. `permission_interaction` capability gates these commands.
 
 `messages_list` can include user and assistant text, images, thinking summaries,
@@ -1173,10 +1175,10 @@ emitted.
 - `tool_output`: bounded preview only; full results remain in session
   storage.
 
-`permission_request` is part of the shared `AgentEvent` type, but RPC's
-headless permission asker fails closed and does not emit it.
-`user_input_request` is a separate model-question interaction and is emitted
-as documented above.
+`permission_request` is emitted while an ask-mode tool authorization blocks for
+a trusted host decision. `user_input_request` is a separate model-question
+interaction and is emitted as documented above; replying to it never authorizes
+a tool.
 
 ## Event payload reference
 
@@ -1207,6 +1209,7 @@ tags.
 | Event type | Payload fields | Ordering |
 |---|---|---|
 | `user_input_request` | `user_input` | While an `ask_user` call blocks for host input |
+| `permission_request` | `permission.request` | While an ask-mode authorization blocks for a trusted host decision |
 | `queue_updated` | `queue` | When steer/follow-up input is admitted or delivered |
 
 ### Lifecycle and state events
@@ -1468,15 +1471,18 @@ Production clients should also:
 
 ## Permission model
 
-RPC has no permission request/reply handshake. In `ask` mode its headless
-asker denies without emitting an interactive permission event. Use an
-explicit headless policy:
+RPC supports an explicit trusted-host permission broker:
 
-- `--permission deny` for read-oriented operation;
-- `--permission allow` only in an externally trusted or isolated environment.
+- `--permission deny` denies mutating operations without broker events;
+- `--permission allow` authorizes them without broker events and should be used
+  only in an externally trusted or isolated environment;
+- `--permission ask` emits one correlated `permission_request` and blocks until
+  `permission_reply`, `permission_reject`, prompt cancellation, or EOF.
 
-`ask` fails closed in RPC. `user_input_reply` answers model questions and
-does not authorize OS or tool access.
+Ask-mode hosts must continuously drain events and resolve every request. Use
+`deny` unless the host deliberately implements this authority boundary.
+`user_input_reply` answers model questions and never authorizes OS or tool
+access.
 
 RPC, shell, plugins, stdio MCP servers, and subagents run with the current
 user's OS privileges. Read the [Security model](security.md).
@@ -1487,10 +1493,11 @@ The current command surface covers prompts, active root input, cancellation,
 active-provider and subagent model discovery, model/thinking/mode and response
 controls, session and branch management, manual compaction, active-branch
 messages and usage, MCP/skill discovery, pending-input inspection/clearing,
-configuration diagnostics, model-requested input, goals, and subagents.
+configuration and diagnostic-capture controls, model-requested input, goals,
+and subagents.
 
-Configuration mutation, login, and an interactive permission broker remain
-outside the RPC command surface. MCP and skill inventory is read-only and
+Configuration mutation and login remain outside the RPC command surface. MCP
+and skill inventory is read-only and
 secret-free; management/mutation stays outside the boundary.
 
 ## Related documents

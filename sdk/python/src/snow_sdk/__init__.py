@@ -20,6 +20,8 @@ from .types import (
     BranchesList,
     CompactionResult,
     ConfigDiagnostic,
+    DebugDumpResult,
+    DebugStatus,
     DiagnosticsList,
     MCPServer,
     MCPServers,
@@ -32,6 +34,7 @@ from .types import (
     Skill,
     SkillDiagnostic,
     Skills,
+    UsageCost,
     UsageSnapshot,
 )
 
@@ -41,6 +44,8 @@ __all__ = [
     "BranchesList",
     "CompactionResult",
     "ConfigDiagnostic",
+    "DebugDumpResult",
+    "DebugStatus",
     "DiagnosticsList",
     "EventSubscription",
     "MCPServer",
@@ -55,6 +60,7 @@ __all__ = [
     "Skill",
     "SkillDiagnostic",
     "Skills",
+    "UsageCost",
     "UsageSnapshot",
     "UserInputHandler",
     "SnowCancelledError",

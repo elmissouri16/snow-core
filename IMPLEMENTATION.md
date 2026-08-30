@@ -820,13 +820,15 @@ resume but never become a default for a new session or project. Global and
 project configurations ignore the removed `permission_mode` field for upgrade
 compatibility; it cannot alter the launch baseline or active-session state.
 
-The interactive TUI supplies an `Asker`; headless SDK defaults to `deny` for
-mutating tools unless the caller deliberately opts into `allow`/`AutoApprove`
-in a trusted environment. Project trust is resolved on canonical paths before
-TUI runtime construction; every undecided interactive project prompts, while
-headless `ask` remains fail-closed. Runtime `/trust` changes apply on the next
-launch. Trust controls input loading (project config, configured system-prompt
-files, plugins, MCP declarations, skills) and is not a sandbox.
+The interactive TUI supplies an `Asker`; the headless SDK defaults to `deny`
+for mutating tools unless the caller deliberately opts into `allow`/
+`AutoApprove` or installs a trusted permission handler. Raw RPC `ask` enables
+manual correlated replies and blocks until the host replies, rejects, cancels,
+or closes the process; no headless surface silently approves. Project trust is
+resolved on canonical paths before TUI runtime construction; every undecided
+interactive project prompts. Runtime `/trust` changes apply on the next launch.
+Trust controls input loading (project config, configured system-prompt files,
+plugins, MCP declarations, skills) and is not a sandbox.
 
 ## Config and project context
 
@@ -1152,9 +1154,10 @@ automatically when capacity permits.
 
 The shared cwd and OS authority are not a sandbox. Parallel edits can
 conflict, provider usage is independent, and child/repository output is
-untrusted. The TUI serializes root/child permission requests through an
-attributed FIFO broker; headless ask mode remains fail-closed. Child
-`ask_user` stays excluded, preventing ambiguous input routing. See
+untrusted. The TUI and trusted RPC hosts serialize root/child permission
+requests through the same attributed FIFO broker. SDK/print ask without a handler denies; no
+headless surface silently approves. Child `ask_user` stays excluded, preventing
+ambiguous input routing. See
 `docs/subagents.md`.
 
 ## TUI and surfaces
@@ -1325,9 +1328,9 @@ the agent waits. Admission returns an immediate response; exactly one later
 `prompt_completed` frame reports `completed`, `failed`, or `canceled` after
 all prompt events, and legacy same-ID prompt failure responses are retained.
 `user_input_reply.params` is a `UserInputResponse`;
-`user_input_reject.params` contains `request_id`. EOF closes the interactive
-input broker so pending/future questions fail fast while an ordinary one-shot
-prompt is still allowed to finish. Dispatcher ownership is split by cohesive
+`user_input_reject.params` contains `request_id`. EOF stops command admission,
+cancels the serve context and active prompt/wait workers, closes the user-input
+and permission brokers, and joins all RPC workers before returning. Dispatcher ownership is split by cohesive
 command domain (for example `subagent_commands.go`), and an AST parity test
 requires every `pkg/protocol` command-inventory entry to have a dispatcher case.
 
