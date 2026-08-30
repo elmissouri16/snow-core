@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,7 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -134,7 +135,7 @@ func normalizedSecrets(values []string) []string {
 		seen[value] = struct{}{}
 		out = append(out, value)
 	}
-	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+	slices.SortFunc(out, func(a, b string) int { return cmp.Compare(len(b), len(a)) })
 	return out
 }
 

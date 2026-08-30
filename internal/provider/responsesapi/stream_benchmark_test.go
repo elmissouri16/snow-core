@@ -1,7 +1,6 @@
 package responsesapi
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,12 +12,12 @@ import (
 
 func BenchmarkResponsesSSE600(b *testing.B) {
 	var payload strings.Builder
-	for i := 0; i < 600; i++ {
+	for range 600 {
 		fmt.Fprintf(&payload, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"x\",\"output_index\":0}\n\n")
 	}
 	payload.WriteString("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n")
 	wire := payload.String()
-	ctx := context.Background()
+	ctx := b.Context()
 	b.ReportAllocs()
 	for b.Loop() {
 		stream := NewStream(ctx, &http.Response{Body: io.NopCloser(strings.NewReader(wire))}, "benchmark")

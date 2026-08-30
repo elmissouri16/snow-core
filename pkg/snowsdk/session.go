@@ -3,6 +3,8 @@ package snowsdk
 import (
 	"context"
 	"errors"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/agent"
@@ -616,7 +618,7 @@ func (s *Session) MCPServers() []publicmcp.Status {
 	out := make([]publicmcp.Status, len(statuses))
 	copy(out, statuses)
 	for i := range out {
-		out[i].Capabilities = append([]string(nil), out[i].Capabilities...)
+		out[i].Capabilities = slices.Clone(out[i].Capabilities)
 	}
 	return out
 }
@@ -632,9 +634,7 @@ func (s *Session) Skills() []SkillInfo {
 	out := make([]SkillInfo, 0, len(list))
 	for _, skill := range list {
 		metadata := make(map[string]string, len(skill.Metadata))
-		for key, value := range skill.Metadata {
-			metadata[key] = value
-		}
+		maps.Copy(metadata, skill.Metadata)
 		out = append(out, SkillInfo{Name: skill.Name, Description: skill.Description, License: skill.License, Compatibility: skill.Compatibility, Metadata: metadata, AllowedTools: skill.AllowedTools, Location: skill.Location, Scope: skill.Scope, Source: skill.Source, Enabled: skill.Enabled, DisabledBy: skill.DisabledBy})
 	}
 	return out
@@ -651,9 +651,7 @@ func (s *Session) SkillInventory() []SkillInfo {
 	out := make([]SkillInfo, 0, len(list))
 	for _, skill := range list {
 		metadata := make(map[string]string, len(skill.Metadata))
-		for key, value := range skill.Metadata {
-			metadata[key] = value
-		}
+		maps.Copy(metadata, skill.Metadata)
 		out = append(out, SkillInfo{Name: skill.Name, Description: skill.Description, License: skill.License, Compatibility: skill.Compatibility, Metadata: metadata, AllowedTools: skill.AllowedTools, Location: skill.Location, Scope: skill.Scope, Source: skill.Source, Enabled: skill.Enabled, DisabledBy: skill.DisabledBy})
 	}
 	return out

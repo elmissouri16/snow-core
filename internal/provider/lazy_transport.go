@@ -43,8 +43,8 @@ func (e *TransportInitializationError) Unwrap() error {
 // IsTransportInitializationError reports whether err contains a deferred
 // adapter-construction failure.
 func IsTransportInitializationError(err error) bool {
-	var target *TransportInitializationError
-	return errors.As(err, &target)
+	_, ok := errors.AsType[*TransportInitializationError](err)
+	return ok
 }
 
 type lazyTransportState struct{ transport Transport }

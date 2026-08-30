@@ -215,7 +215,7 @@ func TestCanceledCatalogLoadIsNotCached(t *testing.T) {
 		providers: map[string]provider.Provider{"retry": candidate}, catalogs: map[string][]protocol.Model{},
 		catalogErrors: map[string]error{}, catalogLoads: map[string]*catalogLoad{}, catalogGeneration: map[string]uint64{},
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := selection.ensureCatalog(ctx, "retry", false); !errors.Is(err, context.Canceled) {
 		t.Fatalf("first load error=%v, want canceled", err)

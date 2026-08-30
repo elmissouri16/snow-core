@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -58,7 +59,7 @@ type ToolProgressEvent struct {
 	Name       string `json:"name"`
 	Message    string `json:"message,omitempty"`
 	Done       bool   `json:"done"`
-	IsError    bool   `json:"is_error,omitempty"`
+	IsError    bool   `json:"is_error,omitzero"`
 }
 
 // ToolHost gives tools access to environment and safety services.
@@ -379,7 +380,7 @@ func normalizeDescriptor(desc ToolDescriptor) (ToolDescriptor, error) {
 		return ToolDescriptor{}, err
 	}
 	desc.Schema = cloneSchema(desc.Schema)
-	desc.Capabilities = append([]string(nil), desc.Capabilities...)
+	desc.Capabilities = slices.Clone(desc.Capabilities)
 	return desc, nil
 }
 
@@ -691,7 +692,7 @@ func cloneSchema(schema ToolSchema) ToolSchema {
 }
 
 func cloneStrings(in []string) []string {
-	return append([]string(nil), in...)
+	return slices.Clone(in)
 }
 
 // CloneRegistry creates an independent registry snapshot filtered by immutable

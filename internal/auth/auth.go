@@ -24,7 +24,7 @@ type Credential struct {
 	Key       string         `json:"key,omitempty"`
 	Access    string         `json:"access,omitempty"`
 	Refresh   string         `json:"refresh,omitempty"`
-	Expires   int64          `json:"expires,omitempty"`   // unix seconds; 0 = unknown
+	Expires   int64          `json:"expires,omitzero"`    // unix seconds; 0 = unknown
 	AccountID string         `json:"accountId,omitempty"` // compatible with pi/Codex OAuth entries
 	Extra     map[string]any `json:"extra,omitempty"`
 }
@@ -135,7 +135,7 @@ func secretExtraKey(key string) bool {
 		}
 		normalized.WriteRune(unicode.ToLower(r))
 	}
-	for _, word := range strings.Fields(normalized.String()) {
+	for word := range strings.FieldsSeq(normalized.String()) {
 		switch word {
 		case "token", "secret", "password", "passwd", "credential", "authorization", "cookie", "key":
 			return true

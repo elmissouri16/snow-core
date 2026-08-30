@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -315,7 +316,7 @@ func (q *agentEventMailbox) popBatch(limit int) []protocol.AgentEvent {
 		q.mu.Unlock()
 		return nil
 	}
-	items := append([]queuedAgentEvent(nil), q.items[:count]...)
+	items := slices.Clone(q.items[:count])
 	for i := range q.items[:count] {
 		q.bytes -= q.items[i].bytes
 	}

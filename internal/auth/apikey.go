@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -22,7 +23,7 @@ func NewAPIKeyDriver(options APIKeyOptions) *APIKeyDriver {
 	return &APIKeyDriver{descriptor: Descriptor{
 		ProviderID: options.ProviderID, DisplayName: options.DisplayName,
 		Required: options.Required, Kinds: []CredentialType{CredentialAPIKey},
-		Environment: append([]string(nil), options.Environment...),
+		Environment: slices.Clone(options.Environment),
 		Methods:     []LoginMethod{{ID: "api_key", DisplayName: "API key", Kind: CredentialAPIKey}},
 	}}
 }

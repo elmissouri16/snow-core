@@ -5,10 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -167,7 +166,7 @@ func (b *eventBus) runSubscriber(sub *eventSubscriber) {
 }
 
 func (b *eventBus) dispatch() {
-	atomic.StoreUint64(&b.dispatcherID, currentGoroutineID())
+	b.dispatcherID.Store(currentGoroutineID())
 	defer close(b.closed)
 	timer := time.NewTimer(time.Hour)
 	if !timer.Stop() {
@@ -198,7 +197,7 @@ func (b *eventBus) dispatch() {
 				for id := range b.subs {
 					ids = append(ids, id)
 				}
-				sort.Ints(ids)
+				slices.Sort(ids)
 				for _, id := range ids {
 					subscribers = append(subscribers, b.subs[id])
 				}
@@ -475,5 +474,5 @@ func (b *eventBus) Publish(ev protocol.AgentEvent) {
 }
 
 func newID() string {
-	return fmt.Sprintf("%d-%x", time.Now().UnixNano(), atomic.AddUint64(&idCounter, 1))
+	return fmt.Sprintf("%d-%x", time.Now().UnixNano(), idCounter.Add(1))
 }

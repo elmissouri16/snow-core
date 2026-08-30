@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -457,7 +458,7 @@ func (m *Manager) HasActive() bool {
 
 func (m *Manager) Usage() (protocol.Usage, error) {
 	m.mu.RLock()
-	ids := append([]string(nil), m.order...)
+	ids := slices.Clone(m.order)
 	m.mu.RUnlock()
 	var total protocol.Usage
 	for _, id := range ids {
@@ -558,10 +559,7 @@ func (m *Manager) Close(ctx context.Context) error {
 }
 
 func (m *Manager) worker(r *runtime, stop <-chan struct{}, done chan<- struct{}) {
-	defer func() {
-		close(done)
-		m.wg.Done()
-	}()
+	defer close(done)
 	for {
 		select {
 		case <-stop:
@@ -687,10 +685,7 @@ func (m *Manager) scheduleEviction() {
 		return
 	}
 	m.evictionScheduled = true
-	m.wg.Add(1)
-	m.mu.Unlock()
-	go func() {
-		defer m.wg.Done()
+	m.wg.Go(func() {
 		for {
 			m.evictIdle()
 			m.mu.Lock()
@@ -703,5 +698,6 @@ func (m *Manager) scheduleEviction() {
 			m.evictionRequested = false
 			m.mu.Unlock()
 		}
-	}()
+	})
+	m.mu.Unlock()
 }

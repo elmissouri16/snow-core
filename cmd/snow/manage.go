@@ -17,12 +17,12 @@ type mcpConfigView struct {
 	CWD            string            `json:"cwd,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
 	Headers        map[string]string `json:"headers,omitempty"`
-	TimeoutMS      int               `json:"timeout_ms,omitempty"`
+	TimeoutMS      int               `json:"timeout_ms,omitzero"`
 	ToolDiscovery  string            `json:"tool_discovery,omitempty"`
 	Lifecycle      string            `json:"lifecycle,omitempty"`
 	CacheBootstrap string            `json:"cache_bootstrap,omitempty"`
-	IdleTimeoutMS  int               `json:"idle_timeout_ms,omitempty"`
-	Shadowed       bool              `json:"shadowed,omitempty"`
+	IdleTimeoutMS  int               `json:"idle_timeout_ms,omitzero"`
+	Shadowed       bool              `json:"shadowed,omitzero"`
 	DisabledBy     string            `json:"disabled_by,omitempty"`
 	spec           publicmcp.ServerSpec
 }

@@ -127,7 +127,7 @@ func (w *blockingWriter) Write(p []byte) (int, error) {
 
 func rpcFrame(t *testing.T, output, kind, id string) []byte {
 	t.Helper()
-	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
 		var header struct {
 			Type      string `json:"type"`
 			ID        string `json:"id"`

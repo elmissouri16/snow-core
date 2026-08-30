@@ -13,8 +13,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/elmissouri16/snow-core/pkg/protocol"
 	_ "modernc.org/sqlite"
+
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 const (
@@ -44,7 +45,7 @@ type SearchHit struct {
 	EntryID   string    `json:"entry_id"`
 	Kind      EntryType `json:"kind"`
 	Role      string    `json:"role,omitempty"`
-	Timestamp int64     `json:"timestamp,omitempty"`
+	Timestamp int64     `json:"timestamp,omitzero"`
 	Snippet   string    `json:"snippet"`
 	UpdatedAt int64     `json:"updated_at"`
 }
@@ -247,7 +248,7 @@ func (q *QueryEngine) Search(ctx context.Context, query string, limit int, exclu
 			q.cacheKey = ""
 		}
 		buildKey := fileKey
-		for attempt := 0; attempt < 3; attempt++ {
+		for range 3 {
 			sessions, listErr := q.index.listRecentForQuery(q.cwd, maxSearchSessions)
 			if listErr != nil {
 				return nil, listErr
@@ -660,10 +661,7 @@ func truncateUTF8(text string, maxBytes int) (string, bool) {
 		return text, false
 	}
 	const marker = "\n… [session reference truncated]"
-	limit := maxBytes - len(marker)
-	if limit < 0 {
-		limit = 0
-	}
+	limit := max(maxBytes-len(marker), 0)
 	for limit > 0 && !utf8.RuneStart(text[limit]) {
 		limit--
 	}

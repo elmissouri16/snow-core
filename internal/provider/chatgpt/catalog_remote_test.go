@@ -33,9 +33,9 @@ func TestRemoteCatalogMappingETagAndAccountCache(t *testing.T) {
 		}
 		w.Header().Set("ETag", "tag")
 		_ = json.NewEncoder(w).Encode(modelsResponse{Models: []modelRecord{
-			{Slug: "visible", DisplayName: "Visible", Description: "desc", Visibility: "list", Priority: 2, ContextWindow: 1000, MaxContextWindow: 2000, EffectiveContextWindowPercent: 95, SupportVerbosity: true, SupportsReasoningSummaryParameter: boolPointer(true), InputModalities: []string{"text", "image"}, DefaultReasoningLevel: "xhigh", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"xhigh"}, {"max"}, {"ultra"}, {"high"}}, Upgrade: &modelUpgradeRecord{Model: "next", MigrationMarkdown: "move"}},
+			{Slug: "visible", DisplayName: "Visible", Description: "desc", Visibility: "list", Priority: 2, ContextWindow: 1000, MaxContextWindow: 2000, EffectiveContextWindowPercent: 95, SupportVerbosity: true, SupportsReasoningSummaryParameter: new(true), InputModalities: []string{"text", "image"}, DefaultReasoningLevel: "xhigh", SupportedReasoningLevels: []reasoningLevelRecord{{"low"}, {"xhigh"}, {"max"}, {"ultra"}, {"high"}}, Upgrade: &modelUpgradeRecord{Model: "next", MigrationMarkdown: "move"}},
 			{Slug: "hidden", Visibility: "hide", Priority: 1},
-			{Slug: "spark", Visibility: "list", Priority: 1, SupportedInAPI: false, ContextWindow: 128000, SupportsReasoningSummaryParameter: boolPointer(false), SupportedReasoningLevels: []reasoningLevelRecord{{"medium"}}},
+			{Slug: "spark", Visibility: "list", Priority: 1, SupportedInAPI: false, ContextWindow: 128000, SupportsReasoningSummaryParameter: new(false), SupportedReasoningLevels: []reasoningLevelRecord{{"medium"}}},
 		}})
 	}))
 	defer server.Close()
@@ -104,5 +104,3 @@ func TestAuthenticatedCatalogReturnsExactlyVisibleAccountRecords(t *testing.T) {
 		t.Fatalf("account models=%+v", models)
 	}
 }
-
-func boolPointer(value bool) *bool { return &value }

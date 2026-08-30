@@ -194,7 +194,7 @@ func transcriptSelectionContextMenuView() string {
 
 func transcriptSelectionBlockWidth(block string) int {
 	width := 0
-	for _, line := range strings.Split(block, "\n") {
+	for line := range strings.SplitSeq(block, "\n") {
 		width = max(width, xansi.StringWidth(line))
 	}
 	return width
@@ -297,8 +297,7 @@ func transcriptSelectionClipboardSequence(text string) string {
 }
 
 func cloneTranscriptSelectionPoint(point transcriptSelectionPoint) *transcriptSelectionPoint {
-	copy := point
-	return &copy
+	return new(point)
 }
 
 func (m *Model) transcriptSelectionClickCount(point transcriptSelectionPoint, word transcriptSelectionRange, hasWord bool) int {

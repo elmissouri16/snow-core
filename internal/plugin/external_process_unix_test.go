@@ -20,7 +20,7 @@ func TestExternalHostUsesDedicatedProcessGroup(t *testing.T) {
 	if host.cmd.SysProcAttr == nil || !host.cmd.SysProcAttr.Setpgid {
 		t.Fatal("external plugin was not configured as a process-group leader")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
 	_ = host.Close(ctx)
 	select {

@@ -1,11 +1,12 @@
 package mcp
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -109,7 +110,7 @@ func (rt *serverRuntime) installCached(catalog cachedCatalog) error {
 	for _, tool := range catalog.Tools {
 		remote = append(remote, &sdkmcp.Tool{Name: tool.Name, Title: tool.Title, Description: tool.Description, InputSchema: append(json.RawMessage(nil), tool.InputSchema...)})
 	}
-	sort.SliceStable(remote, func(i, j int) bool { return remote[i].Name < remote[j].Name })
+	slices.SortStableFunc(remote, func(a, b *sdkmcp.Tool) int { return cmp.Compare(a.Name, b.Name) })
 	used := make(map[string]string)
 	descriptors := make([]tools.ToolDescriptor, 0, len(remote))
 	for _, tool := range remote {

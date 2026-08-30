@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func TestCloneChildRegistryRoleCapabilities(t *testing.T) {
 	parent := testChildParentRegistry(t)
 	defaults := config.Default().Subagents.Roles
 
-	general := subagent.Role{Name: "general", Tools: append([]string(nil), defaults["general"].Tools...)}
+	general := subagent.Role{Name: "general", Tools: slices.Clone(defaults["general"].Tools)}
 	generalReg, generalCaps, err := cloneChildRegistry(parent, general, false)
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +74,7 @@ func TestCloneChildRegistryRoleCapabilities(t *testing.T) {
 		t.Fatal("general role unexpectedly has mutation capability")
 	}
 
-	explorer := subagent.Role{Name: "explorer", Tools: append([]string(nil), defaults["explorer"].Tools...)}
+	explorer := subagent.Role{Name: "explorer", Tools: slices.Clone(defaults["explorer"].Tools)}
 	explorerReg, explorerCaps, err := cloneChildRegistry(parent, explorer, false)
 	if err != nil {
 		t.Fatal(err)

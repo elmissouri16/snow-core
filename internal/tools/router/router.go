@@ -4,10 +4,12 @@
 package router
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -137,11 +139,11 @@ func deferredCatalog(catalog []tools.DescriptorMetadata) []routeDescriptor {
 		}
 		deferred = append(deferred, routeDescriptor{
 			name: desc.Name, original: desc.OriginalName, description: desc.Description,
-			namespace: desc.Namespace, keywords: append([]string(nil), desc.Keywords...),
+			namespace: desc.Namespace, keywords: slices.Clone(desc.Keywords),
 		})
 	}
-	sort.SliceStable(deferred, func(i, j int) bool {
-		return deferred[i].name < deferred[j].name
+	slices.SortStableFunc(deferred, func(a, b routeDescriptor) int {
+		return cmp.Compare(a.name, b.name)
 	})
 	return deferred
 }
@@ -166,7 +168,7 @@ func buildIndexesContext(ctx context.Context, catalog []routeDescriptor, factory
 			return nil, nil, nil, 0, err
 		}
 		name := strings.TrimSpace(strings.Join([]string{desc.name, desc.original, normalizeIdentifier(desc.name), normalizeIdentifier(desc.original)}, " "))
-		doc := indexDocument{NamespaceID: desc.namespace, Namespace: desc.namespace, Name: name, Description: desc.description, Keywords: append([]string(nil), desc.keywords...)}
+		doc := indexDocument{NamespaceID: desc.namespace, Namespace: desc.namespace, Name: name, Description: desc.description, Keywords: slices.Clone(desc.keywords)}
 		if err := toolBatch.Index(desc.name, doc); err != nil {
 			_ = idx.Close()
 			return nil, nil, nil, 0, fmt.Errorf("tool router: index %s: %w", desc.name, err)
@@ -192,11 +194,7 @@ func buildIndexesContext(ctx context.Context, catalog []routeDescriptor, factory
 		return nil, nil, nil, 0, fmt.Errorf("tool router: create namespace index: %w", err)
 	}
 	namespaceBatch := namespaceIdx.NewBatch()
-	namespaces := make([]string, 0, len(namespaceDocs))
-	for namespace := range namespaceDocs {
-		namespaces = append(namespaces, namespace)
-	}
-	sort.Strings(namespaces)
+	namespaces := slices.Sorted(maps.Keys(namespaceDocs))
 	for _, namespace := range namespaces {
 		if err := ctx.Err(); err != nil {
 			_ = closeIndexes(idx, namespaceIdx)
@@ -341,8 +339,14 @@ func uniqueSortedContext(ctx context.Context, values []string) ([]string, error)
 			return nil, err
 		}
 		end := min(start+sortChunk, len(items))
-		sort.SliceStable(items[start:end], func(i, j int) bool {
-			return less(items[start+i], items[start+j])
+		slices.SortStableFunc(items[start:end], func(a, b sortableValue) int {
+			if less(a, b) {
+				return -1
+			}
+			if less(b, a) {
+				return 1
+			}
+			return 0
 		})
 	}
 	buffer := make([]sortableValue, len(items))
@@ -480,7 +484,7 @@ func (r *Bleve) ensureInitialized(ctx context.Context) error {
 		}
 		initialization := &indexInitialization{done: make(chan struct{}), generation: generation}
 		r.init = initialization
-		catalog := append([]routeDescriptor(nil), r.catalog...)
+		catalog := slices.Clone(r.catalog)
 		factory := r.factory
 		r.mu.Unlock()
 
@@ -676,11 +680,11 @@ func searchIndex(ctx context.Context, idx bleve.Index, searchQuery query.Query, 
 	for _, hit := range result.Hits {
 		hits = append(hits, scoredHit{id: hit.ID, score: hit.Score})
 	}
-	sort.SliceStable(hits, func(i, j int) bool {
-		if hits[i].score == hits[j].score {
-			return hits[i].id < hits[j].id
+	slices.SortStableFunc(hits, func(a, b scoredHit) int {
+		if byScore := cmp.Compare(b.score, a.score); byScore != 0 {
+			return byScore
 		}
-		return hits[i].score > hits[j].score
+		return cmp.Compare(a.id, b.id)
 	})
 	return hits, nil
 }
@@ -709,11 +713,11 @@ func fuseRankings(global, scoped []tools.ToolMatch, limit int) []tools.ToolMatch
 		entry.match.Score = entry.score
 		matches = append(matches, entry.match)
 	}
-	sort.SliceStable(matches, func(i, j int) bool {
-		if matches[i].Score == matches[j].Score {
-			return matches[i].ID < matches[j].ID
+	slices.SortStableFunc(matches, func(a, b tools.ToolMatch) int {
+		if byScore := cmp.Compare(b.Score, a.Score); byScore != 0 {
+			return byScore
 		}
-		return matches[i].Score > matches[j].Score
+		return cmp.Compare(a.ID, b.ID)
 	})
 	// Routing consumers expose the first five candidates. Keep the strongest
 	// global hit inside that window even when many scoped-only hits receive the

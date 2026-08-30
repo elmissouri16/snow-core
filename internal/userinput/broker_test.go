@@ -101,7 +101,7 @@ func TestBrokerRejectCancelUnavailableAndValidation(t *testing.T) {
 	t.Run("cancel", func(t *testing.T) {
 		b := New(nil)
 		b.EnableManual()
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		published := make(chan protocol.UserInputRequest, 1)
 		resolved := make(chan error, 1)
 		go func() {
@@ -118,8 +118,7 @@ func TestBrokerRejectCancelUnavailableAndValidation(t *testing.T) {
 	t.Run("invalid reply remains pending", func(t *testing.T) {
 		b := New(nil)
 		b.EnableManual()
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := t.Context()
 		published := make(chan protocol.UserInputRequest, 1)
 		go b.Ask(ctx, testRequest(), func(req protocol.UserInputRequest) { published <- req }) //nolint:errcheck
 		req := receive(t, published)

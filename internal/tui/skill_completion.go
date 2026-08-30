@@ -1,7 +1,8 @@
 package tui
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -30,7 +31,7 @@ func skillCompletionQuery(text string) (query string, start int, selected []stri
 	if start >= len(text) || text[start] != '$' {
 		return "", 0, nil, false
 	}
-	for _, field := range strings.Fields(text[:start]) {
+	for field := range strings.FieldsSeq(text[:start]) {
 		if len(field) >= 2 && field[0] == '$' {
 			selected = append(selected, field[1:])
 		}
@@ -51,7 +52,7 @@ func matchSkillCompletions(skills []skillCompletionItem, query string, selected 
 		}
 		matches = append(matches, skill)
 	}
-	sort.Slice(matches, func(i, j int) bool { return matches[i].Name < matches[j].Name })
+	slices.SortFunc(matches, func(a, b skillCompletionItem) int { return cmp.Compare(a.Name, b.Name) })
 	if len(matches) > skillCompletionLimit {
 		matches = matches[:skillCompletionLimit]
 	}

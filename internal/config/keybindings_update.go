@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -97,11 +98,11 @@ func UpdateKeybindings(scope KeybindingWriteScope, mutate func(*KeybindingsFile)
 	} else {
 		inherited := defaultAuxBindings()
 		for action, values := range scope.Inherited {
-			inherited[action] = append([]string(nil), values...)
+			inherited[action] = slices.Clone(values)
 		}
 		effective := cloneBindings(inherited)
 		for action, values := range current.Bindings {
-			effective[action] = append([]string(nil), values...)
+			effective[action] = slices.Clone(values)
 		}
 		effective["abort"] = appendUnique(effective["abort"], "ctrl+c")
 		effective["abort"] = appendUnique(effective["abort"], "esc")

@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 )
 
@@ -75,7 +76,7 @@ var rpcCommands = []string{
 
 // KnownRPCCommands returns every command accepted by protocol version 1.
 func KnownRPCCommands() []string {
-	return append([]string(nil), rpcCommands...)
+	return slices.Clone(rpcCommands)
 }
 
 var rpcCapabilities = []string{
@@ -105,7 +106,7 @@ var rpcCapabilities = []string{
 // KnownRPCCapabilities returns an independent list of optional protocol
 // features implemented by this version. Callers must tolerate unknown values.
 func KnownRPCCapabilities() []string {
-	return append([]string(nil), rpcCapabilities...)
+	return slices.Clone(rpcCapabilities)
 }
 
 // RPCRequest is one command line sent to snow --mode rpc.
@@ -178,7 +179,7 @@ type RPCPromptCompleted struct {
 type RPCModelList struct {
 	Provider string  `json:"provider,omitempty"`
 	Current  string  `json:"current,omitempty"`
-	Enabled  *bool   `json:"enabled,omitempty"`
+	Enabled  *bool   `json:"enabled,omitzero"`
 	Models   []Model `json:"models"`
 }
 
@@ -246,7 +247,7 @@ type RPCDiagnosticsList struct {
 // RPCDebugStatus describes process-local shared diagnostic capture.
 type RPCDebugStatus struct {
 	Enabled       bool      `json:"enabled"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
+	StartedAt     time.Time `json:"started_at,omitzero"`
 	EventCount    int       `json:"event_count"`
 	RetainedBytes int       `json:"retained_bytes"`
 	DroppedEvents uint64    `json:"dropped_events"`
@@ -275,12 +276,12 @@ type RPCMCPServer struct {
 	ServerName      string    `json:"server_name,omitempty"`
 	ServerVersion   string    `json:"server_version,omitempty"`
 	Capabilities    []string  `json:"capabilities,omitempty"`
-	ToolCount       int       `json:"tool_count,omitempty"`
+	ToolCount       int       `json:"tool_count,omitzero"`
 	Message         string    `json:"message,omitempty"`
 	State           string    `json:"state,omitempty"`
-	Cached          bool      `json:"cached,omitempty"`
-	CachedAt        time.Time `json:"cached_at,omitempty"`
-	LastUsedAt      time.Time `json:"last_used_at,omitempty"`
+	Cached          bool      `json:"cached,omitzero"`
+	CachedAt        time.Time `json:"cached_at,omitzero"`
+	LastUsedAt      time.Time `json:"last_used_at,omitzero"`
 }
 
 // RPCSkill is the metadata catalog entry exposed to clients.

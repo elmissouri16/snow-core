@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -115,7 +116,7 @@ func stripPastedTextAttachmentTokens(text string, attachments []pastedTextAttach
 }
 
 func (m *Model) takePastedTextAttachments() []pastedTextAttachment {
-	attachments := append([]pastedTextAttachment(nil), m.pastedTexts...)
+	attachments := slices.Clone(m.pastedTexts)
 	m.pastedTexts = nil
 	return attachments
 }
@@ -190,7 +191,7 @@ func (m *Model) editorCursorRuneOffset() int {
 	lines := strings.Split(value, "\n")
 	row := max(0, min(m.editor.Line(), len(lines)-1))
 	offset := 0
-	for i := 0; i < row; i++ {
+	for i := range row {
 		offset += utf8.RuneCountInString(lines[i]) + 1
 	}
 	info := m.editor.LineInfo()

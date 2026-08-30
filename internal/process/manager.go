@@ -3,13 +3,14 @@
 package process
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -44,11 +45,11 @@ type State struct {
 	Name       string `json:"name"`
 	Status     string `json:"status"`
 	StartedAt  int64  `json:"started_at"`
-	FinishedAt int64  `json:"finished_at,omitempty"`
-	ExitCode   *int   `json:"exit_code,omitempty"`
+	FinishedAt int64  `json:"finished_at,omitzero"`
+	ExitCode   *int   `json:"exit_code,omitzero"`
 	Signal     string `json:"signal,omitempty"`
 	Reason     string `json:"reason,omitempty"`
-	Ready      bool   `json:"ready,omitempty"`
+	Ready      bool   `json:"ready,omitzero"`
 }
 
 type StartRequest struct {
@@ -60,10 +61,10 @@ type StartRequest struct {
 type ReadinessRequest struct {
 	Type      string `json:"type"`
 	Host      string `json:"host,omitempty"`
-	Port      int    `json:"port,omitempty"`
+	Port      int    `json:"port,omitzero"`
 	URL       string `json:"url,omitempty"`
 	Pattern   string `json:"pattern,omitempty"`
-	TimeoutMS int    `json:"timeout_ms,omitempty"`
+	TimeoutMS int    `json:"timeout_ms,omitzero"`
 }
 
 type LogsRequest struct {
@@ -78,7 +79,7 @@ type LogsResult struct {
 	Status     string `json:"status"`
 	Output     string `json:"output,omitempty"`
 	NextCursor int64  `json:"next_cursor"`
-	Omitted    int64  `json:"omitted_bytes,omitempty"`
+	Omitted    int64  `json:"omitted_bytes,omitzero"`
 	EOF        bool   `json:"eof"`
 }
 
@@ -331,13 +332,16 @@ func (m *Manager) List() []State {
 		}
 	}
 	m.mu.Unlock()
-	sort.Slice(states, func(i, j int) bool {
-		iRunning := states[i].Status == "running"
-		jRunning := states[j].Status == "running"
-		if iRunning != jRunning {
-			return iRunning
+	slices.SortFunc(states, func(a, b State) int {
+		aRunning := a.Status == "running"
+		bRunning := b.Status == "running"
+		if aRunning != bRunning {
+			if aRunning {
+				return -1
+			}
+			return 1
 		}
-		return states[i].StartedAt > states[j].StartedAt
+		return cmp.Compare(b.StartedAt, a.StartedAt)
 	})
 	return states
 }
@@ -466,13 +470,11 @@ func stopProcessRecords(ctx context.Context, records []*runtimeProcess, grace ti
 	var wg sync.WaitGroup
 	errs := make(chan error, len(records))
 	for _, record := range records {
-		wg.Add(1)
-		go func(record *runtimeProcess) {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := record.stop(ctx, grace, reason); err != nil {
 				errs <- err
 			}
-		}(record)
+		})
 	}
 	wg.Wait()
 	close(errs)

@@ -3,6 +3,7 @@ package rpc
 import (
 	"fmt"
 	"io"
+	"slices"
 	"time"
 )
 
@@ -22,7 +23,7 @@ func newProcessOutputWriter(out io.Writer) *processOutputWriter {
 func (*processOutputWriter) RPCWriteBounded() bool { return true }
 
 func (w *processOutputWriter) Write(p []byte) (int, error) {
-	payload := append([]byte(nil), p...)
+	payload := slices.Clone(p)
 	type result struct {
 		n   int
 		err error

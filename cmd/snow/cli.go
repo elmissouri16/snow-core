@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -348,8 +349,8 @@ func promptSecret(prompt string) (string, error) {
 }
 
 func buildOptions(cmd *cobra.Command) (app.Options, error) {
-	opts := app.Options{BuildVersion: version}
-	opts.CWD = mustCWD()
+	opts := app.Options{BuildVersion: version,
+		CWD: mustCWD()}
 	opts.Provider, _ = cmd.Flags().GetString("provider")
 	opts.Model, _ = cmd.Flags().GetString("model")
 	opts.APIKey, _ = cmd.Flags().GetString("api-key")
@@ -439,11 +440,7 @@ func parseMCPSpecs(arg string) ([]publicmcp.ServerSpec, error) {
 			servers = common.SnowServers
 		}
 		if len(servers) > 0 {
-			ids := make([]string, 0, len(servers))
-			for id := range servers {
-				ids = append(ids, id)
-			}
-			sort.Strings(ids)
+			ids := slices.Sorted(maps.Keys(servers))
 			out := make([]publicmcp.ServerSpec, 0, len(ids))
 			for _, id := range ids {
 				spec := servers[id]

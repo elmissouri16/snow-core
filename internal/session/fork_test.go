@@ -20,8 +20,8 @@ func TestFileIndexCreateForkMaterializesIndependentSession(t *testing.T) {
 	}
 	defer source.Close()
 
-	user := Entry{Type: EntryMessage, ID: "user-1", Message: messagePtr(protocol.NewUserMessage("user-1", "root", "design one"))}
-	assistant := Entry{Type: EntryMessage, ID: "assistant-1", Message: messagePtr(protocol.NewAssistantMessage("assistant-1", "user-1", "fake", "fake-1", []protocol.ContentBlock{protocol.NewTextBlock("answer one")}, protocol.StopStop, nil))}
+	user := Entry{Type: EntryMessage, ID: "user-1", Message: new(protocol.NewUserMessage("user-1", "root", "design one"))}
+	assistant := Entry{Type: EntryMessage, ID: "assistant-1", Message: new(protocol.NewAssistantMessage("assistant-1", "user-1", "fake", "fake-1", []protocol.ContentBlock{protocol.NewTextBlock("answer one")}, protocol.StopStop, nil))}
 	if err := source.(BatchStore).AppendBatch([]Entry{user, assistant}); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestFileIndexCreateForkMaterializesIndependentSession(t *testing.T) {
 		t.Fatalf("historical fork mode = %q, err=%v", mode, err)
 	}
 
-	childMessage := Entry{Type: EntryMessage, ID: "child-user", Message: messagePtr(protocol.NewUserMessage("child-user", "assistant-1", "child only"))}
+	childMessage := Entry{Type: EntryMessage, ID: "child-user", Message: new(protocol.NewUserMessage("child-user", "assistant-1", "child only"))}
 	if err := forked.Append(childMessage); err != nil {
 		t.Fatal(err)
 	}
@@ -87,13 +87,13 @@ func TestCreateForkHistoricalEntryUsesDefaultMode(t *testing.T) {
 	index := NewFileIndex(root)
 	source := NewMemoryStore(Options{CWD: cwd, Name: "source"})
 	defer source.Close()
-	if err := source.Append(Entry{Type: EntryMessage, ID: "u1", Message: messagePtr(protocol.NewUserMessage("u1", "root", "one"))}); err != nil {
+	if err := source.Append(Entry{Type: EntryMessage, ID: "u1", Message: new(protocol.NewUserMessage("u1", "root", "one"))}); err != nil {
 		t.Fatal(err)
 	}
-	if err := source.Append(Entry{Type: EntryMessage, ID: "a1", Message: messagePtr(protocol.NewAssistantMessage("a1", "u1", "fake", "fake-1", []protocol.ContentBlock{protocol.NewTextBlock("one")}, protocol.StopStop, nil))}); err != nil {
+	if err := source.Append(Entry{Type: EntryMessage, ID: "a1", Message: new(protocol.NewAssistantMessage("a1", "u1", "fake", "fake-1", []protocol.ContentBlock{protocol.NewTextBlock("one")}, protocol.StopStop, nil))}); err != nil {
 		t.Fatal(err)
 	}
-	if err := source.Append(Entry{Type: EntryMessage, ID: "u2", Message: messagePtr(protocol.NewUserMessage("u2", "a1", "two"))}); err != nil {
+	if err := source.Append(Entry{Type: EntryMessage, ID: "u2", Message: new(protocol.NewUserMessage("u2", "a1", "two"))}); err != nil {
 		t.Fatal(err)
 	}
 	if err := source.SetCollaborationMode(protocol.ModePlan); err != nil {
@@ -176,5 +176,3 @@ func TestForkArtifactIDsOrdersByLatestOccurrence(t *testing.T) {
 		t.Fatalf("artifact IDs by latest occurrence=%v", ids)
 	}
 }
-
-func messagePtr(message protocol.Message) *protocol.Message { return &message }

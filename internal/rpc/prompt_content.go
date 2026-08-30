@@ -63,9 +63,7 @@ func (s *Server) handleImagePrompt(ctx context.Context, req Request) error {
 	s.promptDone = done
 	s.mu.Unlock()
 	s.write(Response{ID: req.ID, Type: "response", Command: "prompt", Success: true})
-	s.promptWG.Add(1)
-	go func() {
-		defer s.promptWG.Done()
+	s.promptWG.Go(func() {
 		var err error
 		if req.Mode != "" {
 			mode, parseErr := protocol.ParseCollaborationMode(req.Mode)
@@ -102,6 +100,6 @@ func (s *Server) handleImagePrompt(ctx context.Context, req Request) error {
 			s.cancel = nil
 		}
 		s.mu.Unlock()
-	}()
+	})
 	return nil
 }

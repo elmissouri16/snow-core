@@ -107,10 +107,7 @@ func settingsCardWindow(selected, total, height int) (start, end int) {
 	}
 	selected = clampPickerIndex(selected, total)
 	visible := min(total, max(1, height))
-	start = selected - visible/2
-	if start < 0 {
-		start = 0
-	}
+	start = max(selected-visible/2, 0)
 	if start+visible > total {
 		start = total - visible
 	}

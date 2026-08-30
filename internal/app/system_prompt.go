@@ -103,7 +103,7 @@ func resolveSystemPromptPath(path, baseDir string, expandHome bool) (string, err
 func rejectPromptPathSymlinks(root, rel string) error {
 	current := root
 	var target os.FileInfo
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		if part == "" || part == "." {
 			continue
 		}

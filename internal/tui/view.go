@@ -1,9 +1,10 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,10 +41,7 @@ func (m *Model) renderOverlays() string {
 		matches := m.compMatches
 		selected := m.compIndex
 		if limit := m.availableOverlayHeight(); len(matches) > limit {
-			start := selected - limit/2
-			if start < 0 {
-				start = 0
-			}
+			start := max(selected-limit/2, 0)
 			if start+limit > len(matches) {
 				start = len(matches) - limit
 			}
@@ -128,13 +126,7 @@ func (m *Model) planNudgeVisible() bool {
 	if m.app == nil || m.busy || m.app.Agent.Mode() != protocol.ModeDefault || strings.HasPrefix(strings.TrimSpace(m.editor.Value()), "/") {
 		return false
 	}
-	containsPlan := false
-	for _, word := range strings.FieldsFunc(strings.ToLower(m.editor.Value()), func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') }) {
-		if word == "plan" {
-			containsPlan = true
-			break
-		}
-	}
+	containsPlan := slices.Contains(strings.FieldsFunc(strings.ToLower(m.editor.Value()), func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') }), "plan")
 	return containsPlan && !m.nudgeDismissed[m.planNudgeScope()]
 }
 
@@ -567,7 +559,7 @@ func renderHeaderMetadataControls(metadata string, base int, thinkingText, modeT
 		}
 		return style.Render(metadata), [2]int{}, [2]int{}
 	}
-	sort.Slice(controls, func(i, j int) bool { return controls[i].start < controls[j].start })
+	slices.SortFunc(controls, func(a, b control) int { return cmp.Compare(a.start, b.start) })
 	baseStyle := styleHeaderDim
 	if thinkingFlash {
 		baseStyle = styleBrand
@@ -742,10 +734,7 @@ func (m *Model) renderFooter() string {
 		}
 	}
 	line := m.permissionStatusStyle().Render(permissionField)
-	pad := available - lipgloss.Width(" "+permissionField) - lipgloss.Width(right)
-	if pad < 1 {
-		pad = 1
-	}
+	pad := max(available-lipgloss.Width(" "+permissionField)-lipgloss.Width(right), 1)
 	runtimeStyle := styleFooter
 	if m.thinkingFlash {
 		runtimeStyle = styleBrand
@@ -840,8 +829,8 @@ func formatGoalTokenUsage(goal *protocol.ThreadGoal) string {
 	if len(goal.EstimatedCosts) == 0 {
 		return usage
 	}
-	costs := append([]protocol.Cost(nil), goal.EstimatedCosts...)
-	sort.Slice(costs, func(i, j int) bool { return costs[i].Currency < costs[j].Currency })
+	costs := slices.Clone(goal.EstimatedCosts)
+	slices.SortFunc(costs, func(a, b protocol.Cost) int { return cmp.Compare(a.Currency, b.Currency) })
 	formatted := make([]string, 0, len(costs))
 	for _, cost := range costs {
 		formatted = append(formatted, formatEstimatedCost(cost))

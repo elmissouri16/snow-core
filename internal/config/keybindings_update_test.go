@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 )
@@ -192,13 +193,13 @@ func validateTestLayeredBindings(globalDir, projectRoot, candidateScope string, 
 	}
 	effective := defaultAuxBindings()
 	for action, values := range global {
-		effective[action] = append([]string(nil), values...)
+		effective[action] = slices.Clone(values)
 	}
 	if err := validateEffectiveAuxBindings(effective); err != nil {
 		return err
 	}
 	for action, values := range project {
-		effective[action] = append([]string(nil), values...)
+		effective[action] = slices.Clone(values)
 	}
 	return validateEffectiveAuxBindings(effective)
 }
@@ -276,16 +277,14 @@ func TestUpdateKeybindingsSerializesConcurrentMutations(t *testing.T) {
 	scope := KeybindingWriteScope{Path: path, ConfinedRoot: root, Global: true}
 	var wg sync.WaitGroup
 	for action, value := range map[string]string{"models": "alt+z", "agents": "ctrl+g"} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := UpdateKeybindings(scope, func(file *KeybindingsFile) error {
 				file.Bindings[action] = []string{value}
 				return nil
 			}); err != nil {
 				t.Errorf("update %s: %v", action, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	got, diagnostics := LoadKeybindings(root, "", false)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -106,7 +107,7 @@ func TestQueuedInputPriorityAndOneAtATime(t *testing.T) {
 	}
 
 	p.mu.Lock()
-	requests := append([]protocol.ChatRequest(nil), p.requests...)
+	requests := slices.Clone(p.requests)
 	p.mu.Unlock()
 	if len(requests) != 4 {
 		t.Fatalf("provider requests = %d, want initial + two steers + follow-up", len(requests))
@@ -172,7 +173,7 @@ func TestQueuedSkillMentionActivatesBeforeContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.mu.Lock()
-	requests := append([]protocol.ChatRequest(nil), p.requests...)
+	requests := slices.Clone(p.requests)
 	p.mu.Unlock()
 	if len(requests) != 2 || strings.Contains(requests[0].System, "queued review instructions") || !strings.Contains(requests[1].System, "queued review instructions") {
 		t.Fatalf("queued activation requests = %+v", requests)
@@ -271,7 +272,7 @@ func TestAbortClearsQueuedInputsAndPublishesEmptySnapshot(t *testing.T) {
 	if err := a.Steer("queued"); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	if err := a.AbortContext(ctx); err != nil {
 		t.Fatal(err)
@@ -308,14 +309,12 @@ func TestQueueSnapshotsPublishInMutationOrder(t *testing.T) {
 	go func() { done <- a.Prompt(context.Background(), "initial") }()
 	<-p.started
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 32 {
+		wg.Go(func() {
 			if err := a.Steer("queued"); err != nil {
 				t.Errorf("Steer: %v", err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	a.Abort()
@@ -330,7 +329,7 @@ func TestQueueSnapshotsPublishInMutationOrder(t *testing.T) {
 	if len(sizes) != 33 {
 		t.Fatalf("snapshot sizes = %v", sizes)
 	}
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		if sizes[i] != i+1 {
 			t.Fatalf("snapshot sizes out of mutation order: %v", sizes)
 		}
@@ -406,7 +405,7 @@ func TestProviderFailureDeliversAcceptedQueueBeforeReturning(t *testing.T) {
 		t.Fatalf("accepted follow-up was lost: %+v", messages)
 	}
 	p.mu.Lock()
-	requests := append([]protocol.ChatRequest(nil), p.requests...)
+	requests := slices.Clone(p.requests)
 	p.mu.Unlock()
 	if len(requests) != 2 {
 		t.Fatalf("provider requests=%d, want failed request plus queued retry", len(requests))
@@ -504,7 +503,7 @@ func TestAutomaticPromptQueueClosureIsAtomicWithAdmission(t *testing.T) {
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
 	a, _ := setup(t, p, nil, permission.ModeDeny)
 	defer a.Close()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		a.mu.Lock()
 		a.running = true
 		a.autoRunning = true

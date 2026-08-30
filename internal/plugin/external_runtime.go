@@ -9,9 +9,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/procgroup"
@@ -33,7 +33,7 @@ func SpawnExternal(ctx context.Context, spec plugin.PluginSpec, cwd string) (*Ex
 	}
 	cmd := exec.CommandContext(ctx, spec.Command[0], spec.Command[1:]...)
 	cmd.Dir = cwd
-	cmd.Env = append([]string(nil), spec.Env...)
+	cmd.Env = slices.Clone(spec.Env)
 	if err := procgroup.Configure(cmd); err != nil {
 		return nil, fmt.Errorf("plugin %s: configure process group: %w", spec.ID, err)
 	}
@@ -182,7 +182,7 @@ func (h *ExternalHost) Initialize(ctx context.Context, hostVersion, cwd, session
 	h.mu.Unlock()
 	out.Manifest = cloneManifest(manifest)
 	out.Tools = cloneExternalSchemas(listed.Tools)
-	out.SupportedEvents = append([]plugin.EventType(nil), out.SupportedEvents...)
+	out.SupportedEvents = slices.Clone(out.SupportedEvents)
 	return out, nil
 }
 
@@ -264,7 +264,7 @@ func (h *ExternalHost) call(ctx context.Context, method string, params []byte, c
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	id := strconv.FormatUint(atomic.AddUint64(&h.nextID, 1), 10)
+	id := strconv.FormatUint(h.nextID.Add(1), 10)
 	req, err := json.Marshal(rpcRequestV2{JSONRPC: "2.0", ID: id, Method: method, Params: params})
 	if err != nil {
 		return fmt.Errorf("plugin %s: marshal request: %w", h.spec.ID, err)
@@ -649,7 +649,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 func (b *boundedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return string(append([]byte(nil), b.data...))
+	return string(slices.Clone(b.data))
 }
 
 func boundString(s string, max int) string {
@@ -668,8 +668,8 @@ func redactDiagnostics(s string) string {
 	for i, line := range lines {
 		ending := ""
 		content := line
-		if strings.HasSuffix(content, "\n") {
-			content = strings.TrimSuffix(content, "\n")
+		if before, ok := strings.CutSuffix(content, "\n"); ok {
+			content = before
 			ending = "\n"
 		}
 		if diagnosticCredentialRE.MatchString(content) {
@@ -681,7 +681,7 @@ func redactDiagnostics(s string) string {
 
 func cloneManifest(in plugin.Manifest) plugin.Manifest {
 	out := in
-	out.Capabilities = append([]string(nil), in.Capabilities...)
+	out.Capabilities = slices.Clone(in.Capabilities)
 	return out
 }
 
@@ -691,7 +691,7 @@ func cloneExternalSchemas(in []plugin.ExternalToolDefinition) []plugin.ExternalT
 		out[i] = schema
 		out[i].Parameters = append(json.RawMessage(nil), schema.Parameters...)
 		out[i].Discovery = cloneDiscovery(schema.Discovery)
-		out[i].Capabilities = append([]string(nil), schema.Capabilities...)
+		out[i].Capabilities = slices.Clone(schema.Capabilities)
 	}
 	return out
 }
@@ -701,7 +701,7 @@ func cloneDiscovery(in *protocol.ToolDiscovery) *protocol.ToolDiscovery {
 		return nil
 	}
 	out := *in
-	out.Keywords = append([]string(nil), in.Keywords...)
+	out.Keywords = slices.Clone(in.Keywords)
 	return &out
 }
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -138,7 +139,7 @@ func Vendor(options Options) (Receipt, error) {
 	}
 	metadata := vendorMetadata{
 		Runtime: runtime, SDKVersion: runtimeVersions[runtime],
-		HostVersion: options.HostVersion, Files: append([]FileReceipt(nil), files...),
+		HostVersion: options.HostVersion, Files: slices.Clone(files),
 	}
 	metadataData, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {

@@ -124,7 +124,7 @@ func TestResolveSessionPathRejectsSymlinkEscape(t *testing.T) {
 }
 
 func TestCreatePropagatesCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := create(ctx, canceledRunner{}, Request{SourceDir: t.TempDir()})
 	if !errors.Is(err, context.Canceled) {

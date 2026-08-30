@@ -114,7 +114,7 @@ func TestSQLiteGoalAccountingAtomicAcrossHandles(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	errs := make(chan error, 200)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		for _, store := range []*SQLiteStore{first, second} {
 			wg.Add(1)
 			go func(st *SQLiteStore) {
@@ -200,7 +200,7 @@ func TestSQLiteGoalReadsAreAtomicWithCostAccounting(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			if _, _, err := writer.AccountGoal(goal.GoalID, 1, 0, &protocol.Cost{Currency: "USD", Total: 0.01}); err != nil {
 				done <- err
 				return
@@ -271,7 +271,7 @@ func TestSQLiteGoalTransitionsAndReplacementAreCompareAndSwap(t *testing.T) {
 		results <- result{g, err}
 	}()
 	successes := 0
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if r := <-results; r.err == nil {
 			successes++
 		}

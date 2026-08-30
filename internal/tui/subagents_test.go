@@ -39,7 +39,6 @@ func TestPermissionBrokerSerializesAttributedChildren(t *testing.T) {
 	a.SetPublisher(func(ev protocol.AgentEvent) { events <- ev })
 	decisions := make(chan permission.Decision, 2)
 	for _, path := range []protocol.AgentPath{"/root/a", "/root/b"} {
-		path := path
 		go func() {
 			d, _ := a.Ask(context.Background(), permission.Request{Tool: "edit", Risk: permission.RiskWrite, Agent: &protocol.AgentRef{ThreadID: string(path), Path: path, ParentThreadID: "root", ParentPath: "/root", Depth: 1}})
 			decisions <- d

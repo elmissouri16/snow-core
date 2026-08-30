@@ -353,7 +353,7 @@ func TestManagerCancellationStillGracefullyClosesExternalPlugin(t *testing.T) {
 	if err := m.LoadExternal(publicplugin.PluginSpec{ID: "v2", Command: []string{bin}, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	if err := m.Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}

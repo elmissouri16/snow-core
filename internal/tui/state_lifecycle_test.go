@@ -162,7 +162,7 @@ func TestAuthoritativeGoalContinuationReplacesStaleUIProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider.release(call)
-	waitCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	waitCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	if err := runtime.WaitIdle(waitCtx); err != nil {
 		t.Fatal(err)

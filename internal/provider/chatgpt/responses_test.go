@@ -14,10 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/elmissouri16/snow-core/internal/auth"
 	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
-	"github.com/klauspost/compress/zstd"
 )
 
 func TestChatClassifiesThrottleAndQuotaWithoutLocalRetry(t *testing.T) {
@@ -44,8 +45,7 @@ func TestChatClassifiesThrottleAndQuotaWithoutLocalRetry(t *testing.T) {
 				t.Fatalf("event=%+v err=%v calls=%d", ev, err, calls)
 			}
 			if tc.quota {
-				var limited providerpkg.UsageLimitedError
-				if !errors.As(ev.Err, &limited) {
+				if _, ok := errors.AsType[providerpkg.UsageLimitedError](ev.Err); !ok {
 					t.Fatalf("quota error=%T %v", ev.Err, ev.Err)
 				}
 			} else if advice, ok := providerpkg.RetryAdviceFor(ev.Err); !ok || advice.Kind != tc.kind {
@@ -347,7 +347,7 @@ func TestChatNextCallContextTimeoutWhileWaitingForHeadersIsNonterminal(t *testin
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	callCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	callCtx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { _, err := stream.Next(callCtx); done <- err }()
@@ -382,7 +382,7 @@ func TestChatNextCallContextTimeoutDoesNotTerminateStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	callCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	callCtx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
 	if _, err := stream.Next(callCtx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("first Next err=%v", err)
@@ -570,7 +570,7 @@ func TestChatProviderAttemptIsContextCancellable(t *testing.T) {
 		return nil, req.Context().Err()
 	})}
 	p := New(Config{BaseURL: "https://example.test", HTTPClient: client})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	stream, err := p.Chat(ctx, auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 	if err != nil {
 		t.Fatal(err)

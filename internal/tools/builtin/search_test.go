@@ -225,7 +225,7 @@ func TestSearchCancellation(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	g := NewGlob(NewPathGuard([]string{root}, root))
 	result, _ := g.Run(ctx, searchArgs(t, map[string]any{"pattern": "*"}), stubHost{cwd: root, roots: []string{root}})

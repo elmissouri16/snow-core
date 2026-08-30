@@ -23,11 +23,11 @@ type responsesRequest struct {
 	Reasoning         *reasoning      `json:"reasoning,omitempty"`
 	Include           []string        `json:"include,omitempty"`
 	Text              *responseText   `json:"text,omitempty"`
-	MaxOutputTokens   int             `json:"max_output_tokens,omitempty"`
-	Temperature       *float64        `json:"temperature,omitempty"`
+	MaxOutputTokens   int             `json:"max_output_tokens,omitzero"`
+	Temperature       *float64        `json:"temperature,omitzero"`
 	PromptCacheKey    string          `json:"prompt_cache_key,omitempty"`
 	ToolChoice        string          `json:"tool_choice,omitempty"`
-	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"`
+	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitzero"`
 }
 
 type responseText struct {

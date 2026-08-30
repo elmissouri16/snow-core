@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 
@@ -74,9 +75,7 @@ func AddPlugin(path string, global bool, spec publicplugin.PluginSpec, replace b
 			for _, key := range pluginSpecKeys {
 				delete(declaration.object, key)
 			}
-			for key, value := range encoded {
-				declaration.object[key] = value
-			}
+			maps.Copy(declaration.object, encoded)
 			declaration.spec = spec
 			declarations[i] = declaration
 			return declarations, nil

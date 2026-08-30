@@ -37,12 +37,12 @@ func (m *Model) toggleCollaborationMode() tea.Cmd {
 			m.lastStatus = "mode switch canceled"
 			return nil
 		}
-		m.pendingMode = collaborationModePointer(target)
+		m.pendingMode = new(target)
 		m.modeSwitchReady = false
 		m.lastStatus = "mode switches after current turn"
 		return nil
 	}
-	m.pendingMode = collaborationModePointer(target)
+	m.pendingMode = new(target)
 	return m.beginPendingModeSwitch()
 }
 
@@ -118,9 +118,4 @@ func (m *Model) collaborationModeLabel() string {
 		return string(current) + "→" + string(*m.pendingMode)
 	}
 	return string(current)
-}
-
-func collaborationModePointer(mode protocol.CollaborationMode) *protocol.CollaborationMode {
-	copy := mode
-	return &copy
 }

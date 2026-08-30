@@ -100,7 +100,7 @@ func testPluginBuilderTemplate(t *testing.T, id, asset string, command []string)
 	}
 	command = append(command, pluginPath)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	host, err := SpawnExternal(ctx, publicplugin.PluginSpec{ID: id, Command: command, Enabled: true, CWD: project}, project)
 	if err != nil {
@@ -142,7 +142,7 @@ func testPluginBuilderTemplate(t *testing.T, id, asset string, command []string)
 
 func testExternalExample(t *testing.T, id string, command []string, runtimeName string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	host, err := SpawnExternal(ctx, publicplugin.PluginSpec{ID: id, Command: command, Enabled: true}, t.TempDir())
 	if err != nil {
@@ -185,7 +185,7 @@ func testExternalExample(t *testing.T, id string, command []string, runtimeName 
 		t.Fatal("empty call id was accepted")
 	}
 
-	callCtx, cancelCall := context.WithCancel(context.Background())
+	callCtx, cancelCall := context.WithCancel(t.Context())
 	cancelProgress := make(chan ProgressNotification, 1)
 	cancelled := make(chan error, 1)
 	go func() {

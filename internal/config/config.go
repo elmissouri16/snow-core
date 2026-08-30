@@ -49,7 +49,7 @@ type ProviderConfig struct {
 	DefaultModel string `json:"default_model,omitempty"`
 	// StreamIdleTimeoutMS bounds silence between streamed response bytes.
 	// Zero uses the provider default; -1 disables the watchdog.
-	StreamIdleTimeoutMS int `json:"stream_idle_timeout_ms,omitempty"`
+	StreamIdleTimeoutMS int `json:"stream_idle_timeout_ms,omitzero"`
 }
 
 type TUIConfig struct {
@@ -82,18 +82,18 @@ type RetryConfig struct {
 // Zero RetainTokens uses a model-aware retention target. A zero automatic
 // threshold disables pressure compaction and overflow recovery.
 type CompactionConfig struct {
-	RetainTokens         int    `json:"retain_tokens,omitempty"`
-	MinRetainedTurns     int    `json:"min_retained_turns,omitempty"`
-	SummaryMaxTokens     int    `json:"summary_max_tokens,omitempty"`
+	RetainTokens         int    `json:"retain_tokens,omitzero"`
+	MinRetainedTurns     int    `json:"min_retained_turns,omitzero"`
+	SummaryMaxTokens     int    `json:"summary_max_tokens,omitzero"`
 	Fallback             string `json:"fallback,omitempty"` // local|error
 	Guidance             string `json:"guidance,omitempty"`
 	AutoThresholdPercent int    `json:"auto_threshold_percent"`
 	// ToolHistoryBudgetPercent triggers safe whole-turn compaction when completed
 	// tool calls/results exceed this share of the model window. Zero disables it.
 	ToolHistoryBudgetPercent      int `json:"tool_history_budget_percent"`
-	ToolResultInlineBytes         int `json:"tool_result_inline_bytes,omitempty"`
-	ArtifactMaxBytes              int `json:"artifact_max_bytes,omitempty"`
-	HistoricalToolResultThreshold int `json:"historical_tool_result_threshold_bytes,omitempty"`
+	ToolResultInlineBytes         int `json:"tool_result_inline_bytes,omitzero"`
+	ArtifactMaxBytes              int `json:"artifact_max_bytes,omitzero"`
+	HistoricalToolResultThreshold int `json:"historical_tool_result_threshold_bytes,omitzero"`
 }
 
 const defaultTUITheme = "default"
@@ -119,9 +119,9 @@ var legacyTUIThemes = [...]string{
 // SkillsConfig controls Agent Skills discovery. Standard .snow/.agents paths
 // remain enabled unless Disabled is true.
 type SkillsConfig struct {
-	Disabled      bool     `json:"disabled,omitempty"`
+	Disabled      bool     `json:"disabled,omitzero"`
 	Dirs          []string `json:"dirs,omitempty"`
-	IncludeClaude bool     `json:"include_claude,omitempty"`
+	IncludeClaude bool     `json:"include_claude,omitzero"`
 	// Overrides enables or disables individual discovered skills by name.
 	// Presence is significant: true can re-enable a skill after a broader
 	// disabled policy, while false suppresses it without removing its files.
@@ -140,26 +140,26 @@ type AgentRole struct {
 	Model         string                  `json:"model,omitempty"`
 	Thinking      *protocol.ThinkingLevel `json:"thinking,omitempty"`
 	Tools         []string                `json:"tools,omitempty"`
-	AllowMutation bool                    `json:"allow_mutation,omitempty"`
+	AllowMutation bool                    `json:"allow_mutation,omitzero"`
 }
 
 // SubagentConfig controls the one V2-style subagent implementation.
 type SubagentConfig struct {
-	Enabled   bool `json:"enabled,omitempty"`
-	Recursive bool `json:"recursive,omitempty"`
+	Enabled   bool `json:"enabled,omitzero"`
+	Recursive bool `json:"recursive,omitzero"`
 	// MaxConcurrentThreads is the compatible config key for simultaneously
 	// running child agents. The root does not consume a slot.
-	MaxConcurrentThreads  int                  `json:"max_concurrent_threads,omitempty"`
-	MaxAgentsPerSession   int                  `json:"max_agents_per_session,omitempty"`
-	MaxDepth              int                  `json:"max_depth,omitempty"`
-	MinWaitTimeoutMS      int                  `json:"min_wait_timeout_ms,omitempty"`
-	DefaultWaitTimeoutMS  int                  `json:"default_wait_timeout_ms,omitempty"`
-	MaxWaitTimeoutMS      int                  `json:"max_wait_timeout_ms,omitempty"`
-	TaskTimeoutMS         int                  `json:"task_timeout_ms,omitempty"`
-	MaxResultBytes        int                  `json:"max_result_bytes,omitempty"`
-	Durable               bool                 `json:"durable,omitempty"`
-	AllowMutation         bool                 `json:"allow_mutation,omitempty"`
-	ExposeChildToolEvents bool                 `json:"expose_child_tool_events,omitempty"`
+	MaxConcurrentThreads  int                  `json:"max_concurrent_threads,omitzero"`
+	MaxAgentsPerSession   int                  `json:"max_agents_per_session,omitzero"`
+	MaxDepth              int                  `json:"max_depth,omitzero"`
+	MinWaitTimeoutMS      int                  `json:"min_wait_timeout_ms,omitzero"`
+	DefaultWaitTimeoutMS  int                  `json:"default_wait_timeout_ms,omitzero"`
+	MaxWaitTimeoutMS      int                  `json:"max_wait_timeout_ms,omitzero"`
+	TaskTimeoutMS         int                  `json:"task_timeout_ms,omitzero"`
+	MaxResultBytes        int                  `json:"max_result_bytes,omitzero"`
+	Durable               bool                 `json:"durable,omitzero"`
+	AllowMutation         bool                 `json:"allow_mutation,omitzero"`
+	ExposeChildToolEvents bool                 `json:"expose_child_tool_events,omitzero"`
 	DefaultProvider       string               `json:"default_provider,omitempty"`
 	DefaultModel          string               `json:"default_model,omitempty"`
 	DefaultRole           string               `json:"default_role,omitempty"`
@@ -169,7 +169,7 @@ type SubagentConfig struct {
 // ProjectSkillsConfig is the trust-gated project policy layer. Disabled is a
 // pointer so an omitted project value does not override the global default.
 type ProjectSkillsConfig struct {
-	Disabled  *bool           `json:"disabled,omitempty"`
+	Disabled  *bool           `json:"disabled,omitzero"`
 	Overrides map[string]bool `json:"overrides,omitempty"`
 }
 
@@ -181,9 +181,9 @@ type ProjectTUIConfig struct {
 // ProjectCompactionConfig is a narrow trust-gated overlay. Pointer fields
 // preserve omission while guidance is additive to the fixed/global contract.
 type ProjectCompactionConfig struct {
-	RetainTokens     *int    `json:"retain_tokens,omitempty"`
-	MinRetainedTurns *int    `json:"min_retained_turns,omitempty"`
-	SummaryMaxTokens *int    `json:"summary_max_tokens,omitempty"`
+	RetainTokens     *int    `json:"retain_tokens,omitzero"`
+	MinRetainedTurns *int    `json:"min_retained_turns,omitzero"`
+	SummaryMaxTokens *int    `json:"summary_max_tokens,omitzero"`
 	Fallback         *string `json:"fallback,omitempty"`
 	Guidance         string  `json:"guidance,omitempty"`
 }
@@ -199,9 +199,9 @@ type ProjectSelection struct {
 
 // ProcessConfig bounds app-owned managed background processes.
 type ProcessConfig struct {
-	MaxRunning          int `json:"max_running,omitempty"`
-	MaxRecords          int `json:"max_records,omitempty"`
-	RetainedOutputBytes int `json:"retained_output_bytes,omitempty"`
+	MaxRunning          int `json:"max_running,omitzero"`
+	MaxRecords          int `json:"max_records,omitzero"`
+	RetainedOutputBytes int `json:"retained_output_bytes,omitzero"`
 }
 
 // Config is the global snow configuration.
@@ -215,21 +215,21 @@ type Config struct {
 	TextVerbosity             string                          `json:"text_verbosity,omitempty"`             // low|medium|high
 	CollaborationMode         string                          `json:"collaboration_mode,omitempty"`         // default|plan
 	PlanModeReasoningEffort   string                          `json:"plan_mode_reasoning_effort,omitempty"` // optional off|minimal|low|medium|high|xhigh|max|ultra
-	ToolOutputBytes           int                             `json:"tool_output_bytes,omitempty"`
-	BashTimeoutMS             int                             `json:"bash_timeout_ms,omitempty"`
-	ContextCapBytes           int                             `json:"context_cap_bytes,omitempty"`
-	FixedContextBudgetPercent int                             `json:"fixed_context_budget_percent,omitempty"`
+	ToolOutputBytes           int                             `json:"tool_output_bytes,omitzero"`
+	BashTimeoutMS             int                             `json:"bash_timeout_ms,omitzero"`
+	ContextCapBytes           int                             `json:"context_cap_bytes,omitzero"`
+	FixedContextBudgetPercent int                             `json:"fixed_context_budget_percent,omitzero"`
 	SystemPromptFile          string                          `json:"system_prompt_file,omitempty"`
 	Providers                 map[string]ProviderConfig       `json:"providers,omitempty"`
-	TUI                       TUIConfig                       `json:"tui,omitempty"`
-	Debug                     DebugConfig                     `json:"debug,omitempty"`
+	TUI                       TUIConfig                       `json:"tui,omitzero"`
+	Debug                     DebugConfig                     `json:"debug,omitzero"`
 	Plugins                   []plugin.PluginSpec             `json:"plugins,omitempty"`
 	MCPServers                map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
-	Skills                    SkillsConfig                    `json:"skills,omitempty"`
-	Subagents                 SubagentConfig                  `json:"subagents,omitempty"`
-	Processes                 ProcessConfig                   `json:"processes,omitempty"`
-	Retry                     RetryConfig                     `json:"retry,omitempty"`
-	Compaction                CompactionConfig                `json:"compaction,omitempty"`
+	Skills                    SkillsConfig                    `json:"skills,omitzero"`
+	Subagents                 SubagentConfig                  `json:"subagents,omitzero"`
+	Processes                 ProcessConfig                   `json:"processes,omitzero"`
+	Retry                     RetryConfig                     `json:"retry,omitzero"`
+	Compaction                CompactionConfig                `json:"compaction,omitzero"`
 }
 
 // ProjectExtensions are the only project configuration fields loaded after a
@@ -237,8 +237,8 @@ type Config struct {
 type ProjectExtensions struct {
 	Plugins          []plugin.PluginSpec             `json:"plugins,omitempty"`
 	MCPServers       map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
-	Skills           ProjectSkillsConfig             `json:"skills,omitempty"`
-	TUI              ProjectTUIConfig                `json:"tui,omitempty"`
-	Compaction       ProjectCompactionConfig         `json:"compaction,omitempty"`
+	Skills           ProjectSkillsConfig             `json:"skills,omitzero"`
+	TUI              ProjectTUIConfig                `json:"tui,omitzero"`
+	Compaction       ProjectCompactionConfig         `json:"compaction,omitzero"`
 	SystemPromptFile *string                         `json:"system_prompt_file,omitempty"`
 }

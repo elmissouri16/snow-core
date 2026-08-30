@@ -244,8 +244,8 @@ func missingReasoningSuffix(streamed, completed string) string {
 	if streamed == "" {
 		return completed
 	}
-	if strings.HasPrefix(completed, streamed) {
-		return strings.TrimPrefix(completed, streamed)
+	if after, ok := strings.CutPrefix(completed, streamed); ok {
+		return after
 	}
 	return ""
 }

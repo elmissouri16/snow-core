@@ -74,7 +74,7 @@ func TestRepeatedToolDetailedReminderKeepsUTF8Valid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < repeatedToolNextThreshold; i++ {
+	for range repeatedToolNextThreshold {
 		a.observeRepeatedToolCall("read", args)
 	}
 	reminder := a.takeRepeatedToolReminder()
@@ -447,7 +447,7 @@ func (p *startFailureProvider) Chat(ctx context.Context, _ protocol.ChatRequest)
 }
 
 func TestSynchronousProviderCancellationPersistsAbortedBoundary(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	provider := &startFailureProvider{cancel: cancel}
 	a, store := setup(t, provider, nil, permission.ModeDeny)
 	if err := a.Prompt(ctx, "cancel during startup"); err != nil {
@@ -483,7 +483,7 @@ func TestCancellationDuringProviderStartupBackoffPersistsAbort(t *testing.T) {
 			}
 		}
 	})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- a.Prompt(ctx, "cancel retry") }()
 	select {

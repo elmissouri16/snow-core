@@ -75,7 +75,6 @@ func TestCreateDebugDumpCapturesFullSessionButExcludesPrivateData(t *testing.T) 
 	}
 	result := protocol.NewToolResultMessage("result-1", assistant.ID, "call-1", "read", []protocol.ContentBlock{{Type: protocol.BlockText, Text: "complete unique tool output"}}, false)
 	for _, message := range []protocol.Message{user, assistant, result} {
-		message := message
 		if err := a.Session.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, ParentID: message.ParentID, Message: &message}); err != nil {
 			t.Fatal(err)
 		}

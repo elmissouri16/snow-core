@@ -176,7 +176,7 @@ func TestRPCCancellationInterruptsDeadlineOnlyReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- New(context.Background(), a, reader, io.Discard).Serve(ctx) }()
 	cancel()
@@ -197,7 +197,7 @@ func TestRPCCancellationClosesAndJoinsScanner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- New(context.Background(), a, reader, io.Discard).Serve(ctx) }()
 	cancel()
@@ -223,7 +223,7 @@ func TestRPCBoundsConcurrentWaitWorkers(t *testing.T) {
 	}
 	defer a.Close()
 	server := New(context.Background(), a, strings.NewReader(""), io.Discard)
-	for i := 0; i < maxConcurrentWaits; i++ {
+	for range maxConcurrentWaits {
 		server.waitSlots <- struct{}{}
 	}
 	err = server.handle(context.Background(), Request{Type: "subagent_wait", Params: json.RawMessage(`{"timeout_ms":1}`)})

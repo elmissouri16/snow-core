@@ -206,7 +206,7 @@ func TestActivationAndResourceReadAreConfined(t *testing.T) {
 	if err != nil || !escape.IsError || !strings.Contains(escape.Content[0].Text, "inside") {
 		t.Fatalf("escape = %+v, err = %v", escape, err)
 	}
-	canceled, cancel := context.WithCancel(context.Background())
+	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
 	canceledResult, err := activate.Run(canceled, json.RawMessage(`{"name":"pdf-tools"}`), nil)
 	if err != nil || !canceledResult.IsError || !strings.Contains(canceledResult.Content[0].Text, "canceled") {
@@ -339,7 +339,7 @@ func TestOptionalFieldTypesAndCharacterLimits(t *testing.T) {
 
 func TestFrontmatterMayEndAtEOFAndCatalogDisclosesEverySkill(t *testing.T) {
 	root := t.TempDir()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		name := fmt.Sprintf("skill-%03d", i)
 		dir := filepath.Join(root, name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -3,6 +3,7 @@ package chatgpt
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -123,7 +124,7 @@ func (d *AuthDriver) Login(ctx context.Context, request auth.LoginRequest, inter
 	}
 	return LoginCredential(ctx, LoginOptions{
 		Method: method, HTTPClient: provider.client, AuthBaseURL: provider.authBaseURL, Now: provider.now,
-		AllowedWorkspaceIDs: append([]string(nil), request.Params["allowed_workspace_id"]...),
+		AllowedWorkspaceIDs: slices.Clone(request.Params["allowed_workspace_id"]),
 		OpenBrowser:         interaction.OpenURL,
 		PasteCallback:       pasteCallback,
 		Progress: func(progress LoginProgress) {

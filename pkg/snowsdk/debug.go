@@ -9,7 +9,7 @@ import (
 // can still retain earlier events until ClearDebugEvents is called.
 type DebugStatus struct {
 	Enabled       bool      `json:"enabled"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
+	StartedAt     time.Time `json:"started_at,omitzero"`
 	EventCount    int       `json:"event_count"`
 	RetainedBytes int       `json:"retained_bytes"`
 	DroppedEvents uint64    `json:"dropped_events"`

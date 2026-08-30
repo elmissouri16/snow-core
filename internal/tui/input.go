@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -627,7 +628,7 @@ func clonePromptImages(images []protocol.ContentBlock) []protocol.ContentBlock {
 	cloned := make([]protocol.ContentBlock, len(images))
 	for i, image := range images {
 		cloned[i] = image
-		cloned[i].Data = append([]byte(nil), image.Data...)
+		cloned[i].Data = slices.Clone(image.Data)
 	}
 	return cloned
 }
@@ -738,7 +739,7 @@ func (m *Model) requestAbort() {
 		queue = m.app.Agent.ClearPendingInputs()
 	}
 	draft := m.editor.Value()
-	fallbacks := append([]queueSubmitMsg(nil), m.queueFallbacks...)
+	fallbacks := slices.Clone(m.queueFallbacks)
 	m.queueFallbacks = nil
 	m.abort()
 	m.pendingInputs = protocol.InputQueue{}

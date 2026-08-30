@@ -717,7 +717,7 @@ func TestExplicitSkillMentionActivatesAndRestoresWithoutModelToolCall(t *testing
 		t.Fatalf("direct activation metadata missing: marker=%t transcript=%t entries=%+v", markerFound, transcriptFound, entries)
 	}
 	eventMu.Lock()
-	observedEvents := append([]protocol.AgentEventType(nil), skillEvents...)
+	observedEvents := slices.Clone(skillEvents)
 	eventMu.Unlock()
 	if !slices.Equal(observedEvents, []protocol.AgentEventType{protocol.EvToolStart, protocol.EvToolEnd}) {
 		t.Fatalf("direct activation lifecycle events = %v", observedEvents)

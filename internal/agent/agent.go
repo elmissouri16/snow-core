@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/artifact"
@@ -48,7 +49,10 @@ var (
 	ErrReentrantDrain = errors.New("agent: event drain requested from inside a callback")
 )
 
-type providerFailure interface{ providerFailure() }
+type providerFailure interface {
+	error
+	providerFailure()
+}
 
 type providerStartError struct{ err error }
 
@@ -289,7 +293,7 @@ type eventBus struct {
 	maxItems     int
 	closing      bool
 	callbackIDs  map[uint64]struct{}
-	dispatcherID uint64
+	dispatcherID atomic.Uint64
 	closed       chan struct{}
 }
 type eventBarrier struct{ done chan struct{} }
@@ -325,4 +329,4 @@ func (s *eventSubscriber) close() {
 // ---------------------------------------------------------------------------
 
 // idCounter disambiguates IDs generated within the same nanosecond tick.
-var idCounter uint64
+var idCounter atomic.Uint64

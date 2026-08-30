@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ type debugDump struct {
 // DebugStatus returns current recorder counters.
 func (a *App) DebugStatus() DebugStatus {
 	if a == nil || a.Debugger == nil {
-		return DebugStatus{Status: diagnostics.Status{MaxEvents: diagnostics.MaxEventRecords, MaxBytes: diagnostics.MaxEventBytes}}
+		return DebugStatus{MaxEvents: diagnostics.MaxEventRecords, MaxBytes: diagnostics.MaxEventBytes}
 	}
 	return DebugStatus{Status: a.Debugger.Status()}
 }
@@ -170,8 +171,8 @@ func (a *App) CreateDebugDump(ctx context.Context, path string) (string, error) 
 
 	providerID := a.ProviderID
 	projectAllowed := a.ProjectAllowed
-	configDiagnostics := append([]config.Diagnostic(nil), a.Diagnostics...)
-	statuses := append([]publicmcp.Status(nil), a.MCPStatuses...)
+	configDiagnostics := slices.Clone(a.Diagnostics)
+	statuses := slices.Clone(a.MCPStatuses)
 	if a.MCPManager != nil {
 		statuses = a.MCPManager.Statuses()
 	}

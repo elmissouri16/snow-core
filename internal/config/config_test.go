@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,18 @@ import (
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 )
+
+func TestZeroConfigOmitsEmptyNestedSections(t *testing.T) {
+	data, err := json.Marshal(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"tui", "debug", "skills", "subagents", "processes", "retry", "compaction"} {
+		if bytes.Contains(data, []byte(`"`+field+`"`)) {
+			t.Fatalf("zero config unexpectedly includes %q: %s", field, data)
+		}
+	}
+}
 
 func TestLoadRejectsFixedContextBudgetOutsideRange(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
@@ -363,12 +376,7 @@ func TestSubagentBashCapabilityIsIndependentFromMutation(t *testing.T) {
 }
 
 func hasTool(tools []string, want string) bool {
-	for _, name := range tools {
-		if name == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(tools, want)
 }
 
 func TestLoadOlderConfigGetsResponseDefaults(t *testing.T) {
@@ -535,7 +543,7 @@ func TestLoadRejectsOversizedConfiguration(t *testing.T) {
 
 func TestProjectSelectionCountIsBounded(t *testing.T) {
 	cfg := Default()
-	for i := 0; i < MaxProjectSelections; i++ {
+	for i := range MaxProjectSelections {
 		cfg.ProjectSelections[fmt.Sprintf("/project/%04d", i)] = ProjectSelection{Provider: "fake"}
 	}
 	if _, err := WithProjectSelection(cfg, "/new-project", ProjectSelection{Provider: "fake"}); err == nil {
@@ -606,13 +614,11 @@ func TestUpdateMergesConcurrentProjectAndGlobalChanges(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, projects+3)
 	for i := range projects {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			cwd := filepath.Join(projectRoot, fmt.Sprintf("project-%d", i))
 			_, err := SaveProjectSelection(path, cwd, ProjectSelection{Provider: "fake", Model: fmt.Sprintf("model-%d", i), Thinking: "off"})
 			errs <- err
-		}()
+		})
 	}
 	mutations := []func(*Config){
 		func(cfg *Config) { cfg.TextVerbosity = "high" },
@@ -620,15 +626,13 @@ func TestUpdateMergesConcurrentProjectAndGlobalChanges(t *testing.T) {
 		func(cfg *Config) { cfg.TUI.Theme = "dark" },
 	}
 	for _, mutation := range mutations {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := Update(path, func(cfg *Config) error {
 				mutation(cfg)
 				return nil
 			})
 			errs <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

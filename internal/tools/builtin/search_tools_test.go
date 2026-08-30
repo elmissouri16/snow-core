@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,7 +16,7 @@ import (
 type searchToolsRouter struct{ matches []tools.ToolMatch }
 
 func (r searchToolsRouter) Search(_ context.Context, _ string, limit int) ([]tools.ToolMatch, error) {
-	matches := append([]tools.ToolMatch(nil), r.matches...)
+	matches := slices.Clone(r.matches)
 	if len(matches) > limit {
 		matches = matches[:limit]
 	}
@@ -74,7 +75,7 @@ func TestSearchToolsFiltersDeniedMatchesAndReturnsDiscoveryDetails(t *testing.T)
 func TestSearchToolsDeniedTopCandidatesDoNotHidePermittedResult(t *testing.T) {
 	registry := tools.NewRegistry()
 	matches := make([]tools.ToolMatch, 0, 21)
-	for i := 0; i < 21; i++ {
+	for i := range 21 {
 		name := fmt.Sprintf("catalog_%02d", i)
 		risk := permission.RiskWrite
 		if i == 20 {

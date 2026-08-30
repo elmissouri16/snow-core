@@ -10,15 +10,16 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func BenchmarkMailboxIngestion(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		q := newAgentEventMailbox()
-		for j := 0; j < 10000; j++ {
+		for range 10000 {
 			q.Push(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: "token "})
 		}
 		_ = q.popBatch(maxAgentEventsPerUpdate)
@@ -70,7 +71,7 @@ func BenchmarkSessionHydrationMixed5000(b *testing.B) {
 	batch := make([]session.Entry, 0, 5000)
 	assistantBody := strings.Repeat("x", 1200)
 	userBody := strings.Repeat("u", 256)
-	for i := 0; i < 1250; i++ {
+	for i := range 1250 {
 		user := protocol.NewUserMessage(fmt.Sprintf("mixed-user-%d", i), "", userBody)
 		batch = append(batch, session.Entry{Type: session.EntryMessage, ID: user.ID, Message: &user})
 		usage := &protocol.Usage{Input: 1000 + i, Output: 100, Total: 1100 + i}
@@ -111,7 +112,7 @@ func BenchmarkBusySessionUpdateBurst12MB(b *testing.B) {
 	}
 	defer runtime.Close()
 	payload := strings.Repeat("x", 2400)
-	for i := 0; i < 5000; i++ {
+	for i := range 5000 {
 		message := protocol.NewAssistantMessage(fmt.Sprintf("message-%d", i), "", "fake", "fake-model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: payload}}, protocol.StopStop, nil)
 		if err := runtime.Session.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
 			b.Fatal(err)
@@ -126,7 +127,7 @@ func BenchmarkBusySessionUpdateBurst12MB(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for _, event := range events {
 			m.handleAgentEvent(event)
 		}
@@ -145,7 +146,7 @@ func BenchmarkPlanNudgeLongSession(b *testing.B) {
 	}
 	defer runtime.Close()
 	payload := strings.Repeat("x", 2400)
-	for i := 0; i < 5000; i++ {
+	for i := range 5000 {
 		message := protocol.NewAssistantMessage(fmt.Sprintf("message-%d", i), "", "fake", "fake-model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: payload}}, protocol.StopStop, nil)
 		if err := runtime.Session.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
 			b.Fatal(err)
@@ -156,7 +157,7 @@ func BenchmarkPlanNudgeLongSession(b *testing.B) {
 	m.editor.SetValue("make a plan first")
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if !m.planNudgeVisible() {
 			b.Fatal("plan nudge unexpectedly hidden")
 		}
@@ -168,14 +169,14 @@ func BenchmarkSubagentFleetView32(b *testing.B) {
 	m.width, m.height = 140, 42
 	m.subagentFleetOpen = true
 	m.subagentFleetList.ConcurrentLimit = 32
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		state := fleetTestState(fmt.Sprintf("agent-%d", i), fmt.Sprintf("/root/agent_%d", i), protocol.AgentRunning)
 		m.subagentFleetList.Agents = append(m.subagentFleetList.Agents, state)
 		m.subagentFleetActivity[state.Agent.ThreadID] = []string{"12:00:00  tool ▶  grep", "12:00:01  thinking  inspecting files"}
 	}
 	m.subagentFleetList.Running = 32
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = m.renderSubagentFleetModal()
 	}
 }
@@ -188,7 +189,7 @@ func BenchmarkTranscriptRefresh10K(b *testing.B) {
 	for i := range m.lines {
 		m.lines[i] = fmt.Sprintf("line %d: stable transcript content", i)
 	}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		m.transcriptBaseDirty = true
 		m.transcriptDirty = true
 		m.refreshTranscriptForced()
@@ -207,7 +208,7 @@ func BenchmarkViewNormalAndNarrow(b *testing.B) {
 			m.layout()
 			m.refreshTranscriptForced()
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = m.View()
 			}
 		})
@@ -220,7 +221,7 @@ func BenchmarkMentionMatching(b *testing.B) {
 		files[i] = fmt.Sprintf("internal/package-%03d/file.go", i)
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = matchMentionFiles(files, "file")
 	}
 }
@@ -237,7 +238,7 @@ func BenchmarkComposerBackspace(b *testing.B) {
 			remaining := size
 			b.ReportAllocs()
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				if remaining == 0 {
 					m.editor.SetValue(payload)
 					m.editor.CursorEnd()
@@ -254,7 +255,7 @@ func BenchmarkComposerBackspace(b *testing.B) {
 
 func BenchmarkMentionDiscovery(b *testing.B) {
 	root := b.TempDir()
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		path := filepath.Join(root, fmt.Sprintf("pkg-%03d", i), "file.go")
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			b.Fatal(err)
@@ -264,7 +265,7 @@ func BenchmarkMentionDiscovery(b *testing.B) {
 		}
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = discoverMentionFiles(root)
 	}
 }

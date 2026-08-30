@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -71,11 +72,7 @@ func resolveRole(roles map[string]Role, defaultRole, requested string) (string, 
 }
 
 func availableRoleError(roles map[string]Role, defaultRole, requested string) error {
-	names := make([]string, 0, len(roles))
-	for name := range roles {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(roles))
 	available := strings.Join(names, ", ")
 	return fmt.Errorf("subagents: unknown role %q (available: %s; omit role to use %q)", strings.TrimSpace(requested), available, defaultRole)
 }
@@ -756,9 +753,8 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 	m.byID[id] = r
 	m.byPath[path] = r
 	m.order = append(m.order, id)
-	m.wg.Add(1)
+	m.wg.Go(func() { m.worker(r, workerStop, workerDone) })
 	m.mu.Unlock()
-	go m.worker(r, workerStop, workerDone)
 	m.emit(protocol.AgentEvent{Type: protocol.EvSubagentStarted, Agent: state.Agent.Clone(), Subagent: r.snapshot()})
 	m.setStatus(r, protocol.AgentQueued, "", "")
 	r.tasks <- childTask{message: req.Task, initial: true}

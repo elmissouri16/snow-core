@@ -1,11 +1,12 @@
 package skills
 
 import (
+	"cmp"
 	"embed"
 	"fmt"
 	"io/fs"
 	pathpkg "path"
-	"sort"
+	"slices"
 )
 
 // builtinSkillsFS keeps Snow's own skills available from the installed single
@@ -20,7 +21,7 @@ func discoverBuiltins(maxFileSize int64) (skills []Skill, diagnostics []Diagnost
 	if err != nil {
 		return nil, []Diagnostic{{Path: "snow-builtin://", Level: "error", Message: err.Error()}}
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	slices.SortFunc(entries, func(a, b fs.DirEntry) int { return cmp.Compare(a.Name(), b.Name()) })
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue

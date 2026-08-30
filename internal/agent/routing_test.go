@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,7 +22,7 @@ type fakeRouter struct {
 }
 
 func (r *fakeRouter) Search(context.Context, string, int) ([]tools.ToolMatch, error) {
-	return append([]tools.ToolMatch(nil), r.matches...), r.err
+	return slices.Clone(r.matches), r.err
 }
 func (r *fakeRouter) DeferredCount() int { return r.count }
 func (*fakeRouter) Close() error         { return nil }

@@ -82,7 +82,7 @@ func TestSearchEscapesAnchorsAndForcedExcludeWins(t *testing.T) {
 	result, _ := NewGlob(NewPathGuard([]string{root}, root)).Run(context.Background(), searchArgs(t, map[string]any{"pattern": "**/*", "exclude": []string{"keep.txt"}}), host)
 	out := result.Content[0].Text
 	lines := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		lines[line] = true
 	}
 	for _, hidden := range []string{"!literal", "#literal", "trail ", "root.txt", "drop.txt", "keep.txt"} {

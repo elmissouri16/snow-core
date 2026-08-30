@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
@@ -186,8 +186,8 @@ func TestAgentEventSchemaCoversKnownTypes(t *testing.T) {
 	for i, eventType := range wantTypes {
 		want[i] = string(eventType)
 	}
-	sort.Strings(got)
-	sort.Strings(want)
+	slices.Sort(got)
+	slices.Sort(want)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("event schema types = %v, want %v", got, want)
 	}
@@ -235,8 +235,8 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 		}
 	}
 	wantCommands := KnownRPCCommands()
-	sort.Strings(gotCommands)
-	sort.Strings(wantCommands)
+	slices.Sort(gotCommands)
+	slices.Sort(wantCommands)
 	if !reflect.DeepEqual(gotCommands, wantCommands) {
 		t.Fatalf("request schema commands = %v, want %v", gotCommands, wantCommands)
 	}

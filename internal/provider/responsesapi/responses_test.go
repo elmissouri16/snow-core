@@ -30,8 +30,8 @@ func TestStreamIdleDoesNotParseOrExposePartialEvent(t *testing.T) {
 	if err != nil || event.Type != protocol.EvStreamError || event.Err == nil {
 		t.Fatalf("event=%+v err=%v", event, err)
 	}
-	var responseErr *ResponseError
-	if !errors.As(event.Err, &responseErr) || responseErr.Code != "stream_idle" || strings.Contains(event.Err.Error(), "private partial") {
+	responseErr, ok := errors.AsType[*ResponseError](event.Err)
+	if !ok || responseErr.Code != "stream_idle" || strings.Contains(event.Err.Error(), "private partial") {
 		t.Fatalf("stream error=%v", event.Err)
 	}
 }
@@ -232,8 +232,8 @@ func TestStreamPreservesBoundedErrorMetadata(t *testing.T) {
 	if err != nil || event.Type != protocol.EvStreamError || event.Err == nil {
 		t.Fatalf("event=%+v err=%v", event, err)
 	}
-	var responseErr *ResponseError
-	if !errors.As(event.Err, &responseErr) || responseErr.Code != "server_overloaded" || responseErr.RequestID != "req-123" {
+	responseErr, ok := errors.AsType[*ResponseError](event.Err)
+	if !ok || responseErr.Code != "server_overloaded" || responseErr.RequestID != "req-123" {
 		t.Fatalf("error=%T %v", event.Err, event.Err)
 	}
 	if strings.Contains(event.Err.Error(), secret) || !strings.Contains(event.Err.Error(), "[redacted]") {

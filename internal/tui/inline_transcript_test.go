@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -156,13 +157,7 @@ func TestInlineFrameLeavesFinalColumnUnusedAndSeparatesWrappedText(t *testing.T)
 	}
 	lines := strings.Split(view, "\n")
 	separator := strings.Repeat("─", m.width-1)
-	found := false
-	for _, line := range lines {
-		if line == separator {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(lines, separator)
 	if !found {
 		t.Fatalf("separator was not isolated on its own row: %q", view)
 	}

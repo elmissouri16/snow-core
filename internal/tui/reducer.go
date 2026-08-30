@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -190,7 +191,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastErr = err
 				m.pushLine(styleError.Render("goal restore: " + err.Error()))
 			}
-			for _, diagnostic := range append(append([]config.Diagnostic(nil), msg.app.Diagnostics...), m.auxDiagnostics...) {
+			for _, diagnostic := range append(slices.Clone(msg.app.Diagnostics), m.auxDiagnostics...) {
 				m.pushLine(styleFooter.Render("config warning: " + diagnostic.Path + ": " + diagnostic.Message))
 			}
 			// The sticky header and footer already expose provider, model, cwd,
@@ -479,7 +480,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshMentions()
 			return m, nil
 		}
-		m.mentionFiles = append([]string(nil), msg.files...)
+		m.mentionFiles = slices.Clone(msg.files)
 		m.mentionFilesCWD = msg.cwd
 		m.mentionFilesLoaded = true
 		m.refreshMentions()
@@ -534,8 +535,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.sessionLoading = false
 		m.sessionDeleteInFlight = false
-		var cleanupWarning *app.SessionDeleteCleanupError
-		if msg.err != nil && !errors.As(msg.err, &cleanupWarning) {
+		cleanupWarning, hasCleanupWarning := errors.AsType[*app.SessionDeleteCleanupError](msg.err)
+		if msg.err != nil && !hasCleanupWarning {
 			m.pushLine(styleError.Render("session delete: " + msg.err.Error()))
 			return m, nil
 		}

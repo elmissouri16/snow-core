@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -191,8 +192,8 @@ func Apply(ctx context.Context, st session.Store, summarizer Summarizer, plan Pl
 	if boundary == "" {
 		boundary = plan.CompactionCandidates[len(plan.CompactionCandidates)-1].ID
 	}
-	if strings.HasPrefix(boundary, "compaction-") {
-		markerID := strings.TrimPrefix(boundary, "compaction-")
+	if after, ok := strings.CutPrefix(boundary, "compaction-"); ok {
+		markerID := after
 		entriesStore, ok := st.(session.BranchEntryStore)
 		if !ok {
 			return Result{}, errors.New("compact: cannot resolve prior compaction boundary")
@@ -309,7 +310,7 @@ func canonicalizeWorkingStateCheckpoint(summary string) string {
 			current = nil
 		}
 	}
-	for _, line := range strings.Split(summary, "\n") {
+	for line := range strings.SplitSeq(summary, "\n") {
 		if strings.HasPrefix(line, "## ") {
 			flush()
 			current = &chunk{heading: strings.TrimSpace(strings.TrimPrefix(line, "## "))}
@@ -644,14 +645,11 @@ func DefaultSummarizer(ctx context.Context, msgs []protocol.Message) (string, er
 				out = append(out, value)
 			}
 		}
-		remaining := 8 - len(pinned)
-		if remaining < 0 {
-			remaining = 0
-		}
+		remaining := max(8-len(pinned), 0)
 		if len(out) > remaining {
 			out = out[len(out)-remaining:]
 		}
-		prioritized := append([]string(nil), pinned...)
+		prioritized := slices.Clone(pinned)
 		return append(prioritized, out...)
 	}
 	commands = pinEvidence(commands, failedCommands)
@@ -726,11 +724,7 @@ func jsonStringValues(raw json.RawMessage) []string {
 				walk(item)
 			}
 		case map[string]any:
-			keys := make([]string, 0, len(typed))
-			for key := range typed {
-				keys = append(keys, key)
-			}
-			sort.Strings(keys)
+			keys := slices.Sorted(maps.Keys(typed))
 			for _, key := range keys {
 				walk(typed[key])
 			}
@@ -742,7 +736,7 @@ func jsonStringValues(raw json.RawMessage) []string {
 
 func extractFileAndSymbolHints(value string) []string {
 	var hints []string
-	for _, field := range strings.Fields(value) {
+	for field := range strings.FieldsSeq(value) {
 		raw := field
 		candidate := strings.Trim(field, "`[](){}<>,.;:\"'")
 		if candidate == "" || len(candidate) > 200 || strings.Contains(candidate, "://") {

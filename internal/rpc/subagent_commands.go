@@ -69,9 +69,7 @@ func (s *Server) handleSubagentCommand(ctx context.Context, req Request) error {
 		default:
 			return fmt.Errorf("rpc: concurrent subagent_wait limit %d reached", maxConcurrentWaits)
 		}
-		s.promptWG.Add(1)
-		go func() {
-			defer s.promptWG.Done()
+		s.promptWG.Go(func() {
 			defer func() { <-s.waitSlots }()
 			var (
 				res protocol.WaitSubagentsResult
@@ -90,7 +88,7 @@ func (s *Server) handleSubagentCommand(ctx context.Context, req Request) error {
 				return
 			}
 			s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: res})
-		}()
+		})
 		return nil
 	case "subagent_interrupt":
 		var p struct {

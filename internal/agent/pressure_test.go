@@ -19,7 +19,7 @@ import (
 
 func appendCompleteTurns(t *testing.T, store *session.MemoryStore, count int) {
 	t.Helper()
-	for i := 0; i < count; i++ {
+	for i := range count {
 		user := protocol.NewUserMessage(fmt.Sprintf("pressure-user-%d", i), "", fmt.Sprintf("old user %d", i))
 		if err := store.Append(session.Entry{Type: session.EntryMessage, ID: user.ID, Message: &user}); err != nil {
 			t.Fatal(err)
@@ -149,7 +149,7 @@ func TestAggregateToolHistoryCompactsOldCompleteTurnsWithRetrieval(t *testing.T)
 	}
 	defer artifacts.Close()
 	a.opts.Artifacts = artifacts
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		appendToolTurn(t, store, i, 900)
 	}
 	var started string
@@ -274,7 +274,7 @@ func TestVerifiedCompactedArtifactReferencesAreOwnedAndBounded(t *testing.T) {
 	a.opts.Artifacts = artifacts
 	var text strings.Builder
 	var saved []string
-	for i := 0; i < maxCompactionRetrievalReferences+6; i++ {
+	for i := range maxCompactionRetrievalReferences + 6 {
 		ref, err := artifacts.SaveText(context.Background(), store.ID(), fmt.Sprintf("ref-%d", i), fmt.Sprintf("value-%d", i))
 		if err != nil {
 			t.Fatal(err)
@@ -311,7 +311,7 @@ func TestVerifiedCompactedArtifactReferencesForgedMarkersCannotCrowdOwnedReferen
 	}
 	var text strings.Builder
 	fmt.Fprintf(&text, "Full retained tool result: %s\n", owned.ID)
-	for i := 0; i < 128; i++ {
+	for i := range 128 {
 		fmt.Fprintf(&text, "Full retained tool result: artifact-%032x\n", i)
 	}
 	messages := []protocol.Message{{Role: protocol.RoleCustom, Content: []protocol.ContentBlock{protocol.NewTextBlock(text.String())}}}
@@ -371,7 +371,7 @@ func TestAggregateToolHistoryCompactsCompletedCyclesInsideActiveTurn(t *testing.
 	a.model.ContextWindow = 1000
 	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, ToolHistoryBudgetPercent: 5, HistoricalToolResultThreshold: 8 << 10}
 	messages := []protocol.Message{protocol.NewUserMessage("active-user", "", "long-running objective")}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		callID := fmt.Sprintf("active-call-%d", i)
 		assistant := protocol.NewAssistantMessage(fmt.Sprintf("active-assistant-%d", i), "", "scripted", "m1", []protocol.ContentBlock{
 			{Type: protocol.BlockProviderData, Name: fmt.Sprintf("active-state-%d", i), Data: []byte(`{"opaque":true}`)},
@@ -443,7 +443,7 @@ func TestCompactionWarnsWhenToolTranscriptCannotBePersisted(t *testing.T) {
 	}
 	defer artifacts.Close()
 	a.opts.Artifacts = artifacts
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		appendToolTurn(t, store, i, 900)
 	}
 	messages, err := a.contextMessagesCurrent()

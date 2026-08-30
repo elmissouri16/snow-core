@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -147,7 +147,7 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 			profileIDs = append(profileIDs, id)
 		}
 	}
-	sort.Strings(profileIDs)
+	slices.Sort(profileIDs)
 	for index, profileID := range profileIDs {
 		id := profileID
 		profileConfig := cfg.Providers[id]

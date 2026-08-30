@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/internal/provider"
@@ -220,11 +221,7 @@ func requiredSubagentProviders(cfg config.SubagentConfig, activeProvider string)
 			ids[providerID] = true
 		}
 	}
-	out := make([]string, 0, len(ids))
-	for id := range ids {
-		out = append(out, id)
-	}
-	sort.Strings(out)
+	out := slices.Sorted(maps.Keys(ids))
 	return out
 }
 
@@ -235,7 +232,7 @@ func (s *liveRuntimeSelection) availableModels(ctx context.Context) ([]protocol.
 		providerIDs = append(providerIDs, id)
 	}
 	s.mu.RUnlock()
-	sort.Strings(providerIDs)
+	slices.Sort(providerIDs)
 	type result struct {
 		id     string
 		models []protocol.Model
@@ -270,11 +267,7 @@ func (s *liveRuntimeSelection) availableModels(ctx context.Context) ([]protocol.
 
 func (s *liveRuntimeSelection) cachedModels() []protocol.Model {
 	s.mu.RLock()
-	providerIDs := make([]string, 0, len(s.catalogs))
-	for id := range s.catalogs {
-		providerIDs = append(providerIDs, id)
-	}
-	sort.Strings(providerIDs)
+	providerIDs := slices.Sorted(maps.Keys(s.catalogs))
 	var out []protocol.Model
 	for _, id := range providerIDs {
 		out = append(out, cloneModels(s.catalogs[id])...)

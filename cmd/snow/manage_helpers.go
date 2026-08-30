@@ -1,9 +1,11 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -35,11 +37,7 @@ func parseAssignments(values []string, allowBare bool) (map[string]string, error
 }
 
 func sortedMCPNames(values map[string]publicmcp.ServerSpec) []string {
-	names := make([]string, 0, len(values))
-	for name := range values {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(values))
 	return names
 }
 
@@ -73,18 +71,11 @@ func scopeName(project bool) string {
 }
 
 func defaultString(value, fallback string) string {
-	if value == "" {
-		return fallback
-	}
-	return value
+	return cmp.Or(value, fallback)
 }
 
 func formatStringMap(values map[string]string) string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(values))
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
 		parts = append(parts, key+"="+values[key])

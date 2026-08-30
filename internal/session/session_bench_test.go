@@ -30,7 +30,7 @@ func BenchmarkSQLiteContextMessages(b *testing.B) {
 	}
 	b.Run("cold", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			store.mu.Lock()
 			store.invalidateContextCacheLocked()
 			store.mu.Unlock()
@@ -45,7 +45,7 @@ func BenchmarkSQLiteContextMessages(b *testing.B) {
 		}
 		b.ReportAllocs()
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			if _, err := store.ContextMessages(); err != nil {
 				b.Fatal(err)
 			}
@@ -91,8 +91,11 @@ func BenchmarkSQLiteAppendBatch1500(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		store, err := NewSQLiteStore(filepath.Join(dir, fmt.Sprintf("append-%d.db", i)), dir, Options{})
+	b.StartTimer()
+	iteration := 0
+	for b.Loop() {
+		b.StopTimer()
+		store, err := NewSQLiteStore(filepath.Join(dir, fmt.Sprintf("append-%d.db", iteration)), dir, Options{})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -105,6 +108,8 @@ func BenchmarkSQLiteAppendBatch1500(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+		iteration++
+		b.StartTimer()
 	}
 }
 

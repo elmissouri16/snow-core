@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -156,7 +158,7 @@ func (c CompactionConfig) Validate() error {
 // BuiltInTUIThemes returns the selectable built-in themes in display order.
 // Hidden legacy themes remain accepted by IsBuiltInTUITheme for compatibility.
 func BuiltInTUIThemes() []string {
-	return append([]string(nil), builtInTUIThemes[:]...)
+	return slices.Clone(builtInTUIThemes[:])
 }
 
 // IsBuiltInTUITheme reports whether name is reserved for a current or legacy
@@ -585,9 +587,7 @@ func WithProjectSelection(cfg Config, cwd string, selection ProjectSelection) (C
 		return cfg, fmt.Errorf("config: project_selections limit %d reached", MaxProjectSelections)
 	}
 	projectSelections := make(map[string]ProjectSelection, len(cfg.ProjectSelections)+1)
-	for existingKey, existing := range cfg.ProjectSelections {
-		projectSelections[existingKey] = existing
-	}
+	maps.Copy(projectSelections, cfg.ProjectSelections)
 	projectSelections[key] = selection
 	cfg.ProjectSelections = projectSelections
 	return cfg, nil
@@ -682,9 +682,7 @@ func LoadWithProject(globalPath, projectPath string, allowProject bool) (Config,
 	if cfg.MCPServers == nil {
 		cfg.MCPServers = map[string]publicmcp.ServerSpec{}
 	}
-	for id, spec := range extensions.MCPServers {
-		cfg.MCPServers[id] = spec
-	}
+	maps.Copy(cfg.MCPServers, extensions.MCPServers)
 	return cfg, nil
 }
 

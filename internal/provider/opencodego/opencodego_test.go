@@ -289,7 +289,7 @@ func TestChatStreamSequence(t *testing.T) {
 	defer srv.Close()
 
 	p := mustNew(t, srv.URL, "test-key")
-	ctx := context.Background()
+	ctx := t.Context()
 	req := protocol.ChatRequest{
 		Model:    protocol.Model{ID: "kimi-k2.6"},
 		Messages: []protocol.Message{protocol.NewUserMessage("u1", "", "hi")},

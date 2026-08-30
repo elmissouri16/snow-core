@@ -1,9 +1,10 @@
 package provider
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 
 	"github.com/elmissouri16/snow-core/internal/auth"
@@ -85,11 +86,11 @@ func (r *Registry) Modules() []Module {
 		out = append(out, module)
 	}
 	r.mu.RUnlock()
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Order == out[j].Order {
-			return out[i].ID < out[j].ID
+	slices.SortStableFunc(out, func(a, b Module) int {
+		if byOrder := cmp.Compare(a.Order, b.Order); byOrder != 0 {
+			return byOrder
 		}
-		return out[i].Order < out[j].Order
+		return cmp.Compare(a.ID, b.ID)
 	})
 	return out
 }

@@ -202,7 +202,7 @@ func decodeTerminalPrefix(input string) (terminalPrefixStatus, tea.Msg, int) {
 	i++
 
 	values := [3]int{}
-	for part := 0; part < len(values); part++ {
+	for part := range len(values) {
 		start := i
 		for i < len(input) && input[i] >= '0' && input[i] <= '9' {
 			i++

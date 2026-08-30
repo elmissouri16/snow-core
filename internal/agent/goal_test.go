@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -152,13 +153,7 @@ func TestGoalUsageUpdatesAfterEachProviderResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []int64{5, 12, 15} {
-		found := false
-		for _, got := range usage {
-			if got == want {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(usage, want)
 		if !found {
 			t.Fatalf("goal updates=%v missing %d", usage, want)
 		}
@@ -229,7 +224,7 @@ func TestAutomaticGoalRecoversFromTransientProviderFailure(t *testing.T) {
 		}
 	})
 	a.ContinueGoal()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	if err := a.WaitGoal(ctx); err != nil {
 		t.Fatal(err)
@@ -258,7 +253,7 @@ func TestAutomaticGoalThrottleExhaustionBecomesUsageLimited(t *testing.T) {
 	a.opts.Retry.Goal = RetryProfile{MaxAttempts: 2, MaxElapsed: time.Second, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}
 	_, _ = c.Create("wait through throttle", nil, false)
 	a.ContinueGoal()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	if err := a.WaitGoal(ctx); err != nil {
 		t.Fatal(err)
@@ -279,7 +274,7 @@ func TestAutomaticGoalPausesAfterTransientRetryExhaustion(t *testing.T) {
 	a.opts.Retry.Goal = RetryProfile{MaxAttempts: 2, MaxElapsed: time.Second, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}
 	_, _ = c.Create("stop after bounded retry", nil, false)
 	a.ContinueGoal()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	if err := a.WaitGoal(ctx); err != nil {
 		t.Fatal(err)
@@ -394,7 +389,7 @@ func TestPlanModeCancelsAutomaticGoalAndDefaultResumesOnce(t *testing.T) {
 	if err := a.SetMode(protocol.ModeDefault); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	if err := a.WaitGoal(ctx); err != nil {
 		t.Fatal(err)
@@ -459,7 +454,7 @@ func TestFailedPlanModePersistenceRestartsAutomaticGoal(t *testing.T) {
 	if a.Mode() != protocol.ModeDefault {
 		t.Fatalf("mode=%q want default", a.Mode())
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	if err := a.WaitGoal(ctx); err != nil {
 		t.Fatal(err)
@@ -590,7 +585,7 @@ func TestUserPromptRestartsInterruptedAutomaticGoal(t *testing.T) {
 	if err := a.Prompt(context.Background(), "additional guidance"); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	if err := a.WaitGoal(ctx); err != nil {
 		t.Fatal(err)
@@ -636,7 +631,7 @@ func TestAbortContextCancelsOrdinaryPrompt(t *testing.T) {
 	promptDone := make(chan error, 1)
 	go func() { promptDone <- a.Prompt(context.Background(), "wait") }()
 	<-p.started
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	if err := a.AbortContext(ctx); err != nil {
 		t.Fatal(err)
@@ -691,7 +686,7 @@ func TestUserPromptDoesNotResumeAbortedGoalUntilExplicitContinue(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.ContinueGoal()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	if err := a.WaitGoal(ctx); err != nil {
 		t.Fatal(err)
@@ -739,7 +734,7 @@ func TestManualCompactPausesRunningAutomaticGoal(t *testing.T) {
 	}}
 	a, c, st := goalAgent(t, p)
 	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 128, Fallback: "error"}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		msg := protocol.NewUserMessage(fmt.Sprintf("manual-pause-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
 			t.Fatal(err)

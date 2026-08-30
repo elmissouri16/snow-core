@@ -7,6 +7,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -187,10 +188,5 @@ func (t *ReadResourceTool) Run(ctx context.Context, raw json.RawMessage, _ tools
 }
 
 func containsNUL(data []byte) bool {
-	for _, b := range data {
-		if b == 0 {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(data, 0)
 }

@@ -1,6 +1,9 @@
 package protocol
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // CollaborationMode identifies the behavior contract for subsequent turns.
 type CollaborationMode string
@@ -64,6 +67,6 @@ func (p *PlanUpdate) Clone() *PlanUpdate {
 		return nil
 	}
 	out := *p
-	out.Plan = append([]PlanStep(nil), p.Plan...)
+	out.Plan = slices.Clone(p.Plan)
 	return &out
 }

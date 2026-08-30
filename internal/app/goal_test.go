@@ -218,7 +218,7 @@ func TestFailedGoalMutationRestartsPreviousAutomaticGoal(t *testing.T) {
 			if err := tc.mutate(a); err == nil {
 				t.Fatal("invalid mutation succeeded")
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 			defer cancel()
 			if err := a.Agent.WaitGoal(ctx); err != nil {
 				t.Fatal(err)

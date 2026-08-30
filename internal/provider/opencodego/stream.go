@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -392,7 +393,7 @@ func readBoundedSSELine(reader *bufio.Reader, maxBytes int) ([]byte, error) {
 		// caller processes it synchronously before advancing the stream.
 		return part, err
 	}
-	line := append([]byte(nil), part...)
+	line := slices.Clone(part)
 	for {
 		part, err = reader.ReadSlice('\n')
 		if len(line)+len(part) > maxBytes {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -17,7 +18,7 @@ var managedProcessToolNames = [...]string{"process_start", "process_status", "pr
 
 // ManagedProcessToolNames returns the lifecycle bundle in stable exposure order.
 func ManagedProcessToolNames() []string {
-	return append([]string(nil), managedProcessToolNames[:]...)
+	return slices.Clone(managedProcessToolNames[:])
 }
 
 // RegisterProcessTools adds the app-owned managed-process control surface.
@@ -128,9 +129,9 @@ type processLogsTool struct{ manager *managedprocess.Manager }
 
 type processLogsArgs struct {
 	ProcessID string `json:"process_id"`
-	Cursor    *int64 `json:"cursor,omitempty"`
-	MaxBytes  int    `json:"max_bytes,omitempty"`
-	WaitMS    int    `json:"wait_ms,omitempty"`
+	Cursor    *int64 `json:"cursor,omitzero"`
+	MaxBytes  int    `json:"max_bytes,omitzero"`
+	WaitMS    int    `json:"wait_ms,omitzero"`
 }
 
 func (t *processLogsTool) Schema() tools.ToolSchema {
@@ -167,7 +168,7 @@ type processStopTool struct{ manager *managedprocess.Manager }
 
 type processStopArgs struct {
 	ProcessID string `json:"process_id"`
-	GraceMS   int    `json:"grace_ms,omitempty"`
+	GraceMS   int    `json:"grace_ms,omitzero"`
 }
 
 func (t *processStopTool) Schema() tools.ToolSchema {

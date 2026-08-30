@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -43,14 +43,14 @@ func (m *Manager) evictIdle() {
 			unlockRoot()
 			return
 		}
-		sort.SliceStable(candidates, func(i, j int) bool {
-			candidates[i].mu.Lock()
-			left := candidates[i].lastUsed
-			candidates[i].mu.Unlock()
-			candidates[j].mu.Lock()
-			right := candidates[j].lastUsed
-			candidates[j].mu.Unlock()
-			return left.Before(right)
+		slices.SortStableFunc(candidates, func(a, b *runtime) int {
+			a.mu.Lock()
+			left := a.lastUsed
+			a.mu.Unlock()
+			b.mu.Lock()
+			right := b.lastUsed
+			b.mu.Unlock()
+			return left.Compare(right)
 		})
 		evicted := false
 		for _, r := range candidates {
@@ -592,13 +592,10 @@ func (m *Manager) loadRuntime(r *runtime) error {
 		r.workerStarted = true
 		r.workerStop = workerStop
 		r.workerDone = workerDone
-		m.wg.Add(1)
+		m.wg.Go(func() { m.worker(r, workerStop, workerDone) })
 	}
 	r.mu.Unlock()
 	m.mu.Unlock()
-	if startWorker {
-		go m.worker(r, workerStop, workerDone)
-	}
 	return nil
 }
 
@@ -621,8 +618,8 @@ func conservativeRestoreRole(role Role) Role {
 }
 
 func roleFingerprint(role Role) string {
-	tools := append([]string(nil), role.Tools...)
-	sort.Strings(tools)
+	tools := slices.Clone(role.Tools)
+	slices.Sort(tools)
 	h := sha256.New()
 	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00", rolePolicyFingerprintVersion, role.Name, role.Description, role.System, role.Provider, role.Model, role.AllowMutation)
 	if role.Thinking != nil {

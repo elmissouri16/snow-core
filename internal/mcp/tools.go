@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -312,7 +313,7 @@ func convertContents(contents []sdkmcp.Content) []protocol.ContentBlock {
 		case *sdkmcp.TextContent:
 			blocks = append(blocks, protocol.NewTextBlock(value.Text))
 		case *sdkmcp.ImageContent:
-			blocks = append(blocks, protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: value.MIMEType, Data: append([]byte(nil), value.Data...)})
+			blocks = append(blocks, protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: value.MIMEType, Data: slices.Clone(value.Data)})
 		case *sdkmcp.AudioContent:
 			blocks = append(blocks, protocol.NewTextBlock(fmt.Sprintf("audio content (%s, base64):\n%s", value.MIMEType, base64.StdEncoding.EncodeToString(value.Data))))
 		case *sdkmcp.ResourceLink:
@@ -337,7 +338,7 @@ func convertResource(content *sdkmcp.ResourceContents) []protocol.ContentBlock {
 		return []protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("resource %s (%s):\n%s", content.URI, content.MIMEType, content.Text))}
 	}
 	if strings.HasPrefix(content.MIMEType, "image/") {
-		return []protocol.ContentBlock{{Type: protocol.BlockImage, MIMEType: content.MIMEType, Data: append([]byte(nil), content.Blob...)}}
+		return []protocol.ContentBlock{{Type: protocol.BlockImage, MIMEType: content.MIMEType, Data: slices.Clone(content.Blob)}}
 	}
 	return []protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("resource %s (%s, %d bytes, base64):\n%s", content.URI, content.MIMEType, len(content.Blob), base64.StdEncoding.EncodeToString(content.Blob)))}
 }

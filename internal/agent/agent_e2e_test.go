@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -56,8 +57,8 @@ func (p *e2eProvider) Chat(_ context.Context, req protocol.ChatRequest) (protoco
 	}
 	// Copy the request and its slices before the caller can reuse them.
 	copyReq := req
-	copyReq.Messages = append([]protocol.Message(nil), req.Messages...)
-	copyReq.Tools = append([]protocol.ToolSchema(nil), req.Tools...)
+	copyReq.Messages = slices.Clone(req.Messages)
+	copyReq.Tools = slices.Clone(req.Tools)
 	p.requests = append(p.requests, copyReq)
 
 	var events []protocol.StreamEvent
@@ -66,7 +67,7 @@ func (p *e2eProvider) Chat(_ context.Context, req protocol.ChatRequest) (protoco
 		if index >= len(p.scripts) {
 			index = len(p.scripts) - 1
 		}
-		events = append([]protocol.StreamEvent(nil), p.scripts[index]...)
+		events = slices.Clone(p.scripts[index])
 	}
 	return &e2eStream{events: events}, nil
 }
@@ -74,7 +75,7 @@ func (p *e2eProvider) Chat(_ context.Context, req protocol.ChatRequest) (protoco
 func (p *e2eProvider) Requests() []protocol.ChatRequest {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return append([]protocol.ChatRequest(nil), p.requests...)
+	return slices.Clone(p.requests)
 }
 
 type e2eStream struct {
@@ -659,7 +660,7 @@ func TestAgentEndToEndAbortDuringBash(t *testing.T) {
 	}}
 	st := session.NewMemoryStore(session.Options{CWD: root})
 	a := newBuiltinE2EAgent(t, root, p, st, permission.ModeAllow, nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
 	defer cancel()
 	err := a.Prompt(ctx, "run a cancellable command")
 	if !errors.Is(err, context.DeadlineExceeded) {

@@ -1,13 +1,14 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -76,7 +77,7 @@ func (a *Agent) prepareToolRouting(ctx context.Context, query string) {
 	}
 	ids := a.filterRequestDeferredIDs(a.expandDeferredIDs(matchIDs(selected), true))
 	a.mu.Lock()
-	a.baseDeferred = append([]string(nil), ids...)
+	a.baseDeferred = slices.Clone(ids)
 	a.searchedDeferred = nil
 	a.mu.Unlock()
 	a.publishToolRouting("automatic", ids, len(candidates), latency, fallback, err)
@@ -98,7 +99,7 @@ func (a *Agent) applyDiscoveryDetails(details any) {
 	selected := a.selectPermittedMatches(discovery.Matches, defaultDeferredTopK)
 	ids := a.filterRequestDeferredIDs(a.expandDeferredIDs(matchIDs(selected), true))
 	a.mu.Lock()
-	a.searchedDeferred = append([]string(nil), ids...)
+	a.searchedDeferred = slices.Clone(ids)
 	a.mu.Unlock()
 	a.publishToolRouting("search_tools", ids, discovery.CandidateCount, discovery.LatencyMS, false, nil)
 }
@@ -184,11 +185,11 @@ func (a *Agent) fallbackDeferred(query string, limit int) []tools.ToolMatch {
 		}
 		rankedMatches = append(rankedMatches, ranked{match: tools.ToolMatch{ID: desc.Name, Namespace: desc.Namespace, Description: desc.Description, Score: score}, score: score})
 	}
-	sort.SliceStable(rankedMatches, func(i, j int) bool {
-		if rankedMatches[i].score == rankedMatches[j].score {
-			return rankedMatches[i].match.ID < rankedMatches[j].match.ID
+	slices.SortStableFunc(rankedMatches, func(a, b ranked) int {
+		if byScore := cmp.Compare(b.score, a.score); byScore != 0 {
+			return byScore
 		}
-		return rankedMatches[i].score > rankedMatches[j].score
+		return cmp.Compare(a.match.ID, b.match.ID)
 	})
 	selected := make([]tools.ToolMatch, 0, min(limit, len(rankedMatches)))
 	schemaBytes := 0
@@ -219,7 +220,7 @@ func matchIDs(matches []tools.ToolMatch) []string {
 }
 
 func (a *Agent) expandDeferredIDs(ids []string, includeSticky bool) []string {
-	out := append([]string(nil), ids...)
+	out := slices.Clone(ids)
 	seen := make(map[string]bool, len(out))
 	for _, id := range out {
 		seen[id] = true
@@ -294,8 +295,8 @@ func (a *Agent) requestToolSchemasWithTurnRouting(includeTurnRouting bool) []pro
 	a.mu.RLock()
 	var base, searched []string
 	if includeTurnRouting {
-		base = append([]string(nil), a.baseDeferred...)
-		searched = append([]string(nil), a.searchedDeferred...)
+		base = slices.Clone(a.baseDeferred)
+		searched = slices.Clone(a.searchedDeferred)
 	}
 	a.mu.RUnlock()
 	allowed := a.requestToolPolicy()
@@ -322,7 +323,7 @@ func (a *Agent) requestToolSchemas() []protocol.ToolSchema {
 
 func (a *Agent) publishToolRouting(trigger string, ids []string, candidates int, latency int64, fallback bool, routeErr error) {
 	schemas := a.requestToolSchemas()
-	eventIDs := append([]string(nil), ids...)
+	eventIDs := slices.Clone(ids)
 	if len(eventIDs) > maxRoutingEventTools {
 		eventIDs = eventIDs[:maxRoutingEventTools]
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +71,7 @@ type refreshCatalogProvider struct {
 }
 
 func (p *refreshCatalogProvider) RefreshModels(context.Context) ([]protocol.Model, error) {
-	return append([]protocol.Model(nil), p.models...), nil
+	return slices.Clone(p.models), nil
 }
 func (p *refreshCatalogProvider) ModelCatalogAuthoritative() bool { return p.authoritative }
 
@@ -216,7 +217,7 @@ func TestAppTrustStoreUsesTrustFileNotAuthFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	a, err := New(ctx, Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
 	if err != nil {
 		t.Fatalf("app must start with a populated auth.json: %v", err)

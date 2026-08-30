@@ -40,7 +40,7 @@ func TestAppDefaultModelPrefersProviderDefault(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	a, err := New(ctx, Options{
 		Provider:   "opencode-go",
 		NoSession:  true,

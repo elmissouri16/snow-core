@@ -29,7 +29,7 @@ func (p AgentPath) Validate() error {
 	if s == "" || len(s) > MaxAgentPathBytes || !strings.HasPrefix(s, string(RootAgentPath)+"/") {
 		return fmt.Errorf("invalid agent path %q", s)
 	}
-	for _, segment := range strings.Split(strings.TrimPrefix(s, string(RootAgentPath)+"/"), "/") {
+	for segment := range strings.SplitSeq(strings.TrimPrefix(s, string(RootAgentPath)+"/"), "/") {
 		if segment == "root" || !agentPathSegmentRE.MatchString(segment) {
 			return fmt.Errorf("invalid agent path segment %q", segment)
 		}
@@ -70,8 +70,8 @@ func (p AgentPath) Parent() (AgentPath, bool) {
 	if err := p.Validate(); err != nil {
 		return "", false
 	}
-	i := strings.LastIndexByte(string(p), '/')
-	return AgentPath(string(p)[:i]), true
+	parent, _, _ := strings.CutLast(string(p), "/")
+	return AgentPath(parent), true
 }
 
 // Depth returns root=0, direct child=1.
@@ -158,8 +158,7 @@ func (r *AgentRef) Clone() *AgentRef {
 	if r == nil {
 		return nil
 	}
-	out := *r
-	return &out
+	return new(*r)
 }
 
 // SubagentState is a bounded immutable snapshot returned by manager surfaces.
@@ -170,12 +169,12 @@ type SubagentState struct {
 	Provider   string        `json:"provider,omitempty"`
 	Thinking   ThinkingLevel `json:"thinking,omitempty"`
 	CreatedAt  int64         `json:"created_at"`
-	StartedAt  int64         `json:"started_at,omitempty"`
-	FinishedAt int64         `json:"finished_at,omitempty"`
+	StartedAt  int64         `json:"started_at,omitzero"`
+	FinishedAt int64         `json:"finished_at,omitzero"`
 	Result     string        `json:"result,omitempty"`
 	Error      string        `json:"error,omitempty"`
 	Usage      *Usage        `json:"usage,omitempty"`
-	Generation uint64        `json:"generation,omitempty"`
+	Generation uint64        `json:"generation,omitzero"`
 }
 
 func (s SubagentState) Validate() error {
@@ -222,7 +221,7 @@ type AgentMessage struct {
 	Recipient   AgentPath        `json:"recipient"`
 	Kind        AgentMessageKind `json:"kind"`
 	Content     string           `json:"content"`
-	TriggerTurn bool             `json:"trigger_turn,omitempty"`
+	TriggerTurn bool             `json:"trigger_turn,omitzero"`
 	CreatedAt   int64            `json:"created_at"`
 }
 
@@ -254,8 +253,7 @@ func (m *AgentMessage) Clone() *AgentMessage {
 	if m == nil {
 		return nil
 	}
-	out := *m
-	return &out
+	return new(*m)
 }
 
 // SpawnSubagentRequest is shared by SDK/RPC and manager-bound model tools.
@@ -272,7 +270,7 @@ type SpawnSubagentRequest struct {
 type WaitSubagentsResult struct {
 	Message     string `json:"message"`
 	TimedOut    bool   `json:"timed_out"`
-	Clamped     bool   `json:"clamped,omitempty"`
+	Clamped     bool   `json:"clamped,omitzero"`
 	Running     int    `json:"running"`
 	Queued      int    `json:"queued"`
 	Terminal    int    `json:"terminal"`
@@ -288,7 +286,7 @@ type SubagentList struct {
 	Closed          int             `json:"closed"`
 	ConcurrentLimit int             `json:"concurrent_limit"`
 	AgentLimit      int             `json:"agent_limit"`
-	Truncated       bool            `json:"truncated,omitempty"`
+	Truncated       bool            `json:"truncated,omitzero"`
 }
 
 // SealedText renders a compatibility-safe attributed envelope for providers.

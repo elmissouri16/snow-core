@@ -140,10 +140,7 @@ func readerMatchesString(ctx context.Context, reader io.Reader, expected string)
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
-		want := len(expected) - matched
-		if want > len(buf) {
-			want = len(buf)
-		}
+		want := min(len(expected)-matched, len(buf))
 		n, err := reader.Read(buf[:want])
 		if n > 0 {
 			if string(buf[:n]) != expected[matched:matched+n] {

@@ -3,12 +3,13 @@
 package provider
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -178,8 +179,7 @@ func IsContextWindowExceeded(err error) bool {
 	if err == nil {
 		return false
 	}
-	var marked ContextWindowExceededError
-	if errors.As(err, &marked) && marked.ContextWindowExceeded() {
+	if marked, ok := errors.AsType[ContextWindowExceededError](err); ok && marked.ContextWindowExceeded() {
 		return true
 	}
 	message := strings.ToLower(err.Error())
@@ -267,7 +267,7 @@ func RedactSecrets(message string, secrets ...string) string {
 			filtered = append(filtered, secret)
 		}
 	}
-	sort.Slice(filtered, func(i, j int) bool { return len(filtered[i]) > len(filtered[j]) })
+	slices.SortFunc(filtered, func(a, b string) int { return cmp.Compare(len(b), len(a)) })
 	for _, secret := range filtered {
 		message = strings.ReplaceAll(message, secret, "[redacted]")
 	}

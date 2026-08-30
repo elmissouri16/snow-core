@@ -1,13 +1,14 @@
 package session
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -116,7 +117,7 @@ func (f *FileIndex) DeleteWithIDs(cwd, path, expectedID string) ([]string, error
 		if walkErr != nil {
 			return nil, fmt.Errorf("session: inspect child histories: %w", walkErr)
 		}
-		sort.Strings(childPaths)
+		slices.Sort(childPaths)
 		for _, childPath := range childPaths {
 			if err := lockDatabase(childPath); err != nil {
 				if errors.Is(err, errSessionInUse) {
@@ -140,7 +141,7 @@ func (f *FileIndex) DeleteWithIDs(cwd, path, expectedID string) ([]string, error
 
 	parent := filepath.Dir(rel)
 	var quarantine string
-	for attempts := 0; attempts < 16; attempts++ {
+	for range 16 {
 		candidate := filepath.Join(parent, ".delete-"+randomSuffix())
 		if err := root.Mkdir(candidate, 0o700); err == nil {
 			quarantine = candidate
@@ -298,7 +299,7 @@ func (f *FileIndex) queryFileCacheKey(cwd string) (string, error) {
 			return "", err
 		}
 	}
-	sort.Strings(identities)
+	slices.Sort(identities)
 	h := sha256.New()
 	for _, identity := range identities {
 		_, _ = h.Write([]byte(identity))
@@ -417,8 +418,8 @@ func (f *FileIndex) listRecentForQuery(cwd string, limit int) ([]SessionInfo, er
 	for _, entry := range byPath {
 		candidates = append(candidates, *entry)
 	}
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].updatedAt > candidates[j].updatedAt
+	slices.SortFunc(candidates, func(a, b candidate) int {
+		return cmp.Compare(b.updatedAt, a.updatedAt)
 	})
 	out := make([]SessionInfo, 0, min(limit, len(candidates)))
 	for _, candidate := range candidates {
@@ -431,7 +432,7 @@ func (f *FileIndex) listRecentForQuery(cwd string, limit int) ([]SessionInfo, er
 			break
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt > out[j].UpdatedAt })
+	slices.SortFunc(out, func(a, b SessionInfo) int { return cmp.Compare(b.UpdatedAt, a.UpdatedAt) })
 	return out, nil
 }
 
@@ -480,7 +481,7 @@ func (f *FileIndex) List(cwd string) ([]SessionInfo, error) {
 			return nil, err
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt > out[j].UpdatedAt })
+	slices.SortFunc(out, func(a, b SessionInfo) int { return cmp.Compare(b.UpdatedAt, a.UpdatedAt) })
 	return out, nil
 }
 

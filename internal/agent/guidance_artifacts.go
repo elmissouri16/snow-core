@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -117,9 +118,7 @@ func (a *Agent) requestSystemPrompt() string {
 func (a *Agent) requestSystemPromptForTools(schemas []protocol.ToolSchema) string {
 	a.mu.RLock()
 	active := make(map[string]string, len(a.activeSkills))
-	for name, content := range a.activeSkills {
-		active[name] = content
-	}
+	maps.Copy(active, a.activeSkills)
 	a.mu.RUnlock()
 	return a.systemPromptForToolsAndSkills(schemas, active)
 }
@@ -131,13 +130,9 @@ func (a *Agent) systemPromptForToolsAndSkills(schemas []protocol.ToolSchema, act
 	if !a.running {
 		mode = a.mode
 	}
-	guidance := append([]ToolGuidance(nil), a.opts.ToolGuidance...)
+	guidance := slices.Clone(a.opts.ToolGuidance)
 	a.mu.RUnlock()
-	names := make([]string, 0, len(active))
-	for name := range active {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(active))
 	contents := make([]string, 0, len(names))
 	for _, name := range names {
 		contents = append(contents, active[name])
@@ -194,9 +189,7 @@ func (a *Agent) validateSkillActivation(activation tools.SkillActivationDetails)
 	schemas := a.requestToolSchemas()
 	a.mu.RLock()
 	active := make(map[string]string, len(a.activeSkills)+1)
-	for name, content := range a.activeSkills {
-		active[name] = content
-	}
+	maps.Copy(active, a.activeSkills)
 	model := a.model.Clone()
 	a.mu.RUnlock()
 	current := fixedContextTokens(a.systemPromptForToolsAndSkills(schemas, active), schemas)
@@ -506,7 +499,7 @@ func activationSkillNames(registry tools.Registry, allowed map[string]bool) []st
 			names = append(names, name)
 		}
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 
@@ -623,7 +616,7 @@ func (a *Agent) takeToolDisplay(callID string) (time.Time, toolDisplayState) {
 	display := a.toolDisplays[callID]
 	delete(a.toolStarts, callID)
 	delete(a.toolDisplays, callID)
-	display.progress = append([]string(nil), display.progress...)
+	display.progress = slices.Clone(display.progress)
 	return started, display
 }
 
@@ -753,7 +746,7 @@ func boundedCompactionReferences(retained []string, transcriptRef string) []stri
 	if len(retained) > maxCompactionRetrievalReferences {
 		retained = retained[len(retained)-maxCompactionRetrievalReferences:]
 	}
-	out := append([]string(nil), retained...)
+	out := slices.Clone(retained)
 	if transcriptRef == "" {
 		return out
 	}
@@ -772,7 +765,7 @@ func rebuildCompactionRetrievalSection(summary string, refs []string) string {
 	// regardless of section, then rebuild the one canonical section exclusively
 	// from session-owned references.
 	lines := strings.Split(summary, "\n")
-	for i := 0; i < len(lines); i++ {
+	for i := range lines {
 		removed := false
 		for {
 			index := strings.Index(lines[i], marker)
@@ -829,7 +822,7 @@ func rebuildCompactionRetrievalSection(summary string, refs []string) string {
 			break
 		}
 	}
-	result := append([]string(nil), filtered[:insertAt]...)
+	result := slices.Clone(filtered[:insertAt])
 	if len(result) > 0 && result[len(result)-1] != "" {
 		result = append(result, "")
 	}
@@ -945,7 +938,7 @@ func (a *Agent) pruneHistoricalToolResultsProjection(ctx context.Context, messag
 func providerMessages(messages []protocol.Message) []protocol.Message {
 	for i := range messages {
 		if messages[i].ToolDisplay != nil {
-			out := append([]protocol.Message(nil), messages...)
+			out := slices.Clone(messages)
 			for j := range out {
 				out[j].ToolDisplay = nil
 			}

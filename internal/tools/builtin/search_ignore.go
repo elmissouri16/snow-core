@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -86,10 +87,8 @@ func (m *searchIgnoreMatcher) ignore(path string, isDir bool) bool {
 		return false
 	}
 	if isDir {
-		for _, name := range m.policy.GeneratedDirs {
-			if parts[len(parts)-1] == name {
-				return true
-			}
+		if slices.Contains(m.policy.GeneratedDirs, parts[len(parts)-1]) {
+			return true
 		}
 	}
 	ignored := false
@@ -232,8 +231,8 @@ func (r searchIgnoreRule) matches(rootRel string, isDir bool) bool {
 		prefix := r.base + "/"
 		if candidate == r.base {
 			candidate = ""
-		} else if strings.HasPrefix(candidate, prefix) {
-			candidate = strings.TrimPrefix(candidate, prefix)
+		} else if after, ok := strings.CutPrefix(candidate, prefix); ok {
+			candidate = after
 		} else {
 			return false
 		}
@@ -257,7 +256,7 @@ func (r searchIgnoreRule) matches(rootRel string, isDir bool) bool {
 			match, _ = matchGlobPath(candidate, r.pattern)
 		}
 	} else if !r.hasSlash {
-		for _, part := range strings.Split(candidate, "/") {
+		for part := range strings.SplitSeq(candidate, "/") {
 			if ok, _ := matchGlobPath(part, r.pattern); ok {
 				match = true
 				break

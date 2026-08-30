@@ -188,7 +188,7 @@ func TestWrite_CancelLeavesExistingFile(t *testing.T) {
 	if err := os.WriteFile(file, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	w := NewWrite(NewPathGuard([]string{dir}, dir))
 	res, _ := w.Run(ctx, argsFor(t, map[string]any{"path": file, "content": "new"}), stubHost{cwd: dir, roots: []string{dir}})

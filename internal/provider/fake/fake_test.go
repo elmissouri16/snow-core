@@ -20,7 +20,7 @@ func TestReplayOrderMatchesScript(t *testing.T) {
 		{Kind: StepDone, Stop: protocol.StopStop},
 	}
 	p := New(script)
-	ctx := context.Background()
+	ctx := t.Context()
 	es, err := p.Chat(ctx, protocol.ChatRequest{})
 	if err != nil {
 		t.Fatalf("Chat: %v", err)
@@ -103,8 +103,8 @@ func TestToolCallArgumentsParsed(t *testing.T) {
 func TestScriptReplaysOnEveryCall(t *testing.T) {
 	script := []Step{{Kind: StepText, Text: "x"}, {Kind: StepDone}}
 	p := New(script)
-	ctx := context.Background()
-	for i := 0; i < 3; i++ {
+	ctx := t.Context()
+	for i := range 3 {
 		es, err := p.Chat(ctx, protocol.ChatRequest{})
 		if err != nil {
 			t.Fatal(err)
@@ -157,7 +157,7 @@ func TestDefaultModels(t *testing.T) {
 
 func TestRecordedCalls(t *testing.T) {
 	p := NewRecorded()
-	ctx := context.Background()
+	ctx := t.Context()
 	tools := []protocol.ToolSchema{{Name: "read", Description: "read a file"}}
 	msgs := []protocol.Message{
 		{Role: protocol.RoleUser, Content: []protocol.ContentBlock{{Type: protocol.BlockText, Text: "hi"}}},
@@ -220,7 +220,7 @@ func TestStepErrorEvent(t *testing.T) {
 
 func TestStreamCancel(t *testing.T) {
 	p := New([]Step{{Kind: StepText, Text: "a"}, {Kind: StepText, Text: "b"}})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // already cancelled
 	es, _ := p.Chat(context.Background(), protocol.ChatRequest{})
 	defer es.Close()

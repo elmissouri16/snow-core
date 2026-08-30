@@ -263,7 +263,7 @@ type SessionInfo struct {
 	CreatedAt      int64  `json:"created_at"`
 	UpdatedAt      int64  `json:"updated_at"`
 	Messages       int    `json:"messages"`
-	MessagesCapped bool   `json:"messages_capped,omitempty"`
+	MessagesCapped bool   `json:"messages_capped,omitzero"`
 	// searchFingerprint tracks branch names/tips for the derived FTS cache.
 	searchFingerprint string
 }

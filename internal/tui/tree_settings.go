@@ -3,7 +3,8 @@ package tui
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -55,10 +56,7 @@ func (m *Model) treeWindow() (start, end int) {
 	if total == 0 || total <= visible {
 		return 0, total
 	}
-	start = m.branchIndex - visible/2
-	if start < 0 {
-		start = 0
-	}
+	start = max(m.branchIndex-visible/2, 0)
 	if start+visible > total {
 		start = total - visible
 	}
@@ -416,10 +414,7 @@ func (m *Model) cycleSetting(direction int) {
 			m.settingsStatus = "subagent setting saved; restart Snow to apply"
 		}
 	case settingsSubagentConcurrency:
-		next := m.app.Cfg.Subagents.MaxConcurrentThreads + direction
-		if next < 1 {
-			next = 1
-		}
+		next := max(m.app.Cfg.Subagents.MaxConcurrentThreads+direction, 1)
 		err = m.setSubagentConcurrency(next)
 		if err == nil {
 			m.settingsStatus = "subagent concurrency saved; restart Snow to apply"
@@ -470,10 +465,8 @@ func cycleValue[T comparable](values []T, current T, direction int) T {
 }
 
 func cycleThemeValue(values []string, current string, direction int) string {
-	for _, value := range values {
-		if value == current {
-			return cycleValue(values, current, direction)
-		}
+	if slices.Contains(values, current) {
+		return cycleValue(values, current, direction)
 	}
 	if len(values) == 0 {
 		return current
@@ -495,7 +488,7 @@ func (m *Model) loadAuxiliaryTUIConfig() {
 	themes, themeDiagnostics := config.LoadThemes(config.GlobalDir(), m.app.ProjectInputRoot, m.app.ProjectAllowed)
 	scopes, keyDiagnostics := config.LoadKeybindingScopes(config.GlobalDir(), m.app.ProjectInputRoot, m.app.ProjectAllowed)
 	m.customThemes = themes
-	m.auxDiagnostics = append(append([]config.Diagnostic(nil), themeDiagnostics...), keyDiagnostics...)
+	m.auxDiagnostics = append(slices.Clone(themeDiagnostics), keyDiagnostics...)
 	m.keys = tuiKeys
 	for _, scope := range scopes {
 		keys, err := applyKeybindingOverrides(m.keys, scope.File.Bindings)
@@ -511,11 +504,7 @@ func (m *Model) loadAuxiliaryTUIConfig() {
 
 func (m *Model) themeChoices() []string {
 	values := themeChoices()
-	var custom []string
-	for name := range m.customThemes {
-		custom = append(custom, name)
-	}
-	sort.Strings(custom)
+	custom := slices.Sorted(maps.Keys(m.customThemes))
 	return append(values, custom...)
 }
 

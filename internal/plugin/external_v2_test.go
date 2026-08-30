@@ -62,7 +62,7 @@ func TestExternalHostReportsPluginExit(t *testing.T) {
 		t.Fatalf("build: %v %s", err, out)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	host, err := SpawnExternal(ctx, publicplugin.PluginSpec{ID: "crash", Command: []string{bin}, Enabled: true}, dir)
 	if err != nil {
@@ -76,7 +76,7 @@ func TestExternalHostReportsPluginExit(t *testing.T) {
 
 func TestExternalHostV2ConcurrentStringCorrelation(t *testing.T) {
 	bin := buildV2Plugin(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	h, err := SpawnExternal(ctx, publicplugin.PluginSpec{ID: "v2", Command: []string{bin}, Enabled: true}, t.TempDir())
 	if err != nil {
@@ -108,7 +108,7 @@ func TestExternalHostV2ConcurrentStringCorrelation(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 8)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

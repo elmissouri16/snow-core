@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ func newTranscriptSelectionTestModel(t *testing.T, lines []string) *Model {
 	m.app.Cfg.TUI.Mouse = true
 	m.width, m.height = 32, 12
 	m.layout()
-	m.lines = append([]string(nil), lines...)
+	m.lines = slices.Clone(lines)
 	m.transcriptBaseDirty = true
 	m.transcriptDirty = true
 	m.refreshTranscriptForced()

@@ -1,10 +1,11 @@
 package session
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -905,11 +906,11 @@ func (s *MemoryStore) Branches() ([]protocol.SessionBranch, error) {
 		branch.Active = branch.ID == s.activeBranch
 		out = append(out, branch)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].CreatedAt == out[j].CreatedAt {
-			return out[i].ID < out[j].ID
+	slices.SortFunc(out, func(a, b protocol.SessionBranch) int {
+		if byCreated := cmp.Compare(a.CreatedAt, b.CreatedAt); byCreated != 0 {
+			return byCreated
 		}
-		return out[i].CreatedAt < out[j].CreatedAt
+		return cmp.Compare(a.ID, b.ID)
 	})
 	return out, nil
 }

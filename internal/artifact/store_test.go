@@ -88,7 +88,7 @@ func TestLocalStoreBoundsVerifiedArtifactCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	for i := 0; i < maxVerifiedArtifacts+100; i++ {
+	for i := range maxVerifiedArtifacts + 100 {
 		if _, err := store.SaveText(context.Background(), "session", fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i)); err != nil {
 			t.Fatal(err)
 		}
@@ -199,10 +199,8 @@ func TestSaveTextConcurrentSameAddressPublishesCompleteContent(t *testing.T) {
 	text := strings.Repeat("concurrent-content\n", 1024)
 	var wg sync.WaitGroup
 	errs := make(chan error, workers)
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			ref, saveErr := store.SaveText(context.Background(), "session", "same", text)
 			if saveErr != nil {
 				errs <- saveErr
@@ -214,7 +212,7 @@ func TestSaveTextConcurrentSameAddressPublishesCompleteContent(t *testing.T) {
 			} else if got != text {
 				errs <- fmt.Errorf("partial content: got %d bytes", len(got))
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

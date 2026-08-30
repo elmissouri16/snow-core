@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/auth"
@@ -254,7 +255,7 @@ func applyCachedReasoning(model *protocol.Model, cached protocol.Model) {
 	model.SupportsThinking = true
 	levels := cached.SupportedThinkingLevels()
 	if len(levels) > 1 {
-		model.ThinkingLevels = append([]protocol.ThinkingLevel(nil), levels[1:]...)
+		model.ThinkingLevels = slices.Clone(levels[1:])
 	}
 }
 

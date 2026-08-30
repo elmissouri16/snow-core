@@ -17,7 +17,7 @@ func TestConfigDiagnosticsFingerprintIgnoresUnrelatedThemeEntries(t *testing.T) 
 	if err := os.MkdirAll(themes, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < config.ThemeFileLimit+8; i++ {
+	for i := range config.ThemeFileLimit + 8 {
 		if err := os.WriteFile(filepath.Join(themes, fmt.Sprintf("%03d.txt", i)), []byte("ignored"), 0o600); err != nil {
 			t.Fatal(err)
 		}

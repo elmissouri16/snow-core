@@ -61,10 +61,7 @@ func validateReadiness(req *ReadinessRequest) error {
 func waitForReadiness(ctx context.Context, process *runtimeProcess, req ReadinessRequest) error {
 	timeout := DefaultReadinessTimeout
 	if req.TimeoutMS > 0 {
-		timeout = time.Duration(req.TimeoutMS) * time.Millisecond
-		if timeout > MaxReadinessTimeout {
-			timeout = MaxReadinessTimeout
-		}
+		timeout = min(time.Duration(req.TimeoutMS)*time.Millisecond, MaxReadinessTimeout)
 	}
 	readyCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -223,6 +220,6 @@ func loopbackIPs(ctx context.Context, host string) ([]net.IP, error) {
 type retryableReadinessError struct{ error }
 
 func isRetryableReadiness(err error) bool {
-	var retry retryableReadinessError
-	return errors.As(err, &retry)
+	_, ok := errors.AsType[retryableReadinessError](err)
+	return ok
 }

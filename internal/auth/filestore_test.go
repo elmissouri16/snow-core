@@ -129,7 +129,7 @@ func TestFileStoreNoTempFilesLeft(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "auth.json")
 	fs, _ := NewFileStore(path)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		if err := fs.Put("p", Credential{Type: CredentialAPIKey, Key: "k"}); err != nil {
 			t.Fatal(err)
 		}
@@ -268,7 +268,7 @@ func TestConcurrentPutsNoLostUpdate(t *testing.T) {
 	const n = 20
 	var wg sync.WaitGroup
 	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -285,7 +285,7 @@ func TestConcurrentPutsNoLostUpdate(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		provider := fmt.Sprintf("provider-%02d", i)
 		got, ok := fs.Get(provider)
 		if !ok {

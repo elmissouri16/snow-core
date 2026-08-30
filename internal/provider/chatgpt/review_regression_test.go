@@ -210,7 +210,7 @@ func TestBrowserLoginCanUsePasteOnlyWhenCallbackPortOccupied(t *testing.T) {
 	defer listener.Close()
 	// Exercise only the setup/state path: cancellation proves the occupied port
 	// no longer causes an immediate failure when a paste callback is available.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	c := &loginClient{opts: LoginOptions{PasteCallback: func(context.Context) (string, error) { return "", context.Canceled }}, base: "https://auth.example", client: http.DefaultClient, now: time.Now}
 	_, err = c.browser(ctx)

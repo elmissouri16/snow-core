@@ -22,7 +22,7 @@ func TestMailboxFIFOAndProviderDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		msg := protocol.AgentMessage{ID: fmt.Sprintf("m%d", i), Author: "/root/c", Recipient: "/root", Kind: protocol.AgentMessageNormal, Content: fmt.Sprintf("mail-%d", i), CreatedAt: time.Now().UnixMilli()}
 		if err := a.EnqueueMailbox(msg); err != nil {
 			t.Fatal(err)
@@ -50,7 +50,7 @@ func TestMailboxFIFOAndProviderDelivery(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("calls=%d", len(calls))
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if calls[0].Messages[i].Role != protocol.RoleAgent {
 			t.Fatalf("request[%d]=%s", i, calls[0].Messages[i].Role)
 		}
@@ -66,7 +66,7 @@ func TestMailboxRejectsUnboundedPendingInput(t *testing.T) {
 	defer a.Close()
 	// Idle envelopes are persisted immediately, but remain unread until the
 	// next provider request and must still count toward the admission limit.
-	for i := 0; i < maxPendingMailboxItems; i++ {
+	for i := range maxPendingMailboxItems {
 		err := a.EnqueueMailbox(protocol.AgentMessage{ID: fmt.Sprintf("limit-%d", i), Author: "/root/c", Recipient: "/root", Kind: protocol.AgentMessageNormal, Content: "x", CreatedAt: time.Now().UnixMilli()})
 		if err != nil {
 			t.Fatalf("enqueue %d: %v", i, err)
@@ -84,7 +84,7 @@ func TestMailboxUnreadLimitResetsAcrossBranchSwitch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	for i := 0; i < maxPendingMailboxItems; i++ {
+	for i := range maxPendingMailboxItems {
 		if err := a.EnqueueMailbox(protocol.AgentMessage{ID: fmt.Sprintf("branch-a-%d", i), Author: "/root/c", Recipient: "/root", Kind: protocol.AgentMessageNormal, Content: "x", CreatedAt: time.Now().UnixMilli()}); err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +108,7 @@ func TestMailboxConcurrentProducersLinearize(t *testing.T) {
 	const n = 32
 	var wg sync.WaitGroup
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(i int) {
 			defer wg.Done()
 			if err := a.EnqueueMailbox(protocol.AgentMessage{ID: fmt.Sprintf("c%02d", i), Author: "/root/c", Recipient: "/root", Kind: protocol.AgentMessageNormal, Content: "x", CreatedAt: time.Now().UnixMilli()}); err != nil {

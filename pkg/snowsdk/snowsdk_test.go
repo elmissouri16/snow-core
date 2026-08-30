@@ -360,7 +360,7 @@ func TestSkillInventoryIncludesPolicyDisabledSkills(t *testing.T) {
 }
 
 func TestBranchesAndFork(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, err := Open(ctx, Options{Provider: "fake", NoSession: true, PermissionMode: "allow"})
 	if err != nil {
 		t.Fatal(err)
@@ -409,7 +409,7 @@ func TestBranchesAndFork(t *testing.T) {
 
 func TestForkSessionCreatesDetachedDurableChild(t *testing.T) {
 	t.Setenv("SNOW_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	cwd := t.TempDir()
 	source, err := Open(ctx, Options{Provider: "fake", NoSession: true, PermissionMode: "allow", CWD: cwd, NoPlugins: true, NoMCP: true, NoSkills: true})
 	if err != nil {
@@ -445,7 +445,7 @@ func TestForkSessionCreatesDetachedDurableChild(t *testing.T) {
 }
 
 func TestRootQueueAPIErrorsAndSnapshots(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, err := Open(ctx, Options{Provider: "fake", NoSession: true, PermissionMode: "allow", CWD: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -499,7 +499,7 @@ func TestSessionRenameAndName(t *testing.T) {
 }
 
 func TestClosedSessionReturnsErrStopped(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, err := Open(ctx, Options{Provider: "fake", NoSession: true, PermissionMode: "allow"})
 	if err != nil {
 		t.Fatal(err)
@@ -522,7 +522,7 @@ func TestClosedSessionReturnsErrStopped(t *testing.T) {
 }
 
 func TestThinkingAndModelsAPI(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, err := Open(ctx, Options{Provider: "fake", NoSession: true, PermissionMode: "allow"})
 	if err != nil {
 		t.Fatal(err)
@@ -580,7 +580,7 @@ func TestResponseOptionsInitializeSession(t *testing.T) {
 }
 
 func TestOpenMissingProvider(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := Open(ctx, Options{Provider: "nope", NoSession: true})
 	if err == nil {
 		t.Fatal("expected error for unknown provider")

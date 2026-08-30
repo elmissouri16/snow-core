@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"slices"
 	"testing"
 
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -80,7 +81,7 @@ func TestEstimateImageTokensUsesDimensionsNotCompressedFileSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	small := encoded.Bytes()
-	large := append(append([]byte(nil), small...), make([]byte, 2<<20)...)
+	large := append(slices.Clone(small), make([]byte, 2<<20)...)
 	if got, want := estimateImageTokens(small), 85; got != want {
 		t.Fatalf("320x160 image estimate = %d, want %d", got, want)
 	}

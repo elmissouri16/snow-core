@@ -378,8 +378,7 @@ func (a *Agent) stopGoalOnError(turnErr error) error {
 		return nil
 	}
 	status := protocol.GoalBlocked
-	var limited provider.UsageLimitedError
-	if errors.As(turnErr, &limited) && limited.UsageLimited() {
+	if limited, ok := errors.AsType[provider.UsageLimitedError](turnErr); ok && limited.UsageLimited() {
 		status = protocol.GoalUsageLimited
 	} else if advice, retryable := provider.RetryAdviceFor(turnErr); retryable {
 		if advice.Kind == provider.RetryRateLimit {
@@ -551,10 +550,7 @@ func (a *Agent) ContinueGoal() {
 	a.autoPending = false
 	a.autoDone = make(chan struct{})
 	done := a.autoDone
-	a.autoWG.Add(1)
-	a.mu.Unlock()
-	go func() {
-		defer a.autoWG.Done()
+	a.autoWG.Go(func() {
 		a.mu.Lock()
 		wrap := a.budgetWrap
 		a.budgetWrap = false
@@ -612,7 +608,8 @@ func (a *Agent) ContinueGoal() {
 			wrap = false
 		}
 		a.finishAutoWorker(done)
-	}()
+	})
+	a.mu.Unlock()
 }
 
 func (a *Agent) finishAutoWorker(done chan struct{}) {

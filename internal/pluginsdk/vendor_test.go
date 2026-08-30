@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -180,10 +181,6 @@ func TestVendorValidatesRuntimeAndExistingDestination(t *testing.T) {
 }
 
 func mapKeys(values map[string][]byte) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(values))
 	return keys
 }

@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -85,9 +86,9 @@ func (m *Model) loadSubagentFleetDetail() tea.Cmd {
 			messages, messageErr = appRuntime.SubagentMessages(ctx, target)
 		}
 		if len(messages) > maxAgentInspectionMessages {
-			messages = append([]protocol.Message(nil), messages[len(messages)-maxAgentInspectionMessages:]...)
+			messages = slices.Clone(messages[len(messages)-maxAgentInspectionMessages:])
 		} else {
-			messages = append([]protocol.Message(nil), messages...)
+			messages = slices.Clone(messages)
 		}
 		return subagentFleetDetailMsg{generation: generation, target: target, state: state, messages: messages, messageErr: messageErr}
 	}
@@ -166,7 +167,7 @@ func (m *Model) applySubagentFleetDetail(msg subagentFleetDetailMsg) {
 	if len(messages) > maxAgentInspectionMessages {
 		messages = messages[len(messages)-maxAgentInspectionMessages:]
 	}
-	m.subagentFleetMessages = append([]protocol.Message(nil), messages...)
+	m.subagentFleetMessages = slices.Clone(messages)
 	if msg.messageErr != nil {
 		m.subagentFleetDetailError = msg.messageErr.Error()
 	} else {
@@ -306,7 +307,7 @@ func (m *Model) recordSubagentFleetEvent(ev protocol.AgentEvent) {
 			lines = append(lines, line)
 		}
 		if len(lines) > maxFleetActivityLines {
-			lines = append([]string(nil), lines[len(lines)-maxFleetActivityLines:]...)
+			lines = slices.Clone(lines[len(lines)-maxFleetActivityLines:])
 		}
 		for fleetActivityBytes(lines) > maxFleetActivityBytes && len(lines) > 1 {
 			lines = lines[1:]
@@ -538,10 +539,7 @@ func (m *Model) renderSubagentFleetList(width, height int) string {
 	}
 	const rowsPerAgent = 2
 	visibleAgents := max(1, height/rowsPerAgent)
-	start := m.subagentFleetIndex - visibleAgents/2
-	if start < 0 {
-		start = 0
-	}
+	start := max(m.subagentFleetIndex-visibleAgents/2, 0)
 	if start+visibleAgents > len(m.subagentFleetList.Agents) {
 		start = max(0, len(m.subagentFleetList.Agents)-visibleAgents)
 	}
@@ -624,7 +622,7 @@ func (m *Model) subagentFleetDetailLines(width int) []string {
 	} else if state.Result != "" {
 		lines = append(lines, styleAssistant.Render(" Result"))
 		result := m.renderSubagentFleetMarkdown(state.Result, max(10, width-2))
-		for _, line := range strings.Split(result, "\n") {
+		for line := range strings.SplitSeq(result, "\n") {
 			lines = append(lines, "  "+line)
 		}
 	}
@@ -699,7 +697,7 @@ func (m *Model) fleetMessageLines(message protocol.Message, width int) []string 
 	}
 	lines := []string{prefix}
 	for _, section := range sections {
-		for _, line := range strings.Split(section, "\n") {
+		for line := range strings.SplitSeq(section, "\n") {
 			lines = append(lines, "  "+line)
 		}
 	}
@@ -748,9 +746,9 @@ func fleetToolCallBlock(block protocol.ContentBlock, width int) string {
 	}
 	args = sanitizeToolPreview(args, maxAgentMessagePreviewRunes)
 	var lines []string
-	for _, line := range strings.Split(args, "\n") {
-		wrapped := strings.Split(ansi.Wordwrap(line, max(1, width-2), ""), "\n")
-		for _, part := range wrapped {
+	for line := range strings.SplitSeq(args, "\n") {
+		wrapped := strings.SplitSeq(ansi.Wordwrap(line, max(1, width-2), ""), "\n")
+		for part := range wrapped {
 			lines = append(lines, styleHeaderDim.Render("│ "+part))
 		}
 	}

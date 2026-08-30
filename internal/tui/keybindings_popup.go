@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -268,12 +269,7 @@ func uniqueKeyNames(values []string) []string {
 }
 
 func containsString(values []string, value string) bool {
-	for _, candidate := range values {
-		if candidate == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, value)
 }
 
 func (m *Model) selectedKeybindingAction() keybindingAction {
@@ -346,7 +342,7 @@ func (m *Model) persistKeybinding(action string, values []string, remove bool) e
 		if remove {
 			delete(candidate, action)
 		} else {
-			candidate[action] = append([]string(nil), values...)
+			candidate[action] = slices.Clone(values)
 		}
 		file.Bindings = candidate
 		return nil
@@ -429,34 +425,34 @@ func (m *Model) refreshKeybindingOverrides() {
 func cloneKeybindingMap(in map[string][]string) map[string][]string {
 	out := make(map[string][]string, len(in))
 	for action, values := range in {
-		out[action] = append([]string(nil), values...)
+		out[action] = slices.Clone(values)
 	}
 	return out
 }
 
 func (m *Model) inheritedKeybinding(action string) []string {
 	if m.keybindingsScope == keybindingScopeGlobal {
-		return append([]string(nil), config.DefaultKeybindings()[action]...)
+		return slices.Clone(config.DefaultKeybindings()[action])
 	}
 	global := m.keybindingsGlobalOverrides
 	keys, err := applyKeybindingOverrides(tuiKeys, global)
 	if err != nil {
-		return append([]string(nil), config.DefaultKeybindings()[action]...)
+		return slices.Clone(config.DefaultKeybindings()[action])
 	}
-	return append([]string(nil), keybindingForAction(keys, action).Keys()...)
+	return slices.Clone(keybindingForAction(keys, action).Keys())
 }
 
 func (m *Model) editableKeybinding(action string) []string {
 	if m.keybindingsScope == keybindingScopeProject {
 		if values, ok := m.keybindingsProjectOverrides[action]; ok {
-			return append([]string(nil), values...)
+			return slices.Clone(values)
 		}
 		return m.inheritedKeybinding(action)
 	}
 	if values, ok := m.keybindingsGlobalOverrides[action]; ok {
-		return append([]string(nil), values...)
+		return slices.Clone(values)
 	}
-	return append([]string(nil), config.DefaultKeybindings()[action]...)
+	return slices.Clone(config.DefaultKeybindings()[action])
 }
 
 func keybindingSourceFromMaps(action string, projectAllowed bool, global, project map[string][]string) string {
@@ -606,7 +602,7 @@ func (m *Model) renderKeybindingEditorRows(width, height int) string {
 	action := m.selectedKeybindingAction()
 	rows := make([]string, 0, len(m.keybindingsDraft)+3)
 	rows = append(rows, styleHeaderDim.Render(truncateDisplayText("Editing "+action.label, width)))
-	labels := append([]string(nil), m.keybindingsDraft...)
+	labels := slices.Clone(m.keybindingsDraft)
 	labels = append(labels, "Replace all…", "Add key…")
 	available := max(1, height-1)
 	selected := clampPickerIndex(m.keybindingsEditIndex, len(labels))

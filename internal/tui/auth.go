@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -157,13 +158,7 @@ func chatGPTAccountChoices(sources []chatgpt.AuthSource) []chatGPTAccountChoice 
 			continue
 		}
 		if i, ok := index[accountID]; ok {
-			duplicate := false
-			for _, name := range choices[i].Sources {
-				if name == source.Name {
-					duplicate = true
-					break
-				}
-			}
+			duplicate := slices.Contains(choices[i].Sources, source.Name)
 			if !duplicate {
 				choices[i].Sources = append(choices[i].Sources, source.Name)
 			}
@@ -678,7 +673,7 @@ func (m *Model) startModelPick() (tea.Model, tea.Cmd) {
 		m.pushLine(styleError.Render("model catalog unavailable"))
 		return m, nil
 	}
-	models := append([]protocol.Model(nil), m.app.AllModels...)
+	models := slices.Clone(m.app.AllModels)
 	if len(models) == 0 {
 		models = append(models, m.app.Models...)
 	}

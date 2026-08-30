@@ -20,7 +20,7 @@ func TestManualCompactUsesSummaryAndPreservesHistory(t *testing.T) {
 		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
 	}}}
 	a, st := setup(t, prov, nil, permission.ModeDeny)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		msg := protocol.NewUserMessage(fmt.Sprintf("msg-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
 			t.Fatal(err)
@@ -60,7 +60,7 @@ func TestManualCompactPublishesSessionUpdateBeforeTerminalDone(t *testing.T) {
 		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
 	}}}
 	a, st := setup(t, prov, nil, permission.ModeDeny)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		msg := protocol.NewUserMessage(fmt.Sprintf("ordered-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
 			t.Fatal(err)
@@ -89,7 +89,7 @@ func TestManualCompactPublishesSessionUpdateBeforeTerminalDone(t *testing.T) {
 func TestManualCompactPersistsMailboxArrivingDuringSummary(t *testing.T) {
 	provider := &blockingSummaryProvider{started: make(chan struct{}), release: make(chan struct{})}
 	a, store := setup(t, provider, nil, permission.ModeDeny)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		message := protocol.NewUserMessage(fmt.Sprintf("mailbox-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := store.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
 			t.Fatal(err)
@@ -126,7 +126,7 @@ func TestManualCompactConfiguredGuidanceAndBudgetReachProvider(t *testing.T) {
 	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamTextDelta, Text: "summary"}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
 	a, st := setup(t, prov, nil, permission.ModeDeny)
 	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 333, Fallback: "error", Guidance: "Preserve ticket IDs."}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		msg := protocol.NewUserMessage(fmt.Sprintf("configured-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
 			t.Fatal(err)
@@ -144,14 +144,14 @@ func TestRepeatedCompactionSummarizesProjectedContext(t *testing.T) {
 	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamTextDelta, Text: "first summary"}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}, {{Type: protocol.EvStreamTextDelta, Text: "second summary"}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
 	a, st := setup(t, prov, nil, permission.ModeDeny)
 	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 500, Fallback: "error"}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		msg := protocol.NewUserMessage(fmt.Sprintf("repeat-a-%d", i), "", fmt.Sprintf("first %d", i))
 		_ = st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg})
 	}
 	if _, err := a.Compact(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		msg := protocol.NewUserMessage(fmt.Sprintf("repeat-b-%d", i), "", fmt.Sprintf("second %d", i))
 		_ = st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg})
 	}
@@ -176,7 +176,7 @@ func TestRepeatedCompactionSendsLatestCheckpointToNextTurn(t *testing.T) {
 	memoryValues := []string{"ALPHA-17", "BRAVO-29", "COBALT-31", "DELTA-43", "EMBER-59", "FROST-61", "GARNET-73", "HARBOR-89"}
 	appendUsers := func(prefix string, count int) {
 		t.Helper()
-		for i := 0; i < count; i++ {
+		for i := range count {
 			text := fmt.Sprintf("%s message %d", prefix, i)
 			if prefix == "first" && i == 2 {
 				text = "Facts available only in this old turn: " + strings.Join(memoryValues, ", ")
@@ -230,7 +230,7 @@ func TestManualCompactRejectsMalformedSummaryWhenFallbackIsError(t *testing.T) {
 	}}}
 	a, st := setup(t, prov, nil, permission.ModeDeny)
 	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 500, Fallback: "error"}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		msg := protocol.NewUserMessage(fmt.Sprintf("malformed-%d", i), "", fmt.Sprintf("objective message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
 			t.Fatal(err)
@@ -253,7 +253,7 @@ func TestManualCompactRejectsMalformedSummaryWhenFallbackIsError(t *testing.T) {
 func TestManualCompactFallsBackWhenProviderFails(t *testing.T) {
 	prov := &scriptedProvider{resolveErr: errors.New("summary unavailable")}
 	a, st := setup(t, prov, nil, permission.ModeDeny)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		msg := protocol.NewUserMessage(fmt.Sprintf("fallback-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
 			t.Fatal(err)

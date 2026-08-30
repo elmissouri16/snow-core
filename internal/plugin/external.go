@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sync"
+	"sync/atomic"
 
 	"github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -37,7 +38,7 @@ type ExternalInitResult struct {
 	// runtimes should return Manifest.
 	Name            string `json:"name,omitempty"`
 	Version         string `json:"version,omitempty"`
-	ProtocolVersion int    `json:"protocol_version,omitempty"`
+	ProtocolVersion int    `json:"protocol_version,omitzero"`
 }
 
 type rpcResponseV2 struct {
@@ -65,7 +66,7 @@ type ProgressNotification struct {
 	CallID  string `json:"call_id"`
 	Message string `json:"message,omitempty"`
 	Done    bool   `json:"done"`
-	IsError bool   `json:"is_error,omitempty"`
+	IsError bool   `json:"is_error,omitzero"`
 }
 
 type logNotification struct {
@@ -87,7 +88,7 @@ type ExternalHost struct {
 	failed     error
 	done       chan struct{}
 	failOnce   sync.Once
-	nextID     uint64
+	nextID     atomic.Uint64
 
 	maxFrame        int
 	maxOutput       int
@@ -109,7 +110,7 @@ type ExternalHost struct {
 type toolsCallResult struct {
 	Content []protocol.ContentBlock `json:"content"`
 	Details json.RawMessage         `json:"details,omitempty"`
-	IsError bool                    `json:"is_error,omitempty"`
+	IsError bool                    `json:"is_error,omitzero"`
 }
 
 // boundedBuffer stores only the last bounded amount of diagnostics.

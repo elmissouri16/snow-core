@@ -37,8 +37,8 @@ type ServerSpec struct {
 	CWD       string            `json:"cwd,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
-	Disabled  bool              `json:"disabled,omitempty"`
-	TimeoutMS int               `json:"timeout_ms,omitempty"`
+	Disabled  bool              `json:"disabled,omitzero"`
+	TimeoutMS int               `json:"timeout_ms,omitzero"`
 	// ToolDiscovery is "deferred" (default) or "always".
 	ToolDiscovery string `json:"tool_discovery,omitempty"`
 	// Lifecycle is "eager" (default), "lazy", or "lazy-keep-alive".
@@ -48,7 +48,7 @@ type ServerSpec struct {
 	CacheBootstrap string `json:"cache_bootstrap,omitempty"`
 	// IdleTimeoutMS overrides the ten-minute lazy idle timeout. Zero uses the
 	// default; negative values are invalid.
-	IdleTimeoutMS int `json:"idle_timeout_ms,omitempty"`
+	IdleTimeoutMS int `json:"idle_timeout_ms,omitzero"`
 }
 
 // Validate checks the transport declaration without starting the server.
@@ -149,7 +149,7 @@ type CacheStatus struct {
 	ServerName      string    `json:"server_name,omitempty"`
 	ServerVersion   string    `json:"server_version,omitempty"`
 	Capabilities    []string  `json:"capabilities,omitempty"`
-	ToolCount       int       `json:"tool_count,omitempty"`
+	ToolCount       int       `json:"tool_count,omitzero"`
 	Message         string    `json:"message,omitempty"`
 }
 
@@ -162,10 +162,10 @@ type Status struct {
 	ServerName      string    `json:"server_name,omitempty"`
 	ServerVersion   string    `json:"server_version,omitempty"`
 	Capabilities    []string  `json:"capabilities,omitempty"`
-	ToolCount       int       `json:"tool_count,omitempty"`
+	ToolCount       int       `json:"tool_count,omitzero"`
 	Message         string    `json:"message,omitempty"`
 	State           string    `json:"state,omitempty"`
-	Cached          bool      `json:"cached,omitempty"`
+	Cached          bool      `json:"cached,omitzero"`
 	CachedAt        time.Time `json:"cached_at,omitzero"`
 	LastUsedAt      time.Time `json:"last_used_at,omitzero"`
 }

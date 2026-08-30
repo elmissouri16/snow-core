@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // Model describes a resolvable LLM model exposed by a provider.
@@ -17,9 +18,9 @@ type Model struct {
 	ID               string        `json:"id"`
 	DisplayName      string        `json:"display_name,omitempty"`
 	Description      string        `json:"description,omitempty"`
-	ContextWindow    int           `json:"context_window,omitempty"`
-	MaxContextWindow int           `json:"max_context_window,omitempty"`
-	MaxOutputTokens  int           `json:"max_output_tokens,omitempty"`
+	ContextWindow    int           `json:"context_window,omitzero"`
+	MaxContextWindow int           `json:"max_context_window,omitzero"`
+	MaxOutputTokens  int           `json:"max_output_tokens,omitzero"`
 	SupportsTools    bool          `json:"supports_tools"`
 	SupportsThinking bool          `json:"supports_thinking"`
 	DefaultThinking  ThinkingLevel `json:"default_thinking,omitempty"`
@@ -28,11 +29,11 @@ type Model struct {
 	// callers must not guess that an effort is supported from a model name.
 	ThinkingLevels    []ThinkingLevel `json:"thinking_levels,omitempty"`
 	SupportsVision    bool            `json:"supports_vision"`
-	SupportsVerbosity bool            `json:"supports_verbosity,omitempty"`
+	SupportsVerbosity bool            `json:"supports_verbosity,omitzero"`
 	// SupportsReasoningSummary is nil for legacy/bundled model metadata, which
 	// preserves the historical behavior of sending reasoning.summary. An
 	// authenticated catalog can explicitly advertise true or false.
-	SupportsReasoningSummary *bool         `json:"supports_reasoning_summary,omitempty"`
+	SupportsReasoningSummary *bool         `json:"supports_reasoning_summary,omitzero"`
 	Upgrade                  *ModelUpgrade `json:"upgrade,omitempty"`
 	Pricing                  *ModelPricing `json:"pricing,omitempty"`
 }
@@ -40,7 +41,7 @@ type Model struct {
 // Clone returns a deep defensive copy of model metadata.
 func (m Model) Clone() Model {
 	out := m
-	out.ThinkingLevels = append([]ThinkingLevel(nil), m.ThinkingLevels...)
+	out.ThinkingLevels = slices.Clone(m.ThinkingLevels)
 	if m.SupportsReasoningSummary != nil {
 		supported := *m.SupportsReasoningSummary
 		out.SupportsReasoningSummary = &supported
@@ -217,12 +218,7 @@ func (m Model) SupportsThinkingLevel(level ThinkingLevel) bool {
 	default:
 		return false
 	}
-	for _, supported := range m.SupportedThinkingLevels() {
-		if supported == level {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.SupportedThinkingLevels(), level)
 }
 
 // ToolDiscoveryMode controls whether a tool schema is always sent to the model

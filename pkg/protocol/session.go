@@ -71,6 +71,6 @@ type CompactionResult struct {
 	SummarizedMessages int    `json:"summarized_messages"`
 	RetainedMessages   int    `json:"retained_messages"`
 	Summary            string `json:"summary,omitempty"`
-	UsedFallback       bool   `json:"used_fallback,omitempty"`
-	Automatic          bool   `json:"automatic,omitempty"`
+	UsedFallback       bool   `json:"used_fallback,omitzero"`
+	Automatic          bool   `json:"automatic,omitzero"`
 }

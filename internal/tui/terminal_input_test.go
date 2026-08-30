@@ -18,7 +18,7 @@ func prepareScrollableModel(t *testing.T) *Model {
 	buildAppForTest(t, m)
 	m.width, m.height = 80, 12
 	m.layout()
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		m.lines = append(m.lines, fmt.Sprintf("line %02d", i))
 	}
 	m.transcriptBaseDirty = true

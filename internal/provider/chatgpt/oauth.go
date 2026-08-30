@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -124,10 +125,8 @@ func ensureAllowedWorkspace(cred auth.Credential, allowed []string) error {
 	if err != nil {
 		return err
 	}
-	for _, expected := range allowed {
-		if status.AccountID == expected {
-			return nil
-		}
+	if slices.Contains(allowed, status.AccountID) {
+		return nil
 	}
 	return fmt.Errorf("chatgpt: selected account %q is not the requested workspace; login was not saved", status.AccountID)
 }

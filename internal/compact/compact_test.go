@@ -17,7 +17,7 @@ func mkMsg(id, parent, text string) protocol.Message {
 
 func TestPlannerKeepsTail(t *testing.T) {
 	msgs := []protocol.Message{}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		msgs = append(msgs, mkMsg(string(rune('a'+i)), "", "message "+string(rune('a'+i))))
 	}
 	plan := PlannerWithOptions(msgs, PlannerOptions{RetainTokens: 1000, MinRetainedTurns: 2})
@@ -71,7 +71,7 @@ func TestPlannerKeepsToolCallsWithResultsAcrossAutonomousTurns(t *testing.T) {
 
 func TestPlannerCompactsCompletedCyclesInsideActiveToolTurn(t *testing.T) {
 	messages := []protocol.Message{mkMsg("user", "", "long-running objective")}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		callID := fmtID(i) + "-call"
 		assistant := protocol.NewAssistantMessage(fmtID(i)+"-assistant", "", "test", "model", []protocol.ContentBlock{
 			{Type: protocol.BlockProviderData, Name: fmtID(i) + "-state", Data: []byte(`{"opaque":true}`)},
@@ -113,7 +113,7 @@ func TestPlannerActiveCyclesDoNotConsumeRecentTurnFloor(t *testing.T) {
 		mkMsg("old-user-2", "", "old two"), assistantText("old-assistant-2"),
 		mkMsg("active-user", "", "active objective"),
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		callID := fmtID(i) + "-active-call"
 		messages = append(messages,
 			protocol.NewAssistantMessage(fmtID(i)+"-active-assistant", "", "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"}}, protocol.StopToolUse, nil),
@@ -131,7 +131,7 @@ func TestPlannerCheckpointProjectionKeepsRetainedTerminalGoalTurn(t *testing.T) 
 		{ID: "checkpoint", Role: protocol.RoleCustom, Content: []protocol.ContentBlock{protocol.NewTextBlock("working state")}},
 		protocol.NewAssistantMessage("retained-goal", "checkpoint", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("prior exact goal result")}, protocol.StopStop, nil),
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		callID := fmtID(i) + "-goal-call"
 		messages = append(messages,
 			protocol.NewAssistantMessage(fmtID(i)+"-goal-assistant", "", "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"}}, protocol.StopToolUse, nil),
@@ -150,7 +150,7 @@ func TestPlannerCheckpointProjectionCompactsFreshParentedActiveTurn(t *testing.T
 		checkpoint,
 		protocol.NewUserMessage("active-user", "marker", "fresh long objective"),
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		callID := fmtID(i) + "-fresh-call"
 		messages = append(messages,
 			protocol.NewAssistantMessage(fmtID(i)+"-fresh-assistant", "", "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"}}, protocol.StopToolUse, nil),
@@ -190,7 +190,7 @@ func TestPlannerSmallConversation(t *testing.T) {
 
 func TestApplyAppendsSummary(t *testing.T) {
 	st := session.NewMemoryStore(session.Options{})
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		m := mkMsg(fmtID(i), "", "text "+fmtID(i))
 		_ = st.Append(session.Entry{Type: session.EntryMessage, ID: m.ID, Message: &m})
 	}
@@ -499,7 +499,7 @@ func TestDefaultSummarizerDoesNotRepeatEvidencePayloads(t *testing.T) {
 
 func TestDefaultSummarizerBounded(t *testing.T) {
 	var msgs []protocol.Message
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		msgs = append(msgs, mkMsg(fmtID(i), "", "long text "+fmtID(i)))
 	}
 	s, err := DefaultSummarizer(context.Background(), msgs)

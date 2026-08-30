@@ -123,7 +123,7 @@ func BenchmarkBuildRequestImages(b *testing.B) {
 func benchmarkChatRequest(kind string, messageCount, toolCount int) (protocol.ChatRequest, RequestOptions) {
 	messages := make([]protocol.Message, 0, messageCount)
 	text := strings.Repeat("provider request benchmark text ", 4)
-	for i := 0; i < messageCount; i++ {
+	for i := range messageCount {
 		switch kind {
 		case "plain":
 			role := protocol.RoleUser
@@ -159,7 +159,7 @@ func benchmarkChatRequest(kind string, messageCount, toolCount int) (protocol.Ch
 		}
 	}
 	tools := make([]protocol.ToolSchema, 0, toolCount)
-	for i := 0; i < toolCount; i++ {
+	for i := range toolCount {
 		tools = append(tools, protocol.ToolSchema{
 			Name:        fmt.Sprintf("benchmark_tool_%02d", i),
 			Description: "Inspect benchmark repository data without changing it.",

@@ -172,7 +172,7 @@ func TestManagerCloseKillsDescendantGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	if err := manager.Close(ctx); err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestManagerFailedRebindRetainsOldInventoryForRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	if err := manager.RebindSession(ctx, "session-two"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("rebind error = %v", err)
@@ -298,7 +298,7 @@ func TestManagerCloseDuringRebindPreventsNewStartsAndBinding(t *testing.T) {
 	if _, err := manager.Start(context.Background(), StartRequest{Command: "sleep 10"}, nil); err == nil || !strings.Contains(err.Error(), "session switch") {
 		t.Fatalf("start during rebind error = %v", err)
 	}
-	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	closeCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	if err := manager.Close(closeCtx); err != nil {
 		t.Fatalf("close during rebind: %v", err)
@@ -320,7 +320,7 @@ func TestManagerStopCancellationEscalatesImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	started := time.Now()
 	stopped, err := manager.Stop(ctx, state.ProcessID, MaxStopGrace)

@@ -92,7 +92,7 @@ func TestTranscriptRefreshPreservesScrollIntent(t *testing.T) {
 	m.width = 60
 	m.height = 12
 	m.layout()
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		m.lines = append(m.lines, fmt.Sprintf("line %02d", i))
 	}
 	m.transcriptBaseDirty = true
@@ -130,7 +130,7 @@ func TestTranscriptWrapsLongLinesToWindow(t *testing.T) {
 	if !strings.Contains(plain, "\n") {
 		t.Fatalf("long transcript line did not wrap: %q", plain)
 	}
-	for _, line := range strings.Split(plain, "\n") {
+	for line := range strings.SplitSeq(plain, "\n") {
 		if len([]rune(line)) > m.transcript.Width {
 			t.Fatalf("wrapped transcript line exceeds width %d: %q", m.transcript.Width, line)
 		}
@@ -566,7 +566,7 @@ func TestTUIAskerAcceptsNilContext(t *testing.T) {
 
 func TestTUIAskerCancellationCannotLeakDecisionToNextRequest(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	first := make(chan error, 1)
 	go func() {
 		_, err := m.asker.Ask(ctx, permissionRequest())

@@ -9,10 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -478,7 +479,7 @@ func validateCachedCatalog(entry cachedCatalog) error {
 
 func cloneCachedCatalog(in cachedCatalog) cachedCatalog {
 	out := in
-	out.Capabilities = append([]string(nil), in.Capabilities...)
+	out.Capabilities = slices.Clone(in.Capabilities)
 	out.Tools = make([]cachedTool, len(in.Tools))
 	copy(out.Tools, in.Tools)
 	for i := range out.Tools {
@@ -503,7 +504,7 @@ func cacheIdentity(decl Declaration, roots []string) (string, string, string) {
 	for _, root := range roots {
 		rootHashes = append(rootHashes, hashStrings("snow-mcp-root-v1", filepath.Clean(root)))
 	}
-	sort.Strings(rootHashes)
+	slices.Sort(rootHashes)
 	fingerprint := hashStrings("snow-mcp-config-v1", spec.ID, spec.EffectiveTransport(), endpoint, spec.CWD, strings.Join(argShape, "\x00"), strings.Join(envKeys, "\x00"), strings.Join(headerKeys, "\x00"), strings.Join(rootHashes, "\x00"), decl.Scope, projectHash)
 	key := hashStrings("snow-mcp-entry-v1", spec.ID, decl.Scope, projectHash, fingerprint)
 	return key, projectHash, fingerprint
@@ -594,10 +595,6 @@ func hashStrings(values ...string) string {
 }
 
 func sortedKeys(values map[string]string) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(values))
 	return keys
 }

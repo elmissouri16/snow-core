@@ -17,7 +17,7 @@ import (
 // TestAppSessionPersistence verifies a real session file is created and
 // messages survive reopening.
 func TestAppSessionPersistence(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	// Point the index at a temp sessions dir.
 	t.Setenv("SNOW_SESSIONS_DIR", filepath.Join(dir, "sessions"))
@@ -59,7 +59,7 @@ func TestAppSessionPersistence(t *testing.T) {
 }
 
 func TestAppDeleteSessionRejectsActiveDatabase(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	t.Setenv("SNOW_HOME", filepath.Join(dir, "home"))
 	t.Setenv("SNOW_SESSIONS_DIR", filepath.Join(dir, "sessions"))
@@ -89,7 +89,7 @@ func TestAppDeleteSessionRejectsActiveDatabase(t *testing.T) {
 }
 
 func TestAppDeleteSessionCleansManagedPrivateState(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
 	t.Setenv("SNOW_HOME", home)
@@ -138,7 +138,7 @@ func TestAppDeleteSessionCleansManagedPrivateState(t *testing.T) {
 }
 
 func TestAppEmptySessionIsNotPersisted(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	t.Setenv("SNOW_SESSIONS_DIR", filepath.Join(dir, "sessions"))
 
@@ -244,7 +244,7 @@ func TestAppPermissionStatePersistsPerSession(t *testing.T) {
 
 // TestAppContextLoadsAgents verifies AGENTS.md is picked up into the system prompt.
 func TestAppContextLoadsAgents(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("always use tabs"), 0o644); err != nil {
 		t.Fatal(err)
@@ -380,7 +380,7 @@ func TestTrustedProjectSystemPromptCannotEscapeProject(t *testing.T) {
 
 // TestAppPermissionDenyBlocksBash verifies deny mode blocks write tools at the app level.
 func TestAppPermissionDenyBlocksBash(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 
 	// Use the opencode-go provider? No — we need a provider that errors without

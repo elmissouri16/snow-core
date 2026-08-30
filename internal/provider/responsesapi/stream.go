@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -33,7 +34,7 @@ func NewStream(ctx context.Context, resp *http.Response, providerID string, secr
 
 func NewStreamWithIdleTimeout(ctx context.Context, resp *http.Response, providerID string, idleTimeout time.Duration, secrets ...string) protocol.EventStream {
 	body := providerpkg.WrapIdleReadCloser(resp.Body, idleTimeout)
-	s := &codexStream{ch: make(chan protocol.StreamEvent, 64), done: make(chan struct{}), ctx: ctx, body: body, secrets: append([]string(nil), secrets...), provider: providerLabel(providerID)}
+	s := &codexStream{ch: make(chan protocol.StreamEvent, 64), done: make(chan struct{}), ctx: ctx, body: body, secrets: slices.Clone(secrets), provider: providerLabel(providerID)}
 	go s.read()
 	return s
 }
@@ -212,8 +213,8 @@ func (s *codexStream) read() {
 			}
 			continue
 		}
-		if bytes.HasPrefix(line, []byte("data:")) {
-			fragment := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		if after, ok := bytes.CutPrefix(line, []byte("data:")); ok {
+			fragment := bytes.TrimSpace(after)
 			// Count a separator byte even for an empty fragment and independently
 			// cap fragment count so buffer overhead cannot bypass the byte bound.
 			if dataFragments >= maxCodexSSEEventFragments || len(fragment)+1 > maxCodexSSEEventBytes-dataBytes {

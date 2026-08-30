@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,7 +21,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/permission"
 	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
 	managedprocess "github.com/elmissouri16/snow-core/internal/process"
-	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/skills"
 	"github.com/elmissouri16/snow-core/internal/subagent"
@@ -120,7 +120,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	// dedicated tools after the model or user activates a skill.
 	var skillCatalog *skills.Registry
 	if !opts.NoSkills {
-		skillDirs := append(append([]string(nil), cfg.Skills.Dirs...), opts.SkillDirs...)
+		skillDirs := append(slices.Clone(cfg.Skills.Dirs), opts.SkillDirs...)
 		skillDisabled := cfg.Skills.Disabled
 		skillDisabledReason := "disabled by global skills policy"
 		skillOverrides := make(map[string]bool, len(cfg.Skills.Overrides)+len(projectSkills.Overrides))
@@ -261,12 +261,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		if len(opts.Tools) == 0 {
 			return true
 		}
-		for _, v := range opts.Tools {
-			if v == name {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(opts.Tools, name)
 	}
 	for _, tool := range goalpkg.Tools(goalController) {
 		if allowedGoalTool(tool.Schema().Name) {
@@ -426,18 +421,12 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 	}
 
-	runtimeProviders := make(map[string]provider.Provider, len(providers))
-	for id, candidate := range providers {
-		runtimeProviders[id] = candidate
-	}
+	runtimeProviders := maps.Clone(providers)
 	runtimeCatalogs := make(map[string][]protocol.Model, len(modelCatalog))
 	for id, catalog := range modelCatalog {
 		runtimeCatalogs[id] = cloneModels(catalog)
 	}
-	runtimeCatalogErrors := make(map[string]error, len(modelCatalogErrors))
-	for id, catalogErr := range modelCatalogErrors {
-		runtimeCatalogErrors[id] = catalogErr
-	}
+	runtimeCatalogErrors := maps.Clone(modelCatalogErrors)
 	runtimeSelection := &liveRuntimeSelection{
 		provider: providerID, model: model, providers: runtimeProviders, catalogs: runtimeCatalogs,
 		catalogErrors: runtimeCatalogErrors, catalogLoads: make(map[string]*catalogLoad),
@@ -542,7 +531,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 		roles := make(map[string]subagent.Role, len(cfg.Subagents.Roles))
 		for name, role := range cfg.Subagents.Roles {
-			roles[name] = subagent.Role{Name: name, Description: role.Description, System: role.System, Provider: role.Provider, Model: role.Model, Thinking: role.Thinking, Tools: append([]string(nil), role.Tools...), AllowMutation: role.AllowMutation}
+			roles[name] = subagent.Role{Name: name, Description: role.Description, System: role.System, Provider: role.Provider, Model: role.Model, Thinking: role.Thinking, Tools: slices.Clone(role.Tools), AllowMutation: role.AllowMutation}
 		}
 		subManager = subagent.New(ctx, subagent.Limits{
 			MaxConcurrentThreads: cfg.Subagents.MaxConcurrentThreads, MaxAgentsPerSession: cfg.Subagents.MaxAgentsPerSession,
@@ -828,7 +817,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		ProviderID:         providerID,
 		Providers:          providers,
 		ProviderModules:    providerModules,
-		Models:             append([]protocol.Model(nil), models...),
+		Models:             slices.Clone(models),
 		AllModels:          allModels,
 		modelCatalog:       modelCatalog,
 		runtimeSelection:   runtimeSelection,
@@ -841,10 +830,10 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		PluginManager:      manager,
 		ProcessManager:     processManager,
 		MCPManager:         mcpManager,
-		MCPStatuses:        append([]publicmcp.Status(nil), mcpStatuses...),
+		MCPStatuses:        slices.Clone(mcpStatuses),
 		Skills:             skillCatalog,
 		Subagents:          subManager,
-		Diagnostics:        append([]config.Diagnostic(nil), configDiagnostics...),
+		Diagnostics:        slices.Clone(configDiagnostics),
 		diagnosticSecrets:  collectDiagnosticSecrets(opts, cfg, authStore, authService),
 		DebugDumpPath:      opts.DebugDumpPath,
 		SearchPolicy:       searchPolicy,

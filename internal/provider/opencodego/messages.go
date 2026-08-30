@@ -20,8 +20,8 @@ type openAIChatRequest struct {
 	Stream          bool            `json:"stream"`
 	StreamOptions   *streamOptions  `json:"stream_options,omitempty"`
 	Tools           []openAITool    `json:"tools,omitempty"`
-	Temperature     *float64        `json:"temperature,omitempty"`
-	MaxTokens       *int            `json:"max_tokens,omitempty"`
+	Temperature     *float64        `json:"temperature,omitzero"`
+	MaxTokens       *int            `json:"max_tokens,omitzero"`
 	ReasoningEffort *string         `json:"reasoning_effort,omitempty"`
 }
 
@@ -39,7 +39,7 @@ type openAIMessage struct {
 type openAIToolCall struct {
 	ID       string                 `json:"id,omitempty"`
 	Type     string                 `json:"type,omitempty"`
-	Function openAIToolCallFunction `json:"function,omitempty"`
+	Function openAIToolCallFunction `json:"function"`
 }
 
 type openAIToolCallFunction struct {

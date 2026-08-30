@@ -3,6 +3,7 @@ package subagent
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -107,8 +108,8 @@ func sanitizeContext(messages []protocol.Message) []protocol.Message {
 					continue
 				}
 			}
-			block.Arguments = append([]byte(nil), block.Arguments...)
-			block.Data = append([]byte(nil), block.Data...)
+			block.Arguments = slices.Clone(block.Arguments)
+			block.Data = slices.Clone(block.Data)
 			m.Content = append(m.Content, block)
 		}
 		if len(m.Content) == 0 {

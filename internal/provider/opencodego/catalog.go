@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -244,7 +245,7 @@ func enrichModelRecord(record openAIModelRecord, details modelsdev.Model) openAI
 		record.Reasoning = details.Reasoning
 	}
 	if record.SupportsVision == nil && (record.Capabilities == nil || record.Capabilities.Vision == nil) && len(record.Input) == 0 && record.Architecture == nil {
-		record.Input = append([]string(nil), details.Modalities.Input...)
+		record.Input = slices.Clone(details.Modalities.Input)
 	}
 	if record.Pricing == nil && details.Cost != nil {
 		record.Pricing = &protocol.ModelPricing{
@@ -262,7 +263,7 @@ func enrichModelRecord(record openAIModelRecord, details modelsdev.Model) openAI
 			}
 			supported := true
 			record.SupportsReasoningEffort = &supported
-			record.ReasoningEfforts = append([]string(nil), option.Values...)
+			record.ReasoningEfforts = slices.Clone(option.Values)
 			break
 		}
 	}
@@ -331,7 +332,7 @@ func normalizeModelRecord(record openAIModelRecord) (protocol.Model, bool) {
 		}
 	}
 
-	levels := append([]string(nil), record.ThinkingLevels...)
+	levels := slices.Clone(record.ThinkingLevels)
 	levels = append(levels, record.ReasoningEfforts...)
 	levels = append(levels, record.ReasoningEffortLevels...)
 	levels = append(levels, record.SupportedReasoningEfforts...)

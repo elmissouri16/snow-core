@@ -22,7 +22,7 @@ func testStream(capacity int) *codexStream {
 
 func TestReasoningAccumReconstructsManyFragments(t *testing.T) {
 	accum := newReasoningAccum()
-	for i := 0; i < 4096; i++ {
+	for range 4096 {
 		if err := accum.canAppend("item", "x"); err != nil {
 			t.Fatal(err)
 		}
@@ -103,7 +103,7 @@ func TestStreamBoundsToolCallsAndArguments(t *testing.T) {
 		s := testStream(16)
 		calls := make(map[string]*toolAccum)
 		bounds := &codexStreamBounds{}
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			id := fmt.Sprintf("snapshot-%d", i)
 			if s.processEvent(map[string]any{"type": "response.function_call_arguments.delta", "item_id": id, "delta": "x"}, calls, newReasoningAccum(), bounds, new(protocol.StopReason), new(bool)) {
 				t.Fatalf("delta %d stopped early", i)
@@ -203,7 +203,7 @@ func TestStreamTerminalEventEndsKeepaliveConnection(t *testing.T) {
 	}
 	stream := NewStream(context.Background(), resp, "test")
 	defer stream.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	first, err := stream.Next(ctx)
 	if err != nil || first.Type != protocol.EvStreamUsage {

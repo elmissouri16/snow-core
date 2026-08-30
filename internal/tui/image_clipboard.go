@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -58,7 +59,7 @@ func readClipboardImage() (protocol.ContentBlock, error) {
 	if !ok {
 		return protocol.ContentBlock{}, errors.New("clipboard image is not PNG, JPEG, GIF, or WebP")
 	}
-	return protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: mime, Data: append([]byte(nil), data...)}, nil
+	return protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: mime, Data: slices.Clone(data)}, nil
 }
 
 func boundedCommandOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -151,7 +152,7 @@ func readLinuxClipboardImage(ctx context.Context) ([]byte, error) {
 
 func preferredClipboardImageType(types string) string {
 	available := make(map[string]bool)
-	for _, field := range strings.Fields(types) {
+	for field := range strings.FieldsSeq(types) {
 		available[strings.TrimSpace(field)] = true
 	}
 	for _, mime := range []string{"image/png", "image/jpeg", "image/webp", "image/gif"} {
@@ -193,7 +194,7 @@ func imageAttachmentInsertion(current string, row, column, index int) string {
 }
 
 func stripImageAttachmentTokens(text string, count int) string {
-	for i := 0; i < count; i++ {
+	for i := range count {
 		token := imageAttachmentToken(i)
 		if strings.Contains(text, token+" ") {
 			text = strings.Replace(text, token+" ", "", 1)

@@ -91,10 +91,7 @@ func retryBackoff(profile RetryProfile, failure int, advice provider.RetryAdvice
 	}
 	if profile.Jitter > 0 {
 		factor := 1 - profile.Jitter + rand.Float64()*(2*profile.Jitter)
-		delay = time.Duration(float64(delay) * factor)
-		if delay < 0 {
-			delay = 0
-		}
+		delay = max(time.Duration(float64(delay)*factor), 0)
 	}
 	if advice.RetryAfter > delay {
 		delay = advice.RetryAfter

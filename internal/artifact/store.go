@@ -13,7 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -249,7 +249,7 @@ func (s *LocalStore) SaveText(ctx context.Context, sessionID, key, text string) 
 
 	var tempName string
 	var file *os.File
-	for attempt := 0; attempt < 8; attempt++ {
+	for range 8 {
 		var suffix [8]byte
 		if _, err := rand.Read(suffix[:]); err != nil {
 			return Ref{}, fmt.Errorf("artifact: temporary name: %w", err)
@@ -503,7 +503,7 @@ func (s *LocalStore) ListIDs(ctx context.Context, sessionID string) ([]string, e
 		}
 		ids = append(ids, id)
 	}
-	sort.Strings(ids)
+	slices.Sort(ids)
 	return ids, nil
 }
 

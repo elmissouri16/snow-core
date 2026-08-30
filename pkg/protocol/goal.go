@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 )
 
@@ -44,7 +45,7 @@ type ThreadGoal struct {
 	Objective      string           `json:"objective"`
 	Status         ThreadGoalStatus `json:"status"`
 	BlockedReason  string           `json:"blocked_reason,omitempty"`
-	TokenBudget    *int64           `json:"token_budget,omitempty"`
+	TokenBudget    *int64           `json:"token_budget,omitzero"`
 	TokensUsed     int64            `json:"tokens_used"`
 	SecondsUsed    int64            `json:"seconds_used"`
 	EstimatedCosts []Cost           `json:"estimated_costs,omitempty"`
@@ -61,7 +62,7 @@ func (g *ThreadGoal) Clone() *ThreadGoal {
 		v := *g.TokenBudget
 		out.TokenBudget = &v
 	}
-	out.EstimatedCosts = append([]Cost(nil), g.EstimatedCosts...)
+	out.EstimatedCosts = slices.Clone(g.EstimatedCosts)
 	return &out
 }
 
@@ -69,10 +70,7 @@ func (g ThreadGoal) RemainingBudget() *int64 {
 	if g.TokenBudget == nil {
 		return nil
 	}
-	v := *g.TokenBudget - g.TokensUsed
-	if v < 0 {
-		v = 0
-	}
+	v := max(*g.TokenBudget-g.TokensUsed, 0)
 	return &v
 }
 
@@ -126,7 +124,7 @@ func (g ThreadGoal) Validate() error {
 
 type ThreadGoalUpdate struct {
 	Goal    *ThreadGoal `json:"goal,omitempty"`
-	Cleared bool        `json:"cleared,omitempty"`
+	Cleared bool        `json:"cleared,omitzero"`
 }
 
 func (u *ThreadGoalUpdate) Clone() *ThreadGoalUpdate {

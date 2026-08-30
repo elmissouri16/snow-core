@@ -122,10 +122,9 @@ func (r *Read) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if a.Offset == nil && a.Limit == nil {
 		// Read only enough to determine whether content exceeds the cap. A few
 		// extra bytes let truncateRunes back up from a split UTF-8 rune.
-		readLimit := maxBytes + utf8.UTFMax
-		if readLimit < maxBytes { // integer overflow guard
-			readLimit = maxBytes
-		}
+		readLimit := max(maxBytes+utf8.UTFMax,
+			// integer overflow guard
+			maxBytes)
 		content, err = readUpTo(ctx, file, readLimit)
 		truncated = len(content) > maxBytes
 	} else {
@@ -170,10 +169,7 @@ func readUpTo(ctx context.Context, reader io.Reader, max int) ([]byte, error) {
 	if max <= 0 {
 		return nil, nil
 	}
-	chunkSize := 32 * 1024
-	if max < chunkSize {
-		chunkSize = max
-	}
+	chunkSize := min(max, 32*1024)
 	data := make([]byte, 0, chunkSize)
 	buf := make([]byte, chunkSize)
 	for len(data) < max {

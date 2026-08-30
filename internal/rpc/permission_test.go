@@ -47,7 +47,7 @@ func TestRPCPermissionReplyInvalidAndNoPending(t *testing.T) {
 
 func assertResponseFailed(t *testing.T, out *bytes.Buffer, id string) {
 	t.Helper()
-	for _, frame := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+	for frame := range strings.SplitSeq(strings.TrimSpace(out.String()), "\n") {
 		if frame == "" {
 			continue
 		}
@@ -124,7 +124,7 @@ func mustRequestPB(t *testing.T, line string) Request {
 
 func assertResponseSuccess(t *testing.T, out *bytes.Buffer, id string) {
 	t.Helper()
-	for _, frame := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+	for frame := range strings.SplitSeq(strings.TrimSpace(out.String()), "\n") {
 		if frame == "" {
 			continue
 		}

@@ -134,7 +134,7 @@ func TestQueryEngineCachesUntilSessionFileChanges(t *testing.T) {
 
 	engine := NewQueryEngine(idx, project)
 	defer engine.Close()
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		hits, err := engine.Search(context.Background(), "cached phrase", 5, "")
 		if err != nil || len(hits) != 1 {
 			t.Fatalf("search %d: hits=%+v err=%v", i, hits, err)
@@ -189,7 +189,7 @@ func TestListRecentForQueryIncludesLiveWALBeyondDBMtimeCap(t *testing.T) {
 	root := t.TempDir()
 	index := NewFileIndex(root)
 	project := filepath.Join(root, "project")
-	for i := 0; i < maxSearchSessions; i++ {
+	for range maxSearchSessions {
 		store, err := index.Create(project)
 		if err != nil {
 			t.Fatal(err)

@@ -45,7 +45,7 @@ func TestRunStatusResizeKeepsLiveToolEventsFollowingTail(t *testing.T) {
 	buildAppForTest(t, m)
 	m.width, m.height = 80, 16
 	m.layout()
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		m.lines = append(m.lines, fmt.Sprintf("history %02d", i))
 	}
 	m.transcriptBaseDirty = true
@@ -86,7 +86,7 @@ func TestTranscriptSnapshotFreezesOffTailAndCatchesUpAtEnd(t *testing.T) {
 	buildAppForTest(t, m)
 	m.width, m.height = 60, 12
 	m.layout()
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		m.lines = append(m.lines, fmt.Sprintf("history %02d", i))
 	}
 	m.transcriptBaseDirty = true
@@ -114,7 +114,7 @@ func TestWheelToFrozenSnapshotBottomCatchesUpOnce(t *testing.T) {
 	buildAppForTest(t, m)
 	m.width, m.height = 60, 12
 	m.layout()
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		m.lines = append(m.lines, fmt.Sprintf("history %02d", i))
 	}
 	m.transcriptBaseDirty = true

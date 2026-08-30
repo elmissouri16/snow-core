@@ -491,7 +491,7 @@ func TestMaxTurns(t *testing.T) {
 func TestAbort(t *testing.T) {
 	prov := &blockingProvider{}
 	a, st := setup(t, prov, nil, permission.ModeDeny)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // already cancelled
 	if err := a.Prompt(ctx, "hi"); err != nil {
 		t.Fatal(err)
@@ -603,7 +603,7 @@ func TestEmptyPrompt(t *testing.T) {
 func TestAlreadyRunning(t *testing.T) {
 	prov := newBlockingProvider()
 	a, _ := setup(t, prov, nil, permission.ModeDeny)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		done <- a.Prompt(ctx, "first")
@@ -627,7 +627,7 @@ func TestAlreadyRunning(t *testing.T) {
 func TestConcurrentPromptNoGhostMessage(t *testing.T) {
 	prov := newBlockingProvider()
 	a, st := setup(t, prov, nil, permission.ModeDeny)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		done <- a.Prompt(ctx, "first")
@@ -691,7 +691,7 @@ func TestToolLoopCancelStopsRemaining(t *testing.T) {
 	}}}
 	a, st := setup(t, prov, reg, permission.ModeDeny)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancelFirst = cancel
 
 	err := a.Prompt(ctx, "run tools")

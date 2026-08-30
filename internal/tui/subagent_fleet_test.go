@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -79,7 +80,7 @@ func TestSubagentFleetWheelScrollsVisibleDetail(t *testing.T) {
 			m := fleetTestModel(t)
 			m.width = tc.width
 			m.app.Cfg.TUI.Mouse = true
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				m.subagentFleetActivity["one"] = append(m.subagentFleetActivity["one"], fmt.Sprintf("activity %03d", i))
 			}
 			m.subagentFleetDetailEnd = true
@@ -123,7 +124,7 @@ func TestSubagentFleetWheelScrollsVisibleDetail(t *testing.T) {
 
 func TestSubagentFleetPageDownAtTailStaysAtTail(t *testing.T) {
 	m := fleetTestModel(t)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		m.subagentFleetActivity["one"] = append(m.subagentFleetActivity["one"], fmt.Sprintf("activity %03d", i))
 	}
 	m.subagentFleetDetailOffset = 0
@@ -202,7 +203,7 @@ func TestSubagentFleetCountsExcludeRootAndSnapshotsDoNotRegress(t *testing.T) {
 	live := m.subagentFleetList.Agents[1]
 	live.Status, live.Generation = protocol.AgentCompleted, 3
 	m.subagentFleetList.Agents[1] = live
-	stale := protocol.SubagentList{Agents: append([]protocol.SubagentState(nil), m.subagentFleetList.Agents...)}
+	stale := protocol.SubagentList{Agents: slices.Clone(m.subagentFleetList.Agents)}
 	stale.Agents[1].Status, stale.Agents[1].Generation = protocol.AgentRunning, 2
 	m.subagentFleetGeneration = 4
 	if cmd := m.applySubagentFleetList(subagentFleetListMsg{generation: 4, target: "/root/one", list: stale}); cmd == nil {
@@ -247,7 +248,7 @@ func TestSubagentFleetLiveEventsAreBoundedAndStayOutOfRoot(t *testing.T) {
 	m := fleetTestModel(t)
 	m.assistantBuf.WriteString("root")
 	ref := m.subagentFleetList.Agents[0].Agent.Clone()
-	for i := 0; i < maxFleetActivityLines+80; i++ {
+	for i := range maxFleetActivityLines + 80 {
 		m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolProgress, Agent: ref, ToolName: "bash", Message: fmt.Sprintf("line-%03d %s", i, strings.Repeat("x", 400))})
 	}
 	lines := m.subagentFleetActivity[ref.ThreadID]

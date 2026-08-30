@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
 )
@@ -115,12 +117,10 @@ func cloneExtraValue(value any) any {
 		return cloneExtra(value)
 	case map[string]string:
 		out := make(map[string]string, len(value))
-		for key, nested := range value {
-			out[key] = nested
-		}
+		maps.Copy(out, value)
 		return out
 	case []string:
-		return append([]string(nil), value...)
+		return slices.Clone(value)
 	case []any:
 		out := make([]any, len(value))
 		for i := range value {

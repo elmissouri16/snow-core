@@ -12,7 +12,7 @@ import (
 func TestBoundedCommandTransportUsesDedicatedProcessGroup(t *testing.T) {
 	cmd := exec.Command("/bin/cat")
 	transport := &boundedCommandTransport{command: cmd, maxMessageBytes: 1024}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	connection, err := transport.Connect(ctx)
 	if err != nil {

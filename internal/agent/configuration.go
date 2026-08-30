@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,13 +28,13 @@ func (e *providerTurnError) Unwrap() error { return e.err }
 func (e *providerTurnError) providerFailure() {}
 
 func isProviderFailure(err error) bool {
-	var marked providerFailure
-	return errors.As(err, &marked)
+	_, ok := errors.AsType[providerFailure](err)
+	return ok
 }
 
 func providerFailureActivity(err error) bool {
-	var turnErr *providerTurnError
-	return errors.As(err, &turnErr) && turnErr.activity
+	turnErr, ok := errors.AsType[*providerTurnError](err)
+	return ok && turnErr.activity
 }
 
 // New creates an agent.
@@ -104,20 +106,18 @@ func New(opts Options) (*Agent, error) {
 	opts.Model = opts.Model.Clone()
 	if opts.SkillNames != nil {
 		names := make(map[string]bool, len(opts.SkillNames))
-		for name, allowed := range opts.SkillNames {
-			names[name] = allowed
-		}
+		maps.Copy(names, opts.SkillNames)
 		opts.SkillNames = names
 	}
-	bundles := append([]DeferredBundle(nil), opts.DeferredBundles...)
+	bundles := slices.Clone(opts.DeferredBundles)
 	for i := range bundles {
-		bundles[i].Members = append([]string(nil), bundles[i].Members...)
+		bundles[i].Members = slices.Clone(bundles[i].Members)
 	}
 	opts.DeferredBundles = bundles
-	guidance := append([]ToolGuidance(nil), opts.ToolGuidance...)
+	guidance := slices.Clone(opts.ToolGuidance)
 	for i := range guidance {
-		guidance[i].AnyOf = append([]string(nil), guidance[i].AnyOf...)
-		guidance[i].UnlessAny = append([]string(nil), guidance[i].UnlessAny...)
+		guidance[i].AnyOf = slices.Clone(guidance[i].AnyOf)
+		guidance[i].UnlessAny = slices.Clone(guidance[i].UnlessAny)
 	}
 	opts.ToolGuidance = guidance
 	repair, err := repairInterruptedToolCallsReport(opts.Session, opts.Registry)
@@ -838,7 +838,7 @@ func (a *Agent) EmitUserInputRequest(req protocol.UserInputRequest) {
 	copy.Questions = make([]protocol.UserInputQuestion, len(req.Questions))
 	for i, question := range req.Questions {
 		copy.Questions[i] = question
-		copy.Questions[i].Options = append([]protocol.UserInputOption(nil), question.Options...)
+		copy.Questions[i].Options = slices.Clone(question.Options)
 	}
 	a.publish(protocol.AgentEvent{Type: protocol.EvUserInputRequest, UserInput: &copy})
 }

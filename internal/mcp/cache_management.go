@@ -1,8 +1,9 @@
 package mcp
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
@@ -39,7 +40,7 @@ func (m *Manager) CacheStatuses(declarations []Declaration) []publicmcp.CacheSta
 			} else {
 				status.State, status.Valid = publicmcp.CacheStateValid, true
 				status.ProtocolVersion, status.ServerName, status.ServerVersion = entry.ProtocolVersion, entry.ServerName, entry.ServerVersion
-				status.Capabilities = append([]string(nil), entry.Capabilities...)
+				status.Capabilities = slices.Clone(entry.Capabilities)
 				status.ToolCount = len(entry.Tools)
 			}
 			statuses = append(statuses, status)
@@ -53,11 +54,11 @@ func (m *Manager) CacheStatuses(declarations []Declaration) []publicmcp.CacheSta
 		}
 		statuses = append(statuses, status)
 	}
-	sort.SliceStable(statuses, func(i, j int) bool {
-		if statuses[i].ID == statuses[j].ID {
-			return statuses[i].Scope < statuses[j].Scope
+	slices.SortStableFunc(statuses, func(a, b publicmcp.CacheStatus) int {
+		if byID := cmp.Compare(a.ID, b.ID); byID != 0 {
+			return byID
 		}
-		return statuses[i].ID < statuses[j].ID
+		return cmp.Compare(a.Scope, b.Scope)
 	})
 	return statuses
 }

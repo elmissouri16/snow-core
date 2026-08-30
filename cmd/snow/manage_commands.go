@@ -1,13 +1,14 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -148,7 +149,7 @@ func mcpAddCmd() *cobra.Command {
 				if len(args) < 2 {
 					return errors.New("mcp add: provide --url or a command after --")
 				}
-				spec.Transport, spec.Command, spec.Args = publicmcp.TransportStdio, args[1], append([]string(nil), args[2:]...)
+				spec.Transport, spec.Command, spec.Args = publicmcp.TransportStdio, args[1], slices.Clone(args[2:])
 			} else {
 				spec.Transport = publicmcp.TransportStreamableHTTP
 				if len(args) > 1 {
@@ -463,7 +464,7 @@ func skillsGetCmd() *cobra.Command {
 			view := struct {
 				Skill     any    `json:"skill"`
 				Resources int    `json:"resource_count"`
-				Truncated bool   `json:"resources_truncated,omitempty"`
+				Truncated bool   `json:"resources_truncated,omitzero"`
 				Error     string `json:"resource_error,omitempty"`
 			}{Skill: skill, Resources: count, Truncated: truncated}
 			if resourceErr != nil {
@@ -615,15 +616,21 @@ func loadMCPConfig(cmd *cobra.Command, includeShadowed bool) (mcpConfigSet, erro
 			}
 		}
 	}
-	views := append([]mcpConfigView(nil), shadowed...)
+	views := slices.Clone(shadowed)
 	for _, name := range sortedMCPNames(effective) {
 		views = append(views, newMCPView(name, scopes[name], effective[name], false))
 	}
-	sort.SliceStable(views, func(i, j int) bool {
-		if views[i].Name == views[j].Name {
-			return views[i].Shadowed
+	slices.SortStableFunc(views, func(a, b mcpConfigView) int {
+		if byName := cmp.Compare(a.Name, b.Name); byName != 0 {
+			return byName
 		}
-		return views[i].Name < views[j].Name
+		if a.Shadowed == b.Shadowed {
+			return 0
+		}
+		if a.Shadowed {
+			return -1
+		}
+		return 1
 	})
 	return mcpConfigSet{Views: views, Effective: effective, Scopes: scopes, ProjectIdentity: projectIdentity, ProjectBlocked: projectBlocked, Config: cfg}, nil
 }
@@ -642,7 +649,7 @@ func newMCPView(name, scope string, spec publicmcp.ServerSpec, shadowed bool) mc
 }
 
 func redactArgs(values []string) []string {
-	out := append([]string(nil), values...)
+	out := slices.Clone(values)
 	redactNext := false
 	headerNext := false
 	for i, value := range out {

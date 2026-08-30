@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -106,7 +107,7 @@ streamLoop:
 		case protocol.EvStreamProviderData:
 			if ev.ProviderData != nil && ev.ProviderData.Type == protocol.BlockProviderData {
 				block := *ev.ProviderData
-				block.Data = append([]byte(nil), ev.ProviderData.Data...)
+				block.Data = slices.Clone(ev.ProviderData.Data)
 				providerData = append(providerData, block)
 			}
 		case protocol.EvStreamToolCallDelta:
@@ -403,7 +404,7 @@ func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBl
 func (a *Agent) executeToolCalls(ctx context.Context) (toolBatchResult, error) {
 	a.mu.Lock()
 	pending := a.pending
-	order := append([]string(nil), a.pendingOrder...)
+	order := slices.Clone(a.pendingOrder)
 	forcedError := a.pendingToolError
 	a.pending = make(map[string]protocol.ContentBlock)
 	a.pendingOrder = a.pendingOrder[:0]
@@ -765,12 +766,10 @@ func (a *Agent) applyPlanUpdateDetails(details any) {
 	var update *protocol.PlanUpdate
 	switch value := details.(type) {
 	case tools.PlanUpdateDetails:
-		copy := value.Update
-		update = &copy
+		update = new(value.Update)
 	case *tools.PlanUpdateDetails:
 		if value != nil {
-			copy := value.Update
-			update = &copy
+			update = new(value.Update)
 		}
 	}
 	if update != nil {

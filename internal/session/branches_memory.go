@@ -1,11 +1,12 @@
 package session
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -191,11 +192,11 @@ func (s *MemoryStore) ListSubagents() ([]SubagentRecord, error) {
 		rec.State = *rec.State.Clone()
 		out = append(out, rec)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].State.CreatedAt == out[j].State.CreatedAt {
-			return out[i].State.Agent.ThreadID < out[j].State.Agent.ThreadID
+	slices.SortFunc(out, func(a, b SubagentRecord) int {
+		if byCreated := cmp.Compare(a.State.CreatedAt, b.State.CreatedAt); byCreated != 0 {
+			return byCreated
 		}
-		return out[i].State.CreatedAt < out[j].State.CreatedAt
+		return cmp.Compare(a.State.Agent.ThreadID, b.State.Agent.ThreadID)
 	})
 	return out, nil
 }

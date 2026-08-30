@@ -188,7 +188,7 @@ func TestEventBusUnsubscribeInsideCallbackDoesNotDelayDrain(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("subscriber was not called")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
 	if err := bus.Drain(ctx); err != nil {
 		t.Fatalf("drain after callback unsubscribe: %v", err)
@@ -199,7 +199,7 @@ func BenchmarkEventBusDispatch256(b *testing.B) {
 	bus := newEventBusWithCap(eventBusMaxItems)
 	bus.Subscribe(func(protocol.AgentEvent) {})
 	defer func() { bus.Close(); bus.Wait() }()
-	ctx := context.Background()
+	ctx := b.Context()
 	b.ReportAllocs()
 	for b.Loop() {
 		for range 256 {

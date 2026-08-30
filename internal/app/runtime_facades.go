@@ -1,13 +1,15 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -60,7 +62,7 @@ func auxiliaryConfigFingerprint(globalDir, projectRoot string, projectAllowed bo
 			fmt.Fprintf(h, "error:%v\x00", err)
 			continue
 		}
-		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		slices.SortFunc(entries, func(a, b os.DirEntry) int { return cmp.Compare(a.Name(), b.Name()) })
 		count := 0
 		for _, entry := range entries {
 			if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".yaml") {
@@ -87,9 +89,9 @@ func (a *App) ConfigDiagnostics() []protocol.ConfigDiagnostic {
 	a.diagnosticsMu.Lock()
 	defer a.diagnosticsMu.Unlock()
 	if key == a.diagnosticsCacheKey && a.diagnosticsCache != nil {
-		return append([]protocol.ConfigDiagnostic(nil), a.diagnosticsCache...)
+		return slices.Clone(a.diagnosticsCache)
 	}
-	all := append([]config.Diagnostic(nil), a.Diagnostics...)
+	all := slices.Clone(a.Diagnostics)
 	themes, themeDiagnostics := config.LoadThemes(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed)
 	_, keyDiagnostics := config.LoadKeybindings(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed)
 	selected := a.Cfg.TUI.Theme
@@ -105,7 +107,7 @@ func (a *App) ConfigDiagnostics() []protocol.ConfigDiagnostic {
 		out = append(out, protocol.ConfigDiagnostic{Path: diagnostic.Path, Message: diagnostic.Message})
 	}
 	a.diagnosticsCacheKey = key
-	a.diagnosticsCache = append([]protocol.ConfigDiagnostic(nil), out...)
+	a.diagnosticsCache = slices.Clone(out)
 	return out
 }
 
@@ -636,11 +638,7 @@ func mergeMCPDeclarations(global, project map[string]publicmcp.ServerSpec, expli
 	for _, spec := range explicit {
 		add(spec.ID, "explicit", spec)
 	}
-	ids := make([]string, 0, len(merged))
-	for id := range merged {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
+	ids := slices.Sorted(maps.Keys(merged))
 	out := make([]internalmcp.Declaration, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, merged[id])
@@ -925,80 +923,6 @@ func (a *App) ManagedProcessLogs(ctx context.Context, processID string, cursor *
 	return a.ProcessManager.Logs(ctx, managedprocess.LogsRequest{ProcessID: processID, Cursor: cursor, MaxBytes: maxBytes})
 }
 
-// ActiveModelsSnapshot returns the active provider, current model, and a
-// defensive catalog copy from the same live-selection snapshot.
-func (a *App) ActiveModelsSnapshot() (string, protocol.Model, []protocol.Model) {
-	if a == nil {
-		return "", protocol.Model{}, nil
-	}
-	if a.runtimeSelection != nil {
-		a.runtimeSelection.mu.RLock()
-		defer a.runtimeSelection.mu.RUnlock()
-		providerID := a.runtimeSelection.provider
-		catalog := a.runtimeSelection.catalogs[providerID]
-		out := make([]protocol.Model, len(catalog))
-		for i, model := range catalog {
-			out[i] = model.Clone()
-		}
-		return providerID, a.runtimeSelection.model.Clone(), out
-	}
-	a.stateMu.Lock()
-	defer a.stateMu.Unlock()
-	out := make([]protocol.Model, len(a.Models))
-	for i, model := range a.Models {
-		out[i] = model.Clone()
-	}
-	return a.ProviderID, a.Model.Clone(), out
-}
-
-// LoadProviderCatalogs resolves every currently available provider catalog on
-// demand and refreshes the combined picker snapshot. Partial results are kept
-// when one inactive provider cannot be listed.
-func (a *App) LoadProviderCatalogs(ctx context.Context) ([]protocol.Model, error) {
-	if a == nil || a.runtimeSelection == nil {
-		return nil, errors.New("app: provider catalogs unavailable")
-	}
-	_, loadErr := a.runtimeSelection.availableModels(ctx)
-	// Publish one generation-consistent snapshot. Profile reconfiguration uses
-	// the same stateMu -> runtimeSelection.mu lock order, so an obsolete lazy
-	// load cannot restore the replaced provider's catalog in App mirrors.
-	a.stateMu.Lock()
-	a.runtimeSelection.mu.RLock()
-	providerIDs := make([]string, 0, len(a.runtimeSelection.catalogs))
-	catalogs := make(map[string][]protocol.Model, len(a.runtimeSelection.catalogs))
-	for id, catalog := range a.runtimeSelection.catalogs {
-		providerIDs = append(providerIDs, id)
-		catalogs[id] = cloneModels(catalog)
-	}
-	a.runtimeSelection.mu.RUnlock()
-	sort.Strings(providerIDs)
-	var models []protocol.Model
-	for _, id := range providerIDs {
-		models = append(models, cloneModels(catalogs[id])...)
-	}
-	a.modelCatalog = catalogs
-	a.AllModels = cloneModels(models)
-	if active, ok := catalogs[a.ProviderID]; ok {
-		a.Models = cloneModels(active)
-	}
-	a.stateMu.Unlock()
-	return cloneModels(models), loadErr
-}
-
-// ModelsSnapshot returns a defensive copy of the active provider catalog.
-func (a *App) ModelsSnapshot() []protocol.Model {
-	_, _, models := a.ActiveModelsSnapshot()
-	return models
-}
-
-// SubagentModels returns exact provider/model pairs currently available to children.
-func (a *App) SubagentModels() []protocol.Model {
-	if a == nil || a.runtimeSelection == nil {
-		return nil
-	}
-	return a.runtimeSelection.cachedModels()
-}
-
 func (a *App) SubagentUsage() (protocol.Usage, error) {
 	if a.Subagents == nil {
 		return protocol.Usage{}, nil
@@ -1049,9 +973,7 @@ func (a *App) SkillInventoryPublic() (protocol.RPCSkillsList, error) {
 	out.Skills = make([]protocol.RPCSkill, 0, len(skills))
 	for _, skill := range skills {
 		metadata := make(map[string]string, len(skill.Metadata))
-		for key, value := range skill.Metadata {
-			metadata[key] = value
-		}
+		maps.Copy(metadata, skill.Metadata)
 		out.Skills = append(out.Skills, protocol.RPCSkill{
 			Name: skill.Name, Description: skill.Description, License: skill.License,
 			Compatibility: skill.Compatibility, Metadata: metadata, AllowedTools: skill.AllowedTools,

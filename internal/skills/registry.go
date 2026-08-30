@@ -2,6 +2,7 @@ package skills
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -11,7 +12,7 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -95,7 +96,7 @@ scanDirs:
 			}
 			continue
 		}
-		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		slices.SortFunc(entries, func(a, b os.DirEntry) int { return cmp.Compare(a.Name(), b.Name()) })
 		for _, entry := range entries {
 			if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 				continue
@@ -160,11 +161,11 @@ scanDirs:
 	}
 	// Prefer higher-precedence locations when the bounded catalog cannot admit
 	// every otherwise-valid entry, then sort the admitted/provider view by name.
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].rank != candidates[j].rank {
-			return candidates[i].rank > candidates[j].rank
+	slices.SortFunc(candidates, func(a, b Skill) int {
+		if byRank := cmp.Compare(b.rank, a.rank); byRank != 0 {
+			return byRank
 		}
-		return candidates[i].Name < candidates[j].Name
+		return cmp.Compare(a.Name, b.Name)
 	})
 	catalogLimit := opts.MaxCatalogBytes
 	if catalogLimit <= 0 {
@@ -189,8 +190,8 @@ scanDirs:
 			r.ordered = append(r.ordered, skill)
 		}
 	}
-	sort.Slice(r.ordered, func(i, j int) bool { return r.ordered[i].Name < r.ordered[j].Name })
-	sort.Slice(r.allOrdered, func(i, j int) bool { return r.allOrdered[i].Name < r.allOrdered[j].Name })
+	slices.SortFunc(r.ordered, func(a, b Skill) int { return cmp.Compare(a.Name, b.Name) })
+	slices.SortFunc(r.allOrdered, func(a, b Skill) int { return cmp.Compare(a.Name, b.Name) })
 	return r
 }
 
@@ -426,7 +427,7 @@ func (r *Registry) List() []Skill {
 	if r == nil {
 		return nil
 	}
-	return append([]Skill(nil), r.ordered...)
+	return slices.Clone(r.ordered)
 }
 
 // Inventory returns every discovered effective skill, including entries that
@@ -435,7 +436,7 @@ func (r *Registry) Inventory() []Skill {
 	if r == nil {
 		return nil
 	}
-	return append([]Skill(nil), r.allOrdered...)
+	return slices.Clone(r.allOrdered)
 }
 
 // Lookup returns discovered metadata regardless of its enabled state.
@@ -472,7 +473,7 @@ func (r *Registry) Diagnostics() []Diagnostic {
 	if r == nil {
 		return nil
 	}
-	return append([]Diagnostic(nil), r.diagnostics...)
+	return slices.Clone(r.diagnostics)
 }
 
 // DisableAll removes every currently enabled skill from runtime/provider
@@ -623,7 +624,7 @@ func listResources(ctx context.Context, skill Skill, limit int) ([]string, bool,
 				entriesSeen++
 				if entriesSeen > 2000 {
 					_ = dir.Close()
-					sort.Strings(resources)
+					slices.Sort(resources)
 					return resources, true, nil
 				}
 				if entry.Type()&os.ModeSymlink != 0 {
@@ -644,7 +645,7 @@ func listResources(ctx context.Context, skill Skill, limit int) ([]string, bool,
 				}
 				if len(resources) >= limit {
 					_ = dir.Close()
-					sort.Strings(resources)
+					slices.Sort(resources)
 					return resources, true, nil
 				}
 				resources = append(resources, resourcePath)
@@ -661,7 +662,7 @@ func listResources(ctx context.Context, skill Skill, limit int) ([]string, bool,
 			return nil, false, err
 		}
 	}
-	sort.Strings(resources)
+	slices.Sort(resources)
 	return resources, false, nil
 }
 
@@ -689,7 +690,7 @@ func listFSResources(ctx context.Context, root fs.FS, limit int) ([]string, bool
 			}
 			entriesSeen++
 			if entriesSeen > 2000 {
-				sort.Strings(resources)
+				slices.Sort(resources)
 				return resources, true, nil
 			}
 			resourcePath := entry.Name()
@@ -706,12 +707,12 @@ func listFSResources(ctx context.Context, root fs.FS, limit int) ([]string, bool
 				continue
 			}
 			if len(resources) >= limit {
-				sort.Strings(resources)
+				slices.Sort(resources)
 				return resources, true, nil
 			}
 			resources = append(resources, resourcePath)
 		}
 	}
-	sort.Strings(resources)
+	slices.Sort(resources)
 	return resources, false, nil
 }

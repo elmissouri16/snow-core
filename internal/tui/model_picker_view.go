@@ -225,7 +225,7 @@ func (m *Model) renderModelDetails(models []protocol.Model, width, height int) s
 		}
 		if selected.Description != "" && len(lines) < height {
 			wrapped := xansi.Wordwrap(selected.Description, max(1, width-2), "")
-			for _, line := range strings.Split(wrapped, "\n") {
+			for line := range strings.SplitSeq(wrapped, "\n") {
 				lines = append(lines, styleFooter.Render(truncateDisplayText(" "+line, width)))
 				if len(lines) == height {
 					break

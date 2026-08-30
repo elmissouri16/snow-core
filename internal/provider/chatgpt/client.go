@@ -239,8 +239,7 @@ func (p *Provider) refresh(ctx context.Context, current auth.Credential) (auth.C
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	var tokens tokenResponse
 	if err := doBoundedJSON(p.client, req, &tokens); err != nil {
-		var endpointErr *oauthEndpointError
-		if errors.As(err, &endpointErr) && endpointErr.permanentRefreshFailure() {
+		if endpointErr, ok := errors.AsType[*oauthEndpointError](err); ok && endpointErr.permanentRefreshFailure() {
 			return current, fmt.Errorf("%w: OAuth refresh token was rejected; sign in again", ErrLoginRequired)
 		}
 		return current, fmt.Errorf("%w: %v", ErrRefreshFailed, err)

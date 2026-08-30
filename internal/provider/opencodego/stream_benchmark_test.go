@@ -1,7 +1,6 @@
 package opencodego
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,12 +10,12 @@ import (
 
 func BenchmarkChatSSE600(b *testing.B) {
 	var payload strings.Builder
-	for i := 0; i < 600; i++ {
+	for range 600 {
 		fmt.Fprintf(&payload, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":\"\"}]}\n\n")
 	}
 	payload.WriteString("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 	wire := payload.String()
-	ctx := context.Background()
+	ctx := b.Context()
 	b.ReportAllocs()
 	for b.Loop() {
 		stream := newStream(ctx, 128, nil, "benchmark", "")

@@ -3,6 +3,7 @@ package openaicompat
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -123,8 +124,8 @@ func normalizeEndpoints(raw string) (string, string, error) {
 		u.Path = strings.TrimSuffix(u.Path, "/responses") + "/models"
 		return responses, u.String(), nil
 	}
-	if strings.HasSuffix(u.Path, "/chat/completions") {
-		basePath := strings.TrimSuffix(u.Path, "/chat/completions")
+	if before, ok := strings.CutSuffix(u.Path, "/chat/completions"); ok {
+		basePath := before
 		u.Path = basePath + "/responses"
 		responses := u.String()
 		u.Path = basePath + "/models"
@@ -315,9 +316,9 @@ func normalizeModel(r modelRecord) (protocol.Model, bool) {
 	if r.ID == "" {
 		return protocol.Model{}, false
 	}
-	m := protocol.Model{Provider: ProviderID, ID: r.ID, DisplayName: firstNonempty(r.DisplayName, r.Name), SupportsTools: true, Pricing: r.Pricing}
-	m.ContextWindow = max(r.ContextWindow, r.ContextLength)
-	m.MaxOutputTokens = max(r.MaxOutputTokens, r.MaxCompletionTokens)
+	m := protocol.Model{Provider: ProviderID, ID: r.ID, DisplayName: firstNonempty(r.DisplayName, r.Name), SupportsTools: true, Pricing: r.Pricing,
+		ContextWindow:   max(r.ContextWindow, r.ContextLength),
+		MaxOutputTokens: max(r.MaxOutputTokens, r.MaxCompletionTokens)}
 	if r.SupportsTools != nil {
 		m.SupportsTools = *r.SupportsTools
 	} else if r.Capabilities != nil && r.Capabilities.Tools != nil {
@@ -332,7 +333,7 @@ func normalizeModel(r modelRecord) (protocol.Model, bool) {
 		visionExplicit = true
 	}
 	if !visionExplicit {
-		inputs := append([]string(nil), r.Input...)
+		inputs := slices.Clone(r.Input)
 		if r.Architecture != nil {
 			inputs = append(inputs, r.Architecture.InputModalities...)
 		}
@@ -405,7 +406,9 @@ func normalizeLevels(values []string) []protocol.ThinkingLevel {
 			out = append(out, level)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return levelRank(out[i]) < levelRank(out[j]) })
+	slices.SortStableFunc(out, func(a, b protocol.ThinkingLevel) int {
+		return cmp.Compare(levelRank(a), levelRank(b))
+	})
 	return out
 }
 func levelRank(level protocol.ThinkingLevel) int {
@@ -534,7 +537,7 @@ func withoutProviderReasoning(request protocol.ChatRequest) protocol.ChatRequest
 		return request
 	}
 
-	request.Messages = append([]protocol.Message(nil), request.Messages...)
+	request.Messages = slices.Clone(request.Messages)
 	for i, message := range request.Messages {
 		removeProviderData := false
 		for _, block := range message.Content {

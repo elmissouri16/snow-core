@@ -2,6 +2,7 @@ package process
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -68,10 +69,7 @@ func (r *outputRing) read(cursor *int64, maxBytes int, allowIncomplete bool) (ou
 	if at > r.end {
 		return outputRead{}, errCursorBeyondOutput
 	}
-	available := int(r.end - at)
-	if available > maxBytes {
-		available = maxBytes
-	}
+	available := min(int(r.end-at), maxBytes)
 	offset := int(at - r.start)
 	// Never return a cursor in the middle of a retained UTF-8 rune. Invalid
 	// bytes remain one-byte replacement units; only a valid continuation at the
@@ -96,7 +94,7 @@ func (r *outputRing) read(cursor *int64, maxBytes int, allowIncomplete bool) (ou
 			available = boundary
 		}
 	}
-	data := append([]byte(nil), r.data[offset:offset+available]...)
+	data := slices.Clone(r.data[offset : offset+available])
 	return outputRead{
 		data: data, next: at + int64(available), omitted: omitted,
 		end: r.end, notify: r.notify, hasOutput: available > 0,
@@ -109,7 +107,7 @@ func (r *outputRing) tail(maxBytes int) []byte {
 	if maxBytes > len(r.data) {
 		maxBytes = len(r.data)
 	}
-	return append([]byte(nil), r.data[len(r.data)-maxBytes:]...)
+	return slices.Clone(r.data[len(r.data)-maxBytes:])
 }
 
 func sanitizeUTF8(data []byte, maxBytes int) string {

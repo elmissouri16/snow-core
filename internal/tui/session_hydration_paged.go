@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -142,9 +143,7 @@ func (m *Model) hydrateSessionPaginated() bool {
 	if !ok {
 		return false
 	}
-	for id, entry := range lookbehind {
-		entriesByID[id] = entry
-	}
+	maps.Copy(entriesByID, lookbehind)
 
 	toolCallsByEntry := make(map[string]map[string]protocol.ContentBlock)
 	for _, entry := range entriesByID {

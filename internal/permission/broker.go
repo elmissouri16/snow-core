@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -91,8 +92,8 @@ func (b *Broker) Ask(ctx context.Context, req Request) (Decision, error) {
 	}
 	public := protocol.PermissionRequest{
 		Tool:   req.Tool,
-		Args:   append([]byte(nil), req.Args...),
-		Paths:  append([]string(nil), req.Paths...),
+		Args:   slices.Clone(req.Args),
+		Paths:  slices.Clone(req.Paths),
 		Risk:   string(req.Risk),
 		Reason: req.Reason,
 	}

@@ -1,12 +1,30 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
 	"testing"
 )
+
+func TestRPCOptionalTimesOmitZeroValues(t *testing.T) {
+	for name, value := range map[string]any{
+		"debug": RPCDebugStatus{},
+		"mcp":   RPCMCPServer{},
+	} {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range []string{"started_at", "cached_at", "last_used_at"} {
+			if bytes.Contains(data, []byte(`"`+field+`"`)) {
+				t.Fatalf("%s zero value unexpectedly includes %q: %s", name, field, data)
+			}
+		}
+	}
+}
 
 func TestRPCReadyIsDefensiveAndStable(t *testing.T) {
 	ready := NewRPCReady("test-version")

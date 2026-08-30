@@ -142,10 +142,10 @@ func TestRefreshRotatesOnceAcrossConcurrentResolvers(t *testing.T) {
 	_ = store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "opaque", Refresh: "old", Expires: now.Add(-time.Minute).Unix(), AccountID: "acct"})
 	p := New(Config{Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client(), Now: func() time.Time { return now }})
 	errs := make(chan error, 2)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		go func() { _, err := p.Resolve(context.Background(), auth.Credential{}); errs <- err }()
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := <-errs; err != nil {
 			t.Fatal(err)
 		}
@@ -209,7 +209,7 @@ func TestDeviceLoginImmediateAuthorization(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	store := auth.NewMemoryStoreForTest()
 	status, err := Login(ctx, LoginOptions{Method: LoginDevice, Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client()})

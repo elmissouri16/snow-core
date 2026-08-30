@@ -2,7 +2,8 @@ package tui
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -104,11 +105,7 @@ func applyKeybindingOverrides(base tuiKeyMap, overrides map[string][]string) (tu
 		"picker_page_up": &base.PickerPageUp, "picker_page_down": &base.PickerPageDown, "picker_top": &base.PickerTop, "picker_bottom": &base.PickerBottom,
 		"accept": &base.Accept, "close": &base.Close, "branch_fork": &base.BranchFork, "branch_rename": &base.BranchRename, "branch_delete": &base.BranchDelete, "confirm": &base.Confirm,
 	}
-	var names []string
-	for name := range overrides {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(overrides))
 	for _, name := range names {
 		target, ok := targets[name]
 		if !ok {
@@ -166,11 +163,7 @@ func applyKeybindingOverrides(base tuiKeyMap, overrides map[string][]string) (tu
 
 func validateBindingCollisions(bindings map[string]key.Binding) error {
 	seen := map[string]string{}
-	var names []string
-	for name := range bindings {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(bindings))
 	for _, name := range names {
 		for _, value := range bindings[name].Keys() {
 			if old := seen[value]; old != "" {
@@ -197,10 +190,8 @@ func validKeyName(value string) bool {
 }
 
 func ensureBindingKey(binding key.Binding, value string) key.Binding {
-	for _, existing := range binding.Keys() {
-		if existing == value {
-			return binding
-		}
+	if slices.Contains(binding.Keys(), value) {
+		return binding
 	}
 	keys := append(binding.Keys(), value)
 	help := binding.Help()

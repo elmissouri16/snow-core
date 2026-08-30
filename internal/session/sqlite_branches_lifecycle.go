@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
-	"github.com/elmissouri16/snow-core/pkg/protocol"
 	_ "modernc.org/sqlite"
+
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // Fork implements Store. Branch copying is intentionally explicit; the
@@ -117,7 +119,7 @@ func (s *SQLiteStore) CompareAndSwapSubagent(id string, expected uint64, rec Sub
 	defer s.mu.Unlock()
 	args := subagentArgs(rec)
 	q := `UPDATE subagent_threads SET parent_thread_id=?,parent_branch_id=?,agent_path=?,parent_path=?,role=?,role_fingerprint=?,nickname=?,depth=?,status=?,child_session_path=?,model_provider=?,model_id=?,thinking=?,created_at=?,started_at=?,finished_at=?,result=?,error=?,usage_json=?,generation=? WHERE thread_id=? AND generation=?`
-	updateArgs := append(append([]any(nil), args[1:]...), id, expected)
+	updateArgs := append(slices.Clone(args[1:]), id, expected)
 	res, err := s.db.Exec(q, updateArgs...)
 	if err != nil {
 		return err

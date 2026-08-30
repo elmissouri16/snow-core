@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"slices"
+)
 
 // AgentEventType enumerates cross-surface agent events emitted by the core.
 // These are the only observation channel for TUI / SDK / print / RPC.
@@ -79,7 +82,7 @@ type ToolProgress struct {
 	Name       string `json:"name"`
 	Message    string `json:"message,omitempty"`
 	Done       bool   `json:"done"`
-	IsError    bool   `json:"is_error,omitempty"`
+	IsError    bool   `json:"is_error,omitzero"`
 }
 
 // ToolRouting describes one automatic or model-requested deferred-tool search.
@@ -92,7 +95,7 @@ type ToolRouting struct {
 	ExposedCount   int      `json:"exposed_count"`
 	SchemaBytes    int      `json:"schema_bytes"`
 	LatencyMS      int64    `json:"latency_ms"`
-	Fallback       bool     `json:"fallback,omitempty"`
+	Fallback       bool     `json:"fallback,omitzero"`
 }
 
 // ProviderRetry describes a nonterminal provider recovery wait. Message text is
@@ -121,7 +124,7 @@ type AgentEvent struct {
 	// SDK consumers. The complete result remains in the session message.
 	ToolOutput string `json:"tool_output,omitempty"`
 	// ToolDurationMS is populated on tool_end when timing is available.
-	ToolDurationMS int64 `json:"tool_duration_ms,omitempty"`
+	ToolDurationMS int64 `json:"tool_duration_ms,omitzero"`
 	// ToolProgress carries structured progress emitted by a running tool.
 	ToolProgress  *ToolProgress           `json:"tool_progress,omitempty"`
 	ToolRouting   *ToolRouting            `json:"tool_routing,omitempty"`
@@ -143,13 +146,13 @@ type AgentEvent struct {
 	AgentMessage *AgentMessage  `json:"agent_message,omitempty"`
 	TurnID       string         `json:"turn_id,omitempty"`
 	TurnOrigin   string         `json:"turn_origin,omitempty"`
-	TurnSequence uint64         `json:"turn_sequence,omitempty"`
-	RootEpoch    uint64         `json:"root_epoch,omitempty"`
+	TurnSequence uint64         `json:"turn_sequence,omitzero"`
+	RootEpoch    uint64         `json:"root_epoch,omitzero"`
 	// Snapshot marks state published to initialize observers after restore or a
 	// session switch, rather than a lifecycle transition that just occurred.
-	Snapshot       bool `json:"snapshot,omitempty"`
-	GoalContinuing bool `json:"goal_continuing,omitempty"`
-	IsError        bool `json:"is_error,omitempty"`
+	Snapshot       bool `json:"snapshot,omitzero"`
+	GoalContinuing bool `json:"goal_continuing,omitzero"`
+	IsError        bool `json:"is_error,omitzero"`
 }
 
 // Clone returns a fully independent event for one observer. Event subscribers
@@ -163,7 +166,7 @@ func (e AgentEvent) Clone() AgentEvent {
 	}
 	if e.ToolRouting != nil {
 		v := *e.ToolRouting
-		v.ToolIDs = append([]string(nil), e.ToolRouting.ToolIDs...)
+		v.ToolIDs = slices.Clone(e.ToolRouting.ToolIDs)
 		out.ToolRouting = &v
 	}
 	if e.ProviderRetry != nil {
@@ -191,7 +194,7 @@ func (e AgentEvent) Clone() AgentEvent {
 	if e.Permission != nil {
 		v := *e.Permission
 		v.Request.Args = append(json.RawMessage(nil), e.Permission.Request.Args...)
-		v.Request.Paths = append([]string(nil), e.Permission.Request.Paths...)
+		v.Request.Paths = slices.Clone(e.Permission.Request.Paths)
 		out.Permission = &v
 	}
 	if e.UserInput != nil {
@@ -199,7 +202,7 @@ func (e AgentEvent) Clone() AgentEvent {
 		v.Questions = make([]UserInputQuestion, len(e.UserInput.Questions))
 		for i, question := range e.UserInput.Questions {
 			v.Questions[i] = question
-			v.Questions[i].Options = append([]UserInputOption(nil), question.Options...)
+			v.Questions[i].Options = slices.Clone(question.Options)
 		}
 		out.UserInput = &v
 	}

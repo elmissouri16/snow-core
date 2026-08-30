@@ -94,7 +94,7 @@ func TestGoalAutoCompactsAtConfiguredContextThreshold(t *testing.T) {
 	a, c, st := goalAgent(t, p)
 	a.model.ContextWindow = 100
 	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 128, Fallback: "local", AutoThresholdPercent: 90}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		msg := protocol.NewUserMessage(fmt.Sprintf("auto-compact-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
 			t.Fatal(err)
@@ -145,7 +145,7 @@ func TestGoalAutoCompactsInsideSingleToolChain(t *testing.T) {
 	a, c, st := goalAgent(t, p)
 	a.model.ContextWindow = 100
 	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 128, Fallback: "local", AutoThresholdPercent: 90}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		msg := protocol.NewUserMessage(fmt.Sprintf("chain-history-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
 			t.Fatal(err)
@@ -233,7 +233,7 @@ func TestAbortDuringGoalAutoCompactionDefersWithoutBlocking(t *testing.T) {
 	a.opts.Provider = provider
 	a.model = protocol.Model{Provider: provider.ID(), ID: "m", SupportsTools: true, ContextWindow: 100}
 	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, Fallback: "local", AutoThresholdPercent: 90}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		msg := protocol.NewUserMessage(fmt.Sprintf("abort-auto-%d", i), "", fmt.Sprintf("message %d", i))
 		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
 			t.Fatal(err)

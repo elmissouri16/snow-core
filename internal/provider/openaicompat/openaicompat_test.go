@@ -150,7 +150,7 @@ func TestChatFallsBackToChatCompletionsAndCachesCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		stream, err := p.Chat(context.Background(), auth.Credential{Key: "compatible-key"}, protocol.ChatRequest{Model: protocol.Model{Provider: ProviderID, ID: "chat-model", SupportsTools: true}, Messages: []protocol.Message{protocol.NewUserMessage("u", "", "hi")}})
 		if err != nil {
 			t.Fatal(err)
@@ -383,9 +383,9 @@ func TestListModelsMetadataAndFallback(t *testing.T) {
 		t.Fatalf("rich thinking levels=%v, want %v", rich.ThinkingLevels, wantLevels)
 	}
 	negative, ok := normalizeModel(modelRecord{
-		ID: "negative", SupportsVision: boolPtr(false), SupportsThinking: boolPtr(false), Reasoning: boolPtr(true),
+		ID: "negative", SupportsVision: new(false), SupportsThinking: new(false), Reasoning: new(true),
 		Input: []string{"image"}, ThinkingLevels: []string{"high"},
-		Capabilities: &modelCapabilities{Vision: boolPtr(true), Thinking: boolPtr(true), ThinkingLevels: []string{"high"}},
+		Capabilities: &modelCapabilities{Vision: new(true), Thinking: new(true), ThinkingLevels: []string{"high"}},
 	})
 	if !ok || negative.SupportsVision || negative.SupportsThinking || len(negative.ThinkingLevels) != 0 {
 		t.Fatalf("explicit negative metadata was overridden: %+v", negative)
@@ -403,8 +403,6 @@ func TestListModelsMetadataAndFallback(t *testing.T) {
 		t.Fatal("missing discovery error")
 	}
 }
-
-func boolPtr(value bool) *bool { return &value }
 
 func TestChatRejectsNonStreamSuccess(t *testing.T) {
 	const key = "nonstream-secret"
@@ -446,8 +444,7 @@ func TestChatClassifiesLimitsAndRedactsSecrets(t *testing.T) {
 				t.Fatal(err)
 			}
 			if status == http.StatusPaymentRequired {
-				var limited providerpkg.UsageLimitedError
-				if ev.Err == nil || !errors.As(ev.Err, &limited) {
+				if _, ok := errors.AsType[providerpkg.UsageLimitedError](ev.Err); ev.Err == nil || !ok {
 					t.Fatalf("event=%+v", ev)
 				}
 			} else if advice, ok := providerpkg.RetryAdviceFor(ev.Err); !ok || advice.Kind != providerpkg.RetryRateLimit {

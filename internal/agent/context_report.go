@@ -6,6 +6,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"slices"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -38,7 +39,7 @@ type ContextReport struct {
 
 // Clone returns an independent report suitable for another surface.
 func (r ContextReport) Clone() ContextReport {
-	r.Categories = append([]ContextCategory(nil), r.Categories...)
+	r.Categories = slices.Clone(r.Categories)
 	r.Usage = r.Usage.Clone()
 	return r
 }

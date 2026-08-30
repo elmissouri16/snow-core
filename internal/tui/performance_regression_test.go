@@ -10,7 +10,7 @@ import (
 
 func TestTranscriptBaseIncrementalMatchesFullRebuild(t *testing.T) {
 	m := newTranscriptSelectionTestModel(t, []string{"seed"})
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		m.appendTranscriptLine(fmt.Sprintf("line %d\nwide 界 content", i))
 		m.transcriptBaseDirty = true
 		m.transcriptDirty = true
@@ -30,7 +30,7 @@ func TestTranscriptBaseIncrementalMatchesFullRebuild(t *testing.T) {
 
 func TestTranscriptRetentionIsBounded(t *testing.T) {
 	m := newTranscriptSelectionTestModel(t, nil)
-	for i := 0; i < maxTranscriptEntries+100; i++ {
+	for i := range maxTranscriptEntries + 100 {
 		m.appendTranscriptLine(fmt.Sprintf("line-%04d", i))
 	}
 	if len(m.lines) > maxTranscriptEntries {
@@ -65,7 +65,7 @@ func TestTranscriptSelectionLinesAreLazy(t *testing.T) {
 func TestAgentEventMailboxBoundsFlood(t *testing.T) {
 	q := newAgentEventMailbox()
 	defer q.Close()
-	for i := 0; i < maxMailboxQueuedItems*2; i++ {
+	for i := range maxMailboxQueuedItems * 2 {
 		typ := protocol.EvTextDelta
 		if i%2 != 0 {
 			typ = protocol.EvThinkingDelta

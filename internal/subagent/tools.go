@@ -111,7 +111,7 @@ func (t *managerTool) Run(ctx context.Context, raw json.RawMessage, _ tools.Tool
 		return jsonResult(map[string]any{})
 	case "wait_agent":
 		var in struct {
-			TimeoutMS int    `json:"timeout_ms,omitempty"`
+			TimeoutMS int    `json:"timeout_ms,omitzero"`
 			Until     string `json:"until,omitempty"`
 		}
 		if err := decodeStrict(raw, &in); err != nil {
@@ -195,7 +195,7 @@ func (t *managerTool) Run(ctx context.Context, raw json.RawMessage, _ tools.Tool
 			Closed          int    `json:"closed"`
 			ConcurrentLimit int    `json:"concurrent_limit"`
 			AgentLimit      int    `json:"agent_limit"`
-			Truncated       bool   `json:"truncated,omitempty"`
+			Truncated       bool   `json:"truncated,omitzero"`
 		}{Running: list.Running, Queued: list.Queued, Terminal: list.Terminal, Open: list.Open, Closed: list.Closed, ConcurrentLimit: list.ConcurrentLimit, AgentLimit: list.AgentLimit, Truncated: list.Truncated}
 		for _, s := range list.Agents {
 			out.Agents = append(out.Agents, item{AgentName: s.Agent.Path, AgentStatus: s.Status, Role: s.Agent.Role})

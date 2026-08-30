@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -77,7 +78,7 @@ func (w *boundedGitOutput) Write(p []byte) (int, error) {
 func (w *boundedGitOutput) Bytes() []byte {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	output := append([]byte(nil), w.buf.Bytes()...)
+	output := slices.Clone(w.buf.Bytes())
 	if w.truncated {
 		output = append(output, []byte("\n… output truncated")...)
 	}
@@ -239,9 +240,9 @@ func registeredExactWorktree(ctx context.Context, git runner, result Result) boo
 		return false
 	}
 	wantBranch := "refs/heads/" + result.Branch
-	for _, record := range strings.Split(strings.TrimSpace(string(output)), "\n\n") {
+	for record := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n\n") {
 		path, branch := "", ""
-		for _, line := range strings.Split(record, "\n") {
+		for line := range strings.SplitSeq(record, "\n") {
 			switch {
 			case strings.HasPrefix(line, "worktree "):
 				path = strings.TrimPrefix(line, "worktree ")

@@ -124,7 +124,7 @@ func TestManagerBridgeNameCollisionGetsStableSuffix(t *testing.T) {
 }
 
 func TestManagerStreamableHTTPNegotiatesLatestAndBridgesCapabilities(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	server := testServer()
 	t.Setenv("SNOW_MCP_TEST_TOKEN", "test-token")
 	var sawHeader atomic.Bool

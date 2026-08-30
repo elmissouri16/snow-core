@@ -352,7 +352,7 @@ func fixedLoginBody(body string, width, height int) string {
 func wrapLoginLines(lines []string, width, height int) string {
 	wrapped := make([]string, 0, height)
 	for _, line := range lines {
-		for _, part := range strings.Split(xansi.Wordwrap(line, max(1, width), ""), "\n") {
+		for part := range strings.SplitSeq(xansi.Wordwrap(line, max(1, width), ""), "\n") {
 			wrapped = append(wrapped, truncateDisplayText(part, width))
 			if len(wrapped) == height {
 				return strings.Join(wrapped, "\n")

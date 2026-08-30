@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -34,7 +35,7 @@ func (m *Model) startUserInput(req protocol.UserInputRequest) {
 	copy.Questions = make([]protocol.UserInputQuestion, len(req.Questions))
 	for i, question := range req.Questions {
 		copy.Questions[i] = question
-		copy.Questions[i].Options = append([]protocol.UserInputOption(nil), question.Options...)
+		copy.Questions[i].Options = slices.Clone(question.Options)
 	}
 	m.closeTranscriptSelectionContextMenu()
 	m.userInputPending = true

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -231,16 +232,10 @@ func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
 func (a *Agent) compactionPlannerOptions(model protocol.Model, messages []protocol.Message) compact.PlannerOptions {
 	budget := a.opts.Compaction.RetainTokens
 	if budget <= 0 {
-		budget = model.ContextWindow / 4
-		if budget < 8*1024 {
-			budget = 8 * 1024
-		}
-		if budget > 32*1024 {
-			budget = 32 * 1024
-		}
+		budget = min(max(model.ContextWindow/4, 8*1024), 32*1024)
 	}
-	if model.ContextWindow > 0 && budget > model.ContextWindow/2 {
-		budget = model.ContextWindow / 2
+	if model.ContextWindow > 0 {
+		budget = min(budget, model.ContextWindow/2)
 	}
 	minTurns := a.opts.Compaction.MinRetainedTurns
 	if minTurns <= 0 {
@@ -676,7 +671,7 @@ func cloneContentBlocks(blocks []protocol.ContentBlock) []protocol.ContentBlock 
 	cloned := make([]protocol.ContentBlock, len(blocks))
 	for i, block := range blocks {
 		cloned[i] = block
-		cloned[i].Data = append([]byte(nil), block.Data...)
+		cloned[i].Data = slices.Clone(block.Data)
 		cloned[i].Arguments = append(json.RawMessage(nil), block.Arguments...)
 	}
 	return cloned

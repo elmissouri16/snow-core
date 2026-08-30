@@ -129,7 +129,7 @@ type hydrationProjectionMessage struct {
 	Usage       *protocol.Usage                 `json:"usage,omitempty"`
 	ToolCallID  string                          `json:"tool_call_id,omitempty"`
 	ToolName    string                          `json:"tool_name,omitempty"`
-	IsError     bool                            `json:"is_error,omitempty"`
+	IsError     bool                            `json:"is_error,omitzero"`
 	ToolDisplay *hydrationProjectionToolDisplay `json:"tool_display,omitempty"`
 }
 
@@ -324,8 +324,8 @@ func (s *SQLiteStore) BranchHydration() (BranchHydrationSnapshot, error) {
 			snapshot.ContextUsage = summarizeBranchContextUsage(snapshot.Entries)
 			return snapshot, nil
 		}
-		var incomplete *hydrationProjectionEntryError
-		if !errors.As(err, &incomplete) {
+		incomplete, ok := errors.AsType[*hydrationProjectionEntryError](err)
+		if !ok {
 			return BranchHydrationSnapshot{}, err
 		}
 		if _, duplicate := repaired[incomplete.entryID]; duplicate {

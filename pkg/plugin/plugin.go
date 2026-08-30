@@ -11,8 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -81,11 +82,7 @@ func MergeCapabilities(groups ...[]string) []string {
 			}
 		}
 	}
-	merged := make([]string, 0, len(seen))
-	for capability := range seen {
-		merged = append(merged, capability)
-	}
-	sort.Strings(merged)
+	merged := slices.Sorted(maps.Keys(seen))
 	return merged
 }
 
@@ -105,7 +102,7 @@ type ToolContext struct {
 type ProgressUpdate struct {
 	Message string `json:"message,omitempty"`
 	Done    bool   `json:"done"`
-	IsError bool   `json:"is_error,omitempty"`
+	IsError bool   `json:"is_error,omitzero"`
 }
 
 // ToolResult is the result returned to the model. Details are private to the
@@ -163,12 +160,12 @@ type PluginSpec struct {
 	Enabled          bool            `json:"enabled"`
 	CWD              string          `json:"cwd,omitempty"`
 	Env              []string        `json:"env,omitempty"`
-	TimeoutMS        int             `json:"timeout_ms,omitempty"`
-	MaxFrameBytes    int             `json:"max_frame_bytes,omitempty"`
-	MaxOutputBytes   int             `json:"max_output_bytes,omitempty"`
-	MaxProgressBytes int             `json:"max_progress_bytes,omitempty"`
-	MaxInputBytes    int             `json:"max_input_bytes,omitempty"`
-	MaxConcurrent    int             `json:"max_concurrent,omitempty"`
+	TimeoutMS        int             `json:"timeout_ms,omitzero"`
+	MaxFrameBytes    int             `json:"max_frame_bytes,omitzero"`
+	MaxOutputBytes   int             `json:"max_output_bytes,omitzero"`
+	MaxProgressBytes int             `json:"max_progress_bytes,omitzero"`
+	MaxInputBytes    int             `json:"max_input_bytes,omitzero"`
+	MaxConcurrent    int             `json:"max_concurrent,omitzero"`
 	Capabilities     []string        `json:"capabilities,omitempty"`
 	Config           json.RawMessage `json:"config,omitempty"`
 }

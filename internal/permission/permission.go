@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -136,9 +137,7 @@ func (s *SimpleService) State() State {
 
 func (s *SimpleService) stateLocked() State {
 	rules := make(map[string]Decision, len(s.rules))
-	for key, decision := range s.rules {
-		rules[key] = decision
-	}
+	maps.Copy(rules, s.rules)
 	return State{Mode: s.mode, Rules: rules}
 }
 
@@ -214,9 +213,7 @@ func (s *SimpleService) Authorize(ctx context.Context, req Request) (Decision, e
 	s.mu.Lock()
 	mode := s.mode
 	rules := make(map[string]Decision, len(s.rules))
-	for k, v := range s.rules {
-		rules[k] = v
-	}
+	maps.Copy(rules, s.rules)
 	s.mu.Unlock()
 
 	switch mode {

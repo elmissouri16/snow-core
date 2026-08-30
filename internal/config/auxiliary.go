@@ -2,13 +2,14 @@ package config
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -117,7 +118,7 @@ func LoadSearchPolicy(globalDir, projectRoot string, projectAllowed bool) (Effec
 			diagnostics = append(diagnostics, Diagnostic{Path: path, Message: fmt.Sprintf("unsupported version %d", raw.Version)})
 			return
 		}
-		for _, pattern := range append(append([]string(nil), raw.GeneratedDirs...), raw.Exclude...) {
+		for _, pattern := range append(slices.Clone(raw.GeneratedDirs), raw.Exclude...) {
 			if strings.TrimSpace(pattern) == "" {
 				diagnostics = append(diagnostics, Diagnostic{Path: path, Message: "empty ignore pattern"})
 				return
@@ -161,7 +162,7 @@ func LoadKeybindingScopes(globalDir, projectRoot string, projectAllowed bool) ([
 		}
 		candidate := cloneBindings(effective)
 		for action, keys := range raw.Bindings {
-			candidate[action] = append([]string(nil), keys...)
+			candidate[action] = slices.Clone(keys)
 		}
 		candidate["abort"] = appendUnique(candidate["abort"], "ctrl+c")
 		candidate["abort"] = appendUnique(candidate["abort"], "esc")
@@ -187,7 +188,7 @@ func LoadKeybindings(globalDir, projectRoot string, projectAllowed bool) (Keybin
 	scopes, diagnostics := LoadKeybindingScopes(globalDir, projectRoot, projectAllowed)
 	for _, scope := range scopes {
 		for action, keys := range scope.File.Bindings {
-			result.Bindings[action] = append([]string(nil), keys...)
+			result.Bindings[action] = slices.Clone(keys)
 		}
 	}
 	return result, diagnostics
@@ -211,7 +212,7 @@ func LoadThemes(globalDir, projectRoot string, projectAllowed bool) (map[string]
 			}
 			return
 		}
-		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		slices.SortFunc(entries, func(a, b os.DirEntry) int { return cmp.Compare(a.Name(), b.Name()) })
 		count := 0
 		for _, entry := range entries {
 			if count >= ThemeFileLimit {
@@ -276,16 +277,14 @@ func defaultAuxBindings() map[string][]string {
 func cloneBindings(in map[string][]string) map[string][]string {
 	out := make(map[string][]string, len(in))
 	for key, values := range in {
-		out[key] = append([]string(nil), values...)
+		out[key] = slices.Clone(values)
 	}
 	return out
 }
 
 func appendUnique(values []string, value string) []string {
-	for _, existing := range values {
-		if existing == value {
-			return values
-		}
+	if slices.Contains(values, value) {
+		return values
 	}
 	return append(values, value)
 }
@@ -465,7 +464,7 @@ func validateAuxPath(rootPath, path string) error {
 
 func validateAuxRootPath(root *os.Root, rel string) error {
 	current := ""
-	for _, part := range strings.Split(filepath.Clean(rel), string(filepath.Separator)) {
+	for part := range strings.SplitSeq(filepath.Clean(rel), string(filepath.Separator)) {
 		if part == "" || part == "." {
 			continue
 		}

@@ -1,12 +1,13 @@
 package auth
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -161,7 +162,7 @@ func (s *Service) Providers() []Descriptor {
 		out = append(out, normalizeDescriptor(driver.Descriptor()))
 	}
 	s.mu.RUnlock()
-	sort.Slice(out, func(i, j int) bool { return out[i].ProviderID < out[j].ProviderID })
+	slices.SortFunc(out, func(a, b Descriptor) int { return cmp.Compare(a.ProviderID, b.ProviderID) })
 	return out
 }
 

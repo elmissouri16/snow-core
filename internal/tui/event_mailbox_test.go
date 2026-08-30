@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -102,11 +103,11 @@ func TestCoalesceTUISnapshotEventsRespectsTurnAndDebugBoundaries(t *testing.T) {
 		{Type: protocol.EvModelChanged, RootEpoch: 1, Model: &modelOne},
 		{Type: protocol.EvModelChanged, RootEpoch: 1, Model: &modelTwo},
 	}
-	got := coalesceTUISnapshotEvents(append([]protocol.AgentEvent(nil), events...), false)
+	got := coalesceTUISnapshotEvents(slices.Clone(events), false)
 	if len(got) != 4 || got[0].Usage.Input != 2 || got[1].Type != protocol.EvTurnDone || got[2].Usage.Input != 3 || got[3].Model.ID != "two" {
 		t.Fatalf("snapshot coalescing crossed a boundary: %+v", got)
 	}
-	debug := coalesceTUISnapshotEvents(append([]protocol.AgentEvent(nil), events...), true)
+	debug := coalesceTUISnapshotEvents(slices.Clone(events), true)
 	usageEvents := 0
 	for _, event := range debug {
 		if event.Type == protocol.EvUsage {
@@ -187,7 +188,7 @@ func TestAgentEventMailboxNeverEvictsInteractionOrTerminalEvents(t *testing.T) {
 func TestAgentEventMailboxBackpressuresProtectedOverflow(t *testing.T) {
 	q := newAgentEventMailbox()
 	defer q.Close()
-	for i := 0; i < maxMailboxQueuedItems; i++ {
+	for i := range maxMailboxQueuedItems {
 		q.Push(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: string(rune(i + 1))})
 	}
 	pushed := make(chan struct{})
@@ -284,7 +285,7 @@ func TestAgentEventMailboxCloseReleasesWaiterAndDropsLateEvents(t *testing.T) {
 
 func TestAgentEventMailboxRearmsBoundedBatches(t *testing.T) {
 	q := newAgentEventMailbox()
-	for i := 0; i < maxAgentEventsPerUpdate+7; i++ {
+	for i := range maxAgentEventsPerUpdate + 7 {
 		q.Push(protocol.AgentEvent{Type: protocol.EvToolStart, ToolCallID: string(rune(i + 1))})
 	}
 	first, ok := q.wait().(agentEventBatchMsg)

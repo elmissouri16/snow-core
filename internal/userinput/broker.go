@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -216,7 +217,7 @@ func cloneRequest(req protocol.UserInputRequest) protocol.UserInputRequest {
 	out.Questions = make([]protocol.UserInputQuestion, len(req.Questions))
 	for i, question := range req.Questions {
 		out.Questions[i] = question
-		out.Questions[i].Options = append([]protocol.UserInputOption(nil), question.Options...)
+		out.Questions[i].Options = slices.Clone(question.Options)
 	}
 	return out
 }

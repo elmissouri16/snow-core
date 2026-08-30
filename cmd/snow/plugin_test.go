@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -214,7 +215,7 @@ func runPluginCommand(configPath string, args ...string) (string, string, error)
 	var stdout, stderr bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
-	commandArgs := append([]string(nil), args...)
+	commandArgs := slices.Clone(args)
 	if configPath != "" {
 		commandArgs = append([]string{"--config", configPath}, commandArgs...)
 	}
@@ -237,7 +238,7 @@ func TestInspectExternalPlugin(t *testing.T) {
 	if output, err := exec.Command(goBin, "build", "-o", binary, source).CombinedOutput(); err != nil {
 		t.Fatalf("build fixture: %v\n%s", err, output)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	view, err := inspectExternalPlugin(ctx, publicplugin.PluginSpec{ID: "check", Command: []string{binary}, Capabilities: []string{"configured"}}, dir)
 	if err != nil {

@@ -73,7 +73,7 @@ func TestRPCSubagentWaitUntilAll(t *testing.T) {
 	}
 	waitedAll := false
 	lifecycle := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out.String()), "\n") {
 		var resp Response
 		if err := json.Unmarshal([]byte(line), &resp); err != nil {
 			t.Fatal(err)

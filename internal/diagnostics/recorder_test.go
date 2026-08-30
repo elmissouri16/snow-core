@@ -15,6 +15,16 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+func TestStatusJSONOmitsZeroStart(t *testing.T) {
+	data, err := json.Marshal(Status{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"started_at"`) {
+		t.Fatalf("zero status unexpectedly includes started_at: %s", data)
+	}
+}
+
 func TestRecorderIsOptInAndRetainsDisabledCapture(t *testing.T) {
 	recorder := New(false)
 	defer recorder.Close()
@@ -75,7 +85,7 @@ func TestRedactTextRemovesKnownTokenAndPrivateKeyFormats(t *testing.T) {
 func TestRecorderEvictsInOrderWithoutShiftingEveryEvent(t *testing.T) {
 	r := New(false)
 	defer r.Close()
-	for i := 0; i < MaxEventRecords+2048; i++ {
+	for i := range MaxEventRecords + 2048 {
 		r.append(queuedEvent{recordedAt: time.Now(), event: protocol.AgentEvent{Type: protocol.EvTextDelta, Text: fmt.Sprintf("event-%06d", i)}})
 	}
 	records, status, err := r.Snapshot(context.Background())
@@ -95,7 +105,7 @@ func TestWriteJSONContextCancellationPreservesDestination(t *testing.T) {
 	if err := os.WriteFile(path, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err := WriteJSONContext(ctx, path, map[string]string{"secret": "replace"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("error=%v", err)

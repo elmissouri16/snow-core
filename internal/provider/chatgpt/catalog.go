@@ -1,6 +1,7 @@
 package chatgpt
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,7 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -73,7 +74,7 @@ type modelsResponse struct {
 
 func (p *Provider) DefaultModel() protocol.Model {
 	p.modelsMu.RLock()
-	records := append([]modelRecord(nil), p.models...)
+	records := slices.Clone(p.models)
 	p.modelsMu.RUnlock()
 	models := mapModelRecords(records)
 	if len(models) == 0 {
@@ -239,7 +240,7 @@ func (p *Provider) acceptRecords(records []modelRecord) []protocol.Model {
 	// missing from it: the Codex backend can reject a model for one ChatGPT
 	// account even when another local OpenCode/Pi account can invoke it.
 	p.modelsMu.Lock()
-	p.models = append([]modelRecord(nil), records...)
+	p.models = slices.Clone(records)
 	p.modelsMu.Unlock()
 	return models
 }
@@ -255,18 +256,17 @@ func mapModelRecords(records []modelRecord) []protocol.Model {
 			visible = append(visible, ranked{r, i})
 		}
 	}
-	sort.SliceStable(visible, func(i, j int) bool {
-		pi, pj := visible[i].record.Priority, visible[j].record.Priority
-		if pi == pj {
-			return visible[i].order < visible[j].order
+	slices.SortStableFunc(visible, func(a, b ranked) int {
+		if a.record.Priority == b.record.Priority {
+			return cmp.Compare(a.order, b.order)
 		}
-		if pi == 0 {
-			return false
+		if a.record.Priority == 0 {
+			return 1
 		}
-		if pj == 0 {
-			return true
+		if b.record.Priority == 0 {
+			return -1
 		}
-		return pi < pj
+		return cmp.Compare(a.record.Priority, b.record.Priority)
 	})
 	out := make([]protocol.Model, 0, len(visible))
 	for _, item := range visible {
@@ -315,10 +315,8 @@ func inferenceThinkingLevel(value string) (protocol.ThinkingLevel, bool) {
 }
 
 func appendUniqueThinking(levels []protocol.ThinkingLevel, level protocol.ThinkingLevel) []protocol.ThinkingLevel {
-	for _, v := range levels {
-		if v == level {
-			return levels
-		}
+	if slices.Contains(levels, level) {
+		return levels
 	}
 	return append(levels, level)
 }

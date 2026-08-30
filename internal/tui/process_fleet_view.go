@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -61,7 +62,7 @@ func (m *Model) applyProcessFleetList(msg processFleetListMsg) tea.Cmd {
 		return m.scheduleProcessFleetRefresh()
 	}
 	selectedBefore := m.processFleetSelectedID()
-	m.processFleetList = append([]app.ManagedProcessState(nil), msg.list...)
+	m.processFleetList = slices.Clone(msg.list)
 	m.processFleetError = ""
 	if len(m.processFleetList) == 0 {
 		m.processFleetIndex = 0
@@ -113,7 +114,7 @@ func (m *Model) loadProcessFleetLogs() tea.Cmd {
 	ctx := m.ctx
 	return func() tea.Msg {
 		var combined app.ManagedProcessLogs
-		for chunk := 0; chunk < processFleetLogBatchChunks; chunk++ {
+		for chunk := range processFleetLogBatchChunks {
 			logs, err := appRuntime.ManagedProcessLogs(ctx, target, cursor, processFleetLogReadBytes)
 			if err != nil {
 				return processFleetLogsMsg{generation: generation, target: target, err: err}
@@ -365,10 +366,7 @@ func (m *Model) renderProcessFleetList(width, height int) string {
 	}
 	const rowsPerProcess = 2
 	visible := max(1, height/rowsPerProcess)
-	start := m.processFleetIndex - visible/2
-	if start < 0 {
-		start = 0
-	}
+	start := max(m.processFleetIndex-visible/2, 0)
 	if start+visible > len(m.processFleetList) {
 		start = max(0, len(m.processFleetList)-visible)
 	}
@@ -506,7 +504,7 @@ func (m *Model) processOutputLines(width int) []string {
 	}
 	output := sanitizeProcessOutput(m.processFleetOutput)
 	lines := make([]string, 0, strings.Count(output, "\n")+1)
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		wrapped := ansi.Wordwrap(line, width, "")
 		lines = append(lines, strings.Split(wrapped, "\n")...)
 	}

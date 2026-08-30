@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,7 +32,7 @@ func (m *Model) hydrateInputHistory(messages []protocol.Message) {
 }
 
 func (m *Model) hydrateInputHistoryValues(history []string) {
-	m.inputHistory = append([]string(nil), history...)
+	m.inputHistory = slices.Clone(history)
 	m.resetInputHistoryNavigation()
 }
 

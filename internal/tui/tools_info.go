@@ -1,10 +1,11 @@
 package tui
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/elmissouri16/snow-core/internal/session"
+	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -75,7 +77,7 @@ func toolHasDiffPreview(toolName, output string) bool {
 }
 
 func looksLikeEditDiff(output string) bool {
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") {
 			return true
 		}
@@ -97,10 +99,7 @@ func renderEditDiff(output string, width int) string {
 	if len(lines) > 80 {
 		lines = append(lines[:80], "... [diff preview truncated]")
 	}
-	maxWidth := width - 2
-	if maxWidth < 20 {
-		maxWidth = 20
-	}
+	maxWidth := max(width-2, 20)
 	for i, line := range lines {
 		line = truncateRunes(line, maxWidth)
 		switch {
@@ -129,10 +128,7 @@ func renderToolOutputPreview(output string, width int) string {
 	if len(lines) > maxLines {
 		lines = append(lines[:maxLines], "… [preview truncated]")
 	}
-	maxWidth := width - 8
-	if maxWidth < 20 {
-		maxWidth = 20
-	}
+	maxWidth := max(width-8, 20)
 	for i, line := range lines {
 		lines[i] = "  │ " + truncateRunes(line, maxWidth)
 	}
@@ -254,7 +250,7 @@ func (m *Model) startMCPInfo() (tea.Model, tea.Cmd) {
 	if m.app.MCPManager != nil {
 		statuses = m.app.MCPManager.Statuses()
 	}
-	sort.Slice(statuses, func(i, j int) bool { return statuses[i].ID < statuses[j].ID })
+	slices.SortFunc(statuses, func(a, b publicmcp.Status) int { return cmp.Compare(a.ID, b.ID) })
 	items := make([]statusInfoItem, 0, len(statuses))
 	for _, status := range statuses {
 		state := status.State
@@ -427,10 +423,7 @@ func (m *Model) infoWindow() (start, end int) {
 	if len(m.infoItems) <= visible {
 		return 0, len(m.infoItems)
 	}
-	start = m.infoIndex - visible/2
-	if start < 0 {
-		start = 0
-	}
+	start = max(m.infoIndex-visible/2, 0)
 	if start+visible > len(m.infoItems) {
 		start = len(m.infoItems) - visible
 	}
@@ -511,10 +504,7 @@ func (m *Model) sessionWindow() (start, end int) {
 	if total == 0 || total <= visible {
 		return 0, total
 	}
-	start = m.sessionIndex - visible/2
-	if start < 0 {
-		start = 0
-	}
+	start = max(m.sessionIndex-visible/2, 0)
 	if start+visible > total {
 		start = total - visible
 	}
@@ -763,11 +753,11 @@ func orderBranches(branches []protocol.SessionBranch) []protocol.SessionBranch {
 		byParent[branch.ParentID] = append(byParent[branch.ParentID], branch)
 	}
 	for parent := range byParent {
-		sort.SliceStable(byParent[parent], func(i, j int) bool {
-			if byParent[parent][i].CreatedAt == byParent[parent][j].CreatedAt {
-				return byParent[parent][i].ID < byParent[parent][j].ID
+		slices.SortStableFunc(byParent[parent], func(a, b protocol.SessionBranch) int {
+			if byCreated := cmp.Compare(a.CreatedAt, b.CreatedAt); byCreated != 0 {
+				return byCreated
 			}
-			return byParent[parent][i].CreatedAt < byParent[parent][j].CreatedAt
+			return cmp.Compare(a.ID, b.ID)
 		})
 	}
 	var out []protocol.SessionBranch

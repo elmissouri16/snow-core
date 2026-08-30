@@ -1,9 +1,10 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -31,12 +32,11 @@ func (a *App) AuthProviders() []auth.Descriptor {
 		}
 		return 50
 	}
-	sort.SliceStable(descriptors, func(i, j int) bool {
-		left, right := providerOrder(descriptors[i].ProviderID), providerOrder(descriptors[j].ProviderID)
-		if left == right {
-			return descriptors[i].ProviderID < descriptors[j].ProviderID
+	slices.SortStableFunc(descriptors, func(a, b auth.Descriptor) int {
+		if byOrder := cmp.Compare(providerOrder(a.ProviderID), providerOrder(b.ProviderID)); byOrder != 0 {
+			return byOrder
 		}
-		return left < right
+		return cmp.Compare(a.ProviderID, b.ProviderID)
 	})
 	return descriptors
 }

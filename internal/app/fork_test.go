@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -49,7 +50,7 @@ func TestCopyForkArtifactsIgnoresUnboundedForgedMarkerSet(t *testing.T) {
 	defer store.Close()
 	child := session.NewMemoryStore(session.Options{})
 	var summary strings.Builder
-	for i := 0; i < maxForkArtifactCopies+1; i++ {
+	for i := range maxForkArtifactCopies + 1 {
 		fmt.Fprintf(&summary, "Full retained tool result: artifact-%032x\n", i)
 	}
 	if err := child.Append(session.Entry{Type: session.EntryCompaction, ID: "checkpoint", Summary: summary.String(), CompactedThrough: "root"}); err != nil {
@@ -76,7 +77,7 @@ func (s *listedForkArtifactStore) Exists(context.Context, string, string) (bool,
 	return false, nil
 }
 func (s *listedForkArtifactStore) ListIDs(context.Context, string) ([]string, error) {
-	return append([]string(nil), s.ids...), nil
+	return slices.Clone(s.ids), nil
 }
 func (s *listedForkArtifactStore) CopyText(context.Context, string, string, string) error {
 	s.copies++
@@ -88,7 +89,7 @@ func TestCopyForkArtifactsRejectsTooManyVerifiedArtifactsWithoutPartialCopy(t *t
 	store := &listedForkArtifactStore{}
 	child := session.NewMemoryStore(session.Options{})
 	var summary strings.Builder
-	for i := 0; i < maxForkArtifactCopies+1; i++ {
+	for i := range maxForkArtifactCopies + 1 {
 		id := fmt.Sprintf("artifact-%032x", i)
 		store.ids = append(store.ids, id)
 		fmt.Fprintf(&summary, "Full retained tool result: %s\n", id)

@@ -10,16 +10,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/elmissouri16/snow-core/internal/auth"
 	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/provider/responsesapi"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
-	"github.com/klauspost/compress/zstd"
 )
 
 const (
@@ -354,14 +356,14 @@ func normalizeAffinityKey(value string) string {
 
 func compressRequestBody(body []byte) ([]byte, string) {
 	if len(body) < requestCompressMinimum {
-		return append([]byte(nil), body...), ""
+		return slices.Clone(body), ""
 	}
 	encoder, _ := requestEncoderPool.Get().(*zstd.Encoder)
 	if encoder == nil {
 		var err error
 		encoder, err = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest), zstd.WithEncoderConcurrency(1))
 		if err != nil {
-			return append([]byte(nil), body...), ""
+			return slices.Clone(body), ""
 		}
 	}
 	encoded := encoder.EncodeAll(body, make([]byte, 0, len(body)/2))

@@ -1,13 +1,15 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -53,15 +55,15 @@ type pluginConfigView struct {
 	Command          []string `json:"command"`
 	CWD              string   `json:"cwd,omitempty"`
 	Env              []string `json:"env,omitempty"`
-	TimeoutMS        int      `json:"timeout_ms,omitempty"`
-	MaxFrameBytes    int      `json:"max_frame_bytes,omitempty"`
-	MaxOutputBytes   int      `json:"max_output_bytes,omitempty"`
-	MaxProgressBytes int      `json:"max_progress_bytes,omitempty"`
-	MaxInputBytes    int      `json:"max_input_bytes,omitempty"`
-	MaxConcurrent    int      `json:"max_concurrent,omitempty"`
+	TimeoutMS        int      `json:"timeout_ms,omitzero"`
+	MaxFrameBytes    int      `json:"max_frame_bytes,omitzero"`
+	MaxOutputBytes   int      `json:"max_output_bytes,omitzero"`
+	MaxProgressBytes int      `json:"max_progress_bytes,omitzero"`
+	MaxInputBytes    int      `json:"max_input_bytes,omitzero"`
+	MaxConcurrent    int      `json:"max_concurrent,omitzero"`
 	Capabilities     []string `json:"capabilities,omitempty"`
 	ConfigPresent    bool     `json:"config_present"`
-	Shadowed         bool     `json:"shadowed,omitempty"`
+	Shadowed         bool     `json:"shadowed,omitzero"`
 	DisabledBy       string   `json:"disabled_by,omitempty"`
 }
 
@@ -327,15 +329,15 @@ func loadPluginConfig(cmd *cobra.Command, includeShadowed bool) (pluginConfigSet
 	merge("global", globalSpecs)
 	merge("project", projectSpecs)
 	merge("explicit", explicitSpecs)
-	views := append([]pluginConfigView(nil), shadowed...)
+	views := slices.Clone(shadowed)
 	for _, view := range effectiveViews {
 		views = append(views, view)
 	}
-	sort.SliceStable(views, func(i, j int) bool {
-		if views[i].ID != views[j].ID {
-			return views[i].ID < views[j].ID
+	slices.SortStableFunc(views, func(a, b pluginConfigView) int {
+		if byID := cmp.Compare(a.ID, b.ID); byID != 0 {
+			return byID
 		}
-		return pluginScopeRank(views[i].Scope) < pluginScopeRank(views[j].Scope)
+		return cmp.Compare(pluginScopeRank(a.Scope), pluginScopeRank(b.Scope))
 	})
 	return pluginConfigSet{Views: views, ProjectBlocked: projectBlocked}, nil
 }
@@ -347,10 +349,10 @@ func newPluginConfigView(scope string, spec publicplugin.PluginSpec) pluginConfi
 		CWD: spec.CWD, Env: redactPluginEnv(spec.Env), TimeoutMS: spec.TimeoutMS,
 		MaxFrameBytes: spec.MaxFrameBytes, MaxOutputBytes: spec.MaxOutputBytes,
 		MaxProgressBytes: spec.MaxProgressBytes, MaxInputBytes: spec.MaxInputBytes,
-		MaxConcurrent: spec.MaxConcurrent, Capabilities: append([]string(nil), spec.Capabilities...),
+		MaxConcurrent: spec.MaxConcurrent, Capabilities: slices.Clone(spec.Capabilities),
 		ConfigPresent: len(spec.Config) > 0,
-	}
-	view.Target = strings.Join(command, " ")
+
+		Target: strings.Join(command, " ")}
 	if !spec.Enabled {
 		view.DisabledBy = "configuration"
 	}
@@ -486,7 +488,7 @@ func inspectExternalPlugin(ctx context.Context, spec publicplugin.PluginSpec, cw
 		Version: initialized.Manifest.Version, ProtocolVersion: initialized.Manifest.ProtocolVersion,
 		CWD: host.WorkingDir(), StartupMS: startup.Milliseconds(),
 		Capabilities:    publicplugin.MergeCapabilities(initialized.Manifest.Capabilities, initialized.Capabilities, spec.Capabilities),
-		SupportedEvents: append([]publicplugin.EventType(nil), initialized.SupportedEvents...),
+		SupportedEvents: slices.Clone(initialized.SupportedEvents),
 		Limits:          cloneIntMap(initialized.Limits),
 		Diagnostics:     strings.TrimSpace(host.Diagnostics()),
 	}
@@ -502,8 +504,8 @@ func inspectExternalPlugin(ctx context.Context, spec publicplugin.PluginSpec, cw
 			Capabilities: publicplugin.MergeCapabilities(view.Capabilities, tool.Capabilities),
 		})
 	}
-	sort.Slice(view.Tools, func(i, j int) bool { return view.Tools[i].Name < view.Tools[j].Name })
-	sort.Slice(view.SupportedEvents, func(i, j int) bool { return view.SupportedEvents[i] < view.SupportedEvents[j] })
+	slices.SortFunc(view.Tools, func(a, b pluginCheckToolView) int { return cmp.Compare(a.Name, b.Name) })
+	slices.Sort(view.SupportedEvents)
 
 	closeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -547,11 +549,7 @@ func printPluginCheck(cmd *cobra.Command, view pluginCheckView) {
 		fmt.Fprintf(out, "  - %s\n", terminalSafe(string(eventType)))
 	}
 	fmt.Fprintf(out, "Negotiated limits (%d):\n", len(view.Limits))
-	limitNames := make([]string, 0, len(view.Limits))
-	for name := range view.Limits {
-		limitNames = append(limitNames, name)
-	}
-	sort.Strings(limitNames)
+	limitNames := slices.Sorted(maps.Keys(view.Limits))
 	for _, name := range limitNames {
 		fmt.Fprintf(out, "  - %s=%d\n", terminalSafe(name), view.Limits[name])
 	}
@@ -559,7 +557,7 @@ func printPluginCheck(cmd *cobra.Command, view pluginCheckView) {
 		fmt.Fprintln(out, "Diagnostics: none")
 	} else {
 		fmt.Fprintln(out, "Diagnostics:")
-		for _, line := range strings.Split(view.Diagnostics, "\n") {
+		for line := range strings.SplitSeq(view.Diagnostics, "\n") {
 			fmt.Fprintf(out, "  %s\n", terminalSafe(line))
 		}
 	}
@@ -582,14 +580,7 @@ func terminalSafe(value string) string {
 }
 
 func cloneIntMap(input map[string]int) map[string]int {
-	if input == nil {
-		return nil
-	}
-	output := make(map[string]int, len(input))
-	for key, value := range input {
-		output[key] = value
-	}
-	return output
+	return maps.Clone(input)
 }
 
 func cloneToolDiscovery(input *protocol.ToolDiscovery) *protocol.ToolDiscovery {
@@ -597,6 +588,6 @@ func cloneToolDiscovery(input *protocol.ToolDiscovery) *protocol.ToolDiscovery {
 		return nil
 	}
 	output := *input
-	output.Keywords = append([]string(nil), input.Keywords...)
+	output.Keywords = slices.Clone(input.Keywords)
 	return &output
 }

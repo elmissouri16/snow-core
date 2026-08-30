@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -682,7 +683,7 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		goal, _ := s.app.GoalState()
 		if goal != nil {
-			info.Goal = &protocol.RPCGoalSummary{GoalID: goal.GoalID, Status: goal.Status, BlockedReason: goal.BlockedReason, TokensUsed: goal.TokensUsed, TokenBudget: goal.TokenBudget, EstimatedCosts: append([]protocol.Cost(nil), goal.EstimatedCosts...)}
+			info.Goal = &protocol.RPCGoalSummary{GoalID: goal.GoalID, Status: goal.Status, BlockedReason: goal.BlockedReason, TokensUsed: goal.TokensUsed, TokenBudget: goal.TokenBudget, EstimatedCosts: slices.Clone(goal.EstimatedCosts)}
 		}
 		steering, followUps := s.app.Agent.PendingInputs().Counts()
 		info.PendingInputs = protocol.RPCPendingInputCounts{Steering: steering, FollowUp: followUps, Total: steering + followUps}
@@ -733,9 +734,7 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 	s.mu.Unlock()
 
 	s.write(Response{ID: req.ID, Type: "response", Command: "prompt", Success: true})
-	s.promptWG.Add(1)
-	go func() {
-		defer s.promptWG.Done()
+	s.promptWG.Go(func() {
 		var err error
 		switch {
 		case len(req.Content) > 0 && req.Mode != "":
@@ -782,7 +781,7 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 			s.cancel = nil
 		}
 		s.mu.Unlock()
-	}()
+	})
 	return nil
 }
 

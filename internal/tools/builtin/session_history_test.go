@@ -82,7 +82,7 @@ func TestSessionHistoryToolsSearchCaptureAndLimit(t *testing.T) {
 
 	reference := NewSessionReference(engine, binding)
 	args, _ := json.Marshal(map[string]any{"session_id": priorID, "branch_id": "main", "tip_id": tip, "max_bytes": 4096})
-	for i := 0; i < maxSessionReferencesPerBranch; i++ {
+	for i := range maxSessionReferencesPerBranch {
 		result, err = reference.Run(context.Background(), args, nil)
 		if err != nil || result.IsError {
 			t.Fatalf("reference %d = %+v, %v", i, result, err)

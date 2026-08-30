@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -87,7 +88,7 @@ func (c *mockChild) IsRunning() bool { return c.running.Load() }
 func (c *mockChild) Messages() ([]protocol.Message, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]protocol.Message(nil), c.messages...), nil
+	return slices.Clone(c.messages), nil
 }
 func (c *mockChild) ContextMessages() ([]protocol.Message, error) { return c.Messages() }
 func (c *mockChild) Usage() (protocol.Usage, error)               { return protocol.Usage{}, nil }

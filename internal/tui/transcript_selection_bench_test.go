@@ -27,9 +27,11 @@ func BenchmarkTranscriptSelectionDragFrame(b *testing.B) {
 	m.transcriptSelection.pressActive = true
 	m.cacheTranscriptSelectionView()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		point := transcriptSelectionPoint{row: 5000 + i%(m.transcript.Height-1), col: i % m.transcript.Width}
+	frame := 0
+	for b.Loop() {
+		point := transcriptSelectionPoint{row: 5000 + frame%(m.transcript.Height-1), col: frame % m.transcript.Width}
 		m.updateTranscriptSelectionFocus(point)
 		_ = m.View()
+		frame++
 	}
 }

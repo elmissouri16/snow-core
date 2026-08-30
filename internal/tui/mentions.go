@@ -5,7 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -59,7 +59,7 @@ func discoverMentionFiles(cwd string) []string {
 		}
 		return nil
 	})
-	sort.Strings(files)
+	slices.Sort(files)
 	return files
 }
 
@@ -94,8 +94,8 @@ func matchMentionFiles(files []string, query string) []string {
 			baseMatches = append(baseMatches, path)
 		}
 	}
-	sort.Strings(pathMatches)
-	sort.Strings(baseMatches)
+	slices.Sort(pathMatches)
+	slices.Sort(baseMatches)
 	matches := append(pathMatches, baseMatches...)
 	if len(matches) > mentionResultLimit {
 		matches = matches[:mentionResultLimit]

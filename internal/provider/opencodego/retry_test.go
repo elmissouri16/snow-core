@@ -54,8 +54,7 @@ func TestChatKeepsPaymentLimitTerminal(t *testing.T) {
 	p, _ := New(Config{BaseURL: server.URL, APIKey: "secret", HTTPClient: server.Client(), DefaultModel: "m"})
 	stream, _ := p.Chat(context.Background(), auth.Credential{}, protocol.ChatRequest{Model: protocol.Model{ID: "m"}})
 	event, _ := stream.Next(context.Background())
-	var limited providerpkg.UsageLimitedError
-	if !errors.As(event.Err, &limited) {
+	if _, ok := errors.AsType[providerpkg.UsageLimitedError](event.Err); !ok {
 		t.Fatalf("event=%+v", event)
 	}
 	if _, ok := providerpkg.RetryAdviceFor(event.Err); ok {

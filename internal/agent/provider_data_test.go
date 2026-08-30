@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -73,7 +74,7 @@ func TestImageToolResultPersistsIntoProviderFollowup(t *testing.T) {
 		runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
 			return tools.ToolResult{Content: []protocol.ContentBlock{
 				protocol.NewTextBlock("MCP screenshot"),
-				{Type: protocol.BlockImage, MIMEType: "image/png", Data: append([]byte(nil), image...)},
+				{Type: protocol.BlockImage, MIMEType: "image/png", Data: slices.Clone(image)},
 			}}
 		},
 	}

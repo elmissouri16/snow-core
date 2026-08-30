@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,7 +11,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -289,7 +290,7 @@ func (g *Glob) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if len(paths) == 0 {
 		return tools.TextResult(fmt.Sprintf("no files match %q", a.Pattern)), nil
 	}
-	sort.Strings(paths)
+	slices.Sort(paths)
 	var out strings.Builder
 	for _, path := range paths {
 		out.WriteString(path)
@@ -409,7 +410,7 @@ func walkSearchFiles(ctx context.Context, root string, guard *PathGuard, opts se
 		if len(entries) > maxSearchDirectoryEntries {
 			return fmt.Errorf("directory %q exceeds %d entry search limit", absDir, maxSearchDirectoryEntries)
 		}
-		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		slices.SortFunc(entries, func(a, b os.DirEntry) int { return cmp.Compare(a.Name(), b.Name()) })
 		for _, entry := range entries {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -489,7 +490,7 @@ func hardSearchExcluded(path, policyRoot string) bool {
 	if err != nil {
 		return true
 	}
-	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+	for part := range strings.SplitSeq(filepath.ToSlash(rel), "/") {
 		if strings.EqualFold(part, ".git") {
 			return true
 		}
@@ -624,12 +625,7 @@ func readBoundedSearchLine(ctx context.Context, reader *bufio.Reader, maxBytes i
 func isTextReader(f io.Reader) bool {
 	buf := make([]byte, 8192)
 	n, _ := f.Read(buf)
-	for _, c := range buf[:n] {
-		if c == 0 {
-			return false
-		}
-	}
-	return true
+	return !slices.Contains(buf[:n], 0)
 }
 
 func truncate(s string, n int) string {

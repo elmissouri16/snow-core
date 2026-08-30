@@ -202,7 +202,7 @@ func TestBrokerCancelDeniesAndPublishesNext(t *testing.T) {
 	b.SetPublisher(pub)
 	b.EnableManual()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	ch := make(chan Decision, 1)
 	go func() {

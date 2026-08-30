@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"unicode/utf8"
 
@@ -141,7 +142,7 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		m.mu.Unlock()
 		return err
 	}
-	plugins := append([]*managedPlugin(nil), m.plugins...)
+	plugins := slices.Clone(m.plugins)
 	m.initialized = true
 	m.mu.Unlock()
 	for _, p := range plugins {
@@ -268,7 +269,7 @@ func (m *Manager) Subscribe(t publicplugin.EventType, fn publicplugin.EventHandl
 func (m *Manager) Diagnostics() []Diagnostic {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]Diagnostic(nil), m.diagnostics...)
+	return slices.Clone(m.diagnostics)
 }
 
 // Close unregisters capabilities and closes resources in reverse load order.
@@ -289,7 +290,7 @@ func (m *Manager) Close(ctx context.Context) error {
 	}
 	m.closed = true
 	m.ready = false
-	plugins := append([]*managedPlugin(nil), m.plugins...)
+	plugins := slices.Clone(m.plugins)
 	m.mu.Unlock()
 	var errs []error
 	for i := len(plugins) - 1; i >= 0; i-- {
@@ -405,7 +406,7 @@ func (r *scopedRegistrar) RegisterTool(def publicplugin.ToolDefinition) error {
 		return err
 	}
 	tool := &goManagedTool{schema: protocol.ToolSchema{Name: name, Description: def.Description, Parameters: append(json.RawMessage(nil), def.Parameters...), Discovery: cloneDiscovery(def.Discovery)}, definition: def, manager: r.manager}
-	return r.manager.registry.RegisterDescriptor(tools.ToolDescriptor{Schema: tool.schema, Tool: tool, Source: tools.SourceGoPlugin, Owner: r.owner, PluginID: r.pluginID, OriginalName: def.Name, Risk: risk, Capabilities: append([]string(nil), def.Capabilities...)})
+	return r.manager.registry.RegisterDescriptor(tools.ToolDescriptor{Schema: tool.schema, Tool: tool, Source: tools.SourceGoPlugin, Owner: r.owner, PluginID: r.pluginID, OriginalName: def.Name, Risk: risk, Capabilities: slices.Clone(def.Capabilities)})
 }
 func (r *scopedRegistrar) Subscribe(t publicplugin.EventType, fn publicplugin.EventHandler) func() {
 	u := r.manager.Subscribe(t, fn)
@@ -516,7 +517,7 @@ func sanitizeEvent(ev protocol.AgentEvent) protocol.AgentEvent {
 	}
 	if ev.ToolRouting != nil {
 		routing := *ev.ToolRouting
-		routing.ToolIDs = append([]string(nil), routing.ToolIDs...)
+		routing.ToolIDs = slices.Clone(routing.ToolIDs)
 		ev.ToolRouting = &routing
 	}
 	if ev.Mode != nil {

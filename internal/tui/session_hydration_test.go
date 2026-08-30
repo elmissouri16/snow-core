@@ -126,7 +126,7 @@ func TestPaginatedHydrationBoundsMessageBlobPages(t *testing.T) {
 	buildAppForTest(t, m)
 	m.width, m.height = 100, 30
 	m.layout()
-	for i := 0; i < 5000; i++ {
+	for i := range 5000 {
 		message := protocol.NewAssistantMessage(fmt.Sprintf("bounded-%04d", i), m.app.Session.BranchTip(), "fake", "model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: "visible row"}}, protocol.StopStop, nil)
 		if err := m.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
 			t.Fatal(err)
@@ -204,7 +204,7 @@ func TestPaginatedHydrationMatchesLegacyProjection(t *testing.T) {
 	if err := fast.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: call.ID, Message: &call}); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < maxTranscriptEntries+25; i++ {
+	for i := range maxTranscriptEntries + 25 {
 		message := protocol.NewAssistantMessage(fmt.Sprintf("row-%04d", i), fast.app.Session.BranchTip(), "fake", "fake-model", []protocol.ContentBlock{{Type: protocol.BlockText, Text: fmt.Sprintf("row %04d", i)}}, protocol.StopStop, nil)
 		if err := fast.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
 			t.Fatal(err)
@@ -466,7 +466,7 @@ func TestModelHydrationLimitsRenderedRowsNotRawMessages(t *testing.T) {
 	if err := m.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: assistant.ID, Message: &assistant}); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < maxTranscriptEntries+10; i++ {
+	for i := range maxTranscriptEntries + 10 {
 		result := protocol.NewToolResultMessage(fmt.Sprintf("hidden-tool-%d", i), m.app.Session.BranchTip(), fmt.Sprintf("call-%d", i), "spawn_agent", []protocol.ContentBlock{protocol.NewTextBlock("hidden")}, false)
 		result.ToolDisplay = &protocol.ToolDisplay{Started: true, Output: `{"path":"/root/child"}`}
 		if err := m.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: result.ID, Message: &result}); err != nil {
@@ -585,7 +585,7 @@ func TestModelAbortOnEscDuringActiveRun(t *testing.T) {
 	m.width, m.height = 100, 30
 	m.busy = true
 	m.runStartedAt = time.Unix(100, 0)
-	cancelled, cancel := context.WithCancel(context.Background())
+	cancelled, cancel := context.WithCancel(t.Context())
 	m.cancelRun = cancel
 	m.layout()
 
@@ -613,7 +613,7 @@ func TestModelAbortOnEscDuringActiveRun(t *testing.T) {
 func TestActiveToolProgressBufferReleasedAtCompletion(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolStart, ToolCallID: "call", ToolName: "read", Message: "running"})
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolProgress, ToolCallID: "call", ToolName: "read", Message: strings.Repeat("x", 256)})
 	}
 	if m.activeToolRows != 1001 || m.activeToolText.Len() == 0 {

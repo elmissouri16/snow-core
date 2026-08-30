@@ -30,7 +30,7 @@ type EventRecord struct {
 // Status is a cheap snapshot of the recorder state.
 type Status struct {
 	Enabled       bool      `json:"enabled"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
+	StartedAt     time.Time `json:"started_at,omitzero"`
 	EventCount    int       `json:"event_count"`
 	RetainedBytes int       `json:"retained_bytes"`
 	DroppedEvents uint64    `json:"dropped_events"`

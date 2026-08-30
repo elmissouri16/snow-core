@@ -156,12 +156,10 @@ func TestConcurrentFirstSearchesShareLazyIndexBuild(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 8)
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := router.Search(context.Background(), "catalog", 5)
 			errs <- err
-		}()
+		})
 	}
 	<-started
 	close(release)
@@ -214,7 +212,7 @@ func TestCloseDoesNotWaitForLazyIndexBuild(t *testing.T) {
 
 func TestSearchCancellationAndClose(t *testing.T) {
 	router := New([]tools.ToolDescriptor{deferredDescriptor("one", "catalog", "Find catalog data.")})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := router.Search(ctx, "catalog", 5); err == nil {
 		t.Fatal("expected canceled search")
@@ -369,7 +367,7 @@ func TestNamespaceFilterDoesNotChangeMetadataScores(t *testing.T) {
 		deferredDescriptor("large_target", "large", "Shared needle capability.", "needle"),
 		deferredDescriptor("small_target", "small", "Shared needle capability.", "needle"),
 	}
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		catalog = append(catalog, deferredDescriptor(fmt.Sprintf("large_filler_%02d", i), "large", "Unrelated filler capability.", "filler"))
 	}
 	router := New(catalog)
@@ -558,13 +556,13 @@ func TestConcurrentSearchAndRefresh(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			_, _ = router.Search(context.Background(), "find records", 20)
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			if err := router.Refresh(catalogB); err != nil {
 				t.Errorf("refresh B: %v", err)
 				return
@@ -606,7 +604,7 @@ func BenchmarkSearch(b *testing.B) {
 	for _, size := range []int{100, 1000, 5000} {
 		b.Run(fmt.Sprintf("tools_%d", size), func(b *testing.B) {
 			catalog := make([]tools.ToolDescriptor, 0, size)
-			for i := 0; i < size; i++ {
+			for i := range size {
 				namespace := fmt.Sprintf("catalog_%02d", i%10)
 				catalog = append(catalog, deferredDescriptor(fmt.Sprintf("catalog_tool_%d", i), namespace, "Find and update catalog inventory records.", "inventory", "record"))
 			}
@@ -618,7 +616,7 @@ func BenchmarkSearch(b *testing.B) {
 
 			b.Run("global", func(b *testing.B) {
 				b.ReportAllocs()
-				for i := 0; i < b.N; i++ {
+				for b.Loop() {
 					router.mu.RLock()
 					_, err := router.searchToolIndex(context.Background(), "catalog 03 update inventory", nil, 20)
 					router.mu.RUnlock()
@@ -629,7 +627,7 @@ func BenchmarkSearch(b *testing.B) {
 			})
 			b.Run("namespace_first", func(b *testing.B) {
 				b.ReportAllocs()
-				for i := 0; i < b.N; i++ {
+				for b.Loop() {
 					if _, err := router.Search(context.Background(), "catalog 03 update inventory", 20); err != nil {
 						b.Fatal(err)
 					}

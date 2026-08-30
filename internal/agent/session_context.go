@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -117,7 +118,7 @@ func (a *Agent) enqueueMailboxAdmitted(message protocol.AgentMessage) error {
 		a.mailboxMu.Unlock()
 		return nil
 	}
-	batch := append([]protocol.AgentMessage(nil), a.mailbox...)
+	batch := slices.Clone(a.mailbox)
 	a.mailbox = nil
 	a.mailboxBytes = 0
 	a.mailboxMu.Unlock()
@@ -148,7 +149,7 @@ func (a *Agent) drainMailboxForProvider() error {
 	a.mailboxPersistMu.Lock()
 	defer a.mailboxPersistMu.Unlock()
 	a.mailboxMu.Lock()
-	batch := append([]protocol.AgentMessage(nil), a.mailbox...)
+	batch := slices.Clone(a.mailbox)
 	a.mailbox = nil
 	a.mailboxBytes = 0
 	a.mailboxMu.Unlock()
@@ -167,7 +168,7 @@ func (a *Agent) drainMailbox() error {
 	a.mailboxPersistMu.Lock()
 	defer a.mailboxPersistMu.Unlock()
 	a.mailboxMu.Lock()
-	batch := append([]protocol.AgentMessage(nil), a.mailbox...)
+	batch := slices.Clone(a.mailbox)
 	a.mailbox = nil
 	a.mailboxBytes = 0
 	a.mailboxMu.Unlock()
@@ -208,7 +209,7 @@ func mailboxMessageBytes(message protocol.AgentMessage) int {
 
 func (a *Agent) requeueMailbox(batch []protocol.AgentMessage) {
 	a.mailboxMu.Lock()
-	a.mailbox = append(append([]protocol.AgentMessage(nil), batch...), a.mailbox...)
+	a.mailbox = append(slices.Clone(batch), a.mailbox...)
 	for _, message := range batch {
 		a.mailboxBytes += mailboxMessageBytes(message)
 	}
@@ -229,7 +230,7 @@ func (a *Agent) finishTurnMailbox(mark func()) error {
 	a.mu.Lock()
 	mark()
 	a.mu.Unlock()
-	batch := append([]protocol.AgentMessage(nil), a.mailbox...)
+	batch := slices.Clone(a.mailbox)
 	a.mailbox = nil
 	a.mailboxBytes = 0
 	a.mailboxMu.Unlock()

@@ -542,9 +542,7 @@ func TestLazyAcquireSharesConnectionAndIdleDisconnects(t *testing.T) {
 	releases := make(chan func(), 2)
 	var wg sync.WaitGroup
 	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			session, release, err := rt.acquire(context.Background())
 			if err != nil {
@@ -553,7 +551,7 @@ func TestLazyAcquireSharesConnectionAndIdleDisconnects(t *testing.T) {
 			}
 			sessions <- session
 			releases <- release
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -658,7 +656,7 @@ func TestCanceledLazyWaiterStillGetsIdleDisconnect(t *testing.T) {
 	defer manager.Close()
 	rt := manager.runtimes["canceled"]
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	waiter := make(chan error, 1)
 	go func() {
 		_, _, err := rt.acquire(ctx)

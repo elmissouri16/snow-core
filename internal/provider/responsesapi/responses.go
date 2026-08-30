@@ -157,8 +157,8 @@ func SanitizeErrorText(value string, maxBytes int, secrets ...string) string {
 	for _, secret := range secrets {
 		limit := min(len(secret), len(value))
 		for size := limit; size >= 1; size-- {
-			if strings.HasSuffix(value, secret[:size]) {
-				value = strings.TrimSuffix(value, secret[:size]) + "[redacted]"
+			if before, ok := strings.CutSuffix(value, secret[:size]); ok {
+				value = before + "[redacted]"
 				break
 			}
 		}

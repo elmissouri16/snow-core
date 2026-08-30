@@ -1,6 +1,8 @@
 package rpc
 
 import (
+	"slices"
+
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -15,7 +17,7 @@ func (s *Server) handleMCPServers(req Request) error {
 		servers = append(servers, protocol.RPCMCPServer{
 			ID: st.ID, Transport: st.Transport, Connected: st.Connected,
 			ProtocolVersion: st.ProtocolVersion, ServerName: st.ServerName, ServerVersion: st.ServerVersion,
-			Capabilities: append([]string(nil), st.Capabilities...), ToolCount: st.ToolCount, Message: st.Message,
+			Capabilities: slices.Clone(st.Capabilities), ToolCount: st.ToolCount, Message: st.Message,
 			State: st.State, Cached: st.Cached, CachedAt: st.CachedAt, LastUsedAt: st.LastUsedAt,
 		})
 	}

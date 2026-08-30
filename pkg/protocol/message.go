@@ -7,6 +7,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 )
 
@@ -59,7 +60,7 @@ type ContentBlock struct {
 	Text string `json:"text,omitempty"`
 	// PlanComplete distinguishes an official completed plan from interrupted
 	// plan-shaped output. Providers only reconstruct tags for completed plans.
-	PlanComplete bool `json:"plan_complete,omitempty"`
+	PlanComplete bool `json:"plan_complete,omitzero"`
 
 	// Image
 	MIMEType string `json:"mime_type,omitempty"`
@@ -98,8 +99,7 @@ func (c *Cost) Clone() *Cost {
 	if c == nil {
 		return nil
 	}
-	out := *c
-	return &out
+	return new(*c)
 }
 
 // Usage tracks token usage for one provider request or an aggregate. Input is
@@ -111,12 +111,12 @@ func (c *Cost) Clone() *Cost {
 type Usage struct {
 	Input          int   `json:"input"`
 	Output         int   `json:"output"`
-	Reasoning      int   `json:"reasoning,omitempty"`
+	Reasoning      int   `json:"reasoning,omitzero"`
 	CacheRead      int   `json:"cache_read"`
-	CacheReadKnown bool  `json:"cache_read_known,omitempty"`
+	CacheReadKnown bool  `json:"cache_read_known,omitzero"`
 	CacheWrite     int   `json:"cache_write"`
 	Total          int   `json:"total_tokens"`
-	Requests       int   `json:"requests,omitempty"`
+	Requests       int   `json:"requests,omitzero"`
 	Cost           *Cost `json:"cost,omitempty"`
 }
 
@@ -189,10 +189,7 @@ func (u Usage) CostFor(pricing *ModelPricing) *Cost {
 	if pricing == nil {
 		return nil
 	}
-	uncached := u.Input - u.CacheRead - u.CacheWrite
-	if uncached < 0 {
-		uncached = 0
-	}
+	uncached := max(u.Input-u.CacheRead-u.CacheWrite, 0)
 	currency := pricing.Currency
 	if currency == "" {
 		currency = "USD"
@@ -217,11 +214,11 @@ func (u Usage) CostFor(pricing *ModelPricing) *Cost {
 // permission denial). Progress contains the non-empty progress rows shown before
 // completion. StartMessage is normally a file path or shell command.
 type ToolDisplay struct {
-	Started      bool     `json:"started,omitempty"`
+	Started      bool     `json:"started,omitzero"`
 	StartMessage string   `json:"start_message,omitempty"`
 	Progress     []string `json:"progress,omitempty"`
 	Output       string   `json:"output,omitempty"`
-	DurationMS   int64    `json:"duration_ms,omitempty"`
+	DurationMS   int64    `json:"duration_ms,omitzero"`
 }
 
 // ToolTranscript is a branch-scoped presentation entry for tool activity that
@@ -229,7 +226,7 @@ type ToolDisplay struct {
 // skill activation performed by the harness before a provider request.
 type ToolTranscript struct {
 	ToolName string      `json:"tool_name"`
-	IsError  bool        `json:"is_error,omitempty"`
+	IsError  bool        `json:"is_error,omitzero"`
 	Display  ToolDisplay `json:"display"`
 }
 
@@ -239,7 +236,7 @@ func (d *ToolDisplay) Clone() *ToolDisplay {
 		return nil
 	}
 	out := *d
-	out.Progress = append([]string(nil), d.Progress...)
+	out.Progress = slices.Clone(d.Progress)
 	return &out
 }
 
@@ -261,7 +258,7 @@ type Message struct {
 	// Tool result metadata
 	ToolCallID  string       `json:"tool_call_id,omitempty"`
 	ToolName    string       `json:"tool_name,omitempty"`
-	IsError     bool         `json:"is_error,omitempty"`
+	IsError     bool         `json:"is_error,omitzero"`
 	ToolDisplay *ToolDisplay `json:"tool_display,omitempty"`
 }
 
@@ -273,7 +270,7 @@ func (m Message) Clone() Message {
 	out.Content = make([]ContentBlock, len(m.Content))
 	for i, block := range m.Content {
 		out.Content[i] = block
-		out.Content[i].Data = append([]byte(nil), block.Data...)
+		out.Content[i].Data = slices.Clone(block.Data)
 		out.Content[i].Arguments = append(json.RawMessage(nil), block.Arguments...)
 	}
 	out.Usage = m.Usage.Clone()

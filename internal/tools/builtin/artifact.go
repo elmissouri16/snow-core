@@ -86,7 +86,7 @@ func artifactLineWindow(text string, offset, limit int) (string, int, int, int) 
 		return "", startLine, startLine, total
 	}
 	startByte := 0
-	for line := 0; line < startLine; line++ {
+	for range startLine {
 		next := strings.IndexByte(text[startByte:], '\n')
 		startByte += next + 1
 	}

@@ -89,8 +89,7 @@ func (rt *serverRuntime) acquire(ctx context.Context) (*sdkmcp.ClientSession, fu
 			}
 			rt.activeCalls++
 			rt.mu.Unlock()
-			var once sync.Once
-			return session, func() { once.Do(rt.release) }, nil
+			return session, sync.OnceFunc(rt.release), nil
 		case stateConnecting, stateDisconnecting:
 			attempt := rt.connectAttempt
 			done := rt.transitionDone

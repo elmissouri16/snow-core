@@ -1,12 +1,24 @@
 package snowsdk
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestDebugStatusJSONOmitsZeroStart(t *testing.T) {
+	data, err := json.Marshal(DebugStatus{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte(`"started_at"`)) {
+		t.Fatalf("zero debug status unexpectedly includes started_at: %s", data)
+	}
+}
 
 func TestSDKDebugControlsAndDump(t *testing.T) {
 	t.Setenv("SNOW_HOME", t.TempDir())
