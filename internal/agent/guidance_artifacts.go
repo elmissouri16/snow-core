@@ -115,6 +115,13 @@ func (a *Agent) requestSystemPrompt() string {
 	return a.requestSystemPromptForTools(a.requestToolSchemas())
 }
 
+func defaultModeContext() protocol.InternalContextFragment {
+	return protocol.InternalContextFragment{
+		Source: "collaboration-mode",
+		Text:   "The current turn is in Default collaboration mode. Plan Mode is not active; execute the user request with the available tools, subject to other instructions and permission gates.",
+	}
+}
+
 func (a *Agent) requestSystemPromptForTools(schemas []protocol.ToolSchema) string {
 	a.mu.RLock()
 	active := make(map[string]string, len(a.activeSkills))

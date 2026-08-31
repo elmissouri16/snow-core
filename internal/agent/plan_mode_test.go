@@ -97,6 +97,55 @@ func TestDefaultPromptHandoffAutomaticallyClearsActiveSkills(t *testing.T) {
 	requireSkillClearMarker(t, st)
 }
 
+func TestAttachedDefaultModeReassertsAfterPlanProviderContinuity(t *testing.T) {
+	opaque := protocol.ContentBlock{
+		Type: protocol.BlockProviderData,
+		Name: "plan-reasoning",
+		Data: []byte(`{"type":"reasoning","id":"plan-reasoning","summary":[],"encrypted_content":"opaque-plan-state"}`),
+	}
+	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{
+			{Type: protocol.EvStreamProviderData, ProviderData: &opaque},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+		},
+		{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}}
+	a := newPlanAgent(t, p, nil, session.NewMemoryStore(session.Options{}))
+	if err := a.Prompt(t.Context(), "Prepare the implementation plan."); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.PromptWithMode(t.Context(), "Go ahead and implement it.", protocol.ModeDefault); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.requests) != 2 {
+		t.Fatalf("provider requests=%d want 2", len(p.requests))
+	}
+	implementation := p.requests[1]
+	if !strings.Contains(implementation.System, "# Default Mode") || strings.Contains(implementation.System, "# Plan Mode") {
+		t.Fatalf("attached Default system prompt = %q", implementation.System)
+	}
+	var retainedContinuity bool
+	for _, message := range implementation.Messages {
+		for _, block := range message.Content {
+			if block.Type == protocol.BlockProviderData && block.Name == opaque.Name {
+				retainedContinuity = true
+			}
+		}
+	}
+	if !retainedContinuity {
+		t.Fatal("complete Plan-turn provider continuity was not retained")
+	}
+	var reasserted bool
+	for _, fragment := range implementation.InternalContext {
+		if fragment.Source == "collaboration-mode" && strings.Contains(fragment.Text, "Default collaboration mode") && strings.Contains(fragment.Text, "Plan Mode is not active") {
+			reasserted = true
+		}
+	}
+	if !reasserted {
+		t.Fatalf("Default mode was not reasserted after provider continuity: %+v", implementation.InternalContext)
+	}
+}
+
 func TestPlanModeParsesEventsAndPersistsOrderedBlocks(t *testing.T) {
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
 		{Type: protocol.EvStreamTextDelta, Text: "Intro\n<proposed"},

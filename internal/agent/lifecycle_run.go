@@ -368,6 +368,17 @@ func boundRoutingMessage(message string, max int) string {
 	return message[:max] + "…"
 }
 
+func hasProviderContinuity(messages []protocol.Message) bool {
+	for _, message := range messages {
+		for _, block := range message.Content {
+			if block.Type == protocol.BlockProviderData {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (a *Agent) run(ctx context.Context) error {
 	stableTools := a.requestToolSchemasWithTurnRouting(false)
 	stableSystem := a.requestSystemPromptForTools(stableTools)
@@ -413,6 +424,14 @@ func (a *Agent) run(ctx context.Context) error {
 		internalContext, err := a.goalInternalContext()
 		if err != nil {
 			return fmt.Errorf("agent: load goal context: %w", err)
+		}
+		// Reassert Default mode after provider-private reasoning continuity. Opaque
+		// state was produced under the mode active for its owning turn and may retain
+		// that instruction context across an attached Plan-to-Default transition.
+		// Internal context is encoded after history by every provider adapter while
+		// the complete owning turns and their private state remain intact.
+		if a.capturedTurnMode() == protocol.ModeDefault && hasProviderContinuity(msgs) {
+			internalContext = append(internalContext, defaultModeContext())
 		}
 		if reminder := a.takeRepeatedToolReminder(); reminder != "" {
 			internalContext = append(internalContext, protocol.InternalContextFragment{Source: "loop-guard", Text: reminder})
