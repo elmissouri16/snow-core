@@ -1342,6 +1342,13 @@ Node.js 22+ ESM/TypeScript SDKs, other non-Go hosts, and IDE bridges. They
 invoke an installed/explicit Snow binary and do not download one. Go hosts
 should prefer `pkg/snowsdk`. See `docs/rpc.md` and `docs/language-sdks.md`.
 
+The independent experimental `desktop/` client requires both interaction
+capabilities, launches its Snow child in `ask`, and keeps permission decisions
+and model-requested answers in separate trusted, request-correlated host cards.
+It fails closed on malformed or overflow interactions, keeps extensions
+disabled, and supports searchable provider/model controls plus bounded manual
+model IDs without moving credentials or auth policy into the Desktop.
+
 ### Language SDKs
 
 Zero-runtime-dependency Python 3.9+ async and Node.js 22+ ESM/TypeScript

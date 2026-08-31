@@ -548,17 +548,23 @@ The Python and JavaScript/TypeScript SDKs and the experimental macOS desktop
 start an external Snow binary directly without a shell. They do not download
 binaries or accept API keys as process arguments; credentials should come from
 Snow's auth store or a deliberately controlled inherited environment. The
-desktop currently forces `deny`, disables plugins, MCP, skills, and subagents,
-and restores only surface-safe user/assistant text from Snow's durable private
-SQLite session. It still inherits the user's OS privileges and environment and
-is not a sandbox.
+desktop uses `ask`, requires the `permission_interaction` and `user_input` RPC
+capabilities, and resolves each request through a separate trusted, correlated
+host card. It keeps a request visible until Snow acknowledges the exact reply, fails
+closed on malformed or excess interactions, disables plugins, MCP, skills, and
+subagents, and restores only surface-safe user/assistant text from
+Snow's durable private SQLite session. It still inherits the user's OS
+privileges and environment and is not a sandbox.
 
-- default to `deny`;
+- default unattended clients to `deny`; use `ask` only with a continuously
+  drained, trusted interaction broker;
 - pass the smallest built-in tool allowlist;
 - disable unused plugins, MCP, skills, and subagents;
+- keep model-requested input visually and logically separate from permission
+  authorization;
 - set context deadlines;
-- consume error, usage, and tool events;
-- close sessions and processes cleanly;
+- consume error, usage, tool, permission, and user-input events;
+- close sessions and processes cleanly so pending brokers reject safely;
 - move to `allow` only when the embedding host supplies external isolation and
   intends the resulting authority.
 

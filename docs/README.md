@@ -27,8 +27,10 @@ for a subject.
   readiness, permissions, and a [standalone Go module](../examples/sdk).
 - [JSONL RPC](rpc.md) — versioned framing, every command, responses/events,
   ordering, interactive input, goals, subagents, shutdown, and schemas.
-- [Experimental macOS desktop](../desktop/README.md) — basic independent GPUI
-  client, external-process lifecycle, durable session reuse, and current limits.
+- [Experimental macOS desktop](../desktop/README.md) — independent GPUI client,
+  trusted permission/model-input interactions, searchable provider/model
+  controls, external-process lifecycle, durable session reuse, and current
+  limits.
 - [Python and JavaScript/TypeScript SDKs](language-sdks.md) — typed local
   clients, lifecycle, secure defaults, external-binary policy, and runnable
   [Python](../examples/rpc/python) and

@@ -11,10 +11,14 @@ The current milestone intentionally stays small:
   when the user picks another provider;
 - keeps a normal Snow SQLite session, pins its canonical path across provider
   restarts, and restores surface-safe text history through RPC;
-- loads the active provider's model catalog and switches models without
-  restarting Snow;
-- validates the Snow JSONL RPC v1 handshake and required capabilities;
+- loads the active provider's model catalog, offers searchable provider/model
+  controls and bounded manual model IDs, and switches models without restarting
+  Snow;
+- validates the Snow JSONL RPC v1 handshake and requires both trusted
+  interaction capabilities;
 - submits one root prompt at a time;
+- resolves ask-mode tool permissions and model-requested questions through
+  separate trusted, request-correlated cards;
 - streams root assistant text and basic tool status;
 - distinguishes prompt admission, `turn_done`, and definitive
   `prompt_completed` status;
@@ -75,7 +79,7 @@ The desktop client defaults to:
 
 ```text
 --provider fake
---permission deny
+--permission ask
 --thinking off
 --no-plugins
 --no-mcp
@@ -110,8 +114,9 @@ SNOW_PROVIDER=opencode-go \
 cargo run
 ```
 
-The prompt composer’s provider picker can switch between Fake, OpenCode Zen,
-OpenCode Go, ChatGPT, and the legacy OpenAI-compatible profile. Authentication and endpoint
+The prompt composer’s searchable provider picker can switch between Fake,
+OpenCode Zen, OpenCode Go, ChatGPT, and the legacy OpenAI-compatible profile.
+Search matches labels and provider IDs. Authentication and endpoint
 configuration still belong to Snow; the desktop never reads or writes provider
 credentials. OpenCode Zen is the easiest streaming proof because its maintained
 free catalog supports anonymous use when available.
@@ -139,17 +144,23 @@ the window; and one anchored prompt surface contains composition plus the
 provider, model, and Send/Stop controls. Tool activity appears contextually
 above the prompt only after a tool has run.
 
-- The composer **Provider** picker selects Fake, Zen Free, OpenCode Go,
-  ChatGPT, or Compatible. Switching is available only while idle, shuts down
-  and reaps the current Snow process before starting the new one, resumes the
-  exact active session, and replaces the visible transcript with restored
-  surface-safe history. If startup fails, the old transcript is retained and
-  the selected provider can be retried.
-- The composer **Model** picker shows the active provider's live Snow catalog.
-  A direct selection uses `set_model`, does not restart Snow, and is disabled
-  while a prompt or another model change is active. Model changes include a
-  compatible thinking level atomically, falling back to the model's advertised
-  default or Off when the previous level is unsupported.
+- The composer **Provider** picker searches Fake, Zen Free, OpenCode Go,
+  ChatGPT, and Compatible by display label or provider ID. In both searchable
+  pickers, Up/Down moves the highlighted row, Enter selects it, and Escape
+  closes the popover. Switching is
+  available only while idle, shuts down and reaps the current Snow process
+  before starting the new one, resumes the exact active session, and replaces
+  the visible transcript with restored surface-safe history. If startup fails,
+  the old transcript is retained and the selected provider can be retried.
+- The searchable composer **Model** picker shows the active provider's live
+  Snow catalog and matches display name, model ID, or provider. When discovery
+  is empty or has no exact ID match, a trimmed manual ID of at most 256
+  characters can still be submitted. A discovered selection uses `set_model`,
+  does not restart Snow, and includes a compatible thinking level atomically,
+  falling back to the model's advertised default or Off when the previous level
+  is unsupported. Manual IDs are selected atomically with thinking Off because
+  no discovery metadata is available. Model changes remain disabled while a
+  prompt or another model change is active.
 - The composer **Thinking** picker sits immediately to the right of the model
   picker and shows only the active model's advertised effort levels. Off is
   always available. An off-only model keeps the current setting visible but
@@ -168,9 +179,21 @@ above the prompt only after a tool has run.
 - **Send** or **Enter** submits the composer text when connected, restored, and
   idle. The prompt input grows from one to six rows; secondary Enter remains
   available for a line break.
-- While a turn is active, **Stop** replaces Send and issues one Snow RPC
-  `abort` command. Repeated abort requests remain gated until terminal
-  completion.
+- A tool authorization request appears in a trusted card above the composer,
+  never as transcript content. The card shows bounded tool, risk, reason, path,
+  and argument details and offers **Allow once**, **Allow for session**,
+  **Always allow**, and **Deny**. It stays visible in a submitting state until
+  Snow acknowledges the exact correlated command.
+- Model-requested input uses a separate trusted card with one question at a
+  time, option descriptions, an explicit Other/free-form path, preserved
+  per-question drafts, previous/next navigation, and ordered answer validation.
+  Declining the form rejects only the model-input request and never authorizes a
+  tool. One additional interaction may queue; malformed or further overlapping
+  requests fail closed by stopping the turn.
+- While a turn is active or blocked on either trusted interaction, **Stop**
+  replaces Send and issues one Snow RPC `abort` command. Repeated abort requests
+  remain gated until terminal completion; ordinary prompt and configuration
+  actions remain disabled while an interaction is pending.
 - Closing the final window synchronously performs bounded Snow shutdown during
   application teardown; timeout fallback force-stops and reaps the child before
   the desktop process exits.
@@ -213,14 +236,18 @@ Expected behavior:
 
 1. the window opens as one conversation canvas with a compact Starting status bar;
 2. the status bar changes to Connected without duplicating provider/model metadata;
-3. provider and model pickers remain attached to the prompt surface and open above it;
-4. entering a prompt adds a right-aligned user message in the conversation;
-5. fake-provider completion replaces Stop with Send and returns the composer to Ready;
-6. tool rows remain absent until activity occurs and then appear above the prompt;
-7. the top-bar session control opens a transient current-session branch menu;
-8. session rename, branch selection, and branch fork remain disabled during prompts;
-9. provider/model controls retain their existing idle-state gates;
-10. closing the window leaves no Snow child process.
+3. provider and model pickers remain attached to the prompt surface, open above
+   it, and filter as text is entered;
+4. a missing discovered model can be entered as a bounded manual model ID;
+5. entering a prompt adds a right-aligned user message in the conversation;
+6. fake-provider completion replaces Stop with Send and returns the composer to Ready;
+7. permission and model-input fixtures render separate trusted cards above the
+   composer, retain the card while submitting, and keep Stop available;
+8. tool rows remain absent until activity occurs and then appear above the prompt;
+9. the top-bar session control opens a transient current-session branch menu;
+10. session, provider, model, and thinking changes remain disabled during
+    prompts and trusted interactions;
+11. closing the window leaves no Snow child process.
 
 ## Security
 
@@ -228,10 +255,14 @@ Snow Desktop's subprocess boundary improves lifecycle management; it is **not a
 sandbox**. Snow, Bash tools, plugins, MCP servers, and subagents run with the
 user's operating-system privileges when enabled.
 
-This milestone deliberately uses `--permission deny` and disables extensions.
-Before adding `--permission ask`, the desktop client must implement a trusted,
-correlated permission surface that cannot be confused with model output. Model
-questions and tool authorization must remain separate interactions.
+This milestone uses `--permission ask` and disables plugins, MCP, skills, and
+subagents. Startup requires both `permission_interaction` and `user_input`.
+Permission and model-input requests are decoded into separate typed host state,
+never transcript messages; replies are correlated by host command and Snow
+request IDs, and controls stay disabled until the exact acknowledgement. A
+malformed, stale, dismissed, or excess request is rejected or terminates the
+transport fail closed rather than authorizing or silently dropping it. Model
+questions can never resolve tool authorization.
 
 The stderr reader drains diagnostics into a bounded event channel. The client
 does not log the inherited environment or put provider credentials in process
@@ -249,15 +280,12 @@ authority.
 
 The basic client does not yet provide:
 
-- login, named-profile discovery, or provider credential/configuration UI (the
-  basic built-in provider picker uses Snow's existing configuration);
-- searchable model selection or manual IDs when provider discovery returns an
-  empty catalog (the current control cycles the discovered catalog);
+- login, named-profile discovery/enumeration, arbitrary provider-ID entry, or
+  provider credential/configuration UI (the searchable built-in picker uses
+  Snow's existing configuration);
 - an independent-session picker, automatic last-session reopening across app
   launches, or rich historical tool/image rendering (`SNOW_SESSION` provides
   explicit relaunch continuity; current-session branch controls are available);
-- ask-mode permission or model-requested-input answering UI (blocking requests
-  are detected and shown with instructions to stop the turn);
 - image/attachment rendering or a richer multiline composition editor;
 - steering, follow-ups, goals, Plan Mode, or subagents;
 - plugins, MCP, or Agent Skills;

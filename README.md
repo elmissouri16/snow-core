@@ -235,8 +235,9 @@ remains.
 Read the [user guide](docs/using-snow.md) for TUI keys, slash commands, queue
 semantics, sessions, and modes. Read the [RPC protocol](docs/rpc.md) before
 building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0. The independent
-[desktop proof](desktop/README.md) is macOS arm64-only, intentionally keeps
-permissions denied, and is not part of the Go runtime or release artifacts.
+[desktop proof](desktop/README.md) is macOS arm64-only, uses Snow's trusted RPC
+permission and user-input brokers while keeping extensions disabled, and is not
+part of the Go runtime or release artifacts.
 
 ## Providers
 
