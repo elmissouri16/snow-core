@@ -6,8 +6,8 @@ use std::{
 };
 
 use snow_desktop::snow::{
-    BranchCatalog, HistoryMessage, ModelCatalog, PromptStatus, RuntimeConfig, RuntimeEvent,
-    SessionInfo, SnowClient, SnowConnection,
+    BranchCatalog, HistoryMessage, InteractionKind, ModelCatalog, PermissionDecision, PromptStatus,
+    RuntimeConfig, RuntimeEvent, SessionInfo, SnowClient, SnowConnection, UserInputAnswer,
 };
 
 struct TempProject(PathBuf);
@@ -186,6 +186,342 @@ fn mock_provider_streams_text_before_completion() {
     assert_eq!(delta_count, 2, "both streaming chunks should be observable");
     assert_eq!(text, "streaming works");
     connection.client.shutdown().expect("stop mock Snow RPC");
+}
+
+#[test]
+fn mock_interactions_block_until_correlated_trusted_replies() {
+    let project = TempProject::new("interactions");
+    let connection = start_ready_mock(&project.0);
+    let argv = fs::read_to_string(project.0.join(".mock-snow-argv")).expect("read mock argv");
+    let argv: Vec<_> = argv.lines().collect();
+    assert!(
+        argv.windows(2).any(|args| args == ["--permission", "ask"]),
+        "desktop must start Snow with trusted ask-mode permissions"
+    );
+    for disabled in ["--no-plugins", "--no-mcp", "--no-skills", "--no-subagents"] {
+        assert!(argv.contains(&disabled), "missing {disabled}");
+    }
+
+    let prompt_id = connection
+        .client
+        .prompt("interactive milestone".into())
+        .expect("submit interactive prompt");
+    let permission = loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(2))
+            .expect("receive permission request")
+        {
+            RuntimeEvent::PermissionRequested(request) => break request,
+            RuntimeEvent::TextDelta { text } => {
+                panic!("prompt continued before permission reply: {text}")
+            }
+            RuntimeEvent::Failed(error) => panic!("mock runtime failed: {error}"),
+            _ => {}
+        }
+    };
+    assert_eq!(permission.id, "perm-1");
+    assert_eq!(permission.tool, "bash");
+    assert_eq!(permission.args["command"], "printf trusted");
+    assert!(
+        matches!(
+            connection.events.recv_timeout(Duration::from_millis(100)),
+            Err(flume::RecvTimeoutError::Timeout)
+        ),
+        "fixture must remain blocked before the permission reply"
+    );
+
+    let permission_command_id = connection
+        .client
+        .permission_reply(permission.id, PermissionDecision::Allow)
+        .expect("allow permission");
+    let mut permission_confirmed = false;
+    let user_input = loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(2))
+            .expect("receive permission acknowledgement and user input")
+        {
+            RuntimeEvent::InteractionResolved {
+                command_id,
+                request_id,
+                command,
+            } if command_id == permission_command_id => {
+                assert_eq!(request_id, "perm-1");
+                assert_eq!(command, "permission_reply");
+                permission_confirmed = true;
+            }
+            RuntimeEvent::UserInputRequested(request) => break request,
+            RuntimeEvent::TextDelta { text } => {
+                panic!("prompt continued before user input reply: {text}")
+            }
+            RuntimeEvent::Failed(error) => panic!("mock runtime failed: {error}"),
+            _ => {}
+        }
+    };
+    assert!(permission_confirmed);
+    assert_eq!(user_input.id, "ask-1");
+    assert_eq!(user_input.questions.len(), 2);
+    assert!(
+        matches!(
+            connection.events.recv_timeout(Duration::from_millis(100)),
+            Err(flume::RecvTimeoutError::Timeout)
+        ),
+        "fixture must remain blocked before the user input reply"
+    );
+    assert!(
+        connection
+            .client
+            .user_input_reply(
+                "stale-input".into(),
+                vec![UserInputAnswer {
+                    question_id: "language".into(),
+                    answer: "Rust".into(),
+                }],
+            )
+            .is_err(),
+        "stale interaction IDs must be rejected locally"
+    );
+    assert!(
+        connection
+            .client
+            .user_input_reply(
+                user_input.id.clone(),
+                vec![UserInputAnswer {
+                    question_id: "language".into(),
+                    answer: "Rust".into(),
+                }],
+            )
+            .is_err(),
+        "incomplete answer sets must be rejected locally"
+    );
+    assert!(
+        connection
+            .client
+            .user_input_reply(
+                user_input.id.clone(),
+                vec![
+                    UserInputAnswer {
+                        question_id: "language".into(),
+                        answer: "Rust".into(),
+                    },
+                    UserInputAnswer {
+                        question_id: "language".into(),
+                        answer: "Go".into(),
+                    },
+                ],
+            )
+            .is_err(),
+        "duplicate answer IDs must be rejected locally"
+    );
+
+    let input_command_id = connection
+        .client
+        .user_input_reply(
+            user_input.id,
+            vec![
+                UserInputAnswer {
+                    question_id: "language".into(),
+                    answer: "Rust".into(),
+                },
+                UserInputAnswer {
+                    question_id: "reason".into(),
+                    answer: "Safety".into(),
+                },
+            ],
+        )
+        .expect("reply to user input");
+    let mut input_confirmed = false;
+    let mut text = String::new();
+    loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(2))
+            .expect("receive interaction completion")
+        {
+            RuntimeEvent::InteractionResolved {
+                command_id,
+                request_id,
+                command,
+            } if command_id == input_command_id => {
+                assert_eq!(request_id, "ask-1");
+                assert_eq!(command, "user_input_reply");
+                input_confirmed = true;
+            }
+            RuntimeEvent::TextDelta { text: delta } => text.push_str(&delta),
+            RuntimeEvent::PromptCompleted(completed) if completed.request_id == prompt_id => {
+                assert_eq!(completed.status, PromptStatus::Completed);
+                break;
+            }
+            RuntimeEvent::Failed(error) => panic!("mock runtime failed: {error}"),
+            _ => {}
+        }
+    }
+    assert!(input_confirmed);
+    assert_eq!(text, "continued after trusted replies");
+    connection.client.shutdown().expect("stop mock Snow RPC");
+}
+
+#[test]
+fn mismatched_prompt_completion_fails_without_resolving_pending_interaction() {
+    let project = TempProject::new("mismatched-completion");
+    let connection = start_ready_mock(&project.0);
+
+    connection
+        .client
+        .prompt("mismatched completion".into())
+        .expect("submit prompt");
+    let mut saw_permission = false;
+    loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(2))
+            .expect("receive fail-closed mismatch")
+        {
+            RuntimeEvent::PermissionRequested(request) => {
+                assert_eq!(request.id, "mismatch-perm");
+                saw_permission = true;
+            }
+            RuntimeEvent::Failed(error) => {
+                assert!(error.contains("unknown correlation id"), "{error}");
+                break;
+            }
+            RuntimeEvent::InteractionResolved { .. } => {
+                panic!("an unknown completion must not resolve the pending interaction")
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_permission);
+    let _ = connection.client.shutdown();
+}
+
+#[test]
+fn mock_interaction_rejection_and_malformed_events_remain_correlated() {
+    let project = TempProject::new("interaction-errors");
+    let connection = start_ready_mock(&project.0);
+
+    let prompt_id = connection
+        .client
+        .prompt("malformed interaction".into())
+        .expect("submit malformed prompt");
+    let request_id = loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(2))
+            .expect("receive malformed interaction")
+        {
+            RuntimeEvent::MalformedInteraction {
+                kind,
+                request_id,
+                error,
+            } => {
+                assert_eq!(kind, InteractionKind::Permission);
+                assert!(error.contains("invalid permission_request"));
+                break request_id.expect("malformed event retains usable id");
+            }
+            RuntimeEvent::PermissionRequested(request) => {
+                panic!("malformed request entered trusted UI state: {request:?}")
+            }
+            RuntimeEvent::Failed(error) => panic!("mock runtime failed: {error}"),
+            _ => {}
+        }
+    };
+    let reject_id = connection
+        .client
+        .permission_reject(request_id)
+        .expect("reject malformed permission");
+    let mut rejection_confirmed = false;
+    loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(2))
+            .expect("receive malformed rejection completion")
+        {
+            RuntimeEvent::InteractionResolved {
+                command_id,
+                request_id,
+                command,
+            } if command_id == reject_id => {
+                assert_eq!(request_id, "malformed-1");
+                assert_eq!(command, "permission_reject");
+                rejection_confirmed = true;
+            }
+            RuntimeEvent::PromptCompleted(completed) if completed.request_id == prompt_id => {
+                assert_eq!(completed.status, PromptStatus::Failed);
+                break;
+            }
+            RuntimeEvent::Failed(error) => panic!("mock runtime failed: {error}"),
+            _ => {}
+        }
+    }
+    assert!(rejection_confirmed);
+    connection.client.shutdown().expect("stop mock Snow RPC");
+}
+
+#[test]
+fn mock_interaction_command_failure_reports_both_correlation_ids() {
+    let project = TempProject::new("interaction-command-rejection");
+    let connection = start_ready_mock(&project.0);
+    connection
+        .client
+        .prompt("interactive milestone".into())
+        .expect("submit interactive prompt");
+    let permission = loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+        {
+            RuntimeEvent::PermissionRequested(request) => break request,
+            RuntimeEvent::Failed(error) => panic!("mock runtime failed: {error}"),
+            _ => {}
+        }
+    };
+    connection
+        .client
+        .permission_reply(permission.id, PermissionDecision::Allow)
+        .expect("allow permission");
+    let user_input = loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+        {
+            RuntimeEvent::UserInputRequested(request) => break request,
+            RuntimeEvent::Failed(error) => panic!("mock runtime failed: {error}"),
+            _ => {}
+        }
+    };
+    let command_id = connection
+        .client
+        .user_input_reject(user_input.id)
+        .expect("reject user input");
+    loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+        {
+            RuntimeEvent::InteractionRejected {
+                command_id: rejected_command_id,
+                request_id,
+                command,
+                error,
+            } if rejected_command_id.as_deref() == Some(&command_id) => {
+                assert_eq!(request_id.as_deref(), Some("ask-1"));
+                assert_eq!(command, "user_input_reject");
+                assert_eq!(error, "fixture rejection");
+                break;
+            }
+            RuntimeEvent::Failed(error) => panic!("mock runtime failed: {error}"),
+            _ => {}
+        }
+    }
+    connection
+        .client
+        .shutdown()
+        .expect("stop blocked mock Snow RPC");
 }
 
 #[test]

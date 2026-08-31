@@ -19,10 +19,10 @@ fi
 if [ ! -f .mock-session-name ]; then
     printf '%s\n' 'Desktop proof' > .mock-session-name
 fi
-emit '{"type":"rpc_ready","protocol_version":"1","snow_version":"mock-streaming","capabilities":["branch_management","messages_list","models_list","prompt_completion","session_info"],"max_input_bytes":1048576}'
+emit '{"type":"rpc_ready","protocol_version":"1","snow_version":"mock-streaming","capabilities":["branch_management","messages_list","models_list","permission_interaction","prompt_completion","session_info","user_input"],"max_input_bytes":1048576}'
 
 while IFS= read -r request; do
-    request_id=$(printf '%s\n' "$request" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    request_id=$(printf '%s\n' "$request" | sed -n 's/^{"type":"[^"]*","id":"\([^"]*\)".*/\1/p')
     case "$request" in
         *'"type":"session_info"'*)
             model=$(cat .mock-model)
@@ -97,14 +97,65 @@ while IFS= read -r request; do
             ;;
         *'"type":"prompt"'*)
             emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"prompt\",\"success\":true}"
-            emit '{"type":"text_delta","text":"streaming "}'
-            sleep 0.05
-            emit '{"type":"text_delta","text":"works"}'
-            sleep 0.05
-            emit '{"type":"turn_done","turn_id":"mock-turn"}'
-            : > .mock-has-history
-            emit '{"type":"session_updated"}'
-            emit "{\"type\":\"prompt_completed\",\"request_id\":\"$request_id\",\"status\":\"completed\"}"
+            if printf '%s\n' "$request" | grep -q 'mismatched completion'; then
+                emit '{"type":"permission_request","permission":{"request":{"id":"mismatch-perm","tool":"bash","args":{"command":"false"},"risk":"exec"}}}'
+                emit '{"type":"prompt_completed","request_id":"wrong-prompt","status":"completed"}'
+            elif printf '%s\n' "$request" | grep -q 'interactive milestone'; then
+                printf '%s\n' "$request_id" > .mock-interaction-prompt
+                printf '%s\n' 'permission' > .mock-interaction-phase
+                emit '{"type":"permission_request","permission":{"request":{"id":"child-perm","tool":"bash","args":{"command":"false"},"risk":"exec"}},"agent":{"id":"child-1"}}'
+                emit '{"type":"permission_request","permission":{"request":{"id":"perm-1","tool":"bash","args":{"command":"printf trusted"},"paths":["/tmp/mock-output"],"risk":"exec","reason":"integration proof"}}}'
+            elif printf '%s\n' "$request" | grep -q 'malformed interaction'; then
+                printf '%s\n' "$request_id" > .mock-interaction-prompt
+                printf '%s\n' 'malformed' > .mock-interaction-phase
+                emit '{"type":"permission_request","permission":{"request":{"id":"malformed-1","tool":"bash","args":{},"risk":17}}}'
+            else
+                emit '{"type":"text_delta","text":"streaming "}'
+                sleep 0.05
+                emit '{"type":"text_delta","text":"works"}'
+                sleep 0.05
+                emit '{"type":"turn_done","turn_id":"mock-turn"}'
+                : > .mock-has-history
+                emit '{"type":"session_updated"}'
+                emit "{\"type\":\"prompt_completed\",\"request_id\":\"$request_id\",\"status\":\"completed\"}"
+            fi
+            ;;
+        *'"type":"permission_reply"'*)
+            phase=$(cat .mock-interaction-phase 2>/dev/null)
+            if [ "$phase" != 'permission' ] || ! printf '%s\n' "$request" | grep -q '"request_id":"perm-1","decision":"allow"'; then
+                emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"permission_reply\",\"success\":false,\"error\":\"unexpected permission reply\"}"
+                continue
+            fi
+            emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"permission_reply\",\"success\":true}"
+            printf '%s\n' 'user-input' > .mock-interaction-phase
+            emit '{"type":"user_input_request","user_input":{"id":"ask-1","tool_call_id":"ask-1","questions":[{"id":"language","header":"Language","question":"Which language?","options":[{"label":"Rust","description":"Safe systems language"},{"label":"Go","description":"Simple concurrency"}]},{"id":"reason","header":"Reason","question":"Why?"}]}}'
+            ;;
+        *'"type":"permission_reject"'*)
+            phase=$(cat .mock-interaction-phase 2>/dev/null)
+            if [ "$phase" != 'malformed' ] || ! printf '%s\n' "$request" | grep -q '"request_id":"malformed-1"'; then
+                emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"permission_reject\",\"success\":false,\"error\":\"unexpected permission rejection\"}"
+                continue
+            fi
+            emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"permission_reject\",\"success\":true}"
+            prompt_id=$(cat .mock-interaction-prompt)
+            emit "{\"type\":\"prompt_completed\",\"request_id\":\"$prompt_id\",\"status\":\"failed\",\"error\":\"malformed interaction rejected\"}"
+            rm -f .mock-interaction-phase .mock-interaction-prompt
+            ;;
+        *'"type":"user_input_reply"'*)
+            phase=$(cat .mock-interaction-phase 2>/dev/null)
+            if [ "$phase" != 'user-input' ] || ! printf '%s\n' "$request" | grep -q '"request_id":"ask-1","answers":\[{"id":"language","answer":"Rust"},{"id":"reason","answer":"Safety"}\]'; then
+                emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"user_input_reply\",\"success\":false,\"error\":\"unexpected user input reply\"}"
+                continue
+            fi
+            emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"user_input_reply\",\"success\":true}"
+            prompt_id=$(cat .mock-interaction-prompt)
+            emit '{"type":"text_delta","text":"continued after trusted replies"}'
+            emit '{"type":"turn_done","turn_id":"mock-interaction-turn"}'
+            emit "{\"type\":\"prompt_completed\",\"request_id\":\"$prompt_id\",\"status\":\"completed\"}"
+            rm -f .mock-interaction-phase .mock-interaction-prompt
+            ;;
+        *'"type":"user_input_reject"'*)
+            emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"user_input_reject\",\"success\":false,\"error\":\"fixture rejection\"}"
             ;;
         *'"type":"abort"'*)
             emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"abort\",\"success\":true}"

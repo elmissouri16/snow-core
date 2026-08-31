@@ -301,7 +301,7 @@ fn model_change_blocks_actions_until_confirmation() {
     assert!(state.can_switch_model());
     assert!(!state.can_select_model("fake-1"));
     assert!(state.can_select_model("fake-2"));
-    assert!(!state.can_select_model("unknown"));
+    assert!(state.can_select_model("unknown")); // Valid manual model ID.
 
     state.begin_model_change("model-1".into(), "fake-2", "off".into());
     assert!(!state.can_send());
@@ -676,4 +676,347 @@ fn tool_lifecycle_updates_one_record() {
     assert_eq!(state.tools.len(), 1);
     assert_eq!(state.tools[0].status, "Completed");
     assert_eq!(state.tools[0].state, ToolState::Completed);
+}
+
+fn permission_request(id: &str) -> PermissionRequest {
+    PermissionRequest {
+        id: id.into(),
+        tool: "bash".into(),
+        args: serde_json::json!({"command": "cargo test"}),
+        paths: vec!["/tmp/snow-core".into()],
+        risk: "exec".into(),
+        reason: "Run the requested checks".into(),
+    }
+}
+
+fn user_input_request(id: &str) -> UserInputRequest {
+    UserInputRequest {
+        id: id.into(),
+        tool_call_id: format!("tool-{id}"),
+        questions: vec![
+            UserInputQuestion {
+                id: "language".into(),
+                header: "Language".into(),
+                question: "Which language?".into(),
+                options: vec![
+                    crate::snow::UserInputOption {
+                        label: "Rust".into(),
+                        description: "Use the Rust client".into(),
+                    },
+                    crate::snow::UserInputOption {
+                        label: "Go".into(),
+                        description: "Use the Go client".into(),
+                    },
+                ],
+            },
+            UserInputQuestion {
+                id: "notes".into(),
+                header: "Notes".into(),
+                question: "Any implementation notes?".into(),
+                options: Vec::new(),
+            },
+        ],
+    }
+}
+
+fn begin_interactive_prompt(state: &mut ChatState) {
+    make_ready(state);
+    state.begin_prompt("prompt-interaction".into(), "work".into());
+}
+
+#[test]
+fn permission_card_supports_all_four_decisions_and_waits_for_exact_ack() {
+    for (index, decision) in [
+        PermissionDecision::Allow,
+        PermissionDecision::AllowSession,
+        PermissionDecision::AllowAlways,
+        PermissionDecision::Deny,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut state = ChatState::default();
+        begin_interactive_prompt(&mut state);
+        state.apply(RuntimeEvent::PermissionRequested(permission_request("perm-1")));
+        assert!(!state.can_send());
+        assert!(state.can_abort(), "Stop must remain available while blocked");
+        assert!(state.begin_permission_command("perm-1", decision, format!("command-{index}")));
+        let Some(ActiveInteraction::Permission(interaction)) = &state.active_interaction else {
+            panic!("permission must remain visible until the host acknowledges it");
+        };
+        assert_eq!(interaction.decision, Some(decision));
+        assert!(interaction.pending.is_some());
+
+        state.apply(RuntimeEvent::InteractionResolved {
+            command_id: "stale-command".into(),
+            request_id: "perm-1".into(),
+            command: "permission_reply".into(),
+        });
+        assert!(state.active_interaction.is_some());
+        state.apply(RuntimeEvent::InteractionResolved {
+            command_id: format!("command-{index}"),
+            request_id: "perm-1".into(),
+            command: "permission_reply".into(),
+        });
+        assert!(state.active_interaction.is_none());
+    }
+}
+
+#[test]
+fn interaction_queue_suppresses_duplicates_and_fails_closed_on_overflow() {
+    let mut state = ChatState::default();
+    begin_interactive_prompt(&mut state);
+    state.apply(RuntimeEvent::PermissionRequested(permission_request("perm-1")));
+    state.apply(RuntimeEvent::PermissionRequested(permission_request("perm-1")));
+    assert!(state.queued_interaction.is_none(), "duplicate must not consume queue");
+
+    state.apply(RuntimeEvent::UserInputRequested(user_input_request("ask-1")));
+    assert!(matches!(
+        state.queued_interaction,
+        Some(InteractionRequest::UserInput(_))
+    ));
+    state.apply(RuntimeEvent::PermissionRequested(permission_request("perm-overflow")));
+    assert_eq!(state.interaction_rejections.len(), 1);
+    assert_eq!(state.interaction_rejections[0].request_id, "perm-overflow");
+    assert_eq!(state.interaction_rejections[0].kind, InteractionKind::Permission);
+
+    state.begin_permission_command("perm-1", PermissionDecision::Deny, "deny-1".into());
+    state.apply(RuntimeEvent::InteractionResolved {
+        command_id: "deny-1".into(),
+        request_id: "perm-1".into(),
+        command: "permission_reply".into(),
+    });
+    assert!(matches!(
+        state.active_interaction,
+        Some(ActiveInteraction::UserInput(_))
+    ));
+    assert!(state.queued_interaction.is_none());
+
+    // A stale duplicate cannot reappear after the original leaves the visible slot.
+    state.apply(RuntimeEvent::PermissionRequested(permission_request("perm-1")));
+    assert!(state.queued_interaction.is_none());
+}
+
+#[test]
+fn interaction_rejections_are_exactly_correlated_and_retryable() {
+    let mut state = ChatState::default();
+    begin_interactive_prompt(&mut state);
+    state.apply(RuntimeEvent::PermissionRequested(permission_request("perm-1")));
+    state.begin_permission_command("perm-1", PermissionDecision::Allow, "reply-1".into());
+
+    for event in [
+        RuntimeEvent::InteractionRejected {
+            command_id: Some("other".into()),
+            request_id: Some("perm-1".into()),
+            command: "permission_reply".into(),
+            error: "stale command".into(),
+        },
+        RuntimeEvent::InteractionRejected {
+            command_id: Some("reply-1".into()),
+            request_id: Some("other".into()),
+            command: "permission_reply".into(),
+            error: "stale request".into(),
+        },
+        RuntimeEvent::InteractionRejected {
+            command_id: Some("reply-1".into()),
+            request_id: Some("perm-1".into()),
+            command: "permission_reject".into(),
+            error: "stale command kind".into(),
+        },
+    ] {
+        state.apply(event);
+        assert!(state
+            .active_interaction
+            .as_ref()
+            .and_then(ActiveInteraction::pending)
+            .is_some());
+    }
+
+    state.apply(RuntimeEvent::InteractionRejected {
+        command_id: Some("reply-1".into()),
+        request_id: Some("perm-1".into()),
+        command: "permission_reply".into(),
+        error: "host rejected reply".into(),
+    });
+    let Some(ActiveInteraction::Permission(interaction)) = &state.active_interaction else {
+        panic!("a rejected host command must leave the trusted card available for retry");
+    };
+    assert!(interaction.pending.is_none());
+    assert_eq!(interaction.decision, None);
+    assert_eq!(state.last_error.as_deref(), Some("host rejected reply"));
+}
+
+#[test]
+fn user_input_drafts_validate_and_answers_follow_request_order() {
+    let mut state = ChatState::default();
+    begin_interactive_prompt(&mut state);
+    state.apply(RuntimeEvent::UserInputRequested(user_input_request("ask-1")));
+
+    state.select_user_input_option("not-an-option");
+    assert!(state.user_input_answers().is_none());
+    state.select_user_input_option("Rust");
+    assert!(state.move_user_input_question(1));
+    state.set_user_input_draft("   keep request order   ");
+    let (request_id, answers) = state.user_input_answers().expect("valid answers");
+    assert_eq!(request_id, "ask-1");
+    assert_eq!(
+        answers,
+        vec![
+            UserInputAnswer {
+                question_id: "language".into(),
+                answer: "Rust".into(),
+            },
+            UserInputAnswer {
+                question_id: "notes".into(),
+                answer: "keep request order".into(),
+            },
+        ]
+    );
+
+    state.set_user_input_draft("x".repeat(MAX_USER_INPUT_BYTES + 1));
+    assert!(state.user_input_answers().is_none());
+    assert!(state
+        .current_user_input()
+        .and_then(|interaction| interaction.validation_error.as_deref())
+        .is_some_and(|error| error.contains("8 KiB")));
+}
+
+#[test]
+fn user_input_other_draft_survives_navigation() {
+    let mut state = ChatState::default();
+    begin_interactive_prompt(&mut state);
+    state.apply(RuntimeEvent::UserInputRequested(user_input_request("ask-1")));
+    state.select_user_input_other();
+    state.set_user_input_draft("Zig");
+    assert!(state.move_user_input_question(1));
+    state.set_user_input_draft("No extra notes");
+    assert!(state.move_user_input_question(-1));
+
+    let interaction = state.current_user_input().unwrap();
+    assert!(interaction.draft().use_other);
+    assert_eq!(interaction.draft().other, "Zig");
+    assert!(state.move_user_input_question(1));
+    assert_eq!(state.current_user_input().unwrap().draft().other, "No extra notes");
+}
+
+#[test]
+fn prompt_lifecycle_cleans_interactions_and_late_acks_are_ignored() {
+    let mut state = ChatState::default();
+    begin_interactive_prompt(&mut state);
+    state.apply(RuntimeEvent::PermissionRequested(permission_request("perm-1")));
+    state.apply(RuntimeEvent::UserInputRequested(user_input_request("ask-1")));
+    state.begin_permission_command("perm-1", PermissionDecision::Deny, "deny-1".into());
+    state.apply(RuntimeEvent::PromptCompleted(PromptCompleted {
+        request_id: "prompt-interaction".into(),
+        status: PromptStatus::Canceled,
+        error: None,
+    }));
+    assert!(state.active_interaction.is_none());
+    assert!(state.queued_interaction.is_none());
+
+    state.apply(RuntimeEvent::InteractionResolved {
+        command_id: "deny-1".into(),
+        request_id: "perm-1".into(),
+        command: "permission_reply".into(),
+    });
+    assert!(state.active_interaction.is_none());
+}
+
+#[test]
+fn malformed_interaction_is_declined_once_and_never_displayed() {
+    let mut state = ChatState::default();
+    begin_interactive_prompt(&mut state);
+    let malformed = || RuntimeEvent::MalformedInteraction {
+        kind: InteractionKind::UserInput,
+        request_id: Some("bad-1".into()),
+        error: "questions missing".into(),
+    };
+    state.apply(malformed());
+    state.apply(malformed());
+    assert!(state.active_interaction.is_none());
+    assert_eq!(state.interaction_rejections.len(), 1);
+    assert_eq!(state.interaction_rejections[0].request_id, "bad-1");
+}
+
+#[test]
+fn search_picker_filters_required_fields_and_resets_highlight() {
+    assert_eq!(provider_search_results("zen"), vec![1]);
+    assert_eq!(provider_search_results("opencode-go"), vec![2]);
+
+    let mut state = ChatState::default();
+    make_ready(&mut state);
+    assert_eq!(model_search_results(&state.models, "fake two"), vec![1]);
+    assert_eq!(model_search_results(&state.models, "fake-1"), vec![0]);
+    assert_eq!(model_search_results(&state.models, "missing"), Vec::<usize>::new());
+
+    let mut search = SearchPickerState::default();
+    search.move_highlight(1, 2);
+    assert_eq!(search.highlighted, 1);
+    search.set_query("fake");
+    assert_eq!(search.highlighted, 0);
+    search.move_highlight(-1, 2);
+    assert_eq!(search.highlighted, 0);
+    search.move_highlight(20, 2);
+    assert_eq!(search.highlighted, 1);
+    search.normalize_highlight(1);
+    assert_eq!(search.highlighted, 0);
+}
+
+#[test]
+fn manual_model_ids_are_trimmed_bounded_and_require_no_exact_catalog_match() {
+    let mut state = ChatState::default();
+    make_ready(&mut state);
+    assert_eq!(manual_model_id(&state.models, "  custom/model  ").as_deref(), Some("custom/model"));
+    assert_eq!(manual_model_id(&state.models, ""), None);
+    assert_eq!(manual_model_id(&state.models, " fake-1 "), None);
+    assert_eq!(manual_model_id(&state.models, &"x".repeat(257)), None);
+
+    state.models.clear();
+    assert!(state.can_switch_model(), "empty discovery must still allow manual IDs");
+    assert!(state.can_select_model("custom/model"));
+    assert!(!state.can_select_model("   "));
+}
+
+#[test]
+fn manual_model_change_is_correlated_keeps_id_and_forces_thinking_off() {
+    let mut state = ChatState::default();
+    make_ready(&mut state);
+    state.models.clear();
+    state.current_thinking = "high".into();
+    state.begin_model_change("manual-1".into(), "private/model", "off".into());
+
+    state.apply(RuntimeEvent::ModelChangeConfirmed {
+        request_id: "stale".into(),
+    });
+    assert_eq!(state.current_model, "fake-1");
+    state.apply(RuntimeEvent::ModelChangeConfirmed {
+        request_id: "manual-1".into(),
+    });
+    assert_eq!(state.current_model, "private/model");
+    assert_eq!(state.current_thinking, "off");
+    assert_eq!(state.thinking_levels, ["off"]);
+
+    state.begin_runtime_load("manual-refresh".into(), false);
+    state.apply(RuntimeEvent::ModelsLoaded {
+        generation: "manual-refresh".into(),
+        catalog: ModelCatalog {
+            provider: "fake".into(),
+            current: String::new(),
+            models: Vec::new(),
+        },
+    });
+    assert_eq!(state.current_model, "private/model");
+}
+
+#[test]
+fn trusted_interaction_previews_are_bounded() {
+    assert_eq!(bounded_display("safe", 4), "safe");
+    assert_eq!(bounded_display("permission", 4), "perm…");
+
+    let paths = (0..10)
+        .map(|index| format!("/{index}/{}", "x".repeat(300)))
+        .collect::<Vec<_>>();
+    let preview = bounded_paths(&paths);
+    assert!(preview.contains("and 2 more"));
+    assert!(!preview.contains(&"x".repeat(257)));
 }

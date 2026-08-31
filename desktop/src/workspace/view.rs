@@ -10,6 +10,10 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         v_flex()
+            .key_context("DesktopWorkspace")
+            .on_action(cx.listener(Self::picker_up))
+            .on_action(cx.listener(Self::picker_down))
+            .on_action(cx.listener(Self::dismiss_picker))
             .size_full()
             .min_w(px(800.))
             .min_h(px(560.))
@@ -21,6 +25,9 @@ impl Workspace {
                 workspace.child(self.render_session_menu(cx))
             })
             .child(self.render_transcript(window, cx))
+            .when_some(self.render_interaction_card(cx), |workspace, card| {
+                workspace.child(card)
+            })
             .child(self.render_composer(cx))
     }
 
@@ -418,6 +425,291 @@ impl Workspace {
         }
     }
 
+    fn render_interaction_card(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let theme = cx.theme();
+        match self.state.active_interaction.as_ref()? {
+            ActiveInteraction::Permission(interaction) => {
+                let pending = interaction.pending.is_some();
+                let args = bounded_display(
+                    &serde_json::to_string_pretty(&interaction.request.args)
+                        .unwrap_or_else(|_| "<unavailable>".into()),
+                    4_000,
+                );
+                let decision_button =
+                    |id: &'static str,
+                     label: &'static str,
+                     decision: PermissionDecision,
+                     danger: bool| {
+                        Button::new(id)
+                            .label(label)
+                            .when(danger, |button| button.danger())
+                            .when(!danger, |button| button.ghost())
+                            .disabled(pending)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.resolve_permission(decision, cx)
+                            }))
+                    };
+                Some(
+                    v_flex()
+                        .mx_auto()
+                        .mb_3()
+                        .w_full()
+                        .max_w(px(CONVERSATION_WIDTH))
+                        .gap_3()
+                        .p_4()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(theme.warning)
+                        .bg(theme.background)
+                        .child(
+                            h_flex()
+                                .justify_between()
+                                .child(div().font_semibold().child("Trusted permission required"))
+                                .child(div().text_xs().text_color(theme.warning).child(
+                                    if pending {
+                                        "Waiting for Snow…"
+                                    } else {
+                                        "Review before allowing"
+                                    },
+                                )),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_medium()
+                                        .child(bounded_display(&interaction.request.tool, 256)),
+                                )
+                                .child(
+                                    div()
+                                        .px_2()
+                                        .rounded_full()
+                                        .bg(theme.secondary)
+                                        .text_xs()
+                                        .child(bounded_display(&interaction.request.risk, 64)),
+                                ),
+                        )
+                        .when(!interaction.request.reason.is_empty(), |card| {
+                            card.child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child(bounded_display(&interaction.request.reason, 1_000)),
+                            )
+                        })
+                        .when(!interaction.request.paths.is_empty(), |card| {
+                            card.child(div().text_xs().text_color(theme.muted_foreground).child(
+                                format!("Paths: {}", bounded_paths(&interaction.request.paths)),
+                            ))
+                        })
+                        .child(
+                            div()
+                                .max_h(px(120.))
+                                .overflow_y_scrollbar()
+                                .p_2()
+                                .rounded_lg()
+                                .bg(theme.secondary)
+                                .text_xs()
+                                .font_family("monospace")
+                                .child(args),
+                        )
+                        .child(
+                            h_flex()
+                                .flex_wrap()
+                                .gap_2()
+                                .child(decision_button(
+                                    "permission-once",
+                                    "Allow once",
+                                    PermissionDecision::Allow,
+                                    false,
+                                ))
+                                .child(decision_button(
+                                    "permission-session",
+                                    "Allow for session",
+                                    PermissionDecision::AllowSession,
+                                    false,
+                                ))
+                                .child(decision_button(
+                                    "permission-always",
+                                    "Always allow",
+                                    PermissionDecision::AllowAlways,
+                                    false,
+                                ))
+                                .child(decision_button(
+                                    "permission-deny",
+                                    "Deny",
+                                    PermissionDecision::Deny,
+                                    true,
+                                )),
+                        )
+                        .into_any_element(),
+                )
+            }
+            ActiveInteraction::UserInput(interaction) => {
+                let question = interaction.question();
+                let draft = interaction.draft();
+                let pending = interaction.pending.is_some();
+                let question_index = interaction.question_index;
+                let question_count = interaction.request.questions.len();
+                let last = question_index + 1 == question_count;
+                Some(
+                    v_flex()
+                        .mx_auto()
+                        .mb_3()
+                        .w_full()
+                        .max_w(px(CONVERSATION_WIDTH))
+                        .gap_3()
+                        .p_4()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(theme.info)
+                        .bg(theme.background)
+                        .child(
+                            h_flex()
+                                .justify_between()
+                                .child(
+                                    div()
+                                        .font_semibold()
+                                        .child(bounded_display(&question.header, 80)),
+                                )
+                                .child(div().text_xs().text_color(theme.muted_foreground).child(
+                                    if pending {
+                                        "Waiting for Snow…".into()
+                                    } else {
+                                        format!(
+                                            "Question {} of {question_count}",
+                                            question_index + 1
+                                        )
+                                    },
+                                )),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .child(bounded_display(&question.question, 1_000)),
+                        )
+                        .children(question.options.iter().enumerate().map(|(index, option)| {
+                            let label = option.label.clone();
+                            let selected = !draft.use_other
+                                && draft.selected.as_deref() == Some(option.label.as_str());
+                            v_flex()
+                                .w_full()
+                                .gap_1()
+                                .child(
+                                    Button::new((
+                                        "user-input-option",
+                                        question_index * 1024 + index,
+                                    ))
+                                    .w_full()
+                                    .label(if selected {
+                                        format!("✓ {}", bounded_display(&option.label, 100))
+                                    } else {
+                                        bounded_display(&option.label, 100)
+                                    })
+                                    .when(selected, |button| button.primary())
+                                    .when(!selected, |button| button.ghost())
+                                    .disabled(pending)
+                                    .on_click(cx.listener(
+                                        move |this, _, _, cx| {
+                                            this.select_user_input_option(&label, cx)
+                                        },
+                                    )),
+                                )
+                                .when(!option.description.is_empty(), |option_row| {
+                                    option_row.child(
+                                        div()
+                                            .px_3()
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child(bounded_display(&option.description, 300)),
+                                    )
+                                })
+                        }))
+                        .when(!question.options.is_empty(), |card| {
+                            card.child(
+                                Button::new(("user-input-other", question_index))
+                                    .w_full()
+                                    .label(if draft.use_other {
+                                        "✓ Other"
+                                    } else {
+                                        "Other"
+                                    })
+                                    .when(draft.use_other, |button| button.primary())
+                                    .when(!draft.use_other, |button| button.ghost())
+                                    .disabled(pending)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.select_user_input_other(window, cx)
+                                    })),
+                            )
+                        })
+                        .when(draft.use_other, |card| {
+                            card.child(Input::new(&self.interaction_input).disabled(pending))
+                        })
+                        .when_some(interaction.validation_error.as_ref(), |card, error| {
+                            card.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme.danger)
+                                    .child(error.clone()),
+                            )
+                        })
+                        .child(
+                            h_flex()
+                                .justify_between()
+                                .child(
+                                    Button::new(("user-input-decline", question_index))
+                                        .label("Decline")
+                                        .danger()
+                                        .disabled(pending)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.decline_user_input(window, cx)
+                                        })),
+                                )
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .when(question_index > 0, |buttons| {
+                                            buttons.child(
+                                                Button::new(("user-input-prev", question_index))
+                                                    .label("Previous")
+                                                    .ghost()
+                                                    .disabled(pending)
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.move_user_input_question(
+                                                                -1, window, cx,
+                                                            )
+                                                        },
+                                                    )),
+                                            )
+                                        })
+                                        .child(if last {
+                                            Button::new(("user-input-submit", question_index))
+                                                .label("Submit")
+                                                .primary()
+                                                .disabled(pending)
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.submit_user_input(window, cx)
+                                                }))
+                                        } else {
+                                            Button::new(("user-input-next", question_index))
+                                                .label("Next")
+                                                .primary()
+                                                .disabled(pending)
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.move_user_input_question(1, window, cx)
+                                                }))
+                                        }),
+                                ),
+                        )
+                        .into_any_element(),
+                )
+            }
+        }
+    }
+
     fn render_contextual_activity(&self, theme: &gpui_component::theme::Theme) -> AnyElement {
         let hidden = self.state.tools.len().saturating_sub(3);
         v_flex()
@@ -486,107 +778,176 @@ impl Workspace {
     fn render_provider_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let can_switch = self.state.can_switch_provider();
+        let results = provider_search_results(&self.composer_picker.search.query);
 
         v_flex()
-            .w(px(240.))
+            .key_context("PickerSearch")
+            .w(px(320.))
             .max_h(px(PICKER_MAX_HEIGHT))
-            .overflow_y_scrollbar()
             .p_2()
             .gap_1()
             .rounded_xl()
             .border_1()
             .border_color(theme.border)
             .bg(theme.background)
-            .children(PROVIDER_CHOICES.iter().enumerate().map(|(index, choice)| {
-                let provider = choice.id;
-                let selected = provider == self.provider;
-                let retries_failure =
-                    selected && matches!(self.state.connection, ConnectionState::Failed(_));
-                if selected && !retries_failure {
-                    h_flex()
-                        .w_full()
-                        .justify_between()
-                        .px_3()
-                        .py_2()
-                        .rounded_lg()
-                        .bg(theme.secondary)
-                        .text_sm()
-                        .font_medium()
-                        .child(choice.label)
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("Selected"),
-                        )
-                        .into_any_element()
-                } else {
-                    Button::new(("provider-picker", index))
-                        .w_full()
-                        .label(choice.label)
-                        .ghost()
-                        .disabled(!can_switch)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.select_provider(provider, cx);
-                        }))
-                        .into_any_element()
-                }
-            }))
+            .child(Input::new(&self.picker_search_input))
+            .child(
+                v_flex().min_h(px(0.)).overflow_y_scrollbar().children(
+                    results
+                        .into_iter()
+                        .enumerate()
+                        .map(|(result_index, index)| {
+                            let choice = PROVIDER_CHOICES[index];
+                            let provider = choice.id;
+                            let selected = provider == self.provider;
+                            let highlighted =
+                                result_index == self.composer_picker.search.highlighted;
+                            let retries_failure = selected
+                                && matches!(self.state.connection, ConnectionState::Failed(_));
+                            if selected && !retries_failure {
+                                h_flex()
+                                    .w_full()
+                                    .justify_between()
+                                    .px_3()
+                                    .py_2()
+                                    .rounded_lg()
+                                    .bg(theme.secondary)
+                                    .text_sm()
+                                    .font_medium()
+                                    .child(choice.label)
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child("Selected"),
+                                    )
+                                    .into_any_element()
+                            } else {
+                                Button::new(("provider-picker", index))
+                                    .w_full()
+                                    .label(if highlighted {
+                                        format!("› {}", choice.label)
+                                    } else {
+                                        choice.label.into()
+                                    })
+                                    .ghost()
+                                    .disabled(!can_switch)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.select_provider(provider, window, cx);
+                                    }))
+                                    .into_any_element()
+                            }
+                        }),
+                ),
+            )
             .into_any_element()
     }
 
     fn render_model_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let can_switch = self.state.can_switch_model();
+        let results = model_search_results(&self.state.models, &self.composer_picker.search.query);
+        let manual = manual_model_id(&self.state.models, &self.composer_picker.search.query);
+        let result_count = results.len();
 
         v_flex()
-            .w(px(320.))
+            .key_context("PickerSearch")
+            .w(px(360.))
             .max_h(px(PICKER_MAX_HEIGHT))
-            .overflow_y_scrollbar()
             .p_2()
             .gap_1()
             .rounded_xl()
             .border_1()
             .border_color(theme.border)
             .bg(theme.background)
-            .children(self.state.models.iter().enumerate().map(|(index, model)| {
-                let model_id = model.id.clone();
-                let selected = model.id == self.state.current_model;
-                let label = if model.display_name.is_empty() {
-                    model.id.clone()
-                } else {
-                    model.display_name.clone()
-                };
-                if selected {
-                    h_flex()
-                        .w_full()
-                        .justify_between()
-                        .px_3()
-                        .py_2()
-                        .rounded_lg()
-                        .bg(theme.secondary)
-                        .text_sm()
-                        .font_medium()
-                        .child(label)
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("Selected"),
+            .child(Input::new(&self.picker_search_input))
+            .child(
+                v_flex()
+                    .min_h(px(0.))
+                    .overflow_y_scrollbar()
+                    .children(
+                        results
+                            .into_iter()
+                            .enumerate()
+                            .map(|(result_index, index)| {
+                                let model = &self.state.models[index];
+                                let model_id = model.id.clone();
+                                let selected = model.id == self.state.current_model;
+                                let highlighted =
+                                    result_index == self.composer_picker.search.highlighted;
+                                let label = if model.display_name.is_empty() {
+                                    model.id.clone()
+                                } else {
+                                    format!("{} · {}", model.display_name, model.id)
+                                };
+                                if selected {
+                                    h_flex()
+                                        .w_full()
+                                        .justify_between()
+                                        .px_3()
+                                        .py_2()
+                                        .rounded_lg()
+                                        .bg(theme.secondary)
+                                        .text_sm()
+                                        .font_medium()
+                                        .child(label)
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(theme.muted_foreground)
+                                                .child("Selected"),
+                                        )
+                                        .into_any_element()
+                                } else {
+                                    Button::new(("model-picker", index))
+                                        .w_full()
+                                        .label(if highlighted {
+                                            format!("› {label}")
+                                        } else {
+                                            label
+                                        })
+                                        .ghost()
+                                        .disabled(!can_switch)
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.select_model(&model_id, cx);
+                                        }))
+                                        .into_any_element()
+                                }
+                            }),
+                    )
+                    .when_some(manual, |models, manual| {
+                        let selected = manual == self.state.current_model;
+                        models.child(
+                            Button::new("manual-model")
+                                .w_full()
+                                .label(if selected {
+                                    format!("Manual: {manual} · Selected")
+                                } else {
+                                    format!("Use manual model ID: {manual}")
+                                })
+                                .ghost()
+                                .disabled(!can_switch || selected)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.select_model(&manual, cx)
+                                })),
                         )
-                        .into_any_element()
-                } else {
-                    Button::new(("model-picker", index))
-                        .w_full()
-                        .label(label)
-                        .ghost()
-                        .disabled(!can_switch)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.select_model(&model_id, cx);
-                        }))
-                        .into_any_element()
-                }
-            }))
+                    })
+                    .when(
+                        result_count == 0 && self.composer_picker.search.query.trim().is_empty(),
+                        |models| {
+                            models.child(
+                                div()
+                                    .px_3()
+                                    .py_2()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child(
+                                        "No discovered models. Type a model ID to use it manually.",
+                                    ),
+                            )
+                        },
+                    ),
+            )
             .into_any_element()
     }
 
@@ -655,7 +1016,7 @@ impl Workspace {
         let can_send = self.state.can_send();
         let can_abort = self.state.can_abort();
         let can_switch_provider = self.state.can_switch_provider();
-        let can_open_model_picker = self.state.can_send() && !self.state.models.is_empty();
+        let can_open_model_picker = self.state.can_send();
         let can_open_thinking_picker = self.state.can_switch_thinking();
 
         v_flex()
@@ -719,24 +1080,30 @@ impl Workspace {
                                                     .label(format!("{}  ▾", self.provider_label()))
                                                     .ghost()
                                                     .disabled(!can_switch_provider)
-                                                    .on_click(cx.listener(|this, _, _, cx| {
-                                                        this.toggle_picker(
-                                                            ComposerPicker::Provider,
-                                                            cx,
-                                                        )
-                                                    })),
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.toggle_picker(
+                                                                ComposerPicker::Provider,
+                                                                window,
+                                                                cx,
+                                                            )
+                                                        },
+                                                    )),
                                             )
                                             .child(
                                                 Button::new("model-menu")
                                                     .label(format!("{}  ▾", self.model_label()))
                                                     .ghost()
                                                     .disabled(!can_open_model_picker)
-                                                    .on_click(cx.listener(|this, _, _, cx| {
-                                                        this.toggle_picker(
-                                                            ComposerPicker::Model,
-                                                            cx,
-                                                        )
-                                                    })),
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.toggle_picker(
+                                                                ComposerPicker::Model,
+                                                                window,
+                                                                cx,
+                                                            )
+                                                        },
+                                                    )),
                                             )
                                             .child(
                                                 Button::new("thinking-menu")
@@ -748,12 +1115,15 @@ impl Workspace {
                                                     ))
                                                     .ghost()
                                                     .disabled(!can_open_thinking_picker)
-                                                    .on_click(cx.listener(|this, _, _, cx| {
-                                                        this.toggle_picker(
-                                                            ComposerPicker::Thinking,
-                                                            cx,
-                                                        )
-                                                    })),
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.toggle_picker(
+                                                                ComposerPicker::Thinking,
+                                                                window,
+                                                                cx,
+                                                            )
+                                                        },
+                                                    )),
                                             ),
                                     )
                                     .child(match self.state.composer_action() {

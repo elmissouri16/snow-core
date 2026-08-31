@@ -87,7 +87,7 @@ pub(crate) fn spawn(config: &RuntimeConfig) -> Result<SpawnedProcess, SnowError>
         "--provider",
         config.provider.as_str(),
         "--permission",
-        "deny",
+        "ask",
         "--thinking",
         "off",
         "--no-plugins",

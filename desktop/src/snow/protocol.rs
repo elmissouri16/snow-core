@@ -7,12 +7,14 @@ use super::SnowError;
 
 pub const RPC_PROTOCOL_VERSION: &str = "1";
 pub const DEFAULT_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
-pub const REQUIRED_CAPABILITIES: [&str; 5] = [
+pub const REQUIRED_CAPABILITIES: [&str; 7] = [
     "prompt_completion",
     "session_info",
     "messages_list",
     "models_list",
     "branch_management",
+    "permission_interaction",
+    "user_input",
 ];
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -59,6 +61,22 @@ pub enum RpcRequest {
         id: String,
         thinking: String,
     },
+    PermissionReply {
+        id: String,
+        params: PermissionReplyParams,
+    },
+    PermissionReject {
+        id: String,
+        params: PermissionRejectParams,
+    },
+    UserInputReply {
+        id: String,
+        params: UserInputReplyParams,
+    },
+    UserInputReject {
+        id: String,
+        params: UserInputRejectParams,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -75,6 +93,101 @@ pub struct BranchForkParams {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SessionRenameParams {
     pub name: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionDecision {
+    Allow,
+    AllowSession,
+    AllowAlways,
+    Deny,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PermissionReplyParams {
+    pub request_id: String,
+    pub decision: PermissionDecision,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PermissionRejectParams {
+    pub request_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UserInputRejectParams {
+    pub request_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UserInputReplyParams {
+    pub request_id: String,
+    pub answers: Vec<UserInputAnswer>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UserInputAnswer {
+    #[serde(rename = "id")]
+    pub question_id: String,
+    pub answer: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PermissionRequest {
+    pub id: String,
+    pub tool: String,
+    pub args: Value,
+    #[serde(default)]
+    pub paths: Vec<String>,
+    pub risk: String,
+    #[serde(default)]
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct UserInputOption {
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct UserInputQuestion {
+    pub id: String,
+    pub header: String,
+    pub question: String,
+    #[serde(default)]
+    pub options: Vec<UserInputOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct UserInputRequest {
+    pub id: String,
+    pub tool_call_id: String,
+    pub questions: Vec<UserInputQuestion>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InteractionKind {
+    Permission,
+    UserInput,
+}
+
+impl InteractionKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Permission => "permission",
+            Self::UserInput => "user input",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MalformedInteraction {
+    pub kind: InteractionKind,
+    pub request_id: Option<String>,
+    pub error: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -281,6 +394,9 @@ pub enum RpcFrame {
     Ready(RpcReady),
     Response(RpcResponse),
     PromptCompleted(PromptCompleted),
+    PermissionRequest(PermissionRequest),
+    UserInputRequest(UserInputRequest),
+    MalformedInteraction(MalformedInteraction),
     Agent(AgentEvent),
     Unknown(RawFrame),
 }
@@ -354,6 +470,8 @@ pub fn decode_frame(bytes: &[u8]) -> Result<RpcFrame, SnowError> {
         "rpc_ready" => decode_ready(value),
         "response" => decode_response(object),
         "prompt_completed" => decode_prompt_completed(object),
+        "permission_request" if !object.contains_key("agent") => decode_permission_request(object),
+        "user_input_request" if !object.contains_key("agent") => decode_user_input_request(object),
         _ if AGENT_EVENT_TYPES.contains(&kind.as_str()) => {
             let mut fields = object.clone();
             fields.remove("type");
@@ -365,6 +483,109 @@ pub fn decode_frame(bytes: &[u8]) -> Result<RpcFrame, SnowError> {
             Ok(RpcFrame::Unknown(RawFrame { kind, fields }))
         }
     }
+}
+
+fn decode_permission_request(object: &Map<String, Value>) -> Result<RpcFrame, SnowError> {
+    let request_id = object
+        .get("permission")
+        .and_then(Value::as_object)
+        .and_then(|permission| permission.get("request"))
+        .and_then(Value::as_object)
+        .and_then(|request| request.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_owned);
+    let result = object
+        .get("permission")
+        .and_then(Value::as_object)
+        .and_then(|permission| permission.get("request"))
+        .cloned()
+        .ok_or_else(|| "permission_request is missing permission.request".to_owned())
+        .and_then(|value| {
+            serde_json::from_value::<PermissionRequest>(value)
+                .map_err(|error| format!("invalid permission_request: {error}"))
+        })
+        .and_then(validate_permission_request);
+    match result {
+        Ok(request) => Ok(RpcFrame::PermissionRequest(request)),
+        Err(error) => Ok(RpcFrame::MalformedInteraction(MalformedInteraction {
+            kind: InteractionKind::Permission,
+            request_id,
+            error,
+        })),
+    }
+}
+
+fn validate_permission_request(request: PermissionRequest) -> Result<PermissionRequest, String> {
+    if request.id.trim().is_empty() {
+        return Err("permission_request id must be non-empty".into());
+    }
+    if request.tool.trim().is_empty() {
+        return Err("permission_request tool must be non-empty".into());
+    }
+    if request.risk.trim().is_empty() {
+        return Err("permission_request risk must be non-empty".into());
+    }
+    Ok(request)
+}
+
+fn decode_user_input_request(object: &Map<String, Value>) -> Result<RpcFrame, SnowError> {
+    let request_id = object
+        .get("user_input")
+        .and_then(Value::as_object)
+        .and_then(|request| request.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_owned);
+    let result = object
+        .get("user_input")
+        .cloned()
+        .ok_or_else(|| "user_input_request is missing user_input".to_owned())
+        .and_then(|value| {
+            serde_json::from_value::<UserInputRequest>(value)
+                .map_err(|error| format!("invalid user_input_request: {error}"))
+        })
+        .and_then(validate_user_input_request);
+    match result {
+        Ok(request) => Ok(RpcFrame::UserInputRequest(request)),
+        Err(error) => Ok(RpcFrame::MalformedInteraction(MalformedInteraction {
+            kind: InteractionKind::UserInput,
+            request_id,
+            error,
+        })),
+    }
+}
+
+fn validate_user_input_request(request: UserInputRequest) -> Result<UserInputRequest, String> {
+    if request.id.trim().is_empty() {
+        return Err("user_input_request id must be non-empty".into());
+    }
+    if request.tool_call_id.trim().is_empty() {
+        return Err("user_input_request tool_call_id must be non-empty".into());
+    }
+    if request.questions.is_empty() {
+        return Err("user_input_request questions must be non-empty".into());
+    }
+    let mut ids = HashSet::with_capacity(request.questions.len());
+    for question in &request.questions {
+        if question.id.trim().is_empty()
+            || question.header.trim().is_empty()
+            || question.question.trim().is_empty()
+        {
+            return Err("user_input_request question fields must be non-empty".into());
+        }
+        if !ids.insert(question.id.as_str()) {
+            return Err("user_input_request question ids must be unique".into());
+        }
+        if question
+            .options
+            .iter()
+            .any(|option| option.label.trim().is_empty())
+        {
+            return Err("user_input_request option labels must be non-empty".into());
+        }
+    }
+    Ok(request)
 }
 
 fn decode_ready(value: Value) -> Result<RpcFrame, SnowError> {
@@ -560,6 +781,105 @@ mod tests {
     }
 
     #[test]
+    fn interaction_requests_have_exact_jsonl_encoding() {
+        let cases = [
+            (
+                RpcRequest::PermissionReply {
+                    id: "c1".into(),
+                    params: PermissionReplyParams {
+                        request_id: "perm-1".into(),
+                        decision: PermissionDecision::AllowSession,
+                    },
+                },
+                "{\"type\":\"permission_reply\",\"id\":\"c1\",\"params\":{\"request_id\":\"perm-1\",\"decision\":\"allow_session\"}}\n",
+            ),
+            (
+                RpcRequest::PermissionReject {
+                    id: "c2".into(),
+                    params: PermissionRejectParams {
+                        request_id: "perm-1".into(),
+                    },
+                },
+                "{\"type\":\"permission_reject\",\"id\":\"c2\",\"params\":{\"request_id\":\"perm-1\"}}\n",
+            ),
+            (
+                RpcRequest::UserInputReply {
+                    id: "c3".into(),
+                    params: UserInputReplyParams {
+                        request_id: "ask-1".into(),
+                        answers: vec![UserInputAnswer {
+                            question_id: "language".into(),
+                            answer: "Rust".into(),
+                        }],
+                    },
+                },
+                "{\"type\":\"user_input_reply\",\"id\":\"c3\",\"params\":{\"request_id\":\"ask-1\",\"answers\":[{\"id\":\"language\",\"answer\":\"Rust\"}]}}\n",
+            ),
+            (
+                RpcRequest::UserInputReject {
+                    id: "c4".into(),
+                    params: UserInputRejectParams {
+                        request_id: "ask-1".into(),
+                    },
+                },
+                "{\"type\":\"user_input_reject\",\"id\":\"c4\",\"params\":{\"request_id\":\"ask-1\"}}\n",
+            ),
+        ];
+        for (request, expected) in cases {
+            assert_eq!(encode_request(&request, 1024).unwrap(), expected.as_bytes());
+        }
+    }
+
+    #[test]
+    fn root_interaction_events_decode_to_typed_requests() {
+        let RpcFrame::PermissionRequest(permission) = decode_frame(
+            br#"{"type":"permission_request","permission":{"request":{"id":"perm-1","tool":"bash","args":{"command":"pwd"},"paths":["/tmp"],"risk":"exec","reason":"run command"}}}"#,
+        )
+        .unwrap()
+        else {
+            panic!("wanted permission request")
+        };
+        assert_eq!(permission.id, "perm-1");
+        assert_eq!(permission.args["command"], "pwd");
+
+        let RpcFrame::UserInputRequest(user_input) = decode_frame(
+            br#"{"type":"user_input_request","user_input":{"id":"ask-1","tool_call_id":"call-1","questions":[{"id":"language","header":"Language","question":"Which language?","options":[{"label":"Rust","description":"Safe"}]}]}}"#,
+        )
+        .unwrap()
+        else {
+            panic!("wanted user input request")
+        };
+        assert_eq!(user_input.id, "ask-1");
+        assert_eq!(user_input.questions[0].options[0].label, "Rust");
+    }
+
+    #[test]
+    fn malformed_interaction_preserves_usable_request_id() {
+        let RpcFrame::MalformedInteraction(malformed) = decode_frame(
+            br#"{"type":"permission_request","permission":{"request":{"id":"perm-1","tool":"bash","args":{},"risk":17}}}"#,
+        )
+        .unwrap()
+        else {
+            panic!("wanted malformed interaction")
+        };
+        assert_eq!(malformed.kind, InteractionKind::Permission);
+        assert_eq!(malformed.request_id.as_deref(), Some("perm-1"));
+        assert!(malformed.error.contains("invalid permission_request"));
+    }
+
+    #[test]
+    fn attributed_interactions_remain_raw_agent_events() {
+        let RpcFrame::Agent(event) = decode_frame(
+            br#"{"type":"permission_request","permission":{"request":{"id":"child-perm","tool":"bash","args":{},"risk":"exec"}},"agent":{"id":"child-1"}}"#,
+        )
+        .unwrap()
+        else {
+            panic!("wanted attributed agent event")
+        };
+        assert!(event.has_agent());
+    }
+
+    #[test]
     fn session_and_model_metadata_preserve_thinking_capabilities() {
         let session: SessionInfo = serde_json::from_value(serde_json::json!({
             "session_id": "s1",
@@ -743,24 +1063,21 @@ mod tests {
     }
 
     #[test]
-    fn extracts_correlated_interaction_ids() {
-        let RpcFrame::Agent(user_input) =
+    fn malformed_interactions_retain_correlated_ids() {
+        let RpcFrame::MalformedInteraction(user_input) =
             decode_frame(br#"{"type":"user_input_request","user_input":{"id":"ask-1"}}"#).unwrap()
         else {
-            panic!("wanted user input event")
+            panic!("wanted malformed user input event")
         };
-        assert_eq!(user_input.nested_string("user_input", "id"), Some("ask-1"));
+        assert_eq!(user_input.request_id.as_deref(), Some("ask-1"));
 
-        let RpcFrame::Agent(permission) = decode_frame(
+        let RpcFrame::MalformedInteraction(permission) = decode_frame(
             br#"{"type":"permission_request","permission":{"request":{"id":"perm-1"}}}"#,
         )
         .unwrap() else {
-            panic!("wanted permission event")
+            panic!("wanted malformed permission event")
         };
-        assert_eq!(
-            permission.nested_object_string("permission", "request", "id"),
-            Some("perm-1")
-        );
+        assert_eq!(permission.request_id.as_deref(), Some("perm-1"));
     }
 
     #[test]

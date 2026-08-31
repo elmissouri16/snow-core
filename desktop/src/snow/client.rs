@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io::{BufReader, Read, Write},
     process::Child,
     sync::{
@@ -17,9 +18,12 @@ use super::{
     process::{RuntimeConfig, read_bounded_frame, spawn},
     protocol::{
         AgentEvent, BranchCatalog, BranchForkParams, BranchSelectParams, HistoryMessage,
-        ModelCatalog, PromptCompleted, PromptStatus, REQUIRED_CAPABILITIES, RPC_PROTOCOL_VERSION,
-        RpcFrame, RpcReady, RpcRequest, SessionBranch, SessionInfo, SessionRenameParams,
-        SessionRenameResult, decode_frame, decode_history, encode_request,
+        InteractionKind, MalformedInteraction, ModelCatalog, PermissionDecision,
+        PermissionRejectParams, PermissionReplyParams, PermissionRequest, PromptCompleted,
+        PromptStatus, REQUIRED_CAPABILITIES, RPC_PROTOCOL_VERSION, RpcFrame, RpcReady, RpcRequest,
+        SessionBranch, SessionInfo, SessionRenameParams, SessionRenameResult, UserInputAnswer,
+        UserInputRejectParams, UserInputReplyParams, UserInputRequest, decode_frame,
+        decode_history, encode_request,
     },
 };
 
@@ -105,6 +109,24 @@ pub enum RuntimeEvent {
         kind: String,
         request_id: Option<String>,
     },
+    PermissionRequested(PermissionRequest),
+    UserInputRequested(UserInputRequest),
+    InteractionResolved {
+        command_id: String,
+        request_id: String,
+        command: String,
+    },
+    InteractionRejected {
+        command_id: Option<String>,
+        request_id: Option<String>,
+        command: String,
+        error: String,
+    },
+    MalformedInteraction {
+        kind: InteractionKind,
+        request_id: Option<String>,
+        error: String,
+    },
     PromptCompleted(PromptCompleted),
     Status(String),
     Diagnostic(String),
@@ -125,6 +147,19 @@ pub struct SnowClient {
     workers: Mutex<Vec<JoinHandle<()>>>,
 }
 
+#[derive(Debug)]
+struct PendingInteractionCommand {
+    kind: InteractionKind,
+    request_id: String,
+    command: &'static str,
+}
+
+#[derive(Debug, Clone)]
+struct PendingInteraction {
+    resolving: bool,
+    question_ids: Option<Vec<String>>,
+}
+
 struct Shared {
     command_tx: Sender<WriterCommand>,
     event_tx: Sender<RuntimeEvent>,
@@ -133,6 +168,8 @@ struct Shared {
     shutting_down: AtomicBool,
     max_input_bytes: AtomicUsize,
     active_prompt: Mutex<Option<PendingPrompt>>,
+    pending_interactions: Mutex<HashMap<(InteractionKind, String), PendingInteraction>>,
+    interaction_commands: Mutex<HashMap<String, PendingInteractionCommand>>,
     termination_watchdog_started: AtomicBool,
     shutdown_timeout: Duration,
 }
@@ -219,6 +256,8 @@ impl SnowClient {
             shutting_down: AtomicBool::new(false),
             max_input_bytes: AtomicUsize::new(config.max_frame_bytes),
             active_prompt: Mutex::new(None),
+            pending_interactions: Mutex::new(HashMap::new()),
+            interaction_commands: Mutex::new(HashMap::new()),
             termination_watchdog_started: AtomicBool::new(false),
             shutdown_timeout: config.shutdown_timeout,
         });
@@ -381,6 +420,209 @@ impl SnowClient {
             params: SessionRenameParams { name },
         })?;
         Ok(id)
+    }
+
+    pub fn permission_reply(
+        &self,
+        request_id: String,
+        decision: PermissionDecision,
+    ) -> Result<String, SnowError> {
+        self.send_interaction_request(
+            InteractionKind::Permission,
+            request_id.clone(),
+            "permission_reply",
+            RpcRequest::PermissionReply {
+                id: String::new(),
+                params: PermissionReplyParams {
+                    request_id,
+                    decision,
+                },
+            },
+        )
+    }
+
+    pub fn permission_reject(&self, request_id: String) -> Result<String, SnowError> {
+        self.send_interaction_request(
+            InteractionKind::Permission,
+            request_id.clone(),
+            "permission_reject",
+            RpcRequest::PermissionReject {
+                id: String::new(),
+                params: PermissionRejectParams { request_id },
+            },
+        )
+    }
+
+    pub fn user_input_reply(
+        &self,
+        request_id: String,
+        answers: Vec<UserInputAnswer>,
+    ) -> Result<String, SnowError> {
+        if answers.is_empty() {
+            return Err(SnowError::Protocol(
+                "user input reply must contain at least one answer".into(),
+            ));
+        }
+        let mut normalized = Vec::with_capacity(answers.len());
+        for answer in answers {
+            let question_id = answer.question_id.trim().to_owned();
+            let value = answer.answer.trim().to_owned();
+            if question_id.is_empty() || value.is_empty() {
+                return Err(SnowError::Protocol(
+                    "user input answer ids and values must be non-empty".into(),
+                ));
+            }
+            if value.len() > 8 * 1024 {
+                return Err(SnowError::Protocol(
+                    "user input answer exceeds the 8 KiB limit".into(),
+                ));
+            }
+            normalized.push(UserInputAnswer {
+                question_id,
+                answer: value,
+            });
+        }
+        let question_ids = self
+            .shared
+            .pending_interactions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&(InteractionKind::UserInput, request_id.clone()))
+            .and_then(|interaction| interaction.question_ids.clone())
+            .ok_or_else(|| {
+                SnowError::Protocol(format!(
+                    "user_input_reply does not match a complete pending user input request {request_id}"
+                ))
+            })?;
+        if normalized.len() != question_ids.len() {
+            return Err(SnowError::Protocol(
+                "user input reply must answer every pending question exactly once".into(),
+            ));
+        }
+        let mut ordered = Vec::with_capacity(question_ids.len());
+        for question_id in question_ids {
+            let mut matches = normalized
+                .iter()
+                .filter(|answer| answer.question_id == question_id);
+            let Some(answer) = matches.next() else {
+                return Err(SnowError::Protocol(format!(
+                    "user input reply is missing question {question_id}"
+                )));
+            };
+            if matches.next().is_some() {
+                return Err(SnowError::Protocol(format!(
+                    "user input reply contains duplicate question {question_id}"
+                )));
+            }
+            ordered.push(answer.clone());
+        }
+        self.send_interaction_request(
+            InteractionKind::UserInput,
+            request_id.clone(),
+            "user_input_reply",
+            RpcRequest::UserInputReply {
+                id: String::new(),
+                params: UserInputReplyParams {
+                    request_id,
+                    answers: ordered,
+                },
+            },
+        )
+    }
+
+    pub fn user_input_reject(&self, request_id: String) -> Result<String, SnowError> {
+        self.send_interaction_request(
+            InteractionKind::UserInput,
+            request_id.clone(),
+            "user_input_reject",
+            RpcRequest::UserInputReject {
+                id: String::new(),
+                params: UserInputRejectParams { request_id },
+            },
+        )
+    }
+
+    fn send_interaction_request(
+        &self,
+        kind: InteractionKind,
+        request_id: String,
+        command: &'static str,
+        mut request: RpcRequest,
+    ) -> Result<String, SnowError> {
+        if !self.shared.ready.load(Ordering::Acquire) {
+            return Err(SnowError::NotReady);
+        }
+        if request_id.trim().is_empty() {
+            return Err(SnowError::Protocol(format!(
+                "{command} request id must be non-empty"
+            )));
+        }
+        if !command.ends_with("_reject")
+            && self
+                .shared
+                .active_prompt
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_none()
+        {
+            return Err(SnowError::NoActivePrompt);
+        }
+        let interaction_key = (kind, request_id.clone());
+        {
+            let mut interactions = self
+                .shared
+                .pending_interactions
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(interaction) = interactions.get_mut(&interaction_key) else {
+                return Err(SnowError::Protocol(format!(
+                    "{command} does not match a pending {} request {request_id}",
+                    kind.label()
+                )));
+            };
+            if interaction.resolving {
+                return Err(SnowError::Protocol(format!(
+                    "{} request {request_id} already has a reply in flight",
+                    kind.label()
+                )));
+            }
+            interaction.resolving = true;
+        }
+        let command_id = Uuid::new_v4().to_string();
+        match &mut request {
+            RpcRequest::PermissionReply { id, .. }
+            | RpcRequest::PermissionReject { id, .. }
+            | RpcRequest::UserInputReply { id, .. }
+            | RpcRequest::UserInputReject { id, .. } => id.clone_from(&command_id),
+            _ => {
+                mark_interaction_retryable(&self.shared, kind, &request_id);
+                return Err(SnowError::Protocol(
+                    "internal interaction request mismatch".into(),
+                ));
+            }
+        }
+        self.shared
+            .interaction_commands
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                command_id.clone(),
+                PendingInteractionCommand {
+                    kind,
+                    request_id: request_id.clone(),
+                    command,
+                },
+            );
+        if let Err(error) = self.send_request(request) {
+            self.shared
+                .interaction_commands
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&command_id);
+            mark_interaction_retryable(&self.shared, kind, &request_id);
+            return Err(error);
+        }
+        Ok(command_id)
     }
 
     fn require_idle(&self) -> Result<(), SnowError> {
@@ -791,7 +1033,25 @@ fn dispatch_frame(shared: &Shared, frame: RpcFrame) -> Result<(), SnowError> {
             } else if !response.success {
                 let command = response.command.unwrap_or_else(|| "request".into());
                 let error = response.error.unwrap_or_else(|| "request failed".into());
-                if matches!(
+                let pending = response
+                    .id
+                    .as_deref()
+                    .and_then(|id| take_interaction_command(shared, id));
+                if is_interaction_command(&command) || pending.is_some() {
+                    let command_id = response.id;
+                    if let Some(pending) = pending.as_ref() {
+                        mark_interaction_retryable(shared, pending.kind, &pending.request_id);
+                    }
+                    emit_event(
+                        shared,
+                        RuntimeEvent::InteractionRejected {
+                            command_id,
+                            request_id: pending.map(|pending| pending.request_id),
+                            command,
+                            error,
+                        },
+                    );
+                } else if matches!(
                     command.as_str(),
                     "models_list" | "session_info" | "messages_list" | "branches_list"
                 ) {
@@ -819,6 +1079,53 @@ fn dispatch_frame(shared: &Shared, frame: RpcFrame) -> Result<(), SnowError> {
             } else {
                 let data = response.data;
                 match response.command.as_deref() {
+                    Some(command) if is_interaction_command(command) => {
+                        let command_id = response.id.ok_or_else(|| {
+                            SnowError::Protocol(format!("{command} response is missing request id"))
+                        })?;
+                        if let Some(pending) = take_interaction_command(shared, &command_id) {
+                            if pending.command != command {
+                                mark_interaction_retryable(
+                                    shared,
+                                    pending.kind,
+                                    &pending.request_id,
+                                );
+                                emit_event(
+                                    shared,
+                                    RuntimeEvent::InteractionRejected {
+                                        command_id: Some(command_id),
+                                        request_id: Some(pending.request_id),
+                                        command: command.into(),
+                                        error: format!(
+                                            "interaction response command mismatch: expected {}",
+                                            pending.command
+                                        ),
+                                    },
+                                );
+                            } else {
+                                resolve_pending_interaction(shared, &pending);
+                                emit_event(
+                                    shared,
+                                    RuntimeEvent::InteractionResolved {
+                                        command_id,
+                                        request_id: pending.request_id,
+                                        command: command.into(),
+                                    },
+                                );
+                            }
+                        } else {
+                            emit_event(
+                                shared,
+                                RuntimeEvent::InteractionRejected {
+                                    command_id: Some(command_id),
+                                    request_id: None,
+                                    command: command.into(),
+                                    error: "interaction response has an unknown correlation id"
+                                        .into(),
+                                },
+                            );
+                        }
+                    }
                     Some("models_list") => {
                         let generation =
                             runtime_response_generation(response.id.as_deref(), "models_list")?;
@@ -949,14 +1256,104 @@ fn dispatch_frame(shared: &Shared, frame: RpcFrame) -> Result<(), SnowError> {
                         })?;
                         emit_event(shared, RuntimeEvent::ThinkingChanged { request_id });
                     }
-                    _ => {}
+                    command => {
+                        if let Some(command_id) = response.id
+                            && let Some(pending) = take_interaction_command(shared, &command_id)
+                        {
+                            mark_interaction_retryable(shared, pending.kind, &pending.request_id);
+                            emit_event(
+                                shared,
+                                RuntimeEvent::InteractionRejected {
+                                    command_id: Some(command_id),
+                                    request_id: Some(pending.request_id),
+                                    command: command.unwrap_or("response").into(),
+                                    error: format!(
+                                        "interaction response command mismatch: expected {}",
+                                        pending.command
+                                    ),
+                                },
+                            );
+                        }
+                    }
                 }
             }
             Ok(())
         }
         RpcFrame::PromptCompleted(completed) => {
-            clear_matching_active_prompt(shared, &completed.request_id);
+            if !clear_matching_active_prompt(shared, &completed.request_id) {
+                return Err(SnowError::Protocol(format!(
+                    "prompt_completed has unknown correlation id {}",
+                    completed.request_id
+                )));
+            }
+            clear_interactions(shared);
             emit_event(shared, RuntimeEvent::PromptCompleted(completed));
+            Ok(())
+        }
+        RpcFrame::PermissionRequest(request) => {
+            register_pending_interaction(shared, InteractionKind::Permission, &request.id, None);
+            if has_active_prompt(shared) {
+                emit_event(shared, RuntimeEvent::PermissionRequested(request));
+            } else {
+                emit_event(
+                    shared,
+                    RuntimeEvent::MalformedInteraction {
+                        kind: InteractionKind::Permission,
+                        request_id: Some(request.id),
+                        error: "received permission_request without an active prompt".into(),
+                    },
+                );
+            }
+            Ok(())
+        }
+        RpcFrame::UserInputRequest(request) => {
+            register_pending_interaction(
+                shared,
+                InteractionKind::UserInput,
+                &request.id,
+                Some(
+                    request
+                        .questions
+                        .iter()
+                        .map(|question| question.id.clone())
+                        .collect(),
+                ),
+            );
+            if has_active_prompt(shared) {
+                emit_event(shared, RuntimeEvent::UserInputRequested(request));
+            } else {
+                emit_event(
+                    shared,
+                    RuntimeEvent::MalformedInteraction {
+                        kind: InteractionKind::UserInput,
+                        request_id: Some(request.id),
+                        error: "received user_input_request without an active prompt".into(),
+                    },
+                );
+            }
+            Ok(())
+        }
+        RpcFrame::MalformedInteraction(MalformedInteraction {
+            kind,
+            request_id,
+            mut error,
+        }) => {
+            if let Some(request_id) = request_id.as_deref() {
+                register_pending_interaction(shared, kind, request_id, None);
+            }
+            if request_id.is_none()
+                && let Err(abort_error) = begin_fail_closed_abort(shared)
+            {
+                error.push_str(&format!("; could not abort blocked turn: {abort_error}"));
+            }
+            emit_event(
+                shared,
+                RuntimeEvent::MalformedInteraction {
+                    kind,
+                    request_id,
+                    error,
+                },
+            );
             Ok(())
         }
         RpcFrame::Agent(event) => {
@@ -1055,6 +1452,81 @@ fn truncate_chars(value: &str, limit: usize) -> String {
     }
 }
 
+fn is_interaction_command(command: &str) -> bool {
+    matches!(
+        command,
+        "permission_reply" | "permission_reject" | "user_input_reply" | "user_input_reject"
+    )
+}
+
+fn register_pending_interaction(
+    shared: &Shared,
+    kind: InteractionKind,
+    request_id: &str,
+    question_ids: Option<Vec<String>>,
+) {
+    shared
+        .pending_interactions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry((kind, request_id.to_owned()))
+        .or_insert(PendingInteraction {
+            resolving: false,
+            question_ids,
+        });
+}
+
+fn mark_interaction_retryable(shared: &Shared, kind: InteractionKind, request_id: &str) {
+    if let Some(interaction) = shared
+        .pending_interactions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get_mut(&(kind, request_id.to_owned()))
+    {
+        interaction.resolving = false;
+    }
+}
+
+fn resolve_pending_interaction(shared: &Shared, pending: &PendingInteractionCommand) {
+    shared
+        .pending_interactions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&(pending.kind, pending.request_id.clone()));
+}
+
+fn take_interaction_command(
+    shared: &Shared,
+    command_id: &str,
+) -> Option<PendingInteractionCommand> {
+    shared
+        .interaction_commands
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(command_id)
+}
+
+fn clear_interactions(shared: &Shared) {
+    shared
+        .pending_interactions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+    shared
+        .interaction_commands
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+}
+
+fn has_active_prompt(shared: &Shared) -> bool {
+    shared
+        .active_prompt
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .is_some()
+}
+
 fn active_prompt_matches(shared: &Shared, expected: &str) -> bool {
     shared
         .active_prompt
@@ -1076,6 +1548,38 @@ fn clear_matching_active_prompt(shared: &Shared, expected: &str) -> bool {
     true
 }
 
+fn begin_fail_closed_abort(shared: &Shared) -> Result<(), SnowError> {
+    {
+        let mut active = shared
+            .active_prompt
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(active) = active.as_mut() else {
+            return Ok(());
+        };
+        if active.abort_pending {
+            return Ok(());
+        }
+        active.abort_pending = true;
+    }
+    let frame = encode_request(
+        &RpcRequest::Abort {
+            id: Uuid::new_v4().to_string(),
+        },
+        shared.max_input_bytes.load(Ordering::Acquire),
+    )?;
+    shared
+        .command_tx
+        .try_send(WriterCommand::Frame(frame))
+        .map_err(|error| {
+            clear_abort_pending(shared);
+            match error {
+                flume::TrySendError::Full(_) => SnowError::CommandQueueFull,
+                flume::TrySendError::Disconnected(_) => SnowError::ChannelClosed,
+            }
+        })
+}
+
 fn clear_abort_pending(shared: &Shared) {
     if let Some(active) = shared
         .active_prompt
@@ -1092,6 +1596,7 @@ fn force_clear_active_prompt(shared: &Shared) {
         .active_prompt
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    clear_interactions(shared);
 }
 
 fn frame_kind(frame: &RpcFrame) -> String {
@@ -1099,6 +1604,12 @@ fn frame_kind(frame: &RpcFrame) -> String {
         RpcFrame::Ready(_) => "rpc_ready",
         RpcFrame::Response(_) => "response",
         RpcFrame::PromptCompleted(_) => "prompt_completed",
+        RpcFrame::PermissionRequest(_) => "permission_request",
+        RpcFrame::UserInputRequest(_) => "user_input_request",
+        RpcFrame::MalformedInteraction(interaction) => match interaction.kind {
+            InteractionKind::Permission => "permission_request",
+            InteractionKind::UserInput => "user_input_request",
+        },
         RpcFrame::Agent(event) => event.kind.as_str(),
         RpcFrame::Unknown(frame) => frame.kind.as_str(),
     }
@@ -1152,6 +1663,11 @@ fn emit_event(shared: &Shared, event: RuntimeEvent) {
         .is_err()
     {
         initiate_shutdown(shared);
+        // The host is no longer draining lifecycle events, so there is no safe
+        // interactive recovery path. Reap immediately instead of relying on a
+        // child that may ignore stdin closure or waiting for another event to
+        // start the termination watchdog.
+        force_stop_child(shared);
     }
 }
 
@@ -1193,6 +1709,16 @@ mod tests {
             validate_ready(&ready("1", &["prompt_completion"])),
             Err(SnowError::MissingCapability(_))
         ));
+        for required in ["permission_interaction", "user_input"] {
+            let capabilities: Vec<_> = REQUIRED_CAPABILITIES
+                .into_iter()
+                .filter(|capability| *capability != required)
+                .collect();
+            assert!(matches!(
+                validate_ready(&ready("1", &capabilities)),
+                Err(SnowError::MissingCapability(capability)) if capability == required
+            ));
+        }
     }
 
     #[test]

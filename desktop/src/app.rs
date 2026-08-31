@@ -1,11 +1,12 @@
 use gpui::{App, Application, Bounds, WindowBounds, WindowOptions, prelude::*, px, size};
 use gpui_component::Root;
 
-use crate::workspace::Workspace;
+use crate::workspace::{self, Workspace};
 
 pub fn run() {
     Application::new().run(|cx: &mut App| {
         gpui_component::init(cx);
+        workspace::init(cx);
         cx.on_window_closed(move |cx| {
             if cx.windows().is_empty() {
                 cx.quit();
