@@ -169,7 +169,7 @@ blocks.
 | `type` | string | Yes | Command name |
 | `message` | string | No | Top-level text for `prompt`, `steer`, and `follow_up` |
 | `model` | string | No | Top-level model ID for `set_model` |
-| `thinking` | string | No | Top-level effort for `set_thinking` |
+| `thinking` | string | No | Top-level effort for `set_thinking` or atomic `set_model` |
 | `reasoning_summary` | string | No | Top-level provider summary preference for `set_reasoning_summary` |
 | `text_verbosity` | string | No | Top-level provider verbosity preference for `set_text_verbosity` |
 | `mode` | string | No | Top-level collaboration mode for `set_mode` or a prompt-attached mode |
@@ -398,7 +398,8 @@ explicitly configured compatible model IDs may still work.
 {
   "id": "model-1",
   "type": "set_model",
-  "model": "kimi-k2.6"
+  "model": "kimi-k2.6",
+  "thinking": "high"
 }
 ```
 
@@ -407,9 +408,12 @@ explicitly configured compatible model IDs may still work.
 | `id` | string | No | Correlation ID |
 | `type` | string | Yes | Must be `set_model` |
 | `model` | string | Yes | Model ID to activate |
+| `thinking` | string | No | Compatible effort to activate atomically with the model |
 
-Snow uses matching catalog metadata when available. A change may be rejected
-while work is active or when current settings are incompatible.
+Snow uses matching catalog metadata when available. When `thinking` is present,
+Snow validates and applies the model and effort as one idle transaction. When
+it is omitted, the existing model-only behavior is preserved. A change may be
+rejected while work is active or when the requested settings are incompatible.
 
 ### `set_thinking`
 

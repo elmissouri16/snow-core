@@ -572,7 +572,15 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 				break
 			}
 		}
-		if err := s.app.SetModel(m); err != nil {
+		if req.Thinking != "" {
+			level, err := protocol.ParseThinkingLevel(req.Thinking)
+			if err != nil {
+				return err
+			}
+			if err := s.app.SetProviderModelThinking(providerID, m, level); err != nil {
+				return err
+			}
+		} else if err := s.app.SetModel(m); err != nil {
 			return err
 		}
 		if err := s.write(Response{ID: req.ID, Type: "response", Command: "set_model", Success: true}); err != nil {

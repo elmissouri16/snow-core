@@ -184,6 +184,7 @@ the same provider → tool → session loop.
 | Print | `snow -p "..."` | Human-readable one-shot automation |
 | JSON events | `snow --mode json -p "..."` | Shell pipelines and event recording |
 | RPC | `snow --mode rpc` | Versioned, long-lived foreign-language/IDE control over JSONL stdio |
+| Experimental macOS desktop | [`desktop`](desktop) | Basic GPUI client that owns an external, permission-denied RPC process |
 | Go SDK | `github.com/elmissouri16/snow-core/pkg/snowsdk` | In-process embedding without Cobra or Bubble Tea |
 | Python SDK | [`sdk/python`](sdk/python) | Async typed local client around an external Snow binary |
 | JavaScript/TypeScript SDK | [`sdk/javascript`](sdk/javascript) | Zero-dependency ESM client with TypeScript declarations |
@@ -233,7 +234,9 @@ remains.
 
 Read the [user guide](docs/using-snow.md) for TUI keys, slash commands, queue
 semantics, sessions, and modes. Read the [RPC protocol](docs/rpc.md) before
-building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
+building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0. The independent
+[desktop proof](desktop/README.md) is macOS arm64-only, intentionally keeps
+permissions denied, and is not part of the Go runtime or release artifacts.
 
 ## Providers
 

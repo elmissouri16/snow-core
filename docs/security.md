@@ -542,12 +542,16 @@ snow --permission allow --no-session -p "run the approved verification"
 > a container, VM, or runner whose OS-level permissions and secrets are already
 > constrained.
 
-### Headless SDK/RPC
+### Headless SDK/RPC and experimental desktop
 
-The Python and JavaScript/TypeScript SDKs start an external Snow binary directly
-without a shell. They do not download binaries or accept API keys as process
-arguments; credentials should come from Snow's auth store or a deliberately
-controlled inherited environment.
+The Python and JavaScript/TypeScript SDKs and the experimental macOS desktop
+start an external Snow binary directly without a shell. They do not download
+binaries or accept API keys as process arguments; credentials should come from
+Snow's auth store or a deliberately controlled inherited environment. The
+desktop currently forces `deny`, disables plugins, MCP, skills, and subagents,
+and restores only surface-safe user/assistant text from Snow's durable private
+SQLite session. It still inherits the user's OS privileges and environment and
+is not a sandbox.
 
 - default to `deny`;
 - pass the smallest built-in tool allowlist;

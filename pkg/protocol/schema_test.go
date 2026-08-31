@@ -293,6 +293,7 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 			value.Message = "next"
 		case "set_model":
 			value.Model = "fake-1"
+			value.Thinking = "high"
 		case "set_thinking":
 			value.Thinking = "off"
 		case "set_mode":

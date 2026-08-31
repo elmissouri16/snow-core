@@ -69,8 +69,9 @@ keeps UI dependencies out of core packages.
 
 ### Non-goals
 
-- No desktop product surface or Electron/IPC contract; Snow is a standalone
-  harness, not a backend for another IDE.
+- No desktop UI dependency or Electron/IPC contract in the Go runtime. The
+  experimental `desktop/` proof is an independent JSONL RPC client, not a second
+  agent loop or a release artifact.
 - No built-in process or per-extension sandbox. Bash, external plugins, stdio
   MCP servers, and subagents execute with the user's OS privileges; operators
   provide external containment when needed.
@@ -130,6 +131,7 @@ keeps UI dependencies out of core packages.
 │   ├── protocol/            # dependency-light public messages/events/models
 │   │   └── schema/          # network-free Draft 2020-12 wire schemas
 │   └── snowsdk/             # public embeddable API; no TUI dependency
+├── desktop/                 # independent experimental GPUI RPC client
 ├── examples/                # standalone SDK, RPC, and plugin examples
 ├── sdk/                     # Language clients and private plugin-authoring SDKs
 └── docs/                    # user guides and per-topic references
@@ -138,6 +140,7 @@ keeps UI dependencies out of core packages.
 | Package | Responsibility |
 |---|---|
 | `cmd/snow` | Cobra entry point and CLI mode selection |
+| `desktop` | Independent experimental GPUI client for an external permission-denied RPC process |
 | `internal/app` | Runtime wiring and provider/model/session catalogs |
 | `internal/agent` | Provider → stream → permission → tools turn loop |
 | `internal/auth` | Credential model and memory/file stores |

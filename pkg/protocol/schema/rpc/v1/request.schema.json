@@ -351,6 +351,9 @@
         "model": {
           "type": "string",
           "minLength": 1
+        },
+        "thinking": {
+          "$ref": "#/$defs/thinking"
         }
       },
       "additionalProperties": false

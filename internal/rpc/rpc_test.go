@@ -377,11 +377,13 @@ func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 	srv := New(context.Background(), a, &in, &out)
 	in.WriteString(`{"id":"t1","type":"set_thinking","thinking":"low"}` + "\n")
 	in.WriteString(`{"id":"i1","type":"session_info"}` + "\n")
+	in.WriteString(`{"id":"m1","type":"set_model","model":"fake-1","thinking":"off"}` + "\n")
+	in.WriteString(`{"id":"i2","type":"session_info"}` + "\n")
 	if err := srv.Serve(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 3 {
+	if len(lines) != 5 {
 		t.Fatalf("lines = %q", lines)
 	}
 	var set Response
@@ -401,6 +403,21 @@ func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
 	costs, _ := goalInfo["estimated_costs"].([]any)
 	if info.Command != "session_info" || !info.Success || data["thinking"] != "low" || fmt.Sprint(data["thinking_levels"]) != "[off low]" || pending["total"] != float64(0) || goalInfo["blocked_reason"] != "CI unavailable" || len(costs) != 1 {
 		t.Fatalf("session info = %+v", info)
+	}
+	var setModel Response
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "m1"), &setModel); err != nil {
+		t.Fatal(err)
+	}
+	if setModel.Command != "set_model" || !setModel.Success {
+		t.Fatalf("set model response = %+v", setModel)
+	}
+	var updated Response
+	if err := json.Unmarshal(rpcFrame(t, out.String(), "response", "i2"), &updated); err != nil {
+		t.Fatal(err)
+	}
+	updatedData, _ := updated.Data.(map[string]any)
+	if !updated.Success || updatedData["model"] != "fake-1" || updatedData["thinking"] != "off" || fmt.Sprint(updatedData["thinking_levels"]) != "[off]" {
+		t.Fatalf("updated session info = %+v", updated)
 	}
 }
 
