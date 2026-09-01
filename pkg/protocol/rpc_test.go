@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 )
@@ -22,6 +23,23 @@ func TestRPCOptionalTimesOmitZeroValues(t *testing.T) {
 			if bytes.Contains(data, []byte(`"`+field+`"`)) {
 				t.Fatalf("%s zero value unexpectedly includes %q: %s", name, field, data)
 			}
+		}
+	}
+}
+
+func TestRPCSettingsUpdateParamsAreSecretFreeAndPartial(t *testing.T) {
+	provider := "fake"
+	debugEnabled := true
+	data, err := json.Marshal(RPCSettingsUpdateParams{Provider: &provider, DebugEnabled: &debugEnabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), `{"provider":"fake","debug_enabled":true}`; got != want {
+		t.Fatalf("settings update JSON = %s, want %s", got, want)
+	}
+	for _, forbidden := range [][]byte{[]byte("secret"), []byte("api_key"), []byte("headers"), []byte("environment")} {
+		if bytes.Contains(data, forbidden) {
+			t.Fatalf("settings update exposed forbidden field %q: %s", forbidden, data)
 		}
 	}
 }
@@ -48,6 +66,11 @@ func TestRPCReadyIsDefensiveAndStable(t *testing.T) {
 	commands[0] = "mutated"
 	if KnownRPCCommands()[0] == "mutated" {
 		t.Fatal("command list aliases protocol state")
+	}
+	for _, capability := range []string{"session_management", "permission_mode", "project_trust", "managed_processes", "project_init", "settings", "context_report"} {
+		if !slices.Contains(ready.Capabilities, capability) {
+			t.Fatalf("capabilities omit %s: %v", capability, ready.Capabilities)
+		}
 	}
 }
 
@@ -104,6 +127,26 @@ func TestRPCPublicDTOJSONRoundTrips(t *testing.T) {
 		},
 		func(t *testing.T) {
 			assertJSONRoundTrip(t, RPCSessionInfo{SessionID: "s", Name: "n", Path: "p", CWD: "c", Provider: "fake", Model: "fake-1", Thinking: ThinkingOff, ThinkingLevels: []ThinkingLevel{ThinkingOff}, CollaborationMode: ModeDefault, Goal: &RPCGoalSummary{GoalID: "g", Status: GoalActive, TokenBudget: &budget, EstimatedCosts: []Cost{}}, Subagents: RPCSubagentLimits{}, PendingInputs: RPCPendingInputCounts{}})
+		},
+		func(t *testing.T) { assertJSONRoundTrip(t, RPCPermissionMode{Mode: "ask"}) },
+		func(t *testing.T) {
+			assertJSONRoundTrip(t, RPCSettings{Provider: "fake", Model: "fake-1", Thinking: ThinkingOff, ReasoningSummary: ReasoningSummaryAuto, TextVerbosity: TextVerbosityMedium, PermissionMode: "ask", SubagentsEnabled: true, SubagentsMaxConcurrent: 4, SubagentsMaxAgents: 32, SkillsEnabled: true})
+		},
+		func(t *testing.T) {
+			assertJSONRoundTrip(t, RPCProjectTrust{Path: "/project", Level: "allow", Loaded: false, RestartRequired: true})
+		},
+		func(t *testing.T) {
+			exitCode := 0
+			assertJSONRoundTrip(t, RPCManagedProcessList{Processes: []RPCManagedProcess{{ProcessID: "proc-1", Name: "server", Status: "exited", StartedAt: 1, FinishedAt: 2, ExitCode: &exitCode, Ready: true}}})
+		},
+		func(t *testing.T) {
+			assertJSONRoundTrip(t, RPCManagedProcessLogs{ProcessID: "proc-1", Status: "running", Output: "ready\n", NextCursor: 6, EOF: false})
+		},
+		func(t *testing.T) {
+			assertJSONRoundTrip(t, RPCContextReport{LatestRequest: true, Categories: []RPCContextCategory{{Name: "User messages", Bytes: 12, EstimatedTokens: 3, Items: 1}}, EstimatedInputTokens: 3, MessageCount: 1, ToolCount: 0, ContextWindow: 128000})
+		},
+		func(t *testing.T) {
+			assertJSONRoundTrip(t, RPCSkillsClearResult{Cleared: 2, Catalog: RPCSkillsList{Skills: []RPCSkill{}}})
 		},
 	}
 	for i, test := range values {

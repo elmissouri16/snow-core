@@ -3,55 +3,211 @@
   "$id": "https://snow-core.dev/schemas/rpc/v1/session-info.schema.json",
   "title": "Snow RPC session_info data",
   "type": "object",
-  "required": ["session_id", "name", "path", "cwd", "provider", "model", "thinking", "thinking_levels", "collaboration_mode", "subagents", "pending_inputs"],
+  "required": [
+    "session_id",
+    "name",
+    "path",
+    "cwd",
+    "provider",
+    "model",
+    "thinking",
+    "thinking_levels",
+    "collaboration_mode",
+    "subagents",
+    "pending_inputs"
+  ],
   "properties": {
-    "session_id": {"type": "string"},
-    "name": {"type": "string"},
-    "path": {"type": "string"},
-    "cwd": {"type": "string"},
-    "provider": {"type": "string"},
-    "model": {"type": "string"},
-    "thinking": {"type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]},
-    "thinking_levels": {"type": "array", "items": {"type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]}},
-    "collaboration_mode": {"type": "string", "enum": ["default", "plan"]},
-    "reasoning_summary": {"type": "string", "enum": ["off", "auto", "concise", "detailed"]},
-    "text_verbosity": {"type": "string", "enum": ["low", "medium", "high"]},
+    "session_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "cwd": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "thinking": {
+      "type": "string",
+      "enum": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ]
+    },
+    "thinking_levels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      }
+    },
+    "collaboration_mode": {
+      "type": "string",
+      "enum": [
+        "default",
+        "plan"
+      ]
+    },
+    "reasoning_summary": {
+      "type": "string",
+      "enum": [
+        "off",
+        "auto",
+        "concise",
+        "detailed"
+      ]
+    },
+    "text_verbosity": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
     "goal": {
       "type": "object",
-      "required": ["goal_id", "status", "tokens_used", "token_budget", "estimated_costs"],
+      "required": [
+        "goal_id",
+        "status",
+        "tokens_used",
+        "token_budget",
+        "estimated_costs"
+      ],
       "properties": {
-        "goal_id": {"type": "string"},
-        "status": {"type": "string", "enum": ["active", "paused", "blocked", "usage_limited", "budget_limited", "complete"]},
-        "blocked_reason": {"type": "string"},
-        "tokens_used": {"type": "integer", "minimum": 0},
-        "token_budget": {"type": ["integer", "null"], "minimum": 1},
-        "estimated_costs": {"type": ["array", "null"], "items": {"$ref": "common.schema.json#/$defs/cost"}}
+        "goal_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "paused",
+            "blocked",
+            "usage_limited",
+            "budget_limited",
+            "complete"
+          ]
+        },
+        "blocked_reason": {
+          "type": "string"
+        },
+        "tokens_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "token_budget": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "estimated_costs": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "common.schema.json#/$defs/cost"
+          }
+        }
       },
       "additionalProperties": false
     },
     "subagents": {
       "type": "object",
-      "required": ["enabled", "max_concurrent_agents", "max_concurrent_threads", "max_agents_per_session", "max_depth", "durable", "allow_mutation"],
+      "required": [
+        "enabled",
+        "max_concurrent_agents",
+        "max_concurrent_threads",
+        "max_agents_per_session",
+        "max_depth",
+        "durable",
+        "allow_mutation"
+      ],
       "properties": {
-        "enabled": {"type": "boolean"},
-        "max_concurrent_agents": {"type": "integer", "minimum": 0},
-        "max_concurrent_threads": {"type": "integer", "minimum": 0},
-        "max_agents_per_session": {"type": "integer", "minimum": 0},
-        "max_depth": {"type": "integer", "minimum": 0},
-        "durable": {"type": "boolean"},
-        "allow_mutation": {"type": "boolean"}
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_concurrent_agents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_concurrent_threads": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_agents_per_session": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_depth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "durable": {
+          "type": "boolean"
+        },
+        "allow_mutation": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
     "pending_inputs": {
       "type": "object",
-      "required": ["steering", "follow_up", "total"],
+      "required": [
+        "steering",
+        "follow_up",
+        "total"
+      ],
       "properties": {
-        "steering": {"type": "integer", "minimum": 0},
-        "follow_up": {"type": "integer", "minimum": 0},
-        "total": {"type": "integer", "minimum": 0}
+        "steering": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "follow_up": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
+    },
+    "permission_mode": {
+      "type": "string",
+      "enum": [
+        "ask",
+        "allow",
+        "deny"
+      ]
     }
   },
   "additionalProperties": false

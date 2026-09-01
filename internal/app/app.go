@@ -76,6 +76,9 @@ type App struct {
 	ProjectInputRoot string
 
 	stateMu              sync.Mutex
+	settingsMu           sync.Mutex
+	settingsMutationMu   sync.Mutex
+	settingsBaseline     *restartSettingsBaseline
 	providerTransitionMu sync.Mutex
 	diagnosticsMu        sync.Mutex
 	diagnosticsCacheKey  string

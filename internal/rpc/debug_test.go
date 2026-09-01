@@ -2,17 +2,18 @@ package rpc
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/config"
 )
 
 func TestRPCDebugControlsAndDump(t *testing.T) {
-	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, NoPlugins: true, NoMCP: true, NoSkills: true, Permission: "deny", CWD: t.TempDir()})
+	t.Setenv("SNOW_HOME", filepath.Join(t.TempDir(), "snow-home"))
+	a, err := app.New(t.Context(), app.Options{Provider: "fake", NoSession: true, NoPlugins: true, NoMCP: true, NoSkills: true, Permission: "deny", CWD: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +27,7 @@ func TestRPCDebugControlsAndDump(t *testing.T) {
 	request, _ := json.Marshal(Request{ID: "dump", Type: "debug_dump", Params: params})
 	in.Write(request)
 	in.WriteByte('\n')
-	if err := New(context.Background(), a, &in, &out).Serve(context.Background()); err != nil {
+	if err := New(t.Context(), a, &in, &out).Serve(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"enable", "status", "dump"} {
@@ -40,5 +41,12 @@ func TestRPCDebugControlsAndDump(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
+	}
+	persisted, err := config.Load(a.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !persisted.Debug.Enabled {
+		t.Fatal("debug_enable did not persist debug.enabled")
 	}
 }

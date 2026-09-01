@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/theme-catalog.schema.json",
+  "title": "Snow resolved theme catalog",
+  "$defs": {
+    "adaptiveColor": {
+      "type": "object",
+      "required": ["light", "dark"],
+      "properties": {
+        "light": {"type": "string", "minLength": 1, "maxLength": 64},
+        "dark": {"type": "string", "minLength": 1, "maxLength": 64}
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "required": ["selected", "themes"],
+  "properties": {
+    "selected": {"type": "string", "minLength": 1, "maxLength": 64},
+    "themes": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 132,
+      "items": {
+        "type": "object",
+        "required": ["name", "display_name", "scope", "colors"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 64},
+          "display_name": {"type": "string", "minLength": 1, "maxLength": 64},
+          "scope": {"type": "string", "enum": ["builtin", "global", "project"]},
+          "colors": {
+            "type": "object",
+            "required": ["accent", "muted", "foreground", "warning", "error", "success", "separator"],
+            "properties": {
+              "accent": {"$ref": "#/$defs/adaptiveColor"},
+              "muted": {"$ref": "#/$defs/adaptiveColor"},
+              "foreground": {"$ref": "#/$defs/adaptiveColor"},
+              "warning": {"$ref": "#/$defs/adaptiveColor"},
+              "error": {"$ref": "#/$defs/adaptiveColor"},
+              "success": {"$ref": "#/$defs/adaptiveColor"},
+              "separator": {"$ref": "#/$defs/adaptiveColor"}
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

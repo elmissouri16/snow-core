@@ -354,6 +354,90 @@
           "const": "response"
         },
         "command": {
+          "const": "messages_page"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "messages",
+            "start",
+            "total",
+            "has_more"
+          ],
+          "properties": {
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "message.schema.json"
+              }
+            },
+            "next_cursor": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "has_more": {
+              "type": "boolean"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "has_more": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "has_more"
+                ]
+              },
+              "then": {
+                "required": [
+                  "next_cursor"
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
           "const": "usage"
         },
         "success": {
@@ -678,6 +762,481 @@
       "required": [
         "type",
         "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "enum": [
+            "session_create",
+            "session_open"
+          ]
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "session-summary.schema.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "sessions_list"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "sessions"
+          ],
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "items": {
+                "$ref": "session-summary.schema.json"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "session_delete"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "session_id",
+            "deleted"
+          ],
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "deleted": {
+              "const": true
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "session_rename"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "session_id",
+            "name"
+          ],
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "enum": [
+            "permission_mode_get",
+            "permission_mode_set"
+          ]
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "allow",
+                "deny"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "enum": [
+            "trust_get",
+            "trust_set"
+          ]
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "path",
+            "level",
+            "prompt",
+            "loaded",
+            "restart_required"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "level": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "allow",
+                "deny"
+              ]
+            },
+            "prompt": {
+              "type": "boolean"
+            },
+            "loaded": {
+              "type": "boolean"
+            },
+            "restart_required": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "processes_list"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "processes"
+          ],
+          "properties": {
+            "processes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "process_id",
+                  "name",
+                  "status",
+                  "started_at"
+                ],
+                "properties": {
+                  "process_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "started_at": {
+                    "type": "integer"
+                  },
+                  "finished_at": {
+                    "type": "integer"
+                  },
+                  "exit_code": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "signal": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "ready": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "process_logs"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "process_id",
+            "status",
+            "next_cursor",
+            "eof"
+          ],
+          "properties": {
+            "process_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "output": {
+              "type": "string"
+            },
+            "next_cursor": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "omitted_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "eof": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "context"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "context-report.schema.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "skills_clear"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "skills-clear.schema.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "subagent_messages"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "subagent-messages.schema.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
         "success"
       ],
       "properties": {
@@ -691,29 +1250,55 @@
           "type": "string",
           "not": {
             "enum": [
+              "auth_login_cancel",
+              "auth_login_start",
+              "auth_login_status",
+              "auth_logout",
+              "auth_profile_set",
+              "auth_providers",
               "branch_fork",
-              "branches_list",
               "branch_rename",
+              "branches_list",
               "compact",
+              "context",
               "debug_clear",
               "debug_disable",
               "debug_dump",
               "debug_enable",
               "debug_status",
               "diagnostics",
+              "keybindings_get",
+              "keybindings_update",
               "mcp_servers",
               "messages_list",
+              "messages_page",
               "models_list",
               "pending_inputs",
               "pending_inputs_clear",
+              "permission_mode_get",
+              "permission_mode_set",
+              "permission_reject",
+              "permission_reply",
+              "process_logs",
+              "processes_list",
+              "session_create",
+              "session_delete",
               "session_fork",
               "session_info",
+              "session_open",
+              "session_rename",
               "session_worktree_fork",
+              "sessions_list",
+              "settings_get",
+              "settings_update",
               "skills",
+              "skills_clear",
+              "subagent_messages",
               "subagent_models",
-              "usage",
-              "permission_reply",
-              "permission_reject"
+              "themes_list",
+              "trust_get",
+              "trust_set",
+              "usage"
             ]
           }
         },
@@ -721,6 +1306,435 @@
           "const": true
         },
         "data": {}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "auth_providers"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "providers"
+          ],
+          "properties": {
+            "providers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "provider_id",
+                  "display_name",
+                  "required",
+                  "kinds",
+                  "environment",
+                  "methods",
+                  "status"
+                ],
+                "properties": {
+                  "provider_id": {
+                    "type": "string"
+                  },
+                  "display_name": {
+                    "type": "string"
+                  },
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "kinds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "environment": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "methods": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "display_name",
+                        "kind"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "status": {
+                    "$ref": "auth-status.schema.json"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "enum": [
+            "auth_login_start",
+            "auth_login_status",
+            "auth_login_cancel",
+            "auth_profile_set"
+          ]
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "auth-login-job.schema.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "auth_logout"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "provider_id",
+            "status"
+          ],
+          "properties": {
+            "provider_id": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "auth-status.schema.json"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "settings_get"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "provider",
+            "model",
+            "thinking",
+            "reasoning_summary",
+            "text_verbosity",
+            "permission_mode",
+            "debug_enabled",
+            "subagents_enabled",
+            "subagents_max_concurrent",
+            "subagents_max_agents",
+            "skills_enabled",
+            "subagents_restart_required",
+            "skills_restart_required",
+            "restart_required",
+            "theme"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "thinking": {
+              "type": "string"
+            },
+            "reasoning_summary": {
+              "type": "string"
+            },
+            "text_verbosity": {
+              "type": "string"
+            },
+            "permission_mode": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "allow",
+                "deny"
+              ]
+            },
+            "debug_enabled": {
+              "type": "boolean"
+            },
+            "subagents_enabled": {
+              "type": "boolean"
+            },
+            "subagents_max_concurrent": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "subagents_max_agents": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "skills_enabled": {
+              "type": "boolean"
+            },
+            "subagents_restart_required": {
+              "type": "boolean"
+            },
+            "skills_restart_required": {
+              "type": "boolean"
+            },
+            "restart_required": {
+              "type": "boolean"
+            },
+            "theme": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "settings_update"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "provider",
+            "model",
+            "thinking",
+            "reasoning_summary",
+            "text_verbosity",
+            "permission_mode",
+            "debug_enabled",
+            "subagents_enabled",
+            "subagents_max_concurrent",
+            "subagents_max_agents",
+            "skills_enabled",
+            "subagents_restart_required",
+            "skills_restart_required",
+            "restart_required",
+            "theme"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "thinking": {
+              "type": "string"
+            },
+            "reasoning_summary": {
+              "type": "string"
+            },
+            "text_verbosity": {
+              "type": "string"
+            },
+            "permission_mode": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "allow",
+                "deny"
+              ]
+            },
+            "debug_enabled": {
+              "type": "boolean"
+            },
+            "subagents_enabled": {
+              "type": "boolean"
+            },
+            "subagents_max_concurrent": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "subagents_max_agents": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "skills_enabled": {
+              "type": "boolean"
+            },
+            "subagents_restart_required": {
+              "type": "boolean"
+            },
+            "skills_restart_required": {
+              "type": "boolean"
+            },
+            "restart_required": {
+              "type": "boolean"
+            },
+            "theme": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "themes_list"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "theme-catalog.schema.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "enum": [
+            "keybindings_get",
+            "keybindings_update"
+          ]
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "keybindings.schema.json"
+        }
       },
       "additionalProperties": false
     }

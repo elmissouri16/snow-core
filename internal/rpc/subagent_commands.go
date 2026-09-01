@@ -11,7 +11,7 @@ import (
 
 func isSubagentCommand(command string) bool {
 	switch command {
-	case "subagent_spawn", "subagent_send_message", "subagent_followup", "subagent_wait", "subagent_interrupt", "subagent_close", "subagent_resume", "subagent_list", "subagent_get", "subagent_ready":
+	case "subagent_spawn", "subagent_send_message", "subagent_followup", "subagent_wait", "subagent_interrupt", "subagent_close", "subagent_resume", "subagent_list", "subagent_get", "subagent_messages", "subagent_ready":
 		return true
 	default:
 		return false
@@ -139,6 +139,8 @@ func (s *Server) handleSubagentCommand(ctx context.Context, req Request) error {
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: list})
 		return nil
+	case "subagent_messages":
+		return s.handleSubagentMessages(ctx, req)
 	case "subagent_get":
 		var p struct {
 			Target string `json:"target"`

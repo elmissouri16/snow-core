@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/auth-login-job.schema.json",
+  "title": "Snow RPC asynchronous authentication job",
+  "$defs": {
+    "progress": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"type": "string"},
+        "message": {"type": "string"},
+        "url": {"type": "string"},
+        "user_code": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "required": ["job_id", "provider_id", "method", "state", "progress"],
+  "properties": {
+    "job_id": {"type": "string"},
+    "provider_id": {"type": "string"},
+    "method": {"type": "string"},
+    "state": {"enum": ["running", "completed", "failed", "canceled"]},
+    "progress": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/progress"}},
+    "status": {"$ref": "auth-status.schema.json"},
+    "error": {"type": "string"}
+  },
+  "additionalProperties": false
+}

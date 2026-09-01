@@ -1316,8 +1316,9 @@ Versioned JSONL over stdin/stdout:
   sorted protocol capabilities, and maximum input size.
 - Commands cover prompts (including additive text/image content when
   `multimodal_prompts` is announced) and active input, model/mode/response
-  controls, session and branch management, manual compaction, active-branch
-  messages and usage, MCP/skill discovery, pending-input
+  controls, session and branch management, manual compaction, count-only context reports,
+  active-branch messages and usage, MCP/skill discovery and branch-active skill
+  clearing, pending-input
   inspection/clearing, configuration diagnostics, goals, subagents,
   model-requested input, and a trusted-host interactive permission broker
   (`permission_reply`/`permission_reject`, gated by `permission_interaction`).
@@ -1325,6 +1326,10 @@ Versioned JSONL over stdin/stdout:
 - Framing splits on `\n` only (not Unicode line separators).
 - Schemas are network-free Draft 2020-12 contracts under
   `pkg/protocol/schema/rpc/v1`.
+- Provider/model/thinking controls persist the canonical project-scoped
+  selection, while reasoning summary, text verbosity, and debug controls use
+  the locked atomic global configuration path shared with the TUI. RPC settings
+  DTOs remain secret-free and cannot mutate credentials or transport policy.
 
 RPC prompts run asynchronously so the command reader remains available while
 the agent waits. Admission returns an immediate response; exactly one later

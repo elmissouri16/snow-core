@@ -83,6 +83,9 @@ func jsonValue(t *testing.T, value any) any {
 func TestRPCSchemasResolveWithoutNetwork(t *testing.T) {
 	for _, name := range []string{
 		"agent-event.schema.json",
+		"auth-login-job.schema.json",
+		"auth-status.schema.json",
+		"context-report.schema.json",
 		"handshake.schema.json",
 		"mcp-server.schema.json",
 		"message.schema.json",
@@ -93,7 +96,9 @@ func TestRPCSchemasResolveWithoutNetwork(t *testing.T) {
 		"response.schema.json",
 		"session-branch.schema.json",
 		"skills.schema.json",
+		"skills-clear.schema.json",
 		"session-info.schema.json",
+		"session-summary.schema.json",
 	} {
 		resolveRPCSchema(t, name)
 	}
@@ -106,6 +111,7 @@ func TestRepresentativeRPCValuesConformToSchemas(t *testing.T) {
 	values := []any{
 		NewRPCReady("test"),
 		RPCResponse{ID: "p1", Type: "response", Command: "prompt", Success: true},
+		RPCResponse{ID: "history-page", Type: "response", Command: "messages_page", Success: true, Data: RPCMessagesPage{Messages: []Message{{ID: "m1", Role: RoleUser, Content: []ContentBlock{}, Timestamp: 1}}, Start: 0, Total: 1, HasMore: false}},
 		RPCPromptCompleted{Type: RPCTypePromptCompleted, RequestID: "p1", Status: RPCPromptCompletedStatus},
 		RPCPromptCompleted{Type: RPCTypePromptCompleted, Status: RPCPromptCompletedStatus},
 		AgentEvent{Type: EvModeChanged, Mode: &CollaborationModeState{Mode: ModeDefault, ReasoningEffort: ThinkingOff}},
@@ -117,7 +123,22 @@ func TestRepresentativeRPCValuesConformToSchemas(t *testing.T) {
 		RPCResponse{ID: "m1", Type: "response", Command: "models_list", Success: true, Data: RPCModelList{Provider: "fake", Current: "fake-1", Models: []Model{{Provider: "fake", ID: "fake-1", SupportsTools: true}}}},
 		RPCResponse{ID: "sm1", Type: "response", Command: "subagent_models", Success: true, Data: RPCModelList{Enabled: &enabled, Models: []Model{}}},
 		RPCResponse{ID: "history1", Type: "response", Command: "messages_list", Success: true, Data: RPCMessagesList{Messages: []Message{{ID: "tool-result", Role: RoleTool, Content: []ContentBlock{{Type: BlockText, Text: "done"}}, Timestamp: 1, ToolCallID: "call-1", ToolName: "read", ToolDisplay: &ToolDisplay{Started: true, StartMessage: "file.go", Progress: []string{"reading"}, Output: "done", DurationMS: 2}}}}},
-		RPCResponse{ID: "i1", Type: "response", Command: "session_info", Success: true, Data: RPCSessionInfo{SessionID: "s", Name: "", Path: "", CWD: "/tmp", Provider: "fake", Model: "fake-1", Thinking: ThinkingOff, ThinkingLevels: []ThinkingLevel{ThinkingOff}, ReasoningSummary: ReasoningSummaryAuto, TextVerbosity: TextVerbosityLow, CollaborationMode: ModeDefault, Subagents: RPCSubagentLimits{}, PendingInputs: RPCPendingInputCounts{}}},
+		RPCResponse{ID: "i1", Type: "response", Command: "session_info", Success: true, Data: RPCSessionInfo{SessionID: "s", Name: "", Path: "", CWD: "/tmp", Provider: "fake", Model: "fake-1", Thinking: ThinkingOff, ThinkingLevels: []ThinkingLevel{ThinkingOff}, ReasoningSummary: ReasoningSummaryAuto, TextVerbosity: TextVerbosityLow, CollaborationMode: ModeDefault, Subagents: RPCSubagentLimits{}, PendingInputs: RPCPendingInputCounts{}, PermissionMode: "deny"}},
+		RPCResponse{ID: "sl1", Type: "response", Command: "sessions_list", Success: true, Data: RPCSessionList{Sessions: []RPCSessionSummary{{SessionID: "s", Name: "one", CreatedAt: 1, UpdatedAt: 2, Messages: 3, Active: true}}}},
+		RPCResponse{ID: "sc1", Type: "response", Command: "session_create", Success: true, Data: RPCSessionSummary{SessionID: "s2", CreatedAt: 1, UpdatedAt: 1, Active: true}},
+		RPCResponse{ID: "so1", Type: "response", Command: "session_open", Success: true, Data: RPCSessionSummary{SessionID: "s", CreatedAt: 1, UpdatedAt: 2, Active: true}},
+		RPCResponse{ID: "sd1", Type: "response", Command: "session_delete", Success: true, Data: RPCSessionDeleteResult{SessionID: "s2", Deleted: true}},
+		RPCResponse{ID: "sr1", Type: "response", Command: "session_rename", Success: true, Data: RPCSessionRenameResult{SessionID: "s", Name: "renamed"}},
+		RPCResponse{ID: "pm1", Type: "response", Command: "permission_mode_get", Success: true, Data: RPCPermissionMode{Mode: "ask"}},
+		RPCResponse{ID: "st1", Type: "response", Command: "settings_get", Success: true, Data: RPCSettings{Provider: "fake", Model: "fake-1", Thinking: ThinkingOff, ReasoningSummary: ReasoningSummaryAuto, TextVerbosity: TextVerbosityMedium, Theme: "default", PermissionMode: "ask", SubagentsEnabled: true, SubagentsMaxConcurrent: 4, SubagentsMaxAgents: 32, SkillsEnabled: true}},
+		RPCResponse{ID: "tr1", Type: "response", Command: "trust_get", Success: true, Data: RPCProjectTrust{Path: "/tmp", Level: "deny", Loaded: false}},
+		RPCResponse{ID: "ps1", Type: "response", Command: "processes_list", Success: true, Data: RPCManagedProcessList{Processes: []RPCManagedProcess{{ProcessID: "proc-1", Name: "server", Status: "running", StartedAt: 1}}}},
+		RPCResponse{ID: "pl1", Type: "response", Command: "process_logs", Success: true, Data: RPCManagedProcessLogs{ProcessID: "proc-1", Status: "running", Output: "ready\n", NextCursor: 6}},
+		RPCResponse{ID: "ap1", Type: "response", Command: "auth_providers", Success: true, Data: RPCAuthProviderList{Providers: []RPCAuthProvider{{ProviderID: "chatgpt", DisplayName: "ChatGPT", Required: true, Kinds: []string{"oauth"}, Environment: []string{}, Methods: []RPCAuthMethod{{ID: "device", DisplayName: "Device code", Kind: "oauth"}}, Status: RPCAuthStatus{ProviderID: "chatgpt", State: "missing"}}}}},
+		RPCResponse{ID: "al1", Type: "response", Command: "auth_login_status", Success: true, Data: RPCAuthLoginJob{JobID: "auth-1", ProviderID: "chatgpt", Method: "device", State: RPCAuthLoginRunning, Progress: []RPCAuthProgress{{Kind: "device", URL: "https://example.invalid", UserCode: "ABCD"}}}},
+		RPCResponse{ID: "ao1", Type: "response", Command: "auth_logout", Success: true, Data: RPCAuthLogoutResult{ProviderID: "chatgpt", Status: RPCAuthStatus{ProviderID: "chatgpt", State: "missing"}}},
+		RPCResponse{ID: "ctx1", Type: "response", Command: "context", Success: true, Data: RPCContextReport{LatestRequest: true, Categories: []RPCContextCategory{{Name: "User messages", Bytes: 12, EstimatedTokens: 3, Items: 1}}, EstimatedInputTokens: 3, MessageCount: 1, ContextWindow: 128000}},
+		RPCResponse{ID: "skc1", Type: "response", Command: "skills_clear", Success: true, Data: RPCSkillsClearResult{Cleared: 1, Catalog: RPCSkillsList{Skills: []RPCSkill{}}}},
 	}
 	for _, value := range values {
 		if err := output.Validate(jsonValue(t, value)); err != nil {
@@ -157,6 +178,7 @@ func TestRPCBlockedGoalsConformToSchemas(t *testing.T) {
 		ReasoningSummary:  ReasoningSummaryAuto,
 		TextVerbosity:     TextVerbosityLow,
 		CollaborationMode: ModeDefault,
+		PermissionMode:    "ask",
 		Goal: &RPCGoalSummary{
 			GoalID:        "g",
 			Status:        GoalBlocked,
@@ -192,6 +214,7 @@ func TestRPCPromptRequestWithContentConformsToRequestSchema(t *testing.T) {
 		RPCRequest{ID: "mm1", Type: "prompt", Message: "look", Mode: "plan", Content: []ContentBlock{{Type: BlockText, Text: "look"}, {Type: BlockImage, MIMEType: "image/png", Data: []byte{1, 2, 3}}}},
 		RPCRequest{ID: "img1", Type: "prompt", Content: []ContentBlock{{Type: BlockImage, MIMEType: "image/jpeg", Data: []byte{9}}}},
 		RPCRequest{ID: "t1", Type: "prompt", Message: "plain"},
+		RPCRequest{ID: "history", Type: "messages_page", Params: json.RawMessage(`{"cursor":"opaque","limit":32,"max_bytes":2097152}`)},
 	}
 	for _, value := range values {
 		if err := request.Validate(jsonValue(t, value)); err != nil {
@@ -287,11 +310,24 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 	for _, command := range KnownRPCCommands() {
 		value := RPCRequest{ID: "test", Type: command}
 		switch command {
+		case "auth_login_start":
+			value.Provider = "opencode-go"
+			value.Method = "api_key"
+			value.Secret = "test-secret"
+		case "auth_profile_set":
+			value.Provider = "x-provider"
+			value.Method = "api_key"
+			value.Params = json.RawMessage(`{"profile_id":"x-provider","base_url":"https://example.invalid/v1"}`)
+		case "auth_login_status", "auth_login_cancel":
+			value.Params = json.RawMessage(`{"job_id":"auth-1"}`)
+		case "auth_logout":
+			value.Provider = "opencode-go"
 		case "prompt":
 			value.Message = "hello"
 		case "steer", "follow_up":
 			value.Message = "next"
 		case "set_model":
+			value.Provider = "fake"
 			value.Model = "fake-1"
 			value.Thinking = "high"
 		case "set_thinking":
@@ -303,7 +339,9 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 		case "goal_edit":
 			value.Params = json.RawMessage(`{"objective":"ship safely"}`)
 		case "session_rename":
-			value.Params = json.RawMessage(`{"name":"renamed"}`)
+			value.Params = json.RawMessage(`{"name":"renamed","session_id":"session-1"}`)
+		case "session_open", "session_delete":
+			value.Params = json.RawMessage(`{"session_id":"session-1"}`)
 		case "branch_select", "branch_delete":
 			value.Params = json.RawMessage(`{"branch_id":"branch-1"}`)
 		case "branch_rename":
@@ -314,7 +352,7 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 			value.TextVerbosity = "medium"
 		case "subagent_followup", "subagent_send_message":
 			value.Params = json.RawMessage(`{"target":"/root/child","message":"continue"}`)
-		case "subagent_close", "subagent_get", "subagent_interrupt", "subagent_resume":
+		case "subagent_close", "subagent_get", "subagent_interrupt", "subagent_messages", "subagent_resume":
 			value.Params = json.RawMessage(`{"target":"/root/child"}`)
 		case "subagent_spawn":
 			value.Params = json.RawMessage(`{"name":"child","task":"inspect"}`)
@@ -328,6 +366,16 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 			value.Params = json.RawMessage(`{"request_id":"perm-1"}`)
 		case "permission_reply":
 			value.Params = json.RawMessage(`{"request_id":"perm-1","decision":"allow"}`)
+		case "permission_mode_set":
+			value.Params = json.RawMessage(`{"mode":"ask"}`)
+		case "settings_update":
+			value.Params = json.RawMessage(`{"provider":"fake","model":"fake-1","thinking":"off","reasoning_summary":"auto","text_verbosity":"medium","theme":"default","debug_enabled":true}`)
+		case "keybindings_update":
+			value.Params = json.RawMessage(`{"scope":"global","bindings":{"models":["alt+z"]}}`)
+		case "trust_set":
+			value.Params = json.RawMessage(`{"level":"deny"}`)
+		case "process_logs":
+			value.Params = json.RawMessage(`{"process_id":"proc-1","max_bytes":4096}`)
 		}
 		if err := request.Validate(jsonValue(t, value)); err != nil {
 			t.Errorf("command %s is not covered: %v", command, err)

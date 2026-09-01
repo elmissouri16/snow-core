@@ -83,6 +83,7 @@ func liveRPCRequestFrames() []string {
 		`{"id":"c1","type":"compact"}`,
 		`{"id":"d1","type":"diagnostics"}`,
 		`{"id":"ms1","type":"messages_list"}`,
+		`{"id":"mp1","type":"messages_page","params":{"limit":32,"max_bytes":2097152}}`,
 		`{"id":"pi1","type":"pending_inputs"}`,
 		`{"id":"pi2","type":"pending_inputs_clear"}`,
 		`{"id":"rs1","type":"set_reasoning_summary","reasoning_summary":"auto"}`,

@@ -5,9 +5,11 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use serde_json::{Map, Value, json};
 use snow_desktop::snow::{
-    BranchCatalog, HistoryMessage, InteractionKind, ModelCatalog, PermissionDecision, PromptStatus,
-    RuntimeConfig, RuntimeEvent, SessionInfo, SnowClient, SnowConnection, UserInputAnswer,
+    BranchCatalog, HistoryBlock, HistoryEntry, InteractionKind, ModelCatalog, PermissionDecision,
+    PromptStatus, RuntimeConfig, RuntimeEvent, SessionInfo, SnowClient, SnowConnection,
+    UserInputAnswer,
 };
 
 struct TempProject(PathBuf);
@@ -40,6 +42,8 @@ fn mock_config(project_root: &Path) -> RuntimeConfig {
         project_root: project_root.to_owned(),
         provider: "fake".into(),
         model: None,
+        permission: None,
+        thinking: None,
         session_path: None,
         no_session: true,
         startup_timeout: Duration::from_secs(2),
@@ -76,12 +80,7 @@ fn start_ready_mock(project_root: &Path) -> SnowConnection {
 
 fn load_runtime_state(
     connection: &SnowConnection,
-) -> (
-    SessionInfo,
-    ModelCatalog,
-    Vec<HistoryMessage>,
-    BranchCatalog,
-) {
+) -> (SessionInfo, ModelCatalog, Vec<HistoryEntry>, BranchCatalog) {
     let expected_generation = connection
         .client
         .load_runtime_state()
@@ -89,6 +88,7 @@ fn load_runtime_state(
     let mut session = None;
     let mut catalog = None;
     let mut history = None;
+    let mut history_pages = Vec::new();
     let mut branches = None;
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while std::time::Instant::now() < deadline
@@ -108,6 +108,21 @@ fn load_runtime_state(
                 generation,
                 history: value,
             }) if generation == expected_generation => history = Some(value),
+            Ok(RuntimeEvent::HistoryPageLoaded {
+                generation,
+                history: value,
+                start,
+                complete,
+                ..
+            }) if generation == expected_generation => {
+                if start == 0 {
+                    history_pages.clear();
+                }
+                history_pages.extend(value);
+                if complete {
+                    history = Some(std::mem::take(&mut history_pages));
+                }
+            }
             Ok(RuntimeEvent::BranchesLoaded {
                 generation,
                 catalog: value,
@@ -122,9 +137,79 @@ fn load_runtime_state(
     (
         session.expect("session_info response"),
         catalog.expect("models_list response"),
-        history.expect("messages_list response"),
+        history.expect("messages_page response"),
         branches.expect("branches_list response"),
     )
+}
+
+fn history_text(entry: &HistoryEntry) -> String {
+    entry
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            HistoryBlock::Text { text } | HistoryBlock::Plan { text, .. } => Some(text.as_str()),
+            HistoryBlock::Image(_) | HistoryBlock::ToolCall(_) => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn run_command(
+    connection: &SnowConnection,
+    command: &str,
+    params: Option<Value>,
+) -> Result<Option<Value>, String> {
+    let mut fields = Map::new();
+    if let Some(params) = params {
+        fields.insert("params".into(), params);
+    }
+    let request_id = connection
+        .client
+        .command(command.into(), fields)
+        .unwrap_or_else(|error| panic!("submit {command}: {error}"));
+    loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap_or_else(|error| panic!("receive {command} response: {error}"))
+        {
+            RuntimeEvent::CommandCompleted {
+                request_id: completed_id,
+                command: completed_command,
+                data,
+            } if completed_id == request_id => {
+                assert_eq!(completed_command, command);
+                return Ok(data);
+            }
+            RuntimeEvent::RequestRejected {
+                request_id: Some(rejected_id),
+                error,
+            } if rejected_id == request_id => return Err(error),
+            RuntimeEvent::Failed(error) => panic!("Snow runtime failed: {error}"),
+            _ => {}
+        }
+    }
+}
+
+fn complete_fake_prompt(connection: &SnowConnection, prompt: &str) {
+    let request_id = connection
+        .client
+        .prompt(prompt.into())
+        .unwrap_or_else(|error| panic!("submit persistence prompt: {error}"));
+    loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(10))
+            .expect("receive persistence prompt completion")
+        {
+            RuntimeEvent::PromptCompleted(completed) if completed.request_id == request_id => {
+                assert_eq!(completed.status, PromptStatus::Completed);
+                return;
+            }
+            RuntimeEvent::Failed(error) => panic!("Snow runtime failed: {error}"),
+            _ => {}
+        }
+    }
 }
 
 fn mock_pid(project_root: &Path) -> u32 {
@@ -189,17 +274,38 @@ fn mock_provider_streams_text_before_completion() {
 }
 
 #[test]
+fn explicit_permission_and_thinking_overrides_are_forwarded() {
+    let project = TempProject::new("launch-overrides");
+    let mut config = mock_config(&project.0);
+    config.permission = Some("ask".into());
+    config.thinking = Some("high".into());
+    let connection = start_ready(config, Some("mock-streaming"));
+
+    let argv = fs::read_to_string(project.0.join(".mock-snow-argv")).expect("read mock argv");
+    let argv: Vec<_> = argv.lines().collect();
+    assert!(argv.windows(2).any(|args| args == ["--permission", "ask"]));
+    assert!(argv.windows(2).any(|args| args == ["--thinking", "high"]));
+
+    connection.client.shutdown().expect("stop mock Snow RPC");
+}
+
+#[test]
 fn mock_interactions_block_until_correlated_trusted_replies() {
     let project = TempProject::new("interactions");
     let connection = start_ready_mock(&project.0);
     let argv = fs::read_to_string(project.0.join(".mock-snow-argv")).expect("read mock argv");
     let argv: Vec<_> = argv.lines().collect();
     assert!(
-        argv.windows(2).any(|args| args == ["--permission", "ask"]),
-        "desktop must start Snow with trusted ask-mode permissions"
+        !argv
+            .iter()
+            .any(|arg| *arg == "--permission" || *arg == "--thinking"),
+        "desktop must not override configured permission or thinking defaults"
     );
     for disabled in ["--no-plugins", "--no-mcp", "--no-skills", "--no-subagents"] {
-        assert!(argv.contains(&disabled), "missing {disabled}");
+        assert!(
+            !argv.contains(&disabled),
+            "desktop must honor configured {disabled} feature state"
+        );
     }
 
     let prompt_id = connection
@@ -784,8 +890,8 @@ fn mock_provider_restart_reaps_each_child() {
     assert_eq!(restored_session.session_id, session.session_id);
     assert_eq!(restored_catalog.current, "mock-two");
     assert_eq!(restored_history.len(), 2);
-    assert_eq!(restored_history[0].text, "restored question");
-    assert_eq!(restored_history[1].text, "restored answer");
+    assert_eq!(history_text(&restored_history[0]), "restored question");
+    assert_eq!(history_text(&restored_history[1]), "restored answer");
 
     let (close_complete, close_finished) = flume::bounded(1);
     replacement.client.shutdown_in_background(close_complete);
@@ -810,6 +916,8 @@ fn fake_provider_completes_one_rpc_prompt() {
         project_root,
         provider: "fake".into(),
         model: None,
+        permission: None,
+        thinking: Some("off".into()),
         session_path: None,
         no_session: true,
         startup_timeout: Duration::from_secs(10),
@@ -894,6 +1002,8 @@ fn real_snow_restores_persistent_history_after_restart() {
         project_root: project.0.clone(),
         provider: "fake".into(),
         model: None,
+        permission: None,
+        thinking: Some("off".into()),
         session_path: Some(session_path.clone()),
         no_session: false,
         startup_timeout: Duration::from_secs(10),
@@ -925,15 +1035,120 @@ fn real_snow_restores_persistent_history_after_restart() {
     let replacement = start_ready(config, None);
     let (restored_session, _, restored_history, _) = load_runtime_state(&replacement);
     assert_eq!(restored_session.session_id, session.session_id);
-    assert!(
-        restored_history.iter().any(|message| {
-            message.role == "user" && message.text == "persistent desktop proof"
-        })
-    );
+    assert!(restored_history.iter().any(|message| {
+        message.role == "user" && history_text(message) == "persistent desktop proof"
+    }));
     replacement
         .client
         .shutdown()
         .expect("stop replacement Snow RPC");
+}
+
+#[test]
+#[ignore = "requires SNOW_TEST_BINARY pointing to an existing Snow executable"]
+fn real_snow_deletes_only_inactive_sessions() {
+    let executable = env::var_os("SNOW_TEST_BINARY")
+        .map(PathBuf::from)
+        .expect("set SNOW_TEST_BINARY to the existing Snow executable");
+    let project = TempProject::new("real-session-delete");
+    let connection = start_ready(
+        RuntimeConfig {
+            executable,
+            project_root: project.0.clone(),
+            provider: "fake".into(),
+            model: None,
+            permission: None,
+            thinking: Some("off".into()),
+            session_path: None,
+            no_session: false,
+            startup_timeout: Duration::from_secs(10),
+            shutdown_timeout: Duration::from_secs(3),
+            max_frame_bytes: 16 * 1024 * 1024,
+        },
+        None,
+    );
+    let _ = load_runtime_state(&connection);
+
+    let first_created = run_command(&connection, "session_create", Some(json!({})))
+        .expect("create first managed real session")
+        .expect("first session_create response data");
+    let first_created_id = first_created["session_id"]
+        .as_str()
+        .expect("first created session id")
+        .to_owned();
+    assert_eq!(first_created["active"], true);
+    complete_fake_prompt(&connection, "persist first managed session");
+
+    let second_created = run_command(&connection, "session_create", Some(json!({})))
+        .expect("create replacement real session")
+        .expect("second session_create response data");
+    let second_created_id = second_created["session_id"]
+        .as_str()
+        .expect("second created session id")
+        .to_owned();
+    assert_ne!(second_created_id, first_created_id);
+    assert_eq!(second_created["active"], true);
+    complete_fake_prompt(&connection, "persist second managed session");
+    let (active_second, _, _, _) = load_runtime_state(&connection);
+    assert_eq!(active_second.session_id, second_created_id);
+
+    let opened = run_command(
+        &connection,
+        "session_open",
+        Some(json!({"session_id": first_created_id})),
+    )
+    .expect("open first managed real session")
+    .expect("session_open response data");
+    assert_eq!(opened["session_id"], first_created_id);
+    assert_eq!(opened["active"], true);
+
+    let deleted = run_command(
+        &connection,
+        "session_delete",
+        Some(json!({"session_id": second_created_id})),
+    )
+    .expect("delete inactive real session")
+    .expect("session_delete response data");
+    assert_eq!(deleted["session_id"], second_created_id);
+    assert_eq!(deleted["deleted"], true);
+
+    let sessions = run_command(&connection, "sessions_list", None)
+        .expect("list real sessions after deletion")
+        .expect("sessions_list response data");
+    let sessions = sessions["sessions"]
+        .as_array()
+        .expect("sessions_list sessions array");
+    assert!(
+        sessions.iter().any(|session| {
+            session["session_id"] == first_created_id && session["active"] == true
+        })
+    );
+    assert!(
+        !sessions
+            .iter()
+            .any(|session| session["session_id"] == second_created_id)
+    );
+
+    let active_delete_error = run_command(
+        &connection,
+        "session_delete",
+        Some(json!({"session_id": first_created_id})),
+    )
+    .expect_err("active session deletion must fail");
+    assert!(
+        active_delete_error.contains("active session"),
+        "unexpected active deletion error: {active_delete_error}"
+    );
+    run_command(
+        &connection,
+        "session_open",
+        Some(json!({"session_id": second_created_id})),
+    )
+    .expect_err("deleted session must not reopen");
+
+    let (active_first, _, _, _) = load_runtime_state(&connection);
+    assert_eq!(active_first.session_id, first_created_id);
+    connection.client.shutdown().expect("stop real Snow RPC");
 }
 
 #[test]
@@ -949,6 +1164,8 @@ fn real_snow_manages_current_session_branches() {
             project_root: project.0.clone(),
             provider: "fake".into(),
             model: None,
+            permission: None,
+            thinking: Some("off".into()),
             session_path: Some(project.0.join("desktop-branches.db")),
             no_session: false,
             startup_timeout: Duration::from_secs(10),
@@ -1019,6 +1236,56 @@ fn real_snow_manages_current_session_branches() {
             .any(|branch| branch.id == forked_branch.id && branch.active)
     );
 
+    let child_fork_id = connection
+        .client
+        .fork_branch(forked_branch.id.clone())
+        .expect("fork child real branch");
+    let child_branch = loop {
+        match connection
+            .events
+            .recv_timeout(Duration::from_secs(10))
+            .expect("receive real child branch fork")
+        {
+            RuntimeEvent::BranchForked { request_id, branch } if request_id == child_fork_id => {
+                break branch;
+            }
+            RuntimeEvent::Failed(error) => panic!("Snow runtime failed: {error}"),
+            _ => {}
+        }
+    };
+    assert!(child_branch.active);
+    assert_eq!(child_branch.parent_branch_id, forked_branch.id);
+
+    let renamed = run_command(
+        &connection,
+        "branch_rename",
+        Some(json!({
+            "branch_id": child_branch.id,
+            "name": "Desktop child branch",
+        })),
+    )
+    .expect("rename real child branch")
+    .expect("branch_rename response data");
+    assert_eq!(renamed["id"], child_branch.id);
+    assert_eq!(renamed["name"], "Desktop child branch");
+
+    let (_, _, _, branches) = load_runtime_state(&connection);
+    assert_eq!(branches.branches.len(), 3);
+    assert!(branches.branches.iter().any(|branch| {
+        branch.id == child_branch.id && branch.name == "Desktop child branch" && branch.active
+    }));
+
+    let non_leaf_error = run_command(
+        &connection,
+        "branch_delete",
+        Some(json!({"branch_id": forked_branch.id})),
+    )
+    .expect_err("non-leaf branch deletion must fail");
+    assert!(
+        non_leaf_error.contains("children"),
+        "unexpected non-leaf deletion error: {non_leaf_error}"
+    );
+
     let select_id = connection
         .client
         .select_branch(source_branch.clone())
@@ -1034,7 +1301,42 @@ fn real_snow_manages_current_session_branches() {
             _ => {}
         }
     }
+
+    assert!(
+        run_command(
+            &connection,
+            "branch_delete",
+            Some(json!({"branch_id": child_branch.id})),
+        )
+        .expect("delete leaf child branch")
+        .is_none()
+    );
     let (_, _, _, branches) = load_runtime_state(&connection);
+    assert_eq!(branches.branches.len(), 2);
+    assert!(
+        !branches
+            .branches
+            .iter()
+            .any(|branch| branch.id == child_branch.id)
+    );
+    assert!(
+        branches
+            .branches
+            .iter()
+            .any(|branch| branch.id == forked_branch.id)
+    );
+
+    assert!(
+        run_command(
+            &connection,
+            "branch_delete",
+            Some(json!({"branch_id": forked_branch.id})),
+        )
+        .expect("delete newly-leaf parent branch")
+        .is_none()
+    );
+    let (_, _, _, branches) = load_runtime_state(&connection);
+    assert_eq!(branches.branches.len(), 1);
     assert!(
         branches
             .branches

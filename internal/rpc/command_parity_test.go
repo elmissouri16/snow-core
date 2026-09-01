@@ -21,6 +21,11 @@ func TestProtocolCommandInventoryHasDispatcherCase(t *testing.T) {
 		functions map[string]bool
 	}{
 		{path: "server.go", functions: map[string]bool{"handle": true}},
+		{path: "auth_commands.go", functions: map[string]bool{"isAuthCommand": true, "handleAuthCommand": true}},
+		{path: "session_commands.go", functions: map[string]bool{"isSessionManagementCommand": true, "handleSessionManagementCommand": true}},
+		{path: "runtime_commands.go", functions: map[string]bool{"isRuntimeParityCommand": true, "handleRuntimeParityCommand": true}},
+		{path: "settings_commands.go", functions: map[string]bool{"isSettingsCommand": true, "handleSettingsCommand": true}},
+		{path: "presentation_commands.go", functions: map[string]bool{"isPresentationCommand": true, "handlePresentationCommand": true}},
 		{path: "subagent_commands.go", functions: map[string]bool{"isSubagentCommand": true, "handleSubagentCommand": true}},
 	}
 	for _, source := range files {

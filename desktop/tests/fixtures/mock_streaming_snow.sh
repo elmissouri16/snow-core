@@ -19,7 +19,7 @@ fi
 if [ ! -f .mock-session-name ]; then
     printf '%s\n' 'Desktop proof' > .mock-session-name
 fi
-emit '{"type":"rpc_ready","protocol_version":"1","snow_version":"mock-streaming","capabilities":["branch_management","messages_list","models_list","permission_interaction","prompt_completion","session_info","user_input"],"max_input_bytes":1048576}'
+emit '{"type":"rpc_ready","protocol_version":"1","snow_version":"mock-streaming","capabilities":["active_input","authentication","branch_management","compaction","context_report","debug_diagnostics","diagnostics","goals","managed_processes","mcp_servers","messages_list","messages_page","models_list","multimodal_prompts","pending_inputs","permission_interaction","permission_mode","presentation_settings","project_init","project_trust","prompt_completion","response_controls","session_forks","session_info","session_management","settings","skills","subagent_messages","subagent_models","subagents","usage","user_input"],"max_input_bytes":1048576}'
 
 while IFS= read -r request; do
     request_id=$(printf '%s\n' "$request" | sed -n 's/^{"type":"[^"]*","id":"\([^"]*\)".*/\1/p')
@@ -34,6 +34,19 @@ while IFS= read -r request; do
             fi
             session_name=$(cat .mock-session-name)
             emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"session_info\",\"success\":true,\"data\":{\"session_id\":\"mock-session\",\"name\":\"$session_name\",\"path\":\"$PWD/mock-session.db\",\"cwd\":\"$PWD\",\"provider\":\"fake\",\"model\":\"$model\",\"thinking\":\"$thinking\",\"thinking_levels\":$thinking_levels}}"
+            ;;
+        *'"type":"messages_page"'*)
+            if [ -f .mock-has-history ]; then
+                if printf '%s\n' "$request" | grep -q '"cursor":"page-2"'; then
+                    messages='[{"id":"a1","parent_id":"u1","role":"assistant","content":[{"type":"text","text":"restored answer"}],"ts":2}]'
+                    emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"messages_page\",\"success\":true,\"data\":{\"messages\":$messages,\"start\":1,\"total\":2,\"has_more\":false}}"
+                else
+                    messages='[{"id":"u1","role":"user","content":[{"type":"text","text":"restored question"}],"ts":1}]'
+                    emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"messages_page\",\"success\":true,\"data\":{\"messages\":$messages,\"next_cursor\":\"page-2\",\"start\":0,\"total\":2,\"has_more\":true}}"
+                fi
+            else
+                emit "{\"type\":\"response\",\"id\":\"$request_id\",\"command\":\"messages_page\",\"success\":true,\"data\":{\"messages\":[],\"start\":0,\"total\":0,\"has_more\":false}}"
+            fi
             ;;
         *'"type":"messages_list"'*)
             if [ -f .mock-has-history ]; then

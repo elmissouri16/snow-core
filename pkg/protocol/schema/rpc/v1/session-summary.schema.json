@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/session-summary.schema.json",
+  "title": "Snow RPC durable session summary",
+  "type": "object",
+  "required": ["session_id", "name", "created_at", "updated_at", "messages", "active"],
+  "properties": {
+    "session_id": {"type": "string", "minLength": 1},
+    "name": {"type": "string"},
+    "created_at": {"type": "integer"},
+    "updated_at": {"type": "integer"},
+    "messages": {"type": "integer", "minimum": 0},
+    "messages_capped": {"type": "boolean"},
+    "active": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

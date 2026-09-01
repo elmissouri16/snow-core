@@ -5355,9 +5355,11 @@ checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 name = "snow-desktop"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "flume",
  "gpui",
  "gpui-component",
+ "image",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

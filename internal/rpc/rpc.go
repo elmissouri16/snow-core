@@ -9,6 +9,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/app"
@@ -49,6 +50,10 @@ type Server struct {
 	promptDone chan struct{}
 	promptWG   sync.WaitGroup
 	waitSlots  chan struct{}
+	authMu     sync.Mutex
+	authJobs   map[string]*authLoginJob
+	authWG     sync.WaitGroup
+	authSerial atomic.Uint64
 }
 
 // ServerOptions configures RPC transport metadata.

@@ -11,25 +11,34 @@ use std::{
 };
 
 use flume::{Receiver, Sender};
+use serde_json::{Map, Value};
 use uuid::Uuid;
 
 use super::{
     SnowError,
     process::{RuntimeConfig, read_bounded_frame, spawn},
     protocol::{
-        AgentEvent, BranchCatalog, BranchForkParams, BranchSelectParams, HistoryMessage,
-        InteractionKind, MalformedInteraction, ModelCatalog, PermissionDecision,
-        PermissionRejectParams, PermissionReplyParams, PermissionRequest, PromptCompleted,
-        PromptStatus, REQUIRED_CAPABILITIES, RPC_PROTOCOL_VERSION, RpcFrame, RpcReady, RpcRequest,
-        SessionBranch, SessionInfo, SessionRenameParams, SessionRenameResult, UserInputAnswer,
-        UserInputRejectParams, UserInputReplyParams, UserInputRequest, decode_frame,
-        decode_history, encode_request,
+        AgentEvent, BranchCatalog, BranchForkParams, BranchSelectParams, DecodedHistoryPage,
+        HistoryEntry, InteractionKind, KeybindingsUpdateParams, MAX_SUBAGENT_IDENTITY_BYTES,
+        MAX_SUBAGENT_MESSAGE_CURSOR_BYTES, MAX_SUBAGENT_MESSAGE_PAGE_BYTES,
+        MAX_SUBAGENT_MESSAGES_PER_PAGE, MIN_SUBAGENT_MESSAGE_PAGE_BYTES, MalformedInteraction,
+        MessagesPageParams, ModelCatalog, PermissionDecision, PermissionRejectParams,
+        PermissionReplyParams, PermissionRequest, PromptCompleted, PromptStatus,
+        REQUIRED_CAPABILITIES, RPC_PROTOCOL_VERSION, RpcFrame, RpcReady, RpcRequest, RpcResponse,
+        SessionBranch, SessionInfo, SessionRenameParams, SessionRenameResult, SubagentMessagesPage,
+        SubagentMessagesParams, ThemeSettingsUpdateParams, UserInputAnswer, UserInputRejectParams,
+        UserInputReplyParams, UserInputRequest, decode_frame, decode_history_entries,
+        decode_history_page, decode_keybindings, decode_settings, decode_subagent_messages_page,
+        decode_theme_catalog, encode_request, validate_keybindings_update,
+        validate_theme_selection,
     },
 };
 
 const COMMAND_QUEUE_CAPACITY: usize = 32;
 const EVENT_QUEUE_CAPACITY: usize = 256;
 const EVENT_SEND_TIMEOUT: Duration = Duration::from_secs(1);
+const HISTORY_PAGE_LIMIT: usize = 32;
+const HISTORY_PAGE_MAX_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub enum RuntimeEvent {
@@ -44,7 +53,15 @@ pub enum RuntimeEvent {
     },
     HistoryLoaded {
         generation: String,
-        history: Vec<HistoryMessage>,
+        history: Vec<HistoryEntry>,
+    },
+    HistoryPageLoaded {
+        generation: String,
+        history: Vec<HistoryEntry>,
+        start: usize,
+        next_start: usize,
+        total: usize,
+        complete: bool,
     },
     BranchesLoaded {
         generation: String,
@@ -82,7 +99,20 @@ pub enum RuntimeEvent {
         request_id: Option<String>,
         error: String,
     },
+    CommandCompleted {
+        request_id: String,
+        command: String,
+        data: Option<Value>,
+    },
+    ChildActivity {
+        path: String,
+        kind: String,
+        detail: Option<String>,
+    },
     TextDelta {
+        text: String,
+    },
+    PlanDelta {
         text: String,
     },
     ThinkingDelta {
@@ -160,6 +190,36 @@ struct PendingInteraction {
     question_ids: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone)]
+struct PendingSubagentMessages {
+    target: String,
+    max_bytes: usize,
+}
+
+/// Correlates a child-history request with the caller's selected-detail generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentMessagesRequest {
+    pub request_id: String,
+    pub generation: u64,
+}
+
+#[derive(Debug, Default)]
+struct PendingHistoryLoad {
+    next_start: usize,
+    total: Option<usize>,
+    superseded: bool,
+}
+
+fn begin_pending_history_load(
+    pending_history: &mut HashMap<String, PendingHistoryLoad>,
+    generation: String,
+) {
+    for pending in pending_history.values_mut() {
+        pending.superseded = true;
+    }
+    pending_history.insert(generation, PendingHistoryLoad::default());
+}
+
 struct Shared {
     command_tx: Sender<WriterCommand>,
     event_tx: Sender<RuntimeEvent>,
@@ -170,6 +230,9 @@ struct Shared {
     active_prompt: Mutex<Option<PendingPrompt>>,
     pending_interactions: Mutex<HashMap<(InteractionKind, String), PendingInteraction>>,
     interaction_commands: Mutex<HashMap<String, PendingInteractionCommand>>,
+    pending_commands: Mutex<HashMap<String, String>>,
+    pending_history: Mutex<HashMap<String, PendingHistoryLoad>>,
+    pending_subagent_messages: Mutex<HashMap<String, PendingSubagentMessages>>,
     termination_watchdog_started: AtomicBool,
     shutdown_timeout: Duration,
 }
@@ -258,6 +321,9 @@ impl SnowClient {
             active_prompt: Mutex::new(None),
             pending_interactions: Mutex::new(HashMap::new()),
             interaction_commands: Mutex::new(HashMap::new()),
+            pending_commands: Mutex::new(HashMap::new()),
+            pending_history: Mutex::new(HashMap::new()),
+            pending_subagent_messages: Mutex::new(HashMap::new()),
             termination_watchdog_started: AtomicBool::new(false),
             shutdown_timeout: config.shutdown_timeout,
         });
@@ -280,6 +346,23 @@ impl SnowClient {
     }
 
     pub fn prompt(&self, message: String) -> Result<String, SnowError> {
+        self.prompt_with_mode(message, None)
+    }
+
+    pub fn prompt_with_mode(
+        &self,
+        message: String,
+        mode: Option<String>,
+    ) -> Result<String, SnowError> {
+        self.prompt_content(message, Vec::new(), mode)
+    }
+
+    pub fn prompt_content(
+        &self,
+        message: String,
+        content: Vec<Value>,
+        mode: Option<String>,
+    ) -> Result<String, SnowError> {
         if !self.shared.ready.load(Ordering::Acquire) {
             return Err(SnowError::NotReady);
         }
@@ -287,8 +370,28 @@ impl SnowClient {
             return Err(SnowError::ChannelClosed);
         }
         let message = message.trim().to_owned();
-        if message.is_empty() {
+        if message.is_empty() && content.is_empty() {
             return Err(SnowError::Protocol("prompt must not be empty".into()));
+        }
+        if content.iter().any(|block| {
+            block.get("type").and_then(Value::as_str) != Some("image")
+                || block.get("mime_type").and_then(Value::as_str).is_none()
+                || block.get("data").and_then(Value::as_str).is_none()
+        }) {
+            return Err(SnowError::Protocol(
+                "prompt content must contain only encoded image blocks".into(),
+            ));
+        }
+        let mode = mode
+            .map(|mode| mode.trim().to_owned())
+            .filter(|mode| !mode.is_empty());
+        if mode
+            .as_deref()
+            .is_some_and(|mode| !matches!(mode, "default" | "plan"))
+        {
+            return Err(SnowError::Protocol(
+                "prompt mode must be default or plan".into(),
+            ));
         }
 
         let id = Uuid::new_v4().to_string();
@@ -307,27 +410,253 @@ impl SnowClient {
             });
         }
 
-        let result = self.send_request(RpcRequest::Prompt {
-            id: id.clone(),
-            message,
-        });
+        let request = if content.is_empty() {
+            match mode {
+                Some(mode) => RpcRequest::PromptWithMode {
+                    id: id.clone(),
+                    message,
+                    mode,
+                },
+                None => RpcRequest::Prompt {
+                    id: id.clone(),
+                    message,
+                },
+            }
+        } else {
+            RpcRequest::PromptContent {
+                id: id.clone(),
+                message,
+                content,
+                mode,
+            }
+        };
+        let result = self.send_request(request);
         if result.is_err() {
             clear_matching_active_prompt(&self.shared, &id);
         }
         result.map(|()| id)
     }
 
+    pub fn project_init(&self) -> Result<String, SnowError> {
+        if !self.shared.ready.load(Ordering::Acquire) {
+            return Err(SnowError::NotReady);
+        }
+        if self.shared.shutting_down.load(Ordering::Acquire) {
+            return Err(SnowError::ChannelClosed);
+        }
+        let id = Uuid::new_v4().to_string();
+        {
+            let mut active = self
+                .shared
+                .active_prompt
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if active.is_some() {
+                return Err(SnowError::PromptAlreadyRunning);
+            }
+            *active = Some(PendingPrompt {
+                id: id.clone(),
+                abort_pending: false,
+            });
+        }
+        if let Err(error) = self.send_request(RpcRequest::ProjectInit { id: id.clone() }) {
+            clear_matching_active_prompt(&self.shared, &id);
+            return Err(error);
+        }
+        Ok(id)
+    }
+
+    pub fn command(
+        &self,
+        command: String,
+        fields: Map<String, Value>,
+    ) -> Result<String, SnowError> {
+        let id = Uuid::new_v4().to_string();
+        let request = RpcRequest::raw(id.clone(), command.clone(), fields)?;
+        self.send_correlated_command(id, command, request)
+    }
+
+    pub fn load_themes(&self) -> Result<String, SnowError> {
+        let id = Uuid::new_v4().to_string();
+        self.send_correlated_command(
+            id.clone(),
+            "themes_list".into(),
+            RpcRequest::ThemesList { id },
+        )
+    }
+
+    pub fn load_keybindings(&self) -> Result<String, SnowError> {
+        let id = Uuid::new_v4().to_string();
+        self.send_correlated_command(
+            id.clone(),
+            "keybindings_get".into(),
+            RpcRequest::KeybindingsGet { id },
+        )
+    }
+
+    pub fn update_keybindings(
+        &self,
+        params: KeybindingsUpdateParams,
+        project_allowed: bool,
+    ) -> Result<String, SnowError> {
+        validate_keybindings_update(&params, project_allowed)?;
+        let id = Uuid::new_v4().to_string();
+        self.send_correlated_command(
+            id.clone(),
+            "keybindings_update".into(),
+            RpcRequest::KeybindingsUpdate { id, params },
+        )
+    }
+
+    pub fn load_settings(&self) -> Result<String, SnowError> {
+        let id = Uuid::new_v4().to_string();
+        self.send_correlated_command(
+            id.clone(),
+            "settings_get".into(),
+            RpcRequest::SettingsGet { id },
+        )
+    }
+
+    pub fn update_theme(&self, theme: String) -> Result<String, SnowError> {
+        validate_theme_selection(&theme)?;
+        let id = Uuid::new_v4().to_string();
+        self.send_correlated_command(
+            id.clone(),
+            "settings_update".into(),
+            RpcRequest::SettingsThemeUpdate {
+                id,
+                params: ThemeSettingsUpdateParams { theme },
+            },
+        )
+    }
+
+    fn send_correlated_command(
+        &self,
+        id: String,
+        command: String,
+        request: RpcRequest,
+    ) -> Result<String, SnowError> {
+        if !self.shared.ready.load(Ordering::Acquire) {
+            return Err(SnowError::NotReady);
+        }
+        if self.shared.shutting_down.load(Ordering::Acquire) {
+            return Err(SnowError::ChannelClosed);
+        }
+        self.shared
+            .pending_commands
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(id.clone(), command);
+        if let Err(error) = self.send_request(request) {
+            self.shared
+                .pending_commands
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&id);
+            return Err(error);
+        }
+        Ok(id)
+    }
+
+    pub fn load_subagent_messages(
+        &self,
+        target: String,
+        request_generation: u64,
+        cursor: Option<String>,
+        limit: usize,
+        max_bytes: usize,
+    ) -> Result<SubagentMessagesRequest, SnowError> {
+        if !self.shared.ready.load(Ordering::Acquire) {
+            return Err(SnowError::NotReady);
+        }
+        if self.shared.shutting_down.load(Ordering::Acquire) {
+            return Err(SnowError::ChannelClosed);
+        }
+        let target = target.trim().to_owned();
+        if target.is_empty() || target.len() > MAX_SUBAGENT_IDENTITY_BYTES {
+            return Err(SnowError::Protocol(format!(
+                "subagent_messages target must contain 1..={MAX_SUBAGENT_IDENTITY_BYTES} bytes"
+            )));
+        }
+        if let Some(cursor) = cursor.as_deref()
+            && (cursor.is_empty() || cursor.len() > MAX_SUBAGENT_MESSAGE_CURSOR_BYTES)
+        {
+            return Err(SnowError::Protocol(format!(
+                "subagent_messages cursor must contain 1..={MAX_SUBAGENT_MESSAGE_CURSOR_BYTES} bytes"
+            )));
+        }
+        if !(1..=MAX_SUBAGENT_MESSAGES_PER_PAGE).contains(&limit) {
+            return Err(SnowError::Protocol(format!(
+                "subagent_messages limit must be between 1 and {MAX_SUBAGENT_MESSAGES_PER_PAGE}"
+            )));
+        }
+        if !(MIN_SUBAGENT_MESSAGE_PAGE_BYTES..=MAX_SUBAGENT_MESSAGE_PAGE_BYTES).contains(&max_bytes)
+        {
+            return Err(SnowError::Protocol(format!(
+                "subagent_messages max_bytes must be between {MIN_SUBAGENT_MESSAGE_PAGE_BYTES} and {MAX_SUBAGENT_MESSAGE_PAGE_BYTES}"
+            )));
+        }
+
+        let id = Uuid::new_v4().to_string();
+        self.shared
+            .pending_subagent_messages
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                id.clone(),
+                PendingSubagentMessages {
+                    target: target.clone(),
+                    max_bytes,
+                },
+            );
+        let request = RpcRequest::SubagentMessages {
+            id: id.clone(),
+            params: SubagentMessagesParams {
+                target,
+                cursor,
+                limit,
+                max_bytes,
+            },
+        };
+        if let Err(error) = self.send_request(request) {
+            self.shared
+                .pending_subagent_messages
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&id);
+            return Err(error);
+        }
+        Ok(SubagentMessagesRequest {
+            request_id: id,
+            generation: request_generation,
+        })
+    }
+
     pub fn load_runtime_state(&self) -> Result<String, SnowError> {
         let generation = Uuid::new_v4().to_string();
-        self.send_runtime_requests(
+        let mut pending_history = self
+            .shared
+            .pending_history
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        begin_pending_history_load(&mut pending_history, generation.clone());
+        drop(pending_history);
+        if let Err(error) = self.send_runtime_requests(
             &generation,
             &[
                 "session_info",
-                "messages_list",
+                "messages_page",
                 "models_list",
                 "branches_list",
             ],
-        )?;
+        ) {
+            self.shared
+                .pending_history
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&generation);
+            return Err(error);
+        }
         Ok(generation)
     }
 
@@ -346,6 +675,14 @@ impl SnowClient {
             let request = match *command {
                 "session_info" => RpcRequest::SessionInfo { id },
                 "messages_list" => RpcRequest::MessagesList { id },
+                "messages_page" => RpcRequest::MessagesPage {
+                    id,
+                    params: MessagesPageParams {
+                        cursor: None,
+                        limit: HISTORY_PAGE_LIMIT,
+                        max_bytes: HISTORY_PAGE_MAX_BYTES,
+                    },
+                },
                 "models_list" => RpcRequest::ModelsList { id },
                 "branches_list" => RpcRequest::BranchesList { id },
                 _ => {
@@ -708,15 +1045,7 @@ impl SnowClient {
     }
 
     fn send_request(&self, request: RpcRequest) -> Result<(), SnowError> {
-        let limit = self.shared.max_input_bytes.load(Ordering::Acquire);
-        let frame = encode_request(&request, limit)?;
-        self.shared
-            .command_tx
-            .try_send(WriterCommand::Frame(frame))
-            .map_err(|error| match error {
-                flume::TrySendError::Full(_) => SnowError::CommandQueueFull,
-                flume::TrySendError::Disconnected(_) => SnowError::ChannelClosed,
-            })
+        queue_request(&self.shared, request)
     }
 }
 
@@ -1000,13 +1329,223 @@ fn runtime_response_generation(
         })
 }
 
+struct HistoryPageAdvance {
+    entries: Vec<HistoryEntry>,
+    start: usize,
+    next_start: usize,
+    total: usize,
+    next_cursor: Option<String>,
+}
+
+impl HistoryPageAdvance {
+    fn complete(&self) -> bool {
+        self.next_cursor.is_none()
+    }
+}
+
+fn advance_history_page(
+    shared: &Shared,
+    generation: &str,
+    page: DecodedHistoryPage,
+) -> Result<Option<HistoryPageAdvance>, SnowError> {
+    let mut loads = shared
+        .pending_history
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let result = (|| {
+        let superseded = loads
+            .get(generation)
+            .ok_or_else(|| {
+                SnowError::Protocol(format!(
+                    "messages_page response has unknown runtime generation {generation}"
+                ))
+            })?
+            .superseded;
+        if superseded {
+            loads.remove(generation);
+            return Ok(None);
+        }
+        let pending = loads
+            .get_mut(generation)
+            .expect("active history load exists after supersession check");
+        if page.start != pending.next_start {
+            return Err(SnowError::Protocol(format!(
+                "messages_page starts at {}, expected {}",
+                page.start, pending.next_start
+            )));
+        }
+        match pending.total {
+            Some(total) if total != page.total => {
+                return Err(SnowError::Protocol(format!(
+                    "messages_page total changed from {total} to {}",
+                    page.total
+                )));
+            }
+            None => pending.total = Some(page.total),
+            _ => {}
+        }
+        pending.next_start = pending
+            .next_start
+            .checked_add(page.wire_count)
+            .ok_or_else(|| SnowError::Protocol("messages_page progress overflow".into()))?;
+        if !page.has_more && pending.next_start != page.total {
+            return Err(SnowError::Protocol(format!(
+                "terminal messages_page loaded {} of {} messages",
+                pending.next_start, page.total
+            )));
+        }
+        let advance = HistoryPageAdvance {
+            entries: page.entries,
+            start: page.start,
+            next_start: pending.next_start,
+            total: page.total,
+            next_cursor: page.next_cursor,
+        };
+        if advance.complete() {
+            loads.remove(generation);
+        }
+        Ok(Some(advance))
+    })();
+    if result.is_err() {
+        loads.remove(generation);
+    }
+    result
+}
+
+fn queue_request(shared: &Shared, request: RpcRequest) -> Result<(), SnowError> {
+    let frame = encode_request(&request, shared.max_input_bytes.load(Ordering::Acquire))?;
+    shared
+        .command_tx
+        .try_send(WriterCommand::Frame(frame))
+        .map_err(|error| match error {
+            flume::TrySendError::Full(_) => SnowError::CommandQueueFull,
+            flume::TrySendError::Disconnected(_) => SnowError::ChannelClosed,
+        })
+}
+
+fn correlate_command_response(
+    pending_commands: &Mutex<HashMap<String, String>>,
+    mut response: RpcResponse,
+) -> Result<RpcResponse, Box<RuntimeEvent>> {
+    let Some(request_id) = response.id.as_deref() else {
+        return Ok(response);
+    };
+    let Some(expected_command) = pending_commands
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(request_id)
+    else {
+        return Ok(response);
+    };
+
+    let request_id = response
+        .id
+        .take()
+        .expect("correlated response has a request id");
+    if response.command.as_deref() != Some(expected_command.as_str()) {
+        let actual_command = response.command.as_deref().unwrap_or("<missing>");
+        return Err(Box::new(RuntimeEvent::RequestRejected {
+            request_id: Some(request_id),
+            error: format!(
+                "RPC response command mismatch: expected {expected_command}, received {actual_command}"
+            ),
+        }));
+    }
+    if !response.success {
+        return Err(Box::new(RuntimeEvent::RequestRejected {
+            request_id: Some(request_id),
+            error: response
+                .error
+                .unwrap_or_else(|| format!("{expected_command} request failed")),
+        }));
+    }
+
+    let data = match sanitize_presentation_response(&expected_command, response.data) {
+        Ok(data) => data,
+        Err(error) => {
+            return Err(Box::new(RuntimeEvent::RequestRejected {
+                request_id: Some(request_id),
+                error: error.to_string(),
+            }));
+        }
+    };
+    Err(Box::new(RuntimeEvent::CommandCompleted {
+        request_id,
+        command: expected_command,
+        data,
+    }))
+}
+
+fn sanitize_presentation_response(
+    command: &str,
+    data: Option<Value>,
+) -> Result<Option<Value>, SnowError> {
+    let Some(data) = data else {
+        if matches!(
+            command,
+            "themes_list"
+                | "keybindings_get"
+                | "keybindings_update"
+                | "settings_get"
+                | "settings_update"
+        ) {
+            return Err(SnowError::Protocol(format!(
+                "{command} response is missing data"
+            )));
+        }
+        return Ok(None);
+    };
+    let sanitized = match command {
+        "themes_list" => serde_json::to_value(decode_theme_catalog(data)?),
+        "keybindings_get" | "keybindings_update" => serde_json::to_value(decode_keybindings(data)?),
+        "settings_get" | "settings_update" => serde_json::to_value(decode_settings(data)?),
+        _ => return Ok(Some(data)),
+    }
+    .map_err(|_| SnowError::Protocol(format!("could not normalize {command} response data")))?;
+    Ok(Some(sanitized))
+}
+
+fn subagent_page_matches_target(page: &SubagentMessagesPage, target: &str) -> bool {
+    page.agent.path == target || page.agent.thread_id == target
+}
+
+fn validate_subagent_response_command(
+    pending: &Mutex<HashMap<String, PendingSubagentMessages>>,
+    response: &RpcResponse,
+) -> Result<(), SnowError> {
+    let Some(request_id) = response.id.as_deref() else {
+        return Ok(());
+    };
+    let mut pending = pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !pending.contains_key(request_id) {
+        return Ok(());
+    }
+    if response.command.as_deref() == Some("subagent_messages") {
+        return Ok(());
+    }
+    pending.remove(request_id);
+    Err(SnowError::Protocol(format!(
+        "subagent_messages response command mismatch for correlation id {request_id}"
+    )))
+}
+
 fn dispatch_frame(shared: &Shared, frame: RpcFrame) -> Result<(), SnowError> {
     match frame {
         RpcFrame::Ready(_) => Err(SnowError::Protocol(
             "received a second rpc_ready frame".into(),
         )),
         RpcFrame::Response(response) => {
-            if response.command.as_deref() == Some("prompt") {
+            validate_subagent_response_command(&shared.pending_subagent_messages, &response)?;
+            let response = match correlate_command_response(&shared.pending_commands, response) {
+                Ok(response) => response,
+                Err(event) => {
+                    emit_event(shared, *event);
+                    return Ok(());
+                }
+            };
+            if matches!(response.command.as_deref(), Some("prompt" | "project_init")) {
                 let request_id = response.id.ok_or_else(|| {
                     SnowError::Protocol("prompt response is missing its correlation id".into())
                 })?;
@@ -1033,48 +1572,85 @@ fn dispatch_frame(shared: &Shared, frame: RpcFrame) -> Result<(), SnowError> {
             } else if !response.success {
                 let command = response.command.unwrap_or_else(|| "request".into());
                 let error = response.error.unwrap_or_else(|| "request failed".into());
-                let pending = response
-                    .id
-                    .as_deref()
-                    .and_then(|id| take_interaction_command(shared, id));
-                if is_interaction_command(&command) || pending.is_some() {
-                    let command_id = response.id;
-                    if let Some(pending) = pending.as_ref() {
-                        mark_interaction_retryable(shared, pending.kind, &pending.request_id);
-                    }
-                    emit_event(
-                        shared,
-                        RuntimeEvent::InteractionRejected {
-                            command_id,
-                            request_id: pending.map(|pending| pending.request_id),
-                            command,
-                            error,
-                        },
-                    );
-                } else if matches!(
-                    command.as_str(),
-                    "models_list" | "session_info" | "messages_list" | "branches_list"
-                ) {
-                    let generation = runtime_response_generation(response.id.as_deref(), &command)?;
-                    emit_event(
-                        shared,
-                        RuntimeEvent::RuntimeStateFailed {
-                            generation,
-                            command,
-                            error,
-                        },
-                    );
-                } else {
-                    if command == "abort" {
-                        clear_abort_pending(shared);
+                if command == "subagent_messages" {
+                    let request_id = response.id.ok_or_else(|| {
+                        SnowError::Protocol(
+                            "subagent_messages rejection is missing request id".into(),
+                        )
+                    })?;
+                    let pending = shared
+                        .pending_subagent_messages
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .remove(&request_id);
+                    if pending.is_none() {
+                        return Err(SnowError::Protocol(format!(
+                            "subagent_messages rejection has unknown correlation id {request_id}"
+                        )));
                     }
                     emit_event(
                         shared,
                         RuntimeEvent::RequestRejected {
-                            request_id: response.id,
+                            request_id: Some(request_id),
                             error,
                         },
                     );
+                } else {
+                    let pending = response
+                        .id
+                        .as_deref()
+                        .and_then(|id| take_interaction_command(shared, id));
+                    if is_interaction_command(&command) || pending.is_some() {
+                        let command_id = response.id;
+                        if let Some(pending) = pending.as_ref() {
+                            mark_interaction_retryable(shared, pending.kind, &pending.request_id);
+                        }
+                        emit_event(
+                            shared,
+                            RuntimeEvent::InteractionRejected {
+                                command_id,
+                                request_id: pending.map(|pending| pending.request_id),
+                                command,
+                                error,
+                            },
+                        );
+                    } else if matches!(
+                        command.as_str(),
+                        "models_list"
+                            | "session_info"
+                            | "messages_list"
+                            | "messages_page"
+                            | "branches_list"
+                    ) {
+                        let generation =
+                            runtime_response_generation(response.id.as_deref(), &command)?;
+                        if command == "messages_page" {
+                            shared
+                                .pending_history
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                .remove(&generation);
+                        }
+                        emit_event(
+                            shared,
+                            RuntimeEvent::RuntimeStateFailed {
+                                generation,
+                                command,
+                                error,
+                            },
+                        );
+                    } else {
+                        if command == "abort" {
+                            clear_abort_pending(shared);
+                        }
+                        emit_event(
+                            shared,
+                            RuntimeEvent::RequestRejected {
+                                request_id: response.id,
+                                error,
+                            },
+                        );
+                    }
                 }
             } else {
                 let data = response.data;
@@ -1126,6 +1702,41 @@ fn dispatch_frame(shared: &Shared, frame: RpcFrame) -> Result<(), SnowError> {
                             );
                         }
                     }
+                    Some("subagent_messages") => {
+                        let request_id = response.id.ok_or_else(|| {
+                            SnowError::Protocol(
+                                "subagent_messages response is missing request id".into(),
+                            )
+                        })?;
+                        let pending = shared
+                            .pending_subagent_messages
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .remove(&request_id)
+                            .ok_or_else(|| {
+                                SnowError::Protocol(format!(
+                                    "subagent_messages response has unknown correlation id {request_id}"
+                                ))
+                            })?;
+                        let data = data.ok_or_else(|| {
+                            SnowError::Protocol("subagent_messages response is missing data".into())
+                        })?;
+                        let page = decode_subagent_messages_page(data.clone(), pending.max_bytes)?;
+                        if !subagent_page_matches_target(&page, &pending.target) {
+                            return Err(SnowError::Protocol(format!(
+                                "subagent_messages response identity does not match target {:?}",
+                                pending.target
+                            )));
+                        }
+                        emit_event(
+                            shared,
+                            RuntimeEvent::CommandCompleted {
+                                request_id,
+                                command: "subagent_messages".into(),
+                                data: Some(data),
+                            },
+                        );
+                    }
                     Some("models_list") => {
                         let generation =
                             runtime_response_generation(response.id.as_deref(), "models_list")?;
@@ -1159,10 +1770,58 @@ fn dispatch_frame(shared: &Shared, frame: RpcFrame) -> Result<(), SnowError> {
                         })?;
                         emit_event(shared, RuntimeEvent::SessionLoaded { generation, info });
                     }
+                    Some("messages_page") => {
+                        let generation =
+                            runtime_response_generation(response.id.as_deref(), "messages_page")?;
+                        let page = decode_history_page(data.ok_or_else(|| {
+                            SnowError::Protocol("messages_page response is missing data".into())
+                        })?)?;
+                        let Some(advance) = advance_history_page(shared, &generation, page)? else {
+                            return Ok(());
+                        };
+                        if let Some(cursor) = advance.next_cursor.as_ref() {
+                            let request = RpcRequest::MessagesPage {
+                                id: runtime_request_id(&generation, "messages_page"),
+                                params: MessagesPageParams {
+                                    cursor: Some(cursor.clone()),
+                                    limit: HISTORY_PAGE_LIMIT,
+                                    max_bytes: HISTORY_PAGE_MAX_BYTES,
+                                },
+                            };
+                            if let Err(error) = queue_request(shared, request) {
+                                shared
+                                    .pending_history
+                                    .lock()
+                                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                    .remove(&generation);
+                                emit_event(
+                                    shared,
+                                    RuntimeEvent::RuntimeStateFailed {
+                                        generation,
+                                        command: "messages_page".into(),
+                                        error: error.to_string(),
+                                    },
+                                );
+                                return Ok(());
+                            }
+                        }
+                        let complete = advance.complete();
+                        emit_event(
+                            shared,
+                            RuntimeEvent::HistoryPageLoaded {
+                                generation,
+                                history: advance.entries,
+                                start: advance.start,
+                                next_start: advance.next_start,
+                                total: advance.total,
+                                complete,
+                            },
+                        );
+                    }
                     Some("messages_list") => {
                         let generation =
                             runtime_response_generation(response.id.as_deref(), "messages_list")?;
-                        let history = decode_history(data.ok_or_else(|| {
+                        let history = decode_history_entries(data.ok_or_else(|| {
                             SnowError::Protocol("messages_list response is missing data".into())
                         })?)?;
                         emit_event(
@@ -1375,12 +2034,22 @@ fn dispatch_frame(shared: &Shared, frame: RpcFrame) -> Result<(), SnowError> {
 
 fn dispatch_agent_event(shared: &Shared, event: AgentEvent) {
     if event.has_agent() {
+        let path = event
+            .nested_string("agent", "path")
+            .unwrap_or("child")
+            .to_owned();
+        let detail = event
+            .string("tool_name")
+            .or_else(|| event.string("message"))
+            .or_else(|| event.string("text"))
+            .map(|detail| truncate_chars(detail, 160));
         emit_event(
             shared,
-            RuntimeEvent::Diagnostic(format!(
-                "ignored attributed child event {} in the basic client",
-                event.kind
-            )),
+            RuntimeEvent::ChildActivity {
+                path,
+                kind: event.kind,
+                detail,
+            },
         );
         return;
     }
@@ -1389,6 +2058,9 @@ fn dispatch_agent_event(shared: &Shared, event: AgentEvent) {
         "text_delta" => event
             .string("text")
             .map(|text| RuntimeEvent::TextDelta { text: text.into() }),
+        "plan_delta" => event
+            .string("text")
+            .map(|text| RuntimeEvent::PlanDelta { text: text.into() }),
         "thinking_delta" => event
             .string("text")
             .map(|text| RuntimeEvent::ThinkingDelta { text: text.into() }),
@@ -1429,6 +2101,20 @@ fn dispatch_agent_event(shared: &Shared, event: AgentEvent) {
         "model_changed" => event
             .nested_string("model", "id")
             .map(|model| RuntimeEvent::ModelChanged(model.into())),
+        "subagent_started" | "subagent_status" | "subagent_message" | "subagent_activity" => {
+            Some(RuntimeEvent::ChildActivity {
+                path: event
+                    .nested_object_string("subagent", "agent", "path")
+                    .or_else(|| event.nested_string("agent_message", "author"))
+                    .unwrap_or("subagent")
+                    .into(),
+                kind: event.kind.clone(),
+                detail: event
+                    .nested_string("subagent", "status")
+                    .or_else(|| event.nested_string("agent_message", "kind"))
+                    .map(str::to_owned),
+            })
+        }
         "session_updated" | "run_stats_updated" => Some(RuntimeEvent::SessionStateInvalidated),
         "provider_retry" => Some(RuntimeEvent::Status("Provider retrying…".into())),
         "error" => Some(RuntimeEvent::Failed(
@@ -1709,7 +2395,12 @@ mod tests {
             validate_ready(&ready("1", &["prompt_completion"])),
             Err(SnowError::MissingCapability(_))
         ));
-        for required in ["permission_interaction", "user_input"] {
+        for required in [
+            "permission_interaction",
+            "presentation_settings",
+            "subagent_messages",
+            "user_input",
+        ] {
             let capabilities: Vec<_> = REQUIRED_CAPABILITIES
                 .into_iter()
                 .filter(|capability| *capability != required)
@@ -1719,6 +2410,20 @@ mod tests {
                 Err(SnowError::MissingCapability(capability)) if capability == required
             ));
         }
+    }
+
+    #[test]
+    fn newer_history_load_supersedes_prior_page_chains() {
+        let mut loads = HashMap::new();
+        begin_pending_history_load(&mut loads, "older".into());
+        loads.get_mut("older").unwrap().next_start = 32;
+
+        begin_pending_history_load(&mut loads, "newer".into());
+
+        assert!(loads["older"].superseded);
+        assert_eq!(loads["older"].next_start, 32);
+        assert!(!loads["newer"].superseded);
+        assert_eq!(loads["newer"].next_start, 0);
     }
 
     #[test]
@@ -1756,5 +2461,184 @@ mod tests {
                 label
             );
         }
+    }
+
+    #[test]
+    fn subagent_message_pages_match_only_stable_requested_identity() {
+        let page = SubagentMessagesPage {
+            agent: crate::snow::AgentRef {
+                path: "/root/reviewer".into(),
+                thread_id: "thread-reviewer".into(),
+                ..Default::default()
+            },
+            generation: 4,
+            messages: Vec::new(),
+            next_cursor: None,
+            start: 0,
+            total: 0,
+            wire_count: 0,
+            has_more: false,
+        };
+        assert!(subagent_page_matches_target(&page, "/root/reviewer"));
+        assert!(subagent_page_matches_target(&page, "thread-reviewer"));
+        assert!(!subagent_page_matches_target(&page, "/root/stale"));
+        assert!(!subagent_page_matches_target(&page, "thread-stale"));
+    }
+
+    #[test]
+    fn subagent_message_command_mismatch_is_stale_safe_and_consumed() {
+        let pending = Mutex::new(HashMap::from([(
+            "request-1".into(),
+            PendingSubagentMessages {
+                target: "/root/reviewer".into(),
+                max_bytes: MIN_SUBAGENT_MESSAGE_PAGE_BYTES,
+            },
+        )]));
+        let response = RpcResponse {
+            id: Some("request-1".into()),
+            command: Some("subagent_get".into()),
+            success: true,
+            data: None,
+            error: None,
+            error_code: None,
+        };
+        let error = validate_subagent_response_command(&pending, &response).unwrap_err();
+        assert!(error.to_string().contains("command mismatch"));
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn raw_command_success_is_correlated_to_completion() {
+        let pending = Mutex::new(HashMap::from([(
+            "command-1".into(),
+            "thread_goal_set".into(),
+        )]));
+        let response = RpcResponse {
+            id: Some("command-1".into()),
+            command: Some("thread_goal_set".into()),
+            success: true,
+            data: Some(serde_json::json!({"goal": "Ship it"})),
+            error: None,
+            error_code: None,
+        };
+
+        let Err(event) = correlate_command_response(&pending, response) else {
+            panic!("expected a correlated command completion");
+        };
+        let RuntimeEvent::CommandCompleted {
+            request_id,
+            command,
+            data,
+        } = *event
+        else {
+            panic!("expected a correlated command completion");
+        };
+        assert_eq!(request_id, "command-1");
+        assert_eq!(command, "thread_goal_set");
+        assert_eq!(data, Some(serde_json::json!({"goal": "Ship it"})));
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn presentation_completion_is_correlated_sanitized_and_private_free() {
+        let pending = Mutex::new(HashMap::from([("themes-1".into(), "themes_list".into())]));
+        let colors = serde_json::json!({
+            "accent":{"light":"#0969DA","dark":"#58A6FF"},
+            "muted":{"light":"#57606A","dark":"#8B949E"},
+            "foreground":{"light":"#24292F","dark":"#F0F6FC"},
+            "warning":{"light":"#9A6700","dark":"#E3B341"},
+            "error":{"light":"#CF222E","dark":"#FF7B72"},
+            "success":{"light":"#1A7F37","dark":"#7EE787"},
+            "separator":{"light":"#8C959F","dark":"#6E7681"}
+        });
+        let response = RpcResponse {
+            id: Some("themes-1".into()),
+            command: Some("themes_list".into()),
+            success: true,
+            data: Some(serde_json::json!({
+                "selected":"default",
+                "themes":[
+                    {"name":"default","display_name":"Snow","scope":"builtin","colors":colors.clone()},
+                    {"name":"frost","display_name":"Frost","scope":"builtin","colors":colors.clone()},
+                    {"name":"ember","display_name":"Ember","scope":"builtin","colors":colors.clone()},
+                    {"name":"aurora","display_name":"Aurora","scope":"builtin","colors":colors}
+                ]
+            })),
+            error: None,
+            error_code: None,
+        };
+        let Err(event) = correlate_command_response(&pending, response) else {
+            panic!("expected correlated completion");
+        };
+        assert!(
+            matches!(*event, RuntimeEvent::CommandCompleted { command, .. } if command == "themes_list")
+        );
+
+        let pending = Mutex::new(HashMap::from([(
+            "themes-private".into(),
+            "themes_list".into(),
+        )]));
+        let response = RpcResponse {
+            id: Some("themes-private".into()),
+            command: Some("themes_list".into()),
+            success: true,
+            data: Some(serde_json::json!({"selected":"default","themes":[],"path":"/secret"})),
+            error: None,
+            error_code: None,
+        };
+        let Err(event) = correlate_command_response(&pending, response) else {
+            panic!("expected private response rejection");
+        };
+        assert!(matches!(*event, RuntimeEvent::RequestRejected { .. }));
+    }
+
+    #[test]
+    fn raw_command_failure_uses_existing_rejection_event() {
+        let pending = Mutex::new(HashMap::from([("command-1".into(), "debug_get".into())]));
+        let response = RpcResponse {
+            id: Some("command-1".into()),
+            command: Some("debug_get".into()),
+            success: false,
+            data: None,
+            error: Some("debugging is unavailable".into()),
+            error_code: Some("unavailable".into()),
+        };
+
+        let Err(event) = correlate_command_response(&pending, response) else {
+            panic!("expected a command rejection");
+        };
+        let RuntimeEvent::RequestRejected { request_id, error } = *event else {
+            panic!("expected a command rejection");
+        };
+        assert_eq!(request_id.as_deref(), Some("command-1"));
+        assert_eq!(error, "debugging is unavailable");
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn raw_command_response_mismatch_is_rejected_and_consumed() {
+        let pending = Mutex::new(HashMap::from([(
+            "command-1".into(),
+            "thread_goal_set".into(),
+        )]));
+        let response = RpcResponse {
+            id: Some("command-1".into()),
+            command: Some("session_info".into()),
+            success: true,
+            data: None,
+            error: None,
+            error_code: None,
+        };
+
+        let Err(event) = correlate_command_response(&pending, response) else {
+            panic!("expected a correlation mismatch rejection");
+        };
+        let RuntimeEvent::RequestRejected { request_id, error } = *event else {
+            panic!("expected a correlation mismatch rejection");
+        };
+        assert_eq!(request_id.as_deref(), Some("command-1"));
+        assert!(error.contains("expected thread_goal_set"));
+        assert!(error.contains("received session_info"));
+        assert!(pending.lock().unwrap().is_empty());
     }
 }

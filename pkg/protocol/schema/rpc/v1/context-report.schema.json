@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/context-report.schema.json",
+  "title": "Snow RPC context report",
+  "type": "object",
+  "required": [
+    "latest_request",
+    "categories",
+    "estimated_input_tokens",
+    "fixed_context_tokens",
+    "fixed_context_budget_tokens",
+    "fixed_context_over_budget",
+    "message_count",
+    "tool_count",
+    "context_window"
+  ],
+  "properties": {
+    "latest_request": { "type": "boolean" },
+    "categories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "bytes", "estimated_tokens", "items"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "estimated_tokens": { "type": "integer", "minimum": 0 },
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "estimated_input_tokens": { "type": "integer", "minimum": 0 },
+    "fixed_context_tokens": { "type": "integer", "minimum": 0 },
+    "fixed_context_budget_tokens": { "type": "integer", "minimum": 0 },
+    "fixed_context_over_budget": { "type": "boolean" },
+    "message_count": { "type": "integer", "minimum": 0 },
+    "tool_count": { "type": "integer", "minimum": 0 },
+    "context_window": { "type": "integer", "minimum": 0 },
+    "usage": { "$ref": "common.schema.json#/$defs/usage" }
+  },
+  "additionalProperties": false
+}

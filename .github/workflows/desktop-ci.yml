@@ -1,0 +1,126 @@
+name: Desktop CI (non-publishing)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Rust, RPC conformance, and package (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          # Keep synchronized with go.mod and the root CI workflow.
+          go-version: '1.27.0-rc.3'
+          check-latest: true
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.9'
+
+      - name: Install GPUI and packaging dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            clang \
+            file \
+            libasound2-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libvulkan-dev \
+            libwayland-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
+
+      - name: Report Rust toolchain
+        shell: bash
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Check desktop formatting
+        working-directory: desktop
+        run: cargo fmt --check
+
+      - name: Check all desktop targets
+        working-directory: desktop
+        run: cargo check --all-targets
+
+      - name: Test desktop
+        working-directory: desktop
+        run: cargo test
+
+      - name: Lint desktop
+        working-directory: desktop
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build compatible Snow runtime
+        run: go build -trimpath -o "$RUNNER_TEMP/snow" ./cmd/snow
+
+      - name: Run real Snow RPC conformance
+        working-directory: desktop
+        env:
+          SNOW_TEST_BINARY: ${{ runner.temp }}/snow
+        run: cargo test --test rpc_integration -- --ignored --test-threads=1
+
+      - name: Test packaging logic and capability omissions
+        run: >-
+          python3 -m unittest discover
+          -s desktop/scripts/tests
+          -p 'test_*.py'
+          -v
+
+      - name: Build release desktop binary
+        working-directory: desktop
+        run: cargo build --release
+
+      - name: Build and verify relocatable Linux archive
+        env:
+          SOURCE_DATE_EPOCH: '1700000000'
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/desktop-dist"
+          python3 desktop/scripts/package_desktop.py \
+            --platform linux \
+            --arch amd64 \
+            --snow-binary "$RUNNER_TEMP/snow" \
+            --desktop-binary "$PWD/desktop/target/release/snow-desktop" \
+            --output "$RUNNER_TEMP/desktop-dist"
+          archive="$(find "$RUNNER_TEMP/desktop-dist" -maxdepth 1 \
+            -type f -name 'snow-desktop_*_linux_amd64.tar.gz' -print -quit)"
+          test -n "$archive"
+          python3 desktop/scripts/verify_desktop_archive.py "$archive"
+
+      - name: Confirm workflow remains non-publishing
+        shell: bash
+        run: |
+          test ! -e desktop/dist
+          printf '%s\n' 'Desktop CI verified a temporary local archive; nothing was published.'

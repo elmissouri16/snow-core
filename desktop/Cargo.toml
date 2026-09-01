@@ -7,11 +7,13 @@ license = "MIT"
 description = "A basic GPUI desktop client for Snow's local JSONL RPC protocol"
 
 [dependencies]
+base64 = "0.22.1"
 flume = "0.11.1"
 # Compile Metal shaders at runtime so local builds do not require Xcode's optional
 # command-line Metal Toolchain component.
 gpui = { version = "0.2.2", features = ["runtime_shaders"] }
 gpui-component = "0.5.1"
+image = { version = "0.25.10", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 thiserror = "2.0.18"

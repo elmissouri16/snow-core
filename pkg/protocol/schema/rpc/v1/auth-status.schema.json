@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/auth-status.schema.json",
+  "title": "Snow RPC authentication status",
+  "type": "object",
+  "required": ["provider_id", "state"],
+  "properties": {
+    "provider_id": {"type": "string"},
+    "state": {"enum": ["missing", "configured", "expired", "invalid"]},
+    "method": {"type": "string"},
+    "refreshable": {"type": "boolean"},
+    "expires_at": {"type": "integer"},
+    "account_id": {"type": "string"},
+    "summary": {"type": "string"}
+  },
+  "additionalProperties": false
+}

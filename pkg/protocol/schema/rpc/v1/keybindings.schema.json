@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/keybindings.schema.json",
+  "title": "Snow semantic keybindings",
+  "$defs": {
+    "keys": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {"type": "string", "minLength": 1, "maxLength": 64}
+    }
+  },
+  "type": "object",
+  "required": ["project_allowed", "actions"],
+  "properties": {
+    "project_allowed": {"type": "boolean"},
+    "actions": {
+      "type": "array",
+      "minItems": 31,
+      "maxItems": 31,
+      "items": {
+        "type": "object",
+        "required": ["name", "global", "project", "effective", "source"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 64},
+          "global": {"$ref": "#/$defs/keys"},
+          "project": {"$ref": "#/$defs/keys"},
+          "effective": {"$ref": "#/$defs/keys"},
+          "source": {"type": "string", "enum": ["default", "global", "project"]}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -35,32 +35,65 @@
         "type": {
           "enum": [
             "abort",
+            "auth_providers",
             "branch_fork",
             "branches_list",
             "compact",
+            "context",
             "debug_clear",
             "debug_disable",
             "debug_enable",
             "debug_status",
             "diagnostics",
+            "goal_clear",
+            "goal_continue",
             "goal_get",
             "goal_pause",
             "goal_resume",
-            "goal_clear",
-            "goal_continue",
+            "keybindings_get",
             "mcp_servers",
             "messages_list",
+            "messages_page",
             "models_list",
             "pending_inputs",
             "pending_inputs_clear",
+            "permission_mode_get",
+            "processes_list",
+            "project_init",
+            "session_create",
             "session_fork",
             "session_info",
             "session_worktree_fork",
+            "sessions_list",
+            "settings_get",
+            "skills",
+            "skills_clear",
             "subagent_models",
             "subagent_ready",
-            "skills",
+            "themes_list",
+            "trust_get",
             "usage"
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "messagesPageParams": {
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 65536,
+          "maximum": 16711680
         }
       },
       "additionalProperties": false
@@ -229,11 +262,134 @@
           "additionalProperties": false
         }
       ]
+    },
+    "permissionModeParams": {
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow",
+            "deny"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "trustParams": {
+      "type": "object",
+      "required": [
+        "level"
+      ],
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow",
+            "deny"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "processLogsParams": {
+      "type": "object",
+      "required": [
+        "process_id"
+      ],
+      "properties": {
+        "process_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 4
+        }
+      },
+      "additionalProperties": false
+    },
+    "authJobParams": {
+      "type": "object",
+      "required": [
+        "job_id"
+      ],
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "authLoginParams": {
+      "type": "object",
+      "properties": {
+        "allowed_workspace_ids": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "authProfileParams": {
+      "type": "object",
+      "required": [
+        "base_url"
+      ],
+      "properties": {
+        "profile_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "base_url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        }
+      },
+      "additionalProperties": false
     }
   },
   "oneOf": [
     {
       "$ref": "#/$defs/noParams"
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "messages_page"
+        },
+        "params": {
+          "$ref": "#/$defs/messagesPageParams"
+        }
+      },
+      "additionalProperties": false
     },
     {
       "type": "object",
@@ -348,9 +504,15 @@
         "type": {
           "const": "set_model"
         },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
         "model": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 4096
         },
         "thinking": {
           "$ref": "#/$defs/thinking"
@@ -420,7 +582,46 @@
           "properties": {
             "name": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 72
+            },
+            "session_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "session_delete",
+            "session_open"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "required": [
+            "session_id"
+          ],
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
             }
           },
           "additionalProperties": false
@@ -730,6 +931,49 @@
     {
       "type": "object",
       "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "subagent_messages"
+        },
+        "params": {
+          "type": "object",
+          "required": [
+            "target"
+          ],
+          "properties": {
+            "target": {
+              "$ref": "#/$defs/path"
+            },
+            "cursor": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "max_bytes": {
+              "type": "integer",
+              "minimum": 16384,
+              "maximum": 8388608
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
         "type"
       ],
       "properties": {
@@ -995,6 +1239,419 @@
               "minLength": 1
             }
           },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "permission_mode_set"
+        },
+        "params": {
+          "$ref": "#/$defs/permissionModeParams"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "trust_set"
+        },
+        "params": {
+          "$ref": "#/$defs/trustParams"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "process_logs"
+        },
+        "params": {
+          "$ref": "#/$defs/processLogsParams"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "provider"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "auth_login_start"
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "secret": {
+          "type": "string",
+          "maxLength": 65536,
+          "writeOnly": true
+        },
+        "params": {
+          "$ref": "#/$defs/authLoginParams"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "provider",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "auth_profile_set"
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "method": {
+          "const": "api_key"
+        },
+        "secret": {
+          "type": "string",
+          "maxLength": 65536,
+          "writeOnly": true
+        },
+        "params": {
+          "$ref": "#/$defs/authProfileParams"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "auth_login_cancel",
+            "auth_login_status"
+          ]
+        },
+        "params": {
+          "$ref": "#/$defs/authJobParams"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "provider"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "auth_logout"
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "settings_update"
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "thinking": {
+              "$ref": "#/$defs/thinking"
+            },
+            "reasoning_summary": {
+              "$ref": "#/$defs/reasoningSummaryEnum"
+            },
+            "text_verbosity": {
+              "$ref": "#/$defs/textVerbosityEnum"
+            },
+            "debug_enabled": {
+              "type": "boolean"
+            },
+            "subagents_enabled": {
+              "type": "boolean"
+            },
+            "subagents_max_concurrent": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "skills_enabled": {
+              "type": "boolean"
+            },
+            "theme": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "provider"
+              ]
+            },
+            {
+              "required": [
+                "model"
+              ]
+            },
+            {
+              "required": [
+                "thinking"
+              ]
+            },
+            {
+              "required": [
+                "reasoning_summary"
+              ]
+            },
+            {
+              "required": [
+                "text_verbosity"
+              ]
+            },
+            {
+              "required": [
+                "debug_enabled"
+              ]
+            },
+            {
+              "required": [
+                "subagents_enabled"
+              ]
+            },
+            {
+              "required": [
+                "subagents_max_concurrent"
+              ]
+            },
+            {
+              "required": [
+                "skills_enabled"
+              ]
+            },
+            {
+              "required": [
+                "theme"
+              ]
+            }
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "keybindings_update"
+        },
+        "params": {
+          "type": "object",
+          "required": [
+            "scope"
+          ],
+          "properties": {
+            "scope": {
+              "type": "string",
+              "enum": [
+                "global",
+                "project"
+              ]
+            },
+            "bindings": {
+              "type": "object",
+              "maxProperties": 31,
+              "propertyNames": {
+                "enum": [
+                  "submit",
+                  "follow_up",
+                  "newline",
+                  "paste",
+                  "abort",
+                  "quit",
+                  "toggle_mode",
+                  "thinking",
+                  "models",
+                  "agents",
+                  "processes",
+                  "page_up",
+                  "page_down",
+                  "top",
+                  "bottom",
+                  "line_up",
+                  "line_down",
+                  "picker_up",
+                  "picker_down",
+                  "picker_previous",
+                  "picker_next",
+                  "picker_page_up",
+                  "picker_page_down",
+                  "picker_top",
+                  "picker_bottom",
+                  "accept",
+                  "close",
+                  "branch_fork",
+                  "branch_rename",
+                  "branch_delete",
+                  "confirm"
+                ]
+              },
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 32,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              }
+            },
+            "reset": {
+              "type": "array",
+              "maxItems": 31,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "submit",
+                  "follow_up",
+                  "newline",
+                  "paste",
+                  "abort",
+                  "quit",
+                  "toggle_mode",
+                  "thinking",
+                  "models",
+                  "agents",
+                  "processes",
+                  "page_up",
+                  "page_down",
+                  "top",
+                  "bottom",
+                  "line_up",
+                  "line_down",
+                  "picker_up",
+                  "picker_down",
+                  "picker_previous",
+                  "picker_next",
+                  "picker_page_up",
+                  "picker_page_down",
+                  "picker_top",
+                  "picker_bottom",
+                  "accept",
+                  "close",
+                  "branch_fork",
+                  "branch_rename",
+                  "branch_delete",
+                  "confirm"
+                ]
+              }
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "bindings"
+              ]
+            },
+            {
+              "required": [
+                "reset"
+              ]
+            }
+          ],
           "additionalProperties": false
         }
       },

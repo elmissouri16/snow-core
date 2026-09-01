@@ -318,6 +318,24 @@ global store lock during network I/O. Trust data is also locked and mode `0600`.
 > log `Key`, `Access`, or `Refresh` values, and never include credentials in
 > errors or tool output.
 
+RPC authentication accepts API keys only in the dedicated write-only `secret`
+field of `auth_login_start` and `auth_profile_set`. Snow does not echo that
+field into responses, events, diagnostics, or errors, but it necessarily exists
+in the trusted host's input frame and process memory while being committed. RPC
+hosts must never log request frames containing it. OAuth URLs and device codes
+are bounded trusted-interaction data returned by polling and should likewise not
+be persisted. The RPC server launches no browser itself, bounds retained login
+progress/jobs, and cancels and joins login workers on EOF or shutdown.
+
+RPC settings persistence accepts only the documented secret-free provider ID,
+model ID, normalized response controls, debug boolean, and bounded manager
+booleans/limits. It never accepts or returns credentials, provider headers,
+environment values, or arbitrary configuration objects. Writes use the same
+locked atomic mode-`0600` configuration path as the TUI; a persistence failure
+rolls back live provider/model/response changes. Project-scoped provider, model,
+and thinking choices are keyed by Snow's canonical working directory in the
+operator-owned global config, never in repository-controlled project config.
+
 Snow inventories redact:
 
 - API keys and OAuth access and refresh tokens;

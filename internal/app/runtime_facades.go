@@ -901,8 +901,8 @@ func (a *App) SubagentMessages(ctx context.Context, target string) ([]protocol.M
 }
 
 // ManagedProcessState and ManagedProcessLogs are app-facade snapshots used by
-// first-party surfaces. They intentionally do not create a public RPC or SDK
-// process-control contract.
+// first-party surfaces. RPC maps them into dependency-light public DTOs so the
+// internal process manager remains private and authoritative.
 type ManagedProcessState = managedprocess.State
 type ManagedProcessLogs = managedprocess.LogsResult
 

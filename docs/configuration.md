@@ -228,9 +228,9 @@ fills required zero-value defaults before validation.
 | `default_model` | provider default | Global fallback model ID; provider-specific config may also declare a default |
 | `default_project_trust` | `ask` | `ask`, `allow`, or `deny`; legacy `always`/`never` are aliases |
 | `thinking` | `off` | Global fallback effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` |
-| `project_selections` | `{}` | Operator-owned absolute working-directory map populated by interactive model/thinking changes; each entry stores `provider`, `model`, and `thinking` |
-| `reasoning_summary` | `auto` | `off`, `auto`, `concise`, or `detailed` |
-| `text_verbosity` | `low` | `low`, `medium`, or `high` |
+| `project_selections` | `{}` | Operator-owned absolute working-directory map populated by TUI or RPC model/thinking changes; each entry stores `provider`, `model`, and `thinking` |
+| `reasoning_summary` | `auto` | `off`, `auto`, `concise`, or `detailed`; TUI and RPC settings persist this global preference |
+| `text_verbosity` | `low` | `low`, `medium`, or `high`; TUI and RPC settings persist this global preference |
 | `collaboration_mode` | `default` | `default` or `plan`; branch persistence may restore a saved mode |
 | `plan_mode_reasoning_effort` | Plan preset | Optional explicit normalized thinking level |
 | `tool_output_bytes` | `262144` | Bound for provider-facing tool results and previews |
@@ -241,7 +241,7 @@ fills required zero-value defaults before validation.
 | `context_cap_bytes` | `102400` | Hard cap for loaded project instructions and maximum configured system-prompt file size |
 | `fixed_context_budget_percent` | `25` (`10..50`) | Operator-owned admission budget for recurring system instructions, active skills, conditional guidance, and exposed tool schemas as a share of the selected model window; unknown windows use a 32,768-token fallback |
 | `system_prompt_file` | unset | Markdown/text file replacing the embedded base preamble; relative paths resolve from the loaded config file's directory (normally the global config directory; `--config`/`ConfigPath` can override it) and `~` is supported |
-| `debug.enabled` | `false` | Persisted opt-in for shared bounded diagnostic event capture across TUI, print/JSON, RPC, and SDK runtimes. The TUI **Debug diagnostics** setting and `/debug on|off` update this global field. |
+| `debug.enabled` | `false` | Persisted opt-in for shared bounded diagnostic event capture across TUI, print/JSON, RPC, and SDK runtimes. The TUI **Debug diagnostics** setting, `/debug on|off`, and RPC `debug_enable`/`debug_disable` update this global field. |
 
 `--debug` and `--no-debug` override `debug.enabled` for one CLI process without
 rewriting configuration. `--debug-dump PATH` enables capture and writes a
@@ -273,8 +273,9 @@ active working directory, and reports the adjustment instead of leaving the
 next prompt in an invalid state.
 A different project directory retains its own tuple across restarts. The global
 `default_provider`, `default_model`, and `thinking` values remain fallbacks and
-are not rewritten by `/model`, `/thinking`, or the settings picker. Explicit
-CLI/SDK options override the remembered project tuple for that process.
+are not rewritten by `/model`, `/thinking`, the settings picker, or the
+equivalent RPC controls. Explicit CLI/SDK options override the remembered
+project tuple for that process.
 
 `project_selections` is stored in the operator-owned global config rather than
 trusted project `.snow/config.json`; repository content therefore cannot choose
@@ -483,11 +484,14 @@ model context window. `tool_history_budget_percent` independently triggers the
 same safe whole-turn compaction when tool calls and bounded tool-result
 projections in the eligible old prefix exceed 20% of the model window. Minimum-
 retained recent work never counts toward that aggregate trigger. In a single
-long active turn, completed assistant-call/tool-result cycles may form safe
+long tool-driven turn, completed assistant-call/tool-result cycles may form safe
 checkpoint boundaries when no exact retained prior turn would be consumed,
 allowing old complete cycles to compact while the current and recent cycles
-remain exact. A large unresolved current batch still
-cannot cause unrelated history to be compacted. Each trigger applies to
+remain exact. Those cycle boundaries remain eligible after the turn's terminal
+assistant response, so a pressure check between automatic goal turns can
+checkpoint the long turn instead of blocking the goal for lack of an older
+conversation turn. A large unresolved current batch still cannot cause
+unrelated history to be compacted. Each trigger applies to
 ordinary, goal, Plan, and subagent turns; set either to `0`
 to disable it. Disabling `auto_threshold_percent` also disables one-shot
 provider context-overflow repair. For upgrade compatibility, an existing file
@@ -682,7 +686,9 @@ Project: `<project>/.snow/keybindings.yaml` after trust
 Use `/keybindings` in the TUI, or select **Keybindings** from `/settings`, to
 edit these files interactively. The popup defaults to global scope; `S` toggles
 to trusted-project overrides. Changes are validated, saved atomically, and
-applied to the running TUI immediately. Resetting a global action removes its
+applied to the running TUI immediately. RPC clients use `keybindings_get` for
+the same deterministic layered view and `keybindings_update` for the same
+validated, locked, atomic update path. Resetting a global action removes its
 override and restores the built-in default; resetting a project action removes
 the project override so it inherits the global/default value. Manual YAML
 editing remains supported.
@@ -744,7 +750,9 @@ Custom names cannot replace current or legacy built-in names, exceed 64 runes,
 contain control characters, or contain `/` or `\\`. Colors are optional
 semantic overrides using `#RRGGBB` or ANSI `0..255`. Each light/dark value styles
 both TUI chrome and Markdown while backgrounds remain terminal-owned. Project
-themes replace same-named global themes.
+themes replace same-named global themes. RPC clients use `themes_list` to read
+the resolved catalog and selected name; `settings_get`/`settings_update` read
+and change the same persisted `theme` setting used by the TUI.
 
 ## Diagnostics and failure behavior
 

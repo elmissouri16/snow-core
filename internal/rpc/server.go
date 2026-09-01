@@ -79,7 +79,7 @@ func NewWithOptions(ctx context.Context, a *app.App, in io.Reader, out io.Writer
 		independentOutputBound = true
 	}
 	_, deadlineOutput := out.(interface{ SetWriteDeadline(time.Time) error })
-	return &Server{in: input, inputInterruptible: interruptible, inputIndependentInterruptible: independentInputInterrupt, inputDeadline: inputDeadline, out: out, outputBounded: independentOutputBound || deadlineOutput, outputIndependentBound: independentOutputBound, app: a, writeFailed: make(chan struct{}), snowVersion: opts.SnowVersion, waitSlots: make(chan struct{}, maxConcurrentWaits)}
+	return &Server{in: input, inputInterruptible: interruptible, inputIndependentInterruptible: independentInputInterrupt, inputDeadline: inputDeadline, out: out, outputBounded: independentOutputBound || deadlineOutput, outputIndependentBound: independentOutputBound, app: a, writeFailed: make(chan struct{}), snowVersion: opts.SnowVersion, waitSlots: make(chan struct{}, maxConcurrentWaits), authJobs: make(map[string]*authLoginJob)}
 }
 
 func (s *Server) interruptInput() {
@@ -203,6 +203,8 @@ finish:
 		<-done
 	}
 	s.promptWG.Wait()
+	s.cancelAuthJobs()
+	s.authWG.Wait()
 	s.mu.Lock()
 	writeErr := s.writeErr
 	s.mu.Unlock()
@@ -234,7 +236,7 @@ func rpcErrorCode(err error) string {
 	switch {
 	case strings.Contains(message, "subagents are active"):
 		return "subagents_active"
-	case strings.Contains(message, "while running"):
+	case strings.Contains(message, "while running"), strings.Contains(message, "active session"):
 		return "session_busy"
 	case strings.Contains(message, "does not support"):
 		return "unsupported"
@@ -253,6 +255,21 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 	}
 	if isSubagentCommand(req.Type) {
 		return s.handleSubagentCommand(ctx, req)
+	}
+	if isSessionManagementCommand(req.Type) {
+		return s.handleSessionManagementCommand(req)
+	}
+	if isRuntimeParityCommand(req.Type) {
+		return s.handleRuntimeParityCommand(ctx, req)
+	}
+	if isAuthCommand(req.Type) {
+		return s.handleAuthCommand(ctx, req)
+	}
+	if isSettingsCommand(req.Type) {
+		return s.handleSettingsCommand(ctx, req)
+	}
+	if isPresentationCommand(req.Type) {
+		return s.handlePresentationCommand(ctx, req)
 	}
 	switch req.Type {
 	case "prompt":
@@ -406,7 +423,7 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		if err != nil {
 			return err
 		}
-		if err := s.app.Agent.SetReasoningSummary(summary); err != nil {
+		if _, err := s.app.UpdateRPCSettingsContext(ctx, app.SettingsUpdate{ReasoningSummary: new(summary)}); err != nil {
 			return err
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: "set_reasoning_summary", Success: true})
@@ -419,11 +436,13 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		if err != nil {
 			return err
 		}
-		if err := s.app.Agent.SetTextVerbosity(verbosity); err != nil {
+		if _, err := s.app.UpdateRPCSettingsContext(ctx, app.SettingsUpdate{TextVerbosity: new(verbosity)}); err != nil {
 			return err
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: "set_text_verbosity", Success: true})
 		return nil
+	case "context":
+		return s.handleContextReport(req)
 	case "compact":
 		result, err := s.app.Agent.Compact(ctx)
 		if err != nil {
@@ -497,6 +516,8 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true})
 		return nil
+	case "messages_page":
+		return s.handleMessagesPage(req)
 	case "messages_list":
 		messages, err := s.app.Agent.Messages()
 		if err != nil {
@@ -534,7 +555,10 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: rpcDebugStatus(s.app.DebugStatus())})
 		return nil
 	case "debug_enable", "debug_disable":
-		s.app.SetDebugEnabled(req.Type == "debug_enable")
+		enabled := req.Type == "debug_enable"
+		if _, err := s.app.UpdateRPCSettingsContext(ctx, app.SettingsUpdate{DebugEnabled: new(enabled)}); err != nil {
+			return err
+		}
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: rpcDebugStatus(s.app.DebugStatus())})
 		return nil
 	case "debug_clear":
@@ -560,27 +584,24 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		return s.handleMCPServers(req)
 	case "skills":
 		return s.handleSkills(req)
+	case "skills_clear":
+		return s.handleSkillsClear(req)
 	case "set_model":
 		if req.Model == "" {
 			return errors.New("set_model requires model")
 		}
-		providerID, _, catalog := s.app.ActiveModelsSnapshot()
-		m := protocol.Model{Provider: providerID, ID: req.Model, SupportsTools: true}
-		for _, cached := range catalog {
-			if cached.ID == req.Model {
-				m = cached
-				break
-			}
+		update := app.SettingsUpdate{Model: new(req.Model)}
+		if req.Provider != "" {
+			update.Provider = new(req.Provider)
 		}
 		if req.Thinking != "" {
 			level, err := protocol.ParseThinkingLevel(req.Thinking)
 			if err != nil {
 				return err
 			}
-			if err := s.app.SetProviderModelThinking(providerID, m, level); err != nil {
-				return err
-			}
-		} else if err := s.app.SetModel(m); err != nil {
+			update.Thinking = new(level)
+		}
+		if _, err := s.app.UpdateRPCSettingsContext(ctx, update); err != nil {
 			return err
 		}
 		if err := s.write(Response{ID: req.ID, Type: "response", Command: "set_model", Success: true}); err != nil {
@@ -605,7 +626,7 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		if err != nil {
 			return err
 		}
-		if err := s.app.Agent.SetThinking(level); err != nil {
+		if _, err := s.app.UpdateRPCSettingsContext(ctx, app.SettingsUpdate{Thinking: new(level)}); err != nil {
 			return err
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: "set_thinking", Success: true})
@@ -649,26 +670,6 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: result})
 		return nil
-	case "session_rename":
-		var p struct {
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return err
-		}
-		if err := s.app.RenameSession(p.Name); err != nil {
-			return err
-		}
-		title, err := s.app.Agent.SessionTitle()
-		if err != nil {
-			return err
-		}
-		sessionID, _, err := s.app.Agent.SessionIdentity()
-		if err != nil {
-			return err
-		}
-		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: map[string]any{"session_id": sessionID, "name": title}})
-		return nil
 	case "session_info":
 		model := s.app.Agent.Model()
 		sessionID, sessionPath, err := s.app.Agent.SessionIdentity()
@@ -676,6 +677,10 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 			return err
 		}
 		title, err := s.app.Agent.SessionTitle()
+		if err != nil {
+			return err
+		}
+		permissionMode, err := s.app.PermissionMode()
 		if err != nil {
 			return err
 		}
@@ -691,6 +696,7 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 			ReasoningSummary:  s.app.Agent.ReasoningSummary(),
 			TextVerbosity:     s.app.Agent.TextVerbosity(),
 			CollaborationMode: s.app.Agent.Mode(),
+			PermissionMode:    string(permissionMode),
 			Subagents: protocol.RPCSubagentLimits{
 				Enabled:              s.app.Subagents != nil,
 				MaxConcurrentAgents:  s.app.Cfg.Subagents.MaxConcurrentThreads,
@@ -754,7 +760,7 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 	s.promptDone = done
 	s.mu.Unlock()
 
-	if err := s.write(Response{ID: req.ID, Type: "response", Command: "prompt", Success: true}); err != nil {
+	if err := s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true}); err != nil {
 		cancel()
 		s.releasePrompt(done)
 		return err
@@ -773,7 +779,7 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 		}
 		canceled := promptCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 		if err != nil && !canceled {
-			_ = s.write(Response{ID: req.ID, Type: "response", Command: "prompt", Success: false, Error: err.Error()})
+			_ = s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error()})
 		}
 		completed := protocol.RPCPromptCompleted{
 			Type:      protocol.RPCTypePromptCompleted,

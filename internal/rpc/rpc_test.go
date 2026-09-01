@@ -349,6 +349,7 @@ func TestRPCBranchAndDetachedSessionFork(t *testing.T) {
 }
 
 func TestRPCSetThinkingAndSessionInfo(t *testing.T) {
+	t.Setenv("SNOW_HOME", filepath.Join(t.TempDir(), "snow-home"))
 	var in bytes.Buffer
 	var out bytes.Buffer
 	dir := t.TempDir()
