@@ -23,8 +23,9 @@ The desktop surface currently provides:
   restored sessions do not eagerly lay out every message; bounded history pages
   are applied incrementally on the UI thread, and changing visible rows are
   explicitly remeasured and clipped to the transcript viewport;
-- streaming Markdown assistant responses, syntax-highlighted code, copy
-  controls, root/child activity, tool progress, abort, and definitive
+- streaming Markdown assistant responses, syntax-highlighted code, compact
+  clipboard-icon copy controls backed by the embedded GPUI Component SVG asset
+  bundle registered at application startup, root/child activity, tool progress, abort, and definitive
   `prompt_completed` handling;
 - normal prompts, active-turn steering, queued follow-ups, Default/Plan mode,
   plan nudges, and the plan-to-implementation boundary; the composer remains
@@ -38,8 +39,9 @@ The desktop surface currently provides:
   text-verbosity controls;
 - multimodal prompts from bounded image files or clipboard images, with pending
   attachment review/removal before send;
-- virtualized project session inventory in both the persistent sidebar and
-  detailed management panel, create/open/confirmed delete, durable relaunch
+- fixed-height uniform virtualized project session inventory in both the
+  persistent sidebar and detailed management panel, with one bounded render
+  pass per visible range for smooth local scrolling, create/open/confirmed delete, durable relaunch
   continuity, session and branch rename, branch switch/fork/delete, and the remaining
   focused branch-lifecycle coverage tracked in [`PARITY.md`](PARITY.md);
 - provider authentication and logout using Snow's canonical auth backends,
@@ -57,10 +59,11 @@ The desktop surface currently provides:
 
 Provider-private continuity data and private thinking are never placed in the
 desktop transcript. Restored history is surface-filtered and retains typed
-Markdown, plans, images, and paired tool call/result cards. Tool cards are
-collapsed to a bounded summary by default; their fenced input/output details
-open in a fixed-height internally scrollable surface so large payloads cannot
-change neighboring transcript-row geometry. The remaining presentation
+Markdown, plans, images, and paired tool call/results. Consecutive tool-only
+segments collapse into one quiet activity disclosure by default; expanding it
+shows lightweight bounded-summary rows with icon-only copy controls, while each
+row's fenced input/output details remain in a fixed-height internal scroller so
+large payloads cannot change neighboring transcript-row geometry. The remaining presentation
 refinements are tracked explicitly in
 [`PARITY.md`](PARITY.md), rather than being implied by the RPC transport alone.
 
@@ -185,10 +188,11 @@ blocking card, or an ordinary workspace panel exists, the transcript takes the
 flexible middle and the same composer moves to the bottom. Settings instead
 replace the entire chat canvas and do not render the transcript or composer.
 User messages are compact,
-right-aligned bubbles; assistant Markdown is left-aligned and unboxed. Copy,
-streaming, code, tool/history, plan, attachment, error, permission, and user-input
-affordances retain their existing behavior and remain visually secondary to the
-conversation.
+right-aligned bubbles; assistant Markdown is left-aligned and unboxed. Copy
+actions render as compact clipboard icons with hover tooltips instead of text
+labels. Streaming, code, tool/history, plan, attachment, error, permission, and
+user-input affordances retain their existing behavior and remain visually
+secondary to the conversation.
 
 This is a presentation recompose, not a new Snow product or agent path. The
 sidebar, toolbar, and composer call the existing typed RPC/session handlers;

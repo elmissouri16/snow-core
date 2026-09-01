@@ -179,19 +179,113 @@ pub(crate) fn reapply_palette(cx: &mut App) {
 }
 
 fn apply_semantic_palette(colors: SemanticPalette, cx: &mut App) {
+    let is_dark = Theme::global(cx).is_dark();
     let theme = Theme::global_mut(cx);
     let accent = to_hsla(colors.accent);
+    let accent_foreground = contrast_foreground(colors.accent);
+    let muted = to_hsla(colors.muted);
+    let foreground = to_hsla(colors.foreground);
+    let warning = to_hsla(colors.warning);
+    let danger = to_hsla(colors.error);
+    let success = to_hsla(colors.success);
+    let separator = to_hsla(colors.separator);
+
+    // Snow themes expose semantic roles rather than the much larger GPUI
+    // component palette. Project those roles through every related component
+    // token so hover, active, focus, selection, sidebar, and status treatments
+    // cannot retain colors from the previously selected native theme.
     theme.primary = accent;
+    theme.primary_hover = interaction_variant(accent, is_dark, InteractionState::Hover);
+    theme.primary_active = interaction_variant(accent, is_dark, InteractionState::Active);
+    theme.primary_foreground = accent_foreground;
+    theme.accent = translucent(accent, 0.14);
+    theme.accent_foreground = foreground;
     theme.info = accent;
-    theme.muted_foreground = to_hsla(colors.muted);
-    theme.foreground = to_hsla(colors.foreground);
-    theme.warning = to_hsla(colors.warning);
-    theme.danger = to_hsla(colors.error);
-    theme.success = to_hsla(colors.success);
-    theme.border = to_hsla(colors.separator);
+    theme.info_hover = theme.primary_hover;
+    theme.info_active = theme.primary_active;
+    theme.info_foreground = accent_foreground;
+    theme.link = accent;
+    theme.link_hover = theme.primary_hover;
+    theme.link_active = theme.primary_active;
+    theme.caret = accent;
+    theme.ring = accent;
+    theme.selection = translucent(accent, 0.24);
+    theme.progress_bar = accent;
+    theme.slider_thumb = accent;
+    theme.sidebar_primary = accent;
+    theme.sidebar_primary_foreground = accent_foreground;
+
+    theme.muted_foreground = muted;
+    theme.foreground = foreground;
+    theme.popover_foreground = foreground;
+    theme.sidebar_foreground = foreground;
+
+    theme.warning = warning;
+    theme.danger = danger;
+    theme.danger_hover = interaction_variant(danger, is_dark, InteractionState::Hover);
+    theme.danger_active = interaction_variant(danger, is_dark, InteractionState::Active);
+    theme.danger_foreground = contrast_foreground(colors.error);
+    theme.success = success;
+    theme.success_hover = interaction_variant(success, is_dark, InteractionState::Hover);
+    theme.success_active = interaction_variant(success, is_dark, InteractionState::Active);
+    theme.success_foreground = contrast_foreground(colors.success);
+
+    theme.border = separator;
+    theme.input = separator;
+    theme.sidebar_border = separator;
+    theme.list_active_border = accent;
+    theme.table_active_border = accent;
+    theme.drag_border = accent;
     // gpui-component 0.5 has no Theme::sync_base API. Its pinned equivalent
     // is to mutate the one global Theme snapshot and refresh every window.
     cx.refresh_windows();
+}
+
+#[derive(Clone, Copy)]
+enum InteractionState {
+    Hover,
+    Active,
+}
+
+fn interaction_variant(
+    mut color: gpui::Hsla,
+    is_dark: bool,
+    state: InteractionState,
+) -> gpui::Hsla {
+    let distance = match state {
+        InteractionState::Hover => 0.06,
+        InteractionState::Active => 0.1,
+    };
+    color.l = if is_dark {
+        (color.l + distance).min(1.0)
+    } else {
+        (color.l - distance).max(0.0)
+    };
+    color
+}
+
+fn translucent(mut color: gpui::Hsla, alpha: f32) -> gpui::Hsla {
+    color.a = alpha;
+    color
+}
+
+fn contrast_foreground(color: Rgb) -> gpui::Hsla {
+    let channel = |value: u8| {
+        let value = f32::from(value) / 255.0;
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let luminance =
+        0.2126 * channel(color.red) + 0.7152 * channel(color.green) + 0.0722 * channel(color.blue);
+    // The WCAG contrast crossover between black and white text is ~0.179.
+    if luminance > 0.179 {
+        gpui::Hsla::black()
+    } else {
+        gpui::Hsla::white()
+    }
 }
 
 fn to_hsla(color: Rgb) -> gpui::Hsla {
@@ -369,5 +463,41 @@ mod tests {
         assert_ne!(to_hsla(colors.foreground), to_hsla(colors.warning));
         assert_ne!(to_hsla(colors.error), to_hsla(colors.success));
         assert_ne!(to_hsla(colors.separator), to_hsla(colors.accent));
+    }
+
+    #[test]
+    fn interaction_variants_follow_native_appearance() {
+        let accent = to_hsla(Rgb::new(64, 128, 192));
+        let dark_hover = interaction_variant(accent, true, InteractionState::Hover);
+        let dark_active = interaction_variant(accent, true, InteractionState::Active);
+        let light_hover = interaction_variant(accent, false, InteractionState::Hover);
+        let light_active = interaction_variant(accent, false, InteractionState::Active);
+
+        assert!(dark_hover.l > accent.l);
+        assert!(dark_active.l > dark_hover.l);
+        assert!(light_hover.l < accent.l);
+        assert!(light_active.l < light_hover.l);
+    }
+
+    #[test]
+    fn semantic_accents_get_readable_foregrounds() {
+        assert_eq!(
+            contrast_foreground(Rgb::new(250, 250, 250)),
+            gpui::Hsla::black()
+        );
+        assert_eq!(
+            contrast_foreground(Rgb::new(10, 10, 10)),
+            gpui::Hsla::white()
+        );
+    }
+
+    #[test]
+    fn translucent_semantic_tokens_preserve_color() {
+        let accent = to_hsla(Rgb::new(64, 128, 192));
+        let selection = translucent(accent, 0.24);
+        assert_eq!(selection.h, accent.h);
+        assert_eq!(selection.s, accent.s);
+        assert_eq!(selection.l, accent.l);
+        assert_eq!(selection.a, 0.24);
     }
 }

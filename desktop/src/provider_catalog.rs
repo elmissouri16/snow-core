@@ -21,7 +21,8 @@ const MAX_MODEL_EFFORTS: usize = 64;
 /// `fake` is Snow's deterministic internal runtime adapter. It remains valid
 /// for tests and local process startup, but is not a user-selectable provider.
 pub fn is_user_visible_provider(provider_id: &str) -> bool {
-    provider_id.trim() != "fake"
+    let provider_id = provider_id.trim();
+    !provider_id.is_empty() && provider_id != "fake"
 }
 
 /// A bounded, presentation-safe provider row built from the server inventory.
@@ -66,6 +67,18 @@ pub enum ProviderStatus {
 }
 
 impl ProviderStatus {
+    /// Return a compact, actionable authentication problem for picker rows.
+    /// Healthy and credential-free providers need no secondary line.
+    pub fn authentication_attention(&self) -> Option<&'static str> {
+        match self {
+            Self::NotConfigured { .. } => Some("Authentication required"),
+            Self::Expired { .. } => Some("Credential expired"),
+            Self::Invalid { .. } => Some("Credential invalid"),
+            Self::Unknown { .. } => Some("Authentication status unavailable"),
+            Self::NoAuthenticationRequired { .. } | Self::Configured { .. } => None,
+        }
+    }
+
     pub fn label(&self) -> String {
         match self {
             Self::NoAuthenticationRequired {
@@ -530,6 +543,10 @@ mod tests {
         );
         assert_eq!(provider_label(&synthesized, "fake"), "Choose provider");
         assert!(!is_user_visible_provider(" fake "));
+        assert!(!is_user_visible_provider(""));
+        assert!(!is_user_visible_provider("   "));
+        assert_eq!(provider_label(&[], ""), "Choose provider");
+        assert_eq!(provider_label(&[], "   "), "Choose provider");
     }
 
     #[test]
@@ -581,6 +598,11 @@ mod tests {
             ProviderStatus::NotConfigured { .. }
         ));
         assert!(rows[1].status.label().contains("Not configured"));
+        assert_eq!(rows[0].status.authentication_attention(), None);
+        assert_eq!(
+            rows[1].status.authentication_attention(),
+            Some("Authentication required")
+        );
     }
 
     #[test]

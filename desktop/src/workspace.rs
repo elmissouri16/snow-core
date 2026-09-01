@@ -8,12 +8,13 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, Corner, Entity, Image, ImageFormat, IntoElement,
-    KeyBinding, ListAlignment, ListOffset, ListState, Render, Subscription, Task, Window, actions,
-    div, img, list, prelude::*, px,
+    AnyElement, App, ClipboardItem, Context, Corner, Entity, FocusHandle, Image, ImageFormat,
+    IntoElement, KeyBinding, ListAlignment, ListOffset, ListState, Render, SharedString,
+    Subscription, Task, UniformListScrollHandle, Window, actions, div, img, list, prelude::*, px,
+    uniform_list,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Selectable, StyledExt,
+    ActiveTheme, Disableable, IconName, Selectable, StyledExt,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -123,10 +124,60 @@ pub enum ChatRole {
 pub struct ChatMessage {
     pub role: ChatRole,
     pub text: String,
+    presentation_text: SharedString,
     pub streaming: bool,
     history_blocks: Vec<HistoryBlock>,
     history_tool_results: Vec<HistoryToolResult>,
     render_id: u64,
+}
+
+fn is_tool_only_message(message: &ChatMessage) -> bool {
+    message.role == ChatRole::Assistant
+        && message.text.is_empty()
+        && (!message.history_blocks.is_empty() || !message.history_tool_results.is_empty())
+        && message
+            .history_blocks
+            .iter()
+            .all(|block| matches!(block, HistoryBlock::ToolCall(_)))
+}
+
+fn tool_activity_run_bounds(messages: &[ChatMessage], index: usize) -> Option<(usize, usize)> {
+    messages
+        .get(index)
+        .filter(|message| is_tool_only_message(message))?;
+    let mut start = index;
+    while start > 0 && is_tool_only_message(&messages[start - 1]) {
+        start -= 1;
+    }
+    let mut end = index;
+    while end + 1 < messages.len() && is_tool_only_message(&messages[end + 1]) {
+        end += 1;
+    }
+    Some((start, end))
+}
+
+fn coalesced_tool_activity_message(
+    messages: &[ChatMessage],
+    start: usize,
+    end: usize,
+) -> Option<ChatMessage> {
+    let mut coalesced = messages.get(start)?.clone();
+    coalesced.history_blocks.clear();
+    coalesced.history_tool_results.clear();
+    coalesced.streaming = false;
+    for message in messages.get(start..=end)? {
+        if !is_tool_only_message(message) {
+            return None;
+        }
+        coalesced
+            .history_blocks
+            .extend(message.history_blocks.iter().cloned());
+        coalesced
+            .history_tool_results
+            .extend(message.history_tool_results.iter().cloned());
+        coalesced.streaming |= message.streaming;
+    }
+    Some(coalesced)
 }
 
 fn chat_message_copy_text(message: &ChatMessage) -> String {
@@ -283,6 +334,16 @@ fn sidebar_session_title(name: &str) -> String {
     }
 }
 
+fn should_follow_transcript(
+    previous_message_count: usize,
+    previous_scroll: ListOffset,
+    transcript_content_changed: bool,
+    transcript_reset: bool,
+) -> bool {
+    transcript_reset
+        || (transcript_content_changed && previous_scroll.item_ix >= previous_message_count)
+}
+
 fn sync_transcript_list_items(
     list_state: &ListState,
     message_count: usize,
@@ -292,14 +353,6 @@ fn sync_transcript_list_items(
         return false;
     }
     list_state.reset(message_count);
-    true
-}
-
-fn sync_session_list_items(list_state: &ListState, session_count: usize) -> bool {
-    if list_state.item_count() == session_count {
-        return false;
-    }
-    list_state.reset(session_count);
     true
 }
 
@@ -316,6 +369,46 @@ fn markdown_code_block(language: &str, content: &str) -> String {
 fn tool_card_summary(content: &str) -> String {
     let compact = content.split_whitespace().collect::<Vec<_>>().join(" ");
     bounded_display(&compact, TOOL_CARD_SUMMARY_CHARS)
+}
+
+fn compact_tool_duration(duration_ms: i64) -> String {
+    let duration_ms = duration_ms.max(0);
+    if duration_ms < 1_000 {
+        return format!("{duration_ms} ms");
+    }
+    if duration_ms < 60_000 {
+        return format!("{:.1}s", duration_ms as f64 / 1_000.);
+    }
+    let minutes = duration_ms / 60_000;
+    let seconds = duration_ms % 60_000 / 1_000;
+    format!("{minutes}m {seconds}s")
+}
+
+fn tool_activity_label(
+    tool_count: usize,
+    completed_count: usize,
+    failed_count: usize,
+    duration_ms: i64,
+) -> String {
+    if completed_count < tool_count {
+        return if tool_count == 1 {
+            "Working…".into()
+        } else {
+            format!("Working · {tool_count} tools")
+        };
+    }
+
+    let mut label = if duration_ms > 0 {
+        format!("Worked for {}", compact_tool_duration(duration_ms))
+    } else if tool_count == 1 {
+        "Used 1 tool".into()
+    } else {
+        format!("Used {tool_count} tools")
+    };
+    if failed_count > 0 {
+        label.push_str(&format!(" · {failed_count} failed"));
+    }
+    label
 }
 
 fn composer_suggestion_priority(
@@ -568,7 +661,6 @@ fn bounded_display(value: &str, max_chars: usize) -> String {
 
 const MAX_TRANSCRIPT_PUBLIC_CHARS: usize = 32 * 1024;
 const TRANSCRIPT_LIST_OVERDRAW: f32 = 640.;
-const SESSION_LIST_OVERDRAW: f32 = 256.;
 const TOOL_CARD_DETAILS_HEIGHT: f32 = 280.;
 const TOOL_CARD_SUMMARY_CHARS: usize = 160;
 const MAX_TOOL_PUBLIC_CHARS: usize = 8 * 1024;
@@ -964,6 +1056,15 @@ impl SettingsSection {
         Self::Keybindings,
     ];
 
+    const fn id(self) -> &'static str {
+        match self {
+            Self::General => "general",
+            Self::Capabilities => "capabilities",
+            Self::Appearance => "appearance",
+            Self::Keybindings => "keybindings",
+        }
+    }
+
     const fn label(self) -> &'static str {
         match self {
             Self::General => "General",
@@ -1053,10 +1154,53 @@ enum ComposerFooterLayout {
     Wrapped,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkspaceTopBarLayout {
+    Full,
+    Compact,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PickerCloseFocusTarget {
+    Composer,
+    Settings,
+    None,
+}
+
+fn picker_close_focus_target(
+    settings_workspace_open: bool,
+    composer_editable: bool,
+) -> PickerCloseFocusTarget {
+    if settings_workspace_open {
+        PickerCloseFocusTarget::Settings
+    } else if composer_editable {
+        PickerCloseFocusTarget::Composer
+    } else {
+        PickerCloseFocusTarget::None
+    }
+}
+
 const EXPANDED_SIDEBAR_WIDTH: f32 = 296.;
 const COLLAPSED_SIDEBAR_WIDTH: f32 = 58.;
 const COMPOSER_HORIZONTAL_INSET: f32 = 80.;
 const COMPOSER_INLINE_FOOTER_MIN_WIDTH: f32 = 840.;
+const TOP_BAR_FULL_MIN_WIDTH: f32 = 900.;
+
+fn workspace_top_bar_layout(
+    workspace_width: f32,
+    sidebar_collapsed: bool,
+) -> WorkspaceTopBarLayout {
+    let sidebar_width = if sidebar_collapsed {
+        COLLAPSED_SIDEBAR_WIDTH
+    } else {
+        EXPANDED_SIDEBAR_WIDTH
+    };
+    if workspace_width - sidebar_width < TOP_BAR_FULL_MIN_WIDTH {
+        WorkspaceTopBarLayout::Compact
+    } else {
+        WorkspaceTopBarLayout::Full
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ComposerLayoutProjection {
@@ -1093,6 +1237,20 @@ fn composer_footer_layout(workspace_width: f32, sidebar_collapsed: bool) -> Comp
 
 fn can_open_model_picker(provider: &str, can_send: bool) -> bool {
     can_send && is_user_visible_provider(provider)
+}
+
+fn provider_picker_empty_message(
+    catalog_count: usize,
+    result_count: usize,
+    query: &str,
+) -> Option<&'static str> {
+    if result_count > 0 {
+        None
+    } else if catalog_count == 0 || query.trim().is_empty() {
+        Some("No providers available.")
+    } else {
+        Some("No providers match your search.")
+    }
 }
 
 fn composer_model_label(provider: &str, current_model: &str, models: &[ModelInfo]) -> String {
@@ -1258,6 +1416,8 @@ fn image_format_for_mime(mime_type: &str) -> Option<ImageFormat> {
     }
 }
 
+const MAX_RUNTIME_EVENTS_PER_BATCH: usize = 64;
+
 fn push_coalesced(batch: &mut Vec<RuntimeEvent>, event: RuntimeEvent) {
     match event {
         RuntimeEvent::TextDelta { text } => {
@@ -1283,6 +1443,25 @@ fn push_coalesced(batch: &mut Vec<RuntimeEvent>, event: RuntimeEvent) {
         }
         event => batch.push(event),
     }
+}
+
+fn receive_runtime_batch(
+    events: &flume::Receiver<RuntimeEvent>,
+    first_event: RuntimeEvent,
+) -> Vec<RuntimeEvent> {
+    let mut batch = Vec::with_capacity(16);
+    let mut history_page_in_batch = matches!(&first_event, RuntimeEvent::HistoryPageLoaded { .. });
+    let mut received_event_count = 1;
+    push_coalesced(&mut batch, first_event);
+    while received_event_count < MAX_RUNTIME_EVENTS_PER_BATCH && !history_page_in_batch {
+        let Ok(event) = events.try_recv() else {
+            break;
+        };
+        received_event_count += 1;
+        history_page_in_batch = matches!(&event, RuntimeEvent::HistoryPageLoaded { .. });
+        push_coalesced(&mut batch, event);
+    }
+    batch
 }
 
 fn apply_runtime_batch(
@@ -1317,6 +1496,38 @@ fn runtime_event_generation(event: &RuntimeEvent) -> Option<&str> {
     }
 }
 
+fn should_stop_process_poll(disposition: ProcessResponseDisposition, terminal_eof: bool) -> bool {
+    disposition == ProcessResponseDisposition::Applied && terminal_eof
+}
+
+fn tool_transcript_rows(state: &ChatState, batch: &[RuntimeEvent]) -> Vec<usize> {
+    let call_ids = batch
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeEvent::ToolProgress { call_id, .. }
+            | RuntimeEvent::ToolFinished { call_id, .. } => Some(call_id.as_str()),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+    let mut rows = call_ids
+        .into_iter()
+        .filter_map(|call_id| {
+            let row = state.messages.iter().rposition(|message| {
+                message.history_blocks.iter().any(|block| {
+                    matches!(
+                        block,
+                        HistoryBlock::ToolCall(tool) if tool.tool_call_id == call_id
+                    )
+                })
+            })?;
+            Some(tool_activity_run_bounds(&state.messages, row).map_or(row, |(_, run_end)| run_end))
+        })
+        .collect::<Vec<_>>();
+    rows.sort_unstable();
+    rows.dedup();
+    rows
+}
+
 fn runtime_event_changes_transcript_content(event: &RuntimeEvent) -> bool {
     matches!(
         event,
@@ -1335,12 +1546,20 @@ fn runtime_event_changes_transcript_content(event: &RuntimeEvent) -> bool {
 fn apply_runtime_config_event(config: &mut RuntimeConfig, event: &RuntimeEvent) {
     match event {
         RuntimeEvent::SessionLoaded { info, .. } => {
+            if is_user_visible_provider(&info.provider) {
+                config.provider = info.provider.trim().to_owned();
+            }
             config.session_path = (!info.path.is_empty()).then(|| info.path.clone().into());
             config.no_session = info.path.is_empty();
             config.model = Some(info.model.clone());
         }
-        RuntimeEvent::ModelsLoaded { catalog, .. } if !catalog.current.is_empty() => {
-            config.model = Some(catalog.current.clone());
+        RuntimeEvent::ModelsLoaded { catalog, .. } => {
+            if is_user_visible_provider(&catalog.provider) {
+                config.provider = catalog.provider.trim().to_owned();
+            }
+            if !catalog.current.is_empty() {
+                config.model = Some(catalog.current.clone());
+            }
         }
         _ => {}
     }
@@ -1350,6 +1569,10 @@ fn replacement_provider_config(config: &RuntimeConfig, provider: &str) -> Runtim
     let mut replacement = config.clone();
     replacement.provider = provider.into();
     replacement.model = None;
+    // Thinking capabilities belong to a concrete provider/model pair. A value
+    // retained from the previous provider can make Snow reject the replacement
+    // runtime before its model catalog is available for negotiation.
+    replacement.thinking = Some("off".into());
     replacement
 }
 
@@ -1786,9 +2009,11 @@ impl ChatState {
 
     fn push_system_message(&mut self, text: impl Into<String>) {
         let render_id = self.allocate_render_id();
+        let text = text.into();
         self.messages.push(ChatMessage {
             role: ChatRole::System,
-            text: text.into(),
+            presentation_text: text.clone().into(),
+            text,
             streaming: false,
             history_blocks: Vec::new(),
             history_tool_results: Vec::new(),
@@ -1813,6 +2038,7 @@ impl ChatState {
         let user_render_id = self.allocate_render_id();
         self.messages.push(ChatMessage {
             role: ChatRole::User,
+            presentation_text: message.clone().into(),
             text: message,
             streaming: false,
             history_blocks,
@@ -1824,6 +2050,7 @@ impl ChatState {
         self.messages.push(ChatMessage {
             role: ChatRole::Assistant,
             text: String::new(),
+            presentation_text: "".into(),
             streaming: true,
             history_blocks: Vec::new(),
             history_tool_results: Vec::new(),
@@ -1852,6 +2079,7 @@ impl ChatState {
         self.messages.push(ChatMessage {
             role: ChatRole::Assistant,
             text: String::new(),
+            presentation_text: "".into(),
             streaming,
             history_blocks,
             history_tool_results: history_tool_result.into_iter().collect(),
@@ -2320,6 +2548,7 @@ impl ChatState {
                     && let Some(message) = self.messages.get_mut(index)
                 {
                     append_bounded_public(&mut message.text, &text, MAX_TRANSCRIPT_PUBLIC_CHARS);
+                    message.presentation_text = message.text.clone().into();
                     self.status_text = "Responding…".into();
                 }
             }
@@ -2328,6 +2557,7 @@ impl ChatState {
                     && let Some(message) = self.messages.get_mut(index)
                 {
                     append_bounded_public(&mut message.text, &text, MAX_TRANSCRIPT_PUBLIC_CHARS);
+                    message.presentation_text = message.text.clone().into();
                     append_bounded_public(
                         &mut self.latest_plan,
                         &text,
@@ -2513,7 +2743,7 @@ impl ChatState {
                 } else {
                     "Snow exited".into()
                 };
-                if !expected {
+                if !expected && self.last_error.is_none() {
                     self.last_error = Some(match status {
                         Some(code) => format!("Snow exited unexpectedly with status {code}"),
                         None => "Snow exited unexpectedly".into(),
@@ -2597,6 +2827,7 @@ impl ChatState {
                     "assistant" | "tool_result" | "tool" => ChatRole::Assistant,
                     _ => ChatRole::System,
                 },
+                presentation_text: text.clone().into(),
                 text,
                 streaming: false,
                 history_blocks: blocks,
@@ -2741,6 +2972,7 @@ pub struct Workspace {
     settings_panel: Option<Settings>,
     settings_workspace_open: bool,
     settings_section: SettingsSection,
+    settings_focus_handle: FocusHandle,
     theme_catalog: Option<ThemeCatalog>,
     keybindings: Option<Keybindings>,
     keybinding_edit_action: Option<String>,
@@ -2780,8 +3012,8 @@ pub struct Workspace {
     input_history_draft: String,
     attachments: ImageAttachments,
     attachment_task: Option<Task<()>>,
-    sidebar_session_list: ListState,
-    management_session_list: ListState,
+    sidebar_session_list: UniformListScrollHandle,
+    management_session_list: UniformListScrollHandle,
     transcript_list: ListState,
     expanded_tool_cards: HashSet<u64>,
     focus_composer_when_ready: bool,
@@ -2959,6 +3191,7 @@ impl Workspace {
             settings_panel: None,
             settings_workspace_open: false,
             settings_section: SettingsSection::default(),
+            settings_focus_handle: cx.focus_handle(),
             theme_catalog: None,
             keybindings: None,
             keybinding_edit_action: None,
@@ -2998,12 +3231,8 @@ impl Workspace {
             input_history_draft: String::new(),
             attachments: ImageAttachments::new(),
             attachment_task: None,
-            sidebar_session_list: ListState::new(0, ListAlignment::Top, px(SESSION_LIST_OVERDRAW)),
-            management_session_list: ListState::new(
-                0,
-                ListAlignment::Top,
-                px(SESSION_LIST_OVERDRAW),
-            ),
+            sidebar_session_list: UniformListScrollHandle::default(),
+            management_session_list: UniformListScrollHandle::default(),
             transcript_list: ListState::new(0, ListAlignment::Bottom, px(TRANSCRIPT_LIST_OVERDRAW)),
             expanded_tool_cards: HashSet::new(),
             focus_composer_when_ready: false,
@@ -3036,18 +3265,7 @@ impl Workspace {
                 self.runtime = Some(connection.client);
                 self.runtime_task = Some(cx.spawn_in(window, async move |this, window| {
                     while let Ok(event) = events.recv_async().await {
-                        let mut batch = Vec::with_capacity(16);
-                        let mut history_page_in_batch =
-                            matches!(&event, RuntimeEvent::HistoryPageLoaded { .. });
-                        push_coalesced(&mut batch, event);
-                        while batch.len() < 64 && !history_page_in_batch {
-                            let Ok(event) = events.try_recv() else {
-                                break;
-                            };
-                            history_page_in_batch =
-                                matches!(&event, RuntimeEvent::HistoryPageLoaded { .. });
-                            push_coalesced(&mut batch, event);
-                        }
+                        let batch = receive_runtime_batch(&events, event);
                         if this
                             .update_in(window, |this, window, cx| {
                                 let became_ready = batch
@@ -3062,7 +3280,7 @@ impl Workspace {
                                     )
                                 });
                                 if closes_menus {
-                                    this.composer_picker.close();
+                                    this.close_composer_picker(window, cx);
                                     this.session_menu_open = false;
                                 }
                                 let may_update_model = batch.iter().any(|event| {
@@ -3304,19 +3522,31 @@ impl Workspace {
                                         )
                                     )
                                 });
-                                if let Some(config) = this.runtime_config.as_mut() {
-                                    for event in &batch {
-                                        if runtime_event_generation(event).is_none_or(
-                                            |generation| {
-                                                this.state.accepts_runtime_generation(generation)
-                                            },
-                                        ) {
-                                            apply_runtime_config_event(config, event);
+                                let discovered_provider =
+                                    this.runtime_config.as_mut().map(|config| {
+                                        for event in &batch {
+                                            if runtime_event_generation(event).is_none_or(
+                                                |generation| {
+                                                    this.state
+                                                        .accepts_runtime_generation(generation)
+                                                },
+                                            ) {
+                                                apply_runtime_config_event(config, event);
+                                            }
                                         }
-                                    }
+                                        config.provider.clone()
+                                    });
+                                if let Some(provider) = discovered_provider
+                                    && is_user_visible_provider(&provider)
+                                {
+                                    this.provider = provider;
                                 }
                                 let transcript_content_changed =
                                     batch.iter().any(runtime_event_changes_transcript_content);
+                                let previous_message_count = this.state.messages.len();
+                                let previous_transcript_scroll =
+                                    this.transcript_list.logical_scroll_top();
+                                let tool_rows = tool_transcript_rows(&this.state, &batch);
                                 apply_runtime_batch(&mut this.state, batch, &presented_command_ids);
                                 let transcript_reset = sync_transcript_list_items(
                                     &this.transcript_list,
@@ -3331,12 +3561,17 @@ impl Workspace {
                                     if start < end {
                                         this.transcript_list.splice(start..end, end - start);
                                     }
+                                    for row in tool_rows {
+                                        if row < start && row < end {
+                                            this.transcript_list.splice(row..row + 1, 1);
+                                        }
+                                    }
                                 }
                                 this.sync_plan_nudge_scope();
                                 for completion in command_completions {
                                     this.apply_command_completion(completion, window, cx);
                                 }
-                                this.suppress_management_panels_for_interaction();
+                                this.suppress_management_panels_for_interaction(window, cx);
                                 if let Some(command) = session_inventory_refresh {
                                     this.run_silent_rpc_command(command);
                                 }
@@ -3459,7 +3694,14 @@ impl Workspace {
                                     this.focus_composer_when_ready = false;
                                     this.input.update(cx, |input, cx| input.focus(window, cx));
                                 }
-                                this.scroll_transcript_to_bottom();
+                                if should_follow_transcript(
+                                    previous_message_count,
+                                    previous_transcript_scroll,
+                                    transcript_content_changed,
+                                    transcript_reset,
+                                ) {
+                                    this.scroll_transcript_to_bottom();
+                                }
                                 cx.notify();
                             })
                             .is_err()
@@ -3609,7 +3851,12 @@ impl Workspace {
         self.track_typed_command("keybindings_get", keybindings);
     }
 
-    fn open_settings_section(&mut self, section: SettingsSection, cx: &mut Context<Self>) {
+    fn open_settings_section(
+        &mut self,
+        section: SettingsSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.settings_workspace_open = true;
         self.settings_section = section;
         self.sessions_panel_open = false;
@@ -3622,12 +3869,18 @@ impl Workspace {
         self.resource_panel = None;
         self.auth_panel_open = false;
         self.composer_picker.close();
+        self.restore_composer_focus_after_picker_close(window, cx);
         self.refresh_settings(cx);
     }
 
-    fn select_settings_section(&mut self, section: SettingsSection, cx: &mut Context<Self>) {
+    fn select_settings_section(
+        &mut self,
+        section: SettingsSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.settings_section = section;
-        self.composer_picker.close();
+        self.close_composer_picker(window, cx);
         cx.notify();
     }
 
@@ -3741,9 +3994,10 @@ impl Workspace {
         cx.notify();
     }
 
-    fn close_settings_panel(&mut self, cx: &mut Context<Self>) {
+    fn close_settings_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.settings_workspace_open = false;
         self.composer_picker.close();
+        self.restore_composer_focus_after_picker_close(window, cx);
         cx.notify();
     }
 
@@ -4321,12 +4575,13 @@ impl Workspace {
     }
 
     fn refresh_session_inventory(&mut self, cx: &mut Context<Self>) {
-        self.run_silent_rpc_command(RpcCommand {
+        if !self.run_silent_rpc_command(RpcCommand {
             name: "sessions_list".into(),
             fields: serde_json::Map::new(),
             refresh_runtime: false,
-        });
-        cx.notify();
+        }) {
+            cx.notify();
+        }
     }
 
     fn management_panel_state(&self) -> ManagementPanelState {
@@ -4347,7 +4602,11 @@ impl Workspace {
         )
     }
 
-    fn suppress_management_panels_for_interaction(&mut self) {
+    fn suppress_management_panels_for_interaction(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let requested = self.management_panel_state();
         let visible =
             management_panels_for_interaction(self.state.active_interaction.is_some(), requested);
@@ -4369,7 +4628,7 @@ impl Workspace {
         self.auth_inventory_opens_panel = false;
         self.settings_workspace_open = visible.settings;
         if !visible.settings {
-            self.composer_picker.close();
+            self.close_composer_picker(window, cx);
         }
     }
 
@@ -4467,9 +4726,7 @@ impl Workspace {
         self.session_menu_open = open;
         if open && !was_open {
             self.dismiss_input_suggestions(cx);
-            self.composer_picker.close();
-            self.picker_search_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.close_composer_picker(window, cx);
             let name = self.state.session_name.clone();
             self.session_name_input
                 .update(cx, |input, cx| input.set_value(&name, window, cx));
@@ -4649,6 +4906,7 @@ impl Workspace {
         ) {
             return;
         }
+        self.restore_composer_focus_after_picker_close(window, cx);
         if !self.state.can_switch_provider() {
             return;
         }
@@ -4736,9 +4994,7 @@ impl Workspace {
         let mut changed = false;
         if open {
             if self.composer_picker.active.is_some() {
-                self.composer_picker.close();
-                self.picker_search_input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.close_composer_picker(window, cx);
                 changed = true;
             }
             if self.session_menu_open {
@@ -4753,6 +5009,35 @@ impl Workspace {
         }
     }
 
+    fn restore_composer_focus_after_picker_close(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.picker_search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        match picker_close_focus_target(
+            self.settings_workspace_open,
+            self.state.can_edit_composer(),
+        ) {
+            PickerCloseFocusTarget::Settings => self.settings_focus_handle.focus(window),
+            PickerCloseFocusTarget::Composer => {
+                self.input.update(cx, |input, cx| input.focus(window, cx));
+            }
+            PickerCloseFocusTarget::None => {}
+        }
+    }
+
+    fn close_composer_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.composer_picker.active.is_none() {
+            return false;
+        }
+        self.composer_picker.close();
+        self.restore_composer_focus_after_picker_close(window, cx);
+        cx.notify();
+        true
+    }
+
     fn set_composer_picker_open(
         &mut self,
         picker: ComposerPicker,
@@ -4760,20 +5045,20 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if open && !self.can_open_composer_picker(picker) {
+        if !open {
+            if self.composer_picker.active == Some(picker) {
+                self.close_composer_picker(window, cx);
+            }
+            return;
+        }
+        if !self.can_open_composer_picker(picker) {
             return;
         }
         let previous = self.composer_picker.active;
-        let dismissed_suggestion = if open {
-            self.dismiss_input_suggestions(cx)
-        } else {
-            false
-        };
-        let should_focus_picker = self.composer_picker.set_open(picker, open);
+        let dismissed_suggestion = self.dismiss_input_suggestions(cx);
+        let should_focus_picker = self.composer_picker.set_open(picker, true);
         let changed = previous != self.composer_picker.active;
-        if open {
-            self.session_menu_open = false;
-        }
+        self.session_menu_open = false;
         if should_focus_picker && picker == ComposerPicker::Thinking {
             self.composer_picker.search.highlighted = picker_highlight_for_value(
                 &self.state.thinking_levels,
@@ -4787,9 +5072,6 @@ impl Workspace {
                 input.set_value("", window, cx);
                 input.focus(window, cx);
             });
-        } else if changed {
-            self.picker_search_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
         }
         if changed || dismissed_suggestion {
             cx.notify();
@@ -5111,12 +5393,8 @@ impl Workspace {
             self.set_session_menu_open(false, window, cx);
             return;
         }
-        let active = self.composer_picker.active;
-        if let Some(picker) = active {
+        if let Some(picker) = self.composer_picker.active {
             self.set_composer_picker_open(picker, false, window, cx);
-            if !self.settings_workspace_open {
-                self.input.update(cx, |input, cx| input.focus(window, cx));
-            }
         }
     }
 
@@ -5326,7 +5604,7 @@ impl Workspace {
                         manual_model_id(&self.state.models, &self.composer_picker.search.query)
                     });
                 if let Some(model) = model {
-                    self.select_model(&model, cx);
+                    self.select_model(&model, window, cx);
                 }
             }
             Some(ComposerPicker::Thinking) => {
@@ -5336,12 +5614,12 @@ impl Workspace {
                     .get(self.composer_picker.search.highlighted)
                     .cloned();
                 if let Some(level) = level {
-                    self.select_thinking(&level, cx);
+                    self.select_thinking(&level, window, cx);
                 }
             }
             Some(ComposerPicker::Permission) => {
                 if let Some(mode) = PERMISSION_MODES.get(self.composer_picker.search.highlighted) {
-                    self.select_permission_mode(mode, cx);
+                    self.select_permission_mode(mode, window, cx);
                 }
             }
             _ => {}
@@ -5361,8 +5639,8 @@ impl Workspace {
         cx.notify();
     }
 
-    fn select_model(&mut self, model: &str, cx: &mut Context<Self>) {
-        self.composer_picker.close();
+    fn select_model(&mut self, model: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_composer_picker(window, cx);
         if !self.state.can_select_model(model) {
             cx.notify();
             return;
@@ -5402,8 +5680,8 @@ impl Workspace {
         cx.notify();
     }
 
-    fn select_thinking(&mut self, level: &str, cx: &mut Context<Self>) {
-        self.composer_picker.close();
+    fn select_thinking(&mut self, level: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_composer_picker(window, cx);
         if !self.state.can_select_thinking(level) {
             cx.notify();
             return;
@@ -5424,8 +5702,8 @@ impl Workspace {
         cx.notify();
     }
 
-    fn select_permission_mode(&mut self, mode: &str, cx: &mut Context<Self>) {
-        self.composer_picker.close();
+    fn select_permission_mode(&mut self, mode: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_composer_picker(window, cx);
         if self.state.active_interaction.is_some() || !PERMISSION_MODES.contains(&mode) {
             cx.notify();
             return;
@@ -5530,7 +5808,7 @@ impl Workspace {
     ) {
         if self.settings_workspace_open {
             self.settings_section = SettingsSection::General;
-            self.composer_picker.close();
+            self.close_composer_picker(window, cx);
             cx.notify();
             return;
         }
@@ -5546,7 +5824,7 @@ impl Workspace {
         if self.settings_workspace_open {
             self.settings_section = SettingsSection::General;
             if self.settings_panel.is_none() {
-                self.composer_picker.close();
+                self.close_composer_picker(window, cx);
                 cx.notify();
                 return;
             }
@@ -6338,6 +6616,12 @@ impl Workspace {
                         ProcessResponseDisposition::Applied => {
                             self.state.status_text = "Watching managed processes".into();
                             self.state.last_error = None;
+                            if should_stop_process_poll(
+                                ProcessResponseDisposition::Applied,
+                                self.process_live.terminal_eof(),
+                            ) {
+                                self.process_poll_task = None;
+                            }
                         }
                         ProcessResponseDisposition::Stale => {}
                         ProcessResponseDisposition::Invalid => {
@@ -6603,7 +6887,7 @@ impl Workspace {
                 ));
             }
             LocalCommand::Keybindings => {
-                self.open_settings_section(SettingsSection::Keybindings, cx);
+                self.open_settings_section(SettingsSection::Keybindings, window, cx);
                 return true;
             }
             LocalCommand::OpenModelPicker => self.toggle_picker(ComposerPicker::Model, window, cx),
@@ -6611,11 +6895,11 @@ impl Workspace {
                 self.toggle_picker(ComposerPicker::Thinking, window, cx)
             }
             LocalCommand::OpenSettings => {
-                self.open_settings_section(SettingsSection::General, cx);
+                self.open_settings_section(SettingsSection::General, window, cx);
                 return true;
             }
             LocalCommand::OpenPermissions => {
-                self.open_settings_section(SettingsSection::General, cx);
+                self.open_settings_section(SettingsSection::General, window, cx);
                 return true;
             }
             LocalCommand::OpenForkChooser => {
@@ -6968,7 +7252,7 @@ impl Workspace {
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.composer_picker.close();
+        self.close_composer_picker(window, cx);
         if self.pending_prompt_submission.is_some() {
             self.state.status_text = "Waiting for prompt admission…".into();
             cx.notify();

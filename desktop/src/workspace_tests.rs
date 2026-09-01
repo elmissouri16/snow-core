@@ -120,6 +120,39 @@ fn discovered_session_path_is_reused_by_provider_replacement() {
     );
     assert!(!replacement.no_session);
     assert_eq!(replacement.model, None);
+    assert_eq!(replacement.thinking.as_deref(), Some("off"));
+}
+
+#[test]
+fn runtime_state_discovers_the_effective_provider_without_a_cli_override() {
+    let mut config = RuntimeConfig {
+        executable: PathBuf::from("snow"),
+        project_root: PathBuf::from("/tmp/project"),
+        provider: String::new(),
+        model: None,
+        permission: None,
+        thinking: None,
+        session_path: None,
+        no_session: true,
+        startup_timeout: Duration::from_secs(1),
+        shutdown_timeout: Duration::from_secs(1),
+        max_frame_bytes: 1024,
+    };
+
+    apply_runtime_config_event(
+        &mut config,
+        &RuntimeEvent::ModelsLoaded {
+            generation: "config-load".into(),
+            catalog: ModelCatalog {
+                provider: " openai ".into(),
+                current: "gpt-5".into(),
+                models: Vec::new(),
+            },
+        },
+    );
+
+    assert_eq!(config.provider, "openai");
+    assert_eq!(config.model.as_deref(), Some("gpt-5"));
 }
 
 #[test]
@@ -129,6 +162,7 @@ fn provider_switch_retains_conversation_until_history_is_restored() {
     state.messages.push(ChatMessage {
         role: ChatRole::User,
         text: "old context".into(),
+        presentation_text: "old context".into(),
         streaming: false,
         history_blocks: Vec::new(),
         history_tool_results: Vec::new(),
@@ -821,6 +855,28 @@ fn authoritative_project_name_uses_session_cwd() {
 }
 
 #[test]
+fn runtime_batch_bounds_received_events_even_when_deltas_coalesce() {
+    let (sender, receiver) = flume::unbounded();
+    for _ in 1..100 {
+        sender
+            .send(RuntimeEvent::TextDelta { text: "x".into() })
+            .expect("test receiver remains connected");
+    }
+
+    let batch = receive_runtime_batch(
+        &receiver,
+        RuntimeEvent::TextDelta { text: "x".into() },
+    );
+
+    assert_eq!(batch.len(), 1);
+    assert!(matches!(
+        &batch[0],
+        RuntimeEvent::TextDelta { text } if text.len() == MAX_RUNTIME_EVENTS_PER_BATCH
+    ));
+    assert_eq!(receiver.len(), 100 - MAX_RUNTIME_EVENTS_PER_BATCH);
+}
+
+#[test]
 fn adjacent_streaming_events_are_coalesced() {
     let mut batch = Vec::new();
     push_coalesced(&mut batch, RuntimeEvent::TextDelta { text: "a".into() });
@@ -855,6 +911,10 @@ fn streamed_batch_updates_assistant_before_prompt_completion() {
     apply_runtime_batch(&mut state, batch, &HashSet::new());
 
     assert_eq!(state.messages[1].text, "streaming works");
+    assert_eq!(
+        state.messages[1].presentation_text.as_ref(),
+        "streaming works"
+    );
     assert!(state.messages[1].streaming);
     assert!(state.active_prompt.is_some());
 }
@@ -1023,6 +1083,145 @@ fn sidebar_session_titles_hide_internal_ids_for_unnamed_threads() {
 }
 
 #[test]
+fn process_poll_stops_only_for_an_applied_terminal_eof_response() {
+    assert!(should_stop_process_poll(
+        ProcessResponseDisposition::Applied,
+        true
+    ));
+    assert!(!should_stop_process_poll(
+        ProcessResponseDisposition::Applied,
+        false
+    ));
+    assert!(!should_stop_process_poll(
+        ProcessResponseDisposition::Stale,
+        true
+    ));
+    assert!(!should_stop_process_poll(
+        ProcessResponseDisposition::Invalid,
+        true
+    ));
+}
+
+#[test]
+fn delayed_tool_updates_invalidate_the_exact_older_transcript_row() {
+    let mut state = ChatState::default();
+    state.messages = (0..7)
+        .map(|index| ChatMessage {
+            role: ChatRole::Assistant,
+            text: format!("message {index}"),
+            presentation_text: format!("message {index}").into(),
+            streaming: false,
+            history_blocks: if index == 1 {
+                vec![HistoryBlock::ToolCall(HistoryToolCall {
+                    tool_call_id: "old-call".into(),
+                    name: "read".into(),
+                    arguments_display: "Running".into(),
+                })]
+            } else {
+                Vec::new()
+            },
+            history_tool_results: Vec::new(),
+            render_id: index as u64 + 1,
+        })
+        .collect();
+    let batch = vec![RuntimeEvent::ToolProgress {
+        call_id: "old-call".into(),
+        message: Some("halfway".into()),
+    }];
+
+    assert_eq!(tool_transcript_rows(&state, &batch), vec![1]);
+    assert!(1 < state.messages.len().saturating_sub(4));
+    apply_runtime_batch(&mut state, batch, &HashSet::new());
+    assert!(matches!(
+        &state.messages[1].history_blocks[0],
+        HistoryBlock::ToolCall(tool) if tool.arguments_display.contains("halfway")
+    ));
+}
+
+#[test]
+fn consecutive_tool_messages_render_and_invalidate_as_one_activity_row() {
+    let messages = (0..3)
+        .map(|index| ChatMessage {
+            role: ChatRole::Assistant,
+            text: String::new(),
+            presentation_text: "".into(),
+            streaming: false,
+            history_blocks: vec![HistoryBlock::ToolCall(HistoryToolCall {
+                tool_call_id: format!("call-{index}"),
+                name: "read".into(),
+                arguments_display: "Running".into(),
+            })],
+            history_tool_results: Vec::new(),
+            render_id: index as u64 + 1,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(tool_activity_run_bounds(&messages, 0), Some((0, 2)));
+    assert_eq!(tool_activity_run_bounds(&messages, 2), Some((0, 2)));
+    let coalesced = coalesced_tool_activity_message(&messages, 0, 2);
+    assert_eq!(
+        coalesced
+            .as_ref()
+            .map(|message| message.history_blocks.len()),
+        Some(3)
+    );
+    assert_eq!(
+        coalesced.as_ref().map(|message| message.render_id),
+        Some(messages[0].render_id)
+    );
+
+    let state = ChatState {
+        messages,
+        ..ChatState::default()
+    };
+    let batch = vec![RuntimeEvent::ToolProgress {
+        call_id: "call-0".into(),
+        message: Some("halfway".into()),
+    }];
+    assert_eq!(tool_transcript_rows(&state, &batch), vec![2]);
+}
+
+#[test]
+fn transcript_following_respects_user_scroll_position_and_event_scope() {
+    assert!(should_follow_transcript(
+        5,
+        ListOffset {
+            item_ix: 5,
+            offset_in_item: px(0.),
+        },
+        true,
+        false,
+    ));
+    assert!(!should_follow_transcript(
+        5,
+        ListOffset {
+            item_ix: 2,
+            offset_in_item: px(0.),
+        },
+        true,
+        false,
+    ));
+    assert!(!should_follow_transcript(
+        5,
+        ListOffset {
+            item_ix: 5,
+            offset_in_item: px(0.),
+        },
+        false,
+        false,
+    ));
+    assert!(should_follow_transcript(
+        5,
+        ListOffset {
+            item_ix: 2,
+            offset_in_item: px(0.),
+        },
+        false,
+        true,
+    ));
+}
+
+#[test]
 fn transcript_list_sync_preserves_scroll_until_history_is_replaced() {
     let list_state = ListState::new(3, ListAlignment::Bottom, px(64.));
     list_state.scroll_to(ListOffset {
@@ -1042,22 +1241,6 @@ fn transcript_list_sync_preserves_scroll_until_history_is_replaced() {
 
     assert!(sync_transcript_list_items(&list_state, 5, false));
     assert_eq!(list_state.item_count(), 5);
-}
-
-#[test]
-fn virtual_session_lists_reset_only_when_inventory_size_changes() {
-    let list_state = ListState::new(2, ListAlignment::Top, px(64.));
-    list_state.scroll_to(ListOffset {
-        item_ix: 1,
-        offset_in_item: px(4.),
-    });
-
-    assert!(!sync_session_list_items(&list_state, 2));
-    assert_eq!(list_state.logical_scroll_top().item_ix, 1);
-
-    assert!(sync_session_list_items(&list_state, 5));
-    assert_eq!(list_state.item_count(), 5);
-    assert_eq!(list_state.logical_scroll_top().item_ix, 0);
 }
 
 #[test]
@@ -1083,6 +1266,17 @@ fn collapsed_tool_card_summaries_are_single_line_and_bounded() {
     assert!(!summary.contains('\t'));
     assert!(summary.ends_with('…'));
     assert!(summary.chars().count() <= TOOL_CARD_SUMMARY_CHARS + 1);
+}
+
+#[test]
+fn tool_activity_uses_one_compact_transcript_label() {
+    assert_eq!(tool_activity_label(4, 4, 0, 9_800), "Worked for 9.8s");
+    assert_eq!(tool_activity_label(1, 0, 0, 0), "Working…");
+    assert_eq!(
+        tool_activity_label(3, 3, 1, 62_400),
+        "Worked for 1m 2s · 1 failed"
+    );
+    assert_eq!(tool_activity_label(2, 2, 0, 0), "Used 2 tools");
 }
 
 #[test]
@@ -1243,6 +1437,24 @@ fn process_exit_clears_pending_thinking_and_allows_recovery() {
     assert!(state.thinking_change_pending.is_none());
     assert!(state.model_change_pending.is_none());
     assert!(state.can_switch_provider());
+}
+
+#[test]
+fn process_exit_preserves_the_actionable_stderr_diagnostic() {
+    let mut state = ChatState::default();
+    make_ready(&mut state);
+    state.apply(RuntimeEvent::Diagnostic(
+        "model does not advertise thinking level low".into(),
+    ));
+    state.apply(RuntimeEvent::Exited {
+        expected: false,
+        status: Some(1),
+    });
+
+    assert_eq!(
+        state.last_error.as_deref(),
+        Some("model does not advertise thinking level low")
+    );
 }
 
 #[test]
@@ -1714,12 +1926,61 @@ fn settings_workspace_visibility_is_independent_from_loaded_data() {
 fn settings_sections_are_stable_and_human_readable() {
     assert_eq!(SettingsSection::default(), SettingsSection::General);
     assert_eq!(
+        SettingsSection::ALL.map(SettingsSection::id),
+        ["general", "capabilities", "appearance", "keybindings"]
+    );
+    assert_eq!(
         SettingsSection::ALL.map(SettingsSection::label),
         ["General", "Capabilities", "Appearance", "Keybindings"]
     );
     assert!(SettingsSection::ALL
         .into_iter()
         .all(|section| !section.description().trim().is_empty()));
+}
+
+#[test]
+fn provider_picker_explains_empty_catalogs_and_searches() {
+    assert_eq!(
+        provider_picker_empty_message(0, 0, ""),
+        Some("No providers available.")
+    );
+    assert_eq!(
+        provider_picker_empty_message(3, 0, "missing"),
+        Some("No providers match your search.")
+    );
+    assert_eq!(provider_picker_empty_message(3, 2, "open"), None);
+}
+
+#[test]
+fn closing_a_picker_restores_focus_to_a_visible_workspace_target() {
+    assert_eq!(
+        picker_close_focus_target(false, true),
+        PickerCloseFocusTarget::Composer
+    );
+    assert_eq!(
+        picker_close_focus_target(true, true),
+        PickerCloseFocusTarget::Settings
+    );
+    assert_eq!(
+        picker_close_focus_target(false, false),
+        PickerCloseFocusTarget::None
+    );
+}
+
+#[test]
+fn top_bar_compacts_before_the_minimum_window_can_overflow() {
+    assert_eq!(
+        workspace_top_bar_layout(900., false),
+        WorkspaceTopBarLayout::Compact
+    );
+    assert_eq!(
+        workspace_top_bar_layout(900., true),
+        WorkspaceTopBarLayout::Compact
+    );
+    assert_eq!(
+        workspace_top_bar_layout(1280., false),
+        WorkspaceTopBarLayout::Full
+    );
 }
 
 #[test]

@@ -14,6 +14,10 @@ fn display_value(value: &str) -> &str {
     if value.is_empty() { "—" } else { value }
 }
 
+fn domain_element_id(namespace: &str, domain_id: &str) -> SharedString {
+    format!("{namespace}-{domain_id}").into()
+}
+
 fn plain_text_html(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
@@ -92,22 +96,22 @@ impl Workspace {
         } else {
             "DesktopWorkspace"
         };
-        let composer_footer_layout = composer_footer_layout(
-            window
-                .inner_window_bounds()
-                .get_bounds()
-                .size
-                .width
-                .to_f64() as f32,
-            self.sidebar_collapsed,
-        );
+        let workspace_width = window
+            .inner_window_bounds()
+            .get_bounds()
+            .size
+            .width
+            .to_f64() as f32;
+        let composer_footer_layout =
+            composer_footer_layout(workspace_width, self.sidebar_collapsed);
+        let top_bar_layout = workspace_top_bar_layout(workspace_width, self.sidebar_collapsed);
         let main = v_flex()
             .min_w(px(0.))
             .min_h(px(0.))
             .flex_1()
             .h_full()
             .bg(cx.theme().background)
-            .child(self.render_top_bar(cx))
+            .child(self.render_top_bar(top_bar_layout, cx))
             .when(management_panels.sessions, |workspace| {
                 workspace.child(self.render_sessions_panel(cx))
             })
@@ -367,14 +371,9 @@ impl Workspace {
                         .child("S"),
                 )
                 .child(
-                    Button::new("expand-sidebar")
-                        .label("›")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
-                )
-                .child(
                     Button::new("collapsed-new-session")
-                        .label("+")
+                        .icon(IconName::Plus)
+                        .tooltip("New thread")
                         .primary()
                         .disabled(!can_change_session)
                         .on_click(
@@ -384,10 +383,11 @@ impl Workspace {
                 .child(div().flex_1())
                 .child(
                     Button::new("collapsed-settings")
-                        .label("⚙")
+                        .label("⚙︎")
+                        .tooltip("Settings")
                         .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_settings_section(SettingsSection::General, cx)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_settings_section(SettingsSection::General, window, cx)
                         })),
                 )
                 .into_any_element();
@@ -408,48 +408,61 @@ impl Workspace {
                 )
                 .into_any_element()
         } else {
-            sync_session_list_items(&self.sidebar_session_list, self.sessions.len());
             let workspace = cx.entity().downgrade();
-            let list_state = self.sidebar_session_list.clone();
-            let session_rows = list(list_state.clone(), move |index, _window, cx| {
-                workspace
-                    .update(cx, |this, cx| {
-                        let Some(session) = this.sessions.get(index) else {
-                            return div().into_any_element();
-                        };
-                        let theme = cx.theme();
-                        let session_id = session.session_id.clone();
-                        let active = session.active;
-                        let title = sidebar_session_title(&session.name);
-                        Button::new(("sidebar-session", index))
-                            .w_full()
-                            .min_w(px(0.))
-                            .h(px(40.))
-                            .px_3()
-                            .overflow_hidden()
-                            .justify_start()
-                            .ghost()
-                            .when(active, |button| button.bg(theme.accent))
-                            .disabled(!can_change_session)
-                            .child(
-                                div()
-                                    .w_full()
-                                    .min_w(px(0.))
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .text_sm()
-                                    .when(active, |title| title.font_medium())
-                                    .child(title),
-                            )
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                if !active {
-                                    this.open_session(&session_id, window, cx);
-                                }
-                            }))
-                            .into_any_element()
-                    })
-                    .unwrap_or_else(|_| div().into_any_element())
-            })
+            let scroll_handle = self.sidebar_session_list.clone();
+            let session_rows = uniform_list(
+                "sidebar-session-list",
+                self.sessions.len(),
+                move |visible_range, _window, cx| {
+                    workspace
+                        .update(cx, |this, cx| {
+                            let theme = cx.theme();
+                            visible_range
+                                .filter_map(|index| {
+                                    let session = this.sessions.get(index)?;
+                                    let session_id = session.session_id.clone();
+                                    let row_id = domain_element_id("sidebar-session", &session_id);
+                                    let active = session.active;
+                                    let title = sidebar_session_title(&session.name);
+                                    Some(
+                                        Button::new(row_id)
+                                            .w_full()
+                                            .min_w(px(0.))
+                                            .h(px(40.))
+                                            .px_3()
+                                            .overflow_hidden()
+                                            .justify_start()
+                                            .ghost()
+                                            .when(active, |button| {
+                                                button
+                                                    .bg(theme.primary)
+                                                    .text_color(theme.primary_foreground)
+                                            })
+                                            .disabled(!can_change_session)
+                                            .child(
+                                                div()
+                                                    .w_full()
+                                                    .min_w(px(0.))
+                                                    .overflow_hidden()
+                                                    .text_ellipsis()
+                                                    .text_sm()
+                                                    .when(active, |title| title.font_medium())
+                                                    .child(title),
+                                            )
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                if !active {
+                                                    this.open_session(&session_id, window, cx);
+                                                }
+                                            }))
+                                            .into_any_element(),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                },
+            )
+            .track_scroll(scroll_handle.clone())
             .w_full()
             .h_full();
             div()
@@ -460,7 +473,7 @@ impl Workspace {
                 .pb_2()
                 .overflow_hidden()
                 .child(session_rows)
-                .vertical_scrollbar(&list_state)
+                .vertical_scrollbar(&scroll_handle)
                 .into_any_element()
         };
 
@@ -496,19 +509,14 @@ impl Workspace {
                                     .child("S"),
                             )
                             .child(div().text_sm().font_semibold().child("Snow")),
-                    )
-                    .child(
-                        Button::new("collapse-sidebar")
-                            .label("‹")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
                     ),
             )
             .child(
                 div().px_3().pb_3().child(
                     Button::new("sidebar-new-session")
                         .w_full()
-                        .label("+  New thread")
+                        .icon(IconName::Plus)
+                        .label("New thread")
                         .primary()
                         .disabled(!can_change_session)
                         .on_click(
@@ -528,17 +536,24 @@ impl Workspace {
                         Button::new("sidebar-settings")
                             .w_full()
                             .label("Settings")
+                            .justify_start()
                             .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_settings_section(SettingsSection::General, cx)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_settings_section(SettingsSection::General, window, cx)
                             })),
                     ),
             )
             .into_any_element()
     }
 
-    fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_top_bar(
+        &self,
+        layout: WorkspaceTopBarLayout,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let theme = cx.theme().clone();
+        let compact = layout == WorkspaceTopBarLayout::Compact;
+        let plan_mode = self.state.collaboration_mode == "plan";
         let session_name = if self.state.session_name.is_empty() {
             "New thread"
         } else {
@@ -580,32 +595,39 @@ impl Workspace {
                     .child(
                         Button::new("toolbar-sidebar-toggle")
                             .label(if self.sidebar_collapsed { "☰" } else { "‹" })
+                            .tooltip(if self.sidebar_collapsed {
+                                "Expand sidebar"
+                            } else {
+                                "Collapse sidebar"
+                            })
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
                     )
-                    .child(
-                        div()
-                            .min_w(px(0.))
-                            .max_w(px(250.))
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .text_sm()
-                            .font_medium()
-                            .child(self.project_label()),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child("/"),
-                    )
+                    .when(!compact, |bar| {
+                        bar.child(
+                            div()
+                                .min_w(px(0.))
+                                .max_w(px(250.))
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .text_sm()
+                                .font_medium()
+                                .child(self.project_label()),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("/"),
+                        )
+                    })
                     .child({
                         let disabled = self.state.session_id.is_empty()
                             || self.state.active_interaction.is_some();
                         if disabled {
                             Button::new("session-menu-trigger-disabled")
                                 .label(session_branch_label)
-                                .max_w(px(360.))
+                                .max_w(px(if compact { 260. } else { 360. }))
                                 .ghost()
                                 .disabled(true)
                                 .into_any_element()
@@ -622,7 +644,7 @@ impl Workspace {
                                 .trigger(
                                     Button::new("session-menu-trigger")
                                         .label(session_branch_label)
-                                        .max_w(px(360.))
+                                        .max_w(px(if compact { 260. } else { 360. }))
                                         .ghost(),
                                 )
                                 .child(self.render_session_menu(cx))
@@ -647,11 +669,14 @@ impl Workspace {
                     })
                     .child(
                         Button::new("collaboration-mode")
-                            .label(if self.state.collaboration_mode == "plan" {
-                                "Plan"
+                            .label(if plan_mode { "Plan" } else { "Default" })
+                            .tooltip(if plan_mode {
+                                "Plan mode active"
                             } else {
-                                "Default"
+                                "Default mode active"
                             })
+                            .selected(plan_mode)
+                            .when(plan_mode, |button| button.bg(theme.secondary))
                             .ghost()
                             .disabled(self.state.active_interaction.is_some())
                             .on_click(
@@ -673,16 +698,7 @@ impl Workspace {
                                     cx.notify();
                                 })),
                         )
-                    })
-                    .child(
-                        Button::new("toolbar-new-session")
-                            .label("New thread")
-                            .ghost()
-                            .disabled(!can_change_session)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.create_session(window, cx)),
-                            ),
-                    ),
+                    }),
             )
     }
 
@@ -741,20 +757,19 @@ impl Workspace {
                             .text_color(theme.muted_foreground)
                             .child("Preferences"),
                     )
-                    .children(SettingsSection::ALL.into_iter().enumerate().map(
-                        |(index, section)| {
-                            let selected = self.settings_section == section;
-                            Button::new(("settings-section", index))
-                                .w_full()
-                                .label(section.label())
-                                .ghost()
-                                .selected(selected)
-                                .when(selected, |button| button.bg(theme.background))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.select_settings_section(section, cx)
-                                }))
-                        },
-                    )),
+                    .children(SettingsSection::ALL.into_iter().map(|section| {
+                        let selected = self.settings_section == section;
+                        Button::new(domain_element_id("settings-section", section.id()))
+                            .w_full()
+                            .label(section.label())
+                            .justify_start()
+                            .ghost()
+                            .selected(selected)
+                            .when(selected, |button| button.bg(theme.background))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.select_settings_section(section, window, cx)
+                            }))
+                    })),
             )
             .child(div().flex_1())
             .child(
@@ -775,13 +790,6 @@ impl Workspace {
                                     .text_color(theme.muted_foreground)
                                     .child(connection),
                             ),
-                    )
-                    .child(
-                        Button::new("settings-back")
-                            .w_full()
-                            .label("←  Back to workspace")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| this.close_settings_panel(cx))),
                     ),
             )
     }
@@ -790,6 +798,7 @@ impl Workspace {
         let theme = cx.theme().clone();
 
         v_flex()
+            .track_focus(&self.settings_focus_handle)
             .min_w(px(0.))
             .min_h(px(0.))
             .flex_1()
@@ -833,8 +842,8 @@ impl Workspace {
                         Button::new("close-loading-settings")
                             .label("Done")
                             .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_settings_panel(cx)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close_settings_panel(window, cx)
                             })),
                     ),
             )
@@ -899,6 +908,7 @@ impl Workspace {
             "Live values save immediately; persisted runtime values apply after restart."
         };
         v_flex()
+            .track_focus(&self.settings_focus_handle)
             .min_w(px(0.))
             .min_h(px(0.))
             .flex_1()
@@ -954,8 +964,8 @@ impl Workspace {
                                 Button::new("close-settings")
                                     .label("Done")
                                     .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.close_settings_panel(cx)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.close_settings_panel(window, cx)
                                     })),
                             ),
                     ),
@@ -1066,8 +1076,8 @@ impl Workspace {
                                             .label(thinking_label(level))
                                             .when(selected, |button| button.primary())
                                             .when(!selected, |button| button.ghost())
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.select_thinking(&target, cx)
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.select_thinking(&target, window, cx)
                                             }))
                                     }),
                             )),
@@ -2012,7 +2022,9 @@ impl Workspace {
                             .gap_1()
                             .child(
                                 Button::new("copy-resource-panel")
-                                    .label("Copy")
+                                    .icon(IconName::Copy)
+                                    .tooltip("Copy")
+                                    .compact()
                                     .ghost()
                                     .on_click(move |_, _, cx| {
                                         cx.write_to_clipboard(ClipboardItem::new_string(
@@ -2078,7 +2090,9 @@ impl Workspace {
                                                             "copy-resource-row",
                                                             section_index * 1000 + row_index,
                                                         ))
-                                                        .label("Copy")
+                                                        .icon(IconName::Copy)
+                                                        .tooltip("Copy")
+                                                        .compact()
                                                         .ghost()
                                                         .on_click(move |_, _, cx| {
                                                             cx.write_to_clipboard(
@@ -2724,111 +2738,127 @@ impl Workspace {
     fn render_sessions_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let can_mutate = self.state.can_send();
-        sync_session_list_items(&self.management_session_list, self.sessions.len());
         let workspace = cx.entity().downgrade();
-        let list_state = self.management_session_list.clone();
-        let session_rows =
-            list(list_state.clone(), move |index, _window, cx| {
+        let scroll_handle = self.management_session_list.clone();
+        let session_rows = uniform_list(
+            "management-session-list",
+            self.sessions.len(),
+            move |visible_range, _window, cx| {
                 workspace
                     .update(cx, |this, cx| {
-                        let Some(session) = this.sessions.get(index) else {
-                            return div().into_any_element();
-                        };
                         let theme = cx.theme();
-                        let session_id = session.session_id.clone();
-                        let open_id = session_id.clone();
-                        let delete_id = session_id.clone();
-                        let confirming_delete =
-                            this.session_delete_confirm.as_deref() == Some(session_id.as_str());
-                        let title = if session.name.is_empty() {
-                            format!(
-                                "Session {}",
-                                &session.session_id[..session.session_id.len().min(8)]
-                            )
-                        } else {
-                            session.name.clone()
-                        };
-                        h_flex()
-                            .w_full()
-                            .h(px(MANAGEMENT_SESSION_ROW_HEIGHT))
-                            .overflow_hidden()
-                            .px_5()
-                            .py_2()
-                            .gap_3()
-                            .items_center()
-                            .border_t_1()
-                            .border_color(theme.border)
-                            .child(
-                                v_flex()
-                                    .min_w(px(0.))
-                                    .flex_1()
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .font_medium()
-                                            .child(if session.active {
-                                                format!("{title} · Active")
-                                            } else {
-                                                title
-                                            }),
+                        visible_range
+                            .filter_map(|index| {
+                                let session = this.sessions.get(index)?;
+                                let session_id = session.session_id.clone();
+                                let open_id = session_id.clone();
+                                let delete_id = session_id.clone();
+                                let confirming_delete = this.session_delete_confirm.as_deref()
+                                    == Some(session_id.as_str());
+                                let title = if session.name.is_empty() {
+                                    format!(
+                                        "Session {}",
+                                        &session.session_id[..session.session_id.len().min(8)]
                                     )
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child(format!(
-                                                "{} messages · updated {} · {}",
-                                                session.messages,
-                                                session.updated_at,
-                                                session.session_id
-                                            )),
-                                    ),
-                            )
-                            .child(
-                                Button::new(("open-session", index))
-                                    .label(if session.active { "Open" } else { "Switch" })
-                                    .ghost()
-                                    .disabled(!can_mutate || session.active)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.open_session(&open_id, window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new(("delete-session", index))
-                                    .label(if confirming_delete {
-                                        "Confirm delete"
-                                    } else {
-                                        "Delete"
-                                    })
-                                    .danger()
-                                    .disabled(!can_mutate || session.active)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.request_session_delete(&delete_id, cx)
-                                    })),
-                            )
-                            .when(confirming_delete, |row| {
-                                row.child(
-                                    Button::new(("cancel-delete-session", index))
-                                        .label("Cancel")
-                                        .ghost()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.cancel_session_delete(cx)
-                                        })),
+                                } else {
+                                    session.name.clone()
+                                };
+                                Some(
+                                    h_flex()
+                                        .w_full()
+                                        .h(px(MANAGEMENT_SESSION_ROW_HEIGHT))
+                                        .overflow_hidden()
+                                        .px_5()
+                                        .py_2()
+                                        .gap_3()
+                                        .items_center()
+                                        .border_t_1()
+                                        .border_color(theme.border)
+                                        .child(
+                                            v_flex()
+                                                .min_w(px(0.))
+                                                .flex_1()
+                                                .child(
+                                                    div()
+                                                        .w_full()
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .whitespace_nowrap()
+                                                        .font_medium()
+                                                        .child(if session.active {
+                                                            format!("{title} · Active")
+                                                        } else {
+                                                            title
+                                                        }),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .w_full()
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .whitespace_nowrap()
+                                                        .text_xs()
+                                                        .text_color(theme.muted_foreground)
+                                                        .child(format!(
+                                                            "{} messages · updated {} · {}",
+                                                            session.messages,
+                                                            session.updated_at,
+                                                            session.session_id
+                                                        )),
+                                                ),
+                                        )
+                                        .child(
+                                            Button::new(domain_element_id(
+                                                "open-session",
+                                                &session_id,
+                                            ))
+                                            .label(if session.active { "Open" } else { "Switch" })
+                                            .ghost()
+                                            .disabled(!can_mutate || session.active)
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.open_session(&open_id, window, cx)
+                                            })),
+                                        )
+                                        .child(
+                                            Button::new(domain_element_id(
+                                                "delete-session",
+                                                &session_id,
+                                            ))
+                                            .label(if confirming_delete {
+                                                "Confirm delete"
+                                            } else {
+                                                "Delete"
+                                            })
+                                            .danger()
+                                            .disabled(!can_mutate || session.active)
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.request_session_delete(&delete_id, cx)
+                                            })),
+                                        )
+                                        .when(confirming_delete, |row| {
+                                            row.child(
+                                                Button::new(domain_element_id(
+                                                    "cancel-delete-session",
+                                                    &session_id,
+                                                ))
+                                                .label("Cancel")
+                                                .ghost()
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.cancel_session_delete(cx)
+                                                })),
+                                            )
+                                        })
+                                        .into_any_element(),
                                 )
                             })
-                            .into_any_element()
+                            .collect::<Vec<_>>()
                     })
-                    .unwrap_or_else(|_| div().into_any_element())
-            })
-            .w_full()
-            .h_full();
+                    .unwrap_or_default()
+            },
+        )
+        .track_scroll(scroll_handle.clone())
+        .w_full()
+        .h_full();
         let session_rows_height =
             (self.sessions.len() as f32 * MANAGEMENT_SESSION_ROW_HEIGHT).min(306.);
         v_flex()
@@ -2875,7 +2905,7 @@ impl Workspace {
                     .min_h(px(0.))
                     .overflow_hidden()
                     .child(session_rows)
-                    .vertical_scrollbar(&list_state),
+                    .vertical_scrollbar(&scroll_handle),
             )
     }
 
@@ -2947,201 +2977,199 @@ impl Workspace {
                     .max_h(px(PICKER_MAX_HEIGHT))
                     .overflow_y_scrollbar()
                     .gap_1()
-                    .children(
-                        branches
-                            .into_iter()
-                            .enumerate()
-                            .map(|(index, (branch, depth))| {
-                                let branch_id = branch.id.clone();
-                                let open_id = branch_id.clone();
-                                let rename_id = branch_id.clone();
-                                let delete_id = branch_id.clone();
-                                let branch_name = if branch.name.is_empty() {
-                                    branch.id.clone()
-                                } else {
-                                    branch.name.clone()
-                                };
-                                let rename_name = branch_name.clone();
-                                let is_editing =
-                                    self.branch_editing_id.as_deref() == Some(branch_id.as_str());
-                                let confirming_delete = self.branch_delete_confirm.as_deref()
-                                    == Some(branch_id.as_str());
-                                v_flex()
+                    .children(branches.into_iter().map(|(branch, depth)| {
+                        let branch_id = branch.id.clone();
+                        let open_id = branch_id.clone();
+                        let rename_id = branch_id.clone();
+                        let delete_id = branch_id.clone();
+                        let branch_name = if branch.name.is_empty() {
+                            branch.id.clone()
+                        } else {
+                            branch.name.clone()
+                        };
+                        let rename_name = branch_name.clone();
+                        let is_editing =
+                            self.branch_editing_id.as_deref() == Some(branch_id.as_str());
+                        let confirming_delete =
+                            self.branch_delete_confirm.as_deref() == Some(branch_id.as_str());
+                        v_flex()
+                            .w_full()
+                            .gap_1()
+                            .child(
+                                h_flex()
                                     .w_full()
-                                    .gap_1()
+                                    .min_h(px(38.))
+                                    .gap_3()
+                                    .px_2()
+                                    .pl(px(8. + depth as f32 * 20.))
+                                    .items_center()
+                                    .justify_between()
+                                    .rounded_md()
+                                    .when(branch.active, |row| row.bg(theme.accent))
                                     .child(
-                                        h_flex()
-                                            .w_full()
-                                            .min_h(px(38.))
-                                            .gap_3()
-                                            .px_2()
-                                            .pl(px(8. + depth as f32 * 20.))
-                                            .items_center()
-                                            .justify_between()
-                                            .rounded_md()
-                                            .when(branch.active, |row| row.bg(theme.accent))
+                                        v_flex()
+                                            .min_w(px(0.))
+                                            .flex_1()
                                             .child(
-                                                v_flex()
-                                                    .min_w(px(0.))
-                                                    .flex_1()
-                                                    .child(
-                                                        div()
-                                                            .text_sm()
-                                                            .font_medium()
-                                                            .overflow_hidden()
-                                                            .text_ellipsis()
-                                                            .child(format!(
-                                                                "{}{}{}",
-                                                                if depth == 0 {
-                                                                    "● "
-                                                                } else {
-                                                                    "↳ "
-                                                                },
-                                                                branch_name,
-                                                                if branch.active {
-                                                                    "  · ACTIVE"
-                                                                } else {
-                                                                    ""
-                                                                }
-                                                            )),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .text_color(theme.muted_foreground)
-                                                            .child(format!(
-                                                                "#{} · parent {} · {} messages",
-                                                                short_id(&branch.id),
-                                                                if branch
-                                                                    .parent_branch_id
-                                                                    .is_empty()
-                                                                {
-                                                                    "root"
-                                                                } else {
-                                                                    short_id(
-                                                                        &branch.parent_branch_id,
-                                                                    )
-                                                                },
-                                                                branch.messages
-                                                            )),
-                                                    )
-                                                    .when(!branch.preview.is_empty(), |details| {
-                                                        details.child(
-                                                            div()
-                                                                .max_w(px(320.))
-                                                                .overflow_hidden()
-                                                                .text_ellipsis()
-                                                                .text_xs()
-                                                                .text_color(theme.muted_foreground)
-                                                                .child(bounded_display(
-                                                                    &branch.preview,
-                                                                    160,
-                                                                )),
-                                                        )
-                                                    }),
+                                                div()
+                                                    .text_sm()
+                                                    .font_medium()
+                                                    .overflow_hidden()
+                                                    .text_ellipsis()
+                                                    .child(format!(
+                                                        "{}{}{}",
+                                                        if depth == 0 { "● " } else { "↳ " },
+                                                        branch_name,
+                                                        if branch.active {
+                                                            "  · ACTIVE"
+                                                        } else {
+                                                            ""
+                                                        }
+                                                    )),
                                             )
                                             .child(
-                                                h_flex()
-                                                    .gap_1()
-                                                    .child(
-                                                        Button::new(("select-branch", index))
-                                                            .label(if branch.active {
-                                                                "Current"
-                                                            } else {
-                                                                "Open"
-                                                            })
-                                                            .ghost()
-                                                            .disabled(!can_manage || branch.active)
-                                                            .on_click(cx.listener(
-                                                                move |this, _, _, cx| {
-                                                                    this.select_branch(&open_id, cx)
-                                                                },
-                                                            )),
-                                                    )
-                                                    .child(
-                                                        Button::new(("rename-branch", index))
-                                                            .label("Rename")
-                                                            .ghost()
-                                                            .disabled(!can_manage)
-                                                            .on_click(cx.listener(
-                                                                move |this, _, window, cx| {
-                                                                    this.begin_branch_rename(
-                                                                        &rename_id,
-                                                                        &rename_name,
-                                                                        window,
-                                                                        cx,
-                                                                    )
-                                                                },
-                                                            )),
-                                                    )
-                                                    .child(
-                                                        Button::new(("delete-branch", index))
-                                                            .label(if confirming_delete {
-                                                                "Confirm delete"
-                                                            } else {
-                                                                "Delete"
-                                                            })
-                                                            .ghost()
-                                                            .disabled(!can_manage || branch.active)
-                                                            .on_click(cx.listener(
-                                                                move |this, _, _, cx| {
-                                                                    this.request_branch_delete(
-                                                                        &delete_id, cx,
-                                                                    )
-                                                                },
-                                                            )),
-                                                    ),
-                                            ),
-                                    )
-                                    .when(is_editing, |branch_row| {
-                                        branch_row.child(
-                                            h_flex()
-                                                .gap_2()
-                                                .px_2()
-                                                .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(theme.muted_foreground)
+                                                    .child(format!(
+                                                        "#{} · parent {} · {} messages",
+                                                        short_id(&branch.id),
+                                                        if branch.parent_branch_id.is_empty() {
+                                                            "root"
+                                                        } else {
+                                                            short_id(&branch.parent_branch_id)
+                                                        },
+                                                        branch.messages
+                                                    )),
+                                            )
+                                            .when(!branch.preview.is_empty(), |details| {
+                                                details.child(
                                                     div()
-                                                        .min_w(px(0.))
-                                                        .flex_1()
-                                                        .child(Input::new(&self.branch_name_input)),
+                                                        .max_w(px(320.))
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .text_xs()
+                                                        .text_color(theme.muted_foreground)
+                                                        .child(bounded_display(
+                                                            &branch.preview,
+                                                            160,
+                                                        )),
                                                 )
-                                                .child(
-                                                    Button::new(("save-branch", index))
-                                                        .label("Save")
-                                                        .primary()
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.confirm_branch_rename(cx)
-                                                        })),
-                                                )
-                                                .child(
-                                                    Button::new(("cancel-branch", index))
-                                                        .label("Cancel")
-                                                        .ghost()
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.cancel_branch_rename(cx)
-                                                        })),
-                                                ),
+                                            }),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .gap_1()
+                                            .child(
+                                                Button::new(domain_element_id(
+                                                    "select-branch",
+                                                    &branch_id,
+                                                ))
+                                                .label(if branch.active {
+                                                    "Current"
+                                                } else {
+                                                    "Open"
+                                                })
+                                                .ghost()
+                                                .disabled(!can_manage || branch.active)
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.select_branch(&open_id, cx)
+                                                })),
+                                            )
+                                            .child(
+                                                Button::new(domain_element_id(
+                                                    "rename-branch",
+                                                    &branch_id,
+                                                ))
+                                                .label("Rename")
+                                                .ghost()
+                                                .disabled(!can_manage)
+                                                .on_click(cx.listener(
+                                                    move |this, _, window, cx| {
+                                                        this.begin_branch_rename(
+                                                            &rename_id,
+                                                            &rename_name,
+                                                            window,
+                                                            cx,
+                                                        )
+                                                    },
+                                                )),
+                                            )
+                                            .child(
+                                                Button::new(domain_element_id(
+                                                    "delete-branch",
+                                                    &branch_id,
+                                                ))
+                                                .label(if confirming_delete {
+                                                    "Confirm delete"
+                                                } else {
+                                                    "Delete"
+                                                })
+                                                .ghost()
+                                                .disabled(!can_manage || branch.active)
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.request_branch_delete(&delete_id, cx)
+                                                })),
+                                            ),
+                                    ),
+                            )
+                            .when(is_editing, |branch_row| {
+                                branch_row.child(
+                                    h_flex()
+                                        .gap_2()
+                                        .px_2()
+                                        .child(
+                                            div()
+                                                .min_w(px(0.))
+                                                .flex_1()
+                                                .child(Input::new(&self.branch_name_input)),
                                         )
-                                    })
-                                    .when(confirming_delete, |branch_row| {
-                                        branch_row.child(
-                                            h_flex()
-                                                .px_2()
-                                                .gap_2()
-                                                .text_xs()
-                                                .text_color(theme.danger)
-                                                .child("Only leaf branches can be deleted.")
-                                                .child(
-                                                    Button::new(("cancel-delete-branch", index))
-                                                        .label("Cancel")
-                                                        .ghost()
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.cancel_branch_delete(cx)
-                                                        })),
-                                                ),
+                                        .child(
+                                            Button::new(domain_element_id(
+                                                "save-branch",
+                                                &branch_id,
+                                            ))
+                                            .label("Save")
+                                            .primary()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.confirm_branch_rename(cx)
+                                            })),
                                         )
-                                    })
-                            }),
-                    ),
+                                        .child(
+                                            Button::new(domain_element_id(
+                                                "cancel-branch",
+                                                &branch_id,
+                                            ))
+                                            .label("Cancel")
+                                            .ghost()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.cancel_branch_rename(cx)
+                                            })),
+                                        ),
+                                )
+                            })
+                            .when(confirming_delete, |branch_row| {
+                                branch_row.child(
+                                    h_flex()
+                                        .px_2()
+                                        .gap_2()
+                                        .text_xs()
+                                        .text_color(theme.danger)
+                                        .child("Only leaf branches can be deleted.")
+                                        .child(
+                                            Button::new(domain_element_id(
+                                                "cancel-delete-branch",
+                                                &branch_id,
+                                            ))
+                                            .label("Cancel")
+                                            .ghost()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.cancel_branch_delete(cx)
+                                            })),
+                                        ),
+                                )
+                            })
+                    })),
             )
     }
 
@@ -3157,6 +3185,15 @@ impl Workspace {
                     let Some(message) = this.state.messages.get(index) else {
                         return div().into_any_element();
                     };
+                    let tool_run = tool_activity_run_bounds(&this.state.messages, index);
+                    if tool_run.is_some_and(|(_, end)| end != index) {
+                        return div().h(px(0.)).into_any_element();
+                    }
+                    let coalesced = tool_run.and_then(|(start, end)| {
+                        coalesced_tool_activity_message(&this.state.messages, start, end)
+                    });
+                    let compact = coalesced.is_some();
+                    let message = coalesced.as_ref().unwrap_or(message);
                     let theme = cx.theme().clone();
                     div()
                         .w_full()
@@ -3170,7 +3207,8 @@ impl Workspace {
                                 .max_w(px(CONVERSATION_WIDTH))
                                 .overflow_hidden()
                                 .px_6()
-                                .pb_6()
+                                .when(compact, |row| row.pb_1())
+                                .when(!compact, |row| row.pb_6())
                                 .child(this.render_message(index, message, &theme, window, cx)),
                         )
                         .into_any_element()
@@ -3299,61 +3337,62 @@ impl Workspace {
             .w_full()
             .min_w(px(0.))
             .overflow_hidden()
-            .gap_2()
-            .p_3()
-            .rounded_lg()
-            .border_1()
-            .border_color(if result.is_some_and(|result| result.is_error) {
-                theme.danger
-            } else {
-                theme.border
-            })
-            .bg(theme.secondary)
+            .gap_1()
             .child(
                 h_flex()
                     .w_full()
                     .min_w(px(0.))
-                    .flex_wrap()
+                    .overflow_hidden()
                     .items_center()
-                    .justify_between()
                     .gap_2()
                     .child(
                         h_flex()
-                            .min_w(px(0.))
+                            .flex_shrink_0()
                             .items_center()
                             .gap_2()
-                            .child(div().text_sm().font_semibold().child(name.to_owned()))
-                            .child(
-                                div()
-                                    .px_2()
-                                    .py_1()
-                                    .rounded_full()
-                                    .bg(theme.background)
-                                    .text_xs()
-                                    .text_color(status_color)
-                                    .child(status),
-                            )
+                            .child(div().text_xs().font_medium().child(name.to_owned()))
+                            .when(status != "Completed", |header| {
+                                header.child(div().text_xs().text_color(status_color).child(status))
+                            })
                             .when(duration_ms > 0, |header| {
                                 header.child(
                                     div()
                                         .text_xs()
                                         .text_color(theme.muted_foreground)
-                                        .child(format!("{duration_ms} ms")),
+                                        .child(compact_tool_duration(duration_ms)),
                                 )
                             }),
                     )
+                    .when_some(summary, |header, summary| {
+                        header.child(
+                            div()
+                                .min_w(px(0.))
+                                .flex_1()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(summary),
+                        )
+                    })
                     .child(
                         h_flex()
-                            .flex_wrap()
+                            .flex_shrink_0()
                             .items_center()
                             .gap_1()
                             .when(has_details, |actions| {
                                 actions.child(
                                     Button::new(("toggle-history-tool", card_id))
-                                        .label(if is_expanded {
-                                            "Hide details"
+                                        .icon(if is_expanded {
+                                            IconName::ChevronDown
                                         } else {
-                                            "Show details"
+                                            IconName::ChevronRight
+                                        })
+                                        .tooltip(if is_expanded {
+                                            "Hide tool details"
+                                        } else {
+                                            "Show tool details"
                                         })
                                         .ghost()
                                         .compact()
@@ -3365,7 +3404,8 @@ impl Workspace {
                             .when_some(arguments.clone(), |actions, arguments| {
                                 actions.child(
                                     Button::new(("copy-history-tool-input", card_id))
-                                        .label("Copy input")
+                                        .icon(IconName::Copy)
+                                        .tooltip("Copy tool input")
                                         .ghost()
                                         .compact()
                                         .on_click(move |_, _, cx| {
@@ -3378,7 +3418,8 @@ impl Workspace {
                             .when_some(output.clone(), |actions, output| {
                                 actions.child(
                                     Button::new(("copy-history-tool-output", card_id))
-                                        .label("Copy output")
+                                        .icon(IconName::Copy)
+                                        .tooltip("Copy tool output")
                                         .ghost()
                                         .compact()
                                         .on_click(move |_, _, cx| {
@@ -3390,19 +3431,6 @@ impl Workspace {
                             }),
                     ),
             )
-            .when_some(summary, |card, summary| {
-                card.child(
-                    div()
-                        .w_full()
-                        .min_w(px(0.))
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .whitespace_nowrap()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(summary),
-                )
-            })
             .when_some(details, |card, details| {
                 card.child(
                     div()
@@ -3439,8 +3467,97 @@ impl Workspace {
             return None;
         }
 
-        let mut content = Vec::new();
+        let tool_group_id = (message.render_id << 32) | u32::MAX as u64;
+        let tool_group_expanded = self.expanded_tool_cards.contains(&tool_group_id);
         let mut rendered_results = HashSet::new();
+        let mut tool_rows = Vec::new();
+        let mut tool_count = 0;
+        let mut completed_count = 0;
+        let mut failed_count = 0;
+        let mut duration_ms = 0_i64;
+
+        for (index, block) in message.history_blocks.iter().enumerate() {
+            let HistoryBlock::ToolCall(tool) = block else {
+                continue;
+            };
+            let result = message.history_tool_results.iter().find(|result| {
+                !tool.tool_call_id.is_empty() && result.tool_call_id == tool.tool_call_id
+            });
+            tool_count += 1;
+            if let Some(result) = result {
+                completed_count += 1;
+                failed_count += usize::from(result.is_error);
+                duration_ms = duration_ms.saturating_add(result.display.duration_ms.max(0));
+                rendered_results.insert(result.tool_call_id.clone());
+            }
+            if tool_group_expanded {
+                let card_id = (message.render_id << 32) | index as u64;
+                tool_rows.push(self.render_history_tool_card(
+                    Some(tool),
+                    result,
+                    card_id,
+                    message_index,
+                    theme,
+                    window,
+                    cx,
+                ));
+            }
+        }
+
+        for (index, result) in message.history_tool_results.iter().enumerate() {
+            if rendered_results.contains(&result.tool_call_id) {
+                continue;
+            }
+            tool_count += 1;
+            completed_count += 1;
+            failed_count += usize::from(result.is_error);
+            duration_ms = duration_ms.saturating_add(result.display.duration_ms.max(0));
+            if tool_group_expanded {
+                let card_id = (message.render_id << 32)
+                    | message.history_blocks.len().saturating_add(index) as u64;
+                tool_rows.push(self.render_history_tool_card(
+                    None,
+                    Some(result),
+                    card_id,
+                    message_index,
+                    theme,
+                    window,
+                    cx,
+                ));
+            }
+        }
+
+        let mut tool_group = (tool_count > 0).then(|| {
+            let label = tool_activity_label(tool_count, completed_count, failed_count, duration_ms);
+            v_flex()
+                .w_full()
+                .gap_1()
+                .child(
+                    Button::new(("toggle-history-tool-group", tool_group_id))
+                        .icon(if tool_group_expanded {
+                            IconName::ChevronDown
+                        } else {
+                            IconName::ChevronRight
+                        })
+                        .label(label)
+                        .tooltip(if tool_group_expanded {
+                            "Hide tool activity"
+                        } else {
+                            "Show tool activity"
+                        })
+                        .ghost()
+                        .compact()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_tool_card(tool_group_id, message_index, cx)
+                        })),
+                )
+                .when(tool_group_expanded, |group| {
+                    group.child(v_flex().w_full().gap_1().pl_2().children(tool_rows))
+                })
+                .into_any_element()
+        });
+
+        let mut content = Vec::new();
         for (index, block) in message.history_blocks.iter().enumerate() {
             let block_id = (message.render_id << 32) | index as u64;
             let element = match block {
@@ -3453,7 +3570,9 @@ impl Workspace {
                             let number = ordinal.fetch_add(1, Ordering::Relaxed) as u64;
                             let action_id = block_id ^ number;
                             Button::new(("copy-history-code", action_id))
-                                .label("Copy")
+                                .icon(IconName::Copy)
+                                .tooltip("Copy")
+                                .compact()
                                 .ghost()
                                 .on_click(move |_, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(code.clone()))
@@ -3515,48 +3634,24 @@ impl Workspace {
                             )),
                     )
                     .into_any_element(),
-                HistoryBlock::ToolCall(tool) => {
-                    let result = message.history_tool_results.iter().find(|result| {
-                        !tool.tool_call_id.is_empty() && result.tool_call_id == tool.tool_call_id
-                    });
-                    if let Some(result) = result {
-                        rendered_results.insert(result.tool_call_id.clone());
+                HistoryBlock::ToolCall(_) => {
+                    if let Some(group) = tool_group.take() {
+                        content.push(group);
                     }
-                    self.render_history_tool_card(
-                        Some(tool),
-                        result,
-                        block_id,
-                        message_index,
-                        theme,
-                        window,
-                        cx,
-                    )
+                    continue;
                 }
             };
             content.push(element);
         }
 
-        for (index, result) in message.history_tool_results.iter().enumerate() {
-            if rendered_results.contains(&result.tool_call_id) {
-                continue;
-            }
-            let card_id = (message.render_id << 32)
-                | message.history_blocks.len().saturating_add(index) as u64;
-            content.push(self.render_history_tool_card(
-                None,
-                Some(result),
-                card_id,
-                message_index,
-                theme,
-                window,
-                cx,
-            ));
+        if let Some(group) = tool_group {
+            content.push(group);
         }
 
         Some(
             v_flex()
                 .w_full()
-                .gap_2()
+                .gap_1()
                 .children(content)
                 .into_any_element(),
         )
@@ -3573,9 +3668,9 @@ impl Workspace {
         let render_id = message.render_id;
         let has_history =
             !message.history_blocks.is_empty() || !message.history_tool_results.is_empty();
-        let copy_text = chat_message_copy_text(message);
         match message.role {
             ChatRole::User => {
+                let copy_text = chat_message_copy_text(message);
                 let history = self.render_history_content(index, message, theme, window, cx);
                 h_flex()
                     .w_full()
@@ -3595,7 +3690,9 @@ impl Workspace {
                                 bubble.child(
                                     h_flex().justify_end().child(
                                         Button::new(("copy-user-message", render_id))
-                                            .label("Copy")
+                                            .icon(IconName::Copy)
+                                            .tooltip("Copy")
+                                            .compact()
                                             .ghost()
                                             .on_click(move |_, _, cx| {
                                                 cx.write_to_clipboard(ClipboardItem::new_string(
@@ -3622,7 +3719,10 @@ impl Workspace {
             }
             ChatRole::Assistant => {
                 let history = self.render_history_content(index, message, theme, window, cx);
-                let show_message_copy = !has_history && !copy_text.is_empty();
+                let copy_text = (!message.streaming && !has_history)
+                    .then(|| chat_message_copy_text(message))
+                    .unwrap_or_default();
+                let show_message_copy = !copy_text.is_empty();
                 let code_block_ordinal = Arc::new(AtomicUsize::new(0));
                 v_flex()
                     .w_full()
@@ -3646,7 +3746,9 @@ impl Workspace {
                                     let copy_text = copy_text.clone();
                                     row.child(
                                         Button::new(("copy-assistant-message", render_id))
-                                            .label("Copy")
+                                            .icon(IconName::Copy)
+                                            .tooltip("Copy")
+                                            .compact()
                                             .ghost()
                                             .on_click(move |_, _, cx| {
                                                 cx.write_to_clipboard(ClipboardItem::new_string(
@@ -3661,7 +3763,7 @@ impl Workspace {
                         column.child(
                             TextView::markdown(
                                 ("assistant-markdown", render_id),
-                                message.text.clone(),
+                                message.presentation_text.clone(),
                                 window,
                                 cx,
                             )
@@ -3673,7 +3775,9 @@ impl Workspace {
                                         code_block_ordinal.fetch_add(1, Ordering::Relaxed);
                                     let action_id = (render_id << 32) | ordinal as u64;
                                     Button::new(("copy-code", action_id))
-                                        .label("Copy")
+                                        .icon(IconName::Copy)
+                                        .tooltip("Copy")
+                                        .compact()
                                         .ghost()
                                         .on_click(move |_, _, cx| {
                                             cx.write_to_clipboard(ClipboardItem::new_string(
@@ -3688,6 +3792,7 @@ impl Workspace {
                     .into_any_element()
             }
             ChatRole::System => {
+                let copy_text = chat_message_copy_text(message);
                 let history = self.render_history_content(index, message, theme, window, cx);
                 h_flex()
                     .w_full()
@@ -3722,7 +3827,9 @@ impl Workspace {
                                         .when(!copy_text.is_empty(), |row| {
                                             row.child(
                                                 Button::new(("copy-system-message", render_id))
-                                                    .label("Copy")
+                                                    .icon(IconName::Copy)
+                                                    .tooltip("Copy")
+                                                    .compact()
                                                     .ghost()
                                                     .on_click(move |_, _, cx| {
                                                         cx.write_to_clipboard(
@@ -3740,7 +3847,9 @@ impl Workspace {
                                 column.child(
                                     h_flex().justify_end().child(
                                         Button::new(("copy-system-message", render_id))
-                                            .label("Copy")
+                                            .icon(IconName::Copy)
+                                            .tooltip("Copy")
+                                            .compact()
                                             .ghost()
                                             .on_click(move |_, _, cx| {
                                                 cx.write_to_clipboard(ClipboardItem::new_string(
@@ -4134,6 +4243,11 @@ impl Workspace {
         let can_switch = self.state.can_switch_provider();
         let catalog = self.provider_catalog();
         let results = search_provider_catalog(&catalog, &self.composer_picker.search.query);
+        let empty_message = provider_picker_empty_message(
+            catalog.len(),
+            results.len(),
+            &self.composer_picker.search.query,
+        );
 
         v_flex()
             .key_context("PickerSearch DesktopPicker")
@@ -4147,11 +4261,11 @@ impl Workspace {
             .bg(theme.background)
             .child(Input::new(&self.picker_search_input))
             .child(
-                v_flex().min_h(px(0.)).overflow_y_scrollbar().children(
-                    results
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(result_index, index)| {
+                v_flex()
+                    .min_h(px(0.))
+                    .overflow_y_scrollbar()
+                    .children(results.into_iter().enumerate().filter_map(
+                        |(result_index, index)| {
                             let item = catalog.get(index)?.clone();
                             let provider = item.id.clone();
                             let selected = item.active;
@@ -4159,12 +4273,7 @@ impl Workspace {
                                 result_index == self.composer_picker.search.highlighted;
                             let retries_failure = selected
                                 && matches!(self.state.connection, ConnectionState::Failed(_));
-                            let status = item.status.label();
-                            let methods = if item.methods.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" · {}", item.methods.join(", "))
-                            };
+                            let authentication_attention = item.status.authentication_attention();
                             Some(
                                 v_flex()
                                     .w_full()
@@ -4174,7 +4283,7 @@ impl Workspace {
                                     .rounded_lg()
                                     .when(selected, |row| row.bg(theme.secondary))
                                     .child(
-                                        Button::new(("provider-picker", index))
+                                        Button::new(domain_element_id("provider-picker", &item.id))
                                             .w_full()
                                             .label(if highlighted {
                                                 format!("› {}", item.label)
@@ -4187,16 +4296,29 @@ impl Workspace {
                                                 this.select_provider(&provider, window, cx);
                                             })),
                                     )
-                                    .child(
-                                        div()
-                                            .px_2()
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child(format!("{status}{methods}")),
-                                    ),
+                                    .when_some(authentication_attention, |row, status| {
+                                        row.child(
+                                            div()
+                                                .px_2()
+                                                .pb_1()
+                                                .text_xs()
+                                                .text_color(theme.warning)
+                                                .child(status),
+                                        )
+                                    }),
                             )
-                        }),
-                ),
+                        },
+                    ))
+                    .when_some(empty_message, |list, message| {
+                        list.child(
+                            div()
+                                .px_3()
+                                .py_3()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(message),
+                        )
+                    }),
             )
             .into_any_element()
     }
@@ -4266,7 +4388,7 @@ impl Workspace {
                                             )
                                             .into_any_element()
                                     } else {
-                                        Button::new(("model-picker", index))
+                                        Button::new(domain_element_id("model-picker", &model.id))
                                             .w_full()
                                             .label(if highlighted {
                                                 format!("› {label}")
@@ -4275,8 +4397,8 @@ impl Workspace {
                                             })
                                             .ghost()
                                             .disabled(!can_switch)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.select_model(&model_id, cx);
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.select_model(&model_id, window, cx);
                                             }))
                                             .into_any_element()
                                     })
@@ -4303,8 +4425,8 @@ impl Workspace {
                                 })
                                 .ghost()
                                 .disabled(!can_switch || selected)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.select_model(&manual, cx)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.select_model(&manual, window, cx)
                                 })),
                         )
                     })
@@ -4378,8 +4500,8 @@ impl Workspace {
                                         )
                                     }),
                             )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.select_thinking(&target, cx);
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.select_thinking(&target, window, cx);
                             }))
                     }),
             )
@@ -4423,8 +4545,8 @@ impl Workspace {
                             })
                             .ghost()
                             .disabled(!can_switch)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.select_permission_mode(mode, cx);
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.select_permission_mode(mode, window, cx);
                             }))
                     }),
             )
@@ -4780,7 +4902,9 @@ impl Workspace {
                                                                     24,
                                                                 )
                                                             ))
+                                                            .min_w(px(150.))
                                                             .max_w(px(200.))
+                                                            .flex_none()
                                                             .ghost()
                                                             .disabled(!can_switch_provider),
                                                     )
