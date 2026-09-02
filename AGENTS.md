@@ -10,8 +10,8 @@ secrets. Source code and tests are the immediate behavioral authority.
 powers the interactive TUI, print/JSON/RPC modes, and the embeddable Go SDK. Do
 not duplicate turn or tool-loop logic in a surface.
 
-The project is intentionally not a desktop product, whole-process sandbox,
-general memory database, or autonomous multi-agent workflow engine. Keep the
+The project is intentionally not a graphical application, whole-process
+sandbox, general memory database, or autonomous multi-agent workflow engine. Keep the
 agent loop understandable, providers and tools behind interfaces, and UI
 dependencies out of core packages.
 
@@ -93,7 +93,11 @@ snowsdk → app + protocol; never bubbletea
 
 ## Change workflow
 
-1. Read this guide, `README.md`, and the relevant source and tests.
+1. Read this guide, `README.md`, root `bugs.md`, and the relevant source and
+   tests. Record newly discovered reproducible defects in `bugs.md`, update an
+   existing entry instead of duplicating it, and do not remove or resolve an
+   entry until its fix is verified. Report security-sensitive defects through
+   `SECURITY.md` rather than disclosing them in the public tracker.
 2. Check `git status`; do not overwrite or revert unrelated work.
 3. Preserve package boundaries and add focused tests for behavior changes.
 4. Update the canonical guide when behavior, security, providers, public APIs,
@@ -166,6 +170,8 @@ change affects SDKs, RPC, providers, TUI lifecycle, concurrency, or packaging.
 - `README.md` — project overview, development baseline, and user entry points.
 - `IMPLEMENTATION.md` — architecture, package map, decisions, full verification
   matrix, roadmap, and known gaps.
+- `bugs.md` — canonical tracker for known reproducible defects, investigation
+  evidence, remediation requirements, and verified resolution status.
 - `docs/README.md` — documentation index and canonical ownership map.
 - `docs/security.md` — complete privilege and threat boundaries.
 - `SECURITY.md` — private vulnerability-reporting policy.

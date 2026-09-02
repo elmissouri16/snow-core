@@ -348,7 +348,7 @@ most 20 MiB and 40 MiB in aggregate. When no ordinary text remains, Backspace
 steering/follow-up input while another turn runs. Apple Terminal intercepts
 Cmd+V as terminal text paste, so use Ctrl+V for image capture. Linux image
 paste requires `wl-paste` or `xclip`; remote SSH sessions read the remote host
-clipboard, not the local desktop clipboard.
+clipboard, not the host clipboard.
 
 ## Steering and follow-ups
 

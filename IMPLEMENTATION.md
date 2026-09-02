@@ -45,7 +45,7 @@ events rather than reimplementing turn logic.
 
 ### Mission
 
-The core is intentionally not a desktop product, a process sandbox, a memory
+The core is intentionally not a graphical application, a process sandbox, a memory
 database, or an autonomous multi-agent workflow product. The optional
 root-scoped subagent manager only orchestrates ordinary agent loops. The design keeps the
 agent loop understandable, keeps providers and tools behind interfaces, and
@@ -69,9 +69,7 @@ keeps UI dependencies out of core packages.
 
 ### Non-goals
 
-- No desktop UI dependency or Electron/IPC contract in the Go runtime. The
-  experimental `desktop/` proof is an independent JSONL RPC client, not a second
-  agent loop or a release artifact.
+- No graphical UI or Electron/IPC contract in the Go runtime.
 - No built-in process or per-extension sandbox. Bash, external plugins, stdio
   MCP servers, and subagents execute with the user's OS privileges; operators
   provide external containment when needed.
@@ -131,7 +129,6 @@ keeps UI dependencies out of core packages.
 │   ├── protocol/            # dependency-light public messages/events/models
 │   │   └── schema/          # network-free Draft 2020-12 wire schemas
 │   └── snowsdk/             # public embeddable API; no TUI dependency
-├── desktop/                 # independent experimental GPUI RPC client
 ├── examples/                # standalone SDK, RPC, and plugin examples
 ├── sdk/                     # Language clients and private plugin-authoring SDKs
 └── docs/                    # user guides and per-topic references
@@ -140,7 +137,6 @@ keeps UI dependencies out of core packages.
 | Package | Responsibility |
 |---|---|
 | `cmd/snow` | Cobra entry point and CLI mode selection |
-| `desktop` | Independent experimental GPUI client for an external permission-denied RPC process |
 | `internal/app` | Runtime wiring and provider/model/session catalogs |
 | `internal/agent` | Provider → stream → permission → tools turn loop |
 | `internal/auth` | Credential model and memory/file stores |
@@ -1354,13 +1350,6 @@ Primary consumers are the checked-in dependency-light Python 3.9+ async and
 Node.js 22+ ESM/TypeScript SDKs, other non-Go hosts, and IDE bridges. They
 invoke an installed/explicit Snow binary and do not download one. Go hosts
 should prefer `pkg/snowsdk`. See `docs/rpc.md` and `docs/language-sdks.md`.
-
-The independent experimental `desktop/` client requires both interaction
-capabilities, launches its Snow child in `ask`, and keeps permission decisions
-and model-requested answers in separate trusted, request-correlated host cards.
-It fails closed on malformed or overflow interactions, keeps extensions
-disabled, and supports searchable provider/model controls plus bounded manual
-model IDs without moving credentials or auth policy into the Desktop.
 
 ### Language SDKs
 

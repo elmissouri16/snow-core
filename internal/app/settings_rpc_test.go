@@ -86,7 +86,7 @@ func TestRPCSettingsUpdatePreservesConcurrentUnrelatedConfig(t *testing.T) {
 	}
 }
 
-func TestRPCSettingsUpdatePersistsLiveDesktopChoices(t *testing.T) {
+func TestRPCSettingsUpdatePersistsLiveClientChoices(t *testing.T) {
 	a := newRuntimeControlsTestApp(t)
 	defaultProvider := a.PersistedCfg.DefaultProvider
 	defaultModel := a.PersistedCfg.DefaultModel
