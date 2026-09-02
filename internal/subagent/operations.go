@@ -31,6 +31,9 @@ func (m *Manager) Followup(ctx context.Context, caller Caller, target, message s
 	if ref.Path == protocol.RootAgentPath {
 		return errors.New("subagents: root cannot receive followup_task")
 	}
+	if err := m.requirePlanSafeTarget(caller, t); err != nil {
+		return err
+	}
 	reopened := false
 	if t.snapshot().Status == protocol.AgentClosed {
 		if _, err := m.resumeRuntime(t); err != nil {

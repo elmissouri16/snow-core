@@ -57,16 +57,29 @@ Every Plan-mode provider request receives the three-phase planning contract:
 non-mutating repository exploration first, intent clarification second, and a
 decision-complete implementation specification last. Its editable source is
 `internal/plan/system.md`, embedded into the binary at build time and appended
-separately from the configurable base system preamble. The rule is an
-instruction boundary, not a sandbox: Snow still runs with user OS privileges
-and does not attempt to classify arbitrary shell commands as read-only.
+separately from the configurable base system preamble.
+
+Snow also enforces the mode as an application-level tool boundary. Descriptor
+effect metadata is checked both when provider schemas are selected and again
+immediately before final dispatch. Permission approval cannot override that
+check. Reads and searches remain available, while file writes, arbitrary Bash,
+process start/stop, mutating or unclassified extension tools, and unsafe child
+work are blocked until the controlling runtime explicitly switches to Default.
+Snow does not attempt to classify arbitrary shell syntax as read-only, so Bash
+is unavailable in Plan Mode.
+
+This is defense in depth rather than a whole-process or OS sandbox. Snow and
+allowed tools still run with the user's privileges, and extension effect
+metadata is part of the trusted operator/tool configuration.
 
 The model may ask blocking questions through `request_user_input`, backed by
 the same TUI/SDK/RPC broker as `ask_user`. Default mode keeps the existing
 `ask_user` name for compatibility. `update_plan` is hidden and rejected in
 Plan mode; in Default mode it emits structured checklist updates. A Plan-mode
-root may spawn only read-only `explorer` subagents; other roles or a mutating
-explorer policy are rejected.
+root may spawn, message, resume, or send follow-up work only when the child's
+resolved tool profile is read-only and non-recursive; role names alone do not
+grant that authority. A transition into Plan Mode is rejected while
+mutation-capable child work is already active.
 
 ## Proposed-plan events
 

@@ -312,10 +312,10 @@ func (s *MemoryStore) ReplaceGoal(expected string, goal protocol.ThreadGoal) err
 	current := s.threadGoals[s.activeBranch]
 	if expected == "" {
 		if current != nil {
-			return errors.New("session: stale goal id")
+			return newGoalConflict("goal_id", expected, s.id, s.activeBranch, current)
 		}
 	} else if current == nil || current.GoalID != expected {
-		return errors.New("session: stale goal id")
+		return newGoalConflict("goal_id", expected, s.id, s.activeBranch, current)
 	}
 	goal.SessionID, goal.BranchID = s.id, s.activeBranch
 	if err := goal.Validate(); err != nil {
@@ -337,7 +337,7 @@ func (s *MemoryStore) ReviseGoal(expected, nextGoalID, objective string) (*proto
 		return nil, ErrNotFound
 	}
 	if g.GoalID != expected {
-		return nil, errors.New("session: stale goal id")
+		return nil, newGoalConflict("goal_id", expected, s.id, s.activeBranch, g)
 	}
 	copy := g.Clone()
 	copy.GoalID = nextGoalID
@@ -364,7 +364,7 @@ func (s *MemoryStore) TransitionGoal(expected string, expectedStatus, nextStatus
 		return nil, ErrNotFound
 	}
 	if g.GoalID != expected || g.Status != expectedStatus {
-		return nil, errors.New("session: stale goal state")
+		return nil, newGoalConflict("goal_state", expected, s.id, s.activeBranch, g)
 	}
 	if _, err := protocol.ParseThreadGoalStatus(string(nextStatus)); err != nil {
 		return nil, err
@@ -398,7 +398,7 @@ func (s *MemoryStore) UpdateGoal(expected string, objective *string, status *pro
 		return nil, ErrNotFound
 	}
 	if g.GoalID != expected {
-		return nil, errors.New("session: stale goal id")
+		return nil, newGoalConflict("goal_id", expected, s.id, s.activeBranch, g)
 	}
 	copy := g.Clone()
 	if objective != nil {
@@ -438,12 +438,12 @@ func (s *MemoryStore) ClearGoal(expected string) error {
 	g := s.threadGoals[s.activeBranch]
 	if g == nil {
 		if expected != "" {
-			return errors.New("session: stale goal id")
+			return newGoalConflict("goal_id", expected, s.id, s.activeBranch, nil)
 		}
 		return nil
 	}
 	if expected == "" || g.GoalID != expected {
-		return errors.New("session: stale goal id")
+		return newGoalConflict("goal_id", expected, s.id, s.activeBranch, g)
 	}
 	delete(s.threadGoals, s.activeBranch)
 	delete(s.goalDeferred, s.activeBranch)
@@ -501,7 +501,7 @@ func (s *MemoryStore) AccountGoal(expected string, tokens, seconds int64, estima
 	defer s.mu.Unlock()
 	g := s.threadGoals[s.activeBranch]
 	if g == nil || g.GoalID != expected {
-		return g.Clone(), false, nil
+		return g.Clone(), false, newGoalConflict("goal_id", expected, s.id, s.activeBranch, g)
 	}
 	if tokens > math.MaxInt64-g.TokensUsed || seconds > math.MaxInt64-g.SecondsUsed {
 		return nil, false, errors.New("session: goal usage overflow")

@@ -605,9 +605,10 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 		m.mu.Unlock()
 		return protocol.SubagentState{}, availableRoleError(m.limits.Roles, m.limits.DefaultRole, req.Role)
 	}
-	if caller.Path == protocol.RootAgentPath && m.root.Mode() == protocol.ModePlan && (roleName != "explorer" || role.AllowMutation) {
+	recursiveAuthority := m.limits.Recursive && m.limits.MaxDepth > 1
+	if caller.Path == protocol.RootAgentPath && m.root.Mode() == protocol.ModePlan && !planRoleReadOnly(role, recursiveAuthority) {
 		m.mu.Unlock()
-		return protocol.SubagentState{}, errors.New("subagents: Plan mode permits only read-only explorer children")
+		return protocol.SubagentState{}, errPlanRequiresReadOnlyChild
 	}
 	thinkingExplicit := req.ReasoningEffort != ""
 	thinking := protocol.NormalizeThinkingLevel(req.ReasoningEffort)
@@ -777,8 +778,13 @@ func (m *Manager) SendMessage(ctx context.Context, caller Caller, target, messag
 	if err != nil {
 		return err
 	}
-	if t != nil && t.snapshot().Status == protocol.AgentClosed {
-		return fmt.Errorf("subagents: agent %s is closed; resume it before sending a message", ref.Path)
+	if t != nil {
+		if err := m.requirePlanSafeTarget(caller, t); err != nil {
+			return err
+		}
+		if t.snapshot().Status == protocol.AgentClosed {
+			return fmt.Errorf("subagents: agent %s is closed; resume it before sending a message", ref.Path)
+		}
 	}
 	env := protocol.AgentMessage{ID: newThreadID(), Author: caller.Path, Recipient: ref.Path, Kind: protocol.AgentMessageNormal, Content: message, CreatedAt: time.Now().UnixMilli()}
 	if err := m.enqueueTarget(t, ref, env); err != nil {

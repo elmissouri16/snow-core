@@ -3,8 +3,12 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	providerfake "github.com/elmissouri16/snow-core/internal/provider/fake"
 	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -22,6 +26,63 @@ func TestAppPlanModeAndModeTools(t *testing.T) {
 		if _, ok := a.Registry.Get(name); !ok {
 			t.Fatalf("missing tool %s", name)
 		}
+	}
+}
+
+type blockingChildProvider struct {
+	*providerfake.Provider
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *blockingChildProvider) Chat(ctx context.Context, req protocol.ChatRequest) (protocol.EventStream, error) {
+	p.once.Do(func() { close(p.started) })
+	select {
+	case <-p.release:
+		return p.Provider.Chat(ctx, req)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestAppPlanTransitionRejectsActiveUnsafeChild(t *testing.T) {
+	enabled := true
+	a, err := New(t.Context(), Options{Provider: "fake", NoSession: true, NoPlugins: true, NoMCP: true, NoSkills: true, Permission: "allow", CWD: t.TempDir(), Subagents: &enabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if err := a.ReadySubagents(); err != nil {
+		t.Fatal(err)
+	}
+	blocking := &blockingChildProvider{Provider: providerfake.New(nil), started: make(chan struct{}), release: make(chan struct{})}
+	a.runtimeSelection.mu.Lock()
+	a.runtimeSelection.providers["fake"] = blocking
+	a.runtimeSelection.mu.Unlock()
+	if _, err := a.SpawnSubagent(t.Context(), protocol.SpawnSubagentRequest{Name: "worker", Task: "inspect", Role: "general", ForkTurns: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.started:
+	case <-time.After(time.Second):
+		t.Fatal("child provider did not start")
+	}
+	if err := a.Agent.SetMode(protocol.ModePlan); err == nil || !strings.Contains(err.Error(), "mutation-capable child work is active") {
+		t.Fatalf("direct Plan transition error=%v", err)
+	}
+	if a.Agent.Mode() != protocol.ModeDefault {
+		t.Fatalf("rejected direct transition changed mode to %s", a.Agent.Mode())
+	}
+	if err := a.Agent.PromptWithMode(t.Context(), "plan atomically", protocol.ModePlan); err == nil || !strings.Contains(err.Error(), "mutation-capable child work is active") {
+		t.Fatalf("atomic Plan transition error=%v", err)
+	}
+	if a.Agent.Mode() != protocol.ModeDefault {
+		t.Fatalf("rejected atomic transition changed mode to %s", a.Agent.Mode())
+	}
+	close(blocking.release)
+	if err := a.Subagents.WaitAll(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 

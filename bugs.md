@@ -17,7 +17,7 @@ For each bug:
 
 ## BUG-001: Plan Mode mutation boundary is not enforced
 
-- **Status:** Open
+- **Status:** Resolved
 - **Severity:** High
 - **Surface:** Collaboration-mode enforcement and tool dispatch
 - **Observed:** Current repository-improvement session
@@ -116,9 +116,42 @@ Add tests proving that, while Plan Mode is active:
 - denial output identifies the active boundary and does not claim success; and
 - an explicit authoritative transition out of Plan Mode enables mutation.
 
+### Remediation
+
+Plan Mode now uses first-class descriptor effects (`read_only`, `mutating`, and
+`conditional`) to filter provider schemas and repeats the same authoritative
+check immediately before final dispatch, before permission approval. Missing
+metadata derives conservatively from risk; arbitrary Bash, file writes,
+process lifecycle calls, and mutating or unclassified extensions fail closed.
+Conditional tools require a typed runtime guard.
+
+Subagent delegation resolves actual child capabilities instead of trusting role
+names. Spawn, messaging, follow-up, and resume reject Bash, write/edit,
+recursive, inherited-shell, unknown, or changed persisted authority. The app
+also rejects direct and atomic transitions into Plan Mode while unsafe child
+work is already active. The embedded Plan contract and compaction context keep
+the branch mode explicit, while only an authoritative runtime transition back
+to Default restores mutation.
+
 ### Resolution evidence
 
-Not yet resolved.
+Verified on the current checkout with:
+
+- focused Plan schema/dispatch, explicit transition, compaction, conditional
+  tool, recursive delegation, persisted-role, messaging, and active-child app
+  integration regressions in `internal/agent`, `internal/subagent`, and
+  `internal/app`;
+- `go test ./...`;
+- `go test -race ./internal/agent ./internal/subagent ./internal/app ./internal/goal ./internal/session ./internal/tools -count=1`;
+- `go vet ./...`;
+- `python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v`;
+- `python3 scripts/check_benchmarks.py`;
+- `git diff --check`;
+- `./scripts/install-local.sh`, which installed the verified `0.1.0-dev` build;
+  and
+- an independent read-only review, including two follow-up reviews after the
+  initial bypass findings were corrected, with no release-blocking issues
+  remaining.
 
 ## BUG-009: Long automatic goals can become uncompactionable
 
@@ -225,7 +258,7 @@ Verified on 2026-09-02 with:
 
 ## BUG-010: Goal reads and terminal updates can disagree on the active ID
 
-- **Status:** Open
+- **Status:** Resolved
 - **Severity:** Medium
 - **Surface:** Persisted goal tools and automatic goal continuation
 - **Observed:** Automatic long-running implementation goal on 2026-09-02
@@ -300,6 +333,44 @@ Add tests proving that:
 - repeated stale conflicts terminate safely rather than causing unbounded
   automatic continuation.
 
+### Remediation
+
+Goal conflict handling now uses one typed optimistic-conflict contract across
+the controller, memory store, and SQLite store. Conflicts include only the
+current goal ID/status, session ID, branch ID, and controller binding generation;
+they never include objective text or store paths. Controller enrichment now
+covers preflight checks and every store mutation path, including accounting,
+edit, clear, replace, and status transitions after a session rebind.
+
+`update_goal` trims and validates canonical goal IDs and returns structured
+conflict details directing the caller to refresh with `get_goal`; it does not
+silently substitute a replacement. Failed tool results count as failures, not
+productive progress. If the same unresolved terminal conflict recurs for three
+consecutive automatic turns, Snow durably defers continuation and pauses the
+still-current goal, preventing unlimited reinjection even when the assistant
+also emitted explanatory text.
+
 ### Resolution evidence
 
-None yet; the defect remains open.
+Verified on the current checkout with:
+
+- memory and SQLite tests for typed mutation and accounting conflicts, current
+  identity, unchanged usage, and privacy-safe diagnostics;
+- controller/tool tests for ID normalization, true replacement conflicts,
+  session-rebind generation enrichment, and `get_goal`/`update_goal`
+  consistency;
+- app session-rebind coverage proving the shared controller projection changes
+  atomically;
+- agent regressions proving failed tool results do not count as progress and
+  three repeated automatic terminal conflicts defer and pause safely;
+- `go test ./...`;
+- `go test -race ./internal/agent ./internal/subagent ./internal/app ./internal/goal ./internal/session ./internal/tools -count=1`;
+- `go vet ./...`;
+- `python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v`;
+- `python3 scripts/check_benchmarks.py`;
+- `git diff --check`;
+- `./scripts/install-local.sh`, which installed the verified `0.1.0-dev` build;
+  and
+- an independent read-only review, including follow-up review of accounting
+  conflict enrichment and the app-level mode-transition integration test, with
+  no release-blocking issue remaining.

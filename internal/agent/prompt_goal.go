@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
 	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -61,6 +62,11 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	}
 	if err := validateUserAttachments(model, attachments); err != nil {
 		return errors.Join(ErrPromptRejected, err)
+	}
+	if requestedMode != nil && *requestedMode != modeBeforeAdmission && a.opts.ModeTransitionGuard != nil {
+		if err := a.opts.ModeTransitionGuard(modeBeforeAdmission, *requestedMode); err != nil {
+			return errors.Join(ErrPromptRejected, fmt.Errorf("agent: collaboration mode transition: %w", err))
+		}
 	}
 	if wasAutomatic && a.closeAutomaticQueueForPrompt() {
 		return fmt.Errorf("%w: undelivered queued input was accepted before automatic work could be preempted; call ClearPendingInputs first", ErrPromptRejected)
@@ -260,6 +266,7 @@ func (a *Agent) resetTurnExecutionLocked() {
 	a.turnUsage = protocol.Usage{}
 	a.usageSet = false
 	a.turnProgress = false
+	a.turnGoalConflict = nil
 	a.baseDeferred = nil
 	a.searchedDeferred = nil
 }
@@ -402,12 +409,30 @@ func (a *Agent) stopGoalOnError(turnErr error) error {
 	return nil
 }
 
+func goalConflictKey(details goalpkg.ConflictDetails) string {
+	conflict := details.Conflict
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d", conflict.ExpectedGoalID, conflict.CurrentGoalID, conflict.SessionID, conflict.BranchID, conflict.BindingGeneration)
+}
+
+func (a *Agent) resetGoalConflictState() {
+	a.mu.Lock()
+	a.autoConflictCount = 0
+	a.autoConflictGoal = ""
+	a.autoConflictKey = ""
+	a.mu.Unlock()
+}
+
 func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 	crossed, accountingErr := a.finishGoalAccounting()
 	var transitionErr error
 	if accountingErr != nil {
 		a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal accounting: " + accountingErr.Error()})
-		transitionErr = a.stopGoalOnError(accountingErr)
+		// A stale admitted turn must not defer or change the replacement goal.
+		// The conflict still terminates this worker and carries current identity
+		// diagnostics so its caller can refresh deterministically.
+		if !errors.Is(accountingErr, session.ErrGoalConflict) {
+			transitionErr = a.stopGoalOnError(accountingErr)
+		}
 	}
 	if turnErr != nil || accountingErr != nil {
 		// Accounting always precedes terminal classification, and budget crossing
@@ -426,6 +451,7 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 	if a.goalAtTurn != nil {
 		goalID = a.goalAtTurn.GoalID
 	}
+	conflict := a.turnGoalConflict
 	if !userOrigin && a.turnOrigin == "goal" && turnErr == nil {
 		if a.autoEmptyGoal != goalID {
 			a.autoEmptyGoal = goalID
@@ -436,8 +462,23 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 		} else {
 			a.autoEmpty++
 		}
+		if conflict == nil {
+			a.autoConflictCount = 0
+			a.autoConflictGoal = ""
+			a.autoConflictKey = ""
+		} else {
+			key := goalConflictKey(*conflict)
+			if a.autoConflictGoal != goalID || a.autoConflictKey != key {
+				a.autoConflictCount = 1
+				a.autoConflictGoal = goalID
+				a.autoConflictKey = key
+			} else {
+				a.autoConflictCount++
+			}
+		}
 	}
 	empty := a.autoEmpty
+	conflicts := a.autoConflictCount
 	stopped := a.autoStop
 	controller := a.opts.Goal
 	mode := a.turnMode
@@ -452,6 +493,27 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 	g, err := controller.Get()
 	if err != nil || g == nil {
 		return false, errors.Join(finalErr, err)
+	}
+	if conflicts >= 3 && conflict != nil && g.Status == protocol.GoalActive {
+		message := "goal continuation paused after three consecutive terminal update conflicts"
+		a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: message})
+		if err := controller.Defer(true); err != nil {
+			transitionErr := fmt.Errorf("goal: defer before conflict pause: %w", err)
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: transitionErr.Error()})
+			return false, transitionErr
+		}
+		if current := conflict.Conflict.CurrentGoalID; current != "" && current != g.GoalID {
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal changed during repeated terminal conflicts; current goal was deferred without changing its status"})
+			a.resetGoalConflictState()
+			return false, finalErr
+		}
+		if _, err := controller.SetStatus(g.GoalID, protocol.GoalPaused, false); err != nil {
+			transitionErr := fmt.Errorf("goal: persist conflict-paused status: %w", err)
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: transitionErr.Error()})
+			return false, transitionErr
+		}
+		a.resetGoalConflictState()
+		return false, finalErr
 	}
 	if empty >= 3 && g.Status == protocol.GoalActive {
 		// Empty output is not proof of an external blocker. Pause conservatively
@@ -531,6 +593,9 @@ func (a *Agent) ResetGoalAudit() {
 	a.goalTurnID = ""
 	a.autoEmpty = 0
 	a.autoEmptyGoal = ""
+	a.autoConflictCount = 0
+	a.autoConflictGoal = ""
+	a.autoConflictKey = ""
 	a.mu.Unlock()
 }
 

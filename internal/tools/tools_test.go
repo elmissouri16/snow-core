@@ -159,3 +159,43 @@ func TestCanExposeUsesOptionalPermissionPolicy(t *testing.T) {
 		t.Fatal("remembered denial should hide deferred tool")
 	}
 }
+
+func TestDescriptorEffectNormalization(t *testing.T) {
+	tests := []struct {
+		name string
+		risk permission.Risk
+		want ToolEffect
+	}{
+		{name: "read", risk: permission.RiskRead, want: EffectReadOnly},
+		{name: "delegate", risk: permission.RiskDelegate, want: EffectConditional},
+		{name: "write", risk: permission.RiskWrite, want: EffectMutating},
+		{name: "exec", risk: permission.RiskExec, want: EffectMutating},
+		{name: "network", risk: permission.RiskNet, want: EffectMutating},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := NewRegistry()
+			schema := protocol.ToolSchema{Name: "effect_tool", Parameters: json.RawMessage(`{"type":"object"}`)}
+			if err := registry.RegisterDescriptor(ToolDescriptor{Schema: schema, Tool: registryTestTool{schema: schema}, Source: SourceSDK, Risk: tt.risk}); err != nil {
+				t.Fatal(err)
+			}
+			desc, ok := registry.Descriptor("effect_tool")
+			if !ok || desc.Effect != tt.want {
+				t.Fatalf("effect = %q, want %q", desc.Effect, tt.want)
+			}
+			metadata, ok := Metadata(registry, "effect_tool")
+			if !ok || metadata.Effect != tt.want {
+				t.Fatalf("metadata effect = %q, want %q", metadata.Effect, tt.want)
+			}
+		})
+	}
+}
+
+func TestDescriptorRejectsInvalidEffect(t *testing.T) {
+	registry := NewRegistry()
+	schema := protocol.ToolSchema{Name: "effect_tool", Parameters: json.RawMessage(`{"type":"object"}`)}
+	err := registry.RegisterDescriptor(ToolDescriptor{Schema: schema, Tool: registryTestTool{schema: schema}, Source: SourceSDK, Risk: permission.RiskRead, Effect: "sometimes"})
+	if err == nil {
+		t.Fatal("invalid effect was accepted")
+	}
+}

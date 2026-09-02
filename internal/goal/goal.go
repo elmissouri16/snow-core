@@ -25,20 +25,35 @@ var (
 )
 
 type Controller struct {
-	mu               sync.Mutex
-	store            session.Store
-	home             string
-	emit             func(protocol.AgentEvent)
-	objectiveUpdated map[string]bool
-	auditGoalID      string
-	auditTurns       int
-	remainders       map[string]time.Duration
+	mu                sync.Mutex
+	store             session.Store
+	bindingGeneration uint64
+	home              string
+	emit              func(protocol.AgentEvent)
+	objectiveUpdated  map[string]bool
+	auditGoalID       string
+	auditTurns        int
+	remainders        map[string]time.Duration
 }
 
 const managedPrefix = "Read the Snow goal objective file at "
 const managedSuffix = " before continuing."
 
 const managedObjectiveName = "goal-objective.md"
+
+// Binding identifies the controller's current non-sensitive store projection.
+type Binding struct {
+	Generation uint64 `json:"generation"`
+	SessionID  string `json:"session_id"`
+	BranchID   string `json:"branch_id,omitempty"`
+}
+
+// ConflictDetails is private structured metadata attached to a failed goal
+// update so automatic continuation can stop repeated conflicts safely.
+type ConflictDetails struct {
+	Conflict session.GoalConflictError
+	Binding  Binding
+}
 
 type managedRoots struct {
 	home, goals, session, owner *os.Root

@@ -514,16 +514,26 @@ not isolation boundaries. See [Subagents](subagents.md).
 
 ## Plan Mode and goals
 
-Plan Mode is a collaboration instruction, not a permission boundary or OS
-sandbox. Ordinary `write`, `edit`, `bash`, plugin, and MCP capabilities remain
-exposed behind their normal permission gates; any allowed capability retains its
-user-level power.
+Plan Mode enforces an application-level non-mutation boundary independently
+from the permission service. Snow filters mutating tool schemas and repeats the
+same check at final dispatch, so permission approval cannot authorize a blocked
+Plan operation. Arbitrary Bash, file writes, process lifecycle changes,
+mutating or unclassified extensions, and mutation-capable child work require an
+explicit transition to Default mode. Child eligibility is based on its resolved
+tool profile rather than its role label.
+
+This remains distinct from an OS sandbox. Snow and allowed tools run with the
+user's privileges, extension effect declarations belong to trusted
+operator/tool configuration, and external containment remains the operator's
+responsibility.
 
 Persistent goals may automatically issue additional provider requests and tool
 calls until completion, blocking, pause, limit, budget, abort, or failure.
 Objectives and usage are branch-scoped and persisted. Large objectives are
 materialized in descriptor-confined private files under `SNOW_HOME`, but goal
-text still becomes trusted host-generated model context.
+text still becomes trusted host-generated model context. Optimistic terminal
+conflicts return the current non-sensitive goal identity; three consecutive
+unresolved automatic-turn conflicts defer continuation and pause the goal.
 
 Use explicit budgets, restrictive permissions, and observability when enabling
 automatic continuation. See [Plan Mode](plan-mode.md) and [Goals](goals.md).

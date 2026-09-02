@@ -293,6 +293,14 @@ func (s *SQLiteStore) CreateGoal(goal protocol.ThreadGoal, replace bool) error {
 	return nil
 }
 
+func (s *SQLiteStore) goalConflict(tx *sql.Tx, kind, expected string) error {
+	current, err := scanGoalWithCosts(tx.QueryRow(`SELECT goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), tx, s.header.ID, s.branchID)
+	if err != nil {
+		return err
+	}
+	return newGoalConflict(kind, expected, s.header.ID, s.branchID, current)
+}
+
 func (s *SQLiteStore) ReplaceGoal(expected string, goal protocol.ThreadGoal) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -317,7 +325,7 @@ func (s *SQLiteStore) ReplaceGoal(expected string, goal protocol.ThreadGoal) err
 		return fmt.Errorf("session: sqlite replace goal: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return errors.New("session: stale goal id")
+		return s.goalConflict(tx, "goal_id", expected)
 	}
 	if err := replaceGoalCosts(tx, s.branchID, goal.EstimatedCosts); err != nil {
 		return fmt.Errorf("session: sqlite replace goal costs: %w", err)
@@ -358,7 +366,7 @@ func (s *SQLiteStore) ReviseGoal(expected, nextGoalID, objective string) (*proto
 		if current == nil {
 			return nil, ErrNotFound
 		}
-		return nil, errors.New("session: stale goal id")
+		return nil, newGoalConflict("goal_id", expected, s.header.ID, s.branchID, current)
 	}
 	if _, err := tx.Exec(`DELETE FROM thread_goal_deferrals WHERE branch_id = ?`, s.branchID); err != nil {
 		return nil, fmt.Errorf("session: sqlite clear goal deferral: %w", err)
@@ -402,7 +410,7 @@ func (s *SQLiteStore) TransitionGoal(expected string, expectedStatus, nextStatus
 		if current == nil {
 			return nil, ErrNotFound
 		}
-		return nil, errors.New("session: stale goal state")
+		return nil, newGoalConflict("goal_state", expected, s.header.ID, s.branchID, current)
 	}
 	if clearDeferral {
 		if _, err := tx.Exec(`DELETE FROM thread_goal_deferrals WHERE branch_id = ?`, s.branchID); err != nil {
@@ -469,7 +477,7 @@ func (s *SQLiteStore) UpdateGoal(expected string, objective *string, status *pro
 		if current == nil {
 			return nil, ErrNotFound
 		}
-		return nil, errors.New("session: stale goal id")
+		return nil, newGoalConflict("goal_id", expected, s.header.ID, s.branchID, current)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("session: sqlite update goal commit: %w", err)
@@ -486,7 +494,11 @@ func (s *SQLiteStore) ClearGoal(expected string) error {
 			return err
 		}
 		if exists != 0 {
-			return errors.New("session: stale goal id")
+			current, err := scanGoalWithCosts(s.db.QueryRow(`SELECT goal_id, objective, status, blocked_reason, token_budget, tokens_used, seconds_used, created_at, updated_at FROM thread_goals WHERE branch_id = ?`, s.branchID), s.db, s.header.ID, s.branchID)
+			if err != nil {
+				return err
+			}
+			return newGoalConflict("goal_id", expected, s.header.ID, s.branchID, current)
 		}
 		return nil
 	}
@@ -500,7 +512,7 @@ func (s *SQLiteStore) ClearGoal(expected string) error {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return errors.New("session: stale goal id")
+		return s.goalConflict(tx, "goal_id", expected)
 	}
 	if _, err := tx.Exec(`DELETE FROM thread_goal_deferrals WHERE branch_id = ?`, s.branchID); err != nil {
 		return err
@@ -541,7 +553,7 @@ func (s *SQLiteStore) AccountGoal(expected string, tokens, seconds int64, estima
 			return nil, false, readErr
 		}
 		if current == nil || current.GoalID != expected {
-			return current, false, nil
+			return current, false, newGoalConflict("goal_id", expected, s.header.ID, s.branchID, current)
 		}
 		return nil, false, errors.New("session: goal usage overflow")
 	}

@@ -69,6 +69,15 @@ optimistic stale-write guards. Objective replacement and status transitions
 are compare-and-swap operations, while SQLite accounting uses one atomic
 update even when the same database is opened by multiple handles.
 
+A stale identity or state transition returns a typed conflict containing the
+current non-sensitive goal ID, status, session, branch, and controller-binding
+generation. `update_goal` validates canonical IDs and tells the model to refresh
+with `get_goal`; it never substitutes the replacement ID automatically. If the
+same unresolved terminal conflict recurs across three consecutive automatic
+goal turns, Snow first defers continuation and then pauses the still-current
+goal. Failed tool results do not count as productive progress merely because a
+provider finished streaming their arguments.
+
 When provider or catalog pricing is available, the same atomic operation also
 accumulates the per-request estimated cost by currency. Cached input retains
 its discounted class rather than being priced as ordinary input. Missing

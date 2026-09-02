@@ -326,10 +326,12 @@ See [sessions](docs/sessions.md) and [configuration](docs/configuration.md).
 
 - **Default mode** allows the normal coding tool surface and turn-local
   `update_plan` checklists.
-- **Plan Mode** is a branch-persisted collaboration instruction that asks the
-  model not to mutate and emits structured proposed-plan events plus
-  `request_user_input`. It is not a permission or sandbox boundary:
-  write, shell, plugin, and MCP capabilities remain behind their normal gates.
+- **Plan Mode** is a branch-persisted collaboration mode that emits structured
+  proposed-plan events plus `request_user_input` and enforces a non-mutation
+  boundary before permission checks and tool dispatch. File writes, arbitrary
+  shell execution, process lifecycle changes, mutating or unclassified
+  extensions, and mutation-capable subagents require an explicit transition to
+  Default mode. This application policy is defense in depth, not an OS sandbox.
 - **Thread Goals** attach a persisted objective and optional token budget to a
   session branch, may continue through bounded private turns, and show durable
   cumulative token usage plus estimated cost when model pricing is available.
@@ -490,7 +492,10 @@ Snow is a harness, **not a whole-process sandbox**:
   `permission_request` events with `permission_reply`/`permission_reject`.
 - Project trust permits loading project-local configuration and extensions. It
   does not constrain what an enabled process can do.
-- Plan Mode is a collaboration contract, not an OS enforcement boundary.
+- Plan Mode enforces Snow's application-level non-mutation policy before tool
+  permission checks, but it is not an OS sandbox. Unknown and potentially
+  mutating tools, including arbitrary Bash, are blocked until an explicit
+  transition to Default mode.
 - Repository text, tool output, extensions, skills, and child results may
   contain prompt injection.
 - Subagents share the working tree and process side effects; parallel mutation

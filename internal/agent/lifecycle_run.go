@@ -267,7 +267,7 @@ func (a *Agent) requestToolPolicy() func(tools.DescriptorMetadata) bool {
 			return false
 		}
 		if mode == protocol.ModePlan {
-			return name != "ask_user" && name != "update_plan"
+			return name != "ask_user" && name != "update_plan" && collaborationToolAllowed(mode, desc)
 		}
 		return name != "request_user_input"
 	}

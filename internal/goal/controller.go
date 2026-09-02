@@ -29,7 +29,7 @@ func New(st session.Store, home string, emit func(protocol.AgentEvent)) (*Contro
 	if _, ok := st.(session.ThreadGoalAtomicStore); !ok {
 		return nil, errors.New("goal: session does not support atomic goal transitions")
 	}
-	return &Controller{store: st, home: home, emit: emit, objectiveUpdated: make(map[string]bool), remainders: make(map[string]time.Duration)}, nil
+	return &Controller{store: st, bindingGeneration: 1, home: home, emit: emit, objectiveUpdated: make(map[string]bool), remainders: make(map[string]time.Duration)}, nil
 }
 
 func (c *Controller) SetEmitter(emit func(protocol.AgentEvent)) {
@@ -61,6 +61,7 @@ func (c *Controller) SetStore(st session.Store) error {
 		return errors.New("goal: session does not support atomic goal transitions")
 	}
 	c.store = st
+	c.bindingGeneration++
 	c.objectiveUpdated = make(map[string]bool)
 	c.auditGoalID = ""
 	c.auditTurns = 0
@@ -69,6 +70,53 @@ func (c *Controller) SetStore(st session.Store) error {
 }
 
 func (c *Controller) Store() session.Store { c.mu.Lock(); defer c.mu.Unlock(); return c.store }
+
+func (c *Controller) Binding() Binding {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bindingLocked()
+}
+
+func (c *Controller) bindingLocked() Binding {
+	binding := Binding{Generation: c.bindingGeneration, SessionID: c.store.ID()}
+	if branches, ok := c.store.(session.ActiveBranchStore); ok {
+		binding.BranchID = branches.ActiveBranchID()
+	}
+	return binding
+}
+
+func (c *Controller) conflictLocked(kind, expected string, current *protocol.ThreadGoal) error {
+	binding := c.bindingLocked()
+	conflict := &session.GoalConflictError{
+		Kind:              kind,
+		ExpectedGoalID:    expected,
+		SessionID:         binding.SessionID,
+		BranchID:          binding.BranchID,
+		BindingGeneration: binding.Generation,
+	}
+	if current != nil {
+		conflict.CurrentGoalID = current.GoalID
+		conflict.CurrentStatus = current.Status
+	}
+	return conflict
+}
+
+func (c *Controller) enrichConflictLocked(err error) error {
+	conflict, ok := errors.AsType[*session.GoalConflictError](err)
+	if !ok {
+		return err
+	}
+	copy := *conflict
+	binding := c.bindingLocked()
+	copy.BindingGeneration = binding.Generation
+	if copy.SessionID == "" {
+		copy.SessionID = binding.SessionID
+	}
+	if copy.BranchID == "" {
+		copy.BranchID = binding.BranchID
+	}
+	return &copy
+}
 
 func (c *Controller) goalStore() session.ThreadGoalStore { return c.store.(session.ThreadGoalStore) }
 
@@ -144,6 +192,7 @@ func (c *Controller) Create(objective string, budget *int64, replace bool) (*pro
 	}
 	if err != nil {
 		cleanup()
+		err = c.enrichConflictLocked(err)
 		c.mu.Unlock()
 		return nil, err
 	}
@@ -185,7 +234,7 @@ func (c *Controller) Edit(expected, objective string) (*protocol.ThreadGoal, err
 		return returnUnlock(c, nil, session.ErrNotFound)
 	}
 	if old.GoalID != expected {
-		return returnUnlock(c, nil, errors.New("goal: stale goal id"))
+		return returnUnlock(c, nil, c.conflictLocked("goal_id", expected, old))
 	}
 	nextGoalID := id()
 	cleanup := func() {}
@@ -200,6 +249,7 @@ func (c *Controller) Edit(expected, objective string) (*protocol.ThreadGoal, err
 	out, err := c.atomicStore().ReviseGoal(old.GoalID, nextGoalID, objective)
 	if err != nil {
 		cleanup()
+		err = c.enrichConflictLocked(err)
 		c.mu.Unlock()
 		return nil, err
 	}
@@ -265,7 +315,7 @@ func (c *Controller) SetStatusWithReason(expected string, status protocol.Thread
 		return returnUnlock(c, nil, session.ErrNotFound)
 	}
 	if old.GoalID != expected {
-		return returnUnlock(c, nil, errors.New("goal: stale goal id"))
+		return returnUnlock(c, nil, c.conflictLocked("goal_id", expected, old))
 	}
 	if model && old.Status != protocol.GoalActive {
 		return returnUnlock(c, nil, errors.New("goal: model terminal update requires active goal"))
@@ -292,6 +342,7 @@ func (c *Controller) SetStatusWithReason(expected string, status protocol.Thread
 		return returnUnlock(c, nil, errors.New("goal: only paused, blocked, or usage-limited goals can be resumed"))
 	}
 	g, err := c.atomicStore().TransitionGoal(expected, old.Status, status, blockedReason, status == protocol.GoalActive)
+	err = c.enrichConflictLocked(err)
 	if err == nil && status == protocol.GoalActive {
 		c.auditGoalID = ""
 		c.auditTurns = 0
@@ -308,6 +359,7 @@ func (c *Controller) Clear(expected string) error {
 	c.mu.Lock()
 	old, _ := c.goalStore().Goal()
 	if err := c.goalStore().ClearGoal(expected); err != nil {
+		err = c.enrichConflictLocked(err)
 		c.mu.Unlock()
 		return err
 	}
@@ -334,6 +386,7 @@ func (c *Controller) AccountDuration(expected string, tokens int64, elapsed time
 	total := c.remainders[expected] + elapsed
 	seconds := int64(total / time.Second)
 	g, cross, err := c.goalStore().AccountGoal(expected, tokens, seconds, estimatedCost)
+	err = c.enrichConflictLocked(err)
 	if err == nil && g != nil && g.GoalID == expected {
 		c.remainders[expected] = total % time.Second
 	}
@@ -348,6 +401,7 @@ func (c *Controller) AccountDuration(expected string, tokens int64, elapsed time
 func (c *Controller) Account(expected string, tokens, seconds int64) (*protocol.ThreadGoal, bool, error) {
 	c.mu.Lock()
 	g, cross, err := c.goalStore().AccountGoal(expected, tokens, seconds, nil)
+	err = c.enrichConflictLocked(err)
 	emit := c.emit
 	c.mu.Unlock()
 	if err == nil && g != nil && g.GoalID == expected {

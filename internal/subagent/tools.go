@@ -30,6 +30,16 @@ func Tools(m *Manager, caller Caller) []tools.Tool {
 }
 
 func (t *managerTool) Schema() protocol.ToolSchema { return toolSchemas[t.name] }
+
+func (t *managerTool) PlanModeConditional() bool {
+	switch t.name {
+	case "spawn_agent", "followup_task", "resume_agent":
+		return true
+	default:
+		return false
+	}
+}
+
 func (t *managerTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {
 	if t.manager == nil {
 		return tools.ErrorResult(ErrNotReady), nil

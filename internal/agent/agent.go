@@ -100,6 +100,9 @@ type Options struct {
 	// CollaborationMode selects Default or Plan behavior. Empty restores the
 	// branch state, then falls back to Default.
 	CollaborationMode protocol.CollaborationMode
+	// ModeTransitionGuard lets the application reject a mode transition when
+	// another runtime subsystem cannot honor the requested boundary.
+	ModeTransitionGuard func(from, to protocol.CollaborationMode) error
 	// PlanThinking overrides reasoning effort while in Plan mode. Nil uses
 	// Medium when advertised, otherwise the configured effort/Off.
 	PlanThinking *protocol.ThinkingLevel
@@ -215,6 +218,10 @@ type Agent struct {
 	autoPending        bool
 	autoEmpty          int
 	autoEmptyGoal      string
+	autoConflictCount  int
+	autoConflictGoal   string
+	autoConflictKey    string
+	turnGoalConflict   *goalpkg.ConflictDetails
 	autoDone           chan struct{}
 	autoWG             sync.WaitGroup
 	turnWG             sync.WaitGroup

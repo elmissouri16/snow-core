@@ -2,6 +2,7 @@ package session
 
 import (
 	"database/sql"
+	"errors"
 	"math"
 	"path/filepath"
 	"runtime"
@@ -55,7 +56,7 @@ func exerciseGoals(t *testing.T, st Store) {
 		t.Fatalf("resumed transition=%+v err=%v", resumed, err)
 	}
 	got, cross, err := gs.AccountGoal("stale", 10, 1, nil)
-	if err != nil || cross || got.GoalID != "g1" || got.TokensUsed != 0 {
+	if !errors.Is(err, ErrGoalConflict) || cross || got.GoalID != "g1" || got.TokensUsed != 0 {
 		t.Fatalf("stale account=%+v %v %v", got, cross, err)
 	}
 	got, cross, err = gs.AccountGoal("g1", 10, 2, &protocol.Cost{Currency: "usd", Input: 0.01, Output: 0.02, Total: 0.03})

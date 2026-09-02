@@ -659,11 +659,17 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		ReasoningSummary:          reasoningSummary,
 		TextVerbosity:             textVerbosity,
 		CollaborationMode:         initialMode,
-		PlanThinking:              planThinking,
-		Goal:                      goalController,
-		SkillNames:                skillNames,
-		Artifacts:                 artifactStore,
-		Retry:                     agentRetryOptions(cfg.Retry),
+		ModeTransitionGuard: func(_, to protocol.CollaborationMode) error {
+			if to == protocol.ModePlan && subManager != nil {
+				return subManager.ValidatePlanTransition()
+			}
+			return nil
+		},
+		PlanThinking: planThinking,
+		Goal:         goalController,
+		SkillNames:   skillNames,
+		Artifacts:    artifactStore,
+		Retry:        agentRetryOptions(cfg.Retry),
 		Compaction: agent.CompactionOptions{RetainTokens: cfg.Compaction.RetainTokens, MinRetainedTurns: cfg.Compaction.MinRetainedTurns,
 			SummaryMaxTokens: cfg.Compaction.SummaryMaxTokens, Fallback: cfg.Compaction.Fallback, Guidance: cfg.Compaction.Guidance,
 			AutoThresholdPercent: cfg.Compaction.AutoThresholdPercent, ToolHistoryBudgetPercent: cfg.Compaction.ToolHistoryBudgetPercent,

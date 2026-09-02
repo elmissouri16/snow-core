@@ -601,6 +601,7 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 	a.turnUsage = protocol.Usage{}
 	a.usageSet = false
 	a.turnProgress = false
+	a.turnGoalConflict = nil
 	runCtx, cancel := context.WithCancel(ctx)
 	a.activeCancel = cancel
 	a.activeDone = make(chan struct{})

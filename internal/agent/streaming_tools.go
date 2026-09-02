@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
 	"github.com/elmissouri16/snow-core/internal/permission"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/tools"
@@ -125,9 +126,6 @@ streamLoop:
 			}
 			toolCalls[ev.ToolCallID] = cb
 		case protocol.EvStreamToolCallDone:
-			a.mu.Lock()
-			a.turnProgress = true
-			a.mu.Unlock()
 			toolDone[ev.ToolCallID] = true
 			cb, ok := toolCalls[ev.ToolCallID]
 			if !ok {
@@ -678,6 +676,23 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		}
 		return msg, false, nil
 	}
+	metadata, ok := tools.Metadata(a.opts.Registry, cb.Name)
+	if !ok {
+		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
+			[]protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("Error: tool metadata unavailable for %q", cb.Name))}, true)
+		if err := a.appendToolResult(parent, msg); err != nil {
+			return msg, false, err
+		}
+		return msg, false, nil
+	}
+	if !collaborationToolAllowed(mode, metadata) {
+		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
+			[]protocol.ContentBlock{protocol.NewTextBlock(collaborationToolDeniedMessage(cb.Name))}, true)
+		if err := a.appendToolResult(parent, msg); err != nil {
+			return msg, false, err
+		}
+		return msg, false, nil
+	}
 	if cb.Name == "deactivate_skill" {
 		_, batchOK := a.opts.Session.(session.BatchStore)
 		_, branchOK := a.opts.Session.(session.BranchEntryStore)
@@ -753,6 +768,7 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 	if err := a.appendToolResult(parent, msg, tr.Details); err != nil {
 		return msg, true, err
 	}
+	a.recordToolOutcome(tr)
 	if !tr.IsError {
 		a.applyDiscoveryDetails(tr.Details)
 		a.applySkillActivationDetails(tr.Details)
@@ -760,6 +776,25 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		a.applyPlanUpdateDetails(tr.Details)
 	}
 	return msg, true, nil
+}
+
+func (a *Agent) recordToolOutcome(result tools.ToolResult) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !result.IsError {
+		a.turnProgress = true
+		return
+	}
+	switch details := result.Details.(type) {
+	case goalpkg.ConflictDetails:
+		copy := details
+		a.turnGoalConflict = &copy
+	case *goalpkg.ConflictDetails:
+		if details != nil {
+			copy := *details
+			a.turnGoalConflict = &copy
+		}
+	}
 }
 
 func (a *Agent) applyPlanUpdateDetails(details any) {

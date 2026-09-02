@@ -12,6 +12,53 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+func TestSetSessionRebindsGoalControllerProjection(t *testing.T) {
+	a, err := New(t.Context(), Options{Provider: "fake", Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	before := a.Goal.Binding()
+
+	next := session.NewMemoryStore(session.Options{CWD: t.TempDir()})
+	now := time.Now().UnixMilli()
+	nextGoal := protocol.ThreadGoal{
+		GoalID:    "goal-11111111111111111111111111111111",
+		Objective: "complete after rebind",
+		Status:    protocol.GoalActive,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := next.CreateGoal(nextGoal, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := next.SetGoalContinuationDeferred(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetSession(next); err != nil {
+		t.Fatal(err)
+	}
+
+	binding := a.Goal.Binding()
+	if binding.Generation != before.Generation+1 || binding.SessionID != next.ID() || binding.BranchID != "main" {
+		t.Fatalf("binding before=%+v after=%+v", before, binding)
+	}
+	current, err := a.GoalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current == nil || current.GoalID != nextGoal.GoalID || current.SessionID != next.ID() || current.BranchID != "main" {
+		t.Fatalf("goal after rebind=%+v", current)
+	}
+	completed, err := a.Goal.SetStatus(nextGoal.GoalID, protocol.GoalComplete, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != protocol.GoalComplete {
+		t.Fatalf("completed goal=%+v", completed)
+	}
+}
+
 func TestGoalRequiresSavedSessionAndCapabilities(t *testing.T) {
 	a, e := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
 	if e != nil {

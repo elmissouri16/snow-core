@@ -791,6 +791,14 @@ deferred `webfetch` is filtered in deny mode. Unknown tool names return a
 consecutive repeats are advisory-loop-guarded without changing permission or
 execution policy.
 
+Tool descriptors separately carry a normalized effect (`read_only`,
+`mutating`, or `conditional`). Plan Mode uses one shared effect policy for both
+schema exposure and authoritative pre-dispatch enforcement, before the
+permission broker; permission approval cannot override a Plan denial. Missing
+effects derive conservatively from risk, arbitrary Bash is mutating, and
+conditional delegation is revalidated by the owning subagent manager against
+the resolved child capabilities.
+
 ```go
 type Mode string // ask | allow | deny
 
@@ -909,6 +917,15 @@ tables (persistent Thread Goals), and `subagent_threads` (child topology).
 Forks copy branch state, goal estimates, managed objective resources, and
 subagent topology where applicable. WAL transactions and indexed branch
 queries keep open and reload bounded; opening never performs a full scan.
+
+Goal mutations use one typed optimistic-conflict contract across controller,
+memory, and SQLite layers. Conflicts expose only current goal/session/branch
+identity plus a controller binding generation, allowing `update_goal` to direct
+a deterministic refresh without leaking objective text or store paths. Tool
+progress is recorded only after successful durable results. Three consecutive
+automatic turns with the same unresolved terminal conflict first defer and then
+pause the still-current goal, preventing unbounded reinjection even when the
+assistant emits explanatory text.
 
 Each durably admitted user, automatic-goal, or child-agent run appends one
 `agent_turn_v1` metadata marker before provider execution. Each logical
@@ -1127,7 +1144,10 @@ consume a slot. Depth defaults to one and is bounded up to eight. Child
 authority is role-scoped: the `general` and `implementer` roles may use
 permission-gated `bash`, while `explorer` remains read/search-only. Recursion
 and file mutation are independent intersections of global and role policy;
-write/edit require both mutation switches. Child system prompts are assembled
+write/edit require both mutation switches. In root Plan Mode, spawn, follow-up,
+and resume validate the resolved tool profile and persisted role fingerprint;
+role names do not bypass Bash/write/unknown-capability rejection. Child system
+prompts are assembled
 from the finalized child registry: MCP, process, shell, mutation, and recursive
 delegation guidance is included only when the corresponding capability is
 present. Root startup validates the active and explicitly configured child

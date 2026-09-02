@@ -84,6 +84,13 @@ type Tool interface {
 	Run(ctx context.Context, args json.RawMessage, host ToolHost) (ToolResult, error)
 }
 
+// PlanModeConditionalTool marks a conditional-effect tool whose owning
+// subsystem performs an authoritative Plan-mode check before changing state.
+// Unmarked conditional tools fail closed in Plan mode.
+type PlanModeConditionalTool interface {
+	PlanModeConditional() bool
+}
+
 // ToolMatch is compact router output. Full JSON schemas and executable tool
 // handlers remain in Registry and are loaded only after selection.
 type ToolMatch struct {
@@ -149,6 +156,16 @@ const (
 	SourceSDK      Source = "sdk"
 )
 
+// ToolEffect classifies whether a tool may change external or durable state.
+// Collaboration policies use it independently from operator-facing risk.
+type ToolEffect string
+
+const (
+	EffectReadOnly    ToolEffect = "read_only"
+	EffectMutating    ToolEffect = "mutating"
+	EffectConditional ToolEffect = "conditional"
+)
+
 // ToolDescriptor keeps host-only registration metadata alongside the adapter.
 type ToolDescriptor struct {
 	Schema       ToolSchema
@@ -158,6 +175,7 @@ type ToolDescriptor struct {
 	PluginID     string
 	OriginalName string
 	Risk         permission.Risk
+	Effect       ToolEffect
 	Capabilities []string
 	Prompt       string
 }
@@ -171,6 +189,8 @@ type DescriptorMetadata struct {
 	Source       Source
 	Owner        string
 	Risk         permission.Risk
+	Effect       ToolEffect
+	PlanGuarded  bool
 	Deferred     bool
 	Namespace    string
 	Keywords     []string
@@ -369,6 +389,12 @@ func normalizeDescriptor(desc ToolDescriptor) (ToolDescriptor, error) {
 	}
 	if desc.Risk == "" || !validRisk(desc.Risk) {
 		desc.Risk = defaultRisk(desc.Schema.Name)
+	}
+	if desc.Effect == "" {
+		desc.Effect = effectForRisk(desc.Risk)
+	}
+	if !validEffect(desc.Effect) {
+		return ToolDescriptor{}, fmt.Errorf("tool %q has invalid effect %q", desc.Schema.Name, desc.Effect)
 	}
 	if desc.OriginalName == "" {
 		desc.OriginalName = desc.Schema.Name
@@ -590,8 +616,11 @@ func MetadataFromDescriptor(desc ToolDescriptor) DescriptorMetadata {
 
 func descriptorMetadata(desc ToolDescriptor) DescriptorMetadata {
 	metadata := DescriptorMetadata{
-		Name: desc.Schema.Name, OriginalName: desc.OriginalName, Description: desc.Schema.Description, Source: desc.Source, Owner: desc.Owner, Risk: desc.Risk,
+		Name: desc.Schema.Name, OriginalName: desc.OriginalName, Description: desc.Schema.Description, Source: desc.Source, Owner: desc.Owner, Risk: desc.Risk, Effect: desc.Effect,
 		Deferred: IsDeferred(desc), Capabilities: cloneStrings(desc.Capabilities),
+	}
+	if guarded, ok := desc.Tool.(PlanModeConditionalTool); ok {
+		metadata.PlanGuarded = guarded.PlanModeConditional()
 	}
 	if desc.Schema.Discovery != nil {
 		metadata.Namespace = desc.Schema.Discovery.Namespace
@@ -710,6 +739,26 @@ func CloneRegistry(src Registry, allow func(DescriptorMetadata) bool) (*SimpleRe
 		}
 	}
 	return out, nil
+}
+
+func validEffect(effect ToolEffect) bool {
+	switch effect {
+	case EffectReadOnly, EffectMutating, EffectConditional:
+		return true
+	default:
+		return false
+	}
+}
+
+func effectForRisk(risk permission.Risk) ToolEffect {
+	switch risk {
+	case permission.RiskRead:
+		return EffectReadOnly
+	case permission.RiskDelegate:
+		return EffectConditional
+	default:
+		return EffectMutating
+	}
 }
 
 func defaultRisk(name string) permission.Risk {

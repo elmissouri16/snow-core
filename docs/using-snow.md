@@ -511,10 +511,13 @@ are always treated as instructions, independently from project-extension trust.
 Default and Plan are collaboration modes, not session types. Mode is persisted
 per branch.
 
-- Plan Mode instructs the model not to mutate and emits a structured proposed
-  plan. It removes mode-specific incompatible aliases/checklists, but ordinary
-  `write`, `edit`, `bash`, plugin, and MCP capabilities remain exposed behind
-  their normal permission gates. It is not a sandbox.
+- Plan Mode instructs the model not to mutate, emits a structured proposed
+  plan, and enforces a non-mutation check both when tools are exposed and before
+  final dispatch. Permission approval cannot override it. Reads remain
+  available; file writes, arbitrary Bash, process lifecycle changes, mutating
+  or unclassified extensions, and mutation-capable child work require an
+  explicit transition to Default. This application policy is not an OS
+  sandbox.
 - Leaving Plan for Default automatically and durably clears active Agent Skills,
   whether the transition uses Shift+Tab, `/default`, the implementation picker,
   SDK/RPC mode control, or an atomic Default-mode prompt. No manual clear is

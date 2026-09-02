@@ -209,11 +209,16 @@ All child roles exclude goals, user-input tools, network tools, plugins, and
 Model Context Protocol (MCP). Mutation requires both
 `subagents.allow_mutation=true` and a role with `allow_mutation=true`; a
 parent `Tools` allowlist remains an upper bound.
-While the root is in Plan mode, `spawn_agent` permits only an `explorer` role
-whose policy remains read-only; other roles are rejected. Bash is not
-sandboxed and can mutate the shared workspace or OS, so `ask` prompts through
-the attributed TUI first-in, first-out (FIFO) broker, `allow` runs it, and
-`deny` rejects it.
+While the root is in Plan mode, child admission uses the role's resolved tool
+profile rather than its name. Spawn, messaging, follow-up, and resume reject
+profiles with Bash, write/edit, inherited shell capability, recursive
+delegation, or unknown tools; an explicitly read-only custom role is allowed
+even when it is not named `explorer`. Entering Plan Mode is rejected while
+mutation-capable child work is already active. Persisted role fingerprints are
+rechecked before reuse. Bash is not sandboxed
+and can mutate the shared workspace or OS, so outside Plan Mode `ask` prompts
+through the attributed TUI first-in, first-out (FIFO) broker, `allow` runs it,
+and `deny` rejects it.
 Headless ask without a trusted SDK/RPC broker or handler remains
 deny-by-default. Read-only children may use a deny-all service because
 read-risk calls are always allowed. Child `ask_user`

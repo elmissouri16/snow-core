@@ -235,6 +235,11 @@ func (a *Agent) SetMode(mode protocol.CollaborationMode) error {
 	if running && !automaticGoalTurn {
 		return errors.New("agent: cannot switch collaboration mode while running")
 	}
+	if parsed != previousMode && a.opts.ModeTransitionGuard != nil {
+		if err := a.opts.ModeTransitionGuard(previousMode, parsed); err != nil {
+			return fmt.Errorf("agent: collaboration mode transition: %w", err)
+		}
+	}
 	stoppedAutomatic := parsed == protocol.ModePlan && wasAutomatic
 	resumeAfterFailure := func(err error) error {
 		if stoppedAutomatic {

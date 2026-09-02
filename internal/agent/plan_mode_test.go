@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -354,6 +355,34 @@ func TestToolGateUsesCapturedTurnMode(t *testing.T) {
 	}
 }
 
+func TestModeTransitionGuardCoversDirectAndAtomicPromptTransitions(t *testing.T) {
+	st := session.NewMemoryStore(session.Options{})
+	a := newPlanAgent(t, &scriptedProvider{}, tools.NewRegistry(), st)
+	if err := a.SetMode(protocol.ModeDefault); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	a.opts.ModeTransitionGuard = func(from, to protocol.CollaborationMode) error {
+		calls++
+		if from == protocol.ModeDefault && to == protocol.ModePlan {
+			return errors.New("unsafe child active")
+		}
+		return nil
+	}
+	if err := a.SetMode(protocol.ModePlan); err == nil || !strings.Contains(err.Error(), "unsafe child active") {
+		t.Fatalf("direct transition error=%v", err)
+	}
+	if a.Mode() != protocol.ModeDefault {
+		t.Fatalf("direct rejected transition changed mode to %s", a.Mode())
+	}
+	if err := a.PromptWithMode(t.Context(), "plan atomically", protocol.ModePlan); !errors.Is(err, ErrPromptRejected) || !strings.Contains(err.Error(), "unsafe child active") {
+		t.Fatalf("atomic transition error=%v", err)
+	}
+	if a.Mode() != protocol.ModeDefault || calls != 2 {
+		t.Fatalf("mode=%s guard calls=%d", a.Mode(), calls)
+	}
+}
+
 func TestSessionAndBranchSwitchesRejectRunningAtomically(t *testing.T) {
 	oldStore := session.NewMemoryStore(session.Options{})
 	a := newPlanAgent(t, &scriptedProvider{}, nil, oldStore)
@@ -502,4 +531,134 @@ func sessionMessageTextForTest(msg protocol.Message) string {
 		b.WriteString(block.Text)
 	}
 	return b.String()
+}
+
+type planGuardedTestTool struct{ *testTool }
+
+func (*planGuardedTestTool) PlanModeConditional() bool { return true }
+
+func TestPlanModeConditionalToolsRequireRegisteredGuard(t *testing.T) {
+	registry := tools.NewRegistry()
+	unguarded := &testTool{name: "unguarded", schema: protocol.ToolSchema{Name: "unguarded", Parameters: []byte(`{"type":"object"}`)}, runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+		return tools.TextResult("unexpected")
+	}}
+	if err := registry.RegisterDescriptor(tools.ToolDescriptor{Schema: unguarded.Schema(), Tool: unguarded, Source: tools.SourceSDK, Owner: "test", Risk: permission.RiskDelegate, Effect: tools.EffectConditional}); err != nil {
+		t.Fatal(err)
+	}
+	guardedBase := &testTool{name: "guarded", schema: protocol.ToolSchema{Name: "guarded", Parameters: []byte(`{"type":"object"}`)}, runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+		return tools.TextResult("ok")
+	}}
+	guarded := &planGuardedTestTool{testTool: guardedBase}
+	if err := registry.RegisterDescriptor(tools.ToolDescriptor{Schema: guarded.Schema(), Tool: guarded, Source: tools.SourceBuiltin, Owner: "test", Risk: permission.RiskDelegate, Effect: tools.EffectConditional}); err != nil {
+		t.Fatal(err)
+	}
+
+	a := newPlanAgent(t, &scriptedProvider{}, registry, session.NewMemoryStore(session.Options{}))
+	schemas := a.requestToolSchemas()
+	if len(schemas) != 1 || schemas[0].Name != "guarded" {
+		t.Fatalf("Plan schemas = %+v, want only guarded", schemas)
+	}
+	call := protocol.ContentBlock{Type: protocol.BlockToolCall, ToolCallID: "unguarded-call", Name: "unguarded", Arguments: []byte(`{}`)}
+	msg, dispatched, err := a.executeOne(t.Context(), call, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dispatched || !msg.IsError || !strings.Contains(sessionMessageTextForTest(msg), "blocked in Plan mode") {
+		t.Fatalf("dispatched=%v result=%q error=%v", dispatched, sessionMessageTextForTest(msg), msg.IsError)
+	}
+}
+
+func TestPlanModeEffectPolicyHidesAndRejectsMutation(t *testing.T) {
+	registry := tools.NewRegistry()
+	runs := 0
+	mutating := &testTool{
+		name:   "mutate",
+		schema: protocol.ToolSchema{Name: "mutate", Parameters: []byte(`{"type":"object"}`)},
+		runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+			runs++
+			return tools.TextResult("mutated")
+		},
+	}
+	if err := registry.RegisterDescriptor(tools.ToolDescriptor{Schema: mutating.Schema(), Tool: mutating, Source: tools.SourceBuiltin, Owner: "test", Risk: permission.RiskExec, Effect: tools.EffectMutating}); err != nil {
+		t.Fatal(err)
+	}
+	readOnly := &testTool{
+		name:    "inspect",
+		schema:  protocol.ToolSchema{Name: "inspect", Parameters: []byte(`{"type":"object"}`)},
+		runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult { return tools.TextResult("ok") },
+	}
+	if err := registry.RegisterDescriptor(tools.ToolDescriptor{Schema: readOnly.Schema(), Tool: readOnly, Source: tools.SourceBuiltin, Owner: "test", Risk: permission.RiskRead, Effect: tools.EffectReadOnly}); err != nil {
+		t.Fatal(err)
+	}
+
+	st := session.NewMemoryStore(session.Options{})
+	a := newPlanAgent(t, &scriptedProvider{}, registry, st)
+	schemas := a.requestToolSchemas()
+	if len(schemas) != 1 || schemas[0].Name != "inspect" {
+		t.Fatalf("Plan schemas = %+v, want only inspect", schemas)
+	}
+
+	call := protocol.ContentBlock{Type: protocol.BlockToolCall, ToolCallID: "mutating-call", Name: "mutate", Arguments: []byte(`{}`)}
+	msg, dispatched, err := a.executeOne(t.Context(), call, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dispatched || runs != 0 || !msg.IsError || !strings.Contains(sessionMessageTextForTest(msg), "blocked in Plan mode") {
+		t.Fatalf("dispatched=%v runs=%d result=%q error=%v", dispatched, runs, sessionMessageTextForTest(msg), msg.IsError)
+	}
+}
+
+func TestPlanModeBlocksArbitraryBashWithAllowPermission(t *testing.T) {
+	registry := tools.NewRegistry()
+	runs := 0
+	bashTool := &testTool{
+		name:   "bash",
+		schema: protocol.ToolSchema{Name: "bash", Parameters: []byte(`{"type":"object"}`)},
+		runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+			runs++
+			return tools.TextResult("ran")
+		},
+	}
+	if err := registry.Register(bashTool); err != nil {
+		t.Fatal(err)
+	}
+	st := session.NewMemoryStore(session.Options{})
+	a := newPlanAgent(t, &scriptedProvider{}, registry, st)
+	call := protocol.ContentBlock{Type: protocol.BlockToolCall, ToolCallID: "bash-call", Name: "bash", Arguments: []byte(`{"command":"touch forbidden"}`)}
+	msg, dispatched, err := a.executeOne(t.Context(), call, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dispatched || runs != 0 || !msg.IsError || !strings.Contains(sessionMessageTextForTest(msg), "blocked in Plan mode") {
+		t.Fatalf("dispatched=%v runs=%d result=%q error=%v", dispatched, runs, sessionMessageTextForTest(msg), msg.IsError)
+	}
+}
+
+func TestPlanModeEffectGateUsesCapturedTurnMode(t *testing.T) {
+	registry := tools.NewRegistry()
+	runs := 0
+	tool := &testTool{
+		name:   "mutate",
+		schema: protocol.ToolSchema{Name: "mutate", Parameters: []byte(`{"type":"object"}`)},
+		runFunc: func(context.Context, json.RawMessage, tools.ToolHost) tools.ToolResult {
+			runs++
+			return tools.TextResult("mutated")
+		},
+	}
+	if err := registry.RegisterDescriptor(tools.ToolDescriptor{Schema: tool.Schema(), Tool: tool, Source: tools.SourceBuiltin, Owner: "test", Risk: permission.RiskExec, Effect: tools.EffectMutating}); err != nil {
+		t.Fatal(err)
+	}
+	a := newPlanAgent(t, &scriptedProvider{}, registry, session.NewMemoryStore(session.Options{}))
+	a.mu.Lock()
+	a.mode = protocol.ModeDefault
+	a.turnMode = protocol.ModePlan
+	a.mu.Unlock()
+	call := protocol.ContentBlock{Type: protocol.BlockToolCall, ToolCallID: "captured-effect", Name: "mutate", Arguments: []byte(`{}`)}
+	msg, dispatched, err := a.executeOne(t.Context(), call, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dispatched || runs != 0 || !msg.IsError {
+		t.Fatalf("captured Plan gate dispatched=%v runs=%d error=%v", dispatched, runs, msg.IsError)
+	}
 }

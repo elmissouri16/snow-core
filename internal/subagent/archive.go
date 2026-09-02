@@ -114,6 +114,9 @@ func (m *Manager) ResumeAgent(ctx context.Context, caller Caller, target string)
 	if ref.Path == protocol.RootAgentPath || ref.Path == caller.Path {
 		return protocol.SubagentState{}, errors.New("subagents: cannot resume root or self")
 	}
+	if err := m.requirePlanSafeTarget(caller, r); err != nil {
+		return protocol.SubagentState{}, err
+	}
 	return m.resumeRuntime(r)
 }
 
