@@ -178,6 +178,56 @@ func TestGoalAutoCompactsInsideSingleToolChain(t *testing.T) {
 	}
 }
 
+func TestGoalAutoCompactsCompletedCyclesAfterLongSingleTurnStops(t *testing.T) {
+	p := &scriptedProvider{}
+	a, c, st := goalAgent(t, p)
+	priorUser := protocol.NewUserMessage("prior-user", "", "start the long-running goal")
+	priorAssistant := protocol.NewAssistantMessage("prior-assistant", priorUser.ID, "scripted", "m1", []protocol.ContentBlock{protocol.NewTextBlock("goal started")}, protocol.StopStop, nil)
+	for _, message := range []protocol.Message{priorUser, priorAssistant} {
+		if err := st.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.model.ContextWindow = 100
+	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 128, Fallback: "local", AutoThresholdPercent: 90}
+	g, err := c.Create("compact the completed tool cycles and continue", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.scripts = [][]protocol.StreamEvent{
+		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "check-1", ToolName: "get_goal", Arguments: []byte(`{}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "check-2", ToolName: "get_goal", Arguments: []byte(`{}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "check-3", ToolName: "get_goal", Arguments: []byte(`{}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+		{{Type: protocol.EvStreamTextDelta, Text: "long turn finished"}, {Type: protocol.EvStreamUsage, Usage: &protocol.Usage{Input: 90, Output: 1, Total: 91}}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+		{{Type: protocol.EvStreamTextDelta, Text: "goal summary"}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "done", ToolName: "update_goal", Arguments: []byte(`{"goal_id":"` + g.GoalID + `","status":"complete"}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
+		{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
+	}
+
+	a.ContinueGoal()
+	deadline := time.Now().Add(3 * time.Second)
+	for a.IsRunning() || func() bool { a.mu.RLock(); defer a.mu.RUnlock(); return a.autoRunning }() {
+		if time.Now().After(deadline) {
+			t.Fatal("completed-cycle auto-compaction did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	goal, err := c.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if goal.Status != protocol.GoalComplete || p.call != 7 {
+		t.Fatalf("goal=%+v calls=%d requests=%+v", goal, p.call, p.requests)
+	}
+	if !strings.Contains(p.requests[4].System, "working-state checkpoint") {
+		t.Fatalf("fifth request was not compaction summary: %q", p.requests[4].System)
+	}
+	continued := p.requests[5].Messages
+	if len(continued) == 0 || continued[0].Role != protocol.RoleCustom {
+		t.Fatalf("continued goal lacks compacted checkpoint: %+v", continued)
+	}
+}
+
 func TestGoalAutoCompactionBlocksWhenNoTurnsCanBeCompacted(t *testing.T) {
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
 		{Type: protocol.EvStreamTextDelta, Text: "working"},

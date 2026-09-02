@@ -15,7 +15,10 @@ import (
 )
 
 // PlannerWithOptions finds a prefix to compact while retaining complete recent
-// user turns. Tool calls and results remain in the same turn by construction.
+// turns. Tool calls and results remain in the same retained unit by
+// construction. Assistant-originated goal turns may fall back to retaining
+// complete recent tool cycles when one oversized goal turn leaves no ordinary
+// turn prefix to compact.
 func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
 	if opts.MinRetainedTurns < 1 {
 		opts.MinRetainedTurns = 2
@@ -24,16 +27,36 @@ func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
 		opts.RetainTokens = 8 * 1024
 	}
 	if len(msgs) <= 1 {
-		return Plan{EstimatedTokens: estimateTokens(msgs), TotalMessages: len(msgs)}
+		return emptyPlan(msgs)
 	}
-	starts := completeTurnStarts(msgs, opts.AllowActiveToolCycles)
-	suffixTokens := make([]int, len(msgs)+1)
-	for i := len(msgs) - 1; i >= 0; i-- {
-		suffixTokens[i] = suffixTokens[i+1] + estimateMessageTokens(msgs[i])
+
+	turnStarts := completeTurnStarts(msgs)
+	if plan := planAtStarts(msgs, turnStarts, opts); len(plan.CompactionCandidates) > 0 {
+		return plan
 	}
+	if opts.AllowActiveToolCycles {
+		starts := activeToolCycleStarts(msgs, turnStarts)
+		if plan := planAtStarts(msgs, starts, opts); len(plan.CompactionCandidates) > 0 {
+			return plan
+		}
+	}
+	if opts.AllowGoalToolCycles {
+		starts := goalToolCycleStarts(msgs, turnStarts)
+		if plan := planAtStarts(msgs, starts, opts); len(plan.CompactionCandidates) > 0 {
+			return plan
+		}
+	}
+	return emptyPlan(msgs)
+}
+
+func planAtStarts(msgs []protocol.Message, starts []int, opts PlannerOptions) Plan {
 	keep := 0
 	if len(starts) > opts.MinRetainedTurns {
 		keep = starts[len(starts)-opts.MinRetainedTurns]
+		suffixTokens := make([]int, len(msgs)+1)
+		for i := len(msgs) - 1; i >= 0; i-- {
+			suffixTokens[i] = suffixTokens[i+1] + estimateMessageTokens(msgs[i])
+		}
 		for turn := len(starts) - opts.MinRetainedTurns - 1; turn >= 1; turn-- {
 			candidate := starts[turn]
 			if suffixTokens[candidate] > opts.RetainTokens {
@@ -43,8 +66,9 @@ func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
 		}
 	}
 	if keep <= 0 || !toolPairingBalancedAt(msgs, keep) {
-		return Plan{EstimatedTokens: estimateTokens(msgs), TotalMessages: len(msgs)}
+		return emptyPlan(msgs)
 	}
+
 	plan := Plan{KeepFrom: keep, CompactionCandidates: msgs[:keep], TotalMessages: len(msgs)}
 	plan.EstimatedTokens = estimateTokens(plan.CompactionCandidates)
 	for i := len(plan.CompactionCandidates) - 1; i >= 0; i-- {
@@ -55,71 +79,92 @@ func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
 		}
 	}
 	if plan.BoundaryID == "" {
-		return Plan{EstimatedTokens: estimateTokens(msgs), TotalMessages: len(msgs)}
+		return emptyPlan(msgs)
 	}
 	return plan
 }
 
-// completeTurnStarts returns boundaries that can safely begin retained provider
-// context. User and mailbox messages always begin a turn. Private goal turns do
-// not append another user message, so an assistant message after a terminal
-// assistant response also begins a turn. During an active long-running turn,
-// an assistant request after a complete tool result is also a safe cycle
-// boundary: the preceding call/result pair remains wholly in the compacted
-// prefix and the retained suffix starts with another complete pair.
-func completeTurnStarts(msgs []protocol.Message, allowActiveToolCycles bool) []int {
+func emptyPlan(msgs []protocol.Message) Plan {
+	return Plan{EstimatedTokens: estimateTokens(msgs), TotalMessages: len(msgs)}
+}
+
+// completeTurnStarts returns complete-turn boundaries in provider context.
+// User and mailbox messages begin explicit turns. Automatic goal turns have no
+// synthetic user message, so an assistant at the beginning of projected
+// history or immediately after a terminal assistant is an implicit turn start.
+func completeTurnStarts(msgs []protocol.Message) []int {
 	starts := make([]int, 0)
-	for i, msg := range msgs {
+	first := 0
+	if len(msgs) > 0 && msgs[0].Role == protocol.RoleCustom {
+		first = 1
+	}
+	if first < len(msgs) && msgs[first].Role == protocol.RoleAssistant {
+		starts = append(starts, first)
+	}
+	for i := first; i < len(msgs); i++ {
+		msg := msgs[i]
 		switch msg.Role {
 		case protocol.RoleUser, protocol.RoleAgent:
 			starts = append(starts, i)
 		case protocol.RoleAssistant:
-			if i > 0 && msgs[i-1].Role == protocol.RoleAssistant && msgs[i-1].StopReason != protocol.StopToolUse {
+			if i > first && terminalAssistant(msgs[i-1]) {
 				starts = append(starts, i)
 			}
 		}
 	}
-	if !allowActiveToolCycles {
-		return starts
-	}
+	return starts
+}
 
-	// Prefix-only projection cannot compact an early cycle in the active turn
-	// without also compacting every older message. If exact prior turns are still
-	// present, doing so would let cycle boundaries consume the configured recent-
-	// turn floor. Restrict intra-turn planning to a context containing only the
-	// active turn, or to its already-compacted checkpoint projection.
-	activeStart := -1
-	switch {
-	case len(msgs) > 0 && msgs[0].Role == protocol.RoleCustom:
-		// A projected checkpoint may be followed by exact retained goal turns.
-		// Any ordinary start after the marker usually proves such a turn remains,
-		// so prefix-only compaction cannot consume it as an active cycle. The one
-		// safe exception is a fresh user/mailbox turn directly parented to the
-		// marker, with no intervening retained message.
-		switch {
-		case len(starts) == 0:
-			activeStart = 0
-		case len(starts) == 1 && starts[0] == 1 && messageDirectlyParentsCheckpoint(msgs[1], msgs[0]):
-			activeStart = 1
-		default:
-			return starts
-		}
-	case len(starts) == 1:
-		activeStart = starts[0]
-	default:
-		return starts
+func terminalAssistant(message protocol.Message) bool {
+	return message.Role == protocol.RoleAssistant && message.StopReason != protocol.StopToolUse && message.StopReason != protocol.StopPending
+}
+
+// activeToolCycleStarts adds safe call/result-cycle boundaries only when doing
+// so cannot consume an exact retained prior turn. The one checkpoint exception
+// is a fresh turn directly parented to that checkpoint.
+func activeToolCycleStarts(msgs []protocol.Message, turnStarts []int) []int {
+	if len(turnStarts) != 1 {
+		return turnStarts
 	}
-	for i := activeStart + 1; i < len(msgs); i++ {
+	activeStart := turnStarts[0]
+	if len(msgs) > 0 && msgs[0].Role == protocol.RoleCustom && (activeStart != 1 || !messageDirectlyParentsCheckpoint(msgs[activeStart], msgs[0])) {
+		return turnStarts
+	}
+	return appendToolCycleStarts(msgs, turnStarts, activeStart)
+}
+
+// goalToolCycleStarts is the pressure fallback for an assistant-originated
+// automatic goal turn. Such a turn has no exact user objective in provider
+// history: the active goal is injected separately on every request. If that
+// single turn grows beyond the context threshold, retaining its newest complete
+// cycles is safer than blocking while an old prefix is still compactable.
+func goalToolCycleStarts(msgs []protocol.Message, turnStarts []int) []int {
+	if len(turnStarts) == 0 {
+		return turnStarts
+	}
+	goalStart := turnStarts[len(turnStarts)-1]
+	if msgs[goalStart].Role != protocol.RoleAssistant {
+		return turnStarts
+	}
+	return appendToolCycleStarts(msgs, turnStarts, goalStart)
+}
+
+// appendToolCycleStarts returns a new ordered boundary slice. Every added
+// boundary begins with an assistant request after a complete tool-result batch,
+// so the prefix ends after whole calls/results and provider-private data remains
+// attached to its owning assistant message.
+func appendToolCycleStarts(msgs []protocol.Message, starts []int, from int) []int {
+	withCycles := slices.Clone(starts)
+	for i := max(from+1, 1); i < len(msgs); i++ {
 		msg := msgs[i]
 		if msg.Role != protocol.RoleAssistant || (msg.StopReason != protocol.StopToolUse && msg.StopReason != protocol.StopPending) {
 			continue
 		}
-		previous := msgs[i-1]
-		if previous.Role == protocol.RoleTool || previous.Role == protocol.RoleCustom {
-			starts = append(starts, i)
+		if msgs[i-1].Role == protocol.RoleTool || msgs[i-1].Role == protocol.RoleCustom {
+			withCycles = append(withCycles, i)
 		}
 	}
-	return starts
+	return withCycles
 }
 
 func messageDirectlyParentsCheckpoint(message, checkpoint protocol.Message) bool {

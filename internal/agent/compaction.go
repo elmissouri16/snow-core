@@ -241,7 +241,8 @@ func (a *Agent) compactionPlannerOptions(model protocol.Model, messages []protoc
 	if minTurns <= 0 {
 		minTurns = 2
 	}
-	if compactionTailIsActive(messages) {
+	activeTail := compactionTailIsActive(messages)
+	if activeTail {
 		// The in-flight user/tool cycle is retained in addition to the configured
 		// number of complete recent turns; it must not consume that quality floor.
 		minTurns++
@@ -249,7 +250,8 @@ func (a *Agent) compactionPlannerOptions(model protocol.Model, messages []protoc
 	return compact.PlannerOptions{
 		RetainTokens:          budget,
 		MinRetainedTurns:      minTurns,
-		AllowActiveToolCycles: compactionTailIsActive(messages),
+		AllowActiveToolCycles: activeTail,
+		AllowGoalToolCycles:   true,
 	}
 }
 

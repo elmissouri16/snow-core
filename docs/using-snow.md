@@ -622,9 +622,12 @@ When invoked during automatic goal work, manual compaction pauses that goal
 after the checkpoint; use `/goal resume` to continue. Every admitted turn may
 auto-compact at a safe top-of-cycle boundary when either total context reaches
 80% by default or safely compactable old tool history reaches 20% of the model
-window. Active and minimum-retained recent tool batches remain exact. Tool calls
-and results are validated as pairs, and opaque provider state is removed only
-with its complete old turn.
+window. Planning normally keeps the configured complete recent turns exact. If
+one assistant-originated automatic goal turn itself becomes oversized, Snow can
+checkpoint its old complete cycles and retain the configured number of newest
+cycles instead, plus an unresolved active cycle; the goal objective remains
+separately injected. Tool calls and results are validated as pairs, and opaque
+provider state is removed only with its complete owning cycle.
 
 Snow also detects identical consecutive tool calls during one admitted run and
 adds advisory reminders after the third, fifth, and eighth repetition. It does

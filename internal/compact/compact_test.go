@@ -69,6 +69,91 @@ func TestPlannerKeepsToolCallsWithResultsAcrossAutonomousTurns(t *testing.T) {
 	}
 }
 
+func TestPlannerCompactsCompletedGoalCyclesAfterTerminalResponse(t *testing.T) {
+	messages := make([]protocol.Message, 0, 7)
+	for i := range 3 {
+		callID := fmtID(i) + "-call"
+		assistant := protocol.NewAssistantMessage(fmtID(i)+"-assistant", "", "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"}}, protocol.StopToolUse, nil)
+		messages = append(messages, assistant)
+		messages = append(messages, protocol.NewToolResultMessage(fmtID(i)+"-result", assistant.ID, callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false))
+	}
+	messages = append(messages, protocol.NewAssistantMessage("terminal", "", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("turn complete")}, protocol.StopStop, nil))
+
+	withoutGoalCycles := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2})
+	if len(withoutGoalCycles.CompactionCandidates) != 0 {
+		t.Fatalf("ordinary planning split a single completed goal turn: %+v", withoutGoalCycles)
+	}
+	plan := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2, AllowGoalToolCycles: true})
+	if plan.KeepFrom != 2 || plan.BoundaryID != "aid-result" || !toolPairingBalancedAt(messages, plan.KeepFrom) {
+		t.Fatalf("goal-only completed-cycle plan=%+v", plan)
+	}
+}
+
+func TestPlannerGoalCycleFallbackHandlesPriorConversationTurn(t *testing.T) {
+	messages := []protocol.Message{
+		mkMsg("prior-user", "", "start the goal"),
+		protocol.NewAssistantMessage("prior-assistant", "", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("goal started")}, protocol.StopStop, nil),
+	}
+	for i := range 3 {
+		callID := fmtID(i) + "-goal-call"
+		assistant := protocol.NewAssistantMessage(fmtID(i)+"-goal-assistant", "", "test", "model", []protocol.ContentBlock{
+			{Type: protocol.BlockProviderData, Name: fmtID(i) + "-state", Data: []byte(`{"opaque":true}`)},
+			{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"},
+		}, protocol.StopToolUse, nil)
+		messages = append(messages, assistant)
+		messages = append(messages, protocol.NewToolResultMessage(fmtID(i)+"-goal-result", assistant.ID, callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false))
+	}
+	messages = append(messages, protocol.NewAssistantMessage("goal-terminal", "", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("turn complete")}, protocol.StopStop, nil))
+
+	plan := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2, AllowGoalToolCycles: true})
+	if plan.KeepFrom != 4 || plan.BoundaryID != "aid-goal-result" || !toolPairingBalancedAt(messages, plan.KeepFrom) {
+		t.Fatalf("prior-turn goal-cycle plan=%+v", plan)
+	}
+	if messages[plan.KeepFrom].ID != "bid-goal-assistant" {
+		t.Fatalf("retained tail starts at %q, want second complete goal cycle", messages[plan.KeepFrom].ID)
+	}
+}
+
+func TestPlannerDoesNotTreatUserTurnCyclesAsGoalFallback(t *testing.T) {
+	messages := []protocol.Message{
+		protocol.NewAssistantMessage("prior-goal", "", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("prior complete goal turn")}, protocol.StopStop, nil),
+		mkMsg("current-user", "", "keep this exact user turn"),
+	}
+	for i := range 3 {
+		callID := fmtID(i) + "-user-call"
+		assistant := protocol.NewAssistantMessage(fmtID(i)+"-user-assistant", "", "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"}}, protocol.StopToolUse, nil)
+		messages = append(messages, assistant)
+		messages = append(messages, protocol.NewToolResultMessage(fmtID(i)+"-user-result", assistant.ID, callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false))
+	}
+	messages = append(messages, protocol.NewAssistantMessage("user-terminal", "", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("turn complete")}, protocol.StopStop, nil))
+
+	plan := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2, AllowGoalToolCycles: true})
+	if len(plan.CompactionCandidates) != 0 {
+		t.Fatalf("goal fallback consumed an exact user-originated turn: %+v", plan)
+	}
+}
+
+func TestPlannerGoalCycleFallbackReplacesExistingCheckpoint(t *testing.T) {
+	checkpoint := protocol.Message{ID: "compaction-marker", Role: protocol.RoleCustom, Content: []protocol.ContentBlock{protocol.NewTextBlock("working state")}}
+	messages := []protocol.Message{checkpoint}
+	for i := range 3 {
+		callID := fmtID(i) + "-checkpoint-call"
+		parent := ""
+		if i == 0 {
+			parent = "marker"
+		}
+		assistant := protocol.NewAssistantMessage(fmtID(i)+"-checkpoint-assistant", parent, "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"}}, protocol.StopToolUse, nil)
+		messages = append(messages, assistant)
+		messages = append(messages, protocol.NewToolResultMessage(fmtID(i)+"-checkpoint-result", assistant.ID, callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false))
+	}
+	messages = append(messages, protocol.NewAssistantMessage("checkpoint-terminal", "", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("turn complete")}, protocol.StopStop, nil))
+
+	plan := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2, AllowGoalToolCycles: true})
+	if plan.KeepFrom != 3 || plan.BoundaryID != "aid-checkpoint-result" || !toolPairingBalancedAt(messages, plan.KeepFrom) {
+		t.Fatalf("checkpoint goal-cycle plan=%+v", plan)
+	}
+}
+
 func TestPlannerCompactsCompletedCyclesInsideActiveToolTurn(t *testing.T) {
 	messages := []protocol.Message{mkMsg("user", "", "long-running objective")}
 	for i := range 5 {
@@ -223,6 +308,62 @@ func TestApplyAppendsSummary(t *testing.T) {
 	}
 	if len(projected) != res.RetainedMessages+1 || projected[0].Role != protocol.RoleCustom {
 		t.Fatalf("projected context = %+v, result = %+v", projected, res)
+	}
+}
+
+func TestGoalCycleFallbackSupportsRepeatedCompaction(t *testing.T) {
+	store := session.NewMemoryStore(session.Options{})
+	appendGoalCycles := func(prefix string, count int) {
+		for i := range count {
+			callID := prefix + "-" + fmtID(i) + "-call"
+			assistant := protocol.NewAssistantMessage(prefix+"-"+fmtID(i)+"-assistant", "", "test", "model", []protocol.ContentBlock{
+				{Type: protocol.BlockProviderData, Name: prefix + "-state", Data: []byte(`{"opaque":true}`)},
+				{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"},
+			}, protocol.StopToolUse, nil)
+			for _, message := range []protocol.Message{
+				assistant,
+				protocol.NewToolResultMessage(prefix+"-"+fmtID(i)+"-result", assistant.ID, callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false),
+			} {
+				if err := store.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		terminal := protocol.NewAssistantMessage(prefix+"-terminal", "", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("turn complete")}, protocol.StopStop, nil)
+		if err := store.Append(session.Entry{Type: session.EntryMessage, ID: terminal.ID, Message: &terminal}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	compactGoalCycles := func(summary string) {
+		messages, err := store.ContextMessages()
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2, AllowGoalToolCycles: true})
+		if len(plan.CompactionCandidates) == 0 || !toolPairingBalancedAt(messages, plan.KeepFrom) {
+			t.Fatalf("%s plan=%+v", summary, plan)
+		}
+		if _, err := Apply(t.Context(), store, func(context.Context, []protocol.Message) (string, error) { return summary, nil }, plan); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	appendGoalCycles("first", 3)
+	compactGoalCycles("first checkpoint")
+	appendGoalCycles("second", 3)
+	compactGoalCycles("second checkpoint")
+
+	projected, err := store.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected) != 6 || projected[0].Role != protocol.RoleCustom || !strings.Contains(projected[0].Content[0].Text, "second checkpoint") {
+		t.Fatalf("repeated projection=%+v", projected)
+	}
+	for _, message := range projected[1:] {
+		if strings.HasPrefix(message.ID, "first-") || message.ID == "second-aid-assistant" || message.ID == "second-aid-result" {
+			t.Fatalf("superseded compacted history resurfaced in projection: %+v", projected)
+		}
 	}
 }
 

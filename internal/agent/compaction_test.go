@@ -54,6 +54,53 @@ func TestManualCompactUsesSummaryAndPreservesHistory(t *testing.T) {
 	}
 }
 
+func TestManualCompactUsesCompletedGoalCyclesAfterPriorTurn(t *testing.T) {
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
+		{Type: protocol.EvStreamTextDelta, Text: "model summary"},
+		{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+	}}}
+	a, store := setup(t, prov, nil, permission.ModeDeny)
+	a.opts.Compaction = CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 128, Fallback: "local"}
+	priorUser := protocol.NewUserMessage("prior-user", "", "start the goal")
+	priorAssistant := protocol.NewAssistantMessage("prior-assistant", priorUser.ID, "scripted", "m1", []protocol.ContentBlock{protocol.NewTextBlock("goal started")}, protocol.StopStop, nil)
+	for _, message := range []protocol.Message{priorUser, priorAssistant} {
+		if err := store.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 3 {
+		callID := fmt.Sprintf("goal-call-%d", i)
+		assistant := protocol.NewAssistantMessage(fmt.Sprintf("goal-assistant-%d", i), "", "scripted", "m1", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"}}, protocol.StopToolUse, nil)
+		for _, message := range []protocol.Message{
+			assistant,
+			protocol.NewToolResultMessage(fmt.Sprintf("goal-result-%d", i), assistant.ID, callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false),
+		} {
+			if err := store.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	terminal := protocol.NewAssistantMessage("goal-terminal", "", "scripted", "m1", []protocol.ContentBlock{protocol.NewTextBlock("turn complete")}, protocol.StopStop, nil)
+	if err := store.Append(session.Entry{Type: session.EntryMessage, ID: terminal.ID, Message: &terminal}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.Compact(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SummarizedMessages != 4 || len(prov.requests) != 1 || len(prov.requests[0].Messages) != 4 {
+		t.Fatalf("manual goal-cycle compaction result=%+v requests=%+v", result, prov.requests)
+	}
+	projected, err := store.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected) != 6 || projected[0].Role != protocol.RoleCustom || projected[1].ID != "goal-assistant-1" {
+		t.Fatalf("manual goal-cycle projection=%+v", projected)
+	}
+}
+
 func TestManualCompactPublishesSessionUpdateBeforeTerminalDone(t *testing.T) {
 	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
 		{Type: protocol.EvStreamTextDelta, Text: "model summary"},

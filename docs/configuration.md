@@ -467,7 +467,7 @@ attempts, elapsed windows up to 24 hours, delays up to 1 hour, and jitter from
 | Field | Range/default | Meaning |
 |---|---|---|
 | `retain_tokens` | `0..1000000`, default `0` | Token target retained after compaction; zero selects a model-aware target |
-| `min_retained_turns` | `1..100`, default `2` | Minimum complete recent turns to preserve |
+| `min_retained_turns` | `1..100`, default `2` | Minimum complete recent turns to preserve when a turn-prefix plan exists; also the recent-cycle floor for the oversized automatic-goal fallback |
 | `summary_max_tokens` | `128..32768`, default `2000` | Maximum provider summary output |
 | `fallback` | `local` | `local` uses deterministic fallback; `error` fails when provider summary generation or quality validation fails |
 | `guidance` | maximum 16 KiB | Additive operator instructions appended to the fixed summary contract |
@@ -487,12 +487,16 @@ retained recent work never counts toward that aggregate trigger. In a single
 long tool-driven turn, completed assistant-call/tool-result cycles may form safe
 checkpoint boundaries when no exact retained prior turn would be consumed,
 allowing old complete cycles to compact while the current and recent cycles
-remain exact. Those cycle boundaries remain eligible after the turn's terminal
-assistant response, so a pressure check between automatic goal turns can
-checkpoint the long turn instead of blocking the goal for lack of an older
-conversation turn. A large unresolved current batch still cannot cause
-unrelated history to be compacted. Each trigger applies to
-ordinary, goal, Plan, and subagent turns; set either to `0`
+remain exact. Those boundaries remain eligible after a terminal assistant
+response. If an assistant-originated automatic goal is itself the oversized
+recent turn and no ordinary complete-turn prefix exists, Snow uses an explicit
+progress fallback: it checkpoints the old prefix and retains
+`min_retained_turns` newest complete goal cycles instead, plus the unresolved
+current cycle while active. The separately injected goal objective remains
+exact. This fallback works with an earlier conversation turn or checkpoint but
+does not reinterpret an exact user-originated recent turn as a goal. A large
+unresolved current batch still cannot cause unrelated history to be compacted.
+Each trigger applies to ordinary, goal, Plan, and subagent turns; set either to `0`
 to disable it. Disabling `auto_threshold_percent` also disables one-shot
 provider context-overflow repair. For upgrade compatibility, an existing file
 that explicitly disables `auto_threshold_percent` (or the legacy goal key) and

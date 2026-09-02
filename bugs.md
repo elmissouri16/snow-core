@@ -376,3 +376,106 @@ Verified on 2026-09-01 with:
 - `cargo check --manifest-path desktop/Cargo.toml --all-targets`
 - `cargo test --manifest-path desktop/Cargo.toml`
 - `git diff --check`
+
+## BUG-009: Long automatic goals can become uncompactionable
+
+- **Status:** Resolved
+- **Severity:** High
+- **Surface:** Automatic goal continuation and context compaction
+- **Observed:** User-provided TUI screenshot showing a blocked goal after 172
+  provider/tool steps
+
+### Expected behavior
+
+A long automatic goal should checkpoint whole completed assistant-call/tool-result
+cycles when context pressure is reached, including after a terminal assistant
+response and after an earlier conversation turn or compaction checkpoint. Snow
+must keep unresolved calls exact, keep provider-private continuity with its
+owning assistant cycle, preserve append-only history, and continue the goal from
+the durable checkpoint.
+
+### Actual behavior and evidence
+
+Automatic goal turns intentionally carry their objective in private internal
+context and do not append a synthetic user message. The compaction planner
+inferred turn starts only from provider-facing messages and enabled intra-turn
+cycle boundaries primarily while the tail still looked active. When provider
+usage first crossed the threshold on a terminal assistant response, a long goal
+could therefore appear to have no compactable older turn even though it
+contained hundreds of complete tool cycles. A prior attempted correction
+recognized assistant-only cycles but still failed when one exact conversation
+turn preceded the long goal: with the default two-turn retention floor, the
+planner again produced no candidates.
+
+The automatic worker treated that planning failure as fatal and durably blocked
+the goal with `context threshold reached but no complete older turns are
+available to compact`. A later manual `/compact` used the same empty plan and
+reported `compact: nothing to compact`.
+
+### Impact
+
+Long-running goals can stop after substantial successful work and require manual
+recovery even though the context contains structurally safe checkpoint
+boundaries. Whether the failure occurs depends on when the provider reports
+usage, whether an earlier turn remains exact, and whether the branch already
+has a compaction checkpoint.
+
+### Reproduction
+
+1. Retain one ordinary user/assistant turn in a session.
+2. Start an automatic goal whose next admitted turn performs at least three
+   complete tool-call/result cycles without a synthetic user message.
+3. Return a terminal assistant response with provider usage at the automatic
+   compaction threshold while leaving the goal active.
+4. Observe automatic compaction return no candidates and block the goal; manual
+   compaction then reports that there is nothing to compact.
+
+### Remediation
+
+Compaction planning now models explicit user/mailbox turns, implicit
+assistant-originated goal turns, and safe completed tool-cycle boundaries in one
+place. It first attempts ordinary complete-turn compaction. Active-cycle
+planning remains constrained so it cannot silently consume exact prior turns.
+If an assistant-originated automatic goal itself is the oversized recent turn
+and the ordinary plan is empty, the planner deliberately falls back to a
+complete-cycle tail: the old prefix becomes a working-state checkpoint while
+the configured number of newest cycles (plus an unresolved active cycle, when
+present) remain exact. The goal objective remains separately injected on every
+request. This is a pressure-specific progress rule, not a relaxation of
+call/result pairing or provider-continuity ownership.
+
+The same model recognizes assistant-first history after an existing checkpoint,
+so repeated compaction replaces the prior checkpoint without resurrecting
+hidden messages. A truly short goal with no complete cycle still fails closed.
+
+### Regression coverage
+
+Focused planner and agent tests cover:
+
+- a threshold-crossing terminal goal turn after a prior conversation turn;
+- goal-only terminal cycles and exact compaction boundaries;
+- an existing checkpoint followed by exactly three completed cycles;
+- repeated goal-cycle compaction without history resurrection;
+- an assistant-only earlier turn followed by a user-originated turn, which must
+  not be mistaken for the goal-cycle fallback;
+- balanced tool pairs and provider-private data on the compacted boundary; and
+- the genuinely uncompactionable short-goal blocker path.
+
+### Resolution evidence
+
+Verified on 2026-09-02 with:
+
+- a regression-first run of
+  `go test ./internal/agent -run TestGoalAutoCompactsCompletedCyclesAfterLongSingleTurnStops -count=1`
+  against the earlier attempted fix, which reproduced the blocked goal;
+- `go test ./internal/compact ./internal/agent -count=1`;
+- `go test -race ./internal/compact ./internal/agent -count=1`;
+- `go test ./...`;
+- `go vet ./...`;
+- `go test ./internal/agent ./internal/compact ./cmd/snow -count=1`;
+- `python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v`;
+- `python3 scripts/check_benchmarks.py`;
+- `git diff --check`;
+- an independent read-only review of the boundary model and regression cases;
+  and
+- `./scripts/install-local.sh`, which installed the verified `0.1.0-dev` build.

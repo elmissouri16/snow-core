@@ -938,10 +938,18 @@ provider projection replaces an old complete-turn prefix with a structured
 working-state checkpoint and retains at least the configured recent turns.
 Planning fails closed if a boundary would split an assistant tool call from its
 result. Opaque provider continuity leaves context only with its complete owning
-turn. Completed assistant-call/tool-result cycles inside one long active turn
-are also safe boundaries when prefix projection does not consume the retained
-prior-turn floor, so old cycles may compact while current and recent cycles
-remain exact. Besides the global pressure trigger, aggregate tool
+turn. Completed assistant-call/tool-result cycles inside one long tool-driven
+turn are also safe boundaries when prefix projection does not consume the
+retained prior-turn floor, so old cycles may compact while current and recent
+cycles remain exact. They remain eligible after a terminal assistant response.
+Planning first attempts an ordinary complete-turn prefix. If an
+assistant-originated automatic goal is itself the oversized recent turn and no
+such prefix exists, the planner deliberately retains the configured number of
+newest complete cycles (plus an unresolved active cycle) and checkpoints the old
+prefix. The goal objective is injected separately on every request. This
+progress fallback is structurally limited to assistant-originated goal turns,
+works across prior checkpoints, and never weakens call/result pairing or opaque
+provider-state ownership. Besides the global pressure trigger, aggregate tool
 calls/results in the safely compactable old prefix have an independent model-
 window budget. Large individual results are measured through their bounded
 provider projection. The OpenCode Go chat-completions adapter renders the

@@ -119,13 +119,27 @@ continues.
 
 ## Compaction interaction
 
-At the safe boundary between complete goal turns, Snow automatically compacts
-when the latest provider-reported request usage reaches the configured
-percentage of the model context window (80% by default). Set
-`compaction.auto_threshold_percent` to `0` to disable it; the older
-`goal_auto_threshold_percent` name is accepted only as a legacy alias.
-Compaction errors block the active goal rather than issuing another request
-with unsafe context pressure.
+At safe boundaries between provider/tool cycles and complete goal turns, Snow
+automatically compacts when the latest provider-reported request usage reaches
+the configured percentage of the model context window (80% by default), or
+when safely compactable completed tool history reaches its independent budget
+(20% by default). Set `compaction.auto_threshold_percent` or
+`compaction.tool_history_budget_percent` to `0` to disable the corresponding
+trigger; the older `goal_auto_threshold_percent` name is accepted only as a
+legacy alias for the pressure threshold. Planning first tries to preserve the
+configured number of complete recent turns. Completed tool-call/result cycles
+from one long assistant-originated goal turn remain eligible checkpoint
+boundaries both while that turn is active and after its terminal assistant
+response. If the goal turn itself causes pressure and there is no ordinary
+turn-prefix plan, Snow checkpoints the old prefix and retains the configured
+number of newest complete cycles instead (plus the unresolved current cycle
+while active). The goal objective is still injected separately on every
+request. This explicit progress fallback also works after an existing
+checkpoint and when an earlier conversation turn precedes the long goal; it is
+not applied to an exact user-originated recent turn. Compaction errors, or
+pressure with neither an older turn nor enough completed cycles available,
+block the active goal rather than issuing another request with unsafe context
+pressure.
 
 `Abort` cancels and joins any admitted turn. If goal work was active, even in
 the small window before its first provider call, it persists a continuation

@@ -29,8 +29,9 @@ type Result struct {
 type Plan struct {
 	// CompactionCandidates are the messages that would be summarized.
 	CompactionCandidates []protocol.Message
-	// KeepFrom is the index in the provider-facing messages where the retained
-	// complete-turn tail begins.
+	// KeepFrom is the index in the provider-facing messages where the exact
+	// retained tail begins. It is normally a complete-turn boundary and may be a
+	// completed goal-cycle boundary under the explicit goal fallback.
 	KeepFrom int
 	// BoundaryID is the last real persisted message folded into the summary.
 	BoundaryID string
@@ -45,6 +46,10 @@ type PlannerOptions struct {
 	RetainTokens          int
 	MinRetainedTurns      int
 	AllowActiveToolCycles bool
+	// AllowGoalToolCycles permits an assistant-originated goal turn to use its
+	// completed tool cycles as the exact retained tail when preserving complete
+	// recent turns would otherwise leave no compactable prefix.
+	AllowGoalToolCycles bool
 }
 
 const WorkingStateTitle = "# Working State Checkpoint"
