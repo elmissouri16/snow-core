@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/internal/permission"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -308,8 +309,8 @@ func (m *Model) startSettings() (tea.Model, tea.Cmd) {
 	m.closeTranscriptSelectionContextMenu()
 	m.pickSettings = true
 	m.settingsIndex = 0
-	m.settingsStatus = ""
-	m.settingsError = ""
+	m.settingsStatus = m.updateLastStatus
+	m.settingsError = m.updateLastError
 	m.compVisible = false
 	return m, nil
 }
@@ -319,13 +320,13 @@ func (m *Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// them before generic picker normalization, whose default bindings also map
 	// horizontal arrows to previous/next list items.
 	if msg.Type == tea.KeyLeft {
-		if m.settingsIndex != settingsModel && m.settingsIndex != settingsKeybindings {
+		if m.settingsValueRow() {
 			m.cycleSetting(-1)
 		}
 		return m, nil
 	}
 	if msg.Type == tea.KeyRight {
-		if m.settingsIndex != settingsModel && m.settingsIndex != settingsKeybindings {
+		if m.settingsValueRow() {
 			m.cycleSetting(1)
 		}
 		return m, nil
@@ -353,9 +354,28 @@ func (m *Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.settingsIndex == settingsKeybindings {
 			return m.startKeybindings(true)
 		}
-		m.cycleSetting(1)
+		switch m.settingsIndex {
+		case settingsCheckNow:
+			return m, m.startUpdateCheck(updateCheckManual)
+		case settingsUpdateNow:
+			if !m.updateActionAvailable() {
+				return m, nil
+			}
+			return m, m.startUpdateCheck(updateCheckBeforeInstall)
+		default:
+			m.cycleSetting(1)
+		}
 	}
 	return m, nil
+}
+
+func (m *Model) settingsValueRow() bool {
+	switch m.settingsIndex {
+	case settingsModel, settingsCheckNow, settingsUpdateNow, settingsKeybindings:
+		return false
+	default:
+		return true
+	}
 }
 
 func (m *Model) cycleSetting(direction int) {
@@ -430,6 +450,18 @@ func (m *Model) cycleSetting(direction int) {
 		err = m.setDebugEnabled(next)
 		if err == nil {
 			m.settingsStatus = "debug diagnostics saved; dumps contain sensitive content"
+		}
+	case settingsUpdateCheckOnStartup:
+		next := cycleValue([]bool{false, true}, m.app.Cfg.Updates.CheckOnStartup, direction)
+		_, err = m.app.UpdateRPCSettings(app.SettingsUpdate{UpdateCheckOnStartup: new(next)})
+		if err == nil {
+			m.settingsStatus = "startup update checking " + onOff(m.app.Cfg.Updates.CheckOnStartup)
+		}
+	case settingsAutoUpdate:
+		next := cycleValue([]bool{false, true}, m.app.Cfg.Updates.AutoUpdate, direction)
+		_, err = m.app.UpdateRPCSettings(app.SettingsUpdate{AutoUpdate: new(next)})
+		if err == nil {
+			m.settingsStatus = "automatic updates " + onOff(m.app.Cfg.Updates.AutoUpdate)
 		}
 	}
 	if err != nil {

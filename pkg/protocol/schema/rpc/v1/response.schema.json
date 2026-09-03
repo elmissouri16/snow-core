@@ -1517,6 +1517,8 @@
             "subagents_restart_required",
             "skills_restart_required",
             "restart_required",
+            "update_check_on_startup",
+            "auto_update",
             "theme"
           ],
           "properties": {
@@ -1567,6 +1569,12 @@
               "type": "boolean"
             },
             "restart_required": {
+              "type": "boolean"
+            },
+            "update_check_on_startup": {
+              "type": "boolean"
+            },
+            "auto_update": {
               "type": "boolean"
             },
             "theme": {
@@ -1618,6 +1626,8 @@
             "subagents_restart_required",
             "skills_restart_required",
             "restart_required",
+            "update_check_on_startup",
+            "auto_update",
             "theme"
           ],
           "properties": {
@@ -1668,6 +1678,12 @@
               "type": "boolean"
             },
             "restart_required": {
+              "type": "boolean"
+            },
+            "update_check_on_startup": {
+              "type": "boolean"
+            },
+            "auto_update": {
               "type": "boolean"
             },
             "theme": {

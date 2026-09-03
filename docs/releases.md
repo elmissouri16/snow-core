@@ -94,6 +94,26 @@ before execution and may fetch it from a reviewed immutable tag. `SHA256SUMS`
 is delivered by the same GitHub release as the archive and therefore detects
 transfer corruption or mismatched assets, but is not an independent signature.
 
+The interactive TUI also has an opt-in native updater under `/settings`. It
+queries the same prerelease-aware GitHub Releases endpoint and accepts only the
+same four archive targets and exact archive layout. It bounds metadata,
+checksum, compressed, and expanded input; verifies SHA-256 and the staged
+binary's exact reported version; and stages in the executable's directory
+before atomic replacement. It never invokes `sudo`, follows a destination
+symlink, or replaces a development build. Custom writable install destinations
+are supported because eligibility is based on the running regular executable,
+not a fixed path. Startup checks and automatic installation are disabled by
+default and run only in the interactive TUI.
+
+After replacement, the current process still contains the old code. The TUI
+therefore offers **Restart now** or **Later**. Choosing **Restart now** first
+shuts Snow down gracefully and then asks the CLI to execute the new binary;
+choosing **Later** uses the new executable on the next launch. An update-check
+or pre-replacement installation failure is nonfatal and leaves the existing
+executable intact. If replacement succeeds but the executable directory cannot
+be durably synced, Snow reports that narrower post-replacement failure
+explicitly instead of claiming a fully durable success.
+
 ## Release requirements
 
 A release commit must pass the reusable GitHub Actions CI workflow. Every

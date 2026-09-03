@@ -22,6 +22,9 @@ func (m *Model) dispatchMouse(msg tea.MouseMsg) tea.Cmd {
 		m.closeTranscriptSelectionContextMenu()
 		return nil
 	}
+	if m.restartPromptVisible() {
+		return nil
+	}
 	if m.processFleetOpen {
 		m.handleProcessFleetMouse(msg)
 		return nil
@@ -197,6 +200,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// The sticky header and footer already expose provider, model, cwd,
 			// and commands; do not duplicate startup chrome in the transcript.
 			cmds = append(cmds, waitForEvent(m.events))
+			if m.app.Cfg.Updates.CheckOnStartup {
+				cmds = append(cmds, m.startUpdateCheck(updateCheckStartup))
+			}
 			if m.pickSessionOnStart {
 				m.pickSessionOnStart = false
 				_, pickerCmd := m.startSessionPick()
@@ -205,6 +211,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.busy = false
 		return m, tea.Batch(cmds...)
+	case updateCheckDoneMsg:
+		if cmd := m.handleUpdateCheckDone(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case updateInstallDoneMsg:
+		m.handleUpdateInstallDone(msg)
 	case spinner.TickMsg:
 		// Standard bubbles spinner pump: advance the frame and re-arm only while
 		// there is something visible to animate. Streaming responsiveness does
@@ -290,6 +302,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		if cmd := m.scheduleRunStatsRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if cmd := m.maybeStartPendingAutoUpdate(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		// Re-arm immediately; the mailbox self-signals while more batches wait.

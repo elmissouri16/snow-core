@@ -606,13 +606,20 @@ TUI settings panel:
 
 ```json
 {"id":"settings-1","type":"settings_get"}
-{"id":"settings-2","type":"settings_update","params":{"provider":"opencode-go","model":"kimi-k2.6","thinking":"high","reasoning_summary":"concise","text_verbosity":"high","debug_enabled":true,"subagents_enabled":true,"subagents_max_concurrent":6,"skills_enabled":false}}
+{"id":"settings-2","type":"settings_update","params":{"provider":"opencode-go","model":"kimi-k2.6","thinking":"high","reasoning_summary":"concise","text_verbosity":"high","debug_enabled":true,"subagents_enabled":true,"subagents_max_concurrent":6,"skills_enabled":false,"update_check_on_startup":true,"auto_update":false}}
 ```
 
 `settings_get` returns the current provider, model, thinking, reasoning-summary,
 text-verbosity, permission, and debug values for display. It also returns
 persisted `subagents_enabled`, `subagents_max_concurrent`,
-`subagents_max_agents`, and `skills_enabled` values.
+`subagents_max_agents`, `skills_enabled`, `update_check_on_startup`, and
+`auto_update` values.
+
+The two update fields configure global preferences only. Enabling
+`auto_update` also enables `update_check_on_startup`; disabling startup checks
+also disables auto-update. RPC startup never performs a release check or binary
+replacement, and this settings capability does not expose a remote install
+command. Automatic execution remains interactive-TUI-only.
 
 `settings_update` is partial and requires at least one supported field. Live
 fields are `provider`, `model`, `thinking`, `reasoning_summary`,

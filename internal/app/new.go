@@ -27,6 +27,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/tools"
 	"github.com/elmissouri16/snow-core/internal/tools/builtin"
 	toolrouter "github.com/elmissouri16/snow-core/internal/tools/router"
+	internalupdate "github.com/elmissouri16/snow-core/internal/update"
 	"github.com/elmissouri16/snow-core/internal/userinput"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
@@ -809,6 +810,10 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	ag.Subscribe(manager.Emit)
 	manager.Emit(ag.StateEvent())
 
+	updater := opts.Updater
+	if updater == nil {
+		updater = internalupdate.New(buildVersion)
+	}
 	a := &App{
 		Cfg:                cfg,
 		PersistedCfg:       persistedCfg,
@@ -845,6 +850,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		SearchPolicy:       searchPolicy,
 		ProjectAllowed:     projectAllowed,
 		ProjectInputRoot:   projectInputRoot,
+		updater:            updater,
 		permissionBaseline: permMode,
 		permissionOverride: opts.Permission != "",
 		PermBroker:         permBroker,

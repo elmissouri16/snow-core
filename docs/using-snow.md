@@ -118,7 +118,7 @@ Type `/` to open command completion. The essential commands are:
 | `/init` | Create missing `AGENTS.md` and `.snow/config.json` files |
 | `/model [id]` | Open the model picker or select a model |
 | `/thinking [level]` | Open or set supported reasoning effort |
-| `/settings` | Open common model, UI, permission, and capability settings |
+| `/settings` | Open common model, UI, permission, capability, and update settings |
 | `/keybindings` | Inspect or edit global/project shortcuts |
 | `/permissions [mode]` | Inspect or set `ask`, `allow`, or `deny` |
 | `/login`, `/logout` | Manage provider credentials |
@@ -136,6 +136,15 @@ Type `/` to open command completion. The essential commands are:
 
 Use `/allow`, `/allow always`, or `/deny` only for the permission request that
 is currently visible. Review the requested operation before approving it.
+
+The settings card includes opt-in GitHub update controls. **Check for updates
+now** performs a fresh explicit check, while **Update now** checks again before
+installing. Startup checks and auto-update are disabled by default and apply
+only to interactive TUI launches. Enabling auto-update also enables startup
+checking; disabling startup checking also disables auto-update. Successful
+installation offers **Restart now** after clean shutdown or **Later** to keep
+using the current old in-memory process. Development builds can check but never
+replace themselves.
 
 ## Use composer completions
 

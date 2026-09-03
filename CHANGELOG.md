@@ -5,6 +5,29 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.3] - 2026-09-03
+
+This alpha adds opt-in release checks and native self-updates to the interactive
+TUI while keeping every headless and SDK startup path free of implicit update
+traffic or executable mutation.
+
+### Added
+
+- Added `/settings` controls for startup checks, automatic installation, manual
+  checks, and explicit updates, with both persisted preferences disabled by
+  default and dependency-safe settings/RPC updates.
+- Added prerelease-aware GitHub release discovery, strict version and archive
+  validation, bounded downloads, checksum verification, staged binary checks,
+  pinned executable identity checks, and atomic replacement for supported
+  macOS/Linux amd64 and arm64 release builds.
+- Added a post-install **Restart now** or **Later** prompt that shuts down
+  gracefully and preserves the active durable session across re-execution.
+
+### Changed
+
+- Update status now shows the current and latest versions explicitly and labels
+  the installed version as latest when no newer release is available.
+
 ## [0.1.0-alpha.2] - 2026-09-03
 
 This alpha adds verified release installation and a curated documentation

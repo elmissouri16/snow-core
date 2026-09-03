@@ -52,6 +52,8 @@ func (s *Server) handleSettingsCommand(ctx context.Context, req Request) error {
 			SubagentsEnabled:       params.SubagentsEnabled,
 			SubagentsMaxConcurrent: params.SubagentsMaxConcurrent,
 			SkillsEnabled:          params.SkillsEnabled,
+			UpdateCheckOnStartup:   params.UpdateCheckOnStartup,
+			AutoUpdate:             params.AutoUpdate,
 		})
 		if err != nil {
 			return err
@@ -71,6 +73,7 @@ func rpcSettings(settings app.SettingsSnapshot) protocol.RPCSettings {
 		SubagentsMaxAgents: settings.SubagentAgentLimit, SkillsEnabled: settings.SkillsEnabled,
 		SubagentsRestartRequired: settings.SubagentsRestartRequired,
 		SkillsRestartRequired:    settings.SkillsRestartRequired, RestartRequired: settings.RestartRequired,
+		UpdateCheckOnStartup: settings.UpdateCheckOnStartup, AutoUpdate: settings.AutoUpdate,
 	}
 }
 

@@ -521,6 +521,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.userInputPending {
 		return m.handleUserInputKey(msg)
 	}
+	if m.restartPromptVisible() {
+		return m.handleRestartPromptKey(msg)
+	}
 
 	if m.processFleetOpen || m.subagentFleetOpen {
 		if handled, cmd := m.handleFleetShortcut(msg); handled {

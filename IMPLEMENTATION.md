@@ -154,6 +154,7 @@ keeps UI dependencies out of core packages.
 | `internal/subagent` | Root manager, context projection, roles, V2 tools |
 | `internal/tools` | `Tool`/`Registry`/`ToolHost` interfaces and BM25 router |
 | `internal/trust` | `~/.snow/trust.json` project decisions |
+| `internal/update` | Bounded GitHub release discovery, verification, and atomic self-update |
 | `internal/tui` | Bubble Tea UI, markdown, mentions, askers |
 | `internal/artifact` | Immutable session-scoped tool-result spill artifacts |
 | `internal/goal` | Branch-scoped persistent Thread Goals lifecycle |
@@ -189,6 +190,17 @@ normalizes and stores the value before passing it to RPC, external-plugin, and
 MCP handshakes. Go SDK sessions seed the same linked value. Release builds
 replace the symbol through `-ldflags -X`, while untagged builds remain
 `0.1.0-dev`.
+
+`internal/update` is constructed by `internal/app.New` without doing I/O and is
+invoked only through explicit app facades. The interactive TUI schedules an
+opt-in startup check after successful app attachment; print, JSON, RPC, SDK,
+version, and management startup never invoke it. Release discovery includes
+published prereleases and uses bounded fixed-origin HTTPS. Installation verifies
+the checksum, exact archive shape, expanded sizes, and staged binary version,
+then rechecks the pinned regular executable before same-directory atomic
+replacement. TUI restart requests cross a typed lifecycle boundary to
+`cmd/snow`, which re-executes only after Bubble Tea terminal restoration and app
+shutdown.
 
 ### Runtime data flow
 

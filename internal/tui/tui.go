@@ -536,6 +536,21 @@ type Model struct {
 	settingsReturnToPanel       bool
 	settingsStatus              string
 	settingsError               string
+	updateStatus                app.UpdateStatus
+	updateChecked               bool
+	updateCheckRunning          bool
+	updateInstallRunning        bool
+	updateGeneration            uint64
+	updateCheckReason           updateCheckReason
+	updateLastStatus            string
+	updateLastError             string
+	updateAutoInstallPending    bool
+	updateInstalledVersion      string
+	restartPromptPending        bool
+	restartChoice               int
+	restartRequested            bool
+	checkForUpdate              func(context.Context) (app.UpdateStatus, error)
+	installUpdate               func(context.Context, app.UpdateStatus) (app.UpdateResult, error)
 	pickKeybindings             bool
 	keybindingsReturnToSettings bool
 	keybindingsScope            keybindingScope
@@ -704,6 +719,10 @@ const (
 	settingsSubagentConcurrency
 	settingsSkills
 	settingsDebug
+	settingsUpdateCheckOnStartup
+	settingsAutoUpdate
+	settingsCheckNow
+	settingsUpdateNow
 	settingsKeybindings
 	settingsCount
 )

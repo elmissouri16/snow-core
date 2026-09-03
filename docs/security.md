@@ -189,6 +189,28 @@ The release installer downloads the requested archive and `SHA256SUMS`,
 verifies the SHA-256 checksum, checks the binary-reported version, and replaces
 the destination atomically. It does not provide an independent signature.
 
+The interactive updater uses the same release assets and integrity model.
+Explicit **Check now** contacts GitHub; automatic startup traffic occurs only
+after the global **Check for updates on startup** opt-in. Auto-update is a
+separate executable-mutation opt-in and implies startup checking. Print, JSON,
+RPC, SDK, version, and management startup never make an implicit update request.
+
+Self-update runs with the user's OS privileges and can replace only the current
+supported macOS/Linux official-release executable. It requires a writable
+regular non-symlink destination, pins and stages within the executable's parent
+directory, rechecks destination identity before atomic replacement, bounds all
+network/archive/process work, and never invokes `sudo`. Development builds,
+unsupported platforms, symlink destinations, changed targets, malformed
+archives, checksum failures, and staged version mismatches fail before replacing
+the existing binary. If the atomic replacement succeeds but directory syncing
+fails, Snow reports that the executable was replaced but durability could not be
+confirmed. The restart prompt appears only after a fully successful replacement;
+choosing Later continues safely with the old in-memory code.
+
+The archive and `SHA256SUMS` still come from the same GitHub release. This
+protects against corruption and mismatched assets but is not an independent
+signature or separate trust root.
+
 The one-line installer command streams `scripts/install.sh` into `sh`. Unless
 `SNOW_NO_MODIFY_PATH=1` is set, the installer attempts a profile update that
 persistently adds its directory to `PATH`. A skipped or failed profile update

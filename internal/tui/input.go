@@ -57,7 +57,7 @@ func (m *Model) composerCoveredByModal() bool {
 		m.pickSettings || m.pickKeybindings || m.pickHelp || m.pickFork || m.pickSession || m.pickTree ||
 		m.pickInfo || m.pickPermissionMode || m.permPending || m.userInputPending ||
 		m.confirmGoalReplace || m.planPrompt || m.processFleetOpen || m.subagentFleetOpen ||
-		m.sessionOpLoading
+		m.sessionOpLoading || m.restartPromptVisible()
 }
 
 func (m *Model) updateComposerEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

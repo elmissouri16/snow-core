@@ -18,6 +18,7 @@ events behind every surface.
 - SQLite sessions with resume, branches, compaction, and persistent goals
 - Built-in coding tools, MCP, plugins, Agent Skills, and optional subagents
 - Opt-in bounded diagnostics with private, credential-redacted session dumps
+- Opt-in interactive GitHub release checks and verified self-updates
 - Pure-Go SDK under [`pkg/snowsdk`](pkg/snowsdk)
 
 ## On this page
@@ -57,6 +58,14 @@ release such as `v0.1.0-alpha.1`, or `SNOW_NO_MODIFY_PATH=1` to leave startup
 files unchanged. Piping a remote script into `sh` trusts the repository; review
 [`scripts/install.sh`](scripts/install.sh) first when your environment requires
 it. Checksums protect release integrity but are not an independent signature.
+
+Interactive users can open `/settings` to check for newer GitHub releases,
+install an update, or opt into startup checks and automatic installation. Both
+startup options are disabled by default. Startup checks run only in the TUI;
+print, JSON, RPC, and SDK startup never contacts GitHub or replaces the
+executable implicitly. Self-update supports official macOS/Linux release builds
+whose current regular executable can be safely replaced, including custom
+writable install directories. Development builds are never replaced.
 
 Verify the local agent loop without credentials:
 

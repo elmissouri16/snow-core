@@ -83,6 +83,9 @@ func (a *App) applySettingsUpdate(ctx context.Context, update SettingsUpdate) er
 	if normalized.DebugEnabled != nil {
 		a.Cfg.Debug.Enabled = candidate.Debug.Enabled
 	}
+	if normalized.UpdateCheckOnStartup != nil || normalized.AutoUpdate != nil {
+		a.Cfg.Updates = candidate.Updates
+	}
 	a.Cfg.Subagents.Enabled = candidate.Subagents.Enabled
 	a.Cfg.Subagents.MaxConcurrentThreads = candidate.Subagents.MaxConcurrentThreads
 	a.Cfg.Subagents.MaxAgentsPerSession = candidate.Subagents.MaxAgentsPerSession
@@ -95,6 +98,11 @@ func (a *App) applySettingsUpdate(ctx context.Context, update SettingsUpdate) er
 }
 
 func normalizeSettingsUpdate(update SettingsUpdate) (SettingsUpdate, error) {
+	if update.UpdateCheckOnStartup != nil && !*update.UpdateCheckOnStartup {
+		update.AutoUpdate = new(false)
+	} else if update.AutoUpdate != nil && *update.AutoUpdate {
+		update.UpdateCheckOnStartup = new(true)
+	}
 	if update.Provider != nil {
 		providerID := strings.TrimSpace(*update.Provider)
 		if providerID == "" {
@@ -235,6 +243,15 @@ func (a *App) persistSettingsUpdate(update SettingsUpdate, selectionChanged bool
 		}
 		if update.SkillsEnabled != nil {
 			latest.Skills.Disabled = !*update.SkillsEnabled
+		}
+		if update.UpdateCheckOnStartup != nil {
+			latest.Updates.CheckOnStartup = *update.UpdateCheckOnStartup
+		}
+		if update.AutoUpdate != nil {
+			latest.Updates.AutoUpdate = *update.AutoUpdate
+		}
+		if err := latest.Updates.Validate(); err != nil {
+			return err
 		}
 		return latest.Subagents.ValidateSubagents()
 	}

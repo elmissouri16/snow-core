@@ -26,18 +26,37 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+// RunResult reports an explicit post-shutdown action requested by the TUI.
+type RunResult struct {
+	RestartRequested bool
+	SessionPath      string
+}
+
 // Run starts the interactive TUI and blocks until exit.
 func Run(ctx context.Context, opts app.Options) error {
+	_, err := RunWithResult(ctx, opts)
+	return err
+}
+
+// RunWithResult starts the interactive TUI and reports post-shutdown actions.
+func RunWithResult(ctx context.Context, opts app.Options) (RunResult, error) {
 	return run(ctx, opts, false)
 }
 
 // RunWithSessionPicker starts the TUI with the current-project session picker
 // open as soon as startup completes.
 func RunWithSessionPicker(ctx context.Context, opts app.Options) error {
+	_, err := RunWithSessionPickerResult(ctx, opts)
+	return err
+}
+
+// RunWithSessionPickerResult starts with the session picker and reports
+// post-shutdown actions.
+func RunWithSessionPickerResult(ctx context.Context, opts app.Options) (RunResult, error) {
 	return run(ctx, opts, true)
 }
 
-func run(ctx context.Context, opts app.Options, sessionPicker bool) error {
+func run(ctx context.Context, opts app.Options, sessionPicker bool) (RunResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -78,7 +97,16 @@ func run(ctx context.Context, opts app.Options, sessionPicker bool) error {
 	p := tea.NewProgram(model, programOptions...)
 	_, runErr := p.Run()
 	cancel()
-	return errors.Join(runErr, model.Close())
+	result := RunResult{RestartRequested: model.restartRequested}
+	if result.RestartRequested {
+		result.SessionPath = currentSessionPath(model.app)
+	}
+	closeErr := model.Close()
+	if runErr != nil || closeErr != nil {
+		result.RestartRequested = false
+		result.SessionPath = ""
+	}
+	return result, errors.Join(runErr, closeErr)
 }
 
 func tuiMouseCaptureEnabled(opts app.Options) bool {

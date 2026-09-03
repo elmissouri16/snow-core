@@ -17,7 +17,7 @@ func TestRPCSettingsGetAndUpdateAreCorrelatedAndSecretFree(t *testing.T) {
 	if err := s.handle(t.Context(), Request{ID: "get", Type: "settings_get"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.handle(t.Context(), Request{ID: "set", Type: "settings_update", Params: json.RawMessage(`{"provider":"fake","model":"fake-1","thinking":"off","reasoning_summary":"detailed","text_verbosity":"high","debug_enabled":true,"subagents_enabled":false,"subagents_max_concurrent":5,"skills_enabled":true}`)}); err != nil {
+	if err := s.handle(t.Context(), Request{ID: "set", Type: "settings_update", Params: json.RawMessage(`{"provider":"fake","model":"fake-1","thinking":"off","reasoning_summary":"detailed","text_verbosity":"high","debug_enabled":true,"subagents_enabled":false,"subagents_max_concurrent":5,"skills_enabled":true,"auto_update":true}`)}); err != nil {
 		t.Fatal(err)
 	}
 	responses := decodeRuntimeResponses(t, &out)
@@ -34,7 +34,8 @@ func TestRPCSettingsGetAndUpdateAreCorrelatedAndSecretFree(t *testing.T) {
 	if updated["provider"] != "fake" || updated["model"] != "fake-1" || updated["thinking"] != "off" ||
 		updated["reasoning_summary"] != "detailed" || updated["text_verbosity"] != "high" || updated["debug_enabled"] != true ||
 		updated["subagents_enabled"] != false || updated["subagents_max_concurrent"] != float64(5) ||
-		updated["skills_enabled"] != true || updated["restart_required"] != true {
+		updated["skills_enabled"] != true || updated["restart_required"] != true ||
+		updated["auto_update"] != true || updated["update_check_on_startup"] != true {
 		t.Fatalf("updated settings = %#v", updated)
 	}
 	for _, forbidden := range []string{"secret", "api_key", "headers", "environment", "providers"} {

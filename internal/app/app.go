@@ -75,6 +75,8 @@ type App struct {
 	ProjectAllowed   bool
 	ProjectInputRoot string
 
+	updater UpdateService
+
 	stateMu              sync.Mutex
 	settingsMu           sync.Mutex
 	settingsMutationMu   sync.Mutex
@@ -118,9 +120,12 @@ type catalogLoad struct {
 
 // Options control app assembly.
 type Options struct {
-	CWD                     string
-	ConfigPath              string
-	BuildVersion            string
+	CWD          string
+	ConfigPath   string
+	BuildVersion string
+	// Updater overrides the release updater for tests and embedded TUI hosts.
+	// Constructing App never invokes it; only explicit app calls perform work.
+	Updater                 UpdateService
 	AuthPath                string
 	Provider                string
 	Model                   string

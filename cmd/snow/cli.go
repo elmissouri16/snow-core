@@ -587,7 +587,7 @@ func runInteractiveOptions(cmd *cobra.Command, sessionPicker, requireExistingSes
 		showUsage, _ := cmd.Flags().GetBool("usage")
 		return runPrint(ctx, opts, prompt, mode == "json", showUsage)
 	}
-	return runTUI(ctx, opts, sessionPicker)
+	return runTUI(ctx, opts, sessionPicker, cmd.Name() == "resume")
 }
 
 func printableGoalBlockedReason(reason string) string {
@@ -750,17 +750,27 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 	return outputErr
 }
 
-func runTUI(ctx context.Context, opts app.Options, sessionPicker bool) error {
+func runTUI(ctx context.Context, opts app.Options, sessionPicker, resumeCommand bool) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 		return errors.New("interactive TUI requires terminal stdin/stdout; use -p, --mode json, or --mode rpc")
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb") {
 		return errors.New("interactive TUI requires cursor-addressable terminal support; TERM=dumb is unsupported")
 	}
+	var result tui.RunResult
+	var err error
 	if sessionPicker {
-		return tui.RunWithSessionPicker(ctx, opts)
+		result, err = tui.RunWithSessionPickerResult(ctx, opts)
+	} else {
+		result, err = tui.RunWithResult(ctx, opts)
 	}
-	return tui.Run(ctx, opts)
+	if err != nil {
+		return err
+	}
+	if result.RestartRequested {
+		return restartAfterUpdate(result, opts.SessionPath, resumeCommand)
+	}
+	return nil
 }
 
 func mustCWD() string {

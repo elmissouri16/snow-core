@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -61,6 +62,21 @@ type TUIConfig struct {
 // are still created only by an explicit command, SDK/RPC call, or CLI path.
 type DebugConfig struct {
 	Enabled bool `json:"enabled"`
+}
+
+// UpdateConfig controls opt-in interactive release checks and installation.
+// It is global operator policy and is never loaded from project configuration.
+type UpdateConfig struct {
+	CheckOnStartup bool `json:"check_on_startup"`
+	AutoUpdate     bool `json:"auto_update"`
+}
+
+// Validate ensures automatic installation cannot be enabled without startup checks.
+func (c UpdateConfig) Validate() error {
+	if c.AutoUpdate && !c.CheckOnStartup {
+		return errors.New("config: updates auto_update requires check_on_startup")
+	}
+	return nil
 }
 
 // RetryProfileConfig bounds one consecutive provider outage. It is global-only
@@ -223,6 +239,7 @@ type Config struct {
 	Providers                 map[string]ProviderConfig       `json:"providers,omitempty"`
 	TUI                       TUIConfig                       `json:"tui,omitzero"`
 	Debug                     DebugConfig                     `json:"debug,omitzero"`
+	Updates                   UpdateConfig                    `json:"updates,omitzero"`
 	Plugins                   []plugin.PluginSpec             `json:"plugins,omitempty"`
 	MCPServers                map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
 	Skills                    SkillsConfig                    `json:"skills,omitzero"`

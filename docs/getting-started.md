@@ -14,6 +14,7 @@ require Go.
 - [Try Snow without credentials](#try-snow-without-credentials)
 - [Choose a provider](#choose-a-provider)
 - [Start the interactive agent](#start-the-interactive-agent)
+- [Check for updates](#check-for-updates)
 - [Choose permissions carefully](#choose-permissions-carefully)
 - [Related documents](#related-documents)
 
@@ -125,6 +126,29 @@ For a one-shot prompt without the full-screen interface, run:
 ```sh
 snow -p "summarize this project"
 ```
+
+## Check for updates
+
+In the interactive TUI, open `/settings` to use four update controls:
+
+- **Check for updates on startup** opts into a nonblocking GitHub release check.
+- **Auto update** installs an available verified release after that startup
+  check; enabling it also enables startup checking.
+- **Check for updates now** performs one explicit fresh check without installing.
+- **Update now** performs a fresh check and installs a newer eligible release.
+
+Both startup preferences are disabled by default. Print, JSON, RPC, version,
+and SDK startup do not make implicit update requests or replace an executable.
+GitHub prereleases are valid update targets because Snow is currently alpha.
+
+Self-update is available for official macOS/Linux amd64 or arm64 releases when
+the running executable is a writable regular non-symlink file, including a
+custom `SNOW_INSTALL_DIR`. Development/source builds report that installation
+is unavailable and never replace themselves. After a successful install, choose
+**Restart now** to close Snow cleanly and resume the durable session with the
+new binary, or **Later** to continue in the old in-memory process until exit.
+An ephemeral `--no-session` process cannot preserve in-memory history across a
+restart.
 
 ## Choose permissions carefully
 

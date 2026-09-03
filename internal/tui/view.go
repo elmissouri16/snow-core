@@ -237,6 +237,9 @@ func (m *Model) currentHeaderStatus() string {
 	if m.pickInfo {
 		status = "inspect"
 	}
+	if m.restartPromptVisible() {
+		status = "restart"
+	}
 	// Blocking host requests own both the visible overlay and the status label,
 	// even when an ordinary modal remains suspended underneath.
 	if m.permPending {
@@ -322,7 +325,9 @@ func (m *Model) View() string {
 			frame = overlayTranscriptSelectionContextMenu(frame, m.transcriptSelectionMenu)
 		}
 	}
-	if m.loginModalVisible() && !m.permPending && !m.userInputPending {
+	if m.restartPromptVisible() {
+		frame = m.overlayRestartPrompt(frame)
+	} else if m.loginModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlayLoginModal(frame)
 	} else if m.modelModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlayModelModal(frame)

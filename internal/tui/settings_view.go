@@ -46,7 +46,7 @@ func (m *Model) renderSettings() string {
 		MaxWidth(geometry.innerWidth).
 		MaxHeight(bodyHeight).
 		Render(renderSettingsCardRows(rows, selected, geometry.innerWidth, bodyHeight))
-	footerText := " ↑/↓ navigate · ←/→ change · Enter select · Esc close "
+	footerText := " ↑/↓ navigate · ←/→ change · Enter select/run · Esc close "
 	footer := styleFooter.Render(truncateDisplayText(footerText, geometry.innerWidth))
 	content := lipgloss.JoinVertical(lipgloss.Left, header, message, separator, body, footer)
 	return renderPickerCard(content, geometry)
@@ -69,6 +69,10 @@ func (m *Model) settingsCardRows() []settingsCardRow {
 		{text: concurrency, available: true},
 		{text: "Agent Skills  " + onOff(!m.app.Cfg.Skills.Disabled) + " (restart to apply)", available: true},
 		{text: "Debug diagnostics  " + onOff(m.app.DebugStatus().Enabled) + " (captures sensitive content)", available: true},
+		{text: "Check for updates on startup  " + onOff(m.app.Cfg.Updates.CheckOnStartup), available: true},
+		{text: "Auto update  " + onOff(m.app.Cfg.Updates.AutoUpdate), available: true},
+		{text: checkNowText(m.updateCheckRunning), available: !m.updateCheckRunning && !m.updateInstallRunning},
+		{text: m.updateActionText(), available: m.updateActionAvailable()},
 		{text: "Keybindings  configure shortcuts", available: true},
 	}
 }
@@ -112,4 +116,11 @@ func settingsCardWindow(selected, total, height int) (start, end int) {
 		start = total - visible
 	}
 	return start, start + visible
+}
+
+func checkNowText(checking bool) string {
+	if checking {
+		return "Check for updates now  checking…"
+	}
+	return "Check for updates now"
 }
