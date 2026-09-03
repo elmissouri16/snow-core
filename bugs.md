@@ -616,10 +616,11 @@ behavior.
 
 ## BUG-014: Pages publishes the repository documentation index
 
-- **Status:** Open
+- **Status:** Resolved
 - **Severity:** Medium
 - **Surface:** Public GitHub Pages documentation
 - **Observed:** Public-site review after enabling the repository Pages URL
+- **Resolved:** 2026-09-03
 
 ### Expected behavior
 
@@ -667,6 +668,12 @@ though it is not intended as a user contract.
 
 ### Verification status
 
-Implementation is in progress. Keep this entry open until the focused Pages
-suite, full support-script suite, rendered-output validator, and live deployed
-URL all confirm the curated user surface.
+Resolved by `d581369` (`docs(pages): publish curated user manual`). The focused
+Pages suite, the complete 52-test support-script suite, `go test ./...`,
+`go vet ./...`, the benchmark guard, the official GitHub Pages Jekyll image,
+and the rendered-output validator all passed. Documentation workflow run
+[`33797490365`](https://github.com/elmissouri16/snow-core/actions/runs/33797490365)
+built and deployed the site successfully. Live verification confirmed the
+curated homepage and getting-started guide return HTTP 200, while bug,
+implementation, research, session-internals, Pages, release, benchmark, and
+design-plan routes return HTTP 404.
