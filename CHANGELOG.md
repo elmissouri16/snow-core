@@ -5,13 +5,20 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.2] - 2026-09-03
+
+This alpha adds verified release installation and a curated documentation
+site, removes the unsupported language-specific SDK surface, and fixes
+OpenCode request affinity.
+
 ### Added
 
 - Added a checksum-verifying one-line curl installer for the latest macOS/Linux
   amd64 or arm64 GitHub release, with version pinning, a configurable install
   directory, and idempotent shell PATH setup.
-- Added a responsive GitHub Pages documentation site generated from the
-  canonical guides, with pinned deployment actions and link/staging validation.
+- Added a responsive GitHub Pages documentation site generated from concise,
+  task-oriented guides, with balanced provider setup, pinned deployment
+  actions, and link/staging validation.
 
 ### Removed
 
@@ -32,15 +39,18 @@ also include the generated GitHub comparison for the tagged commit.
   `curl -fsSL … | sh` form while retaining release checksum, archive, and
   binary-version verification inside the installer.
 - Refocused the GitHub Pages site on external users with an ordered first-run
-  guide, task-based agent navigation, and an explicit public-document allowlist;
-  maintainer, audit, research, release-process, and implementation records now
-  remain repository-only.
+  guide, equal setup paths for every provider, task-based navigation, concise
+  capability guides, and an explicit public-document allowlist. Exhaustive SDK,
+  protocol, maintainer, audit, research, release-process, and implementation
+  references remain available in the repository.
 - Generalized fixture commands, generated-directory classification, provider
   JSON formatting, application-level textual response detection, and the macOS
   clipboard implementation so Go runtime paths remain language-neutral.
 
 ### Fixed
 
+- Fixed low-contrast headings, links, quotes, tables, and code in printed or
+  PDF versions of the public documentation.
 - Added OpenCode's required stable `X-Opencode-Session` conversation-affinity
   header to OpenCode Go and OpenCode Zen inference requests without forwarding
   it to model catalogs or unrelated compatible endpoints.
@@ -187,5 +197,6 @@ subagents, and managed development processes as the initial evaluation baseline.
 - Upgraded the source Go profile to 1.27rc3, including the standard library
   security fixes required for a clean reachable-code scan.
 
-[Unreleased]: https://github.com/elmissouri16/snow-core/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/elmissouri16/snow-core/compare/v0.1.0-alpha.2...HEAD
+[0.1.0-alpha.2]: https://github.com/elmissouri16/snow-core/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/elmissouri16/snow-core/releases/tag/v0.1.0-alpha.1
