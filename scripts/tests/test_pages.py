@@ -97,6 +97,7 @@ class PagesBuildTests(unittest.TestCase):
             "_layouts/home.html",
             "_includes/navigation.html",
             "assets/css/style.css",
+            "assets/js/copy-code.js",
             "index.md",
             "404.html",
             "examples/index.md",
@@ -139,6 +140,7 @@ class PagesBuildTests(unittest.TestCase):
         )
         self.assertIn("page.edit_path | default: page.path", layout)
         self.assertIn("blob/main/{{ edit_path }}", layout)
+        self.assertIn("'/assets/js/copy-code.js' | relative_url", layout)
         self.assertEqual(
             sorted(path.name for path in (self.output / "examples" / "sdk").iterdir()),
             ["README.md", "go.mod", "go.sum", "index.md", "main.go"],
@@ -147,12 +149,12 @@ class PagesBuildTests(unittest.TestCase):
             sorted(path.name for path in (self.output / "pkg" / "snowsdk").iterdir()),
             ["index.md"],
         )
-        published_scripts = [
-            path
+        published_scripts = sorted(
+            path.relative_to(self.output).as_posix()
             for path in self.output.rglob("*")
             if path.suffix.lower() in {".js", ".mjs", ".cjs", ".py"}
-        ]
-        self.assertEqual(published_scripts, [])
+        )
+        self.assertEqual(published_scripts, ["assets/js/copy-code.js"])
 
     def test_builder_refuses_to_replace_an_existing_output(self) -> None:
         self.output.mkdir()

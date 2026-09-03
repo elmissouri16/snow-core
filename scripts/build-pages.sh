@@ -45,6 +45,7 @@ for pages_site_file in \
 	site/_layouts/default.html \
 	site/_layouts/home.html \
 	site/assets/css/style.css \
+	site/assets/js/copy-code.js \
 	site/index.md \
 	site/404.html \
 	site/examples/index.md \

@@ -540,12 +540,12 @@ automatic continuation. See [Plan Mode](plan-mode.md) and [Goals](goals.md).
 
 ## Release installer trust
 
-The public installation command streams `scripts/install.sh` into `bash`,
+The public installation command streams `scripts/install.sh` into `sh`,
 executing repository-controlled shell code with the invoking user's OS
-privileges. Its outer Bash process enables `pipefail`; the bootstrap download is
-HTTPS-only, time- and size-bounded, and guarded against empty output, so a curl
-or bootstrap failure produces a failing command. This keeps installation to one
-command but does not provide a review boundary before execution. The installer
+privileges. The intentionally minimal `curl -fsSL … | sh` pipeline reports
+HTTP errors but does not provide a review boundary or independent verification
+before execution, and its final status is the shell's status rather than
+`curl`'s when a download fails before producing executable input. The installer
 does not use `sudo`, but it may replace `snow` in the configured install
 directory. Operators should download and inspect the complete script first, or
 fetch it from a reviewed immutable tag, when that trust model is inappropriate.

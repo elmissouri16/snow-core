@@ -14,15 +14,13 @@ from typing import Optional
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = REPOSITORY_ROOT / "scripts" / "install.sh"
 README = REPOSITORY_ROOT / "README.md"
+GETTING_STARTED_GUIDE = REPOSITORY_ROOT / "docs" / "getting-started.md"
 RELEASE_GUIDE = REPOSITORY_ROOT / "docs" / "releases.md"
 SECURITY_GUIDE = REPOSITORY_ROOT / "docs" / "security.md"
 INSTALL_COMMAND = (
-    "bash -o pipefail -c 'curl --proto \"=https\" --tlsv1.2 -fsSL "
-    "--max-time 30 --max-filesize 262144 "
+    "curl -fsSL "
     "https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh "
-    "| { IFS= read -r first || exit 1; [ \"$first\" = \"#!/bin/sh\" ] || exit 1; "
-    "printf \"%s\\n\" \"$first\"; cat; } "
-    "| bash'"
+    "| sh"
 )
 VERSION = "1.2.3-alpha.4"
 TAG = f"v{VERSION}"
@@ -509,10 +507,6 @@ class InstallerBootstrapTests(unittest.TestCase):
 case "$BOOTSTRAP_MODE" in
   success) printf '%s\\n' '#!/bin/sh' ':' ;;
   script_failure) printf '%s\\n' '#!/bin/sh' 'exit 23' ;;
-  truncated) printf '%s\\n' '#!/bin/sh' ':'; exit 18 ;;
-  empty) exit 0 ;;
-  unexpected) printf '%s\\n' '#!/usr/bin/env python' ':' ;;
-  failure) exit 22 ;;
   *) exit 99 ;;
 esac
 """,
@@ -523,7 +517,7 @@ esac
             environment["BOOTSTRAP_MODE"] = mode
             environment["PATH"] = f"{fake_bin}{os.pathsep}{environment['PATH']}"
             return subprocess.run(
-                ["bash", "-c", INSTALL_COMMAND],
+                ["sh", "-c", INSTALL_COMMAND],
                 env=environment,
                 text=True,
                 capture_output=True,
@@ -531,30 +525,28 @@ esac
                 timeout=10,
             )
 
-    def test_bootstrap_propagates_download_and_script_status(self) -> None:
+    def test_bootstrap_runs_downloaded_script(self) -> None:
         self.assertEqual(self._run_bootstrap("success").returncode, 0)
-        for mode in (
-            "failure",
-            "empty",
-            "truncated",
-            "unexpected",
-            "script_failure",
-        ):
-            with self.subTest(mode=mode):
-                self.assertNotEqual(self._run_bootstrap(mode).returncode, 0)
+        self.assertEqual(self._run_bootstrap("script_failure").returncode, 23)
 
 
 class InstallerDocumentationTests(unittest.TestCase):
-    def test_readme_and_release_guide_use_one_line_install_command(self) -> None:
-        for document in (README, RELEASE_GUIDE):
+    def test_install_guides_use_simple_one_line_command(self) -> None:
+        for document in (README, GETTING_STARTED_GUIDE, RELEASE_GUIDE):
             with self.subTest(document=document):
                 content = document.read_text(encoding="utf-8")
                 self.assertIn(INSTALL_COMMAND, content)
                 self.assertNotIn(f"{INSTALL_COMMAND} &&", content)
+                self.assertNotIn("bash -o pipefail -c", content)
+                self.assertNotIn("IFS= read -r first", content)
                 self.assertIn("SNOW_NO_MODIFY_PATH=1", content)
 
+        getting_started = GETTING_STARTED_GUIDE.read_text(encoding="utf-8")
+        self.assertNotIn("The installer:", getting_started)
+        self.assertNotIn("The command requires", getting_started)
+
         security = SECURITY_GUIDE.read_text(encoding="utf-8")
-        self.assertIn("streams `scripts/install.sh` into `bash`", security)
+        self.assertIn("streams `scripts/install.sh` into `sh`", security)
         self.assertIn("persistently adds its directory", security)
 
 

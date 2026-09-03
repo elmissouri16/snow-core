@@ -42,10 +42,10 @@ installation, a credential-free smoke test, provider authentication, the first
 interactive prompt, permissions, and troubleshooting.
 
 Snow release archives support macOS and Linux on amd64 and arm64. Install the
-latest published release with Bash; Go is not required:
+latest published release with a POSIX shell; Go is not required:
 
-```bash
-bash -o pipefail -c 'curl --proto "=https" --tlsv1.2 -fsSL --max-time 30 --max-filesize 262144 https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh | { IFS= read -r first || exit 1; [ "$first" = "#!/bin/sh" ] || exit 1; printf "%s\n" "$first"; cat; } | bash'
+```sh
+curl -fsSL https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh | sh
 ```
 
 The installer verifies the release checksum and binary version, installs to
@@ -54,7 +54,7 @@ POSIX startup file. Restart your shell after the first installation.
 
 Set `SNOW_INSTALL_DIR` to another absolute directory, `SNOW_VERSION` to an exact
 release such as `v0.1.0-alpha.1`, or `SNOW_NO_MODIFY_PATH=1` to leave startup
-files unchanged. Piping a remote script into Bash trusts the repository; review
+files unchanged. Piping a remote script into `sh` trusts the repository; review
 [`scripts/install.sh`](scripts/install.sh) first when your environment requires
 it. Checksums protect release integrity but are not an independent signature.
 

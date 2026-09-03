@@ -19,27 +19,11 @@ require Go.
 
 ## Install Snow
 
-Run this command in Bash to install the latest published release:
+Run this command to install the latest published release:
 
-```bash
-bash -o pipefail -c 'curl --proto "=https" --tlsv1.2 -fsSL --max-time 30 --max-filesize 262144 https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh | { IFS= read -r first || exit 1; [ "$first" = "#!/bin/sh" ] || exit 1; printf "%s\n" "$first"; cat; } | bash'
+```sh
+curl -fsSL https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh | sh
 ```
-
-The installer:
-
-- detects macOS or Linux and amd64 or arm64;
-- downloads the matching GitHub release;
-- verifies the archive against its published `SHA256SUMS`;
-- verifies the binary-reported version;
-- installs `snow` to `~/.local/bin/snow`; and
-- adds that directory to your Bash, Zsh, or POSIX shell startup file.
-
-Restart your shell after the first installation so the new `PATH` entry takes
-effect.
-
-The command requires Bash, `curl`, `tar`, `uname`, `mktemp`, `mkdir`, `chmod`,
-`mv`, `cp`, `rm`, `sed`, `awk`, `grep`, `cat`, `wc`, and either `sha256sum` or
-`shasum`.
 
 ### Installation options
 
@@ -60,7 +44,7 @@ export SNOW_NO_MODIFY_PATH=1
 colon. If you disable the automatic `PATH` update, add the selected directory
 to `PATH` yourself.
 
-Piping a remotely downloaded script into Bash trusts the repository content. If
+Piping a remotely downloaded script into `sh` trusts the repository content. If
 you need to review it first, download
 [`scripts/install.sh`](https://github.com/elmissouri16/snow-core/blob/main/scripts/install.sh),
 inspect the complete file, and run the reviewed copy locally. Release checksums

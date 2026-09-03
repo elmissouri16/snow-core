@@ -58,11 +58,11 @@ alpha prerelease, and selects the archive matching the host. Anonymous use
 requires a public repository and at least one published GitHub Release; a Git
 tag without an associated release is not installable:
 
-```bash
-bash -o pipefail -c 'curl --proto "=https" --tlsv1.2 -fsSL --max-time 30 --max-filesize 262144 https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh | { IFS= read -r first || exit 1; [ "$first" = "#!/bin/sh" ] || exit 1; printf "%s\n" "$first"; cat; } | bash'
+```sh
+curl -fsSL https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh | sh
 ```
 
-The one-line command requires `bash` plus a standard userland with `curl`,
+The one-line command requires `sh` plus a standard userland with `curl`,
 `tar`, `uname`, `mktemp`, `rm`, `sed`, `awk`, `grep`, `cat`, and `wc`, and either
 `sha256sum` or `shasum`. The installer bounds every download, verifies the selected
 archive against the release's `SHA256SUMS`, validates the archive's exact paths,

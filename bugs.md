@@ -601,9 +601,8 @@ It requires an absolute install path, rejects control characters and
 PATH-delimiter colons, preserves macOS Bash profile precedence, honors absolute
 Zsh `ZDOTDIR`, and warns rather than corrupting a non-regular profile target.
 It supports `SNOW_NO_MODIFY_PATH=1` for users who manage PATH themselves. The
-public command
-is now one bounded, pipefail-protected bootstrap line; the persisted entry takes
-effect in a new shell because a child installer cannot mutate its parent
+public command is a compact `curl -fsSL … | sh` bootstrap; the persisted entry
+takes effect in a new shell because a child installer cannot mutate its parent
 process.
 
 ### Resolution evidence

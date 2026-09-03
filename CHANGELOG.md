@@ -28,6 +28,9 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- Simplified the public installer invocation to the conventional
+  `curl -fsSL … | sh` form while retaining release checksum, archive, and
+  binary-version verification inside the installer.
 - Refocused the GitHub Pages site on external users with an ordered first-run
   guide, task-based agent navigation, and an explicit public-document allowlist;
   maintainer, audit, research, release-process, and implementation records now
