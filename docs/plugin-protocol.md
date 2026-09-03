@@ -479,6 +479,4 @@ See the dependency-free reference runtimes under `examples/plugins/` and the
 ## Related documents
 
 - [Plugins](plugins.md)
-- [JavaScript and Python plugin research](plugin-js-python-research.md)
-- [Tool routing](tool-routing.md)
 - [MCP](mcp.md)

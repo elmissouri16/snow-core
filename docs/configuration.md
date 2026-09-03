@@ -70,7 +70,7 @@ Runtime selection generally follows this order:
 
 The base system preamble has a more specific precedence: explicit SDK
 `SystemPrompt`, trusted-project `system_prompt_file`, global
-`system_prompt_file`, then the embedded `internal/context/system.md`. Project
+`system_prompt_file`, then Snow's embedded default preamble. Project
 `AGENTS.md` files and runtime mode/skill guidance are appended separately.
 
 Trusted project configuration is a separate, deliberately narrow overlay. It

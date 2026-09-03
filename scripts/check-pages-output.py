@@ -18,6 +18,30 @@ MAX_TOTAL_REFERENCES = 100_000
 MAX_PAGE_FRAGMENTS = 20_000
 MAX_TOTAL_FRAGMENTS = 100_000
 ALLOWED_EXTERNAL_SCHEMES = {"http", "https", "mailto", "tel"}
+FORBIDDEN_PUBLIC_PATHS = {
+    "README.html",
+    "SECURITY.html",
+    "IMPLEMENTATION.html",
+    "AGENTS.html",
+    "CHANGELOG.html",
+    "bugs.html",
+    "LICENSE",
+    "docs/README.html",
+    "docs/releases.html",
+    "docs/pages.html",
+    "docs/style-guide.html",
+    "docs/performance.html",
+    "docs/code-audit.html",
+    "docs/codex-plan-mode-and-goals.html",
+    "docs/lazy-mcp-implementation-plan.html",
+    "docs/plugin-js-python-research.html",
+    "docs/subagents-implementation-plan.html",
+    "docs/tool-routing.html",
+    "docs/tui-performance.html",
+    "docs/chatgpt-auth-research.html",
+    "docs/session-storage-internals.html",
+}
+FORBIDDEN_PUBLIC_PREFIXES = (".github/", "benchmarks/", "design-plans/")
 
 
 class PageParser(HTMLParser):
@@ -90,6 +114,13 @@ def validate_site(site_root: Path, base_path: str) -> list[str]:
 
     pages: dict[Path, PageParser] = {}
     failures: list[str] = []
+    for path in files:
+        relative = path.relative_to(site_root).as_posix()
+        if relative in FORBIDDEN_PUBLIC_PATHS or relative.startswith(
+            FORBIDDEN_PUBLIC_PREFIXES
+        ):
+            failures.append(f"forbidden public artifact path: {relative}")
+
     total_references = 0
     total_fragments = 0
     for path in files:

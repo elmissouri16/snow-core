@@ -1,13 +1,13 @@
 # ChatGPT authentication
 
-Snow authenticates ChatGPT/Codex subscriptions through OAuth, not an OpenAI API
-key. This document describes the supported credential shape, local import
-sources, login flows, token refresh, status checks, the authenticated model
-catalog, and the hardened Codex inference boundary.
+Use a ChatGPT/Codex subscription with Snow through OAuth rather than an OpenAI
+API key. This guide covers browser and device login, supported credential
+imports, token refresh, status checks, the authenticated model catalog, and
+account selection.
 
-> **Note:** These are the OAuth client and product-backend routes exercised by
-> official Codex. They can change; constants, wire records, cache parsing, and
-> the bundled fallback remain isolated in `internal/provider/chatgpt`.
+> **Note:** ChatGPT product authentication can change independently of Snow.
+> Run `snow auth check chatgpt` to inspect your current login without refreshing
+> it.
 
 ## On this page
 
@@ -18,7 +18,6 @@ catalog, and the hardened Codex inference boundary.
 - [Status checks and JWT metadata](#status-checks-and-jwt-metadata)
 - [Authenticated model catalog](#authenticated-model-catalog)
 - [Codex inference and SSE](#codex-inference-and-sse)
-- [Research notes](#research-notes)
 - [Compatibility boundary](#compatibility-boundary)
 - [Related documents](#related-documents)
 
@@ -127,8 +126,7 @@ uses a hashed `auth.json.<provider-hash>.refresh.lock`. Both are mode `0600`.
 
 ## Status checks and JWT metadata
 
-The side-effect-free check is available from Go as
-`internal/provider/chatgpt.CheckAuth` and from the CLI:
+Check the stored ChatGPT login without refreshing it:
 
 ```sh
 snow auth check chatgpt
@@ -198,64 +196,6 @@ Completed encrypted reasoning items are persisted only as non-rendered opaque
 continuity blocks and replayed before function calls/outputs; encrypted
 payloads are never emitted as UI or log events.
 
-## Research notes
-
-### Pi
-
-Pi models ChatGPT Plus/Pro as the `openai-codex` OAuth provider:
-
-- Provider registration: [`packages/ai/src/providers/openai-codex.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/providers/openai-codex.ts)
-- OAuth flow and token refresh: [`packages/ai/src/auth/oauth/openai-codex.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/auth/oauth/openai-codex.ts)
-- Side-effect-free auth availability check: [`packages/ai/src/models.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.ts)
-- Auth format and provider documentation: [`packages/coding-agent/docs/providers.md`](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md)
-
-Pi separates `checkAuth` from runtime resolution: the check considers an OAuth
-entry configured without refreshing it, while resolution refreshes expired
-credentials while holding the credential-store lock.
-
-Pi's current Codex flow uses the following endpoints and values (the client ID
-is public configuration, not a secret, but may change):
-
-- client ID `app_EMoamEEZ73f0CkXaXp7hrann`;
-- issuer `https://auth.openai.com`;
-- PKCE browser login at `/oauth/authorize`;
-- token exchange and refresh at `/oauth/token`;
-- optional device flow at `/api/accounts/deviceauth/usercode` and
-  `/api/accounts/deviceauth/token`;
-- access-token namespace `https://api.openai.com/auth`, field
-  `chatgpt_account_id`;
-- ChatGPT Codex requests at `https://chatgpt.com/backend-api/codex/responses`
-  with `Authorization`, `chatgpt-account-id`, and `originator` headers.
-
-### Official OpenAI Codex
-
-The official Codex repository uses the same device-code endpoints and a
-15-minute polling window:
-
-- [`codex-rs/login/src/device_code_auth.rs`](https://github.com/openai/codex/blob/main/codex-rs/login/src/device_code_auth.rs)
-- [`codex-rs/login/src/auth/manager.rs`](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/manager.rs)
-
-It also treats refresh-token failures as a re-login condition and persists
-rotated access/refresh tokens atomically. Snow distinguishes permanent token
-rejection from transient endpoint/network failure rather than forcing a login
-for every refresh error.
-
-### OpenCode
-
-Current OpenCode (`anomalyco/opencode`) implements ChatGPT Plus/Pro OAuth in
-[`packages/opencode/src/plugin/openai/codex.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/openai/codex.ts).
-It stores the credential under `openai`, extracts `accountId` from OAuth tokens,
-refreshes with a form-encoded `/oauth/token` request, rewrites Responses calls
-to `https://chatgpt.com/backend-api/codex/responses`, and sends bearer,
-`ChatGPT-Account-Id`, `originator`, user-agent, and session headers. Its OAuth
-model filter explicitly allows `gpt-5.3-codex-spark`.
-
-The backend still applies account entitlements: a Spark-capable OpenCode account
-and a different browser-selected Snow account are not interchangeable merely
-because both report a ChatGPT Plus plan. Snow therefore uses the discovered
-account ID only as an official OAuth workspace restriction, obtains its own
-token, and rejects a login whose returned claim belongs to a different account.
-
 ## Compatibility boundary
 
 ChatGPT subscription OAuth remains separate from OpenAI API-key authentication.
@@ -271,4 +211,5 @@ cross-origin bearer forwarding.
 - [Security](security.md) — credential handling and network boundaries
 - [Configuration](configuration.md) — provider and auth storage paths
 - [Using Snow](using-snow.md) — login, provider, and model workflows
-- [README](../README.md) — quick start and provider overview
+- [Install Snow and run your first prompt](getting-started.md) — installation
+  and provider setup

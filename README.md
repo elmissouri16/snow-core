@@ -37,177 +37,57 @@ events behind every surface.
 
 ## Quick start
 
-### Requirements
+The canonical [getting-started guide](docs/getting-started.md) walks through
+installation, a credential-free smoke test, provider authentication, the first
+interactive prompt, permissions, and troubleshooting.
 
-- macOS or Linux on amd64 or arm64.
-- The release installer command requires `bash` plus a standard userland with
-  `curl`, `tar`, `uname`, `mktemp`, `rm`, `sed`, `awk`, `grep`, `cat`, and
-  `wc`, and
-  either `sha256sum` or `shasum`.
-- Go 1.27 only when building from source; `go.mod` declares `1.27rc3` because
-  that is the available toolchain required by the pinned Surf release.
-  Prebuilt release archives do not require Go.
-
-### Install the latest release
-
-Install the latest published release on macOS or Linux:
+Snow release archives support macOS and Linux on amd64 and arm64. Install the
+latest published release with Bash; Go is not required:
 
 ```bash
 bash -o pipefail -c 'curl --proto "=https" --tlsv1.2 -fsSL --max-time 30 --max-filesize 262144 https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh | { IFS= read -r first || exit 1; [ "$first" = "#!/bin/sh" ] || exit 1; printf "%s\n" "$first"; cat; } | bash'
 ```
 
-The installer detects macOS/Linux and amd64/arm64, downloads the matching
-GitHub release archive, verifies it against that release's `SHA256SUMS`, checks
-the binary-reported version, and atomically installs `snow` to
-`~/.local/bin/snow`. It also adds the install directory to the appropriate Bash,
-Zsh, or POSIX shell startup file without duplicating its own entry. Restart
-your shell after the first installation. It includes alpha prereleases when
-resolving the latest published version. Go is not required. Anonymous
-installation starts working once the repository is public and at least one
-GitHub Release is published; a Git tag by itself is not a downloadable release.
+The installer verifies the release checksum and binary version, installs to
+`~/.local/bin/snow`, and adds that directory to the appropriate Bash, Zsh, or
+POSIX startup file. Restart your shell after the first installation.
 
-To choose another destination or pin an immutable release, export either value
-before running the installation command. `SNOW_INSTALL_DIR` must be an absolute
-path. Set `SNOW_NO_MODIFY_PATH=1` to install the binary without changing a shell
-startup file:
+Set `SNOW_INSTALL_DIR` to another absolute directory, `SNOW_VERSION` to an exact
+release such as `v0.1.0-alpha.1`, or `SNOW_NO_MODIFY_PATH=1` to leave startup
+files unchanged. Piping a remote script into Bash trusts the repository; review
+[`scripts/install.sh`](scripts/install.sh) first when your environment requires
+it. Checksums protect release integrity but are not an independent signature.
+
+Verify the local agent loop without credentials:
 
 ```sh
-export SNOW_INSTALL_DIR="$HOME/bin"
-export SNOW_VERSION=v0.1.0-alpha.1
-export SNOW_NO_MODIFY_PATH=1 # optional
+snow --provider fake --no-session -p "hello"
 ```
 
-Piping a remotely downloaded script into `bash` trusts the current repository
-content. For manual review, download `scripts/install.sh` to a file, inspect it,
-and then run it locally instead. Release checksums provide integrity against the
-same GitHub release; they are not an independent signature. See the
-[release policy](docs/releases.md).
-
-### Build from source
-
-From the repository root:
-
-```sh
-git clone https://github.com/elmissouri16/snow-core.git
-cd snow-core
-
-# Build a repository-local binary
-go build -o snow ./cmd/snow
-./snow --version
-
-# Or install/update ~/.local/bin/snow from this checkout
-./scripts/install-local.sh
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-Override the local-build destination with `SNOW_INSTALL_DIR=/path/to/bin`. On
-an exact alpha tag, `install-local.sh` embeds the tag version; `SNOW_VERSION`
-can provide an explicit version for a reviewed local build. CLI surfaces treat
-the directory where Snow is launched as the active project.
-
-### Try it without credentials
-
-A fresh configuration defaults to anonymous `opencode-zen`; its maintained
-promotional free models are the only built-in hosted models shown before login.
-Smoke-test the harness without any provider network access by using the
-deterministic `fake` provider:
-
-```sh
-./snow --provider fake --no-session -p "hello"
-```
-
-### Authenticate
-
-OpenCode Go — export a key or store it with Snow:
-
-```sh
-export OPENCODE_API_KEY=oc-...
-snow --provider opencode-go -p "summarize this repository"
-
-# or persist the key in Snow's credential store
-snow login opencode-go
-```
-
-OpenCode Zen promotional free models — anonymous by default, with an optional
-Zen API key:
-
-```sh
-snow --provider opencode-zen --model big-pickle \
-  -p "summarize this repository"
-
-# Optional: raises account-scoped limits when Zen permits it
-export OPENCODE_API_KEY=sk-opencode-...
-# or: snow login opencode-zen
-```
-
-Zen uses only Snow's maintained non-deprecated free-model catalog and never
-silently switches to a paid model. Anonymous quotas and the promotional lineup
-are not stable. Verified context/output limits drive the footer and automatic
-compaction. At provider catalog refresh, Snow loads reasoning capability and
-selectable efforts from OpenCode's current public models.dev record; the Zen
-credential is never sent there, and Snow never guesses efforts from model names.
-A provider completion with no answer or tool call is surfaced as an error
-instead of a silent blank turn. The TUI model picker shows each model's
-documented privacy or training notice; review it before sending private code.
-
-OpenAI-compatible endpoint (Responses preferred; Chat Completions fallback; API
-key optional):
-
-```sh
-snow --provider openai-compatible \
-  --base-url https://gateway.example/v1 \
-  --model model-id --api-key "$OPENAI_API_KEY" \
-  -p "summarize this repository"
-```
-
-Inside the TUI, `/login openai-compatible` prompts for a profile name, endpoint,
-and optional masked API key, then refreshes `/models`. Use names such as
-`x-provider` to keep multiple endpoints and credentials distinct; the name
-becomes the provider selector shown in `/login` and `/model` and works as
-`--provider x-provider` or `/login x-provider`. A blank name preserves the
-legacy `openai-compatible` profile. Create the same profile from the CLI with:
-
-```sh
-snow login openai-compatible --name x-provider \
-  --base-url https://gateway.example/v1
-```
-
-Profile endpoints and type metadata are stored in `config.json`; each profile's
-key is stored separately under the same name in `auth.json`. Leaving the TUI key
-step blank preserves an existing stored key or stays keyless. `OPENAI_API_KEY`
-only falls back for the legacy `openai-compatible` profile, so named profiles do
-not silently share one environment credential.
-
-ChatGPT/Codex:
-
-```sh
-snow login chatgpt                 # browser PKCE
-snow login chatgpt --device-code   # headless/device flow
-snow auth check chatgpt            # inspect without refreshing
-```
-
-Credentials resolve in this order: explicit `--api-key`/SDK option, Snow's auth
-store, then a known environment fallback such as `OPENCODE_API_KEY` or
-`OPENAI_API_KEY`. A provider-scoped auth service owns precedence, status, login,
-persistence, refresh locking, and logout; the agent consumes a credential-free
-provider runtime, so new built-in providers stay out of agent and UI auth logic.
-Secrets are stored separately from configuration and are never printed by
-inventory commands. Required-auth provider catalogs, including OpenCode Go and
-ChatGPT, stay out of model inventories until a usable credential resolves and
-are removed again after logout. Anonymous OpenCode Zen remains visible. See
-[ChatGPT authentication](docs/chatgpt-auth.md) for OAuth, refresh, imports, and
-account-scoped catalogs.
-
-### Start the TUI
+Then launch Snow from the project you want to work on. A fresh configuration can
+use anonymous OpenCode Zen, or you can authenticate another provider first:
 
 ```sh
 cd /path/to/project
-snow
+snow --provider opencode-zen
+
+# Alternatives:
+snow login chatgpt
+snow --provider chatgpt
+snow login opencode-go
+snow --provider opencode-go
 ```
 
-The first interactive launch in an undecided project asks whether project-local
-Snow configuration may be loaded. This is an input-loading decision, not a
-sandbox boundary.
+The first interactive launch asks whether project-local Snow configuration may
+be loaded. This is an input-loading decision, not a sandbox boundary. Review the
+[security model](docs/security.md) before granting broad tool authority.
+
+To build the checkout instead, install Go 1.27rc3, then run:
+
+```sh
+go build -o snow ./cmd/snow
+./snow --version
+```
 
 ## Choose a surface
 
@@ -561,25 +441,23 @@ field, project scope, environment variables, and YAML examples.
 
 ## Documentation
 
-Browse the generated [Snow documentation site](https://elmissouri16.github.io/snow-core/)
-after GitHub Pages is enabled, or start from the repository's canonical
-[documentation index](docs/README.md).
+The [Snow documentation site](https://elmissouri16.github.io/snow-core/) is the
+curated manual for installing and using Snow. Start with
+[Install Snow and run your first prompt](docs/getting-started.md).
 
-| Task | Guide |
+| User task | Guide |
 |---|---|
 | Learn the TUI and CLI modes | [Using Snow](docs/using-snow.md) |
 | Configure paths, providers, tools, themes, and search | [Configuration](docs/configuration.md) |
-| Embed Snow in Go | [Go SDK](docs/sdk.md) · [standalone example](examples/sdk) |
-| Build a raw JSONL client | [RPC](docs/rpc.md) · [schemas](pkg/protocol/schema/rpc/v1) |
-| Author JavaScript/Python plugins | [Plugins](docs/plugins.md) · [Protocol v2](docs/plugin-protocol.md) |
-| Review operational boundaries or report a vulnerability | [Security model](docs/security.md) · [Reporting policy](SECURITY.md) |
-| Prepare or verify a release | [Release policy](docs/releases.md) · [Changelog](CHANGELOG.md) |
-| Publish or maintain the documentation site | [GitHub Pages guide](docs/pages.md) |
-| Authenticate ChatGPT/Codex | [ChatGPT auth](docs/chatgpt-auth.md) |
-| Resume and branch conversations | [Sessions](docs/sessions.md) |
-| Use Plan Mode, goals, or subagents | [Plan Mode](docs/plan-mode.md) · [Goals](docs/goals.md) · [Subagents](docs/subagents.md) |
-| Extend Snow | [MCP](docs/mcp.md) · [Plugins](docs/plugins.md) · [Skills](docs/skills.md) |
-| Understand architecture and roadmap | [IMPLEMENTATION.md](IMPLEMENTATION.md) |
+| Resume work, plan, pursue goals, or delegate | [Sessions](docs/sessions.md) · [Plan Mode](docs/plan-mode.md) · [Goals](docs/goals.md) · [Subagents](docs/subagents.md) |
+| Extend Snow | [Agent Skills](docs/skills.md) · [MCP](docs/mcp.md) · [Plugins](docs/plugins.md) |
+| Embed or automate Snow | [Go SDK](docs/sdk.md) · [JSONL RPC](docs/rpc.md) · [Plugin protocol](docs/plugin-protocol.md) |
+| Understand operational boundaries | [Security model](docs/security.md) |
+
+Maintainer, architecture, release, audit, research, and implementation records
+remain available in the repository but are intentionally excluded from Pages.
+Use the repository-only [complete documentation index](docs/README.md) to find
+them.
 
 ## Development
 

@@ -1,10 +1,9 @@
 # Security model
 
-Snow is a coding-agent harness that runs with the current user's
-operating-system privileges. It provides permission gates, path confinement,
-bounded I/O, trust-gated project input, and explicit extension controls. This
-document is the consolidated privilege and threat-boundary reference for
-operators, CI setups, and SDK/RPC embedders.
+Snow runs with the current user's operating-system privileges. This guide
+explains permission gates, path confinement, bounded input and output, project
+trust, credentials, extensions, and safe operating profiles for terminal and
+embedded use.
 
 > **Note:** Snow has no built-in process sandbox. Snow, model-facing Bash,
 > plugins, stdio MCP servers, and subagents run with the current user's OS
@@ -22,7 +21,6 @@ operators, CI setups, and SDK/RPC embedders.
 - [Extensions risk](#extensions-risk)
 - [Plan Mode and goals](#plan-mode-and-goals)
 - [Release installer trust](#release-installer-trust)
-- [Documentation publication](#documentation-publication)
 - [Recommended operating profiles](#recommended-operating-profiles)
 - [Related documents](#related-documents)
 
@@ -575,23 +573,6 @@ non-regular profile target. Regular-file dotfile symlinks remain supported. Set
 binary installed and emits a warning rather than replacing unrelated shell
 configuration.
 
-## Documentation publication
-
-The GitHub Pages workflow publishes static content from an allowlisted staging
-directory rather than exposing the entire checkout. It includes canonical
-guides plus the tracked Go SDK example, schemas, CI workflow, and root
-references that those guides link to. Raw external plugin fixtures are
-excluded, as are `.snow` state, session databases, credentials, ignored files,
-and arbitrary untracked content.
-
-Official Pages actions remain pinned to reviewed full commit SHAs. The build
-job has only `contents: read`; `pages: write` and `id-token: write` are scoped to
-the deployment job. The workflow uses no Snow or provider secrets and
-serializes deployments through the `github-pages` environment. Repository
-documentation is public, untrusted text rather than a
-security boundary; readers must follow `SECURITY.md` for private vulnerability
-reports instead of posting sensitive findings to public issues.
-
 ## Recommended operating profiles
 
 ### Read-only repository inspection
@@ -645,8 +626,8 @@ arguments.
 
 ## Related documents
 
-- [Security reporting policy](../SECURITY.md) — private vulnerability disclosure
-- [Release policy](releases.md) — supported alpha versions and release handling
+- [Security reporting policy](https://github.com/elmissouri16/snow-core/blob/main/SECURITY.md) — private vulnerability disclosure
+- [Published releases](https://github.com/elmissouri16/snow-core/releases) — available alpha versions
 - [Configuration](configuration.md) — trust, auth, and runtime settings
 - [Plugins](plugins.md) — external plugin lifecycle and risk declarations
 - [MCP](mcp.md) — MCP transports, capabilities, and permissions

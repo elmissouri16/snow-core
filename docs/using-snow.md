@@ -4,9 +4,8 @@ This guide covers Snow's terminal surfaces: the interactive TUI, print output,
 JSON events, and the command-line controls shared by all modes. For machine
 control, see [JSONL RPC](rpc.md). For embedding, see the [Go SDK](sdk.md).
 
-> **Note:** Snow is alpha software. The generated command reference from
-> `snow --help` is authoritative for your build, and behavior described here is
-> verified against source.
+> **Note:** Snow is alpha software. Run `snow --help` to see the command
+> reference for your installed version.
 
 ## On this page
 

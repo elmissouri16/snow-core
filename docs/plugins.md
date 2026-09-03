@@ -1,11 +1,10 @@
 # Plugins
 
-Snow's extensibility core has two adapters sharing one permissioned capability
-registry. Statically linked Go plugins implement `pkg/plugin.Plugin`; external
-runtimes implement Snow's JSON-RPC 2.0 JSONL protocol v2. External runtimes are
-the supported JavaScript/Python plugin ABI. Snow keeps one process alive per
-plugin package, so interpreter startup is paid once while several related tools
-share the same runtime.
+Use plugins to add Snow-specific tools, lifecycle hooks, progress, and agent
+events. Go applications can register plugins in-process; JavaScript, Python,
+and other runtimes connect through Snow's external plugin protocol. External
+plugin processes stay alive while Snow is using them, so one package can expose
+several related tools.
 
 MCP and skills are intentionally separate. Use [MCP](mcp.md) for interoperable
 tools, resources, and prompts; use Snow plugins for Snow-specific lifecycle,
@@ -262,7 +261,5 @@ compatibility with either.
 ## Related documents
 
 - [External plugin protocol v2](plugin-protocol.md)
-- [JavaScript and Python plugin research](plugin-js-python-research.md)
-- [Tool routing](tool-routing.md)
 - [MCP](mcp.md)
 - [Agent Skills](skills.md)

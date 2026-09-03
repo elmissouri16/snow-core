@@ -1,20 +1,24 @@
-# Snow documentation
+# Snow repository documentation
 
-This directory contains user guides, integration references, extension guides,
-and maintainer design material for snow-core. Start with the table below, or use
-the canonical-ownership map at the end when you need the authoritative reference
-for a subject.
+This is the complete documentation index for Snow maintainers and contributors.
+It includes public user guides alongside architecture, release, performance,
+research, audit, and implementation records that are intentionally not
+published on the user documentation site.
+
+If you want to install or use Snow, start with the curated
+[GitHub Pages guide](https://elmissouri16.github.io/snow-core/) or the
+[getting-started guide](getting-started.md). Use the ownership map below when
+maintaining behavior or locating the authoritative repository reference.
 
 > **Note:** Snow is alpha software. Source code and tests are the behavioral
 > authority when an older research or roadmap document differs from a current
-> feature guide. The generated [GitHub Pages site](https://elmissouri16.github.io/snow-core/)
-> becomes available after the public repository enables Pages.
+> feature guide.
 
 ## Start here
 
 | I want to… | Read |
 |---|---|
-| Install Snow and run my first prompt | [Project README](../README.md#quick-start) |
+| Install Snow and run my first prompt | [Getting started](getting-started.md) |
 | Learn the TUI, CLI modes, keys, and slash commands | [Using Snow](using-snow.md) |
 | Configure providers, permissions, sessions, themes, and search | [Configuration](configuration.md) |
 | Understand safety and privilege boundaries | [Security model](security.md) |
@@ -31,8 +35,8 @@ for a subject.
   ordering, interactive input, goals, subagents, shutdown, and schemas.
 - [Model-requested user input](user-input.md) — `ask_user` request/response
   schema across TUI, SDK, RPC, print, and JSON surfaces.
-- [SQLite sessions](sessions.md) — session storage, branches, resume, and the
-  public session-store APIs.
+- [Sessions and branches](sessions.md) — storage, resume, branches, compaction,
+  forks, retrieval, and public SDK options.
 
 ## Workflows
 
@@ -75,6 +79,10 @@ for a subject.
   conventions for documentation contributors.
 - [Documentation site](pages.md) — GitHub Pages enablement, staging, deployment,
   validation, and troubleshooting.
+- [Session storage internals](session-storage-internals.md) — SQLite driver,
+  schema, migrations, append-only branches, projections, and durable child data.
+- [ChatGPT authentication research](chatgpt-auth-research.md) — repository-only
+  provider provenance and compatibility comparisons.
 - [TUI responsiveness](tui-performance.md) — Bubble Tea rendering and
   performance implementation guidance.
 - [Performance regression guard](performance.md) — deterministic allocation
@@ -94,16 +102,21 @@ To reduce drift, use these documents as the primary references:
 
 | Subject | Canonical document |
 |---|---|
-| First run and project overview | [`README.md`](../README.md) |
+| Installation and first run | [`getting-started.md`](getting-started.md) |
+| Project overview and contributor entry point | [`README.md`](../README.md) |
 | TUI/CLI operation | [`using-snow.md`](using-snow.md) |
 | Runtime configuration | [`configuration.md`](configuration.md) |
 | Go embedding | [`sdk.md`](sdk.md) |
 | Foreign-process control | [`rpc.md`](rpc.md) |
 | External plugin ABI | [`plugin-protocol.md`](plugin-protocol.md) |
+| ChatGPT/Codex authentication | [`chatgpt-auth.md`](chatgpt-auth.md) |
+| ChatGPT adapter provenance | [`chatgpt-auth-research.md`](chatgpt-auth-research.md) |
 | Lazy MCP implementation | [Connection plan](lazy-mcp-implementation-plan.md) |
 | Safety model and privilege boundaries | [`security.md`](security.md) |
 | Vulnerability disclosure | [`SECURITY.md`](../SECURITY.md) |
 | Alpha versioning and distribution | [`releases.md`](releases.md) |
+| User session workflows | [`sessions.md`](sessions.md) |
+| SQLite session implementation | [`session-storage-internals.md`](session-storage-internals.md) |
 | GitHub Pages publication | [`pages.md`](pages.md) |
 | Performance allocation gates | [`performance.md`](performance.md) |
 | Feature-specific behavior | The matching guide in this directory |
@@ -113,7 +126,8 @@ To reduce drift, use these documents as the primary references:
 
 ## Related documents
 
-- [Project README](../README.md) — first run and product overview.
+- [Getting started](getting-started.md) — public installation and first-run guide.
+- [Project README](../README.md) — repository overview and contributor entry point.
 - [Release policy](releases.md) — alpha release and distribution requirements.
 - [Security reporting](../SECURITY.md) — private vulnerability disclosure.
 - [Documentation style guide](style-guide.md) — conventions used across this

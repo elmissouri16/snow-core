@@ -28,6 +28,10 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- Refocused the GitHub Pages site on external users with an ordered first-run
+  guide, task-based agent navigation, and an explicit public-document allowlist;
+  maintainer, audit, research, release-process, and implementation records now
+  remain repository-only.
 - Generalized fixture commands, generated-directory classification, provider
   JSON formatting, application-level textual response detection, and the macOS
   clipboard implementation so Go runtime paths remain language-neutral.

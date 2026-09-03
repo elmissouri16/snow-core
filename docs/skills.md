@@ -200,6 +200,5 @@ activating a skill never executes a script automatically.
 
 - [Plugins](plugins.md)
 - [MCP](mcp.md)
-- [Tool routing](tool-routing.md)
 - [Configuration](configuration.md)
 - [Security](security.md)

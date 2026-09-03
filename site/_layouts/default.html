@@ -19,8 +19,8 @@
           <small>Documentation</small>
         </span>
       </a>
-      <nav class="topbar-links" aria-label="Repository links">
-        <a href="{{ '/README.html#quick-start' | relative_url }}">Install</a>
+      <nav class="topbar-links" aria-label="Documentation links">
+        <a href="{{ '/docs/getting-started.html' | relative_url }}">Install</a>
         <a href="https://github.com/{{ site.repository }}">GitHub</a>
       </nav>
     </header>
@@ -38,7 +38,7 @@
         {% unless page.layout == 'home' %}
         {% assign edit_path = page.edit_path | default: page.path %}
         <div class="content-header">
-          <span class="eyebrow">Snow agent handbook</span>
+          <span class="eyebrow">Snow user guide</span>
           <a class="edit-link" href="https://github.com/{{ site.repository }}/blob/main/{{ edit_path }}">Edit this page</a>
         </div>
         {% endunless %}
@@ -46,10 +46,10 @@
           {{ content }}
         </article>
         <footer class="page-footer">
-          <p>Snow is alpha software. Verify behavior against the current release and source.</p>
+          <p>Snow is alpha software. Commands and APIs may change before v1.</p>
           <span class="footer-links">
             <a href="https://github.com/{{ site.repository }}/issues">Report a non-sensitive documentation issue</a>
-            <a href="{{ '/SECURITY.html' | relative_url }}">Report a vulnerability privately</a>
+            <a href="https://github.com/{{ site.repository }}/blob/main/SECURITY.md">Report a vulnerability privately</a>
           </span>
         </footer>
       </main>

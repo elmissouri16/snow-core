@@ -2,33 +2,33 @@
 layout: default
 ---
 <section class="home-hero">
-  <span class="eyebrow">Streaming coding-agent harness</span>
+  <span class="eyebrow">Your Snow user guide</span>
   <h1>Build with Snow, deliberately.</h1>
   <p>
-    Learn the terminal workflow, configure providers and permissions, automate
-    through Go or JSONL RPC, and operate Snow with clear security boundaries.
+    Install Snow, run your first coding-agent prompt, configure the access it
+    needs, and learn the workflows that keep you in control.
   </p>
   <div class="hero-actions">
-    <a class="primary" href="{{ '/README.html#quick-start' | relative_url }}">Install Snow</a>
-    <a class="secondary" href="{{ '/docs/using-snow.html' | relative_url }}">Read the user guide</a>
+    <a class="primary" href="{{ '/docs/getting-started.html' | relative_url }}">Install Snow</a>
+    <a class="secondary" href="{{ '/docs/using-snow.html' | relative_url }}">Use the agent</a>
   </div>
 </section>
 <section class="feature-grid" aria-label="Documentation highlights">
+  <a class="feature-card" href="{{ '/docs/getting-started.html' | relative_url }}">
+    <strong>Install and run</strong>
+    <span>Install the binary, launch Snow, and complete your first prompt.</span>
+  </a>
   <a class="feature-card" href="{{ '/docs/configuration.html' | relative_url }}">
-    <strong>Configure the runtime</strong>
-    <span>Providers, models, permissions, sessions, themes, and tools.</span>
+    <strong>Configure access</strong>
+    <span>Choose providers, models, permissions, themes, and tools.</span>
   </a>
   <a class="feature-card" href="{{ '/docs/plan-mode.html' | relative_url }}">
-    <strong>Control the workflow</strong>
-    <span>Plan Mode, durable goals, queued input, and subagents.</span>
-  </a>
-  <a class="feature-card" href="{{ '/docs/sdk.html' | relative_url }}">
-    <strong>Embed and automate</strong>
-    <span>Pure-Go SDK contracts and the versioned JSONL RPC surface.</span>
+    <strong>Use agent workflows</strong>
+    <span>Plan changes, resume sessions, pursue goals, and delegate work.</span>
   </a>
   <a class="feature-card" href="{{ '/docs/security.html' | relative_url }}">
-    <strong>Operate safely</strong>
-    <span>Privilege boundaries, trust decisions, and release integrity.</span>
+    <strong>Work safely</strong>
+    <span>Understand permissions, trust decisions, and process boundaries.</span>
   </a>
 </section>
 {{ content }}

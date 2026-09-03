@@ -1,9 +1,9 @@
 # Subagents
 
-Snow implements one Codex-V2-style subagent tree around the existing agent
-loop. The feature is disabled by default. This document covers enablement, the
-model-facing tools, roles and permissions, limits, persistence, and the
-surfaces that observe the tree.
+Snow can delegate focused tasks to child agents while the main agent continues
+to coordinate the work. Subagents are disabled by default. This guide covers
+enablement, roles, permissions, limits, persistence, and how to inspect their
+progress.
 
 > **Warning:** Subagents are not a sandbox. Every child runs with the user's
 > OS privileges, shares the working directory and filesystem side effects, and

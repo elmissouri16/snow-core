@@ -15,6 +15,55 @@ CI_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
 MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 ACTION_REFERENCE = re.compile(r"uses:\s+actions/[^@\s]+@([^\s]+)")
 RELATIVE_URL = re.compile(r"\{\{\s*'([^']+)'\s*\|\s*relative_url\s*\}\}")
+NAV_SECTION = re.compile(
+    r"<section>\s*<h2>([^<]+)</h2>(.*?)</section>", re.DOTALL
+)
+NAV_LINK = re.compile(
+    r'''<a href="\{\{\s*'([^']+)'\s*\|\s*relative_url\s*\}\}"[^>]*>([^<]+)</a>'''
+)
+PUBLIC_DOCUMENTS = (
+    "getting-started.md",
+    "using-snow.md",
+    "configuration.md",
+    "chatgpt-auth.md",
+    "sessions.md",
+    "plan-mode.md",
+    "goals.md",
+    "subagents.md",
+    "skills.md",
+    "mcp.md",
+    "plugins.md",
+    "security.md",
+    "sdk.md",
+    "rpc.md",
+    "user-input.md",
+    "plugin-protocol.md",
+)
+INTERNAL_DOCUMENTS = (
+    "README.md",
+    "releases.md",
+    "pages.md",
+    "style-guide.md",
+    "performance.md",
+    "code-audit.md",
+    "codex-plan-mode-and-goals.md",
+    "lazy-mcp-implementation-plan.md",
+    "plugin-js-python-research.md",
+    "subagents-implementation-plan.md",
+    "tool-routing.md",
+    "tui-performance.md",
+    "chatgpt-auth-research.md",
+    "session-storage-internals.md",
+)
+ROOT_INTERNAL_DOCUMENTS = (
+    "README.md",
+    "SECURITY.md",
+    "IMPLEMENTATION.md",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "bugs.md",
+    "LICENSE",
+)
 
 
 class PagesBuildTests(unittest.TestCase):
@@ -37,7 +86,7 @@ class PagesBuildTests(unittest.TestCase):
             timeout=30,
         )
 
-    def test_builder_stages_site_and_canonical_documentation(self) -> None:
+    def test_builder_stages_only_public_user_documentation(self) -> None:
         result = self._build()
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -50,29 +99,37 @@ class PagesBuildTests(unittest.TestCase):
             "assets/css/style.css",
             "index.md",
             "404.html",
-            "README.md",
-            "SECURITY.md",
-            "IMPLEMENTATION.md",
-            "AGENTS.md",
-            "CHANGELOG.md",
-            "docs/README.md",
-            "docs/using-snow.md",
-            "docs/configuration.md",
-            "docs/security.md",
-            "docs/sdk.md",
-            "docs/rpc.md",
+            "examples/index.md",
+            "examples/sdk/index.md",
+            "pkg/snowsdk/index.md",
+            "pkg/protocol/schema/rpc/v1/index.md",
             "examples/sdk/go.mod",
             "pkg/protocol/schema/rpc/v1/agent-event.schema.json",
-            "benchmarks/performance-limits.json",
-            ".github/workflows/ci.yml",
         ):
             self.assertTrue((self.output / relative_path).exists(), relative_path)
 
-        staged_readme = (self.output / "docs" / "README.md").read_text(
-            encoding="utf-8"
+        staged_docs = sorted(
+            path.name for path in (self.output / "docs").glob("*.md")
         )
-        self.assertTrue(staged_readme.startswith("---\nlayout: default\n"))
-        self.assertIn('title: "Snow documentation"', staged_readme)
+        self.assertEqual(staged_docs, sorted(PUBLIC_DOCUMENTS))
+        for document in PUBLIC_DOCUMENTS:
+            staged = (self.output / "docs" / document).read_text(encoding="utf-8")
+            self.assertTrue(staged.startswith("---\nlayout: default\n"), document)
+        for document in INTERNAL_DOCUMENTS:
+            self.assertFalse((self.output / "docs" / document).exists(), document)
+        for document in ROOT_INTERNAL_DOCUMENTS:
+            self.assertFalse((self.output / document).exists(), document)
+        for excluded_path in (
+            "benchmarks",
+            ".github",
+            "sdk/javascript",
+            "sdk/python",
+            "examples/rpc/javascript",
+            "examples/rpc/python",
+            "examples/plugins",
+        ):
+            self.assertFalse((self.output / excluded_path).exists(), excluded_path)
+
         staged_alias = (self.output / "examples" / "index.md").read_text(
             encoding="utf-8"
         )
@@ -83,11 +140,6 @@ class PagesBuildTests(unittest.TestCase):
         self.assertIn("page.edit_path | default: page.path", layout)
         self.assertIn("blob/main/{{ edit_path }}", layout)
         self.assertEqual(
-            len(list((self.output / "docs").glob("*.md"))),
-            len(list((REPOSITORY_ROOT / "docs").glob("*.md"))),
-        )
-        self.assertFalse((self.output / "examples" / "plugins").exists())
-        self.assertEqual(
             sorted(path.name for path in (self.output / "examples" / "sdk").iterdir()),
             ["README.md", "go.mod", "go.sum", "index.md", "main.go"],
         )
@@ -95,14 +147,6 @@ class PagesBuildTests(unittest.TestCase):
             sorted(path.name for path in (self.output / "pkg" / "snowsdk").iterdir()),
             ["index.md"],
         )
-        for excluded_path in (
-            "sdk/javascript",
-            "sdk/python",
-            "examples/rpc/javascript",
-            "examples/rpc/python",
-            "examples/plugins",
-        ):
-            self.assertFalse((self.output / excluded_path).exists(), excluded_path)
         published_scripts = [
             path
             for path in self.output.rglob("*")
@@ -125,8 +169,7 @@ class PagesBuildTests(unittest.TestCase):
         result = self._build()
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        markdown_files = [self.output / "README.md"]
-        markdown_files.extend(sorted((self.output / "docs").glob("*.md")))
+        markdown_files = sorted(self.output.rglob("*.md"))
         failures = []
         for markdown_file in markdown_files:
             content = markdown_file.read_text(encoding="utf-8")
@@ -153,37 +196,102 @@ class PagesBuildTests(unittest.TestCase):
                     failures.append(f"{markdown_file}: missing {raw_target}")
         self.assertEqual(failures, [])
 
-    def test_site_navigation_routes_match_jekyll_outputs(self) -> None:
+    def test_site_routes_resolve_within_curated_staging(self) -> None:
+        result = self._build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
         failures = []
-        for source in sorted((REPOSITORY_ROOT / "site").rglob("*")):
+        for source in sorted(self.output.rglob("*")):
             if not source.is_file() or source.suffix not in {".html", ".md"}:
                 continue
             content = source.read_text(encoding="utf-8")
             for raw_target in RELATIVE_URL.findall(content):
                 route = raw_target.split("#", 1)[0]
                 if route == "/":
-                    target = REPOSITORY_ROOT / "site" / "index.md"
-                elif route == "/README.html":
-                    target = REPOSITORY_ROOT / "README.md"
-                elif route.startswith("/docs/") and route.endswith(".html"):
-                    target = REPOSITORY_ROOT / f"{route.strip('/')[:-5]}.md"
+                    target = self.output / "index.md"
                 elif route.endswith(".html"):
-                    target = REPOSITORY_ROOT / f"{route.strip('/')[:-5]}.md"
+                    target = self.output / f"{route.strip('/')[:-5]}.md"
                 elif route.startswith("/assets/"):
-                    target = REPOSITORY_ROOT / "site" / route.lstrip("/")
+                    target = self.output / route.lstrip("/")
                 elif route.endswith("/"):
-                    target = (
-                        REPOSITORY_ROOT
-                        / "site"
-                        / route.strip("/")
-                        / "index.md"
-                    )
+                    target = self.output / route.strip("/") / "index.md"
                 else:
                     failures.append(f"{source}: unsupported local route {raw_target}")
                     continue
                 if not target.is_file():
-                    failures.append(f"{source}: missing source for {raw_target}")
+                    failures.append(f"{source}: missing staged source for {raw_target}")
         self.assertEqual(failures, [])
+
+    def test_home_and_navigation_are_user_focused(self) -> None:
+        navigation = (
+            REPOSITORY_ROOT / "site" / "_includes" / "navigation.html"
+        ).read_text(encoding="utf-8")
+        expected_navigation = (
+            (
+                "Start",
+                (
+                    ("Overview", "/"),
+                    ("Install and first prompt", "/docs/getting-started.html"),
+                    ("Using Snow", "/docs/using-snow.html"),
+                    ("Configuration", "/docs/configuration.html"),
+                    ("ChatGPT authentication", "/docs/chatgpt-auth.html"),
+                ),
+            ),
+            (
+                "Agent workflows",
+                (
+                    ("Sessions and branches", "/docs/sessions.html"),
+                    ("Plan Mode", "/docs/plan-mode.html"),
+                    ("Thread Goals", "/docs/goals.html"),
+                    ("Subagents", "/docs/subagents.html"),
+                ),
+            ),
+            (
+                "Extend Snow",
+                (
+                    ("Agent Skills", "/docs/skills.html"),
+                    ("MCP", "/docs/mcp.html"),
+                    ("Plugins", "/docs/plugins.html"),
+                ),
+            ),
+            (
+                "Integrate",
+                (
+                    ("Go SDK", "/docs/sdk.html"),
+                    ("JSONL RPC", "/docs/rpc.html"),
+                    ("Model-requested input", "/docs/user-input.html"),
+                    ("Plugin protocol", "/docs/plugin-protocol.html"),
+                ),
+            ),
+            ("Safety", (("Security model", "/docs/security.html"),)),
+        )
+        actual_navigation = tuple(
+            (
+                heading,
+                tuple((label, route) for route, label in NAV_LINK.findall(body)),
+            )
+            for heading, body in NAV_SECTION.findall(navigation)
+        )
+        self.assertEqual(actual_navigation, expected_navigation)
+        self.assertNotIn("Releases", navigation)
+        self.assertNotIn("All documentation", navigation)
+
+        home_layout = (
+            REPOSITORY_ROOT / "site" / "_layouts" / "home.html"
+        ).read_text(encoding="utf-8")
+        homepage = (REPOSITORY_ROOT / "site" / "index.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("/docs/getting-started.html", home_layout)
+        self.assertIn("/docs/getting-started.html", homepage)
+        for internal_copy in (
+            "Contributors",
+            "complete documentation index",
+            "Prepare and verify a release",
+            "one streaming agent loop",
+            "Current source and tests",
+        ):
+            self.assertNotIn(internal_copy, homepage)
 
     def test_pages_workflow_pins_official_actions_and_deploys_artifact(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

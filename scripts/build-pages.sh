@@ -56,17 +56,29 @@ do
 	pages_copy_file_as "$pages_site_file" "$pages_site_destination"
 done
 
-pages_copy_tracked docs
-pages_copy_file docs/pages.md
-for pages_root_document in README.md SECURITY.md IMPLEMENTATION.md AGENTS.md CHANGELOG.md LICENSE; do
-	pages_copy_file "$pages_root_document"
+for pages_public_document in \
+	docs/getting-started.md \
+	docs/using-snow.md \
+	docs/configuration.md \
+	docs/chatgpt-auth.md \
+	docs/sessions.md \
+	docs/plan-mode.md \
+	docs/goals.md \
+	docs/subagents.md \
+	docs/skills.md \
+	docs/mcp.md \
+	docs/plugins.md \
+	docs/security.md \
+	docs/sdk.md \
+	docs/rpc.md \
+	docs/user-input.md \
+	docs/plugin-protocol.md
+do
+	pages_copy_file "$pages_public_document"
 done
 
 pages_copy_tracked examples/sdk
 pages_copy_tracked pkg/protocol/schema/rpc/v1
-pages_copy_tracked benchmarks/performance-limits.json
-pages_copy_tracked .github/workflows/ci.yml
-pages_copy_file .github/workflows/pages.yml
 
 find "$pages_output" -type f -name '*.md' -exec sh -c '
 	set -eu

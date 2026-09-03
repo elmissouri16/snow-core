@@ -1,61 +1,62 @@
 ---
 layout: home
 title: Snow documentation
-description: Install, configure, extend, and safely operate the Snow coding-agent harness.
+description: Install Snow and learn to use, configure, extend, and integrate its coding agent.
 permalink: /
 ---
 
-## Start where you are
+## Start with a working agent
 
-Snow is one streaming agent loop exposed through an interactive terminal,
-print and JSON modes, JSONL RPC, and a pure-Go SDK. These guides describe the
-same runtime from first prompt through advanced integration.
+Follow the guides in order if this is your first time using Snow:
 
-- New users should begin with [installation and quick start][quick-start] and
-  then read [Using Snow][using-snow].
-- Operators should review [Configuration][configuration] and the
-  [Security model][security] before granting write, process, network, plugin,
-  MCP, or subagent authority.
-- Integrators can choose the [Go SDK][sdk] or [JSONL RPC][rpc] without creating
-  a second agent loop.
-- Contributors can open the [complete documentation index][docs-index] for
-  architecture, release, extension, and design-history references.
+1. [Install Snow and run your first prompt][getting-started].
+2. [Configure your provider, model, and permissions][configuration].
+3. [Learn the interactive terminal and command-line workflows][using-snow].
+4. [Review the security boundaries][security] before granting broader access.
 
-## One runtime, deliberate control
+> **Note:** Snow is alpha software. Commands, configuration, and public APIs may
+> change before v1, so use the guides for the version you have installed.
 
-Every surface observes the same normalized event stream, permission service,
-session tree, provider adapters, tools, and compaction behavior. Start with the
-smallest authority required for the task, keep provider credentials out of
-project files, and use external containment when process isolation matters.
+## Choose what you want to do
 
-> **Note:** Snow is alpha software. Public APIs, protocols, configuration, and
-> persisted formats may change before v1. Current source and tests remain the
-> behavioral authority.
-
-## Popular guides
+### Work with the agent
 
 | Goal | Guide |
 |---|---|
-| Resume, branch, fork, or compact a conversation | [Sessions][sessions] |
-| Separate planning from implementation | [Plan Mode][plan-mode] |
+| Return to a conversation or create another branch | [Sessions and branches][sessions] |
+| Separate investigation from implementation | [Plan Mode][plan-mode] |
 | Continue a bounded objective across turns | [Thread Goals][goals] |
-| Delegate bounded child work | [Subagents][subagents] |
-| Connect external tools and context | [Model Context Protocol][mcp] |
-| Add trusted extension behavior | [Plugins][plugins] and [Agent Skills][skills] |
-| Prepare and verify a release | [Release policy][releases] |
+| Delegate focused work to child agents | [Subagents][subagents] |
 
-[quick-start]: {{ '/README.html#quick-start' | relative_url }}
+### Add capabilities
+
+| Goal | Guide |
+|---|---|
+| Load reusable instructions and supporting resources | [Agent Skills][skills] |
+| Connect external tools and context servers | [Model Context Protocol][mcp] |
+| Add trusted extension behavior | [Plugins][plugins] |
+
+### Integrate Snow
+
+| Goal | Guide |
+|---|---|
+| Embed the agent in a Go application | [Go SDK][sdk] |
+| Control Snow from another process or language | [JSONL RPC][rpc] |
+| Handle questions requested by the model | [Model-requested input][user-input] |
+| Build a language-neutral external plugin | [Plugin protocol][plugin-protocol] |
+
+[getting-started]: {{ '/docs/getting-started.html' | relative_url }}
 [using-snow]: {{ '/docs/using-snow.html' | relative_url }}
 [configuration]: {{ '/docs/configuration.html' | relative_url }}
 [security]: {{ '/docs/security.html' | relative_url }}
-[sdk]: {{ '/docs/sdk.html' | relative_url }}
-[rpc]: {{ '/docs/rpc.html' | relative_url }}
-[docs-index]: {{ '/docs/README.html' | relative_url }}
 [sessions]: {{ '/docs/sessions.html' | relative_url }}
 [plan-mode]: {{ '/docs/plan-mode.html' | relative_url }}
 [goals]: {{ '/docs/goals.html' | relative_url }}
 [subagents]: {{ '/docs/subagents.html' | relative_url }}
+[skills]: {{ '/docs/skills.html' | relative_url }}
 [mcp]: {{ '/docs/mcp.html' | relative_url }}
 [plugins]: {{ '/docs/plugins.html' | relative_url }}
-[skills]: {{ '/docs/skills.html' | relative_url }}
-[releases]: {{ '/docs/releases.html' | relative_url }}
+[sdk]: {{ '/docs/sdk.html' | relative_url }}
+[rpc]: {{ '/docs/rpc.html' | relative_url }}
+[user-input]: {{ '/docs/user-input.html' | relative_url }}
+[plugin-protocol]: {{ '/docs/plugin-protocol.html' | relative_url }}

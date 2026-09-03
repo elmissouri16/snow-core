@@ -1,8 +1,10 @@
 # Documentation site
 
-Snow publishes its user, integration, extension, security, and maintainer guides
-as a GitHub Pages site. The site is generated from the canonical Markdown in
-this repository rather than maintaining a second copy of product behavior.
+Snow publishes a curated end-user manual covering installation, daily agent
+workflows, configuration, extensions, public integrations, and security. The
+site is generated from an explicit allowlist of canonical Markdown in this
+repository rather than mirroring the complete maintainer documentation set or
+maintaining a second copy of product behavior.
 
 > **Note:** The deployment becomes publicly reachable after the repository is
 > public, GitHub Pages is enabled with **GitHub Actions** as its source, and the
@@ -49,9 +51,10 @@ actions.
 
 ## Source and build
 
-Canonical guides remain under `docs/`, with the project overview and selected
-maintainer references at the repository root. Site-only presentation files live
-under `site/`:
+Canonical guides remain under `docs/`, while the complete maintainer index and
+repository records remain available on GitHub. Only the end-user guides named in
+`scripts/build-pages.sh` enter the public artifact. Site-only presentation files
+live under `site/`:
 
 | Path | Responsibility |
 |---|---|
@@ -60,14 +63,40 @@ under `site/`:
 | `site/_includes/navigation.html` | Shared guide navigation |
 | `site/assets/css/style.css` | Responsive visual design and print styles |
 | `site/index.md` | Documentation landing-page content |
-| `scripts/build-pages.sh` | Allowlisted staging and generated front matter |
+| `docs/getting-started.md` | Canonical public installation and first-run guide |
+| `scripts/build-pages.sh` | Explicit public-guide staging and generated front matter |
 
 `scripts/build-pages.sh` creates a fresh staging directory and copies only the
-site presentation, canonical documentation, the tracked Go SDK example, and
-schemas that those documents reference. Raw JavaScript or Python plugin
-fixtures are not included in the Pages artifact. It adds Jekyll front matter to
-staged Markdown copies; it never rewrites the canonical source files. The build
-refuses to replace an existing output directory.
+site presentation, an explicit allowlist of public user guides, the tracked Go
+SDK example, and schemas those guides reference. Repository indexes,
+architecture, contributor instructions, releases, audits, research,
+implementation plans, performance records, workflow files, benchmark data, and
+raw JavaScript or Python plugin fixtures are not included in the Pages
+artifact. It adds Jekyll front matter to staged Markdown copies; it never
+rewrites the canonical source files. The build refuses to replace an existing
+output directory.
+
+The public guide allowlist is:
+
+- `docs/getting-started.md`
+- `docs/using-snow.md`
+- `docs/configuration.md`
+- `docs/chatgpt-auth.md`
+- `docs/sessions.md`
+- `docs/plan-mode.md`
+- `docs/goals.md`
+- `docs/subagents.md`
+- `docs/skills.md`
+- `docs/mcp.md`
+- `docs/plugins.md`
+- `docs/security.md`
+- `docs/sdk.md`
+- `docs/rpc.md`
+- `docs/user-input.md`
+- `docs/plugin-protocol.md`
+
+`docs/README.md` remains the complete repository documentation index for
+maintainers and contributors; it is deliberately not a Pages route.
 
 The official `actions/jekyll-build-pages` action converts the staged Markdown to
 static HTML. `jekyll-relative-links` preserves links between repository
@@ -163,10 +192,12 @@ is private; make the repository public or update that policy before retrying.
 
 ### A documentation link fails validation
 
-Fix the canonical relative link or add the referenced tracked documentation,
-example, schema, or workflow to the staging allowlist in
-`scripts/build-pages.sh`. Do not silence the validation by copying the entire
-repository into the public artifact.
+Fix the canonical relative link or classify the referenced guide, example, or
+schema as an end-user dependency before adding that exact path to the staging
+allowlist in `scripts/build-pages.sh`. Keep maintainer records and workflow files
+repository-only, and link to their GitHub URLs only when a public guide must
+reference them. Do not silence validation by copying the entire repository into
+the public artifact.
 
 ### Styling or navigation is missing
 
@@ -176,7 +207,9 @@ break when the site is hosted below the user domain root.
 
 ## Related documents
 
-- [Documentation index](README.md) — canonical ownership and every guide.
+- [Getting started](getting-started.md) — canonical public first-run guide.
+- [Repository documentation index](README.md) — canonical ownership and every
+  user and maintainer guide; not published on Pages.
 - [Documentation style guide](style-guide.md) — source-writing conventions.
 - [Release policy](releases.md) — artifacts, checksums, and release gates.
 - [Security model](security.md) — privilege and trust boundaries.

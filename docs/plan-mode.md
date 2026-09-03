@@ -55,9 +55,8 @@ snapshot at surface startup; SDK hosts can read the same snapshot with
 
 Every Plan-mode provider request receives the three-phase planning contract:
 non-mutating repository exploration first, intent clarification second, and a
-decision-complete implementation specification last. Its editable source is
-`internal/plan/system.md`, embedded into the binary at build time and appended
-separately from the configurable base system preamble.
+decision-complete implementation specification last. Snow appends this built-in
+mode guidance separately from the configurable base system preamble.
 
 Snow also enforces the mode as an application-level tool boundary. Descriptor
 effect metadata is checked both when provider schemas are selected and again

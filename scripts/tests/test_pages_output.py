@@ -54,6 +54,78 @@ class RenderedPagesValidationTests(unittest.TestCase):
 
         self.assertEqual(failures, [])
 
+    def test_accepts_curated_public_documentation_routes(self) -> None:
+        public_guides = (
+            "getting-started",
+            "using-snow",
+            "configuration",
+            "chatgpt-auth",
+            "sessions",
+            "plan-mode",
+            "goals",
+            "subagents",
+            "skills",
+            "mcp",
+            "plugins",
+            "security",
+            "sdk",
+            "rpc",
+            "user-input",
+            "plugin-protocol",
+        )
+        guide_links = "".join(
+            f'<a href="/snow-core/docs/{guide}.html">{guide}</a>'
+            for guide in public_guides
+        )
+        self._write(
+            "index.html",
+            f"<!doctype html><html><body>{guide_links}"
+            '<a href="/snow-core/examples/sdk/">Example</a>'
+            '<a href="/snow-core/pkg/snowsdk/">SDK package</a>'
+            '<a href="/snow-core/pkg/protocol/schema/rpc/v1/">Schemas</a>'
+            "</body></html>",
+        )
+        for guide in public_guides:
+            self._write(
+                f"docs/{guide}.html",
+                f"<!doctype html><html><body><h1>{guide}</h1></body></html>",
+            )
+        for route in (
+            "examples/sdk/index.html",
+            "pkg/snowsdk/index.html",
+            "pkg/protocol/schema/rpc/v1/index.html",
+        ):
+            self._write(
+                route,
+                '<!doctype html><html><body><a href="/snow-core/">Home</a></body></html>',
+            )
+
+        failures = check_pages_output.validate_site(self.site, "/snow-core")
+
+        self.assertEqual(failures, [])
+
+    def test_rejects_internal_repository_artifact_paths(self) -> None:
+        for relative_path in sorted(check_pages_output.FORBIDDEN_PUBLIC_PATHS):
+            self._write(relative_path, "repository-only\n")
+        for relative_path in (
+            ".github/workflows/pages.yml",
+            "benchmarks/performance-limits.json",
+            "design-plans/site-redesign.md",
+        ):
+            self._write(relative_path, "repository-only\n")
+
+        failures = check_pages_output.validate_site(self.site, "/snow-core")
+
+        expected_paths = sorted(check_pages_output.FORBIDDEN_PUBLIC_PATHS) + [
+            ".github/workflows/pages.yml",
+            "benchmarks/performance-limits.json",
+            "design-plans/site-redesign.md",
+        ]
+        for relative_path in expected_paths:
+            self.assertIn(
+                f"forbidden public artifact path: {relative_path}", failures
+            )
+
     def test_reports_broken_links_fragments_base_escapes_and_schemes(self) -> None:
         self._write(
             "index.html",

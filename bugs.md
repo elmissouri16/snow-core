@@ -613,3 +613,60 @@ profiles, idempotence, single-quote escaping, invalid configuration, opt-out,
 and non-regular profile targets. Shell syntax checks run under both `sh` and
 `bash`, and the README, release guide, and security model describe the same
 behavior.
+
+## BUG-014: Pages publishes the repository documentation index
+
+- **Status:** Open
+- **Severity:** Medium
+- **Surface:** Public GitHub Pages documentation
+- **Observed:** Public-site review after enabling the repository Pages URL
+
+### Expected behavior
+
+The repository Pages URL should open an organized end-user manual that starts
+with installation and a first agent prompt, groups supported agent workflows by
+user task, and publishes only documentation required to use, extend, integrate,
+or operate Snow safely.
+
+### Actual behavior and impact
+
+GitHub Pages was configured to deploy `main /docs`, so the live homepage rendered
+`docs/README.md` instead of the generated landing page under `site/`. That index
+exposes maintainer design history, release operations, audits, research, and
+canonical repository ownership before giving users a coherent first-run path.
+The custom builder also copied every tracked document plus root architecture,
+contributor, changelog, workflow, and benchmark files, so switching the Pages
+source alone would still publish repository internals.
+
+Users arriving from the README cannot quickly distinguish installation and
+daily agent guidance from contributor records. Internal implementation material
+also becomes part of the supported-looking public navigation and artifact even
+though it is not intended as a user contract.
+
+### Reproduction
+
+1. Open `https://elmissouri16.github.io/snow-core/` while Pages uses the
+   `main /docs` branch source.
+2. Observe that the first paragraph matches `docs/README.md` and describes the
+   documentation directory rather than a first-use task.
+3. Run `scripts/build-pages.sh` against a fresh directory.
+4. Observe that the staged artifact contains all `docs/*.md` files together with
+   `IMPLEMENTATION.md`, `AGENTS.md`, `CHANGELOG.md`, workflow YAML, and benchmark
+   configuration.
+
+### Remediation requirements
+
+- Configure Pages to deploy through the existing `Documentation` GitHub Actions
+  workflow rather than directly from `main /docs`.
+- Add a canonical getting-started guide and task-oriented homepage/navigation.
+- Replace broad staging with an explicit allowlist of public user and integration
+  guides while keeping maintainer documents available only in the repository.
+- Add tests that fail if internal indexes, implementation records, audits,
+  research, release procedures, workflows, or benchmarks re-enter the public
+  artifact.
+
+### Verification status
+
+Implementation is in progress. Keep this entry open until the focused Pages
+suite, full support-script suite, rendered-output validator, and live deployed
+URL all confirm the curated user surface.

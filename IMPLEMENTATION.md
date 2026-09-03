@@ -1453,10 +1453,12 @@ as a prerelease. `scripts/install.sh` resolves the newest published release
 version, atomically installs the matching binary without requiring Go, and
 idempotently persists its directory in the detected shell profile unless opted
 out.
-`.github/workflows/pages.yml` stages the canonical guides through the bounded
-allowlist in `scripts/build-pages.sh`, builds them with pinned official GitHub
-Pages/Jekyll actions, and serially deploys the static site to the
-`github-pages` environment.
+`.github/workflows/pages.yml` stages a curated end-user guide set through the
+explicit bounded allowlist in `scripts/build-pages.sh`, builds it with pinned
+official GitHub Pages/Jekyll actions, and serially deploys the static site to the
+`github-pages` environment. `docs/getting-started.md` owns the public install and
+first-run sequence; `docs/README.md` remains the repository-only index for both
+user and maintainer documentation.
 
 ## Roadmap
 

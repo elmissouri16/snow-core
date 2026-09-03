@@ -1,12 +1,10 @@
 # Model Context Protocol
 
-Snow is a Model Context Protocol (MCP) host built on the official
-[`modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk).
-The pinned v1.7.0 SDK negotiates the current stateless `2026-07-28` Streamable
-HTTP transport and falls back across its supported legacy protocol revisions.
-This guide covers server configuration, management commands, capability
-bridging, permissions, and the current boundary. For Snow-specific plugins and
-instructional skills, see [Plugins](plugins.md) and [Agent Skills](skills.md).
+Connect Snow to Model Context Protocol (MCP) servers to add external tools,
+resources, and prompts. This guide covers local and remote server
+configuration, management commands, permissions, connection behavior, and
+supported capabilities. For Snow-specific extensions and reusable
+instructions, see [Plugins](plugins.md) and [Agent Skills](skills.md).
 
 ## On this page
 
@@ -252,8 +250,6 @@ headers and stdio environment credentials work today.
 
 ## Related documents
 
-- [Lazy MCP connection implementation plan](lazy-mcp-implementation-plan.md)
 - [Plugins](plugins.md)
-- [Tool routing](tool-routing.md)
 - [Configuration](configuration.md)
 - [Security](security.md)

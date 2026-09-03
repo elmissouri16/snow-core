@@ -7,15 +7,16 @@ permalink: /examples/sdk/
 
 # Go SDK example
 
-The standalone Go module exercises Snow's public SDK without importing internal
-packages or terminal UI dependencies.
+The standalone Go module shows how to open a Snow session, stream agent
+events, and close the session cleanly.
 
 - [Read the example guide]({{ '/examples/sdk/README.html' | relative_url }})
-- [Browse the example source on GitHub](https://github.com/elmissouri16/snow-core/tree/main/examples/sdk)
-- [Open the complete Go SDK guide]({{ '/docs/sdk.html' | relative_url }})
+- [Browse the example source on
+  GitHub](https://github.com/elmissouri16/snow-core/tree/main/examples/sdk)
+- [Open the Go SDK guide]({{ '/docs/sdk.html' | relative_url }})
 
 ## Related documents
 
 - [Go SDK]({{ '/docs/sdk.html' | relative_url }})
 - [JSONL RPC]({{ '/docs/rpc.html' | relative_url }})
-- [Documentation index]({{ '/docs/README.html' | relative_url }})
+- [Install Snow and run your first prompt]({{ '/docs/getting-started.html' | relative_url }})
