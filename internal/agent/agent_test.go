@@ -241,7 +241,17 @@ func messageTextForTest(message protocol.Message) string {
 func TestRequestAffinityKeyIsStableScopedAndOpaque(t *testing.T) {
 	st := session.NewMemoryStore(session.Options{})
 	a := &Agent{opts: Options{Session: st}}
+	conversation := a.conversationAffinityKey()
 	turn := a.requestAffinityKey("turn")
+	if len(conversation) != 64 {
+		t.Fatalf("conversation affinity length=%d", len(conversation))
+	}
+	if _, err := hex.DecodeString(conversation); err != nil {
+		t.Fatalf("conversation affinity is not safe hex: %q", conversation)
+	}
+	if conversation != a.conversationAffinityKey() {
+		t.Fatal("conversation affinity changed within one branch")
+	}
 	if len(turn) != 64 {
 		t.Fatalf("turn affinity length=%d", len(turn))
 	}
@@ -251,7 +261,7 @@ func TestRequestAffinityKeyIsStableScopedAndOpaque(t *testing.T) {
 	if turn != a.requestAffinityKey("turn") {
 		t.Fatal("turn affinity changed within one branch")
 	}
-	if strings.Contains(turn, st.ID()) {
+	if strings.Contains(turn, st.ID()) || strings.Contains(conversation, st.ID()) {
 		t.Fatal("raw session id leaked into affinity")
 	}
 	if compact := a.requestAffinityKey("compaction"); compact == turn {
@@ -266,6 +276,9 @@ func TestRequestAffinityKeyIsStableScopedAndOpaque(t *testing.T) {
 	}
 	if forked := a.requestAffinityKey("turn"); forked == turn || strings.Contains(forked, st.ActiveBranchID()) {
 		t.Fatalf("fork affinity not independently opaque: %q", forked)
+	}
+	if forked := a.conversationAffinityKey(); forked == conversation || strings.Contains(forked, st.ActiveBranchID()) {
+		t.Fatalf("fork conversation affinity not independently opaque: %q", forked)
 	}
 }
 

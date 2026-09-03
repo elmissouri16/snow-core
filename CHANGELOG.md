@@ -24,6 +24,12 @@ also include the generated GitHub comparison for the tagged commit.
   JSON formatting, application-level textual response detection, and the macOS
   clipboard implementation so Go runtime paths remain language-neutral.
 
+### Fixed
+
+- Added OpenCode's required stable `X-Opencode-Session` conversation-affinity
+  header to OpenCode Go and OpenCode Zen inference requests without forwarding
+  it to model catalogs or unrelated compatible endpoints.
+
 ## [0.1.0-alpha.1] - 2026-09-02
 
 The first public alpha establishes the current streaming agent loop, TUI,

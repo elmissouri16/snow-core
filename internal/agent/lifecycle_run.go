@@ -441,15 +441,16 @@ func (a *Agent) run(ctx context.Context) error {
 		}
 		requestTools := a.requestToolSchemas()
 		req := protocol.ChatRequest{
-			Model:              a.Model(),
-			Messages:           providerMessages(msgs),
-			Tools:              requestTools,
-			System:             a.requestSystemPromptForTools(requestTools),
-			Thinking:           a.requestThinking(),
-			ReasoningSummary:   a.ReasoningSummary(),
-			TextVerbosity:      a.TextVerbosity(),
-			InternalContext:    internalContext,
-			SessionAffinityKey: a.requestAffinityKey("turn"),
+			Model:                   a.Model(),
+			Messages:                providerMessages(msgs),
+			Tools:                   requestTools,
+			System:                  a.requestSystemPromptForTools(requestTools),
+			Thinking:                a.requestThinking(),
+			ReasoningSummary:        a.ReasoningSummary(),
+			TextVerbosity:           a.TextVerbosity(),
+			InternalContext:         internalContext,
+			SessionAffinityKey:      a.requestAffinityKey("turn"),
+			ConversationAffinityKey: a.conversationAffinityKey(),
 		}
 
 		schemaBytes := providerSchemaBytes(req.Tools)
@@ -732,6 +733,24 @@ func (a *Agent) deliverQueuedInput(ctx context.Context, item protocol.QueuedInpu
 }
 
 func (a *Agent) requestAffinityKey(purpose string) string {
+	identity := a.sessionBranchAffinityIdentity()
+	if identity == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(identity + "\x00" + purpose))
+	return hex.EncodeToString(sum[:])
+}
+
+func (a *Agent) conversationAffinityKey() string {
+	identity := a.sessionBranchAffinityIdentity()
+	if identity == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(identity))
+	return hex.EncodeToString(sum[:])
+}
+
+func (a *Agent) sessionBranchAffinityIdentity() string {
 	if a.opts.Session == nil || a.opts.Session.ID() == "" {
 		return ""
 	}
@@ -739,6 +758,5 @@ func (a *Agent) requestAffinityKey(purpose string) string {
 	if branches, ok := a.opts.Session.(session.ActiveBranchStore); ok {
 		branchID = branches.ActiveBranchID()
 	}
-	sum := sha256.Sum256([]byte(a.opts.Session.ID() + "\x00" + branchID + "\x00" + purpose))
-	return hex.EncodeToString(sum[:])
+	return a.opts.Session.ID() + "\x00" + branchID
 }

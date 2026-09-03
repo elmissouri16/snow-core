@@ -18,6 +18,7 @@ import (
 
 	"github.com/elmissouri16/snow-core/internal/auth"
 	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/provider/opencodego"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -48,6 +49,9 @@ func TestListModelsFiltersToMaintainedFreeCatalogAndOptionalAuth(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get(opencodego.SessionHeader); got != "" {
+					t.Errorf("catalog request sent %s=%q", opencodego.SessionHeader, got)
+				}
 				if r.URL.Path != "/v1/models" {
 					t.Errorf("path=%q", r.URL.Path)
 				}
@@ -306,6 +310,9 @@ func TestChatRoutesTransportAndOmitsAnonymousAuthorization(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "" {
 			t.Errorf("anonymous Authorization=%q", got)
 		}
+		if got := r.Header.Get(opencodego.SessionHeader); got != "zen-conversation" {
+			t.Errorf("%s=%q want zen-conversation", opencodego.SessionHeader, got)
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
@@ -331,7 +338,9 @@ func TestChatRoutesTransportAndOmitsAnonymousAuthorization(t *testing.T) {
 		{model: "big-pickle", want: "chat"},
 		{model: "muse-spark-1.2-contributor-free", want: "responses"},
 	} {
-		stream, err := p.Chat(context.Background(), auth.Credential{}, chatRequest(tc.model))
+		request := chatRequest(tc.model)
+		request.ConversationAffinityKey = "zen-conversation"
+		stream, err := p.Chat(t.Context(), auth.Credential{}, request)
 		if err != nil {
 			t.Fatal(err)
 		}

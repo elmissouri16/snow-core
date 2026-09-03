@@ -29,6 +29,9 @@ const ProviderID = "opencode-go"
 // EnvAPIKey is the environment variable holding the OpenCode Go API key.
 const EnvAPIKey = "OPENCODE_API_KEY"
 
+// SessionHeader carries OpenCode's stable per-conversation affinity identifier.
+const SessionHeader = "X-Opencode-Session"
+
 // DefaultBaseURL is the OpenCode Go API base URL.
 //
 // Verified 2026 against the opencode model catalog (anomalyco/opencode,
@@ -95,24 +98,28 @@ type Config struct {
 	// DisableEnvAPIKey prevents an unrelated OPENCODE_API_KEY from being sent
 	// when the codec is reused for another provider.
 	DisableEnvAPIKey bool
+	// SendOpenCodeSessionHeader enables OpenCode's proprietary conversation
+	// affinity header when this codec is reused by another OpenCode service.
+	SendOpenCodeSessionHeader bool
 }
 
 // Provider implements provider.Provider for OpenCode Go.
 type Provider struct {
-	baseURL           string
-	apiKey            string
-	client            *http.Client
-	defaultModel      string
-	catalogURL        string
-	discoveryTimeout  time.Duration
-	streamIdleTimeout time.Duration
-	providerID        string
-	allowAnonymous    bool
-	useEnvAPIKey      bool
-	cacheRoot         string
-	catalogMu         sync.Mutex
-	cachedModels      []protocol.Model
-	cachedAt          time.Time
+	baseURL                   string
+	apiKey                    string
+	client                    *http.Client
+	defaultModel              string
+	catalogURL                string
+	discoveryTimeout          time.Duration
+	streamIdleTimeout         time.Duration
+	providerID                string
+	allowAnonymous            bool
+	useEnvAPIKey              bool
+	sendOpenCodeSessionHeader bool
+	cacheRoot                 string
+	catalogMu                 sync.Mutex
+	cachedModels              []protocol.Model
+	cachedAt                  time.Time
 }
 
 // New validates and constructs the provider.
@@ -147,7 +154,20 @@ func New(cfg Config) (*Provider, error) {
 	if providerID == "" {
 		providerID = ProviderID
 	}
-	return &Provider{baseURL: base, apiKey: cfg.APIKey, client: client, defaultModel: model, catalogURL: catalogURL, discoveryTimeout: discoveryTimeout, streamIdleTimeout: streamIdleTimeout, providerID: providerID, allowAnonymous: cfg.AllowAnonymous, useEnvAPIKey: !cfg.DisableEnvAPIKey, cacheRoot: strings.TrimSpace(cfg.CacheRoot)}, nil
+	return &Provider{
+		baseURL:                   base,
+		apiKey:                    cfg.APIKey,
+		client:                    client,
+		defaultModel:              model,
+		catalogURL:                catalogURL,
+		discoveryTimeout:          discoveryTimeout,
+		streamIdleTimeout:         streamIdleTimeout,
+		providerID:                providerID,
+		allowAnonymous:            cfg.AllowAnonymous,
+		useEnvAPIKey:              !cfg.DisableEnvAPIKey,
+		sendOpenCodeSessionHeader: providerID == ProviderID || cfg.SendOpenCodeSessionHeader,
+		cacheRoot:                 strings.TrimSpace(cfg.CacheRoot),
+	}, nil
 }
 
 // ID implements provider.Provider.
@@ -221,6 +241,11 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, req protocol
 		return errorStream(ctx, fmt.Errorf("%s: create request: %w", p.providerID, err)), nil
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if p.sendOpenCodeSessionHeader {
+		if affinity := strings.TrimSpace(req.ConversationAffinityKey); affinity != "" {
+			httpReq.Header.Set(SessionHeader, affinity)
+		}
+	}
 	if key != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+key)
 	}

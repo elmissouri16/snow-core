@@ -374,3 +374,109 @@ Verified on the current checkout with:
 - an independent read-only review, including follow-up review of accounting
   conflict enrichment and the app-level mode-transition integration test, with
   no release-blocking issue remaining.
+
+## BUG-011: OpenCode inference requests omit session affinity
+
+- **Status:** Resolved
+- **Severity:** High
+- **Surface:** OpenCode Go and OpenCode Zen provider transports
+- **Observed:** OpenCode provider notice received 2026-09-03
+
+### Expected behavior
+
+Every inference request to an OpenCode-managed provider should include
+`X-Opencode-Session` with a stable per-conversation identifier. OpenCode uses
+this value for request correlation and service optimization and warned that
+requests omitting it may error starting September 6, 2026.
+
+### Actual behavior and evidence
+
+At discovery, Snow had only the purpose-scoped
+`protocol.ChatRequest.SessionAffinityKey` used for provider prompt caching. Its
+OpenCode Go Chat Completions adapter and both OpenCode Zen inference transports
+did not send the required conversation header. The OpenCode Go request sent only
+content type and optional bearer authorization headers.
+
+Current upstream OpenCode source confirms the contract:
+
+- `packages/opencode/src/session/llm/request.ts` sets
+  `x-opencode-session` to the active session ID for provider IDs beginning with
+  `opencode`; and
+- `packages/console/app/src/routes/zen/util/handler.ts` reads the header for
+  inference correlation.
+
+### Impact
+
+- OpenCode cannot reliably correlate Snow's requests from one conversation.
+- Snow misses provider-side optimization opportunities.
+- OpenCode Go or Zen inference may fail once the announced requirement is
+  enforced.
+
+### Reproduction
+
+1. Configure a recording HTTP server as the OpenCode Go or Zen base URL.
+2. Run an agent turn in a persisted Snow session.
+3. Inspect the inference request headers.
+4. Observe that `X-Opencode-Session` is absent.
+
+### Required remediation
+
+1. Add a distinct opaque `ConversationAffinityKey`, derived only from the Snow
+   session and active branch, and map it to `X-Opencode-Session` on
+   OpenCode-managed inference requests.
+2. Retain the purpose-scoped `SessionAffinityKey` independently for provider
+   prompt caching.
+3. Cover both OpenCode Go Chat Completions and both OpenCode Zen inference
+   transports.
+4. Keep the proprietary header off model catalogs and arbitrary
+   OpenAI-compatible endpoints.
+5. Preserve the same conversation value across ordinary turns, retries, tool
+   continuations, and compaction without exposing raw Snow session or branch
+   IDs.
+
+### Required regression coverage
+
+Add tests proving that:
+
+- native OpenCode Go sends the exact affinity value;
+- repeated requests with one affinity value remain stable;
+- OpenCode Zen sends it through Chat Completions and Responses;
+- codec reuse by an unrelated compatible provider does not send it; and
+- authentication, streaming, and request bodies remain unchanged.
+
+### Remediation
+
+`protocol.ChatRequest` now carries a dedicated `ConversationAffinityKey` for
+provider conversation correlation. The agent derives it as a fixed-width SHA-256
+hash of the durable session and active branch, so it remains stable across
+ordinary turns, tool continuations, retries, and compaction while rotating for
+branches, forks, and subagent sessions. The existing `SessionAffinityKey`
+remains separately purpose-scoped for prompt caching.
+
+OpenCode Go Chat Completions and both OpenCode Zen inference transports map the
+conversation key to `X-Opencode-Session`. The reusable Chat Completions codec
+requires an explicit opt-in outside native OpenCode Go, preventing arbitrary
+OpenAI-compatible endpoints from receiving the proprietary identifier. Model
+catalog requests also omit it.
+
+### Resolution evidence
+
+Verified on the current checkout with:
+
+- upstream OpenCode source documentation showing
+  `packages/opencode/src/session/llm/request.ts` sends the session header for
+  OpenCode-managed providers and the Zen handler reads it for correlation;
+- agent tests proving one conversation key survives a real turn followed by
+  compaction while purpose-scoped request-cache keys remain distinct;
+- branch tests proving the value is opaque, stable within a branch, and rotates
+  across a fork;
+- OpenCode Go and Zen wire tests covering repeated values, both Zen transports,
+  compatible-provider isolation, and catalog omission;
+- `go test ./...`;
+- `go test -race ./internal/provider/opencodego ./internal/provider/opencodezen ./internal/agent ./internal/app ./pkg/protocol ./pkg/snowsdk -count=1`;
+- `go vet ./...`;
+- `python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v`;
+- `python3 scripts/check_benchmarks.py`;
+- `git diff --check`; and
+- an independent read-only review, including follow-up confirmation that
+  conversation correlation is no longer split by request purpose.

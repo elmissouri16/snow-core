@@ -183,6 +183,9 @@ func TestListModelsCachesAcrossProviderInstances(t *testing.T) {
 	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
+		if got := r.Header.Get(SessionHeader); got != "" {
+			t.Errorf("catalog request sent %s=%q", SessionHeader, got)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/catalog" {
 			_, _ = io.WriteString(w, `{"opencode-go":{"models":{"cached-model":{"id":"cached-model","name":"Cached","tool_call":true,"limit":{"context":64000,"output":4096}}}}}`)
@@ -470,13 +473,15 @@ func TestChatUnauthorized(t *testing.T) {
 // role with tool_call_id.
 func TestChatRequestBody(t *testing.T) {
 	var (
-		mu      sync.Mutex
-		gotAuth string
-		gotBody []byte
+		mu         sync.Mutex
+		gotAuth    string
+		gotSession string
+		gotBody    []byte
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		gotAuth = r.Header.Get("Authorization")
+		gotSession = r.Header.Get(SessionHeader)
 		gotBody, _ = io.ReadAll(r.Body)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -502,9 +507,10 @@ func TestChatRequestBody(t *testing.T) {
 	toolRes := protocol.NewToolResultMessage("t1", "a1", "call_9", "read",
 		[]protocol.ContentBlock{protocol.NewTextBlock("contents")}, false)
 
-	s, err := p.Chat(context.Background(), auth.Credential{Key: ""}, protocol.ChatRequest{
-		Model:  protocol.Model{ID: "model-42"},
-		System: "be careful",
+	s, err := p.Chat(t.Context(), auth.Credential{Key: ""}, protocol.ChatRequest{
+		Model:                   protocol.Model{ID: "model-42"},
+		System:                  "be careful",
+		ConversationAffinityKey: "conversation-affinity",
 		Messages: []protocol.Message{
 			protocol.NewUserMessage("u1", "", "please"),
 			msg,
@@ -527,6 +533,9 @@ func TestChatRequestBody(t *testing.T) {
 	defer mu.Unlock()
 	if gotAuth != "Bearer cfg-key" {
 		t.Errorf("Authorization = %q, want Bearer cfg-key", gotAuth)
+	}
+	if gotSession != "conversation-affinity" {
+		t.Errorf("%s = %q, want conversation-affinity", SessionHeader, gotSession)
 	}
 
 	var req struct {

@@ -328,7 +328,10 @@ the timer.
 
 `opencode-go` discovers available models from its live `/models` endpoint and
 fills omitted metadata from matching records in OpenCode's public models.dev
-catalog. Direct gateway fields win. Snow exposes only explicit per-model effort
+catalog. Direct gateway fields win. Inference requests to OpenCode Go and
+OpenCode Zen include `X-Opencode-Session` with Snow's stable, opaque
+conversation-affinity value. Model discovery and unrelated compatible providers
+do not receive that header. Snow exposes only explicit per-model effort
 values from fields such as `thinking_levels`, `reasoning_efforts`, or
 `reasoning_options[type=effort].values`. A reasoning-support boolean or generic
 `reasoning_effort` parameter does not identify selectable values, so Snow does

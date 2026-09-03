@@ -396,12 +396,13 @@ Preserve exact identifiers, paths, artifact IDs, commands, test outcomes, failur
 		maxTokens = 128
 	}
 	req := protocol.ChatRequest{
-		Model:              model,
-		Messages:           providerMessages(msgs),
-		System:             contract,
-		MaxTokens:          maxTokens,
-		Thinking:           protocol.ThinkingOff,
-		SessionAffinityKey: a.requestAffinityKey("compaction"),
+		Model:                   model,
+		Messages:                providerMessages(msgs),
+		System:                  contract,
+		MaxTokens:               maxTokens,
+		Thinking:                protocol.ThinkingOff,
+		SessionAffinityKey:      a.requestAffinityKey("compaction"),
+		ConversationAffinityKey: a.conversationAffinityKey(),
 	}
 	profile := a.retryProfile()
 	attempt := 0

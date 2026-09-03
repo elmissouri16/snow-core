@@ -265,6 +265,9 @@ type ChatRequest struct {
 	// SessionAffinityKey is a stable, non-secret host hint for provider-side
 	// prompt caching and request affinity. Providers may ignore it.
 	SessionAffinityKey string
+	// ConversationAffinityKey is a stable, non-secret host hint for correlating
+	// every request in one conversation. It does not vary by request purpose.
+	ConversationAffinityKey string
 	// Extra carries adapter-specific options; keep opaque to the core.
 	Extra map[string]any
 }

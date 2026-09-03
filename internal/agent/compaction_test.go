@@ -54,6 +54,42 @@ func TestManualCompactUsesSummaryAndPreservesHistory(t *testing.T) {
 	}
 }
 
+func TestConversationAffinityIsSharedAcrossTurnAndCompaction(t *testing.T) {
+	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{
+		{
+			{Type: protocol.EvStreamTextDelta, Text: "turn response"},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+		},
+		{
+			{Type: protocol.EvStreamTextDelta, Text: "model summary"},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopStop},
+		},
+	}}
+	a, store := setup(t, prov, nil, permission.ModeDeny)
+	for i := range 6 {
+		message := protocol.NewUserMessage(fmt.Sprintf("affinity-%d", i), "", fmt.Sprintf("message %d", i))
+		if err := store.Append(session.Entry{Type: session.EntryMessage, ID: message.ID, Message: &message}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.Prompt(t.Context(), "new turn"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Compact(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(prov.requests) != 2 {
+		t.Fatalf("provider requests=%d, want 2", len(prov.requests))
+	}
+	turn, compact := prov.requests[0], prov.requests[1]
+	if turn.ConversationAffinityKey == "" || compact.ConversationAffinityKey != turn.ConversationAffinityKey {
+		t.Fatalf("conversation affinity changed: turn=%q compact=%q", turn.ConversationAffinityKey, compact.ConversationAffinityKey)
+	}
+	if turn.SessionAffinityKey == "" || compact.SessionAffinityKey == "" || compact.SessionAffinityKey == turn.SessionAffinityKey {
+		t.Fatalf("purpose-scoped request affinity was not distinct: turn=%q compact=%q", turn.SessionAffinityKey, compact.SessionAffinityKey)
+	}
+}
+
 func TestManualCompactUsesCompletedGoalCyclesAfterPriorTurn(t *testing.T) {
 	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
 		{Type: protocol.EvStreamTextDelta, Text: "model summary"},

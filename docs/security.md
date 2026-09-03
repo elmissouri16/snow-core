@@ -289,12 +289,17 @@ current terms are acceptable. Promotional terms and availability can change.
 Snow's free-only Zen catalog prevents accidental paid selection, not disclosure
 to the selected free service.
 
-ChatGPT/Codex requests send a fixed-width hash derived from Snow's session,
-branch, and request purpose for provider cache and routing affinity. This avoids
-sending raw local identifiers but is pseudonymous metadata, not an anonymity or
-access-control boundary. Large Codex request bodies use zstd before TLS; this
-reduces long-session transport size but does not attempt to hide compressed
-length from the provider or a network observer.
+OpenCode Go and OpenCode Zen inference requests send a fixed-width hash derived
+from Snow's session and branch in `X-Opencode-Session`. The value remains stable
+across ordinary turns, tool continuations, retries, and compaction requests in
+that conversation. Snow does not send the proprietary header during model
+discovery or to unrelated compatible endpoints. ChatGPT/Codex derives a
+separate hash from the session, branch, and request purpose for provider prompt
+caching and routing affinity. These hashes avoid sending raw local identifiers
+but are pseudonymous metadata, not an anonymity or access-control boundary.
+Large Codex request bodies use zstd before TLS; this reduces long-session
+transport size but does not attempt to hide compressed length from the provider
+or a network observer.
 
 ## Credential security
 

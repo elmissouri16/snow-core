@@ -156,6 +156,7 @@ func (p *Provider) chatAttempt(ctx context.Context, key string, transport transp
 			BaseURL: p.baseURL, APIKey: key, HTTPClient: p.client,
 			DefaultModel: request.Model.ID, ProviderID: ProviderID,
 			AllowAnonymous: true, DisableEnvAPIKey: true, StreamIdleTimeout: p.streamIdleTimeout,
+			SendOpenCodeSessionHeader: true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("opencode-zen: initialize Chat Completions: %w", err)
@@ -175,6 +176,9 @@ func (p *Provider) chatAttempt(ctx context.Context, key string, transport transp
 	}
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Content-Type", "application/json")
+	if affinity := strings.TrimSpace(request.ConversationAffinityKey); affinity != "" {
+		req.Header.Set(opencodego.SessionHeader, affinity)
+	}
 	if key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}

@@ -446,8 +446,9 @@ tools.
 
 ### OpenCode Go
 
-The primary API-key adapter. It attaches `Authorization: Bearer <key>`, maps
-Chat Completions SSE chunks and finish reasons into Snow events, surfaces
+The primary API-key adapter. It attaches `Authorization: Bearer <key>` and the
+stable opaque `X-Opencode-Session` conversation-affinity header, maps Chat
+Completions SSE chunks and finish reasons into Snow events, surfaces
 rate-limit and quota errors as structured errors, and maps normalized thinking
 effort to OpenAI `reasoning_effort` while rejecting levels the selected model
 does not advertise. Startup model discovery fetches `GET /models` and merges
@@ -470,8 +471,9 @@ allowlist and is catalog-authoritative, so paid, unknown, and deprecated IDs
 cannot be selected accidentally. `big-pickle` is the bundled default.
 
 The local transport map sends Muse Spark Contributor Free to Responses/SSE and
-the remaining maintained models to Chat Completions/SSE. Both normalize into
-the shared provider event contract. Temporary HTTP 429 responses carry
+the remaining maintained models to Chat Completions/SSE. Both attach the same
+stable opaque `X-Opencode-Session` conversation-affinity header and normalize
+into the shared provider event contract. Temporary HTTP 429 responses carry
 structured rate-limit advice and bounded `Retry-After`; the central agent policy
 owns every wait and attempt so provider and goal budgets cannot multiply. HTTP
 402 remains terminal usage limitation. Active keys are redacted from bounded
