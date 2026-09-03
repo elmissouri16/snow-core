@@ -40,8 +40,10 @@ events behind every surface.
 ### Requirements
 
 - macOS or Linux on amd64 or arm64.
-- The release installer requires a standard POSIX userland with `curl`, `tar`,
-  `mktemp`, `sed`, `awk`, `grep`, and `wc`, plus either `sha256sum` or `shasum`.
+- The release installer command requires `bash` plus a standard userland with
+  `curl`, `tar`, `uname`, `mktemp`, `rm`, `sed`, `awk`, `grep`, `cat`, and
+  `wc`, and
+  either `sha256sum` or `shasum`.
 - Go 1.27 only when building from source; `go.mod` declares `1.27rc3` because
   that is the available toolchain required by the pinned Surf release.
   Prebuilt release archives do not require Go.
@@ -50,40 +52,35 @@ events behind every surface.
 
 Install the latest published release on macOS or Linux:
 
-```sh
-/bin/sh -c 'set -eu
-installer=$(mktemp)
-cleanup() { rm -f "$installer"; }
-abort() { exit 1; }
-trap cleanup EXIT
-trap abort HUP INT TERM
-curl --proto "=https" --tlsv1.2 -fsSL --max-time 30 --max-filesize 262144 \
-  https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh \
-  -o "$installer"
-/bin/sh "$installer"'
-export PATH="$HOME/.local/bin:$PATH"
+```bash
+bash -o pipefail -c 'curl --proto "=https" --tlsv1.2 -fsSL --max-time 30 --max-filesize 262144 https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh | { IFS= read -r first || exit 1; [ "$first" = "#!/bin/sh" ] || exit 1; printf "%s\n" "$first"; cat; } | bash'
 ```
 
 The installer detects macOS/Linux and amd64/arm64, downloads the matching
 GitHub release archive, verifies it against that release's `SHA256SUMS`, checks
 the binary-reported version, and atomically installs `snow` to
-`~/.local/bin/snow`. It includes alpha prereleases when resolving the latest
-published version. Go is not required. Anonymous installation starts working
-once the repository is public and at least one GitHub Release is published; a
-Git tag by itself is not a downloadable release.
+`~/.local/bin/snow`. It also adds the install directory to the appropriate Bash,
+Zsh, or POSIX shell startup file without duplicating its own entry. Restart
+your shell after the first installation. It includes alpha prereleases when
+resolving the latest published version. Go is not required. Anonymous
+installation starts working once the repository is public and at least one
+GitHub Release is published; a Git tag by itself is not a downloadable release.
 
 To choose another destination or pin an immutable release, export either value
-before running the installation command:
+before running the installation command. `SNOW_INSTALL_DIR` must be an absolute
+path. Set `SNOW_NO_MODIFY_PATH=1` to install the binary without changing a shell
+startup file:
 
 ```sh
 export SNOW_INSTALL_DIR="$HOME/bin"
 export SNOW_VERSION=v0.1.0-alpha.1
+export SNOW_NO_MODIFY_PATH=1 # optional
 ```
 
-Executing a remotely downloaded script trusts the current repository content.
-For manual review, use the same `curl` command to save `scripts/install.sh`,
-inspect it, and then run it locally. Release checksums provide integrity against
-the same GitHub release; they are not an independent signature. See the
+Piping a remotely downloaded script into `bash` trusts the current repository
+content. For manual review, download `scripts/install.sh` to a file, inspect it,
+and then run it locally instead. Release checksums provide integrity against the
+same GitHub release; they are not an independent signature. See the
 [release policy](docs/releases.md).
 
 ### Build from source

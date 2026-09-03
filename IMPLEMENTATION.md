@@ -1450,7 +1450,9 @@ checks remain manual. `.github/workflows/release-alpha.yml` accepts only
 macOS/Linux amd64/arm64 archives and `SHA256SUMS`, and marks the GitHub release
 as a prerelease. `scripts/install.sh` resolves the newest published release
 (including prereleases), verifies the selected archive, validates its embedded
-version, and atomically installs the matching binary without requiring Go.
+version, atomically installs the matching binary without requiring Go, and
+idempotently persists its directory in the detected shell profile unless opted
+out.
 `.github/workflows/pages.yml` stages the canonical guides through the bounded
 allowlist in `scripts/build-pages.sh`, builds them with pinned official GitHub
 Pages/Jekyll actions, and serially deploys the static site to the

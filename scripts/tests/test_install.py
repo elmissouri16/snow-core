@@ -13,6 +13,17 @@ from typing import Optional
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = REPOSITORY_ROOT / "scripts" / "install.sh"
+README = REPOSITORY_ROOT / "README.md"
+RELEASE_GUIDE = REPOSITORY_ROOT / "docs" / "releases.md"
+SECURITY_GUIDE = REPOSITORY_ROOT / "docs" / "security.md"
+INSTALL_COMMAND = (
+    "bash -o pipefail -c 'curl --proto \"=https\" --tlsv1.2 -fsSL "
+    "--max-time 30 --max-filesize 262144 "
+    "https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh "
+    "| { IFS= read -r first || exit 1; [ \"$first\" = \"#!/bin/sh\" ] || exit 1; "
+    "printf \"%s\\n\" \"$first\"; cat; } "
+    "| bash'"
+)
 VERSION = "1.2.3-alpha.4"
 TAG = f"v{VERSION}"
 
@@ -75,18 +86,22 @@ cp "$source" "$output"
 
     def _environment(self, system: str, machine: str) -> dict[str, str]:
         environment = os.environ.copy()
+        for variable in ("SNOW_NO_MODIFY_PATH", "SNOW_VERSION", "ZDOTDIR"):
+            environment.pop(variable, None)
+        home = self.root / "home"
+        home.mkdir(exist_ok=True)
         environment.update(
             {
                 "FIXTURE_DIR": str(self.fixture_dir),
-                "HOME": str(self.root / "home"),
+                "HOME": str(home),
                 "PATH": f"{self.fake_bin}{os.pathsep}{environment['PATH']}",
+                "SHELL": "/bin/bash",
                 "SNOW_INSTALL_DIR": str(self.install_dir),
                 "TEST_UNAME_S": system,
                 "TMPDIR": str(self.temporary_dir),
                 "TEST_UNAME_M": machine,
             }
         )
-        environment.pop("SNOW_VERSION", None)
         return environment
 
     def _write_release(
@@ -140,13 +155,20 @@ cp "$source" "$output"
         )
 
     def _run(
-        self, system: str, machine: str, version: Optional[str] = None
+        self,
+        system: str,
+        machine: str,
+        version: Optional[str] = None,
+        environment_overrides: Optional[dict[str, str]] = None,
+        interpreter: str = "sh",
     ) -> subprocess.CompletedProcess[str]:
         environment = self._environment(system, machine)
         if version is not None:
             environment["SNOW_VERSION"] = version
+        if environment_overrides:
+            environment.update(environment_overrides)
         return subprocess.run(
-            ["sh", str(INSTALLER)],
+            [interpreter, str(INSTALLER)],
             cwd=REPOSITORY_ROOT,
             env=environment,
             text=True,
@@ -194,6 +216,169 @@ cp "$source" "$output"
         self.assertTrue(installed.is_file())
         self.assertNotEqual(installed.read_text(encoding="utf-8"), "existing binary\n")
         self.assertEqual(list(self.install_dir.glob(".snow.*")), [])
+
+    def test_user_facing_bash_invocation_installs(self) -> None:
+        self._write_release("linux", "amd64")
+
+        result = self._run("Linux", "x86_64", TAG, interpreter="bash")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.install_dir / "snow").is_file())
+        self.assertTrue((self.root / "home" / ".bashrc").is_file())
+
+    def test_updates_bash_path_idempotently(self) -> None:
+        self._write_release("linux", "amd64")
+
+        first = self._run("Linux", "x86_64", TAG)
+        second = self._run("Linux", "x86_64", TAG)
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        profile = self.root / "home" / ".bashrc"
+        path_line = f"export PATH='{self.install_dir}':\"$PATH\""
+        profile_content = profile.read_text(encoding="utf-8")
+        self.assertEqual(profile_content.count(path_line), 1)
+        self.assertEqual(profile_content.count("# Added by the Snow installer."), 1)
+        self.assertIn("Added", first.stdout)
+        self.assertIn("already configured", second.stdout)
+
+    def test_updates_zsh_path_on_macos(self) -> None:
+        self._write_release("darwin", "arm64")
+
+        result = self._run(
+            "Darwin", "arm64", TAG, {"SHELL": "/bin/zsh"}
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        profile = self.root / "home" / ".zshrc"
+        self.assertIn(
+            f"export PATH='{self.install_dir}':\"$PATH\"",
+            profile.read_text(encoding="utf-8"),
+        )
+
+    def test_honors_absolute_zdotdir(self) -> None:
+        self._write_release("darwin", "arm64")
+        zdotdir = self.root / "zsh configuration"
+        zdotdir.mkdir()
+
+        result = self._run(
+            "Darwin",
+            "arm64",
+            TAG,
+            {"SHELL": "/bin/zsh", "ZDOTDIR": str(zdotdir)},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((zdotdir / ".zshrc").is_file())
+        self.assertFalse((self.root / "home" / ".zshrc").exists())
+
+    def test_macos_bash_preserves_existing_profile_precedence(self) -> None:
+        self._write_release("darwin", "amd64")
+        home = self.root / "home"
+        home.mkdir()
+        profile = home / ".profile"
+        profile.write_text("export PRESERVED_SETTING=yes\n", encoding="utf-8")
+
+        result = self._run(
+            "Darwin", "x86_64", TAG, {"SHELL": "/bin/bash"}
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((home / ".bash_profile").exists())
+        content = profile.read_text(encoding="utf-8")
+        self.assertIn("export PRESERVED_SETTING=yes", content)
+        self.assertIn(f"export PATH='{self.install_dir}':\"$PATH\"", content)
+
+    def test_can_skip_shell_path_update(self) -> None:
+        self._write_release("linux", "amd64")
+
+        result = self._run(
+            "Linux", "x86_64", TAG, {"SNOW_NO_MODIFY_PATH": "1"}
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.root / "home" / ".bashrc").exists())
+        self.assertIn("Skipped shell PATH update", result.stdout)
+
+    def test_nonregular_shell_profile_warns_without_undoing_install(self) -> None:
+        self._write_release("linux", "amd64")
+        home = self.root / "home"
+        home.mkdir()
+        (home / ".bashrc").mkdir()
+
+        result = self._run("Linux", "x86_64", TAG)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.install_dir / "snow").is_file())
+        self.assertIn("is not a regular file", result.stderr)
+
+    def test_shell_profile_symlink_handling_is_explicit(self) -> None:
+        self._write_release("linux", "amd64")
+        home = self.root / "home"
+        home.mkdir()
+        target = self.root / "dotfiles" / "bashrc"
+        target.parent.mkdir()
+        target.write_text("# managed dotfile\n", encoding="utf-8")
+        profile = home / ".bashrc"
+        profile.symlink_to(target)
+
+        result = self._run("Linux", "x86_64", TAG)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(profile.is_symlink())
+        self.assertIn(
+            f"export PATH='{self.install_dir}':\"$PATH\"",
+            target.read_text(encoding="utf-8"),
+        )
+
+        profile.unlink()
+        profile.symlink_to(self.root / "missing-bashrc")
+        result = self._run("Linux", "x86_64", TAG)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("is not a regular file", result.stderr)
+
+    def test_rejects_invalid_path_configuration(self) -> None:
+        invalid_opt_out = self._run(
+            "Linux", "x86_64", TAG, {"SNOW_NO_MODIFY_PATH": "yes"}
+        )
+        self.assertNotEqual(invalid_opt_out.returncode, 0)
+        self.assertIn("SNOW_NO_MODIFY_PATH must be 0 or 1", invalid_opt_out.stderr)
+
+        invalid_paths = {
+            ".": "absolute path",
+            "bin": "absolute path",
+            "-bin": "absolute path",
+            "/tmp/snow:bin": "must not contain a colon",
+        }
+        for install_directory, expected_error in invalid_paths.items():
+            with self.subTest(install_directory=install_directory):
+                result = self._run(
+                    "Linux",
+                    "x86_64",
+                    TAG,
+                    {"SNOW_INSTALL_DIR": install_directory},
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+
+    def test_shell_path_update_quotes_install_directory(self) -> None:
+        self.install_dir = self.root / "installer's bin"
+        self._write_release("linux", "amd64")
+
+        result = self._run("Linux", "x86_64", TAG)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        profile = self.root / "home" / ".bashrc"
+        environment = os.environ.copy()
+        environment["PATH"] = "/usr/bin:/bin"
+        sourced = subprocess.run(
+            ["sh", "-c", f'. "{profile}"; printf %s "$PATH"'],
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual(sourced.stdout.split(os.pathsep, 1)[0], str(self.install_dir))
 
     def test_failed_atomic_move_preserves_existing_binary_and_cleans_stage(self) -> None:
         self._write_release("linux", "amd64")
@@ -312,6 +497,65 @@ cp "$source" "$output"
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unsupported architecture: riscv64", result.stderr)
         self.assertFalse((self.install_dir / "snow").exists())
+
+
+class InstallerBootstrapTests(unittest.TestCase):
+    def _run_bootstrap(self, mode: str) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            fake_bin = Path(temporary_directory)
+            curl = fake_bin / "curl"
+            curl.write_text(
+                """#!/bin/sh
+case "$BOOTSTRAP_MODE" in
+  success) printf '%s\\n' '#!/bin/sh' ':' ;;
+  script_failure) printf '%s\\n' '#!/bin/sh' 'exit 23' ;;
+  truncated) printf '%s\\n' '#!/bin/sh' ':'; exit 18 ;;
+  empty) exit 0 ;;
+  unexpected) printf '%s\\n' '#!/usr/bin/env python' ':' ;;
+  failure) exit 22 ;;
+  *) exit 99 ;;
+esac
+""",
+                encoding="utf-8",
+            )
+            curl.chmod(0o755)
+            environment = os.environ.copy()
+            environment["BOOTSTRAP_MODE"] = mode
+            environment["PATH"] = f"{fake_bin}{os.pathsep}{environment['PATH']}"
+            return subprocess.run(
+                ["bash", "-c", INSTALL_COMMAND],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+
+    def test_bootstrap_propagates_download_and_script_status(self) -> None:
+        self.assertEqual(self._run_bootstrap("success").returncode, 0)
+        for mode in (
+            "failure",
+            "empty",
+            "truncated",
+            "unexpected",
+            "script_failure",
+        ):
+            with self.subTest(mode=mode):
+                self.assertNotEqual(self._run_bootstrap(mode).returncode, 0)
+
+
+class InstallerDocumentationTests(unittest.TestCase):
+    def test_readme_and_release_guide_use_one_line_install_command(self) -> None:
+        for document in (README, RELEASE_GUIDE):
+            with self.subTest(document=document):
+                content = document.read_text(encoding="utf-8")
+                self.assertIn(INSTALL_COMMAND, content)
+                self.assertNotIn(f"{INSTALL_COMMAND} &&", content)
+                self.assertIn("SNOW_NO_MODIFY_PATH=1", content)
+
+        security = SECURITY_GUIDE.read_text(encoding="utf-8")
+        self.assertIn("streams `scripts/install.sh` into `bash`", security)
+        self.assertIn("persistently adds its directory", security)
 
 
 if __name__ == "__main__":

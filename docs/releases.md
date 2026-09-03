@@ -58,35 +58,34 @@ alpha prerelease, and selects the archive matching the host. Anonymous use
 requires a public repository and at least one published GitHub Release; a Git
 tag without an associated release is not installable:
 
-```sh
-/bin/sh -c 'set -eu
-installer=$(mktemp)
-cleanup() { rm -f "$installer"; }
-abort() { exit 1; }
-trap cleanup EXIT
-trap abort HUP INT TERM
-curl --proto "=https" --tlsv1.2 -fsSL --max-time 30 --max-filesize 262144 \
-  https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh \
-  -o "$installer"
-/bin/sh "$installer"'
+```bash
+bash -o pipefail -c 'curl --proto "=https" --tlsv1.2 -fsSL --max-time 30 --max-filesize 262144 https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh | { IFS= read -r first || exit 1; [ "$first" = "#!/bin/sh" ] || exit 1; printf "%s\n" "$first"; cat; } | bash'
 ```
 
-The script requires a standard POSIX userland with `curl`, `tar`, `uname`,
-`mktemp`, `sed`, `awk`, `grep`, and `wc`, plus either `sha256sum` or `shasum`. It
-bounds every download, verifies the selected archive against the release's
-`SHA256SUMS`, validates the archive's exact paths, regular-file member types,
-and declared/expanded size ceilings, checks the version reported by the
-extracted binary, and atomically replaces
-`${SNOW_INSTALL_DIR:-$HOME/.local/bin}/snow`. It does not invoke `sudo` or edit
-shell startup files.
+The one-line command requires `bash` plus a standard userland with `curl`,
+`tar`, `uname`, `mktemp`, `rm`, `sed`, `awk`, `grep`, `cat`, and `wc`, and either
+`sha256sum` or `shasum`. The installer bounds every download, verifies the selected
+archive against the release's `SHA256SUMS`, validates the archive's exact paths,
+regular-file member types, and declared/expanded size ceilings, checks the
+version reported by the extracted binary, and atomically replaces
+`${SNOW_INSTALL_DIR:-$HOME/.local/bin}/snow`.
+
+After installation, the script adds one idempotent `export PATH=...` entry to
+`.zshrc`, `.bashrc`, `.bash_profile`, `.bash_login`, or `.profile`, based on the
+configured login shell and operating system. It honors an absolute `ZDOTDIR`
+for Zsh and preserves Bash login-profile precedence on macOS. The entry takes
+effect in a new shell. The installer does not invoke `sudo`. Set
+`SNOW_NO_MODIFY_PATH=1` to skip the startup-file change.
 
 Use `SNOW_VERSION` to select an immutable release instead of resolving the
-latest one, and `SNOW_INSTALL_DIR` to choose another destination. Export either
-value before running the installation command:
+latest one, and `SNOW_INSTALL_DIR` to choose another absolute destination. The
+install path cannot contain control characters or the PATH-delimiter colon.
+Export any values before running the installation command:
 
 ```sh
 export SNOW_VERSION=v0.1.0-alpha.1
 export SNOW_INSTALL_DIR="$HOME/bin"
+export SNOW_NO_MODIFY_PATH=1 # optional
 ```
 
 The one-line command trusts the installer currently stored on `main`. Operators

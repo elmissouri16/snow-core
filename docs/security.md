@@ -542,13 +542,15 @@ automatic continuation. See [Plan Mode](plan-mode.md) and [Goals](goals.md).
 
 ## Release installer trust
 
-The public installation command downloads `scripts/install.sh` to a temporary
-file and then executes that repository-controlled shell code with the invoking
-user's OS privileges. Download failure is terminal and the wrapper removes the
-temporary script. The installer does not use `sudo`, but it may replace `snow`
-in the configured install directory. Operators should inspect the script first
-or fetch it from a reviewed immutable tag when that trust model is
-inappropriate.
+The public installation command streams `scripts/install.sh` into `bash`,
+executing repository-controlled shell code with the invoking user's OS
+privileges. Its outer Bash process enables `pipefail`; the bootstrap download is
+HTTPS-only, time- and size-bounded, and guarded against empty output, so a curl
+or bootstrap failure produces a failing command. This keeps installation to one
+command but does not provide a review boundary before execution. The installer
+does not use `sudo`, but it may replace `snow` in the configured install
+directory. Operators should download and inspect the complete script first, or
+fetch it from a reviewed immutable tag, when that trust model is inappropriate.
 
 The installer places bounded API, checksum, archive, and expanded-file data in
 a private temporary directory. It verifies the archive against the release's
@@ -562,6 +564,16 @@ checksum and archive share GitHub as their trust root, the checksum is not a
 signature and does not protect against compromise of the repository or
 release-publishing authority. The extracted binary is executed for its version
 check before installation.
+
+After installing the binary, the installer persistently adds its directory to
+the configured Bash, Zsh, or POSIX shell startup file. It requires an absolute
+install path, safely quotes it, rejects control characters and PATH-delimiter
+colons, honors an absolute Zsh `ZDOTDIR`, preserves macOS Bash profile
+precedence, avoids duplicate entries, and refuses to append through a
+non-regular profile target. Regular-file dotfile symlinks remain supported. Set
+`SNOW_NO_MODIFY_PATH=1` to opt out. A profile-write failure leaves the verified
+binary installed and emits a warning rather than replacing unrelated shell
+configuration.
 
 ## Documentation publication
 

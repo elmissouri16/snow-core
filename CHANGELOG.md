@@ -7,8 +7,9 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Added
 
-- Added a checksum-verifying curl installer for the latest macOS/Linux amd64 or
-  arm64 GitHub release, with version pinning and configurable installation path.
+- Added a checksum-verifying one-line curl installer for the latest macOS/Linux
+  amd64 or arm64 GitHub release, with version pinning, a configurable install
+  directory, and idempotent shell PATH setup.
 - Added a responsive GitHub Pages documentation site generated from the
   canonical guides, with pinned deployment actions and link/staging validation.
 

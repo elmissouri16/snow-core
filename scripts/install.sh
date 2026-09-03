@@ -4,6 +4,7 @@ set -eu
 snow_repository=elmissouri16/snow-core
 snow_install_dir=${SNOW_INSTALL_DIR:-"${HOME:?HOME must be set}/.local/bin"}
 snow_requested_version=${SNOW_VERSION:-}
+snow_no_modify_path=${SNOW_NO_MODIFY_PATH:-0}
 snow_staged_binary=
 
 snow_fail() {
@@ -11,9 +12,24 @@ snow_fail() {
 	exit 1
 }
 
-for snow_command in curl tar uname mktemp mkdir chmod mv cp sed awk grep wc; do
+for snow_command in curl tar uname mktemp mkdir chmod mv cp rm sed awk grep wc; do
 	command -v "$snow_command" >/dev/null 2>&1 || snow_fail "required command not found: $snow_command"
 done
+
+case "$snow_no_modify_path" in
+	0 | 1) ;;
+	*) snow_fail "SNOW_NO_MODIFY_PATH must be 0 or 1" ;;
+esac
+case "$snow_install_dir" in
+	/*) ;;
+	*) snow_fail "install directory must be an absolute path" ;;
+esac
+case "$snow_install_dir" in
+	*:*) snow_fail "install directory must not contain a colon" ;;
+esac
+if printf '%s' "$snow_install_dir" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+	snow_fail "install directory must not contain control characters"
+fi
 
 case "$(uname -s)" in
 	Linux) snow_os=linux ;;
@@ -47,6 +63,95 @@ snow_download() {
 	snow_downloaded_bytes=$(wc -c <"$snow_destination")
 	[ "$snow_downloaded_bytes" -le "$snow_max_bytes" ] || \
 		snow_fail "download exceeds ${snow_max_bytes}-byte limit: $snow_url"
+}
+
+snow_shell_quote() {
+	printf "'"
+	printf '%s' "$1" | sed "s/'/'\\\\''/g"
+	printf "'"
+}
+
+snow_path_exists() {
+	[ -e "$1" ] || [ -L "$1" ]
+}
+
+snow_configure_path() {
+	if [ "$snow_no_modify_path" = 1 ]; then
+		printf 'Skipped shell PATH update because SNOW_NO_MODIFY_PATH=1.\n'
+		return
+	fi
+
+	snow_home=${HOME:-}
+	case "$snow_home" in
+		/*) ;;
+		*)
+			printf 'Could not update PATH: HOME is not an absolute path.\n' >&2
+			return
+			;;
+	esac
+	if printf '%s' "$snow_home" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+		printf 'Could not update PATH: HOME contains control characters.\n' >&2
+		return
+	fi
+
+	case "${SHELL:-}" in
+		*/zsh | zsh)
+			snow_zdotdir=${ZDOTDIR:-$snow_home}
+			case "$snow_zdotdir" in
+				/*) ;;
+				*)
+					printf 'Could not update PATH: ZDOTDIR is not an absolute path.\n' >&2
+					return
+					;;
+			esac
+			if printf '%s' "$snow_zdotdir" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+				printf 'Could not update PATH: ZDOTDIR contains control characters.\n' >&2
+				return
+			fi
+			snow_shell_profile="$snow_zdotdir/.zshrc"
+			;;
+		*/bash | bash)
+			if [ "$snow_os" = darwin ]; then
+				if snow_path_exists "$snow_home/.bash_profile"; then
+					snow_shell_profile="$snow_home/.bash_profile"
+				elif snow_path_exists "$snow_home/.bash_login"; then
+					snow_shell_profile="$snow_home/.bash_login"
+				elif snow_path_exists "$snow_home/.profile"; then
+					snow_shell_profile="$snow_home/.profile"
+				else
+					snow_shell_profile="$snow_home/.bash_profile"
+				fi
+			else
+				snow_shell_profile="$snow_home/.bashrc"
+			fi
+			;;
+		*) snow_shell_profile="$snow_home/.profile" ;;
+	esac
+
+	if snow_path_exists "$snow_shell_profile" && \
+		[ ! -f "$snow_shell_profile" ]; then
+		printf 'Could not update PATH: %s is not a regular file.\n' \
+			"$snow_shell_profile" >&2
+		return
+	fi
+
+	snow_quoted_install_dir=$(snow_shell_quote "$snow_install_dir")
+	snow_path_line="export PATH=${snow_quoted_install_dir}:\"\$PATH\""
+	if [ -f "$snow_shell_profile" ] && \
+		grep -Fqx "$snow_path_line" "$snow_shell_profile"; then
+		printf 'Snow PATH is already configured in %s.\n' "$snow_shell_profile"
+		return
+	fi
+
+	if ! {
+		[ ! -s "$snow_shell_profile" ] || printf '\n'
+		printf '%s\n' '# Added by the Snow installer.' "$snow_path_line"
+	} >>"$snow_shell_profile"; then
+		printf 'Could not update PATH in %s.\n' "$snow_shell_profile" >&2
+		return
+	fi
+	printf 'Added %s to PATH in %s. Restart your shell to use snow.\n' \
+		"$snow_install_dir" "$snow_shell_profile"
 }
 
 if [ -n "$snow_requested_version" ]; then
@@ -189,9 +294,4 @@ mv -f "$snow_staged_binary" "$snow_destination"
 snow_staged_binary=
 
 printf 'Installed Snow %s to %s/snow\n' "$snow_version" "$snow_install_dir"
-case ":${PATH:-}:" in
-	*":${snow_install_dir}:"*) ;;
-	*)
-		printf 'Add %s to PATH to run snow from your shell.\n' "$snow_install_dir" >&2
-		;;
-esac
+snow_configure_path

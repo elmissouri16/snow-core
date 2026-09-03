@@ -570,3 +570,46 @@ Verified on the current checkout with:
 - `python3 scripts/check_benchmarks.py`;
 - `git diff --check`; and
 - two independent read-only Pages reviews whose actionable findings were fixed.
+
+## BUG-013: Release installer does not persist its PATH entry
+
+- **Status:** Resolved
+- **Severity:** Low
+- **Surface:** macOS/Linux release installation
+- **Observed:** One-line installer usability review
+
+### Expected behavior
+
+After the one-line installer places `snow` in its default or configured
+installation directory, a newly opened supported shell should find the binary
+without requiring the user to copy a separate `export PATH=...` command.
+Repeated installation must not keep appending the same configuration.
+
+### Actual behavior and impact
+
+The installer previously printed a PATH instruction only when the destination
+was absent from the current process environment. It could not change its parent
+shell, and it did not persist the directory in a startup file. Users therefore
+had to run and remember a second command after installation, weakening the
+intended one-line experience.
+
+### Remediation
+
+`scripts/install.sh` now writes one safely quoted, idempotent PATH entry to the
+configured login shell's `.zshrc`, `.bashrc`, `.bash_profile`, or `.profile`.
+It requires an absolute install path, rejects control characters and
+PATH-delimiter colons, preserves macOS Bash profile precedence, honors absolute
+Zsh `ZDOTDIR`, and warns rather than corrupting a non-regular profile target.
+It supports `SNOW_NO_MODIFY_PATH=1` for users who manage PATH themselves. The
+public command
+is now one bounded, pipefail-protected bootstrap line; the persisted entry takes
+effect in a new shell because a child installer cannot mutate its parent
+process.
+
+### Resolution evidence
+
+Installer regression tests cover Bash execution, Linux Bash and macOS Zsh
+profiles, idempotence, single-quote escaping, invalid configuration, opt-out,
+and non-regular profile targets. Shell syntax checks run under both `sh` and
+`bash`, and the README, release guide, and security model describe the same
+behavior.
