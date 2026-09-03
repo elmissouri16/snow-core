@@ -81,7 +81,7 @@ func pluginCmd() *cobra.Command {
 			return runPluginList(cmd, false)
 		},
 	}
-	cmd.AddCommand(pluginListCmd(), pluginGetCmd(), pluginAddCmd(), pluginToggleCmd(true), pluginToggleCmd(false), pluginRemoveCmd(), pluginCheckCmd(), pluginSDKCmd())
+	cmd.AddCommand(pluginListCmd(), pluginGetCmd(), pluginAddCmd(), pluginToggleCmd(true), pluginToggleCmd(false), pluginRemoveCmd(), pluginCheckCmd())
 	return cmd
 }
 

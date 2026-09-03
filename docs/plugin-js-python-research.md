@@ -22,8 +22,8 @@ JavaScript/Python plugin ABI. Improve its developer experience and conformance
 rather than embedding language runtimes in the Go binary.
 
 Host hardening, the complete wire reference, `snow plugin check`, and
-dependency-free JavaScript/Python examples are implemented. Published npm/PyPI
-helper packages remain deferred until the protocol fixtures stabilize.
+dependency-free JavaScript/Python examples are implemented. Snow does not ship
+npm or PyPI helper packages for these runtimes.
 
 ## Context
 
@@ -207,31 +207,8 @@ third-party generic JSON-RPC dependency because such packages do not normally
 encode Snow's JSONL framing, progress, call IDs, cancellation, output
 discipline, or shutdown semantics.
 
-### Future SDK ergonomics
-
-After the examples and conformance tests remain stable, they can be extracted
-into:
-
-- `@snow-core/plugin` for Node.js/TypeScript;
-- `snow-plugin` for Python.
-
-The intended API is a declarative plugin definition with tool handlers receiving
-an execution context:
-
-```text
-ToolContext
-  call/request IDs
-  effective cwd
-  AbortSignal or asyncio cancellation
-  bounded progress(message)
-  host deadline
-```
-
-Both SDKs should have no runtime dependencies. TypeScript tooling may remain a
-development dependency; Python can use `asyncio`, `json`, and standard streams.
-The proposed public APIs, package layout, runtime responsibilities, conformance
-matrix, and phased delivery are recorded in the
-[plugin SDK implementation plan](plugin-language-sdks-plan.md).
+The dependency-free examples are the maintained JavaScript and Python authoring
+references. Snow does not ship language-specific authoring packages.
 
 ## Risks and deferrals
 
@@ -245,21 +222,14 @@ Do not add until a demonstrated requirement outweighs its cost:
 - executable directory scans or a plugin marketplace;
 - hot reload;
 - reliable event replay;
-- parallel plugin startup before sequential startup is measured as material;
-- npm/PyPI publication before protocol conformance is stable.
-
-Publishing is deliberately deferred because package release/version support is
-an ongoing maintenance commitment. The wire behavior should be stabilized by
-cross-language conformance fixtures first.
+- parallel plugin startup before sequential startup is measured as material.
 
 ### Acceptance criteria
 
-Before publishing language SDKs:
+For the raw JavaScript and Python protocol examples:
 
 - no embedded runtime, cgo dependency, or bundled interpreter is added;
 - the existing Go plugin API remains compatible;
-- Node and Python fixtures pass initialize, list/call, progress, cancellation,
-  event, malformed-frame, timeout, and shutdown tests;
 - unsubscribed plugins receive zero agent events;
 - external risk defaults to `exec` and invalid values fail initialization;
 - external `details` survive registry adaptation;
@@ -267,7 +237,6 @@ Before publishing language SDKs:
 - small hot calls remain below 1 ms p95 on supported CI hosts;
 - empty example initialization remains below 250 ms p95 on supported CI hosts;
 - 10,000 small calls show no sustained memory growth;
-- macOS and Linux test explicit interpreter launching;
 - `go test ./...`, `go vet ./...`, and focused race tests pass.
 
 ### Security boundary

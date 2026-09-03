@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/converter"
@@ -95,7 +96,7 @@ func (w *WebFetch) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name: "webfetch",
 		Description: "Fetch one public HTTP(S) URL with Surf's Chrome browser impersonation and return bounded readable Markdown or text. " +
-			"Redirects to private or non-HTTP(S) destinations are blocked; this is a static request and does not execute JavaScript.",
+			"Redirects to private or non-HTTP(S) destinations are blocked; response content is never executed.",
 		Parameters: json.RawMessage(`{
   "type": "object",
   "required": ["url"],
@@ -186,7 +187,7 @@ func (w *WebFetch) Run(ctx context.Context, raw json.RawMessage, host tools.Tool
 		return tools.ErrorResult(fmt.Errorf("webfetch: read response: %w", err)), nil
 	}
 	mediaType := webFetchMediaType(resp.Header.Get("Content-Type"), body)
-	if !isWebFetchText(mediaType) {
+	if !isWebFetchText(mediaType, body) {
 		return tools.ErrorResult(fmt.Errorf("webfetch: unsupported binary content type %q (status %s)", mediaType, resp.Status)), nil
 	}
 
@@ -420,17 +421,29 @@ func isWebFetchHTML(mediaType string) bool {
 	return mediaType == "text/html" || mediaType == "application/xhtml+xml"
 }
 
-func isWebFetchText(mediaType string) bool {
+func isWebFetchText(mediaType string, body []byte) bool {
 	if strings.HasPrefix(mediaType, "text/") || strings.HasSuffix(mediaType, "+json") || strings.HasSuffix(mediaType, "+xml") {
 		return true
 	}
 	switch mediaType {
-	case "application/json", "application/xml", "application/javascript", "application/x-javascript",
-		"application/graphql", "application/sql", "application/x-www-form-urlencoded", "application/xhtml+xml":
+	case "application/json", "application/xml", "application/graphql", "application/sql",
+		"application/x-www-form-urlencoded", "application/xhtml+xml":
 		return true
-	default:
+	}
+	detectedType := strings.ToLower(strings.TrimSpace(strings.SplitN(stdhttp.DetectContentType(body), ";", 2)[0]))
+	return strings.HasPrefix(mediaType, "application/") && strings.HasPrefix(detectedType, "text/") && isLikelyUTF8Text(body)
+}
+
+func isLikelyUTF8Text(body []byte) bool {
+	if !utf8.Valid(body) {
 		return false
 	}
+	for _, value := range body {
+		if value < 0x20 && value != '\t' && value != '\n' && value != '\r' {
+			return false
+		}
+	}
+	return true
 }
 
 func decodeWebFetchText(body []byte, contentType string) (string, error) {

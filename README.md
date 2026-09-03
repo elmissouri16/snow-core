@@ -184,10 +184,6 @@ the same provider → tool → session loop.
 | JSON events | `snow --mode json -p "..."` | Shell pipelines and event recording |
 | RPC | `snow --mode rpc` | Versioned, long-lived foreign-language/IDE control over JSONL stdio |
 | Go SDK | `github.com/elmissouri16/snow-core/pkg/snowsdk` | In-process embedding without Cobra or Bubble Tea |
-| Python SDK | [`sdk/python`](sdk/python) | Async typed local client around an external Snow binary |
-| JavaScript/TypeScript SDK | [`sdk/javascript`](sdk/javascript) | Zero-dependency ESM client with TypeScript declarations |
-| Python plugin SDK | [`sdk/plugin-python`](sdk/plugin-python) | Author private protocol-v2 plugins with `snow_plugin` |
-| JavaScript/TypeScript plugin SDK | [`sdk/plugin-javascript`](sdk/plugin-javascript) | Author private protocol-v2 plugins with `@snow-core/plugin` |
 
 Common examples:
 
@@ -355,15 +351,11 @@ Plan and Goal contracts use embedded Markdown sources under `internal/plan` and
 - **Plugins:** statically linked Go extensions or persistent JSON-RPC v2 child
   runtimes with namespaced tools, declared risk, private result metadata,
   progress, cancellation, and explicitly subscribed observe-only events.
-  Dependency-free JavaScript and Python examples are included; the binary can
-  vendor private SDK snapshots offline, and configuration has side-effect-free
-  list/get plus add/enable/disable/remove management.
+  Dependency-free JavaScript and Python examples are included, and configuration
+  has side-effect-free list/get plus add/enable/disable/remove management.
 - **Agent Skills:** strict open `SKILL.md` validation with metadata-only startup
   context, inline `$skill-name` autocomplete and explicit activation, pinned
   on-demand resource confinement, and trust-aware precedence.
-  The binary
-  embeds `$plugin-builder`, a supervised workflow and template set for staging,
-  validating, reviewing, and explicitly enabling agent-authored plugins.
 - **Tool routing:** opt-in, namespace-first Bleve BM25 discovery keeps deferred
   schemas out of ordinary provider requests, retains a global rescue ranking,
   and exposes `search_tools` as a recovery path.
@@ -371,11 +363,9 @@ Plan and Goal contracts use embedded Markdown sources under `internal/plan` and
   role-scoped tools, attributed mailboxes, concurrency/depth limits, and
   SDK/RPC/TUI observation.
 
-Build or manage external runtimes without hot-loading them:
+Validate or manage external runtimes without hot-loading configured plugins:
 
 ```sh
-# In a Snow prompt, start with: $plugin-builder Build a reusable ...
-snow plugin sdk vendor --runtime javascript .snow/generated-plugins/my-plugin --json
 snow plugin check examples/plugins/javascript/manifest.json
 snow plugin check examples/plugins/python/manifest.json --json
 snow plugin add ./my-plugin/manifest.json --project # staged disabled
@@ -384,19 +374,16 @@ snow plugin list --all
 ```
 
 `plugin check` starts the runtime, so it requires the same trust as executing
-other generated code. SDK vendoring writes executable source but does not run
-it; list/get/add/enable/disable/remove also never start a plugin.
+other code. List/get/add/enable/disable/remove never start a plugin.
 
 See [MCP](docs/mcp.md), [plugins](docs/plugins.md), the complete
 [plugin protocol](docs/plugin-protocol.md), [Agent Skills](docs/skills.md),
 [tool routing](docs/tool-routing.md), and [subagents](docs/subagents.md).
 
 Runnable integration projects live under [`examples/`](examples/): a standalone
-[Go SDK module](examples/sdk), [Python](examples/rpc/python) and
-[JavaScript](examples/rpc/javascript) language-SDK clients, and
-JavaScript/Python plugin runtimes. All SDK/RPC examples default to the
-credential-free fake provider and are exercised by CI on Linux and macOS. See
-the [cross-language SDK guide](docs/language-sdks.md).
+[Go SDK module](examples/sdk) and dependency-free JavaScript/Python external
+plugin runtimes. The Go SDK example defaults to the credential-free fake
+provider and is exercised by CI on Linux and macOS.
 
 ## Embed with Go
 
@@ -476,8 +463,7 @@ A prompt receives an immediate admission acknowledgement. `turn_done` ends the
 agent turn; exactly one later `prompt_completed` frame reports definitive
 `completed`, `failed`, or `canceled` status. Model discovery is available
 through `models_list` and `subagent_models`. Keep stdin open until work
-finishes. See the [RPC protocol reference](docs/rpc.md) and
-[cross-language SDK guide](docs/language-sdks.md).
+finishes. See the [RPC protocol reference](docs/rpc.md).
 
 ## Security first
 
@@ -546,7 +532,6 @@ Start at the [documentation index](docs/README.md).
 | Learn the TUI and CLI modes | [Using Snow](docs/using-snow.md) |
 | Configure paths, providers, tools, themes, and search | [Configuration](docs/configuration.md) |
 | Embed Snow in Go | [Go SDK](docs/sdk.md) · [standalone example](examples/sdk) |
-| Embed from Python or JavaScript/TypeScript | [Language SDKs](docs/language-sdks.md) · [Python](sdk/python) · [JavaScript](sdk/javascript) |
 | Build a raw JSONL client | [RPC](docs/rpc.md) · [schemas](pkg/protocol/schema/rpc/v1) |
 | Author JavaScript/Python plugins | [Plugins](docs/plugins.md) · [Protocol v2](docs/plugin-protocol.md) |
 | Review operational boundaries or report a vulnerability | [Security model](docs/security.md) · [Reporting policy](SECURITY.md) |
@@ -561,7 +546,7 @@ Start at the [documentation index](docs/README.md).
 
 [GitHub Actions CI](.github/workflows/ci.yml) runs automatically for `main`
 pushes and pull requests and remains manually dispatchable. Linux and macOS run
-the network-free suite, binary and SDK/plugin checks, and examples; Linux also
+the network-free suite, binary, and Go SDK example; Linux also
 runs the race detector, deterministic performance-regression guard, four
 release-target cross-builds, and `govulncheck`.
 This local list is the common baseline;
@@ -576,14 +561,6 @@ python3 scripts/check_benchmarks.py
 go test -race ./internal/... ./pkg/snowsdk
 (cd examples/sdk && go test ./... && go run .)
 go build -o ./snow ./cmd/snow
-SNOW_TEST_BINARY="$PWD/snow" PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v
-(cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration && npm run pack:check)
-PYTHONPATH=sdk/plugin-python/src python3 -m unittest discover -s sdk/plugin-python/tests -v
-(cd sdk/plugin-javascript && npm test && npm run pack:check)
-./snow plugin check examples/plugins/python-sdk/manifest.json
-./snow plugin check examples/plugins/javascript-sdk/manifest.json
-python3 examples/rpc/python/client.py --snow ./snow
-node examples/rpc/javascript/client.mjs ./snow
 # Release check after installing the pinned command:
 govulncheck ./...
 ```

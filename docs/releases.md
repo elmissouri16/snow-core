@@ -2,8 +2,7 @@
 
 This guide defines Snow's alpha versioning, compatibility, verification, and
 binary distribution policy. It applies to the Go CLI, JSONL RPC protocol, and
-Go SDK in this repository; the checked-in Python and JavaScript packages have a
-separate publication status.
+Go SDK in this repository.
 
 > **Note:** Alpha releases are suitable for evaluation and early integration.
 > Public APIs, RPC details, configuration, and persisted formats may change
@@ -18,7 +17,6 @@ separate publication status.
 - [Publish an alpha](#publish-an-alpha)
 - [Artifacts and checksums](#artifacts-and-checksums)
 - [Support and rollback](#support-and-rollback)
-- [Unpublished language packages](#unpublished-language-packages)
 - [Related documents](#related-documents)
 
 ## Versioning and compatibility
@@ -63,11 +61,7 @@ version comments document the corresponding upstream major. The gate includes:
 - the Linux race suite;
 - the Linux performance-regression guard and its parser tests;
 - cgo-disabled cross-builds for every release target;
-- standalone Go SDK and RPC examples;
-- Python and JavaScript RPC SDK unit and integration checks, plus JavaScript
-  dry-run package validation;
-- Python and JavaScript plugin SDK tests, JavaScript dry-run package validation,
-  and packaged-example checks;
+- the standalone Go SDK example;
 - a reachable-code scan with the pinned `govulncheck` version.
 
 The default suite remains credential-free and uses local mock servers. Before a
@@ -254,18 +248,9 @@ notes and publish a new alpha. Go module versions may be retracted in `go.mod`
 when necessary. Preserve old release notes and checksums for auditability unless
 removal is required to contain active harm.
 
-## Unpublished language packages
-
-The Python and JavaScript RPC clients and both plugin-authoring SDKs remain
-private, pre-alpha, unpublished packages. They are tested as part of the core
-release but versioned independently. Snow must not resolve the private npm or
-PyPI package names automatically; plugin SDK snapshots are supplied only by the
-reviewed offline vendoring workflow.
-
 ## Related documents
 
 - [Project README](../README.md)
 - [Security reporting policy](../SECURITY.md)
 - [Security model](security.md)
 - [Architecture and verification](../IMPLEMENTATION.md)
-- [Python and JavaScript SDKs](language-sdks.md)

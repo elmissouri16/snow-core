@@ -36,7 +36,6 @@ type Skill struct {
 	DisabledBy    string            `json:"disabled_by,omitempty"`
 	rank          int
 	identity      fs.FileInfo
-	embeddedRoot  fs.FS
 }
 
 // Diagnostic records malformed or shadowed skills without aborting startup.
@@ -55,7 +54,6 @@ type Options struct {
 	ProjectTrusted   bool
 	ExtraDirs        []string
 	IncludeClaude    bool
-	IncludeBuiltins  bool
 	Disabled         bool
 	DisabledReason   string
 	Overrides        map[string]bool

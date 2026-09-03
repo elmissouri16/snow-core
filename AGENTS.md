@@ -133,14 +133,6 @@ go test -race ./internal/subagent ./internal/agent ./internal/app ./internal/ses
 go test ./internal/agent ./cmd/snow -count=1
 (cd examples/sdk && go test ./... && go run .)
 go build -o ./snow ./cmd/snow
-SNOW_TEST_BINARY="$PWD/snow" PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v
-(cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration && npm run pack:check)
-PYTHONPATH=sdk/plugin-python/src python3 -m unittest discover -s sdk/plugin-python/tests -v
-(cd sdk/plugin-javascript && npm test && npm run pack:check)
-./snow plugin check examples/plugins/python-sdk/manifest.json
-./snow plugin check examples/plugins/javascript-sdk/manifest.json
-python3 examples/rpc/python/client.py --snow ./snow
-node examples/rpc/javascript/client.mjs ./snow
 govulncheck ./...
 ```
 

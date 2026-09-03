@@ -18,7 +18,7 @@ func TestDiscoverMentionFilesSkipsGeneratedAndSymlinkedPaths(t *testing.T) {
 	for _, path := range []string{
 		"README.md",
 		filepath.Join("internal", "tui", "tui.go"),
-		filepath.Join("node_modules", "ignored.js"),
+		filepath.Join("vendor", "ignored.bin"),
 		filepath.Join(".git", "config"),
 	} {
 		full := filepath.Join(root, path)
@@ -36,7 +36,7 @@ func TestDiscoverMentionFilesSkipsGeneratedAndSymlinkedPaths(t *testing.T) {
 			t.Fatalf("mention files missing %q: %v", want, files)
 		}
 	}
-	for _, unwanted := range []string{"node_modules", ".git"} {
+	for _, unwanted := range []string{"vendor", ".git"} {
 		if strings.Contains(joined, unwanted) {
 			t.Fatalf("mention files should skip %q: %v", unwanted, files)
 		}

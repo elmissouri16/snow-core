@@ -6,15 +6,12 @@ import (
 	"errors"
 	"math"
 	"strconv"
-	"strings"
 	"unicode/utf8"
 )
 
 var chatRawFormatOptions = []jsontext.Options{
 	jsontext.AllowDuplicateNames(true),
 	jsontext.AllowInvalidUTF8(true),
-	jsontext.EscapeForHTML(true),
-	jsontext.EscapeForJS(true),
 	jsontext.PreserveRawStrings(true),
 }
 
@@ -212,8 +209,7 @@ func (b *chatJSONBuilder) quote(value string) {
 func appendChatJSONString(dst []byte, src string) []byte {
 	start := len(dst)
 	quoted, err := jsontext.AppendQuote(dst, src)
-	if err == nil && strings.IndexByte(src, '<') < 0 && strings.IndexByte(src, '>') < 0 && strings.IndexByte(src, '&') < 0 &&
-		!strings.Contains(src, "\u2028") && !strings.Contains(src, "\u2029") {
+	if err == nil {
 		return quoted
 	}
 	return appendChatJSONStringCompat(dst[:start], src)
@@ -255,13 +251,6 @@ func appendChatJSONStringCompat(dst []byte, src string) []byte {
 			dst = append(dst, src[start:i]...)
 			dst = append(dst, '\xef', '\xbf', '\xbd')
 			i++
-			start = i
-			continue
-		}
-		if r == '\u2028' || r == '\u2029' {
-			dst = append(dst, src[start:i]...)
-			dst = append(dst, '\\', 'u', '2', '0', '2', hex[r&0xf])
-			i += size
 			start = i
 			continue
 		}

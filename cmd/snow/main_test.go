@@ -467,7 +467,7 @@ func TestMCPManagementLifecycleAndRedaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := runCLI(t, "snow", "mcp", "add", "demo", "--env", "TOKEN=secret", "--lifecycle", "lazy", "--cache-bootstrap", "explicit", "--json", "--", "npx", "--api-key=secret", "demo-mcp"); err != nil {
+	if _, err := runCLI(t, "snow", "mcp", "add", "demo", "--env", "TOKEN=secret", "--lifecycle", "lazy", "--cache-bootstrap", "explicit", "--json", "--", "mcp-host", "--api-key=secret", "demo-mcp"); err != nil {
 		t.Fatal(err)
 	}
 	listed, err := runCLI(t, "snow", "mcp", "list", "--json")

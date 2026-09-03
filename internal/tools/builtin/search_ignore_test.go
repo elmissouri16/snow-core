@@ -10,12 +10,12 @@ import (
 
 func TestSearchHonorsNestedGitignoreNegationHiddenAndBypass(t *testing.T) {
 	root := t.TempDir()
-	for _, dir := range []string{"logs", "src", ".hidden", "node_modules", ".git"} {
+	for _, dir := range []string{"logs", "src", ".hidden", "vendor", ".git"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	files := map[string]string{"logs/a.log": "needle", "logs/keep.log": "needle", "src/a.tmp": "needle", "src/keep.tmp": "needle", ".hidden/a.txt": "needle", "node_modules/a.txt": "needle", ".git/a.txt": "needle"}
+	files := map[string]string{"logs/a.log": "needle", "logs/keep.log": "needle", "src/a.tmp": "needle", "src/keep.tmp": "needle", ".hidden/a.txt": "needle", "vendor/a.txt": "needle", ".git/a.txt": "needle"}
 	for name, data := range files {
 		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(data), 0o600); err != nil {
 			t.Fatal(err)
@@ -32,14 +32,14 @@ func TestSearchHonorsNestedGitignoreNegationHiddenAndBypass(t *testing.T) {
 			t.Fatalf("missing %s: %q", want, out)
 		}
 	}
-	for _, unwanted := range []string{"logs/a.log", "src/a.tmp", ".hidden/a.txt", "node_modules/a.txt", ".git/a.txt"} {
+	for _, unwanted := range []string{"logs/a.log", "src/a.tmp", ".hidden/a.txt", "vendor/a.txt", ".git/a.txt"} {
 		if strings.Contains(out, unwanted) {
 			t.Fatalf("leaked %s: %q", unwanted, out)
 		}
 	}
 	bypass, _ := g.Run(context.Background(), searchArgs(t, map[string]any{"pattern": "**/*", "hidden": true, "include_ignored": true}), host)
 	bypassOut := bypass.Content[0].Text
-	for _, want := range []string{"logs/a.log", ".hidden/a.txt", "node_modules/a.txt"} {
+	for _, want := range []string{"logs/a.log", ".hidden/a.txt", "vendor/a.txt"} {
 		if !strings.Contains(bypassOut, want) {
 			t.Fatalf("bypass missing %s: %q", want, bypassOut)
 		}

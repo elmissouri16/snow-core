@@ -49,7 +49,7 @@ func TestRegisterBuiltins_DescriptionsDocumentOperationalBoundaries(t *testing.T
 		"ask_user":           {"interactive user", "free-form answers", "custom answer", "Other in the TUI", "no interactive input surface"},
 		"request_user_input": {"interactive user", "free-form answers", "custom answer", "Other in the TUI", "no interactive input surface"},
 		"update_plan":        {"current task TODO/checklist", "At most one step", "does not enter Plan mode"},
-		"webfetch":           {"public HTTP(S) URL", "private or non-HTTP(S) destinations are blocked", "does not execute JavaScript"},
+		"webfetch":           {"public HTTP(S) URL", "private or non-HTTP(S) destinations are blocked", "response content is never executed"},
 	}
 	for name, phrases := range wantPhrases {
 		descriptor, ok := reg.Descriptor(name)

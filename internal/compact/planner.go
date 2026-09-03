@@ -789,7 +789,7 @@ func extractFileAndSymbolHints(value string) []string {
 		}
 		pathLike := strings.Contains(candidate, "/") || strings.Contains(candidate, "\\")
 		if !pathLike {
-			for _, suffix := range []string{".go", ".md", ".json", ".yaml", ".yml", ".toml", ".ts", ".tsx", ".js", ".py", ".sh", ".sql", ".db"} {
+			for _, suffix := range []string{".go", ".md", ".json", ".yaml", ".yml", ".toml", ".sh", ".sql", ".db"} {
 				if strings.HasSuffix(candidate, suffix) {
 					pathLike = true
 					break

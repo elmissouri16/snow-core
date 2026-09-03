@@ -3,7 +3,7 @@ package rpc
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json/jsontext"
+	jsonv1 "encoding/json"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -235,14 +235,10 @@ func historyImageCount(message protocol.Message) int {
 }
 
 func messagesPageFrameSize(requestID string, page protocol.RPCMessagesPage) (int, error) {
-	// Server.write uses encoding/json v1, whose HTML/JS escaping can expand
-	// untrusted text substantially. Match those formatting rules so this is a
-	// conservative bound for the bytes the shared writer will emit.
-	frame, err := json.Marshal(
+	// Match the shared writer exactly so untrusted text cannot make the emitted
+	// frame larger than this estimate.
+	frame, err := jsonv1.Marshal(
 		Response{ID: requestID, Type: "response", Command: "messages_page", Success: true, Data: page},
-		jsontext.AllowInvalidUTF8(true),
-		jsontext.EscapeForHTML(true),
-		jsontext.EscapeForJS(true),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("encode messages_page response: %w", err)

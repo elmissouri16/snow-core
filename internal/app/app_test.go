@@ -178,31 +178,6 @@ func TestAppProjectPluginOverrideSuppressesGlobalPlugin(t *testing.T) {
 	}
 }
 
-func TestAppIncludesEmbeddedPluginBuilderSkill(t *testing.T) {
-	t.Setenv("SNOW_HOME", t.TempDir())
-	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, NoPlugins: true, NoMCP: true, Permission: "deny", CWD: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	skill, ok := a.Skills.Get("plugin-builder")
-	if !ok || skill.Scope != "builtin" {
-		t.Fatalf("plugin-builder = %+v, %v", skill, ok)
-	}
-	if _, ok := a.Registry.Get("activate_skill"); !ok {
-		t.Fatal("embedded skill did not register activation tool")
-	}
-
-	without, err := New(context.Background(), Options{Provider: "fake", NoSession: true, NoPlugins: true, NoMCP: true, NoSkills: true, Permission: "deny", CWD: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer without.Close()
-	if without.Skills != nil {
-		t.Fatal("NoSkills retained embedded plugin-builder catalog")
-	}
-}
-
 // TestAppTrustStoreUsesTrustFileNotAuthFile is a regression test for a real
 // startup bug: the trust store was wired to config.DefaultPaths()[1]
 // (authPath) instead of [2] (trustPath), so once /login stored a credential in

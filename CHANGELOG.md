@@ -5,6 +5,25 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the checked-in Python and JavaScript RPC client SDKs and their
+  SDK-backed examples, tests, package metadata, and documentation. The
+  language-neutral JSONL RPC protocol remains supported.
+- Removed the Python and JavaScript plugin-authoring SDKs, embedded SDK
+  snapshots, offline vendoring command, and bundled plugin-builder skill. Raw,
+  dependency-free JavaScript and Python external protocol-v2 examples remain
+  supported.
+- Removed language-specific raw-plugin runtime tests and the remaining Python,
+  JavaScript, Node.js, and package-ecosystem references from Go source and test
+  files.
+
+### Changed
+
+- Generalized fixture commands, generated-directory classification, provider
+  JSON formatting, application-level textual response detection, and the macOS
+  clipboard implementation so Go runtime paths remain language-neutral.
+
 ## [0.1.0-alpha.1] - 2026-09-02
 
 The first public alpha establishes the current streaming agent loop, TUI,

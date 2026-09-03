@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"runtime"
 	"slices"
@@ -40,7 +41,7 @@ func readClipboardImage() (protocol.ContentBlock, error) {
 	var err error
 	switch runtime.GOOS {
 	case "darwin":
-		data, err = boundedCommandOutput(ctx, "osascript", "-l", "JavaScript", "-e", macOSClipboardImageScript)
+		data, err = readMacOSClipboardImage(ctx)
 	case "linux":
 		data, err = readLinuxClipboardImage(ctx)
 	default:
@@ -163,13 +164,72 @@ func preferredClipboardImageType(types string) string {
 	return ""
 }
 
-const macOSClipboardImageScript = `ObjC.import('AppKit'); ObjC.import('Foundation');
-const p = $.NSPasteboard.generalPasteboard;
-const out = $.NSFileHandle.fileHandleWithStandardOutput;
-let wrote = false;
-const types = ['public.png','public.jpeg','com.compuserve.gif','org.webmproject.webp'];
-for (const t of types) { const d = p.dataForType(t); if (ObjC.unwrap(d) !== undefined && Number(d.length) > 0) { out.writeData(d); wrote = true; break; } }
-if (!wrote) { const d = p.dataForType('public.tiff'); if (ObjC.unwrap(d) !== undefined) { const image = $.NSImage.alloc.initWithData(d); const tiff = image ? image.TIFFRepresentation : null; const r = tiff ? $.NSBitmapImageRep.imageRepWithData(tiff) : null; if (r) { const png = r.representationUsingTypeProperties(4, $({})); if (png) out.writeData(png); } } }`
+func readMacOSClipboardImage(ctx context.Context) ([]byte, error) {
+	file, err := os.CreateTemp("", "snow-clipboard-image-*")
+	if err != nil {
+		return nil, err
+	}
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return nil, err
+	}
+	defer os.Remove(path)
+
+	format, err := boundedCommandOutputLimit(ctx, 64<<10, "osascript", "-e", macOSClipboardImageScript, path)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(string(format)) == "tiff" {
+		convertedPath := path + ".png"
+		defer os.Remove(convertedPath)
+		if _, err := boundedCommandOutputLimit(ctx, 64<<10, "sips", "-s", "format", "png", path, "--out", convertedPath); err != nil {
+			return nil, err
+		}
+		path = convertedPath
+	}
+	file, err = os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(io.LimitReader(file, maxClipboardImageBytes+1))
+}
+
+const macOSClipboardImageScript = `on run argv
+set outputPath to POSIX file (item 1 of argv)
+set imageKind to "native"
+try
+	set imageData to the clipboard as «class PNGf»
+on error
+	try
+		set imageData to the clipboard as JPEG picture
+	on error
+		try
+			set imageData to the clipboard as GIF picture
+		on error
+			try
+				set imageData to the clipboard as «class WebP»
+			on error
+				set imageData to the clipboard as TIFF picture
+				set imageKind to "tiff"
+			end try
+		end try
+	end try
+end try
+set outputFile to open for access outputPath with write permission
+try
+	set eof outputFile to 0
+	write imageData to outputFile
+on error errorMessage number errorNumber
+	try
+		close access outputFile
+	end try
+	error errorMessage number errorNumber
+end try
+close access outputFile
+return imageKind
+end run`
 
 func imageAttachmentToken(index int) string {
 	return fmt.Sprintf("[Image #%d]", index+1)

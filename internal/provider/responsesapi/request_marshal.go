@@ -12,8 +12,6 @@ import (
 var responseRawFormatOptions = []jsontext.Options{
 	jsontext.AllowDuplicateNames(true),
 	jsontext.AllowInvalidUTF8(true),
-	jsontext.EscapeForHTML(true),
-	jsontext.EscapeForJS(true),
 	jsontext.PreserveRawStrings(true),
 }
 
@@ -261,6 +259,15 @@ func (b *responseJSONBuilder) quoteSafeASCII(value string) {
 }
 
 func appendResponseJSONString(dst []byte, src string) []byte {
+	start := len(dst)
+	quoted, err := jsontext.AppendQuote(dst, src)
+	if err == nil {
+		return quoted
+	}
+	return appendResponseJSONStringCompat(dst[:start], src)
+}
+
+func appendResponseJSONStringCompat(dst []byte, src string) []byte {
 	const hex = "0123456789abcdef"
 	dst = append(dst, '"')
 	start := 0
@@ -296,13 +303,6 @@ func appendResponseJSONString(dst []byte, src string) []byte {
 			dst = append(dst, src[start:i]...)
 			dst = append(dst, '\xef', '\xbf', '\xbd')
 			i++
-			start = i
-			continue
-		}
-		if r == '\u2028' || r == '\u2029' {
-			dst = append(dst, src[start:i]...)
-			dst = append(dst, '\\', 'u', '2', '0', '2', hex[r&0xf])
-			i += size
 			start = i
 			continue
 		}

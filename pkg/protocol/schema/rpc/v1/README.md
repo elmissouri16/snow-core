@@ -17,6 +17,6 @@ from this directory and reject network fallback.
   shapes.
 
 The v1 schemas are strict (`additionalProperties: false`) so Go conformance tests
-catch accidental wire drift. Python and JavaScript SDK decoders intentionally
-preserve unknown event types and additive fields for forward compatibility.
+catch accidental wire drift. Clients should preserve or safely ignore unknown
+event types and additive fields for forward compatibility.
 Breaking or newly required fields need a new RPC protocol version.

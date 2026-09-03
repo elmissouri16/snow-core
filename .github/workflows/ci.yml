@@ -43,16 +43,6 @@ jobs:
             go.sum
             examples/sdk/go.sum
 
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.9'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: '22'
-
       - name: Check formatting
         if: runner.os == 'Linux'
         shell: bash
@@ -89,53 +79,6 @@ jobs:
       - name: Run standalone Go SDK example
         working-directory: examples/sdk
         run: go run . -provider fake -prompt "CI lifecycle smoke test"
-
-      - name: Test Python RPC SDK
-        shell: bash
-        env:
-          SNOW_TEST_BINARY: ${{ runner.temp }}/snow
-          PYTHONPATH: sdk/python/src
-        run: |
-          python3 -m compileall -q sdk/python/src sdk/python/tests
-          python3 -m unittest discover -s sdk/python/tests -v
-
-      - name: Test JavaScript RPC SDK
-        working-directory: sdk/javascript
-        env:
-          SNOW_TEST_BINARY: ${{ runner.temp }}/snow
-        run: |
-          npm ci
-          npm test
-          npm run test:integration
-          npm run pack:check
-
-      - name: Test Python plugin SDK
-        shell: bash
-        env:
-          PYTHONPATH: sdk/plugin-python/src
-        run: |
-          python3 -m compileall -q sdk/plugin-python/src sdk/plugin-python/tests
-          python3 -m unittest discover -s sdk/plugin-python/tests -v
-
-      - name: Test JavaScript plugin SDK
-        working-directory: sdk/plugin-javascript
-        run: |
-          npm test
-          npm run pack:check
-
-      - name: Check SDK-based plugin examples
-        shell: bash
-        run: |
-          "$RUNNER_TEMP/snow" plugin check examples/plugins/python-sdk/manifest.json
-          "$RUNNER_TEMP/snow" plugin check examples/plugins/javascript-sdk/manifest.json
-
-      - name: Run Python RPC SDK example
-        shell: bash
-        run: python3 examples/rpc/python/client.py --snow "$RUNNER_TEMP/snow" --provider fake --prompt "CI lifecycle smoke test"
-
-      - name: Run JavaScript RPC SDK example
-        shell: bash
-        run: node examples/rpc/javascript/client.mjs "$RUNNER_TEMP/snow" "CI lifecycle smoke test"
 
   performance:
     name: Performance regression guard (Linux)
@@ -182,7 +125,7 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      - name: Test internal runtime and SDK with race detector
+      - name: Test internal runtime and Go SDK with race detector
         run: go test -race ./internal/... ./pkg/snowsdk -count=1
 
   cross-build:

@@ -20,6 +20,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
 
+	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/internal/tools/builtin"
 )
 
@@ -35,13 +36,6 @@ func Discover(opts Options) *Registry {
 		maxFile = defaultMaxSkillFile
 	}
 	r := &Registry{byName: make(map[string]Skill), allByName: make(map[string]Skill), maxFileSize: maxFile}
-	if opts.IncludeBuiltins {
-		builtins, diagnostics := discoverBuiltins(maxFile)
-		r.diagnostics = append(r.diagnostics, diagnostics...)
-		for _, skill := range builtins {
-			r.allByName[skill.Name] = skill
-		}
-	}
 
 	home := opts.Home
 	if home == "" {
@@ -389,25 +383,6 @@ func readBoundedRoot(root *os.Root, name string, maxBytes int64) ([]byte, error)
 	return readBoundedFile(file, info, maxBytes)
 }
 
-func readBoundedFS(root fs.FS, name string, maxBytes int64) ([]byte, error) {
-	if root == nil || !fs.ValidPath(name) {
-		return nil, errors.New("invalid embedded skill resource path")
-	}
-	file, err := root.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, errors.New("skill resource is not a regular file")
-	}
-	return readBoundedFile(file, info, maxBytes)
-}
-
 func readBoundedFile(file io.Reader, info fs.FileInfo, maxBytes int64) ([]byte, error) {
 	if info.Size() > maxBytes {
 		return nil, fmt.Errorf("file exceeds %d-byte limit", maxBytes)
@@ -554,18 +529,12 @@ func (r *Registry) load(name string) (Skill, []byte, error) {
 	if !ok {
 		return Skill{}, nil, fmt.Errorf("unknown skill %q", name)
 	}
-	var data []byte
-	var err error
-	if skill.embeddedRoot != nil {
-		data, err = readBoundedFS(skill.embeddedRoot, "SKILL.md", r.maxFileSize)
-	} else {
-		var root *os.Root
-		root, err = openSkillRoot(skill)
-		if err == nil {
-			defer root.Close()
-			data, err = readBoundedRoot(root, "SKILL.md", r.maxFileSize)
-		}
+	root, err := openSkillRoot(skill)
+	if err != nil {
+		return Skill{}, nil, err
 	}
+	defer root.Close()
+	data, err := readBoundedRoot(root, "SKILL.md", r.maxFileSize)
 	if err != nil {
 		return Skill{}, nil, err
 	}
@@ -574,9 +543,6 @@ func (r *Registry) load(name string) (Skill, []byte, error) {
 }
 
 func (r *Registry) readResource(skill Skill, name string, maxBytes int64) ([]byte, error) {
-	if skill.embeddedRoot != nil {
-		return readBoundedFS(skill.embeddedRoot, filepath.ToSlash(name), maxBytes)
-	}
 	root, err := openSkillRoot(skill)
 	if err != nil {
 		return nil, err
@@ -588,9 +554,6 @@ func (r *Registry) readResource(skill Skill, name string, maxBytes int64) ([]byt
 func listResources(ctx context.Context, skill Skill, limit int) ([]string, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	if skill.embeddedRoot != nil {
-		return listFSResources(ctx, skill.embeddedRoot, limit)
 	}
 	root, err := openSkillRoot(skill)
 	if err != nil {
@@ -635,7 +598,7 @@ func listResources(ctx context.Context, skill Skill, limit int) ([]string, bool,
 					resourcePath = pathpkg.Join(current.path, entry.Name())
 				}
 				if entry.IsDir() {
-					if current.depth < 5 && entry.Name() != ".git" && entry.Name() != "node_modules" {
+					if current.depth < 5 && entry.Name() != ".git" && !config.IsDefaultGeneratedDir(entry.Name()) {
 						stack = append(stack, directory{path: resourcePath, depth: current.depth + 1})
 					}
 					continue
@@ -660,57 +623,6 @@ func listResources(ctx context.Context, skill Skill, limit int) ([]string, bool,
 		}
 		if err := dir.Close(); err != nil {
 			return nil, false, err
-		}
-	}
-	slices.Sort(resources)
-	return resources, false, nil
-}
-
-func listFSResources(ctx context.Context, root fs.FS, limit int) ([]string, bool, error) {
-	type directory struct {
-		path  string
-		depth int
-	}
-	stack := []directory{{path: "."}}
-	var resources []string
-	entriesSeen := 0
-	for len(stack) > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, false, err
-		}
-		current := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		entries, err := fs.ReadDir(root, current.path)
-		if err != nil {
-			return nil, false, err
-		}
-		for _, entry := range entries {
-			if err := ctx.Err(); err != nil {
-				return nil, false, err
-			}
-			entriesSeen++
-			if entriesSeen > 2000 {
-				slices.Sort(resources)
-				return resources, true, nil
-			}
-			resourcePath := entry.Name()
-			if current.path != "." {
-				resourcePath = pathpkg.Join(current.path, entry.Name())
-			}
-			if entry.IsDir() {
-				if current.depth < 5 && entry.Name() != ".git" && entry.Name() != "node_modules" {
-					stack = append(stack, directory{path: resourcePath, depth: current.depth + 1})
-				}
-				continue
-			}
-			if resourcePath == "SKILL.md" {
-				continue
-			}
-			if len(resources) >= limit {
-				slices.Sort(resources)
-				return resources, true, nil
-			}
-			resources = append(resources, resourcePath)
 		}
 	}
 	slices.Sort(resources)

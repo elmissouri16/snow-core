@@ -6,7 +6,7 @@ import (
 )
 
 func TestValidateSpecRejectsAmbiguousEnvironmentAndNUL(t *testing.T) {
-	valid := PluginSpec{ID: "demo", Command: []string{"python3", "plugin.py"}, Env: []string{"PATH=/usr/bin", "MODE=test"}}
+	valid := PluginSpec{ID: "demo", Command: []string{"plugin-host", "--serve"}, Env: []string{"PATH=/usr/bin", "MODE=test"}}
 	if err := ValidateSpec(valid); err != nil {
 		t.Fatalf("valid spec: %v", err)
 	}

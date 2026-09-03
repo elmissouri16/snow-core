@@ -4,9 +4,7 @@ Snow RPC is a long-lived, bidirectional JSON-lines control plane for IDEs,
 editor plugins, foreign-language hosts, and subprocess integrations. This
 reference defines the wire framing, handshake, command surface, event stream,
 ordering guarantees, error model, and shutdown semantics. Companion material
-for model-requested input and the Python and JavaScript SDKs lives in
-[Model-requested user input](user-input.md) and
-[Python and JavaScript/TypeScript SDKs](language-sdks.md).
+for model-requested input lives in [Model-requested user input](user-input.md).
 
 > **Note:** This is not JSON-RPC 2.0. Snow's external plugin protocol uses
 > JSON-RPC 2.0; the CLI control plane documented here is a separate
@@ -1796,21 +1794,10 @@ Important ordering rules:
 - Keep a response table keyed by ID, a prompt-terminal table keyed by
   `request_id`, and process agent events independently.
 
-## Example clients
+## Example client
 
-Typed, zero-runtime-dependency SDKs and runnable examples are exercised by
-Linux/macOS CI against the fake provider:
-
-```sh
-go build -o ./snow ./cmd/snow
-python3 examples/rpc/python/client.py --snow ./snow
-node examples/rpc/javascript/client.mjs ./snow
-```
-
-See [Python and JavaScript/TypeScript SDKs](language-sdks.md) for the
-supported high-level clients. The following low-level example shows the
-underlying framing, including the distinction between `turn_done` and
-`prompt_completed`.
+The following low-level example shows the underlying framing, including the
+distinction between `turn_done` and `prompt_completed`.
 
 ```python
 #!/usr/bin/env python3
@@ -1890,12 +1877,9 @@ proc.stdin.close()  # EOF: orderly RPC shutdown
 raise SystemExit(proc.wait())
 ```
 
-This compact snippet demonstrates raw framing. Applications should normally
-use the checked-in Python or JavaScript SDK, which validates the handshake,
-routes out-of-order responses, bounds frames and queues, and waits for
-definitive prompt completion.
-
-Production clients should also:
+This compact snippet demonstrates raw framing. Production clients must validate
+the handshake, route out-of-order responses, bound frames and queues, and wait
+for definitive prompt completion. They should also:
 
 - use an asynchronous reader independent from request submission;
 - maintain ID-indexed promises/futures;
@@ -1959,7 +1943,6 @@ provider-facing contents.
 ## Related documents
 
 - [Model-requested user input](user-input.md)
-- [Python and JavaScript/TypeScript SDKs](language-sdks.md)
 - [Persistent Thread Goals](goals.md)
 - [Subagents](subagents.md)
 - [Security model](security.md)

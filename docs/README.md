@@ -27,10 +27,6 @@ for a subject.
   readiness, permissions, and a [standalone Go module](../examples/sdk).
 - [JSONL RPC](rpc.md) — versioned framing, every command, responses/events,
   ordering, interactive input, goals, subagents, shutdown, and schemas.
-- [Python and JavaScript/TypeScript SDKs](language-sdks.md) — typed local
-  clients, lifecycle, secure defaults, external-binary policy, and runnable
-  [Python](../examples/rpc/python) and
-  [JavaScript](../examples/rpc/javascript) examples.
 - [Model-requested user input](user-input.md) — `ask_user` request/response
   schema across TUI, SDK, RPC, print, and JSON surfaces.
 - [SQLite sessions](sessions.md) — session storage, branches, resume, and the
@@ -59,9 +55,6 @@ for a subject.
 - [JavaScript/Python plugin research](plugin-js-python-research.md) —
   benchmarked architecture decision, alternatives, implementation sequence, and
   deferrals.
-- [JavaScript/Python plugin SDK plan](plugin-language-sdks-plan.md) — implemented
-  private authoring APIs, package boundaries, runtime behavior, conformance
-  tests, deferred publication, and remaining release gates.
 - [Agent Skills](skills.md) — `SKILL.md` discovery, trust, precedence,
   progressive disclosure, and resource confinement.
 - [Tool routing](tool-routing.md) — deferred schemas, BM25 retrieval,
@@ -102,11 +95,9 @@ To reduce drift, use these documents as the primary references:
 | TUI/CLI operation | [`using-snow.md`](using-snow.md) |
 | Runtime configuration | [`configuration.md`](configuration.md) |
 | Go embedding | [`sdk.md`](sdk.md) |
-| Python/JavaScript embedding | [`language-sdks.md`](language-sdks.md) |
 | Foreign-process control | [`rpc.md`](rpc.md) |
 | External plugin ABI | [`plugin-protocol.md`](plugin-protocol.md) |
 | Lazy MCP implementation | [Connection plan](lazy-mcp-implementation-plan.md) |
-| Plugin SDK implementation | [SDK plan](plugin-language-sdks-plan.md) |
 | Safety model and privilege boundaries | [`security.md`](security.md) |
 | Vulnerability disclosure | [`SECURITY.md`](../SECURITY.md) |
 | Alpha versioning and distribution | [`releases.md`](releases.md) |

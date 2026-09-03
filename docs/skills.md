@@ -52,26 +52,13 @@ bypasses Snow permissions.
 The startup scan is bounded and metadata-only. Sources, from lower to higher
 precedence, are:
 
-1. immutable skills embedded in the Snow binary;
-2. user `.claude/skills/` when `skills.include_claude` is enabled;
-3. `~/.agents/skills/`;
-4. `~/.snow/skills/` (or `$SNOW_HOME/skills/`);
-5. explicit global/CLI skill directories;
-6. project `.claude/skills/` when enabled and project trust is allowed;
-7. `<project>/.agents/skills/` after project trust is allowed;
-8. `<project>/.snow/skills/` after project trust is allowed.
-
-Snow currently embeds `plugin-builder`, a supervised playbook and SDK-first
-template set for creating external protocol-v2 plugins when a reusable
-capability is missing. It prefers Snow's private Python or JavaScript SDK,
-uses an explicit offline command to vendor the selected SDK snapshot embedded
-in the binary beside generated code, never fetches an unpublished package name
-from a registry, and fails closed instead of hand-rolling protocol framing. It
-can be activated
-explicitly with `$plugin-builder`. Like every skill, it is
-instructional only: file creation, validation, configuration changes, and shell
-execution remain separate permissioned operations. A valid same-named
-filesystem skill shadows the built-in.
+1. user `.claude/skills/` when `skills.include_claude` is enabled;
+2. `~/.agents/skills/`;
+3. `~/.snow/skills/` (or `$SNOW_HOME/skills/`);
+4. explicit global/CLI skill directories;
+5. project `.claude/skills/` when enabled and project trust is allowed;
+6. `<project>/.agents/skills/` after project trust is allowed;
+7. `<project>/.snow/skills/` after project trust is allowed.
 
 Set `skills.include_claude` to also scan user/project `.claude/skills/`
 locations. Project skills always override same-named user skills. Snow-native
@@ -150,14 +137,14 @@ Snow follows all three disclosure tiers:
    demand. Filesystem skills use a pinned `os.Root`; each operation verifies
    the directory identity recorded at discovery, preventing traversal, symlink
    escape, and ancestor-replacement races without retaining one file
-   descriptor per skill. Built-in resources use the immutable embedded
-   filesystem and the same path, size, file-count, depth, and cancellation
-   bounds.
+   descriptor per skill. The same path, size, file-count, depth, and
+   cancellation bounds apply to every discovered skill.
 
 Activation returns structured, XML-escaped `<skill_content>` with the skill
 directory and a bounded resource inventory. Resource files are listed through a
 cancellation-aware streaming walk capped at 200 files, 2,000 directory entries,
-and five levels of depth; `.git` and `node_modules` directories are skipped.
+and five levels of depth; `.git` and the language-neutral generated directories
+from the default search policy are skipped.
 Resources are not eagerly loaded. The dedicated reader avoids broadening the
 normal `read`/`write` filesystem roots merely because a user-level skill exists
 outside the project.

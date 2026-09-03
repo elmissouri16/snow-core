@@ -666,13 +666,12 @@ respect_gitignore: true
 respect_ignore: true
 hidden: false
 generated_dirs:
-  - node_modules
   - vendor
   - dist
   - build
   - coverage
 exclude:
-  - "**/*.min.js"
+  - "**/*.min.*"
   - "tmp/**"
 ```
 

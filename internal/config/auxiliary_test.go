@@ -117,4 +117,12 @@ func TestDefaultSearchPolicy(t *testing.T) {
 	if !got.RespectGitignore || !got.RespectIgnore || got.Hidden || len(got.GeneratedDirs) == 0 {
 		t.Fatalf("%+v", got)
 	}
+	for _, name := range got.GeneratedDirs {
+		if !IsDefaultGeneratedDir(name) {
+			t.Fatalf("default generated directory %q is not shared", name)
+		}
+	}
+	if IsDefaultGeneratedDir("src") {
+		t.Fatal("source directory classified as generated")
+	}
 }

@@ -1,8 +1,0 @@
-{
-  "id": "example-js-sdk",
-  "command": ["node", "examples/plugins/javascript-sdk/plugin.mjs"],
-  "enabled": true,
-  "timeout_ms": 10000,
-  "max_output_bytes": 262144,
-  "env": ["PATH=/usr/local/bin:/usr/bin:/bin"]
-}

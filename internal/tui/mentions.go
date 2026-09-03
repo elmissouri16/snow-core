@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/elmissouri16/snow-core/internal/config"
 )
 
 const (
@@ -19,11 +21,9 @@ const (
 )
 
 var ignoredMentionDirs = map[string]bool{
-	".git":         true,
-	".hg":          true,
-	".svn":         true,
-	"node_modules": true,
-	"vendor":       true,
+	".git": true,
+	".hg":  true,
+	".svn": true,
 }
 
 // discoverMentionFiles returns regular, cwd-relative files that can be
@@ -39,7 +39,7 @@ func discoverMentionFiles(cwd string) []string {
 			return nil
 		}
 		if entry.IsDir() {
-			if path != cwd && ignoredMentionDirs[entry.Name()] {
+			if path != cwd && (ignoredMentionDirs[entry.Name()] || config.IsDefaultGeneratedDir(entry.Name())) {
 				return filepath.SkipDir
 			}
 			return nil

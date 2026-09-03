@@ -113,7 +113,6 @@ keeps UI dependencies out of core packages.
 │   ├── rpc/                 # JSONL stdin/stdout control plane
 │   ├── session/             # SQLite/in-memory stores, topology, session index
 │   ├── skills/              # Agent Skills parser, catalog, and activation tools
-│   │   └── builtin/         # immutable rank-zero built-in skills
 │   ├── subagent/            # root manager, context projection, roles, V2 tools
 │   ├── tempfile/            # crash-orphaned atomic-write cleanup
 │   ├── tools/               # Tool/Registry/ToolHost interfaces + BM25 router
@@ -129,8 +128,7 @@ keeps UI dependencies out of core packages.
 │   ├── protocol/            # dependency-light public messages/events/models
 │   │   └── schema/          # network-free Draft 2020-12 wire schemas
 │   └── snowsdk/             # public embeddable API; no TUI dependency
-├── examples/                # standalone SDK, RPC, and plugin examples
-├── sdk/                     # Language clients and private plugin-authoring SDKs
+├── examples/                # standalone Go SDK and external-plugin examples
 └── docs/                    # user guides and per-topic references
 ```
 
@@ -148,7 +146,6 @@ keeps UI dependencies out of core packages.
 | `internal/plugin` | Lifecycle manager and Go/external adapters |
 | `internal/process` | Session-bound app-owned background processes, output rings, readiness, and cleanup |
 | `internal/procgroup` | Shared Unix process-group configuration, signaling, and exit-state helpers |
-| `internal/pluginsdk` | Embedded private SDK snapshots and confined vendoring |
 | `internal/mcp` | Official-SDK MCP manager and tool/resource bridges |
 | `internal/skills` | Agent Skills parser, catalog, and activation tools |
 | `internal/provider` | `Provider` interface, registry, and adapters |
@@ -1072,14 +1069,8 @@ inspection output redacts credential-bearing values.
 
 `internal/skills` implements the open Agent Skills `SKILL.md` format. Startup
 discovery strictly validates standard metadata and loads only names and
-descriptions from immutable rank-zero embedded skills plus standard user and
-trust-gated project paths under a 64 KiB catalog budget. The bundled
-`plugin-builder` skill provides supervised, restart-required protocol-v2
-authoring instructions and SDK-first Python/JavaScript templates. The binary
-embeds reviewed private SDK snapshots; `plugin sdk vendor` copies one into a
-plugin directory through staged, root-confined replacement without executing
-it and reports per-file hashes. Generated templates require that reviewed copy
-and fail closed rather than hand-rolling protocol framing.
+descriptions from standard user and trust-gated project paths under a 64 KiB
+catalog budget.
 
 `activate_skill` loads escaped full instructions, the TUI autocompletes
 enabled leading `$skill-name` directives, and a directive activates before
@@ -1087,9 +1078,8 @@ provider dispatch while recording branch-scoped state. `deactivate_skill`
 removes one named active skill, or all active skills only via `name: "*"`, and
 atomically persists a provider-hidden lifecycle marker with the tool result so
 the next continuation and resumed sessions omit that guidance.
-`read_skill_resource` uses immutable bounded `embed.FS` reads for built-ins or
-verifies the discovery-time directory identity before using a pinned
-per-operation `os.Root` for filesystem resources. Activated content is
+`read_skill_resource` verifies the discovery-time directory identity before
+using a pinned per-operation `os.Root` for filesystem resources. Activated content is
 reattached on every provider call and reconstructed from successful markers
 and session history after resume so compaction does not drop it; current
 trust/disable/tool policy filters stale activations. New activations are
@@ -1366,26 +1356,9 @@ and permission brokers, and joins all RPC workers before returning. Dispatcher o
 command domain (for example `subagent_commands.go`), and an AST parity test
 requires every `pkg/protocol` command-inventory entry to have a dispatcher case.
 
-Primary consumers are the checked-in dependency-light Python 3.9+ async and
-Node.js 22+ ESM/TypeScript SDKs, other non-Go hosts, and IDE bridges. They
-invoke an installed/explicit Snow binary and do not download one. Go hosts
-should prefer `pkg/snowsdk`. See `docs/rpc.md` and `docs/language-sdks.md`.
-
-### Language SDKs
-
-Zero-runtime-dependency Python 3.9+ async and Node.js 22+ ESM/TypeScript
-packages use an explicitly installed external Snow binary, safe defaults,
-bounded JSONL routing, multimodal prompts, MCP/skill discovery,
-user-input and trusted-host permission handlers, and real-binary CI conformance
-tests. They never download a binary.
-
-Separate private plugin-authoring packages live in `sdk/plugin-python`
-(`snow-plugin`, imported as `snow_plugin`) and `sdk/plugin-javascript`
-(`@snow-core/plugin`). They implement the persistent external protocol-v2
-lifecycle, bounded tool calls/results/events, cancellation, progress/logging,
-shutdown, and stderr-safe diagnostics without runtime dependencies. Go
-`ExternalHost` tests execute both packaged examples. External npm/PyPI
-publication remains deliberately deferred.
+Consumers include non-Go hosts and IDE bridges. They invoke an
+installed/explicit Snow binary. Go hosts should prefer `pkg/snowsdk`. See
+`docs/rpc.md`.
 
 ## Security model
 
@@ -1430,16 +1403,7 @@ go test -race ./internal/...
 go test -race ./internal/subagent ./internal/agent ./internal/app ./internal/session ./internal/rpc ./pkg/snowsdk
 go test ./internal/agent ./cmd/snow -count=1
 (cd examples/sdk && go test ./... && go run .)
-PYTHONPATH=sdk/plugin-python/src python3 -m unittest discover -s sdk/plugin-python/tests -v
-python3 -m compileall -q sdk/plugin-python/src sdk/plugin-python/tests
-(cd sdk/plugin-javascript && npm test && npm run pack:check)
-./snow plugin check examples/plugins/python-sdk/manifest.json
-./snow plugin check examples/plugins/javascript-sdk/manifest.json
 go build -o ./snow ./cmd/snow
-SNOW_TEST_BINARY="$PWD/snow" PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v
-(cd sdk/javascript && npm test && SNOW_TEST_BINARY="$PWD/../../snow" npm run test:integration && npm run pack:check)
-python3 examples/rpc/python/client.py --snow ./snow
-node examples/rpc/javascript/client.mjs ./snow
 govulncheck ./...
 ```
 
@@ -1457,8 +1421,6 @@ After a verified feature change, refresh the user-local binary with
   failures, and reopen SQLite sessions for continuation.
 - CLI end-to-end tests drive Cobra print and JSON modes against a local
   OpenAI-compatible SSE server with no credentials or network.
-- Language SDK tests run network-free unit tests and real-binary fake-provider
-  integration tests on Linux and macOS.
 - Benchmarks cover TUI startup, stream lag, bounded branch hydration,
   provider request/stream processing, event delivery, and large-session reload.
   Reviewed allocation ceilings are enforced by `scripts/check_benchmarks.py`;
@@ -1470,8 +1432,7 @@ After a verified feature change, refresh the user-local binary with
 `.github/workflows/ci.yml` runs for `main` pushes, pull requests, manual
 dispatches, and calls from the release workflow. Linux and macOS run formatting
 (Linux), vet, `go test ./...`, production builds, credential-free standalone
-SDK/RPC examples, language-SDK integration checks, JavaScript dry-run package
-checks, and plugin-SDK conformance checks. Linux also runs the deterministic
+Go SDK example. Linux also runs the deterministic
 performance-regression guard, `go test -race ./internal/... ./pkg/snowsdk`,
 cgo-disabled builds for all four release targets, and a pinned `govulncheck`
 reachable-code scan. Real-provider
@@ -1491,7 +1452,7 @@ next heading.
 | 0 — Spec and skeleton | `go.mod`, `cmd/snow` stub, `pkg/protocol` types, interface files compiling with the `fake` provider, in-memory session store, README |
 | 1 — Vertical slice | Agent loop with serial tool dispatch, SQLite session persistence, `read`/`bash`, OpenCode Go streaming chat and startup model discovery, API-key auth, print mode, basic TUI, system prompt and `AGENTS.md` load, cancellation |
 | 2 — OAuth, mutations, permissions | `write`/`edit` with path gates, ask/allow/deny permissions, login/logout, ChatGPT browser/device OAuth with guarded refresh, sessions/resume/new, durable branches and `/tree`, manual `/compact`, project trust, interactive asker |
-| 3 — SDK, search, RPC | Public `pkg/snowsdk`, `grep`/`glob`, JSON mode, RPC protocol v1, Python/JavaScript SDKs, extensibility core and JSON-RPC v2 stdio host, bounded steer/follow-up queue |
+| 3 — SDK, search, RPC | Public `pkg/snowsdk`, `grep`/`glob`, JSON mode, RPC protocol v1, extensibility core and JSON-RPC v2 stdio host, bounded steer/follow-up queue |
 | 4 — Extensibility and UX | Agent Skills, MCP client, themes and keybindings, persistent ChatGPT catalog cache, fork/tree navigation, macOS/Linux platform guard, plugin permission gate, opt-in BM25 tool routing |
 
 ## Research and decisions

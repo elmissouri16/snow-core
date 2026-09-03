@@ -119,6 +119,10 @@ func TestWebFetchTextJSONHTTPErrorAndBinary(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
+	mux.HandleFunc("/application-text", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.example.source")
+		_, _ = w.Write([]byte("custom textual payload"))
+	})
 	mux.HandleFunc("/missing", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusNotFound)
@@ -128,6 +132,10 @@ func TestWebFetchTextJSONHTTPErrorAndBinary(t *testing.T) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte{0, 1, 2, 3})
 	})
+	mux.HandleFunc("/binary-ascii", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n"))
+	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	w := testWebFetch()
@@ -136,13 +144,19 @@ func TestWebFetchTextJSONHTTPErrorAndBinary(t *testing.T) {
 	if isError || !strings.Contains(output, `{"ok":true}`) {
 		t.Fatalf("json result: error=%v output=%s", isError, output)
 	}
+	output, isError = runWebFetch(t, w, server.URL+"/application-text")
+	if isError || !strings.Contains(output, "custom textual payload") {
+		t.Fatalf("application text result: error=%v output=%s", isError, output)
+	}
 	output, isError = runWebFetch(t, w, server.URL+"/missing")
 	if !isError || !strings.Contains(output, "Status: 404 Not Found") || !strings.Contains(output, "not here") {
 		t.Fatalf("404 result: error=%v output=%s", isError, output)
 	}
-	output, isError = runWebFetch(t, w, server.URL+"/binary")
-	if !isError || !strings.Contains(output, "unsupported binary content type") {
-		t.Fatalf("binary result: error=%v output=%s", isError, output)
+	for _, path := range []string{"/binary", "/binary-ascii"} {
+		output, isError = runWebFetch(t, w, server.URL+path)
+		if !isError || !strings.Contains(output, "unsupported binary content type") {
+			t.Fatalf("binary result for %s: error=%v output=%s", path, isError, output)
+		}
 	}
 }
 

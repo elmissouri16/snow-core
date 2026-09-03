@@ -364,7 +364,7 @@ Per-server subscription URI count and length are bounded; failed unsubscribe
 operations retain their lease rather than risking an untracked live
 subscription. Live tool catalogs enforce per-tool, count, pagination, and
 aggregate byte limits while they are collected; Streamable HTTP response bodies
-and newline-delimited stdio JSON-RPC messages are bounded before SDK decoding.
+and newline-delimited stdio JSON-RPC messages are bounded before host decoding.
 
 Do not rely on redaction as a data-loss-prevention system. A model can request a
 readable secret file if it falls under an allowed root, and an allowed shell or
@@ -458,18 +458,12 @@ are external model context and cannot override system or user authority.
 | Agent Skills | No child process | Project trust for project skills | Activated instructions become model context |
 | Subagents | Separate agent loops sharing OS privileges | `delegate` risk plus role and tool intersections | Share filesystem and process side effects |
 
-The embedded `$plugin-builder` skill is guidance, not an execution capability.
 Generated files still need ordinary write approval. Testing, compiling, and
 `plugin check` need execution approval, and dependency downloads need network
-approval. `plugin sdk vendor` performs a root-confined, staged copy of SDK
-source embedded in the Snow binary and reports hashes, but the resulting files
-are still untrusted executable input requiring review. SDK-first templates load
-only that reviewed copy and fail closed when it is absent; unpublished SDK
-names must never be resolved from a registry. `plugin check`
-starts initialization code with user privileges; it is not passive validation. `plugin add` therefore persists
-generated declarations disabled by default, enabling is separate and explicit,
-and activation occurs
-only after restart. Project trust never substitutes for generated-code review.
+approval. `plugin check` starts initialization code with user privileges; it is
+not passive validation. `plugin add` therefore persists declarations disabled
+by default, enabling is separate and explicit, and activation occurs only after
+restart. Project trust never substitutes for generated-code review.
 
 Use `snow plugin check` to inspect a runtime's declared tools, risks, subscribed
 events, and bounded diagnostics. Diagnostic credential redaction is best effort;
@@ -570,13 +564,12 @@ snow --permission allow --no-session -p "run the approved verification"
 > a container, VM, or runner whose OS-level permissions and secrets are already
 > constrained.
 
-### Headless SDK/RPC
+### Headless RPC and Go SDK
 
-The Python and JavaScript/TypeScript SDKs start an external Snow binary directly
-without a shell. They do not download binaries or accept API keys as process
-arguments; credentials should come from Snow's auth store or a deliberately
-controlled inherited environment. The SDK process and Snow child still inherit
-the user's OS privileges and environment and are not a sandbox.
+RPC clients and Go SDK embeddings inherit the user's OS privileges and
+environment and are not a sandbox. Credentials should come from Snow's auth
+store or a deliberately controlled inherited environment, not process
+arguments.
 
 - default unattended clients to `deny`; use `ask` only with a continuously
   drained, trusted interaction broker;

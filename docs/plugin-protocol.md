@@ -305,11 +305,12 @@ Successful tool result:
 JSON-RPC request successfully.
 
 If the encoded result exceeds the configured output limit, Snow replaces it
-with a bounded error result. Language SDKs expose an explicit expected-tool
-error type whose message becomes provider-facing structured error content.
-Unexpected handler exceptions become JSON-RPC errors containing only the
-exception class/type; their messages are not copied to stdout because they may
-contain configuration or provider-private data.
+with a bounded error result. Runtime implementations should distinguish
+expected tool failures, whose message becomes provider-facing structured error
+content, from unexpected handler exceptions. Unexpected exceptions become
+JSON-RPC errors containing only the exception class/type; their messages are
+not copied to stdout because they may contain configuration or provider-private
+data.
 
 ## Progress
 
@@ -329,7 +330,7 @@ A plugin reports bounded progress with a notification:
 ```
 
 Always include the originating `call_id`. Snow ignores progress with an empty
-call ID, and language helpers should reject it before writing a frame.
+call ID, and runtime implementations should reject it before writing a frame.
 
 ## Cancellation
 
@@ -350,8 +351,8 @@ sends a best-effort notification:
 
 The runtime should cancel work by both request and call ID. Cancellation is
 cooperative: synchronous CPU work or a blocking native call may not stop until
-the process exits. A late result is ignored by Snow. Language helpers should
-also enforce `tools/call.params.timeout_ms` locally because cancellation
+the process exits. A late result is ignored by Snow. Runtime implementations
+should also enforce `tools/call.params.timeout_ms` locally because cancellation
 delivery uses a bounded queue.
 
 ## Agent events

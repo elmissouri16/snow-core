@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 )
 
-func TestAppendChatJSONStringMatchesEncodingJSON(t *testing.T) {
+func TestAppendChatJSONStringPreservesContent(t *testing.T) {
 	allBytes := make([]byte, 256)
 	for i := range allBytes {
 		allBytes[i] = byte(i)
@@ -16,28 +17,28 @@ func TestAppendChatJSONStringMatchesEncodingJSON(t *testing.T) {
 	for _, value := range []string{
 		string(allBytes),
 		"plain ASCII / path",
-		"HTML <script>& and separators \u2028\u2029",
+		"markup <tag>& and separators \u2028\u2029",
 		"Unicode 世界 😀",
 	} {
-		want, err := json.Marshal(value)
-		if err != nil {
-			t.Fatal(err)
-		}
 		got := appendChatJSONString(nil, value)
-		if !bytes.Equal(got, want) {
-			t.Fatalf("quoted string changed wire encoding\n got: %q\nwant: %q", got, want)
+		var decoded string
+		if err := json.Unmarshal(got, &decoded); err != nil {
+			t.Fatalf("decode quoted string: %v", err)
+		}
+		if want := string([]rune(value)); decoded != want {
+			t.Fatalf("quoted string decoded to %q, want %q", decoded, want)
 		}
 	}
 }
 
-func TestChatRequestMarshalerMatchesEncodingJSON(t *testing.T) {
+func TestChatRequestMarshalerPreservesJSONSemantics(t *testing.T) {
 	temperature := 1e-9
 	maxTokens := 1234
 	reasoning := "high"
 	body := openAIChatRequest{
 		Model: "model<&>",
 		Messages: []openAIMessage{
-			{Role: "system", Content: "system <script>\u2029 " + string([]byte{0xfe})},
+			{Role: "system", Content: "system <tag>\u2029 " + string([]byte{0xfe})},
 			{Role: "user", Content: []openAIContentPart{
 				{Type: "text", Text: "user <text> & quote \" slash \\ line\nseparator \u2028 invalid " + string([]byte{0xff})},
 				{Type: "image_url", ImageURL: &openAIImageURLPart{URL: "data:image/png;base64,iVBORw=="}},
@@ -62,9 +63,7 @@ func TestChatRequestMarshalerMatchesEncodingJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("specialized request JSON changed wire encoding\n got: %s\nwant: %s", got, want)
-	}
+	assertEquivalentChatJSON(t, got, want)
 }
 
 func TestChatRequestMarshalerMatchesNilEmptyAndNegativeZero(t *testing.T) {
@@ -93,9 +92,7 @@ func TestChatRequestMarshalerMatchesNilEmptyAndNegativeZero(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(got, want) {
-			t.Fatalf("request %q changed wire encoding\n got: %s\nwant: %s", body.Model, got, want)
-		}
+		assertEquivalentChatJSON(t, got, want)
 	}
 }
 
@@ -110,6 +107,20 @@ func TestChatRequestMarshalerMatchesInvalidUTF8RawJSONBehavior(t *testing.T) {
 	}
 	if wantErr == nil && !bytes.Equal(got, want) {
 		t.Fatalf("invalid UTF-8 raw behavior changed\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func assertEquivalentChatJSON(t *testing.T, got, want []byte) {
+	t.Helper()
+	var gotValue, wantValue any
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("decode specialized request: %v", err)
+	}
+	if err := json.Unmarshal(want, &wantValue); err != nil {
+		t.Fatalf("decode reference request: %v", err)
+	}
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Fatalf("request JSON changed semantics\n got: %s\nwant: %s", got, want)
 	}
 }
 

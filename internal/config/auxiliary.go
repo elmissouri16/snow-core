@@ -77,12 +77,19 @@ type EffectiveSearchPolicy struct {
 	Exclude          []string
 }
 
+var defaultGeneratedDirs = []string{"vendor", "dist", "build", "coverage"}
+
 func DefaultSearchPolicy() EffectiveSearchPolicy {
 	return EffectiveSearchPolicy{
 		RespectGitignore: true,
 		RespectIgnore:    true,
-		GeneratedDirs:    []string{"node_modules", "vendor", "dist", "build", "coverage"},
+		GeneratedDirs:    slices.Clone(defaultGeneratedDirs),
 	}
+}
+
+// IsDefaultGeneratedDir reports whether name is excluded by the built-in search policy.
+func IsDefaultGeneratedDir(name string) bool {
+	return slices.Contains(defaultGeneratedDirs, name)
 }
 
 func mergeSearch(base EffectiveSearchPolicy, overlay SearchPolicy) EffectiveSearchPolicy {

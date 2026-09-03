@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-func TestAppendResponseJSONStringMatchesEncodingJSON(t *testing.T) {
+func TestAppendResponseJSONStringPreservesContent(t *testing.T) {
 	allBytes := make([]byte, 256)
 	for i := range allBytes {
 		allBytes[i] = byte(i)
@@ -18,21 +19,21 @@ func TestAppendResponseJSONStringMatchesEncodingJSON(t *testing.T) {
 	for _, value := range []string{
 		string(allBytes),
 		"plain ASCII / path",
-		"HTML <script>& and separators \u2028\u2029",
+		"markup <tag>& and separators \u2028\u2029",
 		"Unicode 世界 😀",
 	} {
-		want, err := json.Marshal(value)
-		if err != nil {
-			t.Fatal(err)
-		}
 		got := appendResponseJSONString(nil, value)
-		if !bytes.Equal(got, want) {
-			t.Fatalf("quoted string changed wire encoding\n got: %q\nwant: %q", got, want)
+		var decoded string
+		if err := json.Unmarshal(got, &decoded); err != nil {
+			t.Fatalf("decode quoted string: %v", err)
+		}
+		if want := string([]rune(value)); decoded != want {
+			t.Fatalf("quoted string decoded to %q, want %q", decoded, want)
 		}
 	}
 }
 
-func TestRequestMarshalerMatchesEncodingJSON(t *testing.T) {
+func TestRequestMarshalerPreservesJSONSemantics(t *testing.T) {
 	summarySupported := true
 	temperature := 1e-9
 	parallel := false
@@ -70,7 +71,7 @@ func TestRequestMarshalerMatchesEncodingJSON(t *testing.T) {
 			{Name: "read", Description: "Read <safe> data.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)},
 			{Name: "empty", Parameters: nil},
 		},
-		System:           "system <script>\u2029 " + string([]byte{0xfe}),
+		System:           "system <tag>\u2029 " + string([]byte{0xfe}),
 		MaxTokens:        1234,
 		Temperature:      &temperature,
 		Thinking:         protocol.ThinkingHigh,
@@ -94,9 +95,7 @@ func TestRequestMarshalerMatchesEncodingJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("specialized request JSON changed wire encoding\n got: %s\nwant: %s", got, want)
-	}
+	assertEquivalentResponseJSON(t, got, want)
 }
 
 func TestRequestMarshalerMatchesEmptyAndNegativeZeroFields(t *testing.T) {
@@ -136,6 +135,20 @@ func TestRequestMarshalerMatchesNilInput(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("nil input changed wire encoding: got %s, want %s", got, want)
+	}
+}
+
+func assertEquivalentResponseJSON(t *testing.T, got, want []byte) {
+	t.Helper()
+	var gotValue, wantValue any
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("decode specialized request: %v", err)
+	}
+	if err := json.Unmarshal(want, &wantValue); err != nil {
+		t.Fatalf("decode reference request: %v", err)
+	}
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Fatalf("request JSON changed semantics\n got: %s\nwant: %s", got, want)
 	}
 }
 

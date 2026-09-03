@@ -147,7 +147,7 @@ func TestSectionUpdatesPreserveUnknownFieldsAndPermissions(t *testing.T) {
 
 func TestPluginManagementPreservesUnknownFieldsAndStagesDisabled(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	original := `{"future":{"kept":true},"plugins":[{"id":"demo","command":["python3","plugin.py"],"enabled":true,"env":["TOKEN=secret"],"future_plugin":{"kept":true}}]}`
+	original := `{"future":{"kept":true},"plugins":[{"id":"demo","command":["plugin-host","--legacy"],"enabled":true,"env":["TOKEN=secret"],"future_plugin":{"kept":true}}]}`
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestPluginManagementPreservesUnknownFieldsAndStagesDisabled(t *testing.T) {
 	if len(declarations) != 1 || declarations[0].Enabled {
 		t.Fatalf("declarations after disable = %+v", declarations)
 	}
-	if err := AddPlugin(path, true, publicplugin.PluginSpec{ID: "demo", Command: []string{"node", "plugin.mjs"}, Enabled: false}, true); err != nil {
+	if err := AddPlugin(path, true, publicplugin.PluginSpec{ID: "demo", Command: []string{"plugin-host", "--serve"}, Enabled: false}, true); err != nil {
 		t.Fatal(err)
 	}
 	assertPluginUnknownFields(t, path)
@@ -171,7 +171,7 @@ func TestPluginManagementPreservesUnknownFieldsAndStagesDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	declarations, err = LoadPluginDeclarations(path)
-	if err != nil || len(declarations) != 1 || strings.Join(declarations[0].Command, " ") != "node plugin.mjs" || len(declarations[0].Env) != 0 || strings.Contains(string(data), "TOKEN=secret") {
+	if err != nil || len(declarations) != 1 || strings.Join(declarations[0].Command, " ") != "plugin-host --serve" || len(declarations[0].Env) != 0 || strings.Contains(string(data), "TOKEN=secret") {
 		t.Fatalf("replacement did not clear old known fields: declarations=%+v err=%v data=%s", declarations, err, data)
 	}
 	if err := RemovePlugin(path, true, "demo"); err != nil {

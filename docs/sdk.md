@@ -658,9 +658,8 @@ execution, network, delegation, or automatic continuation authority.
 ## Readiness and capabilities
 
 The Go SDK has no JSONL wire handshake; RPC version and capability negotiation
-belongs to the [JSONL RPC](rpc.md) surface and the
-[language SDKs](language-sdks.md). Embeddings instead observe session readiness
-through the methods below.
+belongs to the [JSONL RPC protocol](rpc.md). Embeddings instead observe session
+readiness through the methods below.
 
 ### Readiness methods
 

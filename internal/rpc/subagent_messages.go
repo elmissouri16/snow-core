@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json/jsontext"
+	jsonv1 "encoding/json"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -224,11 +224,8 @@ func decodeSubagentMessagesCursor(encoded string, agent protocol.AgentRef, messa
 }
 
 func subagentMessagesFrameSize(requestID string, page protocol.RPCSubagentMessagesPage) (int, error) {
-	frame, err := json.Marshal(
+	frame, err := jsonv1.Marshal(
 		Response{ID: requestID, Type: "response", Command: "subagent_messages", Success: true, Data: page},
-		jsontext.AllowInvalidUTF8(true),
-		jsontext.EscapeForHTML(true),
-		jsontext.EscapeForJS(true),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("encode subagent_messages response: %w", err)

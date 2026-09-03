@@ -32,10 +32,8 @@ const EnvAPIKey = "OPENCODE_API_KEY"
 // DefaultBaseURL is the OpenCode Go API base URL.
 //
 // Verified 2026 against the opencode model catalog (anomalyco/opencode,
-// packages/opencode/test/tool/fixtures/models-api.json) and the live service:
-//
-//	"opencode-go": { "npm": "@ai-sdk/openai-compatible",
-//	                  "api": "https://opencode.ai/zen/go/v1" }
+// packages/opencode/test/tool/fixtures/models-api.json) and the live service.
+// The catalog identifies https://opencode.ai/zen/go/v1 as the provider API.
 //
 // The endpoint is an OpenAI-compatible gateway (GET /models and POST
 // /chat/completions both respond with OpenAI wire format; an invalid key

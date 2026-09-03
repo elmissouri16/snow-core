@@ -141,7 +141,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 		skillCatalog = skills.Discover(skills.Options{
 			CWD: projectInputRoot, SnowHome: config.GlobalDir(), ProjectTrusted: projectAllowed,
-			ExtraDirs: skillDirs, IncludeClaude: cfg.Skills.IncludeClaude, IncludeBuiltins: true,
+			ExtraDirs: skillDirs, IncludeClaude: cfg.Skills.IncludeClaude,
 			Disabled: skillDisabled, DisabledReason: skillDisabledReason,
 			Overrides: skillOverrides, OverrideReasons: skillOverrideReasons,
 		})
