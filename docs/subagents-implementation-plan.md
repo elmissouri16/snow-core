@@ -16,14 +16,14 @@ rationale rather than a live feature reference.
 
 - [Status summary](#status-summary)
 - [Research basis](#research-basis)
-- [Phase 0 — lock public semantics and baseline](#phase-0-lock-public-semantics-and-baseline)
-- [Phase 1 — protocol identity and Agent mailbox](#phase-1-protocol-identity-and-agent-mailbox)
-- [Phase 2 — ephemeral manager and child factory](#phase-2-ephemeral-manager-and-child-factory)
-- [Phase 3 — V2 model tools and headless integration](#phase-3-v2-model-tools-and-headless-integration)
-- [Phase 4 — SDK and RPC surfaces](#phase-4-sdk-and-rpc-surfaces)
-- [Phase 5 — TUI observation and interaction multiplexing](#phase-5-tui-observation-and-interaction-multiplexing)
-- [Phase 6 — durable topology and lazy reload](#phase-6-durable-topology-and-lazy-reload)
-- [Phase 7 — recursive agents, mutation, dynamic tools, and budgets](#phase-7-recursive-agents-mutation-dynamic-tools-and-budgets)
+- [Phase 0: lock public semantics and baseline](#phase-0-lock-public-semantics-and-baseline)
+- [Phase 1: protocol identity and Agent mailbox](#phase-1-protocol-identity-and-agent-mailbox)
+- [Phase 2: ephemeral manager and child factory](#phase-2-ephemeral-manager-and-child-factory)
+- [Phase 3: V2 model tools and headless integration](#phase-3-v2-model-tools-and-headless-integration)
+- [Phase 4: SDK and RPC surfaces](#phase-4-sdk-and-rpc-surfaces)
+- [Phase 5: TUI observation and interaction multiplexing](#phase-5-tui-observation-and-interaction-multiplexing)
+- [Phase 6: durable topology and lazy reload](#phase-6-durable-topology-and-lazy-reload)
+- [Phase 7: recursive agents, mutation, dynamic tools, and budgets](#phase-7-recursive-agents-mutation-dynamic-tools-and-budgets)
 - [Related documents](#related-documents)
 
 ## Status summary
@@ -138,7 +138,7 @@ and migrate. The design adopted for Snow:
 7. Never let roles broaden authority; role configuration is subordinate to
    parent and operator policy.
 
-## Phase 0 — lock public semantics and baseline
+## Phase 0: lock public semantics and baseline
 
 Lock the public names, tool schemas, status transitions, and cancellation
 policy before any runtime code changes, so later phases never force a public
@@ -166,7 +166,7 @@ Phase 0 introduces no runtime code. Its outcomes are recorded in the
 acceptance criteria above and carried forward as the baseline tests captured
 in later phases.
 
-## Phase 1 — protocol identity and Agent mailbox
+## Phase 1: protocol identity and Agent mailbox
 
 Introduce the protocol-level identity, status, and message types plus a
 race-safe Agent mailbox, so children can communicate through attributed mail
@@ -202,7 +202,7 @@ without writing directly to a parent store.
 - Compaction and resume do not duplicate mailbox messages.
 - Close unblocks mailbox waiters.
 
-## Phase 2 — ephemeral manager and child factory
+## Phase 2: ephemeral manager and child factory
 
 Build the in-memory manager and child factory that construct independent child
 Agents, filter their registries by role, and run them concurrently without
@@ -247,7 +247,7 @@ exposing model tools yet.
   capability and still use root authorization.
 - `go test -race` reports no map/store/event races.
 
-## Phase 3 — V2 model tools and headless integration
+## Phase 3: V2 model tools and headless integration
 
 Register the seven manager-bound collaboration tools, wire delegation
 permissions, and validate the full spawn-to-result loop with the fake
@@ -291,7 +291,7 @@ The end-to-end fake-provider scenario:
 
 Provider integration tests are added as needed.
 
-## Phase 4 — SDK and RPC surfaces
+## Phase 4: SDK and RPC surfaces
 
 Expose subagent orchestration through the public SDK and RPC surfaces while
 keeping events attributed and close semantics deadlock-free. SDK methods call
@@ -322,7 +322,7 @@ App/Manager; they do not implement orchestration.
 - Events include identity and clone isolation.
 - Headless child user-input calls fail fast until a handler is configured.
 
-## Phase 5 — TUI observation and interaction multiplexing
+## Phase 5: TUI observation and interaction multiplexing
 
 Add the TUI fleet inspector and an attributed FIFO queue so the terminal
 observes and multiplexes child interaction without becoming the orchestrator.
@@ -359,7 +359,7 @@ observes and multiplexes child interaction without becoming the orchestrator.
 - FIFO permission/user-input queue routes each answer to the correct child.
 - Session teardown clears all child UI state.
 
-## Phase 6 — durable topology and lazy reload
+## Phase 6: durable topology and lazy reload
 
 Persist child topology and transcripts in separate databases and restore them
 lazily, so durable children survive restart without duplication or root store
@@ -412,7 +412,7 @@ Branch semantics required by this phase:
 - LRU never unloads running or mailbox-nonempty children.
 - Cleanup never deletes an unrelated session path.
 
-## Phase 7 — recursive agents, mutation, dynamic tools, and budgets
+## Phase 7: recursive agents, mutation, dynamic tools, and budgets
 
 Enable recursion, file mutation, dynamic tools, and tree budgets under
 explicit policy, keeping every child within the root's authority and limits.

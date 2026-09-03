@@ -1423,6 +1423,12 @@ After a verified feature change, refresh the user-local binary with
   failures, and reopen SQLite sessions for continuation.
 - CLI end-to-end tests drive Cobra print and JSON modes against a local
   OpenAI-compatible SSE server with no credentials or network.
+- Installer tests simulate every supported OS/architecture mapping and verify
+  latest-release resolution, checksums, successful installation, unsupported
+  platform rejection, and preservation of an existing binary on failure.
+- Documentation-site tests verify allowlisted staging, generated Jekyll front
+  matter, relative-link targets, immutable action pins, and Pages deployment
+  structure without requiring provider or deployment credentials.
 - Benchmarks cover TUI startup, stream lag, bounded branch hydration,
   provider request/stream processing, event delivery, and large-session reload.
   Reviewed allocation ceilings are enforced by `scripts/check_benchmarks.py`;
@@ -1433,15 +1439,22 @@ After a verified feature change, refresh the user-local binary with
 
 `.github/workflows/ci.yml` runs for `main` pushes, pull requests, manual
 dispatches, and calls from the release workflow. Linux and macOS run formatting
-(Linux), vet, `go test ./...`, production builds, credential-free standalone
-Go SDK example. Linux also runs the deterministic
+(Linux), vet, `go test ./...`, the mocked release-installer suite against their
+native POSIX userland, production builds, and the credential-free standalone Go
+SDK example. Linux also runs the deterministic
 performance-regression guard, `go test -race ./internal/... ./pkg/snowsdk`,
 cgo-disabled builds for all four release targets, and a pinned `govulncheck`
 reachable-code scan. Real-provider
 checks remain manual. `.github/workflows/release-alpha.yml` accepts only
 `vMAJOR.MINOR.PATCH-alpha.N` tags, reuses the complete CI gate, publishes
 macOS/Linux amd64/arm64 archives and `SHA256SUMS`, and marks the GitHub release
-as a prerelease.
+as a prerelease. `scripts/install.sh` resolves the newest published release
+(including prereleases), verifies the selected archive, validates its embedded
+version, and atomically installs the matching binary without requiring Go.
+`.github/workflows/pages.yml` stages the canonical guides through the bounded
+allowlist in `scripts/build-pages.sh`, builds them with pinned official GitHub
+Pages/Jekyll actions, and serially deploys the static site to the
+`github-pages` environment.
 
 ## Roadmap
 

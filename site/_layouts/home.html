@@ -1,0 +1,34 @@
+---
+layout: default
+---
+<section class="home-hero">
+  <span class="eyebrow">Streaming coding-agent harness</span>
+  <h1>Build with Snow, deliberately.</h1>
+  <p>
+    Learn the terminal workflow, configure providers and permissions, automate
+    through Go or JSONL RPC, and operate Snow with clear security boundaries.
+  </p>
+  <div class="hero-actions">
+    <a class="primary" href="{{ '/README.html#quick-start' | relative_url }}">Install Snow</a>
+    <a class="secondary" href="{{ '/docs/using-snow.html' | relative_url }}">Read the user guide</a>
+  </div>
+</section>
+<section class="feature-grid" aria-label="Documentation highlights">
+  <a class="feature-card" href="{{ '/docs/configuration.html' | relative_url }}">
+    <strong>Configure the runtime</strong>
+    <span>Providers, models, permissions, sessions, themes, and tools.</span>
+  </a>
+  <a class="feature-card" href="{{ '/docs/plan-mode.html' | relative_url }}">
+    <strong>Control the workflow</strong>
+    <span>Plan Mode, durable goals, queued input, and subagents.</span>
+  </a>
+  <a class="feature-card" href="{{ '/docs/sdk.html' | relative_url }}">
+    <strong>Embed and automate</strong>
+    <span>Pure-Go SDK contracts and the versioned JSONL RPC surface.</span>
+  </a>
+  <a class="feature-card" href="{{ '/docs/security.html' | relative_url }}">
+    <strong>Operate safely</strong>
+    <span>Privilege boundaries, trust decisions, and release integrity.</span>
+  </a>
+</section>
+{{ content }}

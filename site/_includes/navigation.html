@@ -1,0 +1,30 @@
+<nav class="nav-groups" aria-label="Snow guides">
+  <section>
+    <h2>Get started</h2>
+    <a href="{{ '/' | relative_url }}"{% if page.url == '/' %} aria-current="page"{% endif %}>Overview</a>
+    <a href="{{ '/README.html#quick-start' | relative_url }}"{% if page.path == 'README.md' %} aria-current="page"{% endif %}>Install and first run</a>
+    <a href="{{ '/docs/using-snow.html' | relative_url }}"{% if page.path == 'docs/using-snow.md' %} aria-current="page"{% endif %}>Using Snow</a>
+    <a href="{{ '/docs/configuration.html' | relative_url }}"{% if page.path == 'docs/configuration.md' %} aria-current="page"{% endif %}>Configuration</a>
+  </section>
+  <section>
+    <h2>Core workflows</h2>
+    <a href="{{ '/docs/sessions.html' | relative_url }}"{% if page.path == 'docs/sessions.md' %} aria-current="page"{% endif %}>Sessions and branches</a>
+    <a href="{{ '/docs/plan-mode.html' | relative_url }}"{% if page.path == 'docs/plan-mode.md' %} aria-current="page"{% endif %}>Plan Mode</a>
+    <a href="{{ '/docs/goals.html' | relative_url }}"{% if page.path == 'docs/goals.md' %} aria-current="page"{% endif %}>Thread Goals</a>
+    <a href="{{ '/docs/subagents.html' | relative_url }}"{% if page.path == 'docs/subagents.md' %} aria-current="page"{% endif %}>Subagents</a>
+  </section>
+  <section>
+    <h2>Integrate</h2>
+    <a href="{{ '/docs/sdk.html' | relative_url }}"{% if page.path == 'docs/sdk.md' %} aria-current="page"{% endif %}>Go SDK</a>
+    <a href="{{ '/docs/rpc.html' | relative_url }}"{% if page.path == 'docs/rpc.md' %} aria-current="page"{% endif %}>JSONL RPC</a>
+    <a href="{{ '/docs/mcp.html' | relative_url }}"{% if page.path == 'docs/mcp.md' %} aria-current="page"{% endif %}>MCP</a>
+    <a href="{{ '/docs/plugins.html' | relative_url }}"{% if page.path == 'docs/plugins.md' %} aria-current="page"{% endif %}>Plugins</a>
+    <a href="{{ '/docs/skills.html' | relative_url }}"{% if page.path == 'docs/skills.md' %} aria-current="page"{% endif %}>Agent Skills</a>
+  </section>
+  <section>
+    <h2>Operate</h2>
+    <a href="{{ '/docs/security.html' | relative_url }}"{% if page.path == 'docs/security.md' %} aria-current="page"{% endif %}>Security model</a>
+    <a href="{{ '/docs/releases.html' | relative_url }}"{% if page.path == 'docs/releases.md' %} aria-current="page"{% endif %}>Releases</a>
+    <a href="{{ '/docs/README.html' | relative_url }}"{% if page.path == 'docs/README.md' %} aria-current="page"{% endif %}>All documentation</a>
+  </section>
+</nav>

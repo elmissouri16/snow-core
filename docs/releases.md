@@ -12,6 +12,7 @@ Go SDK in this repository.
 
 - [Versioning and compatibility](#versioning-and-compatibility)
 - [Supported targets](#supported-targets)
+- [Install a published release](#install-a-published-release)
 - [Release requirements](#release-requirements)
 - [Next-release runbook](#next-release-runbook)
 - [Publish an alpha](#publish-an-alpha)
@@ -50,6 +51,50 @@ release-candidate toolchain explicitly. Binary users do not need Go installed.
 
 Windows is not currently supported.
 
+## Install a published release
+
+The public installer resolves the newest published GitHub release, including an
+alpha prerelease, and selects the archive matching the host. Anonymous use
+requires a public repository and at least one published GitHub Release; a Git
+tag without an associated release is not installable:
+
+```sh
+/bin/sh -c 'set -eu
+installer=$(mktemp)
+cleanup() { rm -f "$installer"; }
+abort() { exit 1; }
+trap cleanup EXIT
+trap abort HUP INT TERM
+curl --proto "=https" --tlsv1.2 -fsSL --max-time 30 --max-filesize 262144 \
+  https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh \
+  -o "$installer"
+/bin/sh "$installer"'
+```
+
+The script requires a standard POSIX userland with `curl`, `tar`, `uname`,
+`mktemp`, `sed`, `awk`, `grep`, and `wc`, plus either `sha256sum` or `shasum`. It
+bounds every download, verifies the selected archive against the release's
+`SHA256SUMS`, validates the archive's exact paths, regular-file member types,
+and declared/expanded size ceilings, checks the version reported by the
+extracted binary, and atomically replaces
+`${SNOW_INSTALL_DIR:-$HOME/.local/bin}/snow`. It does not invoke `sudo` or edit
+shell startup files.
+
+Use `SNOW_VERSION` to select an immutable release instead of resolving the
+latest one, and `SNOW_INSTALL_DIR` to choose another destination. Export either
+value before running the installation command:
+
+```sh
+export SNOW_VERSION=v0.1.0-alpha.1
+export SNOW_INSTALL_DIR="$HOME/bin"
+```
+
+The one-line command trusts the installer currently stored on `main`. Operators
+who require review or reproducibility should download and inspect the script
+before execution and may fetch it from a reviewed immutable tag. `SHA256SUMS`
+is delivered by the same GitHub release as the archive and therefore detects
+transfer corruption or mismatched assets, but is not an independent signature.
+
 ## Release requirements
 
 A release commit must pass the reusable GitHub Actions CI workflow. Every
@@ -60,6 +105,7 @@ version comments document the corresponding upstream major. The gate includes:
 - all Go tests on Linux and macOS;
 - the Linux race suite;
 - the Linux performance-regression guard and its parser tests;
+- installer syntax plus mocked Linux/macOS, checksum, and atomic-replacement tests;
 - cgo-disabled cross-builds for every release target;
 - the standalone Go SDK example;
 - a reachable-code scan with the pinned `govulncheck` version.
@@ -178,10 +224,14 @@ tar -xzf "$tmp/snow_${version}_linux_amd64.tar.gz" -C "$tmp"
   SNOW_HOME="$tmp/home" "./snow_${version}_linux_amd64/snow" \
     --provider fake --no-session -p "release smoke"
 )
+SNOW_VERSION="$tag" SNOW_INSTALL_DIR="$tmp/installed" ./scripts/install.sh
+test "$("$tmp/installed/snow" version)" = "$version"
 ```
 
 Review the GitHub prerelease title, notes, target commit, four archives, and
-`SHA256SUMS` before announcing it.
+`SHA256SUMS` before announcing it. When release documentation changed, also
+require the `Documentation` workflow on that `main` commit to pass and inspect
+the published GitHub Pages release guide.
 
 ### 5. Clean up or recover
 
@@ -253,4 +303,5 @@ removal is required to contain active harm.
 - [Project README](../README.md)
 - [Security reporting policy](../SECURITY.md)
 - [Security model](security.md)
+- [Documentation site](pages.md)
 - [Architecture and verification](../IMPLEMENTATION.md)

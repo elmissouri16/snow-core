@@ -1,5 +1,7 @@
 /snow
 /dist/
+/_pages_source/
+/_site/
 *.test
 *.out
 coverage/

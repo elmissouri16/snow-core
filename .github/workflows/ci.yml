@@ -59,6 +59,14 @@ jobs:
       - name: Test
         run: go test ./... -count=1
 
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.9'
+
+      - name: Test support scripts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
       - name: Build snow
         shell: bash
         run: go build -trimpath -o "$RUNNER_TEMP/snow" ./cmd/snow
@@ -79,6 +87,32 @@ jobs:
       - name: Run standalone Go SDK example
         working-directory: examples/sdk
         run: go run . -provider fake -prompt "CI lifecycle smoke test"
+
+  pages:
+    name: Documentation build (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.9'
+
+      - name: Prepare documentation source
+        run: ./scripts/build-pages.sh "$GITHUB_WORKSPACE/_pages_source"
+
+      - name: Build documentation with Jekyll
+        uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1
+        with:
+          source: ./_pages_source
+          destination: ./_site
+
+      - name: Validate rendered documentation
+        run: python3 scripts/check-pages-output.py ./_site --base-path /snow-core
 
   performance:
     name: Performance regression guard (Linux)

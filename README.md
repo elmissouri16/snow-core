@@ -39,12 +39,54 @@ events behind every surface.
 
 ### Requirements
 
-- macOS or Linux.
+- macOS or Linux on amd64 or arm64.
+- The release installer requires a standard POSIX userland with `curl`, `tar`,
+  `mktemp`, `sed`, `awk`, `grep`, and `wc`, plus either `sha256sum` or `shasum`.
 - Go 1.27 only when building from source; `go.mod` declares `1.27rc3` because
   that is the available toolchain required by the pinned Surf release.
   Prebuilt release archives do not require Go.
 
-### Build or install
+### Install the latest release
+
+Install the latest published release on macOS or Linux:
+
+```sh
+/bin/sh -c 'set -eu
+installer=$(mktemp)
+cleanup() { rm -f "$installer"; }
+abort() { exit 1; }
+trap cleanup EXIT
+trap abort HUP INT TERM
+curl --proto "=https" --tlsv1.2 -fsSL --max-time 30 --max-filesize 262144 \
+  https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh \
+  -o "$installer"
+/bin/sh "$installer"'
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The installer detects macOS/Linux and amd64/arm64, downloads the matching
+GitHub release archive, verifies it against that release's `SHA256SUMS`, checks
+the binary-reported version, and atomically installs `snow` to
+`~/.local/bin/snow`. It includes alpha prereleases when resolving the latest
+published version. Go is not required. Anonymous installation starts working
+once the repository is public and at least one GitHub Release is published; a
+Git tag by itself is not a downloadable release.
+
+To choose another destination or pin an immutable release, export either value
+before running the installation command:
+
+```sh
+export SNOW_INSTALL_DIR="$HOME/bin"
+export SNOW_VERSION=v0.1.0-alpha.1
+```
+
+Executing a remotely downloaded script trusts the current repository content.
+For manual review, use the same `curl` command to save `scripts/install.sh`,
+inspect it, and then run it locally. Release checksums provide integrity against
+the same GitHub release; they are not an independent signature. See the
+[release policy](docs/releases.md).
+
+### Build from source
 
 From the repository root:
 
@@ -56,17 +98,15 @@ cd snow-core
 go build -o snow ./cmd/snow
 ./snow --version
 
-# Or install/update ~/.local/bin/snow
+# Or install/update ~/.local/bin/snow from this checkout
 ./scripts/install-local.sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Choose either build path. Override the install directory with
-`SNOW_INSTALL_DIR=/path/to/bin`. On an exact alpha tag,
-`install-local.sh` embeds the tag version; `SNOW_VERSION` can provide an
-explicit version for a reviewed local build. Tagged alpha releases also publish
-macOS/Linux amd64/arm64 archives and `SHA256SUMS`; see the
-[release policy](docs/releases.md). CLI surfaces treat the directory where Snow is launched as the active project.
+Override the local-build destination with `SNOW_INSTALL_DIR=/path/to/bin`. On
+an exact alpha tag, `install-local.sh` embeds the tag version; `SNOW_VERSION`
+can provide an explicit version for a reviewed local build. CLI surfaces treat
+the directory where Snow is launched as the active project.
 
 ### Try it without credentials
 
@@ -351,7 +391,7 @@ Plan and Goal contracts use embedded Markdown sources under `internal/plan` and
 - **Plugins:** statically linked Go extensions or persistent JSON-RPC v2 child
   runtimes with namespaced tools, declared risk, private result metadata,
   progress, cancellation, and explicitly subscribed observe-only events.
-  Dependency-free JavaScript and Python examples are included, and configuration
+  Dependency-free external protocol examples are included, and configuration
   has side-effect-free list/get plus add/enable/disable/remove management.
 - **Agent Skills:** strict open `SKILL.md` validation with metadata-only startup
   context, inline `$skill-name` autocomplete and explicit activation, pinned
@@ -366,8 +406,7 @@ Plan and Goal contracts use embedded Markdown sources under `internal/plan` and
 Validate or manage external runtimes without hot-loading configured plugins:
 
 ```sh
-snow plugin check examples/plugins/javascript/manifest.json
-snow plugin check examples/plugins/python/manifest.json --json
+snow plugin check ./my-plugin/manifest.json --json
 snow plugin add ./my-plugin/manifest.json --project # staged disabled
 snow plugin enable my-plugin --project              # next launch; restart required
 snow plugin list --all
@@ -380,10 +419,10 @@ See [MCP](docs/mcp.md), [plugins](docs/plugins.md), the complete
 [plugin protocol](docs/plugin-protocol.md), [Agent Skills](docs/skills.md),
 [tool routing](docs/tool-routing.md), and [subagents](docs/subagents.md).
 
-Runnable integration projects live under [`examples/`](examples/): a standalone
-[Go SDK module](examples/sdk) and dependency-free JavaScript/Python external
-plugin runtimes. The Go SDK example defaults to the credential-free fake
-provider and is exercised by CI on Linux and macOS.
+The runnable SDK integration is the standalone [Go SDK module](examples/sdk).
+It defaults to the credential-free fake provider and is exercised by CI on
+Linux and macOS. Other files under `examples/` are raw external-protocol
+fixtures, not JavaScript or Python SDKs.
 
 ## Embed with Go
 
@@ -525,7 +564,9 @@ field, project scope, environment variables, and YAML examples.
 
 ## Documentation
 
-Start at the [documentation index](docs/README.md).
+Browse the generated [Snow documentation site](https://elmissouri16.github.io/snow-core/)
+after GitHub Pages is enabled, or start from the repository's canonical
+[documentation index](docs/README.md).
 
 | Task | Guide |
 |---|---|
@@ -536,6 +577,7 @@ Start at the [documentation index](docs/README.md).
 | Author JavaScript/Python plugins | [Plugins](docs/plugins.md) · [Protocol v2](docs/plugin-protocol.md) |
 | Review operational boundaries or report a vulnerability | [Security model](docs/security.md) · [Reporting policy](SECURITY.md) |
 | Prepare or verify a release | [Release policy](docs/releases.md) · [Changelog](CHANGELOG.md) |
+| Publish or maintain the documentation site | [GitHub Pages guide](docs/pages.md) |
 | Authenticate ChatGPT/Codex | [ChatGPT auth](docs/chatgpt-auth.md) |
 | Resume and branch conversations | [Sessions](docs/sessions.md) |
 | Use Plan Mode, goals, or subagents | [Plan Mode](docs/plan-mode.md) · [Goals](docs/goals.md) · [Subagents](docs/subagents.md) |
@@ -546,9 +588,11 @@ Start at the [documentation index](docs/README.md).
 
 [GitHub Actions CI](.github/workflows/ci.yml) runs automatically for `main`
 pushes and pull requests and remains manually dispatchable. Linux and macOS run
-the network-free suite, binary, and Go SDK example; Linux also
-runs the race detector, deterministic performance-regression guard, four
-release-target cross-builds, and `govulncheck`.
+the network-free suite, support-script tests, binary, and Go SDK example; Linux
+also runs the race detector, deterministic performance-regression guard, four
+release-target cross-builds, and `govulncheck`. The pinned
+[Documentation workflow](.github/workflows/pages.yml) stages, builds, validates,
+and deploys the GitHub Pages site after relevant `main` changes.
 This local list is the common baseline;
 the affected-area matrix in [`IMPLEMENTATION.md`](IMPLEMENTATION.md#testing-and-verification)
 is the complete maintainer reference:
@@ -582,6 +626,8 @@ roadmap live in [`IMPLEMENTATION.md`](IMPLEMENTATION.md).
 
 - [Documentation index](docs/README.md) — every user, integration, extension,
   and maintainer guide in one place.
+- [Documentation site](docs/pages.md) — GitHub Pages publishing, validation,
+  and troubleshooting.
 - [Security model](docs/security.md) and [reporting policy](SECURITY.md) —
   operational boundaries and private vulnerability disclosure.
 - [Release policy](docs/releases.md) and [changelog](CHANGELOG.md) — alpha

@@ -1,0 +1,22 @@
+title: Snow Documentation
+description: Guides and references for the Snow coding-agent harness.
+url: https://elmissouri16.github.io
+baseurl: /snow-core
+repository: elmissouri16/snow-core
+markdown: kramdown
+highlighter: rouge
+plugins:
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+  collections: true
+include:
+  - .github
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default

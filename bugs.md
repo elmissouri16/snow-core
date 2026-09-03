@@ -480,3 +480,93 @@ Verified on the current checkout with:
 - `git diff --check`; and
 - an independent read-only review, including follow-up confirmation that
   conversation correlation is no longer split by request purpose.
+
+## BUG-012: Jekyll output can truncate guides and break heading links
+
+- **Status:** Resolved
+- **Severity:** Medium
+- **Surface:** GitHub Pages documentation rendering
+- **Observed:** Documentation-site implementation and rendered-link validation
+
+### Expected behavior
+
+Every canonical Markdown guide staged for GitHub Pages should render completely,
+and its table-of-contents and cross-document fragment links should resolve to
+headings in the generated HTML.
+
+### Actual behavior and evidence
+
+The official GitHub Pages Jekyll image rendered the latter portion of
+`docs/security.md` as literal Markdown after a multiline inline-code span placed
+`<name>` at the beginning of a physical line. Kramdown treated it as raw HTML,
+so every later heading disappeared from the generated document. Rendered-link
+validation also found stale fragment names in the RPC and performance guides and
+single-hyphen phase anchors that disagreed with Kramdown's handling of em dashes.
+
+### Impact
+
+- The published security guide would lose navigation and formatting after the
+  MCP cache section.
+- Several table-of-contents and cross-guide links would land at the top of a
+  page instead of the intended section.
+- Source-only relative-link checks would pass despite defects in rendered HTML.
+
+### Reproduction
+
+1. Stage the documentation with `scripts/build-pages.sh`.
+2. Build it with the same `actions/jekyll-build-pages` image used by Pages.
+3. Inspect the generated `docs/security.html` after the credential section.
+4. Validate generated links and fragments.
+5. Observe literal Markdown and missing targets for the affected anchors.
+
+### Required remediation
+
+1. Keep the MCP cache command in one inline-code span that does not expose an
+   apparent HTML tag at the beginning of a Markdown line.
+2. Correct stale table-of-contents and cross-guide fragments.
+3. Use heading punctuation that produces the same stable anchor under GitHub
+   Markdown and Kramdown.
+4. Validate bounded generated HTML links, assets, schemes, and fragments before
+   uploading a Pages artifact.
+
+### Required regression coverage
+
+Add tests proving that:
+
+- staged source links resolve within the explicit Pages allowlist;
+- site navigation targets the Jekyll output routes;
+- rendered internal links and fragments resolve;
+- root-relative links cannot escape the `/snow-core` Pages base path;
+- unsafe URL schemes are rejected; and
+- validation input count and HTML byte size are bounded.
+
+### Remediation
+
+The affected Markdown now avoids a physical-line `<name>` token, stale fragment
+links use their rendered Kramdown anchors, and heading punctuation produces
+stable GitHub and Pages IDs. `scripts/check-pages-output.py` validates generated
+links, assets, fragments, base-path confinement, duplicate URL attributes,
+allowed schemes, and bounded file, byte, reference, and fragment counts before
+the Pages artifact is uploaded.
+
+The Pages staging allowlist publishes only canonical documents, the standalone
+Go SDK example, RPC schemas, and required references. Raw JavaScript/Python
+plugin fixtures and removed language-SDK locations remain outside the artifact.
+CI and the deployment workflow both use the same pinned official Jekyll action
+and rendered-output validator.
+
+### Resolution evidence
+
+Verified on the current checkout with:
+
+- `python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v`;
+- a successful `actions/jekyll-build-pages` v1.0.13 container render;
+- `python3 scripts/check-pages-output.py ./_site --base-path /snow-core`;
+- assertions that the rendered security guide retains its later headings;
+- assertions that edit links map back to the real `site/` sources;
+- assertions that JavaScript/Python SDK and plugin-fixture paths are absent;
+- `go test ./...`;
+- `go vet ./...`;
+- `python3 scripts/check_benchmarks.py`;
+- `git diff --check`; and
+- two independent read-only Pages reviews whose actionable findings were fixed.

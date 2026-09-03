@@ -7,7 +7,8 @@ for a subject.
 
 > **Note:** Snow is alpha software. Source code and tests are the behavioral
 > authority when an older research or roadmap document differs from a current
-> feature guide.
+> feature guide. The generated [GitHub Pages site](https://elmissouri16.github.io/snow-core/)
+> becomes available after the public repository enables Pages.
 
 ## Start here
 
@@ -19,6 +20,7 @@ for a subject.
 | Understand safety and privilege boundaries | [Security model](security.md) |
 | Report a suspected vulnerability | [Security reporting](../SECURITY.md) |
 | Prepare or verify an alpha release | [Release policy](releases.md) |
+| Publish or maintain the documentation site | [Documentation site](pages.md) |
 | Authenticate with ChatGPT/Codex | [ChatGPT authentication](chatgpt-auth.md) |
 
 ## Embed and automate
@@ -49,12 +51,11 @@ for a subject.
   metadata cache, connection state machine, idle shutdown, security rules,
   implementation phases, and verification.
 - [Plugins](plugins.md) — statically linked Go plugins plus persistent
-  JavaScript/Python/other external runtimes.
+  language-neutral external runtimes.
 - [External plugin protocol v2](plugin-protocol.md) — complete JSON-RPC JSONL
   framing, lifecycle, tools, risk, progress, events, errors, and shutdown.
-- [JavaScript/Python plugin research](plugin-js-python-research.md) —
-  benchmarked architecture decision, alternatives, implementation sequence, and
-  deferrals.
+- [External plugin runtime research](plugin-js-python-research.md) — benchmarked
+  architecture decision, alternatives, implementation sequence, and deferrals.
 - [Agent Skills](skills.md) — `SKILL.md` discovery, trust, precedence,
   progressive disclosure, and resource confinement.
 - [Tool routing](tool-routing.md) — deferred schemas, BM25 retrieval,
@@ -72,6 +73,8 @@ for a subject.
   supported-release policy.
 - [Documentation style guide](style-guide.md) — writing and formatting
   conventions for documentation contributors.
+- [Documentation site](pages.md) — GitHub Pages enablement, staging, deployment,
+  validation, and troubleshooting.
 - [TUI responsiveness](tui-performance.md) — Bubble Tea rendering and
   performance implementation guidance.
 - [Performance regression guard](performance.md) — deterministic allocation
@@ -101,6 +104,7 @@ To reduce drift, use these documents as the primary references:
 | Safety model and privilege boundaries | [`security.md`](security.md) |
 | Vulnerability disclosure | [`SECURITY.md`](../SECURITY.md) |
 | Alpha versioning and distribution | [`releases.md`](releases.md) |
+| GitHub Pages publication | [`pages.md`](pages.md) |
 | Performance allocation gates | [`performance.md`](performance.md) |
 | Feature-specific behavior | The matching guide in this directory |
 | Contributor workflow and must-load repository rules | [`AGENTS.md`](../AGENTS.md) |
@@ -114,6 +118,7 @@ To reduce drift, use these documents as the primary references:
 - [Security reporting](../SECURITY.md) — private vulnerability disclosure.
 - [Documentation style guide](style-guide.md) — conventions used across this
   directory.
+- [Documentation site](pages.md) — GitHub Pages publishing and validation.
 - [Architecture and roadmap](../IMPLEMENTATION.md) — design decisions and open
   risks.
 - [Agent working guide](../AGENTS.md) — repository rules for contributors.

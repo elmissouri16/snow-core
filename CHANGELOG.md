@@ -5,6 +5,13 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+### Added
+
+- Added a checksum-verifying curl installer for the latest macOS/Linux amd64 or
+  arm64 GitHub release, with version pinning and configurable installation path.
+- Added a responsive GitHub Pages documentation site generated from the
+  canonical guides, with pinned deployment actions and link/staging validation.
+
 ### Removed
 
 - Removed the checked-in Python and JavaScript RPC client SDKs and their

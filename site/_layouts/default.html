@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#08111f">
+    <title>{% if page.title %}{{ page.title | escape }} · {% endif %}{{ site.title | escape }}</title>
+    <meta name="description" content="{{ page.description | default: site.description | escape }}">
+    <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="topbar">
+      <a class="brand" href="{{ '/' | relative_url }}" aria-label="Snow documentation home">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span>
+          <strong>Snow</strong>
+          <small>Documentation</small>
+        </span>
+      </a>
+      <nav class="topbar-links" aria-label="Repository links">
+        <a href="{{ '/README.html#quick-start' | relative_url }}">Install</a>
+        <a href="https://github.com/{{ site.repository }}">GitHub</a>
+      </nav>
+    </header>
+
+    <details class="mobile-navigation">
+      <summary>Browse documentation</summary>
+      {% include navigation.html %}
+    </details>
+
+    <div class="page-shell">
+      <aside class="sidebar" aria-label="Documentation navigation">
+        {% include navigation.html %}
+      </aside>
+      <main id="main-content" class="content" tabindex="-1">
+        {% unless page.layout == 'home' %}
+        {% assign edit_path = page.edit_path | default: page.path %}
+        <div class="content-header">
+          <span class="eyebrow">Snow agent handbook</span>
+          <a class="edit-link" href="https://github.com/{{ site.repository }}/blob/main/{{ edit_path }}">Edit this page</a>
+        </div>
+        {% endunless %}
+        <article class="prose">
+          {{ content }}
+        </article>
+        <footer class="page-footer">
+          <p>Snow is alpha software. Verify behavior against the current release and source.</p>
+          <span class="footer-links">
+            <a href="https://github.com/{{ site.repository }}/issues">Report a non-sensitive documentation issue</a>
+            <a href="{{ '/SECURITY.html' | relative_url }}">Report a vulnerability privately</a>
+          </span>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

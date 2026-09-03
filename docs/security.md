@@ -21,6 +21,8 @@ operators, CI setups, and SDK/RPC embedders.
 - [Credential security](#credential-security)
 - [Extensions risk](#extensions-risk)
 - [Plan Mode and goals](#plan-mode-and-goals)
+- [Release installer trust](#release-installer-trust)
+- [Documentation publication](#documentation-publication)
 - [Recommended operating profiles](#recommended-operating-profiles)
 - [Related documents](#related-documents)
 
@@ -361,8 +363,9 @@ transport work until a permissioned tool or resource/prompt bridge call; an
 uncached automatic lazy declaration must bootstrap once at startup to create
 that metadata. `cache_bootstrap: "explicit"` provides a strict no-transport
 startup path: missing, invalid, expired, and mismatched entries remain
-unavailable until the operator runs the explicitly live `snow mcp cache refresh
-<name>` command. Cache status and clear operations do not start MCP servers.
+unavailable until the operator runs the explicitly live
+`snow mcp cache refresh <name>` command. Cache status and clear operations do not
+start MCP servers.
 A successful resource subscription intentionally holds the live MCP
 session until unsubscribe or shutdown, so its server does not idle-disconnect.
 Per-server subscription URI count and length are bounded; failed unsubscribe
@@ -536,6 +539,46 @@ unresolved automatic-turn conflicts defer continuation and pause the goal.
 
 Use explicit budgets, restrictive permissions, and observability when enabling
 automatic continuation. See [Plan Mode](plan-mode.md) and [Goals](goals.md).
+
+## Release installer trust
+
+The public installation command downloads `scripts/install.sh` to a temporary
+file and then executes that repository-controlled shell code with the invoking
+user's OS privileges. Download failure is terminal and the wrapper removes the
+temporary script. The installer does not use `sudo`, but it may replace `snow`
+in the configured install directory. Operators should inspect the script first
+or fetch it from a reviewed immutable tag when that trust model is
+inappropriate.
+
+The installer places bounded API, checksum, archive, and expanded-file data in
+a private temporary directory. It verifies the archive against the release's
+`SHA256SUMS`, requires the exact release member allowlist, rejects links and
+other non-regular member types, checks declared and expanded size ceilings,
+rejects a non-file install destination, and validates the extracted binary's
+reported version before using a staged same-directory replacement. This
+protects against incomplete transfers, mismatched or malformed release assets,
+unsafe archive paths, oversized expansion, and partial writes. Because the
+checksum and archive share GitHub as their trust root, the checksum is not a
+signature and does not protect against compromise of the repository or
+release-publishing authority. The extracted binary is executed for its version
+check before installation.
+
+## Documentation publication
+
+The GitHub Pages workflow publishes static content from an allowlisted staging
+directory rather than exposing the entire checkout. It includes canonical
+guides plus the tracked Go SDK example, schemas, CI workflow, and root
+references that those guides link to. Raw external plugin fixtures are
+excluded, as are `.snow` state, session databases, credentials, ignored files,
+and arbitrary untracked content.
+
+Official Pages actions remain pinned to reviewed full commit SHAs. The build
+job has only `contents: read`; `pages: write` and `id-token: write` are scoped to
+the deployment job. The workflow uses no Snow or provider secrets and
+serializes deployments through the `github-pages` environment. Repository
+documentation is public, untrusted text rather than a
+security boundary; readers must follow `SECURITY.md` for private vulnerability
+reports instead of posting sensitive findings to public issues.
 
 ## Recommended operating profiles
 

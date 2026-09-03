@@ -83,8 +83,7 @@ The Linux-only **Performance regression guard** job in
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs the checker and
 its parser tests. The reusable CI workflow makes it part of the release gate.
 
-Local success is not remote CI evidence. The canonical temporary workflow
-status and re-enable commands live in the
-[agent working guide](../AGENTS.md#temporary-github-actions-state). Before a
+Local success is not remote CI evidence. The canonical local verification
+commands live in the [agent working guide](../AGENTS.md#verification). Before a
 release, require the complete remote CI run—including this regression guard—to
 pass as described in the [release policy](releases.md).

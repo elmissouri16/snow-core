@@ -28,7 +28,7 @@ for model-requested input lives in [Model-requested user input](user-input.md).
 - [Event stream](#event-stream)
 - [Event payload reference](#event-payload-reference)
 - [Prompt and response ordering](#prompt-and-response-ordering)
-- [Example clients](#example-clients)
+- [Example client](#example-client)
 - [Errors and shutdown](#errors-and-shutdown)
 - [Permission model](#permission-model)
 - [Current RPC boundary](#current-rpc-boundary)
