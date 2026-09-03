@@ -15,7 +15,7 @@ require Go.
 - [Choose a provider](#choose-a-provider)
 - [Start the interactive agent](#start-the-interactive-agent)
 - [Choose permissions carefully](#choose-permissions-carefully)
-- [Next steps](#next-steps)
+- [Related documents](#related-documents)
 
 ## Install Snow
 
@@ -82,40 +82,16 @@ session.
 
 ## Choose a provider
 
-A fresh configuration defaults to anonymous `opencode-zen`, whose promotional
-free-model availability and quotas may change. Start an interactive session
-without storing a credential:
+Choose the setup that matches the account or endpoint you want to use:
 
-```sh
-snow --provider opencode-zen
-```
+- No credential: `snow --provider opencode-zen`
+- OpenCode API key: `snow login opencode-go`
+- ChatGPT subscription: `snow login chatgpt`
+- Another compatible endpoint:
+  `snow login openai-compatible --name NAME --base-url URL`
 
-For OpenCode Go, export a key for the current shell or store it in Snow's
-credential store, then launch that provider explicitly:
-
-```sh
-export OPENCODE_API_KEY=oc-...
-snow --provider opencode-go
-
-# Or store the key interactively before launching it.
-snow login opencode-go
-snow --provider opencode-go
-```
-
-For ChatGPT/Codex, use browser login or the device flow, then select that
-provider when launching Snow:
-
-```sh
-snow login chatgpt
-# Or: snow login chatgpt --device-code
-snow auth check chatgpt
-snow --provider chatgpt
-```
-
-See [ChatGPT authentication](chatgpt-auth.md) for OAuth details. See
-[Configuration](configuration.md#providers) for all provider and named-endpoint
-options. Review a provider's privacy and training notice before sending private
-code.
+See [Providers](providers.md) for the complete setup and launch commands. Review
+a provider's privacy and training policy before sending private code.
 
 ## Start the interactive agent
 
@@ -167,12 +143,10 @@ subagents, or broad tool authority. Report suspected vulnerabilities through
 the repository's private
 [security policy](https://github.com/elmissouri16/snow-core/blob/main/SECURITY.md).
 
-## Next steps
+## Related documents
 
-- Learn the TUI, CLI modes, and slash commands in [Using Snow](using-snow.md).
-- Configure providers, models, permissions, and themes in
-  [Configuration](configuration.md).
-- Return to prior work with [Sessions and branches](sessions.md).
-- Separate investigation from implementation with [Plan Mode](plan-mode.md).
-- Delegate bounded child work with [Subagents](subagents.md).
-- Add reusable instructions with [Agent Skills](skills.md).
+- [Providers](providers.md) — connect OpenCode, ChatGPT, or another endpoint.
+- [Using Snow](using-snow.md) — learn TUI, CLI, and slash-command workflows.
+- [Configuration](configuration.md) — set models, permissions, and themes.
+- [Sessions and branches](sessions.md) — return to previous work.
+- [Security model](security.md) — understand permissions and process authority.

@@ -17,7 +17,6 @@ on:
       - 'LICENSE'
       - 'examples/**'
       - 'pkg/snowsdk/**'
-      - 'pkg/protocol/schema/rpc/v1/**'
       - 'benchmarks/performance-limits.json'
       - 'scripts/build-pages.sh'
       - 'scripts/check-pages-output.py'

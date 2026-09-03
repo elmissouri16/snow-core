@@ -1,139 +1,80 @@
 # Plan Mode
 
-Snow implements Codex-style Plan Mode as a persisted collaboration mode. It is
-separate from the `update_plan` TODO/checklist tool. This document covers mode
-selection, the three-phase contract, the proposed-plan event stream, mode
-persistence, and the handoff into implementation.
+Plan Mode lets Snow investigate and prepare an implementation specification
+without changing the project. It is a persisted collaboration mode, separate
+from the implementation checklist used after work begins.
 
-## On this page
+## Select Plan Mode
 
-- [Selecting Plan Mode](#selecting-plan-mode)
-- [Behavior contract](#behavior-contract)
-- [Proposed-plan events](#proposed-plan-events)
-- [Implementation handoff](#implementation-handoff)
-- [Configuration](#configuration)
-- [Related documents](#related-documents)
-
-## Selecting Plan Mode
+In the TUI, use:
 
 ```text
-Shift+Tab                          toggle Default ↔ Plan in the TUI
+Shift+Tab
 /plan
 /plan design a branch-aware retry system
 /default
 ```
 
-At the top-level composer, `Shift+Tab` changes mode immediately while idle. If
-a prompt or automatic goal turn is active, Snow shows the pending transition as
-`mode:<current>→<target>` and applies it after `turn_done`; pressing the
-shortcut again cancels that pending transition. Modal pickers, completion
-lists, model-requested questions, and the implementation prompt keep their
-existing `Shift+Tab` navigation behavior.
+`Shift+Tab` toggles Default and Plan while Snow is idle. During an active turn,
+Snow queues the change until the turn finishes; press the shortcut again to
+cancel the pending change.
 
-The CLI, SDK, and RPC equivalents are:
+Start a one-shot planning turn from the command line with:
 
 ```sh
 snow --collaboration-mode plan -p "design the change"
 ```
 
-```go
-session.SetMode(protocol.ModePlan)
-session.PromptWithMode(ctx, "design the change", protocol.ModePlan)
-```
+Mode is stored per session branch and restored when that branch resumes.
 
-```json
-{"id":"1","type":"set_mode","mode":"plan"}
-{"id":"2","type":"prompt","mode":"plan","message":"design the change"}
-```
+## Understand the boundary
 
-Mode is stored per session branch, copied on fork, restored on resume, and
-shown in the TUI header/footer. JSON/RPC and plugins receive an explicit mode
-snapshot at surface startup; SDK hosts can read the same snapshot with
-`Session.StateEvent()` after subscribing.
+In Plan Mode, Snow should:
 
-## Behavior contract
+1. inspect the repository without changing it;
+2. ask only the questions needed to settle intent; and
+3. return a decision-complete implementation plan.
 
-Every Plan-mode provider request receives the three-phase planning contract:
-non-mutating repository exploration first, intent clarification second, and a
-decision-complete implementation specification last. Snow appends this built-in
-mode guidance separately from the configurable base system preamble.
+Snow blocks file writes, arbitrary Bash, process lifecycle changes, mutating or
+unclassified extensions, and mutation-capable child work. Permission approval
+does not override this boundary. Read and search tools remain available.
 
-Snow also enforces the mode as an application-level tool boundary. Descriptor
-effect metadata is checked both when provider schemas are selected and again
-immediately before final dispatch. Permission approval cannot override that
-check. Reads and searches remain available, while file writes, arbitrary Bash,
-process start/stop, mutating or unclassified extension tools, and unsafe child
-work are blocked until the controlling runtime explicitly switches to Default.
-Snow does not attempt to classify arbitrary shell syntax as read-only, so Bash
-is unavailable in Plan Mode.
+> **Warning:** Plan Mode is an application policy, not an operating-system
+> sandbox. Snow and allowed tools still run with the user's privileges.
 
-This is defense in depth rather than a whole-process or OS sandbox. Snow and
-allowed tools still run with the user's privileges, and extension effect
-metadata is part of the trusted operator/tool configuration.
+A Plan Mode root can delegate only to children whose resolved tool profile is
+read-only and non-recursive. Snow also rejects entry into Plan Mode while
+mutation-capable child work is active.
 
-The model may ask blocking questions through `request_user_input`, backed by
-the same TUI/SDK/RPC broker as `ask_user`. Default mode keeps the existing
-`ask_user` name for compatibility. `update_plan` is hidden and rejected in
-Plan mode; in Default mode it emits structured checklist updates. A Plan-mode
-root may spawn, message, resume, or send follow-up work only when the child's
-resolved tool profile is read-only and non-recursive; role names alone do not
-grant that authority. A transition into Plan Mode is rejected while
-mutation-capable child work is already active.
+## Review a proposed plan
 
-## Proposed-plan events
+A completed plan appears as a distinct plan block in the TUI and event stream.
+Interrupted plans remain visible but do not open the implementation handoff.
 
-A final plan is wrapped by the model in exact line-delimited `<proposed_plan>`
-tags. Snow parses the stream incrementally, suppresses the raw tags, and
-emits:
+Check that a plan identifies:
 
-- `plan_started`
-- `plan_delta`
-- `plan_completed`
+- the files and public interfaces to change;
+- required behavior and important edge cases;
+- tests and validation commands; and
+- unresolved assumptions that need your decision.
 
-The durable assistant message stores plan Markdown as a `plan` content block.
-`plan_completed` is emitted only after that assistant message append succeeds,
-so surfaces never receive an authoritative completion for a plan that was not
-stored. Provider adapters reconstruct the tagged block when sending history
-back to the model, while TUI/print/JSON/RPC/SDK consumers receive clean
-structured output.
+## Start implementation
 
-Split tags, CRLF, plan-only responses, unterminated blocks, and a second block
-are handled deterministically. Only a bounded possible tag prefix at line start
-is withheld, so ordinary text and long lines stream immediately. Interrupted
-plans remain visible and durable but do not emit `plan_completed` or open the
-implementation prompt.
+After a complete plan, the TUI offers three choices:
 
-Committed plans survive terminal resize and are reflowed with the transcript.
-The current TUI retains committed rows as rendered strings rather than a typed
-Markdown source tree, so resize preserves content and wrapping but does not
-rerun Glamour from the original plan source.
+1. switch to Default and implement in the current session;
+2. start a fresh session with the complete plan; or
+3. remain in Plan Mode.
 
-## Implementation handoff
+Switching from Plan to Default clears session-active Agent Skills so a
+planning-only instruction does not accidentally constrain implementation.
+Historical activation records remain in the session. `/skills clear` is still
+available for manual recovery.
 
-After a completed plan, the TUI offers to:
+## Configure reasoning effort
 
-1. switch to Default and submit `Implement the plan.` in the current context;
-2. create a fresh session, include the complete plan, and implement there;
-3. remain in Plan mode.
-
-Every Plan-to-Default transition automatically clears session-active Agent
-Skills, including Shift+Tab, `/default`, SDK/RPC mode changes, and atomic
-Default-mode prompts. Audit/planning workflows may carry independent read-only
-instructions that would otherwise survive the mode switch and block
-implementation. The clear is branch-scoped, provider-hidden, append-only, and
-durable across resume; historical activation records remain available. The
-fresh-session choice naturally begins without session activations.
-
-The mode switch and implementation prompt are submitted atomically after that
-handoff. Automatic internal turns are rejected while Plan mode is active, which
-is the safety seam used by persistent goals. Default requests also state
-explicitly that Plan mode is inactive, preventing stale transcript claims from
-being mistaken for the current mode; independent constraints are attributed to
-the active skill or permission gate that actually supplies them. `/skills
-clear` remains an optional mode-independent recovery operation; it is not part
-of the normal Plan-to-implementation workflow.
-
-## Configuration
+Set the default mode and optional Plan Mode reasoning effort in
+`~/.snow/config.json`:
 
 ```json
 {
@@ -142,16 +83,13 @@ of the normal Plan-to-implementation workflow.
 }
 ```
 
-Plan mode uses medium reasoning when the model advertises it;
-`plan_mode_reasoning_effort` can override that preset. The value accepts
-`off|minimal|low|medium|high|xhigh|max|ultra`. When it is omitted, Snow uses
-medium only if supported by the selected model; otherwise it preserves a
-supported configured effort or falls back to off.
+The effort may be `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`,
+or `ultra`. The selected model must support the configured value.
 
 ## Related documents
 
 - [Thread Goals](goals.md)
-- [Sessions](sessions.md)
+- [Sessions and branches](sessions.md)
 - [Using Snow](using-snow.md)
 - [Configuration](configuration.md)
-- [SDK](sdk.md)
+- [Go SDK](sdk.md)

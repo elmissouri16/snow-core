@@ -23,9 +23,9 @@ NAV_LINK = re.compile(
 )
 PUBLIC_DOCUMENTS = (
     "getting-started.md",
+    "providers.md",
     "using-snow.md",
     "configuration.md",
-    "chatgpt-auth.md",
     "sessions.md",
     "plan-mode.md",
     "goals.md",
@@ -35,12 +35,14 @@ PUBLIC_DOCUMENTS = (
     "plugins.md",
     "security.md",
     "sdk.md",
-    "rpc.md",
-    "user-input.md",
-    "plugin-protocol.md",
 )
 INTERNAL_DOCUMENTS = (
     "README.md",
+    "chatgpt-auth.md",
+    "rpc.md",
+    "user-input.md",
+    "plugin-protocol.md",
+    "sdk-reference.md",
     "releases.md",
     "pages.md",
     "style-guide.md",
@@ -103,9 +105,7 @@ class PagesBuildTests(unittest.TestCase):
             "examples/index.md",
             "examples/sdk/index.md",
             "pkg/snowsdk/index.md",
-            "pkg/protocol/schema/rpc/v1/index.md",
             "examples/sdk/go.mod",
-            "pkg/protocol/schema/rpc/v1/agent-event.schema.json",
         ):
             self.assertTrue((self.output / relative_path).exists(), relative_path)
 
@@ -128,6 +128,7 @@ class PagesBuildTests(unittest.TestCase):
             "examples/rpc/javascript",
             "examples/rpc/python",
             "examples/plugins",
+            "pkg/protocol/schema/rpc/v1",
         ):
             self.assertFalse((self.output / excluded_path).exists(), excluded_path)
 
@@ -234,13 +235,12 @@ class PagesBuildTests(unittest.TestCase):
                 (
                     ("Overview", "/"),
                     ("Install and first prompt", "/docs/getting-started.html"),
+                    ("Providers", "/docs/providers.html"),
                     ("Using Snow", "/docs/using-snow.html"),
-                    ("Configuration", "/docs/configuration.html"),
-                    ("ChatGPT authentication", "/docs/chatgpt-auth.html"),
                 ),
             ),
             (
-                "Agent workflows",
+                "Workflows",
                 (
                     ("Sessions and branches", "/docs/sessions.html"),
                     ("Plan Mode", "/docs/plan-mode.html"),
@@ -249,7 +249,7 @@ class PagesBuildTests(unittest.TestCase):
                 ),
             ),
             (
-                "Extend Snow",
+                "Add capabilities",
                 (
                     ("Agent Skills", "/docs/skills.html"),
                     ("MCP", "/docs/mcp.html"),
@@ -257,15 +257,13 @@ class PagesBuildTests(unittest.TestCase):
                 ),
             ),
             (
-                "Integrate",
+                "Reference",
                 (
+                    ("Configuration", "/docs/configuration.html"),
                     ("Go SDK", "/docs/sdk.html"),
-                    ("JSONL RPC", "/docs/rpc.html"),
-                    ("Model-requested input", "/docs/user-input.html"),
-                    ("Plugin protocol", "/docs/plugin-protocol.html"),
+                    ("Security model", "/docs/security.html"),
                 ),
             ),
-            ("Safety", (("Security model", "/docs/security.html"),)),
         )
         actual_navigation = tuple(
             (
@@ -286,6 +284,11 @@ class PagesBuildTests(unittest.TestCase):
         )
         self.assertIn("/docs/getting-started.html", home_layout)
         self.assertIn("/docs/getting-started.html", homepage)
+        self.assertIn("Advanced references on GitHub", homepage)
+        self.assertIn(
+            "https://github.com/elmissouri16/snow-core/blob/main/docs/README.md",
+            homepage,
+        )
         for internal_copy in (
             "Contributors",
             "complete documentation index",
@@ -294,6 +297,71 @@ class PagesBuildTests(unittest.TestCase):
             "Current source and tests",
         ):
             self.assertNotIn(internal_copy, homepage)
+        self.assertNotIn("| Goal | Guide |", homepage)
+        self.assertNotIn("ChatGPT authentication", navigation)
+        self.assertNotIn("JSONL RPC", navigation)
+        self.assertNotIn("Plugin protocol", navigation)
+
+    def test_public_setup_guides_cover_required_tasks(self) -> None:
+        providers = (REPOSITORY_ROOT / "docs" / "providers.md").read_text(
+            encoding="utf-8"
+        )
+        for provider in (
+            "opencode-zen",
+            "opencode-go",
+            "chatgpt",
+            "openai-compatible",
+        ):
+            self.assertIn(provider, providers)
+        for command in (
+            "snow --provider opencode-zen",
+            "snow login opencode-go",
+            "snow login chatgpt",
+            "snow login openai-compatible",
+            "snow --provider my-provider",
+        ):
+            self.assertIn(command, providers)
+
+        skills = (REPOSITORY_ROOT / "docs" / "skills.md").read_text(
+            encoding="utf-8"
+        )
+        for setup_detail in (
+            "~/.agents/skills/",
+            "snow skills list",
+            "$pdf-processing",
+            "snow skills disable",
+            "project trust",
+        ):
+            self.assertIn(setup_detail, skills)
+
+        mcp = (REPOSITORY_ROOT / "docs" / "mcp.md").read_text(encoding="utf-8")
+        for setup_detail in (
+            "snow mcp add local-tools",
+            "snow mcp add remote-tools",
+            "--bearer-token-env",
+            "--project",
+            "snow mcp check",
+            "snow mcp disable",
+            "snow mcp remove",
+        ):
+            self.assertIn(setup_detail, mcp)
+
+        stylesheet = (
+            REPOSITORY_ROOT / "site" / "assets" / "css" / "style.css"
+        ).read_text(encoding="utf-8")
+        print_block = stylesheet[stylesheet.index("@media print") :]
+        self.assertRegex(
+            print_block,
+            r"\.prose h1,\s*\.prose h2,\s*\.prose h3,\s*\.prose h4,"
+            r"\s*\.prose strong,\s*\.prose th\s*\{\s*color: #111;\s*\}",
+        )
+        for readable_selector in (
+            ".prose blockquote p",
+            ".prose a",
+            ".prose code",
+            ".prose pre code",
+        ):
+            self.assertIn(readable_selector, print_block)
 
     def test_pages_workflow_pins_official_actions_and_deploys_artifact(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

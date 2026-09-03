@@ -3,32 +3,26 @@
     <h2>Start</h2>
     <a href="{{ '/' | relative_url }}"{% if page.url == '/' %} aria-current="page"{% endif %}>Overview</a>
     <a href="{{ '/docs/getting-started.html' | relative_url }}"{% if page.path == 'docs/getting-started.md' %} aria-current="page"{% endif %}>Install and first prompt</a>
+    <a href="{{ '/docs/providers.html' | relative_url }}"{% if page.path == 'docs/providers.md' %} aria-current="page"{% endif %}>Providers</a>
     <a href="{{ '/docs/using-snow.html' | relative_url }}"{% if page.path == 'docs/using-snow.md' %} aria-current="page"{% endif %}>Using Snow</a>
-    <a href="{{ '/docs/configuration.html' | relative_url }}"{% if page.path == 'docs/configuration.md' %} aria-current="page"{% endif %}>Configuration</a>
-    <a href="{{ '/docs/chatgpt-auth.html' | relative_url }}"{% if page.path == 'docs/chatgpt-auth.md' %} aria-current="page"{% endif %}>ChatGPT authentication</a>
   </section>
   <section>
-    <h2>Agent workflows</h2>
+    <h2>Workflows</h2>
     <a href="{{ '/docs/sessions.html' | relative_url }}"{% if page.path == 'docs/sessions.md' %} aria-current="page"{% endif %}>Sessions and branches</a>
     <a href="{{ '/docs/plan-mode.html' | relative_url }}"{% if page.path == 'docs/plan-mode.md' %} aria-current="page"{% endif %}>Plan Mode</a>
     <a href="{{ '/docs/goals.html' | relative_url }}"{% if page.path == 'docs/goals.md' %} aria-current="page"{% endif %}>Thread Goals</a>
     <a href="{{ '/docs/subagents.html' | relative_url }}"{% if page.path == 'docs/subagents.md' %} aria-current="page"{% endif %}>Subagents</a>
   </section>
   <section>
-    <h2>Extend Snow</h2>
+    <h2>Add capabilities</h2>
     <a href="{{ '/docs/skills.html' | relative_url }}"{% if page.path == 'docs/skills.md' %} aria-current="page"{% endif %}>Agent Skills</a>
     <a href="{{ '/docs/mcp.html' | relative_url }}"{% if page.path == 'docs/mcp.md' %} aria-current="page"{% endif %}>MCP</a>
     <a href="{{ '/docs/plugins.html' | relative_url }}"{% if page.path == 'docs/plugins.md' %} aria-current="page"{% endif %}>Plugins</a>
   </section>
   <section>
-    <h2>Integrate</h2>
+    <h2>Reference</h2>
+    <a href="{{ '/docs/configuration.html' | relative_url }}"{% if page.path == 'docs/configuration.md' %} aria-current="page"{% endif %}>Configuration</a>
     <a href="{{ '/docs/sdk.html' | relative_url }}"{% if page.path == 'docs/sdk.md' %} aria-current="page"{% endif %}>Go SDK</a>
-    <a href="{{ '/docs/rpc.html' | relative_url }}"{% if page.path == 'docs/rpc.md' %} aria-current="page"{% endif %}>JSONL RPC</a>
-    <a href="{{ '/docs/user-input.html' | relative_url }}"{% if page.path == 'docs/user-input.md' %} aria-current="page"{% endif %}>Model-requested input</a>
-    <a href="{{ '/docs/plugin-protocol.html' | relative_url }}"{% if page.path == 'docs/plugin-protocol.md' %} aria-current="page"{% endif %}>Plugin protocol</a>
-  </section>
-  <section>
-    <h2>Safety</h2>
     <a href="{{ '/docs/security.html' | relative_url }}"{% if page.path == 'docs/security.md' %} aria-current="page"{% endif %}>Security model</a>
   </section>
 </nav>

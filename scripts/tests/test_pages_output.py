@@ -57,9 +57,9 @@ class RenderedPagesValidationTests(unittest.TestCase):
     def test_accepts_curated_public_documentation_routes(self) -> None:
         public_guides = (
             "getting-started",
+            "providers",
             "using-snow",
             "configuration",
-            "chatgpt-auth",
             "sessions",
             "plan-mode",
             "goals",
@@ -69,9 +69,6 @@ class RenderedPagesValidationTests(unittest.TestCase):
             "plugins",
             "security",
             "sdk",
-            "rpc",
-            "user-input",
-            "plugin-protocol",
         )
         guide_links = "".join(
             f'<a href="/snow-core/docs/{guide}.html">{guide}</a>'
@@ -82,7 +79,6 @@ class RenderedPagesValidationTests(unittest.TestCase):
             f"<!doctype html><html><body>{guide_links}"
             '<a href="/snow-core/examples/sdk/">Example</a>'
             '<a href="/snow-core/pkg/snowsdk/">SDK package</a>'
-            '<a href="/snow-core/pkg/protocol/schema/rpc/v1/">Schemas</a>'
             "</body></html>",
         )
         for guide in public_guides:
@@ -93,7 +89,6 @@ class RenderedPagesValidationTests(unittest.TestCase):
         for route in (
             "examples/sdk/index.html",
             "pkg/snowsdk/index.html",
-            "pkg/protocol/schema/rpc/v1/index.html",
         ):
             self._write(
                 route,
@@ -111,6 +106,7 @@ class RenderedPagesValidationTests(unittest.TestCase):
             ".github/workflows/pages.yml",
             "benchmarks/performance-limits.json",
             "design-plans/site-redesign.md",
+            "pkg/protocol/schema/rpc/v1/agent-event.schema.json",
         ):
             self._write(relative_path, "repository-only\n")
 
@@ -120,6 +116,7 @@ class RenderedPagesValidationTests(unittest.TestCase):
             ".github/workflows/pages.yml",
             "benchmarks/performance-limits.json",
             "design-plans/site-redesign.md",
+            "pkg/protocol/schema/rpc/v1/agent-event.schema.json",
         ]
         for relative_path in expected_paths:
             self.assertIn(

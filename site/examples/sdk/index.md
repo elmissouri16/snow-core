@@ -18,5 +18,6 @@ events, and close the session cleanly.
 ## Related documents
 
 - [Go SDK]({{ '/docs/sdk.html' | relative_url }})
-- [JSONL RPC]({{ '/docs/rpc.html' | relative_url }})
-- [Install Snow and run your first prompt]({{ '/docs/getting-started.html' | relative_url }})
+- [Install Snow and run your first
+  prompt]({{ '/docs/getting-started.html' | relative_url }})
+- [Security model]({{ '/docs/security.html' | relative_url }})

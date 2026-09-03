@@ -676,3 +676,47 @@ built and deployed the site successfully. Live verification confirmed the
 curated homepage and getting-started guide return HTTP 200, while bug,
 implementation, research, session-internals, Pages, release, benchmark, and
 design-plan routes return HTTP 404.
+
+## BUG-015: Printed Pages guides hide their headings
+
+- **Status:** Resolved in the working tree
+- **Severity:** Low
+- **Surface:** GitHub Pages print and PDF output
+- **Observed:** Documentation presentation audit
+
+### Expected behavior
+
+Printed and PDF versions of every public guide should retain a visible heading
+hierarchy on the white print background.
+
+### Actual behavior and impact
+
+The screen stylesheet assigns `#f6faff` to `.prose h1` through `.prose h4`.
+The print rules change the page background to white and paragraphs, lists, and
+table cells to dark text, but do not override the explicit heading color.
+Headings therefore render almost white on white in print and PDF output, making
+the document structure difficult to read.
+
+### Reproduction
+
+1. Open the homepage or any public guide.
+2. Open the browser print preview or save the page as PDF.
+3. Observe that prose headings retain their near-white screen color on the
+   white print background.
+
+### Remediation requirements
+
+- Set an explicit dark print color for `.prose h1` through `.prose h4`.
+- Keep screen styling unchanged.
+- Add regression coverage that checks the print block owns all four heading
+  levels.
+
+### Verification status
+
+Resolved by the Pages documentation overhaul in this working tree. The print
+stylesheet now assigns dark colors to all prose heading levels and other
+screen-specific text, with light backgrounds for quotes, tables, and code.
+The focused Pages tests assert the heading color and other print selectors; the
+complete support-script suite, official GitHub Pages Jekyll image, and rendered
+site validator pass. A headless Chrome print of the provider guide produced a
+PDF whose content stream contains the expected `#111` text drawing color.

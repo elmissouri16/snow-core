@@ -1,9 +1,9 @@
 # Snow repository documentation
 
-This is the complete documentation index for Snow maintainers and contributors.
-It includes public user guides alongside architecture, release, performance,
-research, audit, and implementation records that are intentionally not
-published on the user documentation site.
+This is the complete documentation index for Snow users, integrators,
+maintainers, and contributors. Concise setup and workflow guides are published
+on GitHub Pages. Complete API and protocol references, architecture, release,
+research, audit, and implementation records remain available in the repository.
 
 If you want to install or use Snow, start with the curated
 [GitHub Pages guide](https://elmissouri16.github.io/snow-core/) or the
@@ -19,8 +19,9 @@ maintaining behavior or locating the authoritative repository reference.
 | I want to… | Read |
 |---|---|
 | Install Snow and run my first prompt | [Getting started](getting-started.md) |
+| Connect a supported model provider | [Providers](providers.md) |
 | Learn the TUI, CLI modes, keys, and slash commands | [Using Snow](using-snow.md) |
-| Configure providers, permissions, sessions, themes, and search | [Configuration](configuration.md) |
+| Configure permissions, sessions, themes, and search | [Configuration](configuration.md) |
 | Understand safety and privilege boundaries | [Security model](security.md) |
 | Report a suspected vulnerability | [Security reporting](../SECURITY.md) |
 | Prepare or verify an alpha release | [Release policy](releases.md) |
@@ -29,28 +30,30 @@ maintaining behavior or locating the authoritative repository reference.
 
 ## Embed and automate
 
-- [Go SDK](sdk.md) — options, lifecycle, methods, events, errors, concurrency,
-  readiness, permissions, and a [standalone Go module](../examples/sdk).
+- [Go SDK](sdk.md) — concise embedding setup and a
+  [standalone Go module](../examples/sdk).
+- [Go SDK reference](sdk-reference.md) — complete methods, events, lifecycle,
+  sessions, concurrency, errors, and readiness behavior.
 - [JSONL RPC](rpc.md) — versioned framing, every command, responses/events,
   ordering, interactive input, goals, subagents, shutdown, and schemas.
 - [Model-requested user input](user-input.md) — `ask_user` request/response
   schema across TUI, SDK, RPC, print, and JSON surfaces.
-- [Sessions and branches](sessions.md) — storage, resume, branches, compaction,
-  forks, retrieval, and public SDK options.
+- [Sessions and branches](sessions.md) — resume, naming, branches, compaction,
+  independent forks, worktree forks, and earlier-work retrieval.
 
 ## Workflows
 
-- [Plan Mode](plan-mode.md) — model-directed planning, proposed-plan events,
-  mode persistence, permission boundaries, and implementation handoff.
-- [Persistent Thread Goals](goals.md) — branch goals, budgets, automatic
-  continuation, stopping, SDK/RPC controls, and privacy.
-- [Subagents](subagents.md) — model tools, lifecycle, roles, permissions,
-  persistence, and SDK/RPC/TUI surfaces.
+- [Plan Mode](plan-mode.md) — selecting the mode, non-mutation boundaries,
+  reviewing a plan, and starting implementation.
+- [Persistent Thread Goals](goals.md) — branch goals, budgets, status, controls,
+  usage, and privacy.
+- [Subagents](subagents.md) — enablement, roles, delegation, inspection, limits,
+  persistence, and shared-authority safety.
 
 ## Extend Snow
 
-- [Model Context Protocol](mcp.md) — stdio and Streamable HTTP configuration,
-  management commands, capability bridging, permissions, and current limits.
+- [Model Context Protocol](mcp.md) — Snow-specific local and remote server
+  setup, management commands, permissions, and current limits.
 - [Lazy MCP connection plan](lazy-mcp-implementation-plan.md) — proposed
   metadata cache, connection state machine, idle shutdown, security rules,
   implementation phases, and verification.
@@ -60,8 +63,8 @@ maintaining behavior or locating the authoritative repository reference.
   framing, lifecycle, tools, risk, progress, events, errors, and shutdown.
 - [External plugin runtime research](plugin-js-python-research.md) — benchmarked
   architecture decision, alternatives, implementation sequence, and deferrals.
-- [Agent Skills](skills.md) — `SKILL.md` discovery, trust, precedence,
-  progressive disclosure, and resource confinement.
+- [Agent Skills](skills.md) — Snow-specific installation, discovery,
+  activation, project trust, and safety.
 - [Tool routing](tool-routing.md) — deferred schemas, BM25 retrieval,
   `search_tools`, observability, and fallback behavior.
 
@@ -105,8 +108,10 @@ To reduce drift, use these documents as the primary references:
 | Installation and first run | [`getting-started.md`](getting-started.md) |
 | Project overview and contributor entry point | [`README.md`](../README.md) |
 | TUI/CLI operation | [`using-snow.md`](using-snow.md) |
+| Provider setup | [`providers.md`](providers.md) |
 | Runtime configuration | [`configuration.md`](configuration.md) |
-| Go embedding | [`sdk.md`](sdk.md) |
+| Go embedding quickstart | [`sdk.md`](sdk.md) |
+| Complete Go SDK behavior | [`sdk-reference.md`](sdk-reference.md) |
 | Foreign-process control | [`rpc.md`](rpc.md) |
 | External plugin ABI | [`plugin-protocol.md`](plugin-protocol.md) |
 | ChatGPT/Codex authentication | [`chatgpt-auth.md`](chatgpt-auth.md) |

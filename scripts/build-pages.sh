@@ -50,8 +50,7 @@ for pages_site_file in \
 	site/404.html \
 	site/examples/index.md \
 	site/examples/sdk/index.md \
-	site/pkg/snowsdk/index.md \
-	site/pkg/protocol/schema/rpc/v1/index.md
+	site/pkg/snowsdk/index.md
 do
 	pages_site_destination=${pages_site_file#site/}
 	pages_copy_file_as "$pages_site_file" "$pages_site_destination"
@@ -59,9 +58,9 @@ done
 
 for pages_public_document in \
 	docs/getting-started.md \
+	docs/providers.md \
 	docs/using-snow.md \
 	docs/configuration.md \
-	docs/chatgpt-auth.md \
 	docs/sessions.md \
 	docs/plan-mode.md \
 	docs/goals.md \
@@ -70,16 +69,12 @@ for pages_public_document in \
 	docs/mcp.md \
 	docs/plugins.md \
 	docs/security.md \
-	docs/sdk.md \
-	docs/rpc.md \
-	docs/user-input.md \
-	docs/plugin-protocol.md
+	docs/sdk.md
 do
 	pages_copy_file "$pages_public_document"
 done
 
 pages_copy_tracked examples/sdk
-pages_copy_tracked pkg/protocol/schema/rpc/v1
 
 find "$pages_output" -type f -name '*.md' -exec sh -c '
 	set -eu

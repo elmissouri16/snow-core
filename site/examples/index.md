@@ -7,17 +7,15 @@ permalink: /examples/
 
 # Snow examples
 
-The published documentation exposes only the maintained standalone Go SDK
-example. Use JSONL RPC to control Snow from a foreign-language host. Use
-External Plugin Protocol v2 only to implement a Snow plugin runtime. Neither
-protocol is a language-specific SDK.
+The published documentation includes the maintained standalone Go SDK example.
+Use it to open a Snow session, stream events, and close the session cleanly.
 
 - [Go SDK example]({{ '/examples/sdk/' | relative_url }})
 - [Go SDK guide]({{ '/docs/sdk.html' | relative_url }})
-- [JSONL RPC protocol]({{ '/docs/rpc.html' | relative_url }})
 
 ## Related documents
 
+- [Install Snow and run your first
+  prompt]({{ '/docs/getting-started.html' | relative_url }})
 - [Go SDK]({{ '/docs/sdk.html' | relative_url }})
-- [JSONL RPC]({{ '/docs/rpc.html' | relative_url }})
-- [External plugin protocol]({{ '/docs/plugin-protocol.html' | relative_url }})
+- [Security model]({{ '/docs/security.html' | relative_url }})

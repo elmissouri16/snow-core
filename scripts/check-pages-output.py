@@ -27,6 +27,11 @@ FORBIDDEN_PUBLIC_PATHS = {
     "bugs.html",
     "LICENSE",
     "docs/README.html",
+    "docs/chatgpt-auth.html",
+    "docs/rpc.html",
+    "docs/user-input.html",
+    "docs/plugin-protocol.html",
+    "docs/sdk-reference.html",
     "docs/releases.html",
     "docs/pages.html",
     "docs/style-guide.html",
@@ -41,7 +46,12 @@ FORBIDDEN_PUBLIC_PATHS = {
     "docs/chatgpt-auth-research.html",
     "docs/session-storage-internals.html",
 }
-FORBIDDEN_PUBLIC_PREFIXES = (".github/", "benchmarks/", "design-plans/")
+FORBIDDEN_PUBLIC_PREFIXES = (
+    ".github/",
+    "benchmarks/",
+    "design-plans/",
+    "pkg/protocol/schema/rpc/v1/",
+)
 
 
 class PageParser(HTMLParser):

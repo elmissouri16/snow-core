@@ -49,8 +49,8 @@ Environment overrides:
 
 | Variable | Effect |
 |---|---|
-| `SNOW_HOME` | Replaces the global `~/.snow` directory for config, auth, trust, caches, goals, themes, keys, and search policy |
-| `SNOW_SESSIONS_DIR` | Replaces only the session database root |
+| `SNOW_HOME` | Replaces the global `~/.snow` directory for config, auth, trust, caches, oversized goal content, themes, keys, and search policy |
+| `SNOW_SESSIONS_DIR` | Replaces the session database root, including durable Thread Goal state |
 | `OPENCODE_API_KEY` | Fallback credential for `opencode-go` and optional credential for `opencode-zen` |
 | `OPENAI_API_KEY` | Optional fallback Bearer credential for the legacy `openai-compatible` profile only |
 | `XDG_DATA_HOME` | Included when discovering compatible OpenCode ChatGPT credentials |
@@ -102,7 +102,7 @@ and project configuration and cannot change the launch baseline. Delete it when
 convenient; use `--permission` or the active-session TUI controls instead.
 
 The SDK intentionally defaults `PermissionMode` to `deny` when omitted. See
-[SDK permissions](sdk.md#permissions-and-security).
+[SDK permissions](sdk.md#handle-permissions-and-input).
 
 ## Global config.json
 
@@ -298,115 +298,66 @@ also have fixed runtime bounds.
 
 ## Providers
 
-`providers` maps provider IDs to:
+Use [Providers](providers.md) for authentication and launch commands. The
+`providers` object stores non-secret defaults for built-in providers and named
+OpenAI-compatible profiles:
 
 ```json
 {
-  "base_url": "https://example.invalid/v1",
-  "default_model": "model-id",
-  "stream_idle_timeout_ms": 600000
+  "default_provider": "opencode-zen",
+  "default_model": "big-pickle",
+  "providers": {
+    "opencode-zen": {
+      "default_model": "big-pickle"
+    },
+    "x-provider": {
+      "type": "openai-compatible",
+      "base_url": "https://gateway.example/v1",
+      "default_model": "model-id",
+      "stream_idle_timeout_ms": 600000
+    }
+  }
 }
 ```
 
-Snow constructs the active provider adapter and any explicitly configured
-subagent adapters during startup. Other configured adapters retain only a lazy
-constructor until their catalog, login flow, or provider selection is used.
-Their authentication descriptors remain available without allocating an HTTP
-client. Static configuration errors for the active provider still fail startup;
-an invalid inactive endpoint is reported when that provider is first used.
-Providers whose authentication descriptor is required do not publish static,
-cached, or remote models to user-facing inventories until a usable credential
-resolves. Logging out removes their cached picker entries immediately. Optional
-or keyless providers continue to publish models; the fresh-install default,
-`opencode-zen`, is intentionally anonymous.
+Each provider entry supports these fields:
 
-`stream_idle_timeout_ms` bounds silence between bytes on a live streaming
-response without imposing a total turn deadline. Omit it or set `0` for the
-conservative 10-minute default; set `-1` to disable the watchdog. Positive
-values above 86,400,000 ms (24 hours) are rejected. Any received bytes reset
-the timer.
+| Field | Purpose |
+|---|---|
+| `type` | Set to `openai-compatible` for a named compatible profile; omit it for built-in providers |
+| `base_url` | Override the provider endpoint; required for a named compatible profile |
+| `default_model` | Select the provider's default model |
+| `stream_idle_timeout_ms` | Bound silence between streamed bytes; `0` uses 10 minutes and `-1` disables the watchdog |
 
-`opencode-go` discovers available models from its live `/models` endpoint and
-fills omitted metadata from matching records in OpenCode's public models.dev
-catalog. Direct gateway fields win. Inference requests to OpenCode Go and
-OpenCode Zen include `X-Opencode-Session` with Snow's stable, opaque
-conversation-affinity value. Model discovery and unrelated compatible providers
-do not receive that header. Snow exposes only explicit per-model effort
-values from fields such as `thinking_levels`, `reasoning_efforts`, or
-`reasoning_options[type=effort].values`. A reasoning-support boolean or generic
-`reasoning_effort` parameter does not identify selectable values, so Snow does
-not infer the conventional `low`/`medium`/`high` set. Without an explicit list,
-only `off` is available.
+Positive `stream_idle_timeout_ms` values cannot exceed `86400000` (24 hours).
+A compatible endpoint may be an API root or a full URL ending in `/responses`
+or `/chat/completions`. If the endpoint cannot supply a usable model list, set
+`default_model` or launch Snow with `--model MODEL`.
 
-`opencode-zen` defaults to `https://opencode.ai/zen/v1` and `big-pickle`.
-It exposes only Snow's maintained non-deprecated promotional free allowlist,
-intersected with the live `/models` response. The catalog is authoritative:
-paid, unknown, or deprecated Zen IDs are rejected rather than accepted as
-custom models. A fresh bounded disk cache and then the bundled free policy
-records keep discovery failures nonfatal. The local transport map routes Muse
-Spark Contributor Free through Responses and the other maintained models
-through Chat Completions.
+Create a named profile with the CLI instead of editing it by hand:
 
-During provider catalog discovery against the canonical Zen endpoint, Snow
-concurrently fetches OpenCode's public models.dev catalog and dynamically merges
-`reasoning` plus `reasoning_options[type=effort]` for matching maintained Zen
-IDs. No model-specific effort list is pinned in Snow, and the Zen API key is
-never sent to models.dev. A custom Zen `base_url` disables this external
-metadata merge because the OpenCode catalog cannot be assumed to describe an
-unrelated gateway. Successfully fetched reasoning metadata is retained in the
-15-minute memory/disk catalog cache. If models.dev is unavailable, Snow uses the
-last verified cached reasoning metadata when present; otherwise it advertises
-no selectable override rather than guessing. Models without advertised effort
-controls remain on Snow's `off` setting, which omits an effort override and
-leaves the model's provider default behavior intact.
+```sh
+snow login openai-compatible \
+  --name x-provider \
+  --base-url https://gateway.example/v1
 
-`OPENCODE_API_KEY`, `snow login opencode-zen`, and `--api-key` are optional;
-with no resolved key Snow omits `Authorization` and uses anonymous access.
-Logout removes Snow's stored Zen key; an explicit `--api-key` or
-`OPENCODE_API_KEY` fallback remains active until the caller clears it. Snow
-never imports OpenCode's local `auth.json` or falls back from a free model to a
-paid one. Snow publishes verified context and output limits for all maintained
-Zen models, so the TUI footer and automatic compaction have concrete budgets.
-Big Pickle uses its stricter 160k input limit for compaction and exposes its
-advertised 200k total as the maximum context. If a Zen route terminates without
-text or a tool call, Snow reports an empty-completion error instead of silently
-accepting a blank assistant turn.
+snow --provider x-provider
+```
 
-For `openai-compatible`, `base_url` is required and may be an API root such as
-`https://gateway.example/v1` or a full URL ending in `/responses` or
-`/chat/completions`. Snow tries the sibling `/models` endpoint, prefers
-Responses/SSE, and automatically caches a Chat Completions/SSE fallback when
-the Responses endpoint returns HTTP 404, 405, or 501. When neither
-`default_model`/`--model` nor a valid discovered model is available, startup
-fails with an actionable model-selection error. ID-only model records remain
-tool-capable but do not guess vision, reasoning, verbosity, limits, or pricing.
-Because standard compatible `/models` responses do not reliably advertise
-reasoning efforts, switching from a reasoning-capable model to an ID-only model
-in the TUI resets the current effort to `off`; use `/thinking` only when the
-selected model advertises additional levels.
+The name becomes the provider selector and credential key. Names use 1–64
+lowercase letters, digits, or internal `.`, `_`, and `-` characters. The
+reserved IDs are `opencode-go`, `opencode-zen`, `chatgpt`, and `fake`. Named
+profiles keep endpoints, model defaults, timeouts, and credentials separate.
 
-The compatible provider's Bearer key is optional. Inside the TUI,
-`/login openai-compatible` captures a profile name, endpoint, and optional
-masked key. A blank profile name updates the legacy `openai-compatible` entry.
-Any other profile is stored as another `providers` map entry with
-`"type": "openai-compatible"`; its name must be 1-64 lowercase letters, digits,
-or internal `.`, `_`, and `-` characters and must not collide with a built-in
-provider. The profile name is also its provider/model selector and `auth.json`
-credential key.
+> **Warning:** Do not put API keys or OAuth tokens in `config.json`.
+> Credentials belong in `~/.snow/auth.json`; use `snow login`, `--api-key`, or
+> an environment variable.
 
-The top-level `snow login openai-compatible` remains key-only for the legacy
-profile. `snow login openai-compatible --name x-provider --base-url URL`
-creates or updates a named profile, after which `snow login x-provider`
-addresses it directly. `--api-key` binds to the selected active profile.
-`OPENAI_API_KEY` is a fallback only for the legacy profile; named profiles do
-not silently share it. Keyless gateways receive no `Authorization` header.
-
-> **Warning:** Do not put API keys or OAuth tokens in `config.json`. Credentials
-> belong in `~/.snow/auth.json`.
-
-Named profiles support independent endpoints, default models, stream timeouts,
-and Bearer keys. Compatible profiles still do not accept custom/Azure headers
-or query parameters. ChatGPT/Codex retains its dedicated backend and OAuth flow.
+`OPENCODE_API_KEY` applies to `opencode-go` and optional authenticated
+`opencode-zen` access. `OPENAI_API_KEY` applies only to the unnamed
+`openai-compatible` profile; named profiles do not inherit it. Compatible
+profiles support Bearer authentication but not custom Azure headers or query
+parameters.
 
 ## TUI
 

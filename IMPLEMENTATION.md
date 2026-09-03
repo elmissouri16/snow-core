@@ -1456,9 +1456,11 @@ out.
 `.github/workflows/pages.yml` stages a curated end-user guide set through the
 explicit bounded allowlist in `scripts/build-pages.sh`, builds it with pinned
 official GitHub Pages/Jekyll actions, and serially deploys the static site to the
-`github-pages` environment. `docs/getting-started.md` owns the public install and
-first-run sequence; `docs/README.md` remains the repository-only index for both
-user and maintainer documentation.
+`github-pages` environment. `docs/getting-started.md` owns installation and the
+first-run sequence, while `docs/providers.md` gives each supported provider an
+equal setup path. Pages publishes concise task guides; exhaustive RPC, plugin,
+ChatGPT authentication, SDK, and implementation references remain available in
+the repository through `docs/README.md`.
 
 ## Roadmap
 
@@ -1533,7 +1535,10 @@ that is fully covered elsewhere is referenced rather than repeated.
 - [Security model](docs/security.md) — consolidated privilege and threat boundaries
 - [Security reporting](SECURITY.md) — private vulnerability disclosure policy
 - [Release policy](docs/releases.md) — alpha versioning, verification, artifacts, and rollback
-- [SDK](docs/sdk.md) — public Go SDK lifecycle and API reference
-- [Sessions](docs/sessions.md) — pure-Go SQLite session storage and schema
+- [SDK](docs/sdk.md) — concise public Go SDK quickstart
+- [SDK reference](docs/sdk-reference.md) — complete lifecycle and API reference
+- [Sessions](docs/sessions.md) — user workflows for resume, branches, and forks
+- [Session storage internals](docs/session-storage-internals.md) — pure-Go
+  SQLite storage, schema, migrations, and projections
 - [Performance](docs/performance.md) — allocation ceilings and CI regression guard
 - [RPC](docs/rpc.md) — versioned JSONL framing, schemas, commands, and events

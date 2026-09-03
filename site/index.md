@@ -1,54 +1,47 @@
 ---
 layout: home
 title: Snow documentation
-description: Install Snow and learn to use, configure, extend, and integrate its coding agent.
+description: >-
+  Install Snow and learn to use, configure, and extend its coding agent.
 permalink: /
 ---
-
-## Start with a working agent
-
-Follow the guides in order if this is your first time using Snow:
-
-1. [Install Snow and run your first prompt][getting-started].
-2. [Configure your provider, model, and permissions][configuration].
-3. [Learn the interactive terminal and command-line workflows][using-snow].
-4. [Review the security boundaries][security] before granting broader access.
 
 > **Note:** Snow is alpha software. Commands, configuration, and public APIs may
 > change before v1, so use the guides for the version you have installed.
 
-## Choose what you want to do
+## Start
 
-### Work with the agent
+- [Install and first prompt][getting-started] — Install Snow and confirm that
+  the agent runs.
+- [Providers][providers] — Connect one of Snow's supported model providers.
+- [Using Snow][using-snow] — Learn the TUI and essential command-line controls.
+- [Configuration][configuration] — Set common defaults after the first run.
 
-| Goal | Guide |
-|---|---|
-| Return to a conversation or create another branch | [Sessions and branches][sessions] |
-| Separate investigation from implementation | [Plan Mode][plan-mode] |
-| Continue a bounded objective across turns | [Thread Goals][goals] |
-| Delegate focused work to child agents | [Subagents][subagents] |
+## Workflows
 
-### Add capabilities
+- [Sessions and branches][sessions] — Return to previous work or create a
+  branch.
+- [Plan Mode][plan-mode] — Investigate and prepare a plan without implementing.
+- [Thread Goals][goals] — Continue a bounded objective across turns.
+- [Subagents][subagents] — Delegate focused work to child agents.
 
-| Goal | Guide |
-|---|---|
-| Load reusable instructions and supporting resources | [Agent Skills][skills] |
-| Connect external tools and context servers | [Model Context Protocol][mcp] |
-| Add trusted extension behavior | [Plugins][plugins] |
+## Add capabilities
 
-### Integrate Snow
+- [Agent Skills][skills] — Install reusable instructions for Snow.
+- [MCP][mcp] — Connect a local or remote MCP server.
+- [Plugins][plugins] — Register a trusted Snow-specific extension.
 
-| Goal | Guide |
-|---|---|
-| Embed the agent in a Go application | [Go SDK][sdk] |
-| Control Snow from another process or language | [JSONL RPC][rpc] |
-| Handle questions requested by the model | [Model-requested input][user-input] |
-| Build a language-neutral external plugin | [Plugin protocol][plugin-protocol] |
+## Develop with Snow
+
+- [Go SDK][sdk] — Embed Snow in a Go application.
+- [Go SDK example][sdk-example] — Run the maintained standalone example.
+- [Advanced references on GitHub][advanced-references] — Find RPC, plugin,
+  model-input, and complete SDK references.
 
 [getting-started]: {{ '/docs/getting-started.html' | relative_url }}
+[providers]: {{ '/docs/providers.html' | relative_url }}
 [using-snow]: {{ '/docs/using-snow.html' | relative_url }}
 [configuration]: {{ '/docs/configuration.html' | relative_url }}
-[security]: {{ '/docs/security.html' | relative_url }}
 [sessions]: {{ '/docs/sessions.html' | relative_url }}
 [plan-mode]: {{ '/docs/plan-mode.html' | relative_url }}
 [goals]: {{ '/docs/goals.html' | relative_url }}
@@ -57,6 +50,5 @@ Follow the guides in order if this is your first time using Snow:
 [mcp]: {{ '/docs/mcp.html' | relative_url }}
 [plugins]: {{ '/docs/plugins.html' | relative_url }}
 [sdk]: {{ '/docs/sdk.html' | relative_url }}
-[rpc]: {{ '/docs/rpc.html' | relative_url }}
-[user-input]: {{ '/docs/user-input.html' | relative_url }}
-[plugin-protocol]: {{ '/docs/plugin-protocol.html' | relative_url }}
+[sdk-example]: {{ '/examples/sdk/' | relative_url }}
+[advanced-references]: https://github.com/elmissouri16/snow-core/blob/main/docs/README.md

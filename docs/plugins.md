@@ -1,265 +1,137 @@
-# Plugins
+# Set Up Snow Plugins
 
-Use plugins to add Snow-specific tools, lifecycle hooks, progress, and agent
-events. Go applications can register plugins in-process; JavaScript, Python,
-and other runtimes connect through Snow's external plugin protocol. External
-plugin processes stay alive while Snow is using them, so one package can expose
-several related tools.
-
-MCP and skills are intentionally separate. Use [MCP](mcp.md) for interoperable
-tools, resources, and prompts; use Snow plugins for Snow-specific lifecycle,
-private configuration, progress, and observation-only agent events. Skills are
-an instructional resource layer with dedicated activation tools.
+Plugins add Snow-specific tools, lifecycle hooks, progress, and agent events.
+Use an external executable with the Snow CLI, or register an in-process Go
+plugin when embedding Snow. Only install plugins you trust.
 
 ## On this page
 
-- [Go plugin API](#go-plugin-api)
-- [External configuration](#external-configuration)
-- [Manage plugins](#manage-plugins)
-- [Environment behavior](#environment-behavior)
-- [JavaScript and Python quickstart](#javascript-and-python-quickstart)
-- [Validate a runtime](#validate-a-runtime)
-- [Protocol v2 summary](#protocol-v2-summary)
-- [Security](#security)
+- [Choose plugins, MCP, or Agent Skills](#choose-plugins-mcp-or-agent-skills)
+- [Add an external plugin](#add-an-external-plugin)
+- [Enable or disable plugins](#enable-or-disable-plugins)
+- [Validate a plugin](#validate-a-plugin)
+- [Use an in-process Go plugin](#use-an-in-process-go-plugin)
+- [Safety](#safety)
+- [Related documents](#related-documents)
 
-## Go plugin API
+## Choose plugins, MCP, or Agent Skills
 
-A plugin has a stable manifest, registration phase, and idempotent close:
+Choose the smallest extension type that fits the task:
 
-```go
-p := myPlugin{}
-s, err := snowsdk.Open(ctx, snowsdk.Options{
-    NoSession: true,
-    PermissionMode: "allow",
-    GoPlugins: []plugin.Plugin{p},
-})
-```
+| Capability | Use |
+|---|---|
+| Reusable instructions and resources | [Agent Skills](skills.md) |
+| Interoperable external tools, resources, or prompts | [MCP](mcp.md) |
+| Snow-specific tools, hooks, progress, or events | Plugins |
 
-`Plugin.Register` receives a scoped `plugin.Registrar`. Tool names are local to
-the plugin and exposed to the model as `plugin_<plugin-id>_<tool-name>`.
-Duplicate IDs, invalid identifiers, malformed schemas, and duplicate names are
-rejected before the agent starts.
+## Add an external plugin
 
-Tools declare a risk (`read`, `write`, `exec`, or `network`) and all calls pass
-through Snow's central permission service. Tool contexts carry cancellation,
-session/cwd/call identity, and a bounded progress callback.
-
-Tools may set optional `protocol.ToolDiscovery` metadata. The default is direct
-exposure; `mode: deferred` keeps the full schema in the registry and lets the
-local router select it per prompt. Routing never bypasses execution
-permissions.
-
-Go plugins may subscribe to versioned agent events. Handlers are
-observation-only: they cannot mutate, veto, or reorder the loop, and panics are
-isolated from the host. Delivery is best effort: shutdown stops new emissions
-but does not wait for a blocked observer, preventing observer-driven deadlocks.
-
-## External configuration
-
-Global configuration and SDK/CLI options use the same `PluginSpec`; the
-representative example below is not exhaustive. Fields such as `cwd`, frame and
-input/progress/concurrency limits, `capabilities`, and private `config` are
-specified in [External plugin protocol v2](plugin-protocol.md#configuration):
+An external plugin declaration identifies the process Snow should run. A
+minimal `manifest.json` is:
 
 ```json
 {
-  "plugins": [
-    {
-      "id": "my-tools",
-      "command": [
-        "/absolute/path/to/python",
-        "-u",
-        "/absolute/path/to/plugin.py"
-      ],
-      "enabled": true,
-      "timeout_ms": 120000,
-      "max_output_bytes": 262144,
-      "env": ["PATH=/usr/local/bin:/usr/bin:/bin"]
-    }
-  ]
+  "id": "my-tools",
+  "command": ["/absolute/path/to/plugin-executable"],
+  "enabled": false
 }
 ```
 
-`command` is argv. Snow never invokes `sh -c` or parses a shell string.
+Register the declaration, review it, and enable it for the next Snow launch:
 
 ```sh
-snow --plugin /absolute/path/to/executable
+snow plugin add manifest.json
+snow plugin get my-tools
+snow plugin enable my-tools
+snow
+```
+
+`snow plugin add` stages a plugin disabled by default. Use `--enable` only when
+you have already reviewed the executable and want it enabled on the next
+launch:
+
+```sh
+snow plugin add manifest.json --enable
+```
+
+Load a manifest or executable for one launch without saving it:
+
+```sh
+snow --plugin /absolute/path/to/plugin-executable
 snow --plugin manifest.json
+```
+
+Use a manifest when an interpreter and script require separate command
+arguments. The `command` field is an argument array; Snow does not interpret a
+shell command string.
+
+## Enable or disable plugins
+
+Inspect and change saved declarations without starting them:
+
+```sh
+snow plugin list
+snow plugin list --all
+snow plugin get my-tools
+snow plugin enable my-tools
+snow plugin disable my-tools
+snow plugin remove my-tools
+```
+
+Add `--project` to `add`, `enable`, `disable`, or `remove` to edit the current
+project's `.snow/config.json`. Snow loads project plugins only after project
+trust is allowed. Restart Snow after a saved enable, disable, or removal.
+
+Disable every configured plugin for one launch with:
+
+```sh
 snow --no-plugins
 ```
 
-`--no-plugins` suppresses all declarations for that launch and records a
-diagnostic for each skipped declaration. The executable shorthand derives an ID
-and enables the plugin. A manifest is required when an interpreter and script
-need separate argv entries.
+## Validate a plugin
 
-## Manage plugins
-
-Configuration can be inspected and changed without starting any plugin:
-
-```sh
-snow plugin
-snow plugin list [--all] [--json]  # alias: ls
-snow plugin get my-tools [--json]
-snow plugin add manifest.json [--project] [--replace] [--enable] [--json]
-snow plugin enable my-tools [--project] [--json]
-snow plugin disable my-tools [--project] [--json]
-snow plugin remove my-tools [--project] [--json]
-```
-
-`plugin add` stages a declaration with `enabled: false` by default, regardless
-of the source manifest. Use `--enable` only when registration and execution on
-the next launch were reviewed together. `enable`, `disable`, and `remove` also
-take effect on the next launch; no management command hot-loads code. A project
-enable/disable requires an existing project declaration. Snow never copies a
-global command, environment, or private config into the usually commit-visible
-project file. Add and replace preserve unrelated configuration fields, while
-list/get redact child environments, credential-shaped command/header arguments,
-and private runtime configuration.
-
-Global, trusted-project, and repeated explicit `--plugin` declarations merge by
-ID in that order. A higher-precedence disabled declaration still suppresses a
-lower enabled declaration. `plugin list --all` includes lower-precedence entries
-with `shadowed: true`; ordinary list/get report only effective declarations.
-Duplicate IDs inside one persisted scope are rejected. The inherited
-`--config PATH` flag selects a nondefault global configuration file for plugin
-subcommands and cannot be combined with `--project` mutations.
-
-Project `.snow/config.json` entries are loaded only after project trust has an
-explicit `allow` decision (or always-trust policy). Denied or unresolved project
-entries are not parsed by inspection commands and are reported as
-trust-blocked. Disabled entries are not spawned. An explicit `--project`
-mutation does not change project trust. Snow does not scan executable
-directories and has no plugin marketplace.
-
-## Environment behavior
-
-Snow intentionally supplies the configured `env`; omitted `env` means an empty
-child environment. Entries must be unique literal `NAME=VALUE` strings; blank,
-whitespace-bearing, duplicate, or assignment-free names are rejected. This
-reduces accidental credential inheritance but can affect interpreter shebangs,
-subprocess lookup, locale, and certificate configuration.
-
-When `command[0]` has no path separator, Go resolves it using Snow's launch
-environment before applying the configured child `env`. The child's `PATH`
-affects only the running plugin and subprocesses it starts; it does not select
-the already resolved interpreter. Plugin `env` values are literal and do not
-expand `${VAR}`.
-
-Prefer an absolute interpreter path, especially a Python virtual environment's
-interpreter. Otherwise provide a deliberately minimal `PATH`. Never put secrets
-in a committed manifest; use a plugin-owned secure credential store or inject a
-runtime-only `PluginSpec` from an embedding host.
-
-## JavaScript and Python quickstart
-
-From the repository root:
-
-```sh
-snow plugin check examples/plugins/javascript/manifest.json
-snow plugin check examples/plugins/python/manifest.json
-
-snow --plugin examples/plugins/javascript/manifest.json
-snow --plugin examples/plugins/python/manifest.json
-```
-
-The checked-in examples use only Node/Python standard libraries. Their manifests
-use runtime names plus a minimal POSIX `PATH` for readability; production
-declarations should replace those values with explicit paths.
-
-Stdout belongs exclusively to JSON-RPC frames. JavaScript plugins must log with
-`console.error` or stderr; Python plugins must configure logging/printing for
-stderr.
-
-## Validate a runtime
+Start one plugin in isolation and inspect the tools and capabilities it reports:
 
 ```sh
 snow plugin check manifest.json
-snow plugin check /absolute/path/to/executable
-snow plugin check manifest.json --json
-snow plugin check manifest.json --timeout 20s --cwd /path/to/project
 ```
 
-`plugin check` accepts a manifest or executable shorthand. Its overall startup
-and validation timeout defaults to 10 seconds. It starts no provider or agent
-session and:
+Use `--json` for structured output. Validation starts the executable, so apply
+the same trust decision you would use for a normal launch.
 
-- starts the configured process;
-- validates the manifest ID/version/protocol and tool schemas;
-- reports initialization time and effective cwd;
-- lists effective plugin/tool capabilities, tools, risks, discovery modes, and
-  subscribed events;
-- includes informational negotiated limits;
-- prints bounded diagnostics with best-effort redaction of common credential
-  assignments/headers;
-- verifies graceful shutdown.
+Plugin authors should use the
+[advanced plugin protocol reference](https://github.com/elmissouri16/snow-core/blob/main/docs/plugin-protocol.md)
+for the complete external process contract.
 
-Redaction is defense in depth, not a secret-handling API. Plugins must never
-emit credentials to stderr, protocol logs, results, progress, or errors.
+## Use an in-process Go plugin
 
-An explicit check runs even when the declaration has `enabled: false`; it does
-not modify stored configuration.
+Go applications can pass implementations of `pkg/plugin.Plugin` through the
+Snow SDK:
 
-## Protocol v2 summary
+```go
+session, err := snowsdk.Open(ctx, snowsdk.Options{
+    NoSession: true,
+    GoPlugins: []plugin.Plugin{myPlugin},
+})
+```
 
-The wire transport is JSON-RPC 2.0 with one object per LF-terminated line.
-Request IDs are strings and one host reader correlates concurrent responses.
+See the [Go SDK](sdk.md) for session setup and lifecycle. In-process plugins are
+part of the embedding application and are not managed by `snow plugin`.
 
-Host requests:
+## Safety
 
-- `initialize`: protocol/host version, cwd, session ID, capabilities, config;
-- `tools/list`: authoritative tool descriptors;
-- `tools/call`: original name, call ID, arguments, deadline, cancellation hint;
-- `shutdown`: graceful close.
+> **Warning:** Plugin processes and in-process plugins run with the user's
+> operating-system privileges. Project trust controls whether a declaration is
+> loaded; it does not sandbox the loaded code.
 
-Plugin-to-host notifications:
-
-- `notifications/progress`: bounded progress for a non-empty call ID;
-- `notifications/log`: bounded diagnostics.
-
-Host-to-plugin notifications:
-
-- `notifications/event`: sanitized events listed in `supported_events`;
-- `notifications/cancelled`: best-effort cancellation by request/call ID.
-
-Tool descriptors may declare `risk` and per-tool capabilities. Omitted risk
-fails closed to `exec`; invalid risks reject initialization. Result `details`
-are preserved as private host metadata and are not sent to the model.
-
-`supported_events` is an explicit subscription. Empty or omitted lists receive
-no events. Delivery uses a bounded queue and is best effort, so plugins must not
-treat events as a reliable transaction log.
-
-Frames, inputs, results, progress, stderr, logs, event queues, deadlines, and
-concurrent calls are bounded. EOF, crashes, malformed frames, JSON-RPC errors,
-timeouts, and cancellation become isolated errors instead of panics. Processes
-close in reverse load order.
-
-See [External plugin protocol v2](plugin-protocol.md) for every field and frame.
-
-## Security
-
-Plugins execute with the user's OS privileges. Process separation provides a
-crash/termination boundary, not a sandbox. Trust controls whether project input
-is loaded; it does not confine an already loaded plugin.
-
-Tool risk is plugin-declared metadata used by the central permission service;
-capabilities are retained descriptor/discovery metadata and do not
-independently authorize a call. Neither field stops the process from accessing
-files, network, or subprocesses directly. Only trusted plugins should receive
-`read`, `write`, or `network` classifications instead of the safe `exec`
-default.
-
-Use containers, a VM, or an OS sandbox for untrusted code. Snow avoids implicit
-environment inheritance, does not intentionally log credentials, applies
-best-effort common-credential redaction to diagnostics, and bounds plugin I/O.
-
-Snow's lifecycle draws inspiration from Pi's extension/progressive-disclosure
-model and OpenCode's explicit permission-aware plugins, but does not promise API
-compatibility with either.
+Review the executable, arguments, working directory, environment, private
+configuration, and requested capabilities before enabling a plugin. Use a
+container, virtual machine, or operating-system sandbox for untrusted code.
 
 ## Related documents
 
-- [External plugin protocol v2](plugin-protocol.md)
-- [MCP](mcp.md)
-- [Agent Skills](skills.md)
+- [External plugin protocol v2](https://github.com/elmissouri16/snow-core/blob/main/docs/plugin-protocol.md)
+  — implement an external plugin runtime.
+- [MCP](mcp.md) — connect interoperable external tools and resources.
+- [Agent Skills](skills.md) — install reusable instructions and resources.
+- [Security model](security.md) — understand extension authority and trust.

@@ -13,7 +13,6 @@
   --mint: #8cf0cd;
   --warning: #ffd38a;
   --code: #06101b;
-  --shadow: 0 22px 60px rgba(0, 0, 0, 0.28);
   --sidebar: 17rem;
   --content: 53rem;
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -464,42 +463,18 @@ summary:focus-visible {
 }
 
 .home-hero {
-  position: relative;
-  overflow: hidden;
-  margin-bottom: 2.5rem;
-  padding: clamp(2rem, 6vw, 4.25rem);
+  margin-bottom: 2rem;
+  padding: clamp(2rem, 5vw, 3rem);
   border: 1px solid var(--line-strong);
   border-radius: 1rem;
-  background:
-    linear-gradient(135deg, rgba(105, 213, 255, 0.13), transparent 45%),
-    linear-gradient(315deg, rgba(140, 240, 205, 0.08), transparent 40%),
-    var(--bg-elevated);
-  box-shadow: var(--shadow);
-}
-
-.home-hero::after {
-  position: absolute;
-  top: -5rem;
-  right: -4rem;
-  width: 17rem;
-  height: 17rem;
-  border: 1px solid rgba(105, 213, 255, 0.22);
-  border-radius: 50%;
-  box-shadow: 0 0 0 2.7rem rgba(105, 213, 255, 0.025), 0 0 0 5.4rem rgba(105, 213, 255, 0.018);
-  content: "";
-}
-
-.home-hero > * {
-  position: relative;
-  z-index: 1;
+  background: var(--bg-elevated);
 }
 
 .home-hero h1 {
-  max-width: 12ch;
   margin: 0.55rem 0 1rem;
-  font-size: clamp(2.7rem, 7vw, 5.4rem);
-  line-height: 0.98;
-  letter-spacing: -0.065em;
+  font-size: clamp(2.2rem, 5vw, 3.65rem);
+  line-height: 1.05;
+  letter-spacing: -0.052em;
 }
 
 .home-hero p {
@@ -670,10 +645,45 @@ summary:focus-visible {
     padding: 0;
   }
 
+  .prose h1,
+  .prose h2,
+  .prose h3,
+  .prose h4,
+  .prose strong,
+  .prose th {
+    color: #111;
+  }
+
   .prose p,
   .prose ul,
   .prose ol,
-  .prose td {
+  .prose td,
+  .prose blockquote p {
     color: #222;
+  }
+
+  .prose a {
+    color: #005a7a;
+  }
+
+  .prose blockquote {
+    border-color: #777;
+    background: #f4f7f9;
+  }
+
+  .prose th {
+    background: #e9eef2;
+  }
+
+  .prose code {
+    color: #111;
+    border-color: #bbb;
+    background: #f3f5f7;
+  }
+
+  .prose pre,
+  .prose pre code {
+    color: #111;
+    background: #f3f5f7;
   }
 }

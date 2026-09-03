@@ -1,176 +1,47 @@
 # Persistent Thread Goals
 
-Snow can attach one objective to each session branch. SQLite sessions persist
-goals across processes; ephemeral `--no-session` sessions support the same goal
-operations for the process lifetime only. This document covers statuses,
-budgets and accounting, compaction, the model-facing tools, and the SDK, RPC,
-and TUI surfaces.
+A Thread Goal gives one session branch a continuing objective. Snow can keep
+working through private serial turns until the goal completes, pauses, becomes
+blocked, reaches a usage limit, or reaches its optional token budget.
 
-## On this page
+## Create a goal
 
-- [Lifecycle and statuses](#lifecycle-and-statuses)
-- [Creation and budgets](#creation-and-budgets)
-- [Accounting and stopping](#accounting-and-stopping)
-- [Compaction interaction](#compaction-interaction)
-- [TUI commands](#tui-commands)
-- [SDK and RPC](#sdk-and-rpc)
-- [Model contract and privacy](#model-contract-and-privacy)
-- [Related documents](#related-documents)
+Use the TUI command with an optional token budget:
 
-## Lifecycle and statuses
-
-Statuses are `active`, `paused`, `blocked`, `usage_limited`, `budget_limited`,
-and `complete`. `complete` and `budget_limited` are terminal. Pause is valid
-only from active; resume is valid from paused, blocked, usage-limited, or an
-active goal with a deferred continuation. Editing rotates the goal ID,
-reactivates the objective, preserves its accumulated usage and budget, and
-makes in-flight updates for the old objective stale.
-
-Active goals continue through private serial turns in Default mode. Automatic
-goal turns do not expose `ask_user` or `request_user_input`, and execution
-rejects either name even if a provider emits an undeclared call; autonomous work
-must continue from the objective and available evidence or use the goal blocker
-lifecycle instead of waiting for interactive input. Ordinary user-originated
-Default and Plan turns retain their mode-appropriate input tool.
-
-Plan mode cancels and joins automatic goal work, never launches goal turns, and
-never charges planning work. Returning to Default resumes only an active,
-non-deferred goal. User prompts may temporarily interrupt eligible automatic
-work, but they never clear a persisted continuation deferral.
-
-## Creation and budgets
-
-`create_goal` creates a goal on the active branch; the TUI equivalent is
-`/goal <objective>`. A token budget is optional and must be positive:
-
-```sh
+```text
 /goal ship and verify the parser
 /goal --budget 20000 ship and verify the parser
 ```
 
-Creating a replacement while an unfinished goal exists requires explicit
-confirmation. A failed edit or replacement restarts the unchanged prior goal
-when it had been eligible for automatic work. Empty-ID clear is a
-compare-and-swap no-op only when no goal exists; it can never wildcard-delete a
-concurrently created goal.
+A goal belongs only to the active branch and requires a persisted session.
+Durable sessions restore it after a restart; Thread Goals are unavailable with
+`--no-session`. Replacing an unfinished goal requires confirmation.
 
-## Accounting and stopping
+Goals continue only in Default collaboration mode. Automatic goal turns cannot
+ask for interactive user input; if the agent needs information, it should mark
+the goal blocked and explain what is missing.
 
-### Usage accounting
+## Understand goal status
 
-Provider usage events inside one request are cumulative snapshots, so Snow
-charges only that request's final snapshot. Final snapshots are summed across
-tool-result requests in the logical turn. Accounting happens once, before any
-terminal error classification.
+| Status | Meaning |
+|---|---|
+| `active` | Eligible for automatic continuation |
+| `paused` | Stopped until you resume it |
+| `blocked` | Waiting for missing information or another condition |
+| `usage_limited` | Stopped by provider or runtime usage limits |
+| `budget_limited` | Reached the goal token budget; terminal |
+| `complete` | Objective finished; terminal |
 
-Elapsed usage is in-process monotonic work time, including sub-second
-remainder carried across turns. Process downtime is not charged. Goal IDs are
-optimistic stale-write guards. Objective replacement and status transitions
-are compare-and-swap operations, while SQLite accounting uses one atomic
-update even when the same database is opened by multiple handles.
+Transient provider failures use bounded retries. Cancellation, a provider
+quota, a budget limit, or repeated non-progress stops further continuation
+instead of looping indefinitely.
 
-A stale identity or state transition returns a typed conflict containing the
-current non-sensitive goal ID, status, session, branch, and controller-binding
-generation. `update_goal` validates canonical IDs and tells the model to refresh
-with `get_goal`; it never substitutes the replacement ID automatically. If the
-same unresolved terminal conflict recurs across three consecutive automatic
-goal turns, Snow first defers continuation and then pauses the still-current
-goal. Failed tool results do not count as productive progress merely because a
-provider finished streaming their arguments.
+## Control a goal
 
-When provider or catalog pricing is available, the same atomic operation also
-accumulates the per-request estimated cost by currency. Cached input retains
-its discounted class rather than being priced as ordinary input. Missing
-pricing leaves cost absent; Snow never invents a price. These estimates are
-not provider invoices.
-
-### Budget crossing
-
-Exact budget crossing atomically changes the goal to `budget_limited`; a
-successful crossing gets one final budget-summary turn. If the crossing request
-itself fails, Snow preserves budget precedence but does not issue a provider
-request already known to be impossible.
-
-### Failure classification
-
-Tool, context, persistence, and accounting failures immediately stop an active
-goal as `blocked`; hard provider quota/payment exhaustion becomes
-`usage_limited`. Structured network, HTTP 408/425/5xx, stream interruption,
-overload, and temporary 429 failures use the centralized goal retry profile:
-up to 30 attempts within 30 minutes by default, with exponential jittered
-backoff capped at two minutes and provider `Retry-After` honored as a minimum.
-Every wait remains responsive to pause, abort, preemption, and shutdown.
-
-Before provider activity, Snow safely repeats the side-effect-free request.
-After partial activity, it persists a failed boundary and issues a new recovery
-continuation from durable conversation and completed tool results; incomplete
-streamed tool calls are never dispatched. Exhausted transport outages pause the
-goal, while exhausted temporary throttling becomes `usage_limited`. Accounting
-errors never permit another autonomous turn, and exact goal-budget crossing
-retains precedence. This host error classification is distinct from a model
-declaring an external blocker. Every `blocked` transition stores a bounded
-`blocked_reason`: host failures use the underlying failure, while model updates
-must supply a concise reason naming the audited external blocker. The reason is
-cleared when the goal resumes or its objective is revised. A blocked goal
-migrated from a pre-version-10 session has no historical reason and displays an
-explicit fallback instead.
-
-On restart, an interrupted read-only tool can be represented by a synthetic
-retryable result. An unresolved write, exec, network, delegation, or unknown
-operation has an uncertain external outcome, so Snow repairs transcript pairing
-but durably defers the active goal instead of auto-resuming it.
-
-Three automatic turns with no text or tool progress conservatively pause the
-goal and emit an error; they do not falsely claim that the blocked audit
-succeeded. Automatic requests also yield briefly between turns, preventing an
-immediate-response provider from hot-spinning even while useful text/tool work
-continues.
-
-## Compaction interaction
-
-At safe boundaries between provider/tool cycles and complete goal turns, Snow
-automatically compacts when the latest provider-reported request usage reaches
-the configured percentage of the model context window (80% by default), or
-when safely compactable completed tool history reaches its independent budget
-(20% by default). Set `compaction.auto_threshold_percent` or
-`compaction.tool_history_budget_percent` to `0` to disable the corresponding
-trigger; the older `goal_auto_threshold_percent` name is accepted only as a
-legacy alias for the pressure threshold. Planning first tries to preserve the
-configured number of complete recent turns. Completed tool-call/result cycles
-from one long assistant-originated goal turn remain eligible checkpoint
-boundaries both while that turn is active and after its terminal assistant
-response. If the goal turn itself causes pressure and there is no ordinary
-turn-prefix plan, Snow checkpoints the old prefix and retains the configured
-number of newest complete cycles instead (plus the unresolved current cycle
-while active). The goal objective is still injected separately on every
-request. This explicit progress fallback also works after an existing
-checkpoint and when an earlier conversation turn precedes the long goal; it is
-not applied to an exact user-originated recent turn. Compaction errors, or
-pressure with neither an older turn nor enough completed cycles available,
-block the active goal rather than issuing another request with unsafe context
-pressure.
-
-`Abort` cancels and joins any admitted turn. If goal work was active, even in
-the small window before its first provider call, it persists a continuation
-deferral. A deferred active goal stays idle across reopen and ordinary prompts
-until an explicit continue or resume clears that deferral. Manual `/compact`
-pauses automatic goal continuation after writing its summary; `/goal resume`
-continues both paused goals and active-but-deferred goals. Threshold-triggered
-automatic compaction resumes on its own.
-
-Pause, edit, and clear remain usable while automatic work runs. Resume,
-session, branch, fork, compaction, and shutdown paths cancel and join owned
-work before changing state. Compaction resumes only a goal that was already
-running; it cannot bypass surface readiness, and aborting compaction persists
-the deferral. A fork gets an independent managed objective file, so clearing
-either branch cannot remove the other's objective.
-
-## TUI commands
+Use these TUI commands:
 
 ```text
 /goal
-/goal ship and verify the parser
-/goal --budget 20000 ship and verify the parser
 /goal edit revised objective
 /goal replace revised objective
 /goal pause
@@ -178,79 +49,45 @@ either branch cannot remove the other's objective.
 /goal clear
 ```
 
-Restored paused, blocked, and usage-limited goals display resume guidance.
-When a goal becomes blocked, the TUI writes `Goal blocked: <reason>` into the
-transcript; restored blocked goals and `/goal` inspection show the same durable
-reason, and human-readable print mode emits a `[reason: ...]` line. The sticky
-header, footer, and `/goal` output refresh cumulative usage after every
-provider response within the goal, rather than waiting for the admitted goal
-turn to finish. The compact label uses `tks`, for example
-`2.1m tks · est. $0.0183`. Costs persist across resume, edit, and fork and are
-grouped by currency. On the version-8 migration, Snow backfills an older goal
-only when priced historical messages exactly match its persisted token total;
-ambiguous histories remain cost-free rather than showing a misleading
-estimate.
+- `/goal` shows the current objective, status, usage, and budget.
+- `edit` revises the objective while preserving accumulated usage and the
+  budget.
+- `replace` discards the unfinished goal and creates a new goal with fresh
+  accounting and no token budget.
+- `pause` stops automatic work without deleting the goal.
+- `resume` restarts an eligible paused, blocked, or usage-limited goal.
+- `clear` removes the goal from the branch.
 
-## SDK and RPC
+Pressing Ctrl+C or Esc during automatic goal work aborts the turn and defers
+continuation. Use `/goal resume` when you are ready to continue.
 
-The SDK exposes `Goal`, `CreateGoal`/`SetGoal`, `EditGoal`, `PauseGoal`,
-`ResumeGoal`, `ClearGoal`, `ContinueGoal`, `ReadyGoals`, and a context-aware
-`Abort`. SDK construction deliberately does not start persisted automatic work
-before the embedding host can subscribe. The host should subscribe, emit or
-inspect `StateEvent`, then call `ReadyGoals`; that publishes the initial goal
-snapshot and starts only an active, non-deferred Default-mode goal.
+## Use goals with Plan Mode
 
-RPC commands are `goal_get`, `goal_set`/`goal_create`, `goal_edit`,
-`goal_pause`, `goal_resume`, `goal_clear`, and `goal_continue`; successful
-responses use `data`. `ThreadGoal.blocked_reason` contains the durable reason
-when status is `blocked`; `ThreadGoal.estimated_costs` is an optional array of
-currency-bearing `Cost` totals. `session_info.goal` includes the same fields.
-Print/JSON, RPC, and TUI install event observers before they signal goal
-readiness.
+Entering Plan Mode stops and waits for automatic goal work. Planning turns do
+not consume the goal budget, and Snow does not launch new automatic goal turns
+until the branch returns to Default mode.
 
-Agent events are delivered by one ordered dispatcher rather than on provider
-or tool worker goroutines. Subscriber payloads are deep copies. A subscriber
-can therefore invoke prompt, model, mode, goal, or close controls without
-holding goal locks or waiting on the worker that is invoking it. A
-dispatcher-reentrant prompt that requests manual input fails that tool call
-fast unless an in-process SDK handler can answer it; this prevents waiting for
-an event that the same dispatcher would have to deliver.
+A goal remains attached to its branch during compaction. Snow includes a
+compact status reminder in provider context so the objective survives long
+conversations without repeatedly copying its full text.
 
-## Model contract and privacy
+## Review usage and privacy
 
-Direct `get_goal`, `create_goal`, and `update_goal` tools are registered
-normally. Models may set only `complete` or `blocked`. Completion requires a
-direct evidence audit. A blocked update must include `reason`. It has a
-mechanical minimum of three goal turns, and the steering prompt requires the
-same true external blocker on all three; blocker identity remains a
-prompt-audited semantic claim, matching the Codex contract. Resume and
-objective edit reset that audit and clear the stored reason.
-Pause, resume, clear, and limit states remain host-controlled.
+Goal usage includes provider input, cached input, output, reasoning, and tool
+requests from automatic work. When provider pricing is available, Snow may
+also show estimated cost. Provider usage remains authoritative.
 
-Snow includes the current objective and remaining budget on each goal-bearing
-provider request as trusted host-generated context. This guidance is separate
-from `system_prompt_file`, is not persisted as visible conversation text, and
-cannot be rewritten by repository instructions. Goal tool previews are private;
-permission, routing, and session-summary events omit objective text.
+Goal text is private session state and is not published in summary events.
+However, Snow sends the active objective to the selected model provider while
+working on it. Do not put credentials or unnecessary sensitive data in a goal.
 
-Objectives over 8 KiB by byte length are atomically materialized under
-`SNOW_HOME/goals/<session>/<goal-id>/goal-objective.md`. Directories are real
-(non-symlink) `0700` directories and the regular file is `0600`; objectives
-are bounded to 128 KiB. Reads, writes, renames, and cleanup use Go's
-descriptor-anchored `os.Root` API and remove only the expected file plus an
-empty owner directory, closing symlink-swap and recursive-delete races.
-
-The persisted public goal contains a short reference; the controller resolves
-only its own goal-ID-owned, root-confined file and injects the actual escaped
-text privately. The model does not need broad `SNOW_HOME` read or shell
-access. Replacement, edit, and clear remove only validated owned files; forged
-reference-shaped objective text cannot trigger deletion. Snow does not invent
-image attachments.
+Subagents do not receive the root objective automatically. Give each child a
+focused task and assume every child incurs separate provider usage.
 
 ## Related documents
 
 - [Plan Mode](plan-mode.md)
-- [Sessions](sessions.md)
-- [SDK](sdk.md)
-- [RPC](rpc.md)
+- [Sessions and branches](sessions.md)
 - [Using Snow](using-snow.md)
+- [Go SDK](sdk.md)
+- [Security model](security.md)

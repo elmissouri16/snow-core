@@ -149,6 +149,9 @@ building an RPC client; RPC is Snow JSONL, not JSON-RPC 2.0.
 
 ## Providers
 
+Use the concise [provider setup guide](docs/providers.md) to connect any
+supported provider.
+
 | Provider | ID | Authentication | Runtime |
 |---|---|---|---|
 | OpenCode Go | `opencode-go` | API key | OpenAI-compatible chat completions/SSE with live model discovery enriched by models.dev metadata |
