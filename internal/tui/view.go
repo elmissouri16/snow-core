@@ -237,6 +237,12 @@ func (m *Model) currentHeaderStatus() string {
 	if m.pickInfo {
 		status = "inspect"
 	}
+	if m.updateOfferVisible() {
+		status = "update available"
+	}
+	if m.updateInstallProgressVisible() {
+		status = "installing update"
+	}
 	if m.restartPromptVisible() {
 		status = "restart"
 	}
@@ -327,6 +333,10 @@ func (m *Model) View() string {
 	}
 	if m.restartPromptVisible() {
 		frame = m.overlayRestartPrompt(frame)
+	} else if m.updateInstallProgressVisible() {
+		frame = m.overlayUpdateInstallProgress(frame)
+	} else if m.updateOfferVisible() {
+		frame = m.overlayUpdateOffer(frame)
 	} else if m.loginModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlayLoginModal(frame)
 	} else if m.modelModalVisible() && !m.permPending && !m.userInputPending {

@@ -5,6 +5,31 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] - 2026-09-04
+
+This alpha fixes native installation of published release archives, removes
+background archive downloads and automatic installation, and keeps every
+approved download visible through completion.
+
+### Added
+
+- Added a foreground installation card with live archive byte counts,
+  percentage, progress bar, checksum/archive verification status, and final
+  installation status.
+
+### Changed
+
+- Removed automatic update installation. Opt-in startup checks now fetch only
+  release metadata and require an explicit **Install update** or **Skip for
+  now** decision before any archive download or executable modification;
+  legacy `auto_update` configuration is ignored.
+
+### Fixed
+
+- Fixed native self-update rejecting valid large release archives because the
+  gzip checksum trailer had not been consumed when strict trailing-data
+  validation ran.
+
 ## [0.1.0-alpha.3] - 2026-09-03
 
 This alpha adds opt-in release checks and native self-updates to the interactive

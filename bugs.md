@@ -720,3 +720,55 @@ The focused Pages tests assert the heading color and other print selectors; the
 complete support-script suite, official GitHub Pages Jekyll image, and rendered
 site validator pass. A headless Chrome print of the provider guide produced a
 PDF whose content stream contains the expected `#111` text drawing color.
+
+## BUG-016: Native updater rejects valid release archives
+
+- **Status:** Resolved in the working tree
+- **Severity:** High
+- **Surface:** Interactive native self-update installation
+- **Observed:** Installing published `v0.1.0-alpha.3` from `v0.1.0-alpha.2`
+
+### Expected behavior
+
+After the release archive passes checksum and strict member validation, the
+native updater should validate the staged binary and atomically install it.
+
+### Actual behavior and impact
+
+The updater reports `release archive has trailing or invalid data` for the
+valid published archive even though the release workflow and external checksum
+verification accept it. The tar reader reaches the end-of-archive marker before
+the gzip reader consumes and validates the remaining gzip trailer, so the
+underlying-reader length check mistakes unread valid framing for appended data.
+Users cannot install the release through the new native update path.
+
+### Reproduction
+
+1. Run the published `v0.1.0-alpha.2` binary on supported macOS/Linux hardware.
+2. Check for `v0.1.0-alpha.3` and select installation, or enable automatic
+   installation.
+3. Observe `update: release archive has trailing or invalid data`.
+4. Independently verify the same archive against `SHA256SUMS` and extract it
+   successfully.
+
+### Remediation requirements
+
+- Drain the validated gzip member through EOF after tar reaches its end marker
+  so its checksum/trailer is consumed before testing for appended bytes.
+- Continue rejecting a second gzip member and arbitrary trailing bytes.
+- Add regression coverage using a sufficiently large valid release archive so
+  gzip buffering cannot hide unread valid trailer bytes.
+- Re-run native updater, focused TUI, race, full-suite, and vet checks.
+
+### Verification status
+
+Resolved in the working tree by draining the single gzip member through EOF
+before closing it and checking the byte reader for appended data. Regression
+coverage accepts a large valid archive while continuing to reject arbitrary
+trailing bytes and a second gzip member. A live test copied the installed
+`v0.1.0-alpha.2` executable to a temporary directory, discovered the published
+`v0.1.0-alpha.3` release, installed it through the native updater, and verified
+the resulting binary reports `0.1.0-alpha.3`; the user-local executable remained
+unchanged. Focused updater/config/app/RPC/protocol/TUI/CLI tests, updater/app and
+TUI/RPC race tests, `go test ./...`, `go vet ./...`, the 53-test support-script
+suite, the benchmark guard, the production build, and `git diff --check` pass.

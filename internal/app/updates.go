@@ -13,11 +13,25 @@ type UpdateStatus = updatepkg.Status
 // UpdateResult describes a successfully installed release.
 type UpdateResult = updatepkg.Result
 
+// UpdateProgress is one bounded snapshot from an explicitly approved install.
+type UpdateProgress = updatepkg.Progress
+
+// UpdateProgressFunc receives synchronous installation progress snapshots.
+type UpdateProgressFunc = updatepkg.ProgressFunc
+
+const (
+	UpdateProgressPreparing   = updatepkg.ProgressPreparing
+	UpdateProgressDownloading = updatepkg.ProgressDownloading
+	UpdateProgressVerifying   = updatepkg.ProgressVerifying
+	UpdateProgressInstalling  = updatepkg.ProgressInstalling
+)
+
 // UpdateService is the application boundary for checking and installing Snow
 // releases. Constructing a service performs no network or filesystem mutation.
 type UpdateService interface {
 	Check(context.Context) (updatepkg.Status, error)
 	Install(context.Context, updatepkg.Status) (updatepkg.Result, error)
+	InstallWithProgress(context.Context, updatepkg.Status, updatepkg.ProgressFunc) (updatepkg.Result, error)
 	Eligibility() (bool, string)
 }
 
@@ -31,10 +45,16 @@ func (a *App) CheckForUpdate(ctx context.Context) (updatepkg.Status, error) {
 
 // InstallUpdate verifies and installs a release returned by CheckForUpdate.
 func (a *App) InstallUpdate(ctx context.Context, status updatepkg.Status) (updatepkg.Result, error) {
+	return a.InstallUpdateWithProgress(ctx, status, nil)
+}
+
+// InstallUpdateWithProgress verifies and installs a checked release while
+// reporting progress only after an interactive surface approves installation.
+func (a *App) InstallUpdateWithProgress(ctx context.Context, status updatepkg.Status, report updatepkg.ProgressFunc) (updatepkg.Result, error) {
 	if a == nil || a.updater == nil {
 		return updatepkg.Result{}, errors.New("app: updater unavailable")
 	}
-	return a.updater.Install(ctx, status)
+	return a.updater.InstallWithProgress(ctx, status, report)
 }
 
 // UpdateEligibility reports whether this process can replace its executable.

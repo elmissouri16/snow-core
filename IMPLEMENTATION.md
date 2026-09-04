@@ -193,9 +193,12 @@ replace the symbol through `-ldflags -X`, while untagged builds remain
 
 `internal/update` is constructed by `internal/app.New` without doing I/O and is
 invoked only through explicit app facades. The interactive TUI schedules an
-opt-in startup check after successful app attachment; print, JSON, RPC, SDK,
-version, and management startup never invoke it. Release discovery includes
-published prereleases and uses bounded fixed-origin HTTPS. Installation verifies
+opt-in metadata-only startup check after successful app attachment; every
+available update requires an explicit Install/Skip decision before the archive
+download begins, and print, JSON, RPC, SDK, version, and management startup
+never invoke it. Approved downloads stream bounded byte/total snapshots into a
+foreground TUI progress card. Release discovery includes published prereleases
+and uses bounded fixed-origin HTTPS. Installation verifies
 the checksum, exact archive shape, expanded sizes, and staged binary version,
 then rechecks the pinned regular executable before same-directory atomic
 replacement. TUI restart requests cross a typed lifecycle boundary to

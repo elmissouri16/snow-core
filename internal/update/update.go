@@ -22,6 +22,7 @@ const (
 	metadataLimit      = 1 << 20
 	checksumLimit      = 64 << 10
 	archiveLimit       = 128 << 20
+	progressStep       = 256 << 10
 )
 
 type Release struct {
@@ -42,6 +43,27 @@ type Result struct {
 	PreviousVersion  string
 	InstalledVersion string
 }
+
+// ProgressPhase identifies the visible phase of an explicitly approved update.
+type ProgressPhase uint8
+
+const (
+	ProgressPreparing ProgressPhase = iota + 1
+	ProgressDownloading
+	ProgressVerifying
+	ProgressInstalling
+)
+
+// Progress is a bounded installation progress snapshot. TotalBytes is zero when
+// the server does not provide a usable content length.
+type Progress struct {
+	Phase           ProgressPhase
+	DownloadedBytes int64
+	TotalBytes      int64
+}
+
+// ProgressFunc receives synchronous progress snapshots during installation.
+type ProgressFunc func(Progress)
 
 type Options struct {
 	CurrentVersion string
@@ -196,6 +218,10 @@ func (s *Service) getJSON(ctx context.Context, target string, limit int64, dst a
 }
 
 func (s *Service) download(ctx context.Context, target string, limit int64) ([]byte, error) {
+	return s.downloadWithProgress(ctx, target, limit, nil)
+}
+
+func (s *Service) downloadWithProgress(ctx context.Context, target string, limit int64, report func(downloaded, total int64)) ([]byte, error) {
 	u, err := url.Parse(target)
 	if err != nil || u.Scheme != "https" || u.User != nil {
 		return nil, errors.New("update: invalid HTTPS download URL")
@@ -217,12 +243,51 @@ func (s *Service) download(ctx context.Context, target string, limit int64) ([]b
 	if resp.ContentLength > limit {
 		return nil, fmt.Errorf("update: download exceeds %d-byte limit", limit)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	total := resp.ContentLength
+	if total < 0 {
+		total = 0
+	}
+	body := io.Reader(resp.Body)
+	var progress *downloadProgressReader
+	if report != nil {
+		report(0, total)
+		progress = &downloadProgressReader{reader: body, total: total, report: report}
+		body = progress
+	}
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
 	if err != nil {
 		return nil, fmt.Errorf("update: read download: %w", err)
 	}
 	if int64(len(data)) > limit {
 		return nil, fmt.Errorf("update: download exceeds %d-byte limit", limit)
 	}
+	if progress != nil {
+		progress.finish()
+	}
 	return data, nil
+}
+
+type downloadProgressReader struct {
+	reader     io.Reader
+	total      int64
+	downloaded int64
+	reported   int64
+	report     func(downloaded, total int64)
+}
+
+func (r *downloadProgressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.downloaded += int64(n)
+	if r.downloaded-r.reported >= progressStep {
+		r.reported = r.downloaded
+		r.report(r.downloaded, r.total)
+	}
+	return n, err
+}
+
+func (r *downloadProgressReader) finish() {
+	if r.downloaded != r.reported {
+		r.reported = r.downloaded
+		r.report(r.downloaded, r.total)
+	}
 }

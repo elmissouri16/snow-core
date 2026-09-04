@@ -17,8 +17,15 @@ func (s *recordingUpdateService) Check(context.Context) (updatepkg.Status, error
 	return updatepkg.Status{LatestVersion: "1.0.1", Available: true, Eligible: true}, nil
 }
 
-func (s *recordingUpdateService) Install(context.Context, updatepkg.Status) (updatepkg.Result, error) {
+func (s *recordingUpdateService) Install(ctx context.Context, status updatepkg.Status) (updatepkg.Result, error) {
+	return s.InstallWithProgress(ctx, status, nil)
+}
+
+func (s *recordingUpdateService) InstallWithProgress(_ context.Context, _ updatepkg.Status, report updatepkg.ProgressFunc) (updatepkg.Result, error) {
 	s.installs++
+	if report != nil {
+		report(updatepkg.Progress{Phase: updatepkg.ProgressDownloading, DownloadedBytes: 2, TotalBytes: 4})
+	}
 	return updatepkg.Result{InstalledVersion: "1.0.1"}, nil
 }
 
@@ -41,10 +48,16 @@ func TestAppConstructionDoesNotInvokeUpdater(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.InstallUpdate(t.Context(), status); err != nil {
+	var progress updatepkg.Progress
+	if _, err := a.InstallUpdateWithProgress(t.Context(), status, func(snapshot updatepkg.Progress) {
+		progress = snapshot
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if service.checks != 1 || service.installs != 1 {
 		t.Fatalf("explicit updater calls = checks:%d installs:%d", service.checks, service.installs)
+	}
+	if progress.Phase != updatepkg.ProgressDownloading || progress.DownloadedBytes != 2 || progress.TotalBytes != 4 {
+		t.Fatalf("progress = %+v", progress)
 	}
 }

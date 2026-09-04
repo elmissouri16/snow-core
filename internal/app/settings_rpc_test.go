@@ -232,36 +232,27 @@ func TestRPCSettingsModelEventCallbackCanReadSnapshot(t *testing.T) {
 	}
 }
 
-func TestRPCSettingsUpdateNormalizesUpdateDependencies(t *testing.T) {
+func TestRPCSettingsUpdatePersistsStartupUpdateCheck(t *testing.T) {
 	a := newRuntimeControlsTestApp(t)
 	a.ConfigPath = filepath.Join(t.TempDir(), "config.json")
 	if err := config.Save(a.ConfigPath, a.PersistedCfg); err != nil {
 		t.Fatal(err)
 	}
 
-	auto := true
-	settings, err := a.UpdateRPCSettings(SettingsUpdate{AutoUpdate: &auto})
+	settings, err := a.UpdateRPCSettings(SettingsUpdate{UpdateCheckOnStartup: new(true)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !settings.AutoUpdate || !settings.UpdateCheckOnStartup {
-		t.Fatalf("enabling auto update did not enable checking: %+v", settings)
+	if !settings.UpdateCheckOnStartup {
+		t.Fatalf("startup update check was not enabled: %+v", settings)
 	}
 
-	check := false
-	settings, err = a.UpdateRPCSettings(SettingsUpdate{UpdateCheckOnStartup: &check})
+	settings, err = a.UpdateRPCSettings(SettingsUpdate{UpdateCheckOnStartup: new(false)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.AutoUpdate || settings.UpdateCheckOnStartup {
-		t.Fatalf("disabling checking did not disable auto update: %+v", settings)
-	}
-	settings, err = a.UpdateRPCSettings(SettingsUpdate{UpdateCheckOnStartup: new(false), AutoUpdate: new(true)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if settings.AutoUpdate || settings.UpdateCheckOnStartup {
-		t.Fatalf("explicit check disable did not win over auto enable: %+v", settings)
+	if settings.UpdateCheckOnStartup {
+		t.Fatalf("startup update check was not disabled: %+v", settings)
 	}
 	persisted, err := config.Load(a.ConfigPath)
 	if err != nil {

@@ -70,7 +70,6 @@ func (m *Model) settingsCardRows() []settingsCardRow {
 		{text: "Agent Skills  " + onOff(!m.app.Cfg.Skills.Disabled) + " (restart to apply)", available: true},
 		{text: "Debug diagnostics  " + onOff(m.app.DebugStatus().Enabled) + " (captures sensitive content)", available: true},
 		{text: "Check for updates on startup  " + onOff(m.app.Cfg.Updates.CheckOnStartup), available: true},
-		{text: "Auto update  " + onOff(m.app.Cfg.Updates.AutoUpdate), available: true},
 		{text: checkNowText(m.updateCheckRunning), available: !m.updateCheckRunning && !m.updateInstallRunning},
 		{text: m.updateActionText(), available: m.updateActionAvailable()},
 		{text: "Keybindings  configure shortcuts", available: true},

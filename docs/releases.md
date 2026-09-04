@@ -102,8 +102,11 @@ binary's exact reported version; and stages in the executable's directory
 before atomic replacement. It never invokes `sudo`, follows a destination
 symlink, or replaces a development build. Custom writable install destinations
 are supported because eligibility is based on the running regular executable,
-not a fixed path. Startup checks and automatic installation are disabled by
-default and run only in the interactive TUI.
+not a fixed path. Startup checks are disabled by default and run only in the
+interactive TUI. Startup checks fetch release metadata only. Every available
+update requires an explicit **Install update** or **Skip for now** decision
+before the archive is downloaded; an approved install remains visible with
+byte, percentage, verification, and installation progress.
 
 After replacement, the current process still contains the old code. The TUI
 therefore offers **Restart now** or **Later**. Choosing **Restart now** first

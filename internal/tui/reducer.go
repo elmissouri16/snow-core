@@ -22,7 +22,7 @@ func (m *Model) dispatchMouse(msg tea.MouseMsg) tea.Cmd {
 		m.closeTranscriptSelectionContextMenu()
 		return nil
 	}
-	if m.restartPromptVisible() {
+	if m.restartPromptVisible() || m.updateOfferVisible() || m.updateInstallProgressVisible() {
 		return nil
 	}
 	if m.processFleetOpen {
@@ -215,6 +215,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.handleUpdateCheckDone(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case updateInstallProgressMsg:
+		if cmd := m.handleUpdateInstallProgress(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case updateInstallDoneMsg:
 		m.handleUpdateInstallDone(msg)
 	case spinner.TickMsg:
@@ -302,9 +306,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		if cmd := m.scheduleRunStatsRefresh(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		if cmd := m.maybeStartPendingAutoUpdate(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		// Re-arm immediately; the mailbox self-signals while more batches wait.

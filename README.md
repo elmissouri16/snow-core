@@ -60,10 +60,13 @@ files unchanged. Piping a remote script into `sh` trusts the repository; review
 it. Checksums protect release integrity but are not an independent signature.
 
 Interactive users can open `/settings` to check for newer GitHub releases,
-install an update, or opt into startup checks and automatic installation. Both
-startup options are disabled by default. Startup checks run only in the TUI;
-print, JSON, RPC, and SDK startup never contacts GitHub or replaces the
-executable implicitly. Self-update supports official macOS/Linux release builds
+install an update, or opt into startup checks. Startup checking is disabled by
+default, and every discovered update requires an explicit **Install update** or
+**Skip for now** decision before Snow downloads an archive or modifies the
+executable. Approved installs remain in the foreground with byte, percentage,
+verification, and installation progress. Startup checks fetch release metadata
+only and run only in the TUI; print, JSON, RPC, and SDK startup never contacts
+GitHub or replaces the executable implicitly. Self-update supports official macOS/Linux release builds
 whose current regular executable can be safely replaced, including custom
 writable install directories. Development builds are never replaced.
 

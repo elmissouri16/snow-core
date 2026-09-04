@@ -242,16 +242,14 @@ fills required zero-value defaults before validation.
 | `fixed_context_budget_percent` | `25` (`10..50`) | Operator-owned admission budget for recurring system instructions, active skills, conditional guidance, and exposed tool schemas as a share of the selected model window; unknown windows use a 32,768-token fallback |
 | `system_prompt_file` | unset | Markdown/text file replacing the embedded base preamble; relative paths resolve from the loaded config file's directory (normally the global config directory; `--config`/`ConfigPath` can override it) and `~` is supported |
 | `debug.enabled` | `false` | Persisted opt-in for shared bounded diagnostic event capture across TUI, print/JSON, RPC, and SDK runtimes. The TUI **Debug diagnostics** setting, `/debug on|off`, and RPC `debug_enable`/`debug_disable` update this global field. |
-| `updates.check_on_startup` | `false` | Opt in to an asynchronous GitHub release check after interactive TUI startup. Headless and SDK startup never perform this check. |
-| `updates.auto_update` | `false` | Install an available verified release after an enabled TUI startup check. Enabling this also enables `check_on_startup`. |
+| `updates.check_on_startup` | `false` | Opt in to an asynchronous metadata-only GitHub release check after interactive TUI startup. A newer eligible release opens an **Install update** / **Skip for now** confirmation; Snow never downloads an archive or installs automatically. Approved installs show foreground byte, percentage, verification, and installation progress. Headless and SDK startup never perform this check. |
 
 Update policy is global/operator-owned; trusted project configuration cannot
-override it. Both options default to disabled. Disabling startup checks also
-disables automatic installation, and a hand-written configuration that enables
-auto-update while disabling checks is rejected. `/settings` and
-`settings_update` preserve this dependency atomically. RPC can configure the
-preferences, but starting an RPC runtime does not itself check for or install
-updates.
+override it. Startup checking defaults to disabled. `/settings` and
+`settings_update` can configure the check preference, but starting an RPC
+runtime does not itself check for or install updates. The removed
+`updates.auto_update` field is ignored when reading older alpha configurations
+and disappears on the next configuration rewrite.
 
 `--debug` and `--no-debug` override `debug.enabled` for one CLI process without
 rewriting configuration. `--debug-dump PATH` enables capture and writes a

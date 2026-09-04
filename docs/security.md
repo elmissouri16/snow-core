@@ -191,9 +191,12 @@ the destination atomically. It does not provide an independent signature.
 
 The interactive updater uses the same release assets and integrity model.
 Explicit **Check now** contacts GitHub; automatic startup traffic occurs only
-after the global **Check for updates on startup** opt-in. Auto-update is a
-separate executable-mutation opt-in and implies startup checking. Print, JSON,
-RPC, SDK, version, and management startup never make an implicit update request.
+after the global **Check for updates on startup** opt-in. Startup checking
+fetches bounded release metadata only. A successful check can offer **Install
+update** or **Skip for now**, but the release archive is not downloaded and the
+executable is not mutated until that explicit confirmation. An approved install
+stays visible in a foreground progress card. Print, JSON, RPC, SDK, version, and
+management startup never make an implicit update request.
 
 Self-update runs with the user's OS privileges and can replace only the current
 supported macOS/Linux official-release executable. It requires a writable

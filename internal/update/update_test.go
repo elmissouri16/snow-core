@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -22,7 +23,9 @@ func TestCheckDiscoversPrereleaseAndEligibility(t *testing.T) {
 	dir := t.TempDir()
 	executable := filepath.Join(dir, "snow")
 	writeVersionScript(t, executable, "0.1.0-alpha.1")
+	var requests atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
 		if got := r.Header.Get("User-Agent"); got == "" {
 			t.Error("missing User-Agent")
 		}
@@ -36,6 +39,9 @@ func TestCheckDiscoversPrereleaseAndEligibility(t *testing.T) {
 	}
 	if !status.Available || !status.Eligible || status.LatestVersion != "0.1.0-alpha.2" {
 		t.Fatalf("unexpected status: %+v", status)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("release check made %d requests, want metadata only", got)
 	}
 }
 
@@ -204,12 +210,33 @@ func TestInstallVerifiedReleaseAtomically(t *testing.T) {
 	defer server.Close()
 	svc := NewWithOptions(Options{CurrentVersion: current, Executable: executable, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, HTTPClient: server.Client(), DownloadURL: server.URL, CommandTimeout: 2 * time.Second})
 	status := Status{CurrentVersion: current, LatestVersion: latest, Available: true, Eligible: true, Release: Release{Version: latest, Tag: "v" + latest}}
-	result, err := svc.Install(t.Context(), status)
+	var progress []Progress
+	result, err := svc.InstallWithProgress(t.Context(), status, func(snapshot Progress) {
+		progress = append(progress, snapshot)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.InstalledVersion != latest {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+	phases := make(map[ProgressPhase]bool)
+	for _, snapshot := range progress {
+		phases[snapshot.Phase] = true
+	}
+	for _, phase := range []ProgressPhase{ProgressPreparing, ProgressDownloading, ProgressVerifying, ProgressInstalling} {
+		if !phases[phase] {
+			t.Fatalf("progress missing phase %d: %+v", phase, progress)
+		}
+	}
+	lastDownload := Progress{}
+	for _, snapshot := range progress {
+		if snapshot.Phase == ProgressDownloading {
+			lastDownload = snapshot
+		}
+	}
+	if lastDownload.DownloadedBytes != int64(len(archive)) {
+		t.Fatalf("downloaded bytes = %d, want %d", lastDownload.DownloadedBytes, len(archive))
 	}
 	reported, err := binaryVersion(t.Context(), executable, time.Second)
 	if err != nil || reported != latest {
@@ -265,6 +292,38 @@ func TestExtractReleaseBinaryRejectsUnexpectedAndLinks(t *testing.T) {
 	link := releaseArchive(t, version, "linux", "amd64", []byte("binary"), &tar.Header{Name: "snow_1.2.3_linux_amd64/extra", Typeflag: tar.TypeSymlink, Linkname: "/tmp/x"})
 	if _, err := extractReleaseBinary(link, version, "linux", "amd64"); err == nil {
 		t.Fatal("link archive member was accepted")
+	}
+}
+
+func TestExtractReleaseBinaryConsumesValidGzipTrailerAndRejectsTrailingData(t *testing.T) {
+	t.Parallel()
+	const version = "1.2.3"
+	binary := make([]byte, 256<<10)
+	state := uint64(0x9e3779b97f4a7c15)
+	for i := range binary {
+		state ^= state << 13
+		state ^= state >> 7
+		state ^= state << 17
+		binary[i] = byte(state)
+	}
+	archive := releaseArchive(t, version, "linux", "amd64", binary, nil)
+	got, err := extractReleaseBinary(archive, version, "linux", "amd64")
+	if err != nil {
+		t.Fatalf("large valid archive was rejected: %v", err)
+	}
+	if !bytes.Equal(got, binary) {
+		t.Fatal("extracted release binary differs from archive")
+	}
+	if _, err := extractReleaseBinary(append(bytes.Clone(archive), "trailing"...), version, "linux", "amd64"); err == nil {
+		t.Fatal("archive with trailing bytes was accepted")
+	}
+	if _, err := extractReleaseBinary(append(bytes.Clone(archive), archive...), version, "linux", "amd64"); err == nil {
+		t.Fatal("archive with a second gzip member was accepted")
+	}
+	corruptTrailer := bytes.Clone(archive)
+	corruptTrailer[len(corruptTrailer)-8] ^= 0xff
+	if _, err := extractReleaseBinary(corruptTrailer, version, "linux", "amd64"); err == nil {
+		t.Fatal("archive with a corrupt gzip checksum trailer was accepted")
 	}
 }
 

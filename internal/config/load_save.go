@@ -467,9 +467,6 @@ func Load(path string) (Config, error) {
 	if err := cfg.Retry.Validate(); err != nil {
 		return cfg, err
 	}
-	if err := cfg.Updates.Validate(); err != nil {
-		return cfg, err
-	}
 	if err := cfg.Compaction.Validate(); err != nil {
 		return cfg, err
 	}

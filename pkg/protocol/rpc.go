@@ -389,7 +389,6 @@ type RPCSettings struct {
 	SkillsRestartRequired    bool             `json:"skills_restart_required"`
 	RestartRequired          bool             `json:"restart_required"`
 	UpdateCheckOnStartup     bool             `json:"update_check_on_startup"`
-	AutoUpdate               bool             `json:"auto_update"`
 }
 
 // RPCSettingsUpdateParams is the bounded, secret-free partial settings
@@ -407,7 +406,6 @@ type RPCSettingsUpdateParams struct {
 	SubagentsMaxConcurrent *int              `json:"subagents_max_concurrent,omitempty"`
 	SkillsEnabled          *bool             `json:"skills_enabled,omitempty"`
 	UpdateCheckOnStartup   *bool             `json:"update_check_on_startup,omitempty"`
-	AutoUpdate             *bool             `json:"auto_update,omitempty"`
 }
 
 // RPCAdaptiveColor is one light/dark semantic color pair.

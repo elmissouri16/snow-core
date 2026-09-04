@@ -2,7 +2,6 @@
 package config
 
 import (
-	"errors"
 	"sync"
 	"time"
 
@@ -68,15 +67,6 @@ type DebugConfig struct {
 // It is global operator policy and is never loaded from project configuration.
 type UpdateConfig struct {
 	CheckOnStartup bool `json:"check_on_startup"`
-	AutoUpdate     bool `json:"auto_update"`
-}
-
-// Validate ensures automatic installation cannot be enabled without startup checks.
-func (c UpdateConfig) Validate() error {
-	if c.AutoUpdate && !c.CheckOnStartup {
-		return errors.New("config: updates auto_update requires check_on_startup")
-	}
-	return nil
 }
 
 // RetryProfileConfig bounds one consecutive provider outage. It is global-only

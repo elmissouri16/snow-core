@@ -22,7 +22,6 @@ type SettingsUpdate struct {
 	SubagentsMaxConcurrent *int
 	SkillsEnabled          *bool
 	UpdateCheckOnStartup   *bool
-	AutoUpdate             *bool
 }
 
 // SettingsSnapshot is a secret-free view of the settings shown by the TUI.
@@ -45,7 +44,6 @@ type SettingsSnapshot struct {
 	SkillsRestartRequired    bool
 	RestartRequired          bool
 	UpdateCheckOnStartup     bool
-	AutoUpdate               bool
 }
 
 type restartSettingsBaseline struct {
@@ -102,7 +100,7 @@ func (update SettingsUpdate) empty() bool {
 	return update.Provider == nil && update.Model == nil && update.Thinking == nil &&
 		update.ReasoningSummary == nil && update.TextVerbosity == nil && update.Theme == nil && update.DebugEnabled == nil &&
 		update.SubagentsEnabled == nil && update.SubagentsMaxConcurrent == nil && update.SkillsEnabled == nil &&
-		update.UpdateCheckOnStartup == nil && update.AutoUpdate == nil
+		update.UpdateCheckOnStartup == nil
 }
 
 func (a *App) ensureSettingsBaselineLocked() {
@@ -140,6 +138,5 @@ func (a *App) settingsSnapshotLocked() SettingsSnapshot {
 		SkillsRestartRequired:    skillsRestart,
 		RestartRequired:          subagentsRestart || skillsRestart,
 		UpdateCheckOnStartup:     a.Cfg.Updates.CheckOnStartup,
-		AutoUpdate:               a.Cfg.Updates.AutoUpdate,
 	}
 }

@@ -139,12 +139,14 @@ is currently visible. Review the requested operation before approving it.
 
 The settings card includes opt-in GitHub update controls. **Check for updates
 now** performs a fresh explicit check, while **Update now** checks again before
-installing. Startup checks and auto-update are disabled by default and apply
-only to interactive TUI launches. Enabling auto-update also enables startup
-checking; disabling startup checking also disables auto-update. Successful
-installation offers **Restart now** after clean shutdown or **Later** to keep
-using the current old in-memory process. Development builds can check but never
-replace themselves.
+installing. Startup checking is disabled by default and applies only to
+interactive TUI launches. Startup checks fetch release metadata only. When one
+finds a newer eligible release, Snow asks you to choose **Install update** or
+**Skip for now** and does not download the archive automatically. An approved
+install opens a foreground card with byte counts, percentage, a progress bar,
+verification, and installation phases. Successful installation offers
+**Restart now** after clean shutdown or **Later** to keep using the current old
+in-memory process. Development builds can check but never replace themselves.
 
 ## Use composer completions
 

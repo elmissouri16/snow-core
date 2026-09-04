@@ -1463,9 +1463,6 @@
             "update_check_on_startup": {
               "type": "boolean"
             },
-            "auto_update": {
-              "type": "boolean"
-            },
             "theme": {
               "type": "string",
               "minLength": 1,
@@ -1521,11 +1518,6 @@
             {
               "required": [
                 "update_check_on_startup"
-              ]
-            },
-            {
-              "required": [
-                "auto_update"
               ]
             },
             {

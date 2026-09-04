@@ -27,6 +27,12 @@ const (
 )
 
 func (s *Service) Install(ctx context.Context, status Status) (Result, error) {
+	return s.InstallWithProgress(ctx, status, nil)
+}
+
+// InstallWithProgress verifies and installs a checked release while reporting
+// progress only after the caller explicitly starts installation.
+func (s *Service) InstallWithProgress(ctx context.Context, status Status, report ProgressFunc) (Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -65,6 +71,7 @@ func (s *Service) Install(ctx context.Context, status Status) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	reportInstallProgress(report, Progress{Phase: ProgressPreparing})
 	archiveName := fmt.Sprintf("snow_%s_%s_%s.tar.gz", latest.String(), s.goos, s.goarch)
 	base := s.downloadURL + "/" + status.Release.Tag
 	checksums, err := s.download(ctx, base+"/SHA256SUMS", checksumLimit)
@@ -75,10 +82,13 @@ func (s *Service) Install(ctx context.Context, status Status) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	archive, err := s.download(ctx, base+"/"+archiveName, archiveLimit)
+	archive, err := s.downloadWithProgress(ctx, base+"/"+archiveName, archiveLimit, func(downloaded, total int64) {
+		reportInstallProgress(report, Progress{Phase: ProgressDownloading, DownloadedBytes: downloaded, TotalBytes: total})
+	})
 	if err != nil {
 		return Result{}, err
 	}
+	reportInstallProgress(report, Progress{Phase: ProgressVerifying, DownloadedBytes: int64(len(archive)), TotalBytes: int64(len(archive))})
 	actual := sha256.Sum256(archive)
 	if !bytes.Equal(actual[:], expected) {
 		return Result{}, errors.New("update: release checksum verification failed")
@@ -87,6 +97,7 @@ func (s *Service) Install(ctx context.Context, status Status) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	reportInstallProgress(report, Progress{Phase: ProgressInstalling, DownloadedBytes: int64(len(archive)), TotalBytes: int64(len(archive))})
 	stageName, stageFile, err := createStage(root, name)
 	if err != nil {
 		return Result{}, err
@@ -160,6 +171,12 @@ func (s *Service) Install(ctx context.Context, status Status) (Result, error) {
 		return Result{}, fmt.Errorf("update: executable was replaced but its directory could not be closed after sync: %w", err)
 	}
 	return Result{PreviousVersion: s.currentVersion, InstalledVersion: latest.String()}, nil
+}
+
+func reportInstallProgress(report ProgressFunc, progress Progress) {
+	if report != nil {
+		report(progress)
+	}
 }
 
 func regularFile(root *os.Root, name string) (os.FileInfo, error) {
@@ -285,6 +302,9 @@ func extractReleaseBinary(data []byte, version, goos, goarch string) ([]byte, er
 		} else if _, err := io.Copy(io.Discard, tr); err != nil {
 			return nil, errors.New("update: cannot read release member")
 		}
+	}
+	if _, err := io.Copy(io.Discard, gz); err != nil {
+		return nil, errors.New("update: release archive has trailing or invalid data")
 	}
 	if err := gz.Close(); err != nil || source.Len() != 0 {
 		return nil, errors.New("update: release archive has trailing or invalid data")

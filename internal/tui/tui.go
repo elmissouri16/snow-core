@@ -540,17 +540,19 @@ type Model struct {
 	updateChecked               bool
 	updateCheckRunning          bool
 	updateInstallRunning        bool
+	updateProgress              app.UpdateProgress
 	updateGeneration            uint64
 	updateCheckReason           updateCheckReason
 	updateLastStatus            string
 	updateLastError             string
-	updateAutoInstallPending    bool
+	updateOfferPending          bool
+	updateOfferChoice           int
 	updateInstalledVersion      string
 	restartPromptPending        bool
 	restartChoice               int
 	restartRequested            bool
 	checkForUpdate              func(context.Context) (app.UpdateStatus, error)
-	installUpdate               func(context.Context, app.UpdateStatus) (app.UpdateResult, error)
+	installUpdate               func(context.Context, app.UpdateStatus, app.UpdateProgressFunc) (app.UpdateResult, error)
 	pickKeybindings             bool
 	keybindingsReturnToSettings bool
 	keybindingsScope            keybindingScope
@@ -720,7 +722,6 @@ const (
 	settingsSkills
 	settingsDebug
 	settingsUpdateCheckOnStartup
-	settingsAutoUpdate
 	settingsCheckNow
 	settingsUpdateNow
 	settingsKeybindings

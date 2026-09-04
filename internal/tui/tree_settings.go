@@ -457,12 +457,6 @@ func (m *Model) cycleSetting(direction int) {
 		if err == nil {
 			m.settingsStatus = "startup update checking " + onOff(m.app.Cfg.Updates.CheckOnStartup)
 		}
-	case settingsAutoUpdate:
-		next := cycleValue([]bool{false, true}, m.app.Cfg.Updates.AutoUpdate, direction)
-		_, err = m.app.UpdateRPCSettings(app.SettingsUpdate{AutoUpdate: new(next)})
-		if err == nil {
-			m.settingsStatus = "automatic updates " + onOff(m.app.Cfg.Updates.AutoUpdate)
-		}
 	}
 	if err != nil {
 		m.settingsError = err.Error()

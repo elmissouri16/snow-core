@@ -129,24 +129,28 @@ snow -p "summarize this project"
 
 ## Check for updates
 
-In the interactive TUI, open `/settings` to use four update controls:
+In the interactive TUI, open `/settings` to use three update controls:
 
-- **Check for updates on startup** opts into a nonblocking GitHub release check.
-- **Auto update** installs an available verified release after that startup
-  check; enabling it also enables startup checking.
+- **Check for updates on startup** opts into a nonblocking metadata-only GitHub
+  release check. When a newer eligible release exists, Snow asks you to choose
+  **Install update** or **Skip for now**; it never downloads the release archive
+  or installs automatically.
 - **Check for updates now** performs one explicit fresh check without installing.
 - **Update now** performs a fresh check and installs a newer eligible release.
 
-Both startup preferences are disabled by default. Print, JSON, RPC, version,
-and SDK startup do not make implicit update requests or replace an executable.
-GitHub prereleases are valid update targets because Snow is currently alpha.
+Startup checking is disabled by default. Print, JSON, RPC, version, and SDK
+startup do not make implicit update requests or replace an executable. GitHub
+prereleases are valid update targets because Snow is currently alpha.
 
 Self-update is available for official macOS/Linux amd64 or arm64 releases when
 the running executable is a writable regular non-symlink file, including a
 custom `SNOW_INSTALL_DIR`. Development/source builds report that installation
-is unavailable and never replace themselves. After a successful install, choose
-**Restart now** to close Snow cleanly and resume the durable session with the
-new binary, or **Later** to continue in the old in-memory process until exit.
+is unavailable and never replace themselves. After explicit approval, a
+foreground card shows downloaded bytes, percentage, a progress bar,
+checksum/archive verification, and installation status. After a successful
+install, choose **Restart now** to close Snow cleanly and resume the durable
+session with the new binary, or **Later** to continue in the old in-memory
+process until exit.
 An ephemeral `--no-session` process cannot preserve in-memory history across a
 restart.
 

@@ -524,6 +524,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.restartPromptVisible() {
 		return m.handleRestartPromptKey(msg)
 	}
+	if m.updateInstallProgressVisible() {
+		return m, nil
+	}
+	if m.updateOfferVisible() {
+		return m.handleUpdateOfferKey(msg)
+	}
 
 	if m.processFleetOpen || m.subagentFleetOpen {
 		if handled, cmd := m.handleFleetShortcut(msg); handled {
