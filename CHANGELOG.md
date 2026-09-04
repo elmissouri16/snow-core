@@ -5,6 +5,30 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.6] - 2026-09-04
+
+This alpha prevents silent headless-output truncation and hardens concurrent
+configuration updates, OAuth shutdown, prior-session search caching, and
+physical session-fork cleanup without changing public interfaces or persisted
+formats.
+
+### Fixed
+
+- Made print and JSON modes return an explicit error if slow output causes their
+  monitored event subscription to be evicted, instead of silently returning an
+  incomplete response.
+- Serialized typed and raw-section configuration mutations under one
+  cross-process update lock, preventing concurrent plugin, MCP, Agent Skill,
+  and ordinary settings writes from overwriting each other while preserving
+  unknown JSON fields.
+- Gave ChatGPT OAuth workers TUI-lifetime cancellation and ownership so shutdown
+  cancels and joins them without breaking in-session cancellation completion.
+- Excluded the active session database and its SQLite sidecars from the
+  prior-session FTS corpus and cache identity, avoiding unnecessary index
+  rebuilds after active-session writes while retaining historical invalidation.
+- Removed temporary staging lock files after physical session forks while
+  preserving the published destination session's live lease.
+
 ## [0.1.0-alpha.5] - 2026-09-04
 
 This alpha shortens release publication while preserving exact-commit CI,
