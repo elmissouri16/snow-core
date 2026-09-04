@@ -1452,26 +1452,33 @@ After a verified feature change, refresh the user-local binary with
 
 ### CI
 
-`.github/workflows/ci.yml` runs for `main` pushes, pull requests, manual
-dispatches, and calls from the release workflow. Linux and macOS run formatting
-(Linux), vet, `go test ./...`, the mocked release-installer suite against their
-native POSIX userland, production builds, and the credential-free standalone Go
-SDK example. Linux also runs the deterministic
+`.github/workflows/ci.yml` runs for `main` pushes, pull requests, and manual
+dispatches. Linux and macOS both run `go test ./...` and the standalone SDK
+tests; macOS additionally retains a focused native installer suite. Linux owns
+formatting, vet, the full support-script suite, the production build and
+credential-free lifecycle smoke, SDK example execution, the deterministic
 performance-regression guard, `go test -race ./internal/... ./pkg/snowsdk`,
-cgo-disabled builds for all four release targets, and a pinned `govulncheck`
-reachable-code scan. Real-provider
-checks remain manual. `.github/workflows/release-alpha.yml` accepts only
-`vMAJOR.MINOR.PATCH-alpha.N` tags, reuses the complete CI gate, publishes
-macOS/Linux amd64/arm64 archives and `SHA256SUMS`, and marks the GitHub release
-as a prerelease. `scripts/install.sh` resolves the newest published release
+cgo-disabled builds for all four release targets, and the pinned `govulncheck`
+reachable-code scan. Real-provider checks remain manual.
+`.github/workflows/release-alpha.yml` accepts only
+`vMAJOR.MINOR.PATCH-alpha.N` tags, peels each annotated tag to its commit,
+requires that commit to be on `main`, and fails closed unless GitHub records
+exact completed successful `ci.yml` and `pages.yml` `push` runs for that SHA and
+branch. It does not rerun CI or documentation validation after tagging. It
+publishes macOS/Linux amd64/arm64 archives and
+`SHA256SUMS`, smoke-tests the Linux amd64 release binary, and marks the GitHub
+release as a prerelease. `scripts/install.sh` resolves the newest published release
 (including prereleases), verifies the selected archive, validates its embedded
 version, atomically installs the matching binary without requiring Go, and
 idempotently persists its directory in the detected shell profile unless opted
 out.
-`.github/workflows/pages.yml` stages a curated end-user guide set through the
-explicit bounded allowlist in `scripts/build-pages.sh`, builds it with pinned
-official GitHub Pages/Jekyll actions, and serially deploys the static site to the
-`github-pages` environment. `docs/getting-started.md` owns installation and the
+`.github/workflows/pages.yml` is the canonical rendered-documentation gate. It
+stages a curated end-user guide set through the explicit bounded allowlist in
+`scripts/build-pages.sh` and builds it with pinned official GitHub Pages/Jekyll
+actions. Relevant pull requests build and validate without uploading or
+deploying an artifact; relevant `main` pushes build, validate, and serially
+deploy the static site to the `github-pages` environment.
+`docs/getting-started.md` owns installation and the
 first-run sequence, while `docs/providers.md` gives each supported provider an
 equal setup path. Pages publishes concise task guides; exhaustive RPC, plugin,
 ChatGPT authentication, SDK, and implementation references remain available in

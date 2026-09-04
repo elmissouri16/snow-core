@@ -119,18 +119,35 @@ explicitly instead of claiming a fully durable success.
 
 ## Release requirements
 
-A release commit must pass the reusable GitHub Actions CI workflow. Every
-third-party or GitHub-maintained action is pinned to a reviewed full commit SHA;
-version comments document the corresponding upstream major. The gate includes:
+A release commit must pass one GitHub Actions `CI` workflow run and one
+`Documentation` workflow run triggered by its push to `main`. Every release
+changes `CHANGELOG.md`, so the path-filtered documentation gate always applies.
+The alpha-tag workflow fails closed unless it can identify both completed
+successful runs by the exact tagged commit SHA, `main` branch, `push` event, and
+respective `ci.yml` or `pages.yml` workflow. It does not rerun either suite
+after the immutable tag is created. Every third-party or GitHub-maintained
+action is pinned to a reviewed full commit SHA; version comments document the
+corresponding upstream major.
 
-- formatting and `go vet`;
-- all Go tests on Linux and macOS;
+The gate includes:
+
+- formatting and `go vet` on Linux;
+- all Go tests and standalone SDK tests on Linux and macOS;
+- focused native installer coverage on macOS;
+- the full support-script suite on Linux;
+- the Linux production-build and credential-free lifecycle smoke;
 - the Linux race suite;
 - the Linux performance-regression guard and its parser tests;
-- installer syntax plus mocked Linux/macOS, checksum, and atomic-replacement tests;
+- installer syntax, checksum, and atomic-replacement tests;
 - cgo-disabled cross-builds for every release target;
-- the standalone Go SDK example;
+- the standalone Go SDK example on Linux;
 - a reachable-code scan with the pinned `govulncheck` version.
+
+The path-filtered `Documentation` workflow is the canonical rendered-site gate.
+It builds and validates relevant pull requests, then builds, validates, and
+deploys relevant `main` pushes. A pull request never uploads or deploys a Pages
+artifact. The alpha-tag provenance gate requires its exact successful `main`
+push run alongside CI.
 
 The default suite remains credential-free and uses local mock servers. Before a
 maintainer creates a tag, manually smoke-test each advertised live provider and
@@ -184,16 +201,28 @@ Summarize user-visible changes, breaking changes, migrations, security fixes,
 and known alpha limitations. Keep the Go requirement synchronized across
 `go.mod`, `README.md`, and CI if the toolchain changed.
 
-Run the verification commands in `AGENTS.md` and the expanded matrix in
-`IMPLEMENTATION.md`. Run the manual live-provider/authentication smokes outside
-CI and record only secret-free outcomes. Then audit the exact release changes:
+Run affected checks while developing. Before the release push, run one local
+baseline rather than launching overlapping full, race, and build suites in
+parallel; the exact `main` CI run is the authoritative complete multi-platform
+release gate:
 
 ```sh
 git status --short
 git diff --check
+go test ./...
+go vet ./...
+python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+python3 scripts/check_benchmarks.py
 test -z "$(git ls-files .snow)"
 git diff -- CHANGELOG.md README.md docs/ .github/workflows/
 ```
+
+Use the additional affected-area commands in `AGENTS.md` and
+`IMPLEMENTATION.md` when the release changes those areas. Run manual
+live-provider/authentication smokes outside CI and record only secret-free
+outcomes. Do not run multiple resource-intensive Go verification commands
+concurrently on the same workstation; resource contention can produce
+misleading process-killed failures and duplicate investigation work.
 
 Review and stage only the intended release files—never use a broad add that
 could include credentials, project-local `.snow` state, or unrelated changes.
@@ -204,12 +233,39 @@ git add -- CHANGELOG.md
 git diff --cached --check
 git diff --cached
 git commit -m "chore(release): $tag"
+release_commit=$(git rev-parse HEAD)
 git push origin HEAD:main
 ```
 
 Explicitly name any other intended paths if the release needs more than the
-changelog. Wait for the `CI` workflow on the pushed `main` commit to pass before
-tagging.
+changelog. Query the `CI` workflow by the exact pushed commit instead of holding
+`gh run watch` open:
+
+```sh
+gh run list \
+  --workflow ci.yml \
+  --commit "$release_commit" \
+  --event push \
+  --limit 10 \
+  --json databaseId,headBranch,headSha,status,conclusion,url
+```
+
+Query the canonical rendered-documentation gate the same way; every release
+commit changes `CHANGELOG.md`, so this run is required:
+
+```sh
+gh run list \
+  --workflow pages.yml \
+  --commit "$release_commit" \
+  --event push \
+  --limit 10 \
+  --json databaseId,headBranch,headSha,status,conclusion,url
+```
+
+If either exact run is queued or in progress, keep its URL and query again
+later. A local command timeout is not evidence that a workflow failed. Require
+completed, successful `push` runs on `main` whose `headSha` equals
+`$release_commit` before tagging; never approve merely the newest runs.
 
 ### 3. Create the immutable annotated tag
 
@@ -224,8 +280,24 @@ git push origin "$tag"
 
 Pushing the tag starts `.github/workflows/release-alpha.yml`; do not invoke a
 separate manual packaging process. The workflow validates the tag and changelog,
-reuses CI, builds all four targets, verifies checksums, and creates a GitHub
+peels the annotated tag to its commit, confirms that commit is on `main`, and
+requires the exact successful `main` push CI and Documentation runs. It then
+builds all four targets in parallel, verifies checksums, and creates a GitHub
 prerelease.
+
+Observe the release workflow with another bounded exact-commit query:
+
+```sh
+gh run list \
+  --workflow release-alpha.yml \
+  --commit "$release_commit" \
+  --limit 10 \
+  --json databaseId,headBranch,headSha,status,conclusion,url
+```
+
+Do not use a blocking watch command under a shorter outer command timeout. If a
+query reports `queued` or `in_progress`, report that state and URL rather than
+calling it a failure.
 
 ### 4. Verify the published release
 
@@ -251,9 +323,20 @@ test "$("$tmp/installed/snow" version)" = "$version"
 ```
 
 Review the GitHub prerelease title, notes, target commit, four archives, and
-`SHA256SUMS` before announcing it. When release documentation changed, also
-require the `Documentation` workflow on that `main` commit to pass and inspect
-the published GitHub Pages release guide.
+`SHA256SUMS` before announcing it. Confirm the required `Documentation` workflow
+on that `main` commit passed and inspect the published GitHub Pages release
+guide.
+
+Keep the completion report concise and link to durable workflow evidence rather
+than reproducing command transcripts. Record:
+
+- the release version, URL, and exact commit SHA;
+- the main CI, Documentation, and alpha-release workflow URLs and conclusions;
+- the expected archive/checksum asset count;
+- checksum, current-platform binary, installer, and fake-provider smoke results;
+- secret-free manual provider outcomes;
+- working-tree and intentionally retained local-binary version state;
+- only genuine remaining blockers.
 
 ### 5. Clean up or recover
 
@@ -264,26 +347,33 @@ complete:
 git worktree remove ../snow-release
 ```
 
-If any pre-publish step fails, fix it before creating the tag. If a pushed tag
-or published release is defective, do not move or recreate it: document the
-problem, fix it on a new commit, and publish the next alpha number.
+If any pre-tag step fails, fix it before creating the tag. If the tag workflow
+runs before the exact main CI and Documentation runs have completed, wait for
+them and rerun the same failed workflow; never move the tag. Transient
+hosted-runner failures may also be rerun against the same immutable tag. If the
+tagged code, workflow definition, or published release is defective, do not
+move or recreate it: document the problem, fix it on a new commit, and publish
+the next alpha number.
 
 ## Publish an alpha
 
 1. Update `CHANGELOG.md` with the version and release date.
-2. Run the complete verification matrix from `AGENTS.md` and
-   `IMPLEMENTATION.md` on the intended commit.
+2. Run the local baseline plus affected-area checks on the intended commit.
 3. Complete the manual live-provider smoke checks and record only secret-free
    outcomes in the release notes.
-4. Create and push an annotated tag matching `v0.1.0-alpha.N`.
-5. The `Alpha release` workflow reuses CI for the exact tag, validates the tag,
+4. Push the release commit and require its exact successful `main` push `CI`
+   and `Documentation` runs; use one-shot status queries rather than a blocking
+   watch.
+5. Create and push an annotated tag matching `v0.1.0-alpha.N`.
+6. The `Alpha release` workflow validates the tag and prior CI provenance,
    builds the four archives, smoke-tests the Linux amd64 binary, generates
    checksums, and creates a GitHub prerelease.
-6. Download the published bundle on a clean host, verify `SHA256SUMS`, run
+7. Download the published bundle on a clean host, verify `SHA256SUMS`, run
    `snow version`, and run a credential-free fake-provider prompt.
 
-Do not move or recreate a published tag. If a workflow fails, fix the problem
-on a new commit and use the next alpha number.
+Do not move or recreate a published tag. A not-yet-ready provenance check or
+transient hosted-runner failure may be rerun for the same tag; fix tagged code
+or workflow defects on a new commit and use the next alpha number.
 
 ## Artifacts and checksums
 

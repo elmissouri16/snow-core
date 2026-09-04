@@ -374,6 +374,10 @@ class PagesBuildTests(unittest.TestCase):
         self.assertGreater(workflow.index("id-token: write"), deploy_index)
         self.assertGreater(workflow.index("actions/configure-pages@"), deploy_index)
         self.assertIn("environment:\n      name: github-pages", workflow)
+        self.assertIn("  pull_request:\n    paths:", workflow)
+        self.assertEqual(
+            workflow.count("if: github.event_name != 'pull_request'"), 2
+        )
         self.assertIn("- '.github/workflows/ci.yml'", workflow)
         self.assertIn("- 'LICENSE'", workflow)
         self.assertIn("./scripts/build-pages.sh", workflow)
@@ -382,12 +386,12 @@ class PagesBuildTests(unittest.TestCase):
         self.assertIn("actions/upload-pages-artifact@", workflow)
         self.assertIn("actions/deploy-pages@", workflow)
 
-    def test_ci_builds_and_validates_rendered_pages(self) -> None:
+    def test_pages_workflow_owns_rendered_documentation_validation(self) -> None:
         workflow = CI_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("name: Documentation build (Linux)", workflow)
-        self.assertIn("./scripts/build-pages.sh", workflow)
-        self.assertIn("actions/jekyll-build-pages@", workflow)
-        self.assertIn("scripts/check-pages-output.py ./_site", workflow)
+        self.assertNotIn("name: Documentation build (Linux)", workflow)
+        self.assertNotIn("./scripts/build-pages.sh", workflow)
+        self.assertNotIn("actions/jekyll-build-pages@", workflow)
+        self.assertNotIn("scripts/check-pages-output.py ./_site", workflow)
 
 
 if __name__ == "__main__":

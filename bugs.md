@@ -772,3 +772,48 @@ the resulting binary reports `0.1.0-alpha.3`; the user-local executable remained
 unchanged. Focused updater/config/app/RPC/protocol/TUI/CLI tests, updater/app and
 TUI/RPC race tests, `go test ./...`, `go vet ./...`, the 53-test support-script
 suite, the benchmark guard, the production build, and `git diff --check` pass.
+
+## BUG-017: Updater install test flakes under host load
+
+- **Status:** Resolved in the working tree
+- **Severity:** Low
+- **Surface:** Local and CI updater verification
+- **Observed:** Full-suite verification on macOS after other resource-intensive
+  checks
+
+### Expected behavior
+
+`TestInstallVerifiedReleaseAtomically` should reliably execute its tiny staged
+version script during a full `go test ./...` run.
+
+### Actual behavior and impact
+
+The test configures a two-second service command timeout and a separate
+one-second final version-check timeout. Under host load, the subprocess can miss
+those test-only deadlines and report `binary version check failed: signal:
+killed`. The same test passes immediately in isolation, so verification can
+produce a misleading failure and require an unnecessary rerun even though the
+production updater defaults to a ten-second command timeout.
+
+### Reproduction
+
+1. Run resource-intensive benchmark or Go verification on a loaded macOS host.
+2. Run `go test ./...`.
+3. Observe `TestInstallVerifiedReleaseAtomically` occasionally fail during the
+   staged binary version check with `signal: killed`.
+4. Run `go test ./internal/update -run
+   '^TestInstallVerifiedReleaseAtomically$' -count=1` and observe it pass.
+
+### Remediation requirements
+
+- Give this success-path test the same ten-second command allowance as the
+  production updater default.
+- Keep production timeout behavior unchanged.
+- Re-run the focused updater test and the full Go suite.
+
+### Verification status
+
+Resolved in the working tree by using the production-equivalent ten-second
+allowance for both success-path version checks. Production behavior is
+unchanged. The focused test passed ten consecutive runs, and `go test ./...`
+passed afterward.

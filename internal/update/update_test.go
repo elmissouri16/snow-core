@@ -191,6 +191,7 @@ func TestInstallVerifiedReleaseAtomically(t *testing.T) {
 	t.Parallel()
 	const current = "0.1.0-alpha.1"
 	const latest = "0.1.0-alpha.2"
+	const versionCheckTimeout = 10 * time.Second
 	dir := t.TempDir()
 	executable := filepath.Join(dir, "snow")
 	writeVersionScript(t, executable, current)
@@ -208,7 +209,7 @@ func TestInstallVerifiedReleaseAtomically(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	svc := NewWithOptions(Options{CurrentVersion: current, Executable: executable, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, HTTPClient: server.Client(), DownloadURL: server.URL, CommandTimeout: 2 * time.Second})
+	svc := NewWithOptions(Options{CurrentVersion: current, Executable: executable, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, HTTPClient: server.Client(), DownloadURL: server.URL, CommandTimeout: versionCheckTimeout})
 	status := Status{CurrentVersion: current, LatestVersion: latest, Available: true, Eligible: true, Release: Release{Version: latest, Tag: "v" + latest}}
 	var progress []Progress
 	result, err := svc.InstallWithProgress(t.Context(), status, func(snapshot Progress) {
@@ -238,7 +239,7 @@ func TestInstallVerifiedReleaseAtomically(t *testing.T) {
 	if lastDownload.DownloadedBytes != int64(len(archive)) {
 		t.Fatalf("downloaded bytes = %d, want %d", lastDownload.DownloadedBytes, len(archive))
 	}
-	reported, err := binaryVersion(t.Context(), executable, time.Second)
+	reported, err := binaryVersion(t.Context(), executable, versionCheckTimeout)
 	if err != nil || reported != latest {
 		t.Fatalf("installed version = %q, %v", reported, err)
 	}

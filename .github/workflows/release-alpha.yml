@@ -13,17 +13,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify:
-    name: Verify release commit
-    uses: ./.github/workflows/ci.yml
-    permissions:
-      contents: read
-
   metadata:
-    name: Validate alpha tag
+    name: Validate alpha tag and CI provenance
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     outputs:
       version: ${{ steps.meta.outputs.version }}
+      commit: ${{ steps.meta.outputs.commit }}
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -46,6 +44,15 @@ jobs:
             echo "alpha releases require an annotated tag" >&2
             exit 1
           }
+          commit="$(git rev-parse "refs/tags/$tag^{commit}")"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "alpha tag did not resolve to a full commit SHA" >&2
+            exit 1
+          }
+          git merge-base --is-ancestor "$commit" origin/main || {
+            echo "alpha release commit must be contained in origin/main" >&2
+            exit 1
+          }
           version="${tag#v}"
           grep -Eq "^## \\[$version\\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md || {
             echo "CHANGELOG.md must contain a dated $version heading" >&2
@@ -57,11 +64,43 @@ jobs:
             exit 1
           fi
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf 'commit=%s\n' "$commit" >> "$GITHUB_OUTPUT"
+
+      - name: Require successful main checks
+        shell: bash
+        env:
+          COMMIT: ${{ steps.meta.outputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          require_successful_run() {
+            workflow="$1"
+            label="$2"
+            successful_runs="$(
+              gh run list \
+                --repo "$GH_REPO" \
+                --workflow "$workflow" \
+                --commit "$COMMIT" \
+                --event push \
+                --limit 100 \
+                --json databaseId,headBranch,headSha,status,conclusion,url \
+                --jq '.[] | select(.headBranch == "main" and .headSha == "'"$COMMIT"'" and .status == "completed" and .conclusion == "success") | "\(.databaseId)\t\(.url)"'
+            )"
+            if [[ -z "$successful_runs" ]]; then
+              echo "no successful main push $label run found for $COMMIT" >&2
+              exit 1
+            fi
+            printf 'Accepted successful %s run(s) for %s:\n%s\n' \
+              "$label" "$COMMIT" "$successful_runs"
+          }
+
+          require_successful_run ci.yml CI
+          require_successful_run pages.yml Documentation
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
     needs:
-      - verify
       - metadata
     runs-on: ubuntu-latest
     timeout-minutes: 25

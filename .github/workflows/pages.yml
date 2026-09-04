@@ -22,13 +22,32 @@ on:
       - 'scripts/check-pages-output.py'
       - 'scripts/tests/test_pages.py'
       - 'scripts/tests/test_pages_output.py'
+  pull_request:
+    paths:
+      - '.github/workflows/pages.yml'
+      - '.github/workflows/ci.yml'
+      - 'site/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'SECURITY.md'
+      - 'IMPLEMENTATION.md'
+      - 'AGENTS.md'
+      - 'CHANGELOG.md'
+      - 'LICENSE'
+      - 'examples/**'
+      - 'pkg/snowsdk/**'
+      - 'benchmarks/performance-limits.json'
+      - 'scripts/build-pages.sh'
+      - 'scripts/check-pages-output.py'
+      - 'scripts/tests/test_pages.py'
+      - 'scripts/tests/test_pages_output.py'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: github-pages
+  group: github-pages-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -58,12 +77,14 @@ jobs:
         run: python3 scripts/check-pages-output.py ./_site --base-path /snow-core
 
       - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: ./_site
 
   deploy:
     name: Deploy documentation
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10

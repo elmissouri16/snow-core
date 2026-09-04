@@ -5,6 +5,28 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.5] - 2026-09-04
+
+This alpha shortens release publication while preserving exact-commit CI,
+documentation, platform, archive, checksum, and smoke-test gates.
+
+### Changed
+
+- Replaced the duplicate post-tag CI suite with fail-closed provenance checks
+  for the exact successful `main` CI and Documentation runs.
+- Focused native macOS CI on cross-platform Go, SDK, and installer coverage
+  while keeping platform-neutral checks on Linux.
+- Made the Documentation workflow the canonical rendered-site validator for
+  pull requests and `main` deployments, without granting pull requests deploy
+  access.
+- Simplified release monitoring to bounded exact-commit status queries and
+  concise evidence reports.
+
+### Fixed
+
+- Stabilized the updater installation success-path test under host load by
+  using the production-equivalent binary version-check timeout.
+
 ## [0.1.0-alpha.4] - 2026-09-04
 
 This alpha fixes native installation of published release archives, removes
