@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -22,6 +25,12 @@ func newComposerSelectionTestModel(t *testing.T) *Model {
 func TestComposerCtrlASelectsOnlyDraft(t *testing.T) {
 	m := newComposerSelectionTestModel(t)
 	m.editor.SetValue("first line\nsecond line")
+	anchor := transcriptSelectionPoint{row: 1, col: 2}
+	focus := transcriptSelectionPoint{row: 2, col: 3}
+	m.transcriptSelection.anchor = &anchor
+	m.transcriptSelection.focus = &focus
+	m.transcriptSelection.pressActive = true
+	m.transcriptSelectionMenu.open = true
 
 	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
 	if cmd != nil {
@@ -32,6 +41,30 @@ func TestComposerCtrlASelectsOnlyDraft(t *testing.T) {
 	}
 	if got := m.editor.Value(); got != "first line\nsecond line" {
 		t.Fatalf("Ctrl+A changed draft to %q", got)
+	}
+	if m.transcriptSelection.anchor != nil || m.transcriptSelection.focus != nil || m.transcriptSelection.pressActive {
+		t.Fatalf("Ctrl+A retained transcript selection: %+v", m.transcriptSelection)
+	}
+	if m.transcriptSelectionMenu.open {
+		t.Fatal("Ctrl+A retained transcript selection menu")
+	}
+}
+
+func TestComposerCtrlAVisiblyHighlightsCurrentLine(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+
+	m := newComposerSelectionTestModel(t)
+	m.editor.SetValue("visibly selected draft")
+
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
+	rendered := m.renderEditor()
+	if !strings.Contains(rendered, "\x1b[7m") {
+		t.Fatalf("selected current line has no reverse-video highlight: %q", rendered)
+	}
+	if got := stripANSI(rendered); !strings.Contains(got, "visibly selected draft") {
+		t.Fatalf("selection rendering changed draft text: %q", got)
 	}
 }
 

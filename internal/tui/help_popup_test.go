@@ -63,8 +63,12 @@ func TestHelpCardScrollsWithinFixedGeometry(t *testing.T) {
 	if plain := stripANSI(m.renderHelp()); !strings.Contains(plain, "Commands") || !strings.Contains(plain, "/agent") {
 		t.Fatalf("help starts without command registry: %q", plain)
 	}
-	if help := strings.Join(m.helpLines(), "\n"); !strings.Contains(help, "alt+m — models") {
+	help := strings.Join(m.helpLines(), "\n")
+	if !strings.Contains(help, "alt+m — models") {
 		t.Fatalf("help missing model shortcut: %q", help)
+	}
+	if !strings.Contains(help, "Ctrl+A: select only the composer draft") {
+		t.Fatalf("help missing composer Select All guidance: %q", help)
 	}
 
 	_, _ = m.handleHelpKey(tea.KeyMsg{Type: tea.KeyEnd})

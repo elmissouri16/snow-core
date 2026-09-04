@@ -1188,3 +1188,52 @@ result in an owned projection. Persisted-token lookup with a 32 KiB checkpoint
 and 1,500 retained messages dropped from 11.00 to 0.752 µs and from 40,960 to
 zero allocated bytes. Scope and reproduction commands are in
 `IMPLEMENTATION.md`. No installation was performed.
+
+## BUG-027: Composer Select All can retain or hide selection
+
+- **Status:** Resolved in the working tree
+- **Severity:** Low
+- **Surface:** TUI composer and application-owned transcript selection
+
+### Expected behavior
+
+Pressing `Ctrl+A` in the ordinary composer visibly selects only its current
+draft. Any earlier Snow-managed transcript drag selection and copy menu should
+be cleared so selection belongs to one visible surface at a time.
+
+### Actual behavior and impact
+
+The composer correctly tracked the entire draft as selected, but it did not
+clear existing transcript selection state. A prior app-mouse drag selection
+could therefore remain highlighted alongside the composer and make Select All
+appear to include transcript content.
+
+The attempted visual treatment also changed only Bubbles' public `Text` styles.
+Bubbles renders the active row with `CursorLine`, and its copied textarea kept a
+private active-style pointer aimed at the original unmodified style. A typical
+one-line draft therefore had working replacement semantics but no visible
+selection highlight.
+
+This does not cover terminal-native `Command+A`/`Super+A`: major terminal
+emulators commonly reserve that shortcut and select their own screen before a
+TUI process receives an input event. Snow's portable composer shortcut is
+`Ctrl+A` on every supported OS.
+
+### Remediation and regression coverage
+
+Composer Select All clears app-owned transcript selection and its context menu
+before selecting the draft. Rendering applies reverse video to `Text` and
+`CursorLine` for focused and blurred states, then rebinds the copied textarea's
+active style before rendering. Focused regressions require the transcript state
+to clear, the composer value to remain intact, and a one-line active draft to
+contain a reverse-video selection sequence. In-app help and the canonical TUI
+guide identify `Ctrl+A` as the cross-platform shortcut and explain how a
+terminal-specific `Command+A` mapping can send the same control character.
+
+### Verification status
+
+Verified with the focused visual-selection regression,
+`go test ./internal/tui -count=1`, `go test -race ./internal/tui -count=1`,
+`go test ./...`, `go vet ./...`, all 56 support-script tests,
+`python3 scripts/check_benchmarks.py`, and `git diff --check`. The verified local
+binary was then installed with `./scripts/install-local.sh`.

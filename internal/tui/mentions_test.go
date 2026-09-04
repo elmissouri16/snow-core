@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +10,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -57,6 +60,48 @@ func TestMentionQueryAndMatching(t *testing.T) {
 	if replaceMentionToken("read @README", len("read "), "README.md") != "read @README.md " {
 		t.Fatal("replaceMentionToken should replace the current token")
 	}
+}
+
+func TestComposerHighlightsFileAndFolderMentions(t *testing.T) {
+	textStyle, mentionStyle := mentionHighlightTestStyles()
+	const view = "open @internal/tui and @README.md but not user@example.com"
+	rendered := highlightComposerMentions(view, textStyle, mentionStyle)
+	if got := stripANSI(rendered); got != view {
+		t.Fatalf("highlighting changed composer text: got %q, want %q", got, view)
+	}
+	for _, mention := range []string{"@internal/tui", "@README.md"} {
+		if !strings.Contains(rendered, mentionStyle.Render(mention)) {
+			t.Errorf("composer does not apply mention style to %q: %q", mention, rendered)
+		}
+	}
+	if strings.Contains(rendered, mentionStyle.Render("@example.com")) {
+		t.Fatalf("email-like text was styled as a path mention: %q", rendered)
+	}
+	if got := styleMention.GetForeground(); got != colorAccent {
+		t.Fatalf("mention foreground = %v, want accent %v", got, colorAccent)
+	}
+}
+
+func TestComposerMentionHighlightSurvivesCursorEscapeSequences(t *testing.T) {
+	textStyle, mentionStyle := mentionHighlightTestStyles()
+	const view = "read @fol\x1b[7md\x1b[0mer/file.go next"
+	rendered := highlightComposerMentions(view, textStyle, mentionStyle)
+	if got, want := stripANSI(rendered), stripANSI(view); got != want {
+		t.Fatalf("highlighting changed composer text: got %q, want %q", got, want)
+	}
+	for _, part := range []string{"@fol", "d", "er/file.go"} {
+		if !strings.Contains(rendered, mentionStyle.Render(part)) {
+			t.Errorf("cursor-split mention part %q is not styled: %q", part, rendered)
+		}
+	}
+}
+
+func mentionHighlightTestStyles() (lipgloss.Style, lipgloss.Style) {
+	renderer := lipgloss.NewRenderer(io.Discard, termenv.WithProfile(termenv.TrueColor))
+	renderer.SetColorProfile(termenv.TrueColor)
+	textStyle := renderer.NewStyle().Foreground(lipgloss.Color("#eeeeee"))
+	mentionStyle := renderer.NewStyle().Foreground(lipgloss.Color("#0088ff")).Bold(true)
+	return textStyle, mentionStyle
 }
 
 func TestMentionMatchingPreservesCaseAndPriority(t *testing.T) {

@@ -69,6 +69,7 @@ func (m *Model) helpLines() []string {
 	}
 	content := formatCommandListWithKeys(m.keys) +
 		"\n\nBehavior\n" +
+		"  Ctrl+A: select only the composer draft (use Ctrl+A on macOS too)\n" +
 		"  While working, submit queues steer; follow-up uses its configured binding\n" +
 		"  Header: app mouse clicks open models/thinking or toggle mode\n" +
 		"  Working: app mouse click jumps to live output\n" +

@@ -48,6 +48,7 @@ var (
 	styleBrand     = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleSep       = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#8c959f", Dark: "#6e7681"})
 	stylePrompt    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleMention   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleComposer  = lipgloss.NewStyle()
 
 	styleCompletion         = lipgloss.NewStyle().Foreground(colorMuted)

@@ -614,13 +614,30 @@ func (m *Model) renderEditor() string {
 		selectAll := m.composerSelectAll && editor.Value() != ""
 		if selectAll {
 			// Reverse video mirrors native terminal selection without imposing a
-			// permanent background color on Snow's transparent composer.
+			// permanent background color on Snow's transparent composer. Bubbles
+			// renders the active row with CursorLine rather than Text, so both
+			// styles must carry the selection or a one-line draft looks unchanged.
+			// Rebind the copied textarea's private active-style pointer too: a
+			// shallow Model copy still points at the original model's style field.
+			focused := editor.Focused()
 			editor.FocusedStyle.Text = editor.FocusedStyle.Text.Reverse(true)
+			editor.FocusedStyle.CursorLine = editor.FocusedStyle.CursorLine.Reverse(true)
 			editor.BlurredStyle.Text = editor.BlurredStyle.Text.Reverse(true)
+			editor.BlurredStyle.CursorLine = editor.BlurredStyle.CursorLine.Reverse(true)
+			if focused {
+				_ = editor.Focus()
+			} else {
+				editor.Blur()
+			}
 			editor.Cursor.Blur()
 		}
 		editorView := editor.View()
 		if !selectAll {
+			textStyle := editor.BlurredStyle.Text
+			if editor.Focused() {
+				textStyle = editor.FocusedStyle.Text
+			}
+			editorView = highlightComposerMentions(editorView, textStyle, styleMention)
 			for i := range m.promptImages {
 				token := imageAttachmentToken(i)
 				editorView = strings.ReplaceAll(editorView, token, stylePrompt.Render(token))

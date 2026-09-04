@@ -86,7 +86,8 @@ Most keys can be changed in `keybindings.yaml` or `/keybindings`.
 | `Alt+P` | Open the managed-process inspector |
 | `PageUp` / `PageDown` | Scroll the transcript or active detail view |
 | `Home` / `End` | Jump to the beginning or end |
-| `Ctrl+C` | Quit while idle, or abort active work |
+| `Ctrl+A` | Select only the current composer draft; typing, pasting, or deleting replaces it |
+| `Ctrl+C` | Copy a Ctrl+A-selected draft; otherwise quit while idle or abort active work |
 | `Esc` | Close a modal or abort active work |
 | `Ctrl+D` | Quit when the composer is empty |
 | `F6` | Toggle Snow-managed and terminal-native mouse behavior |
@@ -94,6 +95,14 @@ Most keys can be changed in `keybindings.yaml` or `/keybindings`.
 With `tui.mouse: true`, the wheel scrolls Snow's transcript. Primary-button
 drag selects transcript text, and right-click opens a copy menu. Hold Fn while
 dragging in Apple Terminal for terminal-native selection.
+
+Use `Ctrl+A` for composer-only Select All on Linux and macOS. Snow clears any
+app-owned transcript selection before highlighting the draft. A
+terminal emulator can reserve `Command+A`/`Super+A` and select its entire screen
+before Snow receives a key event; a terminal application cannot portably
+override that global shortcut. To use `Command+A`, configure the terminal's
+Snow profile to send the `Ctrl+A` control character instead. This mapping is
+terminal-specific; Snow then handles it exactly like physical `Ctrl+A`.
 
 ## Steer active work
 
@@ -151,7 +160,9 @@ in-memory process. Development builds can check but never replace themselves.
 ## Use composer completions
 
 Type `@` to find project files. Enter or Tab inserts the selected path without
-submitting the prompt.
+submitting the prompt. Whitespace-delimited `@path` tokens use the active theme's
+accent color while you type, so referenced files and folder paths stand apart
+from ordinary prompt text.
 
 Type `$` after whitespace to find enabled Agent Skills. Enter or Tab inserts
 the selected `$skill-name`. An exact whitespace-delimited skill token in a

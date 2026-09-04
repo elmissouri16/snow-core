@@ -9,6 +9,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
+
 	"github.com/elmissouri16/snow-core/internal/config"
 )
 
@@ -161,6 +164,79 @@ func expandMentionPrompt(text, cwd string, files []string) string {
 
 func isMentionSpace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+// highlightComposerMentions gives every whitespace-delimited @path token the
+// theme accent while preserving the textarea's cursor and viewport escape
+// sequences. Styling the syntax rather than only known files also gives
+// immediate feedback while asynchronous path completion is still loading.
+func highlightComposerMentions(view string, textStyle, mentionStyle lipgloss.Style) string {
+	if !strings.Contains(view, "@") {
+		return view
+	}
+
+	var out, segment strings.Builder
+	out.Grow(len(view))
+	segment.Grow(len(view))
+	state := byte(0)
+	atTokenStart := true
+	inMention := false
+	segmentIsMention := false
+
+	flush := func() {
+		if segment.Len() == 0 {
+			return
+		}
+		style := textStyle
+		if segmentIsMention {
+			style = mentionStyle
+		}
+		out.WriteString(style.Render(segment.String()))
+		segment.Reset()
+	}
+
+	for len(view) > 0 {
+		sequence, width, n, nextState := xansi.DecodeSequence(view, state, nil)
+		if n <= 0 {
+			flush()
+			out.WriteString(view)
+			break
+		}
+		view = view[n:]
+		state = nextState
+
+		if width == 0 {
+			flush()
+			out.WriteString(sequence)
+			if len(sequence) == 1 && isMentionSpace(sequence[0]) {
+				atTokenStart = true
+				inMention = false
+			}
+			continue
+		}
+
+		separator := len(sequence) == 1 && isMentionSpace(sequence[0])
+		highlight := inMention
+		if atTokenStart && sequence == "@" {
+			inMention = true
+			highlight = true
+		}
+		if separator {
+			inMention = false
+			atTokenStart = true
+			highlight = false
+		} else {
+			atTokenStart = false
+		}
+
+		if segment.Len() > 0 && highlight != segmentIsMention {
+			flush()
+		}
+		segmentIsMention = highlight
+		segment.WriteString(sequence)
+	}
+	flush()
+	return out.String()
 }
 
 // renderMentionPicker renders the bounded file list directly above the

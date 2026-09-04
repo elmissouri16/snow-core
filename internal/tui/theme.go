@@ -92,6 +92,7 @@ func applyResolvedTheme(t tuiTheme) {
 	styleBrand = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleSep = lipgloss.NewStyle().Foreground(t.sep)
 	stylePrompt = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleMention = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	// Keep the composer transparent. Nested textarea cursor/end-of-buffer
 	// backgrounds can otherwise render as isolated bright edge columns in
 	// terminals that disagree about light/dark background detection.

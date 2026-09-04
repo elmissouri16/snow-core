@@ -23,6 +23,11 @@ import (
 // the next text edit. Modal textareas are handled before this path.
 func (m *Model) handleComposerSelectionKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if msg.Type == tea.KeyCtrlA {
+		// Selection belongs to one surface at a time. In app-mouse mode an old
+		// transcript drag selection can otherwise remain highlighted beside the
+		// newly selected draft, making Select All appear to cover both surfaces.
+		m.clearTranscriptSelection()
+		m.catchUpTranscriptAfterSelection()
 		m.composerSelectAll = m.editor.Value() != ""
 		return true, nil
 	}
