@@ -19,23 +19,34 @@ type searchWalkOptions struct {
 }
 
 type searchIgnoreRule struct {
-	base     string
-	pattern  string
-	negate   bool
-	dirOnly  bool
-	anchored bool
-	hasSlash bool
+	base        string
+	pattern     string
+	negate      bool
+	dirOnly     bool
+	anchored    bool
+	hasSlash    bool
+	compiled    *globMatcher
+	descendants *globMatcher
 }
 
+// Limit the additional inherited-rule cache independently of ignore-file data.
+// Charge slice capacity so spare backing-array storage counts toward the bound.
+const (
+	maxSearchCachedDirectories = 256
+	maxSearchCachedRuleSlots   = 4096
+)
+
 type searchIgnoreMatcher struct {
-	root           string
-	guard          *PathGuard
-	policy         config.EffectiveSearchPolicy
-	hidden         bool
-	includeIgnored bool
-	policyExtra    []searchIgnoreRule
-	forced         []searchIgnoreRule
-	cache          map[string][]searchIgnoreRule
+	root            string
+	guard           *PathGuard
+	policy          config.EffectiveSearchPolicy
+	hidden          bool
+	includeIgnored  bool
+	policyExtra     []searchIgnoreRule
+	forced          []searchIgnoreRule
+	cache           map[string][]searchIgnoreRule
+	directoryRules  map[string][]searchIgnoreRule
+	cachedRuleSlots int
 }
 
 func newSearchIgnoreMatcher(root string, opts searchWalkOptions, guard *PathGuard) *searchIgnoreMatcher {
@@ -116,6 +127,10 @@ func (m *searchIgnoreMatcher) rulesFor(path string, isDir bool) []searchIgnoreRu
 	if !isDir {
 		dir = filepath.Dir(path)
 	}
+	if rules, ok := m.directoryRules[dir]; ok {
+		return rules
+	}
+	cacheDir := dir
 	var dirs []string
 	for {
 		dirs = append(dirs, dir)
@@ -141,6 +156,13 @@ func (m *searchIgnoreMatcher) rulesFor(path string, isDir bool) []searchIgnoreRu
 		if m.policy.RespectIgnore {
 			rules = append(rules, m.loadIgnoreFile(filepath.Join(dirs[i], ".ignore"), base)...)
 		}
+	}
+	if len(m.directoryRules) < maxSearchCachedDirectories && cap(rules) <= maxSearchCachedRuleSlots-m.cachedRuleSlots {
+		if m.directoryRules == nil {
+			m.directoryRules = make(map[string][]searchIgnoreRule)
+		}
+		m.directoryRules[cacheDir] = rules
+		m.cachedRuleSlots += cap(rules)
 	}
 	return rules
 }
@@ -222,6 +244,14 @@ func parseSearchIgnoreRule(base, line string) (searchIgnoreRule, bool) {
 	}
 	rule.pattern = line
 	rule.hasSlash = strings.Contains(line, "/")
+	if matcher, err := compileGlob(rule.pattern); err == nil {
+		rule.compiled = &matcher
+	}
+	if rule.hasSlash && rule.dirOnly {
+		if matcher, err := compileGlob(rule.pattern + "/**"); err == nil {
+			rule.descendants = &matcher
+		}
+	}
 	return rule, true
 }
 
@@ -244,7 +274,7 @@ func (r searchIgnoreRule) matches(rootRel string, isDir bool) bool {
 		parts := strings.Split(candidate, "/")
 		for i := 1; i < len(parts); i++ {
 			prefix := strings.Join(parts[:i], "/")
-			if ok, _ := matchGlobPath(prefix, r.pattern); ok {
+			if ok, _ := r.matchCompiled(prefix, false); ok {
 				return true
 			}
 		}
@@ -253,20 +283,31 @@ func (r searchIgnoreRule) matches(rootRel string, isDir bool) bool {
 	match := false
 	if r.anchored && !r.hasSlash {
 		if !strings.Contains(candidate, "/") {
-			match, _ = matchGlobPath(candidate, r.pattern)
+			match, _ = r.matchCompiled(candidate, false)
 		}
 	} else if !r.hasSlash {
 		for part := range strings.SplitSeq(candidate, "/") {
-			if ok, _ := matchGlobPath(part, r.pattern); ok {
+			if ok, _ := r.matchCompiled(part, false); ok {
 				match = true
 				break
 			}
 		}
 	} else {
-		match, _ = matchGlobPath(candidate, r.pattern)
+		match, _ = r.matchCompiled(candidate, false)
 		if !match && r.dirOnly {
-			match, _ = matchGlobPath(candidate, r.pattern+"/**")
+			match, _ = r.matchCompiled(candidate, true)
 		}
 	}
 	return match
+}
+
+func (r searchIgnoreRule) matchCompiled(candidate string, descendants bool) (bool, error) {
+	matcher, pattern := r.compiled, r.pattern
+	if descendants {
+		matcher, pattern = r.descendants, r.pattern+"/**"
+	}
+	if matcher != nil {
+		return matcher.Match(candidate)
+	}
+	return matchGlobPath(candidate, pattern)
 }

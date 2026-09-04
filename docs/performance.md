@@ -57,6 +57,24 @@ are decoded, and legacy tool calls outside that suffix use focused lookups.
 Exact input history, plans, context usage, compaction boundaries, inline branch
 prefixes, tool pairing, and omission counts remain covered by parity tests.
 
+Additional search benchmarks run independently of the ceiling guard:
+
+```sh
+go test ./internal/tools/builtin -run '^$' \
+  -bench '^(BenchmarkGrep10MB|BenchmarkGlob2000|BenchmarkReadSearchLines100000|BenchmarkSearchIgnore2000)$' \
+  -benchmem -benchtime=10x -count=3 -cpu=1
+```
+
+They distinguish full grep/glob operations from line reading and ignore-rule
+evaluation alone. The fixtures contain a 10 MB / 100,000-line text file or
+2,000 files in 50 directories with 60 ignore rules. Ignore patterns are prepared
+once per search, and inherited directory-rule reuse is limited to 256 directories
+and 4,096 rule slots, charging backing-array capacity. When either limit is
+reached, rule assembly continues uncached with unchanged precedence. Caches do
+not survive between searches. Complete buffered grep lines need only one owned
+string copy; fragmented lines and oversized-line draining retain their existing
+bounded behavior.
+
 ## Ceiling policy
 
 Allocation ceilings are regression limits, not targets or generated snapshots.

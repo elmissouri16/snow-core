@@ -97,6 +97,10 @@ identity and history. Resuming reopens that child without starting a turn;
 queue a follow-up when you want it to work again. Interrupting a child cancels
 only its current turn.
 
+When a child's task deadline expires, its status is `interrupted` and its error
+records the timeout, including when expiration occurs during provider streaming.
+Any partial response delivered to the parent is labeled as incomplete work.
+
 ## Set limits
 
 Configure explicit limits when a task may fan out:

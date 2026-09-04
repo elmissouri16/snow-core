@@ -631,6 +631,10 @@ func (m *Manager) worker(r *runtime, stop <-chan struct{}, done chan<- struct{})
 			} else {
 				err = child.RunMailbox(turnCtx)
 			}
+			// Agent streaming cancellation may return nil after persisting an
+			// aborted assistant. Capture the deadline before cleanup cancels even
+			// successful turns, so incomplete work cannot become "completed".
+			turnErr := turnCtx.Err()
 			cancel()
 			<-m.slots
 			r.mu.Lock()
@@ -644,12 +648,16 @@ func (m *Manager) worker(r *runtime, stop <-chan struct{}, done chan<- struct{})
 			errText := ""
 			if interrupted {
 				status = protocol.AgentInterrupted
+				errText = "interrupted by request"
+			} else if turnErr != nil {
+				status = protocol.AgentInterrupted
+				errText = turnErr.Error()
 			} else if err != nil {
+				errText = bound(err.Error(), m.limits.MaxResultBytes)
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					status = protocol.AgentInterrupted
 				} else {
 					status = protocol.AgentErrored
-					errText = bound(err.Error(), m.limits.MaxResultBytes)
 				}
 			}
 			terminal, record := m.prepareTerminal(r, status, result, errText, &usage)

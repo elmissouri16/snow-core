@@ -604,6 +604,11 @@ func readBoundedSearchLine(ctx context.Context, reader *bufio.Reader, maxBytes i
 			return "", oversized, err
 		}
 		part, err := reader.ReadSlice('\n')
+		// A complete buffered line needs only the owned string copy. Keep the
+		// accumulation/drain path for fragmented and oversized lines.
+		if len(line) == 0 && !oversized && err != bufio.ErrBufferFull && len(part) <= maxBytes {
+			return string(part), false, err
+		}
 		if !oversized {
 			if len(line)+len(part) > maxBytes {
 				oversized = true

@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/elmissouri16/snow-core/internal/app"
-	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 // Main is the RPC entry point used by cmd/snow --mode rpc and embedders.
@@ -30,9 +29,8 @@ func Main(ctx context.Context, opts app.Options) (err error) {
 	if err := srv.announceReady(); err != nil {
 		return err
 	}
-	a.Agent.Subscribe(func(ev protocol.AgentEvent) {
-		srv.write(ev)
-	})
+	stopEvents := srv.forwardAgentEvents()
+	defer func() { err = errors.Join(err, stopEvents()) }()
 	srv.write(a.Agent.StateEvent())
 	if err := a.ReadyGoal(); err != nil {
 		return err

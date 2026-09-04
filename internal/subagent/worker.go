@@ -153,6 +153,15 @@ func (m *Manager) deliverFinal(s *protocol.SubagentState, result, errText string
 	if payload == "" {
 		payload = "(no final response)"
 	}
+	if s.Status == protocol.AgentInterrupted {
+		payload = "Task interrupted"
+		if errText != "" {
+			payload += ": " + errText
+		}
+		if result != "" {
+			payload += "\nPartial response (work did not complete):\n" + result
+		}
+	}
 	env := protocol.AgentMessage{ID: newThreadID(), Author: s.Agent.Path, Recipient: s.Agent.ParentPath, Kind: protocol.AgentMessageFinal, Content: bound(payload, m.limits.MaxResultBytes), CreatedAt: time.Now().UnixMilli()}
 	t, ref, err := m.resolveTarget(Caller{ThreadID: s.Agent.ThreadID, Path: s.Agent.Path}, string(s.Agent.ParentPath))
 	if err != nil {

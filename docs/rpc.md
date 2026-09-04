@@ -1902,6 +1902,10 @@ for definitive prompt completion. They should also:
 - Unknown command and validation errors do not terminate the server.
 - Scanner errors, broken or short stdout writes, startup failures, or parent
   context cancellation terminate serving.
+- The CLI also monitors event delivery. If the event subscriber exceeds its
+  deadline, including time waiting behind another stdout write, RPC cancels
+  active work and exits with an explicit output error. Clients must continuously
+  drain stdout; incomplete event delivery is never treated as success.
 - EOF stops command admission, cancels RPC work and waits, releases
   user-input waiters, joins the active prompt and goroutines, then exits.
 - There is no `shutdown` command. Close stdin, signal the process, or cancel

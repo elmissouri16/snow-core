@@ -740,6 +740,26 @@ the fake-provider JSON `tool_routing` event, and `go test` benchmarks
 vary by host and should be compared only with the same command and checkout
 conditions.
 
+On 2026-09-04, the built-in search tools gained a complete-line copy fast path
+and per-search reuse of compiled ignore patterns and inherited rules. The
+additional inherited-rule cache is bounded to 256 directories and 4,096
+backing-array rule slots; overflow uses the original uncached assembly.
+Same-host before/after benchmarks (Go 1.27rc3, Apple M3 Pro, `-cpu=1`, medians
+of three samples at `-benchtime=10x`) measured:
+
+| Benchmark | Before: time / B/op / allocs/op | After: time / B/op / allocs/op |
+|---|---|---|
+| `BenchmarkGrep10MB` | 21.28 ms / 22,477,364 / 200,303 | 18.85 ms / 11,276,890 / 100,299 |
+| `BenchmarkGlob2000` | 196.95 ms / 19,825,568 / 499,670 | 196.15 ms / 8,107,912 / 177,739 |
+| `BenchmarkReadSearchLines100000` | 5.43 ms / 22,432,800 / 200,002 | 3.26 ms / 11,232,800 / 100,002 |
+| `BenchmarkSearchIgnore2000` | 88.07 ms / 16,163,592 / 444,190 | 63.80 ms / 4,735,616 / 128,719 |
+
+Allocation volume fell about 50% for complete grep and 59% for complete glob.
+The glob wall-clock samples varied from 178 to 213 ms after the change, so
+this run does not establish a stable end-to-end glob speedup. Stage-only gains
+must not be reported as full-operation gains. The fixtures and reproduction
+command are documented in [the performance guide](docs/performance.md).
+
 ### Tool interfaces
 
 ```go

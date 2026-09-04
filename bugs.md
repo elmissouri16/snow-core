@@ -820,9 +820,9 @@ passed afterward.
 
 ## BUG-018: Headless output can be silently truncated after subscriber eviction
 
-- **Status:** Resolved in the working tree
+- **Status:** Resolved in the working tree, including the RPC variant
 - **Severity:** High
-- **Surface:** Print and JSON output
+- **Surface:** Print, JSON, and RPC output
 - **Observed:** Repository-wide reliability audit
 
 ### Expected behavior
@@ -856,6 +856,45 @@ ordering remain covered.
 
 Focused agent/CLI tests, targeted race tests, the full Go suite, vet,
 support-script tests, the benchmark guard, installation, and diff checks pass.
+
+### 2026-09-04 audit: RPC variant
+
+The audit found `internal/rpc/main.go:33` forwarding events through an unmonitored
+`Agent.Subscribe`. The one-second RPC write timeout does not cover waiting for
+`Server.writeMu` (`internal/rpc/server.go:855`), whereas the one-second event
+subscriber deadline covers the complete callback. Waiting behind another RPC
+response and then writing an event can therefore evict the subscriber even
+when every individual write succeeds within its own timeout.
+
+A temporary `TestAuditRPCSubscriberLoss` reproduced this with two serialized
+650 ms writes: one response followed by one agent event. Later text and
+`turn_done` were absent, while `Server.Serve` returned nil and no write error
+was recorded. This can also strand an interactive client when subsequent
+permission or user-input requests are no longer forwarded. This reproduction
+used local bounded output only and required no provider credentials.
+
+RPC must monitor subscription failure, terminate active work/transport with an
+explicit error on eviction, and account for writer contention when enforcing
+its delivery deadline. Add coverage for overlapping responses and events whose
+individual writes remain below the output timeout. The reproduction failed
+against the audited implementation.
+
+### RPC resolution evidence
+
+RPC now uses monitored forwarding with a lifetime-scoped watcher. Eviction
+wakes the server's existing write-failure shutdown path even while stdin stays
+open, and final cleanup drains events and checks failure synchronously before
+unsubscribing. Regression coverage exercises two contending 650 ms writes
+through the real process output wrapper, requires the eviction error, and
+verifies the active provider prompt is canceled and durably aborted. Normal
+cleanup still delivers final text and `turn_done` and is safe to call twice.
+
+`go test ./internal/rpc ./internal/subagent`, `go test ./...`,
+`go test -race ./internal/subagent ./internal/agent ./internal/app
+./internal/session ./internal/rpc ./pkg/snowsdk`, `go vet ./...`, all 56
+support-script tests, and `python3 scripts/check_benchmarks.py` passed. Tests
+requiring session/artifact directory access were rerun outside the filesystem
+sandbox after their initial access failures.
 
 ## BUG-019: Section-specific configuration updates can lose concurrent writes
 
@@ -1003,3 +1042,103 @@ staging pathname while continuing to reopen and use the destination.
 
 Focused session tests, affected-area race tests, the full Go suite, vet,
 support-script tests, the benchmark guard, installation, and diff checks pass.
+
+## BUG-023: Subagent provider timeouts are reported as successful completion
+
+- **Status:** Resolved in the working tree
+- **Severity:** High
+- **Surface:** Subagent task lifecycle, final-result delivery, SDK/RPC/TUI status
+- **Observed:** 2026-09-04 codebase audit; reproduced with a real agent loop and
+  a local provider fixture
+
+### Expected behavior
+
+A child whose task deadline expires during provider streaming must finish as
+interrupted, preserve the timeout reason, and identify any returned text as a
+partial result rather than completed work.
+
+### Actual behavior and impact
+
+`internal/agent/streaming_tools.go` persists provider-stream cancellation as
+`StopAborted`, and `internal/agent/lifecycle_run.go:594` returns nil for that
+stop reason. In `internal/subagent/operations.go:628-654`, the worker only
+checks an explicit interrupt flag or a non-nil returned error. It never checks
+whether the task context expired before its own cleanup cancellation.
+
+Consequently, a child that reaches `task_timeout_ms` during a provider request
+is marked `completed`, with an empty error, and its last partial assistant text
+is delivered to the parent as the final result. Parents and integrations can
+accept unfinished implementation or verification work as successfully done.
+The default task deadline is 1,800,000 ms (30 minutes).
+
+### Reproduction
+
+A temporary `TestAuditSubagentTimeoutStatus` used the real `agent.Agent` inside
+the subagent manager with a 40 ms task deadline. Its local provider emitted
+`Starting the requested work...`, then blocked until the request context
+expired. `WaitAll` returned nil and the child state was:
+
+```text
+status=completed error="" result="Starting the requested work..."
+```
+
+The assertion requiring `interrupted` failed. No network or external side
+effects were involved.
+
+### Remediation and required regression coverage
+
+Capture the task context error before calling the worker's cleanup `cancel()`
+and use it when classifying completion, including when the agent returns nil.
+Preserve the interruption reason in status and parent-facing final delivery.
+Test real-agent deadlines both before any provider output and after partial
+output, for initial prompts and mailbox follow-ups. Keep successful completion
+and explicit interruption covered separately.
+
+### Verification status
+
+The worker now captures the task context error before cleanup cancellation,
+marks expired work interrupted even when the agent returns nil, and preserves
+the interruption reason. Parent-facing final delivery explicitly labels any
+partial text as incomplete work.
+
+Permanent real-agent regression tests cover deadlines in `Chat`, before the
+first stream output, and after partial output, for both initial prompts and
+mailbox follow-ups. They assert child status/error and parent mailbox content;
+successful initial work remains completed. Existing explicit-interruption
+coverage also passes. The focused package tests, full Go suite, affected-area
+race checks, vet, 56 support-script tests, and benchmark guard all passed.
+
+## BUG-024: Repository searches repeat line copies and ignore-rule preparation
+
+- **Status:** Resolved in the working tree
+- **Severity:** Performance
+- **Surface:** Built-in grep and glob tools
+- **Observed:** 2026-09-04 performance audit
+
+Complete buffered grep lines were copied into a temporary byte slice and then
+copied again into their returned string. Ignore checks also recompiled patterns
+and rebuilt the same inherited directory-rule lists for every file. A local
+10 MB / 100,000-line grep allocated about 22.47 MB; a 2,000-file glob with 60
+ignore rules allocated about 19.90 MB.
+
+The fix returns an owned string directly for complete in-limit lines and keeps
+the original fragmented-line, oversized-line drain, error, and cancellation
+paths. Ignore patterns are prepared once, and each search caches inherited
+rules for at most 256 directories and 4,096 backing-array rule slots. Exhausting
+either cache budget falls back to uncached rule assembly without dropping rules
+or changing precedence. No path-guard or ignore-file opening checks change.
+
+Regression coverage checks line boundaries, ownership after reader-buffer reuse,
+oversized-line recovery, errors, cancellation, pattern semantics, both cache
+limits, and fresh rules between searches. Permanent benchmarks cover the line
+reader, full 10 MB grep, ignore evaluation, and full 2,000-file glob.
+
+Verification passed: `go test ./internal/tools/builtin -count=1`,
+`go test ./...`, `go test -race ./internal/tools/builtin -count=1`,
+`go vet ./...`, all 56 support-script tests, and
+`python3 scripts/check_benchmarks.py`. Three-sample before/after benchmarks
+confirmed about 50% less allocation volume for full grep and 59% less for
+full glob. The line-reading stage took 40% less time and ignore evaluation
+28% less; whole-glob timing was variable. Exact commands and measurements
+are recorded in `docs/performance.md` and `IMPLEMENTATION.md`. Nothing was
+installed.
