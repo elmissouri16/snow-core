@@ -56,6 +56,31 @@ func TestNeedsHistoricalToolResultPruning(t *testing.T) {
 	}
 }
 
+func TestPruningThresholdBoundaryPreservesSmallResults(t *testing.T) {
+	const threshold = 8192
+	messages := make([]protocol.Message, 3)
+	for i, size := range []int{threshold - 1, threshold, threshold + 1} {
+		messages[i] = protocol.Message{Role: protocol.RoleTool, Content: []protocol.ContentBlock{protocol.NewTextBlock(strings.Repeat("x", size))}}
+	}
+	resolverCalls := 0
+	got := PruneHistoricalToolResultsWithRefs(messages, threshold, 4096, 1024, func(protocol.Message, string) string {
+		resolverCalls++
+		return "retained-result"
+	})
+	for i := range 2 {
+		if got[i].Content[0].Text != messages[i].Content[0].Text {
+			t.Fatal("result at or below the threshold was changed")
+		}
+	}
+	if resolverCalls != 1 || !strings.Contains(got[2].Content[0].Text, "bytes omitted") || len(got[2].Content[0].Text) >= threshold+1 {
+		t.Fatal("oversized result was not pruned with one artifact lookup")
+	}
+	got[0].Content[0].Text = "changed projection"
+	if messages[0].Content[0].Text != strings.Repeat("x", threshold-1) {
+		t.Fatal("skipping pruning weakened defensive ownership")
+	}
+}
+
 func TestPruneHistoricalToolResultsKeepsUTF8AndSkipsRichBlocks(t *testing.T) {
 	value := strings.Repeat("界", 100)
 	plain := protocol.NewToolResultMessage("plain", "", "call", "read", []protocol.ContentBlock{protocol.NewTextBlock(value)}, false)

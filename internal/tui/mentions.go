@@ -90,7 +90,7 @@ func matchMentionFiles(files []string, query string) []string {
 			pathMatches = append(pathMatches, path)
 			continue
 		}
-		if strings.HasPrefix(strings.ToLower(filepath.Base(path)), query) {
+		if strings.HasPrefix(filepath.Base(lower), query) {
 			baseMatches = append(baseMatches, path)
 		}
 	}

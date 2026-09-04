@@ -517,6 +517,7 @@ func (m *Model) processOutputLines(width int) []string {
 func sanitizeProcessOutput(output string) string {
 	output = strings.ReplaceAll(strings.ToValidUTF8(output, "�"), "\r\n", "\n")
 	var safe strings.Builder
+	safe.Grow(len(output))
 	for _, r := range output {
 		switch {
 		case r == '\n':

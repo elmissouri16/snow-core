@@ -1142,3 +1142,49 @@ full glob. The line-reading stage took 40% less time and ignore evaluation
 28% less; whole-glob timing was variable. Exact commands and measurements
 are recorded in `docs/performance.md` and `IMPLEMENTATION.md`. Nothing was
 installed.
+
+## BUG-025: Process-log rendering and mention matching repeat avoidable work
+
+- **Status:** Resolved in the working tree
+- **Severity:** Performance
+- **Surface:** TUI process logs and file mention completion
+
+Process-output sanitizing repeatedly grew its buffer despite knowing an output
+size lower bound after normalization. Mention basename matching lowercased text
+already contained in the lowercase full path. Two production-line changes
+reserve that buffer and reuse the lowercase path. They preserve escaping,
+UTF-8 repair, original result casing, sorting, and existing output bounds.
+
+Benchmarks and before/after measurements are recorded in `IMPLEMENTATION.md`.
+Regression tests check control escaping, CRLF, invalid UTF-8, mixed-case and
+Unicode mentions, and path-prefix priority. Existing process-fleet and mention
+tests cover display and interaction behavior.
+
+Verification passed: focused TUI tests, `go test ./...`,
+`go test -race ./internal/tui -count=1`, `go vet ./...`, all 56 support-script
+tests, and the performance regression guard. Three-sample benchmarks confirmed
+30% fewer allocated bytes for process sanitizing plus wrapping and 6–23% less
+mention-matching time. No installation was performed.
+
+## BUG-026: Context preparation copies unchanged tool results and checkpoint text
+
+- **Status:** Resolved in the working tree
+- **Severity:** Performance
+- **Surface:** Historical tool-result pruning and persisted context-token checks
+
+When one oversized tool result triggers pruning, the pruning helper also copies
+single-text results that are below the threshold. Checkpoint detection similarly
+copies a whole single-text message just to inspect its prefix. Two three-line
+fast paths skip these copies; multi-block handling, pruning thresholds,
+artifact callbacks, and defensive projection ownership retain their existing
+behavior. Focused regression tests and repeatable benchmarks cover both paths.
+
+Verification passed: `go test ./internal/compact ./internal/agent -count=1`,
+`go test ./...`, `go test -race ./internal/compact ./internal/agent -count=1`,
+`go vet ./...`, all 56 support-script tests, and
+`python3 scripts/check_benchmarks.py`. Repeated benchmarks measured about 74%
+less time and allocation volume for pruning 50 small results plus one oversized
+result in an owned projection. Persisted-token lookup with a 32 KiB checkpoint
+and 1,500 retained messages dropped from 11.00 to 0.752 µs and from 40,960 to
+zero allocated bytes. Scope and reproduction commands are in
+`IMPLEMENTATION.md`. No installation was performed.

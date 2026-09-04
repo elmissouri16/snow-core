@@ -132,6 +132,18 @@ func TestProcessFleetOutputWrappingIsCached(t *testing.T) {
 	}
 }
 
+func TestSanitizeProcessOutputPreservesEscaping(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"", ""},
+		{"ready 界\n", "ready 界\n"},
+		{"A\r\nB\rC\t\x00\x1b\u009b\xff", "A\nB\nC    \\x00\\x1b\\x9b�"},
+	} {
+		if got := sanitizeProcessOutput(tc.input); got != tc.want {
+			t.Errorf("sanitize %q = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
 func TestProcessFleetRefreshPreservesSelectionAndInvalidatesOnClose(t *testing.T) {
 	m := processFleetTestModel(t)
 	m.processFleetIndex = 1

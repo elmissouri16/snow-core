@@ -56,6 +56,9 @@ func prunedHistoricalToolResult(message protocol.Message, threshold, head, tail 
 	if message.Role != protocol.RoleTool || threshold <= 0 || head < 0 || tail < 0 {
 		return "", false
 	}
+	if len(message.Content) == 1 && message.Content[0].Type == protocol.BlockText && len(message.Content[0].Text) <= threshold {
+		return "", false
+	}
 	var text strings.Builder
 	plain := len(message.Content) > 0
 	for _, block := range message.Content {

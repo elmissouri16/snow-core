@@ -329,6 +329,9 @@ func validTerminalStop(stop protocol.StopReason) bool {
 }
 
 func messageTextBlocks(message protocol.Message) string {
+	if len(message.Content) == 1 && message.Content[0].Type == protocol.BlockText {
+		return message.Content[0].Text
+	}
 	var text strings.Builder
 	for _, block := range message.Content {
 		if block.Type == protocol.BlockText {

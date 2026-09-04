@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -55,6 +56,22 @@ func TestMentionQueryAndMatching(t *testing.T) {
 	}
 	if replaceMentionToken("read @README", len("read "), "README.md") != "read @README.md " {
 		t.Fatal("replaceMentionToken should replace the current token")
+	}
+}
+
+func TestMentionMatchingPreservesCaseAndPriority(t *testing.T) {
+	files := []string{"b/service.go", "SERVICE/z.go", "A/Service.go", "src/İnput.go", "src/Σervice.go"}
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"SERVICE", []string{"SERVICE/z.go", "A/Service.go", "b/service.go"}},
+		{"İ", []string{"src/İnput.go"}},
+		{"σ", []string{"src/Σervice.go"}},
+	} {
+		if got := matchMentionFiles(files, tc.query); !slices.Equal(got, tc.want) {
+			t.Errorf("query %q = %v, want %v", tc.query, got, tc.want)
+		}
 	}
 }
 

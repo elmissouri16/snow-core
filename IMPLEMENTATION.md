@@ -760,6 +760,56 @@ this run does not establish a stable end-to-end glob speedup. Stage-only gains
 must not be reported as full-operation gains. The fixtures and reproduction
 command are documented in [the performance guide](docs/performance.md).
 
+A second 2026-09-04 pass added one buffer reservation to process-output
+sanitizing and reused the existing lowercase path for mention basename matching.
+Go 1.27rc3 / Apple M3 Pro medians (`-cpu=1 -benchtime=100ms -count=3`):
+
+| Benchmark | Before | After |
+|---|---|---|
+| `BenchmarkSanitizeProcessOutput/131072` | 0.906 ms / 514,840 B / 25 allocations | 0.609 ms / 131,104 B / 2 allocations |
+| `BenchmarkProcessOutputLines` | 2.302 ms / 1,808,232 B | 2.126 ms / 1,260,656 B |
+| `BenchmarkMentionMatching` | 210 µs / 133,440 B | 197 µs / 133,440 B |
+| `BenchmarkMentionMatchingMixedCase` | 413 µs / 277,440 B / 4,012 allocations | 317 µs / 229,440 B / 2,012 allocations |
+
+Process sanitizing plus wrapping allocates 30% fewer bytes; sanitizing alone
+allocates 67–75% fewer bytes for 4–128 KiB inputs. Mention matching takes about
+6–23% less time across these lowercase/mixed-case 2,000-file fixtures; this does
+not measure file discovery. Escaping, invalid UTF-8 handling, result casing,
+and match ordering remain unchanged. These benchmarks are outside the ceiling
+guard:
+
+```sh
+go test ./internal/tui -run '^$' \
+  -bench '^(BenchmarkSanitizeProcessOutput|BenchmarkProcessOutputLines|BenchmarkMentionMatching|BenchmarkMentionMatchingMixedCase)$' \
+  -benchmem -benchtime=100ms -count=3 -cpu=1
+```
+
+A third 2026-09-04 pass added two three-line fast paths: leave single-text
+tool results below the pruning threshold alone, and reuse single-text message
+strings during checkpoint detection. Same-host Go 1.27rc3 / Apple M3 Pro
+medians (`-cpu=1 -benchtime=100ms -count=3`):
+
+| Benchmark | Before | After |
+|---|---|---|
+| `BenchmarkPruneMixedHistory/owned-50` | 63.29 µs / 275,910 B / 55 allocations | 16.31 µs / 71,100 B / 5 allocations |
+| `BenchmarkPruneMixedHistory/defensive-50` | 70.66 µs / 293,495 B / 107 allocations | 21.97 µs / 88,684 B / 57 allocations |
+| `BenchmarkPruneMixedHistory/owned-500` | 331.23 µs / 2,119,153 B / 505 allocations | 13.04 µs / 71,097 B / 5 allocations |
+| `BenchmarkCheckpointContextUsage/tail-1500/checkpoint-32768` | 11.00 µs / 40,960 B / 1 allocation | 0.752 µs / 0 B / 0 allocations |
+
+Pruning fixtures contain 50 or 500 unchanged 4 KiB tool results plus one 64 KiB
+result that requires pruning. They measure the pruning helpers, excluding
+artifact persistence. The checkpoint fixture measures persisted-token lookup
+with a 32 KiB summary body and 1,500 retained messages before the checkpoint.
+These are context-preparation measurements, not complete agent-turn timings.
+Multi-block handling, threshold boundaries, artifact callbacks, and defensive
+ownership retain their existing behavior. Reproduce outside the ceiling guard:
+
+```sh
+go test ./internal/compact ./internal/agent -run '^$' \
+  -bench '^(BenchmarkPruneMixedHistory|BenchmarkCheckpointContextUsage)$' \
+  -benchmem -benchtime=100ms -count=3 -cpu=1
+```
+
 ### Tool interfaces
 
 ```go

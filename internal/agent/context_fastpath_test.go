@@ -14,6 +14,26 @@ type fixedContextStore struct {
 	messages []protocol.Message
 }
 
+func TestMessageTextBlocksPreservesContent(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		blocks []protocol.ContentBlock
+		want   string
+	}{
+		{name: "no blocks"},
+		{name: "empty text", blocks: []protocol.ContentBlock{protocol.NewTextBlock("")}},
+		{name: "single text", blocks: []protocol.ContentBlock{protocol.NewTextBlock("Conversation summary:\n界\xff")}, want: "Conversation summary:\n界\xff"},
+		{name: "non-text", blocks: []protocol.ContentBlock{{Type: protocol.BlockThinking, Text: "private"}}},
+		{name: "mixed blocks", blocks: []protocol.ContentBlock{protocol.NewTextBlock("Conversation "), {Type: protocol.BlockThinking, Text: "private"}, protocol.NewTextBlock("summary:")}, want: "Conversation summary:"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := messageTextBlocks(protocol.Message{Content: tt.blocks}); got != tt.want {
+				t.Fatalf("messageTextBlocks() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func (s fixedContextStore) ContextMessages() ([]protocol.Message, error) { return s.messages, nil }
 
 func TestContextMessagesNoFailureReusesOwnedProjection(t *testing.T) {
