@@ -2,13 +2,17 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/internal/provider/chatgpt"
 	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
@@ -241,6 +245,66 @@ func TestCancelingOAuthReturnsToChatGPTChoices(t *testing.T) {
 	}
 	if card := stripANSI(m.renderLoginModal()); !strings.Contains(card, "Sign in with browser") {
 		t.Fatalf("OAuth cancellation did not restore method choices: %q", card)
+	}
+}
+
+func TestOAuthCompletionAbandonsFullChannelOnTUIShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	events := make(chan tea.Msg, 1)
+	events <- oauthProgressMsg{}
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		deliverOAuthDone(ctx, events, oauthDoneMsg{})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("OAuth completion blocked after TUI shutdown")
+	}
+}
+
+func TestOAuthCompletionStillSettlesOperationCancellation(t *testing.T) {
+	events := make(chan tea.Msg, 1)
+	events <- oauthProgressMsg{}
+	done := make(chan struct{})
+	go func() {
+		deliverOAuthDone(t.Context(), events, oauthDoneMsg{err: context.Canceled})
+		close(done)
+	}()
+	<-events
+	select {
+	case message := <-events:
+		completion, ok := message.(oauthDoneMsg)
+		if !ok || !errors.Is(completion.err, context.Canceled) {
+			t.Fatalf("OAuth completion = %#v", message)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("live TUI did not receive OAuth cancellation completion")
+	}
+	<-done
+}
+
+func TestModelCloseCancelsAndWaitsForStartedOAuthWorker(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	workerStarted := make(chan struct{})
+	workerDone := make(chan struct{})
+	m.oauthLogin = func(ctx context.Context, _ string, _ auth.LoginRequest, _ auth.Interaction) (auth.Status, error) {
+		close(workerStarted)
+		<-ctx.Done()
+		close(workerDone)
+		return auth.Status{}, ctx.Err()
+	}
+	_ = m.startChatGPTOAuth(chatgpt.LoginBrowser, nil)
+	<-workerStarted
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-workerDone:
+	default:
+		t.Fatal("Model.Close returned before the launched OAuth worker stopped")
 	}
 }
 

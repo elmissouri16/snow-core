@@ -224,19 +224,30 @@ func (m *Model) startChatGPTOAuth(method chatgpt.LoginMethod, allowedWorkspaceID
 	m.oauthBackRequested = false
 	m.oauthProgress = chatgpt.LoginProgress{}
 	m.loginError = ""
-	go func() {
+	login := m.oauthLogin
+	if login == nil {
+		login = m.app.Login
+	}
+	m.oauthWG.Go(func() {
 		request := auth.LoginRequest{Method: string(method), Params: map[string][]string{"allowed_workspace_id": allowedWorkspaceIDs}}
-		resolved, err := m.app.Login(ctx, chatgpt.ProviderID, request, tuiOAuthInteraction{events: events})
+		resolved, err := login(ctx, chatgpt.ProviderID, request, tuiOAuthInteraction{events: events})
 		if err != nil && method == chatgpt.LoginBrowser && (strings.Contains(err.Error(), "callback port 1455 is unavailable") || errors.Is(err, auth.ErrInteractionUnavailable)) && ctx.Err() == nil {
 			request.Method = string(chatgpt.LoginDevice)
-			resolved, err = m.app.Login(ctx, chatgpt.ProviderID, request, tuiOAuthInteraction{events: events})
+			resolved, err = login(ctx, chatgpt.ProviderID, request, tuiOAuthInteraction{events: events})
 		}
 		status := chatGPTStatus(resolved)
-		// Once Login has persisted the credential, cancellation/fallback of the
-		// optional catalog refresh must not turn the committed login into failure.
-		events <- oauthDoneMsg{status: status, err: err}
-	}()
+		// Operation cancellation while the TUI remains live must still settle the
+		// picker. TUI shutdown instead abandons the now-unobservable completion.
+		deliverOAuthDone(m.ctx, events, oauthDoneMsg{status: status, err: err})
+	})
 	return waitOAuthEvent(events)
+}
+
+func deliverOAuthDone(ctx context.Context, events chan<- tea.Msg, message oauthDoneMsg) {
+	select {
+	case events <- message:
+	case <-ctx.Done():
+	}
 }
 
 func chatGPTStatus(status auth.Status) chatgpt.AuthStatus {

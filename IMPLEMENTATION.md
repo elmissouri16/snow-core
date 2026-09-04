@@ -684,7 +684,9 @@ tradeoffs auditable rather than contractual:
   and stream corpus tests.
 - Persistent event-subscriber workers preserve serial event order, concurrent
   subscriber callbacks, timeout eviction, reentrant-drain rejection, and
-  payload isolation without a goroutine and timer per delivery. A 256-event,
+  payload isolation without a goroutine and timer per delivery. Monitored
+  subscriptions expose timeout eviction to headless print/JSON consumers so a
+  truncated stream cannot be reported as successful. A 256-event,
   one-subscriber batch fell from 828.5 µs / 286,050 B / 2,315 allocations to
   202.0 µs / 115,912 B / 523 allocations. Forking 1,500 inherited subagent
   messages in one batch fell from 878.0 µs / 2,387,694 B / 11,792 allocations
@@ -857,7 +859,10 @@ Global configuration lives in `~/.snow/config.json`; secrets in
 `~/.snow/auth.json`; trust decisions in `~/.snow/trust.json`; sessions under
 `~/.snow/sessions/`; and TUI bindings/themes under `~/.snow/keybindings.yaml`
 and `~/.snow/themes/*.yaml`. Project-scoped overrides use
-`<project>/.snow/config.json` and are trust-gated. See
+`<project>/.snow/config.json` and are trust-gated. Typed settings and raw
+plugin/MCP/skill section mutations share one process-wide and cross-process
+read-modify-write lock, then publish with atomic replacement so concurrent Snow
+processes preserve unrelated changes and unknown fields. See
 `docs/configuration.md`.
 
 Defaults include provider `opencode-go`, fresh interactive-session permission
@@ -1008,15 +1013,20 @@ schema is Snow-owned; old JSONL sessions are intentionally not migrated.
 ### Forks
 
 - Same-database branches share one file and diverge at a `BranchTip`.
-- Physical exact-entry forks create an independent session with provenance.
+- Physical exact-entry forks create an independent session with provenance and
+  remove the complete randomly named staging database/sidecar set, including
+  its lease, before returning the independently leased destination.
 - Detached clean Git-worktree forks use a bounded direct-argument Git utility.
 - Prior-session reference is deliberately narrower than a general memory
   product: `session_search` rebuilds a disposable SQLite FTS5 corpus, and
   `session_reference` imports at most three tip-pinned, bounded, untrusted
-  snapshots per target branch. Tool content, reasoning, images,
-  provider-private data, credentials, permission/trust state, goals, queues,
-  and child databases are excluded; references transfer information only and
-  no authority.
+  snapshots per target branch. The active session is excluded from both FTS
+  corpus selection and its file-identity key, so current WAL churn does not
+  rebuild an index that cannot return current-session results; changing the
+  active exclusion or any historical database still invalidates it. Tool
+  content, reasoning, images, provider-private data, credentials,
+  permission/trust state, goals, queues, and child databases are excluded;
+  references transfer information only and no authority.
 
 ## Plugins
 
@@ -1228,7 +1238,9 @@ TUI authentication flow also reuses that fixed-frame card:
 provider/logout selection,
 serialized logout progress, compatible profile and endpoint fields, masked key
 capture, ChatGPT account/method selection and OAuth progress, and compatible
-model discovery. Nested auth cards retain a bounded non-secret navigation stack:
+model discovery. ChatGPT OAuth workers are owned by the model lifetime: shutdown
+cancels and joins them, while an in-session Escape still receives its terminal
+cancellation event. Nested auth cards retain a bounded non-secret navigation stack:
 Esc restores the prior field or selection card, while the root Esc cancels and
 masked key drafts are discarded rather than retained. Required device codes and
 validation errors win constrained card rows, and endpoint paths are not echoed

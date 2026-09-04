@@ -75,7 +75,7 @@ func (f *FileIndex) CreateFork(cwd string, source Store, opts protocol.SessionFo
 	}
 	tmpPath := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp-"+randomSuffix())
 	cleanup := func(target string) {
-		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		for _, suffix := range []string{"", "-wal", "-shm", "-journal", ".lock"} {
 			_ = os.Remove(target + suffix)
 		}
 	}
@@ -127,6 +127,11 @@ func (f *FileIndex) CreateFork(cwd string, source Store, opts protocol.SessionFo
 		cleanup(path)
 		cleanup(tmpPath)
 		return nil, protocol.SessionForkResult{}, fmt.Errorf("session: remove fork staging file: %w", err)
+	}
+	if err := os.Remove(tmpPath + ".lock"); err != nil && !os.IsNotExist(err) {
+		cleanup(path)
+		cleanup(tmpPath)
+		return nil, protocol.SessionForkResult{}, fmt.Errorf("session: remove fork staging lock: %w", err)
 	}
 
 	opened, err := OpenSQLiteStore(path, cwd, Options{})

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/url"
 	"os"
@@ -607,7 +608,11 @@ func printableGoalBlockedReason(reason string) string {
 	return reason
 }
 
-func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, showUsage bool) (err error) {
+func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, showUsage bool) error {
+	return runPrintTo(ctx, opts, prompt, jsonMode, showUsage, os.Stdout, os.Stderr)
+}
+
+func runPrintTo(ctx context.Context, opts app.Options, prompt string, jsonMode, showUsage bool, stdout, stderr io.Writer) (err error) {
 	if strings.TrimSpace(prompt) == "" {
 		return fmt.Errorf("print mode requires -p prompt")
 	}
@@ -617,7 +622,7 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 	}
 	defer func() { err = errors.Join(err, a.Close()) }()
 	for _, diagnostic := range a.Diagnostics {
-		fmt.Fprintf(os.Stderr, "config warning: %s: %s\n", diagnostic.Path, diagnostic.Message)
+		fmt.Fprintf(stderr, "config warning: %s: %s\n", diagnostic.Path, diagnostic.Message)
 	}
 
 	var outputMu sync.Mutex
@@ -626,26 +631,29 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 		outputMu.Lock()
 		defer outputMu.Unlock()
 		if outputErr == nil {
-			_, outputErr = fmt.Fprintf(os.Stdout, format, args...)
+			_, outputErr = fmt.Fprintf(stdout, format, args...)
 		}
 	}
 	writeErrOut := func(format string, args ...any) {
 		outputMu.Lock()
 		defer outputMu.Unlock()
 		if outputErr == nil {
-			_, outputErr = fmt.Fprintf(os.Stderr, format, args...)
+			_, outputErr = fmt.Fprintf(stderr, format, args...)
 		}
 	}
+	subscriptionFailure := func() error { return nil }
 	if jsonMode {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(stdout)
 		enc.SetEscapeHTML(false)
-		a.Agent.Subscribe(func(ev protocol.AgentEvent) {
+		unsubscribe, failure := a.Agent.SubscribeMonitored(func(ev protocol.AgentEvent) {
 			outputMu.Lock()
 			defer outputMu.Unlock()
 			if outputErr == nil {
 				outputErr = enc.Encode(ev)
 			}
 		})
+		defer unsubscribe()
+		subscriptionFailure = failure
 		outputMu.Lock()
 		if outputErr == nil {
 			outputErr = enc.Encode(a.Agent.StateEvent())
@@ -653,7 +661,7 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 		outputMu.Unlock()
 	} else {
 		lastGoalStatus := protocol.ThreadGoalStatus("")
-		a.Agent.Subscribe(func(ev protocol.AgentEvent) {
+		unsubscribe, failure := a.Agent.SubscribeMonitored(func(ev protocol.AgentEvent) {
 			if ev.Snapshot {
 				return
 			}
@@ -703,6 +711,8 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 				}
 			}
 		})
+		defer unsubscribe()
+		subscriptionFailure = failure
 	}
 	if err := a.ReadySubagents(); err != nil {
 		return err
@@ -729,6 +739,9 @@ func runPrint(ctx context.Context, opts app.Options, prompt string, jsonMode, sh
 		return err
 	}
 	if err := a.Agent.DrainEvents(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	if err := subscriptionFailure(); err != nil {
 		return err
 	}
 	if !jsonMode {

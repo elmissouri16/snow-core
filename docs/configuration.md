@@ -60,6 +60,12 @@ Environment overrides:
 from shared diagnostic capture. It does not enable `debug.enabled`, event
 recording, or diagnostic dumps.
 
+All Snow-managed `config.json` read-modify-write operations—including settings,
+plugin, MCP, and skill changes—share a process-wide and cross-process lock before
+atomic replacement. Concurrent Snow processes therefore apply changes to the
+latest committed file instead of overwriting unrelated updates from stale
+snapshots.
+
 ## Precedence
 
 Runtime selection generally follows this order:

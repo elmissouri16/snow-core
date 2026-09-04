@@ -40,6 +40,10 @@ func TestFileIndexCreateForkMaterializesIndependentSession(t *testing.T) {
 	if result.SessionID == source.ID() || result.SessionPath == source.Path() {
 		t.Fatalf("fork identity not independent: %+v", result)
 	}
+	stagingPattern := filepath.Join(filepath.Dir(result.SessionPath), "."+filepath.Base(result.SessionPath)+".tmp-*")
+	if staging, err := filepath.Glob(stagingPattern); err != nil || len(staging) != 0 {
+		t.Fatalf("fork staging files=%v err=%v", staging, err)
+	}
 	if result.SourceSessionID != source.ID() || result.SourceBranchID != "main" || result.SourceEntryID != "assistant-1" {
 		t.Fatalf("source provenance = %+v", result)
 	}

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/elmissouri16/snow-core/internal/agent"
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/session"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
@@ -304,6 +306,82 @@ func TestRunPrintRejectsBlankPromptBeforeRuntimeConstruction(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "unsupported provider") {
 		t.Fatalf("runtime was constructed before prompt validation: %v", err)
+	}
+}
+
+type gatedCLIWriter struct {
+	mu          sync.Mutex
+	writes      int
+	blockAt     int
+	started     chan struct{}
+	release     chan struct{}
+	startedOnce sync.Once
+	releaseOnce sync.Once
+}
+
+func (w *gatedCLIWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	w.writes++
+	shouldBlock := w.writes == w.blockAt
+	w.mu.Unlock()
+	if shouldBlock {
+		w.startedOnce.Do(func() { close(w.started) })
+		<-w.release
+	}
+	return len(p), nil
+}
+
+func (w *gatedCLIWriter) unblock() {
+	w.releaseOnce.Do(func() { close(w.release) })
+}
+
+func TestRunPrintReportsSubscriberEviction(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = fmt.Fprint(w, `{"data":[{"id":"cli-model"}]}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"blocked answer\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name     string
+		jsonMode bool
+		blockAt  int
+	}{
+		{name: "print", blockAt: 1},
+		{name: "json", jsonMode: true, blockAt: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, cwd := t.TempDir(), t.TempDir()
+			t.Setenv("SNOW_HOME", home)
+			stdout := &gatedCLIWriter{blockAt: tc.blockAt, started: make(chan struct{}), release: make(chan struct{})}
+			defer stdout.unblock()
+			result := make(chan error, 1)
+			go func() {
+				result <- runPrintTo(t.Context(), app.Options{
+					Provider: "opencode-go", Model: "cli-model", APIKey: "test-key", BaseURL: server.URL,
+					NoSession: true, Permission: "allow", CWD: cwd, NoMCP: true,
+				}, "hello", tc.jsonMode, false, stdout, io.Discard)
+			}()
+			select {
+			case <-stdout.started:
+			case <-time.After(2 * time.Second):
+				t.Fatal("output writer did not block")
+			}
+			select {
+			case err := <-result:
+				if !errors.Is(err, agent.ErrEventSubscriberEvicted) {
+					t.Fatalf("runPrintTo error = %v, want subscriber eviction", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("subscriber eviction did not fail print mode while the writer remained blocked")
+			}
+		})
 	}
 }
 

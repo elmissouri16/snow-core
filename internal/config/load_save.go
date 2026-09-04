@@ -686,33 +686,41 @@ func Update(path string, mutate func(*Config) error) (Config, error) {
 	if mutate == nil {
 		return Config{}, errors.New("config: update mutation is nil")
 	}
-	updateMu.Lock()
-	defer updateMu.Unlock()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return Config{}, fmt.Errorf("config: mkdir update lock: %w", err)
-	}
-	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	var candidate Config
+	err := withUpdateLock(path, func() error {
+		var err error
+		candidate, err = Load(path)
+		if err != nil {
+			return err
+		}
+		if err := mutate(&candidate); err != nil {
+			return err
+		}
+		return Save(path, candidate)
+	})
 	if err != nil {
-		return Config{}, fmt.Errorf("config: open update lock: %w", err)
-	}
-	defer lock.Close()
-	if err := lock.Chmod(0o600); err != nil {
-		return Config{}, fmt.Errorf("config: chmod update lock: %w", err)
-	}
-	if err := lockConfigFile(lock); err != nil {
-		return Config{}, fmt.Errorf("config: lock update: %w", err)
-	}
-	defer unlockConfigFile(lock)
-
-	candidate, err := Load(path)
-	if err != nil {
-		return Config{}, err
-	}
-	if err := mutate(&candidate); err != nil {
-		return Config{}, err
-	}
-	if err := Save(path, candidate); err != nil {
 		return Config{}, err
 	}
 	return candidate, nil
+}
+
+func withUpdateLock(path string, update func() error) error {
+	updateMu.Lock()
+	defer updateMu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("config: mkdir update lock: %w", err)
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("config: open update lock: %w", err)
+	}
+	defer lock.Close()
+	if err := lock.Chmod(0o600); err != nil {
+		return fmt.Errorf("config: chmod update lock: %w", err)
+	}
+	if err := lockConfigFile(lock); err != nil {
+		return fmt.Errorf("config: lock update: %w", err)
+	}
+	defer unlockConfigFile(lock)
+	return update()
 }

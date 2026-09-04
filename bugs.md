@@ -817,3 +817,189 @@ Resolved in the working tree by using the production-equivalent ten-second
 allowance for both success-path version checks. Production behavior is
 unchanged. The focused test passed ten consecutive runs, and `go test ./...`
 passed afterward.
+
+## BUG-018: Headless output can be silently truncated after subscriber eviction
+
+- **Status:** Resolved in the working tree
+- **Severity:** High
+- **Surface:** Print and JSON output
+- **Observed:** Repository-wide reliability audit
+
+### Expected behavior
+
+Print and JSON commands must either deliver their complete normalized event
+stream or return an explicit output failure.
+
+### Actual behavior and impact
+
+Both modes write directly from a bounded event-subscriber callback. If stdout
+blocks longer than the subscriber deadline, the event bus evicts the callback
+but does not report that eviction to the command. Later events are discarded,
+and the process can return success after emitting incomplete text or JSONL.
+
+### Reproduction
+
+1. Run print or JSON mode with stdout connected to a consumer that stops reading.
+2. Keep the output write blocked for longer than the event-subscriber timeout.
+3. Resume the consumer and observe that later events are missing even though the
+   command reports success.
+
+### Remediation and regression coverage
+
+Expose monitored subscription failure state without changing ordinary
+subscriber behavior. Print and JSON modes must use it and return the eviction
+error after draining events. Tests gate both output modes beyond the deadline
+and require `ErrEventSubscriberEvicted`; ordinary end-to-end output and event
+ordering remain covered.
+
+### Verification status
+
+Focused agent/CLI tests, targeted race tests, the full Go suite, vet,
+support-script tests, the benchmark guard, installation, and diff checks pass.
+
+## BUG-019: Section-specific configuration updates can lose concurrent writes
+
+- **Status:** Resolved in the working tree
+- **Severity:** High
+- **Surface:** Plugin, MCP, and Agent Skill configuration management
+- **Observed:** Repository-wide concurrency audit
+
+### Expected behavior
+
+Every configuration read-modify-write operation must serialize against other
+Snow processes and apply its mutation to the latest committed file.
+
+### Actual behavior and impact
+
+`updateSection` reads and atomically replaces configuration without acquiring
+the lock used by `config.Update`. Concurrent valid plugin, MCP, or skill changes
+can therefore use stale snapshots, with the last rename silently discarding an
+earlier update.
+
+### Reproduction
+
+Run two Snow configuration-management operations concurrently against the same
+file and inspect the resulting JSON. Without serialization, only one unrelated
+mutation may survive.
+
+### Remediation and regression coverage
+
+Use one shared process-wide and cross-process lock helper around both typed and
+raw-section updates, while retaining raw unknown fields and atomic replacement.
+Tests require mutation callbacks to serialize and mix section writers with
+ordinary settings writers across helper processes.
+
+### Verification status
+
+Focused configuration tests, targeted race tests, the full Go suite, vet,
+support-script tests, the benchmark guard, installation, and diff checks pass.
+
+## BUG-020: TUI shutdown can strand a ChatGPT OAuth worker
+
+- **Status:** Resolved in the working tree
+- **Severity:** Medium
+- **Surface:** Interactive ChatGPT OAuth lifecycle
+- **Observed:** Repository-wide TUI lifecycle audit
+
+### Expected behavior
+
+Closing the TUI must cancel and join its OAuth worker without breaking the
+in-session Escape flow that waits for a cancellation completion event.
+
+### Actual behavior and impact
+
+OAuth completion performs an unconditional send to a small progress channel.
+If the channel is full after Bubble Tea exits, no consumer remains and the
+worker can block forever. The model does not own or join that goroutine before
+closing app resources.
+
+### Reproduction
+
+1. Start ChatGPT OAuth and allow progress to fill its event channel.
+2. Exit the TUI before login completes.
+3. Let login return and observe the worker block while sending its completion.
+
+### Remediation and regression coverage
+
+Give the model a lifetime cancellation function and OAuth wait group. Completion
+must select between event delivery and TUI-lifetime cancellation; `Model.Close`
+must cancel and join the worker before closing the app. Tests cover a full
+channel on shutdown, operation cancellation in a live TUI, and close-time join.
+
+### Verification status
+
+Focused TUI tests, affected-area race tests, the full Go suite, vet,
+support-script tests, the benchmark guard, installation, and diff checks pass.
+
+## BUG-021: Active-session writes repeatedly rebuild prior-session search
+
+- **Status:** Resolved in the working tree
+- **Severity:** Medium
+- **Surface:** Prior-session FTS search performance
+- **Observed:** Repository-wide performance audit
+
+### Expected behavior
+
+Writes to the active session, which is excluded from `session_search` results,
+must not invalidate or consume capacity in the derived prior-session corpus.
+Historical-session changes and active-session switches must still invalidate it.
+
+### Actual behavior and impact
+
+The cache identity includes every session database, WAL, and journal. Each
+active-session append can therefore force the next search to reopen and decode
+the bounded historical corpus and rebuild its in-memory FTS index, even though
+the active session is discarded by the final SQL predicate.
+
+### Reproduction
+
+1. Search prior sessions while the current SQLite session remains open.
+2. Append another current-session message, changing its WAL metadata.
+3. Search again and observe the derived index rebuild count increase.
+
+### Remediation and regression coverage
+
+Pass the active session ID and path into search, omit that database and its
+sidecars from corpus selection and cache identity, and bind the cache to the
+exclusion. Tests require no rebuild after an active WAL append, a rebuild after
+a historical append, correct exclusion, and a rebuild after switching sessions.
+
+### Verification status
+
+Focused session/built-in-tool tests, affected-area race tests, the full Go
+suite, vet, support-script tests, the benchmark guard, installation, and diff
+checks pass.
+
+## BUG-022: Physical session forks leak staging lock files
+
+- **Status:** Resolved in the working tree
+- **Severity:** Medium
+- **Surface:** Independent session forks
+- **Observed:** Repository-wide session resource audit
+
+### Expected behavior
+
+A successful or failed physical fork must remove every randomly named staging
+file while preserving the published destination's normal lifetime lease.
+
+### Actual behavior and impact
+
+Fork cleanup removes the staging database and SQLite sidecars but omits the
+staging `.lock` created by `NewSQLiteStore`. Every populated fork can leave an
+orphan hidden file, causing unbounded directory and inode clutter over time.
+
+### Reproduction
+
+Create a non-empty independent session fork and list hidden files beside the
+new database. A `.<destination>.tmp-*.lock` file remains.
+
+### Remediation and regression coverage
+
+Include `.lock` in staging cleanup and explicitly remove the successful staging
+lease after publishing the database. The fork test now rejects any remaining
+staging pathname while continuing to reopen and use the destination.
+
+### Verification status
+
+Focused session tests, affected-area race tests, the full Go suite, vet,
+support-script tests, the benchmark guard, installation, and diff checks pass.

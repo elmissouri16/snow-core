@@ -85,11 +85,11 @@ func (s *SessionSearch) Run(ctx context.Context, raw json.RawMessage, _ tools.To
 		return tools.ErrorResult(errors.New("session_search: unavailable")), nil
 	}
 	current := s.Current.Current()
-	currentID := ""
+	exclusion := session.SearchExclusion{}
 	if current != nil {
-		currentID = current.ID()
+		exclusion = session.SearchExclusion{SessionID: current.ID(), Path: current.Path()}
 	}
-	hits, err := s.Engine.Search(ctx, args.Query, args.Limit, currentID)
+	hits, err := s.Engine.Search(ctx, args.Query, args.Limit, exclusion)
 	if err != nil {
 		return tools.ErrorResult(err), nil
 	}

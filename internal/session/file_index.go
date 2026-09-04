@@ -249,11 +249,28 @@ func (f *FileIndex) DeleteWithIDs(cwd, path, expectedID string) ([]string, error
 	return ownedIDs, nil
 }
 
-// queryFileCacheKey returns a cheap identity for the project session corpus.
+func normalizeSessionPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+	return filepath.Clean(absolute)
+}
+
+func isExcludedSessionPath(path, excludedPath string) bool {
+	return excludedPath != "" && normalizeSessionPath(path) == excludedPath
+}
+
+// queryFileCacheKey returns a cheap identity for the prior-session corpus.
 // Unlike List it never opens SQLite databases, so unchanged search-cache hits
 // pay only directory walking and file metadata checks. WAL and journal files
-// are included so live-session writes invalidate the derived index.
-func (f *FileIndex) queryFileCacheKey(cwd string) (string, error) {
+// are included for historical sessions, while writes to the actively excluded
+// session cannot invalidate results that never include it.
+func (f *FileIndex) queryFileCacheKey(cwd, excludedPath string) (string, error) {
+	excludedPath = normalizeSessionPath(excludedPath)
 	dirNames := []string{EncodeCWD(cwd), legacyEncodeCWD(cwd)}
 	seenDirs := make(map[string]bool, len(dirNames))
 	var identities []string
@@ -289,7 +306,7 @@ func (f *FileIndex) queryFileCacheKey(cwd string) (string, error) {
 			default:
 				return nil
 			}
-			if strings.Contains(base, ".db.agents"+string(filepath.Separator)) {
+			if strings.Contains(base, ".db.agents"+string(filepath.Separator)) || isExcludedSessionPath(base, excludedPath) {
 				return nil
 			}
 			identities = append(identities, fmt.Sprintf("%s\x00%d\x00%d\x00%t", path, info.Size(), info.ModTime().UnixNano(), singleLink(info)))
@@ -355,10 +372,11 @@ func (f *FileIndex) findByID(cwd, id string) (SessionInfo, error) {
 	return SessionInfo{}, ErrNotFound
 }
 
-func (f *FileIndex) listRecentForQuery(cwd string, limit int) ([]SessionInfo, error) {
+func (f *FileIndex) listRecentForQuery(cwd string, limit int, excludedPath string) ([]SessionInfo, error) {
 	if limit < 1 {
 		return nil, nil
 	}
+	excludedPath = normalizeSessionPath(excludedPath)
 	type candidate struct {
 		path      string
 		info      os.FileInfo
@@ -394,16 +412,25 @@ func (f *FileIndex) listRecentForQuery(cwd string, limit int) ([]SessionInfo, er
 			updatedAt := info.ModTime().UnixMilli()
 			switch {
 			case strings.HasSuffix(path, ".db"):
+				if isExcludedSessionPath(path, excludedPath) {
+					return nil
+				}
 				entry := &candidate{path: path, info: info, updatedAt: max(updatedAt, sidecarUpdated[path])}
 				byPath[path] = entry
 			case strings.HasSuffix(path, ".db-wal"):
 				base := strings.TrimSuffix(path, "-wal")
+				if isExcludedSessionPath(base, excludedPath) {
+					return nil
+				}
 				sidecarUpdated[base] = max(sidecarUpdated[base], updatedAt)
 				if entry := byPath[base]; entry != nil {
 					entry.updatedAt = max(entry.updatedAt, updatedAt)
 				}
 			case strings.HasSuffix(path, ".db-journal"):
 				base := strings.TrimSuffix(path, "-journal")
+				if isExcludedSessionPath(base, excludedPath) {
+					return nil
+				}
 				sidecarUpdated[base] = max(sidecarUpdated[base], updatedAt)
 				if entry := byPath[base]; entry != nil {
 					entry.updatedAt = max(entry.updatedAt, updatedAt)

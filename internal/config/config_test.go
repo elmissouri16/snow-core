@@ -145,6 +145,34 @@ func TestSectionUpdatesPreserveUnknownFieldsAndPermissions(t *testing.T) {
 	}
 }
 
+func TestSectionUpdateHoldsSharedMutationLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Save(path, Default()); err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		result <- updateSection(path, true, "test", func(json.RawMessage) (json.RawMessage, error) {
+			close(entered)
+			<-release
+			return json.RawMessage("true"), nil
+		})
+	}()
+	<-entered
+	if updateMu.TryLock() {
+		updateMu.Unlock()
+		close(release)
+		<-result
+		t.Fatal("section mutation callback ran without the shared update lock")
+	}
+	close(release)
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPluginManagementPreservesUnknownFieldsAndStagesDisabled(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	original := `{"future":{"kept":true},"plugins":[{"id":"demo","command":["plugin-host","--legacy"],"enabled":true,"env":["TOKEN=secret"],"future_plugin":{"kept":true}}]}`
@@ -677,6 +705,16 @@ func TestUpdateHelperProcess(t *testing.T) {
 			cfg.ReasoningSummary = "detailed"
 			return nil
 		})
+	case "mcp":
+		err = UpdateMCPServers(path, true, func(servers map[string]publicmcp.ServerSpec) error {
+			servers["cross-process"] = publicmcp.ServerSpec{Command: "demo-mcp"}
+			return nil
+		})
+	case "skills":
+		err = UpdateSkills(path, func(skills *SkillsConfig) error {
+			skills.Overrides["cross-process"] = false
+			return nil
+		})
 	default:
 		err = fmt.Errorf("unknown helper kind %q", kind)
 	}
@@ -702,6 +740,8 @@ func TestUpdateSerializesMixedWritersAcrossProcesses(t *testing.T) {
 		{kind: "project", project: filepath.Join(projectRoot, "c"), model: "model-c"},
 		{kind: "theme"},
 		{kind: "summary"},
+		{kind: "mcp"},
+		{kind: "skills"},
 	}
 	commands := make([]*exec.Cmd, 0, len(helpers))
 	for _, helper := range helpers {
@@ -727,8 +767,8 @@ func TestUpdateSerializesMixedWritersAcrossProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.ProjectSelections) != 3 || cfg.TUI.Theme != "dark" || cfg.ReasoningSummary != "detailed" {
-		t.Fatalf("cross-process updates were lost: projects=%+v theme=%q summary=%q", cfg.ProjectSelections, cfg.TUI.Theme, cfg.ReasoningSummary)
+	if len(cfg.ProjectSelections) != 3 || cfg.TUI.Theme != "dark" || cfg.ReasoningSummary != "detailed" || cfg.MCPServers["cross-process"].Command != "demo-mcp" || cfg.Skills.Overrides["cross-process"] {
+		t.Fatalf("cross-process updates were lost: projects=%+v theme=%q summary=%q mcp=%+v skills=%+v", cfg.ProjectSelections, cfg.TUI.Theme, cfg.ReasoningSummary, cfg.MCPServers, cfg.Skills.Overrides)
 	}
 }
 

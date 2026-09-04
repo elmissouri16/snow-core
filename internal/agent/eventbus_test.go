@@ -147,6 +147,30 @@ func TestEventBusEvictsPermanentlyBlockedSubscriber(t *testing.T) {
 	bus.Wait()
 }
 
+func TestEventBusMonitoredSubscriberReportsTimeoutEviction(t *testing.T) {
+	bus := newEventBusWithCap(4)
+	blocked := make(chan struct{})
+	_, failure := bus.SubscribeMonitored(func(protocol.AgentEvent) { <-blocked })
+	delivered := make(chan struct{}, 1)
+	bus.Subscribe(func(protocol.AgentEvent) { delivered <- struct{}{} })
+	bus.Publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
+	select {
+	case <-delivered:
+	case <-time.After(2 * eventSubscriberTimeout):
+		t.Fatal("later subscriber did not receive the event")
+	}
+	deadline := time.Now().Add(2 * eventSubscriberTimeout)
+	for failure() == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := failure(); !errors.Is(err, ErrEventSubscriberEvicted) {
+		t.Fatalf("monitored failure = %v, want %v", err, ErrEventSubscriberEvicted)
+	}
+	close(blocked)
+	bus.Close()
+	bus.Wait()
+}
+
 func TestEventBusSubscriberWorkerSurvivesPanicAndPreservesOrder(t *testing.T) {
 	bus := newEventBusWithCap(8)
 	defer func() { bus.Close(); bus.Wait() }()

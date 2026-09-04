@@ -245,39 +245,41 @@ func updateSection(path string, global bool, key string, update func(json.RawMes
 	if path == "" {
 		return errors.New("config: empty path")
 	}
-	root := map[string]json.RawMessage{}
-	data, err := readConfigFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("config: read %s: %w", path, err)
-	}
-	if err == nil && len(bytes.TrimSpace(data)) > 0 {
-		if err := json.Unmarshal(data, &root); err != nil {
-			return fmt.Errorf("config: parse %s: %w", path, err)
+	return withUpdateLock(path, func() error {
+		root := map[string]json.RawMessage{}
+		data, err := readConfigFile(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("config: read %s: %w", path, err)
 		}
-		if root == nil {
-			return fmt.Errorf("config: parse %s: root must be a JSON object", path)
+		if err == nil && len(bytes.TrimSpace(data)) > 0 {
+			if err := json.Unmarshal(data, &root); err != nil {
+				return fmt.Errorf("config: parse %s: %w", path, err)
+			}
+			if root == nil {
+				return fmt.Errorf("config: parse %s: root must be a JSON object", path)
+			}
 		}
-	}
-	next, err := update(root[key])
-	if err != nil {
-		return err
-	}
-	root[key] = next
-	encoded, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return fmt.Errorf("config: encode %s: %w", path, err)
-	}
-	encoded = append(encoded, '\n')
-	if len(encoded) > MaxConfigFileBytes {
-		return fmt.Errorf("config: encoded configuration exceeds %d byte limit", MaxConfigFileBytes)
-	}
-	mode := os.FileMode(0o644)
-	if global {
-		mode = 0o600
-	} else if info, statErr := os.Stat(path); statErr == nil {
-		mode = info.Mode().Perm()
-	}
-	return atomicWrite(path, encoded, mode)
+		next, err := update(root[key])
+		if err != nil {
+			return err
+		}
+		root[key] = next
+		encoded, err := json.MarshalIndent(root, "", "  ")
+		if err != nil {
+			return fmt.Errorf("config: encode %s: %w", path, err)
+		}
+		encoded = append(encoded, '\n')
+		if len(encoded) > MaxConfigFileBytes {
+			return fmt.Errorf("config: encoded configuration exceeds %d byte limit", MaxConfigFileBytes)
+		}
+		mode := os.FileMode(0o644)
+		if global {
+			mode = 0o600
+		} else if info, statErr := os.Stat(path); statErr == nil {
+			mode = info.Mode().Perm()
+		}
+		return atomicWrite(path, encoded, mode)
+	})
 }
 
 func atomicWrite(path string, data []byte, mode os.FileMode) (err error) {

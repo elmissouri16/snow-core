@@ -17,6 +17,7 @@ import (
 
 	"github.com/elmissouri16/snow-core/internal/agent"
 	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/internal/provider/chatgpt"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -287,6 +288,7 @@ type loginNavigationEntry struct {
 // Model is the TUI state.
 type Model struct {
 	ctx     context.Context
+	cancel  context.CancelFunc
 	opts    app.Options
 	asyncIO bool
 	app     *app.App
@@ -492,6 +494,8 @@ type Model struct {
 	oauthCancel        context.CancelFunc
 	oauthEvents        chan tea.Msg
 	oauthBackRequested bool
+	oauthWG            sync.WaitGroup
+	oauthLogin         func(context.Context, string, auth.LoginRequest, auth.Interaction) (auth.Status, error)
 
 	// Model picker state (for /model).
 	pickModel  bool

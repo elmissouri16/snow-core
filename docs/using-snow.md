@@ -229,8 +229,10 @@ snow --mode json -p "run the focused tests"
 ```
 
 Redirect or parse JSONL as a stream rather than waiting for one final object.
-Both modes fail closed for `ask`; use `deny` or deliberately grant `allow` in a
-trusted external environment.
+If an output consumer blocks longer than Snow's bounded event-subscriber
+deadline, print and JSON modes return an explicit error instead of silently
+reporting a truncated stream as successful. Both modes fail closed for `ask`;
+use `deny` or deliberately grant `allow` in a trusted external environment.
 
 ## Manage capabilities
 

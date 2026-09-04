@@ -35,6 +35,13 @@ const (
 	maxSessionQueryDepth        = 10000
 )
 
+// SearchExclusion identifies the active session omitted from prior-session
+// search indexing and results.
+type SearchExclusion struct {
+	SessionID string
+	Path      string
+}
+
 // SearchHit is one bounded match from a prior session in the same project.
 type SearchHit struct {
 	SessionID string    `json:"session_id"`
@@ -70,11 +77,13 @@ type QueryEngine struct {
 	index *FileIndex
 	cwd   string
 
-	mu       sync.Mutex
-	cacheKey string
-	fileKey  string
-	cacheDB  *sql.DB
-	rebuilds int
+	mu                sync.Mutex
+	cacheKey          string
+	fileKey           string
+	excludedSessionID string
+	excludedPath      string
+	cacheDB           *sql.DB
+	rebuilds          int
 }
 
 func NewQueryEngine(index *FileIndex, cwd string) *QueryEngine {
@@ -96,6 +105,8 @@ func (q *QueryEngine) Close() error {
 	q.cacheDB = nil
 	q.cacheKey = ""
 	q.fileKey = ""
+	q.excludedSessionID = ""
+	q.excludedPath = ""
 	return err
 }
 
@@ -209,7 +220,7 @@ func buildSessionFTS(ctx context.Context, sessions []SessionInfo, cwd string) (*
 	return fts, nil
 }
 
-func (q *QueryEngine) Search(ctx context.Context, query string, limit int, excludeSessionID string) ([]SearchHit, error) {
+func (q *QueryEngine) Search(ctx context.Context, query string, limit int, exclusion SearchExclusion) ([]SearchHit, error) {
 	if q == nil || q.index == nil {
 		return nil, errors.New("session search: unavailable")
 	}
@@ -230,26 +241,30 @@ func (q *QueryEngine) Search(ctx context.Context, query string, limit int, exclu
 	if len(terms) == 0 {
 		return nil, errors.New("session search: query has no searchable terms")
 	}
-	// Reuse the derived index while cheap DB/WAL file identities are unchanged.
-	// SQLite inspection and history decoding happen only on invalidation.
+	// Reuse the derived index while cheap historical DB/WAL identities are
+	// unchanged. The active session is omitted from both the corpus and cache
+	// key because its writes cannot affect prior-session search results.
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	fileKey, err := q.index.queryFileCacheKey(q.cwd)
+	exclusion.Path = normalizeSessionPath(exclusion.Path)
+	fileKey, err := q.index.queryFileCacheKey(q.cwd, exclusion.Path)
 	if err != nil {
 		return nil, err
 	}
 	fts := q.cacheDB
-	if fts == nil || q.fileKey != fileKey {
+	exclusionChanged := q.excludedSessionID != exclusion.SessionID || q.excludedPath != exclusion.Path
+	if fts == nil || q.fileKey != fileKey || exclusionChanged {
 		// Release the prior in-memory FTS before constructing its replacement so
 		// invalidation cannot double peak resident index memory.
 		if q.cacheDB != nil {
 			_ = q.cacheDB.Close()
 			q.cacheDB = nil
 			q.cacheKey = ""
+			fts = nil
 		}
 		buildKey := fileKey
 		for range 3 {
-			sessions, listErr := q.index.listRecentForQuery(q.cwd, maxSearchSessions)
+			sessions, listErr := q.index.listRecentForQuery(q.cwd, maxSearchSessions, exclusion.Path)
 			if listErr != nil {
 				return nil, listErr
 			}
@@ -257,7 +272,7 @@ func (q *QueryEngine) Search(ctx context.Context, query string, limit int, exclu
 			if buildErr != nil {
 				return nil, buildErr
 			}
-			indexedKey, keyErr := q.index.queryFileCacheKey(q.cwd)
+			indexedKey, keyErr := q.index.queryFileCacheKey(q.cwd, exclusion.Path)
 			if keyErr != nil {
 				_ = fresh.Close()
 				return nil, keyErr
@@ -270,6 +285,8 @@ func (q *QueryEngine) Search(ctx context.Context, query string, limit int, exclu
 			q.cacheDB = fresh
 			q.cacheKey = sessionSearchCacheKey(sessions)
 			q.fileKey = indexedKey
+			q.excludedSessionID = exclusion.SessionID
+			q.excludedPath = exclusion.Path
 			q.rebuilds++
 			fts = fresh
 			break
@@ -289,7 +306,7 @@ func (q *QueryEngine) Search(ctx context.Context, query string, limit int, exclu
 		JOIN session_branch_docs m ON m.session_id=d.session_id AND m.entry_id=d.entry_id
 		JOIN session_search_branches b ON b.session_id=m.session_id AND b.branch_id=m.branch_id
 		WHERE session_docs MATCH ? AND d.session_id <> ?
-		ORDER BY bm25(session_docs), b.updated_at DESC`, strings.Join(match, " AND "), excludeSessionID)
+		ORDER BY bm25(session_docs), b.updated_at DESC`, strings.Join(match, " AND "), exclusion.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("session search: query derived index: %w", err)
 	}

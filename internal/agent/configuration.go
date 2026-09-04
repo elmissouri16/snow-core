@@ -762,11 +762,17 @@ func (a *Agent) closeInputQueue(clear bool) protocol.InputQueue {
 	return cleared
 }
 
-// Subscribe registers an event listener; returns an unsubscribe func.
 // Subscribe registers an ordered event callback. Callbacks must return
 // promptly; a callback that runs longer than the bounded subscriber timeout is
 // evicted so it cannot strand delivery or agent shutdown.
 func (a *Agent) Subscribe(fn func(protocol.AgentEvent)) func() { return a.bus.Subscribe(fn) }
+
+// SubscribeMonitored registers an ordered event callback and returns both its
+// unsubscribe function and a concurrency-safe accessor for terminal delivery
+// failures such as timeout eviction.
+func (a *Agent) SubscribeMonitored(fn func(protocol.AgentEvent)) (func(), func() error) {
+	return a.bus.SubscribeMonitored(fn)
+}
 
 func (a *Agent) DrainEvents(ctx context.Context) error { return a.bus.Drain(ctx) }
 

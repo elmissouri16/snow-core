@@ -253,6 +253,7 @@ func (b *eventBus) dispatch() {
 						}
 						b.mu.Unlock()
 						for _, sub := range pending {
+							sub.fail(ErrEventSubscriberEvicted)
 							sub.close()
 						}
 						pending = nil
@@ -369,13 +370,22 @@ func (b *eventBus) Close() {
 }
 
 func (b *eventBus) Subscribe(fn func(protocol.AgentEvent)) func() {
+	unsubscribe, _ := b.subscribeMonitored(fn)
+	return unsubscribe
+}
+
+func (b *eventBus) SubscribeMonitored(fn func(protocol.AgentEvent)) (func(), func() error) {
+	return b.subscribeMonitored(fn)
+}
+
+func (b *eventBus) subscribeMonitored(fn func(protocol.AgentEvent)) (func(), func() error) {
 	if fn == nil {
-		return func() {}
+		return func() {}, func() error { return nil }
 	}
 	b.mu.Lock()
 	if b.closing {
 		b.mu.Unlock()
-		return func() {}
+		return func() {}, func() error { return nil }
 	}
 	id := b.next
 	b.next++
@@ -383,7 +393,7 @@ func (b *eventBus) Subscribe(fn func(protocol.AgentEvent)) func() {
 	b.subs[id] = sub
 	b.mu.Unlock()
 	go b.runSubscriber(sub)
-	return func() {
+	unsubscribe := func() {
 		b.mu.Lock()
 		if b.subs[id] == sub {
 			delete(b.subs, id)
@@ -391,6 +401,7 @@ func (b *eventBus) Subscribe(fn func(protocol.AgentEvent)) func() {
 		b.mu.Unlock()
 		sub.close()
 	}
+	return unsubscribe, sub.failureErr
 }
 
 func coalescibleBusEvent(kind protocol.AgentEventType) bool {

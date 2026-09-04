@@ -197,6 +197,7 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ctx, cancel := context.WithCancel(ctx)
 	_ = applyTUITheme("default")
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -230,6 +231,7 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 
 	m := &Model{
 		ctx:                        ctx,
+		cancel:                     cancel,
 		opts:                       opts,
 		themeName:                  "default",
 		customThemes:               map[string]config.ThemeFile{},
@@ -265,6 +267,13 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 // Close releases the attached app. It is safe to call repeatedly.
 func (m *Model) Close() error {
 	m.closeOnce.Do(func() {
+		if m.cancel != nil {
+			m.cancel()
+		}
+		if m.oauthCancel != nil {
+			m.oauthCancel()
+		}
+		m.oauthWG.Wait()
 		m.events.Close()
 		m.startupMu.Lock()
 		m.startupClosed = true

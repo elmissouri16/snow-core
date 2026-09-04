@@ -44,9 +44,10 @@ const (
 // ErrNotRunning is returned when an operation requires an active,
 // queue-accepting agent run.
 var (
-	ErrNotRunning     = errors.New("agent: no running turn accepting queued input")
-	ErrPromptRejected = errors.New("agent: prompt rejected before admission")
-	ErrReentrantDrain = errors.New("agent: event drain requested from inside a callback")
+	ErrNotRunning             = errors.New("agent: no running turn accepting queued input")
+	ErrPromptRejected         = errors.New("agent: prompt rejected before admission")
+	ErrReentrantDrain         = errors.New("agent: event drain requested from inside a callback")
+	ErrEventSubscriberEvicted = errors.New("agent: event subscriber callback exceeded its deadline and was evicted")
 )
 
 type providerFailure interface {
@@ -312,6 +313,9 @@ type eventSubscriber struct {
 	tasks    chan eventSubscriberTask
 	stop     chan struct{}
 	stopOnce sync.Once
+
+	failureMu sync.Mutex
+	failure   error
 }
 
 type eventSubscriberTask struct {
@@ -329,6 +333,26 @@ func (s *eventSubscriber) close() {
 	if s != nil {
 		s.stopOnce.Do(func() { close(s.stop) })
 	}
+}
+
+func (s *eventSubscriber) fail(err error) {
+	if s == nil || err == nil {
+		return
+	}
+	s.failureMu.Lock()
+	if s.failure == nil {
+		s.failure = err
+	}
+	s.failureMu.Unlock()
+}
+
+func (s *eventSubscriber) failureErr() error {
+	if s == nil {
+		return nil
+	}
+	s.failureMu.Lock()
+	defer s.failureMu.Unlock()
+	return s.failure
 }
 
 // ---------------------------------------------------------------------------

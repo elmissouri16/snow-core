@@ -58,7 +58,7 @@ func TestQueryEngineSearchScopesAndProjects(t *testing.T) {
 	}
 
 	engine := NewQueryEngine(idx, project)
-	hits, err := engine.Search(context.Background(), "cobalt decision", 5, "")
+	hits, err := engine.Search(context.Background(), "cobalt decision", 5, SearchExclusion{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestQueryEngineSearchScopesAndProjects(t *testing.T) {
 	if strings.Contains(hits[0].Snippet, "reasoning") || strings.Contains(hits[0].Snippet, "tool-only") {
 		t.Fatalf("private content leaked in hit: %+v", hits[0])
 	}
-	if excluded, err := engine.Search(context.Background(), "cobalt", 5, priorID); err != nil || len(excluded) != 0 {
+	if excluded, err := engine.Search(context.Background(), "cobalt", 5, SearchExclusion{SessionID: priorID, Path: prior.Path()}); err != nil || len(excluded) != 0 {
 		t.Fatalf("excluded current search = %+v, %v", excluded, err)
 	}
 }
@@ -99,7 +99,7 @@ func TestQueryEngineIndexesSharedEntriesOnceWithBranchMappings(t *testing.T) {
 
 	engine := NewQueryEngine(idx, project)
 	defer engine.Close()
-	hits, err := engine.Search(context.Background(), "shared searchable", 10, "")
+	hits, err := engine.Search(context.Background(), "shared searchable", 10, SearchExclusion{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestQueryEngineCachesUntilSessionFileChanges(t *testing.T) {
 	engine := NewQueryEngine(idx, project)
 	defer engine.Close()
 	for i := range 2 {
-		hits, err := engine.Search(context.Background(), "cached phrase", 5, "")
+		hits, err := engine.Search(context.Background(), "cached phrase", 5, SearchExclusion{})
 		if err != nil || len(hits) != 1 {
 			t.Fatalf("search %d: hits=%+v err=%v", i, hits, err)
 		}
@@ -152,7 +152,7 @@ func TestQueryEngineCachesUntilSessionFileChanges(t *testing.T) {
 	if err := prior.Close(); err != nil {
 		t.Fatal(err)
 	}
-	hits, err := engine.Search(context.Background(), "invalidation phrase", 5, "")
+	hits, err := engine.Search(context.Background(), "invalidation phrase", 5, SearchExclusion{})
 	if err != nil || len(hits) != 1 {
 		t.Fatalf("invalidated search: hits=%+v err=%v", hits, err)
 	}
@@ -173,15 +173,70 @@ func TestQueryEngineInvalidatesWhileWALSessionIsOpen(t *testing.T) {
 	appendQueryMessage(t, store, protocol.RoleUser, protocol.NewTextBlock("wal first phrase"))
 	engine := NewQueryEngine(index, project)
 	defer engine.Close()
-	if hits, err := engine.Search(context.Background(), "first phrase", 5, ""); err != nil || len(hits) != 1 {
+	if hits, err := engine.Search(context.Background(), "first phrase", 5, SearchExclusion{}); err != nil || len(hits) != 1 {
 		t.Fatalf("first search hits=%+v err=%v", hits, err)
 	}
 	appendQueryMessage(t, store, protocol.RoleUser, protocol.NewTextBlock("wal second phrase"))
-	if hits, err := engine.Search(context.Background(), "second phrase", 5, ""); err != nil || len(hits) != 1 {
+	if hits, err := engine.Search(context.Background(), "second phrase", 5, SearchExclusion{}); err != nil || len(hits) != 1 {
 		t.Fatalf("second search hits=%+v err=%v", hits, err)
 	}
 	if engine.rebuilds != 2 {
 		t.Fatalf("rebuilds=%d, want 2 for live WAL append", engine.rebuilds)
+	}
+}
+
+func TestQueryEngineIgnoresActiveSessionWritesUntilExclusionChanges(t *testing.T) {
+	root := t.TempDir()
+	index := NewFileIndex(root)
+	project := filepath.Join(root, "project")
+	historical, err := index.Create(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendQueryMessage(t, historical, protocol.RoleUser, protocol.NewTextBlock("historical first phrase"))
+	historicalPath := historical.Path()
+	if err := historical.Close(); err != nil {
+		t.Fatal(err)
+	}
+	active, err := index.Create(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer active.Close()
+	appendQueryMessage(t, active, protocol.RoleUser, protocol.NewTextBlock("active first phrase"))
+	exclusion := SearchExclusion{SessionID: active.ID(), Path: active.Path()}
+	engine := NewQueryEngine(index, project)
+	defer engine.Close()
+	if hits, err := engine.Search(t.Context(), "historical first", 5, exclusion); err != nil || len(hits) != 1 {
+		t.Fatalf("initial historical search hits=%+v err=%v", hits, err)
+	}
+	appendQueryMessage(t, active, protocol.RoleUser, protocol.NewTextBlock("active second phrase"))
+	if hits, err := engine.Search(t.Context(), "active second", 5, exclusion); err != nil || len(hits) != 0 {
+		t.Fatalf("excluded active search hits=%+v err=%v", hits, err)
+	}
+	if engine.rebuilds != 1 {
+		t.Fatalf("rebuilds=%d, want 1 after active WAL append", engine.rebuilds)
+	}
+	historical, err = OpenSQLiteStore(historicalPath, project, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendQueryMessage(t, historical, protocol.RoleUser, protocol.NewTextBlock("historical second phrase"))
+	if err := historical.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if hits, err := engine.Search(t.Context(), "historical second", 5, exclusion); err != nil || len(hits) != 1 {
+		t.Fatalf("updated historical search hits=%+v err=%v", hits, err)
+	}
+	if engine.rebuilds != 2 {
+		t.Fatalf("rebuilds=%d, want 2 after historical append", engine.rebuilds)
+	}
+	switched := SearchExclusion{SessionID: historical.ID(), Path: historicalPath}
+	if hits, err := engine.Search(t.Context(), "active second", 5, switched); err != nil || len(hits) != 1 {
+		t.Fatalf("switched exclusion search hits=%+v err=%v", hits, err)
+	}
+	if engine.rebuilds != 3 {
+		t.Fatalf("rebuilds=%d, want 3 after exclusion switch", engine.rebuilds)
 	}
 }
 
@@ -209,7 +264,7 @@ func TestListRecentForQueryIncludesLiveWALBeyondDBMtimeCap(t *testing.T) {
 	if err := os.Chtimes(active.Path(), old, old); err != nil {
 		t.Fatal(err)
 	}
-	recent, err := index.listRecentForQuery(project, maxSearchSessions)
+	recent, err := index.listRecentForQuery(project, maxSearchSessions, "")
 	if err != nil {
 		t.Fatal(err)
 	}
