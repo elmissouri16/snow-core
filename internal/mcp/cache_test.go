@@ -340,7 +340,7 @@ func TestLazyCachedResourcePromptBridgesStartWithoutTransportAndReconnect(t *tes
 	}
 	for _, name := range []string{"mcp_bridges_list_resources", "mcp_bridges_read_resource", "mcp_bridges_list_prompts", "mcp_bridges_get_prompt"} {
 		if _, ok := registry.Get(name); !ok {
-			t.Fatalf("cached bridge %q missing: %+v", name, registry.Schemas())
+			t.Fatalf("cached bridge %q missing: %+v", name, registry.Descriptors())
 		}
 	}
 	listResources, _ := registry.Get("mcp_bridges_list_resources")

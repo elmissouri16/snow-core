@@ -79,34 +79,6 @@ func (t *ArtifactRead) Run(ctx context.Context, raw json.RawMessage, _ tools.Too
 	return tools.TextResult(fmt.Sprintf("Artifact %s, lines %d-%d of %d:\n%s", args.ArtifactID, start+1, end, total, out)), nil
 }
 
-func artifactLineWindow(text string, offset, limit int) (string, int, int, int) {
-	total := strings.Count(text, "\n") + 1
-	startLine := offset - 1
-	if startLine >= total {
-		return "", startLine, startLine, total
-	}
-	startByte := 0
-	for range startLine {
-		next := strings.IndexByte(text[startByte:], '\n')
-		startByte += next + 1
-	}
-	endLine := min(startLine+limit, total)
-	endByte := startByte
-	for line := startLine; line < endLine; line++ {
-		next := strings.IndexByte(text[endByte:], '\n')
-		if next < 0 {
-			endByte = len(text)
-			break
-		}
-		if line+1 == endLine {
-			endByte += next
-			break
-		}
-		endByte += next + 1
-	}
-	return text[startByte:endByte], startLine, endLine, total
-}
-
 func (t *ArtifactRead) open(ctx context.Context, id string) (io.ReadCloser, error) {
 	if t == nil || t.Store == nil || t.Current == nil || t.Current.Current() == nil {
 		return nil, errors.New("artifact: unavailable")

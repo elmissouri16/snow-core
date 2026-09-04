@@ -43,11 +43,6 @@ func (a *App) CheckForUpdate(ctx context.Context) (updatepkg.Status, error) {
 	return a.updater.Check(ctx)
 }
 
-// InstallUpdate verifies and installs a release returned by CheckForUpdate.
-func (a *App) InstallUpdate(ctx context.Context, status updatepkg.Status) (updatepkg.Result, error) {
-	return a.InstallUpdateWithProgress(ctx, status, nil)
-}
-
 // InstallUpdateWithProgress verifies and installs a checked release while
 // reporting progress only after an interactive surface approves installation.
 func (a *App) InstallUpdateWithProgress(ctx context.Context, status updatepkg.Status, report updatepkg.ProgressFunc) (updatepkg.Result, error) {
@@ -55,12 +50,4 @@ func (a *App) InstallUpdateWithProgress(ctx context.Context, status updatepkg.St
 		return updatepkg.Result{}, errors.New("app: updater unavailable")
 	}
 	return a.updater.InstallWithProgress(ctx, status, report)
-}
-
-// UpdateEligibility reports whether this process can replace its executable.
-func (a *App) UpdateEligibility() (bool, string) {
-	if a == nil || a.updater == nil {
-		return false, "updater unavailable"
-	}
-	return a.updater.Eligibility()
 }

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
-	"github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -628,14 +627,6 @@ func ApplyProjectPreferences(cfg *Config, project ProjectExtensions) error {
 	return cfg.Compaction.Validate()
 }
 
-// LoadProject reads only the plugin declarations from a project config. It is
-// intentionally separate from Load so callers can avoid reading project input
-// until the trust decision has explicitly allowed it.
-func LoadProject(path string) ([]plugin.PluginSpec, error) {
-	extensions, err := LoadProjectExtensions(path)
-	return extensions.Plugins, err
-}
-
 // LoadProjectExtensions reads the restricted trust-gated project configuration.
 func LoadProjectExtensions(path string) (ProjectExtensions, error) {
 	if path == "" {
@@ -664,26 +655,6 @@ func LoadProjectExtensions(path string) (ProjectExtensions, error) {
 		}
 	}
 	return raw, nil
-}
-
-// LoadWithProject loads global configuration and, only when allowProject is
-// true, appends explicitly declared project plugins. Project config cannot
-// override provider, permission, or other global execution policy.
-func LoadWithProject(globalPath, projectPath string, allowProject bool) (Config, error) {
-	cfg, err := Load(globalPath)
-	if err != nil || !allowProject {
-		return cfg, err
-	}
-	extensions, err := LoadProjectExtensions(projectPath)
-	if err != nil {
-		return cfg, err
-	}
-	cfg.Plugins = append(cfg.Plugins, extensions.Plugins...)
-	if cfg.MCPServers == nil {
-		cfg.MCPServers = map[string]publicmcp.ServerSpec{}
-	}
-	maps.Copy(cfg.MCPServers, extensions.MCPServers)
-	return cfg, nil
 }
 
 // Save writes the config file (creating parent dirs).
@@ -744,17 +715,4 @@ func Update(path string, mutate func(*Config) error) (Config, error) {
 		return Config{}, err
 	}
 	return candidate, nil
-}
-
-// SaveProjectSelection merges one working directory's selection into the
-// latest config without replacing concurrent project or global changes.
-func SaveProjectSelection(path, cwd string, selection ProjectSelection) (Config, error) {
-	return Update(path, func(latest *Config) error {
-		candidate, err := WithProjectSelection(*latest, cwd, selection)
-		if err != nil {
-			return err
-		}
-		*latest = candidate
-		return nil
-	})
 }

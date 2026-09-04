@@ -61,6 +61,30 @@ func deferredDescriptor(id, namespace, description string, keywords ...string) t
 	return tools.ToolDescriptor{Schema: schema, Tool: testTool{schema: schema}, Source: tools.SourceSDK, Owner: "test", Risk: permission.RiskRead, OriginalName: id}
 }
 
+func newWithFactory(catalog []tools.ToolDescriptor, factory indexFactory) *Bleve {
+	metadata := make([]tools.DescriptorMetadata, 0, len(catalog))
+	for _, descriptor := range catalog {
+		metadata = append(metadata, tools.MetadataFromDescriptor(descriptor))
+	}
+	return newWithMetadataFactory(metadata, factory)
+}
+
+func buildNamespaceDocuments(deferred []tools.ToolDescriptor) map[string]indexDocument {
+	metadata := make([]tools.DescriptorMetadata, 0, len(deferred))
+	for _, descriptor := range deferred {
+		metadata = append(metadata, tools.MetadataFromDescriptor(descriptor))
+	}
+	return buildNamespaceRouteDocuments(deferredCatalog(metadata))
+}
+
+func namespaceDocumentSize(document indexDocument) int {
+	size := len(document.NamespaceID) + len(document.Namespace) + len(document.Name) + len(document.Description)
+	for _, keyword := range document.Keywords {
+		size += len(keyword)
+	}
+	return size
+}
+
 func TestSearchRanksNamesKeywordsAndDescriptions(t *testing.T) {
 	router := New([]tools.ToolDescriptor{
 		deferredDescriptor("shopify_inventory_adjust", "shopify", "Increase or decrease variant stock quantity.", "inventory", "stock", "sku"),

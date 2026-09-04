@@ -28,10 +28,6 @@ type codexStream struct {
 	provider string
 }
 
-func NewStream(ctx context.Context, resp *http.Response, providerID string, secrets ...string) protocol.EventStream {
-	return NewStreamWithIdleTimeout(ctx, resp, providerID, providerpkg.DefaultStreamIdleTimeout, secrets...)
-}
-
 func NewStreamWithIdleTimeout(ctx context.Context, resp *http.Response, providerID string, idleTimeout time.Duration, secrets ...string) protocol.EventStream {
 	body := providerpkg.WrapIdleReadCloser(resp.Body, idleTimeout)
 	s := &codexStream{ch: make(chan protocol.StreamEvent, 64), done: make(chan struct{}), ctx: ctx, body: body, secrets: slices.Clone(secrets), provider: providerLabel(providerID)}

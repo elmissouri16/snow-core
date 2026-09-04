@@ -2,6 +2,7 @@ package snowsdk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -76,6 +77,52 @@ func TestRunPromptFakeProvider(t *testing.T) {
 	// Fake provider with empty script yields no text; just verify no error.
 	_ = out
 }
+
+type sdkAskProvider struct {
+	request protocol.UserInputRequest
+	calls   int
+	results chan string
+}
+
+func (p *sdkAskProvider) ID() string                                           { return "sdk-ask" }
+func (p *sdkAskProvider) ListModels(context.Context) ([]protocol.Model, error) { return nil, nil }
+func (p *sdkAskProvider) Chat(_ context.Context, request protocol.ChatRequest) (protocol.EventStream, error) {
+	p.calls++
+	if p.calls == 1 {
+		arguments, err := json.Marshal(struct {
+			Questions []protocol.UserInputQuestion `json:"questions"`
+		}{Questions: p.request.Questions})
+		if err != nil {
+			return nil, err
+		}
+		return &sdkEventStream{events: []protocol.StreamEvent{
+			{Type: protocol.EvStreamToolCallDone, ToolCallID: p.request.ID, ToolName: "ask_user", Arguments: arguments},
+			{Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse},
+		}}, nil
+	}
+	for i := len(request.Messages) - 1; i >= 0; i-- {
+		if request.Messages[i].Role == protocol.RoleTool && len(request.Messages[i].Content) != 0 {
+			p.results <- request.Messages[i].Content[0].Text
+			break
+		}
+	}
+	return &sdkEventStream{events: []protocol.StreamEvent{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}, nil
+}
+
+type sdkEventStream struct {
+	events []protocol.StreamEvent
+	index  int
+}
+
+func (s *sdkEventStream) Next(context.Context) (protocol.StreamEvent, error) {
+	if s.index >= len(s.events) {
+		return protocol.StreamEvent{}, io.EOF
+	}
+	event := s.events[s.index]
+	s.index++
+	return event, nil
+}
+func (*sdkEventStream) Close() error { return nil }
 
 type sdkQueueProvider struct {
 	started chan struct{}
@@ -614,12 +661,20 @@ func TestUserInputHandler(t *testing.T) {
 	}
 	defer s.Close()
 	request := protocol.UserInputRequest{ID: "ask-sdk", Questions: []protocol.UserInputQuestion{{ID: "choice", Header: "Choice", Question: "Choose?"}}}
-	response, err := s.app.RequestUserInput(context.Background(), request)
-	if err != nil {
+	provider := &sdkAskProvider{request: request, results: make(chan string, 1)}
+	model := s.app.Agent.Model()
+	model.Provider = provider.ID()
+	if err := s.app.Agent.SetProviderAndModel(provider, model); err != nil {
 		t.Fatal(err)
 	}
-	if seen.ID != request.ID || response.RequestID != request.ID || response.Answers[0].Answer != "A" {
-		t.Fatalf("seen=%+v response=%+v", seen, response)
+	if err := s.Prompt(context.Background(), "ask the user"); err != nil {
+		t.Fatal(err)
+	}
+	if result := <-provider.results; !strings.Contains(result, `"answer":"A"`) {
+		t.Fatalf("tool result = %q", result)
+	}
+	if seen.ID != request.ID {
+		t.Fatalf("seen=%+v", seen)
 	}
 }
 

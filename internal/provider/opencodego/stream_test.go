@@ -154,18 +154,17 @@ func TestListModelsRemote(t *testing.T) {
 	}
 }
 
-// TestResolve verifies credential resolution behavior.
-func TestResolve(t *testing.T) {
+func TestResolveKeyPrecedence(t *testing.T) {
 	p := mustNew(t, "http://unused", "cfg-key")
-	if _, err := p.Resolve(context.Background(), auth.Credential{}); err != nil {
-		t.Errorf("Resolve with config key should pass, got %v", err)
+	if key := p.resolveKey(auth.Credential{}); key != "cfg-key" {
+		t.Fatalf("configured key=%q", key)
 	}
-	p2 := mustNew(t, "http://unused", "")
-	if _, err := p2.Resolve(context.Background(), auth.Credential{Key: "direct"}); err != nil {
-		t.Errorf("Resolve with credential key should pass, got %v", err)
+	p = mustNew(t, "http://unused", "")
+	if key := p.resolveKey(auth.Credential{Key: "direct"}); key != "direct" {
+		t.Fatalf("direct key=%q", key)
 	}
-	if _, err := p2.Resolve(context.Background(), auth.Credential{}); err == nil {
-		t.Error("Resolve with no key should fail")
+	if key := p.resolveKey(auth.Credential{}); key != "" {
+		t.Fatalf("unexpected key=%q", key)
 	}
 }
 

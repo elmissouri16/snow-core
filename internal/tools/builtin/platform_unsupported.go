@@ -24,8 +24,6 @@ func shellDescription() string {
 func validatePlatformPath(string) error { return errUnsupportedPlatform }
 func platformPathWithin(string) bool    { return false }
 
-func renameReplace(string, string) error { return errUnsupportedPlatform }
-
 func preserveRootedReplacementSecurity(*os.Root, string, *os.File) error {
 	return errUnsupportedPlatform
 }

@@ -139,7 +139,7 @@ func TestLocalStoreIsIdempotentAndBounded(t *testing.T) {
 	}
 }
 
-func TestExistsValidatesSessionOwnershipWithoutReading(t *testing.T) {
+func TestListIDsValidatesSessionOwnershipWithoutReading(t *testing.T) {
 	store, err := NewLocalStore(t.TempDir(), 1024)
 	if err != nil {
 		t.Fatal(err)
@@ -148,12 +148,6 @@ func TestExistsValidatesSessionOwnershipWithoutReading(t *testing.T) {
 	ref, err := store.SaveText(context.Background(), "session-a", "key", "value")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if exists, err := store.Exists(context.Background(), "session-a", ref.ID); err != nil || !exists {
-		t.Fatalf("owned artifact exists=%v err=%v", exists, err)
-	}
-	if exists, err := store.Exists(context.Background(), "session-b", ref.ID); err != nil || exists {
-		t.Fatalf("cross-session artifact exists=%v err=%v", exists, err)
 	}
 	ids, err := store.ListIDs(context.Background(), "session-a")
 	if err != nil || len(ids) != 1 || ids[0] != ref.ID {
@@ -170,7 +164,7 @@ func TestLocalStoreDeleteSessionRemovesOnlyOwnedNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	owned, err := store.SaveText(context.Background(), "delete-session", "call", "secret")
+	_, err = store.SaveText(context.Background(), "delete-session", "call", "secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,11 +175,11 @@ func TestLocalStoreDeleteSessionRemovesOnlyOwnedNamespace(t *testing.T) {
 	if err := store.DeleteSession(context.Background(), "delete-session"); err != nil {
 		t.Fatal(err)
 	}
-	if exists, err := store.Exists(context.Background(), "delete-session", owned.ID); err != nil || exists {
-		t.Fatalf("deleted artifact exists=%v err=%v", exists, err)
+	if ids, err := store.ListIDs(context.Background(), "delete-session"); err != nil || len(ids) != 0 {
+		t.Fatalf("deleted artifact IDs=%v err=%v", ids, err)
 	}
-	if exists, err := store.Exists(context.Background(), "keep-session", kept.ID); err != nil || !exists {
-		t.Fatalf("unrelated artifact exists=%v err=%v", exists, err)
+	if ids, err := store.ListIDs(context.Background(), "keep-session"); err != nil || len(ids) != 1 || ids[0] != kept.ID {
+		t.Fatalf("unrelated artifact IDs=%v err=%v", ids, err)
 	}
 }
 

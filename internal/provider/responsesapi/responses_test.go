@@ -120,7 +120,7 @@ func TestBuildRequestScopesContinuityAndToolCapabilities(t *testing.T) {
 func TestStreamStopsAtDoneSentinel(t *testing.T) {
 	body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: [DONE]\n\ndata: not-json\n\n"
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
-	stream := NewStream(context.Background(), resp, "compatible")
+	stream := newTestStream(context.Background(), resp, "compatible")
 	defer stream.Close()
 	var events []protocol.StreamEvent
 	for {
@@ -164,7 +164,7 @@ func TestBuildRequestProviderOptionsCanSuppressStandardFields(t *testing.T) {
 
 func TestStreamRejectsEOFWithoutTerminalEvent(t *testing.T) {
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"))}
-	stream := NewStream(context.Background(), resp, "compatible")
+	stream := newTestStream(context.Background(), resp, "compatible")
 	defer stream.Close()
 	first, err := stream.Next(context.Background())
 	if err != nil || first.Type != protocol.EvStreamTextDelta {
@@ -226,7 +226,7 @@ func TestResponseErrorMarksContextWindowExceeded(t *testing.T) {
 func TestStreamPreservesBoundedErrorMetadata(t *testing.T) {
 	const secret = "secret-token"
 	body := "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"overloaded secret-token\",\"code\":\"server_overloaded\"},\"request_id\":\"req-123\"}}\n\n"
-	stream := NewStream(context.Background(), &http.Response{Body: io.NopCloser(strings.NewReader(body))}, "chatgpt", secret)
+	stream := newTestStream(context.Background(), &http.Response{Body: io.NopCloser(strings.NewReader(body))}, "chatgpt", secret)
 	defer stream.Close()
 	event, err := stream.Next(context.Background())
 	if err != nil || event.Type != protocol.EvStreamError || event.Err == nil {
@@ -267,7 +267,7 @@ func TestStreamNormalizesRefusalUsageAndIncomplete(t *testing.T) {
 		``,
 	}, "\n")
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
-	stream := NewStream(context.Background(), resp, "compatible")
+	stream := newTestStream(context.Background(), resp, "compatible")
 	defer stream.Close()
 	var text string
 	var usage *protocol.Usage

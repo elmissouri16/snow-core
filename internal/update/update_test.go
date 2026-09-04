@@ -136,7 +136,7 @@ func TestEligibilityRejectsSymlinksAndUnsupportedPlatforms(t *testing.T) {
 	if eligible, _ := NewWithOptions(Options{CurrentVersion: "1.0.0", Executable: link, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}).Eligibility(); eligible {
 		t.Fatal("symlink executable was eligible")
 	}
-	if eligible, _ := NewWithOptions(Options{CurrentVersion: "1.0.0", Executable: target, GOOS: "windows", GOARCH: "amd64"}).Eligibility(); eligible {
+	if eligible, _ := NewWithOptions(Options{CurrentVersion: "1.0.0", Executable: target, GOOS: "freebsd", GOARCH: "amd64"}).Eligibility(); eligible {
 		t.Fatal("unsupported platform was eligible")
 	}
 }

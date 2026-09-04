@@ -36,10 +36,6 @@ func NewAuthenticated(transport Transport, service *auth.Service) (*Authenticate
 
 func (p *Authenticated) ID() string { return p.transport.ID() }
 
-// Transport exposes the raw adapter for provider-manager configuration hooks.
-// Agents and user surfaces must not use it for inference.
-func (p *Authenticated) Transport() Transport { return p.transport }
-
 // CredentialCatalogTransport receives the same resolved credential as Chat.
 // It removes the need for adapter-level discovery-key fallbacks.
 type CredentialCatalogTransport interface {

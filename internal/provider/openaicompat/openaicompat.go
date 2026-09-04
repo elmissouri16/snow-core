@@ -189,14 +189,6 @@ func (p *Provider) resolveDiscoveryKey() string {
 	return ""
 }
 
-func (p *Provider) Resolve(_ context.Context, creds auth.Credential) (auth.Credential, error) {
-	if key := p.resolveKey(creds); key != "" {
-		creds.Type = auth.CredentialAPIKey
-		creds.Key = key
-	}
-	return creds, nil
-}
-
 func (p *Provider) staticCatalog() []protocol.Model {
 	if p.defaultModel == "" {
 		return nil

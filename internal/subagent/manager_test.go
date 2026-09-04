@@ -303,8 +303,8 @@ func TestSpawnRejectsUnavailableSelectionBeforeFactory(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown selection other/missing") {
 		t.Fatalf("selection error = %v", err)
 	}
-	if factoryCalls != 0 || m.HasAgents() {
-		t.Fatalf("invalid selection committed work: factory=%d agents=%v", factoryCalls, m.HasAgents())
+	if factoryCalls != 0 || m.HasActive() {
+		t.Fatalf("invalid selection committed work: factory=%d active=%t", factoryCalls, m.HasActive())
 	}
 	if err := m.Close(context.Background()); err != nil {
 		t.Fatal(err)
@@ -638,18 +638,27 @@ func TestManagerSessionSwitchRejectsActiveAndRebindsIdle(t *testing.T) {
 	}
 	awaitToolState(t, m, string(state.Agent.Path), protocol.AgentRunning)
 	next := session.NewMemoryStore(session.Options{})
-	if err := m.SetStore(next); err == nil {
+	setStore := func() error {
+		unlockRoot := m.lockRootAdmission()
+		defer unlockRoot()
+		return m.SetStoreAdmitted(next)
+	}
+	if err := setStore(); err == nil {
 		t.Fatal("active child did not block session switch")
 	}
 	if _, err := m.Interrupt(context.Background(), caller, string(state.Agent.Path)); err != nil {
 		t.Fatal(err)
 	}
 	awaitToolState(t, m, string(state.Agent.Path), protocol.AgentInterrupted)
-	if err := m.SetStore(next); err != nil {
+	if err := setStore(); err != nil {
 		t.Fatalf("idle child prevented session switch: %v", err)
 	}
-	if m.HasAgents() {
-		t.Fatal("old child tree remained attached")
+	list, err := m.List(context.Background(), m.RootCaller(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.Open != 0 {
+		t.Fatalf("old child tree remained attached: open=%d", list.Open)
 	}
 	if err := m.Close(context.Background()); err != nil {
 		t.Fatal(err)

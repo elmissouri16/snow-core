@@ -16,8 +16,8 @@ func TestRegisterBuiltins_RegistersAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := map[string]bool{}
-	for _, s := range reg.Schemas() {
-		names[s.Name] = true
+	for _, descriptor := range reg.Descriptors() {
+		names[descriptor.Schema.Name] = true
 	}
 	for _, want := range []string{"read", "write", "edit", "bash", "grep", "glob", "ask_user", "request_user_input", "update_plan", "webfetch"} {
 		if !names[want] {

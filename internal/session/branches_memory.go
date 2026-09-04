@@ -155,29 +155,6 @@ func (s *MemoryStore) DeleteBranchForRollback(branchID string) error {
 	return nil
 }
 
-// Fork implements Store.
-func (s *MemoryStore) Fork(fromID string) (Store, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
-		return nil, errors.New("session: store closed")
-	}
-	if _, ok := s.byID[fromID]; !ok {
-		return nil, ErrNotFound
-	}
-	n := NewMemoryStore(Options{ID: s.id + "-fork", CWD: s.header.CWD, Name: s.header.Name})
-	path := pathFrom(s.entries, s.byID, fromID)
-	for _, e := range path {
-		if e.ID == "root" {
-			continue
-		}
-		if err := n.Append(e); err != nil {
-			return nil, err
-		}
-	}
-	return n, nil
-}
-
 func (s *MemoryStore) ActiveBranchID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

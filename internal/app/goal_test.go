@@ -77,7 +77,7 @@ func TestGoalRequiresSavedSessionAndCapabilities(t *testing.T) {
 		t.Fatalf("error=%v", e)
 	}
 }
-func TestGoalSubscriberReentrantCompleteAndClose(t *testing.T) {
+func TestGoalSubscriberReentrantPauseAndClose(t *testing.T) {
 	a, e := New(context.Background(), Options{Provider: "fake", Permission: "allow", CWD: t.TempDir()})
 	if e != nil {
 		t.Fatal(e)
@@ -92,7 +92,7 @@ func TestGoalSubscriberReentrantCompleteAndClose(t *testing.T) {
 				return
 			}
 			if g.Status == protocol.GoalActive {
-				once.Do(func() { _, _ = a.SetGoalStatus(protocol.GoalComplete); close(done) })
+				once.Do(func() { _, _ = a.PauseGoal(); close(done) })
 			}
 		}
 	})
@@ -105,7 +105,7 @@ func TestGoalSubscriberReentrantCompleteAndClose(t *testing.T) {
 		t.Fatal("subscriber deadlocked")
 	}
 	g, _ := a.GoalState()
-	if g.Status != protocol.GoalComplete {
+	if g.Status != protocol.GoalPaused {
 		t.Fatalf("goal=%+v", g)
 	}
 	// Test Close reentrancy independently: no earlier subscriber should read

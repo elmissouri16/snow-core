@@ -32,6 +32,20 @@ const (
 
 var requestEncoderPool sync.Pool
 
+func buildRequestBody(request protocol.ChatRequest) ([]byte, error) {
+	parallel := true
+	return responsesapi.BuildRequest(request, responsesapi.RequestOptions{
+		ProviderID:                ProviderID,
+		IncludeEncryptedReasoning: true,
+		AllowLegacyVerbosity:      request.Model.Provider != ProviderID,
+		PromptCacheKey:            normalizeAffinityKey(request.SessionAffinityKey),
+		ToolChoice:                "auto",
+		ParallelToolCalls:         &parallel,
+		OmitMaxOutputTokens:       true,
+		OmitTemperature:           true,
+	})
+}
+
 // Chat implements the Codex Responses streaming protocol used by ChatGPT
 // subscription credentials. The access token is only placed in the request
 // header and is never included in errors or stream events.
@@ -51,17 +65,7 @@ func (p *Provider) Chat(ctx context.Context, creds auth.Credential, req protocol
 	}
 
 	affinity := normalizeAffinityKey(req.SessionAffinityKey)
-	parallel := true
-	body, err := responsesapi.BuildRequest(req, responsesapi.RequestOptions{
-		ProviderID:                ProviderID,
-		IncludeEncryptedReasoning: true,
-		AllowLegacyVerbosity:      req.Model.Provider != ProviderID,
-		PromptCacheKey:            affinity,
-		ToolChoice:                "auto",
-		ParallelToolCalls:         &parallel,
-		OmitMaxOutputTokens:       true,
-		OmitTemperature:           true,
-	})
+	body, err := buildRequestBody(req)
 	if err != nil {
 		return errorStream(ctx, fmt.Errorf("chatgpt: build request: %w", err)), nil
 	}
@@ -386,33 +390,6 @@ func responseRequestID(header http.Header, secrets ...string) string {
 	}
 	return ""
 }
-
-// buildResponsesBody remains as a thin compatibility seam for ChatGPT package
-// regression tests. Runtime and tests use the shared Responses encoder.
-func buildResponsesBody(req protocol.ChatRequest) ([]byte, error) {
-	affinity := normalizeAffinityKey(req.SessionAffinityKey)
-	parallel := true
-	return responsesapi.BuildRequest(req, responsesapi.RequestOptions{
-		ProviderID:                ProviderID,
-		IncludeEncryptedReasoning: true,
-		AllowLegacyVerbosity:      req.Model.Provider != ProviderID,
-		PromptCacheKey:            affinity,
-		ToolChoice:                "auto",
-		ParallelToolCalls:         &parallel,
-		OmitMaxOutputTokens:       true,
-		OmitTemperature:           true,
-	})
-}
-
-// responseInput and messageText are thin compatibility seams for package tests.
-func responseInput(msg protocol.Message) ([]any, error) {
-	if msg.Provider == "" {
-		msg.Provider = ProviderID
-	}
-	return responsesapi.MessageInput(msg, ProviderID)
-}
-
-func messageText(msg protocol.Message) string { return responsesapi.MessageText(msg) }
 
 func truncate(value string, max int) string {
 	if len(value) <= max {

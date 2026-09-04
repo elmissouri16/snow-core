@@ -11,18 +11,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/session"
 )
 
-func TestArtifactLineWindowDoesNotSplitWholeInput(t *testing.T) {
-	text := "first\nsecond\nthird\n"
-	got, start, end, total := artifactLineWindow(text, 2, 2)
-	if got != "second\nthird" || start != 1 || end != 3 || total != 4 {
-		t.Fatalf("window=%q start=%d end=%d total=%d", got, start, end, total)
-	}
-	got, start, end, total = artifactLineWindow(text, 4, 1)
-	if got != "" || start != 3 || end != 4 || total != 4 {
-		t.Fatalf("trailing window=%q start=%d end=%d total=%d", got, start, end, total)
-	}
-}
-
 func TestArtifactGrepSkipsOversizedLineAndContinues(t *testing.T) {
 	store, err := artifact.NewLocalStore(filepath.Join(t.TempDir(), "artifacts"), 2<<20)
 	if err != nil {

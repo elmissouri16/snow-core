@@ -39,7 +39,7 @@ func TestCatalogAuthorityRequiresStoredAccount(t *testing.T) {
 }
 
 func TestResolveRequiresChatGPTOAuth(t *testing.T) {
-	if _, err := New().Resolve(context.Background(), auth.Credential{}); err == nil {
+	if _, err := New().resolve(context.Background(), auth.Credential{}, false); err == nil {
 		t.Fatal("empty credential should fail")
 	}
 }

@@ -69,8 +69,6 @@ func (c *Controller) SetStore(st session.Store) error {
 	return nil
 }
 
-func (c *Controller) Store() session.Store { c.mu.Lock(); defer c.mu.Unlock(); return c.store }
-
 func (c *Controller) Binding() Binding {
 	c.mu.Lock()
 	defer c.mu.Unlock()

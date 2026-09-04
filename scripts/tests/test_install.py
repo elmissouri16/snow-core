@@ -483,10 +483,10 @@ cp "$source" "$output"
         self.assertEqual(list(self.install_dir.glob(".snow.*")), [])
 
     def test_rejects_unsupported_operating_system(self) -> None:
-        result = self._run("Windows_NT", "x86_64")
+        result = self._run("FreeBSD", "x86_64")
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("unsupported operating system: Windows_NT", result.stderr)
+        self.assertIn("unsupported operating system: FreeBSD", result.stderr)
         self.assertFalse((self.install_dir / "snow").exists())
 
     def test_rejects_unsupported_architecture(self) -> None:

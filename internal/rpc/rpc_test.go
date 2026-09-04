@@ -652,24 +652,23 @@ func TestRPCUserInputReplyAndReject(t *testing.T) {
 	t.Run("reply", func(t *testing.T) {
 		a, srv, out := newHarness(t)
 		defer a.Close()
-		resolved := make(chan protocol.UserInputResponse, 1)
 		published := make(chan struct{})
 		a.Agent.Subscribe(func(event protocol.AgentEvent) {
 			if event.Type == protocol.EvUserInputRequest {
 				close(published)
 			}
 		})
-		go func() {
-			response, _ := a.RequestUserInput(context.Background(), request)
-			resolved <- response
-		}()
+		provider, promptDone := startRPCAsk(t, a, request)
 		<-published
 		params, _ := json.Marshal(protocol.UserInputResponse{RequestID: request.ID, Answers: []protocol.UserInputAnswer{{QuestionID: "choice", Answer: "A"}}})
 		if err := srv.handle(context.Background(), Request{ID: "reply-1", Type: "user_input_reply", Params: params}); err != nil {
 			t.Fatal(err)
 		}
-		if response := <-resolved; response.Answers[0].Answer != "A" {
-			t.Fatalf("response = %+v", response)
+		if err := <-promptDone; err != nil {
+			t.Fatal(err)
+		}
+		if result := <-provider.results; !strings.Contains(result, `"answer":"A"`) {
+			t.Fatalf("tool result = %q", result)
 		}
 		if !strings.Contains(out.String(), `"command":"user_input_reply"`) || !strings.Contains(out.String(), `"success":true`) {
 			t.Fatalf("output = %s", out)
@@ -679,23 +678,22 @@ func TestRPCUserInputReplyAndReject(t *testing.T) {
 	t.Run("reject", func(t *testing.T) {
 		a, srv, out := newHarness(t)
 		defer a.Close()
-		resolved := make(chan error, 1)
 		published := make(chan struct{})
 		a.Agent.Subscribe(func(event protocol.AgentEvent) {
 			if event.Type == protocol.EvUserInputRequest {
 				close(published)
 			}
 		})
-		go func() {
-			_, err := a.RequestUserInput(context.Background(), request)
-			resolved <- err
-		}()
+		provider, promptDone := startRPCAsk(t, a, request)
 		<-published
 		if err := srv.handle(context.Background(), Request{ID: "reject-1", Type: "user_input_reject", Params: json.RawMessage(`{"request_id":"ask-rpc"}`)}); err != nil {
 			t.Fatal(err)
 		}
-		if err := <-resolved; err == nil || !strings.Contains(err.Error(), "declined") {
-			t.Fatalf("error = %v", err)
+		if err := <-promptDone; err != nil {
+			t.Fatal(err)
+		}
+		if result := <-provider.results; !strings.Contains(result, "declined") {
+			t.Fatalf("tool result = %q", result)
 		}
 		if !strings.Contains(out.String(), `"command":"user_input_reject"`) {
 			t.Fatalf("output = %s", out)
@@ -781,19 +779,18 @@ func TestRPCEOFReleasesPendingUserInput(t *testing.T) {
 			close(published)
 		}
 	})
-	resolved := make(chan error, 1)
-	go func() {
-		_, err := a.RequestUserInput(context.Background(), protocol.UserInputRequest{
-			ID: "ask-eof", Questions: []protocol.UserInputQuestion{{ID: "choice", Header: "Choice", Question: "Choose?"}},
-		})
-		resolved <- err
-	}()
+	provider, promptDone := startRPCAsk(t, a, protocol.UserInputRequest{
+		ID: "ask-eof", Questions: []protocol.UserInputQuestion{{ID: "choice", Header: "Choice", Question: "Choose?"}},
+	})
 	<-published
 	if err := srv.Serve(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-resolved; err == nil || !strings.Contains(err.Error(), "closed") {
-		t.Fatalf("pending request error = %v", err)
+	if err := <-promptDone; err != nil {
+		t.Fatal(err)
+	}
+	if result := <-provider.results; !strings.Contains(result, "closed") {
+		t.Fatalf("tool result = %q", result)
 	}
 }
 

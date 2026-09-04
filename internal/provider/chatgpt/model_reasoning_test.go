@@ -56,9 +56,9 @@ func TestBuildResponsesBodyThinkingMapping(t *testing.T) {
 		protocol.ThinkingMax:     "max",
 	}
 	for level, native := range want {
-		body, err := buildResponsesBody(protocol.ChatRequest{Model: model, Thinking: level})
+		body, err := buildRequestBody(protocol.ChatRequest{Model: model, Thinking: level})
 		if err != nil {
-			t.Fatalf("buildResponsesBody(%q): %v", level, err)
+			t.Fatalf("buildRequestBody(%q): %v", level, err)
 		}
 		var decoded map[string]any
 		if err := json.Unmarshal(body, &decoded); err != nil {
@@ -115,7 +115,7 @@ func TestBuildResponsesBodyResponseSettings(t *testing.T) {
 		{name: "summary-off", summary: protocol.ReasoningSummaryOff, verbosity: protocol.TextVerbosityMedium, wantVerbosity: "medium"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body, err := buildResponsesBody(protocol.ChatRequest{
+			body, err := buildRequestBody(protocol.ChatRequest{
 				Model: model, Thinking: protocol.ThinkingHigh,
 				ReasoningSummary: tc.summary, TextVerbosity: tc.verbosity,
 			})
@@ -137,7 +137,7 @@ func TestBuildResponsesBodyResponseSettings(t *testing.T) {
 		})
 	}
 
-	body, err := buildResponsesBody(protocol.ChatRequest{
+	body, err := buildRequestBody(protocol.ChatRequest{
 		Model: model, Thinking: protocol.ThinkingOff,
 		ReasoningSummary: protocol.ReasoningSummaryDetailed,
 	})
@@ -150,7 +150,7 @@ func TestBuildResponsesBodyResponseSettings(t *testing.T) {
 
 	summaryUnsupported := false
 	model.SupportsReasoningSummary = &summaryUnsupported
-	body, err = buildResponsesBody(protocol.ChatRequest{
+	body, err = buildRequestBody(protocol.ChatRequest{
 		Model: model, Thinking: protocol.ThinkingHigh,
 		ReasoningSummary: protocol.ReasoningSummaryDetailed,
 	})
@@ -168,7 +168,7 @@ func TestBuildResponsesBodyResponseSettings(t *testing.T) {
 }
 
 func TestBuildResponsesBodyRejectsUnsupportedThinking(t *testing.T) {
-	_, err := buildResponsesBody(protocol.ChatRequest{
+	_, err := buildRequestBody(protocol.ChatRequest{
 		Model: protocol.Model{
 			Provider:         ProviderID,
 			ID:               "low-only",

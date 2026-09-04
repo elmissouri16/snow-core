@@ -86,16 +86,12 @@ func TestStaleTurnEventsCannotSettleOrMutateNewRun(t *testing.T) {
 func TestQueuedIntermediateTurnReducesBeforeLatestAdmission(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
-	if err := m.app.Agent.Prompt(context.Background(), "intermediate turn"); err != nil {
-		t.Fatal(err)
-	}
-	_, intermediateID := m.app.Agent.LatestTurn()
-	intermediateSequence := m.app.Agent.TurnSequenceWatermark()
-	if err := m.app.Agent.Prompt(context.Background(), "latest turn"); err != nil {
-		t.Fatal(err)
-	}
-	_, latestID := m.app.Agent.LatestTurn()
-	latestSequence := m.app.Agent.TurnSequenceWatermark()
+	intermediateTurn := promptTurnEvent(t, m.app.Agent, "intermediate turn")
+	intermediateID := intermediateTurn.TurnID
+	intermediateSequence := intermediateTurn.TurnSequence
+	latestTurn := promptTurnEvent(t, m.app.Agent, "latest turn")
+	latestID := latestTurn.TurnID
+	latestSequence := latestTurn.TurnSequence
 	if intermediateID == "" || latestID == "" || intermediateID == latestID || intermediateSequence == 0 || latestSequence <= intermediateSequence {
 		t.Fatalf("turn identities intermediate=%q latest=%q", intermediateID, latestID)
 	}
@@ -151,11 +147,17 @@ func TestAuthoritativeGoalContinuationReplacesStaleUIProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	finished := make(chan protocol.AgentEvent, 1)
+	unsubscribe := runtime.Subscribe(func(event protocol.AgentEvent) {
+		if event.Type == protocol.EvTurnDone {
+			finished <- event
+		}
+	})
+	defer unsubscribe()
 	runtime.ContinueGoal()
 	call := waitBoundaryCall(t, provider, 0)
 	origin, turnID, running := runtime.ActiveTurn()
-	turnSequence := runtime.TurnSequenceWatermark()
-	if !running || origin != "goal" || turnID == "" || turnSequence == 0 {
+	if !running || origin != "goal" || turnID == "" {
 		t.Fatalf("active turn = origin %q id %q running %v", origin, turnID, running)
 	}
 	if _, err := controller.SetStatus(goal.GoalID, protocol.GoalPaused, false); err != nil {
@@ -170,10 +172,19 @@ func TestAuthoritativeGoalContinuationReplacesStaleUIProjection(t *testing.T) {
 	if _, _, running := runtime.ActiveTurn(); running {
 		t.Fatal("goal turn still running before delayed marker reduction")
 	}
-	if latestOrigin, latestID := runtime.LatestTurn(); latestOrigin != "goal" || latestID != turnID {
-		t.Fatalf("latest turn = origin %q id %q, want goal/%q", latestOrigin, latestID, turnID)
+	var turnSequence uint64
+	select {
+	case event := <-finished:
+		if event.TurnID != turnID {
+			t.Fatalf("finished turn ID = %q, want %q", event.TurnID, turnID)
+		}
+		turnSequence = event.TurnSequence
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for goal turn-done event")
 	}
-
+	if turnSequence == 0 {
+		t.Fatal("goal turn sequence is zero")
+	}
 	m.subagentFleetOpen = true
 	m.activeTurnID = "stale-turn"
 	m.handleAgentEvent(protocol.AgentEvent{

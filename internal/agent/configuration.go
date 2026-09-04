@@ -631,23 +631,6 @@ func (a *Agent) ActiveTurn() (origin, id string, running bool) {
 	return a.turnOrigin, a.turnID, a.running
 }
 
-// LatestTurn returns the identity of the most recently admitted root
-// operation, including after it has completed. It is empty until the first
-// operation is admitted and supports delayed UI event reconciliation.
-func (a *Agent) LatestTurn() (origin, id string) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.latestTurnOrigin, a.latestTurnID
-}
-
-// TurnSequenceWatermark returns the latest process-local admission sequence.
-// It remains monotonic across session and branch reconciliation boundaries.
-func (a *Agent) TurnSequenceWatermark() uint64 {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.turnSequence
-}
-
 // RootEpoch returns the process-local session/branch reconciliation epoch.
 func (a *Agent) RootEpoch() uint64 {
 	a.mu.RLock()

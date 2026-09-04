@@ -313,7 +313,7 @@ func TestPlanModeRejectsUpdatePlanAndModeSwitchWhileRunning(t *testing.T) {
 	if !found {
 		t.Fatalf("messages = %+v", msgs)
 	}
-	if err := a.TryInternalTurn(context.Background()); err == nil || !strings.Contains(err.Error(), "not allowed") {
+	if err := a.internalTurn(context.Background(), false); err == nil || !strings.Contains(err.Error(), "not allowed") {
 		t.Fatalf("internal turn error = %v", err)
 	}
 }

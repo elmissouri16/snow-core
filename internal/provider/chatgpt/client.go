@@ -109,10 +109,6 @@ func (p *Provider) refreshRejected(ctx context.Context, rejected auth.Credential
 	return p.resolve(ctx, rejected, true)
 }
 
-func (p *Provider) Resolve(ctx context.Context, supplied auth.Credential) (auth.Credential, error) {
-	return p.resolve(ctx, supplied, false)
-}
-
 func (p *Provider) resolve(ctx context.Context, supplied auth.Credential, force bool) (auth.Credential, error) {
 	if p.store == nil {
 		status, err := CheckAuth(supplied)

@@ -255,16 +255,6 @@ func (m *Manager) openAgentCountLocked() int {
 	return open
 }
 
-// SetStore rebinds the manager during an App session switch and restores
-// topology metadata from the new root store. Completed children belong to the
-// old root session, so their in-memory runtimes are detached before rebinding;
-// active work is still rejected by the caller and this method.
-func (m *Manager) SetStore(store session.SubagentTaskStore) error {
-	unlockRoot := m.lockRootAdmission()
-	defer unlockRoot()
-	return m.setStore(store)
-}
-
 // SetStoreAdmitted is used by App session transactions that already hold the
 // root admission mutex.
 func (m *Manager) SetStoreAdmitted(store session.SubagentTaskStore) error {
@@ -299,8 +289,8 @@ func (m *Manager) ensureIdleTreeLocked() error {
 
 // detachIdleTreeLocked marks and removes terminal runtimes while m.mu is held.
 // The actual worker joins and child closes happen after releasing m.mu so a
-// child shutdown cannot block manager observers. The root admission lock held
-// by SetStore prevents new spawns/followups while this transition completes.
+// child shutdown cannot block manager observers. The caller-held root admission
+// lock prevents new spawns or followups while this transition completes.
 func (m *Manager) detachIdleTreeLocked() ([]detachedRuntime, error) {
 	if err := m.ensureIdleTreeLocked(); err != nil {
 		return nil, err

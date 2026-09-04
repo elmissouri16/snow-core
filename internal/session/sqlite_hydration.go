@@ -449,49 +449,10 @@ func sqliteBranchHydrationSummaries(db *sql.DB, tip string) (BranchHydrationSnap
 	return snapshot, nil
 }
 
-// BranchEntryPage implements BranchEntryPager. Recursion stops at limit, so
-// SQLite decodes at most one bounded message window per call.
-func (s *SQLiteStore) BranchEntryPage(cursor string, limit int) (BranchEntryPage, error) {
-	if err := validateHydrationPage(limit); err != nil {
-		return BranchEntryPage{}, err
-	}
-	if cursor == "" {
-		return BranchEntryPage{}, nil
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
-		return BranchEntryPage{}, errors.New("session: store closed")
-	}
-	rows, err := s.db.Query(`
-		WITH RECURSIVE page(depth, seq, id, parent_id, entry_type, message, summary, compacted_through, meta_key, meta_value) AS (
-			SELECT 0, seq, id, parent_id, entry_type, message, summary, compacted_through, meta_key, meta_value
-			FROM entries WHERE id = ?
-			UNION ALL
-			SELECT p.depth + 1, e.seq, e.id, e.parent_id, e.entry_type, e.message,
-				e.summary, e.compacted_through, e.meta_key, e.meta_value
-			FROM entries e JOIN page p ON e.id = p.parent_id
-			WHERE p.depth + 1 < ?
-		)
-		SELECT id, parent_id, entry_type, message, summary, compacted_through, meta_key, meta_value
-		FROM page ORDER BY depth DESC`, cursor, limit)
-	if err != nil {
-		return BranchEntryPage{}, fmt.Errorf("session: sqlite hydration page: %w", err)
-	}
-	entries, err := scanBranchEntries(rows)
-	if err != nil {
-		return BranchEntryPage{}, err
-	}
-	if len(entries) == 0 {
-		return BranchEntryPage{}, ErrNotFound
-	}
-	return BranchEntryPage{Entries: entries, OlderCursor: entries[0].ParentID}, nil
-}
-
 // BranchEntriesByID implements BranchEntryLookup.
 func (s *SQLiteStore) BranchEntriesByID(ids []string) ([]Entry, error) {
-	if len(ids) > maxBranchHydrationPage {
-		return nil, fmt.Errorf("session: branch entry lookup exceeds %d ids", maxBranchHydrationPage)
+	if len(ids) > maxBranchEntryLookupIDs {
+		return nil, fmt.Errorf("session: branch entry lookup exceeds %d ids", maxBranchEntryLookupIDs)
 	}
 	unique := make([]string, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))

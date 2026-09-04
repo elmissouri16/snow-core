@@ -195,7 +195,7 @@ func TestConfigureOpenAICompatibleAtRuntime(t *testing.T) {
 	pc := a.Cfg.Providers[openaicompat.ProviderID]
 	pc.BaseURL = server.URL + "/v1"
 	a.Cfg.Providers[openaicompat.ProviderID] = pc
-	if err := a.ConfigureOpenAICompatible(pc.BaseURL); err != nil {
+	if err := a.ConfigureOpenAICompatibleProfile(openaicompat.ProviderID, pc.BaseURL); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.SetProvider(openaicompat.ProviderID); err != nil {
@@ -207,7 +207,7 @@ func TestConfigureOpenAICompatibleAtRuntime(t *testing.T) {
 	if err := a.SetProvider("fake"); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.ConfigureOpenAICompatible(pc.BaseURL); err != nil {
+	if err := a.ConfigureOpenAICompatibleProfile(openaicompat.ProviderID, pc.BaseURL); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.SetProviderModelThinking(openaicompat.ProviderID, protocol.Model{Provider: openaicompat.ProviderID, ID: "runtime-model"}, protocol.ThinkingOff); err != nil {
@@ -247,7 +247,7 @@ func TestConfigureOpenAICompatiblePreservesExplicitDiscoveryKey(t *testing.T) {
 	if err := a.Auth.Put(openaicompat.ProviderID, auth.Credential{Type: auth.CredentialAPIKey, Key: "stored-key"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.ConfigureOpenAICompatible(server.URL + "/v1"); err != nil {
+	if err := a.ConfigureOpenAICompatibleProfile(openaicompat.ProviderID, server.URL+"/v1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.RefreshProviderModels(context.Background(), openaicompat.ProviderID); err != nil {
@@ -281,13 +281,13 @@ func TestRefreshProviderModelsRejectsStaleCompatibleEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	if err := a.ConfigureOpenAICompatible(serverA.URL); err != nil {
+	if err := a.ConfigureOpenAICompatibleProfile(openaicompat.ProviderID, serverA.URL); err != nil {
 		t.Fatal(err)
 	}
 	staleDone := make(chan error, 1)
 	go func() { staleDone <- a.RefreshProviderModels(context.Background(), openaicompat.ProviderID) }()
 	<-started
-	if err := a.ConfigureOpenAICompatible(serverB.URL); err != nil {
+	if err := a.ConfigureOpenAICompatibleProfile(openaicompat.ProviderID, serverB.URL); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.RefreshProviderModels(context.Background(), openaicompat.ProviderID); err != nil {

@@ -32,7 +32,6 @@ type Ref struct {
 type Store interface {
 	SaveText(context.Context, string, string, string) (Ref, error)
 	ReadText(context.Context, string, string) (string, error)
-	Exists(context.Context, string, string) (bool, error)
 	ListIDs(context.Context, string) ([]string, error)
 	Close() error
 }
@@ -417,39 +416,6 @@ func (s *LocalStore) TextReferenceVerified(ctx context.Context, sessionID, id st
 		return false, closeErr
 	}
 	return s.artifactVerified(id, info), nil
-}
-
-func (s *LocalStore) Exists(ctx context.Context, sessionID, id string) (bool, error) {
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	if sessionID == "" {
-		return false, errors.New("artifact: session ID is required")
-	}
-	if err := validateID(id); err != nil {
-		return false, err
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed || s.root == nil {
-		return false, errors.New("artifact: store is closed")
-	}
-	dir, err := openVerifiedNamespace(s.root, namespace(sessionID), false)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
-		}
-		return false, fmt.Errorf("artifact: open namespace: %w", err)
-	}
-	defer dir.Close()
-	file, err := openVerifiedArtifact(dir, id+".txt", s.maxBytes)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
-		}
-		return false, fmt.Errorf("artifact: inspect: %w", err)
-	}
-	return true, file.Close()
 }
 
 // ListIDs enumerates validated immutable artifact IDs owned by one session.

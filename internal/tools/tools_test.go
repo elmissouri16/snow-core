@@ -140,26 +140,6 @@ func TestReplaceOwnerIsAtomicWhenPrepareFails(t *testing.T) {
 	}
 }
 
-func TestCanExposeUsesOptionalPermissionPolicy(t *testing.T) {
-	desc := ToolDescriptor{Schema: protocol.ToolSchema{Name: "network_tool"}, Risk: permission.RiskNet}
-	deny := permission.NewService(permission.ModeDeny, nil)
-	if CanExpose(deny, desc) {
-		t.Fatal("deny mode exposed a network tool")
-	}
-	allow := permission.NewService(permission.ModeAllow, nil)
-	if !CanExpose(allow, desc) {
-		t.Fatal("allow mode hid a tool")
-	}
-	ask := permission.NewService(permission.ModeAsk, nil)
-	if !CanExpose(ask, desc) {
-		t.Fatal("undecided ask-mode tool should remain visible")
-	}
-	ask.Remember(permission.Request{Tool: "network_tool", Risk: permission.RiskNet}, permission.DecisionDeny)
-	if CanExpose(ask, desc) {
-		t.Fatal("remembered denial should hide deferred tool")
-	}
-}
-
 func TestDescriptorEffectNormalization(t *testing.T) {
 	tests := []struct {
 		name string

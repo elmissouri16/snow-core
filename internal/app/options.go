@@ -311,12 +311,6 @@ func skillPromptForRegistry(catalog *skills.Registry, registry tools.Registry) s
 	)
 }
 
-// DefaultPaths resolves config/auth paths from the environment.
-func DefaultPaths() (configPath, authPath string) {
-	c, a, _ := config.DefaultPaths()
-	return c, a
-}
-
 // InspectProjectTrust loads only global policy and the user trust store. It
 // never reads project-local configuration or resources.
 func InspectProjectTrust(opts Options) (ProjectTrustPreflight, error) {

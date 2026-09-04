@@ -23,7 +23,6 @@ const (
 	DefaultLogReadBytes        = 32 << 10
 	DefaultReadinessTimeout    = 30 * time.Second
 	MaxReadinessTimeout        = 120 * time.Second
-	DefaultLogWait             = 0
 	MaxLogWait                 = 30 * time.Second
 	DefaultStopGrace           = 2 * time.Second
 	MaxStopGrace               = 30 * time.Second
@@ -179,12 +178,6 @@ func (m *Manager) bindSessionLocked(sessionID string) {
 	m.sessionID = sessionID
 	m.records = make(map[string]*runtimeProcess)
 	m.order = nil
-}
-
-func (m *Manager) HasRunning() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.hasRunningLocked()
 }
 
 // HasRecords reports whether the active session retains any managed-process

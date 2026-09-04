@@ -490,26 +490,18 @@ func TestLoadMCPAndSkillsAndTrustedProjectExtensions(t *testing.T) {
 	if err := os.WriteFile(project, []byte(`{"mcp_servers":{"local":{"command":"mcp-local"}},"system_prompt_file":".snow/system.md"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	merged, err := LoadWithProject(global, project, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if merged.MCPServers["local"].Command != "mcp-local" || merged.MCPServers["remote"].URL == "" {
-		t.Fatalf("merged = %+v", merged.MCPServers)
-	}
 	projectExtensions, err := LoadProjectExtensions(project)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if projectExtensions.MCPServers["local"].Command != "mcp-local" {
+		t.Fatalf("project MCP servers = %+v", projectExtensions.MCPServers)
+	}
 	if projectExtensions.SystemPromptFile == nil || *projectExtensions.SystemPromptFile != ".snow/system.md" {
 		t.Fatalf("project system prompt = %#v", projectExtensions.SystemPromptFile)
 	}
-	blocked, err := LoadWithProject(global, project, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := blocked.MCPServers["local"]; ok {
-		t.Fatal("untrusted project MCP server loaded")
+	if _, ok := cfg.MCPServers["local"]; ok {
+		t.Fatal("project MCP server leaked into global configuration")
 	}
 }
 
@@ -604,6 +596,18 @@ func TestProjectSelectionsAreIndependentAndOverlayDefaults(t *testing.T) {
 	}
 }
 
+func updateProjectSelection(path, cwd string, selection ProjectSelection) error {
+	_, err := Update(path, func(latest *Config) error {
+		candidate, err := WithProjectSelection(*latest, cwd, selection)
+		if err != nil {
+			return err
+		}
+		*latest = candidate
+		return nil
+	})
+	return err
+}
+
 func TestUpdateMergesConcurrentProjectAndGlobalChanges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := Save(path, Default()); err != nil {
@@ -616,7 +620,7 @@ func TestUpdateMergesConcurrentProjectAndGlobalChanges(t *testing.T) {
 	for i := range projects {
 		wg.Go(func() {
 			cwd := filepath.Join(projectRoot, fmt.Sprintf("project-%d", i))
-			_, err := SaveProjectSelection(path, cwd, ProjectSelection{Provider: "fake", Model: fmt.Sprintf("model-%d", i), Thinking: "off"})
+			err := updateProjectSelection(path, cwd, ProjectSelection{Provider: "fake", Model: fmt.Sprintf("model-%d", i), Thinking: "off"})
 			errs <- err
 		})
 	}
@@ -662,7 +666,7 @@ func TestUpdateHelperProcess(t *testing.T) {
 	var err error
 	switch kind {
 	case "project":
-		_, err = SaveProjectSelection(path, os.Getenv("SNOW_CONFIG_UPDATE_PROJECT"), ProjectSelection{Provider: "fake", Model: os.Getenv("SNOW_CONFIG_UPDATE_MODEL"), Thinking: "off"})
+		err = updateProjectSelection(path, os.Getenv("SNOW_CONFIG_UPDATE_PROJECT"), ProjectSelection{Provider: "fake", Model: os.Getenv("SNOW_CONFIG_UPDATE_MODEL"), Thinking: "off"})
 	case "theme":
 		_, err = Update(path, func(cfg *Config) error {
 			cfg.TUI.Theme = "dark"

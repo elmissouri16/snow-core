@@ -119,7 +119,7 @@ func TestManagerBridgeNameCollisionGetsStableSuffix(t *testing.T) {
 		t.Fatal("remote collision tool missing")
 	}
 	if _, ok := registry.Get("mcp_demo_list_resources_2"); !ok {
-		t.Fatalf("resource bridge suffix missing; schemas=%+v", registry.Schemas())
+		t.Fatalf("resource bridge suffix missing; schemas=%+v", registry.Descriptors())
 	}
 }
 
@@ -155,7 +155,7 @@ func TestManagerStreamableHTTPNegotiatesLatestAndBridgesCapabilities(t *testing.
 
 	tool, ok := registry.Get("mcp_demo_echo_value")
 	if !ok {
-		t.Fatalf("registered tools = %+v", registry.Schemas())
+		t.Fatalf("registered tools = %+v", registry.Descriptors())
 	}
 	result, err := tool.Run(ctx, json.RawMessage(`{"value":"hello"}`), nil)
 	if err != nil || result.IsError || !strings.Contains(result.Content[0].Text, "hello") {
@@ -214,7 +214,7 @@ func TestManagerStdioServer(t *testing.T) {
 	}
 	tool, ok := registry.Get("mcp_local_echo_value")
 	if !ok {
-		t.Fatalf("schemas = %+v", registry.Schemas())
+		t.Fatalf("schemas = %+v", registry.Descriptors())
 	}
 	result, err := tool.Run(context.Background(), json.RawMessage(`{"value":"stdio"}`), nil)
 	if err != nil || result.IsError || !strings.Contains(result.Content[0].Text, "stdio") {

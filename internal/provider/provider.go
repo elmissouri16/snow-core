@@ -165,14 +165,6 @@ func RetryAdviceFor(err error) (RetryAdvice, bool) {
 	return RetryAdvice{}, false
 }
 
-// IsTransientError is the compatibility predicate for temporary transport and
-// overload failures. Temporary throttling is intentionally excluded so goal
-// exhaustion can classify it separately from an outage.
-func IsTransientError(err error) bool {
-	advice, ok := RetryAdviceFor(err)
-	return ok && advice.Kind == RetryTransient
-}
-
 // IsContextWindowExceeded conservatively recognizes structured markers and the
 // bounded diagnostics retained by adapters that do not expose provider codes.
 func IsContextWindowExceeded(err error) bool {

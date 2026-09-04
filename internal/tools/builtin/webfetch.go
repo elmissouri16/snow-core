@@ -359,7 +359,7 @@ func newWebFetchClient(timeout time.Duration, policy *webFetchNetworkPolicy) (*s
 		return nil, nil, fmt.Errorf("webfetch: network policy is unavailable")
 	}
 	result := surf.NewClient().Builder().
-		Impersonate().Windows().Chrome().
+		Impersonate().MacOS().Chrome().
 		SecureTLS().
 		Timeout(timeout).
 		WebSocketGuard().

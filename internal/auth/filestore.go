@@ -317,22 +317,3 @@ func (f *FileStore) withExclusiveLock(fn func() error) error {
 	defer unlockFile(lock)
 	return fn()
 }
-
-// ResolveAPIKey resolves an API-key credential for provider by checking the
-// store first and then the environment variable envVar. It returns
-// ErrNoCredential when neither source yields a non-empty key. Only
-// api_key-type store entries are accepted; an oauth entry is ignored for
-// API-key resolution.
-func ResolveAPIKey(store Store, envVar, provider string) (Credential, error) {
-	if store != nil {
-		if c, ok := store.Get(provider); ok && c.Type == CredentialAPIKey && c.Key != "" {
-			return c, nil
-		}
-	}
-	if envVar != "" {
-		if v := os.Getenv(envVar); v != "" {
-			return Credential{Provider: provider, Type: CredentialAPIKey, Key: v}, nil
-		}
-	}
-	return Credential{}, ErrNoCredential
-}

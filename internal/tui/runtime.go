@@ -32,22 +32,9 @@ type RunResult struct {
 	SessionPath      string
 }
 
-// Run starts the interactive TUI and blocks until exit.
-func Run(ctx context.Context, opts app.Options) error {
-	_, err := RunWithResult(ctx, opts)
-	return err
-}
-
 // RunWithResult starts the interactive TUI and reports post-shutdown actions.
 func RunWithResult(ctx context.Context, opts app.Options) (RunResult, error) {
 	return run(ctx, opts, false)
-}
-
-// RunWithSessionPicker starts the TUI with the current-project session picker
-// open as soon as startup completes.
-func RunWithSessionPicker(ctx context.Context, opts app.Options) error {
-	_, err := RunWithSessionPickerResult(ctx, opts)
-	return err
 }
 
 // RunWithSessionPickerResult starts with the session picker and reports

@@ -54,7 +54,7 @@ func TestInternalGoalTurnNoUserMessageAndAccountsOnce(t *testing.T) {
 	}
 	cID = g.GoalID
 	p.scripts = [][]protocol.StreamEvent{{{Type: protocol.EvStreamToolCallDone, ToolCallID: "u", ToolName: "update_goal", Arguments: []byte(`{"goal_id":"` + cID + `","status":"complete"}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}}, {{Type: protocol.EvStreamUsage, Usage: &protocol.Usage{Input: 3, Output: 2, Total: 5, Cost: &protocol.Cost{Currency: "USD", Input: 0.01, Output: 0.02, Total: 0.03}}}, {Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}
-	if e := a.TryInternalTurn(context.Background()); e != nil {
+	if e := a.internalTurn(context.Background(), false); e != nil {
 		t.Fatal(e)
 	}
 	got, _ := c.Get()
@@ -96,7 +96,7 @@ func TestAutomaticGoalTurnsCannotRequestInteractiveInput(t *testing.T) {
 	if _, err := c.Create("continue autonomously", nil, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.TryInternalTurn(context.Background()); err != nil {
+	if err := a.internalTurn(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.requests) != 2 {
@@ -146,7 +146,7 @@ func TestGoalUsageUpdatesAfterEachProviderResponse(t *testing.T) {
 			usage = append(usage, ev.ThreadGoal.Goal.TokensUsed)
 		}
 	})
-	if err := a.TryInternalTurn(context.Background()); err != nil {
+	if err := a.internalTurn(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.DrainEvents(context.Background()); err != nil {
@@ -171,7 +171,7 @@ func TestCumulativeUsageSnapshotChargedOnceAndEventOrder(t *testing.T) {
 			order = append(order, ev.Type)
 		}
 	})
-	if err := a.TryInternalTurn(context.Background()); err != nil {
+	if err := a.internalTurn(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
 	_ = a.DrainEvents(context.Background())
@@ -329,7 +329,7 @@ func TestAccountingFailureStopsGoalAndReturnsError(t *testing.T) {
 			done = &copy
 		}
 	})
-	err = a.TryInternalTurn(context.Background())
+	err = a.internalTurn(context.Background(), false)
 	if err == nil || !strings.Contains(err.Error(), "injected accounting failure") {
 		t.Fatalf("turn err=%v", err)
 	}
@@ -349,7 +349,7 @@ func TestUsageLimitErrorStopsGoal(t *testing.T) {
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamError, Err: &providerpkg.LimitError{Provider: "test", Status: 429, Message: "quota"}}}}}
 	a, c, _ := goalAgent(t, p)
 	g, _ := c.Create("quota goal", nil, false)
-	_ = a.TryInternalTurn(context.Background())
+	_ = a.internalTurn(context.Background(), false)
 	got, _ := c.Get()
 	if got.GoalID != g.GoalID || got.Status != protocol.GoalUsageLimited {
 		t.Fatalf("goal=%+v", got)
@@ -491,7 +491,7 @@ func TestPlanModeRejectsGoalTurnWithoutAccounting(t *testing.T) {
 	if e := a.SetMode(protocol.ModePlan); e != nil {
 		t.Fatal(e)
 	}
-	if e := a.TryInternalTurn(context.Background()); e == nil {
+	if e := a.internalTurn(context.Background(), false); e == nil {
 		t.Fatal("plan internal turn succeeded")
 	}
 	got, _ := c.Get()

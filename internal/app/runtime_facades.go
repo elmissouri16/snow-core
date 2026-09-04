@@ -776,28 +776,6 @@ func (a *App) ClosePermissionBroker() {
 	}
 }
 
-// RequestUserInput submits a host interaction through the app broker. It is
-// primarily useful to non-tool hosts and keeps event publication consistent.
-func (a *App) RequestUserInput(ctx context.Context, request protocol.UserInputRequest) (protocol.UserInputResponse, error) {
-	if a == nil || a.userInput == nil || a.Agent == nil {
-		return protocol.UserInputResponse{}, userinput.ErrUnavailable
-	}
-	reentrantEventCallback := a.Agent.InEventCallback()
-	if reentrantEventCallback && !a.userInput.HasHandler() {
-		return protocol.UserInputResponse{}, userinput.ErrUnavailable
-	}
-	response, err := a.userInput.Ask(ctx, request, a.Agent.EmitUserInputRequest)
-	// RequestUserInput historically guarantees that observers see the request
-	// before the interaction returns. Skip the barrier only for a request made
-	// reentrantly by that same ordered event dispatcher.
-	if !reentrantEventCallback {
-		if drainErr := a.Agent.DrainEvents(ctx); err == nil && drainErr != nil {
-			err = drainErr
-		}
-	}
-	return response, err
-}
-
 // ReplyUserInput resolves the current ask_user call.
 func (a *App) ReplyUserInput(response protocol.UserInputResponse) error {
 	if a == nil || a.userInput == nil {

@@ -12,13 +12,13 @@ func TestModelDiscoverySnapshotsAreDefensive(t *testing.T) {
 	}
 	defer a.Close()
 
-	active := a.ModelsSnapshot()
+	_, _, active := a.ActiveModelsSnapshot()
 	if len(active) == 0 {
 		t.Fatal("active model snapshot is empty")
 	}
 	active[0].ID = "mutated"
 	active[0].ThinkingLevels = append(active[0].ThinkingLevels, "mutated")
-	if got := a.ModelsSnapshot()[0].ID; got == "mutated" {
+	if _, _, models := a.ActiveModelsSnapshot(); models[0].ID == "mutated" {
 		t.Fatal("active model snapshot aliases runtime catalog")
 	}
 

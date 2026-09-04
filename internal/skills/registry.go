@@ -481,13 +481,6 @@ func (r *Registry) Close() error { return nil }
 // skill tool set.
 func (r *Registry) CatalogPrompt() string { return r.CatalogPromptForToolAvailability(true, true) }
 
-// CatalogPromptForTools omits resource-reader instructions when an explicit
-// tool allowlist excludes that optional capability. It retains deactivation
-// guidance for compatibility with callers using the standard skill tool set.
-func (r *Registry) CatalogPromptForTools(resourceReader bool) string {
-	return r.CatalogPromptForToolAvailability(resourceReader, true)
-}
-
 // CatalogPromptForToolAvailability describes only skill lifecycle tools that
 // are actually exposed by the active registry.
 func (r *Registry) CatalogPromptForToolAvailability(resourceReader, deactivator bool) string {

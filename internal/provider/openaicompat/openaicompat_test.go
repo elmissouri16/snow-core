@@ -251,24 +251,20 @@ func TestChatCompletionsFallbackDoesNotLeakOpenCodeKey(t *testing.T) {
 func TestResolveKeyPrecedenceAndOptionalKey(t *testing.T) {
 	t.Setenv(EnvAPIKey, "env-key")
 	p, _ := New(Config{APIKey: "stored-or-explicit-key"})
-	resolved, err := p.Resolve(context.Background(), auth.Credential{})
-	if err != nil || resolved.Key != "stored-or-explicit-key" {
-		t.Fatalf("configured resolve=%+v err=%v", resolved, err)
+	if key := p.resolveKey(auth.Credential{}); key != "stored-or-explicit-key" {
+		t.Fatalf("configured key=%q", key)
 	}
 	p, _ = New(Config{})
-	resolved, err = p.Resolve(context.Background(), auth.Credential{})
-	if err != nil || resolved.Key != "env-key" {
-		t.Fatalf("env resolve=%+v err=%v", resolved, err)
+	if key := p.resolveKey(auth.Credential{}); key != "env-key" {
+		t.Fatalf("environment key=%q", key)
 	}
-	resolved, _ = p.Resolve(context.Background(), auth.Credential{Key: "direct"})
-	if resolved.Key != "direct" {
-		t.Fatalf("direct resolve=%+v", resolved)
+	if key := p.resolveKey(auth.Credential{Key: "direct"}); key != "direct" {
+		t.Fatalf("direct key=%q", key)
 	}
 	t.Setenv(EnvAPIKey, "")
 	p, _ = New(Config{})
-	resolved, err = p.Resolve(context.Background(), auth.Credential{})
-	if err != nil || resolved.Key != "" {
-		t.Fatalf("keyless resolve=%+v err=%v", resolved, err)
+	if key := p.resolveKey(auth.Credential{}); key != "" {
+		t.Fatalf("unexpected key=%q", key)
 	}
 }
 

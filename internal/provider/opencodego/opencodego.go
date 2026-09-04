@@ -194,21 +194,6 @@ func (p *Provider) resolveKey(creds auth.Credential) string {
 	return p.apiKey
 }
 
-// Resolve implements provider.Provider: the credential is usable when any key
-// source is present.
-func (p *Provider) Resolve(_ context.Context, creds auth.Credential) (auth.Credential, error) {
-	key := p.resolveKey(creds)
-	if key != "" {
-		creds.Type = auth.CredentialAPIKey
-		creds.Key = key
-		return creds, nil
-	}
-	if p.allowAnonymous {
-		return creds, nil
-	}
-	return creds, fmt.Errorf("%s: no API key found: set %s, add a %q entry to the auth file, or pass a credential explicitly", p.providerID, EnvAPIKey, p.providerID)
-}
-
 // staticCatalog returns the guaranteed-available fallback catalog.
 func (p *Provider) staticCatalog() []protocol.Model {
 	return []protocol.Model{{

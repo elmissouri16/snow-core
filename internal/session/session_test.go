@@ -149,15 +149,6 @@ func TestMemoryBranchAndFork(t *testing.T) {
 	if len(msgs) != 2 || msgs[1].Content[0].Text != "branch2" {
 		t.Fatalf("wrong tip messages: %v", msgs)
 	}
-	// Fork from a gives only base.
-	f, err := s.Fork("a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fmsgs, _ := f.Messages()
-	if len(fmsgs) != 1 || fmsgs[0].Content[0].Text != "base" {
-		t.Fatalf("fork from a should have 1 message: %v", fmsgs)
-	}
 }
 
 func TestMemorySetBranchTipUnknown(t *testing.T) {

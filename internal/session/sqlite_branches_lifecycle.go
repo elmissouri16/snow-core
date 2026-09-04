@@ -13,37 +13,6 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-// Fork implements Store. Branch copying is intentionally explicit; the
-// original database remains untouched and the returned branch is in memory.
-func (s *SQLiteStore) Fork(fromID string) (Store, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
-		return nil, errors.New("session: store closed")
-	}
-	var exists int
-	if err := s.db.QueryRow(`SELECT count(*) FROM entries WHERE id = ?`, fromID).Scan(&exists); err != nil {
-		return nil, fmt.Errorf("session: sqlite lookup fork: %w", err)
-	}
-	if exists == 0 {
-		return nil, ErrNotFound
-	}
-	entries, err := s.branchEntries(fromID)
-	if err != nil {
-		return nil, err
-	}
-	n := NewMemoryStore(Options{ID: s.header.ID + "-fork", CWD: s.header.CWD, Name: s.header.Name})
-	for _, e := range entries {
-		if e.ID == "root" {
-			continue
-		}
-		if err := n.Append(e); err != nil {
-			return nil, err
-		}
-	}
-	return n, nil
-}
-
 func (s *SQLiteStore) ActiveBranchID() string { s.mu.RLock(); defer s.mu.RUnlock(); return s.branchID }
 
 func scanSubagent(row interface{ Scan(...any) error }) (SubagentRecord, error) {

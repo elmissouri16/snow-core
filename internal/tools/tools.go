@@ -202,8 +202,6 @@ type DescriptorMetadata struct {
 type Registry interface {
 	Register(t Tool) error
 	Get(name string) (Tool, bool)
-	Schemas() []ToolSchema
-	List() []Tool
 	RegisterDescriptor(ToolDescriptor) error
 	Descriptor(name string) (ToolDescriptor, bool)
 	Descriptors() []ToolDescriptor
@@ -421,28 +419,6 @@ func (r *SimpleRegistry) Get(name string) (Tool, bool) {
 	return d.Tool, true
 }
 
-// Schemas returns schemas in registration order.
-func (r *SimpleRegistry) Schemas() []ToolSchema {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]ToolSchema, 0, len(r.keys))
-	for _, k := range r.keys {
-		out = append(out, cloneSchema(r.descriptors[k].Schema))
-	}
-	return out
-}
-
-// List returns tools in registration order.
-func (r *SimpleRegistry) List() []Tool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]Tool, 0, len(r.keys))
-	for _, k := range r.keys {
-		out = append(out, r.descriptors[k].Tool)
-	}
-	return out
-}
-
 // Descriptor returns host metadata for a registered tool.
 func (r *SimpleRegistry) Descriptor(name string) (ToolDescriptor, bool) {
 	r.mu.RLock()
@@ -548,12 +524,6 @@ func validRisk(r permission.Risk) bool {
 // IsDeferred reports whether a descriptor is selected through the router.
 func IsDeferred(desc ToolDescriptor) bool {
 	return desc.Schema.Discovery != nil && desc.Schema.Discovery.Mode == protocol.ToolDiscoveryDeferred
-}
-
-// CanExpose performs the non-interactive permission check used for deferred
-// schemas. Unknown permission implementations preserve the existing behavior.
-func CanExpose(service permission.Service, desc ToolDescriptor) bool {
-	return CanExposeMetadata(service, descriptorMetadata(desc))
 }
 
 // CanExposeMetadata performs the deferred schema exposure check without

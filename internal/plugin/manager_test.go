@@ -385,7 +385,7 @@ func TestManagerExternalRegistrationUsesSingleNamespace(t *testing.T) {
 	}
 	descriptor, ok := reg.Descriptor("plugin_v2_echo")
 	if !ok {
-		t.Fatalf("missing namespaced tool: %v", reg.Schemas())
+		t.Fatalf("missing namespaced tool: %v", reg.Descriptors())
 	}
 	if descriptor.Risk != "read" || len(descriptor.Capabilities) != 2 || strings.Join(descriptor.Capabilities, ",") != "base,echo" {
 		t.Fatalf("external metadata = %+v", descriptor)

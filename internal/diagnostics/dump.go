@@ -48,13 +48,6 @@ func RedactText(value string) string {
 	return value
 }
 
-// SanitizeJSON recursively redacts string values and completely removes
-// protocol provider_data content blocks. It returns the number of removed
-// private blocks for audit metadata.
-func SanitizeJSON(data json.RawMessage) (json.RawMessage, int, error) {
-	return SanitizeJSONWithSecrets(data, nil)
-}
-
 // SanitizeJSONWithSecrets additionally replaces exact runtime-known secret
 // values. Values shorter than four bytes are ignored to avoid destroying
 // ordinary diagnostic prose.

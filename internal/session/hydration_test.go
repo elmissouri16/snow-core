@@ -108,26 +108,11 @@ func TestBranchHydrationMatchesBuiltInStores(t *testing.T) {
 	}
 }
 
-func TestBranchHydrationPageAndLookupAreBoundedAndDefensive(t *testing.T) {
+func TestBranchHydrationLookupIsBoundedAndDefensive(t *testing.T) {
 	for name, store := range hydrationStores(t) {
 		t.Run(name, func(t *testing.T) {
 			t.Cleanup(func() { _ = store.Close() })
 			appendHydrationFixture(t, store)
-			snapshot, err := store.(BranchHydrationStore).BranchHydration()
-			if err != nil {
-				t.Fatal(err)
-			}
-			pager := store.(BranchEntryPager)
-			page, err := pager.BranchEntryPage(snapshot.TipID, 2)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(page.Entries) != 2 || page.Entries[0].ID != "assistant-2" || page.Entries[1].ID != "skill-meta" || page.OlderCursor != "user-2" {
-				t.Fatalf("page=%+v", page)
-			}
-			if _, err := pager.BranchEntryPage(snapshot.TipID, 0); err == nil {
-				t.Fatal("zero page limit accepted")
-			}
 			lookup := store.(BranchEntryLookup)
 			entries, err := lookup.BranchEntriesByID([]string{"user-1", "assistant-2"})
 			if err != nil || len(entries) != 2 {
@@ -140,6 +125,9 @@ func TestBranchHydrationPageAndLookupAreBoundedAndDefensive(t *testing.T) {
 			}
 			if _, err := lookup.BranchEntriesByID([]string{"missing"}); err == nil {
 				t.Fatal("missing entry lookup succeeded")
+			}
+			if _, err := lookup.BranchEntriesByID(make([]string, maxBranchEntryLookupIDs+1)); err == nil {
+				t.Fatal("oversized entry lookup succeeded")
 			}
 		})
 	}

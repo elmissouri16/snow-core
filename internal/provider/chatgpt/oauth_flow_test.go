@@ -112,7 +112,7 @@ func TestCoordinatedRefreshDoesNotResurrectLogout(t *testing.T) {
 	}))
 	defer server.Close()
 	provider := New(Config{Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client(), Now: func() time.Time { return now }})
-	if _, err := provider.Resolve(context.Background(), auth.Credential{}); !errors.Is(err, ErrLoginRequired) {
+	if _, err := provider.resolve(context.Background(), auth.Credential{}, false); !errors.Is(err, ErrLoginRequired) {
 		t.Fatalf("Resolve error=%v, want ErrLoginRequired", err)
 	}
 	if _, ok := store.Get(ProviderID); ok {
@@ -143,7 +143,7 @@ func TestRefreshRotatesOnceAcrossConcurrentResolvers(t *testing.T) {
 	p := New(Config{Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client(), Now: func() time.Time { return now }})
 	errs := make(chan error, 2)
 	for range 2 {
-		go func() { _, err := p.Resolve(context.Background(), auth.Credential{}); errs <- err }()
+		go func() { _, err := p.resolve(context.Background(), auth.Credential{}, false); errs <- err }()
 	}
 	for range 2 {
 		if err := <-errs; err != nil {
@@ -173,7 +173,7 @@ func TestBrowserLoginTimeoutAndRefreshErrorRedaction(t *testing.T) {
 	now := time.Now()
 	_ = store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "old", Refresh: "super-secret-refresh", Expires: now.Add(-time.Minute).Unix(), AccountID: "acct"})
 	p := New(Config{Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client(), Now: func() time.Time { return now }})
-	_, err = p.Resolve(context.Background(), auth.Credential{})
+	_, err = p.resolve(context.Background(), auth.Credential{}, false)
 	if err == nil || strings.Contains(err.Error(), "super-secret-refresh") {
 		t.Fatalf("refresh error leaked secret: %v", err)
 	}

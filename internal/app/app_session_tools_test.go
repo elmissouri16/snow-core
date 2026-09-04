@@ -112,8 +112,7 @@ func TestAppDeleteSessionCleansManagedPrivateState(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	ref, err := a.artifacts.SaveText(ctx, id, "tool", "private")
-	if err != nil {
+	if _, err := a.artifacts.SaveText(ctx, id, "tool", "private"); err != nil {
 		t.Fatal(err)
 	}
 	goalPath := filepath.Join(home, "goals", id, "goal", "goal-objective.md")
@@ -129,8 +128,8 @@ func TestAppDeleteSessionCleansManagedPrivateState(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("session database still exists: %v", err)
 	}
-	if exists, err := a.artifacts.Exists(ctx, id, ref.ID); err != nil || exists {
-		t.Fatalf("artifact exists=%v err=%v", exists, err)
+	if ids, err := a.artifacts.ListIDs(ctx, id); err != nil || len(ids) != 0 {
+		t.Fatalf("artifact IDs=%v err=%v", ids, err)
 	}
 	if _, err := os.Stat(goalPath); !os.IsNotExist(err) {
 		t.Fatalf("goal file still exists: %v", err)

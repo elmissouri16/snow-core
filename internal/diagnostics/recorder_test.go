@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -124,27 +123,25 @@ func TestWriteJSONUsesPrivateRegularFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode=%o", info.Mode().Perm())
 	}
 	if data, err := os.ReadFile(path); err != nil || !strings.Contains(string(data), `"value": "ok"`) {
 		t.Fatalf("data=%q err=%v", data, err)
 	}
 
-	if runtime.GOOS != "windows" {
-		target := filepath.Join(t.TempDir(), "target")
-		if err := os.WriteFile(target, []byte("keep"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		link := filepath.Join(t.TempDir(), "link")
-		if err := os.Symlink(target, link); err != nil {
-			t.Fatal(err)
-		}
-		if err := WriteJSON(link, map[string]string{"value": "overwrite"}); err == nil {
-			t.Fatal("symlink destination unexpectedly accepted")
-		}
-		if data, _ := os.ReadFile(target); string(data) != "keep" {
-			t.Fatalf("symlink target changed: %q", data)
-		}
+	target := filepath.Join(t.TempDir(), "target")
+	if err := os.WriteFile(target, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteJSON(link, map[string]string{"value": "overwrite"}); err == nil {
+		t.Fatal("symlink destination unexpectedly accepted")
+	}
+	if data, _ := os.ReadFile(target); string(data) != "keep" {
+		t.Fatalf("symlink target changed: %q", data)
 	}
 }

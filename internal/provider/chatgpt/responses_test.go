@@ -633,7 +633,7 @@ func (b *readErrorBody) Read(dst []byte) (int, error) {
 func (*readErrorBody) Close() error { return nil }
 
 func TestBuildResponsesBodyOmitsHostDiscoveryMetadata(t *testing.T) {
-	body, err := buildResponsesBody(protocol.ChatRequest{
+	body, err := buildRequestBody(protocol.ChatRequest{
 		Model: protocol.Model{ID: "gpt-5.4", SupportsTools: true},
 		Tools: []protocol.ToolSchema{{
 			Name: "mail_find", Description: "Find mail", Parameters: json.RawMessage(`{"type":"object"}`),

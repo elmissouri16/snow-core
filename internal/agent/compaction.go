@@ -667,10 +667,6 @@ func (a *Agent) PromptContentWithMode(ctx context.Context, text string, attachme
 	return a.prompt(ctx, text, cloneContentBlocks(attachments), &parsed)
 }
 
-// TryInternalTurn atomically starts one private goal continuation without a
-// visible or persisted user message.
-func (a *Agent) TryInternalTurn(ctx context.Context) error { return a.internalTurn(ctx, false) }
-
 func cloneContentBlocks(blocks []protocol.ContentBlock) []protocol.ContentBlock {
 	cloned := make([]protocol.ContentBlock, len(blocks))
 	for i, block := range blocks {

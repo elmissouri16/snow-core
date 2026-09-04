@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,7 +19,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/permission"
 	"github.com/elmissouri16/snow-core/internal/provider/fake"
 	"github.com/elmissouri16/snow-core/internal/session"
-	"github.com/elmissouri16/snow-core/internal/userinput"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
 	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -621,89 +619,6 @@ func TestAppRejectsInvalidThinkingConfiguration(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "invalid thinking level") {
 		t.Fatalf("error = %v, want invalid thinking level", err)
 	}
-}
-
-func TestReentrantManualUserInputFailsFast(t *testing.T) {
-	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	a.EnableUserInputReplies()
-	result := make(chan error, 1)
-	a.Agent.Subscribe(func(ev protocol.AgentEvent) {
-		if ev.Type == protocol.EvModeChanged {
-			_, err := a.RequestUserInput(context.Background(), protocol.UserInputRequest{ID: "nested", Questions: []protocol.UserInputQuestion{{ID: "q", Question: "answer?"}}})
-			result <- err
-		}
-	})
-	a.Agent.Publish(a.Agent.StateEvent())
-	select {
-	case err := <-result:
-		if !errors.Is(err, userinput.ErrUnavailable) {
-			t.Fatalf("err=%v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("reentrant manual request deadlocked")
-	}
-}
-
-func TestAppUserInputCallbackAndManualReply(t *testing.T) {
-	request := protocol.UserInputRequest{ID: "ask-1", Questions: []protocol.UserInputQuestion{{ID: "name", Header: "Name", Question: "What name?"}}}
-	t.Run("callback", func(t *testing.T) {
-		var seen protocol.UserInputRequest
-		a, err := New(context.Background(), Options{
-			Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
-			UserInputHandler: func(_ context.Context, req protocol.UserInputRequest) (protocol.UserInputResponse, error) {
-				seen = req
-				return protocol.UserInputResponse{Answers: []protocol.UserInputAnswer{{QuestionID: "name", Answer: "Snow"}}}, nil
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer a.Close()
-		var event *protocol.UserInputRequest
-		a.Agent.Subscribe(func(ev protocol.AgentEvent) {
-			if ev.Type == protocol.EvUserInputRequest {
-				event = ev.UserInput
-			}
-		})
-		response, err := a.RequestUserInput(context.Background(), request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if seen.ID != request.ID || event == nil || event.ID != request.ID || response.Answers[0].Answer != "Snow" {
-			t.Fatalf("seen=%+v event=%+v response=%+v", seen, event, response)
-		}
-	})
-
-	t.Run("manual", func(t *testing.T) {
-		a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir()})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer a.Close()
-		a.EnableUserInputReplies()
-		published := make(chan protocol.UserInputRequest, 1)
-		a.Agent.Subscribe(func(ev protocol.AgentEvent) {
-			if ev.Type == protocol.EvUserInputRequest && ev.UserInput != nil {
-				published <- *ev.UserInput
-			}
-		})
-		resolved := make(chan protocol.UserInputResponse, 1)
-		go func() {
-			response, _ := a.RequestUserInput(context.Background(), request)
-			resolved <- response
-		}()
-		<-published
-		if err := a.ReplyUserInput(protocol.UserInputResponse{RequestID: request.ID, Answers: []protocol.UserInputAnswer{{QuestionID: "name", Answer: "Snow"}}}); err != nil {
-			t.Fatal(err)
-		}
-		if response := <-resolved; response.Answers[0].Answer != "Snow" {
-			t.Fatalf("response = %+v", response)
-		}
-	})
 }
 
 func TestAppRejectsInvalidResponseConfiguration(t *testing.T) {

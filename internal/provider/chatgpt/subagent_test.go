@@ -11,7 +11,7 @@ import (
 func TestResponsesAgentMessageSealedAttribution(t *testing.T) {
 	env := protocol.AgentMessage{ID: "m", Author: "/root/a", Recipient: "/root", Kind: protocol.AgentMessageFinal, Content: "done"}
 	msg := protocol.NewAgentMessage("m", "", env)
-	raw, err := buildResponsesBody(protocol.ChatRequest{Model: protocol.Model{ID: "m"}, Messages: []protocol.Message{msg}})
+	raw, err := buildRequestBody(protocol.ChatRequest{Model: protocol.Model{ID: "m"}, Messages: []protocol.Message{msg}})
 	if err != nil {
 		t.Fatal(err)
 	}

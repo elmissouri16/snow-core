@@ -17,23 +17,10 @@ type BranchHydrationStore interface {
 	BranchHydration() (BranchHydrationSnapshot, error)
 }
 
-// BranchEntryPager reads a bounded root-to-tip window ending at cursor. Cursor
-// must identify an entry on the branch snapshot obtained by the caller.
-type BranchEntryPager interface {
-	BranchEntryPage(cursor string, limit int) (BranchEntryPage, error)
-}
-
 // BranchEntryLookup fetches a bounded set of exact entries by durable ID. TUI
 // hydration uses it only for legacy tool-call lookbehind outside the row page.
 type BranchEntryLookup interface {
 	BranchEntriesByID(ids []string) ([]Entry, error)
-}
-
-// BranchEntryPage is ordered from its oldest entry to cursor. OlderCursor is
-// the parent of the first entry, or empty when the page reached the root.
-type BranchEntryPage struct {
-	Entries     []Entry
-	OlderCursor string
 }
 
 // BranchHydrationSnapshot contains small, caller-owned projections for one
@@ -385,18 +372,11 @@ func latestHydrationCompaction(entries []BranchEntrySummary) (lastCompaction, bo
 	return lastCompaction, boundaryPos
 }
 
-const maxBranchHydrationPage = 4096
-
-func validateHydrationPage(limit int) error {
-	if limit <= 0 || limit > maxBranchHydrationPage {
-		return fmt.Errorf("session: branch page limit must be between 1 and %d", maxBranchHydrationPage)
-	}
-	return nil
-}
+const maxBranchEntryLookupIDs = 4096
 
 func branchEntriesByID(entries []Entry, byID map[string]int, ids []string) ([]Entry, error) {
-	if len(ids) > maxBranchHydrationPage {
-		return nil, fmt.Errorf("session: branch entry lookup exceeds %d ids", maxBranchHydrationPage)
+	if len(ids) > maxBranchEntryLookupIDs {
+		return nil, fmt.Errorf("session: branch entry lookup exceeds %d ids", maxBranchEntryLookupIDs)
 	}
 	out := make([]Entry, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
@@ -417,34 +397,6 @@ func branchEntriesByID(entries []Entry, byID map[string]int, ids []string) ([]En
 	return out, nil
 }
 
-func branchEntryPage(entries []Entry, byID map[string]int, cursor string, limit int) (BranchEntryPage, error) {
-	if err := validateHydrationPage(limit); err != nil {
-		return BranchEntryPage{}, err
-	}
-	if cursor == "" {
-		return BranchEntryPage{}, nil
-	}
-	reversed := make([]Entry, 0, limit)
-	current := cursor
-	for len(reversed) < limit && current != "" {
-		index, ok := byID[current]
-		if !ok {
-			if len(reversed) == 0 {
-				return BranchEntryPage{}, ErrNotFound
-			}
-			break
-		}
-		entry := cloneEntry(entries[index])
-		reversed = append(reversed, entry)
-		current = entry.ParentID
-	}
-	page := BranchEntryPage{Entries: make([]Entry, len(reversed)), OlderCursor: current}
-	for i := range reversed {
-		page.Entries[len(reversed)-1-i] = reversed[i]
-	}
-	return page, nil
-}
-
 // BranchHydration implements BranchHydrationStore.
 func (s *MemoryStore) BranchHydration() (BranchHydrationSnapshot, error) {
 	s.mu.RLock()
@@ -453,16 +405,6 @@ func (s *MemoryStore) BranchHydration() (BranchHydrationSnapshot, error) {
 		return BranchHydrationSnapshot{}, errors.New("session: store closed")
 	}
 	return buildBranchHydrationSnapshot(s.tip, pathFrom(s.entries, s.byID, s.tip)), nil
-}
-
-// BranchEntryPage implements BranchEntryPager.
-func (s *MemoryStore) BranchEntryPage(cursor string, limit int) (BranchEntryPage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
-		return BranchEntryPage{}, errors.New("session: store closed")
-	}
-	return branchEntryPage(s.entries, s.byID, cursor, limit)
 }
 
 // BranchEntriesByID implements BranchEntryLookup.

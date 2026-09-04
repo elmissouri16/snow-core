@@ -2,7 +2,6 @@ package auth
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -175,71 +174,6 @@ func TestFileStoreEmptyFile(t *testing.T) {
 	}
 	if err := fs.Put("p", Credential{Type: CredentialAPIKey, Key: "k"}); err != nil {
 		t.Fatalf("Put on empty file should work: %v", err)
-	}
-}
-
-func TestResolveAPIKeyEnvFallback(t *testing.T) {
-	dir := t.TempDir()
-	fs, _ := NewFileStore(filepath.Join(dir, "auth.json"))
-	t.Setenv("OPENCODE_API_KEY", "env-key")
-
-	c, err := ResolveAPIKey(fs, "OPENCODE_API_KEY", "opencode-go")
-	if err != nil {
-		t.Fatalf("ResolveAPIKey: %v", err)
-	}
-	if c.Key != "env-key" || c.Type != CredentialAPIKey {
-		t.Fatalf("resolved = %+v, want env-key", c)
-	}
-}
-
-func TestResolveAPIKeyStorePriority(t *testing.T) {
-	dir := t.TempDir()
-	fs, _ := NewFileStore(filepath.Join(dir, "auth.json"))
-	if err := fs.Put("opencode-go", Credential{Type: CredentialAPIKey, Key: "store-key"}); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("OPENCODE_API_KEY", "env-key")
-
-	c, err := ResolveAPIKey(fs, "OPENCODE_API_KEY", "opencode-go")
-	if err != nil {
-		t.Fatalf("ResolveAPIKey: %v", err)
-	}
-	if c.Key != "store-key" {
-		t.Fatalf("resolved = %q, want store-key (store wins over env)", c.Key)
-	}
-}
-
-func TestResolveAPIKeyIgnoresOAuthEntry(t *testing.T) {
-	dir := t.TempDir()
-	fs, _ := NewFileStore(filepath.Join(dir, "auth.json"))
-	if err := fs.Put("chatgpt", Credential{Type: CredentialOAuth, Access: "a"}); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CHATGPT_TEST_ENV", "")
-	_, err := ResolveAPIKey(fs, "CHATGPT_TEST_ENV", "chatgpt")
-	if !errors.Is(err, ErrNoCredential) {
-		t.Fatalf("err = %v, want ErrNoCredential for oauth entry without env", err)
-	}
-}
-
-func TestResolveAPIKeyNoCredential(t *testing.T) {
-	dir := t.TempDir()
-	fs, _ := NewFileStore(filepath.Join(dir, "auth.json"))
-	t.Setenv("OPENCODE_API_KEY", "")
-	_, err := ResolveAPIKey(fs, "OPENCODE_API_KEY", "opencode-go")
-	if !errors.Is(err, ErrNoCredential) {
-		t.Fatalf("err = %v, want ErrNoCredential", err)
-	}
-}
-
-func TestResolveAPIKeyNilStore(t *testing.T) {
-	t.Setenv("OPENCODE_API_KEY", "env-key")
-	c, err := ResolveAPIKey(nil, "OPENCODE_API_KEY", "opencode-go")
-	if err != nil {
-		t.Fatalf("ResolveAPIKey with nil store: %v", err)
-	}
-	if c.Key != "env-key" {
-		t.Fatalf("key = %q, want env-key", c.Key)
 	}
 }
 

@@ -555,14 +555,6 @@ func (a *App) setGoalStatusLocked(status protocol.ThreadGoalStatus) (*protocol.T
 	return a.Goal.SetStatus(g.GoalID, status, false)
 }
 
-func (a *App) SetGoalStatus(status protocol.ThreadGoalStatus) (*protocol.ThreadGoal, error) {
-	a.stateMu.Lock()
-	defer a.stateMu.Unlock()
-	unlockAdmission := a.Agent.LockAdmission()
-	defer unlockAdmission()
-	return a.setGoalStatusLocked(status)
-}
-
 func (a *App) PauseGoal() (*protocol.ThreadGoal, error) {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
@@ -650,13 +642,6 @@ func (a *App) ContinueGoal() error {
 	}
 	a.Agent.ContinueGoal()
 	return nil
-}
-
-// ConfigureOpenAICompatible replaces the runtime adapter after an operator
-// changes its endpoint. Persistence remains the caller's responsibility so TUI
-// configuration can save endpoint and credential as one user action.
-func (a *App) ConfigureOpenAICompatible(baseURL string) error {
-	return a.ConfigureOpenAICompatibleProfile(openaicompat.ProviderID, baseURL)
 }
 
 // ConfigureOpenAICompatibleProfile creates or replaces one named compatible

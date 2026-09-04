@@ -196,13 +196,6 @@ func (h *ExternalHost) Manifest() plugin.Manifest {
 	return cloneManifest(h.manifest)
 }
 
-// ToolSchemas returns the latest negotiated external tool definitions.
-func (h *ExternalHost) ToolSchemas() []plugin.ExternalToolDefinition {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return cloneExternalSchemas(h.tools)
-}
-
 // SupportsEvent reports whether the runtime subscribed to an event during
 // initialization. An omitted or empty supported_events list subscribes to no
 // events, preserving the agent loop from unnecessary external fanout.

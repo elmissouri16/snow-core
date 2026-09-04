@@ -49,8 +49,6 @@ The source build currently requires Go 1.27; `go.mod` uses `1.27rc3` while that
 is the toolchain available for the pinned dependency set. CI uses the same
 release-candidate toolchain explicitly. Binary users do not need Go installed.
 
-Windows is not currently supported.
-
 ## Install a published release
 
 The public installer resolves the newest published GitHub release, including an

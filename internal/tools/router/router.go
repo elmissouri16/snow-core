@@ -115,14 +115,6 @@ func NewMetadata(catalog []tools.DescriptorMetadata) *Bleve {
 	return newWithMetadataFactory(catalog, bleve.NewMemOnly)
 }
 
-func newWithFactory(catalog []tools.ToolDescriptor, factory indexFactory) *Bleve {
-	metadata := make([]tools.DescriptorMetadata, 0, len(catalog))
-	for _, desc := range catalog {
-		metadata = append(metadata, tools.MetadataFromDescriptor(desc))
-	}
-	return newWithMetadataFactory(metadata, factory)
-}
-
 func newWithMetadataFactory(catalog []tools.DescriptorMetadata, factory indexFactory) *Bleve {
 	if factory == nil {
 		factory = bleve.NewMemOnly
@@ -235,14 +227,6 @@ func newIndexMapping() blevemapping.IndexMapping {
 	documentMapping.AddFieldMappingsAt("namespace_id", namespaceIDMapping)
 	mapping.DefaultMapping = documentMapping
 	return mapping
-}
-
-func buildNamespaceDocuments(deferred []tools.ToolDescriptor) map[string]indexDocument {
-	metadata := make([]tools.DescriptorMetadata, 0, len(deferred))
-	for _, desc := range deferred {
-		metadata = append(metadata, tools.MetadataFromDescriptor(desc))
-	}
-	return buildNamespaceRouteDocuments(deferredCatalog(metadata))
 }
 
 func buildNamespaceRouteDocuments(deferred []routeDescriptor) map[string]indexDocument {
@@ -442,14 +426,6 @@ func truncateUTF8(value string, maxBytes int) string {
 		end--
 	}
 	return value[:end]
-}
-
-func namespaceDocumentSize(doc indexDocument) int {
-	size := len(doc.NamespaceID) + len(doc.Namespace) + len(doc.Name) + len(doc.Description)
-	for _, keyword := range doc.Keywords {
-		size += len(keyword)
-	}
-	return size
 }
 
 func (r *Bleve) ensureInitialized(ctx context.Context) error {

@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildResponsesBodyEncodesValidatedImageDataURI(t *testing.T) {
-	body, err := buildResponsesBody(protocol.ChatRequest{
+	body, err := buildRequestBody(protocol.ChatRequest{
 		Model: protocol.Model{Provider: ProviderID, ID: "vision"},
 		Messages: []protocol.Message{{Role: protocol.RoleUser, Content: []protocol.ContentBlock{
 			{Type: protocol.BlockText, Text: "inspect"},
@@ -28,7 +28,7 @@ func TestBuildResponsesBodyEncodesValidatedImageDataURI(t *testing.T) {
 		{Type: protocol.BlockImage, MIMEType: "text/plain", Data: []byte("x")},
 		{Type: protocol.BlockImage, MIMEType: "image/png"},
 	} {
-		_, err := buildResponsesBody(protocol.ChatRequest{Model: protocol.Model{ID: "vision"}, Messages: []protocol.Message{{Role: protocol.RoleUser, Content: []protocol.ContentBlock{block}}}})
+		_, err := buildRequestBody(protocol.ChatRequest{Model: protocol.Model{ID: "vision"}, Messages: []protocol.Message{{Role: protocol.RoleUser, Content: []protocol.ContentBlock{block}}}})
 		if err == nil {
 			t.Fatalf("invalid image accepted: %+v", block)
 		}

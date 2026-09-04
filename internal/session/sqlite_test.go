@@ -283,19 +283,6 @@ func TestSQLiteRoundTripAndBranch(t *testing.T) {
 	if len(messages) != 2 || messages[0].Content[0].Text != "one" || messages[1].Content[0].Text != "branch" {
 		t.Fatalf("messages = %+v", messages)
 	}
-
-	fork, err := st.Fork("a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fork.Close()
-	forkMessages, err := fork.Messages()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(forkMessages) != 1 || forkMessages[0].Content[0].Text != "one" {
-		t.Fatalf("fork messages = %+v", forkMessages)
-	}
 }
 
 func TestSQLiteReadNormalizesHistoricalMessageTopology(t *testing.T) {

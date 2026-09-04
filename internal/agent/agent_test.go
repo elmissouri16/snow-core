@@ -70,6 +70,18 @@ func TestFirstPromptCreatesDeterministicSessionTitle(t *testing.T) {
 	}
 }
 
+func latestTurn(a *Agent) (origin, id string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.latestTurnOrigin, a.latestTurnID
+}
+
+func turnSequenceWatermark(a *Agent) uint64 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.turnSequence
+}
+
 func TestQuietSessionTransactionPreservesLatestTurnUntilCommit(t *testing.T) {
 	oldStore := session.NewMemoryStore(session.Options{})
 	newStore := session.NewMemoryStore(session.Options{})
@@ -86,11 +98,11 @@ func TestQuietSessionTransactionPreservesLatestTurnUntilCommit(t *testing.T) {
 	if err := a.Prompt(context.Background(), "establish reconciliation identity"); err != nil {
 		t.Fatal(err)
 	}
-	wantOrigin, wantID := a.LatestTurn()
+	wantOrigin, wantID := latestTurn(a)
 	if wantID == "" {
 		t.Fatal("prompt did not retain latest turn identity")
 	}
-	wantSequence := a.TurnSequenceWatermark()
+	wantSequence := turnSequenceWatermark(a)
 	if wantSequence == 0 {
 		t.Fatal("prompt turn sequence is zero")
 	}
@@ -105,20 +117,20 @@ func TestQuietSessionTransactionPreservesLatestTurnUntilCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	unlock()
-	if origin, id := a.LatestTurn(); origin != wantOrigin || id != wantID {
+	if origin, id := latestTurn(a); origin != wantOrigin || id != wantID {
 		t.Fatalf("rollback identity = %q/%q, want %q/%q", origin, id, wantOrigin, wantID)
 	}
-	if sequence := a.TurnSequenceWatermark(); sequence != wantSequence {
+	if sequence := turnSequenceWatermark(a); sequence != wantSequence {
 		t.Fatalf("rollback sequence = %d; want %d", sequence, wantSequence)
 	}
 
 	if err := a.SetSession(newStore); err != nil {
 		t.Fatal(err)
 	}
-	if origin, id := a.LatestTurn(); origin != "" || id != "" {
+	if origin, id := latestTurn(a); origin != "" || id != "" {
 		t.Fatalf("committed session retained identity %q/%q", origin, id)
 	}
-	if sequence := a.TurnSequenceWatermark(); sequence != wantSequence {
+	if sequence := turnSequenceWatermark(a); sequence != wantSequence {
 		t.Fatalf("session commit changed monotonic sequence to %d; want %d", sequence, wantSequence)
 	}
 }

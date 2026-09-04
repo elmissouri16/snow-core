@@ -20,7 +20,7 @@ func BenchmarkResponsesSSE600(b *testing.B) {
 	ctx := b.Context()
 	b.ReportAllocs()
 	for b.Loop() {
-		stream := NewStream(ctx, &http.Response{Body: io.NopCloser(strings.NewReader(wire))}, "benchmark")
+		stream := newTestStream(ctx, &http.Response{Body: io.NopCloser(strings.NewReader(wire))}, "benchmark")
 		for {
 			if _, err := stream.Next(ctx); err != nil {
 				if err != io.EOF {

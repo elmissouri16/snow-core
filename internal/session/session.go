@@ -100,9 +100,6 @@ type Store interface {
 	SetBranchTip(id string) error
 	// Messages returns complete messages linearized from the root to the branch tip.
 	Messages() ([]protocol.Message, error)
-	// Fork creates a standalone legacy copy. Built-in stores also implement
-	// BranchStore for durable same-database branches.
-	Fork(fromID string) (Store, error)
 	Close() error
 }
 

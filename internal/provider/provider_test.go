@@ -14,22 +14,22 @@ type transientTestError struct{ retry bool }
 func (e transientTestError) Error() string   { return "temporary provider failure" }
 func (e transientTestError) Transient() bool { return e.retry }
 
-func TestIsTransientErrorRequiresEntireErrorChainToBeRetryable(t *testing.T) {
+func TestRetryAdviceRequiresEntireErrorChainToBeRetryable(t *testing.T) {
 	transient := transientTestError{retry: true}
-	if !IsTransientError(fmt.Errorf("provider request: %w", transient)) {
-		t.Fatal("wrapped transient marker was not recognized")
+	advice, ok := RetryAdviceFor(fmt.Errorf("provider request: %w", transient))
+	if !ok || advice.Kind != RetryTransient {
+		t.Fatalf("wrapped transient advice=%+v ok=%v", advice, ok)
 	}
-	if IsTransientError(errors.Join(transient, errors.New("session write failed"))) {
-		t.Fatal("mixed joined failure was treated as transient")
-	}
-	if IsTransientError(context.Canceled) || IsTransientError(context.DeadlineExceeded) {
-		t.Fatal("caller cancellation was treated as transient")
-	}
-	if IsTransientError(&LimitError{Provider: "x", Status: 429, Message: "quota"}) {
-		t.Fatal("usage limit was treated as transient")
-	}
-	if IsTransientError(transientTestError{retry: false}) {
-		t.Fatal("negative transient marker was ignored")
+	for _, err := range []error{
+		errors.Join(transient, errors.New("session write failed")),
+		context.Canceled,
+		context.DeadlineExceeded,
+		&LimitError{Provider: "x", Status: 429, Message: "quota"},
+		transientTestError{retry: false},
+	} {
+		if advice, ok := RetryAdviceFor(err); ok {
+			t.Fatalf("non-retryable error %v returned advice %+v", err, advice)
+		}
 	}
 }
 
@@ -38,9 +38,6 @@ func TestRetryAdviceSeparatesThrottleAndRejectsMixedJoins(t *testing.T) {
 	advice, ok := RetryAdviceFor(fmt.Errorf("request: %w", throttle))
 	if !ok || advice.Kind != RetryRateLimit || advice.RetryAfter != 3*time.Second {
 		t.Fatalf("advice=%+v ok=%v", advice, ok)
-	}
-	if IsTransientError(throttle) {
-		t.Fatal("temporary throttle was conflated with transport outage")
 	}
 	if _, ok := RetryAdviceFor(errors.Join(throttle, errors.New("persist failed"))); ok {
 		t.Fatal("mixed joined failure was retryable")

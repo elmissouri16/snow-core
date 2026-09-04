@@ -134,12 +134,10 @@ func TestSwitchSessionReadinessFailureKeepsCommittedStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Agent.Prompt(context.Background(), "previous session turn"); err != nil {
-		t.Fatal(err)
-	}
-	_, previousTurnID := a.Agent.LatestTurn()
-	previousTurnSequence := a.Agent.TurnSequenceWatermark()
-	previousRootEpoch := a.Agent.RootEpoch()
+	previousTurn := promptTurnEvent(t, a.Agent, "previous session turn")
+	previousTurnID := previousTurn.TurnID
+	previousTurnSequence := previousTurn.TurnSequence
+	previousRootEpoch := previousTurn.RootEpoch
 	if previousTurnID == "" || previousTurnSequence == 0 {
 		t.Fatal("previous session did not retain its latest turn identity")
 	}
@@ -159,9 +157,6 @@ func TestSwitchSessionReadinessFailureKeepsCommittedStore(t *testing.T) {
 	}
 	if m.activeTurnID != "" || m.busy {
 		t.Fatalf("session switch retained prior lifecycle: busy=%v turn=%q", m.busy, m.activeTurnID)
-	}
-	if _, latestID := m.app.Agent.LatestTurn(); latestID != "" {
-		t.Fatalf("session switch retained prior core turn identity %q", latestID)
 	}
 	m.subagentFleetOpen = true
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTextDelta, TurnID: previousTurnID, TurnSequence: previousTurnSequence, RootEpoch: previousRootEpoch, Text: "late prior-session output"})
@@ -310,12 +305,10 @@ func TestForkPickerBranchesOrSwitchesToIndependentSession(t *testing.T) {
 func TestTreePickerSelectsAndForksBranches(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
-	if err := m.app.Agent.Prompt(context.Background(), "branch base"); err != nil {
-		t.Fatal(err)
-	}
-	_, priorTurnID := m.app.Agent.LatestTurn()
-	priorTurnSequence := m.app.Agent.TurnSequenceWatermark()
-	priorRootEpoch := m.app.Agent.RootEpoch()
+	priorTurn := promptTurnEvent(t, m.app.Agent, "branch base")
+	priorTurnID := priorTurn.TurnID
+	priorTurnSequence := priorTurn.TurnSequence
+	priorRootEpoch := priorTurn.RootEpoch
 	messages, err := m.app.Agent.Messages()
 	if err != nil || len(messages) == 0 {
 		t.Fatalf("messages = %+v, err=%v", messages, err)

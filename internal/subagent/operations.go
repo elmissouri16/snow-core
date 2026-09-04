@@ -436,12 +436,6 @@ func (m *Manager) Get(_ context.Context, target string) (protocol.SubagentState,
 	return protocol.SubagentState{Status: protocol.AgentNotFound}, session.ErrNotFound
 }
 
-func (m *Manager) HasAgents() bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return len(m.byID) != 0 || len(m.reserved) != 0
-}
-
 func (m *Manager) HasActive() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

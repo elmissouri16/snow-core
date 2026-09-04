@@ -179,7 +179,7 @@ func TestMissingReasoningSuffixIsMonotonic(t *testing.T) {
 
 func TestStreamCloseReleasesResponseBody(t *testing.T) {
 	reader, writer := io.Pipe()
-	stream := NewStream(context.Background(), &http.Response{Body: reader}, "test")
+	stream := newTestStream(context.Background(), &http.Response{Body: reader}, "test")
 	if err := stream.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestStreamTerminalEventEndsKeepaliveConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream := NewStream(context.Background(), resp, "test")
+	stream := newTestStream(context.Background(), resp, "test")
 	defer stream.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()

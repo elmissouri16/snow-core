@@ -15,9 +15,6 @@ func (p NoAuthTransport) ID() string { return p.Provider.ID() }
 func (p NoAuthTransport) ListModels(ctx context.Context) ([]protocol.Model, error) {
 	return p.Provider.ListModels(ctx)
 }
-func (p NoAuthTransport) Resolve(_ context.Context, credential auth.Credential) (auth.Credential, error) {
-	return credential, nil
-}
 func (p NoAuthTransport) Chat(ctx context.Context, _ auth.Credential, request protocol.ChatRequest) (protocol.EventStream, error) {
 	return p.Provider.Chat(ctx, request)
 }

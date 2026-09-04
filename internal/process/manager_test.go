@@ -155,8 +155,8 @@ func TestManagerReadinessFailureCleansUp(t *testing.T) {
 	state, err := manager.Start(context.Background(), StartRequest{
 		Command: "sleep 10", Readiness: &ReadinessRequest{Type: "log", Pattern: "never", TimeoutMS: 50},
 	}, nil)
-	if err == nil || state.Status != "stopped" || manager.HasRunning() {
-		t.Fatalf("state=%+v running=%t err=%v", state, manager.HasRunning(), err)
+	if err == nil || state.Status != "stopped" {
+		t.Fatalf("state=%+v err=%v", state, err)
 	}
 }
 
@@ -346,9 +346,6 @@ func TestManagerRebindStopsProcessesClearsInventoryAndEnforcesLimit(t *testing.T
 	}
 	if err := manager.RebindSession(context.Background(), "session-two"); err != nil {
 		t.Fatal(err)
-	}
-	if manager.HasRunning() {
-		t.Fatal("process remained running after session rebind")
 	}
 	if _, err := manager.Status(state.ProcessID); err == nil {
 		t.Fatal("old-session process handle remained visible")

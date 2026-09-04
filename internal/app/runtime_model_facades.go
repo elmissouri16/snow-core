@@ -68,12 +68,6 @@ func (a *App) LoadProviderCatalogs(ctx context.Context) ([]protocol.Model, error
 	return cloneModels(models), loadErr
 }
 
-// ModelsSnapshot returns a defensive copy of the active provider catalog.
-func (a *App) ModelsSnapshot() []protocol.Model {
-	_, _, models := a.ActiveModelsSnapshot()
-	return models
-}
-
 // SubagentModels returns exact provider/model pairs currently available to children.
 func (a *App) SubagentModels() []protocol.Model {
 	if a == nil || a.runtimeSelection == nil {
