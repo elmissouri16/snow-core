@@ -1695,3 +1695,32 @@ coverage. Final three-sample 4 KiB truncation improved 9.58x and reduced
 improved 2.30x and reduced 7,856 to 3,920 B/op. Full TUI tests and race checks
 pass. Larger helper-only ratios, raw samples, and reproduction commands are
 recorded in `docs/runtime-fixes-performance.md`.
+
+## BUG-038: Concurrent keybinding lock creation intermittently fails on macOS
+
+- **Status:** Resolved; verified 2026-09-05
+- **Severity:** Medium
+- **Surface:** Cross-process keybinding updates on macOS
+- **Observed:** 2026-09-05, exact-commit CI run 33970958608
+
+The macOS release gate failed in `TestUpdateKeybindingsSerializesAcrossProcesses`.
+Locally, the existing test failed in four of 100 repetitions. A diagnostic test
+overlay that retained helper output failed eight of 100 repetitions and exposed
+`openat keybindings.yaml.lock: no such file or directory` during simultaneous
+nonexclusive `O_CREATE` opens. Early fatal cleanup also caused secondary errors
+in helpers that were still running, obscuring the original failure.
+
+A temporary candidate uses exclusive lock creation, reopening the winner's
+existing lock on `ErrExist`. All pinned-root, non-symlink, regular-file, inode,
+permission, and flock checks remain. It passed 1,000 consecutive repetitions
+of the original cross-process test on the same host. The permanent regression
+now tries 16 fresh locks, captures helper failures, and joins every helper
+before temporary-directory cleanup.
+
+### Verified resolution
+
+Adopted exclusive creation with an existing-file reopen. The strengthened
+keybinding tests passed 20 repetitions, followed by the complete config race
+suite, full Go suite, vet, all 56 support-script tests, and the unchanged
+performance guard. The release must use a new exact-commit CI run; the failed
+original run is not accepted as release evidence.

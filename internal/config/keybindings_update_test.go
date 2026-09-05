@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -210,29 +211,41 @@ func mustLoadTestKeybindingScopes(globalDir, projectRoot string) []KeybindingSco
 }
 
 func TestUpdateKeybindingsSerializesAcrossProcesses(t *testing.T) {
-	root := t.TempDir()
-	var commands []*exec.Cmd
-	for action, value := range map[string]string{"models": "alt+z", "agents": "ctrl+g", "processes": "ctrl+p"} {
-		cmd := exec.Command(os.Args[0], "-test.run=^TestUpdateKeybindingsHelperProcess$")
-		cmd.Env = append(os.Environ(),
-			"SNOW_KEYBINDINGS_UPDATE_HELPER=1",
-			"SNOW_KEYBINDINGS_UPDATE_ROOT="+root,
-			"SNOW_KEYBINDINGS_UPDATE_ACTION="+action,
-			"SNOW_KEYBINDINGS_UPDATE_VALUE="+value,
-		)
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		commands = append(commands, cmd)
-	}
-	for _, cmd := range commands {
-		if err := cmd.Wait(); err != nil {
-			t.Fatalf("helper failed: %v", err)
-		}
-	}
-	got, diagnostics := LoadKeybindings(root, "", false)
-	if len(diagnostics) != 0 || got.Bindings["models"][0] != "alt+z" || got.Bindings["agents"][0] != "ctrl+g" || got.Bindings["processes"][0] != "ctrl+p" {
-		t.Fatalf("got=%+v diagnostics=%+v", got, diagnostics)
+	for range 16 {
+		t.Run("fresh_lock", func(t *testing.T) {
+			root := t.TempDir()
+			var commands []*exec.Cmd
+			outputs := make(map[*exec.Cmd]*bytes.Buffer)
+			for action, value := range map[string]string{"models": "alt+z", "agents": "ctrl+g", "processes": "ctrl+p"} {
+				cmd := exec.Command(os.Args[0], "-test.run=^TestUpdateKeybindingsHelperProcess$")
+				output := new(bytes.Buffer)
+				cmd.Stdout, cmd.Stderr = output, output
+				outputs[cmd] = output
+				cmd.Env = append(os.Environ(),
+					"SNOW_KEYBINDINGS_UPDATE_HELPER=1",
+					"SNOW_KEYBINDINGS_UPDATE_ROOT="+root,
+					"SNOW_KEYBINDINGS_UPDATE_ACTION="+action,
+					"SNOW_KEYBINDINGS_UPDATE_VALUE="+value,
+				)
+				if err := cmd.Start(); err != nil {
+					t.Error(err)
+					break
+				}
+				commands = append(commands, cmd)
+			}
+			for _, cmd := range commands {
+				if err := cmd.Wait(); err != nil {
+					t.Errorf("helper failed: %v\n%s", err, outputs[cmd].String())
+				}
+			}
+			if t.Failed() {
+				return
+			}
+			got, diagnostics := LoadKeybindings(root, "", false)
+			if len(diagnostics) != 0 || got.Bindings["models"][0] != "alt+z" || got.Bindings["agents"][0] != "ctrl+g" || got.Bindings["processes"][0] != "ctrl+p" {
+				t.Fatalf("got=%+v diagnostics=%+v", got, diagnostics)
+			}
+		})
 	}
 }
 

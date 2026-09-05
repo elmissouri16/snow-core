@@ -208,7 +208,12 @@ func openPinnedKeybindingLock(root *os.Root, name string) (*os.File, error) {
 	if err := validateAuxRootPath(root, name); err != nil {
 		return nil, fmt.Errorf("keybindings: %w", err)
 	}
-	lock, err := root.OpenFile(name, os.O_CREATE|os.O_RDWR, 0o600)
+	// Exclusive creation avoids intermittent ENOENT from concurrent macOS
+	// O_CREATE opens. Other writers reopen the winner's stable lock file.
+	lock, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		lock, err = root.OpenFile(name, os.O_RDWR, 0)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("keybindings: open update lock: %w", err)
 	}

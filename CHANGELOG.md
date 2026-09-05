@@ -32,6 +32,8 @@ terminal-preview, and process-capture overhead.
 
 ### Fixed
 
+- Prevent intermittent macOS failures when separate Snow processes create the
+  shared keybindings update lock at the same time.
 - Return caller cancellation and deadline errors from core and SDK prompts,
   pause the admitted active goal, and prevent automatic work from restarting
   after the caller cancels.
