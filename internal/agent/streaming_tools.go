@@ -716,12 +716,51 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 			risk = desc.Risk
 		}
 	}
+	analysis := permission.Analysis{Rememberable: true}
+	if preflight, ok := tool.(tools.PreflightTool); ok {
+		var preflightErr error
+		analysis, preflightErr = preflight.Preflight(ctx, rawArgs, a.opts.ToolHost)
+		if preflightErr != nil {
+			msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
+				[]protocol.ContentBlock{protocol.NewTextBlock("Error: tool preflight failed: " + preflightErr.Error())}, true)
+			if appendErr := a.appendToolResult(parent, msg); appendErr != nil {
+				return msg, false, appendErr
+			}
+			return msg, false, nil
+		}
+	}
+	paths := append(extractPaths(args), analysis.Paths...)
+	slices.Sort(paths)
+	paths = slices.Compact(paths)
 	permReq := permission.Request{
-		Tool:  cb.Name,
-		Args:  rawArgs,
-		Paths: extractPaths(args),
-		Risk:  risk,
-		Agent: a.opts.Identity.Clone(),
+		Tool:         cb.Name,
+		Args:         rawArgs,
+		Paths:        paths,
+		Risk:         risk,
+		Reason:       analysis.Summary,
+		Agent:        a.opts.Identity.Clone(),
+		Effects:      slices.Clone(analysis.Effects),
+		Capabilities: slices.Clone(analysis.Capabilities),
+		Unknown:      analysis.Unknown,
+		Rememberable: analysis.Rememberable,
+		ScopeKey:     analysis.ScopeKey,
+		ScopeLabel:   analysis.ScopeLabel,
+	}
+	policyDecision, err := a.opts.InvocationPolicy.Evaluate(ctx, permReq)
+	if err != nil || policyDecision.Denied {
+		reason := policyDecision.Reason
+		if err != nil {
+			reason = err.Error()
+		}
+		if reason == "" {
+			reason = "blocked by invocation policy"
+		}
+		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
+			[]protocol.ContentBlock{protocol.NewTextBlock("Permission denied: " + reason)}, true)
+		if appendErr := a.appendToolResult(parent, msg); appendErr != nil {
+			return msg, false, appendErr
+		}
+		return msg, false, nil
 	}
 	decision, err := a.opts.Permission.Authorize(ctx, permReq)
 	if err != nil || decision == permission.DecisionDeny {

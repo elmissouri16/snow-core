@@ -144,13 +144,23 @@ func (m *Model) renderTreePicker() string {
 // arrows + Enter. Esc denies (safe default).
 func (m *Model) handlePermissionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
+	choices := m.permissionPickerChoices()
+	index := slices.IndexFunc(choices, func(choice permissionPickerChoice) bool { return choice.id == m.permChoice })
+	if index < 0 {
+		index = 0
+		m.permChoice = choices[index].id
+	}
 	switch msg.Type {
 	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
-		m.permChoice = (m.permChoice - 1 + permChoices) % permChoices
+		index = (index - 1 + len(choices)) % len(choices)
+		m.permChoice = choices[index].id
 	case tea.KeyDown, tea.KeyRight, tea.KeyTab:
-		m.permChoice = (m.permChoice + 1) % permChoices
+		index = (index + 1) % len(choices)
+		m.permChoice = choices[index].id
 	case tea.KeyEnter:
-		m.resolvePermission()
+		if m.permissionApprovalEnabled() {
+			m.resolvePermission()
+		}
 	case tea.KeyEsc:
 		m.permChoice = permChoiceDeny
 		m.resolvePermission()
@@ -177,51 +187,18 @@ func (m *Model) resolvePermission() {
 	m.pushLine(styleFooter.Render("permission: " + string(d)))
 }
 
-// renderPermissionPicker renders the allow/deny selector.
-func (m *Model) renderPermissionPicker() string {
-	if !m.permPending || m.permRequest == nil {
-		return ""
+type permissionPickerChoice struct {
+	id   int
+	name string
+	hint string
+}
+
+func (m *Model) permissionPickerChoices() []permissionPickerChoice {
+	choices := []permissionPickerChoice{{permChoiceAllow, "Allow once", "this request"}}
+	if m.permRequest == nil || m.permRequest.ScopeLabel == "" || m.permRequest.Rememberable {
+		choices = append(choices, permissionPickerChoice{permChoiceAlways, "Allow this scope", "matching requests in this session"})
 	}
-	req := m.permRequest
-	label := "🔐 " + sanitizeTerminalText(req.Tool) + " · " + sanitizeTerminalText(string(req.Risk))
-	if m.permAgent != nil {
-		label += " · " + sanitizeTerminalText(string(m.permAgent.Path))
-	}
-	if len(req.Paths) > 0 {
-		paths := make([]string, len(req.Paths))
-		for i, path := range req.Paths {
-			paths[i] = sanitizeTerminalText(path)
-		}
-		label += " · " + strings.Join(paths, ", ")
-	}
-	if req.Reason != "" {
-		label += " · " + sanitizeTerminalText(req.Reason)
-	}
-	var b strings.Builder
-	b.WriteString(styleTool.Render(label) + "\n")
-	options := []struct {
-		id   int
-		name string
-		hint string
-	}{
-		{permChoiceAllow, "Allow", "this request"},
-		{permChoiceAlways, "Allow always", "all matching requests this session"},
-		{permChoiceDeny, "Deny", "this request"},
-	}
-	for _, o := range options {
-		line := o.name
-		if o.hint != "" {
-			line += "  (" + o.hint + ")"
-		}
-		if o.id == m.permChoice {
-			b.WriteString(styleCompletionSelected.Render("› " + line))
-		} else {
-			b.WriteString(styleCompletion.Render("  " + line))
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString(styleFooter.Render("(↑/↓ choose, Enter confirm, Esc deny)"))
-	return strings.TrimSuffix(b.String(), "\n")
+	return append(choices, permissionPickerChoice{permChoiceDeny, "Deny", "this request"})
 }
 
 func (m *Model) startPermissionModePick() (tea.Model, tea.Cmd) {

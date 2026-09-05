@@ -188,7 +188,7 @@ options; without an advertised effort list, only Snow's local `off` is exposed.
 | `read` | Read a bounded file window | read |
 | `write` | Atomically create or replace a file; new files honor the process umask | write |
 | `edit` | Apply exact, uniqueness-checked replacements to files up to 8 MiB | write |
-| `bash` | Run a bounded foreground POSIX `sh` command | exec |
+| `bash` | Analyze effects, then run an approved bounded foreground POSIX `sh` command on the host | exec |
 | `process_start` / `process_stop` | Start or stop an app-owned background process group | exec |
 | `process_status` / `process_logs` / `process_list` | Inspect bounded session-scoped managed-process state and output | read |
 | `grep` | RE2 text search with globs, ignore files, and output caps | read |
@@ -401,8 +401,13 @@ finishes. See the [RPC protocol reference](docs/rpc.md).
 Snow is a harness, **not a whole-process sandbox**:
 
 - Snow, `bash`, plugins, stdio MCP servers, and subagents run with the user's
-  OS privileges. Snow has no built-in process sandbox; use an external
-  container, VM, or OS policy when containment is required.
+  OS privileges. Before asking permission for Bash, Snow parses POSIX shell
+  source, summarizes statically visible effects, and blocks selected protected
+  operations; parser errors, unsupported structural nodes, and exhausted
+  analysis bounds fail closed. Approved commands still have unrestricted host
+  authority. Snow has no built-in process sandbox, so use an external
+  container, VM, or OS
+  policy when containment is required.
 - Headless SDK/RPC/print callers should normally use `deny`. Print mode has no
   interactive permission reply channel and denies in `ask`; trusted Go SDK and
   RPC hosts can deliberately install a permission handler or resolve correlated
@@ -508,6 +513,13 @@ roadmap live in [`IMPLEMENTATION.md`](IMPLEMENTATION.md).
 
 ## Remaining roadmap
 
+- Expand the effect-aware Bash permission preflight with deeper shell-state and
+  command semantics, broader data-flow analysis, and coverage for managed
+  `process_start` commands. The current focused analyzer parses POSIX shell,
+  reports statically visible effects, hard-denies selected protected operations,
+  and scopes remembered approvals by workspace, capabilities, and resources;
+  approved processes still run with host authority. See
+  [the implementation record](IMPLEMENTATION.md#effect-aware-bash-permission-preflight).
 - Namespace-first tool routing currently uses local BM25; optional
   semantic/vector routing is deferred pending a suitable downloadable
   cross-platform model.

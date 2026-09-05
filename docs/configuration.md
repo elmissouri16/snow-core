@@ -102,10 +102,15 @@ Every fresh interactive session starts in permission mode `ask`. An explicit
 `--permission ask|allow|deny` overrides that baseline for the current launch.
 `/permissions` and the TUI Settings permission row change only the active
 session; that state and remembered rules are restored when the same session is
-resumed, but are not inherited by a new session or project. For upgrade
-compatibility, the removed `permission_mode` field is ignored in both global
-and project configuration and cannot change the launch baseline. Delete it when
-convenient; use `--permission` or the active-session TUI controls instead.
+resumed, but are not inherited by a new session or project. Bash needs no
+separate safety setting: its POSIX source is analyzed before this existing
+permission gate, selected protected effects are hard-denied, and remembered
+approvals are scoped to the analyzed workspace, capabilities, commands, and
+resources. Approved Bash still executes as an unrestricted host process. For
+upgrade compatibility, the removed `permission_mode` field is ignored in both
+global and project configuration and cannot change the launch baseline. Delete
+it when convenient; use `--permission` or the active-session TUI controls
+instead.
 
 The SDK intentionally defaults `PermissionMode` to `deny` when omitted. See
 [SDK permissions](sdk.md#handle-permissions-and-input).

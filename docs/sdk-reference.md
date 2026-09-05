@@ -180,7 +180,7 @@ separates inheritance from clean-install defaults.
 | `SubagentMaxAgents` | Zero inherits config; clean-install default 32, maximum 4096, not below concurrency. |
 | `SubagentMaxDepth` | Zero inherits config; clean-install default 1, maximum 8. |
 | `UserInputHandler` | Answers `ask_user`; nil fails the tool call fast instead of blocking. It is not a permission asker. |
-| `PermissionHandler` | Resolves trusted-host `ask` permission requests after their event is published. It returns a correlated `protocol.PermissionResponse`; nil preserves fail-closed behavior unless manual replies are explicitly enabled. |
+| `PermissionHandler` | Resolves trusted-host `ask` permission requests after their event is published. It returns a correlated `protocol.PermissionResponse`; nil preserves fail-closed behavior unless manual replies are explicitly enabled. Bash requests include bounded static effects, capabilities, paths, uncertainty, and whether a scoped decision may be remembered; approved Bash remains an unrestricted host process. |
 
 ### OpenAI-compatible gateways
 

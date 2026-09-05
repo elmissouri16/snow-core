@@ -79,10 +79,13 @@ type ToolGuidance struct {
 
 // Options configures an Agent.
 type Options struct {
-	Provider                  provider.Provider
-	Registry                  tools.Registry
-	Session                   session.Store
-	Permission                permission.Service
+	Provider   provider.Provider
+	Registry   tools.Registry
+	Session    session.Store
+	Permission permission.Service
+	// InvocationPolicy applies non-interactive hard policy after optional tool
+	// preflight and before the ordinary permission broker.
+	InvocationPolicy          permission.InvocationPolicy
 	ToolHost                  tools.ToolHost
 	Router                    tools.Router
 	DeferredBundles           []DeferredBundle

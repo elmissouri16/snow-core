@@ -36,12 +36,18 @@ const (
 
 // Request describes a tool invocation for authorization.
 type Request struct {
-	Tool   string             `json:"tool"`
-	Args   json.RawMessage    `json:"args"`
-	Paths  []string           `json:"paths,omitempty"`
-	Risk   Risk               `json:"risk"`
-	Reason string             `json:"reason,omitempty"`
-	Agent  *protocol.AgentRef `json:"agent,omitempty"`
+	Tool         string             `json:"tool"`
+	Args         json.RawMessage    `json:"args"`
+	Paths        []string           `json:"paths,omitempty"`
+	Risk         Risk               `json:"risk"`
+	Reason       string             `json:"reason,omitempty"`
+	Agent        *protocol.AgentRef `json:"agent,omitempty"`
+	Effects      []Effect           `json:"effects,omitempty"`
+	Capabilities []Capability       `json:"capabilities,omitempty"`
+	Unknown      bool               `json:"unknown,omitzero"`
+	Rememberable bool               `json:"rememberable,omitzero"`
+	ScopeKey     string             `json:"-"`
+	ScopeLabel   string             `json:"scope_label,omitempty"`
 }
 
 // Decision is the authorization outcome.
@@ -188,6 +194,9 @@ func (s *SimpleService) CanExpose(tool string, risk Risk) bool {
 
 // Remember stores a session-scoped rule keyed by tool+risk.
 func (s *SimpleService) Remember(req Request, d Decision) {
+	if req.ScopeKey != "" && !req.Rememberable {
+		return
+	}
 	if d == DecisionAllowAlways {
 		d = DecisionAllow
 	}
@@ -205,7 +214,24 @@ func (s *SimpleService) Remember(req Request, d Decision) {
 }
 
 func ruleKey(req Request) string {
+	if req.ScopeKey != "" {
+		return fmt.Sprintf("%s|scope|%s", req.Tool, req.ScopeKey)
+	}
 	return fmt.Sprintf("%s|%s", req.Tool, req.Risk)
+}
+
+func rememberedDecision(rules map[string]Decision, req Request) (Decision, bool) {
+	if d, ok := rules[ruleKey(req)]; ok {
+		return d, true
+	}
+	// A legacy broad denial remains conservative, but a legacy broad allow must
+	// never authorize a newly scoped invocation.
+	if req.ScopeKey != "" {
+		if d := rules[fmt.Sprintf("%s|%s", req.Tool, req.Risk)]; d == DecisionDeny {
+			return d, true
+		}
+	}
+	return "", false
 }
 
 // Authorize evaluates the request.
@@ -231,7 +257,7 @@ func (s *SimpleService) Authorize(ctx context.Context, req Request) (Decision, e
 	if req.Risk == RiskRead {
 		return DecisionAllow, nil
 	}
-	if d, ok := rules[ruleKey(req)]; ok {
+	if d, ok := rememberedDecision(rules, req); ok {
 		return d, nil
 	}
 	s.mu.Lock()
@@ -248,6 +274,9 @@ func (s *SimpleService) Authorize(ctx context.Context, req Request) (Decision, e
 	case DecisionAllow:
 		return d, nil
 	case DecisionAllowSession, DecisionAllowAlways:
+		if req.ScopeKey != "" && !req.Rememberable {
+			return DecisionAllow, nil
+		}
 		s.Remember(req, DecisionAllow)
 		return d, nil
 	case DecisionDeny:

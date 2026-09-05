@@ -402,7 +402,7 @@ func TestModelPermissionPickerShowsAndNavigates(t *testing.T) {
 		t.Fatalf("permRequest = %+v, want bash", m.permRequest)
 	}
 	view := m.View()
-	for _, want := range []string{"Allow", "Allow always", "Deny", "bash"} {
+	for _, want := range []string{"Allow once", "Allow this scope", "Deny", "bash"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("picker missing %q: %q", want, view)
 		}
@@ -422,9 +422,201 @@ func TestModelPermissionPickerShowsAndNavigates(t *testing.T) {
 	}
 }
 
+func TestModelPermissionPickerHidesScopedApprovalForUnknownBash(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 100
+	m.height = 30
+	m.inlineTranscript = true
+	m.layout()
+	event := permRequestEvent("bash")
+	event.Permission.Request.ScopeLabel = "dynamic Bash effects"
+	event.Permission.Request.Unknown = true
+	event.Permission.Request.Rememberable = false
+	event.Permission.Request.Effects = []protocol.PermissionEffect{{Type: "unknown", Operation: "unknown", Dynamic: true}}
+	event.Permission.Request.EffectsTruncated = true
+	m.handleAgentEvent(event)
+	view := m.View()
+	for _, want := range []string{"Allow once", "Deny", "Unknown child effects", "Permission analysis was truncated", "unrestricted host process"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("picker missing %q: %q", want, view)
+		}
+	}
+	if strings.Contains(view, "Allow this scope") {
+		t.Fatalf("unknown Bash request offered scoped approval: %q", view)
+	}
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	if m.permChoice != permChoiceDeny {
+		t.Fatalf("down should move directly to deny, got %d", m.permChoice)
+	}
+}
+
+func TestModelPermissionPickerCompactsCompoundBashEffects(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 72
+	m.height = 30
+	m.inlineTranscript = true
+	m.layout()
+
+	event := permRequestEvent("bash")
+	event.Permission.Request.Args = json.RawMessage(`{"command":"tmp_file=${TMPDIR:-/tmp}/snow-test-$$.txt; printf x > $tmp_file; test -f $tmp_file; rm -- $tmp_file; test ! -e $tmp_file; echo tail-marker-that-must-not-remain-visible-after-the-command-row-budget"}`)
+	event.Permission.Request.Unknown = true
+	event.Permission.Request.Rememberable = false
+	event.Permission.Request.ScopeLabel = "dynamic Bash effects"
+	event.Permission.Request.Reason = "4 inferred effect(s)"
+	event.Permission.Request.Effects = []protocol.PermissionEffect{
+		{Type: "process", Capability: "process.exec", Operation: "execute", Command: "rm", Reason: "execute command", Confidence: "high"},
+		{Type: "process", Capability: "process.exec", Operation: "execute", Command: "rm", Reason: "second source", Confidence: "high"},
+		{Type: "unknown", Capability: "effect.unknown", Operation: "unknown", Reason: "dynamic redirection target", Confidence: "low", Dynamic: true},
+		{Type: "unknown", Capability: "effect.unknown", Operation: "unknown", Reason: "dynamic path for rm", Confidence: "low", Dynamic: true},
+	}
+	m.handleAgentEvent(event)
+
+	if got, limit := lipgloss.Height(m.renderOverlays()), m.availableOverlayHeight(); got > limit {
+		t.Fatalf("permission overlay height=%d want<=%d", got, limit)
+	}
+	view := stripANSI(m.View())
+	for _, want := range []string{
+		"Command:",
+		"Effects (4):",
+		"execute rm ×2",
+		"unknown ×2 — dynamic redirection target; dynamic path for rm",
+		"Unknown child effects",
+		"Allow once",
+		"Deny",
+		"Esc deny",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("compact picker missing %q:\n%s", want, view)
+		}
+	}
+	for _, unwanted := range []string{"4 inferred effect(s)", "tail-marker-that-must-not-remain-visible", "  execute\n  execute", "/!"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("compact picker retained %q:\n%s", unwanted, view)
+		}
+	}
+	for row, line := range strings.Split(view, "\n") {
+		if width := lipgloss.Width(line); width > m.width {
+			t.Fatalf("picker row %d width=%d want<=%d: %q", row, width, m.width, line)
+		}
+	}
+}
+
+func TestModelPermissionPickerKeepsDecisionsVisibleAtNarrowWidth(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	buildAppForTest(t, m)
+	m.width = 20
+	m.height = 20
+	m.inlineTranscript = true
+	m.layout()
+
+	event := permRequestEvent("bash")
+	event.Permission.Request.Args = json.RawMessage(`{"command":"printf x > one; rm two"}`)
+	event.Permission.Request.Unknown = true
+	event.Permission.Request.Rememberable = false
+	event.Permission.Request.ScopeLabel = "dynamic Bash effects"
+	event.Permission.Request.Effects = []protocol.PermissionEffect{
+		{Type: "filesystem", Operation: "write", Resource: "/a path/with  repeated spaces", Command: "redirection"},
+		{Type: "unknown", Operation: "unknown", Reason: "line one\nline two", Dynamic: true},
+	}
+	m.handleAgentEvent(event)
+
+	view := stripANSI(m.View())
+	for _, want := range []string{"Allow once", "Deny"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("narrow picker hid %q:\n%s", want, view)
+		}
+	}
+	for row, line := range strings.Split(view, "\n") {
+		if width := lipgloss.Width(line); width > m.width {
+			t.Fatalf("narrow picker row %d width=%d want<=%d: %q", row, width, m.width, line)
+		}
+	}
+}
+
+func TestModelPermissionPickerOwnsSmallDefaultFramesSafely(t *testing.T) {
+	tests := []struct {
+		width, height int
+		enabled       bool
+		truncated     bool
+	}{
+		{40, 3, false, false},
+		{40, 7, false, true},
+		{40, 8, true, false},
+		{40, 9, true, false},
+		{40, 12, true, false},
+		{3, 12, false, false},
+	}
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("%dx%d", tc.width, tc.height), func(t *testing.T) {
+			m := newModel(t.Context(), app.Options{})
+			buildAppForTest(t, m)
+			m.width = tc.width
+			m.height = tc.height
+			m.inlineTranscript = false
+			m.layout()
+
+			event := permRequestEvent("bash")
+			event.Permission.Request.Args = json.RawMessage(`{"command":"printf x > one; rm two"}`)
+			event.Permission.Request.Unknown = true
+			event.Permission.Request.EffectsTruncated = tc.truncated
+			event.Permission.Request.Rememberable = false
+			event.Permission.Request.ScopeLabel = "dynamic Bash effects"
+			event.Permission.Request.Effects = []protocol.PermissionEffect{{Type: "unknown", Operation: "unknown", Reason: "dynamic path", Dynamic: true}}
+			m.handleAgentEvent(event)
+
+			if got := m.permissionApprovalEnabled(); got != tc.enabled {
+				t.Fatalf("permissionApprovalEnabled()=%v want %v", got, tc.enabled)
+			}
+			view := stripANSI(m.View())
+			if tc.enabled {
+				for _, want := range []string{"bash", "Unknown child", "unrestricted host", "Allow once", "Deny"} {
+					if !strings.Contains(view, want) {
+						t.Fatalf("permission frame missing %q:\n%s", want, view)
+					}
+				}
+			} else {
+				_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+				if !m.permPending {
+					t.Fatal("Enter authorized a request that could not be meaningfully displayed")
+				}
+				if tc.width >= permissionReviewMinWidth && !strings.Contains(view, "Approval disabled") {
+					t.Fatalf("small permission frame omitted disabled state:\n%s", view)
+				}
+				if tc.truncated {
+					for _, want := range []string{"Command:", "analysis was truncated", "Approval disabled"} {
+						if !strings.Contains(view, want) {
+							t.Fatalf("truncated height-7 frame missing %q:\n%s", want, view)
+						}
+					}
+				}
+			}
+			for row, line := range strings.Split(view, "\n") {
+				if width := lipgloss.Width(line); width > tc.width {
+					t.Fatalf("row %d width=%d want<=%d: %q", row, width, tc.width, line)
+				}
+			}
+		})
+	}
+}
+
+func TestPermissionInlineTextEscapesControlsWithoutCollapsingSpaces(t *testing.T) {
+	got := permissionInlineText("a  b\tc\r\n\x1b\a")
+	want := `a  b\tc\r\n\u{1b}\u{7}`
+	if got != want {
+		t.Fatalf("permissionInlineText()=%q want %q", got, want)
+	}
+	if permissionInlineText("a  b") == permissionInlineText("a b") {
+		t.Fatal("permission display collapsed distinct space-containing resources")
+	}
+}
+
 func TestModelPermissionPickerAllowResponds(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
+	m.width, m.height = 100, 30
+	m.layout()
 
 	// Drive the asker from a goroutine like the agent loop does.
 	got := make(chan string, 1)
@@ -452,6 +644,8 @@ func TestModelPermissionPickerAllowResponds(t *testing.T) {
 func TestBlockingPermissionPreemptsTranscriptContextMenu(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
+	m.width, m.height = 100, 30
+	m.layout()
 	got := make(chan string, 1)
 	go func() {
 		decision, err := m.asker.Ask(context.Background(), permissionRequest())
@@ -509,6 +703,8 @@ func TestModelPermissionPickerEscDenies(t *testing.T) {
 func TestModelPermissionPickerAllowAlways(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
+	m.width, m.height = 100, 30
+	m.layout()
 
 	got := make(chan string, 1)
 	go func() {

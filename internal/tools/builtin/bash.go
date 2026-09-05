@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/shellanalysis"
 	"github.com/elmissouri16/snow-core/internal/tools"
 )
 
@@ -21,6 +24,8 @@ const (
 )
 
 // Bash is the shell command execution tool.
+var _ tools.PreflightTool = (*Bash)(nil)
+
 type Bash struct {
 	// MaxOutputBytes caps combined stdout+stderr. Defaults to 262144.
 	MaxOutputBytes int
@@ -55,17 +60,56 @@ func (b *Bash) Schema() tools.ToolSchema {
 	}
 }
 
+func decodeBashArgs(args json.RawMessage) (bashArgs, error) {
+	var decoded bashArgs
+	if err := json.Unmarshal(args, &decoded); err != nil {
+		return bashArgs{}, fmt.Errorf("bash: invalid arguments: %w", err)
+	}
+	if decoded.Command == "" {
+		return bashArgs{}, errors.New("bash: command is required")
+	}
+	return decoded, nil
+}
+
+// Preflight implements tools.PreflightTool.
+func (b *Bash) Preflight(ctx context.Context, args json.RawMessage, host tools.ToolHost) (permission.Analysis, error) {
+	decoded, err := decodeBashArgs(args)
+	if err != nil {
+		return permission.Analysis{}, err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return permission.Analysis{}, fmt.Errorf("bash: determine working directory: %w", err)
+	}
+	roots := []string{cwd}
+	home, _ := os.UserHomeDir()
+	if host != nil {
+		if host.CWD() != "" {
+			cwd = host.CWD()
+		}
+		if hostRoots := host.Roots(); len(hostRoots) > 0 {
+			roots = hostRoots
+		} else {
+			roots = []string{cwd}
+		}
+		for _, entry := range host.Environ() {
+			if value, ok := strings.CutPrefix(entry, "HOME="); ok {
+				home = value
+				break
+			}
+		}
+	}
+	return shellanalysis.Analyze(ctx, decoded.Command, cwd, roots, home)
+}
+
 // Run implements tools.Tool.
 func (b *Bash) Run(ctx context.Context, args json.RawMessage, host tools.ToolHost) (tools.ToolResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var a bashArgs
-	if err := json.Unmarshal(args, &a); err != nil {
-		return tools.ErrorResult(fmt.Errorf("bash: invalid arguments: %w", err)), nil
-	}
-	if a.Command == "" {
-		return tools.ErrorResult(fmt.Errorf("bash: command is required")), nil
+	a, err := decodeBashArgs(args)
+	if err != nil {
+		return tools.ErrorResult(err), nil
 	}
 	emitProgress(host, "running command", false, false)
 	defer emitProgress(host, "command finished", true, false)

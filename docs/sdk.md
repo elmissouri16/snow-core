@@ -207,7 +207,11 @@ session, err := snowsdk.Open(ctx, snowsdk.Options{
 
 Handler errors, invalid decisions, and mismatched request IDs deny the action.
 Without a handler or explicitly enabled event-loop replies, `ask` denies
-immediately rather than blocking.
+immediately rather than blocking. For Bash, inspect `Effects`, `Capabilities`,
+`Paths`, `Unknown`, and `Rememberable` before deciding. `allow_session` and
+`allow_always` remember only the analyzed workspace/capability/resource scope;
+when `Rememberable` is false they apply once and are not stored. Approved Bash
+still runs with the Snow process's host privileges.
 
 A trusted host can similarly set `UserInputHandler` for model-requested
 questions, or enable manual replies and correlate each response with its exact

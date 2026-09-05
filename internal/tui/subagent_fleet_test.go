@@ -140,7 +140,7 @@ func TestSubagentFleetBlockingHostOverlayKeepsPrecedence(t *testing.T) {
 	m := fleetTestModel(t)
 	m.handleAgentEvent(permRequestEvent("bash"))
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "Allow always") || !strings.Contains(view, "bash") || strings.Contains(view, "Subagent fleet inspector") {
+	if !strings.Contains(view, "Allow this scope") || !strings.Contains(view, "bash") || strings.Contains(view, "Subagent fleet inspector") {
 		t.Fatalf("permission did not preempt fleet:\n%s", view)
 	}
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})

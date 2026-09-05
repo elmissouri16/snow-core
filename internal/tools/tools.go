@@ -84,6 +84,13 @@ type Tool interface {
 	Run(ctx context.Context, args json.RawMessage, host ToolHost) (ToolResult, error)
 }
 
+// PreflightTool optionally analyzes one immutable invocation before the agent's
+// permission gate. Preflight must not execute the tool or cause side effects.
+type PreflightTool interface {
+	Tool
+	Preflight(ctx context.Context, args json.RawMessage, host ToolHost) (permission.Analysis, error)
+}
+
 // PlanModeConditionalTool marks a conditional-effect tool whose owning
 // subsystem performs an authoritative Plan-mode check before changing state.
 // Unmarked conditional tools fail closed in Plan mode.

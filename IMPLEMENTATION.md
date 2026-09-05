@@ -1580,6 +1580,82 @@ next heading.
 | 3 — SDK, search, RPC | Public `pkg/snowsdk`, `grep`/`glob`, JSON mode, RPC protocol v1, extensibility core and JSON-RPC v2 stdio host, bounded steer/follow-up queue |
 | 4 — Extensibility and UX | Agent Skills, MCP client, themes and keybindings, persistent ChatGPT catalog cache, fork/tree navigation, macOS/Linux platform guard, plugin permission gate, opt-in BM25 tool routing |
 
+### Known gaps / next work
+
+#### Effect-aware Bash permission preflight
+
+Snow now analyzes the built-in `bash` tool before the ordinary permission
+broker. The focused first slice parses the same POSIX `sh` grammar used by the
+executor with `mvdan.cc/sh/v3/syntax`, converts visible operations into a
+Snow-owned Effect IR, applies non-interactive hard policy, and enriches
+permission requests across the TUI, SDK, JSON/RPC, and normalized event stream:
+
+```text
+Bash source
+    → bounded POSIX shell AST
+    → static effects, capabilities, paths, and unknowns
+    → hard policy
+    → scoped remembered decision or ask/allow/deny permission
+    → existing host sh -c execution
+```
+
+The analyzer covers simple commands, redirects, pipelines, lists, subshells,
+command substitutions, basic assignments, literal CWD changes, and statically
+known nested `sh -c` and `bash -c` scripts. Its initial data-driven registry
+recognizes common filesystem commands, network clients, Git operations, package
+managers, interpreters, service/persistence commands, and privilege-changing
+commands. Paths are normalized against the analyzed CWD and configured roots;
+unresolved values, dynamic nested shell source, and unknown executables remain
+explicitly unknown and cannot receive remembered approval. Unsupported
+structural AST nodes and exhausted analysis limits are marked incomplete and
+fail closed before the ordinary permission mode.
+
+High-confidence visible operations against credential files, SSH authorization,
+raw devices, container control sockets, persistence locations, or privilege
+escalation are denied before user permission. Other effects continue through
+the existing permission modes: `deny` blocks Bash, `ask` presents structured
+effects to a trusted broker, and `allow` skips prompting but does not override
+hard policy. Remembered Bash approvals use an analyzer-versioned hash of the
+workspace, capabilities, commands, and concrete resources rather than the old
+broad `bash|exec` key. Legacy broad Bash allows do not authorize analyzed calls;
+legacy denials remain conservative.
+
+The public permission event adds bounded `effects`, `capabilities`, `unknown`,
+`rememberable`, `scope_label`, and explicit projection-truncation fields. The
+TUI presents **Allow once**,
+**Allow this scope**, and **Deny** for rememberable requests; dynamic or unknown
+requests omit the scoped option. Existing RPC/SDK decision strings remain
+compatible, and a session-like decision for a non-rememberable request is
+safely reduced to one-time approval.
+
+This feature is static launch control, not containment. Approved shell commands
+still run through the existing host `sh -c` process with the current user's OS
+privileges. Shell analysis cannot see file or network operations hidden inside
+Python, package lifecycle scripts, compiled programs, or other external
+executables. Permission prompts therefore label Bash execution as an
+unrestricted host process, and operators must continue using an external
+container, VM, or OS policy where containment is required.
+
+Remaining work is deliberately incremental:
+
+1. improve command-specific option parsing and shell constant propagation;
+2. expand nested `eval`/`source`, heredoc, package-manager, and pipeline
+   data-flow semantics without relabeling unresolved behavior safe;
+3. apply the same preflight and scoped permission model to `process_start` so a
+   managed shell command cannot bypass Bash analysis; and
+4. gather false-positive/false-negative fixtures while keeping analysis bounds,
+   protocol projections, and audit-safe summaries deterministic.
+
+The current layer does not add a sandbox, syscall interception, runtime effect
+comparison, or a new user-facing safety mode. Those are separate containment
+projects rather than claims made by the permission preflight.
+
+#### Semantic/vector tool routing
+
+Namespace-first tool routing currently uses local BM25. Optional semantic or
+vector routing remains deferred pending a locally downloadable open-source model
+with acceptable licensing, cross-platform behavior, and startup cost.
+
 ## Research and decisions
 
 This section condenses the recorded research and locked decisions. Rationale
@@ -1629,7 +1705,8 @@ that is fully covered elsewhere is referenced rather than repeated.
 | Symlink path escapes | File safety bug | `EvalSymlinks` plus prefix check; thorough tests |
 | Model ignores tool schema | Poor loops | Tight descriptions; malformed-argument errors; run-scoped call limits and repeated-call reminders |
 | Parallel tool filesystem races | Data loss | Serial tools; no parallel mutation |
-| Bash/plugin/MCP/subagent OS authority | Runs as the user | Documented boundary; external container/VM required for hostile code |
+| Arbitrary Bash effects are opaque at approval time | Overbroad approval or host damage | Current boundary is documented and requires external containment; the effect-aware Bash safety layer above is planned |
+| Plugin/MCP/subagent OS authority | Runs as the user | Documented boundary; external container/VM required for hostile code |
 | Pre-v1 API and file-format drift | Breaking changes | Stabilize `pkg/snowsdk`, `pkg/protocol`, and the session schema before v1 |
 | Semantic/vector tool routing | Deferred | Await a locally downloadable open-source model with acceptable licensing and startup cost |
 

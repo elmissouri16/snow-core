@@ -144,7 +144,12 @@ Type `/` to open command completion. The essential commands are:
 | `/quit` | Exit Snow |
 
 Use `/allow`, `/allow always`, or `/deny` only for the permission request that
-is currently visible. Review the requested operation before approving it.
+is currently visible. The Bash picker names these choices **Allow once**,
+**Allow this scope**, and **Deny** when static effects are rememberable. Its
+prompt shows inferred operations and paths and warns that approved Bash runs as
+an unrestricted host process. Dynamic or unknown Bash requests cannot be
+remembered. Review the command and requested effects before approving them;
+static analysis cannot see operations hidden inside an external executable.
 
 The settings card includes opt-in GitHub update controls. **Check for updates
 now** performs a fresh explicit check, while **Update now** checks again before

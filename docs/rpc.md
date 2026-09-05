@@ -1156,10 +1156,12 @@ before sharing. See [Security model](security.md#diagnostic-dumps).
 ## Permission interaction
 
 Ask-mode permission requests are published as `permission_request` events with
-a stable, host-facing `id`:
+a stable, host-facing `id`. Bash requests additionally include bounded static
+effects, capabilities, resolved paths, uncertainty, and whether the request may
+be remembered:
 
 ```json
-{"type":"permission_request","permission":{"request":{"id":"perm-3","tool":"bash","risk":"exec"}}}
+{"type":"permission_request","permission":{"request":{"id":"perm-3","tool":"bash","risk":"exec","paths":["/tmp/input.json"],"effects":[{"type":"filesystem","capability":"filesystem.read.external","operation":"read","resource":"/tmp/input.json","confidence":"high"}],"capabilities":["filesystem.read.external","process.exec"],"rememberable":true,"scope_label":"matching effects and resources in this workspace"}}}
 ```
 
 A client resolves them with `permission_reply` (decision `allow`,
@@ -1177,8 +1179,13 @@ Remaining security invariants are preserved: the service is deny-by-default,
 reads never ask, and allow/deny modes never consult a broker. Raw RPC `ask`
 deliberately enables manual replies and blocks until the trusted host resolves
 the request, cancels the prompt, or closes the transport. `allow_session` and
-`allow_always` are remembered for the remainder of the
-session. `permission_interaction` capability gates these commands.
+`allow_always` are remembered for the remainder of the session using the
+request's scoped identity. For analyzed Bash, legacy broad `bash|exec` allows
+are ignored and requests with `rememberable:false` reduce a session-like reply
+to one-time approval. The opaque internal scope hash is never published. Hosts
+must treat `effects_truncated`, `capabilities_truncated`, or `paths_truncated`
+as a signal to review the raw command because the bounded public projection is
+incomplete. `permission_interaction` capability gates these commands.
 
 `messages_list` and `messages_page` can include user and assistant text, images,
 thinking summaries, tool calls, tool results, and surface-safe tool-display

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -90,13 +89,7 @@ func (b *Broker) Ask(ctx context.Context, req Request) (Decision, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	public := protocol.PermissionRequest{
-		Tool:   req.Tool,
-		Args:   slices.Clone(req.Args),
-		Paths:  slices.Clone(req.Paths),
-		Risk:   string(req.Risk),
-		Reason: req.Reason,
-	}
+	public := PublicRequest(req)
 
 	b.mu.Lock()
 	if b.closed {

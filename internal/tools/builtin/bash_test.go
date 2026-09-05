@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"github.com/elmissouri16/snow-core/internal/permission"
 	"github.com/elmissouri16/snow-core/internal/tools"
 )
 
@@ -23,6 +25,29 @@ func TestBashSchemaDirectsLongRunningCommandsToProcessStart(t *testing.T) {
 		if !strings.Contains(description, want) {
 			t.Fatalf("bash description missing %q: %q", want, description)
 		}
+	}
+}
+
+func TestBashPreflightAnalyzesWorkspaceAndExternalPaths(t *testing.T) {
+	root := t.TempDir()
+	analysis, err := NewBash().Preflight(t.Context(), argsForT(map[string]any{"command": "cat README.md ../outside"}), stubHost{cwd: root, roots: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, capability := range []permission.Capability{permission.CapabilityProcessExec, permission.CapabilityFilesystemReadWorkspace, permission.CapabilityFilesystemReadExternal} {
+		if !slices.Contains(analysis.Capabilities, capability) {
+			t.Fatalf("capabilities=%v, want %q; effects=%+v", analysis.Capabilities, capability, analysis.Effects)
+		}
+	}
+	if analysis.ScopeKey == "" || !analysis.Rememberable || analysis.Unknown {
+		t.Fatalf("analysis=%+v", analysis)
+	}
+}
+
+func TestBashPreflightRejectsInvalidShellSyntax(t *testing.T) {
+	root := t.TempDir()
+	if _, err := NewBash().Preflight(t.Context(), argsForT(map[string]any{"command": "if then"}), stubHost{cwd: root, roots: []string{root}}); err == nil {
+		t.Fatal("expected parse error")
 	}
 }
 

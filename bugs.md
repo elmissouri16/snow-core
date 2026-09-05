@@ -1237,3 +1237,74 @@ Verified with the focused visual-selection regression,
 `go test ./...`, `go vet ./...`, all 56 support-script tests,
 `python3 scripts/check_benchmarks.py`, and `git diff --check`. The verified local
 binary was then installed with `./scripts/install-local.sh`.
+
+## BUG-028: Multi-command Bash permission cards are noisy and misleading
+
+- **Status:** Resolved
+- **Severity:** Medium
+- **Surface:** TUI permission picker and static Bash effect presentation
+- **Observed:** User-reported screenshot during the Bash permission alpha
+
+### Expected behavior
+
+A permission card for a compound Bash command should present a concise,
+distinguishable summary of each meaningful effect. Repeated operations should
+identify their command or be grouped, dynamic effects should explain their
+source without occupying several identical rows, and shell-test operators must
+not be displayed as filesystem paths.
+
+### Actual behavior and impact
+
+A create-then-delete temporary-file command displayed several indistinguishable
+`execute` rows, four indistinguishable `unknown (dynamic)` rows, and a bogus
+filesystem read ending in `/!`. The command source also consumed multiple wide
+rows without a compact label. The analyzer treats the shell `test` builtin as
+an external file-reading command and the picker omits effect command names and
+reasons, making a correct approval difficult to review when multiple commands
+are present.
+
+This is presentation and conservative-analysis behavior rather than a sandbox
+escape, but the noisy card obscures the operation a user is being asked to
+authorize and undermines the permission system's review value.
+
+### Reproduction
+
+Run in `ask` mode a Bash tool invocation equivalent to:
+
+```sh
+tmp_file="${TMPDIR:-/tmp}/snow-test-$$.txt"; printf x > "$tmp_file"; \
+  test -f "$tmp_file"; rm -- "$tmp_file"; test ! -e "$tmp_file"
+```
+
+### Required remediation and regression coverage
+
+- Treat `test` and `[` as shell builtins and do not infer their predicates as
+  filesystem reads.
+- Give process effects command-specific labels and dynamic effects concise,
+  reason-bearing labels.
+- Group identical rendered effect labels with counts and enforce a compact row
+  budget independent of the raw protocol effect limit.
+- Bound or summarize the displayed Bash source to keep the decision controls
+  prominent.
+- Add analyzer and TUI regressions reproducing the reported compound command.
+
+### Resolution and verification
+
+Resolved by recognizing only unqualified `test` and `[` command tokens as
+shell builtins, preserving external execution for qualified names and wrappers,
+and attaching command names to process effects. The permission picker now
+groups equivalent effects while retaining every distinct dynamic reason,
+escapes layout/control bytes without collapsing path identity, and budgets
+command/effect details against the actual overlay height while reserving the
+decision rows and footer. Blocking permission requests own small frames; when
+the terminal cannot show both the safety context and at least one Bash
+command/effect detail, approval is disabled until the terminal is resized.
+
+Verified with focused analyzer and permission-picker regressions, including the
+reported compound command, qualified and wrapped `test` executables, narrow and
+short default-frame layouts, truncated unknown effects at seven rows, and
+control-byte paths. Also verified with `go test ./...`, `go vet ./...`,
+`go test -race ./internal/tui ./internal/shellanalysis ./internal/permission
+./internal/agent -count=1`, all 56 support-script tests,
+`python3 scripts/check_benchmarks.py`, `go build -o ./snow ./cmd/snow`, and
+`git diff --check`.

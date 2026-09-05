@@ -93,6 +93,33 @@ func TestBrokerManualReplyAllowAndRemember(t *testing.T) {
 	}
 }
 
+func TestBrokerPublishesStructuredAnalysis(t *testing.T) {
+	svc := NewService(ModeAsk, DenyAll{})
+	b := NewBroker(svc)
+	capture, pub := capturePublisher()
+	b.SetPublisher(pub)
+	b.EnableManual()
+	result := make(chan Decision, 1)
+	go func() {
+		d, _ := b.Ask(t.Context(), Request{
+			Tool: "bash", Risk: RiskExec, Paths: []string{"/tmp/input"},
+			Effects:      []Effect{{Type: "filesystem", Capability: CapabilityFilesystemReadExternal, Operation: "read", Resource: "/tmp/input", Confidence: "high"}},
+			Capabilities: []Capability{CapabilityFilesystemReadExternal}, Rememberable: true, ScopeKey: "private", ScopeLabel: "read /tmp/input",
+		})
+		result <- d
+	}()
+	req := <-capture.ch
+	if len(req.Effects) != 1 || req.Effects[0].Resource != "/tmp/input" || len(req.Capabilities) != 1 || !req.Rememberable || req.ScopeLabel == "" {
+		t.Fatalf("published request = %+v", req)
+	}
+	if err := b.Reply(req.ID, DecisionAllow); err != nil {
+		t.Fatal(err)
+	}
+	if d := <-result; d != DecisionAllow {
+		t.Fatalf("decision = %q", d)
+	}
+}
+
 func TestBrokerRejectDenies(t *testing.T) {
 	svc := NewService(ModeAsk, DenyAll{})
 	b := NewBroker(svc)

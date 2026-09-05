@@ -24,7 +24,7 @@ func (m *Model) renderOverlays() string {
 	// precedence. Do not let an unrelated picker hide a request that is holding
 	// a root or child agent.
 	if m.permPending {
-		return m.limitOverlay(m.renderPermissionPicker())
+		return m.renderPermissionPicker()
 	}
 	if m.userInputPending {
 		return m.limitOverlay(m.renderUserInput())
@@ -268,10 +268,16 @@ func (m *Model) View() string {
 	}
 	clipboardSequence := m.transcriptSelectionClipboard
 	if m.height < minFullFrameHeight+m.runStatusHeight() || m.width < 4 {
+		if m.permPending {
+			return clipboardSequence + fitFrameBottom(m.renderPermissionPicker(), m.managedFrameWidth(), m.managedFrameHeight())
+		}
 		return fitFrame(styleBrand.Render(" snow ")+styleHeaderDim.Render("terminal too small"), m.width, m.height)
 	}
 	if m.trustPending {
 		return m.renderTrustPrompt()
+	}
+	if m.permissionNeedsDedicatedFrame() {
+		return clipboardSequence + fitFrameBottom(m.renderPermissionPicker(), m.managedFrameWidth(), m.managedFrameHeight())
 	}
 	// The fleet inspector owns the frame, except when a blocking host request
 	// must preempt it. Its renderer consumes only bounded in-memory snapshots.

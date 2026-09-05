@@ -195,6 +195,8 @@ func (e AgentEvent) Clone() AgentEvent {
 		v := *e.Permission
 		v.Request.Args = append(json.RawMessage(nil), e.Permission.Request.Args...)
 		v.Request.Paths = slices.Clone(e.Permission.Request.Paths)
+		v.Request.Effects = slices.Clone(e.Permission.Request.Effects)
+		v.Request.Capabilities = slices.Clone(e.Permission.Request.Capabilities)
 		out.Permission = &v
 	}
 	if e.UserInput != nil {
@@ -214,17 +216,37 @@ func (e AgentEvent) Clone() AgentEvent {
 	return out
 }
 
+// PermissionEffect is a bounded public summary of one inferred tool effect.
+type PermissionEffect struct {
+	Type       string `json:"type"`
+	Capability string `json:"capability"`
+	Operation  string `json:"operation,omitempty"`
+	Resource   string `json:"resource,omitempty"`
+	Command    string `json:"command,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	Confidence string `json:"confidence,omitempty"`
+	Dynamic    bool   `json:"dynamic,omitzero"`
+}
+
 // PermissionRequest is embedded in permission_request events. ID uniquely
 // identifies one interaction so a host can correlate a reply to a specific
 // request even when the root and subagents ask concurrently (they are still
 // serialized FIFO).
 type PermissionRequest struct {
-	ID     string          `json:"id"`
-	Tool   string          `json:"tool"`
-	Args   json.RawMessage `json:"args"`
-	Paths  []string        `json:"paths,omitempty"`
-	Risk   string          `json:"risk"`
-	Reason string          `json:"reason,omitempty"`
+	ID                    string             `json:"id"`
+	Tool                  string             `json:"tool"`
+	Args                  json.RawMessage    `json:"args"`
+	Paths                 []string           `json:"paths,omitempty"`
+	Risk                  string             `json:"risk"`
+	Reason                string             `json:"reason,omitempty"`
+	Effects               []PermissionEffect `json:"effects,omitempty"`
+	Capabilities          []string           `json:"capabilities,omitempty"`
+	Unknown               bool               `json:"unknown,omitzero"`
+	Rememberable          bool               `json:"rememberable,omitzero"`
+	EffectsTruncated      bool               `json:"effects_truncated,omitzero"`
+	CapabilitiesTruncated bool               `json:"capabilities_truncated,omitzero"`
+	PathsTruncated        bool               `json:"paths_truncated,omitzero"`
+	ScopeLabel            string             `json:"scope_label,omitempty"`
 }
 
 // PermissionDecision is a trusted host's response to an interactive request.

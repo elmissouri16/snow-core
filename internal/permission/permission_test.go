@@ -3,6 +3,7 @@ package permission
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -135,6 +136,84 @@ func TestAllowAlwaysPersists(t *testing.T) {
 	d2, _ := s.Authorize(context.Background(), req)
 	if d2 != DecisionAllow || calls != 1 {
 		t.Fatalf("allow_always should be remembered: d2=%s calls=%d", d2, calls)
+	}
+}
+
+func TestScopedBashApprovalDoesNotAuthorizeDifferentScope(t *testing.T) {
+	calls := 0
+	s := NewService(ModeAsk, askerFunc(func(context.Context, Request) (Decision, error) {
+		calls++
+		return DecisionAllowSession, nil
+	}))
+	first := Request{Tool: "bash", Risk: RiskExec, ScopeKey: "workspace-read-a", Rememberable: true}
+	if d, err := s.Authorize(t.Context(), first); err != nil || d != DecisionAllowSession {
+		t.Fatalf("first decision = %q, %v", d, err)
+	}
+	if d, err := s.Authorize(t.Context(), first); err != nil || d != DecisionAllow || calls != 1 {
+		t.Fatalf("remembered decision = %q, %v; calls=%d", d, err, calls)
+	}
+	second := Request{Tool: "bash", Risk: RiskExec, ScopeKey: "workspace-read-b", Rememberable: true}
+	if d, err := s.Authorize(t.Context(), second); err != nil || d != DecisionAllowSession || calls != 2 {
+		t.Fatalf("different scope decision = %q, %v; calls=%d", d, err, calls)
+	}
+}
+
+func TestUnknownScopedBashApprovalIsNotRemembered(t *testing.T) {
+	calls := 0
+	s := NewService(ModeAsk, askerFunc(func(context.Context, Request) (Decision, error) {
+		calls++
+		return DecisionAllowAlways, nil
+	}))
+	req := Request{Tool: "bash", Risk: RiskExec, ScopeKey: "unknown", Unknown: true, Rememberable: false}
+	for range 2 {
+		if d, err := s.Authorize(t.Context(), req); err != nil || d != DecisionAllow {
+			t.Fatalf("decision = %q, %v", d, err)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("asker calls = %d, want 2", calls)
+	}
+}
+
+func TestLegacyBashAllowDoesNotAuthorizeScopedRequest(t *testing.T) {
+	calls := 0
+	s := NewService(ModeAsk, askerFunc(func(context.Context, Request) (Decision, error) {
+		calls++
+		return DecisionDeny, nil
+	}))
+	s.RestoreState(State{Mode: ModeAsk, Rules: map[string]Decision{"bash|exec": DecisionAllow}})
+	req := Request{Tool: "bash", Risk: RiskExec, ScopeKey: "new-scope", Rememberable: true}
+	if d, err := s.Authorize(t.Context(), req); err != nil || d != DecisionDeny || calls != 1 {
+		t.Fatalf("decision = %q, %v; calls=%d", d, err, calls)
+	}
+}
+
+func TestLegacyBashDenyStillDeniesScopedRequest(t *testing.T) {
+	calls := 0
+	s := NewService(ModeAsk, askerFunc(func(context.Context, Request) (Decision, error) {
+		calls++
+		return DecisionAllow, nil
+	}))
+	s.RestoreState(State{Mode: ModeAsk, Rules: map[string]Decision{"bash|exec": DecisionDeny}})
+	req := Request{Tool: "bash", Risk: RiskExec, ScopeKey: "new-scope", Rememberable: true}
+	if d, err := s.Authorize(t.Context(), req); err != nil || d != DecisionDeny || calls != 0 {
+		t.Fatalf("decision = %q, %v; calls=%d", d, err, calls)
+	}
+}
+
+func TestDefaultPolicyDeniesProtectedHighConfidenceEffects(t *testing.T) {
+	req := Request{Effects: []Effect{{Capability: CapabilityCredentialsRead, Resource: "/home/me/.ssh/id_ed25519", Confidence: "high", Reason: "protected credential read"}}}
+	decision, err := (DefaultPolicy{}).Evaluate(t.Context(), req)
+	if err != nil || !decision.Denied || !strings.Contains(decision.Reason, "id_ed25519") {
+		t.Fatalf("decision = %+v, %v", decision, err)
+	}
+}
+
+func TestDefaultPolicyDoesNotDenyLowConfidenceProtectedGuess(t *testing.T) {
+	req := Request{Effects: []Effect{{Capability: CapabilityCredentialsRead, Resource: "/dynamic", Confidence: "low"}}}
+	decision, err := (DefaultPolicy{}).Evaluate(t.Context(), req)
+	if err != nil || decision.Denied {
+		t.Fatalf("decision = %+v, %v", decision, err)
 	}
 }
 

@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"slices"
 	"sync"
 
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -80,7 +79,7 @@ func (a *tuiAsker) Ask(ctx context.Context, req permission.Request) (permission.
 
 func (a *tuiAsker) publishPending(p *pendingPermission) {
 	req := p.request
-	public := protocol.PermissionRequest{Tool: req.Tool, Args: slices.Clone(req.Args), Paths: slices.Clone(req.Paths), Risk: string(req.Risk), Reason: req.Reason}
+	public := permission.PublicRequest(req)
 	event := protocol.AgentEvent{Type: protocol.EvPermissionRequest, Agent: req.Agent.Clone(), Permission: &protocol.Permission{Request: public}}
 	a.mu.Lock()
 	publish := a.publish

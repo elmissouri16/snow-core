@@ -51,6 +51,9 @@ func New(opts Options) (*Agent, error) {
 	if opts.Permission == nil {
 		opts.Permission = permission.NewService(permission.ModeDeny, nil)
 	}
+	if opts.InvocationPolicy == nil {
+		opts.InvocationPolicy = permission.DefaultPolicy{}
+	}
 	if opts.Retry == (RetryOptions{}) {
 		opts.Retry = DefaultRetryOptions()
 	}
