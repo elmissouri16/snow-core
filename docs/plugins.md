@@ -1,137 +1,76 @@
-# Set Up Snow Plugins
+# Go Plugins
 
-Plugins add Snow-specific tools, lifecycle hooks, progress, and agent events.
-Use an external executable with the Snow CLI, or register an in-process Go
-plugin when embedding Snow. Only install plugins you trust.
+Plugins extend an embedded Snow session with tools and event handlers. Implement
+`pkg/plugin.Plugin` in Go and pass it to `snowsdk.Options.GoPlugins`.
 
-## On this page
+Snow supports in-process Go plugins only. The external executable host,
+JavaScript/Python examples, `snow plugin` commands, and `--plugin` flag have been
+removed. Existing `plugins` keys in global or project configuration are ignored.
 
-- [Choose plugins, MCP, or Agent Skills](#choose-plugins-mcp-or-agent-skills)
-- [Add an external plugin](#add-an-external-plugin)
-- [Enable or disable plugins](#enable-or-disable-plugins)
-- [Validate a plugin](#validate-a-plugin)
-- [Use an in-process Go plugin](#use-an-in-process-go-plugin)
-- [Safety](#safety)
-- [Related documents](#related-documents)
+## Choose an extension
 
-## Choose plugins, MCP, or Agent Skills
-
-Choose the smallest extension type that fits the task:
-
-| Capability | Use |
+| Need | Use |
 |---|---|
 | Reusable instructions and resources | [Agent Skills](skills.md) |
-| Interoperable external tools, resources, or prompts | [MCP](mcp.md) |
-| Snow-specific tools, hooks, progress, or events | Plugins |
+| External tools, resources, or prompts | [MCP](mcp.md) |
+| Go tools and event handlers inside your application | Go plugins |
 
-## Add an external plugin
+## Implement a plugin
 
-An external plugin declaration identifies the process Snow should run. A
-minimal `manifest.json` is:
+The `plugin.Plugin` interface has three methods:
 
-```json
-{
-  "id": "my-tools",
-  "command": ["/absolute/path/to/plugin-executable"],
-  "enabled": false
+```go
+type Plugin interface {
+    Manifest() Manifest
+    Register(context.Context, Registrar) error
+    Close(context.Context) error
 }
 ```
 
-Register the declaration, review it, and enable it for the next Snow launch:
+- `Manifest` supplies an ID, name, and version. IDs use lowercase letters,
+  digits, underscores, and hyphens, with a maximum of 64 characters.
+- `Register` adds tools with `Registrar.RegisterTool` and observes agent events
+  with `Registrar.Subscribe`.
+- `Close` releases resources owned by the plugin.
 
-```sh
-snow plugin add manifest.json
-snow plugin get my-tools
-snow plugin enable my-tools
-snow
-```
+A tool definition includes its name, description, JSON parameters schema, risk,
+and executor. Snow namespaces tool names as `plugin_<id>_<name>`. Risk is `read`,
+`write`, `exec`, or `network`; omission defaults to `exec`. Tool calls pass
+through Snow's permission gate and receive the session ID, working directory,
+call ID, and a progress callback. Results and progress are bounded.
 
-`snow plugin add` stages a plugin disabled by default. Use `--enable` only when
-you have already reviewed the executable and want it enabled on the next
-launch:
+Event handlers receive sanitized copies of agent events. They observe events;
+they cannot modify or veto them. Keep handlers short because they run inline.
 
-```sh
-snow plugin add manifest.json --enable
-```
+See the [public Go contract](https://github.com/elmissouri16/snow-core/blob/main/pkg/plugin/plugin.go)
+for the complete types.
 
-Load a manifest or executable for one launch without saving it:
+## Register with the SDK
 
-```sh
-snow --plugin /absolute/path/to/plugin-executable
-snow --plugin manifest.json
-```
-
-Use a manifest when an interpreter and script require separate command
-arguments. The `command` field is an argument array; Snow does not interpret a
-shell command string.
-
-## Enable or disable plugins
-
-Inspect and change saved declarations without starting them:
-
-```sh
-snow plugin list
-snow plugin list --all
-snow plugin get my-tools
-snow plugin enable my-tools
-snow plugin disable my-tools
-snow plugin remove my-tools
-```
-
-Add `--project` to `add`, `enable`, `disable`, or `remove` to edit the current
-project's `.snow/config.json`. Snow loads project plugins only after project
-trust is allowed. Restart Snow after a saved enable, disable, or removal.
-
-Disable every configured plugin for one launch with:
-
-```sh
-snow --no-plugins
-```
-
-## Validate a plugin
-
-Start one plugin in isolation and inspect the tools and capabilities it reports:
-
-```sh
-snow plugin check manifest.json
-```
-
-Use `--json` for structured output. Validation starts the executable, so apply
-the same trust decision you would use for a normal launch.
-
-Plugin authors should use the
-[advanced plugin protocol reference](https://github.com/elmissouri16/snow-core/blob/main/docs/plugin-protocol.md)
-for the complete external process contract.
-
-## Use an in-process Go plugin
-
-Go applications can pass implementations of `pkg/plugin.Plugin` through the
-Snow SDK:
+Pass your implementation when opening a session:
 
 ```go
 session, err := snowsdk.Open(ctx, snowsdk.Options{
     NoSession: true,
     GoPlugins: []plugin.Plugin{myPlugin},
 })
+if err != nil {
+    return err
+}
+defer session.Close()
 ```
 
-See the [Go SDK](sdk.md) for session setup and lifecycle. In-process plugins are
-part of the embedding application and are not managed by `snow plugin`.
+Snow registers plugins before the agent starts. Invalid or duplicate
+registrations fail startup; a failed registration is rolled back. Closing the
+session unregisters tools and subscriptions and closes plugins in reverse load
+order. Set `NoPlugins: true` to skip supplied Go plugins.
 
-## Safety
+Plugins are compiled into the embedding application. Snow does not load Go
+shared objects or discover plugins from configuration files. See the
+[Go SDK guide](sdk.md) for session setup and lifecycle.
 
-> **Warning:** Plugin processes and in-process plugins run with the user's
-> operating-system privileges. Project trust controls whether a declaration is
-> loaded; it does not sandbox the loaded code.
+## Permissions
 
-Review the executable, arguments, working directory, environment, private
-configuration, and requested capabilities before enabling a plugin. Use a
-container, virtual machine, or operating-system sandbox for untrusted code.
-
-## Related documents
-
-- [External plugin protocol v2](https://github.com/elmissouri16/snow-core/blob/main/docs/plugin-protocol.md)
-  — implement an external plugin runtime.
-- [MCP](mcp.md) — connect interoperable external tools and resources.
-- [Agent Skills](skills.md) — install reusable instructions and resources.
-- [Security model](security.md) — understand extension authority and trust.
+Go plugins run inside the host process with its OS privileges. Declared tool
+risks control Snow's permission checks; they do not contain plugin code or its
+lifecycle methods. Only include code you trust. See the [security model](security.md).

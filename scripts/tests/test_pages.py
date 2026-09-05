@@ -155,7 +155,9 @@ class PagesBuildTests(unittest.TestCase):
             for path in self.output.rglob("*")
             if path.suffix.lower() in {".js", ".mjs", ".cjs", ".py"}
         )
-        self.assertEqual(published_scripts, ["assets/js/copy-code.js"])
+        self.assertEqual(
+            published_scripts, ["assets/js/copy-code.js", "assets/js/guide.js"]
+        )
 
     def test_builder_refuses_to_replace_an_existing_output(self) -> None:
         self.output.mkdir()
@@ -231,7 +233,7 @@ class PagesBuildTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         expected_navigation = (
             (
-                "Start",
+                "Get started",
                 (
                     ("Overview", "/"),
                     ("Install and first prompt", "/docs/getting-started.html"),
@@ -240,7 +242,7 @@ class PagesBuildTests(unittest.TestCase):
                 ),
             ),
             (
-                "Workflows",
+                "Daily work",
                 (
                     ("Sessions and branches", "/docs/sessions.html"),
                     ("Plan Mode", "/docs/plan-mode.html"),
@@ -249,11 +251,11 @@ class PagesBuildTests(unittest.TestCase):
                 ),
             ),
             (
-                "Add capabilities",
+                "Extend Snow",
                 (
                     ("Agent Skills", "/docs/skills.html"),
                     ("MCP", "/docs/mcp.html"),
-                    ("Plugins", "/docs/plugins.html"),
+                    ("Go plugins", "/docs/plugins.html"),
                 ),
             ),
             (
@@ -283,6 +285,12 @@ class PagesBuildTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("/docs/getting-started.html", home_layout)
+        install_command = (
+            "curl -fsSL https://raw.githubusercontent.com/"
+            "elmissouri16/snow-core/main/scripts/install.sh | sh"
+        )
+        self.assertIn(f"<pre><code>{install_command}</code></pre>", home_layout)
+        self.assertIn('id="install-snow"', home_layout)
         self.assertIn("/docs/getting-started.html", homepage)
         self.assertIn("Advanced references on GitHub", homepage)
         self.assertIn(

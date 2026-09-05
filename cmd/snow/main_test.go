@@ -86,7 +86,6 @@ func TestBuildOptionsReadsSubagentModel(t *testing.T) {
 	cmd.Flags().Int("subagent-max-concurrency", 0, "")
 	cmd.Flags().Int("subagent-max-agents", 0, "")
 	cmd.Flags().Int("subagent-max-depth", 0, "")
-	cmd.Flags().StringArray("plugin", nil, "")
 	cmd.Flags().StringArray("mcp", nil, "")
 	if err := cmd.Flags().Set("subagent-provider", "opencode-go"); err != nil {
 		t.Fatal(err)

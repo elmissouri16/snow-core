@@ -183,7 +183,7 @@ fmt.Println(text)
 
 `RunPrompt` returns root-agent text only and closes the runtime before
 returning. Omitted options can inherit the caller's working directory and
-configured plugins, MCP servers, skills, or subagents, so disable ambient
+configured MCP servers, skills, or subagents, so disable ambient
 capabilities explicitly when the host does not intend to load them.
 
 ## Handle permissions and input
@@ -319,7 +319,7 @@ operation; its completion is observable through the event stream.
 - Persisted child transcripts are not exposed as ordinary root messages.
 - `RunPrompt` returns root text only.
 - Provider-private continuity remains internal.
-- Complete RPC and plugin protocol contracts are repository references, not
+- Complete RPC and Go plugin contracts are repository references, not
   alternate language SDKs.
 
 ## Related documents

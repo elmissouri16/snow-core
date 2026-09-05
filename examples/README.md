@@ -1,9 +1,10 @@
 # Snow examples
 
-- [`sdk/`](sdk/) — standalone Go module using the public SDK and protocol packages.
-- [`plugins/javascript/`](plugins/javascript/) and
-  [`plugins/python/`](plugins/python/) — external plugin protocol v2 runtimes.
+[`sdk/`](sdk/) is a standalone Go module using the public SDK and protocol
+packages. It defaults to the credential-free fake provider and runs on Linux
+and macOS in CI.
 
-The Go SDK example defaults to the credential-free fake provider and is
-executed on Linux and macOS by the hosted CI workflow. The plugin examples use
-only their language runtimes and the external protocol.
+## Related documents
+
+- [Go SDK](../docs/sdk.md): embed Snow in a Go application.
+- [Plugins](../docs/plugins.md): register an in-process Go plugin.

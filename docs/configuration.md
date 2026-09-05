@@ -61,7 +61,7 @@ from shared diagnostic capture. It does not enable `debug.enabled`, event
 recording, or diagnostic dumps.
 
 All Snow-managed `config.json` read-modify-write operations—including settings,
-plugin, MCP, and skill changes—share a process-wide and cross-process lock before
+MCP and skill changes—share a process-wide and cross-process lock before
 atomic replacement. Concurrent Snow processes therefore apply changes to the
 latest committed file instead of overwriting unrelated updates from stale
 snapshots.
@@ -238,7 +238,6 @@ A representative configuration:
     "artifact_max_bytes": 4194304,
     "historical_tool_result_threshold_bytes": 8192
   },
-  "plugins": [],
   "mcp_servers": {}
 }
 ```
@@ -569,7 +568,9 @@ See [Subagents](subagents.md) for role examples and the full safety model.
 
 ## Plugins and MCP
 
-- `plugins` is an array of public `plugin.PluginSpec` declarations.
+Go plugins are supplied through `snowsdk.Options.GoPlugins`, not configuration.
+The retired `plugins` key is ignored in global and project files.
+
 - `mcp_servers` maps stable names to public `mcp.ServerSpec` declarations.
   `lifecycle` is `eager` by default, `lazy`, or `lazy-keep-alive`;
   `idle_timeout_ms` is a positive `lazy` session override whose zero value uses
@@ -582,23 +583,8 @@ See [Subagents](subagents.md) for role examples and the full safety model.
   descriptor remain eager, while explicit catalogs require `snow mcp cache
   refresh <name>` to discover changes.
 
-Plugin declarations merge by ID with `global < trusted project < explicit
---plugin` precedence; a disabled higher layer suppresses an enabled lower
-layer. Manage persisted declarations with
-`snow plugin list|get|add|enable|disable|remove`. `add` defaults to disabled,
-mutations preserve unknown configuration fields, and all changes require a
-restart. Inspection and mutation do not start a plugin; `snow plugin check`
-does.
-
-> **Warning:** These processes run with the user's OS privileges. External
-> plugins receive their literal configured `env` and otherwise start with an
-> empty environment; plugin env values do not expand `${VAR}`. Snow resolves a
-> bare `command[0]` using its own launch environment before assigning the child
-> env, so prefer absolute interpreter paths and never commit credentials. MCP
-> has separate environment/header expansion rules.
-
-See [Plugins](plugins.md) and [MCP](mcp.md) for schemas and management
-commands.
+See [Go plugins](plugins.md) for the Go interface and [MCP](mcp.md) for server
+configuration and management commands.
 
 ## Trusted project configuration
 
@@ -609,7 +595,6 @@ credentials into the project.
 
 ```json
 {
-  "plugins": [],
   "mcp_servers": {},
   "skills": {
     "disabled": false,

@@ -6,9 +6,8 @@ reference defines the wire framing, handshake, command surface, event stream,
 ordering guarantees, error model, and shutdown semantics. Companion material
 for model-requested input lives in [Model-requested user input](user-input.md).
 
-> **Note:** This is not JSON-RPC 2.0. Snow's external plugin protocol uses
-> JSON-RPC 2.0; the CLI control plane documented here is a separate
-> Snow-specific protocol with one JSON object per line.
+> **Note:** This is a Snow-specific protocol with one JSON object per line,
+> not JSON-RPC 2.0.
 
 ## On this page
 
@@ -714,7 +713,7 @@ used at startup:
 
 `trust_set` writes the canonical project decision atomically for the next
 launch. It deliberately does **not** load or unload project configuration,
-plugins, MCP declarations, or other trust-gated input in the running process;
+MCP declarations or other trust-gated input in the running process;
 clients must restart when `restart_required` is true. Trust controls input
 loading only. It is not a sandbox and does not reduce Snow's OS privileges.
 
@@ -1151,7 +1150,7 @@ Dumps are private, atomic, encoded `snow-diagnostic-v1` JSON files capped at
 path, error, and active-session content. Snow completely omits
 `provider_data` and redacts known credentials and configured secret-bearing
 transport fields, but unknown sensitive data may remain. Review every dump
-before sharing. See [Security model](security.md#diagnostic-dumps).
+before sharing. See [Security model](security.md#protect-credentials-and-diagnostics).
 
 ## Permission interaction
 

@@ -36,7 +36,7 @@ go get github.com/elmissouri16/snow-core/pkg/snowsdk
 
 A separate checked-in module under [`examples/sdk`](../examples/sdk) exercises
 only the public packages and is run by Linux and macOS CI. SDK-created runtimes
-advertise the linked Snow build version to external plugins and MCP servers.
+advertise the linked Snow build version to MCP servers.
 From this checkout:
 
 ```sh
@@ -163,9 +163,8 @@ separates inheritance from clean-install defaults.
 | `Retry` | Optional `*snowsdk.RetryOptions` runtime override. Nil inherits global configuration; `Normal` and `Goal` profiles specify attempt, elapsed, initial/max-delay millisecond bounds, and jitter percent. Child agents inherit the effective policy. |
 | `APIKey` | Explicit credential with precedence over the auth store and environment. |
 | `BaseURL` | Active provider endpoint override; required for an OpenAI-compatible profile unless configured globally. Accepts an API root or a full `/responses` or `/chat/completions` URL. |
-| `Plugins` | Explicit external plugin process declarations. Configured plugins may also load. |
 | `GoPlugins` | Statically linked `pkg/plugin.Plugin` implementations supplied by the host. |
-| `NoPlugins` | Disable configured, explicit, and Go plugins. |
+| `NoPlugins` | Disable supplied Go plugins. |
 | `MCPServers` | Additional public `pkg/mcp.ServerSpec` declarations. |
 | `NoMCP` | Disable configured and explicit MCP servers. |
 | `SkillDirs` | Additional trusted Agent Skills discovery roots. |
@@ -706,7 +705,7 @@ enables it. Recorder callbacks are nonblocking and bounded. Dumps contain full
 session, prompt, thinking, tool, path, and error content; they omit
 `provider_data` and redact known credentials, but must still be reviewed as
 sensitive before sharing. `CreateDebugDump` fails while the root agent is
-running. See [Security model](security.md#diagnostic-dumps).
+running. See [Security model](security.md#protect-credentials-and-diagnostics).
 
 `Diagnostics()` does not currently include plugin startup failures or detailed
 Agent Skill parse diagnostics; inspect extension inventory and status through

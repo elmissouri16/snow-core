@@ -81,9 +81,7 @@ type Options struct {
 	// BaseURL overrides the active provider base URL. OpenAI-compatible requires
 	// either this value or a globally configured endpoint.
 	BaseURL string
-	// Plugins are explicit argv-based external runtimes.
-	Plugins []publicplugin.PluginSpec
-	// NoPlugins disables all external and statically supplied plugins.
+	// NoPlugins disables statically supplied Go plugins.
 	NoPlugins bool
 	// GoPlugins are statically linked extensions supplied by the embedding app.
 	GoPlugins []publicplugin.Plugin

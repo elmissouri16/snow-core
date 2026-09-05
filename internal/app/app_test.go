@@ -109,71 +109,18 @@ func TestBuildVersionDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
-func TestMergePluginSpecsUsesGlobalProjectExplicitPrecedence(t *testing.T) {
-	base := publicplugin.PluginSpec{ID: "demo", Command: []string{"global"}, Enabled: true}
-	project := publicplugin.PluginSpec{ID: "demo", Command: []string{"project"}, Enabled: false}
-	explicit := publicplugin.PluginSpec{ID: "demo", Command: []string{"explicit"}, Enabled: true}
-	merged, err := mergePluginSpecs([]publicplugin.PluginSpec{base}, []publicplugin.PluginSpec{project}, []publicplugin.PluginSpec{explicit})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(merged) != 1 || strings.Join(merged[0].Command, " ") != "explicit" || !merged[0].Enabled {
-		t.Fatalf("merged plugins = %+v", merged)
-	}
-	merged, err = mergePluginSpecs([]publicplugin.PluginSpec{base}, []publicplugin.PluginSpec{project}, nil)
-	if err != nil || len(merged) != 1 || merged[0].Enabled || strings.Join(merged[0].Command, " ") != "project" {
-		t.Fatalf("disabled project override = %+v, %v", merged, err)
-	}
-	if _, err := mergePluginSpecs([]publicplugin.PluginSpec{base, base}, nil, nil); err == nil || !strings.Contains(err.Error(), "duplicate") {
-		t.Fatalf("duplicate error = %v", err)
-	}
-}
-
-func TestNoPluginsAllowsRecoveryFromInvalidPluginConfiguration(t *testing.T) {
+func TestAppIgnoresInvalidLegacyPluginConfiguration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SNOW_HOME", home)
 	configPath := filepath.Join(home, "config.json")
 	if err := os.WriteFile(configPath, []byte(`{"plugins":[{"id":"broken","enabled":true}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, NoPlugins: true, NoMCP: true, NoSkills: true, Permission: "deny", CWD: t.TempDir(), ConfigPath: configPath})
+	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, NoMCP: true, NoSkills: true, Permission: "deny", CWD: t.TempDir(), ConfigPath: configPath})
 	if err != nil {
-		t.Fatalf("NoPlugins should permit recovery from invalid plugin declarations: %v", err)
+		t.Fatalf("legacy plugin declarations must be ignored: %v", err)
 	}
 	defer a.Close()
-}
-
-func TestAppProjectPluginOverrideSuppressesGlobalPlugin(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SNOW_HOME", home)
-	cwd := t.TempDir()
-	configPath := filepath.Join(home, "config.json")
-	global := `{"default_project_trust":"allow","plugins":[{"id":"layered","command":["/definitely/missing/global-plugin"],"enabled":true}]}`
-	if err := os.WriteFile(configPath, []byte(global), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	projectConfig := filepath.Join(cwd, ".snow", "config.json")
-	if err := os.MkdirAll(filepath.Dir(projectConfig), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	project := `{"plugins":[{"id":"layered","command":["/definitely/missing/project-plugin"],"enabled":false}]}`
-	if err := os.WriteFile(projectConfig, []byte(project), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, NoMCP: true, NoSkills: true, Permission: "deny", CWD: cwd, ConfigPath: configPath})
-	if err != nil {
-		t.Fatalf("disabled project override should suppress enabled global plugin: %v", err)
-	}
-	defer a.Close()
-	found := false
-	for _, diagnostic := range a.PluginManager.Diagnostics() {
-		if diagnostic.PluginID == "layered" && diagnostic.Status == "disabled" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("missing disabled override diagnostic: %+v", a.PluginManager.Diagnostics())
-	}
 }
 
 // TestAppTrustStoreUsesTrustFileNotAuthFile is a regression test for a real

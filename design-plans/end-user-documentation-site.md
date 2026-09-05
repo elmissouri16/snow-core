@@ -1,5 +1,9 @@
 # Rebuild GitHub Pages as a concise Snow setup guide
 
+> Historical design plan. External-plugin support has since been removed;
+> [Go plugins](../docs/plugins.md) is the current plugin guide.
+
+
 Written against: `c449c8a`
 
 ## Status

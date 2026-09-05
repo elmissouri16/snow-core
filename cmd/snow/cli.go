@@ -31,7 +31,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/tui"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
-	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -67,8 +66,7 @@ func run() error {
 	root.PersistentFlags().String("auth", "", "auth file path")
 	root.PersistentFlags().String("thinking", "", "thinking level: off|minimal|low|medium|high|xhigh|max|ultra")
 	root.PersistentFlags().StringSlice("tools", nil, "restrict built-in tools to a comma-separated allowlist")
-	root.PersistentFlags().StringArray("plugin", nil, "load an explicit plugin manifest or executable (repeatable)")
-	root.PersistentFlags().Bool("no-plugins", false, "disable all plugin loading")
+	root.PersistentFlags().Bool("no-plugins", false, "disable supplied Go plugins")
 	root.PersistentFlags().StringArray("mcp", nil, "connect an MCP manifest, Streamable HTTP URL, or stdio executable (repeatable)")
 	root.PersistentFlags().Bool("no-mcp", false, "disable all configured MCP servers")
 	root.PersistentFlags().StringArray("skill-dir", nil, "add a trusted Agent Skills directory (repeatable)")
@@ -94,7 +92,6 @@ func run() error {
 	root.AddCommand(logoutCmd())
 	root.AddCommand(skillsCmd())
 	root.AddCommand(mcpCmd())
-	root.AddCommand(pluginCmd())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -395,14 +392,6 @@ func buildOptions(cmd *cobra.Command) (app.Options, error) {
 	opts.SubagentMaxConcurrency, _ = cmd.Flags().GetInt("subagent-max-concurrency")
 	opts.SubagentMaxAgents, _ = cmd.Flags().GetInt("subagent-max-agents")
 	opts.SubagentMaxDepth, _ = cmd.Flags().GetInt("subagent-max-depth")
-	args, _ := cmd.Flags().GetStringArray("plugin")
-	for _, arg := range args {
-		spec, err := parsePluginSpec(arg)
-		if err != nil {
-			return opts, err
-		}
-		opts.Plugins = append(opts.Plugins, spec)
-	}
 	mcpArgs, _ := cmd.Flags().GetStringArray("mcp")
 	for _, arg := range mcpArgs {
 		specs, err := parseMCPSpecs(arg)
@@ -503,48 +492,6 @@ func sanitizeMCPID(value string) string {
 		value = strings.Trim(value[:64], "-_")
 	}
 	return value
-}
-
-func parsePluginSpec(arg string) (publicplugin.PluginSpec, error) {
-	arg = strings.TrimSpace(arg)
-	if arg == "" {
-		return publicplugin.PluginSpec{}, fmt.Errorf("plugin: empty argument")
-	}
-	var data []byte
-	if strings.HasPrefix(arg, "{") {
-		data = []byte(arg)
-	} else if b, err := os.ReadFile(arg); err == nil {
-		trimmed := strings.TrimSpace(string(b))
-		if strings.HasSuffix(strings.ToLower(arg), ".json") || strings.HasPrefix(trimmed, "{") {
-			data = b
-		}
-	}
-	if len(data) > 0 {
-		var spec publicplugin.PluginSpec
-		if err := json.Unmarshal(data, &spec); err != nil {
-			return spec, fmt.Errorf("plugin %s: parse manifest: %w", arg, err)
-		}
-		if spec.ID == "" {
-			return spec, fmt.Errorf("plugin %s: manifest id required", arg)
-		}
-		var fields map[string]json.RawMessage
-		_ = json.Unmarshal(data, &fields)
-		if _, present := fields["enabled"]; !present {
-			spec.Enabled = true
-		}
-		return spec, nil
-	}
-	id := filepath.Base(arg)
-	for _, r := range id {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
-			id = strings.ReplaceAll(id, string(r), "-")
-		}
-	}
-	id = strings.ToLower(strings.Trim(id, "-"))
-	if id == "" {
-		id = "plugin"
-	}
-	return publicplugin.PluginSpec{ID: id, Command: []string{arg}, Enabled: true}, nil
 }
 
 func runInteractive(cmd *cobra.Command, args []string) error {

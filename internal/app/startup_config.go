@@ -14,7 +14,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/tempfile"
 	"github.com/elmissouri16/snow-core/internal/trust"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
-	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -34,7 +33,6 @@ type startupConfig struct {
 	authStore                     auth.Store
 	trust                         *trust.Store
 	authService                   *auth.Service
-	projectPlugins                []publicplugin.PluginSpec
 	projectMCPServers             map[string]publicmcp.ServerSpec
 	projectSkills                 config.ProjectSkillsConfig
 	projectSystemPrompt           bool
@@ -215,7 +213,6 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 	}
 	// Project configuration is input, not an execution boundary. Its restricted
 	// extension and preference fields are read only after an allow decision.
-	var projectPlugins []publicplugin.PluginSpec
 	projectMCPServers := map[string]publicmcp.ServerSpec{}
 	projectSkills := config.ProjectSkillsConfig{Overrides: map[string]bool{}}
 	projectSystemPrompt := false
@@ -237,7 +234,6 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 		if err != nil {
 			return startupConfig{}, err
 		}
-		projectPlugins = extensions.Plugins
 		projectMCPServers = extensions.MCPServers
 		projectSkills = extensions.Skills
 		projectSystemPrompt = extensions.SystemPromptFile != nil
@@ -253,7 +249,7 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 		persistedCfg: persistedCfg, cfg: cfg, permMode: permMode,
 		thinking: thinking, reasoningSummary: reasoningSummary, textVerbosity: textVerbosity,
 		collaborationMode: collaborationMode, planThinking: planThinking,
-		authPath: authPath, authStore: authStore, authService: authService, trust: tr, projectPlugins: projectPlugins,
+		authPath: authPath, authStore: authStore, authService: authService, trust: tr,
 		projectMCPServers: projectMCPServers, projectSkills: projectSkills,
 		projectSystemPrompt: projectSystemPrompt, projectSelectionApplied: projectSelectionApplied, searchPolicy: searchPolicy,
 		configDiagnostics: configDiagnostics, projectAllowed: projectAllowed,

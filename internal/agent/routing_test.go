@@ -158,7 +158,7 @@ func TestRoutingFallbackMatchesOriginalToolName(t *testing.T) {
 	}
 	target := routingTool("plugin_test_plugin_alias", deferredDiscovery("misc"), tools.TextResult("ok"))
 	if err := registry.RegisterDescriptor(tools.ToolDescriptor{
-		Schema: target.schema, Tool: target, Source: tools.SourceExternal, Owner: "plugin:test", PluginID: "test", OriginalName: "legacy-special-command", Risk: permission.RiskRead,
+		Schema: target.schema, Tool: target, Source: tools.SourceGoPlugin, Owner: "plugin:test", PluginID: "test", OriginalName: "legacy-special-command", Risk: permission.RiskRead,
 	}); err != nil {
 		t.Fatal(err)
 	}

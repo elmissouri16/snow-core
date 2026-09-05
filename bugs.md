@@ -1724,3 +1724,36 @@ keybinding tests passed 20 repetitions, followed by the complete config race
 suite, full Go suite, vet, all 56 support-script tests, and the unchanged
 performance guard. The release must use a new exact-commit CI run; the failed
 original run is not accepted as release evidence.
+
+## BUG-039: Retired plugin support remains executable and documented
+
+- **Status:** Resolved
+- **Surface:** Plugin runtime, CLI, configuration, SDK, and documentation
+- **Evidence:** SDK removal in `e2256fb` retained language-specific examples and
+  a generic external-process host. Enabled `plugins` declarations, `--plugin`,
+  and SDK `Plugins` options could still launch an interpreter or executable.
+- **Expected:** Snow plugins use only the in-process Go interface.
+- **Reproduction:** Before this fix, configure an enabled plugin with a command
+  that writes a marker file. Starting Snow executes it before the protocol
+  handshake, including from trusted project configuration.
+- **Fix:** Removed the subprocess host, external registration path, CLI plugin
+  commands/flag, config management APIs, public external types, and examples.
+  Legacy `plugins` keys are ignored. Go plugin registration, tool execution,
+  events, and lifecycle remain supported. Guides now document Go plugins;
+  obsolete protocol and language research pages point to historical revisions.
+- **Verification:** Regression tests cover ignored global and trusted-project
+  declarations, invalid legacy declarations, rejected CLI entry points, and
+  disabling supplied Go plugins. `go test ./...`, `go vet ./...`, affected-area
+  race tests, the Go SDK example, all 56 support-script tests, and
+  `python3 scripts/check_benchmarks.py` pass. Jekyll builds successfully and
+  `scripts/check-pages-output.py` validates the rendered site.
+
+## BUG-040: Documentation links target renamed sections
+
+- **Status:** Resolved
+- **Surface:** RPC/SDK diagnostic references and subagent design notes
+- **Evidence:** Sixteen links targeted headings no longer present in the
+  security and subagent guides, including `security.md#diagnostic-dumps`.
+- **Fix:** Updated the links to the current sections.
+- **Verified:** Checked relative file links and heading anchors across all 57
+  repository Markdown files; no broken relative links remain.

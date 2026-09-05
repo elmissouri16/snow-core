@@ -9,8 +9,6 @@ installed or connected to a provider.
 
 ## On this page
 
-- [Choose a runtime mode](#choose-a-runtime-mode)
-- [Use common flags](#use-common-flags)
 - [Navigate the TUI](#navigate-the-tui)
 - [Steer active work](#steer-active-work)
 - [Use slash commands](#use-slash-commands)
@@ -18,50 +16,11 @@ installed or connected to a provider.
 - [Choose Plan Mode or a Thread Goal](#choose-plan-mode-or-a-thread-goal)
 - [Manage sessions](#manage-sessions)
 - [Answer model questions](#answer-model-questions)
+- [Choose a runtime mode](#choose-a-runtime-mode)
+- [Use common flags](#use-common-flags)
 - [Use print and JSON output](#use-print-and-json-output)
 - [Manage capabilities](#manage-capabilities)
 - [Related documents](#related-documents)
-
-## Choose a runtime mode
-
-| Mode | Invocation | Use it for |
-|---|---|---|
-| TUI | `snow` | Interactive coding, approvals, sessions, and settings |
-| Resume | `snow resume [path]` | Continue a saved conversation |
-| Print | `snow -p "prompt"` | Human-readable one-shot output |
-| JSON | `snow --mode json -p "prompt"` | One normalized event per JSONL line |
-| RPC | `snow --mode rpc` | Long-lived control from another process |
-
-Supplying `-p` selects print behavior unless `--mode json` or `--mode rpc` is
-set. Print and JSON modes require a nonblank prompt. RPC keeps standard input
-open for commands and ignores `-p`.
-
-The complete RPC contract remains available in the repository's
-[JSONL RPC reference](https://github.com/elmissouri16/snow-core/blob/main/docs/rpc.md).
-
-## Use common flags
-
-| Flag | Purpose |
-|---|---|
-| `-p, --prompt TEXT` | Run a prompt outside the TUI |
-| `--provider ID` | Select a provider or named compatible profile |
-| `--model ID` | Override the configured model |
-| `--thinking LEVEL` | Select a supported reasoning effort |
-| `--collaboration-mode MODE` | Start in `default` or `plan` |
-| `--permission MODE` | Select `ask`, `allow`, or `deny` |
-| `--tools LIST` | Restrict built-in tools to a comma-separated list |
-| `--session PATH` | Open or create a chosen SQLite session |
-| `--no-session` | Keep conversation history in memory |
-| `--config PATH`, `--auth PATH` | Override global config or auth paths |
-| `--api-key VALUE`, `--base-url URL` | Override provider connection values |
-| `--plugin VALUE`, `--mcp VALUE` | Add an explicit extension; repeatable |
-| `--skill-dir PATH` | Add a trusted skills directory; repeatable |
-| `--no-plugins`, `--no-mcp`, `--no-skills` | Disable an extension family |
-| `--subagents`, `--no-subagents` | Override child-agent enablement |
-| `--usage` | Print normalized usage after a print-mode prompt |
-
-Use [Providers](providers.md) for authentication commands and
-[Configuration](configuration.md) for persistent equivalents.
 
 ## Navigate the TUI
 
@@ -229,6 +188,47 @@ The complete cross-surface contract is in the repository's
 [model-requested input
 reference](https://github.com/elmissouri16/snow-core/blob/main/docs/user-input.md).
 
+## Choose a runtime mode
+
+| Mode | Invocation | Use it for |
+|---|---|---|
+| TUI | `snow` | Interactive coding, approvals, sessions, and settings |
+| Resume | `snow resume [path]` | Continue a saved conversation |
+| Print | `snow -p "prompt"` | Human-readable one-shot output |
+| JSON | `snow --mode json -p "prompt"` | One normalized event per JSONL line |
+| RPC | `snow --mode rpc` | Long-lived control from another process |
+
+Supplying `-p` selects print behavior unless `--mode json` or `--mode rpc` is
+set. Print and JSON modes require a nonblank prompt. RPC keeps standard input
+open for commands and ignores `-p`.
+
+The complete RPC contract remains available in the repository's
+[JSONL RPC reference](https://github.com/elmissouri16/snow-core/blob/main/docs/rpc.md).
+
+## Use common flags
+
+| Flag | Purpose |
+|---|---|
+| `-p, --prompt TEXT` | Run a prompt outside the TUI |
+| `--provider ID` | Select a provider or named compatible profile |
+| `--model ID` | Override the configured model |
+| `--thinking LEVEL` | Select a supported reasoning effort |
+| `--collaboration-mode MODE` | Start in `default` or `plan` |
+| `--permission MODE` | Select `ask`, `allow`, or `deny` |
+| `--tools LIST` | Restrict built-in tools to a comma-separated list |
+| `--session PATH` | Open or create a chosen SQLite session |
+| `--no-session` | Keep conversation history in memory |
+| `--config PATH`, `--auth PATH` | Override global config or auth paths |
+| `--api-key VALUE`, `--base-url URL` | Override provider connection values |
+| `--mcp VALUE` | Add an explicit MCP server; repeatable |
+| `--skill-dir PATH` | Add a trusted skills directory; repeatable |
+| `--no-plugins`, `--no-mcp`, `--no-skills` | Disable an extension family |
+| `--subagents`, `--no-subagents` | Override child-agent enablement |
+| `--usage` | Print normalized usage after a print-mode prompt |
+
+Use [Providers](providers.md) for authentication commands and
+[Configuration](configuration.md) for persistent equivalents.
+
 ## Use print and JSON output
 
 Print mode writes assistant text to standard output and lifecycle/tool status to
@@ -260,9 +260,6 @@ snow mcp list
 snow mcp check NAME
 snow skills list
 snow skills get NAME
-snow plugin list --all
-snow plugin get ID
-snow plugin check MANIFEST_OR_EXECUTABLE
 ```
 
 Disable capabilities for one launch with:

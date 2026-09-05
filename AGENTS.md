@@ -17,7 +17,8 @@ dependencies out of core packages.
 
 Before a change, read `README.md` plus the relevant source and tests. Use
 `IMPLEMENTATION.md` for architecture, package maps, decisions, and roadmap;
-`docs/README.md` for canonical documentation ownership, `docs/security.md`
+`docs/README.md` for user guides, `docs/maintaining.md` for documentation
+ownership, `docs/security.md`
 for the expanded threat model, and `docs/releases.md` for release gates. When
 documentation differs from current code and tests, verify behavior in code and
 update the canonical document.
@@ -54,7 +55,7 @@ snowsdk → app + protocol; never bubbletea
 
 - `cmd/snow` builds `app.Options`; `internal/app.New` owns runtime wiring.
 - `internal/buildinfo.Version` is the linked default copied through
-  `app.Options.BuildVersion`; keep CLI, RPC, plugin, MCP, and SDK metadata on
+  `app.Options.BuildVersion`; keep CLI, RPC, MCP, and SDK metadata on
   that one effective value.
 - `agent.Prompt` persists the user input, streams one provider request, persists
   the assistant result, executes serial permissioned tools, and chains results
@@ -148,7 +149,8 @@ change affects SDKs, RPC, providers, TUI lifecycle, concurrency, or packaging.
   matrix, roadmap, and known gaps.
 - `bugs.md` — canonical tracker for known reproducible defects, investigation
   evidence, remediation requirements, and verified resolution status.
-- `docs/README.md` — documentation index and canonical ownership map.
+- `docs/README.md` — task-oriented documentation index.
+- `docs/maintaining.md` — maintainer guides and canonical ownership map.
 - `docs/security.md` — complete privilege and threat boundaries.
 - `SECURITY.md` — private vulnerability-reporting policy.
 - `docs/releases.md` — alpha versioning, verification, artifacts, and rollback.

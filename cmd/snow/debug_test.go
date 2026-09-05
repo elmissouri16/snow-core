@@ -37,7 +37,6 @@ func debugOptionsCommand(t *testing.T, args ...string) *cobra.Command {
 	flags.Int("subagent-max-concurrency", 0, "")
 	flags.Int("subagent-max-agents", 0, "")
 	flags.Int("subagent-max-depth", 0, "")
-	flags.StringArray("plugin", nil, "")
 	flags.StringArray("mcp", nil, "")
 	if err := flags.Parse(args); err != nil {
 		t.Fatal(err)

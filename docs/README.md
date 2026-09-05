@@ -1,145 +1,53 @@
-# Snow repository documentation
+# Snow documentation
 
-This is the complete documentation index for Snow users, integrators,
-maintainers, and contributors. Concise setup and workflow guides are published
-on GitHub Pages. Complete API and protocol references, architecture, release,
-research, audit, and implementation records remain available in the repository.
+New to Snow? Follow [Getting started](getting-started.md), then
+[Using Snow](using-snow.md). The same user guides are available on the
+[documentation website](https://elmissouri16.github.io/snow-core/).
 
-If you want to install or use Snow, start with the curated
-[GitHub Pages guide](https://elmissouri16.github.io/snow-core/) or the
-[getting-started guide](getting-started.md). Use the ownership map below when
-maintaining behavior or locating the authoritative repository reference.
+## Get started
 
-> **Note:** Snow is alpha software. Source code and tests are the behavioral
-> authority when an older research or roadmap document differs from a current
-> feature guide.
+- [Install and first prompt](getting-started.md): install, launch, and update.
+- [Providers](providers.md): connect OpenCode, ChatGPT, or your own endpoint.
+- [Using Snow](using-snow.md): terminal controls, commands, and CLI modes.
+- [Security model](security.md): understand permissions and host privileges.
 
-## Start here
+## Daily work
 
-| I want to… | Read |
-|---|---|
-| Install Snow and run my first prompt | [Getting started](getting-started.md) |
-| Connect a supported model provider | [Providers](providers.md) |
-| Learn the TUI, CLI modes, keys, and slash commands | [Using Snow](using-snow.md) |
-| Configure permissions, sessions, themes, and search | [Configuration](configuration.md) |
-| Understand safety and privilege boundaries | [Security model](security.md) |
-| Report a suspected vulnerability | [Security reporting](../SECURITY.md) |
-| Prepare or verify an alpha release | [Release policy](releases.md) |
-| Publish or maintain the documentation site | [Documentation site](pages.md) |
-| Authenticate with ChatGPT/Codex | [ChatGPT authentication](chatgpt-auth.md) |
-
-## Embed and automate
-
-- [Go SDK](sdk.md) — concise embedding setup and a
-  [standalone Go module](../examples/sdk).
-- [Go SDK reference](sdk-reference.md) — complete methods, events, lifecycle,
-  sessions, concurrency, errors, and readiness behavior.
-- [JSONL RPC](rpc.md) — versioned framing, every command, responses/events,
-  ordering, interactive input, goals, subagents, shutdown, and schemas.
-- [Model-requested user input](user-input.md) — `ask_user` request/response
-  schema across TUI, SDK, RPC, print, and JSON surfaces.
-- [Sessions and branches](sessions.md) — resume, naming, branches, compaction,
-  independent forks, worktree forks, and earlier-work retrieval.
-
-## Workflows
-
-- [Plan Mode](plan-mode.md) — selecting the mode, non-mutation boundaries,
-  reviewing a plan, and starting implementation.
-- [Persistent Thread Goals](goals.md) — branch goals, budgets, status, controls,
-  usage, and privacy.
-- [Subagents](subagents.md) — enablement, roles, delegation, inspection, limits,
-  persistence, and shared-authority safety.
+- [Sessions and branches](sessions.md): resume, fork, and revisit earlier work.
+- [Plan Mode](plan-mode.md): investigate and review a plan before implementing.
+- [Thread Goals](goals.md): continue an objective across turns with a budget.
+- [Subagents](subagents.md): delegate focused tasks and inspect their progress.
+- [Configuration](configuration.md): models, paths, permissions, and themes.
 
 ## Extend Snow
 
-- [Model Context Protocol](mcp.md) — Snow-specific local and remote server
-  setup, management commands, permissions, and current limits.
-- [Lazy MCP connection plan](lazy-mcp-implementation-plan.md) — proposed
-  metadata cache, connection state machine, idle shutdown, security rules,
-  implementation phases, and verification.
-- [Plugins](plugins.md) — statically linked Go plugins plus persistent
-  language-neutral external runtimes.
-- [External plugin protocol v2](plugin-protocol.md) — complete JSON-RPC JSONL
-  framing, lifecycle, tools, risk, progress, events, errors, and shutdown.
-- [External plugin runtime research](plugin-js-python-research.md) — benchmarked
-  architecture decision, alternatives, implementation sequence, and deferrals.
-- [Agent Skills](skills.md) — Snow-specific installation, discovery,
-  activation, project trust, and safety.
-- [Tool routing](tool-routing.md) — deferred schemas, BM25 retrieval,
-  `search_tools`, observability, and fallback behavior.
+- [Agent Skills](skills.md): add reusable instructions.
+- [MCP](mcp.md): connect local or remote tools and resources.
+- [Go plugins](plugins.md): add tools and event handlers to an embedded session.
+- [Tool routing](tool-routing.md): discover tools only when needed.
 
-## Maintainers and design history
+## Build with Snow
 
-- [Architecture and roadmap](../IMPLEMENTATION.md) — package boundaries,
-  interfaces, decisions, phased roadmap, verification, and open risks.
-- [Agent working guide](../AGENTS.md) — repository-specific coding rules,
-  security constraints, and verification commands.
-- [Release policy](releases.md) — alpha versioning, CI gates, artifacts,
-  checksums, and rollback.
-- [Security reporting](../SECURITY.md) — private vulnerability disclosure and
-  supported-release policy.
-- [Documentation style guide](style-guide.md) — writing and formatting
-  conventions for documentation contributors.
-- [Documentation site](pages.md) — GitHub Pages enablement, staging, deployment,
-  validation, and troubleshooting.
-- [Session storage internals](session-storage-internals.md) — SQLite driver,
-  schema, migrations, append-only branches, projections, and durable child data.
-- [ChatGPT authentication research](chatgpt-auth-research.md) — repository-only
-  provider provenance and compatibility comparisons.
-- [TUI responsiveness](tui-performance.md) — Bubble Tea rendering and
-  performance implementation guidance.
-- [Performance regression guard](performance.md) — deterministic allocation
-  ceilings, local commands, CI policy, and benchmark review procedure.
-- [Runtime performance measurements](runtime-fixes-performance.md) — checkpoint,
-  terminal preview, and process capture before/after results and RAM tradeoffs.
-- [Code audit and remediation record](code-audit.md) — repository-wide 2026 bug,
-  security, lifecycle, and maintainability findings with closure evidence.
-- [Codex Plan Mode and Goals research](codex-plan-mode-and-goals.md) — source
-  research and design comparison; users should start with the shorter Plan Mode
-  and Goals guides above.
-- [Subagent implementation plan](subagents-implementation-plan.md) — historical
-  research and phased implementation record; current behavior is documented in
-  [Subagents](subagents.md).
+| Task | Guide | Complete reference |
+|---|---|---|
+| Embed in Go | [Go SDK](sdk.md) · [Example](../examples/sdk) | [SDK reference](sdk-reference.md) |
+| Control Snow from another process | [CLI modes](using-snow.md#choose-a-runtime-mode) | [JSONL RPC](rpc.md) |
+| Write a Go plugin | [Go plugins](plugins.md) | [SDK reference](sdk-reference.md) |
+| Handle model questions in a host app | [Answer model questions](using-snow.md#answer-model-questions) | [User input](user-input.md) |
+| Diagnose ChatGPT login | [Providers](providers.md) | [ChatGPT authentication](chatgpt-auth.md) |
 
-## Canonical ownership
+## Maintain and contribute
 
-To reduce drift, use these documents as the primary references:
+Start with [AGENTS.md](../AGENTS.md) for the change workflow, or
+[Architecture and roadmap](../IMPLEMENTATION.md) for the codebase structure.
+The [maintainer index](maintaining.md) holds release procedures, performance
+checks, documentation ownership, and historical research.
 
-| Subject | Canonical document |
-|---|---|
-| Installation and first run | [`getting-started.md`](getting-started.md) |
-| Project overview and contributor entry point | [`README.md`](../README.md) |
-| TUI/CLI operation | [`using-snow.md`](using-snow.md) |
-| Provider setup | [`providers.md`](providers.md) |
-| Runtime configuration | [`configuration.md`](configuration.md) |
-| Go embedding quickstart | [`sdk.md`](sdk.md) |
-| Complete Go SDK behavior | [`sdk-reference.md`](sdk-reference.md) |
-| Foreign-process control | [`rpc.md`](rpc.md) |
-| External plugin ABI | [`plugin-protocol.md`](plugin-protocol.md) |
-| ChatGPT/Codex authentication | [`chatgpt-auth.md`](chatgpt-auth.md) |
-| ChatGPT adapter provenance | [`chatgpt-auth-research.md`](chatgpt-auth-research.md) |
-| Lazy MCP implementation | [Connection plan](lazy-mcp-implementation-plan.md) |
-| Safety model and privilege boundaries | [`security.md`](security.md) |
-| Vulnerability disclosure | [`SECURITY.md`](../SECURITY.md) |
-| Alpha versioning and distribution | [`releases.md`](releases.md) |
-| User session workflows | [`sessions.md`](sessions.md) |
-| SQLite session implementation | [`session-storage-internals.md`](session-storage-internals.md) |
-| GitHub Pages publication | [`pages.md`](pages.md) |
-| Performance allocation gates | [`performance.md`](performance.md) |
-| Feature-specific behavior | The matching guide in this directory |
-| Contributor workflow and must-load repository rules | [`AGENTS.md`](../AGENTS.md) |
-| Package architecture, dependency direction, and roadmap | [`IMPLEMENTATION.md`](../IMPLEMENTATION.md) |
-| Current implementation details | Source code and tests |
+Source code and tests define current behavior. Design plans and research record
+past decisions and may describe work that has since changed.
 
 ## Related documents
 
-- [Getting started](getting-started.md) — public installation and first-run guide.
-- [Project README](../README.md) — repository overview and contributor entry point.
-- [Release policy](releases.md) — alpha release and distribution requirements.
-- [Security reporting](../SECURITY.md) — private vulnerability disclosure.
-- [Documentation style guide](style-guide.md) — conventions used across this
-  directory.
-- [Documentation site](pages.md) — GitHub Pages publishing and validation.
-- [Architecture and roadmap](../IMPLEMENTATION.md) — design decisions and open
-  risks.
-- [Agent working guide](../AGENTS.md) — repository rules for contributors.
+- [Known bugs](../bugs.md): reproducible defects and verified fixes.
+- [Changelog](../CHANGELOG.md): release history.
+- [Security reporting](../SECURITY.md): private vulnerability disclosure.

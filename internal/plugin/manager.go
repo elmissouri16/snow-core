@@ -22,12 +22,15 @@ type Diagnostic struct {
 	Message  string
 }
 
-// ManagerOptions configures host capabilities exposed to plugins.
+const (
+	defaultOutputBytes   = 256 * 1024
+	defaultProgressBytes = 16 * 1024
+)
+
+// ManagerOptions configures the context and output limits exposed to Go plugins.
 type ManagerOptions struct {
 	CWD              string
 	SessionID        string
-	HostVersion      string
-	HostCapabilities []string
 	MaxProgressBytes int
 	MaxOutputBytes   int
 }
@@ -36,7 +39,6 @@ type managedPlugin struct {
 	id       string
 	owner    string
 	goPlugin publicplugin.Plugin
-	external *ExternalHost
 	cleanups []func()
 }
 
@@ -70,9 +72,6 @@ func NewManager(reg tools.DescriptorRegistry, options ...ManagerOptions) *Manage
 	if opts.MaxOutputBytes <= 0 {
 		opts.MaxOutputBytes = defaultOutputBytes
 	}
-	if opts.HostVersion == "" {
-		opts.HostVersion = "dev"
-	}
 	return &Manager{registry: reg, options: opts, ids: make(map[string]bool), subs: make(map[publicplugin.EventType]map[int]publicplugin.EventHandler)}
 }
 
@@ -102,29 +101,6 @@ func (m *Manager) LoadGo(p publicplugin.Plugin) error {
 	return nil
 }
 
-// LoadExternal queues an argv-based plugin declaration. Disabled entries are
-// recorded and never spawned.
-func (m *Manager) LoadExternal(spec publicplugin.PluginSpec) error {
-	if err := publicplugin.ValidateSpec(spec); err != nil {
-		return err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.closed || m.initialized {
-		return errors.New("plugin manager: cannot load after initialize")
-	}
-	if m.ids[spec.ID] {
-		return fmt.Errorf("plugin %q already loaded", spec.ID)
-	}
-	m.ids[spec.ID] = true
-	if !spec.Enabled {
-		m.diagnostics = append(m.diagnostics, Diagnostic{PluginID: spec.ID, Status: "disabled", Message: "plugin is disabled"})
-		return nil
-	}
-	m.plugins = append(m.plugins, &managedPlugin{id: spec.ID, owner: ownerFor(spec.ID), external: nil, goPlugin: &externalPlaceholder{spec: spec}})
-	return nil
-}
-
 // Initialize registers all queued plugins in load order. A failed plugin is
 // rolled back to its owner scope; later plugins are not allowed to observe a
 // partially initialized registry.
@@ -146,53 +122,16 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	m.initialized = true
 	m.mu.Unlock()
 	for _, p := range plugins {
-		var err error
-		external := false
-		if p.goPlugin != nil {
-			if ext, ok := p.goPlugin.(*externalPlaceholder); ok {
-				external = true
-				// The manager owns the process for the full app lifetime. Keep the
-				// startup context on handshake calls, but do not let cancellation
-				// kill the child before Close can send its graceful shutdown request.
-				host, spawnErr := SpawnExternal(context.WithoutCancel(ctx), ext.spec, m.options.CWD)
-				if spawnErr != nil {
-					err = spawnErr
-				} else {
-					m.mu.Lock()
-					p.external = host
-					m.mu.Unlock()
-					var init ExternalInitResult
-					init, err = host.Initialize(ctx, m.options.HostVersion, host.WorkingDir(), m.options.SessionID, m.options.HostCapabilities)
-					if err == nil {
-						err = m.registerExternal(p, init)
-					}
-				}
-			} else {
-				p.cleanups = nil
-				r := &scopedRegistrar{manager: m, owner: p.owner, pluginID: p.id, cleanups: &p.cleanups}
-				err = p.goPlugin.Register(ctx, r)
-			}
-		}
+		p.cleanups = nil
+		r := &scopedRegistrar{manager: m, owner: p.owner, pluginID: p.id, cleanups: &p.cleanups}
+		err := p.goPlugin.Register(ctx, r)
 		if err != nil {
 			message := err.Error()
-			m.mu.Lock()
-			externalHost := p.external
-			m.mu.Unlock()
-			if externalHost != nil && externalHost.Diagnostics() != "" {
-				message += "; diagnostics: " + externalHost.Diagnostics()
-			}
 			rollbackErr := m.rollback(p)
 			if rollbackErr != nil {
 				message += "; cleanup: " + rollbackErr.Error()
 			}
 			m.addDiagnostic(p.id, "failed", message)
-			// A foreign runtime is an optional isolated resource. A bad
-			// handshake/schema/crash must not prevent the core agent from
-			// starting; static Go registration errors remain fatal because
-			// they are part of the in-process contract.
-			if external {
-				continue
-			}
 			initializeErr := errors.Join(fmt.Errorf("plugin %s: initialize: %w", p.id, err), rollbackErr)
 			m.mu.Lock()
 			m.initializeErr = initializeErr
@@ -215,17 +154,11 @@ func (m *Manager) Emit(ev protocol.AgentEvent) {
 		return
 	}
 	fns := make([]publicplugin.EventHandler, 0, len(m.subs[eventType]))
-	var externals []*ExternalHost
 	for _, fn := range m.subs[eventType] {
 		fns = append(fns, fn)
 	}
-	for _, p := range m.plugins {
-		if p.external != nil && p.external.SupportsEvent(eventType) {
-			externals = append(externals, p.external)
-		}
-	}
 	m.mu.Unlock()
-	if len(fns) == 0 && len(externals) == 0 {
+	if len(fns) == 0 {
 		return
 	}
 	ev = sanitizeEvent(ev.Clone())
@@ -234,11 +167,6 @@ func (m *Manager) Emit(ev protocol.AgentEvent) {
 		observerEvent := e
 		observerEvent.Payload = e.Payload.Clone()
 		func() { defer func() { _ = recover() }(); fn(observerEvent) }()
-	}
-	for _, ext := range externals {
-		externalEvent := e
-		externalEvent.Payload = e.Payload.Clone()
-		_ = ext.NotifyEvent(externalEvent)
 	}
 }
 
@@ -299,11 +227,7 @@ func (m *Manager) Close(ctx context.Context) error {
 		for j := len(p.cleanups) - 1; j >= 0; j-- {
 			p.cleanups[j]()
 		}
-		if p.external != nil {
-			if err := p.external.Close(ctx); err != nil {
-				errs = append(errs, err)
-			}
-		} else if p.goPlugin != nil {
+		if p.goPlugin != nil {
 			if err := p.goPlugin.Close(ctx); err != nil {
 				errs = append(errs, fmt.Errorf("plugin %s: %w", p.id, err))
 			}
@@ -317,52 +241,12 @@ func (m *Manager) rollback(p *managedPlugin) error {
 	for i := len(p.cleanups) - 1; i >= 0; i-- {
 		p.cleanups[i]()
 	}
-	m.mu.Lock()
-	externalHost := p.external
-	p.external = nil
-	m.mu.Unlock()
-	var errs []error
-	if externalHost != nil {
-		if err := externalHost.Close(context.Background()); err != nil {
-			errs = append(errs, fmt.Errorf("plugin %s external close: %w", p.id, err))
-		}
-	}
+	var err error
 	if p.goPlugin != nil {
-		if _, ok := p.goPlugin.(*externalPlaceholder); !ok {
-			if err := p.goPlugin.Close(context.Background()); err != nil {
-				errs = append(errs, fmt.Errorf("plugin %s close: %w", p.id, err))
-			}
-		}
+		err = p.goPlugin.Close(context.Background())
 		p.goPlugin = nil
 	}
-	return errors.Join(errs...)
-}
-
-func (m *Manager) registerExternal(p *managedPlugin, init ExternalInitResult) error {
-	var specCapabilities []string
-	if ext, ok := p.goPlugin.(*externalPlaceholder); ok {
-		specCapabilities = ext.spec.Capabilities
-	}
-	capabilities := publicplugin.MergeCapabilities(init.Manifest.Capabilities, init.Capabilities, specCapabilities)
-	for _, schema := range init.Tools {
-		name, err := publicplugin.Namespace("plugin", p.id, schema.Name)
-		if err != nil {
-			return err
-		}
-		risk, err := declaredRisk(schema.Risk)
-		if err != nil {
-			return err
-		}
-		toolCapabilities := publicplugin.MergeCapabilities(capabilities, schema.Capabilities)
-		tool := &externalManagedTool{schema: protocol.ToolSchema{Name: name, Description: schema.Description, Parameters: schema.Parameters, Discovery: cloneDiscovery(schema.Discovery)}, original: schema.Name, host: p.external}
-		if err := m.registry.RegisterDescriptor(tools.ToolDescriptor{
-			Schema: tool.schema, Tool: tool, Source: tools.SourceExternal, Owner: p.owner,
-			PluginID: p.id, OriginalName: schema.Name, Risk: risk, Capabilities: toolCapabilities,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return err
 }
 
 func (m *Manager) addDiagnostic(id, status, message string) {
@@ -378,14 +262,6 @@ func nonNilContext(ctx context.Context) context.Context {
 }
 
 func ownerFor(id string) string { return "plugin:" + id }
-
-type externalPlaceholder struct{ spec publicplugin.PluginSpec }
-
-func (*externalPlaceholder) Manifest() publicplugin.Manifest { return publicplugin.Manifest{} }
-func (*externalPlaceholder) Register(context.Context, publicplugin.Registrar) error {
-	return errors.New("external placeholder")
-}
-func (*externalPlaceholder) Close(context.Context) error { return nil }
 
 type scopedRegistrar struct {
 	manager         *Manager
@@ -478,34 +354,6 @@ func (t *goManagedTool) Run(ctx context.Context, args json.RawMessage, host tool
 	return tools.ToolResult{Content: result.Content, Details: result.Details, IsError: result.IsError}, nil
 }
 
-type externalManagedTool struct {
-	schema   protocol.ToolSchema
-	original string
-	host     *ExternalHost
-}
-
-func (t *externalManagedTool) Schema() tools.ToolSchema { return t.schema }
-func (t *externalManagedTool) Run(ctx context.Context, args json.RawMessage, host tools.ToolHost) (tools.ToolResult, error) {
-	ctx = nonNilContext(ctx)
-	callID := ""
-	if p, ok := host.(interface{ ToolCallID() string }); ok {
-		callID = p.ToolCallID()
-	}
-	res, err := t.host.Call(ctx, t.original, callID, args, func(p ProgressNotification) {
-		if host != nil {
-			host.EmitProgress(tools.ToolProgressEvent{ToolCallID: p.CallID, Name: t.schema.Name, Message: p.Message, Done: p.Done, IsError: p.IsError})
-		}
-	})
-	if err != nil {
-		return tools.ErrorResult(err), nil
-	}
-	var details any
-	if len(res.Details) > 0 {
-		details = append(json.RawMessage(nil), res.Details...)
-	}
-	return tools.ToolResult{Content: res.Content, Details: details, IsError: res.IsError}, nil
-}
-
 func sanitizeEvent(ev protocol.AgentEvent) protocol.AgentEvent {
 	ev.Text = boundUTF8(ev.Text, 16*1024)
 	ev.Message = boundUTF8(ev.Message, 4*1024)
@@ -557,4 +405,13 @@ func boundUTF8(s string, max int) string {
 		b = b[:len(b)-1]
 	}
 	return string(b) + string(suffix)
+}
+
+func cloneDiscovery(in *protocol.ToolDiscovery) *protocol.ToolDiscovery {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.Keywords = slices.Clone(in.Keywords)
+	return &out
 }

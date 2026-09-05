@@ -160,8 +160,8 @@ remain authoritative over this summary.
   Fatal static registration failures are stored and returned unchanged on
   later calls; registration and rollback run once.
 - **EXT-06 — Remove polling-based external-plugin writer locking** (Medium,
-  closed). A capacity-one context-aware token serializes request and
-  notification frames.
+  closed). The former host used a capacity-one context-aware token to serialize
+  frames. The external-plugin host has since been removed.
 - **EXT-07 — Make permission-aware tool routing exhaustive** (Medium, closed).
   Automatic and explicit searches request the full deferred ranking before
   selecting the top permitted schemas.

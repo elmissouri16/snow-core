@@ -98,7 +98,7 @@ not make a command, extension, endpoint, or model response trustworthy.
 ## Review project trust
 
 Snow asks before loading project-local `.snow/config.json`, theme, keybinding,
-plugin, MCP, Agent Skills, system-prompt, or trusted-project instruction files.
+MCP, Agent Skills, system-prompt, or trusted-project instruction files.
 Trust applies only to the exact canonical project root and is checked again if
 that identity changes.
 
@@ -180,9 +180,10 @@ a dump before sharing it and delete it when no longer needed.
 
 ## Review extensions and subagents
 
-Plugins and stdio MCP servers are child processes with user privileges. Agent
-Skills add untrusted instructions to model context. Subagents start additional
-agent loops that share filesystem and process side effects.
+Go plugins run inside the embedding application; stdio MCP servers run as child
+processes. Both have the user's OS privileges. Agent Skills add untrusted
+instructions to model context. Subagents start additional agent loops that
+share filesystem and process side effects.
 
 Before enabling an extension, review its:
 
@@ -193,8 +194,8 @@ Before enabling an extension, review its:
 - project-trust source.
 
 Risk declarations affect Snow's permission gate but do not constrain what an
-extension process can actually do. `snow plugin check` starts plugin code; it
-is not passive validation. MCP annotations are also untrusted hints.
+extension code can actually do. Go plugin lifecycle methods run outside tool
+permission checks. MCP annotations are also untrusted hints.
 
 Disable unused capabilities with:
 
@@ -305,6 +306,6 @@ external isolation.
   alpha versions
 - [Configuration](configuration.md) — trust, credentials, and runtime settings
 - [Agent Skills](skills.md) — install and activate trusted skills
-- [Plugins](plugins.md) — plugin setup and process risks
+- [Plugins](plugins.md) — Go plugin registration and privileges
 - [MCP](mcp.md) — server setup and credential handling
 - [Subagents](subagents.md) — child roles, limits, and shared authority

@@ -30,7 +30,6 @@ import (
 	internalupdate "github.com/elmissouri16/snow-core/internal/update"
 	"github.com/elmissouri16/snow-core/internal/userinput"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
-	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -73,7 +72,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	authStore := startup.authStore
 	tr := startup.trust
 	authService := startup.authService
-	projectPlugins := startup.projectPlugins
 	projectMCPServers := startup.projectMCPServers
 	projectSkills := startup.projectSkills
 	projectSystemPrompt := startup.projectSystemPrompt
@@ -449,27 +447,13 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		extensionCWD = projectInputRoot
 	}
 	manager = internalplugin.NewManager(reg, internalplugin.ManagerOptions{
-		CWD: extensionCWD, SessionID: st.ID(), HostVersion: buildVersion, HostCapabilities: []string{"tools", "events"},
+		CWD: extensionCWD, SessionID: st.ID(),
 		MaxProgressBytes: cfg.ToolOutputLimit(), MaxOutputBytes: cfg.ToolOutputLimit(),
 	})
-	var allPluginSpecs []publicplugin.PluginSpec
-	if opts.NoPlugins {
-		allPluginSpecs = mergeDisabledPluginSpecs(cfg.Plugins, projectPlugins, opts.Plugins)
-	} else {
-		allPluginSpecs, err = mergePluginSpecs(cfg.Plugins, projectPlugins, opts.Plugins)
-		if err != nil {
-			return nil, fmt.Errorf("app: plugin configuration: %w", err)
-		}
-	}
 	if !opts.NoPlugins {
 		for _, p := range opts.GoPlugins {
 			if err := manager.LoadGo(p); err != nil {
 				return nil, fmt.Errorf("app: plugin: %w", err)
-			}
-		}
-		for _, spec := range allPluginSpecs {
-			if err := manager.LoadExternal(spec); err != nil {
-				return nil, fmt.Errorf("app: plugin %s: %w", spec.ID, err)
 			}
 		}
 		if err := manager.Initialize(ctx); err != nil {
@@ -477,7 +461,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 	}
 
-	// MCP servers are independent of Snow's plugin protocol. The official Go
+	// MCP servers are independent of Go plugins. The official Go
 	// SDK performs protocol negotiation and lifecycle handling; negotiated
 	// tools/resources/prompts are adapted into the same permissioned registry.
 	mcpDeclarations := mergeMCPDeclarations(cfg.MCPServers, projectMCPServers, opts.MCPServers, projectInputRoot)

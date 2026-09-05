@@ -21,7 +21,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/tools"
 	"github.com/elmissouri16/snow-core/internal/userinput"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
-	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -564,60 +563,6 @@ func (a *App) SetPermissionMode(mode permission.Mode) error {
 func (a *App) CWD() string { return a.cwd }
 
 func getwd() (string, error) { return os.Getwd() }
-
-func mergePluginSpecs(global, project, explicit []publicplugin.PluginSpec) ([]publicplugin.PluginSpec, error) {
-	merged := make(map[string]publicplugin.PluginSpec, len(global)+len(project)+len(explicit))
-	order := make([]string, 0, len(merged))
-	mergeLayer := func(scope string, specs []publicplugin.PluginSpec, allowDuplicates bool) error {
-		seen := make(map[string]bool, len(specs))
-		for _, spec := range specs {
-			if err := publicplugin.ValidateSpec(spec); err != nil {
-				return fmt.Errorf("%s plugin %q: %w", scope, spec.ID, err)
-			}
-			if seen[spec.ID] && !allowDuplicates {
-				return fmt.Errorf("%s contains duplicate plugin id %q", scope, spec.ID)
-			}
-			seen[spec.ID] = true
-			if _, exists := merged[spec.ID]; !exists {
-				order = append(order, spec.ID)
-			}
-			merged[spec.ID] = spec
-		}
-		return nil
-	}
-	if err := mergeLayer("global configuration", global, false); err != nil {
-		return nil, err
-	}
-	if err := mergeLayer("project configuration", project, false); err != nil {
-		return nil, err
-	}
-	if err := mergeLayer("explicit options", explicit, true); err != nil {
-		return nil, err
-	}
-	out := make([]publicplugin.PluginSpec, 0, len(order))
-	for _, id := range order {
-		out = append(out, merged[id])
-	}
-	return out, nil
-}
-
-func mergeDisabledPluginSpecs(global, project, explicit []publicplugin.PluginSpec) []publicplugin.PluginSpec {
-	merged := make(map[string]publicplugin.PluginSpec, len(global)+len(project)+len(explicit))
-	order := make([]string, 0, len(merged))
-	for _, specs := range [][]publicplugin.PluginSpec{global, project, explicit} {
-		for _, spec := range specs {
-			if _, exists := merged[spec.ID]; !exists {
-				order = append(order, spec.ID)
-			}
-			merged[spec.ID] = spec
-		}
-	}
-	out := make([]publicplugin.PluginSpec, 0, len(order))
-	for _, id := range order {
-		out = append(out, merged[id])
-	}
-	return out
-}
 
 func mergeMCPDeclarations(global, project map[string]publicmcp.ServerSpec, explicit []publicmcp.ServerSpec, projectIdentity string) []internalmcp.Declaration {
 	merged := make(map[string]internalmcp.Declaration, len(global)+len(project)+len(explicit))

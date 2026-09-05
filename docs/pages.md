@@ -50,7 +50,7 @@ with Snow. They do not duplicate the standards or Snow's implementation
 internals. The provider guide gives `opencode-zen`, `opencode-go`, `chatgpt`,
 and OpenAI-compatible profiles equal setup coverage.
 
-Complete RPC, external plugin protocol, ChatGPT authentication, model-requested
+Complete RPC, ChatGPT authentication, model-requested
 input, and implementation references remain available in the GitHub repository.
 They are not primary Pages routes.
 
@@ -83,7 +83,9 @@ Canonical guides live under `docs/`. Site presentation lives under `site/`:
 | `site/_layouts/` | Shared guide and homepage structures |
 | `site/_includes/navigation.html` | Shared desktop and mobile navigation |
 | `site/assets/css/style.css` | Responsive and print presentation |
-| `site/index.md` | Homepage task directory |
+| `site/assets/js/guide.js` | Progressive page outline for long guides |
+| `site/assets/js/copy-code.js` | Copy buttons for code examples |
+| `site/index.md` | Three reading paths and the builder entry point |
 | `scripts/build-pages.sh` | Explicit public staging allowlist |
 
 `scripts/build-pages.sh` creates a fresh staging directory. It copies the site
@@ -99,6 +101,19 @@ The official `actions/jekyll-build-pages` action renders the staged source.
 `jekyll-relative-links` resolves links between staged Markdown files, and
 `baseurl: /snow-core` keeps routes correct below the user-domain root.
 
+### Reading experience
+
+The homepage introduces Snow with three reading paths. Guide pages use the same
+four navigation groups on desktop and mobile: Get started, Daily work, Extend
+Snow, and Reference. The visual style uses a paper background, ink text, green
+accents, and monospace labels without external fonts or scripts.
+
+Long guides gain an **On this page** outline from their actual section headings.
+It stays beside the article on wide screens and moves above it at narrower
+widths. JavaScript hides the Markdown contents list only after building that
+outline; GitHub, print, and JavaScript-disabled readers keep the original list.
+Code examples have copy buttons. All guides remain readable without JavaScript.
+
 ## Deployment workflow
 
 `.github/workflows/pages.yml`:
@@ -113,8 +128,9 @@ The official `actions/jekyll-build-pages` action renders the staged source.
 Official actions are pinned to full commit SHAs. The workflow receives write
 and OpenID Connect permissions only in the deployment job.
 
-The reusable CI workflow runs the same build and rendered-output validation, so
-release verification exercises the documentation path without publishing it.
+The Documentation workflow owns the rendered-site check. Pull requests build
+and validate without deploying; relevant pushes to `main` also publish. The
+reusable CI workflow runs the Python source tests.
 
 ## Local validation
 
@@ -127,10 +143,10 @@ python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 Stage the curated source into a new directory:
 
 ```sh
-rm -rf ./_pages_source
-./scripts/build-pages.sh ./_pages_source
+./scripts/build-pages.sh /tmp/snow-pages-source-NEW
 ```
 
+Choose a new output path each time; the builder refuses to overwrite a folder.
 Render it with the same pinned `actions/jekyll-build-pages` image or workflow
 used by CI, then validate the result:
 
@@ -182,7 +198,7 @@ filter for assets and site routes.
 - [Getting started](getting-started.md) — canonical first-run guide.
 - [Providers](providers.md) — supported provider setup.
 - [Repository documentation index](README.md) — complete public and maintainer
-  documentation ownership.
+  documentation, with an ownership map in [Maintaining Snow](maintaining.md).
 - [Documentation style guide](style-guide.md) — writing conventions.
 - [Security model](security.md) — privilege and trust boundaries.
 - [Release policy](releases.md) — verification and publication gates.

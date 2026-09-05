@@ -159,8 +159,7 @@ descriptors; routing never depends on the execution transport.
 
 ## Related documents
 
-- [Plugins](plugins.md)
-- [External plugin protocol v2](plugin-protocol.md)
+- [Go plugins](plugins.md)
 - [MCP](mcp.md)
 - [Agent Skills](skills.md)
 - [Configuration](configuration.md)

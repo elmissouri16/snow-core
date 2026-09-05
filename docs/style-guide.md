@@ -11,7 +11,7 @@ reads as one cohesive, professional publication.
 
 ## 1. Document anatomy
 
-Every document follows the same skeleton, top to bottom:
+Use this structure as a starting point; match its length to the reader’s task:
 
 1. **Title** — one `# Heading` with the document name in Title Case
    (`# Using Snow`, `# Security model`). No numbering (`1.`), no leading
@@ -29,7 +29,7 @@ Every document follows the same skeleton, top to bottom:
    only when a subsection genuinely needs it. Prefer depth ≤ 3.
 6. **Related documents** — the final section, titled exactly
    `## Related documents`, listing two to five relevant guides or references
-   as a bulleted list. Every guide ends with this section.
+   as a bulleted list when useful. Index pages need no repeated link roundup.
 
 ### GitHub anchor links
 
@@ -38,6 +38,23 @@ backticks stripped, spaces replaced with hyphens. For example, `## On this
 page` becomes `#on-this-page`, and `### ask_user host interaction` becomes
 `#ask_user-host-interaction`. When you rename a heading, check every in-repo
 link that points to it and update the anchor.
+
+### Keep each layer focused
+
+- The root README introduces Snow, gives a quick start, and points to guides.
+  Keep it near 100 lines; do not copy feature internals or full API examples.
+- `docs/README.md` is the task directory. Maintainer procedures, document
+  ownership, and design history belong in `docs/maintaining.md`.
+- Start guides with the common successful path. Put options, edge cases, and
+  troubleshooting after the first useful result.
+- Keep exact behavior in its canonical guide. Link to it from overviews instead
+  of repeating the same explanation in several places.
+- Long references can be detailed. Use descriptive headings and a contents list
+  so readers can go directly to the part they need.
+- The Pages homepage introduces Snow and offers a small set of reading paths.
+  Do not duplicate the entire sidebar in its body.
+- Site templates may use semantic HTML. Canonical Markdown stays readable on
+  GitHub without relying on the site's CSS or JavaScript.
 
 ## 2. Headings and prose
 
@@ -49,6 +66,9 @@ link that points to it and update the anchor.
 - Active voice and imperative mood for procedures: "Run `snow login`",
   not "The command should be run".
 - One idea per paragraph. Prefer short paragraphs over walls of text.
+- Use concrete product and task names in site headings and labels, such as
+  "Install Snow", "Sessions", and "Go SDK". Avoid slogans and metaphors that
+  do not explain what the coding agent does or where a link leads.
 - Use `1.`, `2.` numbered lists only for ordered procedures; use `-` bullets
   for everything else. Indent continuation lines by two spaces.
 - No emojis, no `---` horizontal rules inside a document, no raw HTML.
@@ -136,5 +156,5 @@ Before finishing any document, verify:
 - [ ] Every relative link resolves; anchors still match renamed headings.
 - [ ] All technical facts, commands, flags, schema fields, and URLs from the
       previous version were preserved or corrected against source.
-- [ ] Ends with `## Related documents`.
+- [ ] Related links help the reader take a next step without repeating an index.
 - [ ] No trailing whitespace; file ends with a newline.

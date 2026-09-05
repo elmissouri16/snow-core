@@ -6,7 +6,6 @@ import (
 	"time"
 
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
-	"github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -231,7 +230,6 @@ type Config struct {
 	TUI                       TUIConfig                       `json:"tui,omitzero"`
 	Debug                     DebugConfig                     `json:"debug,omitzero"`
 	Updates                   UpdateConfig                    `json:"updates,omitzero"`
-	Plugins                   []plugin.PluginSpec             `json:"plugins,omitempty"`
 	MCPServers                map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
 	Skills                    SkillsConfig                    `json:"skills,omitzero"`
 	Subagents                 SubagentConfig                  `json:"subagents,omitzero"`
@@ -243,7 +241,6 @@ type Config struct {
 // ProjectExtensions are the only project configuration fields loaded after a
 // trust allow. Project files cannot override global provider or permissions.
 type ProjectExtensions struct {
-	Plugins          []plugin.PluginSpec             `json:"plugins,omitempty"`
 	MCPServers       map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
 	Skills           ProjectSkillsConfig             `json:"skills,omitzero"`
 	TUI              ProjectTUIConfig                `json:"tui,omitzero"`

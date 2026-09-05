@@ -30,14 +30,14 @@ rationale rather than a live feature reference.
 
 | Phase | Scope | Status | Evidence |
 |---|---|---|---|
-| 0 | Lock public semantics and baseline | Implemented | [Enabling subagents](subagents.md#enabling-subagents), [Limits](subagents.md#limits) |
-| 1 | Protocol identity and Agent mailbox | Implemented | [Model tools](subagents.md#model-tools), [Paths, names, and identity](subagents.md#paths-names-and-identity) |
-| 2 | Ephemeral manager and child factory | Implemented | [Context and lifecycle](subagents.md#context-and-lifecycle), [Authority and security](subagents.md#authority-and-security) |
-| 3 | V2 model tools and headless integration | Implemented | [Model tools](subagents.md#model-tools), [Authority and security](subagents.md#authority-and-security) |
-| 4 | SDK and RPC surfaces | Implemented | [Surfaces](subagents.md#surfaces) |
-| 5 | TUI observation and interaction multiplexing | Implemented | [Surfaces](subagents.md#surfaces), [Context and lifecycle](subagents.md#context-and-lifecycle) |
-| 6 | Durable topology and lazy reload | Implemented | [Persistence](subagents.md#persistence) |
-| 7 | Recursive agents, mutation, dynamic tools, and budgets | Implemented | [Authority and security](subagents.md#authority-and-security), [Limits](subagents.md#limits) |
+| 0 | Lock public semantics and baseline | Implemented | [Enabling subagents](subagents.md#enable-subagents), [Limits](subagents.md#set-limits) |
+| 1 | Protocol identity and Agent mailbox | Implemented | [Model tools](subagents.md#delegate-work), [Paths, names, and identity](subagents.md#delegate-work) |
+| 2 | Ephemeral manager and child factory | Implemented | [Context and lifecycle](subagents.md#inspect-and-control-children), [Authority and security](subagents.md#work-safely) |
+| 3 | V2 model tools and headless integration | Implemented | [Model tools](subagents.md#delegate-work), [Authority and security](subagents.md#work-safely) |
+| 4 | SDK and RPC surfaces | Implemented | [Surfaces](subagents.md#inspect-and-control-children) |
+| 5 | TUI observation and interaction multiplexing | Implemented | [Surfaces](subagents.md#inspect-and-control-children), [Context and lifecycle](subagents.md#inspect-and-control-children) |
+| 6 | Durable topology and lazy reload | Implemented | [Persistence](subagents.md#resume-child-work) |
+| 7 | Recursive agents, mutation, dynamic tools, and budgets | Implemented | [Authority and security](subagents.md#work-safely), [Limits](subagents.md#set-limits) |
 
 ## Research basis
 

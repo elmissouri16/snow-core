@@ -158,7 +158,6 @@ type Source string
 const (
 	SourceBuiltin  Source = "builtin"
 	SourceGoPlugin Source = "go-plugin"
-	SourceExternal Source = "external-plugin"
 	SourceMCP      Source = "mcp"
 	SourceSDK      Source = "sdk"
 )
@@ -356,7 +355,7 @@ func (r *SimpleRegistry) ReplaceOwner(owner string, descriptors []ToolDescriptor
 }
 
 func normalizeDescriptor(desc ToolDescriptor) (ToolDescriptor, error) {
-	if desc.Source == SourceGoPlugin || desc.Source == SourceExternal || desc.Source == SourceMCP {
+	if desc.Source == SourceGoPlugin || desc.Source == SourceMCP {
 		prefix := "plugin"
 		if desc.Source == SourceMCP {
 			prefix = "mcp"

@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
-	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 )
 
 func TestZeroConfigOmitsEmptyNestedSections(t *testing.T) {
@@ -173,130 +172,18 @@ func TestSectionUpdateHoldsSharedMutationLock(t *testing.T) {
 	}
 }
 
-func TestPluginManagementPreservesUnknownFieldsAndStagesDisabled(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	original := `{"future":{"kept":true},"plugins":[{"id":"demo","command":["plugin-host","--legacy"],"enabled":true,"env":["TOKEN=secret"],"future_plugin":{"kept":true}}]}`
-	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := SetPluginEnabled(path, true, "demo", false); err != nil {
-		t.Fatal(err)
-	}
-	assertPluginUnknownFields(t, path)
-	declarations, err := LoadPluginDeclarations(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(declarations) != 1 || declarations[0].Enabled {
-		t.Fatalf("declarations after disable = %+v", declarations)
-	}
-	if err := AddPlugin(path, true, publicplugin.PluginSpec{ID: "demo", Command: []string{"plugin-host", "--serve"}, Enabled: false}, true); err != nil {
-		t.Fatal(err)
-	}
-	assertPluginUnknownFields(t, path)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	declarations, err = LoadPluginDeclarations(path)
-	if err != nil || len(declarations) != 1 || strings.Join(declarations[0].Command, " ") != "plugin-host --serve" || len(declarations[0].Env) != 0 || strings.Contains(string(data), "TOKEN=secret") {
-		t.Fatalf("replacement did not clear old known fields: declarations=%+v err=%v data=%s", declarations, err, data)
-	}
-	if err := RemovePlugin(path, true, "demo"); err != nil {
-		t.Fatal(err)
-	}
-	declarations, err = LoadPluginDeclarations(path)
-	if err != nil || len(declarations) != 0 {
-		t.Fatalf("declarations after remove = %+v, %v", declarations, err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("global plugin config mode = %o", info.Mode().Perm())
-	}
-}
-
-func assertPluginUnknownFields(t *testing.T, path string) {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(data, &root); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := root["future"]; !ok {
-		t.Fatalf("unknown top-level field lost: %s", data)
-	}
-	var plugins []map[string]json.RawMessage
-	if err := json.Unmarshal(root["plugins"], &plugins); err != nil {
-		t.Fatal(err)
-	}
-	if len(plugins) != 1 || plugins[0]["future_plugin"] == nil {
-		t.Fatalf("unknown plugin field lost: %s", data)
-	}
-}
-
 func TestManagementRejectsNullConfigRootWithoutPanic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte("null\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := AddPlugin(path, true, publicplugin.PluginSpec{ID: "demo", Command: []string{"demo"}}, false)
+	err := UpdateSkills(path, func(*SkillsConfig) error { return nil })
 	if err == nil || !strings.Contains(err.Error(), "root must be a JSON object") {
 		t.Fatalf("null-root error = %v", err)
 	}
 	data, readErr := os.ReadFile(path)
 	if readErr != nil || string(data) != "null\n" {
 		t.Fatalf("null-root mutation changed file: %q, %v", data, readErr)
-	}
-}
-
-func TestPluginManagementRejectsDuplicatesWithoutMutation(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	original := []byte(`{"plugins":[{"id":"same","command":["one"]},{"id":"same","command":["two"]}]}`)
-	if err := os.WriteFile(path, original, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := SetPluginEnabled(path, true, "same", true); err == nil || !strings.Contains(err.Error(), "duplicate") {
-		t.Fatalf("duplicate update error = %v", err)
-	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(original) {
-		t.Fatalf("failed update changed file:\n%s", after)
-	}
-}
-
-func TestProjectPluginMutationRetainsExistingModeAndRequiresDeclaration(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".snow", "config.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(`{"plugins":[]}`), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if err := SetPluginEnabled(path, false, "demo", false); err == nil || !strings.Contains(err.Error(), "target scope") {
-		t.Fatalf("missing project declaration error = %v", err)
-	}
-	if err := AddPlugin(path, false, publicplugin.PluginSpec{ID: "demo", Command: []string{"demo"}, Enabled: true}, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := SetPluginEnabled(path, false, "demo", false); err != nil {
-		t.Fatal(err)
-	}
-	declarations, err := LoadPluginDeclarations(path)
-	if err != nil || len(declarations) != 1 || declarations[0].Enabled {
-		t.Fatalf("project declaration = %+v, %v", declarations, err)
-	}
-	info, _ := os.Stat(path)
-	if info.Mode().Perm() != 0o640 {
-		t.Fatalf("project mode = %o", info.Mode().Perm())
 	}
 }
 

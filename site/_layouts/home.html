@@ -2,41 +2,26 @@
 layout: default
 ---
 <section class="home-hero">
-  <span class="eyebrow">Snow documentation</span>
-  <h1>Build with Snow</h1>
-  <p>
-    Install Snow, connect a provider, and configure the tools your agent needs.
-  </p>
-  <div class="hero-actions">
-    <a class="primary" href="{{ '/docs/getting-started.html' | relative_url }}">
-      Install Snow
-    </a>
-    <a class="secondary" href="{{ '/docs/providers.html' | relative_url }}">
-      Choose a provider
-    </a>
+  <div class="hero-copy">
+    <span class="eyebrow">Snow</span>
+    <h1>A terminal<br>coding agent.</h1>
+    <p>Read code, make changes, and run commands with your choice of model provider.</p>
+    <div class="hero-actions">
+      <a class="primary" href="#install-snow">Install Snow <span aria-hidden="true">↗</span></a>
+      <a class="secondary" href="{{ '/docs/using-snow.html' | relative_url }}">Documentation <span aria-hidden="true">→</span></a>
+    </div>
+    <span class="hero-note">Open source · macOS &amp; Linux · Alpha</span>
   </div>
-</section>
-<section class="feature-grid" aria-label="Documentation highlights">
-  <a class="feature-card" href="{{ '/docs/getting-started.html' | relative_url }}">
-    <strong>Install Snow</strong>
-    <span>Install the binary and run a credential-free check.</span>
-  </a>
-  <a class="feature-card" href="{{ '/docs/providers.html' | relative_url }}">
-    <strong>Choose a provider</strong>
-    <span>
-      Start anonymously, use an OpenCode key, sign in with ChatGPT, or connect
-      another compatible endpoint.
-    </span>
-  </a>
-  <a class="feature-card" href="#workflows">
-    <strong>Use the agent</strong>
-    <span>
-      Learn the terminal workflow, sessions, planning, goals, and subagents.
-    </span>
-  </a>
-  <a class="feature-card" href="#add-capabilities">
-    <strong>Add capabilities</strong>
-    <span>Set up Agent Skills, MCP servers, or Snow plugins.</span>
-  </a>
+  <section class="install-panel" id="install-snow" aria-labelledby="install-title">
+    <div class="install-caption"><h2 id="install-title">Install Snow</h2><span>macOS / Linux</span></div>
+    <div class="install-body">
+      <pre><code>curl -fsSL https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh | sh</code></pre>
+      <p class="install-next">Then open a new terminal and run <code>snow</code> in your project.</p>
+    </div>
+    <div class="install-footer">
+      <a href="{{ '/docs/getting-started.html' | relative_url }}">Installation guide <span aria-hidden="true">→</span></a>
+      <a href="https://github.com/{{ site.repository }}/releases">Release downloads <span aria-hidden="true">↗</span></a>
+    </div>
+  </section>
 </section>
 {{ content }}

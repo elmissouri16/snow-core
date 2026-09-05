@@ -5,6 +5,21 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+### Changed
+
+- Simplified the README and documentation navigation, separated maintainer
+  references, and redesigned GitHub Pages around installation and task guides.
+  Long guides gain a responsive page outline; code examples remain copyable.
+
+### Removed
+
+- Removed external-plugin execution, its JSON-RPC host, CLI `snow plugin`
+  commands and `--plugin` flag, configuration APIs, and public `PluginSpec` /
+  `ExternalToolDefinition` types. Go plugins supplied through `GoPlugins` remain
+  supported. Legacy `plugins` configuration keys are ignored and never launched.
+- Removed JavaScript/Python plugin examples and replaced external protocol
+  instructions with a retirement notice.
+
 ## [0.1.0-alpha.7] - 2026-09-05
 
 This alpha improves cancellation and goal accounting, prevents admission

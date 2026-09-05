@@ -148,7 +148,6 @@ type Options struct {
 	DebugDumpPath string
 	NoSession     bool   // in-memory session (SDK ephemeral)
 	BaseURL       string // active provider base URL override
-	Plugins       []publicplugin.PluginSpec
 	GoPlugins     []publicplugin.Plugin
 	NoPlugins     bool
 	MCPServers    []publicmcp.ServerSpec

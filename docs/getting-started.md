@@ -15,6 +15,7 @@ require Go.
 - [Choose a provider](#choose-a-provider)
 - [Start the interactive agent](#start-the-interactive-agent)
 - [Check for updates](#check-for-updates)
+- [Installation options](#installation-options)
 - [Choose permissions carefully](#choose-permissions-carefully)
 - [Related documents](#related-documents)
 
@@ -26,31 +27,11 @@ Run this command to install the latest published release:
 curl -fsSL https://raw.githubusercontent.com/elmissouri16/snow-core/main/scripts/install.sh | sh
 ```
 
-### Installation options
-
-Export an option before running the installation command:
-
-```sh
-# Choose another absolute installation directory.
-export SNOW_INSTALL_DIR="$HOME/bin"
-
-# Install one reviewed release instead of resolving the latest release.
-export SNOW_VERSION=v0.1.0-alpha.1
-
-# Do not change a shell startup file.
-export SNOW_NO_MODIFY_PATH=1
-```
-
-`SNOW_INSTALL_DIR` must be absolute and cannot contain control characters or a
-colon. If you disable the automatic `PATH` update, add the selected directory
-to `PATH` yourself.
-
-Piping a remotely downloaded script into `sh` trusts the repository content. If
-you need to review it first, download
-[`scripts/install.sh`](https://github.com/elmissouri16/snow-core/blob/main/scripts/install.sh),
-inspect the complete file, and run the reviewed copy locally. Release checksums
-protect against corruption or mismatched assets, but they are not an
-independent signature.
+The default location is `~/.local/bin/snow`. The installer verifies the release
+checksum and binary version, then adds the directory to your shell path.
+Review the [install script](https://github.com/elmissouri16/snow-core/blob/main/scripts/install.sh)
+before running it if your environment requires it. Checksums verify integrity;
+they are not an independent signature.
 
 ## Check the installation
 
@@ -129,30 +110,35 @@ snow -p "summarize this project"
 
 ## Check for updates
 
-In the interactive TUI, open `/settings` to use three update controls:
+Open `/settings` and choose **Check for updates now**. To install a newer
+release, use **Update now** and review the confirmation. After installation,
+choose **Restart now** to resume your saved session, or **Later** to keep working.
+An ephemeral `--no-session` conversation cannot survive a restart.
 
-- **Check for updates on startup** opts into a nonblocking metadata-only GitHub
-  release check. When a newer eligible release exists, Snow asks you to choose
-  **Install update** or **Skip for now**; it never downloads the release archive
-  or installs automatically.
-- **Check for updates now** performs one explicit fresh check without installing.
-- **Update now** performs a fresh check and installs a newer eligible release.
+Startup checks are opt-in and only fetch release metadata. Snow never downloads
+or installs an update automatically. Self-update supports writable, regular
+non-symlink official release binaries; development builds are never replaced.
+See [Using Snow](using-snow.md#use-slash-commands) for the full update behavior.
 
-Startup checking is disabled by default. Print, JSON, RPC, version, and SDK
-startup do not make implicit update requests or replace an executable. GitHub
-prereleases are valid update targets because Snow is currently alpha.
+## Installation options
 
-Self-update is available for official macOS/Linux amd64 or arm64 releases when
-the running executable is a writable regular non-symlink file, including a
-custom `SNOW_INSTALL_DIR`. Development/source builds report that installation
-is unavailable and never replace themselves. After explicit approval, a
-foreground card shows downloaded bytes, percentage, a progress bar,
-checksum/archive verification, and installation status. After a successful
-install, choose **Restart now** to close Snow cleanly and resume the durable
-session with the new binary, or **Later** to continue in the old in-memory
-process until exit.
-An ephemeral `--no-session` process cannot preserve in-memory history across a
-restart.
+Export an option before running the install command:
+
+| Variable | Purpose |
+|---|---|
+| `SNOW_INSTALL_DIR` | Set a different absolute installation directory |
+| `SNOW_VERSION` | Pin an exact release, such as `v0.1.0-alpha.1` |
+| `SNOW_NO_MODIFY_PATH=1` | Leave shell startup files unchanged |
+
+For example:
+
+```sh
+export SNOW_INSTALL_DIR="$HOME/bin"
+```
+
+The directory must be absolute and cannot contain control characters or a
+colon. If you disable the automatic path update, add the directory to `PATH`
+yourself.
 
 ## Choose permissions carefully
 

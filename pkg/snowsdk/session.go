@@ -81,7 +81,6 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		DebugDumpPath:           opts.DebugDumpPath,
 		APIKey:                  opts.APIKey,
 		BaseURL:                 opts.BaseURL,
-		Plugins:                 opts.Plugins,
 		NoPlugins:               opts.NoPlugins,
 		GoPlugins:               opts.GoPlugins,
 		MCPServers:              opts.MCPServers,

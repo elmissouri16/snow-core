@@ -260,19 +260,6 @@ func collectDiagnosticSecrets(opts Options, cfg config.Config, store auth.Store,
 	for _, spec := range opts.MCPServers {
 		addMCP(spec)
 	}
-	addPluginEnv := func(values []string) {
-		for _, value := range values {
-			if _, secret, ok := strings.Cut(value, "="); ok {
-				add(configuredSecretValue(secret))
-			}
-		}
-	}
-	for _, spec := range cfg.Plugins {
-		addPluginEnv(spec.Env)
-	}
-	for _, spec := range opts.Plugins {
-		addPluginEnv(spec.Env)
-	}
 	return secrets
 }
 
