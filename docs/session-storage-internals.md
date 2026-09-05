@@ -222,6 +222,15 @@ shapes cannot identify. Explicit markers are authoritative from their first
 appearance. Child session counts are not added
 to the active root branch.
 
+Provider-backed compaction appends one `provider_usage_v1` metadata entry per
+attempt that reports usage, storing the final cumulative usage snapshot as
+JSON. Memory and SQLite `AggregateUsage()` include these entries along the
+selected ancestry, including reported usage from failed attempts. They add no
+conversation message, turn, step, or context-occupancy estimate. Automatic
+compaction also charges its owning goal; manual compaction charges only the
+session. The existing metadata columns require no schema migration. Older
+sessions cannot recover summary usage that was never recorded.
+
 `ContextMessages()` applies the latest compaction marker logically: providers
 receive one structured working-state checkpoint plus the retained tail, while
 `Messages()` continues to return the complete historical branch. SQLite keeps

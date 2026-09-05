@@ -1345,3 +1345,353 @@ in `examples/sdk` failed with a missing go.sum entry for the shell syntax
 package. `go mod tidy` synchronized the example's module graph with the current
 checkout. Both its test/build step and `go run .` now complete successfully
 with the offline fake provider and an isolated temporary Snow home.
+
+## BUG-031: Caller deadlines can return success and restart an active goal
+
+- **Status:** Resolved; verified 2026-09-05
+- **Severity:** High
+- **Surface:** Core prompt lifecycle, direct SDK prompts, active goal continuation
+- **Observed:** 2026-09-05 audit of revision `4d35f52`
+
+When the caller's context expires during provider startup or streaming,
+`streamTurnWithErrors` persists an aborted assistant boundary and returns
+`StopAborted` with no error. `run` then returns nil at
+`internal/agent/lifecycle_run.go:593-594`. The prompt finalizer passes that nil
+to `finalizeGoalTurn` without checking the caller's context. An eligible active
+goal therefore calls `ContinueGoal`, whose next provider request uses a fresh
+background context.
+
+Direct SDK `Prompt` callers can interpret incomplete work as successful, and
+an active goal can incur additional provider usage and execute subsequently
+approved tools after the host's deadline. RPC separately checks its prompt
+context when reporting completion; that status check does not fix the core
+continuation decision. This is distinct from BUG-023's resolved child-worker
+timeout classification.
+
+### Reproduction and verification
+
+A temporary Go overlay test used a real agent, a temporary SQLite session,
+and a local provider that either waited for cancellation in `Chat`, or emitted
+`Partial work` and then waited in `Next`. With a 40 ms caller deadline, both
+ordinary prompts returned nil with `ctx.Err() == context.DeadlineExceeded`.
+With a persisted active goal, both cases also started provider request number
+two after the deadline. All four cases reproduced in three consecutive runs.
+The second request was held until agent cleanup; no network or tools ran.
+
+### Required remediation and regression coverage
+
+Preserve caller cancellation/deadline outcomes before finalizing a prompt and
+deciding goal continuation. Prevent canceled work from launching an automatic
+turn; distinguish cancellation from a provider failure when updating durable
+goal status. Cover startup and partial-stream deadlines, direct SDK errors,
+active goals, queued input, explicit Abort, and successful completion. Existing
+tests that intentionally accept nil for cancellation need an explicit contract
+decision; changing only the subagent or RPC wrapper is insufficient.
+
+### Verified resolution
+
+Caller context errors are joined into the core prompt and mailbox outcomes
+after pending mail is persisted. A matching active goal pauses on caller
+cancellation and cannot launch automatic continuation. Pre-canceled or
+canceled admission waits return without persisting input; explicit Snow Abort
+retains its distinct contract. Startup and partial-stream deadlines, attached
+goals, all four SDK prompt methods, and existing queue/Abort behavior pass
+focused tests and the agent/SDK race suites. See `docs/sdk.md` and
+`docs/goals.md` for the public cancellation contract.
+
+## BUG-032: Checkpoint normalization repeatedly copies growing section bodies
+
+- **Status:** Resolved; verified 2026-09-05
+- **Severity:** Performance
+- **Surface:** Local checkpoint normalization during compaction
+- **Observed:** 2026-09-05 audit of revision `4d35f52`
+
+`canonicalizeWorkingStateCheckpoint` in `internal/compact/planner.go:370-373`
+appends each line and separator to an immutable string. A section with many
+lines repeatedly copies its entire accumulated body, producing quadratic
+allocation volume. The public normalization path canonicalizes provider and
+local summaries, so this cost is part of real compaction processing.
+
+A candidate with six added and three removed production lines accumulates the
+current section in a `strings.Builder`, assigns its string on flush, then resets
+the builder. Existing compaction tests and 1,005 differential cases passed with
+the candidate, including duplicate/unknown headings, blank lines, and Unicode.
+
+Three-sample medians on Go 1.27rc3 / macOS arm64 / Apple M3 Pro, `-cpu=1`,
+`-benchtime=500ms`, measuring the full `NormalizeWorkingStateCheckpoint` call:
+
+| Fixture | Current time | Candidate time | Current B/op | Candidate B/op |
+| --- | ---: | ---: | ---: | ---: |
+| 7.5 KB, 100 lines across twelve sections | 109.31 us | 92.60 us | 185,528 | 127,408 |
+| 28.8 KB, 400 lines across twelve sections | 547.46 us | 284.02 us | 1,446,408 | 509,936 |
+| 28.5 KB, 400 lines in one section | 2,128.51 us | 346.92 us | 12,510,000 | 669,016 |
+| 114 KB, 1,600 lines in one section | 22,277.87 us | 1,242.85 us | 193,995,808 | 2,389,576 |
+
+The large fixtures are stress cases; the default provider summary target is
+2,000 tokens. These measurements isolate local normalization with no historical
+messages and exclude provider latency, summary generation, and persistence.
+They do not imply an equivalent speedup for an entire agent turn.
+
+Before adopting the candidate, retain focused equivalence coverage and add a
+permanent benchmark for both concentrated and distributed section bodies.
+
+### Verified resolution
+
+Adopted the section-local builder in `internal/compact/planner.go` with the
+1,005-case equivalence test and permanent concentrated/distributed benchmarks.
+The final three-sample 28.5 KB concentrated case improved from 2.121 ms to
+0.343 ms and 12,510,000 to 669,016 B/op. The stress case improved 17.22x;
+whole-process peak RSS fell 14%. Full measurements and limitations are in
+`docs/runtime-fixes-performance.md`. The compact tests and race suite pass.
+
+## BUG-033: Goal controls can deadlock with subagent manager tools
+
+- **Status:** Resolved; verified 2026-09-05
+- **Severity:** High
+- **Surface:** Plan-mode transitions and manual compaction during automatic goals
+- **Observed:** 2026-09-05 follow-up audit of revision `4d35f52`
+
+`Agent.SetMode` acquires root admission at `internal/agent/configuration.go:212`
+and holds it while `StopGoal` cancels and joins automatic work at line 254.
+`Manager.List` acquires the same lock at `internal/subagent/operations.go:326`.
+If a running automatic goal reaches `list_agents` after the control acquires
+admission, the control waits for the turn, and the turn waits for admission.
+Canceling the turn cannot interrupt this mutex wait. No child needs to exist.
+
+Entering Plan mode has no deadline on this join, so both calls remain blocked.
+Manual `Compact` uses the same lock-and-join pattern at
+`internal/agent/session_context.go:771-789`; a caller deadline releases that
+control with an error, but a background context permits an indefinite hang.
+Branch selection and forking also call `stopAutomaticForControl` while holding
+admission; these share the source-level risk but were not separately reproduced.
+
+### Reproduction and verification
+
+A temporary Go overlay used a real agent, SQLite goal, subagent manager, and
+the actual `list_agents` tool with a local fake provider. A scheduling gate
+paused immediately before delegating to the real manager tool, then resumed
+when the control canceled the turn. This forces the relevant legal interleaving
+without adding a lock to the tool or creating a child.
+
+The Plan transition hit a three-second test timeout. Its goroutine dump shows
+`SetMode -> StopGoal -> stopWork` waiting for completion and the goal's
+`managerTool.Run -> Manager.List -> LockAdmission` waiting for the mutex.
+Manual compaction hit its 150 ms caller deadline in all three race-enabled
+runs and unwound after releasing admission. No data race was reported; this
+is a lock dependency cycle.
+
+### Required remediation and regression coverage
+
+Do not join running work while holding an admission lock that its tools need.
+Separate cancellation/join from the admitted state transition, then reacquire
+admission and revalidate the target state. Preserve transition guards and
+prevent another turn from entering the gap. A context check before mutex
+acquisition alone does not eliminate the race.
+
+Cover Plan transitions and manual compaction racing with real manager tools,
+plus branch/fork controls and concurrent prompt admission. Include no-child
+fixtures and bounded completion assertions.
+
+### Verified resolution
+
+The initial proposal above was replaced by a smaller fix that retains atomic
+control transactions: admission now supports cancellation while waiting, and
+all context-bearing manager operations use it. Canceled tools leave the queue
+so the control can finish joining the turn without releasing its transition
+guards. Prompt and manual compaction admission also honor caller cancellation.
+Permanent race-enabled tests force the original real-manager interleaving for
+Plan mode, compaction, branch selection, fork, and replacement prompt, with
+bounded completion. A separate test cancels an already-waiting admission.
+The full internal race suite and final affected-area race checks pass.
+
+## BUG-034: Compaction usage is missing from session and goal accounting
+
+- **Status:** Resolved; verified 2026-09-05
+- **Severity:** Medium
+- **Surface:** Provider-backed compaction, usage/cost totals, automatic goal budgets
+- **Observed:** 2026-09-05 follow-up audit of revision `4d35f52`
+
+`readCompactionSummary` at `internal/agent/compaction.go:466-468` handles
+`EvStreamUsage` only by setting an activity flag. `summarizeForCompaction`
+returns summary text without accounting for the provider's reported tokens or
+cost. Applying the checkpoint does not persist that usage either. Session
+totals and automatic goal accounting therefore omit these provider requests.
+
+This undercounts work as well as displayed cost: an automatic goal can continue
+without recognizing that compaction crossed its token budget. The defect is
+the discarded usage, not the ordinary possibility that one in-flight request
+overshoots a budget. Repeated compactions can repeatedly escape accounting.
+
+### Reproduction and verification
+
+A temporary overlay extended the existing automatic-compaction fixture with
+a 150-token goal budget and explicit local provider usage events. The ordinary
+request reported 95 tokens and USD 0.10; the summary request reported another
+100 tokens and USD 0.20. The fixture verified that request two was the actual
+checkpoint request, then observed further normal goal work and completion.
+
+In all three race-enabled runs, both the persisted goal and SQLite session
+aggregate reported only 95 tokens and USD 0.10, despite the provider reporting
+195 tokens and USD 0.30. The goal completed without recognizing the budget
+crossing. Assertions for full usage and cost failed consistently; no data race
+was reported. No network requests or real provider charges were involved.
+
+### Required remediation and regression coverage
+
+Collect provider summary usage, persist it in branch accounting, and attribute
+automatic compaction to its owning goal before deciding further continuation.
+Keep this separate from conversational context-occupancy measurements. Preserve
+goal identity across between-turn compaction; simply calling a turn-accounting
+helper may not have the correct active-turn attribution there.
+
+Cover manual and automatic compaction, within-turn and between-turn boundaries,
+budget crossings, reopen/branch aggregation, and reported usage on failed or
+retried summaries. Avoid double counting cumulative usage events or adding
+synthetic conversational turns solely for accounting.
+
+### Verified resolution
+
+Compaction captures the last cumulative usage snapshot once per provider
+attempt, including reported usage on failed attempts, and appends branch-local
+`provider_usage_v1` metadata. Memory and SQLite aggregates include it without
+creating conversation turns or context-occupancy events. Automatic compaction
+charges the admitted goal, including between-turn work; crossing a budget stops
+normal continuation and invokes the existing budget-completion path. Manual
+compaction charges only the session. Accounting failures remain fatal instead
+of being hidden by local fallback and emit a terminal compaction error event.
+Permanent tests verify 195 tokens / USD 0.30, cumulative snapshots, both
+automatic boundaries, manual retries, budget status, forks, reopen, and failure
+handling. Full tests and agent/session race checks pass. See `docs/goals.md`
+and `docs/session-storage-internals.md`.
+
+## BUG-035: Full process log buffers shift retained output on every small write
+
+- **Status:** Resolved; verified 2026-09-05
+- **Severity:** Performance
+- **Surface:** Managed subprocess stdout/stderr capture
+- **Observed:** 2026-09-05 performance audit of revision `4d35f52`
+
+Once the retained log buffer is full, `outputRing.Write` at
+`internal/process/output.go:37-38` shifts its surviving contents for every
+write smaller than the retention cap. With the default 1 MiB cap, a 4 KiB
+write copies approximately 1 MiB while holding the output mutex.
+
+A one-file candidate with 12 added and two removed lines advances the data
+slice and occasionally compacts it into reusable storage with 25% spare
+capacity. Reads, cursors, notification, and the retained-byte cap remain
+unchanged. This trades 256 KiB of reserved capacity per full default buffer
+for far fewer copies; it is not a free memory optimization.
+
+Three-sample median write times on Go 1.27rc3 / macOS arm64 / Apple M3 Pro,
+with a full 1 MiB buffer, `-cpu=1 -benchtime=300ms`:
+
+| Incoming chunk | Current | Candidate | Speedup |
+| --- | ---: | ---: | ---: |
+| 64 bytes | 23.647 us | 0.070 us | 338x |
+| 4 KiB | 25.049 us | 0.599 us | 41.8x |
+| 32 KiB | 24.943 us | 3.742 us | 6.7x |
+
+These are steady-state capture-helper measurements, not subprocess or agent
+turn speedups. At a smaller 64 KiB cap with 32 KiB writes the candidate showed
+no gain, so retention/chunk size matters. Per-write notification still costs
+one allocation; the candidate does not address it.
+
+A separate local benchmark captured 32 MiB from `head -c 33554432 /dev/zero`
+through `os/exec` stdout/stderr wired to the output ring, as in the runtime.
+Including subprocess startup, pipe transfer, buffer growth, and cleanup,
+three-sample median time fell from 47.679 ms to 26.744 ms (44% less time).
+Total allocated bytes increased from 5,577,096 to 6,901,426 for that capture,
+including the one-time reusable-storage allocation. This isolates output
+capture; it does not predict the speedup of a build or agent turn.
+
+The candidate passed the complete process package race suite and a randomized
+5,500-write oracle across five capacities, including zero-length writes,
+oversized writes, byte contents, cursors, full reads, and notifications.
+Permanent regressions and a benchmark should accompany adoption.
+
+### Verified resolution
+
+Adopted reusable sliding storage with permanent write, cursor, notification,
+and repeated-compaction regressions. Final three-sample full-buffer 4 KiB
+writes improved 44.34x. Complete 32 MiB local subprocess capture took 41% less
+time (45.27 to 26.56 ms), with 24% more total allocated bytes. The live heap
+probe confirms about 256 KiB additional memory per full default buffer;
+whole-process capture peak RSS rose 8%. This is an explicit speed/memory
+tradeoff. The full process suite and race checks pass. Raw evidence and
+reproduction are in `docs/runtime-fixes-performance.md`.
+
+## BUG-036: Terminal sanitization allocates copies for already-safe text
+
+- **Status:** Resolved; verified 2026-09-05
+- **Severity:** Performance
+- **Surface:** TUI text/thinking/plan deltas, labels, and bounded previews
+- **Observed:** 2026-09-05 performance audit of revision `4d35f52`
+
+`sanitizeTerminalTextLimit` at `internal/tui/tools_info.go:226` always builds a
+new string for nonempty output. Ordinary text needs no transformation. A
+five-line fast path returns the original string only when it fits the byte
+limit and contains neither a disallowed control nor a replacement rune.
+All other input uses the existing sanitizer, including malformed UTF-8.
+
+Three-sample medians, `-cpu=1 -benchtime=200ms`, on the same machine as BUG-035:
+
+| Input | Current | Candidate | Current B/op | Candidate B/op |
+| --- | ---: | ---: | ---: | ---: |
+| 20-byte ordinary delta | 148.8 ns | 35.1 ns | 24 | 0 |
+| 4,400-byte ordinary text | 26.667 us | 8.153 us | 4,864 | 0 |
+| 3,900-byte Unicode text | 21.982 us | 6.845 us | 4,096 | 0 |
+
+Control-heavy input remained effectively unchanged. These measurements cover
+sanitization, not provider latency or complete TUI rendering. This is separate
+from the already-adopted process-output builder reservation in BUG-025.
+
+The candidate and BUG-037 together passed the full TUI race suite and byte-for-
+byte differential checks over 10,010 inputs at eight limits, plus rendered
+preview/diff cases. Keep control removal, Unicode behavior, and byte-limit
+regressions when adopting the fast path.
+
+### Verified resolution
+
+Adopted the safe-text return with permanent differential and benchmark
+coverage. Final three-sample safe 4,400-byte text improved 3.04x and eliminated
+4,864 B/op; 20-byte deltas improved 3.60x with zero allocation. Control-heavy
+input measured 7% slower with unchanged allocation volume, which is retained
+in the report rather than treated as a gain. Full TUI tests and race checks
+pass. See `docs/runtime-fixes-performance.md` for all results and scope.
+
+## BUG-037: Short display previews decode entire long strings into runes
+
+- **Status:** Resolved; verified 2026-09-05
+- **Severity:** Performance
+- **Surface:** TUI rune-limited labels, tool previews, and subagent summaries
+- **Observed:** 2026-09-05 performance audit of revision `4d35f52`
+
+`truncateRunes` at `internal/tui/view.go:928` converts the complete input to a
+rune slice before retaining a short prefix. A candidate with 11 added and
+seven removed lines stops scanning when truncation is established and converts
+only the needed prefix. It preserves the existing ellipsis, one-rune-limit,
+short-string, and malformed-UTF-8 behavior.
+
+Three-sample medians for a 120-rune limit, using the BUG-036 benchmark settings:
+
+| Input | Current | Candidate | Current B/op | Candidate B/op |
+| --- | ---: | ---: | ---: | ---: |
+| 4 KiB ASCII | 9.986 us | 0.990 us | 16,640 | 736 |
+| 128 KiB ASCII | 290.594 us | 0.984 us | 524,544 | 736 |
+| Approximately 128 KiB Unicode | 300.705 us | 2.239 us | 180,992 | 1,248 |
+
+The large ratios isolate truncation of long inputs; short strings improved
+only from 43.1 ns to 26.5 ns. Combining this candidate with BUG-036 reduced
+the actual `renderToolOutputPreview` benchmark for 45 ordinary result lines
+at width 120 from 31.046 us to 12.417 us, and from 7,856 to 3,920 B/op.
+The complete TUI race suite and the differential checks described in BUG-036
+passed with both candidates. Add permanent bounded-prefix coverage on adoption.
+
+### Verified resolution
+
+Adopted bounded-prefix scanning with permanent original-behavior parity
+coverage. Final three-sample 4 KiB truncation improved 9.58x and reduced
+16,640 to 736 B/op. With BUG-036, an ordinary 45-line rendered tool preview
+improved 2.30x and reduced 7,856 to 3,920 B/op. Full TUI tests and race checks
+pass. Larger helper-only ratios, raw samples, and reproduction commands are
+recorded in `docs/runtime-fixes-performance.md`.

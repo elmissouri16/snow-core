@@ -1,0 +1,276 @@
+{
+  "before": {
+    "BenchmarkSanitizeTerminalText/token": [
+      127.6,
+      24.0,
+      1.0
+    ],
+    "BenchmarkSanitizeTerminalText/ascii4K": [
+      24936.0,
+      4864.0,
+      1.0
+    ],
+    "BenchmarkSanitizeTerminalText/ascii128K": [
+      738197.0,
+      147456.0,
+      1.0
+    ],
+    "BenchmarkSanitizeTerminalText/unicode4K": [
+      20624.0,
+      4096.0,
+      1.0
+    ],
+    "BenchmarkSanitizeTerminalText/control4K": [
+      19180.0,
+      4096.0,
+      1.0
+    ],
+    "BenchmarkTruncateRunes/short": [
+      41.95,
+      0.0,
+      0.0
+    ],
+    "BenchmarkTruncateRunes/ascii4K": [
+      9900.0,
+      16640.0,
+      3.0
+    ],
+    "BenchmarkTruncateRunes/ascii128K": [
+      278778.0,
+      524544.0,
+      3.0
+    ],
+    "BenchmarkTruncateRunes/unicode128K": [
+      291796.0,
+      180992.0,
+      3.0
+    ],
+    "BenchmarkToolOutputPreview/normal": [
+      28829.0,
+      7856.0,
+      30.0
+    ],
+    "BenchmarkToolOutputPreview/short_lines": [
+      50280.0,
+      24616.0,
+      30.0
+    ],
+    "BenchmarkToolOutputPreview/long_line": [
+      27468.0,
+      13008.0,
+      11.0
+    ],
+    "BenchmarkCompactAgentText/4096": [
+      63505.0,
+      34304.0,
+      6.0
+    ],
+    "BenchmarkCompactAgentText/131072": [
+      1975166.0,
+      1081600.0,
+      6.0
+    ],
+    "BenchmarkNormalizeCheckpoint/concentrated/lines100_bytes7153": [
+      415584.0,
+      912880.0,
+      324.0
+    ],
+    "BenchmarkNormalizeCheckpoint/concentrated/lines400_bytes28453": [
+      2121256.0,
+      12510000.0,
+      929.0
+    ],
+    "BenchmarkNormalizeCheckpoint/concentrated/lines1600_bytes113653": [
+      21525972.0,
+      193995808.0,
+      3335.0
+    ],
+    "BenchmarkNormalizeCheckpoint/distributed/lines100_bytes7461": [
+      113656.0,
+      185528.0,
+      322.0
+    ],
+    "BenchmarkNormalizeCheckpoint/distributed/lines400_bytes28761": [
+      515713.0,
+      1446408.0,
+      946.0
+    ],
+    "BenchmarkNormalizeCheckpoint/distributed/lines1600_bytes113961": [
+      4379207.0,
+      17638152.0,
+      3369.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_65536/chunk_64": [
+      1083.0,
+      112.0,
+      1.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_65536/chunk_4096": [
+      1137.0,
+      112.0,
+      1.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_65536/chunk_32768": [
+      1395.0,
+      112.0,
+      1.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_1048576/chunk_64": [
+      24769.0,
+      112.0,
+      1.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_1048576/chunk_4096": [
+      25875.0,
+      112.0,
+      1.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_1048576/chunk_32768": [
+      26075.0,
+      112.0,
+      1.0
+    ],
+    "BenchmarkProcessCapture32MiB": [
+      45265776.0,
+      5577149.0,
+      1133.0
+    ]
+  },
+  "after": {
+    "BenchmarkSanitizeTerminalText/token": [
+      35.49,
+      0.0,
+      0.0
+    ],
+    "BenchmarkSanitizeTerminalText/ascii4K": [
+      8200.0,
+      0.0,
+      0.0
+    ],
+    "BenchmarkSanitizeTerminalText/ascii128K": [
+      265563.0,
+      0.0,
+      0.0
+    ],
+    "BenchmarkSanitizeTerminalText/unicode4K": [
+      6969.0,
+      0.0,
+      0.0
+    ],
+    "BenchmarkSanitizeTerminalText/control4K": [
+      20580.0,
+      4096.0,
+      1.0
+    ],
+    "BenchmarkTruncateRunes/short": [
+      27.12,
+      0.0,
+      0.0
+    ],
+    "BenchmarkTruncateRunes/ascii4K": [
+      1033.0,
+      736.0,
+      3.0
+    ],
+    "BenchmarkTruncateRunes/ascii128K": [
+      1030.0,
+      736.0,
+      3.0
+    ],
+    "BenchmarkTruncateRunes/unicode128K": [
+      2218.0,
+      1248.0,
+      3.0
+    ],
+    "BenchmarkToolOutputPreview/normal": [
+      12552.0,
+      3920.0,
+      23.0
+    ],
+    "BenchmarkToolOutputPreview/short_lines": [
+      33309.0,
+      21928.0,
+      29.0
+    ],
+    "BenchmarkToolOutputPreview/long_line": [
+      6351.0,
+      1040.0,
+      10.0
+    ],
+    "BenchmarkCompactAgentText/4096": [
+      24376.0,
+      14304.0,
+      5.0
+    ],
+    "BenchmarkCompactAgentText/131072": [
+      746527.0,
+      426720.0,
+      5.0
+    ],
+    "BenchmarkNormalizeCheckpoint/concentrated/lines100_bytes7153": [
+      110817.0,
+      184088.0,
+      158.0
+    ],
+    "BenchmarkNormalizeCheckpoint/concentrated/lines400_bytes28453": [
+      342577.0,
+      669016.0,
+      167.0
+    ],
+    "BenchmarkNormalizeCheckpoint/concentrated/lines1600_bytes113653": [
+      1250026.0,
+      2389576.0,
+      178.0
+    ],
+    "BenchmarkNormalizeCheckpoint/distributed/lines100_bytes7461": [
+      88163.0,
+      127408.0,
+      190.0
+    ],
+    "BenchmarkNormalizeCheckpoint/distributed/lines400_bytes28761": [
+      287959.0,
+      509936.0,
+      264.0
+    ],
+    "BenchmarkNormalizeCheckpoint/distributed/lines1600_bytes113961": [
+      998196.0,
+      1909232.0,
+      347.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_65536/chunk_64": [
+      63.7,
+      112.0,
+      1.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_65536/chunk_4096": [
+      314.3,
+      112.0,
+      1.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_65536/chunk_32768": [
+      1199.0,
+      112.0,
+      1.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_1048576/chunk_64": [
+      66.92,
+      112.0,
+      1.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_1048576/chunk_4096": [
+      583.5,
+      114.0,
+      1.0
+    ],
+    "BenchmarkFullOutputRingWrite/retained_1048576/chunk_32768": [
+      3722.0,
+      125.0,
+      1.0
+    ],
+    "BenchmarkProcessCapture32MiB": [
+      26562840.0,
+      6901739.0,
+      1258.0
+    ]
+  }
+}

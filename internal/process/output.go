@@ -17,6 +17,8 @@ type outputRing struct {
 	end    int64
 	data   []byte
 	notify chan struct{}
+
+	storage []byte
 }
 
 func newOutputRing(maxBytes int) *outputRing {
@@ -29,14 +31,22 @@ func (r *outputRing) Write(p []byte) (int, error) {
 	original := len(p)
 	r.end += int64(original)
 	if original >= r.max {
+		if r.storage != nil {
+			r.data = r.storage[:0]
+		}
 		r.data = append(r.data[:0], p[original-r.max:]...)
 		r.start = r.end - int64(len(r.data))
 	} else {
 		overflow := len(r.data) + original - r.max
 		if overflow > 0 {
-			copy(r.data, r.data[overflow:])
-			r.data = r.data[:len(r.data)-overflow]
+			r.data = r.data[overflow:]
 			r.start += int64(overflow)
+		}
+		if r.start > 0 && len(r.data)+original > cap(r.data) {
+			if r.storage == nil {
+				r.storage = make([]byte, r.max+r.max/4)
+			}
+			r.data = r.storage[:copy(r.storage, r.data)]
 		}
 		r.data = append(r.data, p...)
 	}

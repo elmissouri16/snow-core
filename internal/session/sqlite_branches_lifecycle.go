@@ -208,12 +208,12 @@ func (s *SQLiteStore) AggregateUsage() (protocol.Usage, error) {
 	if s.closed {
 		return protocol.Usage{}, errors.New("session: store closed")
 	}
-	rows, err := s.db.Query(`WITH RECURSIVE branch(id, parent_id, entry_type, message) AS (
-		SELECT id, parent_id, entry_type, message FROM entries WHERE id=?
-		UNION ALL
-		SELECT e.id, e.parent_id, e.entry_type, e.message FROM entries e JOIN branch b ON e.id=b.parent_id
-	) SELECT json_extract(CAST(message AS TEXT), '$.usage') FROM branch
-	WHERE entry_type=? AND json_type(CAST(message AS TEXT), '$.usage')='object'`, s.tip, EntryMessage)
+	rows, err := s.db.Query(`WITH RECURSIVE branch(id, parent_id, entry_type, message, meta_key, meta_value) AS (
+ SELECT id, parent_id, entry_type, message, meta_key, meta_value FROM entries WHERE id=?
+ UNION ALL
+ SELECT e.id, e.parent_id, e.entry_type, e.message, e.meta_key, e.meta_value FROM entries e JOIN branch b ON e.id=b.parent_id
+ ) SELECT CASE WHEN entry_type=? THEN meta_value ELSE json_extract(CAST(message AS TEXT), '$.usage') END FROM branch
+ WHERE (entry_type=? AND json_type(CAST(message AS TEXT), '$.usage')='object') OR (entry_type=? AND meta_key=?)`, s.tip, EntryMeta, EntryMessage, EntryMeta, MetaProviderUsage)
 	if err != nil {
 		return protocol.Usage{}, err
 	}

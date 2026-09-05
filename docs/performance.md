@@ -6,6 +6,10 @@ generous wall-clock ceilings that catch only catastrophic slowdowns.
 This guide owns the benchmark ceiling policy; TUI renderer invariants remain in
 [TUI performance](tui-performance.md).
 
+The [2026-09-05 runtime measurements](runtime-fixes-performance.md) cover small
+checkpoint, terminal-text, and process-capture changes, including allocated
+bytes, live retained heap, and whole-process peak resident memory.
+
 ## Run the guard
 
 From the repository root:

@@ -349,9 +349,12 @@ func canonicalizeWorkingStateCheckpoint(summary string) string {
 	var preamble []string
 	var chunks []chunk
 	var current *chunk
+	var bodyText strings.Builder
 	flush := func() {
 		if current != nil {
+			current.body = bodyText.String()
 			chunks = append(chunks, *current)
+			bodyText.Reset()
 			current = nil
 		}
 	}
@@ -367,10 +370,10 @@ func canonicalizeWorkingStateCheckpoint(summary string) string {
 			}
 			continue
 		}
-		if current.body != "" {
-			current.body += "\n"
+		if bodyText.Len() != 0 {
+			bodyText.WriteByte('\n')
 		}
-		current.body += line
+		bodyText.WriteString(line)
 	}
 	flush()
 

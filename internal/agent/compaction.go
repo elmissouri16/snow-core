@@ -174,7 +174,7 @@ func (a *Agent) autoCompactAdmittedBoundary(ctx context.Context, messages []prot
 	return true, nil
 }
 
-func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
+func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (compacted bool, retErr error) {
 	messages, err := a.contextMessagesCurrent()
 	if err != nil {
 		return false, err
@@ -192,7 +192,15 @@ func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
 		a.mu.Unlock()
 		return false, nil
 	}
+	goal, err := a.opts.Goal.Get()
+	if err != nil || goal == nil || goal.Status != protocol.GoalActive {
+		a.mu.Unlock()
+		return false, err
+	}
 	a.running = true
+	a.goalAtTurn = goal
+	a.turnMode = a.mode
+	a.turnStarted = time.Now()
 	a.queuedInputs = nil
 	a.queueAccepting = false
 	a.admitTurnIdentityLocked("compact")
@@ -203,6 +211,8 @@ func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (bool, error) {
 	a.mu.Unlock()
 	defer func() {
 		cancel()
+		_, accountingErr := a.finishGoalAccounting()
+		retErr = errors.Join(retErr, accountingErr)
 		_ = a.finishTurnMailbox(func() {
 			a.running = false
 			a.queueAccepting = false
@@ -309,6 +319,10 @@ func (a *Agent) compactActiveContextMessages(ctx context.Context, trigger compac
 	if summaryErr == nil && strings.TrimSpace(summary) == "" {
 		summaryErr = errors.New("provider returned a blank compaction summary")
 	}
+	if _, fatal := errors.AsType[*compactionAccountingError](summaryErr); fatal {
+		a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: summaryErr.Error(), IsError: true, Compaction: &result})
+		return result, summaryErr
+	}
 	if summaryErr != nil && a.opts.Compaction.Fallback != "error" {
 		if ctx.Err() != nil {
 			a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: ctx.Err().Error(), IsError: true, Compaction: &result})
@@ -414,10 +428,23 @@ Preserve exact identifiers, paths, artifact IDs, commands, test outcomes, failur
 		activity := false
 		var summary string
 		if err == nil {
-			summary, activity, err = readCompactionSummary(ctx, stream)
+			tracked := &compactionUsageStream{EventStream: stream}
+			if stream == nil {
+				return "", errors.New("provider summary returned a nil stream")
+			}
+			summary, activity, err = readCompactionSummary(ctx, tracked)
+			if accountingErr := a.recordCompactionUsage(tracked.usage); accountingErr != nil {
+				return "", &compactionAccountingError{err: accountingErr}
+			}
 		}
 		if err == nil {
 			return summary, nil
+		}
+		a.mu.RLock()
+		budgetReached := a.budgetWrap
+		a.mu.RUnlock()
+		if budgetReached {
+			return "", err
 		}
 		advice, retryable := provider.RetryAdviceFor(err)
 		if !retryable || ctx.Err() != nil {
@@ -564,7 +591,10 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	unlock := a.LockAdmission()
+	unlock, admissionErr := a.LockAdmissionContext(ctx)
+	if admissionErr != nil {
+		return admissionErr
+	}
 	admissionHeld := true
 	defer func() {
 		if admissionHeld {
@@ -628,7 +658,7 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 	defer func() {
 		a.closeInputQueue(retErr == nil || ctx.Err() != nil)
 		cancel()
-		retErr = errors.Join(retErr, a.drainMailbox())
+		retErr = errors.Join(retErr, a.drainMailbox(), ctx.Err())
 		var origin, turnID string
 		var usage *protocol.Usage
 		retErr = errors.Join(retErr, a.finishTurnMailbox(func() {

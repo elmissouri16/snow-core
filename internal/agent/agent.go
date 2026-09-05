@@ -158,7 +158,7 @@ type toolDisplayState struct {
 
 type Agent struct {
 	mu          sync.RWMutex
-	admissionMu sync.Mutex
+	admissionMu admissionMutex
 	// queuePublishMu serializes queue mutation with snapshot publication. Queue
 	// callbacks never run under mu, while observers still see snapshots in the
 	// exact order the underlying queue changed.

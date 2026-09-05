@@ -1,0 +1,99 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/tui
+cpu: Apple M3 Pro
+BenchmarkSanitizeTerminalText/token         	 2604331	       127.6 ns/op	      24 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/token         	 2740923	       126.9 ns/op	      24 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/token         	 2817952	       129.9 ns/op	      24 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/ascii4K       	   15402	     23633 ns/op	    4864 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/ascii4K       	   13872	     25413 ns/op	    4864 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/ascii4K       	   15336	     24936 ns/op	    4864 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/ascii128K     	     469	    773399 ns/op	  147456 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/ascii128K     	     475	    738197 ns/op	  147456 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/ascii128K     	     543	    691031 ns/op	  147456 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/unicode4K     	   16681	     20624 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/unicode4K     	   16627	     20756 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/unicode4K     	   16756	     20508 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/control4K     	   18739	     19180 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/control4K     	   18778	     19086 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkSanitizeTerminalText/control4K     	   17017	     20142 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkTruncateRunes/short                	 8473237	        41.95 ns/op	       0 B/op	       0 allocs/op
+BenchmarkTruncateRunes/short                	 8579206	        41.97 ns/op	       0 B/op	       0 allocs/op
+BenchmarkTruncateRunes/short                	 8605653	        41.80 ns/op	       0 B/op	       0 allocs/op
+BenchmarkTruncateRunes/ascii4K              	   37368	      9533 ns/op	   16640 B/op	       3 allocs/op
+BenchmarkTruncateRunes/ascii4K              	   36520	      9900 ns/op	   16640 B/op	       3 allocs/op
+BenchmarkTruncateRunes/ascii4K              	   37550	     10259 ns/op	   16640 B/op	       3 allocs/op
+BenchmarkTruncateRunes/ascii128K            	    1268	    278977 ns/op	  524544 B/op	       3 allocs/op
+BenchmarkTruncateRunes/ascii128K            	    1294	    276739 ns/op	  524544 B/op	       3 allocs/op
+BenchmarkTruncateRunes/ascii128K            	    1218	    278778 ns/op	  524544 B/op	       3 allocs/op
+BenchmarkTruncateRunes/unicode128K          	    1250	    293232 ns/op	  180992 B/op	       3 allocs/op
+BenchmarkTruncateRunes/unicode128K          	    1206	    291796 ns/op	  180992 B/op	       3 allocs/op
+BenchmarkTruncateRunes/unicode128K          	    1231	    291619 ns/op	  180992 B/op	       3 allocs/op
+BenchmarkToolOutputPreview/normal           	   12522	     28826 ns/op	    7856 B/op	      30 allocs/op
+BenchmarkToolOutputPreview/normal           	   12495	     28829 ns/op	    7856 B/op	      30 allocs/op
+BenchmarkToolOutputPreview/normal           	   12283	     29439 ns/op	    7856 B/op	      30 allocs/op
+BenchmarkToolOutputPreview/short_lines      	   10000	     50280 ns/op	   24616 B/op	      30 allocs/op
+BenchmarkToolOutputPreview/short_lines      	   10000	     49864 ns/op	   24616 B/op	      30 allocs/op
+BenchmarkToolOutputPreview/short_lines      	   10000	     50938 ns/op	   24616 B/op	      30 allocs/op
+BenchmarkToolOutputPreview/long_line        	   12842	     27705 ns/op	   13008 B/op	      11 allocs/op
+BenchmarkToolOutputPreview/long_line        	   13266	     27145 ns/op	   13008 B/op	      11 allocs/op
+BenchmarkToolOutputPreview/long_line        	   13158	     27468 ns/op	   13008 B/op	      11 allocs/op
+BenchmarkCompactAgentText/4096              	    9882	     63505 ns/op	   34304 B/op	       6 allocs/op
+BenchmarkCompactAgentText/4096              	   10000	     63688 ns/op	   34304 B/op	       6 allocs/op
+BenchmarkCompactAgentText/4096              	   10000	     60770 ns/op	   34304 B/op	       6 allocs/op
+BenchmarkCompactAgentText/131072            	     183	   1968497 ns/op	 1081600 B/op	       6 allocs/op
+BenchmarkCompactAgentText/131072            	     181	   1981121 ns/op	 1081600 B/op	       6 allocs/op
+BenchmarkCompactAgentText/131072            	     183	   1975166 ns/op	 1081600 B/op	       6 allocs/op
+PASS
+ok  	github.com/elmissouri16/snow-core/internal/tui	17.681s
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/compact
+cpu: Apple M3 Pro
+BenchmarkNormalizeCheckpoint/concentrated/lines100_bytes7153         	     782	    419976 ns/op	  912880 B/op	     324 allocs/op
+BenchmarkNormalizeCheckpoint/concentrated/lines100_bytes7153         	     867	    415584 ns/op	  912880 B/op	     324 allocs/op
+BenchmarkNormalizeCheckpoint/concentrated/lines100_bytes7153         	     860	    413278 ns/op	  912880 B/op	     324 allocs/op
+BenchmarkNormalizeCheckpoint/concentrated/lines400_bytes28453        	      98	   3369622 ns/op	12510000 B/op	     929 allocs/op
+BenchmarkNormalizeCheckpoint/concentrated/lines400_bytes28453        	     175	   2121256 ns/op	12510000 B/op	     929 allocs/op
+BenchmarkNormalizeCheckpoint/concentrated/lines400_bytes28453        	     178	   2107464 ns/op	12510000 B/op	     929 allocs/op
+BenchmarkNormalizeCheckpoint/concentrated/lines1600_bytes113653      	      27	  22556932 ns/op	193995808 B/op	    3335 allocs/op
+BenchmarkNormalizeCheckpoint/concentrated/lines1600_bytes113653      	      15	  21525972 ns/op	193995808 B/op	    3335 allocs/op
+BenchmarkNormalizeCheckpoint/concentrated/lines1600_bytes113653      	      18	  19984486 ns/op	193995808 B/op	    3335 allocs/op
+BenchmarkNormalizeCheckpoint/distributed/lines100_bytes7461          	    3206	    129188 ns/op	  185528 B/op	     322 allocs/op
+BenchmarkNormalizeCheckpoint/distributed/lines100_bytes7461          	    3340	    113656 ns/op	  185528 B/op	     322 allocs/op
+BenchmarkNormalizeCheckpoint/distributed/lines100_bytes7461          	    3204	    111177 ns/op	  185528 B/op	     322 allocs/op
+BenchmarkNormalizeCheckpoint/distributed/lines400_bytes28761         	     624	    503549 ns/op	 1446408 B/op	     946 allocs/op
+BenchmarkNormalizeCheckpoint/distributed/lines400_bytes28761         	     624	    547192 ns/op	 1446408 B/op	     946 allocs/op
+BenchmarkNormalizeCheckpoint/distributed/lines400_bytes28761         	    1020	    515713 ns/op	 1446408 B/op	     946 allocs/op
+BenchmarkNormalizeCheckpoint/distributed/lines1600_bytes113961       	      84	   4379207 ns/op	17638152 B/op	    3369 allocs/op
+BenchmarkNormalizeCheckpoint/distributed/lines1600_bytes113961       	      99	   3440175 ns/op	17638152 B/op	    3369 allocs/op
+BenchmarkNormalizeCheckpoint/distributed/lines1600_bytes113961       	      75	   4454477 ns/op	17638152 B/op	    3369 allocs/op
+PASS
+ok  	github.com/elmissouri16/snow-core/internal/compact	7.278s
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/process
+cpu: Apple M3 Pro
+BenchmarkFullOutputRingWrite/retained_65536/chunk_64         	  327801	      1093 ns/op	  58.55 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_65536/chunk_64         	  350768	      1065 ns/op	  60.10 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_65536/chunk_64         	  338973	      1083 ns/op	  59.10 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_65536/chunk_4096       	  338376	      1113 ns/op	3681.44 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_65536/chunk_4096       	  308716	      1145 ns/op	3578.74 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_65536/chunk_4096       	  305883	      1137 ns/op	3602.04 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_65536/chunk_32768      	  332973	      1117 ns/op	29336.91 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_65536/chunk_32768      	  342709	      1698 ns/op	19301.65 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_65536/chunk_32768      	  256716	      1395 ns/op	23491.78 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_1048576/chunk_64       	   12680	     27544 ns/op	   2.32 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_1048576/chunk_64       	   14624	     24769 ns/op	   2.58 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_1048576/chunk_64       	   15194	     23760 ns/op	   2.69 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_1048576/chunk_4096     	   15026	     24959 ns/op	 164.11 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_1048576/chunk_4096     	   13755	     25956 ns/op	 157.81 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_1048576/chunk_4096     	   13513	     25875 ns/op	 158.30 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_1048576/chunk_32768    	   13868	     26075 ns/op	1256.70 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_1048576/chunk_32768    	   14236	     25029 ns/op	1309.20 MB/s	     112 B/op	       1 allocs/op
+BenchmarkFullOutputRingWrite/retained_1048576/chunk_32768    	   13202	     26742 ns/op	1225.34 MB/s	     112 B/op	       1 allocs/op
+BenchmarkProcessCapture32MiB                                 	       8	  45265776 ns/op	 741.28 MB/s	 5577116 B/op	    1133 allocs/op
+BenchmarkProcessCapture32MiB                                 	       8	  41276823 ns/op	 812.91 MB/s	 5577158 B/op	    1133 allocs/op
+BenchmarkProcessCapture32MiB                                 	       7	  50444113 ns/op	 665.18 MB/s	 5577149 B/op	    1133 allocs/op
+PASS
+ok  	github.com/elmissouri16/snow-core/internal/process	8.197s

@@ -46,7 +46,7 @@ func TestStaleTurnAccountingDoesNotDeferReplacementGoal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	continuing, err := a.finalizeGoalTurn(nil, false)
+	continuing, err := a.finalizeGoalTurn(nil, false, nil)
 	if !errors.Is(err, session.ErrGoalConflict) {
 		t.Fatalf("finalize error=%v, want goal conflict", err)
 	}
@@ -99,7 +99,7 @@ func TestRepeatedGoalConflictsPauseAutomaticContinuation(t *testing.T) {
 		a.turnGoalConflict = &copy
 		a.mu.Unlock()
 
-		continuing, err := a.finalizeGoalTurn(nil, false)
+		continuing, err := a.finalizeGoalTurn(nil, false, nil)
 		if err != nil {
 			t.Fatalf("turn %d: %v", turn, err)
 		}

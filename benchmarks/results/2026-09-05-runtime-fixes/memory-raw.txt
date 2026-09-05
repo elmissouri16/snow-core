@@ -1,0 +1,359 @@
+=== heap-after.txt ===
+=== RUN   TestMeasureRetainedOutputHeap
+    measure_heap_test.go:17: live_heap_bytes_per_full_ring=1311060
+--- PASS: TestMeasureRetainedOutputHeap (0.01s)
+=== RUN   TestMeasureRetainedOutputHeap
+    measure_heap_test.go:17: live_heap_bytes_per_full_ring=1311049
+--- PASS: TestMeasureRetainedOutputHeap (0.01s)
+=== RUN   TestMeasureRetainedOutputHeap
+    measure_heap_test.go:17: live_heap_bytes_per_full_ring=1311042
+--- PASS: TestMeasureRetainedOutputHeap (0.01s)
+PASS
+
+=== heap-before.txt ===
+=== RUN   TestMeasureRetainedOutputHeap
+    measure_heap_test.go:17: live_heap_bytes_per_full_ring=1048877
+--- PASS: TestMeasureRetainedOutputHeap (0.13s)
+=== RUN   TestMeasureRetainedOutputHeap
+    measure_heap_test.go:17: live_heap_bytes_per_full_ring=1049201
+--- PASS: TestMeasureRetainedOutputHeap (0.12s)
+=== RUN   TestMeasureRetainedOutputHeap
+    measure_heap_test.go:17: live_heap_bytes_per_full_ring=1048534
+--- PASS: TestMeasureRetainedOutputHeap (0.12s)
+PASS
+
+=== rss-capture-after-1.time ===
+        0.02 real         0.01 user         0.01 sys
+            19283968  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1824  page reclaims
+                   1  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   4  signals received
+                 716  voluntary context switches
+                 600  involuntary context switches
+            97152457  instructions retired
+            46413589  cycles elapsed
+            11600472  peak memory footprint
+
+=== rss-capture-after-1.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/process
+cpu: Apple M3 Pro
+BenchmarkProcessCapture32MiB 	       1	  14392417 ns/op	2331.40 MB/s	 6902336 B/op	    1257 allocs/op
+PASS
+
+=== rss-capture-after-2.time ===
+        0.02 real         0.01 user         0.01 sys
+            19070976  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1809  page reclaims
+                   1  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   3  signals received
+                 721  voluntary context switches
+                 610  involuntary context switches
+            96785593  instructions retired
+            44216885  cycles elapsed
+            11371072  peak memory footprint
+
+=== rss-capture-after-2.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/process
+cpu: Apple M3 Pro
+BenchmarkProcessCapture32MiB 	       1	  13788750 ns/op	2433.46 MB/s	 6902784 B/op	    1261 allocs/op
+PASS
+
+=== rss-capture-after-3.time ===
+        0.02 real         0.01 user         0.01 sys
+            19365888  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1827  page reclaims
+                   1  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   4  signals received
+                 659  voluntary context switches
+                 583  involuntary context switches
+            96316795  instructions retired
+            44317967  cycles elapsed
+            11633192  peak memory footprint
+
+=== rss-capture-after-3.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/process
+cpu: Apple M3 Pro
+BenchmarkProcessCapture32MiB 	       1	  13503834 ns/op	2484.81 MB/s	 6904240 B/op	    1274 allocs/op
+PASS
+
+=== rss-capture-before-1.time ===
+        0.04 real         0.03 user         0.01 sys
+            17678336  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1722  page reclaims
+                   1  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   3  signals received
+                1018  voluntary context switches
+                 196  involuntary context switches
+           227021025  instructions retired
+            95987841  cycles elapsed
+             9978408  peak memory footprint
+
+=== rss-capture-before-1.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/process
+cpu: Apple M3 Pro
+BenchmarkProcessCapture32MiB 	       1	  32343375 ns/op	1037.44 MB/s	 5578080 B/op	    1135 allocs/op
+PASS
+
+=== rss-capture-before-2.time ===
+        0.03 real         0.03 user         0.01 sys
+            17776640  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1729  page reclaims
+                   1  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   4  signals received
+                1016  voluntary context switches
+                 219  involuntary context switches
+           226984661  instructions retired
+            91872381  cycles elapsed
+            10060328  peak memory footprint
+
+=== rss-capture-before-2.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/process
+cpu: Apple M3 Pro
+BenchmarkProcessCapture32MiB 	       1	  30721125 ns/op	1092.23 MB/s	 5577920 B/op	    1134 allocs/op
+PASS
+
+=== rss-capture-before-3.time ===
+        0.04 real         0.03 user         0.01 sys
+            17793024  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1733  page reclaims
+                   1  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   4  signals received
+                1015  voluntary context switches
+                 215  involuntary context switches
+           227546877  instructions retired
+            93332104  cycles elapsed
+            10093120  peak memory footprint
+
+=== rss-capture-before-3.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/process
+cpu: Apple M3 Pro
+BenchmarkProcessCapture32MiB 	       1	  31037375 ns/op	1081.10 MB/s	 5578064 B/op	    1134 allocs/op
+PASS
+
+=== rss-checkpoint-after-1.time ===
+        0.55 real         0.02 user         0.01 sys
+            13778944  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1051  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   8  signals received
+                   0  voluntary context switches
+                 265  involuntary context switches
+           144684262  instructions retired
+            60046898  cycles elapsed
+            10535416  peak memory footprint
+
+=== rss-checkpoint-after-1.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/compact
+cpu: Apple M3 Pro
+BenchmarkNormalizeCheckpoint/concentrated/lines1600_bytes113653         	       1	   2984375 ns/op	 2389576 B/op	     178 allocs/op
+PASS
+
+=== rss-checkpoint-after-2.time ===
+        0.01 real         0.01 user         0.00 sys
+            13860864  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1050  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   7  signals received
+                   1  voluntary context switches
+                 191  involuntary context switches
+           134377182  instructions retired
+            35947792  cycles elapsed
+            10469880  peak memory footprint
+
+=== rss-checkpoint-after-2.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/compact
+cpu: Apple M3 Pro
+BenchmarkNormalizeCheckpoint/concentrated/lines1600_bytes113653         	       1	   1494458 ns/op	 2389576 B/op	     178 allocs/op
+PASS
+
+=== rss-checkpoint-after-3.time ===
+        0.01 real         0.01 user         0.00 sys
+            13877248  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1054  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                  10  signals received
+                   0  voluntary context switches
+                 212  involuntary context switches
+           135271015  instructions retired
+            35982699  cycles elapsed
+            10551800  peak memory footprint
+
+=== rss-checkpoint-after-3.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/compact
+cpu: Apple M3 Pro
+BenchmarkNormalizeCheckpoint/concentrated/lines1600_bytes113653         	       1	   1507167 ns/op	 2389576 B/op	     178 allocs/op
+PASS
+
+=== rss-checkpoint-before-1.time ===
+        0.62 real         0.08 user         0.01 sys
+            16203776  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1194  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                  12  signals received
+                   0  voluntary context switches
+                 394  involuntary context switches
+           994451645  instructions retired
+           206916812  cycles elapsed
+            12927480  peak memory footprint
+
+=== rss-checkpoint-before-1.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/compact
+cpu: Apple M3 Pro
+BenchmarkNormalizeCheckpoint/concentrated/lines1600_bytes113653         	       1	  64349000 ns/op	193995808 B/op	    3335 allocs/op
+PASS
+
+=== rss-checkpoint-before-2.time ===
+        0.07 real         0.06 user         0.00 sys
+            15728640  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1170  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   9  signals received
+                   0  voluntary context switches
+                 367  involuntary context switches
+           997614237  instructions retired
+           185617899  cycles elapsed
+            12485136  peak memory footprint
+
+=== rss-checkpoint-before-2.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/compact
+cpu: Apple M3 Pro
+BenchmarkNormalizeCheckpoint/concentrated/lines1600_bytes113653         	       1	  61825792 ns/op	193995808 B/op	    3335 allocs/op
+PASS
+
+=== rss-checkpoint-before-3.time ===
+        0.07 real         0.06 user         0.00 sys
+            17350656  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1264  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   9  signals received
+                   0  voluntary context switches
+                 347  involuntary context switches
+           975801997  instructions retired
+           180910432  cycles elapsed
+            14074360  peak memory footprint
+
+=== rss-checkpoint-before-3.txt ===
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/compact
+cpu: Apple M3 Pro
+BenchmarkNormalizeCheckpoint/concentrated/lines1600_bytes113653         	       1	  58275541 ns/op	193995808 B/op	    3335 allocs/op
+PASS

@@ -1,0 +1,20 @@
+package process
+import("runtime";"testing")
+func TestMeasureRetainedOutputHeap(t *testing.T) {
+ payload:=make([]byte,DefaultRetainedOutputBytes)
+ runtime.GC()
+ var before,after runtime.MemStats
+ runtime.ReadMemStats(&before)
+ rings:=make([]*outputRing,16)
+ for i:=range rings {
+  r:=newOutputRing(DefaultRetainedOutputBytes)
+  _,_=r.Write(payload)
+  for range 300 {_,_=r.Write(payload[:4096])}
+  rings[i]=r
+ }
+ runtime.GC()
+ runtime.ReadMemStats(&after)
+ t.Logf("live_heap_bytes_per_full_ring=%d",(int64(after.HeapAlloc)-int64(before.HeapAlloc))/int64(len(rings)))
+ runtime.KeepAlive(rings)
+ runtime.KeepAlive(payload)
+}

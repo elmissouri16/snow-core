@@ -224,6 +224,11 @@ func sanitizeToolPreview(value string, maxBytes int) string {
 }
 
 func sanitizeTerminalTextLimit(value string, maxBytes int) string {
+	if (maxBytes < 0 || len(value) <= maxBytes) && strings.IndexFunc(value, func(r rune) bool {
+		return r == utf8.RuneError || (r != '\n' && r != '\t' && unicode.IsControl(r))
+	}) < 0 {
+		return value
+	}
 	if maxBytes == 0 {
 		return ""
 	}

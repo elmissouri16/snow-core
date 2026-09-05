@@ -1,6 +1,9 @@
 package process
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestOutputReadPreservesSplitUTF8AcrossCursors(t *testing.T) {
 	ring := newOutputRing(1024)
@@ -45,5 +48,25 @@ func TestOutputReadRetainsIncompleteRunningRune(t *testing.T) {
 	}
 	if string(second.data) != "é" || second.next != 2 {
 		t.Fatalf("complete read data=%q next=%d", second.data, second.next)
+	}
+}
+
+func TestOutputRingCompactsSlidingStorage(t *testing.T) {
+	ring := newOutputRing(1024)
+	want := make([]byte, 1024)
+	_, _ = ring.Write(want)
+	for i := range 300 {
+		chunk := bytes.Repeat([]byte{byte(i)}, 17)
+		if i == 150 {
+			chunk = bytes.Repeat([]byte{byte(i)}, 2048)
+		}
+		_, _ = ring.Write(chunk)
+		want = append(want, chunk...)
+		if len(want) > 1024 {
+			want = want[len(want)-1024:]
+		}
+		if !bytes.Equal(ring.tail(1024), want) {
+			t.Fatalf("retained bytes changed after write %d", i)
+		}
 	}
 }

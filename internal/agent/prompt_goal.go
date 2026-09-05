@@ -16,7 +16,10 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	unlockAdmission := a.LockAdmission()
+	unlockAdmission, admissionErr := a.LockAdmissionContext(ctx)
+	if admissionErr != nil {
+		return admissionErr
+	}
 	admissionHeld := true
 	skillsCleared := 0
 	reentrantEventCallback := a.bus.InCallback()
@@ -190,8 +193,8 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 		// Persist any mail that arrived after the final provider request before
 		// releasing turn admission. This keeps delivery ordered and durable for
 		// the next user/follow-up turn without racing tool-result chaining.
-		retErr = errors.Join(retErr, a.drainMailbox())
-		continuing, accountingErr := a.finalizeGoalTurn(retErr, true)
+		retErr = errors.Join(retErr, a.drainMailbox(), ctx.Err())
+		continuing, accountingErr := a.finalizeGoalTurn(retErr, true, ctx.Err())
 		retErr = errors.Join(retErr, accountingErr)
 		var origin, turnID string
 		var usage *protocol.Usage
@@ -345,8 +348,8 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	defer func() {
 		a.closeInputQueue(retErr == nil || ctx.Err() != nil)
 		cancel()
-		retErr = errors.Join(retErr, a.drainMailbox())
-		continuing, accountingErr := a.finalizeGoalTurn(retErr, false)
+		retErr = errors.Join(retErr, a.drainMailbox(), ctx.Err())
+		continuing, accountingErr := a.finalizeGoalTurn(retErr, false, ctx.Err())
 		retErr = errors.Join(retErr, accountingErr)
 		var origin, turnID string
 		var usage *protocol.Usage
@@ -422,7 +425,7 @@ func (a *Agent) resetGoalConflictState() {
 	a.mu.Unlock()
 }
 
-func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
+func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool, callerErr error) (bool, error) {
 	crossed, accountingErr := a.finishGoalAccounting()
 	var transitionErr error
 	if accountingErr != nil {
@@ -434,6 +437,9 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 			transitionErr = a.stopGoalOnError(accountingErr)
 		}
 	}
+	if callerErr != nil && accountingErr == nil && !crossed {
+		transitionErr = errors.Join(transitionErr, a.pauseGoalAfterCallerCancellation())
+	}
 	if turnErr != nil || accountingErr != nil {
 		// Accounting always precedes terminal classification, and budget crossing
 		// keeps precedence. Provider retries have already exhausted their central
@@ -441,7 +447,7 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool) (bool, error) {
 		a.mu.Lock()
 		a.budgetWrap = false
 		a.mu.Unlock()
-		if accountingErr == nil && !errors.Is(turnErr, context.Canceled) && !crossed {
+		if callerErr == nil && accountingErr == nil && !errors.Is(turnErr, context.Canceled) && !crossed {
 			transitionErr = errors.Join(transitionErr, a.stopGoalOnError(turnErr))
 		}
 	}
@@ -647,7 +653,20 @@ func (a *Agent) ContinueGoal() {
 			if err != nil || g == nil || g.Status != protocol.GoalActive {
 				break
 			}
-			if compacted, compactErr := a.autoCompactGoalBoundary(context.Background()); compactErr != nil {
+			compacted, compactErr := a.autoCompactGoalBoundary(context.Background())
+			a.mu.Lock()
+			crossed = a.budgetWrap
+			a.budgetWrap = false
+			stopped = a.autoStop
+			a.mu.Unlock()
+			if stopped {
+				break
+			}
+			if crossed && !wrap {
+				wrap = true
+				continue
+			}
+			if compactErr != nil {
 				a.mu.RLock()
 				stopped = a.autoStop
 				a.mu.RUnlock()

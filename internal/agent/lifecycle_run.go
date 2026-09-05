@@ -405,6 +405,9 @@ func (a *Agent) run(ctx context.Context) error {
 			return fmt.Errorf("agent: load context: %w", err)
 		}
 		if compacted, compactErr := a.autoCompactAdmittedBoundary(ctx, msgs); compactErr != nil {
+			if _, fatal := errors.AsType[*compactionAccountingError](compactErr); fatal {
+				return compactErr
+			}
 			a.mu.RLock()
 			goalTurn := a.goalAtTurn != nil
 			a.mu.RUnlock()

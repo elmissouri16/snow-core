@@ -768,7 +768,10 @@ func rollbackFork(branches session.BranchStore, createdBranchID, oldBranchID str
 // The active provider is asked for a concise summary; the local summarizer is
 // used when that request fails, provided the context is still live.
 func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, retErr error) {
-	unlockAdmission := a.LockAdmission()
+	unlockAdmission, admissionErr := a.LockAdmissionContext(ctx)
+	if admissionErr != nil {
+		return result, admissionErr
+	}
 	admissionHeld := true
 	defer func() {
 		if admissionHeld {

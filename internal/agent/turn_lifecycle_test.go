@@ -487,26 +487,18 @@ func TestMaxTurns(t *testing.T) {
 	}
 }
 
-// TestAbort: context cancellation aborts mid-stream and records aborted assistant.
-func TestAbort(t *testing.T) {
+// Canceled callers are rejected before any user input is admitted or persisted.
+func TestCanceledPromptRejectedBeforeAdmission(t *testing.T) {
 	prov := &blockingProvider{}
 	a, st := setup(t, prov, nil, permission.ModeDeny)
 	ctx, cancel := context.WithCancel(t.Context())
-	cancel() // already cancelled
-	if err := a.Prompt(ctx, "hi"); err != nil {
-		t.Fatal(err)
+	cancel()
+	if err := a.Prompt(ctx, "hi"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v", err)
 	}
-	msgs, _ := st.Messages()
-	if len(msgs) != 2 {
-		t.Fatalf("expected 2 messages (user + aborted assistant), got %d", len(msgs))
-	}
-	asst := msgs[1]
-	if asst.Role != protocol.RoleAssistant || asst.StopReason != protocol.StopAborted {
-		t.Fatalf("expected aborted assistant: %+v", asst)
-	}
-	stats, err := a.RunStats()
-	if err != nil || stats != (session.AgentRunStats{Turns: 1, Steps: 1}) {
-		t.Fatalf("pre-request cancellation stats=%+v err=%v, want 1/1", stats, err)
+	messages, err := st.Messages()
+	if err != nil || len(messages) != 0 {
+		t.Fatalf("canceled caller persisted messages=%+v err=%v", messages, err)
 	}
 }
 
@@ -616,8 +608,8 @@ func TestAlreadyRunning(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected already-running error")
 	}
-	if err2 := <-done; err2 != nil {
-		t.Fatalf("first prompt should abort cleanly, got %v", err2)
+	if err2 := <-done; !errors.Is(err2, context.Canceled) {
+		t.Fatalf("first prompt should report caller cancellation, got %v", err2)
 	}
 }
 
@@ -653,8 +645,8 @@ func TestConcurrentPromptNoGhostMessage(t *testing.T) {
 
 	// First turn aborts cleanly on cancel.
 	cancel()
-	if err2 := <-done; err2 != nil {
-		t.Fatalf("first prompt should abort cleanly, got %v", err2)
+	if err2 := <-done; !errors.Is(err2, context.Canceled) {
+		t.Fatalf("first prompt should report caller cancellation, got %v", err2)
 	}
 }
 

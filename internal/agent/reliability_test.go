@@ -450,7 +450,7 @@ func TestSynchronousProviderCancellationPersistsAbortedBoundary(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	provider := &startFailureProvider{cancel: cancel}
 	a, store := setup(t, provider, nil, permission.ModeDeny)
-	if err := a.Prompt(ctx, "cancel during startup"); err != nil {
+	if err := a.Prompt(ctx, "cancel during startup"); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	messages, _ := store.Messages()

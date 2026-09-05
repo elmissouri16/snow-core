@@ -45,6 +45,9 @@ const (
 	// tool results starts another. Compaction and auxiliary provider requests are
 	// deliberately excluded.
 	MetaAgentStep = "agent_step_v1"
+	// MetaProviderUsage records an auxiliary provider request's final Usage JSON.
+	// It contributes to branch totals without adding conversational context.
+	MetaProviderUsage = "provider_usage_v1"
 )
 
 // Entry is one line in a session file.

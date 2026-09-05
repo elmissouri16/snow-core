@@ -248,9 +248,11 @@ events and never drive the loop themselves.
    results without retrying side effects automatically.
 5. Failed provider attempts remain durable for diagnostics but are excluded
    from subsequent provider and overflow-compaction context.
-6. `context.Context` cancellation aborts the provider stream and in-flight
-   tools, and persists one aborted assistant boundary regardless of which
-   provider boundary observes it.
+6. Caller cancellation before admission rejects input without persistence.
+   After admission it aborts provider/tool work, preserves aborted history,
+   returns the caller's context error, and pauses the attached active goal.
+   Subagent manager admission waits are cancelable, so atomic controls can
+   join canceled work without trapping a tool behind their admission lock.
 7. Events are the only cross-surface observation channel (TUI, SDK, print,
    RPC, and plugins all subscribe).
 8. Tool-call limits span the complete admitted run, including multiple
@@ -809,6 +811,16 @@ go test ./internal/compact ./internal/agent -run '^$' \
   -bench '^(BenchmarkPruneMixedHistory|BenchmarkCheckpointContextUsage)$' \
   -benchmem -benchtime=100ms -count=3 -cpu=1
 ```
+
+The 2026-09-05 runtime fixes add four small performance changes (34 added and
+12 removed production lines): incremental checkpoint section assembly, safe
+terminal-text reuse, bounded rune-prefix decoding, and amortized subprocess
+buffer compaction. Same-host three-sample medians show 6.19x faster normalization
+for a 28 KB concentrated checkpoint, 2.30x faster ordinary tool previews, and
+41% less time capturing 32 MiB of process output. A full default log buffer uses
+about 256 KiB more live heap; checkpoint stress peak RSS fell about 14%.
+See [the complete measurements](docs/runtime-fixes-performance.md) for raw
+results, reproduction commands, smaller regressions, and scope limitations.
 
 ### Tool interfaces
 

@@ -90,6 +90,8 @@ maintaining behavior or locating the authoritative repository reference.
   performance implementation guidance.
 - [Performance regression guard](performance.md) — deterministic allocation
   ceilings, local commands, CI policy, and benchmark review procedure.
+- [Runtime performance measurements](runtime-fixes-performance.md) — checkpoint,
+  terminal preview, and process capture before/after results and RAM tradeoffs.
 - [Code audit and remediation record](code-audit.md) — repository-wide 2026 bug,
   security, lifecycle, and maintainability findings with closure evidence.
 - [Codex Plan Mode and Goals research](codex-plan-mode-and-goals.md) — source

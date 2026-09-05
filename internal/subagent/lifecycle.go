@@ -520,17 +520,25 @@ func (m *Manager) RootCaller() Caller {
 // branch with Agent.SelectBranch/SetSession. It is deliberately held only for
 // admission/targeting; child turns continue independently under m.ctx.
 func (m *Manager) lockRootAdmission() func() {
+	unlock, _ := m.lockRootAdmissionContext(context.Background())
+	return unlock
+}
+
+func (m *Manager) lockRootAdmissionContext(ctx context.Context) (func(), error) {
 	m.mu.RLock()
 	root := m.root
 	m.mu.RUnlock()
 	if root == nil {
-		return func() {}
+		return func() {}, nil
 	}
-	return root.LockAdmission()
+	return root.LockAdmissionContext(ctx)
 }
 
 func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSubagentRequest) (protocol.SubagentState, error) {
-	unlockRoot := m.lockRootAdmission()
+	unlockRoot, admissionErr := m.lockRootAdmissionContext(ctx)
+	if admissionErr != nil {
+		return protocol.SubagentState{}, admissionErr
+	}
 	defer unlockRoot()
 	if ctx == nil {
 		ctx = context.Background()
@@ -753,7 +761,10 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 }
 
 func (m *Manager) SendMessage(ctx context.Context, caller Caller, target, message string) error {
-	unlockRoot := m.lockRootAdmission()
+	unlockRoot, admissionErr := m.lockRootAdmissionContext(ctx)
+	if admissionErr != nil {
+		return admissionErr
+	}
 	defer unlockRoot()
 	if ctx == nil {
 		ctx = context.Background()

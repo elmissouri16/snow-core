@@ -2,6 +2,7 @@ package session
 
 import (
 	"cmp"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"math"
@@ -759,6 +760,12 @@ func (s *MemoryStore) AggregateUsage() (protocol.Usage, error) {
 		entry := s.entries[index]
 		if entry.Type == EntryMessage && entry.Message != nil && entry.Message.Usage != nil {
 			total = total.Add(*entry.Message.Usage)
+		} else if entry.Type == EntryMeta && entry.Key == MetaProviderUsage {
+			var usage protocol.Usage
+			if err := json.Unmarshal([]byte(entry.Value), &usage); err != nil {
+				return protocol.Usage{}, err
+			}
+			total = total.Add(usage)
 		}
 		current = entry.ParentID
 	}

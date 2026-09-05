@@ -13,7 +13,10 @@ import (
 )
 
 func (m *Manager) Followup(ctx context.Context, caller Caller, target, message string) error {
-	unlockRoot := m.lockRootAdmission()
+	unlockRoot, admissionErr := m.lockRootAdmissionContext(ctx)
+	if admissionErr != nil {
+		return admissionErr
+	}
 	defer unlockRoot()
 	if ctx == nil {
 		ctx = context.Background()
@@ -281,7 +284,10 @@ func (m *Manager) WaitUntilAll(ctx context.Context, caller Caller, timeout time.
 }
 
 func (m *Manager) Interrupt(ctx context.Context, caller Caller, target string) (protocol.AgentStatus, error) {
-	unlockRoot := m.lockRootAdmission()
+	unlockRoot, admissionErr := m.lockRootAdmissionContext(ctx)
+	if admissionErr != nil {
+		return protocol.AgentNotFound, admissionErr
+	}
 	defer unlockRoot()
 	if ctx == nil {
 		ctx = context.Background()
@@ -322,8 +328,11 @@ func (m *Manager) Interrupt(ctx context.Context, caller Caller, target string) (
 	return prev, nil
 }
 
-func (m *Manager) List(_ context.Context, caller Caller, prefix string) (protocol.SubagentList, error) {
-	unlockRoot := m.lockRootAdmission()
+func (m *Manager) List(ctx context.Context, caller Caller, prefix string) (protocol.SubagentList, error) {
+	unlockRoot, admissionErr := m.lockRootAdmissionContext(ctx)
+	if admissionErr != nil {
+		return protocol.SubagentList{}, admissionErr
+	}
 	defer unlockRoot()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -389,8 +398,11 @@ func (m *Manager) List(_ context.Context, caller Caller, prefix string) (protoco
 	return result, nil
 }
 
-func (m *Manager) Messages(_ context.Context, target string) ([]protocol.Message, error) {
-	unlockRoot := m.lockRootAdmission()
+func (m *Manager) Messages(ctx context.Context, target string) ([]protocol.Message, error) {
+	unlockRoot, admissionErr := m.lockRootAdmissionContext(ctx)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
 	defer unlockRoot()
 	m.mu.RLock()
 	if err := m.requireReadyLocked(); err != nil {
@@ -415,8 +427,11 @@ func (m *Manager) Messages(_ context.Context, target string) ([]protocol.Message
 	return child.Messages()
 }
 
-func (m *Manager) Get(_ context.Context, target string) (protocol.SubagentState, error) {
-	unlockRoot := m.lockRootAdmission()
+func (m *Manager) Get(ctx context.Context, target string) (protocol.SubagentState, error) {
+	unlockRoot, admissionErr := m.lockRootAdmissionContext(ctx)
+	if admissionErr != nil {
+		return protocol.SubagentState{}, admissionErr
+	}
 	defer unlockRoot()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -487,7 +502,10 @@ func (m *Manager) Close(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
-	unlockRoot := m.lockRootAdmission()
+	unlockRoot, admissionErr := m.lockRootAdmissionContext(ctx)
+	if admissionErr != nil {
+		return admissionErr
+	}
 	m.mu.Lock()
 	if m.closed {
 		done := m.closeDone

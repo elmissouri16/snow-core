@@ -1,0 +1,50 @@
+{
+  "heap_before": {
+    "samples": [
+      1048877,
+      1049201,
+      1048534
+    ],
+    "median_bytes": 1048877
+  },
+  "rss_checkpoint_before": {
+    "samples": [
+      16203776,
+      15728640,
+      17350656
+    ],
+    "median_bytes": 16203776
+  },
+  "rss_capture_before": {
+    "samples": [
+      17678336,
+      17776640,
+      17793024
+    ],
+    "median_bytes": 17776640
+  },
+  "heap_after": {
+    "samples": [
+      1311060,
+      1311049,
+      1311042
+    ],
+    "median_bytes": 1311049
+  },
+  "rss_checkpoint_after": {
+    "samples": [
+      13778944,
+      13860864,
+      13877248
+    ],
+    "median_bytes": 13860864
+  },
+  "rss_capture_after": {
+    "samples": [
+      19283968,
+      19070976,
+      19365888
+    ],
+    "median_bytes": 19283968
+  }
+}

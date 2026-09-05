@@ -77,6 +77,16 @@ Goal usage includes provider input, cached input, output, reasoning, and tool
 requests from automatic work. When provider pricing is available, Snow may
 also show estimated cost. Provider usage remains authoritative.
 
+Automatic compaction counts toward the owning goal, including usage reported
+by failed summary attempts. Repeated usage events within one attempt are
+cumulative snapshots. Crossing the budget during compaction enters the budget
+completion path. Manual compaction counts toward session usage but does not
+charge the goal. Auxiliary usage stays in branch metadata, separate
+from conversation messages and context-occupancy estimates.
+
+An SDK caller canceling its prompt or reaching its deadline pauses the attached
+active goal. Resume it explicitly when the host is ready to continue.
+
 Goal text is private session state and is not published in summary events.
 However, Snow sends the active objective to the selected model provider while
 working on it. Do not put credentials or unnecessary sensitive data in a goal.

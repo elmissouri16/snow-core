@@ -5,6 +5,27 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+### Fixed
+
+- Return caller cancellation and deadline errors from core and SDK prompts,
+  pause the admitted active goal, and prevent automatic work from restarting
+  after the caller cancels.
+- Make prompt and subagent-manager admission waits cancelable, so Plan mode,
+  compaction, branch/fork controls, and replacement prompts can stop automatic
+  work without deadlocking on its manager tools.
+- Include provider-reported compaction usage in session totals and automatic
+  goal budgets, including failed summary attempts, without inflating
+  conversational context usage.
+
+### Performance
+
+- Build checkpoint section bodies incrementally, avoid copying safe terminal
+  text, and decode only the prefix needed by truncated display labels.
+- Reduce copying during bounded subprocess log capture using reusable buffer
+  storage. A full default buffer reserves an additional 256 KiB; retained log
+  content remains capped at 1 MiB. See the
+  [measured results](docs/runtime-fixes-performance.md).
+
 ## [0.1.0-alpha.6] - 2026-09-04
 
 This alpha prevents silent headless-output truncation and hardens concurrent

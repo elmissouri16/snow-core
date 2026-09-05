@@ -304,6 +304,13 @@ Use context cancellation and deadlines for prompts and host shutdown. Always
 call `Close`, even after an error, so Snow can release sessions, extensions,
 processes, and event delivery cleanly.
 
+Prompt methods return the caller's `context.Canceled` or
+`context.DeadlineExceeded` error, detectable with `errors.Is`. Cancellation
+before admission does not persist input. Cancellation after admission preserves
+the aborted history and pauses an attached active goal instead of starting a
+background continuation. An explicit Snow `Abort` remains a separate control
+operation; its completion is observable through the event stream.
+
 ## Understand current limits
 
 - The SDK is Go-only and alpha.

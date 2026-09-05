@@ -11,7 +11,10 @@ import (
 // CloseAgent releases one terminal identity from the open-agent quota while
 // preserving its stable path, durable transcript, result, usage, and topology.
 func (m *Manager) CloseAgent(ctx context.Context, caller Caller, target string) (protocol.AgentStatus, error) {
-	unlockRoot := m.lockRootAdmission()
+	unlockRoot, admissionErr := m.lockRootAdmissionContext(ctx)
+	if admissionErr != nil {
+		return protocol.AgentNotFound, admissionErr
+	}
 	defer unlockRoot()
 	if ctx == nil {
 		ctx = context.Background()
@@ -99,7 +102,10 @@ func (m *Manager) CloseAgent(ctx context.Context, caller Caller, target string) 
 // may then send mail, or use Followup to enqueue work. Followup performs this
 // admission automatically for closed agents.
 func (m *Manager) ResumeAgent(ctx context.Context, caller Caller, target string) (protocol.SubagentState, error) {
-	unlockRoot := m.lockRootAdmission()
+	unlockRoot, admissionErr := m.lockRootAdmissionContext(ctx)
+	if admissionErr != nil {
+		return protocol.SubagentState{}, admissionErr
+	}
 	defer unlockRoot()
 	if ctx == nil {
 		ctx = context.Background()
