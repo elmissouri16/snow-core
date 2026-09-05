@@ -1,0 +1,160 @@
+[
+  {
+    "capability": "credentials.read",
+    "operation": "read",
+    "path": "~/.aws/credentials",
+    "match": "exact"
+  },
+  {
+    "capability": "credentials.read",
+    "operation": "read",
+    "path": "~/.kube/config",
+    "match": "exact"
+  },
+  {
+    "capability": "credentials.read",
+    "operation": "read",
+    "path": "~/.config/gcloud/application_default_credentials.json",
+    "match": "exact"
+  },
+  {
+    "capability": "credentials.read",
+    "operation": "read",
+    "path": "~/.gnupg",
+    "match": "tree"
+  },
+  {
+    "capability": "credentials.read",
+    "operation": "read",
+    "path": "~/.ssh",
+    "match": "tree",
+    "basename_prefix": "id_",
+    "exclude_suffix": ".pub"
+  },
+  {
+    "capability": "ssh.authorization.write",
+    "operation": "mutate",
+    "path": "~/.ssh/authorized_keys",
+    "match": "exact"
+  },
+  {
+    "capability": "persistence.write",
+    "operation": "mutate",
+    "path": "~/.bashrc",
+    "match": "exact"
+  },
+  {
+    "capability": "persistence.write",
+    "operation": "mutate",
+    "path": "~/.bash_profile",
+    "match": "exact"
+  },
+  {
+    "capability": "persistence.write",
+    "operation": "mutate",
+    "path": "~/.profile",
+    "match": "exact"
+  },
+  {
+    "capability": "persistence.write",
+    "operation": "mutate",
+    "path": "~/.zshrc",
+    "match": "exact"
+  },
+  {
+    "capability": "persistence.write",
+    "operation": "mutate",
+    "path": "~/.zprofile",
+    "match": "exact"
+  },
+  {
+    "capability": "persistence.write",
+    "operation": "mutate",
+    "path": "~/.config/systemd/user",
+    "match": "tree"
+  },
+  {
+    "capability": "persistence.write",
+    "operation": "mutate",
+    "path": "~/Library/LaunchAgents",
+    "match": "tree"
+  },
+  {
+    "capability": "persistence.write",
+    "operation": "mutate",
+    "path": "/etc/cron.d",
+    "match": "tree"
+  },
+  {
+    "capability": "persistence.write",
+    "operation": "mutate",
+    "path": "/etc/systemd/system",
+    "match": "tree"
+  },
+  {
+    "capability": "persistence.write",
+    "operation": "mutate",
+    "path": "/Library/LaunchAgents",
+    "match": "tree"
+  },
+  {
+    "capability": "persistence.write",
+    "operation": "mutate",
+    "path": "/Library/LaunchDaemons",
+    "match": "tree"
+  },
+  {
+    "capability": "device.raw.access",
+    "operation": "any",
+    "path": "/dev/disk",
+    "match": "prefix"
+  },
+  {
+    "capability": "device.raw.access",
+    "operation": "any",
+    "path": "/dev/rdisk",
+    "match": "prefix"
+  },
+  {
+    "capability": "device.raw.access",
+    "operation": "any",
+    "path": "/dev/sd",
+    "match": "prefix"
+  },
+  {
+    "capability": "device.raw.access",
+    "operation": "any",
+    "path": "/dev/nvme",
+    "match": "prefix"
+  },
+  {
+    "capability": "device.raw.access",
+    "operation": "any",
+    "path": "/dev/mem",
+    "match": "exact"
+  },
+  {
+    "capability": "device.raw.access",
+    "operation": "any",
+    "path": "/dev/kmem",
+    "match": "exact"
+  },
+  {
+    "capability": "container.socket.access",
+    "operation": "any",
+    "path": "/var/run/docker.sock",
+    "match": "exact"
+  },
+  {
+    "capability": "container.socket.access",
+    "operation": "any",
+    "path": "/run/docker.sock",
+    "match": "exact"
+  },
+  {
+    "capability": "container.socket.access",
+    "operation": "any",
+    "path": "/podman/podman.sock",
+    "match": "suffix"
+  }
+]

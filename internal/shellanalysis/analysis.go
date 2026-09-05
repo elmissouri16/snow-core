@@ -20,7 +20,7 @@ const (
 	maxVariables   = 128
 	maxValueBytes  = 4 << 10
 	maxDepth       = 4
-	scopeVersion   = "shell-analysis-v1"
+	scopeVersion   = "shell-analysis-v2"
 )
 
 type state struct {
@@ -33,6 +33,13 @@ type analyzer struct {
 	roots        []string
 	home         string
 	depth        int
+	nodes        int
+	commandDepth int
+	source       string
+	startCWD     string
+	policy       []pathRule
+	resolver     pathResolver
+	err          error
 	effects      map[string]permission.Effect
 	paths        map[string]struct{}
 	caps         map[permission.Capability]struct{}
@@ -43,8 +50,19 @@ type analyzer struct {
 // Analyze parses command using POSIX shell grammar and returns a deterministic,
 // bounded description of statically visible effects.
 func Analyze(ctx context.Context, command, cwd string, roots []string, home string) (permission.Analysis, error) {
+	return AnalyzeWithOptions(ctx, command, cwd, roots, home, Options{})
+}
+
+// Options adds operator-owned protected resources; it cannot relax built-in policy.
+type Options struct{ ProtectedPaths []string }
+
+// AnalyzeWithOptions performs the same bounded preflight with additional policy.
+func AnalyzeWithOptions(ctx context.Context, command, cwd string, roots []string, home string, opts Options) (permission.Analysis, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return permission.Analysis{}, err
 	}
 	if len(command) > maxSourceBytes {
 		return permission.Analysis{}, fmt.Errorf("shell analysis: source exceeds %d bytes", maxSourceBytes)
@@ -64,8 +82,13 @@ func Analyze(ctx context.Context, command, cwd string, roots []string, home stri
 		}
 	}
 	a := &analyzer{
-		ctx: ctx, home: cleanHome, effects: make(map[string]permission.Effect),
+		ctx: ctx, home: cleanHome, source: command, startCWD: absCWD, effects: make(map[string]permission.Effect),
 		paths: make(map[string]struct{}), caps: make(map[permission.Capability]struct{}), rememberable: true,
+	}
+	var policyErr error
+	a.policy, policyErr = preparePathRules(cleanHome, opts.ProtectedPaths, &a.resolver)
+	if policyErr != nil {
+		return permission.Analysis{}, policyErr
 	}
 	for _, root := range roots {
 		if abs, err := filepath.Abs(root); err == nil {
@@ -85,6 +108,9 @@ func Analyze(ctx context.Context, command, cwd string, roots []string, home stri
 	if err := a.parse(command, syntax.LangPOSIX, &state{cwd: filepath.Clean(absCWD), vars: vars}); err != nil {
 		return permission.Analysis{}, err
 	}
+	if a.err != nil {
+		return permission.Analysis{}, a.err
+	}
 	return a.result(), nil
 }
 
@@ -100,14 +126,13 @@ func (a *analyzer) parse(source string, variant syntax.LangVariant, st *state) e
 	if err != nil {
 		return fmt.Errorf("shell analysis: parse: %w", err)
 	}
-	nodes := 0
 	exceeded := false
 	syntax.Walk(file, func(node syntax.Node) bool {
 		if node == nil {
 			return true
 		}
-		nodes++
-		if nodes > maxASTNodes {
+		a.nodes++
+		if a.nodes > maxASTNodes {
 			exceeded = true
 			return false
 		}
@@ -133,68 +158,30 @@ func (a *analyzer) stmts(stmts []*syntax.Stmt, st *state) error {
 		if stmt.Background {
 			a.addEffect(permission.Effect{Type: "process", Capability: permission.CapabilityProcessExec, Operation: "background", Reason: "background process", Confidence: "high"})
 		}
-		if err := a.command(stmt.Cmd, st); err != nil {
+		commandState := st
+		if stmt.Background {
+			copy := cloneState(st)
+			commandState = &copy
+		}
+		if err := a.command(stmt.Cmd, commandState); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (a *analyzer) command(cmd syntax.Command, st *state) error {
-	switch cmd := cmd.(type) {
-	case *syntax.CallExpr:
-		return a.call(cmd, st)
-	case *syntax.BinaryCmd:
-		if err := a.stmts([]*syntax.Stmt{cmd.X}, st); err != nil {
-			return err
-		}
-		return a.stmts([]*syntax.Stmt{cmd.Y}, st)
-	case *syntax.Subshell:
-		copy := cloneState(st)
-		return a.stmts(cmd.Stmts, &copy)
-	case *syntax.Block:
-		return a.stmts(cmd.Stmts, st)
-	case *syntax.IfClause:
-		copy := cloneState(st)
-		if err := a.stmts(cmd.Cond, &copy); err != nil {
-			return err
-		}
-		if err := a.stmts(cmd.Then, &copy); err != nil {
-			return err
-		}
-		for branch := cmd.Else; branch != nil; branch = branch.Else {
-			if err := a.stmts(branch.Cond, &copy); err != nil {
-				return err
-			}
-			if err := a.stmts(branch.Then, &copy); err != nil {
-				return err
-			}
-		}
-		return nil
-	case *syntax.WhileClause:
-		copy := cloneState(st)
-		if err := a.stmts(cmd.Cond, &copy); err != nil {
-			return err
-		}
-		return a.stmts(cmd.Do, &copy)
-	case *syntax.ForClause:
-		copy := cloneState(st)
-		return a.stmts(cmd.Do, &copy)
-	default:
-		a.addIncomplete(fmt.Sprintf("unsupported shell construct %T", cmd))
-		return nil
-	}
-}
-
 func (a *analyzer) call(call *syntax.CallExpr, st *state) error {
 	local := cloneState(st)
 	for _, assign := range call.Assigns {
-		if assign.Name == nil || assign.Value == nil {
+		if assign.Name == nil {
 			continue
 		}
 		// POSIX expands ordinary command arguments against the pre-assignment
 		// environment: HOME=/tmp cat "$HOME/file" still uses the old HOME.
-		value, ok := a.word(assign.Value, st)
+		value, ok := "", true
+		if assign.Value != nil {
+			value, ok = a.word(assign.Value, &local)
+		}
 		if !ok || len(value) > maxValueBytes {
 			a.addUnknown("dynamic or oversized assignment " + assign.Name.Value)
 			delete(local.vars, assign.Name.Value)
@@ -215,6 +202,7 @@ func (a *analyzer) call(call *syntax.CallExpr, st *state) error {
 		value, ok := a.word(word, st)
 		if !ok {
 			a.addUnknown("dynamic command or argument")
+			value = ""
 		}
 		args[i] = value
 	}
@@ -222,65 +210,15 @@ func (a *analyzer) call(call *syntax.CallExpr, st *state) error {
 		a.addUnknown("dynamic command name")
 		return nil
 	}
-	if len(call.Assigns) > 0 && filepath.Base(args[0]) != "cd" {
-		return a.classify(args, &local)
+	if len(call.Assigns) > 0 {
+		a.addUnknown("command environment assignments")
+		err := a.classify(args, &local)
+		if spec := commandSpecs[args[0]]; spec != nil && spec.Builtin {
+			joinState(st, local)
+		}
+		return err
 	}
 	return a.classify(args, st)
-}
-
-func (a *analyzer) word(word *syntax.Word, st *state) (string, bool) {
-	var b strings.Builder
-	for _, part := range word.Parts {
-		value, ok := a.wordPart(part, st)
-		if !ok {
-			return b.String(), false
-		}
-		b.WriteString(value)
-	}
-	value := b.String()
-	if value == "~" {
-		if a.home == "" {
-			return "", false
-		}
-		value = a.home
-	} else if after, ok := strings.CutPrefix(value, "~/"); ok {
-		if a.home == "" {
-			return "", false
-		}
-		value = filepath.Join(a.home, after)
-	}
-	return value, true
-}
-
-func (a *analyzer) wordPart(part syntax.WordPart, st *state) (string, bool) {
-	switch part := part.(type) {
-	case *syntax.Lit:
-		return part.Value, true
-	case *syntax.SglQuoted:
-		return part.Value, true
-	case *syntax.DblQuoted:
-		var b strings.Builder
-		for _, nested := range part.Parts {
-			value, ok := a.wordPart(nested, st)
-			if !ok {
-				return b.String(), false
-			}
-			b.WriteString(value)
-		}
-		return b.String(), true
-	case *syntax.ParamExp:
-		if part.Param == nil || part.Excl || part.Length || part.Index != nil || part.Slice != nil || part.Repl != nil || part.Exp != nil {
-			return "", false
-		}
-		value, ok := st.vars[part.Param.Value]
-		return value, ok
-	case *syntax.CmdSubst:
-		copy := cloneState(st)
-		_ = a.stmts(part.Stmts, &copy)
-		return "", false
-	default:
-		return "", false
-	}
 }
 
 func (a *analyzer) redirect(redir *syntax.Redirect, st *state) {
@@ -305,6 +243,9 @@ func (a *analyzer) redirect(redir *syntax.Redirect, st *state) {
 		return
 	}
 	operation := "write"
+	if redir.Op == syntax.RdrInOut {
+		a.addPathEffect("write", resource, "redirection", "high", st)
+	}
 	if redir.Op == syntax.RdrIn || redir.Op == syntax.RdrInOut {
 		operation = "read"
 	}
@@ -384,6 +325,13 @@ func (a *analyzer) result() permission.Analysis {
 	slices.Sort(paths)
 	var canonical strings.Builder
 	writeScopeField(&canonical, "version", scopeVersion)
+	writeScopeField(&canonical, "specification", specificationDigest)
+	writeScopeField(&canonical, "cwd", a.startCWD)
+	writeScopeField(&canonical, "source", a.source)
+	for _, rule := range a.policy {
+		writeScopeField(&canonical, "policy-path", rule.Path)
+		writeScopeField(&canonical, "policy-capability", string(rule.Capability))
+	}
 	for _, root := range a.roots {
 		writeScopeField(&canonical, "root", root)
 	}
@@ -398,7 +346,7 @@ func (a *analyzer) result() permission.Analysis {
 	}
 	scope := fmt.Sprintf("%x", sha256.Sum256([]byte(canonical.String())))
 	summary := fmt.Sprintf("%d inferred effect(s)", len(effects))
-	return permission.Analysis{Effects: effects, Capabilities: caps, Paths: paths, Summary: summary, Unknown: a.unknown, Rememberable: a.rememberable && !a.unknown, ScopeKey: scope, ScopeLabel: "matching effects and resources in this workspace"}
+	return permission.Analysis{Effects: effects, Capabilities: caps, Paths: paths, Summary: summary, Unknown: a.unknown, Rememberable: a.rememberable && !a.unknown, ScopeKey: scope, ScopeLabel: "this command and its resources in this working directory"}
 }
 
 func writeScopeField(dst *strings.Builder, name, value string) {

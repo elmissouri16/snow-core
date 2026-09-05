@@ -105,3 +105,32 @@ Local success is not remote CI evidence. The canonical local verification
 commands live in the [agent working guide](../AGENTS.md#verification). Before a
 release, require the complete remote CI run—including this regression guard—to
 pass as described in the [release policy](releases.md).
+
+## Shell preflight measurements
+
+`BenchmarkAnalyzeShell` covers representative invocations without running their
+commands or making network requests:
+
+```sh
+go test ./internal/shellanalysis -run '^$' -bench BenchmarkAnalyzeShell -benchmem -count=3
+```
+
+On 2026-09-05, three-sample local medians on an Apple M3 Pro with Go 1.27rc3
+compared commit `8755986` with the specification/state/policy implementation:
+
+| Invocation | Previous time | Current time | Previous bytes | Current bytes |
+|---|---:|---:|---:|---:|
+| `cat README.md` | 58.5 us | 127.2 us | 30,888 | 70,144 |
+| `grep -n -e TODO -- README.md` | 85.1 us | 124.9 us | 43,391 | 70,433 |
+| `git status --short` | 30.0 us | 112.8 us | 20,147 | 73,691 |
+| `cat a b c d e f g h` | 250.6 us | 143.0 us | 116,784 | 88,781 |
+
+The original package was loaded through a temporary Go overlay with the same
+benchmark body; the checkout was not switched. These are analyzer-only local
+measurements, not a performance gate or a claim about all shell workloads.
+Simple commands incur additional fixed work to prepare protected resources and
+bind approval identity to current policy. Bounded per-invocation ancestor
+caching reduces repeated path work: the eight-file case uses about 24% fewer
+bytes and takes about 43% less time. The specification is compiled once; no
+command execution, help scraping, network lookup, or filesystem cache shared
+between invocations is involved.

@@ -1308,3 +1308,40 @@ control-byte paths. Also verified with `go test ./...`, `go vet ./...`,
 ./internal/agent -count=1`, all 56 support-script tests,
 `python3 scripts/check_benchmarks.py`, `go build -o ./snow ./cmd/snow`, and
 `git diff --check`.
+
+## BUG-029: Bash grep summaries include the search pattern as a file
+
+- **Status:** Resolved; verified in the working tree
+- **Severity:** Low
+- **Surface:** Static Bash effect summary and permission-card resources
+- **Observed:** 2026-09-05 review of Bash command classification
+
+For `grep needle README`, the analyzer reports both `needle` and `README` as
+high-confidence filesystem reads. The first ordinary operand is the search
+pattern in this invocation, so the extra `needle` path is misleading. This
+is separate from the resolved shell-test builtin presentation issue in BUG-028.
+
+The shared command specification now declares pattern, pattern-file, option-value,
+and file-operand roles. The generic option parser consumes short clusters,
+attached values, long equals values, and `--`; the grep handler distinguishes
+an ordinary pattern from file operands. Permanent regressions cover ordinary
+and explicit patterns, pattern files, context-count options, multiple files,
+and filenames beginning with a dash.
+
+Verified with the focused shell regression suite, the full Go suite, affected
+race tests, vet, all 56 support-script tests, and the performance guard. No
+security-sensitive reproduction details are included in this public tracker.
+
+## BUG-030: SDK example omits the shell parser module dependency
+
+- **Status:** Resolved; verified in the working tree
+- **Severity:** Low
+- **Surface:** Standalone `examples/sdk` module
+- **Observed:** 2026-09-05 shell-preflight verification
+
+The root module already required `mvdan.cc/sh/v3`, but the standalone SDK
+example lacked its indirect requirement and checksums. Running `go test ./...`
+in `examples/sdk` failed with a missing go.sum entry for the shell syntax
+package. `go mod tidy` synchronized the example's module graph with the current
+checkout. Both its test/build step and `go run .` now complete successfully
+with the offline fake provider and an isolated temporary Snow home.

@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"slices"
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -16,8 +17,9 @@ type Options struct {
 	// GlobMaxResults caps glob paths. 0 means the glob default.
 	GlobMaxResults int
 	// BashTimeout caps bash execution. 0 means default.
-	BashTimeout  time.Duration
-	SearchPolicy config.EffectiveSearchPolicy
+	BashTimeout         time.Duration
+	ShellProtectedPaths []string
+	SearchPolicy        config.EffectiveSearchPolicy
 	// Roots are the allowed path roots for file tools. If empty, file tools
 	// are created without a guard and use host roots at call time.
 	Roots []string
@@ -43,6 +45,7 @@ func RegisterBuiltins(reg tools.Registry, opts Options) error {
 	write := NewWrite(guard)
 	edit := NewEdit(guard)
 	bash := NewBash()
+	bash.ProtectedPaths = slices.Clone(opts.ShellProtectedPaths)
 	grep := NewGrep(guard)
 	grep.Policy = opts.SearchPolicy
 	glob := NewGlob(guard)

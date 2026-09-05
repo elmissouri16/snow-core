@@ -222,7 +222,9 @@ func ruleKey(req Request) string {
 
 func rememberedDecision(rules map[string]Decision, req Request) (Decision, bool) {
 	if d, ok := rules[ruleKey(req)]; ok {
-		return d, true
+		if d == DecisionDeny || req.ScopeKey == "" || req.Rememberable {
+			return d, true
+		}
 	}
 	// A legacy broad denial remains conservative, but a legacy broad allow must
 	// never authorize a newly scoped invocation.

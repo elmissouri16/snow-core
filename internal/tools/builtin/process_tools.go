@@ -22,12 +22,16 @@ func ManagedProcessToolNames() []string {
 }
 
 // RegisterProcessTools adds the app-owned managed-process control surface.
-func RegisterProcessTools(reg tools.Registry, manager *managedprocess.Manager) error {
+func RegisterProcessTools(reg tools.Registry, manager *managedprocess.Manager, options ...Options) error {
 	if manager == nil {
 		return errors.New("managed process manager is nil")
 	}
+	var opts Options
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	descriptors := []tools.ToolDescriptor{
-		processDescriptor(&processStartTool{manager: manager}, permission.RiskExec),
+		processDescriptor(&processStartTool{manager: manager, roots: slices.Clone(opts.Roots), protectedPaths: slices.Clone(opts.ShellProtectedPaths)}, permission.RiskExec),
 		processDescriptor(&processStatusTool{manager: manager}, permission.RiskRead),
 		processDescriptor(&processLogsTool{manager: manager}, permission.RiskRead),
 		processDescriptor(&processStopTool{manager: manager}, permission.RiskExec),
@@ -54,7 +58,10 @@ func processDescriptor(tool tools.Tool, risk permission.Risk) tools.ToolDescript
 	return tools.ToolDescriptor{Schema: schema, Tool: tool, Source: tools.SourceBuiltin, Owner: "builtin", Risk: risk}
 }
 
-type processStartTool struct{ manager *managedprocess.Manager }
+type processStartTool struct {
+	manager               *managedprocess.Manager
+	roots, protectedPaths []string
+}
 
 type processStartArgs struct {
 	Command   string                           `json:"command"`

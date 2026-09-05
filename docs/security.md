@@ -56,7 +56,7 @@ The TUI can ask interactively. Print and JSON modes fail closed for `ask`
 because they have no permission broker. SDK and RPC hosts must explicitly
 provide a trusted broker; otherwise `ask` also denies.
 
-Before authorizing the built-in `bash` tool, Snow parses the POSIX shell source
+Before authorizing the built-in `bash` or `process_start` tool, Snow parses the POSIX shell source
 and publishes bounded, statically inferred effects, capabilities, paths, and
 unknowns. High-confidence visible credential reads, SSH authorization changes,
 raw-device or container-socket access, persistence writes, and privilege
@@ -64,11 +64,32 @@ escalation are denied before the ordinary permission mode. Parser errors,
 unsupported structural shell nodes, and exhausted analysis bounds fail closed.
 `allow` skips the prompt but does not override those hard denials.
 
-Bash approvals are remembered by an analyzer-versioned scope containing the
-workspace, capabilities, commands, and concrete resources. A legacy broad
-`bash|exec` allow does not authorize analyzed Bash calls, and dynamic or unknown
-calls cannot be remembered. The TUI labels the choices **Allow once**, **Allow
-this scope**, and **Deny** when the request is rememberable.
+Shell approvals are remembered only for understood invocations, using the exact
+source, working directory, launch-environment digest, analyzer/specification
+version, protected-path policy, and inferred effects/resources. Environment
+values are never included in permission summaries. Existing approvals from the
+older analyzer are invalidated by the new scope version; broad legacy allows
+cannot authorize either analyzed shell launcher. Current unknown or
+non-rememberable analysis never accepts a cached allow.
+
+Command definitions and option roles are compiled once from the embedded
+`internal/shellanalysis/commands.json` specification. Unsupported options,
+unresolved expansions, uncertain state, and runtime-dependent child effects
+remain unknown and permit only one-time approval in `ask` mode. Git, network
+clients, recursive traversal, and nested shells have runtime effects the
+analyzer cannot prove, so recognizing their names does not enable reusable
+approval. Structural omissions and exhausted analysis budgets remain hard
+errors. This distinction preserves explicit approval of ordinary opaque
+programs without claiming their effects are fully understood.
+
+Protected defaults live separately in
+`internal/shellanalysis/protected_paths.json`. Operators can add absolute paths
+or directory trees with global `shell_protected_paths`; these additions deny
+statically visible reads, writes, and deletes and cannot weaken defaults.
+Trusted-project configuration cannot override this global policy. Path and
+symlink observations are cached only within one bounded preflight and refreshed
+for every later invocation. They do not prevent filesystem races during an
+approved process's execution.
 
 Remembered session approvals and static Bash analysis are conveniences, not
 containment. A permission decision authorizes the classified operation; it does
@@ -98,7 +119,7 @@ session-scoped files under `SNOW_HOME`; protect that directory like a session
 database.
 
 Model-facing Bash and managed processes do not share those file-tool
-confinement guarantees. Bash preflight can block only effects visible in shell
+confinement guarantees. Shell preflight can block only effects visible in shell
 syntax and recognized command arguments. Once approved, Bash and managed
 processes can read or change anything the current user can access, including
 operations hidden inside an interpreter or executable. Managed-process

@@ -99,12 +99,13 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 	}()
 	toolOpts := builtin.Options{
-		MaxOutputBytes: cfg.ToolOutputLimit(),
-		BashTimeout:    cfg.BashTimeout(),
-		Roots:          []string{absCWD},
-		CWD:            absCWD,
-		Guard:          toolGuard,
-		SearchPolicy:   searchPolicy,
+		MaxOutputBytes:      cfg.ToolOutputLimit(),
+		BashTimeout:         cfg.BashTimeout(),
+		ShellProtectedPaths: cfg.ShellProtectedPaths,
+		Roots:               []string{absCWD},
+		CWD:                 absCWD,
+		Guard:               toolGuard,
+		SearchPolicy:        searchPolicy,
 	}
 	// Register builtins. The explicit tool allowlist is applied after Agent
 	// Skills register their built-in capabilities so it remains a true upper
@@ -112,7 +113,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	if err := builtin.RegisterBuiltins(reg, toolOpts); err != nil {
 		return nil, fmt.Errorf("app: built-in tools: %w", err)
 	}
-	if err := builtin.RegisterProcessTools(reg, processManager); err != nil {
+	if err := builtin.RegisterProcessTools(reg, processManager, toolOpts); err != nil {
 		return nil, fmt.Errorf("app: managed process tools: %w", err)
 	}
 

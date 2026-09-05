@@ -111,6 +111,9 @@ func NewManager(opts Options) *Manager {
 	return &Manager{opts: opts, records: make(map[string]*runtimeProcess), closeDone: make(chan struct{})}
 }
 
+// WorkingDirectory is the immutable directory used for child execution.
+func (m *Manager) WorkingDirectory() string { return m.opts.CWD }
+
 func (m *Manager) BindSession(sessionID string) error {
 	if sessionID == "" {
 		return errors.New("process manager: session id is empty")

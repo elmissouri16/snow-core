@@ -1,0 +1,1374 @@
+[
+  {
+    "names": [
+      "echo",
+      "pwd",
+      "true",
+      "false",
+      ":",
+      "test",
+      "["
+    ],
+    "handler": "noop",
+    "builtin": true
+  },
+  {
+    "names": [
+      "unset"
+    ],
+    "handler": "unset",
+    "builtin": true,
+    "options": [
+      {
+        "names": [
+          "-f",
+          "-v"
+        ],
+        "role": "noop",
+        "value": false
+      }
+    ]
+  },
+  {
+    "names": [
+      "export",
+      "read",
+      "set",
+      "shift"
+    ],
+    "handler": "invalidate",
+    "builtin": true
+  },
+  {
+    "names": [
+      "wait"
+    ],
+    "handler": "opaque",
+    "builtin": true
+  },
+  {
+    "names": [
+      "cd"
+    ],
+    "handler": "cd",
+    "builtin": true,
+    "options": [
+      {
+        "names": [
+          "-L",
+          "-P"
+        ],
+        "role": "noop",
+        "value": false
+      }
+    ]
+  },
+  {
+    "names": [
+      "cat"
+    ],
+    "handler": "paths",
+    "operation": "read",
+    "options": [
+      {
+        "names": [
+          "-b",
+          "-e",
+          "-n",
+          "-s",
+          "-t",
+          "-u",
+          "-v",
+          "-A",
+          "-E",
+          "--number",
+          "--number-nonblank",
+          "--squeeze-blank",
+          "--show-all",
+          "--show-ends",
+          "--show-tabs"
+        ],
+        "role": "noop",
+        "value": false
+      }
+    ]
+  },
+  {
+    "names": [
+      "head",
+      "tail"
+    ],
+    "handler": "paths",
+    "operation": "read",
+    "options": [
+      {
+        "names": [
+          "-q",
+          "-v"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-n",
+          "--lines",
+          "-c",
+          "--bytes"
+        ],
+        "role": "value",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "ls"
+    ],
+    "handler": "paths",
+    "operation": "read",
+    "default_path": ".",
+    "options": [
+      {
+        "names": [
+          "-a",
+          "-A",
+          "-b",
+          "-B",
+          "-c",
+          "-C",
+          "-d",
+          "-D",
+          "-f",
+          "-F",
+          "-g",
+          "-G",
+          "-h",
+          "-H",
+          "-i",
+          "-k",
+          "-l",
+          "-L",
+          "-m",
+          "-M",
+          "-n",
+          "-N",
+          "-o",
+          "-p",
+          "-q",
+          "-Q",
+          "-r",
+          "-s",
+          "-S",
+          "-t",
+          "-T",
+          "-u",
+          "-U",
+          "-v",
+          "-w",
+          "-x",
+          "-X",
+          "-1"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-R",
+          "--recursive"
+        ],
+        "role": "recursive",
+        "value": false
+      }
+    ]
+  },
+  {
+    "names": [
+      "stat"
+    ],
+    "handler": "paths",
+    "operation": "read",
+    "options": [
+      {
+        "names": [
+          "-f",
+          "-L",
+          "-t"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-c",
+          "--format"
+        ],
+        "role": "value",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "less"
+    ],
+    "handler": "paths",
+    "operation": "read",
+    "opaque": true
+  },
+  {
+    "names": [
+      "grep"
+    ],
+    "handler": "grep",
+    "operation": "read",
+    "options": [
+      {
+        "names": [
+          "-E",
+          "-F",
+          "-G",
+          "-P",
+          "-i",
+          "-v",
+          "-w",
+          "-x",
+          "-q",
+          "-s",
+          "-l",
+          "-L",
+          "-c",
+          "-h",
+          "-H",
+          "-n",
+          "-b",
+          "-o",
+          "-Z",
+          "-a",
+          "-I",
+          "-U",
+          "-u"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "--color",
+          "--colour"
+        ],
+        "role": "unknown",
+        "value": true
+      },
+      {
+        "names": [
+          "-r",
+          "-R",
+          "--recursive",
+          "--dereference-recursive"
+        ],
+        "role": "recursive",
+        "value": false
+      },
+      {
+        "names": [
+          "-e",
+          "--regexp"
+        ],
+        "role": "pattern",
+        "value": true
+      },
+      {
+        "names": [
+          "-f",
+          "--file"
+        ],
+        "role": "pattern_file",
+        "value": true
+      },
+      {
+        "names": [
+          "--exclude-from"
+        ],
+        "role": "read",
+        "value": true
+      },
+      {
+        "names": [
+          "-A",
+          "-B",
+          "-C",
+          "--after-context",
+          "--before-context",
+          "--context",
+          "-m",
+          "--max-count",
+          "--include",
+          "--exclude",
+          "--exclude-dir"
+        ],
+        "role": "value",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "rm",
+      "rmdir"
+    ],
+    "handler": "paths",
+    "operation": "delete",
+    "options": [
+      {
+        "names": [
+          "-f",
+          "-i",
+          "-v",
+          "-p"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-r",
+          "-R",
+          "--recursive"
+        ],
+        "role": "recursive",
+        "value": false
+      }
+    ]
+  },
+  {
+    "names": [
+      "mkdir"
+    ],
+    "handler": "paths",
+    "operation": "write",
+    "options": [
+      {
+        "names": [
+          "-p",
+          "-v"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-m",
+          "--mode"
+        ],
+        "role": "mode",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "touch"
+    ],
+    "handler": "paths",
+    "operation": "write",
+    "options": [
+      {
+        "names": [
+          "-a",
+          "-c",
+          "-m"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-r",
+          "--reference"
+        ],
+        "role": "read",
+        "value": true
+      },
+      {
+        "names": [
+          "-t",
+          "-d",
+          "--date"
+        ],
+        "role": "value",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "tee"
+    ],
+    "handler": "paths",
+    "operation": "write",
+    "options": [
+      {
+        "names": [
+          "-a",
+          "-i"
+        ],
+        "role": "noop",
+        "value": false
+      }
+    ]
+  },
+  {
+    "names": [
+      "cp"
+    ],
+    "handler": "copy",
+    "operation": "read",
+    "options": [
+      {
+        "names": [
+          "-f",
+          "-i",
+          "-n",
+          "-p",
+          "-v"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-a",
+          "-r",
+          "-R",
+          "--recursive"
+        ],
+        "role": "recursive",
+        "value": false
+      },
+      {
+        "names": [
+          "-t",
+          "--target-directory"
+        ],
+        "role": "target",
+        "value": true
+      },
+      {
+        "names": [
+          "-T",
+          "--no-target-directory"
+        ],
+        "role": "no_target",
+        "value": false
+      }
+    ]
+  },
+  {
+    "names": [
+      "mv"
+    ],
+    "handler": "copy",
+    "operation": "delete",
+    "options": [
+      {
+        "names": [
+          "-f",
+          "-i",
+          "-n",
+          "-v"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-t",
+          "--target-directory"
+        ],
+        "role": "target",
+        "value": true
+      },
+      {
+        "names": [
+          "-T",
+          "--no-target-directory"
+        ],
+        "role": "no_target",
+        "value": false
+      }
+    ]
+  },
+  {
+    "names": [
+      "install"
+    ],
+    "handler": "copy",
+    "operation": "read",
+    "options": [
+      {
+        "names": [
+          "-c",
+          "-v"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-d",
+          "--directory"
+        ],
+        "role": "directory",
+        "value": false
+      },
+      {
+        "names": [
+          "-m",
+          "--mode"
+        ],
+        "role": "mode",
+        "value": true
+      },
+      {
+        "names": [
+          "-o",
+          "--owner",
+          "-g",
+          "--group",
+          "-S",
+          "--suffix"
+        ],
+        "role": "value",
+        "value": true
+      },
+      {
+        "names": [
+          "-t",
+          "--target-directory"
+        ],
+        "role": "target",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "ln"
+    ],
+    "handler": "copy",
+    "operation": "read",
+    "opaque": true,
+    "options": [
+      {
+        "names": [
+          "-s",
+          "-f",
+          "-i",
+          "-n",
+          "-v"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-t",
+          "--target-directory"
+        ],
+        "role": "target",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "chmod",
+      "chown"
+    ],
+    "handler": "mode",
+    "operation": "write",
+    "options": [
+      {
+        "names": [
+          "-f",
+          "-v"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-R",
+          "--recursive"
+        ],
+        "role": "recursive",
+        "value": false
+      },
+      {
+        "names": [
+          "--reference"
+        ],
+        "role": "read",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "find"
+    ],
+    "handler": "find",
+    "opaque": true
+  },
+  {
+    "names": [
+      "curl"
+    ],
+    "handler": "network",
+    "opaque": true,
+    "options": [
+      {
+        "names": [
+          "-s",
+          "-S",
+          "-f",
+          "-I",
+          "-L",
+          "-k",
+          "-q",
+          "-v"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-o",
+          "--output"
+        ],
+        "role": "write",
+        "value": true
+      },
+      {
+        "names": [
+          "-O",
+          "--remote-name"
+        ],
+        "role": "unknown",
+        "value": false
+      },
+      {
+        "names": [
+          "-d",
+          "--data",
+          "--data-binary",
+          "--data-urlencode"
+        ],
+        "role": "data_file",
+        "value": true
+      },
+      {
+        "names": [
+          "--data-raw",
+          "-X",
+          "--request"
+        ],
+        "role": "network_write",
+        "value": true
+      },
+      {
+        "names": [
+          "-T",
+          "--upload-file"
+        ],
+        "role": "upload",
+        "value": true
+      },
+      {
+        "names": [
+          "--key",
+          "--cert",
+          "--cacert",
+          "--unix-socket"
+        ],
+        "role": "read",
+        "value": true
+      },
+      {
+        "names": [
+          "-K",
+          "--config"
+        ],
+        "role": "config",
+        "value": true
+      },
+      {
+        "names": [
+          "-H",
+          "--header",
+          "-A",
+          "--user-agent",
+          "--connect-timeout",
+          "--max-time"
+        ],
+        "role": "value",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "wget"
+    ],
+    "handler": "network",
+    "opaque": true,
+    "options": [
+      {
+        "names": [
+          "-q",
+          "-v"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-O",
+          "--output-document"
+        ],
+        "role": "write",
+        "value": true
+      },
+      {
+        "names": [
+          "--post-file",
+          "--body-file"
+        ],
+        "role": "upload",
+        "value": true
+      },
+      {
+        "names": [
+          "-i",
+          "--input-file",
+          "--certificate",
+          "--private-key",
+          "--ca-certificate",
+          "--load-cookies"
+        ],
+        "role": "read",
+        "value": true
+      },
+      {
+        "names": [
+          "--config"
+        ],
+        "role": "config",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "ssh"
+    ],
+    "handler": "ssh",
+    "opaque": true,
+    "stop_at_operand": true,
+    "options": [
+      {
+        "names": [
+          "-4",
+          "-6",
+          "-A",
+          "-a",
+          "-C",
+          "-f",
+          "-G",
+          "-g",
+          "-K",
+          "-k",
+          "-M",
+          "-N",
+          "-n",
+          "-q",
+          "-T",
+          "-t",
+          "-V",
+          "-v",
+          "-X",
+          "-x",
+          "-Y",
+          "-y"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-p"
+        ],
+        "role": "port",
+        "value": true
+      },
+      {
+        "names": [
+          "-i"
+        ],
+        "role": "read",
+        "value": true
+      },
+      {
+        "names": [
+          "-F",
+          "-o",
+          "-S",
+          "-J",
+          "-L",
+          "-R",
+          "-D",
+          "-W"
+        ],
+        "role": "config",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "scp",
+      "rsync"
+    ],
+    "handler": "transfer",
+    "opaque": true,
+    "options": [
+      {
+        "names": [
+          "-4",
+          "-6",
+          "-C",
+          "-p",
+          "-q",
+          "-r",
+          "-v",
+          "-a",
+          "-z"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-i"
+        ],
+        "role": "read",
+        "value": true
+      },
+      {
+        "names": [
+          "-F",
+          "-o",
+          "-S",
+          "-J",
+          "-e",
+          "--rsh",
+          "--rsync-path"
+        ],
+        "role": "config",
+        "value": true
+      },
+      {
+        "names": [
+          "-P"
+        ],
+        "role": "port",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "sh"
+    ],
+    "handler": "shell",
+    "stop_at_operand": true,
+    "options": [
+      {
+        "names": [
+          "-e",
+          "-u"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-c"
+        ],
+        "role": "script",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "bash"
+    ],
+    "handler": "shell",
+    "operation": "bash",
+    "stop_at_operand": true,
+    "options": [
+      {
+        "names": [
+          "-e",
+          "-u",
+          "--noprofile",
+          "--norc"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-c"
+        ],
+        "role": "script",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "command"
+    ],
+    "handler": "wrapper",
+    "operation": "builtin",
+    "stop_at_operand": true,
+    "options": [
+      {
+        "names": [
+          "-p"
+        ],
+        "role": "noop",
+        "value": false
+      },
+      {
+        "names": [
+          "-v",
+          "-V"
+        ],
+        "role": "enumerate",
+        "value": false
+      }
+    ]
+  },
+  {
+    "names": [
+      "exec"
+    ],
+    "handler": "wrapper",
+    "stop_at_operand": true,
+    "options": [
+      {
+        "names": [
+          "-a"
+        ],
+        "role": "value",
+        "value": true
+      },
+      {
+        "names": [
+          "-c"
+        ],
+        "role": "clear_env",
+        "value": false
+      },
+      {
+        "names": [
+          "-l"
+        ],
+        "role": "unknown",
+        "value": false
+      }
+    ]
+  },
+  {
+    "names": [
+      "nohup"
+    ],
+    "handler": "wrapper",
+    "opaque": true,
+    "stop_at_operand": true
+  },
+  {
+    "names": [
+      "env"
+    ],
+    "handler": "wrapper",
+    "operation": "env",
+    "stop_at_operand": true,
+    "options": [
+      {
+        "names": [
+          "-i",
+          "--ignore-environment"
+        ],
+        "role": "clear_env",
+        "value": false
+      },
+      {
+        "names": [
+          "-u",
+          "--unset"
+        ],
+        "role": "unset_env",
+        "value": true
+      },
+      {
+        "names": [
+          "-C",
+          "--chdir"
+        ],
+        "role": "chdir",
+        "value": true
+      },
+      {
+        "names": [
+          "-S",
+          "--split-string"
+        ],
+        "role": "config",
+        "value": true
+      }
+    ]
+  },
+  {
+    "names": [
+      "sudo",
+      "doas",
+      "su",
+      "pkexec"
+    ],
+    "handler": "capability",
+    "capability": "privilege.escalation",
+    "operation": "escalate"
+  },
+  {
+    "names": [
+      "launchctl",
+      "crontab"
+    ],
+    "handler": "capability",
+    "capability": "persistence.write",
+    "operation": "configure"
+  },
+  {
+    "names": [
+      "go",
+      "npm",
+      "pnpm",
+      "yarn",
+      "pip",
+      "pip3",
+      "python",
+      "python3"
+    ],
+    "handler": "opaque",
+    "opaque": true
+  },
+  {
+    "names": [
+      "systemctl"
+    ],
+    "handler": "subcommands",
+    "stop_at_operand": true,
+    "options": [
+      {
+        "names": [
+          "--user",
+          "--system"
+        ],
+        "role": "noop",
+        "value": false
+      }
+    ],
+    "subcommands": {
+      "enable": {
+        "handler": "capability",
+        "capability": "persistence.write",
+        "operation": "enable"
+      },
+      "disable": {
+        "handler": "capability",
+        "capability": "persistence.write",
+        "operation": "disable"
+      },
+      "reenable": {
+        "handler": "capability",
+        "capability": "persistence.write",
+        "operation": "reenable"
+      },
+      "link": {
+        "handler": "capability",
+        "capability": "persistence.write",
+        "operation": "link"
+      },
+      "preset": {
+        "handler": "capability",
+        "capability": "persistence.write",
+        "operation": "preset"
+      },
+      "preset-all": {
+        "handler": "capability",
+        "capability": "persistence.write",
+        "operation": "preset-all"
+      },
+      "mask": {
+        "handler": "capability",
+        "capability": "persistence.write",
+        "operation": "mask"
+      },
+      "unmask": {
+        "handler": "capability",
+        "capability": "persistence.write",
+        "operation": "unmask"
+      },
+      "edit": {
+        "handler": "capability",
+        "capability": "persistence.write",
+        "operation": "edit"
+      },
+      "revert": {
+        "handler": "capability",
+        "capability": "persistence.write",
+        "operation": "revert"
+      },
+      "status": {
+        "handler": "opaque"
+      },
+      "is-active": {
+        "handler": "opaque"
+      },
+      "is-enabled": {
+        "handler": "opaque"
+      },
+      "list-units": {
+        "handler": "opaque"
+      },
+      "list-unit-files": {
+        "handler": "opaque"
+      },
+      "show": {
+        "handler": "opaque"
+      },
+      "cat": {
+        "handler": "opaque"
+      },
+      "help": {
+        "handler": "opaque"
+      }
+    }
+  },
+  {
+    "names": [
+      "git"
+    ],
+    "handler": "subcommands",
+    "opaque": true,
+    "stop_at_operand": true,
+    "options": [
+      {
+        "names": [
+          "-C"
+        ],
+        "role": "chdir",
+        "value": true
+      },
+      {
+        "names": [
+          "-c",
+          "--config-env"
+        ],
+        "role": "config",
+        "value": true
+      },
+      {
+        "names": [
+          "--no-pager",
+          "--no-optional-locks"
+        ],
+        "role": "noop",
+        "value": false
+      }
+    ],
+    "subcommands": {
+      "status": {
+        "handler": "git",
+        "capability": "git.read",
+        "operation": "status"
+      },
+      "diff": {
+        "handler": "git",
+        "capability": "git.read",
+        "operation": "diff"
+      },
+      "log": {
+        "handler": "git",
+        "capability": "git.read",
+        "operation": "log"
+      },
+      "show": {
+        "handler": "git",
+        "capability": "git.read",
+        "operation": "show"
+      },
+      "rev-parse": {
+        "handler": "git",
+        "capability": "git.read",
+        "operation": "rev-parse"
+      },
+      "fetch": {
+        "handler": "git",
+        "capability": "git.remote_read",
+        "operation": "fetch"
+      },
+      "pull": {
+        "handler": "git",
+        "capability": "git.remote_read",
+        "operation": "pull"
+      },
+      "clone": {
+        "handler": "git",
+        "capability": "git.remote_read",
+        "operation": "clone"
+      },
+      "push": {
+        "handler": "git",
+        "capability": "git.remote_write",
+        "operation": "push"
+      },
+      "checkout": {
+        "handler": "git",
+        "capability": "git.write",
+        "operation": "checkout"
+      },
+      "switch": {
+        "handler": "git",
+        "capability": "git.write",
+        "operation": "switch"
+      },
+      "restore": {
+        "handler": "git",
+        "capability": "git.write",
+        "operation": "restore"
+      },
+      "reset": {
+        "handler": "git",
+        "capability": "git.write",
+        "operation": "reset"
+      },
+      "clean": {
+        "handler": "git",
+        "capability": "git.write",
+        "operation": "clean"
+      },
+      "add": {
+        "handler": "git",
+        "capability": "git.write",
+        "operation": "add"
+      },
+      "commit": {
+        "handler": "git",
+        "capability": "git.write",
+        "operation": "commit"
+      },
+      "merge": {
+        "handler": "git",
+        "capability": "git.write",
+        "operation": "merge"
+      },
+      "rebase": {
+        "handler": "git",
+        "capability": "git.write",
+        "operation": "rebase"
+      },
+      "remote": {
+        "handler": "git",
+        "capability": "git.read",
+        "operation": "remote",
+        "options": [
+          {
+            "names": [
+              "-v",
+              "--verbose"
+            ],
+            "role": "noop",
+            "value": false
+          }
+        ],
+        "subcommands": {
+          "add": {
+            "handler": "git",
+            "capability": "git.write",
+            "operation": "remote add"
+          },
+          "remove": {
+            "handler": "git",
+            "capability": "git.write",
+            "operation": "remote remove"
+          },
+          "rename": {
+            "handler": "git",
+            "capability": "git.write",
+            "operation": "remote rename"
+          },
+          "set-url": {
+            "handler": "git",
+            "capability": "git.write",
+            "operation": "remote set-url"
+          },
+          "set-head": {
+            "handler": "git",
+            "capability": "git.write",
+            "operation": "remote set-head"
+          },
+          "set-branches": {
+            "handler": "git",
+            "capability": "git.write",
+            "operation": "remote set-branches"
+          },
+          "prune": {
+            "handler": "git",
+            "capability": "git.write",
+            "operation": "remote prune"
+          },
+          "update": {
+            "handler": "git",
+            "capability": "git.write",
+            "operation": "remote update"
+          },
+          "get-url": {
+            "handler": "git",
+            "capability": "git.read",
+            "operation": "remote get-url"
+          },
+          "show": {
+            "handler": "git",
+            "capability": "git.read",
+            "operation": "remote show"
+          }
+        }
+      }
+    }
+  },
+  {
+    "names": [
+      "printf"
+    ],
+    "handler": "noop",
+    "builtin": true,
+    "operation": "format"
+  }
+]

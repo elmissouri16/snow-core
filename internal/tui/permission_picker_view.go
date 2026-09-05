@@ -65,7 +65,7 @@ func (m *Model) renderPermissionPicker() string {
 		warnings = append(warnings, styleError.Render("Unknown child effects cannot be determined statically."))
 	}
 	executionWarning := ""
-	if req.Tool == "bash" {
+	if shellPermissionTool(req.Tool) {
 		executionWarning = styleError.Render("Execution: unrestricted host process")
 	}
 
@@ -162,7 +162,7 @@ func permissionRequestDetailRows(req *protocol.PermissionRequest, width, budget 
 		return nil
 	}
 	rows := make([]string, 0, budget)
-	if req.Tool == "bash" {
+	if shellPermissionTool(req.Tool) {
 		var args struct {
 			Command string `json:"command"`
 		}
@@ -256,7 +256,7 @@ func (m *Model) permissionApprovalEnabled() bool {
 	// addition to the tool label, safety warnings, every decision, and help.
 	// Otherwise a warning such as "review the command directly" could be paired
 	// with an invisible command on a short terminal.
-	if m.permRequest.Tool == "bash" {
+	if shellPermissionTool(m.permRequest.Tool) {
 		criticalRows := 2 // tool label and host-execution warning
 		if m.permRequest.EffectsTruncated || m.permRequest.CapabilitiesTruncated || m.permRequest.PathsTruncated {
 			criticalRows++
@@ -397,3 +397,5 @@ func isInferredEffectSummary(reason string) bool {
 	}
 	return true
 }
+
+func shellPermissionTool(name string) bool { return name == "bash" || name == "process_start" }

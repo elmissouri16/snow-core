@@ -460,6 +460,9 @@ func Load(path string) (Config, error) {
 	if err := cfg.Subagents.ValidateSubagents(); err != nil {
 		return cfg, err
 	}
+	if err := ValidateShellProtectedPaths(cfg.ShellProtectedPaths); err != nil {
+		return cfg, err
+	}
 	if err := cfg.Processes.Validate(); err != nil {
 		return cfg, err
 	}

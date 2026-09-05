@@ -1584,71 +1584,72 @@ next heading.
 
 #### Effect-aware Bash permission preflight
 
-Snow now analyzes the built-in `bash` tool before the ordinary permission
-broker. The focused first slice parses the same POSIX `sh` grammar used by the
-executor with `mvdan.cc/sh/v3/syntax`, converts visible operations into a
-Snow-owned Effect IR, applies non-interactive hard policy, and enriches
-permission requests across the TUI, SDK, JSON/RPC, and normalized event stream:
+Snow analyzes both built-in `bash` and `process_start` before the ordinary
+permission broker. The shared preflight uses `mvdan.cc/sh/v3/syntax` for POSIX
+shell grammar and produces the same tool-independent effects for every surface:
 
 ```text
-Bash source
+Shell source + actual launch directory/environment
     → bounded POSIX shell AST
-    → static effects, capabilities, paths, and unknowns
+    → command specification + abstract shell state + resource policy
+    → effects, capabilities, concrete resources, unknowns
     → hard policy
-    → scoped remembered decision or ask/allow/deny permission
+    → invocation-scoped decision or ask/allow/deny
     → existing host sh -c execution
 ```
 
-The analyzer covers simple commands, redirects, pipelines, lists, subshells,
-command substitutions, basic assignments, literal CWD changes, and statically
-known nested `sh -c` and `bash -c` scripts. Its initial data-driven registry
-recognizes common filesystem commands, network clients, Git operations, package
-managers, interpreters, service/persistence commands, and privilege-changing
-commands. Paths are normalized against the analyzed CWD and configured roots;
-unresolved values, dynamic nested shell source, and unknown executables remain
-explicitly unknown and cannot receive remembered approval. Unsupported
-structural AST nodes and exhausted analysis limits are marked incomplete and
-fail closed before the ordinary permission mode.
+`internal/shellanalysis/commands.json` defines commands, subcommands, option
+aliases, value arity, operand roles, and semantic handlers. It is embedded,
+validated, and compiled to lookup maps once. One option parser handles short
+clusters, attached values, long equals values, and `--`; unknown options never
+inherit a generic safe classification. Specialized bounded handlers implement
+copy destinations, shell state, nested execution, traversal, and network
+resources. No external help command or project-provided specification is
+executed or trusted to grant authority.
 
-High-confidence visible operations against credential files, SSH authorization,
-raw devices, container control sockets, persistence locations, or privilege
-escalation are denied before user permission. Other effects continue through
-the existing permission modes: `deny` blocks Bash, `ask` presents structured
-effects to a trusted broker, and `allow` skips prompting but does not override
-hard policy. Remembered Bash approvals use an analyzer-versioned hash of the
-workspace, capabilities, commands, and concrete resources rather than the old
-broad `bash|exec` key. Legacy broad Bash allows do not authorize analyzed calls;
-legacy denials remain conservative.
+The state engine intersects known values across possible conditional outcomes,
+isolates child/pipeline state, invalidates unmodeled loop/builtin state, and
+preserves quote context. Runtime globs, field splitting, unsupported escapes,
+and unresolved words remain unknown; unresolved prefixes are not presented as
+concrete resources. Read/write redirection emits both capabilities. The node
+budget is shared across nested parses, and wrapper recursion, values, effects,
+and per-invocation filesystem observation caches have independent caps.
 
-The public permission event adds bounded `effects`, `capabilities`, `unknown`,
-`rememberable`, `scope_label`, and explicit projection-truncation fields. The
-TUI presents **Allow once**,
-**Allow this scope**, and **Deny** for rememberable requests; dynamic or unknown
-requests omit the scoped option. Existing RPC/SDK decision strings remain
-compatible, and a session-like decision for a non-rememberable request is
-safely reduced to one-time approval.
+Protected defaults live in `protected_paths.json`, separate from shell grammar
+and command handlers. Global `shell_protected_paths` adds protected paths/trees
+without weakening defaults; project overlays cannot modify it. Path rules and
+symlinks are prepared once per invocation, with bounded ancestor reuse and no
+cross-invocation filesystem cache.
 
-This feature is static launch control, not containment. Approved shell commands
-still run through the existing host `sh -c` process with the current user's OS
-privileges. Shell analysis cannot see file or network operations hidden inside
-Python, package lifecycle scripts, compiled programs, or other external
-executables. Permission prompts therefore label Bash execution as an
-unrestricted host process, and operators must continue using an external
-container, VM, or OS policy where containment is required.
+Approval scopes include exact command source, launch CWD, a digest of the actual
+launch environment, analyzer and embedded-specification versions, effective
+resource policy, and inferred effects. No environment values enter public
+permission data. The v2 scope invalidates earlier analyzer approvals; legacy
+broad allows do not authorize either analyzed shell tool. Current unknown or
+non-rememberable analysis ignores cached allows. Git, network clients, nested
+shells, recursive traversal, and other runtime-dependent programs remain
+one-time approvals even when visible effects are recognized. Unsupported
+structural syntax, unparsed embedded configuration, and exhausted analysis
+budgets fail closed before all permission modes.
 
-Remaining work is deliberately incremental:
+`process_start` analyzes the manager's actual immutable CWD and inherited
+process environment, independently of the model-facing ToolHost; network
+readiness adds uncertainty and cannot receive reusable approval. Its TUI card
+uses the same host-execution warning, command display, and small-frame approval
+requirements as Bash. The agent's existing serial permission/dispatch path is
+shared without duplicating execution logic.
 
-1. improve command-specific option parsing and shell constant propagation;
-2. expand nested `eval`/`source`, heredoc, package-manager, and pipeline
-   data-flow semantics without relabeling unresolved behavior safe;
-3. apply the same preflight and scoped permission model to `process_start` so a
-   managed shell command cannot bypass Bash analysis; and
-4. gather false-positive/false-negative fixtures while keeping analysis bounds,
-   protocol projections, and audit-safe summaries deterministic.
+This is static launch control, not containment. Processes still run with the
+operator's OS privileges; hidden executable behavior, runtime configuration,
+and filesystem changes after preflight require external containment. Remaining
+work includes richer bounded value sets, more command/vendor-specific option
+coverage, and runtime effect enforcement as a separate containment project.
 
-The current layer does not add a sandbox, syscall interception, runtime effect
-comparison, or a new user-facing safety mode. Those are separate containment
-projects rather than claims made by the permission preflight.
+Regression coverage compares harmless temporary shell execution with inferred
+resources; checks Git mutation scopes, option roles, quoted tilde, globs,
+redirection creation, state joins, policy configuration and trusted-project
+isolation, shared managed-process dispatch gates, cancellation, bounds, and
+fuzz invariants. `BenchmarkAnalyzeShell` measures common preflight paths.
 
 #### Semantic/vector tool routing
 
@@ -1705,7 +1706,7 @@ that is fully covered elsewhere is referenced rather than repeated.
 | Symlink path escapes | File safety bug | `EvalSymlinks` plus prefix check; thorough tests |
 | Model ignores tool schema | Poor loops | Tight descriptions; malformed-argument errors; run-scoped call limits and repeated-call reminders |
 | Parallel tool filesystem races | Data loss | Serial tools; no parallel mutation |
-| Arbitrary Bash effects are opaque at approval time | Overbroad approval or host damage | Current boundary is documented and requires external containment; the effect-aware Bash safety layer above is planned |
+| Arbitrary Bash effects are opaque at approval time | Overbroad approval or host damage | Current boundary is documented and requires external containment; the shared shell preflight above bounds visible effects but does not contain execution |
 | Plugin/MCP/subagent OS authority | Runs as the user | Documented boundary; external container/VM required for hostile code |
 | Pre-v1 API and file-format drift | Breaking changes | Stabilize `pkg/snowsdk`, `pkg/protocol`, and the session schema before v1 |
 | Semantic/vector tool routing | Deferred | Await a locally downloadable open-source model with acceptable licensing and startup cost |

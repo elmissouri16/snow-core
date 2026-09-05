@@ -195,7 +195,7 @@ type permissionPickerChoice struct {
 
 func (m *Model) permissionPickerChoices() []permissionPickerChoice {
 	choices := []permissionPickerChoice{{permChoiceAllow, "Allow once", "this request"}}
-	if m.permRequest == nil || m.permRequest.ScopeLabel == "" || m.permRequest.Rememberable {
+	if m.permRequest == nil || (!m.permRequest.Unknown && (m.permRequest.ScopeLabel == "" || m.permRequest.Rememberable)) {
 		choices = append(choices, permissionPickerChoice{permChoiceAlways, "Allow this scope", "matching requests in this session"})
 	}
 	return append(choices, permissionPickerChoice{permChoiceDeny, "Deny", "this request"})

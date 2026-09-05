@@ -16,6 +16,7 @@ const (
 	CapabilityFilesystemReadExternal    Capability = "filesystem.read.external"
 	CapabilityFilesystemWriteExternal   Capability = "filesystem.write.external"
 	CapabilityFilesystemDeleteExternal  Capability = "filesystem.delete.external"
+	CapabilityProtectedResourceAccess   Capability = "resource.protected.access"
 	CapabilityCredentialsRead           Capability = "credentials.read"
 	CapabilitySSHAuthorizationWrite     Capability = "ssh.authorization.write"
 	CapabilityRawDeviceAccess           Capability = "device.raw.access"
@@ -84,7 +85,7 @@ func (DefaultPolicy) Evaluate(_ context.Context, req Request) (PolicyDecision, e
 			continue
 		}
 		switch effect.Capability {
-		case CapabilityCredentialsRead,
+		case CapabilityProtectedResourceAccess, CapabilityCredentialsRead,
 			CapabilitySSHAuthorizationWrite,
 			CapabilityRawDeviceAccess,
 			CapabilityDockerSocketAccess,

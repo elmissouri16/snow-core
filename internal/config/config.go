@@ -212,6 +212,7 @@ type ProcessConfig struct {
 
 // Config is the global snow configuration.
 type Config struct {
+	ShellProtectedPaths       []string                        `json:"shell_protected_paths,omitempty"`
 	DefaultProvider           string                          `json:"default_provider,omitempty"`
 	DefaultModel              string                          `json:"default_model,omitempty"`
 	ProjectSelections         map[string]ProjectSelection     `json:"project_selections,omitempty"`

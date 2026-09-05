@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/elmissouri16/snow-core/internal/permission"
-	"github.com/elmissouri16/snow-core/internal/shellanalysis"
 	"github.com/elmissouri16/snow-core/internal/tools"
 )
 
@@ -29,6 +27,8 @@ var _ tools.PreflightTool = (*Bash)(nil)
 type Bash struct {
 	// MaxOutputBytes caps combined stdout+stderr. Defaults to 262144.
 	MaxOutputBytes int
+	// ProtectedPaths adds operator-owned protected shell resources.
+	ProtectedPaths []string
 	// Timeout caps execution. Defaults to 120s.
 	Timeout time.Duration
 }
@@ -77,29 +77,7 @@ func (b *Bash) Preflight(ctx context.Context, args json.RawMessage, host tools.T
 	if err != nil {
 		return permission.Analysis{}, err
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return permission.Analysis{}, fmt.Errorf("bash: determine working directory: %w", err)
-	}
-	roots := []string{cwd}
-	home, _ := os.UserHomeDir()
-	if host != nil {
-		if host.CWD() != "" {
-			cwd = host.CWD()
-		}
-		if hostRoots := host.Roots(); len(hostRoots) > 0 {
-			roots = hostRoots
-		} else {
-			roots = []string{cwd}
-		}
-		for _, entry := range host.Environ() {
-			if value, ok := strings.CutPrefix(entry, "HOME="); ok {
-				home = value
-				break
-			}
-		}
-	}
-	return shellanalysis.Analyze(ctx, decoded.Command, cwd, roots, home)
+	return analyzeHostShell(ctx, decoded.Command, host, b.ProtectedPaths)
 }
 
 // Run implements tools.Tool.

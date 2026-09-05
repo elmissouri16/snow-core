@@ -69,6 +69,7 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.56.0 // indirect
+	mvdan.cc/sh/v3 v3.14.0 // indirect
 )
 
 // Keep the checked-in example runnable against this checkout. External users can

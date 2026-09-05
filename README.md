@@ -401,7 +401,7 @@ finishes. See the [RPC protocol reference](docs/rpc.md).
 Snow is a harness, **not a whole-process sandbox**:
 
 - Snow, `bash`, plugins, stdio MCP servers, and subagents run with the user's
-  OS privileges. Before asking permission for Bash, Snow parses POSIX shell
+  OS privileges. Before asking permission for Bash or managed process startup, Snow parses POSIX shell
   source, summarizes statically visible effects, and blocks selected protected
   operations; parser errors, unsupported structural nodes, and exhausted
   analysis bounds fail closed. Approved commands still have unrestricted host
@@ -513,13 +513,12 @@ roadmap live in [`IMPLEMENTATION.md`](IMPLEMENTATION.md).
 
 ## Remaining roadmap
 
-- Expand the effect-aware Bash permission preflight with deeper shell-state and
-  command semantics, broader data-flow analysis, and coverage for managed
-  `process_start` commands. The current focused analyzer parses POSIX shell,
-  reports statically visible effects, hard-denies selected protected operations,
-  and scopes remembered approvals by workspace, capabilities, and resources;
-  approved processes still run with host authority. See
-  [the implementation record](IMPLEMENTATION.md#effect-aware-bash-permission-preflight).
+- Expand the shared shell permission preflight with deeper shell-state and
+  command semantics. Both `bash` and `process_start` use a compiled command
+  specification, bounded state analysis, protected-resource policy, and
+  invocation-scoped approvals. Unresolved effects remain explicit and cannot
+  receive reusable approval; approved processes still run with host authority.
+  See [the implementation record](IMPLEMENTATION.md#effect-aware-bash-permission-preflight).
 - Namespace-first tool routing currently uses local BM25; optional
   semantic/vector routing is deferred pending a suitable downloadable
   cross-platform model.
