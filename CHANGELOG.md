@@ -5,6 +5,31 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.7] - 2026-09-05
+
+This alpha improves cancellation and goal accounting, prevents admission
+deadlocks, hardens Bash permission analysis, and reduces context, search,
+terminal-preview, and process-capture overhead.
+
+### Added
+
+- Added Bash effect preflight that checks planned reads, writes, and execution
+  against path policy before running supported commands, with protected-resource
+  identity checks and explicit handling of ambiguous shell effects.
+- Added highlighted file mentions and visible composer-only Ctrl+A selection.
+
+### Compatibility
+
+- Bash preflight hard denials also apply in `allow` mode, and prior remembered
+  shell approvals are invalidated by the new analysis scope. Static analysis
+  does not provide process containment.
+- Core and SDK prompt methods now return caller cancellation/deadline errors;
+  canceled active goals pause instead of silently continuing. Hosts should
+  handle `context.Canceled` and `context.DeadlineExceeded`.
+- Compaction usage uses existing append-only metadata without a schema migration.
+  Previously unrecorded summary usage cannot be recovered, and older binaries
+  omit the new summary metadata from totals.
+
 ### Fixed
 
 - Return caller cancellation and deadline errors from core and SDK prompts,
@@ -17,7 +42,13 @@ also include the generated GitHub comparison for the tagged commit.
   goal budgets, including failed summary attempts, without inflating
   conversational context usage.
 
+- Make RPC event-delivery loss fail visibly and classify timed-out subagents
+  as interrupted rather than successful.
+
 ### Performance
+
+- Reduce repeated allocations in context pruning and checkpoint lookup, and
+  reuse bounded per-search ignore rules while avoiding redundant grep copies.
 
 - Build checkpoint section bodies incrementally, avoid copying safe terminal
   text, and decode only the prefix needed by truncated display labels.
@@ -25,6 +56,15 @@ also include the generated GitHub comparison for the tagged commit.
   storage. A full default buffer reserves an additional 256 KiB; retained log
   content remains capped at 1 MiB. See the
   [measured results](docs/runtime-fixes-performance.md).
+
+### Manual provider validation
+
+- OpenCode Go, anonymous OpenCode Zen, and ChatGPT/Codex OAuth completed live
+  response checks on 2026-09-05.
+- The configured OpenAI-compatible endpoint returned HTTP 503 for both models
+  it advertised, so a successful live compatible-provider response could not
+  be verified. Local mocked compatibility tests passed; this service-side
+  availability limitation remains recorded rather than counted as a pass.
 
 ## [0.1.0-alpha.6] - 2026-09-04
 
