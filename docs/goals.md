@@ -33,8 +33,10 @@ the goal blocked and explain what is missing.
 | `complete` | Objective finished; terminal |
 
 Transient provider failures use bounded retries. Cancellation, a provider
-quota, a budget limit, or repeated non-progress stops further continuation
-instead of looping indefinitely.
+quota, or a budget limit stops further continuation. Three consecutive empty
+turns, or three identical responses with no successful tool work beyond
+`get_goal`, pause the goal. This detects repeated output, not every form of
+semantic non-progress. Resuming resets the repetition check.
 
 ## Control a goal
 
@@ -76,6 +78,17 @@ conversations without repeatedly copying its full text.
 Goal usage includes provider input, cached input, output, reasoning, and tool
 requests from automatic work. When provider pricing is available, Snow may
 also show estimated cost. Provider usage remains authoritative.
+
+When the model calls `create_goal` during a running turn, accounting begins
+at creation. Subsequent provider requests and elapsed work count toward the
+new goal; earlier requests are not charged to it.
+
+When usage reaches the goal budget, Snow skips pending tool calls and records
+why they were skipped. It allows at most one report-only provider request with
+no tools and no retries. The in-flight response and final report can exceed
+the token budget; the budget stops further substantive work rather than acting
+as a strict provider billing cap. Queued input that the budget prevents from
+running remains available for recovery.
 
 Automatic compaction counts toward the owning goal, including usage reported
 by failed summary attempts. Repeated usage events within one attempt are

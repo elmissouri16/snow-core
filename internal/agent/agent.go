@@ -243,6 +243,8 @@ type Agent struct {
 	goalTurn           int
 	goalTurnID         string
 	budgetWrap         bool
+	budgetReportDone   bool
+	goalProgress       goalProgressAudit
 }
 
 type compactionTrigger string

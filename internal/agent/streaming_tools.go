@@ -396,6 +396,7 @@ func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBl
 			return fmt.Errorf("agent: account goal usage: %w", err)
 		}
 	}
+	a.recordGoalResponse(content)
 	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	return nil
 }
@@ -625,6 +626,14 @@ func (a *Agent) appendToolResult(parent string, msg protocol.Message, details ..
 }
 
 func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent string) (protocol.Message, bool, error) {
+	if a.goalBudgetReached() {
+		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
+			[]protocol.ContentBlock{protocol.NewTextBlock("Error: tool call skipped because the goal token budget has been reached")}, true)
+		if err := a.appendToolResult(parent, msg); err != nil {
+			return msg, false, err
+		}
+		return msg, false, nil
+	}
 	// Validate args JSON.
 	var args map[string]any
 	rawArgs := cb.Arguments
@@ -790,7 +799,14 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 
 	// Run the tool with panic recovery and bridge progress into the agent
 	// event stream used by the TUI, SDK, print mode, and RPC.
-	tr := a.runTool(ctx, tool, rawArgs, cb.ToolCallID, cb.Name)
+	var tr tools.ToolResult
+	goalErr := a.prepareGoalCreation(tool)
+	if goalErr != nil {
+		tr = tools.ErrorResult(goalErr)
+	} else {
+		tr = a.runTool(ctx, tool, rawArgs, cb.ToolCallID, cb.Name)
+		goalErr = a.bindCreatedGoal(tool, tr)
+	}
 	if !tr.IsError {
 		if activation, ok := skillActivationDetails(tr.Details); ok {
 			if activationErr := a.validateSkillActivation(activation); activationErr != nil {
@@ -810,7 +826,10 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 	if err := a.appendToolResult(parent, msg, tr.Details); err != nil {
 		return msg, true, err
 	}
-	a.recordToolOutcome(tr)
+	if goalErr != nil {
+		return msg, true, goalErr
+	}
+	a.recordToolOutcome(cb.Name, tr)
 	if !tr.IsError {
 		a.applyDiscoveryDetails(tr.Details)
 		a.applySkillActivationDetails(tr.Details)
@@ -820,10 +839,13 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 	return msg, true, nil
 }
 
-func (a *Agent) recordToolOutcome(result tools.ToolResult) {
+func (a *Agent) recordToolOutcome(name string, result tools.ToolResult) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !result.IsError {
+		if name != "get_goal" {
+			a.goalProgress.work = true
+		}
 		a.turnProgress = true
 		return
 	}

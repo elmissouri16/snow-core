@@ -14,6 +14,13 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+// IsCreateTool identifies the built-in creator bound to this controller. Tool
+// names or model-provided result text must never change accounting ownership.
+func IsCreateTool(tool tools.Tool, controller *Controller) bool {
+	creator, ok := tool.(*createTool)
+	return ok && controller != nil && creator.c == controller
+}
+
 func (t *createTool) Run(_ context.Context, raw json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {
 	var a struct {
 		Objective   string `json:"objective"`

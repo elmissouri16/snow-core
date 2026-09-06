@@ -13,7 +13,7 @@ import (
 
 func TestFailedToolResultDoesNotCountAsTurnProgress(t *testing.T) {
 	a := &Agent{}
-	a.recordToolOutcome(tools.ErrorResult(session.ErrGoalConflict))
+	a.recordToolOutcome("inspect", tools.ErrorResult(session.ErrGoalConflict))
 	a.mu.RLock()
 	progress := a.turnProgress
 	a.mu.RUnlock()
@@ -21,7 +21,7 @@ func TestFailedToolResultDoesNotCountAsTurnProgress(t *testing.T) {
 		t.Fatal("failed tool result counted as turn progress")
 	}
 
-	a.recordToolOutcome(tools.TextResult("inspected"))
+	a.recordToolOutcome("inspect", tools.TextResult("inspected"))
 	a.mu.RLock()
 	progress = a.turnProgress
 	a.mu.RUnlock()

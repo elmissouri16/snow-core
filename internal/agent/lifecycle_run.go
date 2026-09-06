@@ -253,12 +253,16 @@ func (a *Agent) requestToolPolicy() func(tools.DescriptorMetadata) bool {
 	a.mu.RLock()
 	mode := a.turnMode
 	origin := a.turnOrigin
+	budgetReached := a.running && a.budgetWrap
 	if !a.running {
 		mode = a.mode
 		origin = ""
 	}
 	a.mu.RUnlock()
 	return func(desc tools.DescriptorMetadata) bool {
+		if budgetReached {
+			return false
+		}
 		name := desc.Name
 		if origin == "goal" && (name == "ask_user" || name == "request_user_input") {
 			return false
@@ -484,7 +488,12 @@ func (a *Agent) run(ctx context.Context) error {
 			a.publish(protocol.AgentEvent{Type: protocol.EvRunStatsUpdated})
 		}
 		providerAttempts++
+		reportOnly := a.beginGoalReport()
 		stop, err := a.streamTurnWithErrors(ctx, req, false)
+		if err != nil && (reportOnly || a.goalBudgetReached()) {
+			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
+			return err
+		}
 		if err != nil {
 			if !overflowRecovered && a.autoThresholdPercent() > 0 && ctx.Err() == nil && provider.IsContextWindowExceeded(err) {
 				if !providerFailureActivity(err) {
@@ -601,6 +610,9 @@ func (a *Agent) run(ctx context.Context) error {
 			naturalStop = true
 		}
 
+		if reportOnly || a.goalBudgetReached() {
+			return nil
+		}
 		canContinue := a.opts.MaxTurns == 0 || turn < a.opts.MaxTurns
 		queued, ok, limited := a.takeQueuedInput(naturalStop, canContinue)
 		if limited {

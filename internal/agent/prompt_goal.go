@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -158,6 +159,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	a.activeDone = make(chan struct{})
 	a.admitTurnIdentityLocked("user")
 	a.goalAtTurn = nil
+	a.budgetWrap = false
 	if a.turnMode != protocol.ModePlan && a.opts.Goal != nil {
 		if g, _ := a.opts.Goal.Get(); g != nil && g.Status == protocol.GoalActive {
 			a.goalAtTurn = g
@@ -188,7 +190,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	// Ensure we stop running on any exit. Operational failures leave accepted
 	// queued input closed but recoverable through PendingInputs/ClearPendingInputs.
 	defer func() {
-		a.closeInputQueue(retErr == nil || ctx.Err() != nil)
+		a.closeGoalInputQueue(retErr == nil, ctx.Err() != nil)
 		cancel()
 		// Persist any mail that arrived after the final provider request before
 		// releasing turn admission. This keeps delivery ordered and durable for
@@ -269,6 +271,9 @@ func (a *Agent) resetTurnExecutionLocked() {
 	a.turnUsage = protocol.Usage{}
 	a.usageSet = false
 	a.turnProgress = false
+	a.goalProgress.text = sha256.New()
+	a.goalProgress.work = false
+	a.budgetReportDone = false
 	a.turnGoalConflict = nil
 	a.baseDeferred = nil
 	a.searchedDeferred = nil
@@ -346,7 +351,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	a.resetTurnExecutionLocked()
 	a.mu.Unlock()
 	defer func() {
-		a.closeInputQueue(retErr == nil || ctx.Err() != nil)
+		a.closeGoalInputQueue(retErr == nil, ctx.Err() != nil)
 		cancel()
 		retErr = errors.Join(retErr, a.drainMailbox(), ctx.Err())
 		continuing, accountingErr := a.finalizeGoalTurn(retErr, false, ctx.Err())
@@ -458,7 +463,13 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool, callerErr error
 		goalID = a.goalAtTurn.GoalID
 	}
 	conflict := a.turnGoalConflict
+	repeated := false
+	if userOrigin {
+		a.goalProgress.repeats = 0
+		a.goalProgress.goalID = ""
+	}
 	if !userOrigin && a.turnOrigin == "goal" && turnErr == nil {
+		repeated = a.repeatedGoalResponseLocked(goalID)
 		if a.autoEmptyGoal != goalID {
 			a.autoEmptyGoal = goalID
 			a.autoEmpty = 0
@@ -521,10 +532,14 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool, callerErr error
 		a.resetGoalConflictState()
 		return false, finalErr
 	}
-	if empty >= 3 && g.Status == protocol.GoalActive {
+	if (empty >= 3 || repeated) && g.Status == protocol.GoalActive {
 		// Empty output is not proof of an external blocker. Pause conservatively
 		// rather than falsely claiming the model's three-turn blocked audit.
-		a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal continuation paused after three turns with no text or tool progress"})
+		message := "goal continuation paused after three turns with no text or tool progress"
+		if repeated && empty < 3 {
+			message = "goal continuation paused after three identical responses without other successful tool work"
+		}
+		a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: message})
 		if err := controller.Defer(true); err != nil {
 			transitionErr := fmt.Errorf("goal: defer before no-progress pause: %w", err)
 			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: transitionErr.Error()})
@@ -542,9 +557,10 @@ func (a *Agent) finalizeGoalTurn(turnErr error, userOrigin bool, callerErr error
 		return false, deferErr
 	}
 	a.mu.RLock()
-	toolsAvailable := a.goalToolsAvailableLocked()
+	toolsAvailable := a.goalToolsAvailableLocked() && len(a.queuedInputs) == 0
+	reported := a.budgetReportDone
 	a.mu.RUnlock()
-	return toolsAvailable && !deferred && (g.Status == protocol.GoalActive || (crossed && g.Status == protocol.GoalBudgetLimited)), finalErr
+	return toolsAvailable && !deferred && (g.Status == protocol.GoalActive || (crossed && !reported && g.Status == protocol.GoalBudgetLimited)), finalErr
 }
 
 func (a *Agent) accountGoalUsage(usage protocol.Usage) error {
@@ -596,6 +612,7 @@ func (a *Agent) finishGoalAccounting() (bool, error) {
 func (a *Agent) ResetGoalAudit() {
 	a.mu.Lock()
 	a.goalTurn = 0
+	a.goalProgress = goalProgressAudit{}
 	a.goalTurnID = ""
 	a.autoEmpty = 0
 	a.autoEmptyGoal = ""
@@ -643,9 +660,10 @@ func (a *Agent) ContinueGoal() {
 			}
 			a.mu.Lock()
 			crossed := a.budgetWrap
+			reported := a.budgetReportDone
 			a.budgetWrap = false
 			a.mu.Unlock()
-			if crossed && !wrap {
+			if crossed && !wrap && !reported {
 				wrap = true
 				continue
 			}

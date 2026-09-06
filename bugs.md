@@ -1757,3 +1757,120 @@ original run is not accepted as release evidence.
 - **Fix:** Updated the links to the current sections.
 - **Verified:** Checked relative file links and heading anchors across all 57
   repository Markdown files; no broken relative links remain.
+
+## BUG-041: Exhausted goal budgets do not stop substantive tool work
+
+- **Status:** Resolved; verified 2026-09-06
+- **Severity:** High
+- **Surface:** Agent tool-result chaining and budget completion
+- **Expected:** After accounting exhausts a goal budget, stop substantive work
+  at the next safe boundary and permit only a bounded completion report.
+- **Actual:** `accountGoalUsage` sets `budgetWrap`, but `run` still dispatches
+  pending tools and exposes the ordinary tool schemas on subsequent requests.
+  Budget steering is only model instruction; the same tool-result chain can
+  continue after the persisted goal becomes `budget_limited`.
+- **Reproduction:** Create a saved goal with budget 1. Have a mock provider
+  report 1 token and request a work tool, then report 10 tokens and request
+  another work tool, then return a final response using 10 tokens. Both tools
+  execute and the goal records 21 tokens. This includes a fresh tool request
+  made after exhaustion, beyond any unavoidable in-flight response overshoot.
+- **Impact:** A model that continues requesting tools can keep performing work
+  and consuming provider usage beyond the user-selected goal budget.
+- **Required remediation:** Enforce budget completion in the runtime before
+  dispatch and request admission; preserve tool-call/result pairing with
+  explicit non-execution results and bound the final reporting path.
+- **Required regression coverage:** Budget crossing on tool-use responses,
+  new tool requests after crossing, tool requests during the final wrap turn,
+  and crossing during automatic compaction.
+- **Verification:** Temporary Go overlay test
+  `TestAuditGoalBudgetStopsSubstantiveTools` reproduced two post-exhaustion
+  work-tool executions and 21 charged tokens against a budget of 1.
+
+- **Resolution:** Budget completion now removes provider tool schemas, rejects
+  pending and unsolicited report-time calls with paired results, and permits
+  at most one report attempt without retries or tool-result chaining. Budget
+  stops preserve queued input. Permanent regressions cover crossing batches,
+  report tools, report failure, direct user work afterward, and automatic
+  compaction both within and between goal turns.
+
+## BUG-042: Goals created during a prompt miss subsequent turn usage
+
+- **Status:** Resolved; verified 2026-09-06
+- **Severity:** High
+- **Surface:** Model-facing create_goal and admitted-turn usage ownership
+- **Expected:** Once `create_goal` succeeds, subsequent provider requests
+  working on that goal charge its usage and enforce its budget.
+- **Actual:** `prompt` captures `goalAtTurn` only at admission. A successful
+  `create_goal` does not bind the newly created goal to the current turn.
+  `accountGoalUsage` and final duration accounting therefore skip that turn,
+  even though subsequent requests receive the active goal objective.
+- **Reproduction:** Start a prompt without an existing goal. Have the provider
+  call `create_goal` with budget 1, then issue two responses consuming 10
+  tokens each. Inspect the goal at the end of that admitted turn, before
+  subsequent autonomous work: it remains active with zero tokens used.
+- **Impact:** An entire potentially long tool chain can work on a new goal
+  without charging tokens, elapsed time, or cost; its budget cannot stop it.
+- **Required remediation:** Bind usage ownership at successful goal creation
+  with a precise accounting baseline, retaining identity checks so replacing
+  goals never charges old work to a new goal.
+- **Required regression coverage:** Creation during a user turn, later usage
+  and duration, budget crossing, completion in the same turn, and replacement
+  after completion without stale accounting.
+- **Verification:** Temporary Go overlay test
+  `TestAuditGoalCreatedDuringPromptAccountsFollowingWork` reproduced zero
+  charged tokens after 20 post-creation provider tokens. The probe suppresses
+  subsequent automatic admission to inspect only the affected user turn.
+
+- **Resolution:** The agent identifies its controller's actual built-in
+  creation tool, flushes the previous owner's elapsed usage before creation,
+  and binds the successful new goal before subsequent tool/provider work.
+  Failed creation keeps the existing owner. Permanent regressions cover
+  same-turn completion, cost and elapsed accounting, budget crossing, and
+  replacing a completed goal without charging its usage to the new goal.
+
+## BUG-043: Repeated blocker text bypasses the goal non-progress guard
+
+- **Status:** Resolved; verified 2026-09-06
+- **Severity:** Medium
+- **Surface:** Automatic goal progress detection
+- **Expected:** Repeated unchanged blocker-only responses should eventually
+  pause automatic continuation instead of consuming usage indefinitely.
+- **Actual:** Any non-whitespace text delta sets `turnProgress=true`, and any
+  successful tool result does likewise. The three-turn guard detects empty
+  output, not repeated non-progress. Every new goal turn resets this flag.
+- **Reproduction:** Use a mock provider that repeatedly returns only
+  `I am still waiting for credentials.` and a normal stop event. Six automatic
+  internal turns leave the goal active; each response resets the empty count.
+- **Impact:** A goal without a token budget can continue requesting responses
+  to the same blocker until user intervention or another runtime/provider
+  limit. The guide's repeated non-progress guarantee is too broad.
+- **Required remediation:** Track repeated terminal output or another bounded,
+  conservative non-progress signal across goal turns; pause with an honest
+  diagnostic rather than claiming a model-audited blocked condition.
+- **Required regression coverage:** Repeated identical blocker text, repeated
+  goal-status reads, distinct productive turns, and explicit resume resetting
+  the audit.
+- **Verification:** Temporary Go overlay test
+  `TestAuditRepeatedNonProgressTextPausesGoal` reproduced an active goal after
+  six identical blocker-only responses.
+- **Resolution:** A bounded SHA-256 fingerprint compares normalized response
+  text across automatic goal turns. Three identical responses with no other
+  successful tool work (including status-read-only turns) durably pause the
+  goal. Distinct responses, successful non-status tool work, and explicit
+  resume reset the repetition streak. Permanent tests cover these cases and
+  differing stream chunks and whitespace.
+
+### Goal-fix verification (BUG-041 through BUG-043)
+
+All checks passed on 2026-09-06 with isolated temporary `SNOW_HOME` and
+`GOCACHE` directories:
+
+- `go test ./internal/agent ./internal/goal ./internal/session ./internal/app ./internal/rpc ./pkg/snowsdk -count=1`;
+- `go test ./...` and `go vet ./...`;
+- `go test -race ./internal/subagent ./internal/agent ./internal/app ./internal/goal ./internal/session ./internal/rpc ./pkg/snowsdk`;
+- `python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v` (56 tests);
+- `python3 scripts/check_benchmarks.py`;
+- standalone `examples/sdk`: `go test ./...` and `go run .` with the fake provider;
+- `git diff --check`;
+- `./scripts/install-local.sh` installed `~/.local/bin/snow` as `0.1.0-dev`;
+- installed CLI: `snow --provider fake --no-session -p "Goal fixes lifecycle smoke test"`.
