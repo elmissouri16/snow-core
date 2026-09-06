@@ -101,6 +101,7 @@ type runtime struct {
 	record                    session.SubagentRecord
 	child                     ChildRuntime
 	tasks                     chan childTask
+	pendingTasks              int // accepted tasks, including dequeued work and finalization
 	cancel                    context.CancelFunc
 	skipQueued                bool
 	unsubscribe               func()

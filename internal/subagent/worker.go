@@ -57,7 +57,7 @@ func (m *Manager) evictIdle() {
 			r.mu.Lock()
 			child := r.child
 			status := r.state.Status
-			busy := r.cancel != nil || r.followupQueued || r.finalizing || len(r.tasks) != 0
+			busy := runtimeHasActiveWorkLocked(r)
 			if child == nil || busy || status == protocol.AgentPendingInit || status == protocol.AgentQueued || status == protocol.AgentRunning {
 				r.mu.Unlock()
 				continue
@@ -68,7 +68,7 @@ func (m *Manager) evictIdle() {
 			}
 			r.mu.Unlock()
 			r.mu.Lock()
-			if r.child != child || r.cancel != nil || r.followupQueued || len(r.tasks) != 0 || r.state.Status != status {
+			if r.child != child || runtimeHasActiveWorkLocked(r) || r.state.Status != status {
 				r.mu.Unlock()
 				continue
 			}
@@ -344,15 +344,6 @@ func runtimeChild(r *runtime) ChildRuntime {
 		r.lastUsed = time.Now()
 	}
 	return r.child
-}
-
-func runtimeFinalizing(r *runtime) bool {
-	if r == nil {
-		return false
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.finalizing
 }
 
 func runtimeParentBranch(r *runtime) string {

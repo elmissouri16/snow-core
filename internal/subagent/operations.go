@@ -86,6 +86,7 @@ func (m *Manager) Followup(ctx context.Context, caller Caller, target, message s
 	}
 	t.mu.Lock()
 	if !t.followupQueued {
+		t.pendingTasks++
 		t.tasks <- childTask{onlyIfPending: wasRunning, followup: true}
 		t.followupQueued = true
 	}
@@ -109,8 +110,10 @@ func (m *Manager) WaitAll(ctx context.Context) error {
 		}
 		active := false
 		for _, r := range m.byID {
-			status := r.snapshot().Status
-			if status == protocol.AgentPendingInit || status == protocol.AgentQueued || status == protocol.AgentRunning || runtimeFinalizing(r) {
+			r.mu.Lock()
+			busy := runtimeHasActiveWorkLocked(r)
+			r.mu.Unlock()
+			if busy {
 				active = true
 				break
 			}
@@ -138,18 +141,17 @@ func (m *Manager) waitResult(caller Caller, message string, timedOut, clamped bo
 	callerPrefix := string(caller.Path) + "/"
 	for _, id := range m.order {
 		r := m.byID[id]
-		if branch := runtimeParentBranch(r); branch != "" && branch != activeBranch {
+		r.mu.Lock()
+		branch, path := r.record.ParentBranchID, r.state.Agent.Path
+		status := runtimeWorkStatusLocked(r)
+		r.mu.Unlock()
+		if branch != "" && branch != activeBranch {
 			continue
 		}
-		s := r.snapshot()
-		if caller.Path != protocol.RootAgentPath && !strings.HasPrefix(string(s.Agent.Path), callerPrefix) {
+		if caller.Path != protocol.RootAgentPath && !strings.HasPrefix(string(path), callerPrefix) {
 			continue
 		}
-		if runtimeFinalizing(r) {
-			running++
-			continue
-		}
-		switch s.Status {
+		switch status {
 		case protocol.AgentRunning:
 			running++
 		case protocol.AgentPendingInit, protocol.AgentQueued:
@@ -594,20 +596,21 @@ func (m *Manager) worker(r *runtime, stop <-chan struct{}, done chan<- struct{})
 			}
 			r.mu.Unlock()
 			if skip {
-				r.mu.Lock()
-				r.interruptRequested = false
-				r.mu.Unlock()
+				m.finishTask(r)
 				continue
 			}
 			if child == nil {
+				m.finishTask(r)
 				continue
 			}
 			if task.onlyIfPending && !child.PendingMailbox() {
+				m.finishTask(r)
 				continue
 			}
 			select {
 			case m.slots <- struct{}{}:
 			case <-m.ctx.Done():
+				m.finishTask(r)
 				return
 			}
 			turnCtx, cancel := context.WithTimeout(m.ctx, m.limits.TaskTimeout)
@@ -622,9 +625,7 @@ func (m *Manager) worker(r *runtime, stop <-chan struct{}, done chan<- struct{})
 			if skip {
 				cancel()
 				<-m.slots
-				r.mu.Lock()
-				r.interruptRequested = false
-				r.mu.Unlock()
+				m.finishTask(r)
 				continue
 			}
 			m.setStatus(r, protocol.AgentRunning, "", "")
@@ -637,10 +638,7 @@ func (m *Manager) worker(r *runtime, stop <-chan struct{}, done chan<- struct{})
 			if skip {
 				cancel()
 				<-m.slots
-				r.mu.Lock()
-				r.cancel = nil
-				r.interruptRequested = false
-				r.mu.Unlock()
+				m.finishTask(r)
 				continue
 			}
 			var err error
@@ -690,6 +688,7 @@ func (m *Manager) worker(r *runtime, stop <-chan struct{}, done chan<- struct{})
 			if persistErr != nil {
 				m.emit(protocol.AgentEvent{Type: protocol.EvError, Agent: terminal.Agent.Clone(), Message: terminal.Error})
 			}
+			m.finishTask(r)
 			m.emitTerminalStatus(r, terminal)
 			m.scheduleEviction()
 		}

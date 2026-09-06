@@ -97,6 +97,12 @@ identity and history. Resuming reopens that child without starting a turn;
 queue a follow-up when you want it to work again. Interrupting a child cancels
 only its current turn.
 
+All-complete waits include accepted follow-ups, even between turns or while a
+task is waiting for an execution slot. A previous task's terminal status does
+not mean its queued follow-up has finished. Interrupted tasks release their
+active-work state when skipped or stopped, allowing the child to be closed and
+session controls to proceed once the rest of the tree is idle.
+
 When a child's task deadline expires, its status is `interrupted` and its error
 records the timeout, including when expiration occurs during provider streaming.
 Any partial response delivered to the parent is labeled as incomplete work.

@@ -57,7 +57,7 @@ func (m *Manager) CloseAgent(ctx context.Context, caller Caller, target string) 
 		r.mu.Unlock()
 		return previous, fmt.Errorf("subagents: agent %s is not terminal", ref.Path)
 	}
-	busy := r.finalizing || r.cancel != nil || r.followupQueued || len(r.tasks) != 0 || (r.child != nil && r.child.IsRunning())
+	busy := runtimeHasActiveWorkLocked(r)
 	if busy {
 		r.mu.Unlock()
 		return previous, fmt.Errorf("subagents: agent %s still has active work", ref.Path)
@@ -174,7 +174,7 @@ func (m *Manager) recloseAfterFailedFollowup(r *runtime) error {
 		r.mu.Unlock()
 		return nil
 	}
-	busy := r.finalizing || r.cancel != nil || r.followupQueued || len(r.tasks) != 0 || (r.child != nil && r.child.IsRunning())
+	busy := runtimeHasActiveWorkLocked(r)
 	if busy || (!r.state.Status.Terminal() && r.state.Status != protocol.AgentNotLoaded) {
 		status := r.state.Status
 		r.mu.Unlock()

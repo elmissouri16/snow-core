@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-func atomicReplaceRooted(ctx context.Context, target rootedPath, data []byte, mode os.FileMode, preserveMode bool) error {
+func atomicReplaceRooted(ctx context.Context, target rootedPath, data []byte, mode os.FileMode, preserveMode bool, expected *rootedEditSnapshot) error {
 	parent := filepath.Dir(target.name)
 	if err := target.root.MkdirAll(parent, 0o755); err != nil {
 		return fmt.Errorf("create parent dirs: %w", err)
@@ -51,6 +51,11 @@ func atomicReplaceRooted(ctx context.Context, target rootedPath, data []byte, mo
 	}
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("close: %w", err)
+	}
+	if expected != nil {
+		if err := expected.validate(ctx, target); err != nil {
+			return err
+		}
 	}
 	if err := target.root.Rename(tempName, target.name); err != nil {
 		return fmt.Errorf("replace: %w", err)

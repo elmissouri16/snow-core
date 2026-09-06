@@ -1874,3 +1874,153 @@ All checks passed on 2026-09-06 with isolated temporary `SNOW_HOME` and
 - `git diff --check`;
 - `./scripts/install-local.sh` installed `~/.local/bin/snow` as `0.1.0-dev`;
 - installed CLI: `snow --provider fake --no-session -p "Goal fixes lifecycle smoke test"`.
+
+## BUG-044: Edit silently overwrites a concurrent file save
+
+- **Status:** Resolved; verified 2026-09-06 (external-writer limitation below)
+- **Severity:** High
+- **Surface:** Built-in Edit and rooted atomic replacement
+- **Expected:** An edit must preserve unrelated changes made after it opens the
+  file, or report a conflict without replacing the newer contents.
+- **Actual:** Edit reads its pinned file descriptor and computes a replacement,
+  then `atomicReplaceRooted` renames the staged result over the destination
+  without checking that the destination still represents the original content.
+  An intervening editor save that atomically replaces the file leaves the old
+  descriptor readable, so Snow silently replaces the newer file with stale data.
+- **Reproduction:** Start with `target before\nbaseline\n`. In the tool host's
+  first progress callback (after Edit opens the file), atomically save
+  `target before\nnew user work\n` at the same path. Let Edit replace
+  `target before` with `target after`. The tool reports success, but the final
+  file is `target after\nbaseline\n`; the newer user work is lost.
+- **Impact:** Concurrent editor saves or other writers can lose unrelated work
+  even when the requested edit matches exactly once. Atomic replacement prevents
+  partially written files but does not prevent this lost update.
+- **Required remediation:** Serialize Snow's edits to a shared target and
+  validate the source identity and contents before replacement; reject detected
+  concurrent changes. Account explicitly for external writers and the remaining
+  check-to-rename race instead of treating a process-local lock as sufficient.
+- **Required regression coverage:** Concurrent atomic saves, in-place writes,
+  overlapping Snow edits, and conflict handling that preserves the newer file.
+- **Verification:** A temporary Go overlay test,
+  `TestAuditEditPreservesConcurrentAtomicSave`, fails deterministically with
+  `tool IsError=false` and the stale final contents above. The fixture uses only
+  temporary files and a synchronous host callback to control the interleaving.
+  Reproduce in this audit workspace with
+  `go test -overlay=/private/tmp/snow-critical-audit-probes/overlay.json ./internal/tools/builtin -run TestAuditEditPreservesConcurrentAtomicSave -count=1`.
+  The existing full internal-package and SDK race suite passes, demonstrating
+  that those tests do not currently cover this filesystem lost-update case.
+- **Resolution:** Built-in Edit and Write now share a cancelable process-wide
+  mutation gate, including across tool instances and path aliases. Edit retains
+  its original file metadata and bounded contents, then validates identity,
+  metadata, and exact bytes through the pinned root immediately before rename.
+  Detected conflicts preserve the newer file and remove the staged replacement.
+  Write retains its intentional full-content overwrite behavior.
+- **Remaining limitation:** External editors, shell commands, plugins, and
+  other processes do not use the gate. Changes after final validation but before
+  rename remain possible because portable replacement has no filesystem
+  compare-and-swap operation. This limit is documented in `docs/security.md`.
+- **Fix verification:** Permanent tests in `edit_conflict_test.go` pass for
+  atomic saves (including identical contents on a new inode), in-place changes,
+  deletion, changed contents with restored size/mtime, overlapping Edit/Write
+  cancellation, and twelve concurrent edits preserving every change.
+  `go test ./internal/tools/builtin -count=1`, `go test ./...`, `go vet ./...`,
+  and `go test -race ./internal/tools/builtin ./internal/subagent ./internal/agent ./internal/app ./internal/session ./internal/rpc ./pkg/snowsdk`
+  passed. All 56 support-script tests, `python3 scripts/check_benchmarks.py`,
+  and `git diff --check` passed as well.
+  `./scripts/install-local.sh` installed `~/.local/bin/snow` as `0.1.0-dev`;
+  an isolated fake-provider CLI smoke check exited successfully with permissions
+  denied and sessions, plugins, MCP, skills, subagents, and debug disabled.
+
+## BUG-045: Subagent waits report completion before accepted follow-ups run
+
+- **Status:** Resolved; verified 2026-09-06
+- **Severity:** High
+- **Surface:** Subagent WaitAll, WaitUntilAll, and wait-result activity counts;
+  CLI and SDK one-shot completion
+- **Expected:** A child with accepted, unprocessed follow-up work must keep an
+  all-terminal wait pending until that work completes or is interrupted.
+- **Actual:** The worker commits and publishes a terminal status for its first
+  task before consuming an already queued follow-up. WaitAll and waitResult
+  inspect lifecycle status and finalization but omit queued tasks and
+  followupQueued. During that interval they report completion even though
+  HasActive correctly reports outstanding work.
+- **Reproduction:** Start a blocked child, submit a follow-up while it runs,
+  then allow its first task to finish. Pause delivery of its first completed
+  status to hold the worker before the next task. WaitAll returns nil and
+  WaitUntilAll returns AllTerminal=true while the child's follow-up remains
+  unread and has not executed.
+- **Impact:** Callers can proceed using incomplete results. CLI and SDK
+  one-shot helpers use WaitAll through WaitSubagentsIdle; premature return can
+  let their normal shutdown cancel accepted follow-up work.
+- **Required remediation:** Make wait predicates and activity counts use a
+  consistent, atomic view of pending, executing, and finalizing work. Cover
+  tasks already dequeued but waiting for a slot as well as queued follow-ups;
+  signal activity whenever the final outstanding work becomes idle.
+- **Required regression coverage:** Follow-up arrival during a running task,
+  the terminal-to-next-task interval, slot waits, already-consumed mail,
+  recursive wait scope, and CLI/SDK completion waiting for accepted work.
+- **Verification:** Temporary Go overlay test
+  `TestAuditWaitIncludesAcceptedFollowup` reproduced
+  `WaitAll=<nil> AllTerminal=true HasActive=true pending=true followups=0`.
+  The test uses a mock child and a synchronous event callback to control the
+  worker interleaving without modifying production source.
+- **Resolution:** Accepted tasks are counted until completion or skipping,
+  including dequeue, slot waits, and finalization. WaitAll, wait-result counts,
+  idle-tree checks, closure, and eviction now share the same active-work
+  predicate. Wait results read the task state under one runtime lock. Permanent
+  regressions cover pending follow-ups between turns, dequeued follow-ups,
+  and already-consumed mail whose skipped task must wake waiters.
+
+## BUG-046: Interrupting a queued child leaves stale active-work state
+
+- **Status:** Resolved; verified 2026-09-06
+- **Severity:** Medium
+- **Surface:** Subagent interruption while waiting for an execution slot
+- **Expected:** Once a queued task is interrupted and skipped, its runtime
+  should become idle and permit closing the child or switching sessions.
+- **Actual:** After acquiring a slot, the worker assigns r.cancel and checks
+  skipQueued. The interrupted branch cancels its context and releases the slot
+  but fails to clear r.cancel. The worker returns to waiting for another task,
+  while active-work checks continue treating that stale callback as live work.
+- **Reproduction:** Fill the execution capacity, spawn a child, wait until its
+  worker is blocked acquiring a slot, interrupt it, then release capacity.
+  After the skip completes, CloseAgent rejects the child as still active and
+  HasActive remains true despite no child task running.
+- **Impact:** The completed interruption blocks child closure and App session
+  or branch transitions that require an idle subagent tree. The stale state
+  persists while the child stays idle.
+- **Required remediation:** Clear all per-task active state on every worker
+  skip/cancellation path and notify activity observers when the task settles.
+- **Required regression coverage:** Interruption before dequeue, while waiting
+  for a slot, and after slot acquisition; subsequent close, session switching,
+  and child reuse must observe a consistent idle state.
+- **Verification:** Temporary Go overlay test
+  `TestAuditInterruptedSlotWaitReleasesActiveState` observed the actual worker
+  blocked at its slot select, then reproduced
+  `close=subagents: agent /root/queued still has active work active=true`.
+  Slot saturation is simulated locally; no provider or external process runs.
+- **Resolution:** Every worker task exit uses common settlement to release its
+  accepted-task count, clear its cancellation and interruption state, and wake
+  activity observers. Permanent synchronized regressions interrupt before
+  dequeue, before slot acquisition, and after acquisition; each verifies idle
+  state, child closure, follow-up reuse, and a subsequent session switch.
+
+Both second-scan probes are available in this audit workspace via
+`go test -overlay=/private/tmp/snow-second-audit/overlay.json ./internal/subagent -run TestAudit -count=1`.
+These historical overlays capture pre-fix source layout; permanent regressions
+now live in `task_activity_test.go` and `worker_cancellation_test.go`.
+
+### Subagent-fix verification (BUG-045 and BUG-046)
+
+Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
+
+- `go test ./internal/subagent -count=1` and `go test -race ./internal/subagent -count=1`;
+- `go test ./...` and `go vet ./...`;
+- `go test -race ./internal/agent ./internal/app ./internal/session ./internal/rpc ./pkg/snowsdk`;
+- `python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v` (56 tests);
+- `python3 scripts/check_benchmarks.py`;
+- standalone `examples/sdk`: `go test ./...` and `go run .` with the fake provider;
+- `git diff --check`.
+- `./scripts/install-local.sh` installed `~/.local/bin/snow` as `0.1.0-dev`;
+  the installed CLI passed an isolated fake-provider smoke check with sessions
+  and extensions disabled and permissions denied.

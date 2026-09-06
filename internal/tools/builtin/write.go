@@ -78,6 +78,12 @@ func (w *Write) Run(ctx context.Context, args json.RawMessage, host tools.ToolHo
 		return tools.ErrorResult(fmt.Errorf("write: %w", err)), nil
 	}
 
+	unlock, err := lockRootedMutation(ctx)
+	if err != nil {
+		return tools.ErrorResult(err), nil
+	}
+	defer unlock()
+
 	mode := os.FileMode(0o644)
 	hasExisting := false
 	var before string
@@ -120,7 +126,7 @@ func (w *Write) Run(ctx context.Context, args json.RawMessage, host tools.ToolHo
 	}
 	emitProgress(host, "writing file", false, false)
 	defer emitProgress(host, "write finished", true, false)
-	if err := atomicReplaceRooted(ctx, rooted, []byte(a.Content), mode, hasExisting); err != nil {
+	if err := atomicReplaceRooted(ctx, rooted, []byte(a.Content), mode, hasExisting, nil); err != nil {
 		return tools.ErrorResult(fmt.Errorf("write: %w", err)), nil
 	}
 	result := tools.ToolResult{

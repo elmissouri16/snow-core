@@ -118,6 +118,19 @@ symlink escapes, and bound input and output. Tool-result artifacts are private,
 session-scoped files under `SNOW_HOME`; protect that directory like a session
 database.
 
+Built-in `edit` and `write` operations serialize within one Snow process,
+including across subagents. Before replacing a file, `edit` rechecks the
+original file's identity, metadata, and exact contents through its pinned root.
+A detected change returns a conflict without replacing the newer file; read
+the file again before retrying. `write` still intentionally replaces the entire
+file with the supplied content.
+
+External editors, shell commands, plugins, and other Snow processes do not
+participate in this coordination. An external write after the final validation
+but before rename can still race an edit: portable atomic replacement does not
+provide a filesystem compare-and-swap operation. Coordinate external writers
+when editing the same file.
+
 Model-facing Bash and managed processes do not share those file-tool
 confinement guarantees. Shell preflight can block only effects visible in shell
 syntax and recognized command arguments. Once approved, Bash and managed

@@ -269,7 +269,7 @@ func runtimeHasActiveWorkLocked(r *runtime) bool {
 	case protocol.AgentPendingInit, protocol.AgentQueued, protocol.AgentRunning:
 		return true
 	}
-	return r.finalizing || r.cancel != nil || r.followupQueued || len(r.tasks) != 0 || (r.child != nil && r.child.IsRunning())
+	return r.pendingTasks != 0 || r.finalizing || r.cancel != nil || r.followupQueued || len(r.tasks) != 0 || (r.child != nil && r.child.IsRunning())
 }
 
 func (m *Manager) ensureIdleTreeLocked() error {
@@ -756,7 +756,10 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 	m.mu.Unlock()
 	m.emit(protocol.AgentEvent{Type: protocol.EvSubagentStarted, Agent: state.Agent.Clone(), Subagent: r.snapshot()})
 	m.setStatus(r, protocol.AgentQueued, "", "")
+	r.mu.Lock()
+	r.pendingTasks++
 	r.tasks <- childTask{message: req.Task, initial: true}
+	r.mu.Unlock()
 	return *r.snapshot(), nil
 }
 

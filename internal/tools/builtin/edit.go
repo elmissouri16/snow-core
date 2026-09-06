@@ -47,7 +47,7 @@ type editArgs struct {
 func (e *Edit) Schema() tools.ToolSchema {
 	return tools.ToolSchema{
 		Name:        "edit",
-		Description: "Atomically replace literal text in one existing regular file within allowed roots. old_str must occur exactly once unless replace_all is true; input and output are limited to 8 MiB by default.",
+		Description: "Atomically replace literal text in one existing regular file within allowed roots. old_str must occur exactly once unless replace_all is true; input and output are limited to 8 MiB by default. Detected concurrent changes fail with a conflict; read the file again before retrying.",
 		Parameters: json.RawMessage(`{
   "type": "object",
   "required": ["path", "old_str", "new_str"],
@@ -105,6 +105,12 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
 	}
+
+	unlock, err := lockRootedMutation(ctx)
+	if err != nil {
+		return tools.ErrorResult(err), nil
+	}
+	defer unlock()
 
 	file, info, err := openRootedRegular(rooted.root, rooted.name)
 	if err != nil {
@@ -169,7 +175,8 @@ func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 	if err := ctx.Err(); err != nil {
 		return tools.ErrorResult(err), nil
 	}
-	if err := atomicReplaceRooted(ctx, rooted, []byte(updated), info.Mode().Perm(), true); err != nil {
+	snapshot := &rootedEditSnapshot{info: info, content: content}
+	if err := atomicReplaceRooted(ctx, rooted, []byte(updated), info.Mode().Perm(), true, snapshot); err != nil {
 		return tools.ErrorResult(fmt.Errorf("edit: %w", err)), nil
 	}
 
