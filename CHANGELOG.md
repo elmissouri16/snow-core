@@ -5,48 +5,84 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.8] - 2026-09-09
+
+This alpha adds local JavaScript extensions across the terminal, CLI, RPC, and
+Go SDK, with native plugin panels and workflow commands. It also includes the
+goal, file-edit, and subagent lifecycle fixes made since alpha.7.
+
 ### Added
 
-- JavaScript API 2 extension commands, asynchronous host controls, declarative
-  TUI views and themes, tool cards, pure lifecycle hooks, scoped SQLite state,
-  typed settings, selected child tools, scaffolding, and editor typings.
-- Review-team and workspace-dashboard workflows, with shared CLI/SDK/RPC
-  command execution and cancellation.
-- UI Studio, Workspace Notes, Prompt Recipes, and Session Pilot examples, plus
-  a selected-tool source scout and an offline API 2 test pack.
-
-- Local JavaScript plugins using pure-Go Goja: synchronous model tools, queued
-  event observers, permissioned built-in calls, CLI/SDK loading, and local
-  registration management. Legacy executable-plugin declarations remain inert.
-- Practical JavaScript examples for project orientation, TODO/FIXME searches,
-  and permissioned Git review, with a one-session launcher and offline tests.
+- Trusted local Goja packages with `snow-plugin.json`, permissioned tools,
+  asynchronous workflow commands, lifecycle hooks, scoped SQLite state, typed
+  settings, selected child tools, tool-result cards, and declarative UI themes.
+- `snow plugin` registration, inspection, validation, execution, and JavaScript
+  or TypeScript scaffolding. Explicit `--js-plugin` loading remains available.
+- Workspace Notes, UI Studio, Prompt Recipes, Session Pilot, dashboard,
+  project-context, TODO search, Git review, and review-team examples, with
+  offline CLI/SDK/RPC smoke coverage and editor typings.
 
 ### Changed
 
-- Simplified the README and documentation navigation, separated maintainer
-  references, and redesigned GitHub Pages around installation and task guides.
-  Long guides gain a responsive page outline; code examples remain copyable.
+- Plugin screens and input dialogs use centered native cards with visible
+  focus, bounded scrolling, compact controls, and drafts preserved on resize.
+- Closed plugin selections omit Other; confirmations default to No. Optional
+  `choices_only` metadata lets RPC/SDK clients represent these constraints.
+- README and GitHub Pages navigation now lead with installation and task guides,
+  while implementation and maintainer references remain in the repository.
 
-### Removed
+### Compatibility and migration
 
-- Removed external-plugin execution, its JSON-RPC host, executable-management
-  commands and `--plugin` flag, configuration APIs, and public `PluginSpec` /
-  `ExternalToolDefinition` types. Go plugins supplied through `GoPlugins` remain
-  supported. Legacy `plugins` configuration keys are ignored and never launched.
-- Removed external-process JavaScript/Python plugin examples and replaced external protocol
-  instructions with a retirement notice.
+- External executable plugins, their JSON-RPC host, the `--plugin` flag, and
+  public `PluginSpec` / `ExternalToolDefinition` APIs have been removed. Legacy
+  `plugins` configuration stays inert. Migrate local scripts to JavaScript
+  packages and `js_plugins`, or use MCP for external tool servers. Statically
+  supplied Go plugins remain supported.
+- Session databases upgrade automatically to schema 12 to store selected child
+  plugin tools. Exact history remains append-only. Back up session databases
+  with Snow stopped before upgrading if rollback is needed: older binaries
+  reject upgraded databases, so rollback requires restoring the backup.
+- Source builds still require Go 1.27rc3. Binary installations do not require Go.
 
 ### Fixed
 
-- Keep plugin dialogs open across unrelated agent events and dismiss them on
-  cancellation. Closed-choice dialogs omit Other and confirmations default to No.
-- Discard failed plugin branch transitions, clean up command-owned children,
-  suppress stale command output after branch changes, and prefer exactly typed
-  plugin aliases in the command palette.
+- Enforce exhausted goal budgets before substantive tool work, count usage for
+  goals created during a prompt, and stop repeated blocked-goal continuations.
+- Revalidate file edits before replacement to detect concurrent saves. Keep
+  accepted child follow-ups pending through execution or cancellation, and
+  settle interrupted child state consistently across waits and shutdown.
+- Keep plugin request context compatible with provider adapters, validate
+  typed form values, preserve runtime cancellation ownership, and enforce
+  explicit child tool selection without widening role permissions.
+- Tie plugin dialogs to their own request lifetime; unrelated root events no
+  longer dismiss them and cancellation no longer leaves a stale dialog.
+- Discard failed plugin branch transitions, close command-owned children on
+  failure, and suppress late command output from a previous branch.
+- Prefer an exactly typed plugin alias over longer prefixes, keep selected
+  panel actions visible, and remove duplicate or generic dialog feedback.
 
-- Make request-hook source labels valid for real provider adapters, accept exact
-  plugin tool names in restricted child roles, and keep plugin dialogs from
-  leaving an idle agent displayed as working.
+### Known alpha limitations
+
+- JavaScript packages are trusted local code, not a security sandbox. Runtime
+  time, call-stack, host-call, and output limits do not provide heap or OS
+  isolation. Node APIs and npm module loading are unavailable at runtime;
+  bundle supported JavaScript before loading it and restart Snow after edits.
+- Headless dialogs require an explicit trusted input broker. Plugin commands
+  and child workflows use ordinary provider credentials, permissions, and usage.
+- Binaries are not yet code-signed or notarized. Release checksums establish
+  asset integrity against the published bundle, not an independent signature.
+
+### Validation
+
+- Local full Go tests, internal/SDK race checks, vet, standalone SDK execution,
+  all 56 support-script tests, benchmark guards, both plugin smoke packs, and
+  formatting checks passed. The pinned vulnerability scan found no reachable
+  vulnerabilities; four advisories in required modules were not identified as
+  called by Snow.
+- Live plugin request-hook prompts passed with OpenCode Go, OpenCode Zen,
+  ChatGPT/Codex OAuth, and the configured OpenAI-compatible endpoint. The
+  optional local `llm-studio` profile was not authenticated and was not counted
+  as a passing provider smoke. No credentials are included in release evidence.
 
 ## [0.1.0-alpha.7] - 2026-09-05
 
