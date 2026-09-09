@@ -1,0 +1,8 @@
+{
+  "id": "session-pilot",
+  "name": "Session Pilot",
+  "version": "0.1.0",
+  "api_version": 2,
+  "entry": "main.js",
+  "capabilities": ["commands", "ui", "agent", "session", "goals"]
+}

@@ -100,7 +100,7 @@ keeps UI dependencies out of core packages.
 │   ├── mcp/                 # official-SDK MCP manager and tool/resource bridges
 │   ├── permission/          # ask/allow/deny service and remembered rules
 │   ├── plan/                # Plan collaboration-mode contract and parser
-│   ├── plugin/              # lifecycle manager and Go/external adapters
+│   ├── plugin/              # lifecycle manager and Go/JavaScript adapters
 │   ├── process/             # app-owned managed background process runtime
 │   ├── procgroup/           # shared Unix process-group signals and exit state
 │   ├── provider/            # Provider interface and adapters
@@ -143,7 +143,7 @@ keeps UI dependencies out of core packages.
 | `internal/context` | Preamble and `AGENTS.md` system-prompt assembly |
 | `internal/diagnostics` | Opt-in asynchronous normalized-event recorder, sanitization, and atomic private dump writer |
 | `internal/permission` | Ask/allow/deny service and remembered rules |
-| `internal/plugin` | Lifecycle manager and Go/external adapters |
+| `internal/plugin` | Lifecycle manager and Go/JavaScript adapters |
 | `internal/process` | Session-bound app-owned background processes, output rings, readiness, and cleanup |
 | `internal/procgroup` | Shared Unix process-group configuration, signaling, and exit-state helpers |
 | `internal/mcp` | Official-SDK MCP manager and tool/resource bridges |
@@ -1009,7 +1009,7 @@ type SessionIndex interface {
 }
 ```
 
-The current on-disk schema version is 11. Tables include `session_meta`
+The current on-disk schema version is 12. Tables include `session_meta`
 (header, title, provenance), `entries` (append-only messages, compaction
 entries, and branch-local agent turn/step markers), `session_branches` (branch tips
 and lineage), `thread_state`
@@ -1118,15 +1118,39 @@ no Go shared-object loading is used. The manager owns registration, namespaced
 tool descriptors, event subscriptions, diagnostics, and reverse-order
 lifecycle.
 
-Plugins are supplied through `GoPlugins` in the app or SDK options. The manager
-validates manifests and tools, defaults tool risk to `exec`, bounds output and
-progress, and delivers sanitized observation events. Registration errors fail
-startup after owner-scoped rollback. `NoPlugins` skips supplied Go plugins.
+JavaScript API 2 adds optional contracts in `pkg/plugin/extensions.go` and UI data
+in `pkg/protocol/extensions.go`. App facades own controls and state; TUI rendering
+stays outside core. Promise settlement is published only after the VM CPU
+watchdog is detached. Context cancellation joins accepted host operations.
+Pure ordered hooks intercept new input, request context, and tool execution;
+transforms are audited without rewriting history. UI views are bounded,
+coalesced, and cached. Typed settings use existing configuration writes; scoped
+SQLite state never advances the conversation cursor. Selected child tools run
+in independent profiles and are persisted in schema 12. See
+[JavaScript extensions](docs/plugin-extensions.md) for the supported surface and
+limits, including Plan-mode and recursive-child restrictions.
 
-External-plugin process execution and configuration management have been
-removed. Legacy `plugins` configuration keys are ignored. There is no plugin
-manifest discovery, subprocess transport, `--plugin` flag, or `snow plugin`
-command. See `docs/plugins.md` for the Go contract.
+Compiled Go plugins are supplied through `GoPlugins`; local bundled JavaScript
+plugins use `JavaScriptPlugins`, `js_plugins`, or `--js-plugin`. The JavaScript
+adapter lives in `internal/plugin/javascript`: one serialized Goja worker per
+plugin per root session, bounded observation queues, context cancellation,
+plain-error/result bridges, and no implicit host globals or module loading.
+JavaScript tools declare a per-handler subset of manifest host built-ins. Risk
+is derived conservatively, and nested operations share the agent admission
+helper for Plan, preflight, invocation policy, and permission checks. Plugin
+origin and package/config fingerprints scope approval reuse. Nested results
+remain inside one outer transcript tool pair. Children exclude JavaScript by default. API 2 tools with explicit child opt-in
+can be selected per spawn, constrained by the role and persisted fingerprints. `NoPlugins` disables Go and JavaScript loading.
+
+Go handlers retain existing inline event delivery and privilege semantics.
+JavaScript observers enqueue sanitized copies without blocking event delivery.
+Plugin state is ephemeral, failures are diagnostic, and runtime interruption
+invalidates the plugin until the next launch. Goja does not provide heap quotas
+or OS containment. The public protocol remains standard-library-only.
+
+External executable transport stays removed; legacy `plugins` declarations and
+`--plugin` remain inert/unsupported. `snow plugin` now manages local JavaScript
+registrations only. See `docs/plugins.md` for the contract and complete limits.
 
 ## MCP
 
@@ -1663,9 +1687,9 @@ that is fully covered elsewhere is referenced rather than repeated.
 |---|---|
 | Product role | Standalone harness, not an IDE backend |
 | Binary name and module | `snow`, `github.com/elmissouri16/snow-core` |
-| Modularity | In-process Go interfaces; no subprocess plugins or Go `.so` loading |
+| Modularity | In-process Go interfaces and Goja JavaScript; no subprocess plugins or Go `.so` loading |
 | Auth | OpenCode Go API key, optional-key/anonymous OpenCode Zen, user-configured OpenAI-compatible endpoints, and ChatGPT/Codex OAuth |
-| Sessions | Snow-owned pure-Go SQLite tree (schema version 11) |
+| Sessions | Snow-owned pure-Go SQLite tree (schema version 12) |
 | TUI | Charmbracelet Bubble Tea |
 | SDK | `pkg/snowsdk` running the same core as the CLI |
 | Process isolation | No built-in process or per-extension sandbox; use external containment when required |

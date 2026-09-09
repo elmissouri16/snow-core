@@ -58,6 +58,7 @@ To reduce drift, use these documents as the primary references:
 | Go embedding quickstart | [`sdk.md`](sdk.md) |
 | Complete Go SDK behavior | [`sdk-reference.md`](sdk-reference.md) |
 | Foreign-process control | [`rpc.md`](rpc.md) |
+| JavaScript extension API | [`plugin-extensions.md`](plugin-extensions.md) and `pkg/plugin` |
 | Go plugin contract | [`plugins.md`](plugins.md) and `pkg/plugin` |
 | ChatGPT/Codex authentication | [`chatgpt-auth.md`](chatgpt-auth.md) |
 | ChatGPT adapter provenance | [`chatgpt-auth-research.md`](chatgpt-auth-research.md) |

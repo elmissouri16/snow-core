@@ -25,6 +25,11 @@ func (m *Model) dispatchMouse(msg tea.MouseMsg) tea.Cmd {
 	if m.restartPromptVisible() || m.updateOfferVisible() || m.updateInstallProgressVisible() {
 		return nil
 	}
+	if m.pluginScreenView() != nil {
+		// The centered panel owns input; clicks must not activate the header or
+		// select transcript text through its visible backdrop.
+		return nil
+	}
 	if m.processFleetOpen {
 		m.handleProcessFleetMouse(msg)
 		return nil
@@ -94,6 +99,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			model, cmd := m.handleKey(msg)
 			m.layout()
 			return model, cmd
+		}
+		if m.pluginScreenView() != nil && msg.Type != tea.KeyCtrlC && msg.Type != tea.KeyCtrlD {
+			_, cmd := m.handlePluginKey(msg)
+			return m, cmd
 		}
 		if handled, cmd := m.applyTranscriptSelectionContextMenuKey(msg); handled {
 			return m, cmd
@@ -178,6 +187,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.app != nil {
 			m.app = msg.app
+			m.pluginDiagnosticCount = 0
 			m.loadAuxiliaryTUIConfig()
 			if msg.app.Cfg.TUI.Theme != "" {
 				if err := m.applyThemeSelection(msg.app.Cfg.TUI.Theme, false, false); err != nil {
@@ -190,10 +200,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.asker.SetPublisher(m.app.Agent.Publish)
 			m.app.Perm.SetAsker(m.asker)
 			m.hydrateSession()
+			cmds = append(cmds, m.pollPluginDiagnostics())
 			if err := m.subscribe(); err != nil {
 				m.lastErr = err
 				m.pushLine(styleError.Render("goal restore: " + err.Error()))
 			}
+			cmds = append(cmds, m.attachPlugins())
 			for _, diagnostic := range append(slices.Clone(msg.app.Diagnostics), m.auxDiagnostics...) {
 				m.pushLine(styleFooter.Render("config warning: " + diagnostic.Path + ": " + diagnostic.Message))
 			}
@@ -221,6 +233,24 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case updateInstallDoneMsg:
 		m.handleUpdateInstallDone(msg)
+	case pluginDiagnosticsTick:
+		if msg.app == m.app {
+			cmds = append(cmds, m.pollPluginDiagnostics())
+		}
+	case pluginUIRequest:
+		return m, m.handlePluginUI(msg)
+	case pluginRefreshMsg:
+		if msg.app == m.app && m.plugins != nil {
+			m.plugins.pending = false
+			m.layout()
+			m.refreshTranscript()
+		}
+	case pluginCommandDone:
+		m.finishPluginCommand(msg)
+	case userInputSettledMsg:
+		if msg.app == m.app && m.userInputRequest != nil && m.userInputRequest == msg.request {
+			m.clearUserInput()
+		}
 	case spinner.TickMsg:
 		// Standard bubbles spinner pump: advance the frame and re-arm only while
 		// there is something visible to animate. Streaming responsiveness does
@@ -281,6 +311,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			immediate = immediate || eventNeedsImmediateTranscript(ev.Type)
 		}
 		m.batchingEvents = false
+		m.syncPluginGeneration()
+		if cmd := m.waitUserInputSettlement(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		m.layout()
 		if m.transcriptDirty {
 			if immediate && m.transcript.AtBottom() {

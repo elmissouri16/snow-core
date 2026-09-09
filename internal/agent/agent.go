@@ -79,10 +79,11 @@ type ToolGuidance struct {
 
 // Options configures an Agent.
 type Options struct {
-	Provider   provider.Provider
-	Registry   tools.Registry
-	Session    session.Store
-	Permission permission.Service
+	PluginHooks PluginHooks
+	Provider    provider.Provider
+	Registry    tools.Registry
+	Session     session.Store
+	Permission  permission.Service
 	// InvocationPolicy applies non-interactive hard policy after optional tool
 	// preflight and before the ordinary permission broker.
 	InvocationPolicy          permission.InvocationPolicy
@@ -157,8 +158,9 @@ type toolDisplayState struct {
 }
 
 type Agent struct {
-	mu          sync.RWMutex
-	admissionMu admissionMutex
+	pluginSchemas sync.Map
+	mu            sync.RWMutex
+	admissionMu   admissionMutex
 	// queuePublishMu serializes queue mutation with snapshot publication. Queue
 	// callbacks never run under mu, while observers still see snapshots in the
 	// exact order the underlying queue changed.

@@ -288,6 +288,7 @@ type loginNavigationEntry struct {
 
 // Model is the TUI state.
 type Model struct {
+	plugins *pluginUIState
 	ctx     context.Context
 	cancel  context.CancelFunc
 	opts    app.Options
@@ -394,6 +395,7 @@ type Model struct {
 	customThemes                  map[string]config.ThemeFile
 	keys                          tuiKeyMap
 	auxDiagnostics                []config.Diagnostic
+	pluginDiagnosticCount         int
 	lastUsage                     *protocol.Usage
 	lastRequestUsage              *protocol.Usage
 	contextTokens                 int
@@ -520,15 +522,16 @@ type Model struct {
 	permChoice  int // 0=allow, 1=allow-always, 2=deny
 
 	// Model-requested user input state.
-	userInputPending bool
-	userInputRequest *protocol.UserInputRequest
-	userInputIndex   int
-	userInputOption  int
-	userInputEditing bool
-	userInputAnswers map[string]string
-	userInputDrafts  map[string]string
-	userInputError   string
-	userInputEditor  textarea.Model
+	userInputPending     bool
+	userInputRequest     *protocol.UserInputRequest
+	userInputWaitRequest *protocol.UserInputRequest
+	userInputIndex       int
+	userInputOption      int
+	userInputEditing     bool
+	userInputAnswers     map[string]string
+	userInputDrafts      map[string]string
+	userInputError       string
+	userInputEditor      textarea.Model
 
 	// Permission-mode picker state for /permissions.
 	pickPermissionMode  bool

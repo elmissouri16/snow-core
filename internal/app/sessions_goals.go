@@ -58,6 +58,11 @@ func (a *App) bindPermissionSession(st session.Store) error {
 // SetSession switches the active durable conversation store. The old store is
 // closed only after the agent accepts the new store.
 func (a *App) SetSession(st session.Store) error {
+	unlockPlugins, pluginErr := a.lockPluginSession()
+	if pluginErr != nil {
+		return pluginErr
+	}
+	defer unlockPlugins()
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return errors.New("app: cannot switch session while subagents are active")
 	}
@@ -130,6 +135,7 @@ func (a *App) SetSession(st session.Store) error {
 	a.Agent.ResetTurnIdentityAdmitted()
 	a.Session = st
 	a.sessionHistory.Set(st)
+	a.pluginSessionChanged()
 	g, _ := a.Goal.Get()
 	a.Agent.Publish(a.Agent.StateEvent())
 	a.Agent.Publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g, Cleared: g == nil}})
@@ -145,12 +151,21 @@ func (a *App) SetSession(st session.Store) error {
 }
 
 func (a *App) SelectBranch(branchID string) error {
+	unlockPlugins, pluginErr := a.lockPluginSession()
+	if pluginErr != nil {
+		return pluginErr
+	}
+	defer unlockPlugins()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return errors.New("app: cannot switch branch while subagents are active")
 	}
-	return a.Agent.SelectBranchAdmitted(branchID)
+	err := a.Agent.SelectBranchAdmitted(branchID)
+	if err == nil {
+		a.pluginSessionChanged()
+	}
+	return err
 }
 
 func (a *App) ForkBranch(fromEntryID string) (protocol.SessionBranch, error) {
@@ -158,12 +173,21 @@ func (a *App) ForkBranch(fromEntryID string) (protocol.SessionBranch, error) {
 }
 
 func (a *App) ForkBranchWithOptions(opts protocol.BranchForkOptions) (protocol.SessionBranch, error) {
+	unlockPlugins, pluginErr := a.lockPluginSession()
+	if pluginErr != nil {
+		return protocol.SessionBranch{}, pluginErr
+	}
+	defer unlockPlugins()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return protocol.SessionBranch{}, errors.New("app: cannot fork branch while subagents are active")
 	}
-	return a.Agent.ForkWithOptionsAdmitted(opts)
+	branch, err := a.Agent.ForkWithOptionsAdmitted(opts)
+	if err == nil {
+		a.pluginSessionChanged()
+	}
+	return branch, err
 }
 
 // ForkSession creates an independent durable session in the current workspace.

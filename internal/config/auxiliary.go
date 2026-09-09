@@ -324,7 +324,7 @@ func validateKeybindingFile(file KeybindingsFile) error {
 	}
 	clean := map[string][]string{}
 	for action, keys := range file.Bindings {
-		if !allowed[action] {
+		if !allowed[action] && !PluginKeybindingAction(action) {
 			return fmt.Errorf("unknown keybinding action %q", action)
 		}
 		if len(keys) == 0 {
@@ -332,6 +332,9 @@ func validateKeybindingFile(file KeybindingsFile) error {
 		}
 		for _, value := range keys {
 			value = strings.ToLower(strings.TrimSpace(value))
+			if PluginKeybindingAction(action) && (!strings.HasPrefix(value, "alt+") || len(value) != 5 || value[4] < 'a' || value[4] > 'z') {
+				return fmt.Errorf("plugin shortcut must be alt+letter")
+			}
 			if !validAuxKeyName(value) {
 				return fmt.Errorf("invalid key %q for %s", value, action)
 			}
@@ -554,4 +557,26 @@ func uniqueStrings(values []string) []string {
 		}
 	}
 	return out
+}
+
+// PluginKeybindingAction identifies namespaced extension command bindings.
+func PluginKeybindingAction(action string) bool {
+	if !strings.HasPrefix(action, "plugin:") {
+		return false
+	}
+	parts := strings.Split(action, ":")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts[1:] {
+		if part == "" || len(part) > 64 {
+			return false
+		}
+		for _, r := range part {
+			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }

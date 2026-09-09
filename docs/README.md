@@ -23,7 +23,8 @@ New to Snow? Follow [Getting started](getting-started.md), then
 
 - [Agent Skills](skills.md): add reusable instructions.
 - [MCP](mcp.md): connect local or remote tools and resources.
-- [Go plugins](plugins.md): add tools and event handlers to an embedded session.
+- [Plugins](plugins.md): install JavaScript extensions or embed Go plugins.
+- [JavaScript extensions](plugin-extensions.md): TUI views, commands, hooks, and agent workflows.
 - [Tool routing](tool-routing.md): discover tools only when needed.
 
 ## Build with Snow
@@ -32,7 +33,7 @@ New to Snow? Follow [Getting started](getting-started.md), then
 |---|---|---|
 | Embed in Go | [Go SDK](sdk.md) · [Example](../examples/sdk) | [SDK reference](sdk-reference.md) |
 | Control Snow from another process | [CLI modes](using-snow.md#choose-a-runtime-mode) | [JSONL RPC](rpc.md) |
-| Write a Go plugin | [Go plugins](plugins.md) | [SDK reference](sdk-reference.md) |
+| Write a JavaScript or Go plugin | [Plugins](plugins.md) | [SDK reference](sdk-reference.md) |
 | Handle model questions in a host app | [Answer model questions](using-snow.md#answer-model-questions) | [User input](user-input.md) |
 | Diagnose ChatGPT login | [Providers](providers.md) | [ChatGPT authentication](chatgpt-auth.md) |
 

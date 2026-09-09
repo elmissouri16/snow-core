@@ -2,6 +2,7 @@ package session
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -39,6 +40,7 @@ func TestSQLiteSubagentTopologyPersistsAndMigrates(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := testSubagentRecord()
+	rec.State.PluginTools = map[string]string{"plugin_example_read": strings.Repeat("a", 64)}
 	if err := st.PutSubagent(rec); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +56,7 @@ func TestSQLiteSubagentTopologyPersistsAndMigrates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].ChildSessionPath != rec.ChildSessionPath || list[0].State.Agent.Path != "/root/child" {
+	if len(list) != 1 || list[0].State.PluginTools["plugin_example_read"] != strings.Repeat("a", 64) || list[0].ChildSessionPath != rec.ChildSessionPath || list[0].State.Agent.Path != "/root/child" {
 		t.Fatalf("list=%+v", list)
 	}
 }

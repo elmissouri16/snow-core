@@ -193,6 +193,14 @@ a dump before sharing it and delete it when no longer needed.
 
 ## Review extensions and subagents
 
+JavaScript plugins use Goja inside Snow. Their exposed host operations repeat
+Snow's built-in permission, Plan Mode, shell-preflight, path, and network checks.
+Package loading is explicit; project packages require project trust. Contexts
+expire after each call, and initialization/observers/shutdown have no host I/O.
+There is no per-plugin heap quota or OS sandbox. Interrupts cannot preempt native
+Go functions; approved Bash retains the user's OS privileges. Only install
+trusted packages. See [Plugins](plugins.md) for limits and failure behavior.
+
 Go plugins run inside the embedding application; stdio MCP servers run as child
 processes. Both have the user's OS privileges. Agent Skills add untrusted
 instructions to model context. Subagents start additional agent loops that
@@ -322,3 +330,15 @@ external isolation.
 - [Plugins](plugins.md) — Go plugin registration and privileges
 - [MCP](mcp.md) — server setup and credential handling
 - [Subagents](subagents.md) — child roles, limits, and shared authority
+
+## JavaScript extension controls
+
+API 2 capabilities narrow individual callbacks; they do not create a sandbox.
+Tool calls retain schema validation, Plan checks, preflight, invocation policy,
+and permission gates after hook argument transformations. UI contributions are
+bounded declarative data and cannot authorize permission requests. Provider
+continuity blocks are omitted from plugin message snapshots. Hooks cannot call
+host APIs; post-tool failures preserve completed outcomes. Selected child tools
+use independent runtimes and stored package/config fingerprints. Scoped plugin
+state is a separate SQLite database, with bounded values and transactional quotas.
+See [the extension lifecycle](plugin-extensions.md#storage-settings-and-lifecycle).

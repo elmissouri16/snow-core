@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/elmissouri16/snow-core/internal/config"
 )
 
 // tuiKeyMap is the single source of truth for the bindings advertised by the
@@ -15,6 +16,7 @@ import (
 // composer's fixed Up/Down session-history behavior; these bindings are only
 // consulted by Snow's outer model and picker handlers.
 type tuiKeyMap struct {
+	Plugins        map[string]key.Binding
 	Submit         key.Binding
 	FollowUp       key.Binding
 	Newline        key.Binding
@@ -98,6 +100,10 @@ func (k tuiKeyMap) FullHelp() [][]key.Binding {
 }
 
 func applyKeybindingOverrides(base tuiKeyMap, overrides map[string][]string) (tuiKeyMap, error) {
+	base.Plugins = maps.Clone(base.Plugins)
+	if base.Plugins == nil {
+		base.Plugins = map[string]key.Binding{}
+	}
 	targets := map[string]*key.Binding{
 		"submit": &base.Submit, "follow_up": &base.FollowUp, "newline": &base.Newline, "paste": &base.Paste, "abort": &base.Abort, "quit": &base.Quit, "toggle_mode": &base.Mode, "thinking": &base.Thinking, "models": &base.Models, "agents": &base.Agents, "processes": &base.Processes,
 		"page_up": &base.PageUp, "page_down": &base.PageDown, "top": &base.Top, "bottom": &base.Bottom, "line_up": &base.LineUp, "line_down": &base.LineDown,
@@ -107,6 +113,19 @@ func applyKeybindingOverrides(base tuiKeyMap, overrides map[string][]string) (tu
 	}
 	names := slices.Sorted(maps.Keys(overrides))
 	for _, name := range names {
+		if config.PluginKeybindingAction(name) {
+			values := overrides[name]
+			if len(values) == 0 {
+				return base, fmt.Errorf("plugin shortcut cannot be empty")
+			}
+			for _, value := range values {
+				if !strings.HasPrefix(value, "alt+") || len(value) != 5 || value[4] < 'a' || value[4] > 'z' {
+					return base, fmt.Errorf("plugin shortcut must be alt+letter")
+				}
+			}
+			base.Plugins[name] = key.NewBinding(key.WithKeys(values...), key.WithHelp(strings.Join(values, "/"), name))
+			continue
+		}
 		target, ok := targets[name]
 		if !ok {
 			return base, fmt.Errorf("unknown keybinding action %q", name)
@@ -129,6 +148,20 @@ func applyKeybindingOverrides(base tuiKeyMap, overrides map[string][]string) (tu
 		}
 		help := target.Help()
 		*target = key.NewBinding(key.WithKeys(clean...), key.WithHelp(strings.Join(clean, "/"), help.Desc))
+	}
+	seenPlugins := map[string]string{}
+	for name, binding := range base.Plugins {
+		for _, value := range binding.Keys() {
+			if previous := seenPlugins[value]; previous != "" && previous != name {
+				return base, fmt.Errorf("plugin key %s collides", value)
+			}
+			seenPlugins[value] = name
+			for core, target := range targets {
+				if slices.Contains(target.Keys(), value) {
+					return base, fmt.Errorf("plugin key %s collides with %s", value, core)
+				}
+			}
+		}
 	}
 	// Install non-removable emergency keys before collision validation so an
 	// override cannot bind Escape to accept (or otherwise shadow modal close).

@@ -14,6 +14,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/tempfile"
 	"github.com/elmissouri16/snow-core/internal/trust"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -34,6 +35,7 @@ type startupConfig struct {
 	trust                         *trust.Store
 	authService                   *auth.Service
 	projectMCPServers             map[string]publicmcp.ServerSpec
+	projectJavaScriptPlugins      map[string]publicplugin.JavaScriptSpec
 	projectSkills                 config.ProjectSkillsConfig
 	projectSystemPrompt           bool
 	projectSelectionApplied       bool
@@ -214,6 +216,7 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 	// Project configuration is input, not an execution boundary. Its restricted
 	// extension and preference fields are read only after an allow decision.
 	projectMCPServers := map[string]publicmcp.ServerSpec{}
+	projectJavaScriptPlugins := map[string]publicplugin.JavaScriptSpec{}
 	projectSkills := config.ProjectSkillsConfig{Overrides: map[string]bool{}}
 	projectSystemPrompt := false
 	trustResolution, err := trust.Resolve(absCWD, cfg.DefaultProjectTrust, tr)
@@ -235,6 +238,7 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 			return startupConfig{}, err
 		}
 		projectMCPServers = extensions.MCPServers
+		projectJavaScriptPlugins = extensions.JavaScriptPlugins
 		projectSkills = extensions.Skills
 		projectSystemPrompt = extensions.SystemPromptFile != nil
 		if err := config.ApplyProjectPreferences(&cfg, extensions); err != nil {
@@ -251,7 +255,8 @@ func initializeStartup(ctx context.Context, opts Options) (startupConfig, error)
 		collaborationMode: collaborationMode, planThinking: planThinking,
 		authPath: authPath, authStore: authStore, authService: authService, trust: tr,
 		projectMCPServers: projectMCPServers, projectSkills: projectSkills,
-		projectSystemPrompt: projectSystemPrompt, projectSelectionApplied: projectSelectionApplied, searchPolicy: searchPolicy,
+		projectJavaScriptPlugins: projectJavaScriptPlugins,
+		projectSystemPrompt:      projectSystemPrompt, projectSelectionApplied: projectSelectionApplied, searchPolicy: searchPolicy,
 		configDiagnostics: configDiagnostics, projectAllowed: projectAllowed,
 		projectInputRoot: projectInputRoot,
 	}

@@ -67,7 +67,7 @@ func (m *Model) helpLines() []string {
 	if m.app != nil && m.app.Cfg.TUI.Mouse {
 		mouseHelp = "Mouse: wheel + app drag-copy · F6 restores native terminal selection"
 	}
-	content := formatCommandListWithKeys(m.keys) +
+	content := formatCommandListWithKeys(m.keys, m.pluginSpecs()...) +
 		"\n\nBehavior\n" +
 		"  Ctrl+A: select only the composer draft (use Ctrl+A on macOS too)\n" +
 		"  While working, submit queues steer; follow-up uses its configured binding\n" +

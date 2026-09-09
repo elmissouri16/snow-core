@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -12,9 +13,9 @@ import (
 	"unicode/utf8"
 
 	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
-	"github.com/elmissouri16/snow-core/internal/permission"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -576,6 +577,19 @@ func (a *Agent) appendToolResult(parent string, msg protocol.Message, details ..
 		Output:       preview,
 		DurationMS:   durationMS,
 	}
+	if len(msg.PluginDetails) > 0 {
+		if renderer, ok := a.opts.PluginHooks.(interface {
+			RenderTool(context.Context, string, json.RawMessage) (*protocol.PluginNode, error)
+		}); ok {
+			data, _ := jsonv2.Marshal(map[string]any{"content": msg.Content, "isError": msg.IsError, "details": msg.PluginDetails})
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			node, err := renderer.RenderTool(ctx, msg.ToolName, data)
+			cancel()
+			if err == nil {
+				msg.ToolDisplay.Plugin = node
+			}
+		}
+	}
 	messageEntry := session.Entry{
 		Type:     session.EntryMessage,
 		ID:       msg.ID,
@@ -617,6 +631,7 @@ func (a *Agent) appendToolResult(parent string, msg protocol.Message, details ..
 		IsError:        msg.IsError,
 		ToolOutput:     preview,
 		ToolDurationMS: durationMS,
+		PluginView:     msg.ToolDisplay.Plugin.Clone(),
 	}
 	if msg.IsError {
 		ev.Message = boundEventText(output, 2*1024)
@@ -679,32 +694,6 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		return msg, false, nil
 	}
 
-	tool, ok := a.opts.Registry.Get(cb.Name)
-	if !ok {
-		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
-			[]protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("Error: unknown tool %q", cb.Name))}, true)
-		if err := a.appendToolResult(parent, msg); err != nil {
-			return msg, false, err
-		}
-		return msg, false, nil
-	}
-	metadata, ok := tools.Metadata(a.opts.Registry, cb.Name)
-	if !ok {
-		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
-			[]protocol.ContentBlock{protocol.NewTextBlock(fmt.Sprintf("Error: tool metadata unavailable for %q", cb.Name))}, true)
-		if err := a.appendToolResult(parent, msg); err != nil {
-			return msg, false, err
-		}
-		return msg, false, nil
-	}
-	if !collaborationToolAllowed(mode, metadata) {
-		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
-			[]protocol.ContentBlock{protocol.NewTextBlock(collaborationToolDeniedMessage(cb.Name))}, true)
-		if err := a.appendToolResult(parent, msg); err != nil {
-			return msg, false, err
-		}
-		return msg, false, nil
-	}
 	if cb.Name == "deactivate_skill" {
 		_, batchOK := a.opts.Session.(session.BatchStore)
 		_, branchOK := a.opts.Session.(session.BranchEntryStore)
@@ -718,67 +707,22 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		}
 	}
 
-	// Permission gate.
-	risk := riskFor(cb.Name)
-	if descriptors, ok := a.opts.Registry.(tools.DescriptorRegistry); ok {
-		if desc, found := descriptors.Descriptor(cb.Name); found && desc.Risk != "" {
-			risk = desc.Risk
-		}
-	}
-	analysis := permission.Analysis{Rememberable: true}
-	if preflight, ok := tool.(tools.PreflightTool); ok {
-		var preflightErr error
-		analysis, preflightErr = preflight.Preflight(ctx, rawArgs, a.opts.ToolHost)
-		if preflightErr != nil {
-			msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
-				[]protocol.ContentBlock{protocol.NewTextBlock("Error: tool preflight failed: " + preflightErr.Error())}, true)
-			if appendErr := a.appendToolResult(parent, msg); appendErr != nil {
-				return msg, false, appendErr
-			}
-			return msg, false, nil
-		}
-	}
-	paths := append(extractPaths(args), analysis.Paths...)
-	slices.Sort(paths)
-	paths = slices.Compact(paths)
-	permReq := permission.Request{
-		Tool:         cb.Name,
-		Args:         rawArgs,
-		Paths:        paths,
-		Risk:         risk,
-		Reason:       analysis.Summary,
-		Agent:        a.opts.Identity.Clone(),
-		Effects:      slices.Clone(analysis.Effects),
-		Capabilities: slices.Clone(analysis.Capabilities),
-		Unknown:      analysis.Unknown,
-		Rememberable: analysis.Rememberable,
-		ScopeKey:     analysis.ScopeKey,
-		ScopeLabel:   analysis.ScopeLabel,
-	}
-	policyDecision, err := a.opts.InvocationPolicy.Evaluate(ctx, permReq)
-	if err != nil || policyDecision.Denied {
-		reason := policyDecision.Reason
-		if err != nil {
-			reason = err.Error()
-		}
-		if reason == "" {
-			reason = "blocked by invocation policy"
-		}
-		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
-			[]protocol.ContentBlock{protocol.NewTextBlock("Permission denied: " + reason)}, true)
-		if appendErr := a.appendToolResult(parent, msg); appendErr != nil {
-			return msg, false, appendErr
+	hookRequest, pluginChanges, hookErr := a.pluginHook(ctx, plugin.HookRequest{Phase: "before_tool", Tool: cb.Name, Arguments: rawArgs})
+	if hookErr != nil {
+		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name, []protocol.ContentBlock{protocol.NewTextBlock(hookErr.Error())}, true)
+		if err := a.appendToolResult(parent, msg); err != nil {
+			return msg, false, err
 		}
 		return msg, false, nil
 	}
-	decision, err := a.opts.Permission.Authorize(ctx, permReq)
-	if err != nil || decision == permission.DecisionDeny {
-		reason := "denied by permission policy"
-		if err != nil {
-			reason = err.Error()
-		}
+	rawArgs = hookRequest.Arguments
+	if err := json.Unmarshal(rawArgs, &args); err != nil {
+		return protocol.Message{}, false, err
+	}
+	tool, admissionErr := a.admitTool(ctx, cb.Name, cb.ToolCallID, rawArgs, args, mode, nil, "")
+	if admissionErr != nil {
 		msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name,
-			[]protocol.ContentBlock{protocol.NewTextBlock("Permission denied: " + reason)}, true)
+			[]protocol.ContentBlock{protocol.NewTextBlock(admissionErr.Error())}, true)
 		if err := a.appendToolResult(parent, msg); err != nil {
 			return msg, false, err
 		}
@@ -804,7 +748,13 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 	if goalErr != nil {
 		tr = tools.ErrorResult(goalErr)
 	} else {
-		tr = a.runTool(ctx, tool, rawArgs, cb.ToolCallID, cb.Name)
+		if a.opts.PluginHooks != nil && (a.opts.PluginHooks.HasHook("before_tool", a.opts.Identity != nil) || a.opts.PluginHooks.HasHook("after_tool", a.opts.Identity != nil)) {
+			toolCtx, audit, _ := pluginAuditContext(ctx)
+			tr = a.runTool(toolCtx, tool, rawArgs, cb.ToolCallID, cb.Name)
+			pluginChanges = append(pluginChanges, audit.changes...)
+		} else {
+			tr = a.runTool(ctx, tool, rawArgs, cb.ToolCallID, cb.Name)
+		}
 		goalErr = a.bindCreatedGoal(tool, tr)
 	}
 	if !tr.IsError {
@@ -815,6 +765,11 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 		}
 	}
 
+	post, postChanges, postErr := a.pluginHook(ctx, plugin.HookRequest{Phase: "after_tool", Tool: cb.Name, Arguments: rawArgs, Content: tr.Content, IsError: tr.IsError})
+	if postErr == nil {
+		tr.Content = post.Content
+	}
+	pluginChanges = append(pluginChanges, postChanges...)
 	var out []protocol.ContentBlock
 	if len(tr.Content) == 0 {
 		out = []protocol.ContentBlock{protocol.NewTextBlock("(no output)")}
@@ -823,11 +778,18 @@ func (a *Agent) executeOne(ctx context.Context, cb protocol.ContentBlock, parent
 	}
 	out = a.spillToolResult(ctx, cb.Name, cb.ToolCallID, out, tr.Details)
 	msg := protocol.NewToolResultMessage(newID(), parent, cb.ToolCallID, cb.Name, out, tr.IsError)
+	msg.PluginTransforms = pluginChanges
+	if details, ok := tr.Details.(json.RawMessage); ok {
+		msg.PluginDetails = append(json.RawMessage(nil), details...)
+	}
 	if err := a.appendToolResult(parent, msg, tr.Details); err != nil {
 		return msg, true, err
 	}
 	if goalErr != nil {
 		return msg, true, goalErr
+	}
+	if postErr != nil {
+		return msg, true, fmt.Errorf("tool executed; post-tool plugin processing failed: %w", postErr)
 	}
 	a.recordToolOutcome(cb.Name, tr)
 	if !tr.IsError {

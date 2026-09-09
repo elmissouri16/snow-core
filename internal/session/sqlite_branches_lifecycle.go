@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -18,11 +19,12 @@ func (s *SQLiteStore) ActiveBranchID() string { s.mu.RLock(); defer s.mu.RUnlock
 func scanSubagent(row interface{ Scan(...any) error }) (SubagentRecord, error) {
 	var rec SubagentRecord
 	var usage []byte
+	var pluginTools []byte
 	err := row.Scan(&rec.State.Agent.ThreadID, &rec.State.Agent.ParentThreadID, &rec.ParentBranchID,
 		&rec.State.Agent.Path, &rec.State.Agent.ParentPath, &rec.State.Agent.Role, &rec.RoleFingerprint, &rec.State.Agent.Nickname,
 		&rec.State.Agent.Depth, &rec.State.Status, &rec.ChildSessionPath, &rec.State.Provider, &rec.State.Model,
 		&rec.State.Thinking, &rec.State.CreatedAt, &rec.State.StartedAt, &rec.State.FinishedAt,
-		&rec.State.Result, &rec.State.Error, &usage, &rec.State.Generation)
+		&rec.State.Result, &rec.State.Error, &usage, &rec.State.Generation, &pluginTools)
 	if err != nil {
 		return rec, err
 	}
@@ -32,6 +34,11 @@ func scanSubagent(row interface{ Scan(...any) error }) (SubagentRecord, error) {
 			return rec, err
 		}
 		rec.State.Usage = &u
+	}
+	if len(pluginTools) > 0 {
+		if err := jsonv2.Unmarshal(pluginTools, &rec.State.PluginTools); err != nil {
+			return rec, err
+		}
 	}
 	return rec, rec.State.Validate()
 }
@@ -60,11 +67,12 @@ func subagentArgs(rec SubagentRecord) []any {
 	if rec.State.Usage != nil {
 		usage, _ = json.Marshal(rec.State.Usage)
 	}
+	pluginTools, _ := jsonv2.Marshal(rec.State.PluginTools)
 	return []any{rec.State.Agent.ThreadID, rec.State.Agent.ParentThreadID, rec.ParentBranchID,
 		rec.State.Agent.Path, rec.State.Agent.ParentPath, rec.State.Agent.Role, rec.RoleFingerprint, rec.State.Agent.Nickname,
 		rec.State.Agent.Depth, rec.State.Status, rec.ChildSessionPath, rec.State.Provider, rec.State.Model,
 		rec.State.Thinking, rec.State.CreatedAt, rec.State.StartedAt, rec.State.FinishedAt,
-		rec.State.Result, rec.State.Error, usage, rec.State.Generation}
+		rec.State.Result, rec.State.Error, usage, rec.State.Generation, pluginTools}
 }
 
 func (s *SQLiteStore) PutSubagent(rec SubagentRecord) error {
@@ -87,7 +95,7 @@ func (s *SQLiteStore) CompareAndSwapSubagent(id string, expected uint64, rec Sub
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	args := subagentArgs(rec)
-	q := `UPDATE subagent_threads SET parent_thread_id=?,parent_branch_id=?,agent_path=?,parent_path=?,role=?,role_fingerprint=?,nickname=?,depth=?,status=?,child_session_path=?,model_provider=?,model_id=?,thinking=?,created_at=?,started_at=?,finished_at=?,result=?,error=?,usage_json=?,generation=? WHERE thread_id=? AND generation=?`
+	q := `UPDATE subagent_threads SET parent_thread_id=?,parent_branch_id=?,agent_path=?,parent_path=?,role=?,role_fingerprint=?,nickname=?,depth=?,status=?,child_session_path=?,model_provider=?,model_id=?,thinking=?,created_at=?,started_at=?,finished_at=?,result=?,error=?,usage_json=?,generation=?,plugin_tools_json=? WHERE thread_id=? AND generation=?`
 	updateArgs := append(slices.Clone(args[1:]), id, expected)
 	res, err := s.db.Exec(q, updateArgs...)
 	if err != nil {

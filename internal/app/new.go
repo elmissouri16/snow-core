@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/agent"
@@ -30,6 +31,7 @@ import (
 	internalupdate "github.com/elmissouri16/snow-core/internal/update"
 	"github.com/elmissouri16/snow-core/internal/userinput"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	"github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -456,6 +458,9 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 				return nil, fmt.Errorf("app: plugin: %w", err)
 			}
 		}
+		if err := loadJavaScriptPlugins(ctx, manager, startup, opts); err != nil {
+			return nil, fmt.Errorf("app: JavaScript plugins: %w", err)
+		}
 		if err := manager.Initialize(ctx); err != nil {
 			return nil, fmt.Errorf("app: plugin initialization: %w", err)
 		}
@@ -628,12 +633,13 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		initialMode = "" // restore the persisted active-branch mode
 	}
 	ag, err = agent.New(agent.Options{
-		Provider:   prov,
-		Registry:   reg,
-		Session:    st,
-		Permission: perm,
-		ToolHost:   host,
-		Router:     router,
+		PluginHooks: manager,
+		Provider:    prov,
+		Registry:    reg,
+		Session:     st,
+		Permission:  perm,
+		ToolHost:    host,
+		Router:      router,
 		DeferredBundles: []agent.DeferredBundle{{
 			Members: builtin.ManagedProcessToolNames(), Sticky: processManager.HasRecords,
 		}},
@@ -676,7 +682,19 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		perm.SetAsker(permBroker)
 	}
 
+	var extensionApp *App
 	if subManager != nil {
+		subManager.SetPluginToolSelection(func(role subagent.Role, names []string) (map[string]string, error) {
+			return manager.SelectChildTools(names, func(name string) bool {
+				if len(role.Tools) > 0 && !slices.Contains(role.Tools, name) {
+					return false
+				}
+				if strings.HasPrefix(name, "plugin_") {
+					return true
+				}
+				return childToolAllowed(name, cfg.Subagents.AllowMutation && role.AllowMutation)
+			})
+		})
 		factory := subagent.ChildFactoryFunc(func(childCtx context.Context, spec subagent.ChildSpec) (subagent.ChildRuntime, error) {
 			var childStore session.Store
 			if spec.Restore {
@@ -738,6 +756,20 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 				_ = childStore.Close()
 				return nil, err
 			}
+			childPlugins, err := manager.CloneChild(childCtx, childReg, spec.State.PluginTools, internalplugin.ManagerOptions{CWD: absCWD, SessionID: childStore.ID(), MaxOutputBytes: cfg.ToolOutputLimit()})
+			if err != nil {
+				_ = childStore.Close()
+				return nil, err
+			}
+			keepPlugins := false
+			defer func() {
+				if !keepPlugins {
+					_ = childPlugins.Close(context.Background())
+				}
+			}()
+			if len(spec.State.PluginTools) > 0 {
+				capabilities.Shell = true
+			}
 			if cfg.Subagents.Recursive && spec.State.Agent.Depth < cfg.Subagents.MaxDepth {
 				caller := subagent.Caller{ThreadID: spec.State.Agent.ThreadID, Path: spec.State.Agent.Path}
 				for _, tool := range subagent.Tools(subManager, caller) {
@@ -768,7 +800,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 				childSystem += spec.Role.System + "\n"
 			}
 			childSystem += "</subagent>"
-			child, err := agent.New(agent.Options{Provider: childProvider, Registry: childReg, Session: childStore, Permission: childPerm, ToolHost: childHost,
+			child, err := agent.New(agent.Options{PluginHooks: manager, Provider: childProvider, Registry: childReg, Session: childStore, Permission: childPerm, ToolHost: childHost,
 				SystemPrompt: childSystem, ToolGuidance: runtimeToolGuidance(), FixedContextBudgetPercent: cfg.FixedContextBudgetPercent,
 				Model: childModel, Thinking: spec.State.Thinking, ReasoningSummary: reasoningSummary,
 				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Identity: spec.State.Agent.Clone(),
@@ -780,7 +812,13 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 				_ = childStore.Close()
 				return nil, err
 			}
-			return &childAgentRuntime{Agent: child, store: childStore}, nil
+			if extensionApp != nil && extensionApp.extensions != nil {
+				childPlugins.BindExtensions(func(info protocol.PluginInfo) plugin.ExtensionHost {
+					return &appExtensionHost{app: extensionApp, services: extensionApp.extensions, info: info, agent: child, store: childStore, child: true, generation: extensionApp.extensions.generation.Load()}
+				})
+			}
+			keepPlugins = true
+			return &childAgentRuntime{Agent: child, store: childStore, plugins: childPlugins}, nil
 		})
 		taskStore, ok := st.(session.SubagentTaskStore)
 		if !ok {
@@ -854,6 +892,8 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	}
 	a.Debugger = diagnostics.New(cfg.Debug.Enabled)
 	ag.Subscribe(a.Debugger.Record)
+	extensionApp = a
+	a.bindExtensions(startup.globalDir)
 	committed = true
 	guardCommitted = true
 	return a, nil

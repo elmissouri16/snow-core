@@ -111,6 +111,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err := s.announceReady(); err != nil {
 		return err
 	}
+	s.app.StartPluginExtensions()
 	serveCtx, cancelServe := context.WithCancel(ctx)
 	defer cancelServe()
 	type scanResult struct {
@@ -272,6 +273,8 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		return s.handlePresentationCommand(ctx, req)
 	}
 	switch req.Type {
+	case "plugins_list", "plugin_commands", "plugin_views", "plugin_command_run", "plugin_command_cancel":
+		return s.handlePluginCommand(ctx, req)
 	case "prompt":
 		return s.handlePrompt(ctx, req)
 	case "abort":

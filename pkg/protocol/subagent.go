@@ -3,6 +3,7 @@ package protocol
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 )
@@ -163,21 +164,30 @@ func (r *AgentRef) Clone() *AgentRef {
 
 // SubagentState is a bounded immutable snapshot returned by manager surfaces.
 type SubagentState struct {
-	Agent      AgentRef      `json:"agent"`
-	Status     AgentStatus   `json:"status"`
-	Model      string        `json:"model,omitempty"`
-	Provider   string        `json:"provider,omitempty"`
-	Thinking   ThinkingLevel `json:"thinking,omitempty"`
-	CreatedAt  int64         `json:"created_at"`
-	StartedAt  int64         `json:"started_at,omitzero"`
-	FinishedAt int64         `json:"finished_at,omitzero"`
-	Result     string        `json:"result,omitempty"`
-	Error      string        `json:"error,omitempty"`
-	Usage      *Usage        `json:"usage,omitempty"`
-	Generation uint64        `json:"generation,omitzero"`
+	PluginTools map[string]string `json:"plugin_tools,omitempty"`
+	Agent       AgentRef          `json:"agent"`
+	Status      AgentStatus       `json:"status"`
+	Model       string            `json:"model,omitempty"`
+	Provider    string            `json:"provider,omitempty"`
+	Thinking    ThinkingLevel     `json:"thinking,omitempty"`
+	CreatedAt   int64             `json:"created_at"`
+	StartedAt   int64             `json:"started_at,omitzero"`
+	FinishedAt  int64             `json:"finished_at,omitzero"`
+	Result      string            `json:"result,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	Usage       *Usage            `json:"usage,omitempty"`
+	Generation  uint64            `json:"generation,omitzero"`
 }
 
 func (s SubagentState) Validate() error {
+	if len(s.PluginTools) > 32 {
+		return errors.New("too many child plugin tools")
+	}
+	for name, fingerprint := range s.PluginTools {
+		if len(name) > 128 || len(fingerprint) != 64 {
+			return errors.New("invalid child plugin tool fingerprint")
+		}
+	}
 	if err := s.Agent.Validate(); err != nil {
 		return err
 	}
@@ -202,6 +212,7 @@ func (s *SubagentState) Clone() *SubagentState {
 	}
 	out := *s
 	out.Usage = s.Usage.Clone()
+	out.PluginTools = maps.Clone(s.PluginTools)
 	return &out
 }
 
@@ -258,6 +269,7 @@ func (m *AgentMessage) Clone() *AgentMessage {
 
 // SpawnSubagentRequest is shared by SDK/RPC and manager-bound model tools.
 type SpawnSubagentRequest struct {
+	PluginTools     []string      `json:"plugin_tools,omitempty"`
 	Name            string        `json:"name"`
 	Task            string        `json:"task"`
 	Role            string        `json:"role,omitempty"`

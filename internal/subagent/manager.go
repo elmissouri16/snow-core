@@ -147,6 +147,7 @@ type Manager struct {
 	closeDone         chan struct{}
 	wg                sync.WaitGroup
 	modelCatalog      func(context.Context) ([]protocol.Model, error)
+	pluginSelection   func(Role, []string) (map[string]string, error)
 	modelSelection    func(context.Context, string, string) (protocol.Model, error)
 }
 

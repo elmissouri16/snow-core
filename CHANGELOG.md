@@ -5,6 +5,22 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+### Added
+
+- JavaScript API 2 extension commands, asynchronous host controls, declarative
+  TUI views and themes, tool cards, pure lifecycle hooks, scoped SQLite state,
+  typed settings, selected child tools, scaffolding, and editor typings.
+- Review-team and workspace-dashboard workflows, with shared CLI/SDK/RPC
+  command execution and cancellation.
+- UI Studio, Workspace Notes, Prompt Recipes, and Session Pilot examples, plus
+  a selected-tool source scout and an offline API 2 test pack.
+
+- Local JavaScript plugins using pure-Go Goja: synchronous model tools, queued
+  event observers, permissioned built-in calls, CLI/SDK loading, and local
+  registration management. Legacy executable-plugin declarations remain inert.
+- Practical JavaScript examples for project orientation, TODO/FIXME searches,
+  and permissioned Git review, with a one-session launcher and offline tests.
+
 ### Changed
 
 - Simplified the README and documentation navigation, separated maintainer
@@ -13,12 +29,24 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Removed
 
-- Removed external-plugin execution, its JSON-RPC host, CLI `snow plugin`
+- Removed external-plugin execution, its JSON-RPC host, executable-management
   commands and `--plugin` flag, configuration APIs, and public `PluginSpec` /
   `ExternalToolDefinition` types. Go plugins supplied through `GoPlugins` remain
   supported. Legacy `plugins` configuration keys are ignored and never launched.
-- Removed JavaScript/Python plugin examples and replaced external protocol
+- Removed external-process JavaScript/Python plugin examples and replaced external protocol
   instructions with a retirement notice.
+
+### Fixed
+
+- Keep plugin dialogs open across unrelated agent events and dismiss them on
+  cancellation. Closed-choice dialogs omit Other and confirmations default to No.
+- Discard failed plugin branch transitions, clean up command-owned children,
+  suppress stale command output after branch changes, and prefer exactly typed
+  plugin aliases in the command palette.
+
+- Make request-hook source labels valid for real provider adapters, accept exact
+  plugin tool names in restricted child roles, and keep plugin dialogs from
+  leaving an idle agent displayed as working.
 
 ## [0.1.0-alpha.7] - 2026-09-05
 

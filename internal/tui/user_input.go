@@ -8,8 +8,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -45,7 +43,8 @@ func (m *Model) startUserInput(req protocol.UserInputRequest) {
 	m.userInputAnswers = make(map[string]string, len(copy.Questions))
 	m.userInputDrafts = make(map[string]string, len(copy.Questions))
 	m.userInputError = ""
-	m.busy = true
+	// Input can originate from an idle plugin command as well as an agent tool.
+	// Only turn lifecycle events own busy; userInputPending owns the modal state.
 	m.editor.Blur()
 	m.prepareUserInputQuestion()
 	m.layout()
@@ -57,6 +56,7 @@ func (m *Model) clearUserInput() {
 	}
 	m.userInputPending = false
 	m.userInputRequest = nil
+	m.userInputWaitRequest = nil
 	m.userInputIndex = 0
 	m.userInputOption = 0
 	m.userInputEditing = false
@@ -79,6 +79,7 @@ func (m *Model) currentUserInputQuestion() *protocol.UserInputQuestion {
 }
 
 func (m *Model) prepareUserInputQuestion() {
+	defer m.layoutUserInputEditor()
 	question := m.currentUserInputQuestion()
 	if question == nil {
 		return
@@ -101,7 +102,7 @@ func (m *Model) prepareUserInputQuestion() {
 			return
 		}
 	}
-	if value != "" {
+	if value != "" && !question.ChoicesOnly {
 		m.userInputOption = len(question.Options)
 		m.beginUserInputEditing(value)
 	}
@@ -112,6 +113,8 @@ func (m *Model) beginUserInputEditing(value string) {
 	m.userInputEditor.SetValue(value)
 	m.userInputEditor.CursorEnd()
 	m.userInputEditor.Focus()
+	m.layoutUserInputEditor()
+	m.refreshUserInputEditorViewport()
 }
 
 func (m *Model) handleUserInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -132,6 +135,9 @@ func (m *Model) handleUserInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.Type {
 	case tea.KeyCtrlC:
+		if m.app != nil {
+			_ = m.app.RejectUserInput(m.userInputRequest.ID)
+		}
 		m.requestAbort()
 		m.clearUserInput()
 		return m, nil
@@ -172,7 +178,7 @@ func (m *Model) handleUserInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	count := len(question.Options) + 1 // automatic Other
+	count := userInputOptionCount(question)
 	switch msg.Type {
 	case tea.KeyUp, tea.KeyLeft:
 		m.userInputOption = (m.userInputOption - 1 + count) % count
@@ -251,84 +257,11 @@ func (m *Model) resolveUserInput() {
 		return
 	}
 	count := len(response.Answers)
+	pluginInput := m.pluginInputPending()
 	m.clearUserInput()
-	m.pushLine(styleFooter.Render(fmt.Sprintf("answered %d question(s)", count)))
-}
-
-func (m *Model) renderUserInput() string {
-	question := m.currentUserInputQuestion()
-	if question == nil || m.userInputRequest == nil {
-		return ""
+	if !pluginInput {
+		m.pushLine(styleFooter.Render(fmt.Sprintf("answered %d question(s)", count)))
 	}
-	width := max(20, m.width-4)
-	var b strings.Builder
-	tabs := make([]string, 0, len(m.userInputRequest.Questions))
-	for i, candidate := range m.userInputRequest.Questions {
-		mark := fmt.Sprintf("%d", i+1)
-		if _, answered := m.userInputAnswers[candidate.ID]; answered {
-			mark += "✓"
-		}
-		if i == m.userInputIndex {
-			mark = "[" + mark + "]"
-		}
-		tabs = append(tabs, mark)
-	}
-	title := fmt.Sprintf("? %s  %s", sanitizeTerminalText(question.Header), strings.Join(tabs, " "))
-	b.WriteString(styleTool.Render(truncateRunes(title, width)) + "\n")
-	wrapped := xansi.Wordwrap(sanitizeTerminalText(question.Question), width, "")
-	wrapped = xansi.Hardwrap(wrapped, width, true)
-	editorView := ""
-	if m.userInputEditing {
-		editorView = styleComposer.Width(width).Render(m.userInputEditor.View())
-	}
-	if m.inlineModalOverlay() {
-		// Keep every actionable row visible inside the fixed inline frame. A valid
-		// question can be 1,000 characters, so letting prose consume the frame
-		// would hide all choices (or the free-form editor) below the truncation
-		// boundary. Only the descriptive question text is elided.
-		reserved := 2 // title + controls hint
-		if m.userInputError != "" {
-			reserved++
-		}
-		if m.userInputEditing {
-			reserved += lipgloss.Height(editorView)
-		} else {
-			reserved += len(question.Options) + 1 // choices + Other
-		}
-		wrapped = truncateOverlayLines(wrapped, max(1, m.availableOverlayHeight()-reserved))
-	}
-	b.WriteString(styleAssistant.Render(wrapped) + "\n")
-
-	if m.userInputEditing {
-		b.WriteString(editorView + "\n")
-		b.WriteString(styleFooter.Render("(Enter accept · Ctrl+V paste · Ctrl+J newline · Tab next · Shift+Tab previous · Esc decline)"))
-	} else {
-		for i, option := range question.Options {
-			line := sanitizeTerminalText(option.Label)
-			if option.Description != "" {
-				line += "  " + styleHeaderDim.Render(sanitizeTerminalText(option.Description))
-			}
-			prefix := "  "
-			style := styleCompletion
-			if i == m.userInputOption {
-				prefix = "› "
-				style = styleCompletionSelected
-			}
-			b.WriteString(style.Render(prefix+truncateRunes(line, width-2)) + "\n")
-		}
-		prefix := "  "
-		style := styleCompletion
-		if m.userInputOption == len(question.Options) {
-			prefix = "› "
-			style = styleCompletionSelected
-		}
-		b.WriteString(style.Render(prefix+"Other  "+styleHeaderDim.Render("type a custom answer")) + "\n")
-		b.WriteString(styleFooter.Render("(↑/↓ choose · Enter accept · Tab next · Shift+Tab previous · Esc decline)"))
-	}
-	if m.userInputError != "" {
-		b.WriteString("\n" + styleError.Render(truncateRunes(sanitizeTerminalText(m.userInputError), width)))
-	}
-	return strings.TrimSuffix(lipgloss.NewStyle().MaxWidth(width).Render(b.String()), "\n")
 }
 
 func truncateOverlayLines(value string, limit int) string {

@@ -260,7 +260,7 @@ func (c SubagentConfig) ValidateSubagents() error {
 			return fmt.Errorf("config: role %q broadens disabled mutation authority", name)
 		}
 		for _, tool := range role.Tools {
-			if !childTools[tool] {
+			if !childTools[tool] && !validChildPluginTool(tool) {
 				return fmt.Errorf("config: role %q references unsupported child tool %q", name, tool)
 			}
 			if (tool == "write" || tool == "edit") && !role.AllowMutation {

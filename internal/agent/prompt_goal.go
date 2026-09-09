@@ -10,6 +10,7 @@ import (
 	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
 	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -60,6 +61,14 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	}
 	if pendingRecovery {
 		return fmt.Errorf("%w: undelivered queued input is waiting for recovery; call ClearPendingInputs first", ErrPromptRejected)
+	}
+	transformed, pluginChanges, hookErr := a.pluginHook(ctx, plugin.HookRequest{Phase: "before_prompt", Text: text})
+	if hookErr != nil {
+		return errors.Join(ErrPromptRejected, hookErr)
+	}
+	text = transformed.Text
+	if strings_trim(text) == "" && len(attachments) == 0 {
+		return errors.Join(ErrPromptRejected, errors.New("plugin produced an empty prompt"))
 	}
 	if !model.SupportsThinkingLevel(level) {
 		return errors.Join(ErrPromptRejected, unsupportedThinkingError(model, level))
@@ -226,6 +235,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	}
 	content = append(content, attachments...)
 	userMsg := protocol.NewUserContentMessage(newID(), "", content)
+	userMsg.PluginTransforms = pluginChanges
 	// A previous turn may have marked itself idle while it is still flushing
 	// final mailbox mail. Serialize this first user append with that flush so
 	// the next provider context cannot outrun attributed completion mail.

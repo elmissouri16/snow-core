@@ -33,6 +33,7 @@ PUBLIC_DOCUMENTS = (
     "skills.md",
     "mcp.md",
     "plugins.md",
+    "plugin-extensions.md",
     "security.md",
     "sdk.md",
 )
@@ -255,7 +256,7 @@ class PagesBuildTests(unittest.TestCase):
                 (
                     ("Agent Skills", "/docs/skills.html"),
                     ("MCP", "/docs/mcp.html"),
-                    ("Go plugins", "/docs/plugins.html"),
+                    ("Plugins", "/docs/plugins.html"),
                 ),
             ),
             (

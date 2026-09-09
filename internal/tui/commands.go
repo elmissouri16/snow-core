@@ -30,6 +30,8 @@ func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.
 	args := parts[1:]
 
 	switch cmd {
+	case "/plugins":
+		m.pluginInspector()
 	case "/quit", "/q":
 		return m, m.quitCmd()
 	case "/help":
@@ -448,6 +450,9 @@ func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.
 			m.pushLine(styleError.Render("invalid trust level: " + args[0]))
 		}
 	default:
+		if handled, command := m.runPluginCommand(cmd, strings.TrimSpace(strings.TrimPrefix(line, cmd))); handled {
+			return m, command
+		}
 		m.pushLine(styleError.Render("unknown command: " + cmd + " (try /help)"))
 	}
 	return m, nil

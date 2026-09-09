@@ -27,7 +27,7 @@ func (m *Model) renderOverlays() string {
 		return m.renderPermissionPicker()
 	}
 	if m.userInputPending {
-		return m.limitOverlay(m.renderUserInput())
+		return "" // user input uses a centered card outside transcript geometry
 	}
 	var overlays []string
 	if m.confirmGoalReplace {
@@ -48,7 +48,7 @@ func (m *Model) renderOverlays() string {
 			matches = matches[start : start+limit]
 			selected -= start
 		}
-		overlays = append(overlays, renderCompletions(matches, selected, m.width))
+		overlays = append(overlays, renderCompletions(matches, selected, m.width, m.pluginSpecs()...))
 	}
 	if m.skillVisible {
 		if r := m.renderSkillCompletionPicker(); r != "" {
@@ -99,6 +99,9 @@ func (m *Model) limitOverlay(overlay string) string {
 	if maxHeight <= 0 || overlay == "" {
 		return ""
 	}
+	// Count physical rows after wrapping so narrow overlays cannot push the
+	// composer/footer out of the frame during final composition.
+	overlay = xansi.Hardwrap(xansi.Wordwrap(overlay, m.managedFrameWidth(), ""), m.managedFrameWidth(), true)
 	lines := strings.Split(overlay, "\n")
 	if len(lines) > maxHeight {
 		lines = lines[:maxHeight]
@@ -281,10 +284,10 @@ func (m *Model) View() string {
 	}
 	// The fleet inspector owns the frame, except when a blocking host request
 	// must preempt it. Its renderer consumes only bounded in-memory snapshots.
-	if m.processFleetOpen && !m.permPending && !m.userInputPending {
+	if m.processFleetOpen && m.pluginScreenView() == nil && !m.permPending && !m.userInputPending {
 		return clipboardSequence + fitFrame(m.renderProcessFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
 	}
-	if m.subagentFleetOpen && !m.permPending && !m.userInputPending {
+	if m.subagentFleetOpen && m.pluginScreenView() == nil && !m.permPending && !m.userInputPending {
 		return clipboardSequence + fitFrame(m.renderSubagentFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
 	}
 
@@ -293,13 +296,13 @@ func (m *Model) View() string {
 	frameWidth := m.managedFrameWidth()
 	sep := styleSep.Render(strings.Repeat("─", frameWidth))
 	overlay := m.renderOverlays()
-	if m.inlineModalOverlay() && overlay != "" {
+	if m.inlineModalOverlay() && overlay != "" && (m.pluginScreenView() == nil || m.permPending || m.userInputPending) {
 		// Modal pickers replace the live tail but remain bottom-anchored inside the
 		// same terminal-height frame, so closing one restores the composer without
 		// moving terminal-owned history.
 		return clipboardSequence + fitFrameBottom(overlay, frameWidth, m.managedFrameHeight())
 	}
-	if m.inlineInputOverlay() && overlay != "" {
+	if m.inlineInputOverlay() && overlay != "" && m.pluginScreenView() == nil {
 		frame := lipgloss.JoinVertical(lipgloss.Left, overlay, sep, m.renderEditor())
 		return clipboardSequence + fitFrameBottom(frame, frameWidth, m.managedFrameHeight())
 	}
@@ -317,14 +320,30 @@ func (m *Model) View() string {
 	// Keep the active provider/model/mode visible in both render modes. Inline
 	// session headers also remain in native scrollback as historical boundaries,
 	// but the current selection must not disappear above the visible window.
-	parts = append(parts, header, sep, m.renderTranscriptView())
+	parts = append(parts, header)
+	if extra := m.pluginPlacement("header", frameWidth); extra != "" {
+		parts = append(parts, extra)
+	}
+	body := m.renderTranscriptView()
+	if sideWidth := m.pluginSidebarWidth(); sideWidth > 0 {
+		side := m.pluginPlacement("sidebar", sideWidth-2)
+		side = fitFrame(lipgloss.NewStyle().PaddingLeft(2).Render(side), sideWidth, m.transcript.Height)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, body, side)
+	}
+	parts = append(parts, sep, body)
 	if overlay != "" {
 		parts = append(parts, overlay)
 	}
 	if runStatus != "" {
 		parts = append(parts, runStatus)
 	}
+	if extra := m.pluginPlacement("above_input", frameWidth); extra != "" {
+		parts = append(parts, extra)
+	}
 	parts = append(parts, sep, editorView, footer)
+	if extra := m.pluginPlacement("footer", frameWidth); extra != "" {
+		parts = append(parts, extra)
+	}
 	frame := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	if m.inlineTranscript {
 		// Keep a constant logical row count. Growing a normal-screen Bubble Tea
@@ -337,7 +356,11 @@ func (m *Model) View() string {
 			frame = overlayTranscriptSelectionContextMenu(frame, m.transcriptSelectionMenu)
 		}
 	}
-	if m.restartPromptVisible() {
+	if m.userInputPending && !m.permPending {
+		frame = m.overlayCenteredModal(frame, m.renderUserInput())
+	} else if m.pluginScreenView() != nil && !m.permPending {
+		frame = m.overlayCenteredModal(frame, m.renderPluginScreen())
+	} else if m.restartPromptVisible() {
 		frame = m.overlayRestartPrompt(frame)
 	} else if m.updateInstallProgressVisible() {
 		frame = m.overlayUpdateInstallProgress(frame)

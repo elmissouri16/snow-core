@@ -1,7 +1,9 @@
 package app
 
 import (
+	"context"
 	"github.com/elmissouri16/snow-core/internal/agent"
+	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -11,7 +13,8 @@ import (
 // child runtime wrapper closes both in the required order.
 type childAgentRuntime struct {
 	*agent.Agent
-	store session.Store
+	store   session.Store
+	plugins *internalplugin.Manager
 }
 
 func (r *childAgentRuntime) LatestAssistantMessage() (protocol.Message, bool, error) {
@@ -30,6 +33,9 @@ func (r *childAgentRuntime) Close() {
 	}
 	if r.Agent != nil {
 		r.Agent.Close()
+	}
+	if r.plugins != nil {
+		_ = r.plugins.Close(context.Background())
 	}
 	if r.store != nil {
 		_ = r.store.Close()

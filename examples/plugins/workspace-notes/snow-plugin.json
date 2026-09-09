@@ -1,0 +1,9 @@
+{
+  "id": "workspace-notes",
+  "name": "Workspace Notes",
+  "version": "0.1.0",
+  "api_version": 2,
+  "entry": "main.js",
+  "capabilities": ["commands", "ui", "storage"],
+  "settings": [{"name": "scope", "title": "Note storage scope", "type": "enum", "choices": ["project", "session", "global"], "default": "project"}]
+}

@@ -84,6 +84,21 @@ func auxiliaryConfigFingerprint(globalDir, projectRoot string, projectAllowed bo
 // ConfigDiagnostics returns an independent snapshot of non-fatal auxiliary
 // configuration warnings, including lazily loaded theme and keybinding files.
 func (a *App) ConfigDiagnostics() []protocol.ConfigDiagnostic {
+	return append(a.auxiliaryDiagnostics(), a.PluginDiagnostics()...)
+}
+
+// PluginDiagnostics returns bounded runtime logs and failures without scanning configuration files.
+func (a *App) PluginDiagnostics() []protocol.ConfigDiagnostic {
+	var out []protocol.ConfigDiagnostic
+	if a.PluginManager != nil {
+		for _, d := range a.PluginManager.Diagnostics() {
+			out = append(out, protocol.ConfigDiagnostic{Path: "plugin:" + d.PluginID, Message: d.Status + ": " + d.Message})
+		}
+	}
+	return out
+}
+
+func (a *App) auxiliaryDiagnostics() []protocol.ConfigDiagnostic {
 	key := auxiliaryConfigFingerprint(config.GlobalDir(), a.ProjectInputRoot, a.ProjectAllowed) + "\x00" + a.Cfg.TUI.Theme
 	a.diagnosticsMu.Lock()
 	defer a.diagnosticsMu.Unlock()
@@ -594,6 +609,11 @@ func mergeMCPDeclarations(global, project map[string]publicmcp.ServerSpec, expli
 // Close releases plugin and router resources before the session store.
 func (a *App) Close() error {
 	var errs []error
+	if a.extensions != nil {
+		a.extensions.mu.Lock()
+		a.extensions.cancel()
+		a.extensions.mu.Unlock()
+	}
 	if a.Subagents != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if err := a.Subagents.Close(ctx); err != nil {
@@ -642,6 +662,12 @@ func (a *App) Close() error {
 	}
 	if a.PluginManager != nil {
 		if err := a.PluginManager.Close(context.Background()); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if a.extensions != nil {
+		a.extensions.wg.Wait()
+		if err := a.extensions.store.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -729,7 +755,6 @@ func (a *App) ReplyUserInput(response protocol.UserInputResponse) error {
 	return a.userInput.Reply(response)
 }
 
-// RejectUserInput declines the current ask_user call.
 // ReadySubagents is called after a surface subscribes. Restored work is never
 // restarted automatically; the call publishes only topology snapshots.
 func (a *App) ReadySubagents() error {
@@ -853,6 +878,17 @@ func (a *App) SubagentUsage() (protocol.Usage, error) {
 	return a.Subagents.Usage()
 }
 
+// UserInputDone signals settlement of one request, independently of root turns.
+func (a *App) UserInputDone(requestID string) <-chan struct{} {
+	if a != nil && a.userInput != nil {
+		return a.userInput.Done(requestID)
+	}
+	done := make(chan struct{})
+	close(done)
+	return done
+}
+
+// RejectUserInput declines the current ask_user or plugin input call.
 func (a *App) RejectUserInput(requestID string) error {
 	if a == nil || a.userInput == nil {
 		return userinput.ErrUnavailable

@@ -38,9 +38,12 @@ func (m *Model) transcriptSelectionSourceLines() []string {
 }
 
 func (m *Model) transcriptSelectionTop() int {
-	// The full-screen frame always places the transcript after the one-row
-	// header and separator. Inline mode leaves history to terminal selection.
-	return 2
+	// Inline mode leaves history to terminal selection.
+	top := 2 // core header and separator
+	if header := m.pluginPlacement("header", m.managedFrameWidth()); header != "" {
+		top += lipgloss.Height(header)
+	}
+	return top
 }
 
 func (m *Model) transcriptSelectionPointAt(x, y int, clampToViewport bool) (transcriptSelectionPoint, bool) {

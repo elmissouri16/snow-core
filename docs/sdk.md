@@ -127,6 +127,7 @@ Empty fields generally inherit global configuration.
 | `Tools` | Restrict built-in tools to an allowlist |
 | `CollaborationMode` | Start in `default` or `plan` |
 | `APIKey`, `BaseURL` | Configure one explicit compatible endpoint |
+| `JavaScriptPlugins`, `GoPlugins` | Local JavaScript package declarations and compiled Go extensions; see [Plugins](plugins.md) |
 | `NoPlugins`, `NoMCP`, `NoSkills` | Disable extension families |
 | `EnableSubagents`, `DisableSubagents` | Override subagent enablement |
 | `PermissionHandler` | Broker correlated permission decisions |

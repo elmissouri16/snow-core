@@ -603,6 +603,22 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 		m.mu.Unlock()
 		return protocol.SubagentState{}, availableRoleError(m.limits.Roles, m.limits.DefaultRole, req.Role)
 	}
+	var pluginTools map[string]string
+	if len(req.PluginTools) > 0 {
+		if caller.Path != protocol.RootAgentPath || m.pluginSelection == nil {
+			m.mu.Unlock()
+			return protocol.SubagentState{}, errors.New("child plugin selection unavailable")
+		}
+		pluginTools, err = m.pluginSelection(role, req.PluginTools)
+		if err != nil {
+			m.mu.Unlock()
+			return protocol.SubagentState{}, err
+		}
+		if m.root.Mode() == protocol.ModePlan {
+			m.mu.Unlock()
+			return protocol.SubagentState{}, errors.New("explicit child plugin tools require default mode")
+		}
+	}
 	recursiveAuthority := m.limits.Recursive && m.limits.MaxDepth > 1
 	if caller.Path == protocol.RootAgentPath && m.root.Mode() == protocol.ModePlan && !planRoleReadOnly(role, recursiveAuthority) {
 		m.mu.Unlock()
@@ -688,7 +704,7 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 	}
 	id := newThreadID()
 	now := time.Now().UnixMilli()
-	state := protocol.SubagentState{Agent: protocol.AgentRef{ThreadID: id, ParentThreadID: parentRef.ThreadID, Path: path, ParentPath: caller.Path, Role: roleName, Depth: path.Depth()}, Status: protocol.AgentPendingInit, Model: model, Provider: provider, Thinking: thinking, CreatedAt: now, Generation: 1}
+	state := protocol.SubagentState{PluginTools: pluginTools, Agent: protocol.AgentRef{ThreadID: id, ParentThreadID: parentRef.ThreadID, Path: path, ParentPath: caller.Path, Role: roleName, Depth: path.Depth()}, Status: protocol.AgentPendingInit, Model: model, Provider: provider, Thinking: thinking, CreatedAt: now, Generation: 1}
 	record := session.SubagentRecord{State: state, ParentBranchID: m.activeBranchLocked(), ChildSessionPath: m.childPathLocked(id), RoleFingerprint: roleFingerprint(role)}
 	topologyStore := m.store
 	r := &runtime{state: state, record: record, tasks: make(chan childTask, 64), lastUsed: time.Now()}

@@ -1745,6 +1745,187 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "plugins_list"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "plugins.schema.json#/$defs/info"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "plugin_commands"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "plugins.schema.json#/$defs/command"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "plugin_views"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "plugins.schema.json#/$defs/view"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "plugin_command_cancel"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "canceled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "canceled"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "plugin_command_run"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "message.schema.json#/$defs/contentBlock"
+              }
+            },
+            "is_error": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "content",
+            "is_error"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
     }
   ]
 }

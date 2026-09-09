@@ -96,6 +96,7 @@ type App struct {
 	sessionHistory       *builtin.SessionBinding
 	sessionQuery         *session.QueryEngine
 	artifacts            artifact.Store
+	extensions           *extensionServices
 }
 
 // SessionDeleteCleanupError reports that the durable session was deleted but
@@ -145,15 +146,17 @@ type Options struct {
 	// Debug overrides persisted diagnostics enablement for this runtime when set.
 	Debug *bool
 	// DebugDumpPath creates one final diagnostic dump during App.Close.
-	DebugDumpPath string
-	NoSession     bool   // in-memory session (SDK ephemeral)
-	BaseURL       string // active provider base URL override
-	GoPlugins     []publicplugin.Plugin
-	NoPlugins     bool
-	MCPServers    []publicmcp.ServerSpec
-	NoMCP         bool
-	SkillDirs     []string
-	NoSkills      bool
+	DebugDumpPath     string
+	NoSession         bool   // in-memory session (SDK ephemeral)
+	BaseURL           string // active provider base URL override
+	GoPlugins         []publicplugin.Plugin
+	JavaScriptPlugins map[string]publicplugin.JavaScriptSpec
+	JavaScriptPaths   []string
+	NoPlugins         bool
+	MCPServers        []publicmcp.ServerSpec
+	NoMCP             bool
+	SkillDirs         []string
+	NoSkills          bool
 	// UserInputHandler answers ask_user calls for embedded/headless clients.
 	// Nil keeps the tool directly visible but makes calls fail fast until an
 	// interactive surface enables manual replies.

@@ -66,7 +66,8 @@ func run() error {
 	root.PersistentFlags().String("auth", "", "auth file path")
 	root.PersistentFlags().String("thinking", "", "thinking level: off|minimal|low|medium|high|xhigh|max|ultra")
 	root.PersistentFlags().StringSlice("tools", nil, "restrict built-in tools to a comma-separated allowlist")
-	root.PersistentFlags().Bool("no-plugins", false, "disable supplied Go plugins")
+	root.PersistentFlags().Bool("no-plugins", false, "disable Go and JavaScript plugins")
+	root.PersistentFlags().StringArray("js-plugin", nil, "load a local JavaScript plugin directory")
 	root.PersistentFlags().StringArray("mcp", nil, "connect an MCP manifest, Streamable HTTP URL, or stdio executable (repeatable)")
 	root.PersistentFlags().Bool("no-mcp", false, "disable all configured MCP servers")
 	root.PersistentFlags().StringArray("skill-dir", nil, "add a trusted Agent Skills directory (repeatable)")
@@ -92,6 +93,7 @@ func run() error {
 	root.AddCommand(logoutCmd())
 	root.AddCommand(skillsCmd())
 	root.AddCommand(mcpCmd())
+	root.AddCommand(pluginCmd())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -362,6 +364,7 @@ func buildOptions(cmd *cobra.Command) (app.Options, error) {
 	opts.Tools, _ = cmd.Flags().GetStringSlice("tools")
 	opts.CollaborationMode, _ = cmd.Flags().GetString("collaboration-mode")
 	opts.NoPlugins, _ = cmd.Flags().GetBool("no-plugins")
+	opts.JavaScriptPaths, _ = cmd.Flags().GetStringArray("js-plugin")
 	opts.NoMCP, _ = cmd.Flags().GetBool("no-mcp")
 	opts.SkillDirs, _ = cmd.Flags().GetStringArray("skill-dir")
 	opts.NoSkills, _ = cmd.Flags().GetBool("no-skills")
@@ -567,7 +570,13 @@ func runPrintTo(ctx context.Context, opts app.Options, prompt string, jsonMode, 
 	if err != nil {
 		return err
 	}
-	defer func() { err = errors.Join(err, a.Close()) }()
+	defer func() {
+		err = errors.Join(err, a.Close())
+		for _, diagnostic := range a.PluginDiagnostics() {
+			_, writeErr := fmt.Fprintf(stderr, "%s: %s\n", diagnostic.Path, printableGoalBlockedReason(diagnostic.Message))
+			err = errors.Join(err, writeErr)
+		}
+	}()
 	for _, diagnostic := range a.Diagnostics {
 		fmt.Fprintf(stderr, "config warning: %s: %s\n", diagnostic.Path, diagnostic.Message)
 	}
@@ -676,6 +685,7 @@ func runPrintTo(ctx context.Context, opts app.Options, prompt string, jsonMode, 
 		return err
 	}
 
+	a.StartPluginExtensions()
 	if err := a.Agent.Prompt(ctx, prompt); err != nil {
 		return err
 	}

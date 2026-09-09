@@ -12,7 +12,6 @@ func TestCLIRemovedExternalPluginEntryPoints(t *testing.T) {
 		want string
 	}{
 		{"flag", []string{"snow", "--plugin", "/unused/plugin"}, "unknown flag: --plugin"},
-		{"command", []string{"snow", "plugin", "list"}, `unknown command "plugin"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := runCLI(t, tc.args...)

@@ -1,6 +1,9 @@
 package tui
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // commandSpec describes one slash command for the completion palette.
 type commandSpec struct {
@@ -43,32 +46,36 @@ var commands = []commandSpec{
 	{name: "/tree", desc: "navigate branches in this session"},
 	{name: "/thinking", desc: "choose reasoning effort", argHint: "[off|minimal|low|medium|high|xhigh|max|ultra]"},
 	{name: "/trust", desc: "show or set project trust", argHint: "[allow|deny]"},
+	{name: "/plugins", desc: "inspect JavaScript plugins, commands, and settings"},
 }
 
-// completeCommand returns exact/prefix matches first, followed by stable
+// completeCommand returns exact matches, then prefixes, then stable
 // subsequence matches. Empty prefix returns the complete registry; rendering
 // applies a selection-following viewport without removing navigable matches.
-func completeCommand(prefix string) []string {
+func completeCommand(prefix string, extra ...commandSpec) []string {
 	prefix = strings.ToLower(strings.TrimPrefix(prefix, "/"))
 	if prefix == "" {
 		out := make([]string, 0, len(commands))
-		for _, c := range commands {
+		for _, c := range combinedCommands(extra) {
 			out = append(out, c.name)
 		}
 		return out
 	}
 	var out []string
+	var exact []string
 	var fuzzy []string
-	for _, c := range commands {
+	for _, c := range combinedCommands(extra) {
 		name := strings.ToLower(strings.TrimPrefix(c.name, "/"))
 		switch {
-		case name == prefix, strings.HasPrefix(name, prefix):
+		case name == prefix:
+			exact = append(exact, c.name)
+		case strings.HasPrefix(name, prefix):
 			out = append(out, c.name)
 		case len(prefix) >= 3 && subsequenceMatch(name, prefix):
 			fuzzy = append(fuzzy, c.name)
 		}
 	}
-	return append(out, fuzzy...)
+	return append(append(exact, out...), fuzzy...)
 }
 
 func subsequenceMatch(value, query string) bool {
@@ -95,8 +102,8 @@ func isCommandPrefix(text string) bool {
 }
 
 // commandByExact returns the command spec for an exact command name match.
-func commandByExact(name string) (commandSpec, bool) {
-	for _, c := range commands {
+func commandByExact(name string, extra ...commandSpec) (commandSpec, bool) {
+	for _, c := range combinedCommands(extra) {
 		if c.name == name {
 			return c, true
 		}
@@ -113,10 +120,10 @@ func (c commandSpec) needsArgs() bool {
 	return c.requiresArg
 }
 
-func formatCommandListWithKeys(keys tuiKeyMap) string {
+func formatCommandListWithKeys(keys tuiKeyMap, extra ...commandSpec) string {
 	var b strings.Builder
 	b.WriteString("Commands\n")
-	for _, c := range commands {
+	for _, c := range combinedCommands(extra) {
 		b.WriteString("  ")
 		b.WriteString(c.name)
 		if c.argHint != "" {
@@ -145,7 +152,7 @@ func formatCommandListWithKeys(keys tuiKeyMap) string {
 
 // renderCompletions renders the palette lines: name + dimmed description
 // (+ arg hint), selected line highlighted, truncated to width.
-func renderCompletions(matches []string, selected int, width int) string {
+func renderCompletions(matches []string, selected int, width int, extra ...commandSpec) string {
 	if width <= 0 {
 		return ""
 	}
@@ -154,7 +161,7 @@ func renderCompletions(matches []string, selected int, width int) string {
 	}
 	var b strings.Builder
 	for i, name := range matches {
-		spec, ok := commandByExact(name)
+		spec, ok := commandByExact(name, extra...)
 		line := name
 		if ok {
 			line = name + "  " + spec.desc
@@ -173,4 +180,11 @@ func renderCompletions(matches []string, selected int, width int) string {
 		b.WriteString("\n")
 	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func combinedCommands(extra []commandSpec) []commandSpec {
+	if len(extra) == 0 {
+		return commands
+	}
+	return append(slices.Clone(commands), extra...)
 }

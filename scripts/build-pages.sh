@@ -69,6 +69,7 @@ for pages_public_document in \
 	docs/skills.md \
 	docs/mcp.md \
 	docs/plugins.md \
+	docs/plugin-extensions.md \
 	docs/security.md \
 	docs/sdk.md
 do

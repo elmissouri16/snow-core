@@ -66,6 +66,8 @@ type ToolContext struct {
 	CWD        string
 	ToolCallID string
 	Progress   func(ProgressUpdate) error
+	// CallTool is an invocation-scoped, permissioned host bridge for JavaScript adapters.
+	CallTool func(context.Context, string, json.RawMessage) (ToolResult, error)
 }
 
 // ProgressUpdate is a bounded observation emitted by a running tool.

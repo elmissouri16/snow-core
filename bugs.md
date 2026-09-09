@@ -2024,3 +2024,301 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
 - `./scripts/install-local.sh` installed `~/.local/bin/snow` as `0.1.0-dev`;
   the installed CLI passed an isolated fake-provider smoke check with sessions
   and extensions disabled and permissions denied.
+
+## BUG-047: Promise settlement cancels an active CPU watchdog
+
+- **Status:** Resolved; verified 2026-09-07
+- **Surface:** JavaScript API 2 commands with immediately resolving host promises
+- **Actual:** Publishing a result from a Goja promise callback let the caller
+  cancel its invocation before the worker detached the CPU watchdog. A successful
+  command could disable the runtime with `context canceled` on its next call.
+- **Resolution:** Queue settlements on the owner and publish them only after
+  `execute` completes and detaches the watchdog.
+- **Verification:** `TestPromiseSettlementDoesNotDisableRuntime` performs 200
+  immediate host-promise commands; it and the app command tests passed with
+  `go test -race ./internal/plugin/javascript ./internal/app -run
+  'TestPromiseSettlement|TestPluginCommand' -count=10`.
+
+## BUG-048: Workflow cancellation closes children before task settlement
+
+- **Status:** Resolved; verified 2026-09-07
+- **Surface:** JavaScript API 2 command-owned reviewers
+- **Actual:** Interrupt requests returned before manager task accounting settled.
+  An immediate close failed with active work and left a command-owned child open.
+- **Resolution:** Cancel only the command's recorded children, then retry their
+  close within a bounded cleanup context until accepted work settles. Cleanup
+  errors are returned, and unrelated children remain untouched.
+- **Verification:** `TestPluginCommandCancellationClosesOnlyOwnedChildren` passed
+  ten race-enabled repetitions with an unrelated completed child in the session.
+
+## BUG-049: Typed plugin forms reject valid numeric answers
+
+- **Status:** Resolved; verified 2026-09-07
+- **Surface:** JavaScript API 2 numeric/boolean form values
+- **Actual:** Decoding into an interface already containing the answer string
+  caused encoding/json/v2 to retain that concrete type and reject a numeric
+  answer such as `7`.
+- **Resolution:** Decode into a fresh interface, then validate the declared field
+  type before returning values to JavaScript.
+- **Verification:** `TestPluginFormUsesExistingBrokerAndValidatesTypes` exercises
+  the real input broker and receives `number:7`; five race-enabled repetitions
+  passed alongside branch-transition and persisted-tool-card tests.
+
+## BUG-050: Provider adapters reject plugin request context attribution
+
+- **Status:** Resolved; verified 2026-09-07
+- **Surface:** API 2 `before_request` hooks with OpenAI-compatible and other
+  providers that validate `InternalContextFragment`
+- **Actual:** The manager emitted `plugin:<id>` sources, but the protocol permits
+  only lowercase letters, digits, underscores, and hyphens. Any nonempty plugin
+  request context failed before the provider request; fake-provider tests missed it.
+- **Reproduction:** The extension pack smoke test runs `#review hook-read-fixture`
+  through `session-pilot:run` against a local OpenAI-compatible mock and receives
+  `protocol: invalid internal context source "plugin:project-helper-v2"`.
+- **Remediation:** Use `plugin-<id>` attribution and validate contributed fragments
+  at the hook boundary; preserve the original plugin ID in transform audit records.
+- **Regression:** `TestHookContextSatisfiesProviderContract` and
+  `python3 examples/plugins/extensions_smoke.py`.
+
+## BUG-051: Configuration rejects explicit child plugin tool allowlists
+
+- **Status:** Resolved; verified 2026-09-07
+- **Surface:** API 2 selected child tools with a restricted role
+- **Actual:** Spawn admission correctly requires the selected plugin tool in
+  the role allowlist, but configuration validation only accepted built-in tool
+  names, making such a role impossible to configure.
+- **Remediation:** Accept syntactically valid canonical plugin tool names in
+  role configuration. Loaded-catalog selection still enforces exact role names,
+  child opt-in, fingerprints, and each required host tool; no wildcard grants.
+- **Regression:** `TestChildPluginToolRoleConfiguration` and the source scout
+  case in `python3 examples/plugins/extensions_smoke.py`.
+
+## BUG-052: Plugin dialogs leave the TUI showing an active agent turn
+
+- **Status:** Resolved; verified 2026-09-07
+- **Surface:** Native input/select/form dialogs opened by an idle plugin command
+- **Actual:** `startUserInput` unconditionally set the root `busy` flag. Plugin
+  completion emits no root `turn_done`, leaving an idle agent displayed as
+  thinking and subsequent input treated as guidance until aborted.
+- **Reproduction:** Open UI Studio, select Ocean in its theme dialog, then close
+  the screen. The fake-provider TUI remains “working” with zero actual turns.
+- **Remediation:** Keep modal activity in `userInputPending`; preserve the root
+  busy state owned by correlated turn lifecycle events.
+- **Regression:** `TestPluginDialogDoesNotChangeAgentBusyState` plus an interactive
+  theme-selection smoke check.
+
+### Extension pack verification (BUG-050 through BUG-052)
+
+- `go test ./...` and `go vet ./...` passed.
+- `go test -race ./internal/config ./internal/plugin/... ./internal/tui` passed.
+- `examples/plugins/extensions_smoke.py` passed with fake and local mocked
+  providers, including actual selected child tool execution.
+- The rebuilt TUI returned to idle after selecting Ocean through the native
+  plugin dialog; no root prompt was started.
+
+## BUG-053: Plugin UI changes clip terminal chrome and offset mouse targets
+
+- **Status:** Resolved; verified 2026-09-07
+- **Surface:** TUI plugin headers, footers, above-input views, and sidebars
+- **Actual:** Updating an existing footer from one to two rows renders a
+  25-row composition in a 24-row terminal until the deferred refresh. In short
+  terminals, plugin contributions exceed the remaining row budget and clip the
+  composer or core footer. Header contributions leave transcript selection and
+  the Working mouse target two rows above their rendered positions.
+- **Reproduction:** `go test ./internal/tui -run
+  'TestPluginUpdatesResize|TestPluginChromeFits|TestPluginHeaderOffsets' -count=1`
+  fails for immediate updates, short frames, overlays, and header mouse offsets.
+- **Remediation:** Apply geometry changes before rendering, budget plugin rows
+  after core controls and overlays, and share the rendered header offset with
+  transcript and run-status hit testing.
+- **Resolution:** Plugin updates synchronously resize/reflow changed geometry;
+  one shared allocation shrinks optional chrome after reserving core controls
+  and wrapped overlay rows. Plugin chrome is inset and sidebars have a gutter.
+  Transcript selection and Working hit testing include rendered plugin headers.
+- **Verification:** Regression tests cover immediate growth/shrink updates,
+  both transcript modes, 20–160 columns, 8–48 rows, repeated resize/overlay
+  transitions, growing input, active runs, and mouse offsets. `go test ./...`,
+  `go vet ./...`, `go test -race ./internal/tui -count=1`, all 56 script tests,
+  and `python3 scripts/check_benchmarks.py` passed. Tests requiring localhost
+  listeners ran outside the sandbox; the full suite and benchmarks used
+  isolated temporary `SNOW_HOME` directories. `./scripts/install-local.sh`
+  installed the updated `0.1.0-dev` binary.
+
+## BUG-054: Plugin screens lack native panels and hide focused actions
+
+- **Status:** Resolved; verified 2026-09-07
+- **Severity:** Medium
+- **Surface:** Workspace Notes and other plugin screens in the TUI
+- **Actual:** Screens replace the full frame with unbordered text, unlike the
+  centered model picker. Actions render as bracketed labels with focus only in
+  a footer; long content can hide the selected action. Scrolling beyond the end
+  accumulates an invisible offset, so Up does not immediately move back.
+- **Reproduction:** `TestPluginScreenUsesCenteredCard` and
+  `TestPluginScreenKeepsFocusedActionsVisible` fail against the original renderer
+  at both wide and narrow sizes, in inline and alternate-screen modes.
+- **Remediation:** Use the shared centered picker card, a bounded content pane,
+  and a separate action list with a visible selection. Clamp scrolling and keep
+  blocking dialogs authoritative. Simplify the Workspace Notes presentation.
+- **Required verification:** Panel bounds and centering, long content and action
+  lists, forward/backward focus, resizing, dialog priority, draft restoration,
+  and a rendered TUI check.
+- **Resolution:** Plugin screens share the centered picker frame, use compact
+  sizing for short content, and keep a highlighted action list outside the
+  scrolling body. Scroll offsets are bounded; background clicks are consumed.
+  Workspace Notes uses a scope/count line, separated notes, and shorter labels.
+- **Verification:** The new panel regressions pass for 20–140 columns and 8–40
+  rows, inline/alternate-screen modes, empty/passive views, Unicode, nested
+  buttons, focus wrapping, dialog priority, and unchanged composer content.
+  Rendered previews use the real Workspace Notes plugin with isolated storage.
+  `go test ./...`, `go test -race ./internal/tui -count=1`, `go vet ./...`,
+  all 56 support-script tests, and `python3 scripts/check_benchmarks.py` passed.
+  After the final compact-copy adjustment, the focused panel tests and TUI vet
+  passed again. `./scripts/install-local.sh` installed `0.1.0-dev`; the installed
+  binary passed `python3 examples/plugins/extensions_smoke.py` with fake and
+  localhost providers. A separate installed-binary PTY session opened `/notes`,
+  added a note through the input dialog, changed the visible action with Tab,
+  and inserted it into the composer with Enter while the agent remained idle.
+
+## BUG-055: User-input dialogs retain the old composer-area layout
+
+- **Status:** Resolved; verified 2026-09-07
+- **Severity:** Medium
+- **Surface:** TUI questions and plugin input/select/confirm/form dialogs
+- **Actual:** The updated plugin screen opens a centered card, but its input
+  dialog still spans the area above the composer with an oversized controls
+  line. It changes transcript geometry and breaks the native panel pattern.
+  Long content can hide choices, and resizing a multiline draft can leave its
+  insertion point outside the visible editor until another update.
+- **Reproduction:** The provided Workspace Notes screenshot and
+  `TestUserInputCardIsCentered`, `TestUserInputCardKeepsSelectionAndErrorsVisible`,
+  and `TestUserInputCardKeepsMultilineDraftAcrossResize` reproduce these failures.
+- **Remediation:** Share the centered picker frame, bound prompt and answer
+  regions, resize the editor to the card, and keep focus, validation, and
+  controls visible. Preserve drafts and blocking-request priority.
+- **Required verification:** Text and choice dialogs, forms, Unicode, long
+  prompts and drafts, resizing, inline/alternate-screen geometry, permission
+  priority, and an installed-binary input/confirm flow.
+- **Resolution:** All user-input requests now use the shared centered card.
+  Textareas fit an inset bordered field; choice windows follow the selection.
+  Controls are compact, form progress appears only for multiple questions,
+  and plugin display names replace generic dialog headings. Resize and draft
+  restoration refresh the editor viewport before displaying the frame.
+- **Verification:** Focused tests pass for 20–140 columns and 8–40 rows,
+  inline/alternate-screen modes, choice windows, validation, Unicode,
+  multiline draft restoration, permission priority, and returning to the
+  parent panel. `go test ./...`, `go test -race ./internal/tui -count=1`,
+  `go vet ./...`, all 56 support-script tests, and the benchmark guard passed.
+  Wide/narrow text and confirmation frames were rendered and visually checked.
+  `./scripts/install-local.sh` installed `0.1.0-dev`; an isolated installed
+  PTY session opened the centered input, saved a multiline note, returned to
+  Notes, opened the centered clear confirmation, and selected No. The agent
+  returned to idle and the note remained intact.
+
+## BUG-056: Failed plugin results apply transitions and retain owned children
+
+- **Status:** Resolved; verified 2026-09-07
+- **Severity:** High
+- **Surface:** Plugin command lifecycle
+- **Actual:** A command returning `isError: true` is treated as successful by
+  deferred branch handling. Its queued fork is applied and its spawned children
+  remain open. Failure to apply a scheduled transition also skips child cleanup.
+- **Reproduction:** `TestPluginErrorResultDoesNotApplyBranchTransition` failed
+  with a changed generation; `TestPluginErrorResultClosesOwnedChildren` failed
+  with the owned child still running.
+- **Remediation:** Apply transitions only after successful, uncancelled command
+  results; clean up command-owned children on result, execution, or transition
+  failure. Keep explicit error results intact for RPC/SDK callers and make them
+  visible in the TUI even when they have no text content.
+- **Required verification:** Error results, transition failure, cancellation,
+  successful fork, and isolation of unrelated children.
+
+## BUG-057: Plugin dialog lifetime is coupled to unrelated root events
+
+- **Status:** Resolved; verified 2026-09-07
+- **Severity:** High
+- **Surface:** Plugin user-input broker and TUI
+- **Actual:** Root `turn_done`, `aborted`, or an unrelated `ask_user` completion
+  dismisses a live plugin dialog. Conversely, cancelling a plugin command leaves
+  its settled dialog visible. Standalone plugin input can exit the TUI on Ctrl+C
+  instead of resolving the request.
+- **Reproduction:** All three cases of
+  `TestPluginDialogSurvivesUnrelatedTurnEvents` failed against a real pending
+  plugin command. The input handler's Ctrl+C path also left its broker blocked.
+- **Remediation:** Signal broker settlement per request, dismiss only the
+  matching dialog, preserve plugin requests across unrelated turn boundaries,
+  and release standalone input on Ctrl+C. Ignore delayed settlement for newer
+  requests, including reused request IDs.
+- **Required verification:** Reply, rejection, cancellation, broker closure,
+  late subscription, stale settlement, concurrent root events, and live TUI input.
+
+## BUG-058: Plugin choice dialogs offer answers they cannot accept
+
+- **Status:** Resolved; verified 2026-09-07
+- **Severity:** Medium
+- **Surface:** Plugin selects, confirmations, forms, and manual input replies
+- **Actual:** Every choice dialog adds Other, including closed selects and typed
+  enum/boolean fields. The custom answer closes the dialog and then fails host
+  validation; confirmations silently interpret arbitrary text as false. Empty
+  or duplicate choices can produce an unanswerable or ambiguous picker.
+- **Remediation:** Add optional host-owned `choices_only` request metadata,
+  enforce it in the broker before settlement, and omit Other from closed
+  pickers. Validate plugin choices before showing them; default confirmation
+  focus to No. Model-authored choice questions keep Other.
+- **Required verification:** TUI choice navigation, corrected manual replies,
+  typed forms, malformed definitions, and RPC schema compatibility.
+
+## BUG-059: Late plugin completions retain UI from a previous branch
+
+- **Status:** Resolved; verified 2026-09-07
+- **Severity:** Medium
+- **Surface:** TUI plugin command completion and branch changes
+- **Actual:** The TUI accepts command output after the app has switched branches
+  and can retain the previous branch's panel. Generation synchronization only
+  runs on child events, which need not accompany a root branch change.
+- **Reproduction:** `TestPluginCompletionCannotRestorePreviousBranchUI` fails
+  after completing input, forking, then reducing the old command completion.
+- **Remediation:** Correlate completions with their originating generation;
+  refresh contributed views on root event batches and diagnostics as well as
+  command completion. Release the running marker without rendering stale output.
+- **Required verification:** Delayed completion after fork, successful commands,
+  native panel layout, and extension smoke flows.
+
+## BUG-060: Plugin prefix completions override an exactly typed command
+
+- **Status:** Resolved; verified 2026-09-07
+- **Severity:** Medium
+- **Surface:** TUI slash-command completion
+- **Actual:** With Workspace Notes loaded, typing `/note` and pressing Enter
+  opens `/notes` instead of the add-note dialog. Exact and prefix matches share
+  registration order; an old palette index can also override the exact match.
+- **Reproduction:** Observed in the installed TUI, and reproduced by
+  `TestPluginExactAliasPrecedesLongerPrefix`.
+- **Remediation:** Rank exact names before longer prefixes and reset the focus
+  to an exact match as the editor changes. Preserve navigation among prefixes
+  and fuzzy matches.
+- **Required verification:** Plugin aliases, retained palette selection,
+  existing completion tests, and installed-binary `/note` input.
+
+
+### Plugin audit verification (BUG-056 through BUG-060)
+
+- New regressions cover explicit error results, failed transitions, owned-child
+  cleanup, dialog cancellation/settlement, late notifications, typed selections,
+  malformed choices, stale branch UI, and exact plugin aliases. Existing
+  success, normal Other-answer, panel sizing, and permission tests still pass.
+- `go test ./...` and `go vet ./...` passed after the final code changes. Race
+  checks passed for `internal/plugin/...`, `internal/app`, `internal/tui`,
+  `internal/userinput`, `internal/rpc`, and `pkg/snowsdk`; app/TUI race checks
+  were repeated after the final alias and cancellation-feedback polish.
+- All 56 Python support-script tests and `scripts/check_benchmarks.py` passed.
+  Go checks used an isolated build cache; full/race checks required permission
+  for localhost mock servers and used temporary Snow homes.
+- The installed extension smoke pack passed registration, commands, typed
+  forms, view/state persistence, branches, model controls, workflow cleanup,
+  all four hooks, bounded file reads, persisted cards, and selected child tools.
+- `./scripts/install-local.sh` installed the final checkout as `0.1.0-dev`.
+  Wide/narrow question frames were rendered and visually reviewed. An isolated
+  installed-binary PTY confirmed Ctrl+C dismisses input, another note can be
+  saved immediately, confirmation offers only No/Yes with No selected, and
+  accepting No preserves the note. A fresh launch verified `/note` opens the
+  add dialog directly and cancellation prints one concise message.

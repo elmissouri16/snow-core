@@ -1961,3 +1961,25 @@ provider-facing contents.
 - [Persistent Thread Goals](goals.md)
 - [Subagents](subagents.md)
 - [Security model](security.md)
+
+## JavaScript plugin integration
+
+RPC sessions load the same global/trusted-project `js_plugins` declarations and
+`--js-plugin` options as the CLI. `--no-plugins` disables Go and JavaScript.
+Tools, progress, and outer results use the existing event stream; nested host
+operations do not fabricate extra provider-facing tool pairs. Permission requests
+may include `plugin: {plugin_id, tool_name, parent_tool_call_id, host_tool}`.
+The optional `host_tool` identifies a nested built-in operation. These fields are
+host-owned attribution, not authority supplied by the script. Runtime warnings
+and bounded plugin logs are available through `diagnostics`. Management remains
+in the CLI; no plugin-management RPC mutations are added. See [Plugins](plugins.md).
+
+## JavaScript extension commands
+
+`plugins_list`, `plugin_commands`, and `plugin_views` return loaded extension
+metadata, command declarations, and current view snapshots. Run a command with
+`plugin_command_run` and `params: {"command":"id:name","input":"text"}`; cancel
+with `plugin_command_cancel` and `params: {"command":"id:name"}`. Execution is
+asynchronous so the reader can accept cancellation and interaction replies.
+See [JavaScript extensions](plugin-extensions.md) for capability and lifecycle
+rules. These commands are additive to RPC version 1.

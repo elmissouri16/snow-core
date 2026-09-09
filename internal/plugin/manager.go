@@ -36,10 +36,13 @@ type ManagerOptions struct {
 }
 
 type managedPlugin struct {
-	id       string
-	owner    string
-	goPlugin publicplugin.Plugin
-	cleanups []func()
+	id          string
+	owner       string
+	goPlugin    publicplugin.Plugin
+	cleanups    []func()
+	source      tools.Source
+	fingerprint string
+	scope       string
 }
 
 // Manager owns plugin lifecycles, registrations, and observation delivery.
@@ -78,6 +81,15 @@ func NewManager(reg tools.DescriptorRegistry, options ...ManagerOptions) *Manage
 // LoadGo queues a statically linked Go plugin. It does not execute Register
 // until Initialize, so all loading has a deterministic startup boundary.
 func (m *Manager) LoadGo(p publicplugin.Plugin) error {
+	return m.load(p, tools.SourceGoPlugin, "")
+}
+
+// LoadJavaScript loads a host-created JavaScript adapter with its pinned scope.
+func (m *Manager) LoadJavaScript(p publicplugin.Plugin, fingerprint string) error {
+	return m.load(p, tools.SourceJSPlugin, fingerprint)
+}
+
+func (m *Manager) load(p publicplugin.Plugin, source tools.Source, fingerprint string) error {
 	if p == nil {
 		return errors.New("plugin manager: nil Go plugin")
 	}
@@ -97,7 +109,7 @@ func (m *Manager) LoadGo(p publicplugin.Plugin) error {
 		return fmt.Errorf("plugin %q already loaded", manifest.ID)
 	}
 	m.ids[manifest.ID] = true
-	m.plugins = append(m.plugins, &managedPlugin{id: manifest.ID, owner: ownerFor(manifest.ID), goPlugin: p})
+	m.plugins = append(m.plugins, &managedPlugin{id: manifest.ID, owner: ownerFor(manifest.ID), goPlugin: p, source: source, fingerprint: fingerprint})
 	return nil
 }
 
@@ -123,7 +135,7 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	m.mu.Unlock()
 	for _, p := range plugins {
 		p.cleanups = nil
-		r := &scopedRegistrar{manager: m, owner: p.owner, pluginID: p.id, cleanups: &p.cleanups}
+		r := &scopedRegistrar{manager: m, owner: p.owner, pluginID: p.id, cleanups: &p.cleanups, source: p.source, fingerprint: p.fingerprint}
 		err := p.goPlugin.Register(ctx, r)
 		if err != nil {
 			message := err.Error()
@@ -138,6 +150,12 @@ func (m *Manager) Initialize(ctx context.Context) error {
 			m.mu.Unlock()
 			return initializeErr
 		}
+	}
+	if err := m.ValidateCommands(); err != nil {
+		m.mu.Lock()
+		m.initializeErr = err
+		m.mu.Unlock()
+		return err
 	}
 	m.mu.Lock()
 	m.ready = true
@@ -154,8 +172,13 @@ func (m *Manager) Emit(ev protocol.AgentEvent) {
 		return
 	}
 	fns := make([]publicplugin.EventHandler, 0, len(m.subs[eventType]))
-	for _, fn := range m.subs[eventType] {
-		fns = append(fns, fn)
+	ids := make([]int, 0, len(m.subs[eventType]))
+	for id := range m.subs[eventType] {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		fns = append(fns, m.subs[eventType][id])
 	}
 	m.mu.Unlock()
 	if len(fns) == 0 {
@@ -267,6 +290,8 @@ type scopedRegistrar struct {
 	manager         *Manager
 	owner, pluginID string
 	cleanups        *[]func()
+	source          tools.Source
+	fingerprint     string
 }
 
 func (r *scopedRegistrar) RegisterTool(def publicplugin.ToolDefinition) error {
@@ -281,8 +306,8 @@ func (r *scopedRegistrar) RegisterTool(def publicplugin.ToolDefinition) error {
 	if err != nil {
 		return err
 	}
-	tool := &goManagedTool{schema: protocol.ToolSchema{Name: name, Description: def.Description, Parameters: append(json.RawMessage(nil), def.Parameters...), Discovery: cloneDiscovery(def.Discovery)}, definition: def, manager: r.manager}
-	return r.manager.registry.RegisterDescriptor(tools.ToolDescriptor{Schema: tool.schema, Tool: tool, Source: tools.SourceGoPlugin, Owner: r.owner, PluginID: r.pluginID, OriginalName: def.Name, Risk: risk, Capabilities: slices.Clone(def.Capabilities)})
+	tool := &goManagedTool{schema: protocol.ToolSchema{Name: name, Description: def.Description, Parameters: append(json.RawMessage(nil), def.Parameters...), Discovery: cloneDiscovery(def.Discovery)}, definition: def, manager: r.manager, pluginID: r.pluginID, source: r.source, fingerprint: r.fingerprint}
+	return r.manager.registry.RegisterDescriptor(tools.ToolDescriptor{Schema: tool.schema, Tool: tool, Source: r.source, Owner: r.owner, PluginID: r.pluginID, OriginalName: def.Name, Risk: risk, Capabilities: slices.Clone(def.Capabilities)})
 }
 func (r *scopedRegistrar) Subscribe(t publicplugin.EventType, fn publicplugin.EventHandler) func() {
 	u := r.manager.Subscribe(t, fn)
@@ -321,9 +346,12 @@ func declaredRisk(s string) (permission.Risk, error) {
 }
 
 type goManagedTool struct {
-	schema     protocol.ToolSchema
-	definition publicplugin.ToolDefinition
-	manager    *Manager
+	schema      protocol.ToolSchema
+	definition  publicplugin.ToolDefinition
+	manager     *Manager
+	pluginID    string
+	source      tools.Source
+	fingerprint string
 }
 
 func (t *goManagedTool) Schema() tools.ToolSchema { return t.schema }
@@ -344,7 +372,16 @@ func (t *goManagedTool) Run(ctx context.Context, args json.RawMessage, host tool
 	if host != nil && host.CWD() != "" {
 		cwd = host.CWD()
 	}
-	result, err := t.definition.Executor(ctx, publicplugin.ToolContext{Context: ctx, SessionID: t.manager.options.SessionID, CWD: cwd, ToolCallID: callID, Progress: progress}, args)
+	var invoke func(context.Context, string, json.RawMessage) (publicplugin.ToolResult, error)
+	if t.source == tools.SourceJSPlugin {
+		if bridge, ok := host.(tools.BuiltinInvoker); ok {
+			invoke = func(ctx context.Context, name string, args json.RawMessage) (publicplugin.ToolResult, error) {
+				result, err := bridge.InvokeBuiltin(ctx, name, args)
+				return publicplugin.ToolResult{Content: result.Content, IsError: result.IsError}, err
+			}
+		}
+	}
+	result, err := t.definition.Executor(ctx, publicplugin.ToolContext{Context: ctx, SessionID: t.manager.options.SessionID, CWD: cwd, ToolCallID: callID, Progress: progress, CallTool: invoke}, args)
 	if err != nil {
 		return tools.ErrorResult(err), nil
 	}
@@ -414,4 +451,39 @@ func cloneDiscovery(in *protocol.ToolDiscovery) *protocol.ToolDiscovery {
 	out := *in
 	out.Keywords = slices.Clone(in.Keywords)
 	return &out
+}
+
+func (t *goManagedTool) PluginInvocation(callID string) (*protocol.PluginOrigin, string) {
+	if t.source != tools.SourceJSPlugin {
+		return nil, ""
+	}
+	return &protocol.PluginOrigin{PluginID: t.pluginID, ToolName: t.schema.Name, ParentToolCallID: callID}, t.fingerprint
+}
+
+// RecordDiagnostic records bounded runtime messages without publishing events.
+func (m *Manager) RecordDiagnostic(id, status, message string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, d := range m.diagnostics {
+		if d.PluginID == id {
+			count++
+		}
+	}
+	if count >= 260 {
+		return
+	}
+	m.diagnostics = append(m.diagnostics, Diagnostic{PluginID: id, Status: status, Message: boundUTF8(message, 2048)})
+}
+
+// HasJavaScript indicates whether this manager owns any JavaScript runtimes.
+func (m *Manager) HasJavaScript() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, p := range m.plugins {
+		if p.source == tools.SourceJSPlugin {
+			return true
+		}
+	}
+	return false
 }

@@ -83,6 +83,7 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		BaseURL:                 opts.BaseURL,
 		NoPlugins:               opts.NoPlugins,
 		GoPlugins:               opts.GoPlugins,
+		JavaScriptPlugins:       opts.JavaScriptPlugins,
 		MCPServers:              opts.MCPServers,
 		NoMCP:                   opts.NoMCP,
 		SkillDirs:               opts.SkillDirs,
@@ -99,6 +100,7 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	a.StartPluginExtensions()
 	return &Session{app: a, ctx: ctx}, nil
 }
 

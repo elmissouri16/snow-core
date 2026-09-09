@@ -58,7 +58,7 @@ OpenAI-compatible endpoints.
 | Continue or branch a conversation | [Sessions and branches](docs/sessions.md) |
 | Investigate before making changes | [Plan Mode](docs/plan-mode.md) |
 | Work toward a longer objective | [Thread Goals](docs/goals.md) |
-| Add reusable instructions or tools | [Agent Skills](docs/skills.md), [MCP](docs/mcp.md), [Go plugins](docs/plugins.md) |
+| Add reusable instructions or tools | [Agent Skills](docs/skills.md), [MCP](docs/mcp.md), [Plugins](docs/plugins.md), [JavaScript extensions](docs/plugin-extensions.md) |
 | Change models, permissions, or themes | [Configuration](docs/configuration.md) |
 
 Snow runs tools with your operating-system privileges and has no built-in

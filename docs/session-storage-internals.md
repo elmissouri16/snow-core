@@ -458,3 +458,11 @@ traverse it.
 - [Subagents](subagents.md)
 - [SDK](sdk.md)
 - [Using Snow](using-snow.md)
+
+## JavaScript child selections (schema 12)
+
+`subagent_threads.plugin_tools_json` stores the explicit selected tool names and
+package/config fingerprints. Empty legacy rows mean no inherited JavaScript.
+Reload checks the original role fingerprint and selected packages before
+constructing a new isolated child runtime. Plugin key/value state is stored in a
+separate `plugin-state.db` and does not modify this session tree.

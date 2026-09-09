@@ -122,7 +122,8 @@ type AgentEvent struct {
 	Message    string `json:"message,omitempty"` // error / progress text / tool path
 	// ToolOutput is a bounded preview of a completed tool result for UIs and
 	// SDK consumers. The complete result remains in the session message.
-	ToolOutput string `json:"tool_output,omitempty"`
+	PluginView *PluginNode `json:"plugin_view,omitempty"`
+	ToolOutput string      `json:"tool_output,omitempty"`
 	// ToolDurationMS is populated on tool_end when timing is available.
 	ToolDurationMS int64 `json:"tool_duration_ms,omitzero"`
 	// ToolProgress carries structured progress emitted by a running tool.
@@ -160,6 +161,7 @@ type AgentEvent struct {
 // later SDK, plugin, RPC, or TUI observers.
 func (e AgentEvent) Clone() AgentEvent {
 	out := e
+	out.PluginView = e.PluginView.Clone()
 	if e.ToolProgress != nil {
 		v := *e.ToolProgress
 		out.ToolProgress = &v
@@ -194,6 +196,9 @@ func (e AgentEvent) Clone() AgentEvent {
 	if e.Permission != nil {
 		v := *e.Permission
 		v.Request.Args = append(json.RawMessage(nil), e.Permission.Request.Args...)
+		if e.Permission.Request.Plugin != nil {
+			v.Request.Plugin = new(*e.Permission.Request.Plugin)
+		}
 		v.Request.Paths = slices.Clone(e.Permission.Request.Paths)
 		v.Request.Effects = slices.Clone(e.Permission.Request.Effects)
 		v.Request.Capabilities = slices.Clone(e.Permission.Request.Capabilities)
@@ -233,6 +238,7 @@ type PermissionEffect struct {
 // request even when the root and subagents ask concurrently (they are still
 // serialized FIFO).
 type PermissionRequest struct {
+	Plugin                *PluginOrigin      `json:"plugin,omitempty"`
 	ID                    string             `json:"id"`
 	Tool                  string             `json:"tool"`
 	Args                  json.RawMessage    `json:"args"`

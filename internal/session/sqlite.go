@@ -43,4 +43,4 @@ type sqliteQueryer interface {
 	Query(query string, args ...any) (*sql.Rows, error)
 }
 
-const subagentColumns = `thread_id,parent_thread_id,parent_branch_id,agent_path,parent_path,role,role_fingerprint,nickname,depth,status,child_session_path,model_provider,model_id,thinking,created_at,started_at,finished_at,result,error,usage_json,generation`
+const subagentColumns = `thread_id,parent_thread_id,parent_branch_id,agent_path,parent_path,role,role_fingerprint,nickname,depth,status,child_session_path,model_provider,model_id,thinking,created_at,started_at,finished_at,result,error,usage_json,generation,plugin_tools_json`

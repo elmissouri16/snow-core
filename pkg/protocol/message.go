@@ -214,11 +214,12 @@ func (u Usage) CostFor(pricing *ModelPricing) *Cost {
 // permission denial). Progress contains the non-empty progress rows shown before
 // completion. StartMessage is normally a file path or shell command.
 type ToolDisplay struct {
-	Started      bool     `json:"started,omitzero"`
-	StartMessage string   `json:"start_message,omitempty"`
-	Progress     []string `json:"progress,omitempty"`
-	Output       string   `json:"output,omitempty"`
-	DurationMS   int64    `json:"duration_ms,omitzero"`
+	Plugin       *PluginNode `json:"plugin,omitempty"`
+	Started      bool        `json:"started,omitzero"`
+	StartMessage string      `json:"start_message,omitempty"`
+	Progress     []string    `json:"progress,omitempty"`
+	Output       string      `json:"output,omitempty"`
+	DurationMS   int64       `json:"duration_ms,omitzero"`
 }
 
 // ToolTranscript is a branch-scoped presentation entry for tool activity that
@@ -236,6 +237,7 @@ func (d *ToolDisplay) Clone() *ToolDisplay {
 		return nil
 	}
 	out := *d
+	out.Plugin = d.Plugin.Clone()
 	out.Progress = slices.Clone(d.Progress)
 	return &out
 }
@@ -256,10 +258,12 @@ type Message struct {
 	Usage      *Usage     `json:"usage,omitempty"`
 
 	// Tool result metadata
-	ToolCallID  string       `json:"tool_call_id,omitempty"`
-	ToolName    string       `json:"tool_name,omitempty"`
-	IsError     bool         `json:"is_error,omitzero"`
-	ToolDisplay *ToolDisplay `json:"tool_display,omitempty"`
+	ToolCallID       string            `json:"tool_call_id,omitempty"`
+	ToolName         string            `json:"tool_name,omitempty"`
+	IsError          bool              `json:"is_error,omitzero"`
+	ToolDisplay      *ToolDisplay      `json:"tool_display,omitempty"`
+	PluginTransforms []PluginTransform `json:"plugin_transforms,omitempty"`
+	PluginDetails    json.RawMessage   `json:"plugin_details,omitempty"`
 }
 
 // Clone returns an independent message, including mutable block payloads and
@@ -275,6 +279,12 @@ func (m Message) Clone() Message {
 	}
 	out.Usage = m.Usage.Clone()
 	out.ToolDisplay = m.ToolDisplay.Clone()
+	out.PluginDetails = slices.Clone(m.PluginDetails)
+	out.PluginTransforms = slices.Clone(m.PluginTransforms)
+	for i := range out.PluginTransforms {
+		out.PluginTransforms[i].Original = slices.Clone(m.PluginTransforms[i].Original)
+		out.PluginTransforms[i].Effective = slices.Clone(m.PluginTransforms[i].Effective)
+	}
 	return out
 }
 

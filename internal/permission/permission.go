@@ -36,18 +36,19 @@ const (
 
 // Request describes a tool invocation for authorization.
 type Request struct {
-	Tool         string             `json:"tool"`
-	Args         json.RawMessage    `json:"args"`
-	Paths        []string           `json:"paths,omitempty"`
-	Risk         Risk               `json:"risk"`
-	Reason       string             `json:"reason,omitempty"`
-	Agent        *protocol.AgentRef `json:"agent,omitempty"`
-	Effects      []Effect           `json:"effects,omitempty"`
-	Capabilities []Capability       `json:"capabilities,omitempty"`
-	Unknown      bool               `json:"unknown,omitzero"`
-	Rememberable bool               `json:"rememberable,omitzero"`
-	ScopeKey     string             `json:"-"`
-	ScopeLabel   string             `json:"scope_label,omitempty"`
+	Plugin       *protocol.PluginOrigin `json:"plugin,omitempty"`
+	Tool         string                 `json:"tool"`
+	Args         json.RawMessage        `json:"args"`
+	Paths        []string               `json:"paths,omitempty"`
+	Risk         Risk                   `json:"risk"`
+	Reason       string                 `json:"reason,omitempty"`
+	Agent        *protocol.AgentRef     `json:"agent,omitempty"`
+	Effects      []Effect               `json:"effects,omitempty"`
+	Capabilities []Capability           `json:"capabilities,omitempty"`
+	Unknown      bool                   `json:"unknown,omitzero"`
+	Rememberable bool                   `json:"rememberable,omitzero"`
+	ScopeKey     string                 `json:"-"`
+	ScopeLabel   string                 `json:"scope_label,omitempty"`
 }
 
 // Decision is the authorization outcome.

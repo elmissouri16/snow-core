@@ -11,6 +11,8 @@ from this directory and reject network fallback.
 - `prompt-completed.schema.json` defines definitive prompt termination.
 - `agent-event.schema.json` defines normalized event frames.
 - `output.schema.json` is the stdout-frame union.
+- `plugins.schema.json` defines JavaScript extension commands, views, settings,
+  themes, and audit transforms.
 - `model.schema.json`, `message.schema.json`, `session-branch.schema.json`,
   `session-info.schema.json`, `session-fork.schema.json`,
   `worktree.schema.json`, and `common.schema.json` contain shared public DTO

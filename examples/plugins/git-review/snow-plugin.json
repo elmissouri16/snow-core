@@ -1,0 +1,8 @@
+{
+  "id": "git-review",
+  "name": "Git Review",
+  "version": "0.1.0",
+  "api_version": 1,
+  "entry": "main.js",
+  "host_tools": ["bash"]
+}

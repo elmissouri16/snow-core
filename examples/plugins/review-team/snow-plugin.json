@@ -1,0 +1,1 @@
+{"id":"review-team","name":"Review team","version":"0.1.0","api_version":2,"entry":"main.js","capabilities":["commands","ui","subagents","agent","storage"],"settings":[{"name":"focus","title":"Default review focus","type":"string","default":"Review the current workspace changes"}]}

@@ -164,7 +164,8 @@ separates inheritance from clean-install defaults.
 | `APIKey` | Explicit credential with precedence over the auth store and environment. |
 | `BaseURL` | Active provider endpoint override; required for an OpenAI-compatible profile unless configured globally. Accepts an API root or a full `/responses` or `/chat/completions` URL. |
 | `GoPlugins` | Statically linked `pkg/plugin.Plugin` implementations supplied by the host. |
-| `NoPlugins` | Disable supplied Go plugins. |
+| `JavaScriptPlugins` | Map of IDs to `plugin.JavaScriptSpec` local package declarations. |
+| `NoPlugins` | Disable Go and JavaScript plugin loading. |
 | `MCPServers` | Additional public `pkg/mcp.ServerSpec` declarations. |
 | `NoMCP` | Disable configured and explicit MCP servers. |
 | `SkillDirs` | Additional trusted Agent Skills discovery roots. |
@@ -772,3 +773,12 @@ Concurrency guidance:
 - [Security model](security.md)
 - [Sessions](sessions.md)
 - [Subagents](subagents.md)
+
+## JavaScript extension commands
+
+API 2 adds `Session.Plugins()`, `PluginCommands()`, `PluginViews()`,
+`RunPluginCommand(ctx, id, input)`, `CancelPluginCommand(id)`, and
+`AttachPluginUI(handler)`. Commands return `plugin.ToolResult`. Presentation
+handlers receive copied `protocol.PluginUIEvent` payloads and must dispatch to
+their own UI loop. The existing permission and user-input brokers remain
+separate and authoritative. See [JavaScript extensions](plugin-extensions.md).

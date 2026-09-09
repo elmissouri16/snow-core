@@ -11,7 +11,7 @@ import (
 )
 
 // SessionVersion is the current on-disk schema version.
-const SessionVersion = 11
+const SessionVersion = 12
 
 // Header is the immutable session metadata persisted by built-in stores.
 type Header struct {

@@ -33,6 +33,7 @@ type result struct {
 type pending struct {
 	request protocol.UserInputRequest
 	result  chan result
+	done    chan struct{}
 }
 
 // Broker owns at most one pending request. Snow executes tool calls serially,
@@ -81,7 +82,7 @@ func (b *Broker) Ask(ctx context.Context, req protocol.UserInputRequest, publish
 		b.mu.Unlock()
 		return protocol.UserInputResponse{}, errors.New("another user input request is already pending")
 	}
-	p := &pending{request: cloneRequest(req), result: make(chan result, 1)}
+	p := &pending{request: cloneRequest(req), result: make(chan result, 1), done: make(chan struct{})}
 	b.pending = p
 	handler := b.handler
 	b.mu.Unlock()
@@ -152,6 +153,9 @@ func (b *Broker) Close() {
 	b.closed = true
 	p := b.pending
 	b.pending = nil
+	if p != nil {
+		close(p.done)
+	}
 	b.mu.Unlock()
 	if p != nil {
 		p.result <- result{err: ErrClosed}
@@ -166,6 +170,7 @@ func (b *Broker) deliver(requestID string, response protocol.UserInputResponse, 
 		return false
 	}
 	b.pending = nil
+	close(p.done)
 	b.mu.Unlock()
 	p.result <- result{response: response, err: err}
 	return true
@@ -174,9 +179,24 @@ func (b *Broker) deliver(requestID string, response protocol.UserInputResponse, 
 func (b *Broker) clear(requestID string) {
 	b.mu.Lock()
 	if b.pending != nil && b.pending.request.ID == requestID {
+		close(b.pending.done)
 		b.pending = nil
 	}
 	b.mu.Unlock()
+}
+
+// Done closes when the matching request is answered, rejected, or cancelled.
+// An absent or already settled request returns a closed channel, so consumers
+// can safely subscribe after receiving an asynchronously delivered request.
+func (b *Broker) Done(requestID string) <-chan struct{} {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.pending != nil && b.pending.request.ID == requestID {
+		return b.pending.done
+	}
+	done := make(chan struct{})
+	close(done)
+	return done
 }
 
 func normalizeResponse(req protocol.UserInputRequest, response protocol.UserInputResponse) (protocol.UserInputResponse, error) {
@@ -206,6 +226,9 @@ func normalizeResponse(req protocol.UserInputRequest, response protocol.UserInpu
 		value, ok := provided[question.ID]
 		if !ok {
 			return protocol.UserInputResponse{}, fmt.Errorf("missing answer for question %q", question.ID)
+		}
+		if question.ChoicesOnly && !slices.ContainsFunc(question.Options, func(option protocol.UserInputOption) bool { return option.Label == value }) {
+			return protocol.UserInputResponse{}, fmt.Errorf("answer for %q must be one of the listed choices", question.ID)
 		}
 		normalized.Answers = append(normalized.Answers, protocol.UserInputAnswer{QuestionID: question.ID, Answer: value})
 	}

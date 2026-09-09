@@ -1,0 +1,8 @@
+{
+  "id": "project-helper",
+  "name": "Project Helper",
+  "version": "0.1.0",
+  "api_version": 1,
+  "entry": "main.js",
+  "host_tools": ["read"]
+}

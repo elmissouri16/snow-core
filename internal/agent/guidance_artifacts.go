@@ -944,10 +944,12 @@ func (a *Agent) pruneHistoricalToolResultsProjection(ctx context.Context, messag
 // that is intentionally visible to the local UI but absent from model context.
 func providerMessages(messages []protocol.Message) []protocol.Message {
 	for i := range messages {
-		if messages[i].ToolDisplay != nil {
+		if messages[i].ToolDisplay != nil || messages[i].PluginDetails != nil || len(messages[i].PluginTransforms) > 0 {
 			out := slices.Clone(messages)
 			for j := range out {
 				out[j].ToolDisplay = nil
+				out[j].PluginDetails = nil
+				out[j].PluginTransforms = nil
 			}
 			return out
 		}

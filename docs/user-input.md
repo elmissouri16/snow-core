@@ -48,8 +48,10 @@ a question with options must contain two or three mutually exclusive choices.
 | `options[].label` | string | Yes | Choice label, 1-80 runes |
 | `options[].description` | string | Yes | Choice description, 1-300 runes |
 
-Choice questions automatically include an **Other** entry; models must not
-provide an option named `Other`.
+Model choice questions automatically include an **Other** entry; models must not
+provide an option named `Other`. Host-created plugin selections can set
+`choices_only: true`, which omits Other and requires a listed option. Invalid
+manual replies leave the request pending so the user can correct the answer.
 
 The host assigns the tool call ID to both `id` and `tool_call_id` in the
 emitted `user_input_request` event. RPC clients echo that `id` as
@@ -78,11 +80,18 @@ tool returns only this model-facing JSON:
 
 ### TUI
 
-The request appears inline above the sticky composer while the transcript
-remains independently scrollable. Arrow keys select a choice. Enter accepts a
-choice or free-form answer. `Ctrl+J` inserts a newline, Tab and Shift+Tab move
-between questions, Esc rejects only the `ask_user` call, and Ctrl+C aborts the
-whole agent turn.
+The request appears in a centered, bordered card matching Snow's model picker.
+It overlays the conversation without taking space from the transcript or
+changing the composer draft. Long prompts are elided to keep the active field,
+selected choice, validation, and controls visible. Text fields scroll with the
+cursor; drafts survive resizing and question navigation. Plugin dialogs use
+the same card, with the registered plugin name as its title.
+
+Arrow keys select a choice. Enter accepts a choice or free-form answer.
+`Ctrl+V` pastes, `Ctrl+J` inserts a newline, and Tab/Shift+Tab moves between
+questions. Esc rejects only the request; Ctrl+C aborts the agent turn or cancels
+active plugin commands. Standalone plugin input is declined without exiting Snow.
+Permission requests take priority over question cards.
 
 ### Go SDK
 

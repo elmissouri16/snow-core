@@ -178,8 +178,11 @@ session, or Git worktree fork. See [Sessions and branches](sessions.md).
 ## Answer model questions
 
 The model can request structured input when it needs a decision. In the TUI,
-Snow opens a distinct question card. Review the full prompt, select or enter an
-answer, and submit it separately from tool permission approval.
+Snow opens a centered question card, matching the model and settings panels.
+Select an answer or type in its bordered input field. Enter accepts, Escape
+declines, and Tab/Shift+Tab moves between questions while preserving drafts.
+Use Ctrl+V to paste and Ctrl+J for a new line. Answers are submitted separately
+from tool permission approval.
 
 Print and JSON modes have no interactive question broker and fail closed. SDK
 and RPC hosts must explicitly install or enable a trusted input broker.
@@ -222,6 +225,7 @@ The complete RPC contract remains available in the repository's
 | `--api-key VALUE`, `--base-url URL` | Override provider connection values |
 | `--mcp VALUE` | Add an explicit MCP server; repeatable |
 | `--skill-dir PATH` | Add a trusted skills directory; repeatable |
+| `--js-plugin <directory>` | Load a local JavaScript package for this launch; see [Plugins](plugins.md) |
 | `--no-plugins`, `--no-mcp`, `--no-skills` | Disable an extension family |
 | `--subagents`, `--no-subagents` | Override child-agent enablement |
 | `--usage` | Print normalized usage after a print-mode prompt |

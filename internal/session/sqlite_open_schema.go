@@ -526,6 +526,7 @@ func createSQLiteSchema(db *sql.DB) error {
 			parent_path TEXT NOT NULL,
 			role TEXT NOT NULL,
 			role_fingerprint TEXT NOT NULL DEFAULT '',
+ plugin_tools_json BLOB,
 			nickname TEXT NOT NULL DEFAULT '',
 			depth INTEGER NOT NULL,
 			status TEXT NOT NULL,
@@ -588,6 +589,12 @@ func ensureBranches(db *sql.DB, tip string, createdAt int64, version int) error 
 		if _, err := tx.Exec(`ALTER TABLE entries ADD COLUMN compacted_through TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			_ = tx.Rollback()
 			return fmt.Errorf("session: sqlite compaction migration: %w", err)
+		}
+	}
+	if version < 12 {
+		if _, err := tx.Exec(`ALTER TABLE subagent_threads ADD COLUMN plugin_tools_json BLOB`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			_ = tx.Rollback()
+			return fmt.Errorf("session: child plugins migration: %w", err)
 		}
 	}
 	if version < 6 {

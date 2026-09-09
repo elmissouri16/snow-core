@@ -41,7 +41,12 @@ func PublicRequest(req Request) protocol.PermissionRequest {
 	for i := range paths {
 		paths[i] = boundRunes(paths[i], maxPublicReasonRunes)
 	}
+	var plugin *protocol.PluginOrigin
+	if req.Plugin != nil {
+		plugin = new(*req.Plugin)
+	}
 	return protocol.PermissionRequest{
+		Plugin:                plugin,
 		Tool:                  boundRunes(req.Tool, maxPublicFieldRunes),
 		Args:                  slices.Clone(req.Args),
 		Paths:                 paths,

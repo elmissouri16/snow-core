@@ -30,6 +30,8 @@ require (
 	github.com/blevesearch/zapx/v15 v15.4.3 // indirect
 	github.com/blevesearch/zapx/v16 v16.3.4 // indirect
 	github.com/blevesearch/zapx/v17 v17.1.2 // indirect
+	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
+	github.com/dop251/goja v0.0.0-20260903201622-f87b40ad7341 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/enetx/g v1.0.228 // indirect
 	github.com/enetx/http v1.0.29 // indirect
@@ -37,8 +39,10 @@ require (
 	github.com/enetx/http3 v1.0.8 // indirect
 	github.com/enetx/iter v0.0.0-20260703211843-75f7a9fffd6d // indirect
 	github.com/enetx/surf v1.0.203 // indirect
+	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
+	github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/json-iterator/go v0.0.0-20171115153421-f7279a603ede // indirect
 	github.com/klauspost/compress v1.19.1 // indirect

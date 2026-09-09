@@ -149,7 +149,7 @@ func composerEditorKeyMayChange(msg tea.KeyMsg, keyMap textarea.KeyMap) bool {
 func (m *Model) insertCompletion(name string) (tea.Model, tea.Cmd) {
 	m.resetInputHistoryNavigation()
 	suffix := ""
-	if spec, ok := commandByExact(name); ok && spec.needsArgs() {
+	if spec, ok := commandByExact(name, m.pluginSpecs()...); ok && spec.needsArgs() {
 		suffix = " "
 	}
 	m.editor.SetValue(name + suffix)
@@ -161,7 +161,7 @@ func (m *Model) insertCompletion(name string) (tea.Model, tea.Cmd) {
 
 func (m *Model) pickCompletion(name string) (tea.Model, tea.Cmd) {
 	m.compVisible = false
-	if spec, ok := commandByExact(name); ok && spec.needsArgs() {
+	if spec, ok := commandByExact(name, m.pluginSpecs()...); ok && spec.needsArgs() {
 		m.resetInputHistoryNavigation()
 		m.editor.SetValue(name + " ")
 		m.editor.CursorEnd()
@@ -182,9 +182,9 @@ func (m *Model) refreshPaletteFor(text string) {
 		// Keep the complete match set navigable. renderOverlays applies a
 		// selection-following viewport, so truncating here would make commands
 		// beyond the first visible page unreachable with the arrow keys.
-		m.compMatches = completeCommand(text[1:])
+		m.compMatches = completeCommand(text[1:], m.pluginSpecs()...)
 		m.compVisible = true
-		if m.compIndex >= len(m.compMatches) {
+		if m.compIndex >= len(m.compMatches) || (len(m.compMatches) > 0 && strings.EqualFold(m.compMatches[0], text)) {
 			m.compIndex = 0
 		}
 	} else {

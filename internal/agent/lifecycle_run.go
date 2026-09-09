@@ -16,6 +16,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/tools"
+	"github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -447,6 +448,18 @@ func (a *Agent) run(ctx context.Context) error {
 			internalContext = append(internalContext, protocol.InternalContextFragment{Source: "provider-recovery", Text: "The previous provider response was interrupted. Continue from the durable conversation and tool results. Do not assume unrecorded work completed, and do not repeat completed side effects unless the recorded result proves a retry is needed."})
 		}
 		requestTools := a.requestToolSchemas()
+		pluginRequest, requestChanges, hookErr := a.pluginHook(ctx, plugin.HookRequest{Phase: "before_request"})
+		if hookErr != nil {
+			return hookErr
+		}
+		if err := a.persistPluginAudit(requestChanges); err != nil {
+			return err
+		}
+		pluginText := ""
+		for _, fragment := range pluginRequest.Context {
+			pluginText += fragment.Text + "\n"
+		}
+		internalContext = append(pluginRequest.Context, internalContext...)
 		req := protocol.ChatRequest{
 			Model:                   a.Model(),
 			Messages:                providerMessages(msgs),
@@ -461,7 +474,7 @@ func (a *Agent) run(ctx context.Context) error {
 		}
 
 		schemaBytes := providerSchemaBytes(req.Tools)
-		fixedTokens := fixedContextTokensWithSchemaBytes(req.System, schemaBytes)
+		fixedTokens := fixedContextTokensWithSchemaBytes(req.System+pluginText, schemaBytes)
 		if budget := a.fixedContextBudgetTokens(req.Model); budget > 0 && fixedTokens > budget && fixedTokens > admittedFixedTokens {
 			return fixedContextBudgetError(fixedTokens, budget, a.opts.FixedContextBudgetPercent)
 		}
@@ -469,7 +482,7 @@ func (a *Agent) run(ctx context.Context) error {
 			admittedFixedTokens = fixedTokens
 		}
 
-		requestEstimate := estimateRequestTokensWithSchemaBytes(req.Messages, req.System, schemaBytes)
+		requestEstimate := estimateRequestTokensWithSchemaBytes(req.Messages, req.System+pluginText, schemaBytes)
 		contextReport := buildContextReportWithSchemaBytes(req, true, schemaBytes)
 		a.applyFixedContextBudget(&contextReport, req.Model)
 		a.mu.Lock()
@@ -708,7 +721,18 @@ func (a *Agent) deliverQueuedInput(ctx context.Context, item protocol.QueuedInpu
 		a.queuePublishMu.Unlock()
 		return err
 	}
+	effective, changes, hookErr := a.pluginHook(ctx, plugin.HookRequest{Phase: "before_prompt", Text: item.Text})
+	if hookErr != nil {
+		a.queuePublishMu.Unlock()
+		return hookErr
+	}
+	if strings.TrimSpace(effective.Text) == "" {
+		a.queuePublishMu.Unlock()
+		return errors.New("plugin produced empty queued input")
+	}
+	item.Text = effective.Text
 	msg := protocol.NewUserMessage(newID(), "", item.Text)
+	msg.PluginTransforms = changes
 	a.mailboxPersistMu.Lock()
 	err := a.opts.Session.Append(session.Entry{
 		Type: session.EntryMessage, ID: msg.ID, ParentID: "", Message: &msg,

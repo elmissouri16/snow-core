@@ -83,6 +83,7 @@ func (m *Model) handleSubagentEvent(ev protocol.AgentEvent) {
 	if ev.Snapshot {
 		return
 	}
+	m.syncPluginGeneration()
 	switch ev.Type {
 	case protocol.EvSubagentStarted:
 		m.pushLine(styleTool.Render(fmt.Sprintf("• agent %s started (%s)", ev.Agent.Path, ev.Agent.Role)))
@@ -357,13 +358,13 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.refreshTranscript()
 		}
 	case protocol.EvToolEnd:
-		if ev.ToolName == "ask_user" && m.userInputPending {
+		if ev.ToolName == "ask_user" && m.userInputPending && m.userInputRequest.ToolCallID == ev.ToolCallID {
 			m.clearUserInput()
 		}
 		startMessage := m.activeToolStartMessage
 		m.toolRunning = false
 		m.clearActiveToolText()
-		for _, row := range m.toolEndTranscriptRows(ev.ToolName, startMessage, ev.ToolDurationMS, ev.Message, ev.ToolOutput, ev.IsError) {
+		for _, row := range m.toolEndTranscriptRows(ev.ToolName, startMessage, ev.ToolDurationMS, ev.Message, ev.ToolOutput, ev.IsError, ev.PluginView) {
 			m.pushLine(row)
 		}
 		if m.activeToolCallID == "" || ev.ToolCallID == "" || m.activeToolCallID == ev.ToolCallID {
@@ -437,6 +438,9 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.layout()
 			m.finishAssistant()
 			label := "🔐 permission request: " + sanitizeTerminalText(req.Tool)
+			if req.Plugin != nil {
+				label += " · plugin " + sanitizeTerminalText(req.Plugin.PluginID)
+			}
 			if ev.Agent != nil {
 				label += " · " + sanitizeTerminalText(string(ev.Agent.Path))
 			}
@@ -484,7 +488,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			m.contextRefreshNeeded = true
 		}
 		m.turnUsageSeen = false
-		m.clearUserInput()
+		m.clearTurnUserInput()
 		m.toolRunning = false
 		m.activeToolCallID = ""
 		m.activeToolStartMessage = ""
@@ -546,7 +550,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 		m.sawPlanThisTurn = false
 		m.completedPlanThisTurn = false
 		m.planPrompt = false
-		m.clearUserInput()
+		m.clearTurnUserInput()
 		m.toolRunning = false
 		m.permPending = false
 		m.permRequest = nil

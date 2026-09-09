@@ -1,7 +1,7 @@
 package protocol
 
 // UserInputOption is one mutually exclusive answer shown for a question.
-// Interactive clients also append a free-form Other choice.
+// Interactive clients also append Other unless the question is ChoicesOnly.
 type UserInputOption struct {
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
@@ -14,6 +14,9 @@ type UserInputQuestion struct {
 	Header   string            `json:"header"`
 	Question string            `json:"question"`
 	Options  []UserInputOption `json:"options,omitempty"`
+	// ChoicesOnly is set by hosts for selections that require a listed value.
+	// Model-authored ask_user questions retain their free-form Other choice.
+	ChoicesOnly bool `json:"choices_only,omitempty"`
 }
 
 // UserInputRequest is emitted while an ask_user tool call is blocked waiting

@@ -1,0 +1,324 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/plugins.schema.json",
+  "$defs": {
+    "node": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "text",
+            "markdown",
+            "column",
+            "row",
+            "list",
+            "table",
+            "progress",
+            "button",
+            "input",
+            "select",
+            "checkbox"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "tone": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "children": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "plugins.schema.json#/$defs/node"
+          }
+        },
+        "columns": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "rows": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "command": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "argument_hint": {
+          "type": "string"
+        },
+        "alias": {
+          "type": "string"
+        },
+        "shortcut": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "plugin_id",
+        "name",
+        "description"
+      ],
+      "additionalProperties": false
+    },
+    "view": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "placement": {
+          "type": "string"
+        },
+        "content": {
+          "$ref": "plugins.schema.json#/$defs/node"
+        }
+      },
+      "required": [
+        "id",
+        "plugin_id",
+        "name",
+        "title",
+        "placement"
+      ],
+      "additionalProperties": false
+    },
+    "theme": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "colors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "light": {
+                "type": "string"
+              },
+              "dark": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "light",
+              "dark"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "id",
+        "plugin_id",
+        "name",
+        "colors"
+      ],
+      "additionalProperties": false
+    },
+    "setting": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "default": {},
+        "choices": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "info": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "api_version": {
+          "enum": [
+            1,
+            2
+          ]
+        },
+        "capabilities": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "host_tools": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "commands": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "plugins.schema.json#/$defs/command"
+          }
+        },
+        "views": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "plugins.schema.json#/$defs/view"
+          }
+        },
+        "themes": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "plugins.schema.json#/$defs/theme"
+          }
+        },
+        "settings": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "plugins.schema.json#/$defs/setting"
+          }
+        },
+        "config": {},
+        "path": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "api_version"
+      ],
+      "additionalProperties": false
+    },
+    "transform": {
+      "type": "object",
+      "properties": {
+        "plugin_id": {
+          "type": "string"
+        },
+        "hook": {
+          "type": "string"
+        },
+        "original": {},
+        "effective": {}
+      },
+      "required": [
+        "plugin_id",
+        "hook",
+        "original",
+        "effective"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

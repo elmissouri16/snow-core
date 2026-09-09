@@ -265,7 +265,7 @@ func (m *Model) runStatusMouseBounds() (y, start, end int, ok bool) {
 	if !m.showRunStatus() {
 		return 0, 0, 0, false
 	}
-	y = 2 + m.transcript.Height // header + separator + transcript
+	y = m.transcriptSelectionTop() + m.transcript.Height
 	if overlay := m.renderOverlays(); overlay != "" {
 		y += lipgloss.Height(overlay)
 	}
@@ -317,7 +317,7 @@ func (m *Model) managedFrameWidth() int {
 // enough rows to show more than their selected item.
 func (m *Model) inlineModalOverlay() bool {
 	return m.inlineTranscript && (m.pickSession || m.pickTree || m.pickInfo ||
-		m.pickPermissionMode || m.permPending || m.userInputPending ||
+		m.pickPermissionMode || m.permPending ||
 		m.confirmGoalReplace || m.planPrompt)
 }
 
@@ -353,7 +353,7 @@ func (m *Model) chromeHeight() int {
 	if overlay := m.renderOverlays(); overlay != "" {
 		overlayHeight = lipgloss.Height(overlay)
 	}
-	return m.fixedChromeRows() + m.editor.Height() + m.runStatusHeight() + overlayHeight
+	return m.fixedChromeRows() + m.editor.Height() + m.runStatusHeight() + overlayHeight + m.pluginChromeHeight()
 }
 
 func (m *Model) layout() {
@@ -367,16 +367,17 @@ func (m *Model) layout() {
 	wasAtBottom := m.transcript.AtBottom()
 	frameWidth := m.managedFrameWidth()
 	m.editor.SetWidth(max(1, frameWidth-4))
-	m.userInputEditor.SetWidth(max(1, frameWidth-6))
+	m.layoutUserInputEditor()
 	frameHeight := m.managedFrameHeight()
 	maxEditorHeight := max(minComposerHeight, frameHeight-m.fixedChromeRows()-m.runStatusHeight()-minTranscriptHeight)
 	editorH := min(m.desiredComposerHeight(), min(maxComposerHeight, maxEditorHeight))
 	m.editor.SetHeight(editorH)
 	bodyH := max(minTranscriptHeight, frameHeight-m.chromeHeight())
-	if m.transcript.Width != frameWidth || m.transcript.Height != bodyH {
+	transcriptWidth := max(1, frameWidth-m.pluginSidebarWidth())
+	if m.transcript.Width != transcriptWidth || m.transcript.Height != bodyH {
 		m.transcriptDirty = true
 	}
-	m.transcript.Width = frameWidth
+	m.transcript.Width = transcriptWidth
 	m.transcript.Height = bodyH
 	if wasAtBottom {
 		m.transcript.GotoBottom()
@@ -493,6 +494,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Emergency Ctrl+C is resolved before any configurable action so a custom
 	// submit/accept binding can never shadow terminal recovery.
 	if msg.Type == tea.KeyCtrlC {
+		if m.plugins != nil {
+			cancelled := false
+			for id := range m.plugins.running {
+				cancelled = m.app.CancelPluginCommand(id) || cancelled
+			}
+			if cancelled {
+				return m, nil
+			}
+		}
+		if m.userInputPending {
+			return m.handleUserInputKey(msg)
+		}
 		if m.busy {
 			m.composerSelectAll = false
 			m.requestAbort()
@@ -520,6 +533,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.userInputPending {
 		return m.handleUserInputKey(msg)
+	}
+	if handled, cmd := m.handlePluginKey(msg); handled {
+		return m, cmd
 	}
 	if m.restartPromptVisible() {
 		return m.handleRestartPromptKey(msg)

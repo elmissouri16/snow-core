@@ -492,7 +492,7 @@ func (m *Model) loadAuxiliaryTUIConfig() {
 	scopes, keyDiagnostics := config.LoadKeybindingScopes(config.GlobalDir(), m.app.ProjectInputRoot, m.app.ProjectAllowed)
 	m.customThemes = themes
 	m.auxDiagnostics = append(slices.Clone(themeDiagnostics), keyDiagnostics...)
-	m.keys = tuiKeys
+	m.keys = m.pluginDefaultKeys()
 	for _, scope := range scopes {
 		keys, err := applyKeybindingOverrides(m.keys, scope.File.Bindings)
 		if err != nil {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
+	publicplugin "github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -211,39 +212,41 @@ type ProcessConfig struct {
 
 // Config is the global snow configuration.
 type Config struct {
-	ShellProtectedPaths       []string                        `json:"shell_protected_paths,omitempty"`
-	DefaultProvider           string                          `json:"default_provider,omitempty"`
-	DefaultModel              string                          `json:"default_model,omitempty"`
-	ProjectSelections         map[string]ProjectSelection     `json:"project_selections,omitempty"`
-	DefaultProjectTrust       string                          `json:"default_project_trust,omitempty"`      // ask|allow|deny (always|never aliases)
-	Thinking                  string                          `json:"thinking,omitempty"`                   // off|minimal|low|medium|high|xhigh|max|ultra
-	ReasoningSummary          string                          `json:"reasoning_summary,omitempty"`          // off|auto|concise|detailed
-	TextVerbosity             string                          `json:"text_verbosity,omitempty"`             // low|medium|high
-	CollaborationMode         string                          `json:"collaboration_mode,omitempty"`         // default|plan
-	PlanModeReasoningEffort   string                          `json:"plan_mode_reasoning_effort,omitempty"` // optional off|minimal|low|medium|high|xhigh|max|ultra
-	ToolOutputBytes           int                             `json:"tool_output_bytes,omitzero"`
-	BashTimeoutMS             int                             `json:"bash_timeout_ms,omitzero"`
-	ContextCapBytes           int                             `json:"context_cap_bytes,omitzero"`
-	FixedContextBudgetPercent int                             `json:"fixed_context_budget_percent,omitzero"`
-	SystemPromptFile          string                          `json:"system_prompt_file,omitempty"`
-	Providers                 map[string]ProviderConfig       `json:"providers,omitempty"`
-	TUI                       TUIConfig                       `json:"tui,omitzero"`
-	Debug                     DebugConfig                     `json:"debug,omitzero"`
-	Updates                   UpdateConfig                    `json:"updates,omitzero"`
-	MCPServers                map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
-	Skills                    SkillsConfig                    `json:"skills,omitzero"`
-	Subagents                 SubagentConfig                  `json:"subagents,omitzero"`
-	Processes                 ProcessConfig                   `json:"processes,omitzero"`
-	Retry                     RetryConfig                     `json:"retry,omitzero"`
-	Compaction                CompactionConfig                `json:"compaction,omitzero"`
+	JavaScriptPlugins         map[string]publicplugin.JavaScriptSpec `json:"js_plugins,omitempty"`
+	ShellProtectedPaths       []string                               `json:"shell_protected_paths,omitempty"`
+	DefaultProvider           string                                 `json:"default_provider,omitempty"`
+	DefaultModel              string                                 `json:"default_model,omitempty"`
+	ProjectSelections         map[string]ProjectSelection            `json:"project_selections,omitempty"`
+	DefaultProjectTrust       string                                 `json:"default_project_trust,omitempty"`      // ask|allow|deny (always|never aliases)
+	Thinking                  string                                 `json:"thinking,omitempty"`                   // off|minimal|low|medium|high|xhigh|max|ultra
+	ReasoningSummary          string                                 `json:"reasoning_summary,omitempty"`          // off|auto|concise|detailed
+	TextVerbosity             string                                 `json:"text_verbosity,omitempty"`             // low|medium|high
+	CollaborationMode         string                                 `json:"collaboration_mode,omitempty"`         // default|plan
+	PlanModeReasoningEffort   string                                 `json:"plan_mode_reasoning_effort,omitempty"` // optional off|minimal|low|medium|high|xhigh|max|ultra
+	ToolOutputBytes           int                                    `json:"tool_output_bytes,omitzero"`
+	BashTimeoutMS             int                                    `json:"bash_timeout_ms,omitzero"`
+	ContextCapBytes           int                                    `json:"context_cap_bytes,omitzero"`
+	FixedContextBudgetPercent int                                    `json:"fixed_context_budget_percent,omitzero"`
+	SystemPromptFile          string                                 `json:"system_prompt_file,omitempty"`
+	Providers                 map[string]ProviderConfig              `json:"providers,omitempty"`
+	TUI                       TUIConfig                              `json:"tui,omitzero"`
+	Debug                     DebugConfig                            `json:"debug,omitzero"`
+	Updates                   UpdateConfig                           `json:"updates,omitzero"`
+	MCPServers                map[string]publicmcp.ServerSpec        `json:"mcp_servers,omitempty"`
+	Skills                    SkillsConfig                           `json:"skills,omitzero"`
+	Subagents                 SubagentConfig                         `json:"subagents,omitzero"`
+	Processes                 ProcessConfig                          `json:"processes,omitzero"`
+	Retry                     RetryConfig                            `json:"retry,omitzero"`
+	Compaction                CompactionConfig                       `json:"compaction,omitzero"`
 }
 
 // ProjectExtensions are the only project configuration fields loaded after a
 // trust allow. Project files cannot override global provider or permissions.
 type ProjectExtensions struct {
-	MCPServers       map[string]publicmcp.ServerSpec `json:"mcp_servers,omitempty"`
-	Skills           ProjectSkillsConfig             `json:"skills,omitzero"`
-	TUI              ProjectTUIConfig                `json:"tui,omitzero"`
-	Compaction       ProjectCompactionConfig         `json:"compaction,omitzero"`
-	SystemPromptFile *string                         `json:"system_prompt_file,omitempty"`
+	JavaScriptPlugins map[string]publicplugin.JavaScriptSpec `json:"js_plugins,omitempty"`
+	MCPServers        map[string]publicmcp.ServerSpec        `json:"mcp_servers,omitempty"`
+	Skills            ProjectSkillsConfig                    `json:"skills,omitzero"`
+	TUI               ProjectTUIConfig                       `json:"tui,omitzero"`
+	Compaction        ProjectCompactionConfig                `json:"compaction,omitzero"`
+	SystemPromptFile  *string                                `json:"system_prompt_file,omitempty"`
 }

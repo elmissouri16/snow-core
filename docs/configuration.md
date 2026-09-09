@@ -568,8 +568,16 @@ See [Subagents](subagents.md) for role examples and the full safety model.
 
 ## Plugins and MCP
 
-Go plugins are supplied through `snowsdk.Options.GoPlugins`, not configuration.
-The retired `plugins` key is ignored in global and project files.
+Go plugins are supplied through `snowsdk.Options.GoPlugins`. Local JavaScript
+packages use `js_plugins`, a map of IDs to `{path, disabled, config}` declarations.
+Explicit SDK/CLI declarations override trusted project and then global entries;
+disabled entries also shadow lower scopes. Global relative paths resolve from
+the config directory, project paths from the trusted project root, and SDK paths
+from the session CWD. Project packages must remain inside that root. The retired
+`plugins` key is still ignored. `--no-plugins` skips both plugin families.
+
+Manage registrations with `snow plugin add|get|list|check|enable|disable|remove`;
+see [Plugins](plugins.md) for package format, trust, limits, and authoring.
 
 - `mcp_servers` maps stable names to public `mcp.ServerSpec` declarations.
   `lifecycle` is `eager` by default, `lazy`, or `lazy-keep-alive`;
@@ -583,7 +591,7 @@ The retired `plugins` key is ignored in global and project files.
   descriptor remain eager, while explicit catalogs require `snow mcp cache
   refresh <name>` to discover changes.
 
-See [Go plugins](plugins.md) for the Go interface and [MCP](mcp.md) for server
+See [Plugins](plugins.md) for the Go interface and [MCP](mcp.md) for server
 configuration and management commands.
 
 ## Trusted project configuration
@@ -595,6 +603,7 @@ credentials into the project.
 
 ```json
 {
+  "js_plugins": {},
   "mcp_servers": {},
   "skills": {
     "disabled": false,

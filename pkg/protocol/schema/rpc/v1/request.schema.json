@@ -72,7 +72,10 @@
             "subagent_ready",
             "themes_list",
             "trust_get",
-            "usage"
+            "usage",
+            "plugins_list",
+            "plugin_commands",
+            "plugin_views"
           ]
         }
       },
@@ -837,6 +840,13 @@
             },
             "reasoning_effort": {
               "$ref": "#/$defs/thinking"
+            },
+            "plugin_tools": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string"
+              }
             }
           },
           "additionalProperties": false
@@ -1663,6 +1673,67 @@
           "additionalProperties": false
         }
       },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "plugin_command_run"
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "minLength": 1
+            },
+            "input": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "plugin_command_cancel"
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
       "additionalProperties": false
     }
   ]

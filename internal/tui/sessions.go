@@ -469,6 +469,9 @@ func (m *Model) hydratedToolTranscriptRows(msg protocol.Message, call protocol.C
 	if msg.IsError {
 		message = output
 	}
+	if display != nil {
+		return m.toolEndTranscriptRows(msg.ToolName, startMessage, durationMS, message, output, msg.IsError, display.Plugin)
+	}
 	return m.toolEndTranscriptRows(msg.ToolName, startMessage, durationMS, message, output, msg.IsError)
 }
 
@@ -817,7 +820,7 @@ func toolProgressTranscriptRow(toolName, message string) string {
 	return styleHeaderDim.Render("  ↳ " + sanitizeToolPreview(message, 500))
 }
 
-func (m *Model) toolEndTranscriptRows(toolName, startMessage string, durationMS int64, message, output string, isError bool) []string {
+func (m *Model) toolEndTranscriptRows(toolName, startMessage string, durationMS int64, message, output string, isError bool, pluginViews ...*protocol.PluginNode) []string {
 	label := toolTranscriptLabel(toolName, startMessage)
 	duration := ""
 	if durationMS > 0 {
@@ -843,6 +846,9 @@ func (m *Model) toolEndTranscriptRows(toolName, startMessage string, durationMS 
 		rows = append(rows, m.renderBashSummary(startMessage, duration, "", false))
 	} else if toolName != "spawn_agent" {
 		rows = append(rows, styleTool.Render("✔ "+label))
+	}
+	if len(pluginViews) > 0 && pluginViews[0] != nil {
+		return append(rows, renderPluginNode(*pluginViews[0], max(1, m.transcript.Width)))
 	}
 	if preview := renderToolOutput(toolName, output, m.width); preview != "" {
 		rows = append(rows, preview)

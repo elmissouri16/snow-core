@@ -81,10 +81,12 @@ type Options struct {
 	// BaseURL overrides the active provider base URL. OpenAI-compatible requires
 	// either this value or a globally configured endpoint.
 	BaseURL string
-	// NoPlugins disables statically supplied Go plugins.
+	// NoPlugins disables Go and JavaScript plugins.
 	NoPlugins bool
 	// GoPlugins are statically linked extensions supplied by the embedding app.
 	GoPlugins []publicplugin.Plugin
+	// JavaScriptPlugins are local packages resolved relative to CWD.
+	JavaScriptPlugins map[string]publicplugin.JavaScriptSpec
 	// MCPServers are explicit stdio or Streamable HTTP MCP servers.
 	MCPServers []publicmcp.ServerSpec
 	// NoMCP disables configured and explicit MCP servers.

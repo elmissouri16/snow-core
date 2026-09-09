@@ -138,26 +138,26 @@ func (m *Model) handleKeybindingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	switch msg.Type {
 	case tea.KeyUp, tea.KeyShiftTab:
-		m.keybindingsIndex = (m.keybindingsIndex - 1 + len(keybindingActions)) % len(keybindingActions)
+		m.keybindingsIndex = (m.keybindingsIndex - 1 + len(m.pluginKeybindingActions())) % len(m.pluginKeybindingActions())
 	case tea.KeyDown, tea.KeyTab:
-		m.keybindingsIndex = (m.keybindingsIndex + 1) % len(keybindingActions)
+		m.keybindingsIndex = (m.keybindingsIndex + 1) % len(m.pluginKeybindingActions())
 	case tea.KeyPgUp:
 		m.keybindingsIndex = max(0, m.keybindingsIndex-8)
 	case tea.KeyPgDown:
-		m.keybindingsIndex = min(len(keybindingActions)-1, m.keybindingsIndex+8)
+		m.keybindingsIndex = min(len(m.pluginKeybindingActions())-1, m.keybindingsIndex+8)
 	case tea.KeyHome:
 		m.keybindingsIndex = 0
 	case tea.KeyEnd:
-		m.keybindingsIndex = len(keybindingActions) - 1
+		m.keybindingsIndex = len(m.pluginKeybindingActions()) - 1
 	}
 	return m, nil
 }
 
 func (m *Model) openKeybindingEditor() {
-	if len(keybindingActions) == 0 {
+	if len(m.pluginKeybindingActions()) == 0 {
 		return
 	}
-	action := keybindingActions[clampPickerIndex(m.keybindingsIndex, len(keybindingActions))]
+	action := m.pluginKeybindingActions()[clampPickerIndex(m.keybindingsIndex, len(m.pluginKeybindingActions()))]
 	m.keybindingsDraft = m.editableKeybinding(action.name)
 	m.keybindingsEditing = true
 	m.keybindingsEditIndex = 0
@@ -273,7 +273,7 @@ func containsString(values []string, value string) bool {
 }
 
 func (m *Model) selectedKeybindingAction() keybindingAction {
-	return keybindingActions[clampPickerIndex(m.keybindingsIndex, len(keybindingActions))]
+	return m.pluginKeybindingActions()[clampPickerIndex(m.keybindingsIndex, len(m.pluginKeybindingActions()))]
 }
 
 func (m *Model) toggleKeybindingScope() {
@@ -382,7 +382,7 @@ func (m *Model) validateKeybindingCandidate(selected map[string][]string) error 
 	} else {
 		global = selected
 	}
-	keys, err := applyKeybindingOverrides(tuiKeys, global)
+	keys, err := applyKeybindingOverrides(m.pluginDefaultKeys(), global)
 	if err != nil {
 		return err
 	}
@@ -432,12 +432,12 @@ func cloneKeybindingMap(in map[string][]string) map[string][]string {
 
 func (m *Model) inheritedKeybinding(action string) []string {
 	if m.keybindingsScope == keybindingScopeGlobal {
-		return slices.Clone(config.DefaultKeybindings()[action])
+		return m.defaultBinding(action)
 	}
 	global := m.keybindingsGlobalOverrides
-	keys, err := applyKeybindingOverrides(tuiKeys, global)
+	keys, err := applyKeybindingOverrides(m.pluginDefaultKeys(), global)
 	if err != nil {
-		return slices.Clone(config.DefaultKeybindings()[action])
+		return m.defaultBinding(action)
 	}
 	return slices.Clone(keybindingForAction(keys, action).Keys())
 }
@@ -452,7 +452,7 @@ func (m *Model) editableKeybinding(action string) []string {
 	if values, ok := m.keybindingsGlobalOverrides[action]; ok {
 		return slices.Clone(values)
 	}
-	return slices.Clone(config.DefaultKeybindings()[action])
+	return m.defaultBinding(action)
 }
 
 func keybindingSourceFromMaps(action string, projectAllowed bool, global, project map[string][]string) string {
@@ -532,7 +532,7 @@ func keybindingForAction(keys tuiKeyMap, action string) key.Binding {
 	case "confirm":
 		return keys.Confirm
 	default:
-		return key.Binding{}
+		return keys.Plugins[action]
 	}
 }
 
@@ -550,7 +550,7 @@ func (m *Model) renderKeybindings() string {
 		scope = "Project"
 	}
 	title := "Keybindings · " + scope
-	header := renderPickerCardHeader(title, fmt.Sprintf("%d of %d", m.keybindingsIndex+1, len(keybindingActions)), geometry.innerWidth)
+	header := renderPickerCardHeader(title, fmt.Sprintf("%d of %d", m.keybindingsIndex+1, len(m.pluginKeybindingActions())), geometry.innerWidth)
 	message := styleHeaderDim.Render(truncateDisplayText(" Changes save and apply immediately", geometry.innerWidth))
 	if m.keybindingsError != "" {
 		message = styleError.Render(truncateDisplayText(" "+sanitizeTerminalLine(m.keybindingsError), geometry.innerWidth))
@@ -574,16 +574,16 @@ func (m *Model) renderKeybindings() string {
 }
 
 func (m *Model) renderKeybindingActionRows(width, height int) string {
-	if len(keybindingActions) == 0 || height <= 0 {
+	if len(m.pluginKeybindingActions()) == 0 || height <= 0 {
 		return ""
 	}
-	selected := clampPickerIndex(m.keybindingsIndex, len(keybindingActions))
-	start, end := settingsCardWindow(selected, len(keybindingActions), height)
+	selected := clampPickerIndex(m.keybindingsIndex, len(m.pluginKeybindingActions()))
+	start, end := settingsCardWindow(selected, len(m.pluginKeybindingActions()), height)
 	global, project := m.keybindingsGlobalOverrides, m.keybindingsProjectOverrides
 	projectAllowed := m.app != nil && m.app.ProjectAllowed
 	rows := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
-		action := keybindingActions[i]
+		action := m.pluginKeybindingActions()[i]
 		prefix := "  "
 		style := styleCompletion
 		if i == selected {
