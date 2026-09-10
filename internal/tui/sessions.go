@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/agent"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -848,7 +848,7 @@ func (m *Model) toolEndTranscriptRows(toolName, startMessage string, durationMS 
 		rows = append(rows, styleTool.Render("✔ "+label))
 	}
 	if len(pluginViews) > 0 && pluginViews[0] != nil {
-		return append(rows, renderPluginNode(*pluginViews[0], max(1, m.transcript.Width)))
+		return append(rows, renderPluginNode(*pluginViews[0], max(1, m.transcript.Width())))
 	}
 	if preview := renderToolOutput(toolName, output, m.width); preview != "" {
 		rows = append(rows, preview)

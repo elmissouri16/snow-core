@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/auth"
@@ -60,19 +60,12 @@ func run(ctx context.Context, opts app.Options, sessionPicker bool) (RunResult, 
 	// terminal-height normal-screen frame with tea.Println history causes old
 	// frames to enter terminal scrollback; scrolling then exposes duplicated
 	// headers and stale chrome. Keep one renderer-owned frame instead.
-	mouseCapture := tuiMouseCaptureEnabled(opts)
 	programOptions := []tea.ProgramOption{
 		// App-owned transcript selection needs pointer-rate feedback. Bubble Tea
 		// coalesces buffered frames, so the 120 FPS ceiling improves drag latency
 		// without making every raw cell-motion event a terminal write.
 		tea.WithFPS(120),
-		tea.WithAltScreen(),
 		tea.WithContext(ctx),
-	}
-	if mouseCapture {
-		// Cell-motion mode reports wheel, press, drag, and release events. Snow
-		// uses them for viewport scrolling and application-owned selection/copy.
-		programOptions = append(programOptions, tea.WithMouseCellMotion())
 	}
 	uiCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -225,7 +218,7 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 	ta.SetHeight(3)
 	ta.Focus()
 
-	vp := viewport.New(80, 20)
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = true
 	vp.MouseWheelDelta = 3
 

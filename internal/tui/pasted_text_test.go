@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 )
@@ -20,7 +20,7 @@ func TestLargeComposerPasteCollapsesAndSubmitsExactText(t *testing.T) {
 	m.editor.CursorEnd()
 	pasted := strings.Repeat("large paste body\n", 400)
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
+	_, _ = m.Update(tea.PasteMsg{Content: pasted})
 
 	if len(m.pastedTexts) != 1 {
 		t.Fatalf("pasted attachments = %d, want 1", len(m.pastedTexts))
@@ -32,11 +32,11 @@ func TestLargeComposerPasteCollapsesAndSubmitsExactText(t *testing.T) {
 	if got := m.expandedPastedText(compact); got != "before "+pasted {
 		t.Fatalf("expanded paste mismatch: got %d bytes, want %d", len(got), len("before "+pasted))
 	}
-	if view := m.View(); strings.Contains(view, "large paste body\nlarge paste body") {
+	if view := m.viewContent(); strings.Contains(view, "large paste body\nlarge paste body") {
 		t.Fatal("rendered view exposed the large paste body")
 	}
 
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil || len(m.inputHistory) == 0 {
 		t.Fatalf("submission state: cmd=%v history=%d", cmd != nil, len(m.inputHistory))
 	}
@@ -54,7 +54,7 @@ func TestLargeCtrlVPasteResultCollapses(t *testing.T) {
 
 	_, _ = m.applyTextareaResult(textareaResultMsg{
 		target: textareaTargetComposer,
-		msg:    tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true},
+		msg:    tea.PasteMsg{Content: pasted},
 	})
 
 	if len(m.pastedTexts) != 1 || strings.Contains(m.editor.Value(), pasted) {
@@ -69,7 +69,7 @@ func TestSmallComposerPasteRemainsEditableText(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	pasted := "first line\nsecond line"
 
-	_, _ = m.updateComposerEditor(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
+	_, _ = m.Update(tea.PasteMsg{Content: pasted})
 
 	if got := m.editor.Value(); got != pasted {
 		t.Fatalf("small paste = %q, want %q", got, pasted)
@@ -84,12 +84,12 @@ func TestLargePasteLineThresholdAndAttachmentRemoval(t *testing.T) {
 	buildAppForTest(t, m)
 	pasted := strings.Repeat("x\n", largePasteLineThreshold-1)
 
-	_, _ = m.updateComposerEditor(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
+	_, _ = m.Update(tea.PasteMsg{Content: pasted})
 	if len(m.pastedTexts) != 1 {
 		t.Fatalf("line-threshold attachments = %d, want 1", len(m.pastedTexts))
 	}
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if got := m.editor.Value(); got != "" || len(m.pastedTexts) != 0 {
 		t.Fatalf("attachment removal left editor=%q attachments=%d", got, len(m.pastedTexts))
 	}
@@ -100,9 +100,9 @@ func TestBackspaceTreatsCollapsedPasteAsOneAttachment(t *testing.T) {
 	m.editor.SetValue("prefix ")
 	m.editor.CursorEnd()
 	pasted := strings.Repeat("body", largePasteRuneThreshold)
-	_, _ = m.updateComposerEditor(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
+	_, _ = m.Update(tea.PasteMsg{Content: pasted})
 
-	_, _ = m.updateComposerEditor(tea.KeyMsg{Type: tea.KeyBackspace})
+	_, _ = m.updateComposerEditor(tea.KeyPressMsg{Code: tea.KeyBackspace})
 
 	if got := m.editor.Value(); got != "prefix " || len(m.pastedTexts) != 0 {
 		t.Fatalf("atomic backspace left editor=%q attachments=%d", got, len(m.pastedTexts))
@@ -113,7 +113,7 @@ func TestRejectedPromptRestoresCollapsedPaste(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	pasted := strings.Repeat("restore me\n", 500)
-	_, _ = m.updateComposerEditor(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
+	_, _ = m.Update(tea.PasteMsg{Content: pasted})
 	compact := m.editor.Value()
 	attachments := m.takePastedTextAttachments()
 	m.editor.Reset()
@@ -139,9 +139,9 @@ func TestPlanCommandKeepsLargePasteCollapsedInTranscript(t *testing.T) {
 	m.editor.SetValue("/plan ")
 	m.editor.CursorEnd()
 	pasted := strings.Repeat("plan body ", largePasteRuneThreshold)
-	_, _ = m.updateComposerEditor(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
+	_, _ = m.Update(tea.PasteMsg{Content: pasted})
 
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("plan command returned no prompt command")
 	}

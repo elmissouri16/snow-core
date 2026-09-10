@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 )
@@ -32,11 +32,10 @@ func TestWorkingClickScrollsTranscriptToLiveBottom(t *testing.T) {
 	if !ok || end <= start {
 		t.Fatalf("Working bounds = y:%d x:%d..%d ok:%v", y, start, end, ok)
 	}
-	_, _ = m.Update(tea.MouseMsg{
+	_, _ = m.Update(tea.MouseClickMsg{
 		X:      start,
 		Y:      y,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	})
 	if !m.transcript.AtBottom() {
 		t.Fatal("clicking Working did not scroll transcript to the bottom")
@@ -57,11 +56,10 @@ func TestWorkingClickRequiresApplicationMouseMode(t *testing.T) {
 	if !ok {
 		t.Fatal("Working bounds unavailable")
 	}
-	handled, cmd := m.handleRunStatusMouse(tea.MouseMsg{
+	handled, cmd := m.handleRunStatusMouse(tea.MouseClickMsg{
 		X:      start,
 		Y:      y,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	})
 	if handled || cmd != nil {
 		t.Fatalf("native mouse mode handled Working click: handled=%v cmd=%v", handled, cmd != nil)

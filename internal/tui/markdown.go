@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
-	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/elmissouri16/snow-core/internal/config"
 )
 
 // mdRenderer converts markdown assistant content to ANSI for the transcript.
@@ -27,28 +27,21 @@ type mdRenderer struct {
 }
 
 func newMarkdownRenderer() *mdRenderer {
-	return &mdRenderer{style: markdownStyleForTheme(activeTUITheme, lipgloss.HasDarkBackground(), false)}
+	return &mdRenderer{style: markdownStyleForTheme(activeTUITheme, terminalDark, false)}
 }
 
 func newThinkingMarkdownRenderer() *mdRenderer {
 	return &mdRenderer{
-		style:    markdownStyleForTheme(activeTUITheme, lipgloss.HasDarkBackground(), true),
+		style:    markdownStyleForTheme(activeTUITheme, terminalDark, true),
 		thinking: true,
 	}
 }
 
-func resolvedThemeColor(color lipgloss.TerminalColor, dark bool) string {
-	switch color := color.(type) {
-	case lipgloss.AdaptiveColor:
-		if dark {
-			return color.Dark
-		}
-		return color.Light
-	case lipgloss.Color:
-		return string(color)
-	default:
-		return ""
+func resolvedThemeColor(pair config.AdaptiveColor, dark bool) string {
+	if dark {
+		return pair.Dark
 	}
+	return pair.Light
 }
 
 func markdownStyleForTheme(theme tuiTheme, dark, thinking bool) *ansi.StyleConfig {
@@ -137,7 +130,7 @@ func (r *mdRenderer) applyTheme(theme tuiTheme) {
 		return
 	}
 	r.mu.Lock()
-	r.style = markdownStyleForTheme(theme, lipgloss.HasDarkBackground(), r.thinking)
+	r.style = markdownStyleForTheme(theme, terminalDark, r.thinking)
 	r.renderer = nil
 	r.width = 0
 	r.lastRaw = ""
@@ -178,7 +171,7 @@ func (r *mdRenderer) render(md string, width int) string {
 	}
 	if r.renderer == nil || r.width != width {
 		if r.style == nil {
-			r.style = markdownStyleForTheme(activeTUITheme, lipgloss.HasDarkBackground(), r.thinking)
+			r.style = markdownStyleForTheme(activeTUITheme, terminalDark, r.thinking)
 		}
 		tr, err := glamour.NewTermRenderer(
 			glamour.WithStyles(*r.style),

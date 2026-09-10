@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -65,12 +65,12 @@ func TestModelMouseToggleRestoresNativeSelection(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.app.Cfg.TUI.Mouse = false
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyF6})
-	if cmd == nil || !m.app.Cfg.TUI.Mouse || !strings.Contains(m.lastStatus, "wheel scroll") {
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyF6})
+	if cmd != nil || m.View().MouseMode != tea.MouseModeCellMotion || !m.app.Cfg.TUI.Mouse || !strings.Contains(m.lastStatus, "wheel scroll") {
 		t.Fatalf("mouse enable: cmd=%v mouse=%v status=%q", cmd != nil, m.app.Cfg.TUI.Mouse, m.lastStatus)
 	}
-	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyF6})
-	if cmd == nil || m.app.Cfg.TUI.Mouse || !strings.Contains(m.lastStatus, "native selection") {
+	_, cmd = m.handleKey(tea.KeyPressMsg{Code: tea.KeyF6})
+	if cmd != nil || m.View().MouseMode != tea.MouseModeNone || m.app.Cfg.TUI.Mouse || !strings.Contains(m.lastStatus, "native selection") {
 		t.Fatalf("mouse disable: cmd=%v mouse=%v status=%q", cmd != nil, m.app.Cfg.TUI.Mouse, m.lastStatus)
 	}
 }
@@ -81,17 +81,17 @@ func TestModelSlashCommands(t *testing.T) {
 	buildAppForTest(t, m)
 
 	m.editor.SetValue("/help")
-	_, quit := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, quit := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if quit != nil {
 		t.Fatal("help should not quit")
 	}
 	if !m.pickHelp || m.renderHelp() == "" {
 		t.Fatal("expected help popup")
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	m.editor.SetValue("/quit")
-	_, quit = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, quit = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if quit == nil {
 		t.Fatal("quit should return a quit command")
 	}
@@ -121,7 +121,7 @@ func TestPromptPreflightFailureReleasesBusyState(t *testing.T) {
 		t.Fatalf("preflight error left run active: busy=%t started=%v cancel=%v", m.busy, m.runStartedAt, m.cancelRun != nil)
 	}
 	before := len(m.lines)
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if len(m.lines) != before {
 		t.Fatalf("idle escape emitted abort output: %v", m.lines[before:])
 	}
@@ -144,7 +144,7 @@ func TestModelStartupFailureRemainsResponsive(t *testing.T) {
 		t.Fatal("composer remained focused after startup failure")
 	}
 
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	for _, want := range []string{
 		"startup failed",
 		"error",
@@ -166,12 +166,12 @@ func TestModelStartupFailureRemainsResponsive(t *testing.T) {
 func TestModelCanQuitBeforeAppIsReady(t *testing.T) {
 	tests := []struct {
 		name string
-		key  tea.KeyType
+		key  rune
 	}{
-		{name: "ctrl c while booting", key: tea.KeyCtrlC},
-		{name: "ctrl d while booting", key: tea.KeyCtrlD},
-		{name: "ctrl c after startup failure", key: tea.KeyCtrlC},
-		{name: "ctrl d after startup failure", key: tea.KeyCtrlD},
+		{name: "ctrl c while booting", key: 'c'},
+		{name: "ctrl d while booting", key: 'd'},
+		{name: "ctrl c after startup failure", key: 'c'},
+		{name: "ctrl d after startup failure", key: 'd'},
 	}
 
 	for _, tt := range tests {
@@ -180,7 +180,7 @@ func TestModelCanQuitBeforeAppIsReady(t *testing.T) {
 			if strings.Contains(tt.name, "failure") {
 				_, _ = m.Update(doneMsg{err: errors.New("startup failed")})
 			}
-			_, quit := m.handleKey(tea.KeyMsg{Type: tt.key})
+			_, quit := m.handleKey(tea.KeyPressMsg{Code: tt.key, Mod: tea.ModCtrl})
 			if quit == nil {
 				t.Fatal("quit key was ignored before app initialization")
 			}
@@ -208,7 +208,7 @@ func TestReadOnlyMCPStatusPicker(t *testing.T) {
 			t.Fatalf("picker missing %q: %q", want, view)
 		}
 	}
-	_, _ = m.handleInfoPick(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleInfoPick(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.pickInfo {
 		t.Fatal("Esc did not close status picker")
 	}
@@ -241,7 +241,7 @@ func TestModelPermissionCommand(t *testing.T) {
 	buildAppForTest(t, m)
 
 	m.editor.SetValue("/permissions deny")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got := string(m.app.Perm.Mode()); got != "deny" {
 		t.Fatalf("mode = %s, want deny", got)
 	}
@@ -262,18 +262,18 @@ func TestThinkingShortcutCyclesAvailableEfforts(t *testing.T) {
 	m.editor.SetValue("draft prompt")
 	lineCount := len(m.lines)
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlT})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if m.pickThinking {
 		t.Fatal("thinking shortcut opened picker instead of cycling")
 	}
 	if got := m.app.Agent.Thinking(); got != protocol.ThinkingHigh {
 		t.Fatalf("first cycle thinking = %q, want high", got)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlT})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if got := m.app.Agent.Thinking(); got != protocol.ThinkingOff {
 		t.Fatalf("second cycle thinking = %q, want off", got)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlT})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if got := m.app.Agent.Thinking(); got != protocol.ThinkingLow {
 		t.Fatalf("wrapped cycle thinking = %q, want low", got)
 	}
@@ -308,15 +308,15 @@ func TestModelThinkingPickerFiltersAndPersists(t *testing.T) {
 	m.app.Model = model
 
 	m.editor.SetValue("/thinking")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pickThinking || len(m.thinkingList) != 2 || m.thinkingList[0] != protocol.ThinkingOff || m.thinkingList[1] != protocol.ThinkingLow {
 		t.Fatalf("thinking picker = open=%v levels=%v", m.pickThinking, m.thinkingList)
 	}
 	if strings.Contains(m.renderThinkingModal(), "high") {
 		t.Fatalf("picker exposed unsupported level: %q", m.renderThinkingModal())
 	}
-	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyDown})
-	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleThinkingPick(tea.KeyPressMsg{Code: tea.KeyDown})
+	_, _ = m.handleThinkingPick(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got := m.app.Agent.Thinking(); got != protocol.ThinkingLow {
 		t.Fatalf("thinking = %q, want low", got)
 	}
@@ -327,7 +327,7 @@ func TestModelThinkingPickerFiltersAndPersists(t *testing.T) {
 	}
 
 	m.editor.SetValue("/thinking high")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(m.lines) == 0 || !strings.Contains(stripANSI(m.lines[len(m.lines)-1]), "does not advertise") {
 		t.Fatalf("unsupported thinking command did not report an error: %v", m.lines)
 	}
@@ -360,7 +360,7 @@ func TestModelPickerSelectsModelThenThinkingEffort(t *testing.T) {
 	}
 	m.app.AllModels = []protocol.Model{thinkingModel}
 	_, _ = m.startModelPick()
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.pickModel || !m.pickThinking || m.thinkingModel == nil || m.thinkingModel.ID != "reasoner" {
 		t.Fatalf("nested picker model=%v thinking=%v selected=%+v", m.pickModel, m.pickThinking, m.thinkingModel)
 	}
@@ -374,13 +374,13 @@ func TestModelPickerSelectsModelThenThinkingEffort(t *testing.T) {
 			t.Fatalf("picker missing %q: %q", label, view)
 		}
 	}
-	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleThinkingPick(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !m.pickModel || m.pickThinking {
 		t.Fatalf("Esc did not return to model picker: model=%v thinking=%v", m.pickModel, m.pickThinking)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m.thinkingIndex = len(m.thinkingList) - 1
-	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleThinkingPick(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.pickThinking || m.app.Agent.Model().ID != "reasoner" || m.app.Agent.Thinking() != protocol.ThinkingUltra {
 		t.Fatalf("selection model=%q thinking=%q picker=%v", m.app.Agent.Model().ID, m.app.Agent.Thinking(), m.pickThinking)
 	}
@@ -403,7 +403,7 @@ func TestModelAgentEventUpdates(t *testing.T) {
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolName: "bash", IsError: true, Message: "boom"})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
 
-	view := m.View()
+	view := m.viewContent()
 	if !strings.Contains(view, "hello") {
 		t.Fatalf("view missing streamed text: %q", view)
 	}
@@ -439,12 +439,12 @@ func TestPersistedSessionUpdateDoesNotDuplicateLiveAssistant(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
-	if got := strings.Count(stripANSI(m.View()), "Hey! How can I help?"); got != 1 {
+	if got := strings.Count(stripANSI(m.viewContent()), "Hey! How can I help?"); got != 1 {
 		t.Fatalf("stream plus persistence rendered reply %d times before turn_done", got)
 	}
 
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
-	if got := strings.Count(stripANSI(m.View()), "Hey! How can I help?"); got != 1 {
+	if got := strings.Count(stripANSI(m.viewContent()), "Hey! How can I help?"); got != 1 {
 		t.Fatalf("reply rendered %d times after turn_done", got)
 	}
 }
@@ -470,7 +470,7 @@ func TestModelToolProgressAndOutputCard(t *testing.T) {
 		t.Fatal("tool_end must not unlock the composer before turn_done")
 	}
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
-	plain := stripANSI(m.View())
+	plain := stripANSI(m.viewContent())
 	for _, want := range []string{"✔ grep", "main.go:1: match", "12ms"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("completed tool card missing %q: %q", want, plain)
@@ -659,7 +659,7 @@ func TestModelEditDiffPreview(t *testing.T) {
 
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolStart, ToolName: "edit", Message: "docs/sessions.md"})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolName: "edit", ToolOutput: "...\n 39 transaction\n-40 old text\n+40 new text\n..."})
-	plain := stripANSI(m.View())
+	plain := stripANSI(m.viewContent())
 	for _, want := range []string{"edit docs/sessions.md", "-40 old text", "+40 new text"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("edit diff preview missing %q: %q", want, plain)
@@ -668,7 +668,7 @@ func TestModelEditDiffPreview(t *testing.T) {
 
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolStart, ToolName: "write", Message: "test.txt"})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolName: "write", ToolOutput: "-1 old\n+1 new"})
-	plain = stripANSI(m.View())
+	plain = stripANSI(m.viewContent())
 	for _, want := range []string{"write test.txt", "-1 old", "+1 new"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("write diff preview missing %q: %q", want, plain)
@@ -696,7 +696,7 @@ func TestModelStreamingDeliveredAsMessages(t *testing.T) {
 	}
 	_, _ = m.Update(got)
 	m.flushTranscriptImmediately()
-	plain := stripANSI(m.View())
+	plain := stripANSI(m.viewContent())
 	if !strings.Contains(plain, "think: step one step two") {
 		t.Fatalf("thinking delta not rendered: %q", plain)
 	}
@@ -713,7 +713,7 @@ func TestModelStreamingDeliveredAsMessages(t *testing.T) {
 
 	// Turn end finalizes the answer as a permanent line.
 	_, _ = m.Update(agentEventMsg{ev: protocol.AgentEvent{Type: protocol.EvTurnDone}})
-	plain = stripANSI(m.View())
+	plain = stripANSI(m.viewContent())
 	if !strings.Contains(plain, "Hello world") || !strings.Contains(plain, "line2") || strings.Contains(plain, "assistant:") {
 		t.Fatalf("finalized assistant line should be clean: %q", plain)
 	}
@@ -731,7 +731,7 @@ func TestModelThinkingOnlyTurn(t *testing.T) {
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvThinkingDelta, Text: "let me think"})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
 
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	if !strings.Contains(view, "think: let me think") {
 		t.Fatalf("thinking-only turn not rendered: %q", view)
 	}

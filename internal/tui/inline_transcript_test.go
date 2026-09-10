@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -29,14 +29,14 @@ func TestInlineTranscriptCommitsStableRowsAndKeepsLiveTail(t *testing.T) {
 	if cmd := m.commitInlineHistory(); cmd == nil {
 		t.Fatal("stable transcript row did not produce a native scrollback command")
 	}
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	if strings.Contains(view, "committed prompt") {
 		t.Fatalf("committed history remained in managed viewport: %q", view)
 	}
 	if !strings.Contains(view, "live reasoning") {
 		t.Fatalf("live tail missing from managed viewport: %q", view)
 	}
-	if got := lipgloss.Height(m.View()); got != m.height {
+	if got := lipgloss.Height(m.viewContent()); got != m.height {
 		t.Fatalf("inline managed region height=%d, want terminal height %d", got, m.height)
 	}
 }
@@ -109,7 +109,7 @@ func TestInlineHeaderRemainsVisible(t *testing.T) {
 	m.inlineTranscript = true
 	m.width, m.height = 100, 30
 	m.layout()
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	model := m.app.Agent.Model()
 	if !strings.Contains(view, "snow") || !strings.Contains(view, model.Provider+"/"+model.ID) || !strings.Contains(view, "idle") {
 		t.Fatalf("sticky inline header missing: %q", view)
@@ -123,10 +123,10 @@ func TestInlineManagedFrameStaysBottomAnchored(t *testing.T) {
 	m.width, m.height = 100, 40
 	m.layout()
 	wantIdleBody := m.height - inlineFixedChromeHeight - minComposerHeight
-	if m.transcript.Height != wantIdleBody {
-		t.Fatalf("idle transcript height=%d want bottom-filling %d", m.transcript.Height, wantIdleBody)
+	if m.transcript.Height() != wantIdleBody {
+		t.Fatalf("idle transcript height=%d want bottom-filling %d", m.transcript.Height(), wantIdleBody)
 	}
-	if got := lipgloss.Height(m.View()); got != m.height {
+	if got := lipgloss.Height(m.viewContent()); got != m.height {
 		t.Fatalf("idle inline frame height=%d want terminal height %d", got, m.height)
 	}
 
@@ -134,12 +134,12 @@ func TestInlineManagedFrameStaysBottomAnchored(t *testing.T) {
 	m.runStartedAt = time.Now()
 	m.editor.SetValue("one\ntwo\nthree\nfour\nfive")
 	m.layout()
-	if got := lipgloss.Height(m.View()); got != m.height {
+	if got := lipgloss.Height(m.viewContent()); got != m.height {
 		t.Fatalf("busy inline frame height=%d want terminal height %d", got, m.height)
 	}
 	wantBusyBody := m.height - inlineFixedChromeHeight - m.editor.Height() - m.runStatusHeight()
-	if m.transcript.Height != wantBusyBody {
-		t.Fatalf("busy transcript height=%d want bottom-filling %d", m.transcript.Height, wantBusyBody)
+	if m.transcript.Height() != wantBusyBody {
+		t.Fatalf("busy transcript height=%d want bottom-filling %d", m.transcript.Height(), wantBusyBody)
 	}
 }
 
@@ -151,8 +151,8 @@ func TestInlineFrameLeavesFinalColumnUnusedAndSeparatesWrappedText(t *testing.T)
 	m.assistantBuf.WriteString(strings.Repeat("wrapped response ", 8))
 	m.refreshTranscriptForced()
 	m.layout()
-	view := stripANSI(m.View())
-	if got := lipgloss.Width(m.View()); got != m.width-1 {
+	view := stripANSI(m.viewContent())
+	if got := lipgloss.Width(m.viewContent()); got != m.width-1 {
 		t.Fatalf("inline frame width=%d want safe width %d", got, m.width-1)
 	}
 	lines := strings.Split(view, "\n")
@@ -161,7 +161,7 @@ func TestInlineFrameLeavesFinalColumnUnusedAndSeparatesWrappedText(t *testing.T)
 	if !found {
 		t.Fatalf("separator was not isolated on its own row: %q", view)
 	}
-	if got := lipgloss.Height(m.View()); got != m.height {
+	if got := lipgloss.Height(m.viewContent()); got != m.height {
 		t.Fatalf("inline frame height=%d want %d", got, m.height)
 	}
 }
@@ -192,10 +192,10 @@ func TestInlineQuitClearsOnlyManagedRegion(t *testing.T) {
 	m.inlineTranscript = true
 	m.width, m.height = 80, 30
 	m.layout()
-	if _, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC}); cmd == nil {
+	if _, cmd := m.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); cmd == nil {
 		t.Fatal("inline quit returned no command")
 	}
-	if view := m.View(); view != "" {
+	if view := m.viewContent(); view != "" {
 		t.Fatalf("inline quit retained managed chrome: %q", stripANSI(view))
 	}
 }

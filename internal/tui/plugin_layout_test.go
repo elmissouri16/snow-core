@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -35,17 +35,17 @@ func TestPluginUpdatesResizeBeforeNextFrame(t *testing.T) {
 			PluginID: "test", Generation: m.app.PluginGeneration(), Operation: "ui.update", Arguments: raw,
 		}})
 		// Bubble Tea renders after every message, including before the coalesced refresh.
-		if got := m.transcript.Height + m.chromeHeight(); got != m.height {
+		if got := m.transcript.Height() + m.chromeHeight(); got != m.height {
 			t.Fatalf("update %q needs %d rows in a %d-row terminal", value, got, m.height)
 		}
 		if value != "" {
 			// Padding between rows is expected; inspect each label separately.
 			for line := range strings.SplitSeq(value, "\n") {
-				if !strings.Contains(stripANSI(m.View()), line) {
+				if !strings.Contains(stripANSI(m.viewContent()), line) {
 					t.Fatalf("update clipped %q", line)
 				}
 			}
-			if !strings.HasPrefix(strings.TrimRight(strings.Split(stripANSI(m.View()), "\n")[m.height-1], " "), " ") {
+			if !strings.HasPrefix(strings.TrimRight(strings.Split(stripANSI(m.viewContent()), "\n")[m.height-1], " "), " ") {
 				t.Fatal("plugin footer lost its inset")
 			}
 		}
@@ -60,10 +60,10 @@ func TestPluginChromePreservesGrowingComposerAndRunStatus(t *testing.T) {
 	m.plugins.views = []protocol.PluginView{{ID: "input", Placement: "above_input", Content: &protocol.PluginNode{Type: "text", Text: strings.Repeat("Plugin row\n", 6)}}}
 	for _, height := range []int{30, 14, 9, 20} {
 		m.update(tea.WindowSizeMsg{Width: m.width, Height: height})
-		if got := m.transcript.Height + m.chromeHeight(); got != height {
+		if got := m.transcript.Height() + m.chromeHeight(); got != height {
 			t.Fatalf("height %d: content needs %d rows", height, got)
 		}
-		frame := stripANSI(m.View())
+		frame := stripANSI(m.viewContent())
 		for _, label := range []string{"Working", "permission:", "sixth"} {
 			if !strings.Contains(frame, label) {
 				t.Fatalf("height %d clipped %q", height, label)
@@ -86,10 +86,10 @@ func TestPluginChromeFitsResizesAndOverlays(t *testing.T) {
 					t.Run(fmt.Sprintf("inline=%v/%dx%d/overlay=%v", inline, width, height, overlay), func(t *testing.T) {
 						m.planPrompt = overlay
 						m.update(tea.WindowSizeMsg{Width: width, Height: height})
-						if got := m.transcript.Height + m.chromeHeight(); !(inline && overlay) && got > height {
+						if got := m.transcript.Height() + m.chromeHeight(); !(inline && overlay) && got > height {
 							t.Fatalf("content needs %d rows, terminal has %d", got, height)
 						}
-						frame := m.View()
+						frame := m.viewContent()
 						if lipgloss.Height(frame) != height || lipgloss.Width(frame) > width-1 {
 							t.Fatalf("frame geometry %dx%d", lipgloss.Width(frame), lipgloss.Height(frame))
 						}
@@ -116,7 +116,7 @@ func TestPluginHeaderOffsetsTranscriptAndRunStatus(t *testing.T) {
 		t.Fatalf("transcript mouse origin=%d, want 4", top)
 	}
 	y, _, _, ok := m.runStatusMouseBounds()
-	if !ok || y != 4+m.transcript.Height {
+	if !ok || y != 4+m.transcript.Height() {
 		t.Fatalf("run status mouse row=%d", y)
 	}
 }

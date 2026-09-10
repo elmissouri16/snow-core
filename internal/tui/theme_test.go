@@ -7,8 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -29,7 +28,7 @@ func TestTUIThemesRenderAndPersist(t *testing.T) {
 		if m.themeName != name || m.app.Cfg.TUI.Theme != name {
 			t.Fatalf("theme name=%q config=%q want %q", m.themeName, m.app.Cfg.TUI.Theme, name)
 		}
-		if got := m.View(); got == "" || !strings.Contains(stripANSI(got), "snow") {
+		if got := m.viewContent(); got == "" || !strings.Contains(stripANSI(got), "snow") {
 			t.Fatalf("theme %q produced empty view", name)
 		}
 	}
@@ -94,7 +93,7 @@ func TestBuiltInThemeTextContrast(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				colors := map[string]lipgloss.TerminalColor{
+				colors := map[string]config.AdaptiveColor{
 					"accent": theme.accent, "muted": theme.muted, "foreground": theme.soft,
 					"warning": theme.warn, "error": theme.err, "success": theme.ok,
 				}
@@ -149,7 +148,7 @@ func TestThemeSwitchRerendersDurableMarkdownAndPreservesComposer(t *testing.T) {
 		t.Fatal("theme switch did not recreate the markdown renderer")
 	}
 	theme, _ := makeTUITheme("ember")
-	want := resolvedThemeColor(theme.soft, lipgloss.HasDarkBackground())
+	want := resolvedThemeColor(theme.soft, terminalDark)
 	if got := dereferenceString(m.md.style.Text.Color); got != want {
 		t.Fatalf("active markdown foreground=%q want %q", got, want)
 	}
@@ -188,20 +187,9 @@ func dereferenceString(value *string) string {
 	return *value
 }
 
-func resolvedHexColor(t *testing.T, color lipgloss.TerminalColor, dark bool) string {
+func resolvedHexColor(t *testing.T, pair config.AdaptiveColor, dark bool) string {
 	t.Helper()
-	switch color := color.(type) {
-	case lipgloss.Color:
-		return string(color)
-	case lipgloss.AdaptiveColor:
-		if dark {
-			return color.Dark
-		}
-		return color.Light
-	default:
-		t.Fatalf("unsupported test color type %T", color)
-		return ""
-	}
+	return resolvedThemeColor(pair, dark)
 }
 
 func contrastRatio(t *testing.T, foreground, background string) float64 {
@@ -252,6 +240,6 @@ func TestPickerJAndKDoNotAffectComposer(t *testing.T) {
 	}
 }
 
-func teaKeyRunes(r rune) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+func teaKeyRunes(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Text: string([]rune{r}), Code: r}
 }

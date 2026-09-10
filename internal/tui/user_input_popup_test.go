@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -19,10 +19,10 @@ func TestUserInputCardIsCentered(t *testing.T) {
 				m.inlineTranscript = inline
 				m.editor.SetValue("original draft")
 				m.layout()
-				beforeHeight := m.transcript.Height
+				beforeHeight := m.transcript.Height()
 				m.startUserInput(protocol.UserInputRequest{ID: "input", Questions: []protocol.UserInputQuestion{{ID: "note", Header: "Notes", Question: "Save a workspace note"}}})
 				m.userInputEditor.SetValue("cool")
-				if m.renderOverlays() != "" || m.transcript.Height != beforeHeight {
+				if m.renderOverlays() != "" || m.transcript.Height() != beforeHeight {
 					t.Fatal("input still takes space above the composer")
 				}
 				card := m.renderUserInput()
@@ -30,7 +30,7 @@ func TestUserInputCardIsCentered(t *testing.T) {
 				if width > 80 || width > m.managedFrameWidth() || height > m.managedFrameHeight() {
 					t.Fatalf("unbounded input card %dx%d", width, height)
 				}
-				frame := m.View()
+				frame := m.viewContent()
 				if lipgloss.Width(frame) != m.managedFrameWidth() || lipgloss.Height(frame) != m.managedFrameHeight() {
 					t.Fatal("input changed frame dimensions")
 				}
@@ -39,7 +39,7 @@ func TestUserInputCardIsCentered(t *testing.T) {
 					t.Fatalf("missing centered input or editor:\n%s", stripANSI(frame))
 				}
 				m.clearUserInput()
-				if m.editor.Value() != "original draft" || m.transcript.Height != beforeHeight || m.busy {
+				if m.editor.Value() != "original draft" || m.transcript.Height() != beforeHeight || m.busy {
 					t.Fatal("closing input changed the composer or agent state")
 				}
 			})
@@ -68,8 +68,8 @@ func TestUserInputCardKeepsSelectionAndErrorsVisible(t *testing.T) {
 				t.Fatalf("choice is hidden:\n%s", stripANSI(card))
 			}
 		}
-		m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyEnter}) // Other opens the editor.
-		m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyEnter}) // Empty answer stays open.
+		m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // Other opens the editor.
+		m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // Empty answer stays open.
 		if !m.userInputPending || !strings.Contains(stripANSI(m.renderUserInput()), "Answer") {
 			t.Fatal("empty-answer validation disappeared")
 		}
@@ -86,9 +86,9 @@ func TestUserInputCardKeepsMultilineDraftAcrossResize(t *testing.T) {
 	value := strings.Repeat("wrapped text 界 ", 20) + "\nlast draft line"
 	m.userInputEditor.SetValue(value)
 	m.userInputEditor.CursorEnd()
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyTab})
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m.userInputEditor.SetValue("second draft")
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	for _, width := range []int{120, 42, 100} {
 		m.width = width
 		m.layout()
@@ -110,15 +110,15 @@ func TestUserInputCardTitleAndPermissionPriority(t *testing.T) {
 		t.Fatalf("dialog retained the generic header: %s", card)
 	}
 	m.permPending = true
-	if strings.Contains(stripANSI(m.View()), "Save a workspace note") {
+	if strings.Contains(stripANSI(m.viewContent()), "Save a workspace note") {
 		t.Fatal("question covered a permission request")
 	}
 	m.permPending = false
-	if !strings.Contains(stripANSI(m.View()), "Save a workspace note") {
+	if !strings.Contains(stripANSI(m.viewContent()), "Save a workspace note") {
 		t.Fatal("question did not resume")
 	}
 	m.clearUserInput()
-	if !strings.Contains(stripANSI(m.View()), "Add a note") {
+	if !strings.Contains(stripANSI(m.viewContent()), "Add a note") {
 		t.Fatal("parent plugin panel did not resume")
 	}
 }

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -55,18 +55,18 @@ func TestKeybindingsCommandAndSettingsEntry(t *testing.T) {
 			t.Fatalf("popup missing %q: %q", want, view)
 		}
 	}
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.pickKeybindings || m.pickSettings {
 		t.Fatalf("direct close popup=%v settings=%v", m.pickKeybindings, m.pickSettings)
 	}
 
 	_, _ = m.startSettings()
 	m.settingsIndex = settingsKeybindings
-	_, _ = m.handleSettingsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleSettingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pickKeybindings || m.pickSettings || !m.keybindingsReturnToSettings {
 		t.Fatalf("settings handoff popup=%v settings=%v return=%v", m.pickKeybindings, m.pickSettings, m.keybindingsReturnToSettings)
 	}
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.pickKeybindings || !m.pickSettings {
 		t.Fatalf("settings return popup=%v settings=%v", m.pickKeybindings, m.pickSettings)
 	}
@@ -85,14 +85,14 @@ func TestKeybindingsReplaceCaptureSavesAndAppliesGlobally(t *testing.T) {
 	m := newKeybindingsTestModel(t)
 	_, _ = m.startKeybindings(false)
 	m.keybindingsIndex = keybindingActionIndex("submit")
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m.keybindingsEditIndex = len(m.keybindingsDraft) // Replace all row.
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyEnter})
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyCtrlX})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if !slices.Equal(m.keybindingsDraft, []string{"ctrl+x"}) || m.keybindingsCapture != keybindingCaptureNone {
 		t.Fatalf("captured draft=%v mode=%v", m.keybindingsDraft, m.keybindingsCapture)
 	}
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if m.keybindingsEditing || m.keybindingsError != "" || !slices.Equal(m.keys.Submit.Keys(), []string{"ctrl+x"}) {
 		t.Fatalf("saved editing=%v error=%q keys=%v", m.keybindingsEditing, m.keybindingsError, m.keys.Submit.Keys())
 	}
@@ -111,17 +111,17 @@ func TestKeybindingsAddDeleteAltCaptureAndRestoreEmergencyAbort(t *testing.T) {
 	_, _ = m.startKeybindings(false)
 	m.keybindingsIndex = keybindingActionIndex("abort")
 	m.openKeybindingEditor()
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if slices.Contains(m.keybindingsDraft, "ctrl+c") {
 		t.Fatalf("delete did not remove ctrl+c: %v", m.keybindingsDraft)
 	}
 	m.keybindingsEditIndex = len(m.keybindingsDraft) + 1 // Add key row.
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyEnter})
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}, Alt: true})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: 'z', Mod: tea.ModAlt})
 	if !slices.Contains(m.keybindingsDraft, "alt+z") {
 		t.Fatalf("Alt capture draft=%v error=%q", m.keybindingsDraft, m.keybindingsError)
 	}
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	for _, mandatory := range []string{"esc", "alt+z", "ctrl+c"} {
 		if !slices.Contains(m.keys.Abort.Keys(), mandatory) {
 			t.Fatalf("runtime abort=%v missing %q", m.keys.Abort.Keys(), mandatory)
@@ -135,8 +135,8 @@ func TestKeybindingsNamedKeyCaptureFlowsThroughHandler(t *testing.T) {
 	m.keybindingsIndex = keybindingActionIndex("close")
 	m.openKeybindingEditor()
 	m.keybindingsEditIndex = len(m.keybindingsDraft)
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyEnter})
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !slices.Equal(m.keybindingsDraft, []string{"enter"}) || m.keybindingsCapture != keybindingCaptureNone {
 		t.Fatalf("named capture draft=%v capture=%v", m.keybindingsDraft, m.keybindingsCapture)
 	}
@@ -246,7 +246,7 @@ func TestKeybindingsLowercaseControlsRemainAvailableForConfiguredNavigation(t *t
 	}
 	m.keys = keys
 	_, _ = m.startKeybindings(false)
-	_, _ = m.handleKeybindingsKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	_, _ = m.handleKeybindingsKey(tea.KeyPressMsg{Text: "s", Code: 's'})
 	if m.keybindingsIndex != 1 || m.keybindingsScope != keybindingScopeGlobal {
 		t.Fatalf("index=%d scope=%v", m.keybindingsIndex, m.keybindingsScope)
 	}
@@ -258,12 +258,12 @@ func TestKeybindingsCaptureAcceptsEscapeAndRejectsPaste(t *testing.T) {
 	m.keybindingsIndex = keybindingActionIndex("close")
 	m.openKeybindingEditor()
 	m.keybindingsCapture = keybindingCaptureReplaceAll
-	m.captureKeybinding(tea.KeyMsg{Type: tea.KeyEsc})
+	m.captureKeybinding(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !slices.Equal(m.keybindingsDraft, []string{"esc"}) {
 		t.Fatalf("escape draft=%v error=%q", m.keybindingsDraft, m.keybindingsError)
 	}
 	m.keybindingsCapture = keybindingCaptureAdd
-	m.captureKeybinding(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("many"), Paste: true})
+	m.handlePaste(tea.PasteMsg{Content: "many"})
 	if m.keybindingsError == "" || m.keybindingsCapture != keybindingCaptureAdd {
 		t.Fatalf("paste error=%q capture=%v", m.keybindingsError, m.keybindingsCapture)
 	}
@@ -280,7 +280,7 @@ func TestKeybindingsRejectsProjectScopeWhenUntrustedAndBusyCommand(t *testing.T)
 	m.busy = true
 	m.editor.SetValue("/keybindings")
 	before := len(m.lines)
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.pickKeybindings || len(m.lines) != before+1 || !strings.Contains(stripANSI(m.lines[len(m.lines)-1]), "wait") {
 		t.Fatalf("busy popup=%v lines=%v", m.pickKeybindings, m.lines[before:])
 	}

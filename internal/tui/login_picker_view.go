@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -193,8 +193,8 @@ func (m *Model) renderLoginTextCard(title, status, label, hint, footer string, s
 		fieldBox = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(colorAccent).
-			Width(fieldWidth).
-			Height(1).
+			Width(fieldWidth + 2).
+			Height(3).
 			Render(field)
 	} else {
 		fieldBox = styleCompletionSelected.Render(truncateDisplayText(" "+field, geometry.innerWidth))

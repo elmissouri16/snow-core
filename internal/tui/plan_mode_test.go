@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -25,7 +25,7 @@ func TestPlanCommandsAndIndicator(t *testing.T) {
 	if m.app.Agent.Mode() != protocol.ModePlan {
 		t.Fatalf("mode = %q", m.app.Agent.Mode())
 	}
-	plain := stripANSI(m.View())
+	plain := stripANSI(m.viewContent())
 	if !strings.Contains(plain, "mode:plan") {
 		t.Fatalf("view missing plan indicator: %q", plain)
 	}
@@ -50,7 +50,7 @@ func applyModeToggleCommand(t *testing.T, m *Model, cmd tea.Cmd) {
 func TestTopLevelShiftTabTogglesModeAndNeverEdits(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	applyModeToggleCommand(t, m, cmd)
 	if got := m.app.Agent.Mode(); got != protocol.ModePlan {
 		t.Fatalf("mode=%q want plan", got)
@@ -58,7 +58,7 @@ func TestTopLevelShiftTabTogglesModeAndNeverEdits(t *testing.T) {
 	if got := m.editor.Value(); got != "" {
 		t.Fatalf("Shift+Tab edited composer: %q", got)
 	}
-	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	_, cmd = m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	applyModeToggleCommand(t, m, cmd)
 	if got := m.app.Agent.Mode(); got != protocol.ModeDefault {
 		t.Fatalf("mode=%q want default", got)
@@ -71,19 +71,19 @@ func TestShiftTabQueuesUntilTurnBoundaryAndCanCancel(t *testing.T) {
 	m.width, m.height = 100, 30
 	m.layout()
 	m.busy = true
-	if _, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab}); cmd != nil {
+	if _, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}); cmd != nil {
 		t.Fatal("busy mode toggle ran before turn boundary")
 	}
 	if m.pendingMode == nil || *m.pendingMode != protocol.ModePlan {
 		t.Fatalf("pending mode=%v want plan", m.pendingMode)
 	}
-	if view := stripANSI(m.View()); !strings.Contains(view, "mode:default→plan") {
+	if view := stripANSI(m.viewContent()); !strings.Contains(view, "mode:default→plan") {
 		t.Fatalf("pending mode indicator missing: %q", view)
 	}
-	if _, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab}); cmd != nil || m.pendingMode != nil {
+	if _, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}); cmd != nil || m.pendingMode != nil {
 		t.Fatalf("second Shift+Tab did not cancel: pending=%v cmd=%v", m.pendingMode, cmd != nil)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, GoalContinuing: true})
 	if !m.modeSwitchReady || m.app.Agent.Mode() != protocol.ModeDefault || !m.busy {
 		t.Fatalf("boundary ready=%v mode=%q busy=%v", m.modeSwitchReady, m.app.Agent.Mode(), m.busy)
@@ -94,7 +94,7 @@ func TestShiftTabQueuesUntilTurnBoundaryAndCanCancel(t *testing.T) {
 	}
 
 	m.busy = true
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
 	applyModeToggleCommand(t, m, m.beginPendingModeSwitch())
 	if got := m.app.Agent.Mode(); got != protocol.ModeDefault {
@@ -109,7 +109,7 @@ func TestQueuedDefaultSwitchDoesNotLeavePlanImplementationPicker(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.busy = true
-	if _, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab}); cmd != nil {
+	if _, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}); cmd != nil {
 		t.Fatal("busy mode toggle ran before plan turn boundary")
 	}
 	if m.pendingMode == nil || *m.pendingMode != protocol.ModeDefault {
@@ -159,7 +159,7 @@ func TestFailedQueuedModeSwitchReconcilesOptimisticGoalBusyState(t *testing.T) {
 	}
 	m.busy = true
 	m.runStartedAt = time.Now()
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, GoalContinuing: true})
 	cmd := m.beginPendingModeSwitch()
 	if cmd == nil {
@@ -183,7 +183,7 @@ func TestPromptSubmissionWaitsForAsynchronousModeSwitch(t *testing.T) {
 	buildAppForTest(t, m)
 	m.editor.SetValue("must run in selected mode")
 	m.modeSwitching = true
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil || m.busy || m.editor.Value() != "must run in selected mode" {
 		t.Fatalf("cmd=%v busy=%v editor=%q", cmd != nil, m.busy, m.editor.Value())
 	}
@@ -198,7 +198,7 @@ func TestShiftTabKeepsCompletionNavigationPrecedence(t *testing.T) {
 	m.compVisible = true
 	m.compMatches = []string{"/default", "/help", "/plan"}
 	m.compIndex = 1
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	if cmd != nil || m.compIndex != 0 || m.app.Agent.Mode() != protocol.ModeDefault {
 		t.Fatalf("cmd=%v index=%d mode=%q", cmd != nil, m.compIndex, m.app.Agent.Mode())
 	}
@@ -214,10 +214,10 @@ func TestStructuredPlanRenderingAndImplementationPrompt(t *testing.T) {
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvPlanDelta, Text: "# Ship\n- test\n", Plan: &protocol.PlanItem{ID: "p"}})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvPlanCompleted, Plan: &protocol.PlanItem{ID: "p", Text: "# Ship\n- test\n"}})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
-	if !m.planPrompt || !strings.Contains(stripANSI(m.View()), "Implement this plan?") || !strings.Contains(stripANSI(m.View()), "Ship") {
-		t.Fatalf("view = %q", stripANSI(m.View()))
+	if !m.planPrompt || !strings.Contains(stripANSI(m.viewContent()), "Implement this plan?") || !strings.Contains(stripANSI(m.viewContent()), "Ship") {
+		t.Fatalf("view = %q", stripANSI(m.viewContent()))
 	}
-	_, cmd := m.handlePlanImplementationKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handlePlanImplementationKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("implementation selection returned no command")
 	}

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -23,7 +23,7 @@ func TestBusyComposerChoosesSteerAndFollowUp(t *testing.T) {
 	m.busy = true
 
 	m.editor.SetValue("change direction")
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("busy Enter did not submit a steer")
 	}
@@ -33,7 +33,7 @@ func TestBusyComposerChoosesSteerAndFollowUp(t *testing.T) {
 	}
 
 	m.editor.SetValue("afterwards")
-	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	_, cmd = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	if cmd == nil {
 		t.Fatal("busy Alt+Enter did not submit a follow-up")
 	}
@@ -100,7 +100,7 @@ func TestAbortInvalidatesLateQueueSubmission(t *testing.T) {
 	buildAppForTest(t, m)
 	m.busy = true
 	m.editor.SetValue("do not restart")
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("missing queue command")
 	}
@@ -219,12 +219,12 @@ func TestProjectTrustBootstrapPromptsEveryUnknownProject(t *testing.T) {
 		t.Fatalf("trust state = pending:%v choice:%d", m.trustPending, m.trustChoice)
 	}
 	m.width, m.height = 100, 30
-	if view := stripANSI(m.View()); !strings.Contains(view, "Continue untrusted") || !strings.Contains(view, "not a sandbox") {
+	if view := stripANSI(m.viewContent()); !strings.Contains(view, "Continue untrusted") || !strings.Contains(view, "not a sandbox") {
 		t.Fatalf("trust view = %q", view)
 	}
 
 	// Safe-default Enter persists exact deny and constructs the app immediately.
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("trust Enter returned no command")
 	}
@@ -267,7 +267,7 @@ func TestTrustPersistenceFailureKeepsPromptActive(t *testing.T) {
 	}
 	m := newModel(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: cwd})
 	_, _ = m.Update(trustPromptMsg{path: cwd, store: store})
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	result := cmd().(trustDecisionMsg)
 	if result.err == nil {
 		t.Fatal("unwritable trust store unexpectedly succeeded")
@@ -343,7 +343,7 @@ func TestTrustPromptCannotExitAfterPersistenceStarts(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	m.trustPending = true
 	m.trustSaving = true
-	if _, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC}); cmd != nil {
+	if _, cmd := m.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); cmd != nil {
 		t.Fatal("Ctrl+C exited while trust persistence owned an in-flight app result")
 	}
 }
@@ -354,7 +354,7 @@ func TestTrustEscapeDeniesAndControlExitsWithoutDecision(t *testing.T) {
 	m := newModel(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow", CWD: cwd})
 	prompt := m.bootstrapCmd()().(trustPromptMsg)
 	_, _ = m.Update(prompt)
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("Ctrl+C did not quit trust prompt")
 	}
@@ -364,7 +364,7 @@ func TestTrustEscapeDeniesAndControlExitsWithoutDecision(t *testing.T) {
 
 	m2 := newModel(context.Background(), m.opts)
 	_, _ = m2.Update(prompt)
-	_, cmd = m2.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd = m2.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	decision := cmd().(trustDecisionMsg)
 	if decision.app != nil {
 		defer decision.app.Close()

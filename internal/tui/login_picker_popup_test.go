@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/internal/app"
@@ -21,11 +21,11 @@ import (
 
 func TestLoginProviderPickerIsCenteredWithoutChangingFrame(t *testing.T) {
 	m := modelPickerTestModel(t, 100, 30)
-	beforeTranscriptHeight := m.transcript.Height
+	beforeTranscriptHeight := m.transcript.Height()
 	_, _ = m.startLogin(nil)
 	m.layout()
-	if m.transcript.Height != beforeTranscriptHeight {
-		t.Fatalf("transcript height changed %d -> %d", beforeTranscriptHeight, m.transcript.Height)
+	if m.transcript.Height() != beforeTranscriptHeight {
+		t.Fatalf("transcript height changed %d -> %d", beforeTranscriptHeight, m.transcript.Height())
 	}
 	if overlay := stripANSI(m.renderOverlays()); strings.Contains(overlay, "Select a provider") {
 		t.Fatalf("login leaked into lower overlay: %q", overlay)
@@ -36,7 +36,7 @@ func TestLoginProviderPickerIsCenteredWithoutChangingFrame(t *testing.T) {
 		t.Fatalf("provider card=%q", got)
 	}
 	assertModelCardBounds(t, m, card)
-	view := m.View()
+	view := m.viewContent()
 	if got := lipgloss.Height(view); got != m.managedFrameHeight() {
 		t.Fatalf("view height=%d want=%d", got, m.managedFrameHeight())
 	}
@@ -63,14 +63,14 @@ func TestLoginKeyEscapeReturnsToProviderPicker(t *testing.T) {
 		t.Fatalf("opencode-go missing from providers: %v", m.providers)
 	}
 	m.provIndex = providerIndex
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginMode || !strings.Contains(stripANSI(m.renderLoginModal()), "Esc back") {
 		t.Fatalf("key card did not expose back navigation: %q", stripANSI(m.renderLoginModal()))
 	}
 	for _, r := range "discard-me" {
-		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		_, _ = m.handleKey(tea.KeyPressMsg{Text: string([]rune{r}), Code: r})
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !m.pickProvider || m.loginMode || m.secretBuf.Len() != 0 {
 		t.Fatalf("back state picker=%v key=%v secret=%d", m.pickProvider, m.loginMode, m.secretBuf.Len())
 	}
@@ -80,7 +80,7 @@ func TestLoginKeyEscapeReturnsToProviderPicker(t *testing.T) {
 	if card := stripANSI(m.renderLoginModal()); !strings.Contains(card, "Select a provider to sign in") || !strings.Contains(card, "Esc cancel") {
 		t.Fatalf("restored provider card=%q", card)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.loginModalVisible() {
 		t.Fatal("Esc at provider root did not close login")
 	}
@@ -103,11 +103,11 @@ func TestChatGPTEscapeReturnsToProviderPicker(t *testing.T) {
 		t.Fatalf("chatgpt missing from providers: %v", m.providers)
 	}
 	m.provIndex = providerIndex
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pickChatGPTAuth {
 		t.Fatal("ChatGPT selection did not open auth choices")
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !m.pickProvider || m.pickChatGPTAuth || len(m.providers) == 0 {
 		t.Fatalf("ChatGPT back state provider=%v auth=%v providers=%v", m.pickProvider, m.pickChatGPTAuth, m.providers)
 	}
@@ -134,7 +134,7 @@ func TestEntireCompatibleLoginFlowStaysInCard(t *testing.T) {
 	if card := stripANSI(m.renderLoginModal()); !strings.Contains(card, "x-provider") {
 		t.Fatalf("profile field missing from card: %q", card)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginEndpointMode || m.loginProfileMode {
 		t.Fatalf("endpoint=%v profile=%v", m.loginEndpointMode, m.loginProfileMode)
 	}
@@ -144,14 +144,14 @@ func TestEntireCompatibleLoginFlowStaysInCard(t *testing.T) {
 
 	m.editor.SetValue("https://gateway.example/v1")
 	m.editor.CursorEnd()
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginMode || m.loginEndpointMode {
 		t.Fatalf("key=%v endpoint=%v", m.loginMode, m.loginEndpointMode)
 	}
 	for _, r := range "sëcret" {
-		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		_, _ = m.handleKey(tea.KeyPressMsg{Text: string([]rune{r}), Code: r})
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if got := m.secretBuf.String(); got != "sëcre" {
 		t.Fatalf("unicode secret backspace=%q", got)
 	}
@@ -159,15 +159,15 @@ func TestEntireCompatibleLoginFlowStaysInCard(t *testing.T) {
 	if strings.Contains(card, "sëcre") || !strings.Contains(card, "•••••") || !strings.Contains(card, "step 3 of 3") {
 		t.Fatalf("masked key card=%q", card)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !m.loginEndpointMode || m.editor.Value() != "https://gateway.example/v1" || m.secretBuf.Len() != 0 {
 		t.Fatalf("key back endpoint=%v value=%q secret length=%d", m.loginEndpointMode, m.editor.Value(), m.secretBuf.Len())
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !m.loginProfileMode || m.editor.Value() != "x-provider" {
 		t.Fatalf("endpoint back profile=%v value=%q", m.loginProfileMode, m.editor.Value())
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.loginModalVisible() {
 		t.Fatal("root profile Esc did not close login")
 	}
@@ -177,11 +177,11 @@ func TestLoginValidationErrorIsVisibleAndClearsOnEdit(t *testing.T) {
 	m := modelPickerTestModel(t, 100, 30)
 	m.beginCompatibleProfileCapture()
 	m.editor.SetValue("Invalid Name")
-	_, _ = m.handleLoginProfileKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleLoginProfileKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.loginError == "" || !strings.Contains(stripANSI(m.renderLoginModal()), "provider profile name") {
 		t.Fatalf("error=%q card=%q", m.loginError, stripANSI(m.renderLoginModal()))
 	}
-	_, _ = m.handleLoginProfileKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	_, _ = m.handleLoginProfileKey(tea.KeyPressMsg{Text: string('x'), Code: 'x'})
 	if m.loginError != "" {
 		t.Fatalf("error did not clear after edit: %q", m.loginError)
 	}
@@ -190,11 +190,11 @@ func TestLoginValidationErrorIsVisibleAndClearsOnEdit(t *testing.T) {
 func TestRequiredLoginKeyErrorStaysInCard(t *testing.T) {
 	m := modelPickerTestModel(t, 100, 30)
 	m.beginKeyCapture("opencode-go")
-	_, _ = m.handleLoginKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleLoginKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginMode || m.loginError == "" || !strings.Contains(stripANSI(m.renderLoginModal()), "API key is required") {
 		t.Fatalf("mode=%v error=%q card=%q", m.loginMode, m.loginError, stripANSI(m.renderLoginModal()))
 	}
-	_, _ = m.handleLoginKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	_, _ = m.handleLoginKey(tea.KeyPressMsg{Text: string('x'), Code: 'x'})
 	if m.loginError != "" {
 		t.Fatalf("key edit did not clear error: %q", m.loginError)
 	}
@@ -235,7 +235,7 @@ func TestCancelingOAuthReturnsToChatGPTChoices(t *testing.T) {
 	canceled := false
 	m.oauthCancel = func() { canceled = true }
 
-	_, _ = m.handleChatGPTAuthPick(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleChatGPTAuthPick(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !canceled || !m.oauthBackRequested {
 		t.Fatalf("OAuth cancellation canceled=%v back=%v", canceled, m.oauthBackRequested)
 	}
@@ -378,9 +378,9 @@ func TestLoginEditorSanitizesConfigAndClipboardControls(t *testing.T) {
 
 	m.beginCompatibleProfileCapture()
 	m.pasteCmdOverride = func() tea.Msg {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("profile\nspoof\t\x1b]52;c;ZXZpbA==\x07"), Paste: true}
+		return tea.PasteMsg{Content: "profile\nspoof\t\x1b]52;c;ZXZpbA==\x07"}
 	}
-	_, cmd := m.handleLoginProfileKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, cmd := m.handleLoginProfileKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("profile paste returned no routed command")
 	}
@@ -397,13 +397,13 @@ func TestStaleLoginFieldPasteIsDiscarded(t *testing.T) {
 	m := modelPickerTestModel(t, 100, 30)
 	m.beginCompatibleProfileCapture()
 	m.pasteCmdOverride = func() tea.Msg {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("stale-profile"), Paste: true}
+		return tea.PasteMsg{Content: "stale-profile"}
 	}
-	_, profilePaste := m.handleLoginProfileKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, profilePaste := m.handleLoginProfileKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if profilePaste == nil {
 		t.Fatal("profile paste returned no routed command")
 	}
-	_, _ = m.handleLoginProfileKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleLoginProfileKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginEndpointMode {
 		t.Fatal("profile submission did not advance to endpoint")
 	}
@@ -413,13 +413,13 @@ func TestStaleLoginFieldPasteIsDiscarded(t *testing.T) {
 	}
 
 	m.pasteCmdOverride = func() tea.Msg {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("private-endpoint-path"), Paste: true}
+		return tea.PasteMsg{Content: "private-endpoint-path"}
 	}
-	_, endpointPaste := m.handleLoginEndpointKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, endpointPaste := m.handleLoginEndpointKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if endpointPaste == nil {
 		t.Fatal("endpoint paste returned no routed command")
 	}
-	_, _ = m.handleLoginEndpointKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleLoginEndpointKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	_, _ = m.Update(endpointPaste())
 	if strings.Contains(m.editor.Value(), "private-endpoint-path") {
 		t.Fatalf("stale endpoint paste mutated composer: %q", m.editor.Value())
@@ -429,9 +429,9 @@ func TestStaleLoginFieldPasteIsDiscarded(t *testing.T) {
 func TestComposerPasteCannotCrossIntoLoginFields(t *testing.T) {
 	m := modelPickerTestModel(t, 100, 30)
 	m.pasteCmdOverride = func() tea.Msg {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("composer-secret"), Paste: true}
+		return tea.PasteMsg{Content: "composer-secret"}
 	}
-	_, textPaste := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, textPaste := m.handleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if textPaste == nil {
 		t.Fatal("composer text paste returned no command")
 	}
@@ -443,12 +443,12 @@ func TestComposerPasteCannotCrossIntoLoginFields(t *testing.T) {
 	if strings.Contains(m.editor.Value(), "composer-secret") {
 		t.Fatalf("stale composer text paste mutated login field: %q", m.editor.Value())
 	}
-	_, _ = m.handleLoginProfileKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleLoginProfileKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	image := protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte("image")}
 	m.pasteCmdOverride = nil
 	m.imagePasteCmdOverride = func() tea.Msg { return clipboardImageMsg{block: image} }
-	_, imagePaste := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, imagePaste := m.handleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if imagePaste == nil {
 		t.Fatal("composer image paste returned no command")
 	}
@@ -465,7 +465,7 @@ func TestCompatibleLoginDiscoveryOwnsModalUntilCompletion(t *testing.T) {
 	m.compatibleLoginGeneration = 9
 	m.compatibleLoginProvider = "x-provider"
 	before := m.editor.Value()
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ignored")})
+	_, _ = m.handleKey(tea.KeyPressMsg{Text: "ignored", Code: tea.KeyExtended})
 	if m.editor.Value() != before {
 		t.Fatalf("pending discovery admitted composer input: %q", m.editor.Value())
 	}
@@ -506,12 +506,12 @@ func TestPermissionRequestPreemptsCenteredLoginCard(t *testing.T) {
 	_, _ = m.startLogin(nil)
 	m.permPending = true
 	m.permRequest = &protocol.PermissionRequest{Tool: "bash", Risk: "exec"}
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	if strings.Contains(view, "Select a provider to sign in") || !strings.Contains(view, "bash") {
 		t.Fatalf("permission did not preempt login card: %q", view)
 	}
 	m.permPending = false
-	if view = stripANSI(m.View()); !strings.Contains(view, "Select a provider to sign in") {
+	if view = stripANSI(m.viewContent()); !strings.Contains(view, "Select a provider to sign in") {
 		t.Fatalf("login card did not resume: %q", view)
 	}
 }
@@ -523,16 +523,16 @@ func TestLoginPickerSupportsPageAndBoundaryNavigation(t *testing.T) {
 		m.providers[i] = "provider-" + string(rune('a'+i%26))
 	}
 	m.pickProvider = true
-	_, _ = m.handleProviderPick(tea.KeyMsg{Type: tea.KeyEnd})
+	_, _ = m.handleProviderPick(tea.KeyPressMsg{Code: tea.KeyEnd})
 	if m.provIndex != len(m.providers)-1 || !strings.Contains(stripANSI(m.renderLoginModal()), "› provider-d") {
 		t.Fatalf("end index=%d card=%q", m.provIndex, stripANSI(m.renderLoginModal()))
 	}
 	last := m.provIndex
-	_, _ = m.handleProviderPick(tea.KeyMsg{Type: tea.KeyPgUp})
+	_, _ = m.handleProviderPick(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if m.provIndex >= last {
 		t.Fatalf("page up index=%d last=%d", m.provIndex, last)
 	}
-	_, _ = m.handleProviderPick(tea.KeyMsg{Type: tea.KeyHome})
+	_, _ = m.handleProviderPick(tea.KeyPressMsg{Code: tea.KeyHome})
 	if m.provIndex != 0 {
 		t.Fatalf("home index=%d", m.provIndex)
 	}
@@ -564,7 +564,7 @@ func TestLoginModalConsumesHeaderMouseClick(t *testing.T) {
 	m := modelPickerTestModel(t, 100, 30)
 	_, _ = m.startLogin(nil)
 	header := m.renderHeaderLayout(m.currentHeaderStatus())
-	_, _ = m.Update(tea.MouseMsg{X: header.modelStart, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	_, _ = m.Update(tea.MouseClickMsg{X: header.modelStart, Y: 0, Button: tea.MouseLeft})
 	if !m.pickProvider || m.pickModel {
 		t.Fatalf("login=%v model=%v", m.pickProvider, m.pickModel)
 	}

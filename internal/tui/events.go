@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -53,7 +53,7 @@ func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cm
 		m.layout()
 		return m, cmd
 	default:
-		if keyMsg, ok := result.msg.(tea.KeyMsg); ok && m.collapseComposerPaste(keyMsg) {
+		if keyMsg, ok := result.msg.(tea.PasteMsg); ok && m.collapseComposerPaste(keyMsg) {
 			m.resetInputHistoryNavigation()
 			cmd := m.refreshInputCompletions()
 			m.layout()
@@ -672,7 +672,7 @@ func (m *Model) finalizeAssistant() {
 // The user prompt already has the blue prompt marker; the response should
 // read as a clean continuation, like the pi transcript.
 func (m *Model) renderAssistantBody(text string) string {
-	width := m.transcript.Width - 4
+	width := m.transcript.Width() - 4
 	body := strings.TrimSpace(text)
 	if m.md != nil && looksLikeMarkdown(body) {
 		body = strings.TrimSpace(m.md.render(body, width))
@@ -696,7 +696,7 @@ func (m *Model) finalizePlan() {
 
 func (m *Model) renderPlanBody(text string) string {
 	body := strings.TrimSpace(text)
-	width := m.transcript.Width - 4
+	width := m.transcript.Width() - 4
 	if m.md != nil {
 		body = strings.TrimSpace(m.md.render(body, width))
 	}
@@ -728,7 +728,7 @@ func (m *Model) renderThinkingBody(text string) string {
 		return ""
 	}
 	label := "think: "
-	width := max(10, m.transcript.Width-lipgloss.Width(label)-4)
+	width := max(10, m.transcript.Width()-lipgloss.Width(label)-4)
 	if m.thinkingMD != nil {
 		body = strings.TrimSpace(m.thinkingMD.render(body, width))
 	} else {

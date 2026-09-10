@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 )
@@ -54,7 +54,7 @@ func TestManualUpdateActionsCheckThenInstall(t *testing.T) {
 	}
 
 	m.settingsIndex = settingsCheckNow
-	_, checkCmd := m.handleSettingsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, checkCmd := m.handleSettingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if checkCmd == nil {
 		t.Fatal("Check now did not schedule a command")
 	}
@@ -64,7 +64,7 @@ func TestManualUpdateActionsCheckThenInstall(t *testing.T) {
 	}
 
 	m.settingsIndex = settingsUpdateNow
-	_, beforeInstall := m.handleSettingsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, beforeInstall := m.handleSettingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if beforeInstall == nil {
 		t.Fatal("Update now did not schedule a fresh check")
 	}
@@ -96,7 +96,7 @@ func TestStartupUpdateOfferRequiresInstallOrSkipDecision(t *testing.T) {
 		}
 	}
 
-	_, cmd := m.handleUpdateOfferKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleUpdateOfferKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil || m.updateOfferPending {
 		t.Fatalf("default Skip choice scheduled install: cmd=%v pending=%v", cmd != nil, m.updateOfferPending)
 	}
@@ -106,7 +106,7 @@ func TestStartupUpdateOfferRequiresInstallOrSkipDecision(t *testing.T) {
 	m.installUpdate = func(context.Context, app.UpdateStatus, app.UpdateProgressFunc) (app.UpdateResult, error) {
 		return app.UpdateResult{PreviousVersion: "1.0.0", InstalledVersion: "1.0.1"}, nil
 	}
-	_, cmd = m.handleUpdateOfferKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd = m.handleUpdateOfferKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil || !m.updateInstallRunning || m.updateOfferPending {
 		t.Fatalf("Install choice state = cmd:%v running:%v pending:%v", cmd != nil, m.updateInstallRunning, m.updateOfferPending)
 	}
@@ -210,14 +210,14 @@ func TestUpdateErrorsAndRestartChoices(t *testing.T) {
 	if !m.restartPromptVisible() {
 		t.Fatal("restart prompt not visible while idle")
 	}
-	_, _ = m.handleRestartPromptKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleRestartPromptKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.restartPromptPending || m.restartRequested {
 		t.Fatalf("Later/Esc requested restart: pending=%v requested=%v", m.restartPromptPending, m.restartRequested)
 	}
 
 	m.restartPromptPending = true
 	m.restartChoice = 0
-	_, quit := m.handleRestartPromptKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, quit := m.handleRestartPromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.restartRequested || quit == nil {
 		t.Fatalf("Restart now state = requested:%v cmd:%v", m.restartRequested, quit != nil)
 	}
@@ -247,7 +247,7 @@ func TestSettingsActionRowsIgnoreHorizontalArrows(t *testing.T) {
 	_, _ = m.startSettings()
 	for _, index := range []int{settingsCheckNow, settingsUpdateNow} {
 		m.settingsIndex = index
-		_, cmd := m.handleSettingsKey(tea.KeyMsg{Type: tea.KeyRight})
+		_, cmd := m.handleSettingsKey(tea.KeyPressMsg{Code: tea.KeyRight})
 		if cmd != nil || m.settingsIndex != index || m.updateCheckRunning {
 			t.Fatalf("action row %d reacted to horizontal arrow", index)
 		}

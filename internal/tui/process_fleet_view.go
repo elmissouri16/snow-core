@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/internal/app"
@@ -215,38 +215,38 @@ func (m *Model) processFleetSelectedID() string {
 }
 
 func (m *Model) handleProcessFleetMouse(msg tea.MouseMsg) {
-	event := tea.MouseEvent(msg)
-	if event.Action != tea.MouseActionPress {
+	event := msg.Mouse()
+	if !isMouseWheel(msg) {
 		return
 	}
 	delta := max(1, m.transcript.MouseWheelDelta)
 	switch event.Button {
-	case tea.MouseButtonWheelUp:
+	case tea.MouseWheelUp:
 		m.scrollProcessFleetDetail(-delta)
-	case tea.MouseButtonWheelDown:
+	case tea.MouseWheelDown:
 		m.scrollProcessFleetDetail(delta)
 	}
 }
 
-func (m *Model) handleProcessFleetKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleProcessFleetKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	count := len(m.processFleetList)
-	switch msg.Type {
-	case tea.KeyEsc:
+	switch {
+	case msg.Code == tea.KeyEscape:
 		m.closeProcessFleet()
 		return m, nil
-	case tea.KeyRunes:
-		if len(msg.Runes) == 1 {
-			switch msg.Runes[0] {
+	case msg.Text != "":
+		if len([]rune(msg.Text)) == 1 {
+			switch []rune(msg.Text)[0] {
 			case 'q':
 				m.closeProcessFleet()
 				return m, nil
 			case 'r':
 				return m, m.refreshProcessFleet()
 			case 'j':
-				msg.Type = tea.KeyDown
+				msg.Code = tea.KeyDown
 			case 'k':
-				msg.Type = tea.KeyUp
+				msg.Code = tea.KeyUp
 			}
 		}
 	}
@@ -254,19 +254,19 @@ func (m *Model) handleProcessFleetKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	previous := m.processFleetIndex
-	switch msg.Type {
-	case tea.KeyUp:
+	switch {
+	case msg.Code == tea.KeyUp:
 		m.processFleetIndex = (m.processFleetIndex - 1 + count) % count
-	case tea.KeyDown:
+	case msg.Code == tea.KeyDown:
 		m.processFleetIndex = (m.processFleetIndex + 1) % count
-	case tea.KeyPgUp:
+	case msg.Code == tea.KeyPgUp:
 		m.scrollProcessFleetDetail(-m.processFleetDetailPageSize())
-	case tea.KeyPgDown:
+	case msg.Code == tea.KeyPgDown:
 		m.scrollProcessFleetDetail(m.processFleetDetailPageSize())
-	case tea.KeyHome:
+	case msg.Code == tea.KeyHome:
 		m.processFleetDetailOffset = 0
 		m.processFleetDetailEnd = false
-	case tea.KeyEnd:
+	case msg.Code == tea.KeyEnd:
 		m.processFleetDetailOffset = max(0, m.processFleetDetailLineCount()-m.processFleetDetailPageSize())
 		m.processFleetDetailEnd = true
 	}
@@ -334,7 +334,7 @@ func (m *Model) renderProcessFleetModal() string {
 		body = lipgloss.JoinVertical(lipgloss.Left, list, sep, detail)
 	}
 	content := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Width(layout.innerWidth).Height(layout.innerHeight).Render(content)
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Width(layout.innerWidth + 2).Height(layout.innerHeight + 2).Render(content)
 }
 
 func (m *Model) renderProcessFleetHeader(width int) string {

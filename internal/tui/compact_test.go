@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -48,7 +48,7 @@ func TestIdleSpinnerStopsAndRestarts(t *testing.T) {
 		t.Fatalf("completed spinner remained armed: cmd=%v running=%v", cmd != nil, m.spinnerRunning)
 	}
 	m.editor.SetValue("/compact")
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil || !m.spinnerRunning || !m.compacting {
+	if _, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd == nil || !m.spinnerRunning || !m.compacting {
 		t.Fatalf("compaction did not restart spinner: cmd=%v running=%v compacting=%v", cmd != nil, m.spinnerRunning, m.compacting)
 	}
 }
@@ -206,7 +206,7 @@ func TestModelCompactTranscriptPresentation(t *testing.T) {
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvUsage, Usage: &protocol.Usage{Input: 100, Output: 10}})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: "Hello!"})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 
 	if strings.Contains(view, "tokens:") {
 		t.Fatal("token diagnostics should stay out of the normal transcript")

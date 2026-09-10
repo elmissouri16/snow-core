@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/internal/app"
@@ -34,7 +34,7 @@ func TestHeaderModelHitTargetOpensPicker(t *testing.T) {
 		t.Fatalf("header selector missing: %q", got)
 	}
 
-	_, cmd := m.Update(tea.MouseMsg{X: header.modelStart, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	_, cmd := m.Update(tea.MouseClickMsg{X: header.modelStart, Y: 0, Button: tea.MouseLeft})
 	if !m.pickModel {
 		t.Fatal("header model click did not open picker")
 	}
@@ -52,14 +52,14 @@ func TestHeaderThinkingAndModeHitTargets(t *testing.T) {
 	if header.thinkingEnd <= header.thinkingStart || header.modeEnd <= header.modeStart {
 		t.Fatalf("header control bounds: thinking=[%d,%d) mode=[%d,%d) view=%q", header.thinkingStart, header.thinkingEnd, header.modeStart, header.modeEnd, stripANSI(header.view))
 	}
-	_, cmd := thinking.Update(tea.MouseMsg{X: header.thinkingStart, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	_, cmd := thinking.Update(tea.MouseClickMsg{X: header.thinkingStart, Y: 0, Button: tea.MouseLeft})
 	if !thinking.pickThinking || thinking.thinkingReturnToModel || cmd != nil {
 		t.Fatalf("thinking click: open=%v return_to_model=%v cmd=%v", thinking.pickThinking, thinking.thinkingReturnToModel, cmd != nil)
 	}
 
 	mode := modelPickerTestModel(t, 120, 30)
 	header = mode.renderHeaderLayout(mode.currentHeaderStatus())
-	_, cmd = mode.Update(tea.MouseMsg{X: header.modeEnd - 1, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	_, cmd = mode.Update(tea.MouseClickMsg{X: header.modeEnd - 1, Y: 0, Button: tea.MouseLeft})
 	if cmd == nil || !mode.modeSwitching || mode.pendingMode == nil || *mode.pendingMode != protocol.ModePlan {
 		t.Fatalf("mode click: cmd=%v switching=%v pending=%v", cmd != nil, mode.modeSwitching, mode.pendingMode)
 	}
@@ -74,7 +74,7 @@ func TestHeaderModeClickQueuesDuringActiveTurn(t *testing.T) {
 	m := modelPickerTestModel(t, 120, 30)
 	m.busy = true
 	header := m.renderHeaderLayout(m.currentHeaderStatus())
-	_, cmd := m.Update(tea.MouseMsg{X: header.modeStart, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	_, cmd := m.Update(tea.MouseClickMsg{X: header.modeStart, Y: 0, Button: tea.MouseLeft})
 	if cmd != nil || m.pendingMode == nil || *m.pendingMode != protocol.ModePlan {
 		t.Fatalf("busy mode click: cmd=%v pending=%v", cmd != nil, m.pendingMode)
 	}
@@ -84,7 +84,7 @@ func TestHeaderModeClickQueuesDuringActiveTurn(t *testing.T) {
 }
 
 func TestAltMOpensModelPickerAndRespectsActiveTurn(t *testing.T) {
-	altM := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true}
+	altM := tea.KeyPressMsg{Code: 'm', Mod: tea.ModAlt}
 	m := modelPickerTestModel(t, 80, 24)
 	_, cmd := m.handleKey(altM)
 	if !m.pickModel || cmd != nil {
@@ -116,7 +116,7 @@ func TestHeaderModelHitTargetMatchesRenderedModes(t *testing.T) {
 			if width >= 80 && header.thinkingEnd <= header.thinkingStart {
 				t.Fatalf("width=%d missing visible thinking hit target: %+v", width, header)
 			}
-			_, _ = m.Update(tea.MouseMsg{X: header.modelEnd, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+			_, _ = m.Update(tea.MouseClickMsg{X: header.modelEnd, Y: 0, Button: tea.MouseLeft})
 			if m.pickModel {
 				t.Fatalf("width=%d click outside rendered selector opened picker", width)
 			}
@@ -126,7 +126,7 @@ func TestHeaderModelHitTargetMatchesRenderedModes(t *testing.T) {
 			if native.modelStart != 0 || native.modelEnd != 0 || native.thinkingStart != 0 || native.thinkingEnd != 0 || native.modeStart != 0 || native.modeEnd != 0 || strings.Contains(stripANSI(native.view), "▾") {
 				t.Fatalf("native header retained controls: model=[%d,%d) thinking=[%d,%d) mode=[%d,%d) view=%q", native.modelStart, native.modelEnd, native.thinkingStart, native.thinkingEnd, native.modeStart, native.modeEnd, stripANSI(native.view))
 			}
-			_, _ = m.Update(tea.MouseMsg{X: header.modelStart, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+			_, _ = m.Update(tea.MouseClickMsg{X: header.modelStart, Y: 0, Button: tea.MouseLeft})
 			if m.pickModel {
 				t.Fatalf("width=%d native mouse mode opened picker", width)
 			}
@@ -151,7 +151,7 @@ func TestHeaderModelHitTargetHandlesWideGraphemes(t *testing.T) {
 	if width := xansi.StringWidth(xansi.Cut(header.view, header.modelStart, header.modelEnd)); width != header.modelEnd-header.modelStart {
 		t.Fatalf("rendered selector width=%d bounds=%d", width, header.modelEnd-header.modelStart)
 	}
-	_, _ = m.Update(tea.MouseMsg{X: header.modelEnd - 1, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	_, _ = m.Update(tea.MouseClickMsg{X: header.modelEnd - 1, Y: 0, Button: tea.MouseLeft})
 	if !m.pickModel {
 		t.Fatal("wide rendered selector was not clickable at its final cell")
 	}
@@ -161,7 +161,7 @@ func TestHeaderModelClickFailsClosedWhileBusy(t *testing.T) {
 	m := modelPickerTestModel(t, 100, 30)
 	m.busy = true
 	header := m.renderHeaderLayout(m.currentHeaderStatus())
-	_, _ = m.Update(tea.MouseMsg{X: header.modelStart, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	_, _ = m.Update(tea.MouseClickMsg{X: header.modelStart, Y: 0, Button: tea.MouseLeft})
 	if m.pickModel || !strings.Contains(m.lastStatus, "wait for the current turn") {
 		t.Fatalf("busy click picker=%v status=%q", m.pickModel, m.lastStatus)
 	}
@@ -171,18 +171,18 @@ func TestModelPickerIsCenteredWithoutChangingFrameGeometry(t *testing.T) {
 	for _, size := range []struct{ width, height int }{{100, 30}, {60, 16}} {
 		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
 			m := modelPickerTestModel(t, size.width, size.height)
-			beforeTranscriptHeight := m.transcript.Height
+			beforeTranscriptHeight := m.transcript.Height()
 			_, _ = m.startModelPick()
 			m.layout()
-			if m.transcript.Height != beforeTranscriptHeight {
-				t.Fatalf("transcript height changed %d -> %d", beforeTranscriptHeight, m.transcript.Height)
+			if m.transcript.Height() != beforeTranscriptHeight {
+				t.Fatalf("transcript height changed %d -> %d", beforeTranscriptHeight, m.transcript.Height())
 			}
 			card := m.renderModelModal()
 			cardWidth, cardHeight := transcriptSelectionBlockWidth(card), lipgloss.Height(card)
 			if cardWidth > m.managedFrameWidth() || cardHeight > m.managedFrameHeight() {
 				t.Fatalf("card=%dx%d frame=%dx%d", cardWidth, cardHeight, m.managedFrameWidth(), m.managedFrameHeight())
 			}
-			view := m.View()
+			view := m.viewContent()
 			if got := lipgloss.Height(view); got != m.managedFrameHeight() {
 				t.Fatalf("view height=%d want=%d", got, m.managedFrameHeight())
 			}
@@ -241,14 +241,14 @@ func TestStandaloneThinkingPickerUsesCenteredFixedFrameCard(t *testing.T) {
 			}
 			m.app.Model = model
 			m.layout()
-			beforeTranscriptHeight := m.transcript.Height
+			beforeTranscriptHeight := m.transcript.Height()
 			_, _ = m.startThinkingPick()
 			m.layout()
 			if !m.thinkingModalVisible() || m.modelModalVisible() {
 				t.Fatalf("thinking modal=%v model modal=%v", m.thinkingModalVisible(), m.modelModalVisible())
 			}
-			if m.transcript.Height != beforeTranscriptHeight {
-				t.Fatalf("transcript height changed %d -> %d", beforeTranscriptHeight, m.transcript.Height)
+			if m.transcript.Height() != beforeTranscriptHeight {
+				t.Fatalf("transcript height changed %d -> %d", beforeTranscriptHeight, m.transcript.Height())
 			}
 			if overlay := stripANSI(m.renderOverlays()); strings.Contains(overlay, "Thinking effort") {
 				t.Fatalf("thinking picker still participates in overlay layout: %q", overlay)
@@ -260,7 +260,7 @@ func TestStandaloneThinkingPickerUsesCenteredFixedFrameCard(t *testing.T) {
 					t.Fatalf("card missing %q: %q", want, plainCard)
 				}
 			}
-			view := m.View()
+			view := m.viewContent()
 			if got := lipgloss.Height(view); got != m.managedFrameHeight() {
 				t.Fatalf("view height=%d want=%d", got, m.managedFrameHeight())
 			}
@@ -324,44 +324,44 @@ func TestModelPickerTypeToFilterAndRuneNavigationContract(t *testing.T) {
 		{Provider: "other", ID: "beta"},
 	}
 	_, _ = m.startModelPick()
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("界")})
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyBackspace})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Text: "j", Code: 'j'})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Text: "界", Code: '界'})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if m.modelQuery != "j" || len(m.filteredModels()) != 1 || m.filteredModels()[0].ID != "jupiter" {
 		t.Fatalf("query=%q matches=%+v", m.modelQuery, m.filteredModels())
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !m.pickModel || m.modelQuery != "" {
 		t.Fatalf("clear picker=%v query=%q", m.pickModel, m.modelQuery)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("jupiter")})
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeySpace})
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("prime")})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Text: "jupiter", Code: tea.KeyExtended})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeySpace})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Text: "prime", Code: tea.KeyExtended})
 	if m.modelQuery != "jupiter prime" || len(m.filteredModels()) != 1 {
 		t.Fatalf("space query=%q matches=%+v", m.modelQuery, m.filteredModels())
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyCtrlU})
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.modelIndex != 1 {
 		t.Fatalf("arrow navigation index=%d", m.modelIndex)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyPgDown})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if m.modelIndex != 2 {
 		t.Fatalf("page navigation index=%d", m.modelIndex)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyHome})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyHome})
 	if m.modelIndex != 0 {
 		t.Fatalf("home navigation index=%d", m.modelIndex)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEnd})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEnd})
 	if m.modelIndex != 2 {
 		t.Fatalf("end navigation index=%d", m.modelIndex)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyCtrlU})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
 	if m.modelQuery != "" {
 		t.Fatalf("ctrl+u query=%q", m.modelQuery)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.pickModel {
 		t.Fatal("empty-query Esc did not close picker")
 	}
@@ -400,8 +400,8 @@ func TestModelThinkingStepStaysInCenteredFlow(t *testing.T) {
 	}
 	m.app.AllModels = []protocol.Model{model}
 	_, _ = m.startModelPick()
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("reason")})
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Text: "reason", Code: tea.KeyExtended})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.modelModalVisible() || m.pickModel || !m.pickThinking || !m.thinkingReturnToModel {
 		t.Fatalf("model=%v thinking=%v return=%v", m.pickModel, m.pickThinking, m.thinkingReturnToModel)
 	}
@@ -419,7 +419,7 @@ func TestModelThinkingStepStaysInCenteredFlow(t *testing.T) {
 	if m.modelLoading || m.modelQuery != "reason" || !m.pickThinking {
 		t.Fatalf("nested refresh loading=%v query=%q thinking=%v", m.modelLoading, m.modelQuery, m.pickThinking)
 	}
-	_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleThinkingPick(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !m.pickModel || m.pickThinking || m.modelQuery != "reason" {
 		t.Fatalf("back model=%v thinking=%v query=%q", m.pickModel, m.pickThinking, m.modelQuery)
 	}
@@ -433,12 +433,12 @@ func TestBlockingRequestPreemptsCenteredModelCard(t *testing.T) {
 	if status := m.currentHeaderStatus(); status != "permission" {
 		t.Fatalf("preempted header status=%q", status)
 	}
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	if strings.Contains(view, "Search:") || !strings.Contains(view, "bash") {
 		t.Fatalf("permission did not preempt model card: %q", view)
 	}
 	m.permPending = false
-	if view = stripANSI(m.View()); !strings.Contains(view, "Search:") {
+	if view = stripANSI(m.viewContent()); !strings.Contains(view, "Search:") {
 		t.Fatalf("model card did not resume after permission: %q", view)
 	}
 }

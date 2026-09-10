@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"github.com/elmissouri16/snow-core/internal/config"
 )
 
@@ -231,32 +231,32 @@ func ensureBindingKey(binding key.Binding, value string) key.Binding {
 	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(help.Key, help.Desc))
 }
 
-func keyMatches(msg tea.KeyMsg, binding key.Binding) bool {
+func keyMatches(msg tea.KeyPressMsg, binding key.Binding) bool {
 	return key.Matches(msg, binding)
 }
 
-func normalizePickerKeyWithMap(msg tea.KeyMsg, keys tuiKeyMap) tea.KeyMsg {
+func normalizePickerKeyWithMap(msg tea.KeyPressMsg, keys tuiKeyMap) tea.KeyPressMsg {
 	switch pickerKeyActionWithMap(msg, keys) {
 	case pickerUp:
-		return tea.KeyMsg{Type: tea.KeyUp}
+		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case pickerDown:
-		return tea.KeyMsg{Type: tea.KeyDown}
+		return tea.KeyPressMsg{Code: tea.KeyDown}
 	case pickerPrev:
-		return tea.KeyMsg{Type: tea.KeyShiftTab}
+		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
 	case pickerNext:
-		return tea.KeyMsg{Type: tea.KeyTab}
+		return tea.KeyPressMsg{Code: tea.KeyTab}
 	case pickerPageUp:
-		return tea.KeyMsg{Type: tea.KeyPgUp}
+		return tea.KeyPressMsg{Code: tea.KeyPgUp}
 	case pickerPageDown:
-		return tea.KeyMsg{Type: tea.KeyPgDown}
+		return tea.KeyPressMsg{Code: tea.KeyPgDown}
 	case pickerTop:
-		return tea.KeyMsg{Type: tea.KeyHome}
+		return tea.KeyPressMsg{Code: tea.KeyHome}
 	case pickerBottom:
-		return tea.KeyMsg{Type: tea.KeyEnd}
+		return tea.KeyPressMsg{Code: tea.KeyEnd}
 	case pickerAccept:
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case pickerClose:
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
 	default:
 		return msg
 	}
@@ -280,9 +280,9 @@ const (
 	pickerClose
 )
 
-func pickerKeyAction(msg tea.KeyMsg) pickerAction { return pickerKeyActionWithMap(msg, tuiKeys) }
+func pickerKeyAction(msg tea.KeyPressMsg) pickerAction { return pickerKeyActionWithMap(msg, tuiKeys) }
 
-func pickerKeyActionWithMap(msg tea.KeyMsg, keys tuiKeyMap) pickerAction {
+func pickerKeyActionWithMap(msg tea.KeyPressMsg, keys tuiKeyMap) pickerAction {
 	switch {
 	case keyMatches(msg, keys.PickerUp):
 		return pickerUp

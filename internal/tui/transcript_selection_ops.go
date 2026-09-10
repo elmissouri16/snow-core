@@ -7,9 +7,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	osc52 "github.com/aymanbagabas/go-osc52/v2"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -47,22 +47,22 @@ func (m *Model) transcriptSelectionTop() int {
 }
 
 func (m *Model) transcriptSelectionPointAt(x, y int, clampToViewport bool) (transcriptSelectionPoint, bool) {
-	if m.inlineTranscript || m.transcript.Height <= 0 || m.transcript.Width <= 0 {
+	if m.inlineTranscript || m.transcript.Height() <= 0 || m.transcript.Width() <= 0 {
 		return transcriptSelectionPoint{}, false
 	}
 	top := m.transcriptSelectionTop()
-	bottom := top + m.transcript.Height - 1
+	bottom := top + m.transcript.Height() - 1
 	if clampToViewport {
-		x = min(max(0, x), m.transcript.Width-1)
+		x = min(max(0, x), m.transcript.Width()-1)
 		y = min(max(top, y), bottom)
-	} else if x < 0 || x >= m.transcript.Width || y < top || y > bottom {
+	} else if x < 0 || x >= m.transcript.Width() || y < top || y > bottom {
 		return transcriptSelectionPoint{}, false
 	}
 	lines := m.transcriptSelectionSourceLines()
 	if len(lines) == 0 {
 		return transcriptSelectionPoint{}, false
 	}
-	row := max(0, m.transcript.YOffset+y-top)
+	row := max(0, m.transcript.YOffset()+y-top)
 	if !clampToViewport && row >= len(lines) {
 		// The viewport pads short content to its configured height. A click in
 		// those blank rows must not select the final actual transcript line.
@@ -76,13 +76,13 @@ func (m *Model) applyTranscriptSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) 
 	if m.app == nil || !m.app.Cfg.TUI.Mouse || m.inlineTranscript {
 		return false, nil
 	}
-	event := tea.MouseEvent(msg)
+	event := msg.Mouse()
 	if m.transcriptSelectionMenu.open {
-		if handled, cmd := m.applyTranscriptSelectionContextMenuMouse(event); handled {
+		if handled, cmd := m.applyTranscriptSelectionContextMenuMouse(msg); handled {
 			return true, cmd
 		}
 	}
-	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonRight {
+	if isMouseClick(msg) && event.Button == tea.MouseRight {
 		text := m.selectedTranscriptText()
 		if text == "" {
 			m.lastStatus = "drag transcript text to select and copy"
@@ -91,7 +91,7 @@ func (m *Model) applyTranscriptSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) 
 		m.openTranscriptSelectionContextMenu(event.X, event.Y, text)
 		return true, nil
 	}
-	if event.Action == tea.MouseActionRelease {
+	if isMouseRelease(msg) {
 		if !m.transcriptSelection.pressActive {
 			return false, nil
 		}
@@ -110,7 +110,7 @@ func (m *Model) applyTranscriptSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) 
 		return true, m.copyTranscriptSelectionCmd(text)
 	}
 
-	if event.Action == tea.MouseActionMotion {
+	if isMouseMotion(msg) {
 		if !m.transcriptSelection.pressActive || m.transcriptSelection.anchor == nil {
 			return false, nil
 		}
@@ -131,7 +131,7 @@ func (m *Model) applyTranscriptSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) 
 		return true, m.updateTranscriptSelectionAutoScroll(event.X, event.Y)
 	}
 
-	if event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft {
+	if !isMouseClick(msg) || event.Button != tea.MouseLeft {
 		return false, nil
 	}
 	point, ok := m.transcriptSelectionPointAt(event.X, event.Y, false)
@@ -219,29 +219,29 @@ func (m *Model) closeTranscriptSelectionContextMenu() {
 	m.transcriptSelectionMenu = transcriptSelectionContextMenu{}
 }
 
-func (m *Model) applyTranscriptSelectionContextMenuMouse(event tea.MouseEvent) (bool, tea.Cmd) {
+func (m *Model) applyTranscriptSelectionContextMenuMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
+	event := msg.Mouse()
 	menu := m.transcriptSelectionMenu
 	if !menu.open {
 		return false, nil
 	}
-	if event.Button == tea.MouseButtonWheelUp || event.Button == tea.MouseButtonWheelDown ||
-		event.Button == tea.MouseButtonWheelLeft || event.Button == tea.MouseButtonWheelRight {
+	if event.Button == tea.MouseWheelUp || event.Button == tea.MouseWheelDown || event.Button == tea.MouseWheelLeft || event.Button == tea.MouseWheelRight {
 		m.closeTranscriptSelectionContextMenu()
 		return false, nil
 	}
-	if event.Action == tea.MouseActionMotion || event.Action == tea.MouseActionRelease {
+	if isMouseMotion(msg) || isMouseRelease(msg) {
 		return true, nil
 	}
-	if event.Action != tea.MouseActionPress {
+	if !isMouseClick(msg) {
 		return true, nil
 	}
 	inside := event.X >= menu.x && event.X < menu.x+menu.width &&
 		event.Y >= menu.y && event.Y < menu.y+menu.height
-	if event.Button == tea.MouseButtonLeft && inside {
+	if event.Button == tea.MouseLeft && inside {
 		m.closeTranscriptSelectionContextMenu()
 		return true, m.copyTranscriptSelectionCmd(menu.selectedText)
 	}
-	if event.Button == tea.MouseButtonRight {
+	if event.Button == tea.MouseRight {
 		m.openTranscriptSelectionContextMenu(event.X, event.Y, menu.selectedText)
 		return true, nil
 	}
@@ -249,20 +249,20 @@ func (m *Model) applyTranscriptSelectionContextMenuMouse(event tea.MouseEvent) (
 	return true, nil
 }
 
-func (m *Model) applyTranscriptSelectionContextMenuKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+func (m *Model) applyTranscriptSelectionContextMenuKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	if !m.transcriptSelectionMenu.open {
 		return false, nil
 	}
-	switch msg.Type {
-	case tea.KeyEnter:
+	switch {
+	case msg.Code == tea.KeyEnter:
 		text := m.transcriptSelectionMenu.selectedText
 		m.closeTranscriptSelectionContextMenu()
 		return true, m.copyTranscriptSelectionCmd(text)
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		m.closeTranscriptSelectionContextMenu()
 		return true, nil
 	}
-	if msg.Type == tea.KeyRunes && strings.EqualFold(string(msg.Runes), "c") {
+	if msg.Text != "" && strings.EqualFold(msg.Text, "c") {
 		text := m.transcriptSelectionMenu.selectedText
 		m.closeTranscriptSelectionContextMenu()
 		return true, m.copyTranscriptSelectionCmd(text)
@@ -518,10 +518,7 @@ const maxTranscriptViewportCacheBytes = 256 << 10
 
 func (m *Model) transcriptViewportView() string {
 	if m.transcriptViewCacheValid &&
-		m.transcriptViewCacheRevision == m.transcriptViewRevision &&
-		m.transcriptViewCacheOffset == m.transcript.YOffset &&
-		m.transcriptViewCacheWidth == m.transcript.Width &&
-		m.transcriptViewCacheHeight == m.transcript.Height {
+		m.transcriptViewCacheRevision == m.transcriptViewRevision && m.transcriptViewCacheOffset == m.transcript.YOffset() && m.transcriptViewCacheWidth == m.transcript.Width() && m.transcriptViewCacheHeight == m.transcript.Height() {
 		return m.transcriptViewCache
 	}
 	view := m.transcript.View()
@@ -531,9 +528,9 @@ func (m *Model) transcriptViewportView() string {
 		return view
 	}
 	m.transcriptViewCacheRevision = m.transcriptViewRevision
-	m.transcriptViewCacheOffset = m.transcript.YOffset
-	m.transcriptViewCacheWidth = m.transcript.Width
-	m.transcriptViewCacheHeight = m.transcript.Height
+	m.transcriptViewCacheOffset = m.transcript.YOffset()
+	m.transcriptViewCacheWidth = m.transcript.Width()
+	m.transcriptViewCacheHeight = m.transcript.Height()
 	m.transcriptViewCache = view
 	m.transcriptViewCacheValid = true
 	return view
@@ -541,7 +538,7 @@ func (m *Model) transcriptViewportView() string {
 
 func (m *Model) cacheTranscriptSelectionView() {
 	m.transcriptSelectionView = m.transcriptViewportView()
-	m.transcriptSelectionViewRow = m.transcript.YOffset
+	m.transcriptSelectionViewRow = m.transcript.YOffset()
 	m.transcriptSelectionViewValid = true
 }
 
@@ -550,13 +547,13 @@ func (m *Model) renderTranscriptView() string {
 		return m.transcriptSelectionRendered
 	}
 	view := ""
-	if m.transcriptSelectionViewValid && m.transcriptSelectionViewRow == m.transcript.YOffset {
+	if m.transcriptSelectionViewValid && m.transcriptSelectionViewRow == m.transcript.YOffset() {
 		view = m.transcriptSelectionView
 	} else {
 		view = m.transcriptViewportView()
 		if m.transcriptSelection.pressActive {
 			m.transcriptSelectionView = view
-			m.transcriptSelectionViewRow = m.transcript.YOffset
+			m.transcriptSelectionViewRow = m.transcript.YOffset()
 			m.transcriptSelectionViewValid = true
 		}
 	}
@@ -568,7 +565,7 @@ func (m *Model) renderTranscriptView() string {
 	}
 	visible := strings.Split(view, "\n")
 	for index, line := range visible {
-		row := m.transcript.YOffset + index
+		row := m.transcript.YOffset() + index
 		if row < selection.start.row || row > selection.end.row {
 			continue
 		}
@@ -593,7 +590,7 @@ func (m *Model) renderTranscriptView() string {
 
 func (m *Model) updateTranscriptSelectionAutoScroll(x, y int) tea.Cmd {
 	top := m.transcriptSelectionTop()
-	bottom := top + m.transcript.Height - 1
+	bottom := top + m.transcript.Height() - 1
 	direction := 0
 	step := 0
 	if y <= top {
@@ -608,7 +605,7 @@ func (m *Model) updateTranscriptSelectionAutoScroll(x, y int) tea.Cmd {
 	// Native terminal selection accelerates as the pointer moves farther beyond
 	// the text region. Cell-motion coordinates may be outside the viewport, so
 	// use that distance while capping jumps to preserve visual tracking.
-	m.transcriptSelection.autoScrollStep = min(max(4, step), max(8, m.transcript.Height/2))
+	m.transcriptSelection.autoScrollStep = min(max(4, step), max(8, m.transcript.Height()/2))
 	if direction == 0 {
 		m.stopTranscriptSelectionAutoScroll()
 		return nil
@@ -636,19 +633,19 @@ func (m *Model) handleTranscriptSelectionAutoScroll(id uint64) tea.Cmd {
 	if !selection.pressActive || selection.autoScroll == 0 || selection.autoScrollID != id {
 		return nil
 	}
-	before := m.transcript.YOffset
+	before := m.transcript.YOffset()
 	// Terminal mouse coordinates commonly clamp to the last visible row, so
 	// pointer distance alone cannot accelerate further. Ramp with dwell time as
 	// native terminal selection does, eventually moving one viewport per frame.
 	selection.autoScrollTicks++
-	step := min(max(1, selection.autoScrollStep+selection.autoScrollTicks/2), max(1, m.transcript.Height))
+	step := min(max(1, selection.autoScrollStep+selection.autoScrollTicks/2), max(1, m.transcript.Height()))
 	if selection.autoScroll < 0 {
 		m.transcript.ScrollUp(step)
 	} else {
 		m.transcript.ScrollDown(step)
 		m.catchUpTranscriptAtBottom()
 	}
-	if m.transcript.YOffset == before {
+	if m.transcript.YOffset() == before {
 		m.stopTranscriptSelectionAutoScroll()
 		return nil
 	}

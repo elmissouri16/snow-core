@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/internal/app"
@@ -46,14 +46,14 @@ func TestTranscriptMouseDragSelectsHighlightsAndCopies(t *testing.T) {
 	}
 	top := m.transcriptSelectionTop()
 
-	_, _ = m.Update(tea.MouseMsg{X: 0, Y: top, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	_, _ = m.Update(tea.MouseMsg{X: 4, Y: top + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	_, _ = m.Update(tea.MouseClickMsg{X: 0, Y: top, Button: tea.MouseLeft})
+	_, _ = m.Update(tea.MouseMotionMsg{X: 4, Y: top + 1, Button: tea.MouseLeft})
 	view := m.renderTranscriptView()
 	if !strings.Contains(view, "\x1b[7m") {
 		t.Fatalf("drag selection was not highlighted: %q", view)
 	}
 
-	_, cmd := m.Update(tea.MouseMsg{X: 4, Y: top + 1, Button: tea.MouseButtonNone, Action: tea.MouseActionRelease})
+	_, cmd := m.Update(tea.MouseReleaseMsg{X: 4, Y: top + 1, Button: tea.MouseNone})
 	if cmd == nil {
 		t.Fatal("selection release did not schedule clipboard copy")
 	}
@@ -73,11 +73,11 @@ func TestTranscriptOSC52SequenceIsRenderedOnceThenCleared(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("OSC52 copy did not schedule one-render cleanup")
 	}
-	if view := m.View(); !strings.Contains(view[:min(len(view), 64)], message.sequence) {
+	if view := m.viewContent(); !strings.Contains(view[:min(len(view), 64)], message.sequence) {
 		t.Fatalf("OSC52 sequence missing from render prefix: %q", view)
 	}
 	_, _ = m.Update(cmd())
-	if view := m.View(); strings.Contains(view, message.sequence) {
+	if view := m.viewContent(); strings.Contains(view, message.sequence) {
 		t.Fatalf("OSC52 sequence repeated after cleanup: %q", view)
 	}
 }
@@ -85,7 +85,7 @@ func TestTranscriptOSC52SequenceIsRenderedOnceThenCleared(t *testing.T) {
 func TestTranscriptBlankViewportPaddingDoesNotSelectFinalLine(t *testing.T) {
 	m := newTranscriptSelectionTestModel(t, []string{"only actual row"})
 	top := m.transcriptSelectionTop()
-	_, _ = m.Update(tea.MouseMsg{X: 2, Y: top + 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	_, _ = m.Update(tea.MouseClickMsg{X: 2, Y: top + 2, Button: tea.MouseLeft})
 	if m.transcriptSelection.pressActive {
 		t.Fatal("blank viewport padding started a selection on the final source row")
 	}
@@ -109,8 +109,8 @@ func TestTranscriptStreamingFreezesDuringSelectionAndCatchesUpAfterRelease(t *te
 	m := newTranscriptSelectionTestModel(t, []string{"stable source"})
 	m.copySelectionToClipboard = func(string) error { return nil }
 	top := m.transcriptSelectionTop()
-	_, _ = m.Update(tea.MouseMsg{X: 0, Y: top, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	_, _ = m.Update(tea.MouseMsg{X: 5, Y: top, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	_, _ = m.Update(tea.MouseClickMsg{X: 0, Y: top, Button: tea.MouseLeft})
+	_, _ = m.Update(tea.MouseMotionMsg{X: 5, Y: top, Button: tea.MouseLeft})
 	frozen := m.transcriptContent
 	m.assistantBuf.WriteString("live delta")
 	m.transcriptDirty = true
@@ -118,7 +118,7 @@ func TestTranscriptStreamingFreezesDuringSelectionAndCatchesUpAfterRelease(t *te
 	if m.transcriptContent != frozen || !m.transcriptSelection.pressActive {
 		t.Fatal("stream update replaced the immutable active-selection snapshot")
 	}
-	_, cmd := m.Update(tea.MouseMsg{X: 5, Y: top, Button: tea.MouseButtonNone, Action: tea.MouseActionRelease})
+	_, cmd := m.Update(tea.MouseReleaseMsg{X: 5, Y: top, Button: tea.MouseNone})
 	if cmd == nil {
 		t.Fatal("release did not preserve and copy frozen selection")
 	}
@@ -166,22 +166,22 @@ func TestTranscriptSelectionAutoScrollExtendsOffscreen(t *testing.T) {
 	m := newTranscriptSelectionTestModel(t, lines)
 	m.transcript.GotoTop()
 	top := m.transcriptSelectionTop()
-	bottom := top + m.transcript.Height - 1
-	_, _ = m.Update(tea.MouseMsg{X: 0, Y: top + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	_, cmd := m.Update(tea.MouseMsg{X: 2, Y: bottom, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	bottom := top + m.transcript.Height() - 1
+	_, _ = m.Update(tea.MouseClickMsg{X: 0, Y: top + 1, Button: tea.MouseLeft})
+	_, cmd := m.Update(tea.MouseMotionMsg{X: 2, Y: bottom, Button: tea.MouseLeft})
 	if cmd == nil {
 		t.Fatal("edge drag did not start auto-scroll")
 	}
-	before := m.transcript.YOffset
+	before := m.transcript.YOffset()
 	msg := cmd()
 	_, next := m.Update(msg)
-	if m.transcript.YOffset <= before {
-		t.Fatalf("auto-scroll offset=%d want > %d", m.transcript.YOffset, before)
+	if m.transcript.YOffset() <= before {
+		t.Fatalf("auto-scroll offset=%d want > %d", m.transcript.YOffset(), before)
 	}
 	if next == nil {
 		t.Fatal("active edge drag did not schedule another auto-scroll tick")
 	}
-	_, _ = m.Update(tea.MouseMsg{X: 2, Y: bottom, Button: tea.MouseButtonNone, Action: tea.MouseActionRelease})
+	_, _ = m.Update(tea.MouseReleaseMsg{X: 2, Y: bottom, Button: tea.MouseNone})
 	if m.transcriptSelection.autoScroll != 0 {
 		t.Fatal("mouse release did not stop selection auto-scroll")
 	}
@@ -195,15 +195,15 @@ func TestTranscriptSelectionAutoScrollAcceleratesBeyondViewport(t *testing.T) {
 	m := newTranscriptSelectionTestModel(t, lines)
 	m.transcript.GotoTop()
 	top := m.transcriptSelectionTop()
-	bottom := top + m.transcript.Height - 1
-	_, _ = m.Update(tea.MouseMsg{X: 0, Y: top, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	_, cmd := m.Update(tea.MouseMsg{X: 0, Y: bottom + 5, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	bottom := top + m.transcript.Height() - 1
+	_, _ = m.Update(tea.MouseClickMsg{X: 0, Y: top, Button: tea.MouseLeft})
+	_, cmd := m.Update(tea.MouseMotionMsg{X: 0, Y: bottom + 5, Button: tea.MouseLeft})
 	if cmd == nil {
 		t.Fatal("drag beyond viewport did not start accelerated auto-scroll")
 	}
 	_, _ = m.Update(cmd())
-	if m.transcript.YOffset <= 1 {
-		t.Fatalf("accelerated auto-scroll advanced only %d row(s)", m.transcript.YOffset)
+	if m.transcript.YOffset() <= 1 {
+		t.Fatalf("accelerated auto-scroll advanced only %d row(s)", m.transcript.YOffset())
 	}
 }
 
@@ -215,17 +215,17 @@ func TestTranscriptSelectionAutoScrollAcceleratesWhileHeldAtEdge(t *testing.T) {
 	m := newTranscriptSelectionTestModel(t, lines)
 	m.transcript.GotoTop()
 	top := m.transcriptSelectionTop()
-	bottom := top + m.transcript.Height - 1
-	_, _ = m.Update(tea.MouseMsg{X: 0, Y: top, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	_, cmd := m.Update(tea.MouseMsg{X: 0, Y: bottom, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	bottom := top + m.transcript.Height() - 1
+	_, _ = m.Update(tea.MouseClickMsg{X: 0, Y: top, Button: tea.MouseLeft})
+	_, cmd := m.Update(tea.MouseMotionMsg{X: 0, Y: bottom, Button: tea.MouseLeft})
 	if cmd == nil {
 		t.Fatal("edge drag did not start auto-scroll")
 	}
 	first := 0
 	for i := 0; i < 12 && cmd != nil; i++ {
-		before := m.transcript.YOffset
+		before := m.transcript.YOffset()
 		_, cmd = m.Update(cmd())
-		advanced := m.transcript.YOffset - before
+		advanced := m.transcript.YOffset() - before
 		if i == 0 {
 			first = advanced
 		}
@@ -241,8 +241,8 @@ func TestTranscriptDoubleAndTripleClickSelectWordThenLine(t *testing.T) {
 	m.now = func() time.Time { return now }
 	top := m.transcriptSelectionTop()
 	click := func() {
-		_, _ = m.Update(tea.MouseMsg{X: 7, Y: top, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-		_, _ = m.Update(tea.MouseMsg{X: 7, Y: top, Button: tea.MouseButtonNone, Action: tea.MouseActionRelease})
+		_, _ = m.Update(tea.MouseClickMsg{X: 7, Y: top, Button: tea.MouseLeft})
+		_, _ = m.Update(tea.MouseReleaseMsg{X: 7, Y: top, Button: tea.MouseNone})
 		now = now.Add(100 * time.Millisecond)
 	}
 	click()
@@ -272,14 +272,14 @@ func TestRightClickContextMenuCopiesWithoutDisablingViewportMouse(t *testing.T) 
 		return nil
 	}
 
-	_, cmd := m.Update(tea.MouseMsg{X: 2, Y: m.transcriptSelectionTop(), Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+	_, cmd := m.Update(tea.MouseClickMsg{X: 2, Y: m.transcriptSelectionTop(), Button: tea.MouseRight})
 	if cmd != nil || !m.transcriptSelectionMenu.open {
 		t.Fatalf("right-click context menu: cmd=%v open=%v", cmd != nil, m.transcriptSelectionMenu.open)
 	}
 	if want := transcriptSelectionBlockWidth(transcriptSelectionContextMenuView()); m.transcriptSelectionMenu.width != want || want > 24 {
 		t.Fatalf("context menu width=%d want=%d and <=24", m.transcriptSelectionMenu.width, want)
 	}
-	rendered := m.View()
+	rendered := m.viewContent()
 	if !strings.Contains(stripANSI(rendered), "Copy selection") {
 		t.Fatal("right-click context menu was not rendered")
 	}
@@ -295,7 +295,7 @@ func TestRightClickContextMenuCopiesWithoutDisablingViewportMouse(t *testing.T) 
 		t.Fatal("right-click cleared the current transcript selection")
 	}
 	menu := m.transcriptSelectionMenu
-	_, cmd = m.Update(tea.MouseMsg{X: menu.x + 1, Y: menu.y + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	_, cmd = m.Update(tea.MouseClickMsg{X: menu.x + 1, Y: menu.y + 1, Button: tea.MouseLeft})
 	if cmd == nil || m.transcriptSelectionMenu.open {
 		t.Fatalf("context-menu copy click: cmd=%v open=%v", cmd != nil, m.transcriptSelectionMenu.open)
 	}
@@ -303,14 +303,14 @@ func TestRightClickContextMenuCopiesWithoutDisablingViewportMouse(t *testing.T) 
 	if copied != "sele" {
 		t.Fatalf("context-menu copied %q, want %q", copied, "sele")
 	}
-	_, _ = m.Update(tea.MouseMsg{X: 2, Y: m.transcriptSelectionTop(), Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
-	before := m.transcript.YOffset
-	_, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	_, _ = m.Update(tea.MouseClickMsg{X: 2, Y: m.transcriptSelectionTop(), Button: tea.MouseRight})
+	before := m.transcript.YOffset()
+	_, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	if m.transcriptSelectionMenu.open {
 		t.Fatal("wheel did not dismiss the transcript context menu")
 	}
-	if m.transcript.YOffset <= before {
-		t.Fatalf("wheel offset=%d want > %d after right-click copy", m.transcript.YOffset, before)
+	if m.transcript.YOffset() <= before {
+		t.Fatalf("wheel offset=%d want > %d after right-click copy", m.transcript.YOffset(), before)
 	}
 }
 
@@ -322,7 +322,7 @@ func TestTranscriptContextMenuFitsNarrowFrame(t *testing.T) {
 	m.transcriptSelection.anchor = &transcriptSelectionPoint{row: 0, col: 0}
 	m.transcriptSelection.focus = &transcriptSelectionPoint{row: 0, col: 3}
 
-	_, _ = m.Update(tea.MouseMsg{X: 2, Y: m.transcriptSelectionTop(), Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+	_, _ = m.Update(tea.MouseClickMsg{X: 2, Y: m.transcriptSelectionTop(), Button: tea.MouseRight})
 	if !m.transcriptSelectionMenu.open {
 		t.Fatal("context menu did not open")
 	}
@@ -330,7 +330,7 @@ func TestTranscriptContextMenuFitsNarrowFrame(t *testing.T) {
 	if width := m.transcriptSelectionMenu.width; width > frameWidth {
 		t.Fatalf("context menu width=%d exceeds narrow frame=%d", width, frameWidth)
 	}
-	for row, line := range strings.Split(m.View(), "\n") {
+	for row, line := range strings.Split(m.viewContent(), "\n") {
 		if width := xansi.StringWidth(line); width > frameWidth {
 			t.Fatalf("context menu widened narrow frame row %d to %d cells (frame=%d)", row, width, frameWidth)
 		}
@@ -348,13 +348,13 @@ func TestTranscriptContextMenuKeyboardCopyAndDismiss(t *testing.T) {
 	}
 
 	open := func() {
-		_, _ = m.Update(tea.MouseMsg{X: 1, Y: m.transcriptSelectionTop(), Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+		_, _ = m.Update(tea.MouseClickMsg{X: 1, Y: m.transcriptSelectionTop(), Button: tea.MouseRight})
 		if !m.transcriptSelectionMenu.open {
 			t.Fatal("context menu did not open")
 		}
 	}
 	open()
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil || m.transcriptSelectionMenu.open {
 		t.Fatalf("Enter copy: cmd=%v open=%v", cmd != nil, m.transcriptSelectionMenu.open)
 	}
@@ -364,7 +364,7 @@ func TestTranscriptContextMenuKeyboardCopyAndDismiss(t *testing.T) {
 	}
 
 	open()
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cmd != nil || m.transcriptSelectionMenu.open {
 		t.Fatalf("Escape dismiss: cmd=%v open=%v", cmd != nil, m.transcriptSelectionMenu.open)
 	}
@@ -385,7 +385,7 @@ func TestTranscriptCopyFallsBackToOSC52WhenHostClipboardFails(t *testing.T) {
 func TestRightClickOverFleetKeepsViewportMouseEnabled(t *testing.T) {
 	m := newTranscriptSelectionTestModel(t, []string{"fleet"})
 	m.subagentFleetOpen = true
-	_, cmd := m.Update(tea.MouseMsg{Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+	_, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseRight})
 	if cmd != nil || !m.app.Cfg.TUI.Mouse {
 		t.Fatalf("fleet right-click changed mouse mode: cmd=%v mouse=%v", cmd != nil, m.app.Cfg.TUI.Mouse)
 	}
@@ -393,7 +393,7 @@ func TestRightClickOverFleetKeepsViewportMouseEnabled(t *testing.T) {
 
 func TestNonRightMouseEventsKeepAppMouseEnabled(t *testing.T) {
 	m := newTranscriptSelectionTestModel(t, []string{"wheel"})
-	_, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	_, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	if !m.app.Cfg.TUI.Mouse {
 		t.Fatal("wheel unexpectedly disabled app mouse")
 	}
@@ -407,8 +407,8 @@ func TestF6ClearsAppSelectionCatchesUpAndRestoresNativeMode(t *testing.T) {
 	frozen := m.transcriptContent
 	m.assistantBuf.WriteString("caught up after F6")
 	m.transcriptDirty = true
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyF6})
-	if cmd == nil || m.app.Cfg.TUI.Mouse {
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyF6})
+	if cmd != nil || m.View().MouseMode != tea.MouseModeNone || m.app.Cfg.TUI.Mouse {
 		t.Fatalf("F6 did not disable app mouse mode: cmd=%v mouse=%v", cmd != nil, m.app.Cfg.TUI.Mouse)
 	}
 	if _, ok := m.transcriptSelectionBounds(); ok {

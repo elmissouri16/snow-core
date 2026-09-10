@@ -3,7 +3,7 @@ package tui
 import (
 	"slices"
 
-	"github.com/charmbracelet/bubbles/key"
+	"charm.land/bubbles/v2/key"
 	"github.com/elmissouri16/snow-core/internal/config"
 )
 

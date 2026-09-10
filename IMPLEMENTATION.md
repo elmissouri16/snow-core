@@ -1331,7 +1331,12 @@ ambiguous input routing. See
 
 ## TUI and surfaces
 
-The Bubble Tea TUI is the interactive default. It renders a transcript with
+The Bubble Tea v2 TUI is the interactive default. Declarative `tea.View` state
+owns alternate screen, focus reporting, and mouse capture; the v2 decoder and
+renderer negotiate enhanced keyboard, synchronized output, and Unicode widths.
+Bubbles v2 textareas use virtual cursors, and Lip Gloss v2 styles share the
+existing bounded geometry. Core and public SDK packages remain UI-independent.
+The TUI renders a transcript with
 markdown, streaming updates, model/provider pickers, model-aware `/thinking`
 effort selection, login/logout, permissions, sessions, slash completion, and
 `@` file mentions. A leading `$` autocompletes enabled Agent Skills. Strict

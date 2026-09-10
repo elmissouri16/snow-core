@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/auth"
@@ -97,7 +97,7 @@ func TestSettingsPanelNavigationAndSessionPermission(t *testing.T) {
 		}
 	}
 	m.layout()
-	fullView := stripANSI(m.View())
+	fullView := stripANSI(m.viewContent())
 	if got := m.managedFrameHeight(); got != m.height {
 		t.Fatalf("inline settings frame height=%d want terminal height %d", got, m.height)
 	}
@@ -108,16 +108,16 @@ func TestSettingsPanelNavigationAndSessionPermission(t *testing.T) {
 	}
 
 	// The model row reuses the model picker, and Esc returns to settings.
-	_, _ = m.handleSettingsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleSettingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pickModel || m.pickSettings {
 		t.Fatalf("model handoff = picker:%v settings:%v", m.pickModel, m.pickSettings)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !m.pickSettings || m.pickModel {
 		t.Fatalf("model return = picker:%v settings:%v", m.pickModel, m.pickSettings)
 	}
-	_, _ = m.handleSettingsKey(tea.KeyMsg{Type: tea.KeyEnter})
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleSettingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pickSettings || m.pickModel || m.settingsError != "" {
 		t.Fatalf("model selection return = picker:%v settings:%v error:%q", m.pickModel, m.pickSettings, m.settingsError)
 	}
@@ -255,14 +255,14 @@ func TestSettingsSaveFailureRollsBackAndStaysOpen(t *testing.T) {
 
 	oldModel := m.app.Agent.Model()
 	m.settingsIndex = settingsModel
-	_, _ = m.handleSettingsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleSettingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(m.modelList) < 2 {
 		t.Fatalf("chatgpt model catalog too small for rollback test: %d", len(m.modelList))
 	}
 	m.modelIndex = (m.modelIndex + 1) % len(m.modelList)
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.pickThinking {
-		_, _ = m.handleThinkingPick(tea.KeyMsg{Type: tea.KeyEnter})
+		_, _ = m.handleThinkingPick(tea.KeyPressMsg{Code: tea.KeyEnter})
 	}
 	if !m.pickSettings || m.settingsError == "" {
 		t.Fatalf("failed model save panel=%v error=%q", m.pickSettings, m.settingsError)

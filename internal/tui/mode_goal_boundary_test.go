@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/agent"
 	"github.com/elmissouri16/snow-core/internal/app"
@@ -146,7 +146,7 @@ func TestQueuedModeSwitchAtRealGoalBoundaryStopsAndConditionallyResumes(t *testi
 	a.ContinueGoal()
 	first := waitBoundaryCall(t, provider, 0)
 	m.busy = true
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	if m.pendingMode == nil || *m.pendingMode != protocol.ModePlan {
 		t.Fatalf("pending=%v", m.pendingMode)
 	}
@@ -175,7 +175,7 @@ func TestQueuedModeSwitchAtRealGoalBoundaryStopsAndConditionallyResumes(t *testi
 	for len(provider.started) > 0 {
 		<-provider.started
 	}
-	_, resumeCmd := m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	_, resumeCmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	applyModeToggleCommand(t, m, resumeCmd)
 	resumedCall := waitBoundaryCall(t, provider, callsInPlan)
 	if a.Mode() != protocol.ModeDefault {
@@ -194,7 +194,7 @@ func TestQueuedModeSwitchAtRealGoalBoundaryStopsAndConditionallyResumes(t *testi
 	m.pendingMode = nil
 	m.modeSwitching = false
 	callsWhilePaused := provider.callCount()
-	_, pausedCmd := m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	_, pausedCmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	applyModeToggleCommand(t, m, pausedCmd)
 	time.Sleep(75 * time.Millisecond)
 	if got := provider.callCount(); got != callsWhilePaused {

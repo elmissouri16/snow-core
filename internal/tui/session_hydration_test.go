@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -566,14 +566,14 @@ func TestModelAbortOnCtrlC(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.busy = true
-	_, quit := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, quit := m.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if quit != nil {
 		t.Fatal("ctrl+c while busy should abort, not quit")
 	}
 	// busy is cleared when the EvAborted event arrives from the agent; a
 	// second ctrl+c while idle should quit.
 	m.busy = false
-	_, quit = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, quit = m.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if quit == nil {
 		t.Fatal("ctrl+c while idle should quit")
 	}
@@ -589,7 +589,7 @@ func TestModelAbortOnEscDuringActiveRun(t *testing.T) {
 	m.cancelRun = cancel
 	m.layout()
 
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cmd != nil {
 		t.Fatal("esc while running returned an unexpected command")
 	}

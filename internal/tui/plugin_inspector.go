@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -278,42 +278,42 @@ func (m *Model) renderPluginInspectorList() string {
 	return renderPickerCard(fitFrame(strings.Join(parts, "\n"), width, g.innerHeight), g)
 }
 
-func (m *Model) handlePluginInspectorKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+func (m *Model) handlePluginInspectorKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	p := m.plugins.inspector
 	if !p.detail {
 		matches := p.matches()
 		last := max(0, len(matches)-1)
 		p.index = min(max(0, p.index), last)
-		switch msg.Type {
-		case tea.KeyEsc:
+		switch {
+		case msg.Code == tea.KeyEscape:
 			m.plugins.screen = ""
-		case tea.KeyUp, tea.KeyShiftTab:
+		case msg.Code == tea.KeyUp, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 			p.index = max(0, p.index-1)
-		case tea.KeyDown, tea.KeyTab:
+		case msg.Code == tea.KeyDown, msg.Code == tea.KeyTab:
 			p.index = min(last, p.index+1)
-		case tea.KeyPgUp:
+		case msg.Code == tea.KeyPgUp:
 			p.index = max(0, p.index-m.pluginInspectorListGeometry().listHeight)
-		case tea.KeyPgDown:
+		case msg.Code == tea.KeyPgDown:
 			p.index = min(last, p.index+m.pluginInspectorListGeometry().listHeight)
-		case tea.KeyHome:
+		case msg.Code == tea.KeyHome:
 			p.index = 0
-		case tea.KeyEnd:
+		case msg.Code == tea.KeyEnd:
 			p.index = last
-		case tea.KeyEnter:
+		case msg.Code == tea.KeyEnter:
 			if len(matches) > 0 {
 				p.detail = true
 				m.plugins.selected, m.plugins.scroll = 0, 0
 				m.updatePluginInspectorView()
 			}
-		case tea.KeyBackspace, tea.KeyDelete:
+		case msg.Code == tea.KeyBackspace, msg.Code == tea.KeyDelete:
 			query := []rune(p.query)
 			p.query = string(query[:max(0, len(query)-1)])
 			p.index = 0
-		case tea.KeyCtrlU:
+		case msg.Code == 'u' && msg.Mod.Contains(tea.ModCtrl):
 			p.query, p.index = "", 0
-		case tea.KeyRunes, tea.KeySpace:
-			text := string(msg.Runes)
-			if msg.Type == tea.KeySpace {
+		case msg.Text != "", msg.Code == tea.KeySpace:
+			text := msg.Text
+			if msg.Code == tea.KeySpace {
 				text = " "
 			}
 			query := []rune(p.query + sanitizeTerminalLine(text))
@@ -326,32 +326,32 @@ func (m *Model) handlePluginInspectorKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	layout := m.pluginScreenLayout(*view)
 	m.plugins.scroll, m.plugins.selected = layout.offset, layout.selected
 	count := len(layout.actions)
-	switch msg.Type {
-	case tea.KeyEsc:
+	switch {
+	case msg.Code == tea.KeyEscape:
 		p.detail = false
 		m.plugins.selected, m.plugins.scroll = 0, 0
 		m.updatePluginInspectorView()
-	case tea.KeyUp, tea.KeyShiftTab:
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		if count > 0 {
 			m.plugins.selected = (m.plugins.selected + count - 1) % count
 		} else {
 			m.plugins.scroll = max(0, m.plugins.scroll-1)
 		}
-	case tea.KeyDown, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyTab:
 		if count > 0 {
 			m.plugins.selected = (m.plugins.selected + 1) % count
 		} else {
 			m.plugins.scroll = min(layout.limit, m.plugins.scroll+1)
 		}
-	case tea.KeyPgUp:
+	case msg.Code == tea.KeyPgUp:
 		m.plugins.scroll = max(0, m.plugins.scroll-layout.bodyHeight)
-	case tea.KeyPgDown:
+	case msg.Code == tea.KeyPgDown:
 		m.plugins.scroll = min(layout.limit, m.plugins.scroll+layout.bodyHeight)
-	case tea.KeyHome:
+	case msg.Code == tea.KeyHome:
 		m.plugins.selected, m.plugins.scroll = 0, 0
-	case tea.KeyEnd:
+	case msg.Code == tea.KeyEnd:
 		m.plugins.selected, m.plugins.scroll = max(0, count-1), layout.limit
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		if count > 0 && !m.plugins.managementPending {
 			return true, m.runPluginInspectorAction(layout.actions[m.plugins.selected].Action)
 		}

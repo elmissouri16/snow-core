@@ -1,8 +1,8 @@
 package tui
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"context"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 	"testing"
@@ -29,7 +29,7 @@ func TestTUIGoalCommandsAndReplacementConfirmation(t *testing.T) {
 	if !m.confirmGoalReplace {
 		t.Fatal("replacement confirmation not shown")
 	}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.goal == nil || m.goal.Objective != "second objective" {
 		t.Fatalf("goal=%+v", m.goal)
 	}

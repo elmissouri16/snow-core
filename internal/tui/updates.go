@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 )
@@ -287,14 +287,14 @@ func (m *Model) updateOfferVisible() bool {
 		!m.anyUpdateBlockingModalVisible()
 }
 
-func (m *Model) handleUpdateOfferKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleUpdateOfferKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab, tea.KeyDown, tea.KeyRight, tea.KeyTab:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyLeft, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift), msg.Code == tea.KeyDown, msg.Code == tea.KeyRight, msg.Code == tea.KeyTab:
 		m.updateOfferChoice = (m.updateOfferChoice + 1) % 2
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		m.dismissUpdateOffer()
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		if m.updateOfferChoice == 1 {
 			m.dismissUpdateOffer()
 			return m, nil
@@ -356,16 +356,16 @@ func (m *Model) restartPromptVisible() bool {
 		!m.anyUpdateBlockingModalVisible()
 }
 
-func (m *Model) handleRestartPromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleRestartPromptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyLeft, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		m.restartChoice = (m.restartChoice + 1) % 2
-	case tea.KeyDown, tea.KeyRight, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyRight, msg.Code == tea.KeyTab:
 		m.restartChoice = (m.restartChoice + 1) % 2
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		m.dismissRestartPrompt()
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		if m.restartChoice == 1 {
 			m.dismissRestartPrompt()
 			return m, nil

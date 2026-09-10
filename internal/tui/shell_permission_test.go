@@ -19,7 +19,7 @@ func TestManagedShellPermissionDisplaysHostAuthorityAndCommand(t *testing.T) {
 	event.Permission.Request.Unknown = true
 	event.Permission.Request.Rememberable = false
 	m.handleAgentEvent(event)
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	for _, want := range []string{"npm run dev", "unrestricted host process", "Allow once", "Deny"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("managed-process approval omitted %q", want)

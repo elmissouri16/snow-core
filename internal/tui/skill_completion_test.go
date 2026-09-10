@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/skills"
@@ -69,7 +69,7 @@ func TestModelSkillCompletionInsertsInlineReferences(t *testing.T) {
 	if picker := stripANSI(m.renderSkillCompletionPicker()); !strings.Contains(picker, "$review") || !strings.Contains(picker, "Review code carefully") {
 		t.Fatalf("skill picker rendering = %q", picker)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got := m.editor.Value(); got != "Use $review " {
 		t.Fatalf("editor after skill completion = %q", got)
 	}
@@ -82,7 +82,7 @@ func TestModelSkillCompletionInsertsInlineReferences(t *testing.T) {
 	if !m.skillVisible || len(m.skillMatches) != 1 || m.skillMatches[0].Name != "docs" {
 		t.Fatalf("second reference picker = visible %v matches %+v", m.skillVisible, m.skillMatches)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.editor.Value(); got != "Use $review with $docs " {
 		t.Fatalf("editor after second skill completion = %q", got)
 	}

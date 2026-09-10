@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -39,7 +39,7 @@ func fleetTestModel(t *testing.T) *Model {
 
 func TestSubagentFleetOpenRenderNavigateAndClose(t *testing.T) {
 	m := fleetTestModel(t)
-	rendered := m.View()
+	rendered := m.viewContent()
 	view := stripANSI(rendered)
 	if got := strings.Count(rendered, "\n") + 1; got != m.height {
 		t.Fatalf("fleet frame height=%d want=%d", got, m.height)
@@ -49,20 +49,20 @@ func TestSubagentFleetOpenRenderNavigateAndClose(t *testing.T) {
 			t.Fatalf("fleet view missing %q:\n%s", want, view)
 		}
 	}
-	_, cmd := m.handleSubagentFleetKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	_, cmd := m.handleSubagentFleetKey(tea.KeyPressMsg{Text: string('j'), Code: 'j'})
 	if m.subagentFleetIndex != 1 || cmd == nil {
 		t.Fatalf("j navigation: index=%d cmd=%v", m.subagentFleetIndex, cmd != nil)
 	}
 	m.subagentFleetDetailOffset = 20
-	_, _ = m.handleSubagentFleetKey(tea.KeyMsg{Type: tea.KeyHome})
+	_, _ = m.handleSubagentFleetKey(tea.KeyPressMsg{Code: tea.KeyHome})
 	if m.subagentFleetDetailOffset != 0 {
 		t.Fatalf("home offset=%d", m.subagentFleetDetailOffset)
 	}
-	_, _ = m.handleSubagentFleetKey(tea.KeyMsg{Type: tea.KeyEnd})
+	_, _ = m.handleSubagentFleetKey(tea.KeyPressMsg{Code: tea.KeyEnd})
 	if !m.subagentFleetDetailEnd {
 		t.Fatal("end did not select detail tail")
 	}
-	_, _ = m.handleSubagentFleetKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleSubagentFleetKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.subagentFleetOpen {
 		t.Fatal("Esc did not close fleet")
 	}
@@ -92,14 +92,14 @@ func TestSubagentFleetWheelScrollsVisibleDetail(t *testing.T) {
 			m.transcriptDirty = true
 			m.refreshTranscript()
 			m.transcript.SetYOffset(5)
-			rootOffset := m.transcript.YOffset
+			rootOffset := m.transcript.YOffset()
 			maxOffset := max(0, m.subagentFleetDetailLineCount()-m.subagentFleetDetailPageSize())
 			if maxOffset == 0 {
 				t.Fatal("test detail is not scrollable")
 			}
 			before := stripANSI(m.renderSubagentFleetModal())
 
-			_, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+			_, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 			afterUp := stripANSI(m.renderSubagentFleetModal())
 			if m.subagentFleetDetailEnd || m.subagentFleetDetailOffset >= maxOffset {
 				t.Fatalf("wheel up did not leave fleet tail: offset=%d max=%d end=%v", m.subagentFleetDetailOffset, maxOffset, m.subagentFleetDetailEnd)
@@ -107,11 +107,11 @@ func TestSubagentFleetWheelScrollsVisibleDetail(t *testing.T) {
 			if afterUp == before {
 				t.Fatal("wheel up changed state without moving visible fleet detail")
 			}
-			if m.transcript.YOffset != rootOffset {
-				t.Fatalf("fleet wheel moved root transcript: got=%d want=%d", m.transcript.YOffset, rootOffset)
+			if m.transcript.YOffset() != rootOffset {
+				t.Fatalf("fleet wheel moved root transcript: got=%d want=%d", m.transcript.YOffset(), rootOffset)
 			}
 
-			_, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+			_, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 			if !m.subagentFleetDetailEnd || m.subagentFleetDetailOffset != maxOffset {
 				t.Fatalf("wheel down did not restore fleet tail: offset=%d max=%d end=%v", m.subagentFleetDetailOffset, maxOffset, m.subagentFleetDetailEnd)
 			}
@@ -129,7 +129,7 @@ func TestSubagentFleetPageDownAtTailStaysAtTail(t *testing.T) {
 	}
 	m.subagentFleetDetailOffset = 0
 	m.subagentFleetDetailEnd = true
-	_, _ = m.handleSubagentFleetKey(tea.KeyMsg{Type: tea.KeyPgDown})
+	_, _ = m.handleSubagentFleetKey(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	want := max(0, m.subagentFleetDetailLineCount()-m.subagentFleetDetailPageSize())
 	if !m.subagentFleetDetailEnd || m.subagentFleetDetailOffset != want {
 		t.Fatalf("PgDown moved tail to stale offset: offset=%d want=%d end=%v", m.subagentFleetDetailOffset, want, m.subagentFleetDetailEnd)
@@ -139,11 +139,11 @@ func TestSubagentFleetPageDownAtTailStaysAtTail(t *testing.T) {
 func TestSubagentFleetBlockingHostOverlayKeepsPrecedence(t *testing.T) {
 	m := fleetTestModel(t)
 	m.handleAgentEvent(permRequestEvent("bash"))
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	if !strings.Contains(view, "Allow this scope") || !strings.Contains(view, "bash") || strings.Contains(view, "Subagent fleet inspector") {
 		t.Fatalf("permission did not preempt fleet:\n%s", view)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.permChoice != 1 || m.subagentFleetIndex != 0 {
 		t.Fatalf("key precedence: permission=%d fleet=%d", m.permChoice, m.subagentFleetIndex)
 	}
@@ -152,7 +152,7 @@ func TestSubagentFleetBlockingHostOverlayKeepsPrecedence(t *testing.T) {
 func TestSubagentFleetNarrowFallback(t *testing.T) {
 	m := fleetTestModel(t)
 	m.width, m.height = 64, 24
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	for _, want := range []string{"Subagent fleet inspector", "/root/one", "Conversation", "Live activity"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("narrow fleet missing %q:\n%s", want, view)
@@ -309,12 +309,12 @@ func TestFleetShortcutsOpenAndSwitchInspectors(t *testing.T) {
 	m.app = a
 	m.busy = true
 
-	altA := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}, Alt: true}
+	altA := tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt}
 	_, cmd := m.handleKey(altA)
 	if !m.subagentFleetOpen || m.processFleetOpen || cmd == nil {
 		t.Fatalf("alt+a: agents=%v processes=%v cmd=%v", m.subagentFleetOpen, m.processFleetOpen, cmd != nil)
 	}
-	altP := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}, Alt: true}
+	altP := tea.KeyPressMsg{Code: 'p', Mod: tea.ModAlt}
 	_, cmd = m.handleKey(altP)
 	if m.subagentFleetOpen || !m.processFleetOpen || cmd == nil {
 		t.Fatalf("alt+p: agents=%v processes=%v cmd=%v", m.subagentFleetOpen, m.processFleetOpen, cmd != nil)

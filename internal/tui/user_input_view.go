@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -134,7 +134,7 @@ func (m *Model) renderUserInput() string {
 		answer = m.userInputEditor.View()
 		if layout.answerHeight >= 3 {
 			answer = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).
-				Width(max(1, width-4)).Render(answer)
+				Width(max(1, width-4) + 2).Render(answer)
 		}
 		answer = lipgloss.NewStyle().Padding(0, 1).Render(answer)
 	} else {

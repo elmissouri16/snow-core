@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -136,9 +136,9 @@ func (m *Model) handlePluginUI(request pluginUIRequest) tea.Cmd {
 				clear(p.cache)
 				// Every message can produce a frame before the coalesced refresh.
 				// Keep its geometry current even when existing content grows/shrinks.
-				width, height := m.transcript.Width, m.transcript.Height
+				width, height := m.transcript.Width(), m.transcript.Height()
 				m.layout()
-				if width != m.transcript.Width || height != m.transcript.Height || top != m.transcriptSelectionTop() {
+				if width != m.transcript.Width() || height != m.transcript.Height() || top != m.transcriptSelectionTop() {
 					m.clearTranscriptSelection()
 					m.refreshTranscriptForced()
 				}
@@ -256,7 +256,7 @@ func (m *Model) pluginScreenView() *protocol.PluginView {
 	}
 	return nil
 }
-func (m *Model) handlePluginKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+func (m *Model) handlePluginKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	if m.plugins == nil {
 		return false, nil
 	}
@@ -267,8 +267,8 @@ func (m *Model) handlePluginKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		actions := pluginActions(view.Content)
 		layout := m.pluginScreenLayout(*view)
 		m.plugins.scroll, m.plugins.selected = layout.offset, layout.selected
-		switch msg.Type {
-		case tea.KeyEsc:
+		switch {
+		case msg.Code == tea.KeyEscape:
 			if p := m.plugins.inspector; p != nil && p.returnView == view.ID {
 				p.returnView = ""
 				m.plugins.screen = "snow:plugins"
@@ -277,27 +277,27 @@ func (m *Model) handlePluginKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			}
 			m.plugins.screen = ""
 			return true, nil
-		case tea.KeyUp:
+		case msg.Code == tea.KeyUp:
 			m.plugins.scroll = max(0, m.plugins.scroll-1)
-		case tea.KeyDown:
+		case msg.Code == tea.KeyDown:
 			m.plugins.scroll = min(layout.limit, m.plugins.scroll+1)
-		case tea.KeyPgUp:
+		case msg.Code == tea.KeyPgUp:
 			m.plugins.scroll = max(0, m.plugins.scroll-layout.bodyHeight)
-		case tea.KeyPgDown:
+		case msg.Code == tea.KeyPgDown:
 			m.plugins.scroll = min(layout.limit, m.plugins.scroll+layout.bodyHeight)
-		case tea.KeyHome:
+		case msg.Code == tea.KeyHome:
 			m.plugins.scroll = 0
-		case tea.KeyEnd:
+		case msg.Code == tea.KeyEnd:
 			m.plugins.scroll = layout.limit
-		case tea.KeyTab:
+		case msg.Code == tea.KeyTab && !msg.Mod.Contains(tea.ModShift):
 			if len(actions) > 0 {
 				m.plugins.selected = (m.plugins.selected + 1) % len(actions)
 			}
-		case tea.KeyShiftTab:
+		case msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 			if len(actions) > 0 {
 				m.plugins.selected = (m.plugins.selected + len(actions) - 1) % len(actions)
 			}
-		case tea.KeyEnter:
+		case msg.Code == tea.KeyEnter:
 			if len(actions) > 0 {
 				action := actions[m.plugins.selected%len(actions)]
 				name := action.Action

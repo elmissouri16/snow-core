@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -20,9 +20,9 @@ func TestComposerInputHistoryNavigatesAndRestoresDraft(t *testing.T) {
 	m.resetInputHistoryNavigation()
 	m.editor.SetValue("current draft")
 
-	assertHistoryKey := func(key tea.KeyType, want string) {
+	assertHistoryKey := func(key rune, want string) {
 		t.Helper()
-		_, _ = m.handleKey(tea.KeyMsg{Type: key})
+		_, _ = m.handleKey(tea.KeyPressMsg{Code: key})
 		if got := m.editor.Value(); got != want {
 			t.Fatalf("after %v editor = %q, want %q", key, got, want)
 		}
@@ -49,7 +49,7 @@ func TestComposerInputHistoryLeavesMultilineDraftNavigationToTextarea(t *testing
 	m.editor.SetValue("line one\nline two")
 	beforeIndex := m.inputHistoryIndex
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	if got := m.editor.Value(); got != "line one\nline two" {
 		t.Fatalf("multiline draft was replaced by history: %q", got)
 	}
@@ -65,11 +65,11 @@ func TestComposerInputHistoryEditingEndsNavigation(t *testing.T) {
 	m.inputHistory = []string{"older", "latest"}
 	m.resetInputHistoryNavigation()
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.inputHistoryIndex != 1 {
 		t.Fatalf("history index = %d, want 1", m.inputHistoryIndex)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")})
+	_, _ = m.handleKey(tea.KeyPressMsg{Text: "!", Code: '!'})
 	if m.inputHistoryIndex != len(m.inputHistory) {
 		t.Fatalf("editing recalled input left history navigation active at %d", m.inputHistoryIndex)
 	}

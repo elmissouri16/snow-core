@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -66,8 +66,8 @@ func (m *Model) resetInputHistoryNavigation() {
 // composer. Up starts browsing from an empty or single-line draft; multiline
 // drafts retain textarea arrow navigation. Once browsing starts, Up and Down
 // traverse every entry and Down past the newest entry restores the saved draft.
-func (m *Model) navigateInputHistory(msg tea.KeyMsg) (bool, tea.Cmd) {
-	if msg.Type != tea.KeyUp && msg.Type != tea.KeyDown {
+func (m *Model) navigateInputHistory(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+	if msg.Code != tea.KeyUp && msg.Code != tea.KeyDown {
 		return false, nil
 	}
 	if len(m.promptImages) > 0 || len(m.pastedTexts) > 0 {
@@ -75,7 +75,7 @@ func (m *Model) navigateInputHistory(msg tea.KeyMsg) (bool, tea.Cmd) {
 	}
 
 	browsing := m.inputHistoryIndex >= 0 && m.inputHistoryIndex < len(m.inputHistory)
-	if msg.Type == tea.KeyUp {
+	if msg.Code == tea.KeyUp {
 		if len(m.inputHistory) == 0 {
 			return false, nil
 		}

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -80,7 +80,7 @@ func TestPluginDialogSurvivesUnrelatedTurnEvents(t *testing.T) {
 func TestPluginDialogCtrlCReleasesRequest(t *testing.T) {
 	m, done := startPluginDialog(t)
 	wait := m.waitUserInputSettlement()
-	m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	select {
 	case result := <-done:
 		if result.err == nil {
@@ -117,7 +117,7 @@ func TestPluginInputOutsideCommandCtrlCDeclinesWithoutQuitting(t *testing.T) {
 	m, done := startPluginDialog(t)
 	// Settings and readiness dialogs can use the broker without a TUI command.
 	clear(m.plugins.running)
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd != nil || m.userInputPending {
 		t.Fatal("Ctrl+C did not decline the standalone plugin input")
 	}
@@ -134,14 +134,14 @@ func TestPluginInputOutsideCommandCtrlCDeclinesWithoutQuitting(t *testing.T) {
 func TestPluginDialogDoesNotPrintGenericAnswerReceipt(t *testing.T) {
 	m, done := startPluginDialog(t)
 	m.userInputEditor.SetValue("A note")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	select {
 	case result := <-done:
 		m.finishPluginCommand(result)
 	case <-time.After(time.Second):
 		t.Fatal("answered command did not finish")
 	}
-	frame := stripANSI(m.View())
+	frame := stripANSI(m.viewContent())
 	if strings.Contains(frame, "question(s)") || !strings.Contains(frame, "A note") {
 		t.Fatalf("unexpected plugin feedback: %s", frame)
 	}
@@ -155,11 +155,11 @@ func TestPluginClosedChoicesDoNotOfferCustomAnswer(t *testing.T) {
 	if frame := stripANSI(m.renderUserInput()); strings.Contains(frame, "Other") || !strings.Contains(frame, "› No") {
 		t.Fatalf("confirmation choices: %s", frame)
 	}
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyUp})
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.userInputOption != 1 || m.userInputEditing {
 		t.Fatal("choice navigation reached a custom entry")
 	}
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyDown})
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.userInputOption != 0 {
 		t.Fatal("choice navigation did not wrap to No")
 	}
@@ -172,7 +172,7 @@ func TestPluginErrorResultIsVisibleWithoutContent(t *testing.T) {
 	m.width, m.height = 100, 30
 	m.plugins = &pluginUIState{running: map[string]bool{"failed:run": true}}
 	m.finishPluginCommand(pluginCommandDone{app: m.app, id: "failed:run", result: plugin.ToolResult{IsError: true}})
-	if !strings.Contains(stripANSI(m.View()), "failed:run: command failed") || m.plugins.running["failed:run"] {
+	if !strings.Contains(stripANSI(m.viewContent()), "failed:run: command failed") || m.plugins.running["failed:run"] {
 		t.Fatal("error result was presented as silent success")
 	}
 }
@@ -183,7 +183,7 @@ func TestPluginCompletionCannotRestorePreviousBranchUI(t *testing.T) {
 	m.plugins.views = []protocol.PluginView{{ID: "dialog:old", Placement: "screen", Content: &protocol.PluginNode{Type: "text", Text: "Old panel"}}}
 	m.plugins.screen = "dialog:old"
 	m.userInputEditor.SetValue("Old branch note")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	var result pluginCommandDone
 	select {
 	case result = <-done:
@@ -194,7 +194,7 @@ func TestPluginCompletionCannotRestorePreviousBranchUI(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.finishPluginCommand(result)
-	if m.plugins.screen != "" || strings.Contains(stripANSI(m.View()), "Old branch note") {
+	if m.plugins.screen != "" || strings.Contains(stripANSI(m.viewContent()), "Old branch note") {
 		t.Fatal("late command completion retained UI from the previous branch")
 	}
 }

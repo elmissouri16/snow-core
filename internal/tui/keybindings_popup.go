@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/elmissouri16/snow-core/internal/config"
 )
@@ -107,7 +107,7 @@ func (m *Model) closeKeybindings() {
 	}
 }
 
-func (m *Model) handleKeybindingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleKeybindingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.keybindingsCapture != keybindingCaptureNone {
 		m.captureKeybinding(msg)
 		return m, nil
@@ -116,16 +116,16 @@ func (m *Model) handleKeybindingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleKeybindingEditorKey(msg)
 	}
 	m.keybindingsError = ""
-	switch msg.Type {
-	case tea.KeyEsc:
+	switch {
+	case msg.Code == tea.KeyEscape:
 		m.closeKeybindings()
 		return m, nil
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		m.openKeybindingEditor()
 		return m, nil
-	case tea.KeyRunes:
-		if len(msg.Runes) == 1 {
-			switch msg.Runes[0] {
+	case msg.Text != "":
+		if len([]rune(msg.Text)) == 1 {
+			switch []rune(msg.Text)[0] {
 			case 'S':
 				m.toggleKeybindingScope()
 				return m, nil
@@ -136,18 +136,18 @@ func (m *Model) handleKeybindingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	msg = normalizePickerKeyWithMap(msg, m.keys)
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyShiftTab:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		m.keybindingsIndex = (m.keybindingsIndex - 1 + len(m.pluginKeybindingActions())) % len(m.pluginKeybindingActions())
-	case tea.KeyDown, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyTab:
 		m.keybindingsIndex = (m.keybindingsIndex + 1) % len(m.pluginKeybindingActions())
-	case tea.KeyPgUp:
+	case msg.Code == tea.KeyPgUp:
 		m.keybindingsIndex = max(0, m.keybindingsIndex-8)
-	case tea.KeyPgDown:
+	case msg.Code == tea.KeyPgDown:
 		m.keybindingsIndex = min(len(m.pluginKeybindingActions())-1, m.keybindingsIndex+8)
-	case tea.KeyHome:
+	case msg.Code == tea.KeyHome:
 		m.keybindingsIndex = 0
-	case tea.KeyEnd:
+	case msg.Code == tea.KeyEnd:
 		m.keybindingsIndex = len(m.pluginKeybindingActions()) - 1
 	}
 	return m, nil
@@ -165,33 +165,33 @@ func (m *Model) openKeybindingEditor() {
 	m.keybindingsError = ""
 }
 
-func (m *Model) handleKeybindingEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleKeybindingEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.keybindingsError = ""
 	rowCount := len(m.keybindingsDraft) + 2 // Replace all, Add key.
-	if msg.Type == tea.KeyCtrlS {
+	if msg.Code == 's' && msg.Mod.Contains(tea.ModCtrl) {
 		m.saveKeybindingDraft()
 		return m, nil
 	}
-	if msg.Type == tea.KeyEsc {
+	if msg.Code == tea.KeyEscape {
 		m.keybindingsEditing = false
 		m.keybindingsDraft = nil
 		m.keybindingsStatus = "changes discarded"
 		return m, nil
 	}
-	if msg.Type == tea.KeyBackspace || msg.Type == tea.KeyDelete {
+	if msg.Code == tea.KeyBackspace || msg.Code == tea.KeyDelete {
 		if m.keybindingsEditIndex < len(m.keybindingsDraft) {
 			m.keybindingsDraft = append(m.keybindingsDraft[:m.keybindingsEditIndex], m.keybindingsDraft[m.keybindingsEditIndex+1:]...)
 			m.keybindingsEditIndex = min(m.keybindingsEditIndex, len(m.keybindingsDraft)+1)
 		}
 		return m, nil
 	}
-	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == 'R' {
+	if msg.Text != "" && len([]rune(msg.Text)) == 1 && []rune(msg.Text)[0] == 'R' {
 		m.keybindingsDraft = m.inheritedKeybinding(m.selectedKeybindingAction().name)
 		m.keybindingsEditIndex = 0
 		m.keybindingsStatus = "draft reset to inherited/default keys"
 		return m, nil
 	}
-	if msg.Type == tea.KeyEnter {
+	if msg.Code == tea.KeyEnter {
 		switch {
 		case m.keybindingsEditIndex < len(m.keybindingsDraft):
 			m.keybindingsCapture = keybindingCaptureReplaceOne
@@ -204,20 +204,20 @@ func (m *Model) handleKeybindingEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	msg = normalizePickerKeyWithMap(msg, m.keys)
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyShiftTab:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		m.keybindingsEditIndex = (m.keybindingsEditIndex - 1 + rowCount) % rowCount
-	case tea.KeyDown, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyTab:
 		m.keybindingsEditIndex = (m.keybindingsEditIndex + 1) % rowCount
-	case tea.KeyHome:
+	case msg.Code == tea.KeyHome:
 		m.keybindingsEditIndex = 0
-	case tea.KeyEnd:
+	case msg.Code == tea.KeyEnd:
 		m.keybindingsEditIndex = rowCount - 1
 	}
 	return m, nil
 }
 
-func (m *Model) captureKeybinding(msg tea.KeyMsg) {
+func (m *Model) captureKeybinding(msg tea.KeyPressMsg) {
 	name, err := keyNameFromMessage(msg)
 	if err != nil {
 		m.keybindingsError = err.Error()
@@ -244,8 +244,8 @@ func (m *Model) captureKeybinding(msg tea.KeyMsg) {
 	m.keybindingsError = ""
 }
 
-func keyNameFromMessage(msg tea.KeyMsg) (string, error) {
-	if msg.Paste || msg.Type == tea.KeyRunes && len(msg.Runes) != 1 {
+func keyNameFromMessage(msg tea.KeyPressMsg) (string, error) {
+	if msg.Text != "" && len([]rune(msg.Text)) != 1 {
 		return "", fmt.Errorf("pasted or multi-rune input cannot be a shortcut")
 	}
 	name := strings.ToLower(strings.TrimSpace(msg.String()))

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 )
@@ -46,7 +46,7 @@ func TestAsyncSessionPickerCanCloseBeforeResult(t *testing.T) {
 	if cmd == nil || !m.sessionLoading || !m.pickSession {
 		t.Fatalf("session picker cmd=%v loading=%v picker=%v", cmd != nil, m.sessionLoading, m.pickSession)
 	}
-	_, _ = m.handleSessionPick(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleSessionPick(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.pickSession || m.sessionLoading {
 		t.Fatal("Esc did not close loading session picker")
 	}

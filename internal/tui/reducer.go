@@ -7,9 +7,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -89,26 +89,22 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.transcriptSelectionClipboard = ""
 		}
 		return m, nil
-	case tea.KeyMsg:
+	case tea.PasteMsg:
+		return m, m.handlePaste(msg)
+	case tea.KeyReleaseMsg, tea.PasteStartMsg, tea.PasteEndMsg:
+		return m, nil
+	case tea.KeyPressMsg:
 		if m.permPending || m.userInputPending {
 			m.closeTranscriptSelectionContextMenu()
-			if handled, cmd := m.normalizeTerminalKey(msg); handled {
-				m.layout()
-				return m, cmd
-			}
 			model, cmd := m.handleKey(msg)
 			m.layout()
 			return model, cmd
 		}
-		if m.pluginScreenView() != nil && msg.Type != tea.KeyCtrlC && msg.Type != tea.KeyCtrlD {
+		if m.pluginScreenView() != nil && !(msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl)) && !(msg.Code == 'd' && msg.Mod.Contains(tea.ModCtrl)) {
 			_, cmd := m.handlePluginKey(msg)
 			return m, cmd
 		}
 		if handled, cmd := m.applyTranscriptSelectionContextMenuKey(msg); handled {
-			return m, cmd
-		}
-		if handled, cmd := m.normalizeTerminalKey(msg); handled {
-			m.layout()
 			return m, cmd
 		}
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
@@ -512,13 +508,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.thinkingFlash = false
 			m.layout()
 		}
-	case clearMetaEnterMsg:
-		messages := m.expireTerminalInput(uint64(msg))
-		if len(messages) == 0 && uint64(msg) == m.metaEnterSeq {
-			m.metaEnterPending = false
-		}
-		m.replayTerminalMessages(messages, &cmds)
-		m.layout()
 	case mentionFilesMsg:
 		if msg.generation != m.mentionGeneration || m.app == nil || msg.cwd != m.app.CWD() {
 			return m, nil

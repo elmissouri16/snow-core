@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -13,11 +13,11 @@ func TestModelPickerCtrlRRefreshPreservesFilterAndSelection(t *testing.T) {
 	m := modelPickerTestModel(t, 100, 30)
 	_, _ = m.startModelPick()
 	m.modelQuery = m.app.Model.ID
-	_, cmd := m.handleModelPick(tea.KeyMsg{Type: tea.KeyCtrlR})
+	_, cmd := m.handleModelPick(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	if cmd == nil || !m.modelLoading || m.modelQuery != m.app.Model.ID {
 		t.Fatalf("refresh cmd=%v loading=%v query=%q", cmd != nil, m.modelLoading, m.modelQuery)
 	}
-	if _, duplicate := m.handleModelPick(tea.KeyMsg{Type: tea.KeyCtrlR}); duplicate != nil {
+	if _, duplicate := m.handleModelPick(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}); duplicate != nil {
 		t.Fatal("repeated Ctrl+R started concurrent refresh")
 	}
 	_, _ = m.Update(cmd())
@@ -28,7 +28,7 @@ func TestModelPickerCtrlRRefreshPreservesFilterAndSelection(t *testing.T) {
 	if !strings.Contains(stripANSI(m.renderModelModal()), "Ctrl+R refresh") {
 		t.Fatal("model picker does not advertise refresh")
 	}
-	_, cmd = m.handleModelPick(tea.KeyMsg{Type: tea.KeyCtrlR})
+	_, cmd = m.handleModelPick(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	m.clearModelPick()
 	_, _ = m.Update(cmd())
 	if m.pickModel {

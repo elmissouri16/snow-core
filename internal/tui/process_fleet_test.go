@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	managedprocess "github.com/elmissouri16/snow-core/internal/process"
@@ -34,7 +34,7 @@ func processFleetTestModel(t *testing.T) *Model {
 
 func TestProcessFleetRenderNavigateAndClose(t *testing.T) {
 	m := processFleetTestModel(t)
-	rendered := m.View()
+	rendered := m.viewContent()
 	plain := stripANSI(rendered)
 	if got := strings.Count(rendered, "\n") + 1; got != m.height {
 		t.Fatalf("process fleet frame height=%d want=%d", got, m.height)
@@ -47,11 +47,11 @@ func TestProcessFleetRenderNavigateAndClose(t *testing.T) {
 	if strings.Contains(rendered, "\x1b[31mraw escape") {
 		t.Fatal("raw process ANSI escape reached terminal output")
 	}
-	_, cmd := m.handleProcessFleetKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	_, cmd := m.handleProcessFleetKey(tea.KeyPressMsg{Text: string('j'), Code: 'j'})
 	if m.processFleetIndex != 1 || cmd == nil {
 		t.Fatalf("j navigation: index=%d cmd=%v", m.processFleetIndex, cmd != nil)
 	}
-	_, _ = m.handleProcessFleetKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleProcessFleetKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.processFleetOpen {
 		t.Fatal("Esc did not close process fleet")
 	}
@@ -71,7 +71,7 @@ func TestProcessesCommandOpensDuringActiveTurn(t *testing.T) {
 	m.closeProcessFleet()
 	m.busy = true
 	m.editor.SetValue("/processes")
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.processFleetOpen || cmd == nil {
 		t.Fatalf("busy process command: open=%v cmd=%v", m.processFleetOpen, cmd != nil)
 	}

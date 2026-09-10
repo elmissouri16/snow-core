@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 )
@@ -33,8 +33,8 @@ func TestTranscriptViewportCacheTracksContentScrollAndSize(t *testing.T) {
 
 	m.transcript.GotoTop()
 	top := m.transcriptViewportView()
-	if m.transcriptViewCacheOffset != m.transcript.YOffset || top == first {
-		t.Fatalf("scroll did not refresh viewport cache: offset=%d viewport=%d", m.transcriptViewCacheOffset, m.transcript.YOffset)
+	if m.transcriptViewCacheOffset != m.transcript.YOffset() || top == first {
+		t.Fatalf("scroll did not refresh viewport cache: offset=%d viewport=%d", m.transcriptViewCacheOffset, m.transcript.YOffset())
 	}
 
 	m.appendTranscriptLine("new cached content sentinel")
@@ -54,13 +54,13 @@ func TestTranscriptViewportCacheTracksContentScrollAndSize(t *testing.T) {
 	m.layout()
 	m.refreshTranscriptForced()
 	_ = m.transcriptViewportView()
-	if m.transcriptViewCacheWidth != m.transcript.Width || m.transcriptViewCacheHeight != m.transcript.Height {
-		t.Fatalf("resize cache dimensions=(%d,%d) viewport=(%d,%d)", m.transcriptViewCacheWidth, m.transcriptViewCacheHeight, m.transcript.Width, m.transcript.Height)
+	if m.transcriptViewCacheWidth != m.transcript.Width() || m.transcriptViewCacheHeight != m.transcript.Height() {
+		t.Fatalf("resize cache dimensions=(%d,%d) viewport=(%d,%d)", m.transcriptViewCacheWidth, m.transcriptViewCacheHeight, m.transcript.Width(), m.transcript.Height())
 	}
 }
 
 func TestTranscriptViewportCacheDoesNotRetainOversizedView(t *testing.T) {
-	m := &Model{transcript: viewport.New(maxTranscriptViewportCacheBytes+1, 1)}
+	m := &Model{transcript: viewport.New(viewport.WithWidth(maxTranscriptViewportCacheBytes+1), viewport.WithHeight(1))}
 	m.transcript.SetContent("x")
 	view := m.transcriptViewportView()
 	if len(view) <= maxTranscriptViewportCacheBytes {

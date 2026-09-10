@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/agent"
 	"github.com/elmissouri16/snow-core/internal/auth"
@@ -21,8 +21,8 @@ import (
 // Bubbles' textarea does not expose a selection model, so Snow tracks the
 // whole-draft selection explicitly and applies normal replacement semantics to
 // the next text edit. Modal textareas are handled before this path.
-func (m *Model) handleComposerSelectionKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
-	if msg.Type == tea.KeyCtrlA {
+func (m *Model) handleComposerSelectionKey(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
+	if msg.Code == 'a' && msg.Mod.Contains(tea.ModCtrl) {
 		// Selection belongs to one surface at a time. In app-mouse mode an old
 		// transcript drag selection can otherwise remain highlighted beside the
 		// newly selected draft, making Select All appear to cover both surfaces.
@@ -41,8 +41,7 @@ func (m *Model) handleComposerSelectionKey(msg tea.KeyMsg) (handled bool, cmd te
 		key.Matches(msg, m.editor.KeyMap.DeleteBeforeCursor) ||
 		key.Matches(msg, m.editor.KeyMap.DeleteWordBackward) ||
 		key.Matches(msg, m.editor.KeyMap.DeleteWordForward)
-	replaceSelection := msg.Type == tea.KeyRunes || keyMatches(msg, m.keys.Paste) ||
-		(keyMatches(msg, m.keys.Newline) && !(m.busy && keyMatches(msg, m.keys.FollowUp)))
+	replaceSelection := msg.Text != "" || keyMatches(msg, m.keys.Paste) || (keyMatches(msg, m.keys.Newline) && !(m.busy && keyMatches(msg, m.keys.FollowUp)))
 	if !deleteSelection && !replaceSelection {
 		return false, nil
 	}
@@ -65,11 +64,11 @@ func (m *Model) composerCoveredByModal() bool {
 		m.sessionOpLoading || m.restartPromptVisible() || m.updateOfferVisible() || m.updateInstallProgressVisible()
 }
 
-func (m *Model) updateComposerEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updateComposerEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Forward to the editor, then refresh the palette from the new text. Keep
 	// the returned command: textarea uses it to read the clipboard for paste.
 	if keyMatches(msg, m.keys.Paste) {
-		msg = tea.KeyMsg{Type: tea.KeyCtrlV}
+		msg = tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl}
 	}
 	deleteBackward := key.Matches(msg, m.editor.KeyMap.DeleteCharacterBackward)
 	deleteForward := key.Matches(msg, m.editor.KeyMap.DeleteCharacterForward)
@@ -77,10 +76,7 @@ func (m *Model) updateComposerEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.resetInputHistoryNavigation()
 		return m, m.refreshInputCompletions()
 	}
-	if m.collapseComposerPaste(msg) {
-		m.resetInputHistoryNavigation()
-		return m, m.refreshInputCompletions()
-	}
+
 	textMayChange := composerEditorKeyMayChange(msg, m.editor.KeyMap)
 	previous := m.editor.Value()
 	var cmd tea.Cmd
@@ -89,7 +85,7 @@ func (m *Model) updateComposerEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.resetInputHistoryNavigation()
 		m.prunePastedTextAttachments(m.editor.Value())
 	}
-	if msg.Type == tea.KeyEsc {
+	if msg.Code == tea.KeyEscape {
 		m.compVisible = false
 		return m, nil
 	}
@@ -97,7 +93,7 @@ func (m *Model) updateComposerEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if textMayChange {
 		mentionCmd = m.refreshInputCompletionsFor(m.editor.Value())
 	}
-	if msg.Type == tea.KeyCtrlV {
+	if msg.Code == 'v' && msg.Mod.Contains(tea.ModCtrl) {
 		m.editor.Err = nil
 		m.imagePasteGeneration++
 		generation := m.imagePasteGeneration
@@ -127,8 +123,8 @@ func (m *Model) updateComposerEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, mentionCmd
 }
 
-func composerEditorKeyMayChange(msg tea.KeyMsg, keyMap textarea.KeyMap) bool {
-	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+func composerEditorKeyMayChange(msg tea.KeyPressMsg, keyMap textarea.KeyMap) bool {
+	if msg.Text != "" {
 		return true
 	}
 	return key.Matches(msg, keyMap.DeleteAfterCursor) ||
@@ -264,14 +260,14 @@ func (m *Model) insertMention(path string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleLoginProfileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+func (m *Model) handleLoginProfileKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Code == tea.KeyEscape:
 		if !m.restorePreviousLoginStep() {
 			m.cancelLoginFlow()
 		}
 		return m, nil
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		profileDraft := sanitizeTerminalLine(m.editor.Value())
 		profileID := strings.TrimSpace(profileDraft)
 		if profileID == "" {
@@ -301,7 +297,7 @@ func (m *Model) handleLoginProfileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.editor.Value() != previous {
 		m.loginError = ""
 	}
-	if msg.Type == tea.KeyCtrlV {
+	if msg.Code == 'v' && msg.Mod.Contains(tea.ModCtrl) {
 		m.editor.Err = nil
 		if m.pasteCmdOverride != nil {
 			cmd = m.pasteCmdOverride
@@ -311,14 +307,14 @@ func (m *Model) handleLoginProfileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *Model) handleLoginEndpointKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+func (m *Model) handleLoginEndpointKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Code == tea.KeyEscape:
 		if !m.restorePreviousLoginStep() {
 			m.cancelLoginFlow()
 		}
 		return m, nil
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		endpoint := strings.TrimSpace(sanitizeTerminalLine(m.editor.Value()))
 		compatible, err := openaicompat.New(openaicompat.Config{BaseURL: endpoint})
 		if err != nil || !compatible.Configured() {
@@ -348,7 +344,7 @@ func (m *Model) handleLoginEndpointKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.editor.Value() != previous {
 		m.loginError = ""
 	}
-	if msg.Type == tea.KeyCtrlV {
+	if msg.Code == 'v' && msg.Mod.Contains(tea.ModCtrl) {
 		m.editor.Err = nil
 		if m.pasteCmdOverride != nil {
 			cmd = m.pasteCmdOverride
@@ -359,14 +355,14 @@ func (m *Model) handleLoginEndpointKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleLoginKey captures a masked API key.
-func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+func (m *Model) handleLoginKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Code == tea.KeyEscape:
 		if !m.restorePreviousLoginStep() {
 			m.cancelLoginFlow()
 		}
 		return m, nil
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		secret := m.secretBuf.String()
 		provider := m.loginProvider
 		if m.loginEndpoint != "" {
@@ -409,7 +405,7 @@ func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editor.Reset()
 		m.pushLine(styleFooter.Render("stored API key for " + provider + " (0600)"))
 		return m, nil
-	case tea.KeyBackspace:
+	case msg.Code == tea.KeyBackspace:
 		runes := []rune(m.secretBuf.String())
 		if len(runes) > 0 {
 			m.secretBuf.Reset()
@@ -417,14 +413,14 @@ func (m *Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.loginError = ""
 		}
 		return m, nil
-	case tea.KeyCtrlC:
+	case msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl):
 		m.cancelLoginFlow()
 		return m, nil
 	}
-	if msg.Type == tea.KeyRunes {
-		m.secretBuf.WriteString(string(msg.Runes))
+	if msg.Text != "" {
+		m.secretBuf.WriteString(msg.Text)
 		m.loginError = ""
-	} else if msg.Type == tea.KeySpace {
+	} else if msg.Code == tea.KeySpace {
 		m.secretBuf.WriteString(" ")
 		m.loginError = ""
 	}

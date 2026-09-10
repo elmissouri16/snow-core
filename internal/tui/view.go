@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -150,15 +150,15 @@ func (m *Model) renderPlanImplementationPrompt() string {
 	return b.String()
 }
 
-func (m *Model) handlePlanImplementationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyShiftTab:
+func (m *Model) handlePlanImplementationKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		m.planPromptChoice = (m.planPromptChoice + 2) % 3
-	case tea.KeyDown, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyTab:
 		m.planPromptChoice = (m.planPromptChoice + 1) % 3
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		m.planPrompt = false
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		choice := m.planPromptChoice
 		m.planPrompt = false
 		if choice == 2 {
@@ -262,7 +262,17 @@ func (m *Model) currentHeaderStatus() string {
 
 // View implements tea.Model as one full-window frame: sticky header, scrollable
 // transcript viewport, overlays/run status, composer, and footer.
-func (m *Model) View() string {
+func (m *Model) View() tea.View {
+	view := tea.NewView(m.viewContent())
+	view.AltScreen = !m.inlineTranscript
+	view.ReportFocus = true
+	if m.app != nil && m.app.Cfg.TUI.Mouse && !m.inlineTranscript {
+		view.MouseMode = tea.MouseModeCellMotion
+	}
+	return view
+}
+
+func (m *Model) viewContent() string {
 	if m.inlineTranscript && m.inlineExiting {
 		return ""
 	}
@@ -327,7 +337,7 @@ func (m *Model) View() string {
 	body := m.renderTranscriptView()
 	if sideWidth := m.pluginSidebarWidth(); sideWidth > 0 {
 		side := m.pluginPlacement("sidebar", sideWidth-2)
-		side = fitFrame(lipgloss.NewStyle().PaddingLeft(2).Render(side), sideWidth, m.transcript.Height)
+		side = fitFrame(lipgloss.NewStyle().PaddingLeft(2).Render(side), sideWidth, m.transcript.Height())
 		body = lipgloss.JoinHorizontal(lipgloss.Top, body, side)
 	}
 	parts = append(parts, sep, body)
@@ -646,25 +656,21 @@ func (m *Model) renderEditor() string {
 			// permanent background color on Snow's transparent composer. Bubbles
 			// renders the active row with CursorLine rather than Text, so both
 			// styles must carry the selection or a one-line draft looks unchanged.
-			// Rebind the copied textarea's private active-style pointer too: a
-			// shallow Model copy still points at the original model's style field.
-			focused := editor.Focused()
-			editor.FocusedStyle.Text = editor.FocusedStyle.Text.Reverse(true)
-			editor.FocusedStyle.CursorLine = editor.FocusedStyle.CursorLine.Reverse(true)
-			editor.BlurredStyle.Text = editor.BlurredStyle.Text.Reverse(true)
-			editor.BlurredStyle.CursorLine = editor.BlurredStyle.CursorLine.Reverse(true)
-			if focused {
-				_ = editor.Focus()
-			} else {
-				editor.Blur()
-			}
-			editor.Cursor.Blur()
+			// Style the copied textarea and hide its virtual cursor so the
+			// highlight covers the whole draft without mutating editor focus.
+			styles := editor.Styles()
+			styles.Focused.Text = styles.Focused.Text.Reverse(true)
+			styles.Focused.CursorLine = styles.Focused.CursorLine.Reverse(true)
+			styles.Blurred.Text = styles.Blurred.Text.Reverse(true)
+			styles.Blurred.CursorLine = styles.Blurred.CursorLine.Reverse(true)
+			editor.SetStyles(styles)
+			editor.Blur()
 		}
 		editorView := editor.View()
 		if !selectAll {
-			textStyle := editor.BlurredStyle.Text
+			textStyle := editor.Styles().Blurred.Text
 			if editor.Focused() {
-				textStyle = editor.FocusedStyle.Text
+				textStyle = editor.Styles().Focused.Text
 			}
 			editorView = highlightComposerMentions(editorView, textStyle, styleMention)
 			for i := range m.promptImages {
@@ -743,7 +749,7 @@ func (m *Model) renderFooter() string {
 	// Add width-aware help only when it fits beside the persistent context
 	// indicator. Narrow terminals keep the footer quiet and leave shortcuts in
 	// /help rather than forcing the usage counter off-screen.
-	m.help.Width = available
+	m.help.SetWidth(available)
 	helpText := m.help.ShortHelpView(m.keys.ShortHelp())
 	maxRight := available - lipgloss.Width(" "+permissionField)
 	if lipgloss.Width(helpText)+lipgloss.Width(" · ")+lipgloss.Width(right) <= maxRight {

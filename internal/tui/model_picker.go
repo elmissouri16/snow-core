@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -15,15 +15,15 @@ import (
 
 // handleModelPick gives ordinary rune input to search immediately while the
 // non-rune picker bindings continue to navigate the filtered catalog.
-func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleModelPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if keyMatches(msg, m.keys.Close) {
-		msg = tea.KeyMsg{Type: tea.KeyEsc}
+		msg = tea.KeyPressMsg{Code: tea.KeyEscape}
 	} else if keyMatches(msg, m.keys.Accept) {
-		msg = tea.KeyMsg{Type: tea.KeyEnter}
+		msg = tea.KeyPressMsg{Code: tea.KeyEnter}
 	}
 
-	switch msg.Type {
-	case tea.KeyCtrlR:
+	switch {
+	case msg.Code == 'r' && msg.Mod.Contains(tea.ModCtrl):
 		if m.modelLoading || m.app == nil {
 			return m, nil
 		}
@@ -34,26 +34,26 @@ func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			models, err := m.app.RefreshProviderCatalogs(m.ctx)
 			return modelListMsg{generation: generation, models: models, err: err}
 		}
-	case tea.KeyRunes, tea.KeySpace:
-		text := string(msg.Runes)
-		if msg.Type == tea.KeySpace && text == "" {
+	case msg.Text != "", msg.Code == tea.KeySpace:
+		text := msg.Text
+		if msg.Code == tea.KeySpace && text == "" {
 			text = " "
 		}
 		m.modelQuery += text
 		m.modelIndex = 0
 		return m, nil
-	case tea.KeyBackspace:
+	case msg.Code == tea.KeyBackspace:
 		runes := []rune(m.modelQuery)
 		if len(runes) > 0 {
 			m.modelQuery = string(runes[:len(runes)-1])
 		}
 		m.modelIndex = 0
 		return m, nil
-	case tea.KeyCtrlU:
+	case msg.Code == 'u' && msg.Mod.Contains(tea.ModCtrl):
 		m.modelQuery = ""
 		m.resetModelIndexToActive(m.filteredModels())
 		return m, nil
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		if m.modelQuery != "" {
 			m.modelQuery = ""
 			m.resetModelIndexToActive(m.filteredModels())
@@ -73,7 +73,7 @@ func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.modelIndex = next
 		return m, nil
 	}
-	if msg.Type != tea.KeyEnter || len(models) == 0 {
+	if msg.Code != tea.KeyEnter || len(models) == 0 {
 		return m, nil
 	}
 	m.modelIndex = clampPickerIndex(m.modelIndex, len(models))
@@ -126,8 +126,8 @@ func (m *Model) handleHeaderMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 	if m.app == nil || m.app.Agent == nil || !m.app.Cfg.TUI.Mouse {
 		return false, nil
 	}
-	event := tea.MouseEvent(msg)
-	if event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft || event.Y != 0 {
+	event := msg.Mouse()
+	if !isMouseClick(msg) || event.Button != tea.MouseLeft || event.Y != 0 {
 		return false, nil
 	}
 	header := m.renderHeaderLayout(m.currentHeaderStatus())
@@ -317,7 +317,7 @@ func (m *Model) startForkPick() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleForkPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleForkPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	if m.forkLoading {
 		return m, nil
@@ -326,14 +326,14 @@ func (m *Model) handleForkPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.forkIndex = next
 		return m, nil
 	}
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyLeft, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		m.forkIndex = (m.forkIndex - 1 + len(forkChoices)) % len(forkChoices)
-	case tea.KeyDown, tea.KeyRight, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyRight, msg.Code == tea.KeyTab:
 		m.forkIndex = (m.forkIndex + 1) % len(forkChoices)
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		m.pickFork = false
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		switch m.forkIndex {
 		case 0:
 			m.forkLoading = true
@@ -485,7 +485,7 @@ func (m *Model) startSessionPick() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleSessionPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	if m.sessionDeleting {
 		if keyMatches(msg, m.keys.Close) {
@@ -503,14 +503,14 @@ func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sessionRenaming, m.sessionRenameInput = false, ""
 		case keyMatches(msg, m.keys.Accept):
 			return m.executeSessionRename()
-		case msg.Type == tea.KeyBackspace:
+		case msg.Code == tea.KeyBackspace:
 			r := []rune(m.sessionRenameInput)
 			if len(r) > 0 {
 				m.sessionRenameInput = string(r[:len(r)-1])
 			}
-		case msg.Type == tea.KeyRunes:
-			if len([]rune(m.sessionRenameInput))+len(msg.Runes) <= 72 {
-				m.sessionRenameInput += string(msg.Runes)
+		case msg.Text != "":
+			if len([]rune(m.sessionRenameInput))+len([]rune(msg.Text)) <= 72 {
+				m.sessionRenameInput += msg.Text
 			}
 		}
 		return m, nil
@@ -519,7 +519,7 @@ func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.sessionDeleteInFlight {
 			return m, nil
 		}
-		if msg.Type == tea.KeyEsc {
+		if msg.Code == tea.KeyEscape {
 			m.pickSession = false
 			m.sessionLoading = false
 			m.pickerGeneration++
@@ -538,34 +538,34 @@ func (m *Model) handleSessionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sessionIndex = next
 		return m, nil
 	}
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyLeft, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		m.sessionIndex = (m.sessionIndex - 1 + count) % count
-	case tea.KeyDown, tea.KeyRight, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyRight, msg.Code == tea.KeyTab:
 		m.sessionIndex = (m.sessionIndex + 1) % count
-	case tea.KeyPgUp:
+	case msg.Code == tea.KeyPgUp:
 		m.sessionIndex -= m.sessionPickerVisibleItems()
 		if m.sessionIndex < 0 {
 			m.sessionIndex = 0
 		}
-	case tea.KeyPgDown:
+	case msg.Code == tea.KeyPgDown:
 		m.sessionIndex += m.sessionPickerVisibleItems()
 		if m.sessionIndex >= count {
 			m.sessionIndex = count - 1
 		}
-	case tea.KeyHome:
+	case msg.Code == tea.KeyHome:
 		m.sessionIndex = 0
-	case tea.KeyEnd:
+	case msg.Code == tea.KeyEnd:
 		m.sessionIndex = count - 1
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		m.pickSession = false
 		m.sessions = nil
 		if m.startupResumeRequired {
 			return m, m.quitCmd()
 		}
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		return m.openSession(m.sessions[m.sessionIndex].Path)
-	case tea.KeyRunes:
+	case msg.Text != "":
 		switch {
 		case keyMatches(msg, m.keys.BranchRename):
 			m.sessionRenaming = true

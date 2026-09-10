@@ -5,9 +5,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -117,13 +117,13 @@ func (m *Model) beginUserInputEditing(value string) {
 	m.refreshUserInputEditorViewport()
 }
 
-func (m *Model) handleUserInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleUserInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if keyMatches(msg, m.keys.Close) {
-		msg = tea.KeyMsg{Type: tea.KeyEsc}
+		msg = tea.KeyPressMsg{Code: tea.KeyEscape}
 	} else if keyMatches(msg, m.keys.Accept) {
-		msg = tea.KeyMsg{Type: tea.KeyEnter}
+		msg = tea.KeyPressMsg{Code: tea.KeyEnter}
 	} else if keyMatches(msg, m.keys.Paste) {
-		msg = tea.KeyMsg{Type: tea.KeyCtrlV}
+		msg = tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl}
 	}
 	question := m.currentUserInputQuestion()
 	if !m.userInputEditing {
@@ -133,15 +133,15 @@ func (m *Model) handleUserInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clearUserInput()
 		return m, nil
 	}
-	switch msg.Type {
-	case tea.KeyCtrlC:
+	switch {
+	case msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl):
 		if m.app != nil {
 			_ = m.app.RejectUserInput(m.userInputRequest.ID)
 		}
 		m.requestAbort()
 		m.clearUserInput()
 		return m, nil
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		requestID := m.userInputRequest.ID
 		if m.app != nil {
 			if err := m.app.RejectUserInput(requestID); err != nil {
@@ -151,23 +151,23 @@ func (m *Model) handleUserInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clearUserInput()
 		m.pushLine(styleFooter.Render("question declined"))
 		return m, nil
-	case tea.KeyTab:
+	case msg.Code == tea.KeyTab && !msg.Mod.Contains(tea.ModShift):
 		m.moveUserInputQuestion(1)
 		return m, nil
-	case tea.KeyShiftTab:
+	case msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		m.moveUserInputQuestion(-1)
 		return m, nil
 	}
 
 	if m.userInputEditing {
-		if msg.Type == tea.KeyEnter && !msg.Alt {
+		if msg.Code == tea.KeyEnter && !msg.Mod.Contains(tea.ModAlt) {
 			m.commitUserInputAnswer(m.userInputEditor.Value())
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.userInputEditor, cmd = m.userInputEditor.Update(msg)
 		m.userInputDrafts[question.ID] = m.userInputEditor.Value()
-		if msg.Type == tea.KeyCtrlV {
+		if msg.Code == 'v' && msg.Mod.Contains(tea.ModCtrl) {
 			m.userInputEditor.Err = nil
 			m.userInputError = ""
 			if m.pasteCmdOverride != nil {
@@ -179,12 +179,12 @@ func (m *Model) handleUserInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	count := userInputOptionCount(question)
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyLeft:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyLeft:
 		m.userInputOption = (m.userInputOption - 1 + count) % count
-	case tea.KeyDown, tea.KeyRight:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyRight:
 		m.userInputOption = (m.userInputOption + 1) % count
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		if m.userInputOption == len(question.Options) {
 			m.beginUserInputEditing(m.userInputDrafts[question.ID])
 		} else {

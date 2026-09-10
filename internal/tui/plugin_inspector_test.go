@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -41,8 +41,8 @@ func TestPluginInspectorSelectionOwnsActionsAndBackNavigation(t *testing.T) {
 	if !strings.Contains(frame, "8 plugins") || strings.Contains(frame, "/very/") || strings.Contains(frame, "Actions") {
 		t.Fatalf("inventory contains document details:\n%s", frame)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil || !m.plugins.inspector.detail {
 		t.Fatal("opening details executed an action")
 	}
@@ -50,23 +50,23 @@ func TestPluginInspectorSelectionOwnsActionsAndBackNavigation(t *testing.T) {
 	if len(actions) != 3 || actions[0].Action != "disable:plugin-01" || actions[1].Action != "open:plugin-01:main" || actions[2].Action != "setting:plugin-01:focus" {
 		t.Fatalf("selected plugin did not own its actions: %+v", actions)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.plugins.selected != 1 || m.plugins.scroll != 0 {
 		t.Fatal("arrow keys scrolled details instead of selecting an action")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.plugins.screen != "plugin-01:main" {
 		t.Fatal("did not open the selected plugin view")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.plugins.screen != "snow:plugins" || !m.plugins.inspector.detail || m.plugins.selected != 1 {
 		t.Fatal("Escape did not return to plugin details")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.plugins.inspector.detail || m.plugins.inspector.index != 1 {
 		t.Fatal("Escape lost inventory selection")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.plugins.screen != "" || m.editor.Value() != "keep this draft" || m.busy {
 		t.Fatal("closing inspector changed composer or started a turn")
 	}
@@ -75,35 +75,35 @@ func TestPluginInspectorSelectionOwnsActionsAndBackNavigation(t *testing.T) {
 func TestPluginInspectorFilteringAndEmptyResults(t *testing.T) {
 	m := pluginInspectorTestModel(t, 30)
 	p := m.plugins.inspector
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("EXTENSION 24")})
+	m.Update(tea.KeyPressMsg{Text: "EXTENSION 24", Code: tea.KeyExtended})
 	if entry := p.selectedEntry(); entry == nil || entry.status.ID != "plugin-24" {
 		t.Fatal("filter did not match display name case-insensitively")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if p.query != "EXTENSION 24" || !strings.Contains(stripANSI(m.renderPluginScreen()), "› plugin-24") {
 		t.Fatal("back navigation lost filtered selection")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("missing")})
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Text: "missing", Code: tea.KeyExtended})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil || p.detail || !strings.Contains(stripANSI(m.renderPluginScreen()), "No matching plugins") {
 		t.Fatal("empty result activated an old selection")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	m.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
 	if p.index != 29 {
 		t.Fatal("End did not select last plugin")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if p.index >= 29 {
 		t.Fatal("Page Up did not move selection")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("界")})
-	m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m.Update(tea.KeyPressMsg{Text: "界", Code: '界'})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if p.query != "" {
 		t.Fatal("backspace did not remove one Unicode character")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(strings.Repeat("a", 200))})
+	m.Update(tea.KeyPressMsg{Text: string([]rune(strings.Repeat("a", 200))), Code: tea.KeyExtended})
 	if len([]rune(p.query)) != 120 || m.editor.Value() != "" {
 		t.Fatal("filter is unbounded or leaked into composer")
 	}
@@ -128,7 +128,7 @@ func TestPluginInspectorFramesKeepSelectionAndControls(t *testing.T) {
 				if !strings.Contains(frame, "Esc") || (!detail && !strings.Contains(frame, "› plugin-31")) || (detail && !strings.Contains(frame, "› ")) {
 					t.Fatalf("selection or controls hidden at %v:\n%s", size, frame)
 				}
-				full := m.View()
+				full := m.viewContent()
 				if lipgloss.Width(full) != m.managedFrameWidth() || lipgloss.Height(full) != m.managedFrameHeight() {
 					t.Fatalf("overlay changed frame dimensions at %v", size)
 				}
@@ -143,7 +143,7 @@ func TestPluginInspectorLaunchControlsDiagnosticsAndDialogs(t *testing.T) {
 	p.entries[0].status.CanToggle = false
 	p.entries[0].status.Scope = "explicit"
 	p.diagnostics = []protocol.ConfigDiagnostic{{Path: "plugin-00", Message: "observer failed"}}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	for _, action := range pluginActions(m.pluginScreenView().Content) {
 		if strings.HasPrefix(action.Action, "disable:") || strings.HasPrefix(action.Action, "enable:") {
 			t.Fatal("launch-controlled plugin offered a toggle")
@@ -153,16 +153,16 @@ func TestPluginInspectorLaunchControlsDiagnosticsAndDialogs(t *testing.T) {
 		t.Fatal("missing launch control explanation")
 	}
 	m.startUserInput(protocol.UserInputRequest{ID: "input", Questions: []protocol.UserInputQuestion{{ID: "answer", Question: "Configure extension"}}})
-	if strings.Contains(stripANSI(m.View()), "Actions") {
+	if strings.Contains(stripANSI(m.viewContent()), "Actions") {
 		t.Fatal("inspector covered the user-input dialog")
 	}
 	m.clearUserInput()
-	if !p.detail || !strings.Contains(stripANSI(m.View()), "Actions") {
+	if !p.detail || !strings.Contains(stripANSI(m.viewContent()), "Actions") {
 		t.Fatal("dialog completion did not return to details")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnd})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !strings.Contains(stripANSI(m.renderPluginScreen()), "observer failed") || len(pluginActions(m.pluginScreenView().Content)) != 0 {
 		t.Fatal("diagnostics lost or inherited plugin actions")
 	}

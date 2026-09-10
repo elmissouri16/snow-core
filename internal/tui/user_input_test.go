@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/userinput"
@@ -137,10 +137,10 @@ func TestUserInputChoiceThenFreeForm(t *testing.T) {
 	}}
 	outcome := startPendingUserInput(t, m, request)
 
-	if view := stripANSI(m.View()); !strings.Contains(view, "JSON") || !strings.Contains(view, "Text") || !strings.Contains(view, "Other") {
+	if view := stripANSI(m.viewContent()); !strings.Contains(view, "JSON") || !strings.Contains(view, "Text") || !strings.Contains(view, "Other") {
 		t.Fatalf("inline overlay = %q", view)
 	}
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyEnter}) // JSON
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // JSON
 	if m.userInputIndex != 1 || !m.userInputEditing {
 		t.Fatalf("state after choice = index:%d editing:%v", m.userInputIndex, m.userInputEditing)
 	}
@@ -148,7 +148,7 @@ func TestUserInputChoiceThenFreeForm(t *testing.T) {
 		t.Fatalf("free-form overlay = %q", view)
 	}
 	m.userInputEditor.SetValue("keep comments\nand tests")
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	result := awaitUserInput(t, outcome)
 	if result.err != nil {
 		t.Fatal(result.err)
@@ -191,13 +191,13 @@ func TestInlineUserInputLongQuestionKeepsActionsVisible(t *testing.T) {
 	}}}
 	outcome := startPendingUserInput(t, m, request)
 	m.userInputOption = len(request.Questions[0].Options)
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	for _, want := range []string{"Alpha", "Beta", "Gamma", "Other", "Esc decline", "…"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("long inline question hid %q: %q", want, view)
 		}
 	}
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if got := awaitUserInput(t, outcome); !errors.Is(got.err, userinput.ErrRejected) {
 		t.Fatalf("escape outcome = %+v", got)
 	}
@@ -210,21 +210,21 @@ func TestUserInputOtherAndEscapeReject(t *testing.T) {
 		ID: "choice", Header: "Choice", Question: "Choose?", Options: []protocol.UserInputOption{{Label: "A", Description: "First"}, {Label: "B", Description: "Second"}},
 	}}}
 	outcome := startPendingUserInput(t, m, request)
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyDown})
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyDown})
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.userInputEditing {
 		t.Fatal("Other did not open the free-form editor")
 	}
 	m.userInputEditor.SetValue("custom")
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got := awaitUserInput(t, outcome); got.err != nil || got.response.Answers[0].Answer != "custom" {
 		t.Fatalf("outcome = %+v", got)
 	}
 
 	request.ID = "ask-reject"
 	outcome = startPendingUserInput(t, m, request)
-	m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m.handleUserInputKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if got := awaitUserInput(t, outcome); !errors.Is(got.err, userinput.ErrRejected) || m.userInputPending {
 		t.Fatalf("outcome=%+v pending=%v", got, m.userInputPending)
 	}

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -488,12 +488,12 @@ func TestSessionPickerShowsTitleFirstAndRenamesSelectedSession(t *testing.T) {
 		t.Fatalf("session picker = %q", view)
 	}
 	m.sessions[0].ID = currentSessionID(m.app)
-	_, _ = m.handleSessionPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	_, _ = m.handleSessionPick(tea.KeyPressMsg{Text: "r", Code: 'r'})
 	if !m.sessionRenaming || m.sessionRenameInput != "Old title" {
 		t.Fatalf("rename state = %v %q", m.sessionRenaming, m.sessionRenameInput)
 	}
 	m.sessionRenameInput = "New title"
-	_, cmd := m.handleSessionPick(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleSessionPick(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("rename returned no command")
 	}
@@ -527,7 +527,7 @@ func TestSessionPickerDeletesSelectedSessionAfterConfirmation(t *testing.T) {
 	m.sessions = []session.SessionInfo{{ID: id, Path: path, Name: "Disposable", Messages: 1}}
 	m.pickSession = true
 
-	_, _ = m.handleSessionPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	_, _ = m.handleSessionPick(tea.KeyPressMsg{Text: "d", Code: 'd'})
 	if !m.sessionDeleting {
 		t.Fatal("delete key did not open confirmation")
 	}
@@ -542,7 +542,7 @@ func TestSessionPickerDeletesSelectedSessionAfterConfirmation(t *testing.T) {
 		t.Fatalf("cancel removed session: %v", err)
 	}
 
-	_, _ = m.handleSessionPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	_, _ = m.handleSessionPick(tea.KeyPressMsg{Text: "d", Code: 'd'})
 	_, cmd := m.handleSessionPick(teaKeyEnter())
 	if cmd == nil {
 		t.Fatal("confirmed delete returned no command")
@@ -639,21 +639,21 @@ func TestSessionPickerScrollsAndFitsTerminal(t *testing.T) {
 	if end-start >= len(m.sessions) {
 		t.Fatalf("session window should be bounded: %d:%d", start, end)
 	}
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	if !strings.Contains(view, "sessions (20)") || !strings.Contains(view, "more sessions") || !strings.Contains(view, "session-10") {
 		t.Fatalf("bounded session picker missing status, marker, or selection: %q", view)
 	}
 
 	old := m.sessionIndex
-	_, _ = m.handleSessionPick(tea.KeyMsg{Type: tea.KeyPgDown})
+	_, _ = m.handleSessionPick(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if m.sessionIndex <= old {
 		t.Fatalf("PgDown did not advance session selection: %d -> %d", old, m.sessionIndex)
 	}
-	_, _ = m.handleSessionPick(tea.KeyMsg{Type: tea.KeyEnd})
+	_, _ = m.handleSessionPick(tea.KeyPressMsg{Code: tea.KeyEnd})
 	if m.sessionIndex != len(m.sessions)-1 {
 		t.Fatalf("End index = %d, want %d", m.sessionIndex, len(m.sessions)-1)
 	}
-	if view := stripANSI(m.View()); !strings.Contains(view, "session-19") {
+	if view := stripANSI(m.viewContent()); !strings.Contains(view, "session-19") {
 		t.Fatalf("end selection is outside inline session window: %q", view)
 	}
 }
@@ -673,14 +673,20 @@ func TestTreePickerInlineWindowFollowsSelection(t *testing.T) {
 	if rows := m.treePickerRows(); rows > m.managedFrameHeight() {
 		t.Fatalf("tree picker rows = %d, inline budget = %d", rows, m.managedFrameHeight())
 	}
-	if view := stripANSI(m.View()); !strings.Contains(view, "branch-19") {
+	if view := stripANSI(m.viewContent()); !strings.Contains(view, "branch-19") {
 		t.Fatalf("selected branch is outside inline tree window: %q", view)
 	}
 }
 
 // Small key helpers keep this test focused on picker behavior without
 // repeating Bubble Tea imports throughout the session assertions.
-func teaKeyEnter() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyEnter} }
-func teaKeyDown() tea.KeyMsg  { return tea.KeyMsg{Type: tea.KeyDown} }
-func teaKeyUp() tea.KeyMsg    { return tea.KeyMsg{Type: tea.KeyUp} }
-func teaKeyEsc() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyEsc} }
+func teaKeyEnter() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyEnter}
+}
+func teaKeyDown() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyDown}
+}
+func teaKeyUp() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyUp} }
+func teaKeyEsc() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyEscape}
+}

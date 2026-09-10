@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 
@@ -83,7 +83,7 @@ func TestCustomPickerBindingDrivesRuntimeModelPicker(t *testing.T) {
 	m.keys = keys
 	m.pickModel = true
 	m.modelList = []protocol.Model{{ID: "a"}, {ID: "b"}}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyCtrlY})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 	if m.modelIndex != 1 {
 		t.Fatalf("model index=%d", m.modelIndex)
 	}
@@ -103,7 +103,7 @@ func TestCustomThinkingBindingCyclesRuntimeEffort(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.keys = keys
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 	if m.pickThinking || m.app.Agent.Thinking() != protocol.ThinkingLow {
 		t.Fatalf("custom thinking shortcut picker=%v effort=%q", m.pickThinking, m.app.Agent.Thinking())
 	}

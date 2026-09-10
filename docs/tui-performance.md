@@ -1,6 +1,6 @@
 # TUI performance
 
-Snow's terminal interface runs on Bubble Tea v1.3.10 and Bubbles v1.0.0, with
+Snow's terminal interface runs on Bubble Tea v2.0.9 and Bubbles v2.2.1, with
 Lip Gloss for frame styling and Glamour for Markdown rendering. This guide
 records the renderer contract that `internal/tui` must preserve: one owner of
 the alternate screen, bounded streaming work, and constant-time status updates.
@@ -31,9 +31,9 @@ The versions below are load-bearing and must not drift during refactors.
 
 | Package | Version | Purpose |
 |---|---|---|
-| `github.com/charmbracelet/bubbletea` | `v1.3.10` | Alternate-screen program loop, `WindowSizeMsg`, mouse reporting |
-| `github.com/charmbracelet/bubbles` | `v1.0.0` | Transcript `viewport.Model`, textarea, spinner |
-| `github.com/charmbracelet/lipgloss` | `v1.1.1-0.20250404203927-76690c660834` | Frame styling and width-aware layout |
+| `charm.land/bubbletea/v2` | `v2.0.9` | Alternate-screen program loop, `WindowSizeMsg`, mouse reporting |
+| `charm.land/bubbles/v2` | `v2.2.1` | Transcript `viewport.Model`, textarea, spinner |
+| `charm.land/lipgloss/v2` | `v2.0.6` | Frame styling and width-aware layout |
 | `github.com/charmbracelet/glamour` | `v1.0.0` | Markdown-to-ANSI rendering for finalized transcript content |
 
 ## Upstream examples consulted
@@ -52,16 +52,19 @@ frame plus `tea.Println` causes prior frames, including headers and composer
 chrome, to enter terminal scrollback. Snow therefore does not use its historical
 inline/`tea.Println` path at runtime.
 
-> **Note:** Context7 currently returns Bubble Tea v2 examples as well. Snow
-> remains on v1, so `View() string`, `tea.WithAltScreen`, and direct Bubbles
-> width/height fields stay correct until an intentional v2 migration.
+The root model returns `tea.View`. Alternate screen, mouse capture, focus
+reporting, and bracketed paste are declarative view state. Bubble Tea owns
+keyboard enhancement, synchronized output (mode 2026), Unicode width (mode
+2027), and terminal restoration. Unsupported terminals retain legacy input.
+Bubbles textareas retain virtual cursors; Lip Gloss v2 dimensions include borders.
+Glamour still uses its v1 styling dependency internally and returns ANSI strings.
 
 ## Render rules
 
 ### Viewport ownership
 
 One renderer owns the window. Runtime always enters the alternate screen with
-`tea.WithAltScreen` and a 120 FPS program ceiling for pointer-rate drag
+`View.AltScreen` and a 120 FPS program ceiling for pointer-rate drag
 feedback. `View` composes a sticky header, the transcript viewport,
 overlays/run status, the composer, and the footer. Scrolling is confined to the
 transcript viewport and cannot reveal stale rendered frames.
@@ -157,9 +160,10 @@ The viewport follows new output only while already at bottom, and active
 application selections freeze their source snapshot. Keyboard viewport scrolling
 remains available in native mouse mode.
 
-Bubble Tea v1 can expose fragmented SGR mouse reports as text in some terminals,
-so Snow retains defensive reconstruction before input reaches the textarea.
-Pasted mouse-looking text remains literal.
+Bubble Tea v2 decodes fragmented mouse and keyboard sequences before dispatch.
+Snow handles key presses only and routes bracketed paste as literal text to the
+visible editor. Byte-stream regression tests cover split escape and UTF-8 input;
+mouse-looking pasted text remains literal.
 
 Composer editing has a dedicated hot path: ordinary typing and deletion skip
 submission-only image, queue, goal, and whitespace processing. Once a pasted

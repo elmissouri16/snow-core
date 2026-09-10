@@ -1,7 +1,8 @@
 package tui
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"image/color"
 
 	"github.com/elmissouri16/snow-core/internal/config"
 )
@@ -11,17 +12,17 @@ import (
 // adaptive so it remains coherent on both light and dark terminal backgrounds.
 type tuiTheme struct {
 	name   string
-	accent lipgloss.TerminalColor
-	muted  lipgloss.TerminalColor
-	soft   lipgloss.TerminalColor
-	warn   lipgloss.TerminalColor
-	err    lipgloss.TerminalColor
-	ok     lipgloss.TerminalColor
-	sep    lipgloss.TerminalColor
+	accent config.AdaptiveColor
+	muted  config.AdaptiveColor
+	soft   config.AdaptiveColor
+	warn   config.AdaptiveColor
+	err    config.AdaptiveColor
+	ok     config.AdaptiveColor
+	sep    config.AdaptiveColor
 }
 
-func adaptive(light, dark string) lipgloss.TerminalColor {
-	return lipgloss.AdaptiveColor{Light: light, Dark: dark}
+func adaptive(light, dark string) config.AdaptiveColor {
+	return config.AdaptiveColor{Light: light, Dark: dark}
 }
 
 func fromResolvedTheme(resolved config.ResolvedTheme) tuiTheme {
@@ -44,6 +45,13 @@ func snowTheme() tuiTheme {
 }
 
 var activeTUITheme = snowTheme()
+
+// The terminal background is reported through Bubble Tea, the sole input owner.
+var terminalDark = true
+
+func themeColor(pair config.AdaptiveColor) color.Color {
+	return lipgloss.Color(resolvedThemeColor(pair, terminalDark))
+}
 
 func makeTUITheme(name string) (tuiTheme, error) {
 	resolved, err := config.ResolveBuiltInTheme(name)
@@ -77,8 +85,8 @@ func applyCustomTUITheme(custom config.ThemeFile) error {
 
 func applyResolvedTheme(t tuiTheme) {
 	activeTUITheme = t
-	colorAccent, colorMuted, colorSoft = t.accent, t.muted, t.soft
-	colorWarn, colorErr, colorOk = t.warn, t.err, t.ok
+	colorAccent, colorMuted, colorSoft = themeColor(t.accent), themeColor(t.muted), themeColor(t.soft)
+	colorWarn, colorErr, colorOk = themeColor(t.warn), themeColor(t.err), themeColor(t.ok)
 	styleUser = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleAssistant = lipgloss.NewStyle().Foreground(colorSoft)
 	styleTool = lipgloss.NewStyle().Foreground(colorWarn)
@@ -90,7 +98,7 @@ func applyResolvedTheme(t tuiTheme) {
 	styleDiffAdd = lipgloss.NewStyle().Foreground(colorOk)
 	styleDiffDel = lipgloss.NewStyle().Foreground(colorErr)
 	styleBrand = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	styleSep = lipgloss.NewStyle().Foreground(t.sep)
+	styleSep = lipgloss.NewStyle().Foreground(themeColor(t.sep))
 	stylePrompt = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleMention = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	// Keep the composer transparent. Nested textarea cursor/end-of-buffer

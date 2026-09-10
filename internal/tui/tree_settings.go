@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -142,7 +142,7 @@ func (m *Model) renderTreePicker() string {
 
 // handlePermissionPick resolves an interactive permission request with
 // arrows + Enter. Esc denies (safe default).
-func (m *Model) handlePermissionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handlePermissionPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	choices := m.permissionPickerChoices()
 	index := slices.IndexFunc(choices, func(choice permissionPickerChoice) bool { return choice.id == m.permChoice })
@@ -150,18 +150,18 @@ func (m *Model) handlePermissionPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		index = 0
 		m.permChoice = choices[index].id
 	}
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyLeft, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		index = (index - 1 + len(choices)) % len(choices)
 		m.permChoice = choices[index].id
-	case tea.KeyDown, tea.KeyRight, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyRight, msg.Code == tea.KeyTab:
 		index = (index + 1) % len(choices)
 		m.permChoice = choices[index].id
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		if m.permissionApprovalEnabled() {
 			m.resolvePermission()
 		}
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		m.permChoice = permChoiceDeny
 		m.resolvePermission()
 	}
@@ -216,17 +216,17 @@ func (m *Model) startPermissionModePick() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handlePermissionModePick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handlePermissionModePick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	const count = 3
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyLeft, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		m.permissionModeIndex = (m.permissionModeIndex - 1 + count) % count
-	case tea.KeyDown, tea.KeyRight, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyRight, msg.Code == tea.KeyTab:
 		m.permissionModeIndex = (m.permissionModeIndex + 1) % count
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		m.applyPermissionMode()
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		m.pickPermissionMode = false
 	}
 	return m, nil
@@ -292,33 +292,33 @@ func (m *Model) startSettings() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Left/Right adjust the selected value rather than navigate rows. Handle
 	// them before generic picker normalization, whose default bindings also map
 	// horizontal arrows to previous/next list items.
-	if msg.Type == tea.KeyLeft {
+	if msg.Code == tea.KeyLeft {
 		if m.settingsValueRow() {
 			m.cycleSetting(-1)
 		}
 		return m, nil
 	}
-	if msg.Type == tea.KeyRight {
+	if msg.Code == tea.KeyRight {
 		if m.settingsValueRow() {
 			m.cycleSetting(1)
 		}
 		return m, nil
 	}
 	msg = normalizePickerKeyWithMap(msg, m.keys)
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyShiftTab:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		m.settingsIndex = (m.settingsIndex - 1 + settingsCount) % settingsCount
-	case tea.KeyDown, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyTab:
 		m.settingsIndex = (m.settingsIndex + 1) % settingsCount
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		m.pickSettings = false
 		m.settingsError = ""
 		m.settingsStatus = ""
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		if m.settingsIndex == settingsModel {
 			if m.compatibleLoginPending {
 				m.settingsStatus = "waiting for openai-compatible model discovery"
@@ -533,7 +533,7 @@ func (m *Model) rerenderThemedTranscript() {
 		return
 	}
 	wasAtBottom := m.transcript.AtBottom()
-	offset := m.transcript.YOffset
+	offset := m.transcript.YOffset()
 	m.clearTranscriptSelection()
 	m.hydrateSession()
 	m.transcriptBaseDirty = true

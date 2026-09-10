@@ -8,8 +8,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -201,15 +201,15 @@ func (m *Model) subagentFleetSelectedPath() string {
 }
 
 func (m *Model) handleSubagentFleetMouse(msg tea.MouseMsg) {
-	event := tea.MouseEvent(msg)
-	if event.Action != tea.MouseActionPress {
+	event := msg.Mouse()
+	if !isMouseWheel(msg) {
 		return
 	}
 	delta := max(1, m.transcript.MouseWheelDelta)
 	switch event.Button {
-	case tea.MouseButtonWheelUp:
+	case tea.MouseWheelUp:
 		m.scrollSubagentFleetDetail(-delta)
-	case tea.MouseButtonWheelDown:
+	case tea.MouseWheelDown:
 		m.scrollSubagentFleetDetail(delta)
 	}
 }
@@ -226,25 +226,25 @@ func (m *Model) scrollSubagentFleetDetail(delta int) {
 	m.subagentFleetDetailEnd = next >= maxOffset
 }
 
-func (m *Model) handleSubagentFleetKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleSubagentFleetKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	count := len(m.subagentFleetList.Agents)
-	switch msg.Type {
-	case tea.KeyEsc:
+	switch {
+	case msg.Code == tea.KeyEscape:
 		m.closeSubagentFleet()
 		return m, nil
-	case tea.KeyRunes:
-		if len(msg.Runes) == 1 {
-			switch msg.Runes[0] {
+	case msg.Text != "":
+		if len([]rune(msg.Text)) == 1 {
+			switch []rune(msg.Text)[0] {
 			case 'q':
 				m.closeSubagentFleet()
 				return m, nil
 			case 'r':
 				return m, m.refreshSubagentFleet()
 			case 'j':
-				msg.Type = tea.KeyDown
+				msg.Code = tea.KeyDown
 			case 'k':
-				msg.Type = tea.KeyUp
+				msg.Code = tea.KeyUp
 			}
 		}
 	}
@@ -252,19 +252,19 @@ func (m *Model) handleSubagentFleetKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	previous := m.subagentFleetIndex
-	switch msg.Type {
-	case tea.KeyUp:
+	switch {
+	case msg.Code == tea.KeyUp:
 		m.subagentFleetIndex = (m.subagentFleetIndex - 1 + count) % count
-	case tea.KeyDown:
+	case msg.Code == tea.KeyDown:
 		m.subagentFleetIndex = (m.subagentFleetIndex + 1) % count
-	case tea.KeyPgUp:
+	case msg.Code == tea.KeyPgUp:
 		m.scrollSubagentFleetDetail(-m.subagentFleetDetailPageSize())
-	case tea.KeyPgDown:
+	case msg.Code == tea.KeyPgDown:
 		m.scrollSubagentFleetDetail(m.subagentFleetDetailPageSize())
-	case tea.KeyHome:
+	case msg.Code == tea.KeyHome:
 		m.subagentFleetDetailOffset = 0
 		m.subagentFleetDetailEnd = false
-	case tea.KeyEnd:
+	case msg.Code == tea.KeyEnd:
 		m.subagentFleetDetailOffset = max(0, m.subagentFleetDetailLineCount()-m.subagentFleetDetailPageSize())
 		m.subagentFleetDetailEnd = true
 	}
@@ -509,7 +509,7 @@ func (m *Model) renderSubagentFleetModal() string {
 		body = lipgloss.JoinVertical(lipgloss.Left, list, sep, detail)
 	}
 	content := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Width(layout.innerWidth).Height(layout.innerHeight).Render(content)
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Width(layout.innerWidth + 2).Height(layout.innerHeight + 2).Render(content)
 }
 
 func (m *Model) renderSubagentFleetHeader(width int) string {

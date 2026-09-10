@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -30,7 +30,7 @@ func TestPluginViewGeometryAndKeyboard(t *testing.T) {
 		if lipgloss.Width(frame) > width || lipgloss.Height(frame) > 24 {
 			t.Fatalf("geometry %dx%d", lipgloss.Width(frame), lipgloss.Height(frame))
 		}
-		handled, _ := m.handlePluginKey(tea.KeyMsg{Type: tea.KeyEsc})
+		handled, _ := m.handlePluginKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 		if !handled || m.plugins.screen != "" {
 			t.Fatal("escape did not restore transcript")
 		}

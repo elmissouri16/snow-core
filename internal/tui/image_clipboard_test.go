@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -51,7 +51,7 @@ func TestImageAttachmentTokenRoundTrip(t *testing.T) {
 func TestClipboardImageTokenInsertsAtComposerCursor(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	m.editor.SetValue("cool shsh")
-	m.editor.SetCursor(5)
+	m.editor.SetCursorColumn(5)
 	_, _ = m.Update(clipboardImageMsg{block: protocol.ContentBlock{
 		Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte("x"),
 	}})
@@ -68,7 +68,7 @@ func TestComposerCtrlVAttachesImageAndSubmitPersistsMixedContent(t *testing.T) {
 	m.editor.SetValue("describe this")
 	image := protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte("\x89PNG\r\n\x1a\nbytes")}
 	m.imagePasteCmdOverride = func() tea.Msg { return clipboardImageMsg{block: image} }
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("image paste returned no command")
 	}
@@ -95,7 +95,7 @@ func TestComposerCtrlVAttachesImageAndSubmitPersistsMixedContent(t *testing.T) {
 	if err := m.app.Agent.SetModel(model); err != nil {
 		t.Fatal(err)
 	}
-	_, promptCmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, promptCmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if promptCmd == nil {
 		t.Fatal("image prompt returned no command")
 	}
@@ -125,7 +125,7 @@ func TestBusyPromptRetainsImagesInsteadOfQueuingTextOnly(t *testing.T) {
 	m.busy = true
 	m.editor.SetValue("queued text")
 	m.promptImages = []protocol.ContentBlock{{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte("x")}}
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil || len(m.promptImages) != 1 || !strings.Contains(m.lastStatus, "cannot be queued") {
 		t.Fatalf("busy image submission: cmd=%v images=%d status=%q", cmd != nil, len(m.promptImages), m.lastStatus)
 	}
@@ -155,7 +155,7 @@ func TestStaleClipboardImageDoesNotAttachAfterSubmission(t *testing.T) {
 	buildAppForTest(t, m)
 	m.imagePasteGeneration = 4
 	m.editor.SetValue("submitted")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	_, _ = m.Update(clipboardImageMsg{generation: 4, block: protocol.ContentBlock{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte("x")}})
 	if len(m.promptImages) != 0 {
 		t.Fatal("stale clipboard result attached to next prompt")
@@ -182,7 +182,7 @@ func TestComposerTextClipboardFallsBackToTextareaPaste(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.imagePasteCmdOverride = func() tea.Msg { return clipboardImageMsg{err: errClipboardHasNoImage} }
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("clipboard probe returned no command")
 	}
@@ -210,7 +210,7 @@ func TestBackspaceRemovesLastImageFromEmptyComposer(t *testing.T) {
 	buildAppForTest(t, m)
 	m.promptImages = []protocol.ContentBlock{{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte("x")}}
 	m.editor.SetValue("[Image #1] ")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if len(m.promptImages) != 0 || m.editor.Value() != "" {
 		t.Fatalf("Backspace did not remove inline image: images=%d text=%q", len(m.promptImages), m.editor.Value())
 	}

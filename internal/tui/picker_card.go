@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 const (
 	pickerCardMaxWidth  = 80
@@ -75,7 +75,7 @@ func renderPickerCard(content string, geometry pickerCardGeometry) string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorAccent).
-		Width(geometry.innerWidth).
-		Height(geometry.innerHeight).
+		Width(geometry.outerWidth).
+		Height(geometry.outerHeight).
 		Render(content)
 }

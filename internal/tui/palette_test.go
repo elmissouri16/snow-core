@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/auth"
@@ -117,29 +117,29 @@ func TestModelPaletteNavigation(t *testing.T) {
 
 	// Down arrow moves the selection (wraps).
 	before := m.compIndex
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.compIndex != (before+1)%len(m.compMatches) {
 		t.Fatalf("down: index %d -> %d, want wrap to %d", before, m.compIndex, (before+1)%len(m.compMatches))
 	}
 	// Tab inserts the highlighted command without executing it.
 	m.compIndex = 0
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.editor.Value() != "/permissions" {
 		t.Fatalf("Tab inserted %q, want /permissions", m.editor.Value())
 	}
 	if !m.pickPermissionMode {
 		// Completion fills the command; Enter is still the execution key.
-		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+		_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	}
 	if !m.pickPermissionMode {
 		t.Fatal("Enter after Tab should execute /permissions interactively")
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	// Up wraps backward when the palette is open.
 	m.editor.SetValue("/per")
 	m.refreshPalette()
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyUp})
 
 	// Enter with exactly one match for "/model" runs it immediately.
 	m.editor.SetValue("/model")
@@ -149,7 +149,7 @@ func TestModelPaletteNavigation(t *testing.T) {
 	}
 	m.editor.SetValue("/model")
 	m.refreshPalette()
-	_, quit := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, quit := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if quit != nil {
 		t.Fatal("picking /model should not quit")
 	}
@@ -171,7 +171,7 @@ func TestModelPaletteNavigationReachesAllCommands(t *testing.T) {
 	}
 
 	for range len(m.compMatches) - 1 {
-		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+		_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	last := m.compMatches[len(m.compMatches)-1]
 	if m.compIndex != len(m.compMatches)-1 {
@@ -181,7 +181,7 @@ func TestModelPaletteNavigationReachesAllCommands(t *testing.T) {
 		t.Fatalf("selection-following palette did not render %s: %q", last, overlay)
 	}
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.compIndex != 0 {
 		t.Fatalf("down from final command index=%d want wrapped index 0", m.compIndex)
 	}
@@ -195,11 +195,11 @@ func TestModelPaletteLogoutRunsPickerWithoutArgument(t *testing.T) {
 	}
 	m.editor.SetValue("/logout")
 	m.refreshPalette()
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.editor.Value() != "/logout" {
 		t.Fatalf("Tab value = %q, want argument-free command", m.editor.Value())
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pickProvider || !m.providerLogout {
 		t.Fatalf("logout picker open=%v purpose=%v", m.pickProvider, m.providerLogout)
 	}
@@ -227,7 +227,7 @@ func TestModelPaletteLoginRunsNotInserts(t *testing.T) {
 		t.Fatalf("/login not in matches: %v", m.compMatches)
 	}
 	m.compIndex = idx
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if !m.pickProvider {
 		t.Fatalf("picking /login should open the provider picker (pickProvider=%v loginMode=%v)", m.pickProvider, m.loginMode)
@@ -252,7 +252,7 @@ func TestModelEscClosesPalette(t *testing.T) {
 	if !m.compVisible {
 		t.Fatal("palette should open on '/'")
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.compVisible {
 		t.Fatal("Esc should close the palette")
 	}
@@ -264,7 +264,7 @@ func TestModelLoginFlow(t *testing.T) {
 
 	// /login with no args opens the provider picker.
 	m.editor.SetValue("/login")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pickProvider {
 		t.Fatal("login with no args should open the provider picker")
 	}
@@ -274,7 +274,7 @@ func TestModelLoginFlow(t *testing.T) {
 	if got := m.managedFrameHeight(); got != m.height {
 		t.Fatalf("inline provider picker frame height=%d want terminal height %d", got, m.height)
 	}
-	pickerView := stripANSI(m.View())
+	pickerView := stripANSI(m.viewContent())
 	for _, provider := range []string{"opencode-go", "opencode-zen", "openai-compatible", "chatgpt"} {
 		if !strings.Contains(pickerView, provider) {
 			t.Fatalf("inline provider picker truncated %q: %q", provider, pickerView)
@@ -302,7 +302,7 @@ func TestModelLoginFlow(t *testing.T) {
 		t.Fatalf("opencode-go not in picker: %v", m.providers)
 	}
 	m.provIndex = idx
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginMode || m.loginProvider != "opencode-go" {
 		t.Fatalf("expected login mode for opencode-go, got mode=%v provider=%q", m.loginMode, m.loginProvider)
 	}
@@ -312,14 +312,14 @@ func TestModelLoginFlow(t *testing.T) {
 
 	// Type a masked secret.
 	for _, r := range "sk-test-123" {
-		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		_, _ = m.handleKey(tea.KeyPressMsg{Text: string([]rune{r}), Code: r})
 	}
 	if got := m.secretBuf.String(); got != "sk-test-123" {
 		t.Fatalf("secretBuf = %q, want sk-test-123", got)
 	}
 
 	// Enter submits and persists.
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.loginMode {
 		t.Fatal("login mode should end after submit")
 	}
@@ -349,14 +349,14 @@ func TestOpenCodeZenLoginAllowsAnonymousMode(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.editor.SetValue("/login opencode-zen")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginMode || m.loginProvider != "opencode-zen" {
 		t.Fatalf("login mode=%v provider=%q", m.loginMode, m.loginProvider)
 	}
 	if got := stripANSI(m.renderLoginModal()); !strings.Contains(got, "key is optional") {
 		t.Fatalf("optional hint missing from login card: %q", got)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.loginMode {
 		t.Fatal("blank optional login should finish")
 	}
@@ -379,7 +379,7 @@ func TestInlineCommandPaletteWindowFollowsSelection(t *testing.T) {
 	m.compVisible = true
 	m.layout()
 
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	if !strings.Contains(view, "/a9") || !strings.Contains(view, "/") {
 		t.Fatalf("inline command palette lost selection or composer: %q", view)
 	}
@@ -393,21 +393,21 @@ func TestModelProviderPickerNavigation(t *testing.T) {
 	buildAppForTest(t, m)
 
 	m.editor.SetValue("/login")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pickProvider {
 		t.Fatal("expected provider picker")
 	}
 	before := m.provIndex
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.provIndex != (before+1)%len(m.providers) {
 		t.Fatalf("down: index %d -> %d", before, m.provIndex)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.provIndex != before {
 		t.Fatalf("up should return to %d, got %d", before, m.provIndex)
 	}
 	// Esc closes the picker without entering login mode.
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.pickProvider || m.loginMode {
 		t.Fatal("Esc should close picker without login")
 	}
@@ -420,11 +420,11 @@ func TestModelLoginPickerDirectArg(t *testing.T) {
 
 	// Direct provider arg skips the picker.
 	m.editor.SetValue("/login opencode-go")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginMode || m.loginProvider != "opencode-go" || m.pickProvider {
 		t.Fatalf("direct arg should enter capture, mode=%v provider=%q pick=%v", m.loginMode, m.loginProvider, m.pickProvider)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	// The generic Responses login captures and persists its endpoint before the
 	// masked optional key, then refreshes models without rendering the secret.
@@ -440,23 +440,23 @@ func TestModelLoginPickerDirectArg(t *testing.T) {
 	}))
 	defer server.Close()
 	m.editor.SetValue("/login openai-compatible")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginProfileMode {
 		t.Fatal("compatible login did not request a profile name")
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter}) // blank keeps the legacy name
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // blank keeps the legacy name
 	if !m.loginEndpointMode || m.loginProvider != "openai-compatible" {
 		t.Fatalf("compatible endpoint mode=%v provider=%q", m.loginEndpointMode, m.loginProvider)
 	}
 	m.editor.SetValue(server.URL + "/v1")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.loginEndpointMode || !m.loginMode {
 		t.Fatalf("compatible key step endpoint=%v key=%v", m.loginEndpointMode, m.loginMode)
 	}
 	for _, r := range "compatible-secret" {
-		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		_, _ = m.handleKey(tea.KeyPressMsg{Text: string([]rune{r}), Code: r})
 	}
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("compatible login did not schedule model discovery")
 	}
@@ -484,15 +484,15 @@ func TestModelLoginPickerDirectArg(t *testing.T) {
 		t.Fatalf("compatible status leaked or missed configuration: %q", status)
 	}
 	m.editor.SetValue("/login openai-compatible")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginEndpointMode || m.editor.Value() != server.URL+"/v1" {
 		t.Fatalf("saved endpoint was not prefilled: mode=%v value=%q", m.loginEndpointMode, m.editor.Value())
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc}) // endpoint -> profile
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc}) // profile -> close
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape}) // endpoint -> profile
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape}) // profile -> close
 	m.editor.SetValue("/logout openai-compatible")
-	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("compatible logout did not return command")
 	}
@@ -503,14 +503,14 @@ func TestModelLoginPickerDirectArg(t *testing.T) {
 
 	// Unsupported provider errors without entering capture.
 	m.editor.SetValue("/login nope")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.loginMode || m.pickProvider {
 		t.Fatal("unsupported provider should not enter login")
 	}
 
 	// ChatGPT is OAuth-only; it must never be sent through the API-key mask.
 	m.editor.SetValue("/login chatgpt")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.loginMode || m.pickProvider {
 		t.Fatal("chatgpt OAuth should not enter API-key capture")
 	}
@@ -524,10 +524,10 @@ func TestOpenAICompatibleTUILoginAllowsKeylessAndRejectsInvalidEndpoint(t *testi
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.editor.SetValue("/login openai-compatible")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter}) // legacy profile name
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // legacy profile name
 	m.editor.SetValue("relative/path")
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil || !m.loginEndpointMode {
 		t.Fatalf("invalid endpoint cmd=%v mode=%v", cmd != nil, m.loginEndpointMode)
 	}
@@ -540,11 +540,11 @@ func TestOpenAICompatibleTUILoginAllowsKeylessAndRejectsInvalidEndpoint(t *testi
 	}))
 	defer server.Close()
 	m.editor.SetValue(server.URL)
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginMode {
 		t.Fatal("valid endpoint did not advance to optional key")
 	}
-	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("empty optional key did not configure keyless endpoint")
 	}
@@ -569,21 +569,21 @@ func TestOpenAICompatibleTUILoginCreatesNamedProfile(t *testing.T) {
 	defer server.Close()
 
 	m.editor.SetValue("/login openai-compatible")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginProfileMode {
 		t.Fatal("named login did not enter profile-name capture")
 	}
 	m.editor.SetValue("x-provider")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginEndpointMode || m.loginProvider != "x-provider" {
 		t.Fatalf("endpoint mode=%v provider=%q", m.loginEndpointMode, m.loginProvider)
 	}
 	m.editor.SetValue(server.URL + "/v1")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	for _, r := range "x-secret" {
-		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		_, _ = m.handleKey(tea.KeyPressMsg{Text: string([]rune{r}), Code: r})
 	}
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("named profile login did not schedule discovery")
 	}
@@ -653,11 +653,11 @@ func TestModelChatGPTAccountAuthorizationPicker(t *testing.T) {
 	m.height = 30
 	m.layout()
 	m.editor.SetValue("/login chatgpt")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pickChatGPTAuth || len(m.authAccounts) != 1 || m.authAccounts[0].AccountID != "source-account" {
 		t.Fatalf("unexpected auth picker: pick=%v accounts=%+v", m.pickChatGPTAuth, m.authAccounts)
 	}
-	view := m.View()
+	view := m.viewContent()
 	if strings.Contains(view, "source-access") || !strings.Contains(view, "Pi") || !strings.Contains(view, "source-account") || !strings.Contains(view, "own OAuth token") {
 		t.Fatalf("picker leaked token or missed account authorization: %q", view)
 	}
@@ -688,8 +688,8 @@ func TestModelPickerShowsChatGPTAuthStatus(t *testing.T) {
 	m.layout()
 
 	m.editor.SetValue("/login")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	view := m.View()
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	view := m.viewContent()
 	if !strings.Contains(view, "chatgpt") || !strings.Contains(view, "OAuth not configured") {
 		t.Fatalf("picker should show chatgpt OAuth status: %q", view)
 	}
@@ -714,8 +714,8 @@ func TestModelPickerShowsStoredChatGPTOAuth(t *testing.T) {
 	m.layout()
 
 	m.editor.SetValue("/login")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	view := m.View()
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	view := m.viewContent()
 	if !strings.Contains(view, "authenticated via OAuth") || !strings.Contains(view, "account-123") {
 		t.Fatalf("picker should show stored ChatGPT OAuth status: %q", view)
 	}
@@ -731,9 +731,9 @@ func TestModelLoginMaskedView(t *testing.T) {
 	m.loginMode = true
 	m.loginProvider = "opencode-go"
 	for _, r := range "abc" {
-		_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		_, _ = m.handleKey(tea.KeyPressMsg{Text: string([]rune{r}), Code: r})
 	}
-	view := m.View()
+	view := m.viewContent()
 	if strings.Contains(view, "abc") {
 		t.Fatalf("masked view leaked secret: %q", view)
 	}
@@ -747,11 +747,11 @@ func TestModelLoginEscCancels(t *testing.T) {
 	buildAppForTest(t, m)
 
 	m.editor.SetValue("/login opencode-go")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.loginMode {
 		t.Fatal("expected login mode")
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.loginMode {
 		t.Fatal("Esc should cancel login")
 	}
@@ -774,7 +774,7 @@ func TestModelLogoutFlow(t *testing.T) {
 	}
 
 	m.editor.SetValue("/logout")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pickProvider || !m.providerLogout || len(m.providers) != 2 {
 		t.Fatalf("logout picker open=%v purpose=%v providers=%v", m.pickProvider, m.providerLogout, m.providers)
 	}
@@ -782,7 +782,7 @@ func TestModelLogoutFlow(t *testing.T) {
 		t.Fatalf("logout picker = %q", got)
 	}
 	m.provIndex = 0
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil || m.pickProvider || m.providerLogout || !m.logoutPending {
 		t.Fatalf("picker selection cmd=%v open=%v purpose=%v pending=%v", cmd != nil, m.pickProvider, m.providerLogout, m.logoutPending)
 	}
@@ -806,7 +806,7 @@ func TestModelLogoutFlow(t *testing.T) {
 
 	// The explicit form remains available for scripts and experienced users.
 	m.editor.SetValue("/logout chatgpt")
-	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("direct logout should run as an async command")
 	}
@@ -820,7 +820,7 @@ func TestModelLogoutPickerHandlesNoStoredCredentials(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.editor.SetValue("/logout")
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil || m.pickProvider {
 		t.Fatalf("empty logout cmd=%v picker=%v", cmd != nil, m.pickProvider)
 	}
@@ -835,7 +835,7 @@ func TestHelpUsesRegistry(t *testing.T) {
 
 	beforeLines := len(m.lines)
 	m.editor.SetValue("/help")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	joined := strings.Join(m.helpLines(), "\n")
 	if !m.pickHelp || len(m.lines) != beforeLines {
 		t.Fatalf("help popup=%v transcript lines=%d want=%d", m.pickHelp, len(m.lines), beforeLines)
@@ -856,14 +856,14 @@ func TestModelNoArgCommandsOpenPickers(t *testing.T) {
 	m.editor.SetValue("/model")
 	m.refreshPalette()
 	m.compIndex = 0
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got := m.editor.Value(); got != "" {
 		t.Fatalf("picking /model should run it, editor = %q", got)
 	}
 	if m.compVisible || !m.pickModel {
 		t.Fatal("palette should close and model picker should open")
 	}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 }
 
 var _ = protocol.AgentEvent{}

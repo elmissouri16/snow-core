@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -55,10 +55,10 @@ func TestComposerCtrlVPasteResultIsNotDropped(t *testing.T) {
 	m.editor.CursorEnd()
 	pasted := "line one\n[<65;113;44M\nline three"
 	m.pasteCmdOverride = func() tea.Msg {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true}
+		return tea.PasteMsg{Content: pasted}
 	}
 
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("Ctrl+V discarded the textarea clipboard command")
 	}
@@ -85,10 +85,10 @@ func TestPasteResultReturnsToInitiatingUserInputEditor(t *testing.T) {
 	}}})
 	pasted := "first line\nsecond line"
 	m.pasteCmdOverride = func() tea.Msg {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true}
+		return tea.PasteMsg{Content: pasted}
 	}
 
-	_, cmd := m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, cmd := m.handleUserInputKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("free-form Ctrl+V discarded the textarea clipboard command")
 	}
@@ -121,7 +121,7 @@ func TestComposerPasteFailureIsVisibleAndRetryClearsIt(t *testing.T) {
 	}
 
 	m.pasteCmdOverride = func() tea.Msg { return struct{}{} }
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if cmd == nil || m.editor.Err != nil {
 		t.Fatalf("paste retry did not clear prior error: cmd=%v err=%v", cmd != nil, m.editor.Err)
 	}
@@ -136,9 +136,9 @@ func TestDelayedUserInputPasteDoesNotMoveToAnotherQuestion(t *testing.T) {
 	}})
 
 	m.pasteCmdOverride = func() tea.Msg {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("delayed paste"), Paste: true}
+		return tea.PasteMsg{Content: "delayed paste"}
 	}
-	_, resultCmd := m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, resultCmd := m.handleUserInputKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if resultCmd == nil {
 		t.Fatal("free-form Ctrl+V returned no command")
 	}
@@ -164,14 +164,14 @@ func TestUserInputPasteFailureIsVisibleAndRetryClearsIt(t *testing.T) {
 	}}})
 	m.pasteCmdOverride = func() tea.Msg { return struct{}{} }
 
-	_, cmd := m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, cmd := m.handleUserInputKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	m.userInputEditor.Err = errors.New("clipboard unavailable")
 	_, _ = m.Update(cmd())
 	if m.userInputError != "paste: clipboard unavailable" {
 		t.Fatalf("user-input paste error = %q", m.userInputError)
 	}
 
-	_, cmd = m.handleUserInputKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	_, cmd = m.handleUserInputKey(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if cmd == nil || m.userInputEditor.Err != nil || m.userInputError != "" {
 		t.Fatalf("user-input retry did not clear error: cmd=%v editorErr=%v error=%q", cmd != nil, m.userInputEditor.Err, m.userInputError)
 	}
@@ -181,7 +181,7 @@ func TestTerminalBracketedPasteRemainsLiteralAndDoesNotSubmit(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	text := "alpha\n[<0;10;5M\nomega"
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text), Paste: true})
+	_, _ = m.Update(tea.PasteMsg{Content: text})
 	if got := m.editor.Value(); got != text {
 		t.Fatalf("bracketed paste = %q, want %q", got, text)
 	}

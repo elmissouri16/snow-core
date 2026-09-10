@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -26,24 +26,24 @@ func (m *Model) closeHelp() {
 	m.helpOffset = 0
 }
 
-func (m *Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleHelpKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	limit := m.helpOffsetLimit()
 	m.helpOffset = min(max(0, m.helpOffset), limit)
-	switch msg.Type {
-	case tea.KeyUp:
+	switch {
+	case msg.Code == tea.KeyUp:
 		m.helpOffset = max(0, m.helpOffset-1)
-	case tea.KeyDown:
+	case msg.Code == tea.KeyDown:
 		m.helpOffset = min(limit, m.helpOffset+1)
-	case tea.KeyPgUp:
+	case msg.Code == tea.KeyPgUp:
 		m.helpOffset = max(0, m.helpOffset-m.helpBodyHeight())
-	case tea.KeyPgDown:
+	case msg.Code == tea.KeyPgDown:
 		m.helpOffset = min(limit, m.helpOffset+m.helpBodyHeight())
-	case tea.KeyHome:
+	case msg.Code == tea.KeyHome:
 		m.helpOffset = 0
-	case tea.KeyEnd:
+	case msg.Code == tea.KeyEnd:
 		m.helpOffset = limit
-	case tea.KeyEnter, tea.KeyEsc:
+	case msg.Code == tea.KeyEnter, msg.Code == tea.KeyEscape:
 		m.closeHelp()
 	}
 	return m, nil

@@ -2,16 +2,14 @@ package tui
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/permission"
@@ -97,10 +95,8 @@ func TestComposerMentionHighlightSurvivesCursorEscapeSequences(t *testing.T) {
 }
 
 func mentionHighlightTestStyles() (lipgloss.Style, lipgloss.Style) {
-	renderer := lipgloss.NewRenderer(io.Discard, termenv.WithProfile(termenv.TrueColor))
-	renderer.SetColorProfile(termenv.TrueColor)
-	textStyle := renderer.NewStyle().Foreground(lipgloss.Color("#eeeeee"))
-	mentionStyle := renderer.NewStyle().Foreground(lipgloss.Color("#0088ff")).Bold(true)
+	textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#eeeeee"))
+	mentionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#0088ff")).Bold(true)
 	return textStyle, mentionStyle
 }
 
@@ -147,7 +143,7 @@ func TestModelMentionPickerInsertsFileReference(t *testing.T) {
 	if !m.mentionVisible || len(m.mentionMatches) != 1 || m.mentionMatches[0] != "notes.md" {
 		t.Fatalf("mention picker = visible %v, matches %v", m.mentionVisible, m.mentionMatches)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got := m.editor.Value(); got != "please read @notes.md " {
 		t.Fatalf("editor after mention = %q", got)
 	}

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -209,7 +209,7 @@ func BenchmarkViewNormalAndNarrow(b *testing.B) {
 			m.refreshTranscriptForced()
 			b.ResetTimer()
 			for b.Loop() {
-				_ = m.View()
+				_ = m.viewContent()
 			}
 		})
 	}
@@ -244,9 +244,9 @@ func BenchmarkComposerBackspace(b *testing.B) {
 					m.editor.CursorEnd()
 					remaining = size
 				}
-				_, _ = m.updateComposerEditor(tea.KeyMsg{Type: tea.KeyBackspace})
+				_, _ = m.updateComposerEditor(tea.KeyPressMsg{Code: tea.KeyBackspace})
 				m.layout()
-				_ = m.View()
+				_ = m.viewContent()
 				remaining--
 			}
 		})

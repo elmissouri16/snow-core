@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 const (
@@ -31,11 +31,8 @@ func shouldCollapsePastedText(text string) bool {
 // collapseComposerPaste replaces a large bracketed/clipboard paste with a
 // short inline token. The exact body stays in model state and is expanded only
 // when Snow submits or restores the draft.
-func (m *Model) collapseComposerPaste(msg tea.KeyMsg) bool {
-	if !msg.Paste || msg.Type != tea.KeyRunes || len(msg.Runes) == 0 {
-		return false
-	}
-	text := string(msg.Runes)
+func (m *Model) collapseComposerPaste(msg tea.PasteMsg) bool {
+	text := msg.Content
 	if !shouldCollapsePastedText(text) {
 		return false
 	}

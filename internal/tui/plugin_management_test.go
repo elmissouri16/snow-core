@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/pkg/plugin"
@@ -50,17 +50,17 @@ func TestPluginInspectorTogglesDisabledOnlyRegistration(t *testing.T) {
 	if m.pluginScreenView() == nil {
 		t.Fatal("disabled-only inspector unavailable")
 	}
-	m.handlePluginKey(tea.KeyMsg{Type: tea.KeyEnter}) // Open the selected plugin.
+	m.handlePluginKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // Open the selected plugin.
 	actions := pluginActions(m.pluginScreenView().Content)
 	if len(actions) != 1 || actions[0].Action != "enable:demo" {
 		t.Fatalf("actions=%+v", actions)
 	}
 	m.editor.SetValue("keep my draft")
-	handled, cmd := m.handlePluginKey(tea.KeyMsg{Type: tea.KeyEnter})
+	handled, cmd := m.handlePluginKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !handled || cmd == nil {
 		t.Fatal("enable button did not run")
 	}
-	if _, repeated := m.handlePluginKey(tea.KeyMsg{Type: tea.KeyEnter}); repeated != nil {
+	if _, repeated := m.handlePluginKey(tea.KeyPressMsg{Code: tea.KeyEnter}); repeated != nil {
 		t.Fatal("repeated Enter started another save")
 	}
 	if !strings.Contains(m.renderPluginScreen(), "Saving") {
@@ -94,7 +94,7 @@ func TestPluginInspectorTogglesDisabledOnlyRegistration(t *testing.T) {
 		t.Fatalf("undo left stale UI: screen=%s status=%s", m.plugins.screen, m.lastStatus)
 	}
 	m.pluginInspector()
-	m.handlePluginKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handlePluginKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m.finishPluginToggle(pluginToggleDone{app: a, err: errors.New("package is missing")})
 	if !strings.Contains(m.renderPluginScreen(), "package is missing") {
 		t.Fatal("toggle failure hidden behind inspector")

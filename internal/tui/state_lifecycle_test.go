@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/elmissouri16/snow-core/internal/agent"
 	"github.com/elmissouri16/snow-core/internal/app"
@@ -229,7 +229,7 @@ func TestPermissionRequestPreemptsExistingPicker(t *testing.T) {
 	if !strings.Contains(view, "bash") || strings.Contains(view, "other") {
 		t.Fatalf("blocking permission overlay did not preempt model picker: %q", view)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.permChoice != permChoiceAlways {
 		t.Fatalf("permission did not own keyboard: choice=%d", m.permChoice)
 	}
@@ -264,7 +264,7 @@ func TestShortInlineSettingsKeepsSelectionVisible(t *testing.T) {
 	m.pickSettings = true
 	m.settingsIndex = settingsSkills
 	m.layout()
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	if !strings.Contains(view, "Agent Skills") {
 		t.Fatalf("selected setting clipped in short centered card: %q", view)
 	}

@@ -12,8 +12,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/elmissouri16/snow-core/internal/session"
 	publicmcp "github.com/elmissouri16/snow-core/pkg/mcp"
@@ -168,7 +168,7 @@ func (m *Model) renderBashSummary(command, duration, message string, isError boo
 		}
 	}
 
-	width := m.transcript.Width
+	width := m.transcript.Width()
 	if width <= 0 {
 		width = m.width
 	}
@@ -317,10 +317,10 @@ func (m *Model) startInfoPicker(title string, items []statusInfoItem) (tea.Model
 	return m, nil
 }
 
-func (m *Model) handleInfoPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleInfoPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	if m.infoLoading {
-		if msg.Type == tea.KeyEsc {
+		if msg.Code == tea.KeyEscape {
 			m.closeInfoPicker()
 			m.pickerGeneration++
 		}
@@ -331,28 +331,28 @@ func (m *Model) handleInfoPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.closeInfoPicker()
 		return m, nil
 	}
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyLeft, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		m.infoIndex = (m.infoIndex - 1 + count) % count
-	case tea.KeyDown, tea.KeyRight, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyRight, msg.Code == tea.KeyTab:
 		m.infoIndex = (m.infoIndex + 1) % count
-	case tea.KeyPgUp:
+	case msg.Code == tea.KeyPgUp:
 		m.infoIndex -= m.infoPickerVisibleItems()
 		if m.infoIndex < 0 {
 			m.infoIndex = 0
 		}
-	case tea.KeyPgDown:
+	case msg.Code == tea.KeyPgDown:
 		m.infoIndex += m.infoPickerVisibleItems()
 		if m.infoIndex >= count {
 			m.infoIndex = count - 1
 		}
-	case tea.KeyHome:
+	case msg.Code == tea.KeyHome:
 		m.infoIndex = 0
-	case tea.KeyEnd:
+	case msg.Code == tea.KeyEnd:
 		m.infoIndex = count - 1
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		m.closeInfoPicker()
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		if strings.HasPrefix(m.infoTitle, "Agents") && m.infoIndex < len(m.infoAgentTargets) {
 			target := m.infoAgentTargets[m.infoIndex]
 			m.closeInfoPicker()
@@ -638,9 +638,9 @@ func (m *Model) startTreePick() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleTreePick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleTreePick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.treeLoading {
-		if msg.Type == tea.KeyEsc {
+		if msg.Code == tea.KeyEscape {
 			m.pickTree = false
 			m.treeLoading = false
 			m.pickerGeneration++
@@ -654,7 +654,7 @@ func (m *Model) handleTreePick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.branchAction != "" {
 		if m.branchAction == "delete" {
-			if keyMatches(msg, m.keys.Close) || (msg.Type == tea.KeyRunes && strings.EqualFold(string(msg.Runes), "n")) {
+			if keyMatches(msg, m.keys.Close) || (msg.Text != "" && strings.EqualFold(msg.Text, "n")) {
 				m.branchAction = ""
 				return m, nil
 			}
@@ -668,14 +668,14 @@ func (m *Model) handleTreePick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.branchAction, m.branchInput = "", ""
 		case keyMatches(msg, m.keys.Accept):
 			return m.executeTreeAction()
-		case msg.Type == tea.KeyBackspace:
+		case msg.Code == tea.KeyBackspace:
 			r := []rune(m.branchInput)
 			if len(r) > 0 {
 				m.branchInput = string(r[:len(r)-1])
 			}
-		case msg.Type == tea.KeyRunes:
-			if len([]rune(m.branchInput))+len(msg.Runes) <= 64 {
-				m.branchInput += string(msg.Runes)
+		case msg.Text != "":
+			if len([]rune(m.branchInput))+len([]rune(msg.Text)) <= 64 {
+				m.branchInput += msg.Text
 			}
 		}
 		return m, nil

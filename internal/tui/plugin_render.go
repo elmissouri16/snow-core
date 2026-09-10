@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/pkg/protocol"

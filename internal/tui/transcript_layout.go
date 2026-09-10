@@ -6,8 +6,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
@@ -74,7 +74,7 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 		m.transcriptDirty = true
 		return
 	}
-	width := m.transcript.Width
+	width := m.transcript.Width()
 	// Selection coordinates belong to an immutable wrapped snapshot. Keep live
 	// stream deltas off-screen until release so a response cannot cancel a drag
 	// or move the text beneath the pointer.
@@ -265,7 +265,7 @@ func (m *Model) runStatusMouseBounds() (y, start, end int, ok bool) {
 	if !m.showRunStatus() {
 		return 0, 0, 0, false
 	}
-	y = m.transcriptSelectionTop() + m.transcript.Height
+	y = m.transcriptSelectionTop() + m.transcript.Height()
 	if overlay := m.renderOverlays(); overlay != "" {
 		y += lipgloss.Height(overlay)
 	}
@@ -281,8 +281,8 @@ func (m *Model) handleRunStatusMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 	if m.app == nil || !m.app.Cfg.TUI.Mouse {
 		return false, nil
 	}
-	event := tea.MouseEvent(msg)
-	if event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft {
+	event := msg.Mouse()
+	if !isMouseClick(msg) || event.Button != tea.MouseLeft {
 		return false, nil
 	}
 	y, start, end, ok := m.runStatusMouseBounds()
@@ -374,11 +374,11 @@ func (m *Model) layout() {
 	m.editor.SetHeight(editorH)
 	bodyH := max(minTranscriptHeight, frameHeight-m.chromeHeight())
 	transcriptWidth := max(1, frameWidth-m.pluginSidebarWidth())
-	if m.transcript.Width != transcriptWidth || m.transcript.Height != bodyH {
+	if m.transcript.Width() != transcriptWidth || m.transcript.Height() != bodyH {
 		m.transcriptDirty = true
 	}
-	m.transcript.Width = transcriptWidth
-	m.transcript.Height = bodyH
+	m.transcript.SetWidth(transcriptWidth)
+	m.transcript.SetHeight(bodyH)
 	if wasAtBottom {
 		m.transcript.GotoBottom()
 	}
@@ -391,7 +391,7 @@ func (m *Model) quitCmd() tea.Cmd {
 	return tea.Quit
 }
 
-func (m *Model) handleModelShortcut(msg tea.KeyMsg) (bool, tea.Cmd) {
+func (m *Model) handleModelShortcut(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	if !keyMatches(msg, m.keys.Models) {
 		return false, nil
 	}
@@ -403,7 +403,7 @@ func (m *Model) handleModelShortcut(msg tea.KeyMsg) (bool, tea.Cmd) {
 	return true, cmd
 }
 
-func (m *Model) handleFleetShortcut(msg tea.KeyMsg) (bool, tea.Cmd) {
+func (m *Model) handleFleetShortcut(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch {
 	case keyMatches(msg, m.keys.Agents):
 		if m.subagentFleetOpen {
@@ -425,7 +425,7 @@ func (m *Model) handleFleetShortcut(msg tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 // handleKey processes key presses, the command palette, and login capture.
-func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.trustPending {
 		// Once persistence starts, keep ownership of the async result so a late
 		// app cannot be constructed after Bubble Tea has already exited. Before
@@ -433,22 +433,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.trustSaving {
 			return m, nil
 		}
-		if msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyCtrlD {
+		if msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl) || msg.Code == 'd' && msg.Mod.Contains(tea.ModCtrl) {
 			return m, m.quitCmd()
 		}
-		switch msg.Type {
-		case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
+		switch {
+		case msg.Code == tea.KeyUp, msg.Code == tea.KeyLeft, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 			m.trustChoice = (m.trustChoice + 1) % 2
 			m.trustError = ""
-		case tea.KeyDown, tea.KeyRight, tea.KeyTab:
+		case msg.Code == tea.KeyDown, msg.Code == tea.KeyRight, msg.Code == tea.KeyTab:
 			m.trustChoice = (m.trustChoice + 1) % 2
 			m.trustError = ""
-		case tea.KeyEsc:
+		case msg.Code == tea.KeyEscape:
 			m.trustChoice = 0
 			m.trustSaving = true
 			m.trustError = ""
 			return m, m.saveTrustCmd(trust.LevelDeny)
-		case tea.KeyEnter:
+		case msg.Code == tea.KeyEnter:
 			level := trust.LevelDeny
 			if m.trustChoice == 1 {
 				level = trust.LevelAllow
@@ -464,10 +464,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// while booting and on the terminal error screen so the alt-screen can
 	// always be restored cleanly.
 	if m.app == nil {
-		switch msg.Type {
-		case tea.KeyCtrlC:
+		switch {
+		case msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl):
 			return m, m.quitCmd()
-		case tea.KeyCtrlD:
+		case msg.Code == 'd' && msg.Mod.Contains(tea.ModCtrl):
 			if m.editor.Value() == "" {
 				return m, m.quitCmd()
 			}
@@ -478,22 +478,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// F6 toggles application mouse reporting without restarting. Native terminal
 	// selection/context menus require reporting to be disabled; application mode
 	// adds wheel scrolling, transcript drag-copy, and edge auto-scroll.
-	if msg.Type == tea.KeyF6 {
+	if msg.Code == tea.KeyF6 {
 		if m.app.Cfg.TUI.Mouse {
 			m.clearTranscriptSelection()
 			m.catchUpTranscriptAfterSelection()
 			m.app.Cfg.TUI.Mouse = false
 			m.lastStatus = "native selection + context menu · keyboard viewport scrolling"
-			return m, tea.DisableMouse
+			return m, nil
 		}
 		m.app.Cfg.TUI.Mouse = true
 		m.lastStatus = "app mouse · wheel scroll + drag copy enabled"
-		return m, tea.EnableMouseCellMotion
+		return m, nil
 	}
 
 	// Emergency Ctrl+C is resolved before any configurable action so a custom
 	// submit/accept binding can never shadow terminal recovery.
-	if msg.Type == tea.KeyCtrlC {
+	if msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl) {
 		if m.plugins != nil {
 			cancelled := false
 			for id := range m.plugins.running {
@@ -565,11 +565,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.confirmGoalReplace {
 		msg = normalizePickerKeyWithMap(msg, m.keys)
-		switch msg.Type {
-		case tea.KeyEsc:
+		switch {
+		case msg.Code == tea.KeyEscape:
 			m.confirmGoalReplace = false
 			return m, nil
-		case tea.KeyEnter:
+		case msg.Code == tea.KeyEnter:
 			objective, budget := m.pendingGoalObjective, m.pendingGoalBudget
 			m.confirmGoalReplace = false
 			g, err := m.app.CreateGoal(objective, budget, true)
@@ -588,24 +588,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePlanImplementationKey(normalizePickerKeyWithMap(msg, m.keys))
 	}
 
-	// Bubble Tea recognizes Option+Return when the terminal sends ESC+CR in
-	// one read. Some macOS terminals split those bytes into two events. Join
-	// that split form back into Alt+Enter before normal Enter submission.
-	if m.metaEnterPending {
-		m.metaEnterPending = false
-		if msg.Type == tea.KeyEnter && !m.busy {
-			msg.Alt = true
-		}
-	}
-
 	// --- OpenAI-compatible profile-name capture mode ---
 	if m.loginProfileMode {
 		if keyMatches(msg, m.keys.Close) {
-			msg = tea.KeyMsg{Type: tea.KeyEsc}
+			msg = tea.KeyPressMsg{Code: tea.KeyEscape}
 		} else if keyMatches(msg, m.keys.Accept) {
-			msg = tea.KeyMsg{Type: tea.KeyEnter}
+			msg = tea.KeyPressMsg{Code: tea.KeyEnter}
 		} else if keyMatches(msg, m.keys.Paste) {
-			msg = tea.KeyMsg{Type: tea.KeyCtrlV}
+			msg = tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl}
 		}
 		return m.handleLoginProfileKey(msg)
 	}
@@ -613,11 +603,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// --- OpenAI-compatible endpoint capture mode ---
 	if m.loginEndpointMode {
 		if keyMatches(msg, m.keys.Close) {
-			msg = tea.KeyMsg{Type: tea.KeyEsc}
+			msg = tea.KeyPressMsg{Code: tea.KeyEscape}
 		} else if keyMatches(msg, m.keys.Accept) {
-			msg = tea.KeyMsg{Type: tea.KeyEnter}
+			msg = tea.KeyPressMsg{Code: tea.KeyEnter}
 		} else if keyMatches(msg, m.keys.Paste) {
-			msg = tea.KeyMsg{Type: tea.KeyCtrlV}
+			msg = tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl}
 		}
 		return m.handleLoginEndpointKey(msg)
 	}
@@ -625,11 +615,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// --- Masked login capture mode ---
 	if m.loginMode {
 		if keyMatches(msg, m.keys.Close) {
-			msg = tea.KeyMsg{Type: tea.KeyEsc}
+			msg = tea.KeyPressMsg{Code: tea.KeyEscape}
 		} else if keyMatches(msg, m.keys.Accept) {
-			msg = tea.KeyMsg{Type: tea.KeyEnter}
+			msg = tea.KeyPressMsg{Code: tea.KeyEnter}
 		} else if keyMatches(msg, m.keys.Paste) {
-			msg = tea.KeyMsg{Type: tea.KeyCtrlV}
+			msg = tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl}
 		}
 		return m.handleLoginKey(msg)
 	}
@@ -696,7 +686,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Escape interrupts an active agent run. Modal Escape behavior above keeps
 	// its existing meaning (cancel picker/login or deny a permission request).
-	if msg.Type == tea.KeyEsc && m.busy && !m.compacting && !m.runStartedAt.IsZero() {
+	if msg.Code == tea.KeyEscape && m.busy && !m.compacting && !m.runStartedAt.IsZero() {
 		m.requestAbort()
 		return m, nil
 	}
@@ -704,31 +694,31 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// --- Command palette: navigation keys are consumed while open ---
 	if m.compVisible {
 		msg = normalizePickerKeyWithMap(msg, m.keys)
-		switch msg.Type {
-		case tea.KeyUp:
+		switch {
+		case msg.Code == tea.KeyUp:
 			if len(m.compMatches) > 0 {
 				m.compIndex = (m.compIndex - 1 + len(m.compMatches)) % len(m.compMatches)
 			}
 			return m, nil
-		case tea.KeyDown:
+		case msg.Code == tea.KeyDown:
 			if len(m.compMatches) > 0 {
 				m.compIndex = (m.compIndex + 1) % len(m.compMatches)
 			}
 			return m, nil
-		case tea.KeyTab:
+		case msg.Code == tea.KeyTab && !msg.Mod.Contains(tea.ModShift):
 			if len(m.compMatches) > 0 {
 				return m.insertCompletion(m.compMatches[m.compIndex])
 			}
 			return m, nil
-		case tea.KeyShiftTab:
+		case msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 			if len(m.compMatches) > 0 {
 				m.compIndex = (m.compIndex - 1 + len(m.compMatches)) % len(m.compMatches)
 			}
 			return m, nil
-		case tea.KeyEsc:
+		case msg.Code == tea.KeyEscape:
 			m.compVisible = false
 			return m, nil
-		case tea.KeyEnter:
+		case msg.Code == tea.KeyEnter:
 			if len(m.compMatches) == 0 {
 				m.compVisible = false
 				return m, nil
@@ -740,22 +730,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// --- Agent Skill picker: Enter/Tab complete the current $skill token. ---
 	if m.skillVisible {
 		msg = normalizePickerKeyWithMap(msg, m.keys)
-		switch msg.Type {
-		case tea.KeyUp, tea.KeyShiftTab:
+		switch {
+		case msg.Code == tea.KeyUp, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 			if len(m.skillMatches) > 0 {
 				m.skillIndex = (m.skillIndex - 1 + len(m.skillMatches)) % len(m.skillMatches)
 			}
 			return m, nil
-		case tea.KeyDown:
+		case msg.Code == tea.KeyDown:
 			if len(m.skillMatches) > 0 {
 				m.skillIndex = (m.skillIndex + 1) % len(m.skillMatches)
 			}
 			return m, nil
-		case tea.KeyTab, tea.KeyEnter:
+		case msg.Code == tea.KeyTab, msg.Code == tea.KeyEnter:
 			if len(m.skillMatches) > 0 {
 				return m.insertSkillCompletion(m.skillMatches[m.skillIndex].Name)
 			}
-		case tea.KeyEsc:
+		case msg.Code == tea.KeyEscape:
 			m.skillVisible = false
 			return m, nil
 		}
@@ -764,22 +754,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// --- File mention picker: Enter/Tab insert a path, never submit the prompt ---
 	if m.mentionVisible {
 		msg = normalizePickerKeyWithMap(msg, m.keys)
-		switch msg.Type {
-		case tea.KeyUp, tea.KeyShiftTab:
+		switch {
+		case msg.Code == tea.KeyUp, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 			if len(m.mentionMatches) > 0 {
 				m.mentionIndex = (m.mentionIndex - 1 + len(m.mentionMatches)) % len(m.mentionMatches)
 			}
 			return m, nil
-		case tea.KeyDown:
+		case msg.Code == tea.KeyDown:
 			if len(m.mentionMatches) > 0 {
 				m.mentionIndex = (m.mentionIndex + 1) % len(m.mentionMatches)
 			}
 			return m, nil
-		case tea.KeyTab, tea.KeyEnter:
+		case msg.Code == tea.KeyTab, msg.Code == tea.KeyEnter:
 			if len(m.mentionMatches) > 0 {
 				return m.insertMention(m.mentionMatches[m.mentionIndex])
 			}
-		case tea.KeyEsc:
+		case msg.Code == tea.KeyEscape:
 			m.mentionVisible = false
 			return m, nil
 		}
@@ -806,8 +796,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if !m.busy && len(m.pastedTexts) > 0 &&
-		strings.TrimSpace(stripImageAttachmentTokens(stripPastedTextAttachmentTokens(m.editor.Value(), m.pastedTexts), len(m.promptImages))) == "" &&
-		(msg.Type == tea.KeyBackspace || msg.Type == tea.KeyEsc) {
+		strings.TrimSpace(stripImageAttachmentTokens(stripPastedTextAttachmentTokens(m.editor.Value(), m.pastedTexts), len(m.promptImages))) == "" && (msg.Code == tea.KeyBackspace || msg.Code == tea.KeyEscape) {
 		m.removeLastPastedTextAttachment()
 		m.refreshInputCompletions()
 		m.layout()
@@ -815,8 +804,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if !m.busy && len(m.promptImages) > 0 &&
-		strings.TrimSpace(stripImageAttachmentTokens(m.editor.Value(), len(m.promptImages))) == "" &&
-		(msg.Type == tea.KeyBackspace || msg.Type == tea.KeyEsc) {
+		strings.TrimSpace(stripImageAttachmentTokens(m.editor.Value(), len(m.promptImages))) == "" && (msg.Code == tea.KeyBackspace || msg.Code == tea.KeyEscape) {
 		index := len(m.promptImages) - 1
 		m.editor.SetValue(removeImageAttachmentToken(m.editor.Value(), index))
 		m.editor.CursorEnd()
@@ -825,19 +813,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refreshInputCompletions()
 		m.layout()
 		return m, nil
-	}
-
-	// Preserve a standalone Escape briefly as a possible macOS Option/Meta
-	// prefix. Modal Escape and active-run interruption have already returned
-	// above, so this applies only to the idle composer. Replayed terminal input
-	// has already passed through the fragment timeout and must not be held again.
-	if msg.Type == tea.KeyEsc && !m.busy && !m.replayingInput {
-		m.metaEnterSeq++
-		seq := m.metaEnterSeq
-		m.metaEnterPending = true
-		return m, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-			return clearMetaEnterMsg(seq)
-		})
 	}
 
 	// --- Normal editing / sending ---

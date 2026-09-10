@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -60,7 +60,7 @@ func TestPlanImplementationModalChoices(t *testing.T) {
 		buildAppForTest(t, m)
 		completePlanForModal(t, m)
 		id := m.app.Session.ID()
-		_, cmd := m.handlePlanImplementationKey(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := m.handlePlanImplementationKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("missing prompt command")
 		}
@@ -91,7 +91,7 @@ func TestPlanImplementationModalChoices(t *testing.T) {
 			t.Fatal(err)
 		}
 		completePlanForModal(t, m)
-		_, cmd := m.handlePlanImplementationKey(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := m.handlePlanImplementationKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("missing prompt command")
 		}
@@ -118,7 +118,7 @@ func TestPlanImplementationModalChoices(t *testing.T) {
 		completePlanForModal(t, m)
 		id := m.app.Session.ID()
 		m.planPromptChoice = 1
-		_, cmd := m.handlePlanImplementationKey(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := m.handlePlanImplementationKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("missing prompt command")
 		}
@@ -140,7 +140,7 @@ func TestPlanImplementationModalChoices(t *testing.T) {
 		completePlanForModal(t, m)
 		id := m.app.Session.ID()
 		m.planPromptChoice = 1
-		_, cmd := m.handlePlanImplementationKey(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := m.handlePlanImplementationKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("missing prompt command")
 		}
@@ -156,7 +156,7 @@ func TestPlanImplementationModalChoices(t *testing.T) {
 		completePlanForModal(t, m)
 		id := m.app.Session.ID()
 		m.planPromptChoice = 2
-		_, cmd := m.handlePlanImplementationKey(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := m.handlePlanImplementationKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd != nil || m.app.Session.ID() != id || m.app.Agent.Mode() != protocol.ModePlan {
 			t.Fatalf("cmd=%v session=%q mode=%q", cmd != nil, m.app.Session.ID(), m.app.Agent.Mode())
 		}
@@ -218,7 +218,7 @@ func TestCommittedPlanSurvivesResize(t *testing.T) {
 	if !strings.Contains(after, "Resize Plan") || !strings.Contains(after, "preserve this committed") || strings.Count(after, "Resize Plan") != 1 {
 		t.Fatalf("before=%q after=%q", before, after)
 	}
-	if m.transcriptBaseWidth != m.transcript.Width {
-		t.Fatalf("base width=%d transcript width=%d", m.transcriptBaseWidth, m.transcript.Width)
+	if m.transcriptBaseWidth != m.transcript.Width() {
+		t.Fatalf("base width=%d transcript width=%d", m.transcriptBaseWidth, m.transcript.Width())
 	}
 }

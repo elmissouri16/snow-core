@@ -3,7 +3,7 @@ package tui
 import (
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -87,33 +87,5 @@ func eventNeedsImmediateTranscript(kind protocol.AgentEventType) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func (m *Model) replayTerminalInputNow(messages ...tea.Msg) tea.Cmd {
-	var cmds []tea.Cmd
-	m.replayTerminalMessages(messages, &cmds)
-	m.layout()
-	return tea.Batch(cmds...)
-}
-
-func (m *Model) replayTerminalMessages(messages []tea.Msg, cmds *[]tea.Cmd) {
-	if len(messages) == 0 {
-		return
-	}
-	m.replayingInput = true
-	defer func() { m.replayingInput = false }()
-	for _, message := range messages {
-		switch msg := message.(type) {
-		case tea.MouseMsg:
-			if cmd := m.dispatchMouse(msg); cmd != nil {
-				*cmds = append(*cmds, cmd)
-			}
-		case tea.KeyMsg:
-			_, cmd := m.handleKey(msg)
-			if cmd != nil {
-				*cmds = append(*cmds, cmd)
-			}
-		}
 	}
 }

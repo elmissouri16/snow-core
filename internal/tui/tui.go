@@ -4,16 +4,17 @@ package tui
 
 import (
 	"context"
+	"image/color"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/elmissouri16/snow-core/internal/agent"
 	"github.com/elmissouri16/snow-core/internal/app"
@@ -28,12 +29,12 @@ import (
 // Styles use the adaptive default palette until a model applies the selected
 // built-in or custom theme.
 var (
-	colorAccent lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#0969da", Dark: "#58a6ff"}
-	colorMuted  lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#57606a", Dark: "#8b949e"}
-	colorSoft   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#24292f", Dark: "#f0f6fc"}
-	colorWarn   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9a6700", Dark: "#e3b341"}
-	colorErr    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#cf222e", Dark: "#ff7b72"}
-	colorOk     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#1a7f37", Dark: "#7ee787"}
+	colorAccent color.Color = lipgloss.Color("#58a6ff")
+	colorMuted  color.Color = lipgloss.Color("#8b949e")
+	colorSoft   color.Color = lipgloss.Color("#f0f6fc")
+	colorWarn   color.Color = lipgloss.Color("#e3b341")
+	colorErr    color.Color = lipgloss.Color("#ff7b72")
+	colorOk     color.Color = lipgloss.Color("#7ee787")
 
 	styleUser      = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleAssistant = lipgloss.NewStyle().Foreground(colorSoft)
@@ -46,7 +47,7 @@ var (
 	styleDiffAdd   = lipgloss.NewStyle().Foreground(colorOk)
 	styleDiffDel   = lipgloss.NewStyle().Foreground(colorErr)
 	styleBrand     = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	styleSep       = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#8c959f", Dark: "#6e7681"})
+	styleSep       = lipgloss.NewStyle().Foreground(lipgloss.Color("#6e7681"))
 	stylePrompt    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleMention   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleComposer  = lipgloss.NewStyle()
@@ -193,9 +194,7 @@ type inlineHistoryAckMsg struct {
 
 type inlineExitMsg struct{}
 
-// clearMetaEnterMsg expires the short Escape/terminal-fragment window used to
 // recover split mouse, Shift+Tab, and Option+Return sequences.
-type clearMetaEnterMsg uint64
 
 type clearThinkingFlashMsg uint64
 
@@ -627,11 +626,6 @@ type Model struct {
 	secretBuf                 strings.Builder
 
 	cancelRun context.CancelFunc
-
-	metaEnterPending bool
-	metaEnterSeq     uint64
-	terminalInput    terminalInputState
-	replayingInput   bool
 
 	// Tests replace clipboard commands without reading or writing the host clipboard.
 	pasteCmdOverride                 tea.Cmd

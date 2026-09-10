@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -28,11 +28,11 @@ func TestSettingsCardIsCenteredWithoutChangingFrameGeometry(t *testing.T) {
 			m := modelPickerTestModel(t, test.width, test.height)
 			m.inlineTranscript = test.inline
 			m.layout()
-			beforeTranscriptHeight := m.transcript.Height
+			beforeTranscriptHeight := m.transcript.Height()
 			_, _ = m.startSettings()
 			m.layout()
-			if m.transcript.Height != beforeTranscriptHeight {
-				t.Fatalf("transcript height changed %d -> %d", beforeTranscriptHeight, m.transcript.Height)
+			if m.transcript.Height() != beforeTranscriptHeight {
+				t.Fatalf("transcript height changed %d -> %d", beforeTranscriptHeight, m.transcript.Height())
 			}
 			if overlay := stripANSI(m.renderOverlays()); strings.Contains(overlay, "Changes save immediately") {
 				t.Fatalf("settings remained in the layout overlay: %q", overlay)
@@ -43,7 +43,7 @@ func TestSettingsCardIsCenteredWithoutChangingFrameGeometry(t *testing.T) {
 			if cardWidth > m.managedFrameWidth() || cardHeight > m.managedFrameHeight() {
 				t.Fatalf("card=%dx%d frame=%dx%d", cardWidth, cardHeight, m.managedFrameWidth(), m.managedFrameHeight())
 			}
-			view := m.View()
+			view := m.viewContent()
 			if got := lipgloss.Height(view); got != m.managedFrameHeight() {
 				t.Fatalf("view height=%d want=%d", got, m.managedFrameHeight())
 			}
@@ -105,7 +105,7 @@ func TestSettingsHorizontalArrowsChangeValueWithoutMovingRows(t *testing.T) {
 	m.settingsIndex = settingsPermission
 	before := m.app.Perm.Mode()
 
-	_, _ = m.handleSettingsKey(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.handleSettingsKey(tea.KeyPressMsg{Code: tea.KeyRight})
 	if m.settingsIndex != settingsPermission {
 		t.Fatalf("Right moved selection to row %d", m.settingsIndex)
 	}
@@ -113,7 +113,7 @@ func TestSettingsHorizontalArrowsChangeValueWithoutMovingRows(t *testing.T) {
 		t.Fatalf("Right left permission unchanged at %q", got)
 	}
 
-	_, _ = m.handleSettingsKey(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.handleSettingsKey(tea.KeyPressMsg{Code: tea.KeyLeft})
 	if m.settingsIndex != settingsPermission {
 		t.Fatalf("Left moved selection to row %d", m.settingsIndex)
 	}
@@ -127,7 +127,7 @@ func TestSettingsModelCatalogFailureReturnsToCard(t *testing.T) {
 	m.asyncIO = true
 	_, _ = m.startSettings()
 	beforeLines := len(m.lines)
-	_, cmd := m.handleSettingsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleSettingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil || !m.pickModel || !m.settingsReturnToPanel {
 		t.Fatalf("model load command=%v picker=%v return=%v", cmd != nil, m.pickModel, m.settingsReturnToPanel)
 	}
@@ -180,9 +180,9 @@ func TestThinkingPickersBlockBackgroundTranscriptPaging(t *testing.T) {
 			m.thinkingReturnToModel = returnToModel
 			m.thinkingList = []protocol.ThinkingLevel{protocol.ThinkingOff, protocol.ThinkingLow}
 			m.transcript.GotoTop()
-			_, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-			if m.transcript.YOffset != 0 {
-				t.Fatalf("PageDown scrolled transcript behind thinking picker to %d", m.transcript.YOffset)
+			_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+			if m.transcript.YOffset() != 0 {
+				t.Fatalf("PageDown scrolled transcript behind thinking picker to %d", m.transcript.YOffset())
 			}
 		})
 	}
@@ -196,12 +196,12 @@ func TestBlockingRequestPreemptsCenteredSettingsCard(t *testing.T) {
 	if status := m.currentHeaderStatus(); status != "permission" {
 		t.Fatalf("preempted header status=%q", status)
 	}
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	if strings.Contains(view, "Changes save immediately") || !strings.Contains(view, "bash") {
 		t.Fatalf("permission did not preempt settings card: %q", view)
 	}
 	m.permPending = false
-	if view = stripANSI(m.View()); !strings.Contains(view, "Changes save immediately") {
+	if view = stripANSI(m.viewContent()); !strings.Contains(view, "Changes save immediately") {
 		t.Fatalf("settings card did not resume after permission: %q", view)
 	}
 }
@@ -216,16 +216,16 @@ func TestSettingsCardBlocksBackgroundPointerAndTranscriptPaging(t *testing.T) {
 	m.layout()
 	m.transcript.GotoTop()
 
-	_, _ = m.Update(tea.MouseMsg{X: 1, Y: m.transcriptSelectionTop(), Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	_, _ = m.Update(tea.MouseClickMsg{X: 1, Y: m.transcriptSelectionTop(), Button: tea.MouseLeft})
 	if m.transcriptSelection.anchor != nil || m.transcriptSelection.pressActive {
 		t.Fatal("pointer selected transcript behind settings card")
 	}
-	_, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
-	if m.transcript.YOffset != 0 {
-		t.Fatalf("wheel scrolled transcript behind settings card to %d", m.transcript.YOffset)
+	_, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if m.transcript.YOffset() != 0 {
+		t.Fatalf("wheel scrolled transcript behind settings card to %d", m.transcript.YOffset())
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-	if m.transcript.YOffset != 0 {
-		t.Fatalf("PageDown scrolled transcript behind settings card to %d", m.transcript.YOffset)
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if m.transcript.YOffset() != 0 {
+		t.Fatalf("PageDown scrolled transcript behind settings card to %d", m.transcript.YOffset())
 	}
 }

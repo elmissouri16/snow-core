@@ -4,9 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -32,7 +30,7 @@ func TestComposerCtrlASelectsOnlyDraft(t *testing.T) {
 	m.transcriptSelection.pressActive = true
 	m.transcriptSelectionMenu.open = true
 
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
 	if cmd != nil {
 		t.Fatal("Ctrl+A unexpectedly returned a command")
 	}
@@ -51,14 +49,11 @@ func TestComposerCtrlASelectsOnlyDraft(t *testing.T) {
 }
 
 func TestComposerCtrlAVisiblyHighlightsCurrentLine(t *testing.T) {
-	previousProfile := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
 
 	m := newComposerSelectionTestModel(t)
 	m.editor.SetValue("visibly selected draft")
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
 	rendered := m.renderEditor()
 	if !strings.Contains(rendered, "\x1b[7m") {
 		t.Fatalf("selected current line has no reverse-video highlight: %q", rendered)
@@ -72,8 +67,8 @@ func TestComposerTypingReplacesCtrlASelection(t *testing.T) {
 	m := newComposerSelectionTestModel(t)
 	m.editor.SetValue("replace all of this")
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	_, _ = m.handleKey(tea.KeyPressMsg{Text: "n", Code: 'n'})
 
 	if got := m.editor.Value(); got != "n" {
 		t.Fatalf("draft = %q, want %q", got, "n")
@@ -89,8 +84,8 @@ func TestComposerDeleteClearsCtrlASelectionAndAttachments(t *testing.T) {
 	m.promptImages = []protocol.ContentBlock{{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte("x")}}
 	m.pastedTexts = []pastedTextAttachment{{token: "[Pasted text #1 · 4 chars]", text: "text"}}
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 
 	if got := m.editor.Value(); got != "" {
 		t.Fatalf("draft = %q, want empty", got)
@@ -112,8 +107,8 @@ func TestComposerCtrlCCopiesCtrlASelectionInsteadOfQuitting(t *testing.T) {
 		return nil
 	}
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("Ctrl+C did not schedule a composer copy")
 	}
@@ -132,8 +127,8 @@ func TestComposerNavigationCancelsCtrlASelection(t *testing.T) {
 	m := newComposerSelectionTestModel(t)
 	m.editor.SetValue("draft")
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyLeft})
 
 	if m.composerSelectAll {
 		t.Fatal("navigation did not cancel composer selection")

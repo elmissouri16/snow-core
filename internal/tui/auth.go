@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -108,16 +108,16 @@ func (m *Model) restorePreviousLoginStep() bool {
 }
 
 // handleProviderPick navigates the /login provider list.
-func (m *Model) handleProviderPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleProviderPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	if next, handled := movePicker(m.provIndex, len(m.providers), pickerKeyAction(msg), m.loginPickerVisibleChoices()); handled {
 		m.provIndex = next
 		return m, nil
 	}
-	switch msg.Type {
-	case tea.KeyEsc:
+	switch {
+	case msg.Code == tea.KeyEscape:
 		m.cancelLoginFlow()
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		if len(m.providers) == 0 {
 			m.pickProvider = false
 			return m, nil
@@ -184,10 +184,10 @@ func (m *Model) startChatGPTAuthPick() (tea.Model, tea.Cmd) {
 }
 
 // handleChatGPTAuthPick selects and imports a discovered local credential.
-func (m *Model) handleChatGPTAuthPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleChatGPTAuthPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	if m.oauthLoading {
-		if msg.Type == tea.KeyEsc && m.oauthCancel != nil {
+		if msg.Code == tea.KeyEscape && m.oauthCancel != nil {
 			m.oauthBackRequested = true
 			m.oauthCancel()
 		}
@@ -198,12 +198,12 @@ func (m *Model) handleChatGPTAuthPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.authIndex = next
 		return m, nil
 	}
-	switch msg.Type {
-	case tea.KeyEsc:
+	switch {
+	case msg.Code == tea.KeyEscape:
 		if !m.restorePreviousLoginStep() {
 			m.cancelLoginFlow()
 		}
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		if m.authIndex < len(m.authAccounts) {
 			account := m.authAccounts[m.authIndex]
 			return m, m.startChatGPTOAuth(chatgpt.LoginBrowser, []string{account.AccountID})
@@ -546,18 +546,18 @@ func (m *Model) startThinkingPickForModel(model protocol.Model, returnToModel bo
 	m.compVisible = false
 }
 
-func (m *Model) handleThinkingPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleThinkingPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
 	if len(m.thinkingList) == 0 {
 		m.pickThinking = false
 		return m, nil
 	}
-	switch msg.Type {
-	case tea.KeyUp, tea.KeyLeft, tea.KeyShiftTab:
+	switch {
+	case msg.Code == tea.KeyUp, msg.Code == tea.KeyLeft, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
 		m.thinkingIndex = (m.thinkingIndex - 1 + len(m.thinkingList)) % len(m.thinkingList)
-	case tea.KeyDown, tea.KeyRight, tea.KeyTab:
+	case msg.Code == tea.KeyDown, msg.Code == tea.KeyRight, msg.Code == tea.KeyTab:
 		m.thinkingIndex = (m.thinkingIndex + 1) % len(m.thinkingList)
-	case tea.KeyEnter:
+	case msg.Code == tea.KeyEnter:
 		level := m.thinkingList[m.thinkingIndex]
 		selected := m.thinkingModel
 		returnToModel := m.thinkingReturnToModel
@@ -582,7 +582,7 @@ func (m *Model) handleThinkingPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else if err := m.applyThinking(level); err != nil {
 			m.pushLine(styleError.Render(err.Error()))
 		}
-	case tea.KeyEsc:
+	case msg.Code == tea.KeyEscape:
 		returnToModel := m.thinkingReturnToModel
 		m.clearThinkingPick()
 		if returnToModel {

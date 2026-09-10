@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -27,11 +27,11 @@ func TestHelpCardIsCenteredWithoutChangingFrameGeometry(t *testing.T) {
 			m := modelPickerTestModel(t, test.width, test.height)
 			m.inlineTranscript = test.inline
 			m.layout()
-			beforeTranscriptHeight := m.transcript.Height
+			beforeTranscriptHeight := m.transcript.Height()
 			_, _ = m.startHelp()
 			m.layout()
-			if m.transcript.Height != beforeTranscriptHeight {
-				t.Fatalf("transcript height changed %d -> %d", beforeTranscriptHeight, m.transcript.Height)
+			if m.transcript.Height() != beforeTranscriptHeight {
+				t.Fatalf("transcript height changed %d -> %d", beforeTranscriptHeight, m.transcript.Height())
 			}
 			if overlay := stripANSI(m.renderOverlays()); strings.Contains(overlay, "Commands") {
 				t.Fatalf("help remained in the layout overlay: %q", overlay)
@@ -42,7 +42,7 @@ func TestHelpCardIsCenteredWithoutChangingFrameGeometry(t *testing.T) {
 			if cardWidth > m.managedFrameWidth() || cardHeight > m.managedFrameHeight() {
 				t.Fatalf("card=%dx%d frame=%dx%d", cardWidth, cardHeight, m.managedFrameWidth(), m.managedFrameHeight())
 			}
-			view := m.View()
+			view := m.viewContent()
 			if got := lipgloss.Height(view); got != m.managedFrameHeight() {
 				t.Fatalf("view height=%d want=%d", got, m.managedFrameHeight())
 			}
@@ -71,7 +71,7 @@ func TestHelpCardScrollsWithinFixedGeometry(t *testing.T) {
 		t.Fatalf("help missing composer Select All guidance: %q", help)
 	}
 
-	_, _ = m.handleHelpKey(tea.KeyMsg{Type: tea.KeyEnd})
+	_, _ = m.handleHelpKey(tea.KeyPressMsg{Code: tea.KeyEnd})
 	if m.helpOffset != m.helpOffsetLimit() || m.helpOffset == 0 {
 		t.Fatalf("End offset=%d limit=%d", m.helpOffset, m.helpOffsetLimit())
 	}
@@ -83,15 +83,15 @@ func TestHelpCardScrollsWithinFixedGeometry(t *testing.T) {
 	}
 
 	endOffset := m.helpOffset
-	_, _ = m.handleHelpKey(tea.KeyMsg{Type: tea.KeyPgUp})
+	_, _ = m.handleHelpKey(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if m.helpOffset >= endOffset {
 		t.Fatalf("PageUp did not move offset: %d -> %d", endOffset, m.helpOffset)
 	}
-	_, _ = m.handleHelpKey(tea.KeyMsg{Type: tea.KeyHome})
+	_, _ = m.handleHelpKey(tea.KeyPressMsg{Code: tea.KeyHome})
 	if m.helpOffset != 0 {
 		t.Fatalf("Home offset=%d", m.helpOffset)
 	}
-	_, _ = m.handleHelpKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleHelpKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.pickHelp {
 		t.Fatal("Esc did not close help")
 	}
@@ -136,12 +136,12 @@ func TestBlockingRequestPreemptsCenteredHelpCard(t *testing.T) {
 	if status := m.currentHeaderStatus(); status != "permission" {
 		t.Fatalf("preempted header status=%q", status)
 	}
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	if strings.Contains(view, "Commands") || !strings.Contains(view, "bash") {
 		t.Fatalf("permission did not preempt help card: %q", view)
 	}
 	m.permPending = false
-	if view = stripANSI(m.View()); !strings.Contains(view, "Commands") {
+	if view = stripANSI(m.viewContent()); !strings.Contains(view, "Commands") {
 		t.Fatalf("help card did not resume after permission: %q", view)
 	}
 }
@@ -158,20 +158,20 @@ func TestHelpCardOwnsPointerAndPagingInput(t *testing.T) {
 	m.layout()
 	m.transcript.GotoTop()
 
-	_, _ = m.Update(tea.MouseMsg{
+	_, _ = m.Update(tea.MouseClickMsg{
 		X: 1, Y: m.transcriptSelectionTop(),
-		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	})
 	if m.transcriptSelection.anchor != nil || m.transcriptSelection.pressActive {
 		t.Fatal("pointer selected transcript behind help card")
 	}
-	_, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
-	if m.transcript.YOffset != 0 {
-		t.Fatalf("wheel scrolled transcript behind help card to %d", m.transcript.YOffset)
+	_, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if m.transcript.YOffset() != 0 {
+		t.Fatalf("wheel scrolled transcript behind help card to %d", m.transcript.YOffset())
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-	if m.transcript.YOffset != 0 {
-		t.Fatalf("PageDown scrolled transcript behind help card to %d", m.transcript.YOffset)
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if m.transcript.YOffset() != 0 {
+		t.Fatalf("PageDown scrolled transcript behind help card to %d", m.transcript.YOffset())
 	}
 	if m.helpOffset == 0 {
 		t.Fatal("PageDown did not scroll help content")

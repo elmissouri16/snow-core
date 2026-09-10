@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/config"
@@ -74,7 +74,7 @@ func TestModelAssistantMarkdownRendered(t *testing.T) {
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: "# Plan\n\n- step one\n- step two\n\n```bash\nls -la\n```\n"})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
 
-	view := m.View()
+	view := m.viewContent()
 	plain := stripANSI(view)
 	for _, want := range []string{"Plan", "step one", "step two", "ls -la"} {
 		if !strings.Contains(plain, want) {
@@ -101,8 +101,8 @@ func TestTranscriptRefreshPreservesScrollIntent(t *testing.T) {
 	m.lines = append(m.lines, "new output")
 	m.transcriptBaseDirty = true
 	m.refreshTranscript()
-	if m.transcript.YOffset != 2 {
-		t.Fatalf("stream refresh moved scrolled viewport to %d", m.transcript.YOffset)
+	if m.transcript.YOffset() != 2 {
+		t.Fatalf("stream refresh moved scrolled viewport to %d", m.transcript.YOffset())
 	}
 	m.transcript.GotoBottom()
 	m.lines = append(m.lines, "tail output")
@@ -131,15 +131,15 @@ func TestTranscriptWrapsLongLinesToWindow(t *testing.T) {
 		t.Fatalf("long transcript line did not wrap: %q", plain)
 	}
 	for line := range strings.SplitSeq(plain, "\n") {
-		if len([]rune(line)) > m.transcript.Width {
-			t.Fatalf("wrapped transcript line exceeds width %d: %q", m.transcript.Width, line)
+		if len([]rune(line)) > m.transcript.Width() {
+			t.Fatalf("wrapped transcript line exceeds width %d: %q", m.transcript.Width(), line)
 		}
 	}
 }
 
 func assertExactFrame(t *testing.T, m *Model) {
 	t.Helper()
-	view := m.View()
+	view := m.viewContent()
 	if got := lipgloss.Height(view); got != m.height {
 		t.Fatalf("frame height = %d, want %d", got, m.height)
 	}
@@ -172,7 +172,7 @@ func TestModelFrameAlwaysFitsWindow(t *testing.T) {
 		}
 		m.layout()
 		assertExactFrame(t, m)
-		plain := stripANSI(m.View())
+		plain := stripANSI(m.viewContent())
 		if !strings.Contains(plain, "Thinking effort") || !strings.Contains(plain, "high") {
 			t.Fatalf("thinking picker clipped unexpectedly: %q", plain)
 		}
@@ -188,7 +188,7 @@ func TestModelFrameAlwaysFitsWindow(t *testing.T) {
 		m.width, m.height = 210, 55
 		m.layout()
 		assertExactFrame(t, m)
-		plain := stripANSI(m.View())
+		plain := stripANSI(m.viewContent())
 		for _, want := range []string{"Working", "1m 16s", "esc to interrupt"} {
 			if !strings.Contains(plain, want) {
 				t.Fatalf("active run status missing %q: %q", want, plain)
@@ -197,7 +197,7 @@ func TestModelFrameAlwaysFitsWindow(t *testing.T) {
 
 		m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone})
 		m.layout()
-		if strings.Contains(stripANSI(m.View()), "esc to interrupt") {
+		if strings.Contains(stripANSI(m.viewContent()), "esc to interrupt") {
 			t.Fatal("run status remained visible after turn completion")
 		}
 		assertExactFrame(t, m)
@@ -218,7 +218,7 @@ func TestRunStatusGeometryKeepsSingleStickyFooter(t *testing.T) {
 	m.layout()
 	assertFooter := func(stage string) {
 		t.Helper()
-		lines := strings.Split(stripANSI(m.View()), "\n")
+		lines := strings.Split(stripANSI(m.viewContent()), "\n")
 		matches := 0
 		index := -1
 		for i, line := range lines {
@@ -233,7 +233,7 @@ func TestRunStatusGeometryKeepsSingleStickyFooter(t *testing.T) {
 	}
 	assertFooter("idle")
 	m.editor.SetValue("hello")
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil || !m.showRunStatus() {
 		t.Fatal("prompt did not enter visible run status")
 	}
@@ -305,7 +305,7 @@ func TestComposerBackspaceUsesOrdinaryEditingFastPath(t *testing.T) {
 	buildAppForTest(t, m)
 	m.editor.SetValue("/mode")
 	m.editor.CursorEnd()
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if got := m.editor.Value(); got != "/mod" {
 		t.Fatalf("composer after Backspace = %q, want %q", got, "/mod")
 	}
@@ -317,11 +317,10 @@ func TestComposerBackspaceUsesOrdinaryEditingFastPath(t *testing.T) {
 func TestComposerMultilineShortcutsDoNotSubmit(t *testing.T) {
 	tests := []struct {
 		name string
-		keys []tea.KeyMsg
+		keys []tea.KeyPressMsg
 	}{
-		{name: "alt enter", keys: []tea.KeyMsg{{Type: tea.KeyEnter, Alt: true}}},
-		{name: "split mac option enter", keys: []tea.KeyMsg{{Type: tea.KeyEsc}, {Type: tea.KeyEnter}}},
-		{name: "ctrl j", keys: []tea.KeyMsg{{Type: tea.KeyCtrlJ}}},
+		{name: "alt enter", keys: []tea.KeyPressMsg{{Code: tea.KeyEnter, Mod: tea.ModAlt}}},
+		{name: "ctrl j", keys: []tea.KeyPressMsg{{Code: 'j', Mod: tea.ModCtrl}}},
 	}
 
 	for _, tt := range tests {
@@ -350,20 +349,6 @@ func TestComposerMultilineShortcutsDoNotSubmit(t *testing.T) {
 				t.Fatalf("two-line composer height = %d, want minimum 3", got)
 			}
 		})
-	}
-}
-
-func TestComposerSplitMetaPrefixExpires(t *testing.T) {
-	m := newModel(context.Background(), app.Options{})
-	buildAppForTest(t, m)
-
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
-	if cmd == nil || !m.metaEnterPending {
-		t.Fatal("Escape did not open the split Meta key window")
-	}
-	m.Update(clearMetaEnterMsg(m.metaEnterSeq))
-	if m.metaEnterPending {
-		t.Fatal("split Meta key window did not expire")
 	}
 }
 
@@ -401,7 +386,7 @@ func TestModelPermissionPickerShowsAndNavigates(t *testing.T) {
 	if m.permRequest == nil || m.permRequest.Tool != "bash" {
 		t.Fatalf("permRequest = %+v, want bash", m.permRequest)
 	}
-	view := m.View()
+	view := m.viewContent()
 	for _, want := range []string{"Allow once", "Allow this scope", "Deny", "bash"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("picker missing %q: %q", want, view)
@@ -412,11 +397,11 @@ func TestModelPermissionPickerShowsAndNavigates(t *testing.T) {
 	if m.permChoice != permChoiceAllow {
 		t.Fatalf("default choice = %d, want allow", m.permChoice)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.permChoice != permChoiceAlways {
 		t.Fatalf("down should move to always, got %d", m.permChoice)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.permChoice != permChoiceAllow {
 		t.Fatalf("up should return to allow, got %d", m.permChoice)
 	}
@@ -436,7 +421,7 @@ func TestModelPermissionPickerHidesScopedApprovalForUnknownBash(t *testing.T) {
 	event.Permission.Request.Effects = []protocol.PermissionEffect{{Type: "unknown", Operation: "unknown", Dynamic: true}}
 	event.Permission.Request.EffectsTruncated = true
 	m.handleAgentEvent(event)
-	view := m.View()
+	view := m.viewContent()
 	for _, want := range []string{"Allow once", "Deny", "Unknown child effects", "Permission analysis was truncated", "unrestricted host process"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("picker missing %q: %q", want, view)
@@ -445,7 +430,7 @@ func TestModelPermissionPickerHidesScopedApprovalForUnknownBash(t *testing.T) {
 	if strings.Contains(view, "Allow this scope") {
 		t.Fatalf("unknown Bash request offered scoped approval: %q", view)
 	}
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.permChoice != permChoiceDeny {
 		t.Fatalf("down should move directly to deny, got %d", m.permChoice)
 	}
@@ -476,7 +461,7 @@ func TestModelPermissionPickerCompactsCompoundBashEffects(t *testing.T) {
 	if got, limit := lipgloss.Height(m.renderOverlays()), m.availableOverlayHeight(); got > limit {
 		t.Fatalf("permission overlay height=%d want<=%d", got, limit)
 	}
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	for _, want := range []string{
 		"Command:",
 		"Effects (4):",
@@ -522,7 +507,7 @@ func TestModelPermissionPickerKeepsDecisionsVisibleAtNarrowWidth(t *testing.T) {
 	}
 	m.handleAgentEvent(event)
 
-	view := stripANSI(m.View())
+	view := stripANSI(m.viewContent())
 	for _, want := range []string{"Allow once", "Deny"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("narrow picker hid %q:\n%s", want, view)
@@ -569,7 +554,7 @@ func TestModelPermissionPickerOwnsSmallDefaultFramesSafely(t *testing.T) {
 			if got := m.permissionApprovalEnabled(); got != tc.enabled {
 				t.Fatalf("permissionApprovalEnabled()=%v want %v", got, tc.enabled)
 			}
-			view := stripANSI(m.View())
+			view := stripANSI(m.viewContent())
 			if tc.enabled {
 				for _, want := range []string{"bash", "Unknown child", "unrestricted host", "Allow once", "Deny"} {
 					if !strings.Contains(view, want) {
@@ -577,7 +562,7 @@ func TestModelPermissionPickerOwnsSmallDefaultFramesSafely(t *testing.T) {
 					}
 				}
 			} else {
-				_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+				_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 				if !m.permPending {
 					t.Fatal("Enter authorized a request that could not be meaningfully displayed")
 				}
@@ -631,7 +616,7 @@ func TestModelPermissionPickerAllowResponds(t *testing.T) {
 	waitAskerPending(t, m.asker)
 
 	m.handleAgentEvent(permRequestEvent("bash"))
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter}) // Enter on Allow
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // Enter on Allow
 
 	if m.permPending {
 		t.Fatal("picker should clear after resolving")
@@ -665,7 +650,7 @@ func TestBlockingPermissionPreemptsTranscriptContextMenu(t *testing.T) {
 	// Even a stale/reopened menu must not steal Enter from the visible host
 	// request; reducer precedence remains authoritative.
 	m.openTranscriptSelectionContextMenu(1, 1, "must not copy")
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.permPending || m.transcriptSelectionMenu.open {
 		t.Fatalf("permission=%v menu=%v", m.permPending, m.transcriptSelectionMenu.open)
 	}
@@ -690,7 +675,7 @@ func TestModelPermissionPickerEscDenies(t *testing.T) {
 	waitAskerPending(t, m.asker)
 
 	m.handleAgentEvent(permRequestEvent("bash"))
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc}) // Esc denies
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape}) // Esc denies
 
 	if m.permPending {
 		t.Fatal("picker should clear after Esc")
@@ -714,8 +699,8 @@ func TestModelPermissionPickerAllowAlways(t *testing.T) {
 	waitAskerPending(t, m.asker)
 
 	m.handleAgentEvent(permRequestEvent("bash"))
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown}) // Allow always
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown}) // Allow always
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if d := <-got; d != "allow_always" {
 		t.Fatalf("asker decision = %q, want allow_always", d)
 	}
@@ -834,29 +819,29 @@ func TestModelModelPickerFlow(t *testing.T) {
 
 	// /model with no args opens the picker.
 	m.editor.SetValue("/model")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pickModel {
 		t.Fatal("/model should open the interactive picker")
 	}
 	if len(m.modelList) == 0 {
 		t.Fatal("picker should list catalog models")
 	}
-	view := m.View()
+	view := m.viewContent()
 	if !strings.Contains(view, "fake-1") {
 		t.Fatalf("picker should list models: %q", view)
 	}
 
 	// Esc cancels without changing the model.
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.pickModel {
 		t.Fatal("Esc should close the model picker")
 	}
 
 	// Reopen and pick the first model.
 	m.editor.SetValue("/model")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m.modelIndex = 0
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.pickModel {
 		t.Fatal("picker should close after picking")
 	}
@@ -883,7 +868,7 @@ func TestModelPickerDeduplicatesAndSearches(t *testing.T) {
 	if len(m.modelList) != 2 {
 		t.Fatalf("deduplicated models = %d, want 2: %+v", len(m.modelList), m.modelList)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("spark")})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Text: "spark", Code: tea.KeyExtended})
 	matches := m.filteredModels()
 	if len(matches) != 1 || matches[0].ID != "fake-spark" {
 		t.Fatalf("search matches = %+v, want fake-spark", matches)
@@ -896,7 +881,7 @@ func TestModelPickerDeduplicatesAndSearches(t *testing.T) {
 		t.Fatalf("grouped picker repeated provider prefix: %q", view)
 	}
 
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.pickModel || m.app.Model.ID != "fake-spark" {
 		t.Fatalf("search selection picker=%v model=%q", m.pickModel, m.app.Model.ID)
 	}
@@ -906,15 +891,15 @@ func TestModelPickerSearchCanShowNoMatchesAndClear(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	_, _ = m.startModelPick()
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("missing")})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Text: "missing", Code: tea.KeyExtended})
 	if got := stripANSI(m.renderModelPicker()); !strings.Contains(got, "no matching models") {
 		t.Fatalf("no-match picker = %q", got)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !m.pickModel || m.modelQuery != "" {
 		t.Fatalf("search clear picker=%v query=%q", m.pickModel, m.modelQuery)
 	}
-	_, _ = m.handleModelPick(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.pickModel {
 		t.Fatal("second Esc should close the model picker")
 	}
@@ -928,7 +913,7 @@ func TestModelSetModelPersists(t *testing.T) {
 
 	// Direct /model <id> persists only for the active project.
 	m.editor.SetValue("/model some-other-model")
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.app.Model.ID != "some-other-model" {
 		t.Fatalf("model = %q, want some-other-model", m.app.Model.ID)
 	}
