@@ -17,7 +17,7 @@ func wrapTranscript(text string, width int) string {
 	// A grapheme wider than the requested width must remain intact. Match the
 	// widest resulting row as well as the requested width when padding.
 	for line := range strings.SplitSeq(text, "\n") {
-		width = max(width, ansi.StringWidth(line))
+		width = max(width, lineCellWidth(line))
 	}
 	spaces := strings.Repeat(" ", width)
 	var out strings.Builder
@@ -29,7 +29,7 @@ func wrapTranscript(text string, width int) string {
 		}
 		first = false
 		out.WriteString(line)
-		out.WriteString(spaces[:width-ansi.StringWidth(line)])
+		out.WriteString(spaces[:width-lineCellWidth(line)])
 	}
 	return out.String()
 }

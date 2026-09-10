@@ -516,6 +516,7 @@ func (m *Model) setTheme(name string, announce bool) error {
 }
 
 func (m *Model) refreshThemeStyles() {
+	m.editorViewCache = editorViewCache{}
 	if m.plugins != nil {
 		clear(m.plugins.cache)
 	}

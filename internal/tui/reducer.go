@@ -917,7 +917,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	} else {
 		previousEditorValue := m.editor.Value()
 		var cmd tea.Cmd
-		m.editor, cmd = m.editor.Update(msg)
+		cmd = m.updateEditor(msg)
 		if m.editor.Value() != previousEditorValue {
 			// Paste and other non-key textarea messages bypass handleKey but must
 			// still resize the composer and refresh input-driven overlays.

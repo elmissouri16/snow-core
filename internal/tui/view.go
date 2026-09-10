@@ -353,7 +353,8 @@ func (m *Model) viewContent() string {
 	if extra := m.pluginPlacement("footer", frameWidth); extra != "" {
 		parts = append(parts, extra)
 	}
-	frame := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	// The final fit owns padding; aligning all rows here would repeat it.
+	frame := strings.Join(parts, "\n")
 	if m.inlineTranscript {
 		// Keep a constant logical row count. Growing a normal-screen Bubble Tea
 		// frame at the terminal bottom scrolls old chrome into native history;
@@ -461,29 +462,6 @@ func (m *Model) clearManagedFrameCache() {
 	m.managedFrameCacheWidth = 0
 	m.managedFrameCacheHeight = 0
 	m.managedFrameCacheValid = false
-}
-
-func fitFrame(frame string, width, height int) string {
-	width = max(1, width)
-	height = max(1, height)
-	return lipgloss.NewStyle().
-		Width(width).
-		Height(height).
-		MaxWidth(width).
-		MaxHeight(height).
-		Render(frame)
-}
-
-func fitFrameBottom(frame string, width, height int) string {
-	width = max(1, width)
-	height = max(1, height)
-	return lipgloss.NewStyle().
-		Width(width).
-		Height(height).
-		MaxWidth(width).
-		MaxHeight(height).
-		AlignVertical(lipgloss.Bottom).
-		Render(frame)
 }
 
 type headerRender struct {
@@ -665,7 +643,12 @@ func (m *Model) renderEditor() string {
 			editor.SetStyles(styles)
 			editor.Blur()
 		}
-		editorView := editor.View()
+		var editorView string
+		if selectAll {
+			editorView = editor.View()
+		} else {
+			editorView = m.cachedEditorView()
+		}
 		if !selectAll {
 			textStyle := editor.Styles().Blurred.Text
 			if editor.Focused() {
@@ -684,13 +667,11 @@ func (m *Model) renderEditor() string {
 	}
 	height := max(minComposerHeight, m.editor.Height())
 	width := m.managedFrameWidth()
-	return styleComposer.
-		Width(width).
-		Height(height).
-		MaxWidth(width).
-		MaxHeight(height).
-		PaddingLeft(1).
-		Render(input)
+	if width <= 1 {
+		return fitFrame("", width, height)
+	}
+	content := fitFrame(input, max(1, width-1), height)
+	return " " + strings.ReplaceAll(content, "\n", "\n ")
 }
 
 func (m *Model) permissionStatus() string {

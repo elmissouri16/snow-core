@@ -656,6 +656,7 @@ type Model struct {
 	managedFrameCacheWidth           int
 	managedFrameCacheHeight          int
 	managedFrameCacheValid           bool
+	editorViewCache                  editorViewCache
 	transcriptSelectionView          string
 	transcriptSelectionViewRow       int
 	transcriptSelectionViewValid     bool

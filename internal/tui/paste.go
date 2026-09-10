@@ -56,7 +56,7 @@ func (m *Model) handlePaste(msg tea.PasteMsg) tea.Cmd {
 		m.composerSelectAll = false
 	}
 	if !m.collapseComposerPaste(msg) {
-		m.editor, _ = m.editor.Update(msg)
+		_ = m.updateEditor(msg)
 	}
 	m.resetInputHistoryNavigation()
 	m.prunePastedTextAttachments(m.editor.Value())

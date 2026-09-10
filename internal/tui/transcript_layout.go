@@ -366,12 +366,16 @@ func (m *Model) layout() {
 	// reasoning/tool events until the run-status row disappears at turn_done.
 	wasAtBottom := m.transcript.AtBottom()
 	frameWidth := m.managedFrameWidth()
-	m.editor.SetWidth(max(1, frameWidth-4))
+	if width := max(1, frameWidth-4); m.editor.Width() != width {
+		m.editor.SetWidth(width)
+	}
 	m.layoutUserInputEditor()
 	frameHeight := m.managedFrameHeight()
 	maxEditorHeight := max(minComposerHeight, frameHeight-m.fixedChromeRows()-m.runStatusHeight()-minTranscriptHeight)
 	editorH := min(m.desiredComposerHeight(), min(maxComposerHeight, maxEditorHeight))
-	m.editor.SetHeight(editorH)
+	if m.editor.Height() != editorH {
+		m.editor.SetHeight(editorH)
+	}
 	bodyH := max(minTranscriptHeight, frameHeight-m.chromeHeight())
 	transcriptWidth := max(1, frameWidth-m.pluginSidebarWidth())
 	if m.transcript.Width() != transcriptWidth || m.transcript.Height() != bodyH {

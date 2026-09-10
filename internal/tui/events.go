@@ -26,7 +26,7 @@ func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cm
 		}
 		previous := m.editor.Value()
 		var cmd tea.Cmd
-		m.editor, cmd = m.editor.Update(result.msg)
+		cmd = m.updateEditor(result.msg)
 		if value := sanitizeTerminalLine(m.editor.Value()); value != m.editor.Value() {
 			m.editor.SetValue(value)
 			m.editor.CursorEnd()
@@ -64,7 +64,7 @@ func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cm
 		}
 		previous := m.editor.Value()
 		var cmd tea.Cmd
-		m.editor, cmd = m.editor.Update(result.msg)
+		cmd = m.updateEditor(result.msg)
 		if m.editor.Err != nil {
 			m.lastErrorText = "paste: " + m.editor.Err.Error()
 			m.pushLine(styleError.Render(m.lastErrorText))

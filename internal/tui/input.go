@@ -65,6 +65,7 @@ func (m *Model) composerCoveredByModal() bool {
 }
 
 func (m *Model) updateComposerEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.editorViewCache = editorViewCache{}
 	// Forward to the editor, then refresh the palette from the new text. Keep
 	// the returned command: textarea uses it to read the clipboard for paste.
 	if keyMatches(msg, m.keys.Paste) {
@@ -79,11 +80,11 @@ func (m *Model) updateComposerEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	textMayChange := composerEditorKeyMayChange(msg, m.editor.KeyMap)
 	previous := m.editor.Value()
-	var cmd tea.Cmd
-	m.editor, cmd = m.editor.Update(msg)
-	if m.editor.Value() != previous {
+	cmd := m.updateEditor(msg)
+	current := m.editor.Value()
+	if current != previous {
 		m.resetInputHistoryNavigation()
-		m.prunePastedTextAttachments(m.editor.Value())
+		m.prunePastedTextAttachments(current)
 	}
 	if msg.Code == tea.KeyEscape {
 		m.compVisible = false
@@ -91,7 +92,7 @@ func (m *Model) updateComposerEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	var mentionCmd tea.Cmd
 	if textMayChange {
-		mentionCmd = m.refreshInputCompletionsFor(m.editor.Value())
+		mentionCmd = m.refreshInputCompletionsFor(current)
 	}
 	if msg.Code == 'v' && msg.Mod.Contains(tea.ModCtrl) {
 		m.editor.Err = nil
@@ -292,7 +293,7 @@ func (m *Model) handleLoginProfileKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	}
 	previous := m.editor.Value()
 	var cmd tea.Cmd
-	m.editor, cmd = m.editor.Update(msg)
+	cmd = m.updateEditor(msg)
 	if value := sanitizeTerminalLine(m.editor.Value()); value != m.editor.Value() {
 		m.editor.SetValue(value)
 		m.editor.CursorEnd()
@@ -341,7 +342,7 @@ func (m *Model) handleLoginEndpointKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 	}
 	previous := m.editor.Value()
 	var cmd tea.Cmd
-	m.editor, cmd = m.editor.Update(msg)
+	cmd = m.updateEditor(msg)
 	if value := sanitizeTerminalLine(m.editor.Value()); value != m.editor.Value() {
 		m.editor.SetValue(value)
 		m.editor.CursorEnd()
