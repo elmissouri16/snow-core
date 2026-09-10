@@ -9,8 +9,8 @@ require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.14.5 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
-	github.com/aymanbagabas/go-udiff v0.3.1 // indirect
-	github.com/bits-and-blooms/bitset v1.24.4 // indirect
+	github.com/aymanbagabas/go-udiff v0.4.1 // indirect
+	github.com/bits-and-blooms/bitset v1.24.6 // indirect
 	github.com/blevesearch/bleve/v2 v2.6.0 // indirect
 	github.com/blevesearch/bleve_index_api v1.3.11 // indirect
 	github.com/blevesearch/geo v0.2.5 // indirect
