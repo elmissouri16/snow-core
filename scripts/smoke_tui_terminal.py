@@ -186,6 +186,10 @@ def main():
                     terminal.background = b"ffff/ffff/ffff"
                     terminal.send(b"\x1b[I")  # Focus triggers actual background query.
                     terminal.until(lambda: sum(b"]11;" in q for q in terminal.queries) > before, "focus background query")
+                    terminal.send(b"\x01")  # Select the existing composer draft.
+                    terminal.send(b"\x1b[200~" + b"long composer " * 100 + b"tail-marker\x1b[201~")
+                    terminal.until(lambda: b"tail-marker" in terminal.plain_output(), "wrapped long composer tail")
+                    terminal.send(b"\x7f\x7f")
                     terminal.resize(40, 12)
                     terminal.pump()
                     terminal.resize(100, 30)

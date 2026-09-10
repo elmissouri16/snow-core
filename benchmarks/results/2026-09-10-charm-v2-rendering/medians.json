@@ -1,0 +1,76 @@
+{
+  "before": {
+    "BenchmarkTranscriptRefresh10K": {
+      "ns_per_op": 10781732.0,
+      "bytes_per_op": 13468482,
+      "allocs_per_op": 10084
+    },
+    "BenchmarkViewNormalAndNarrow/width-40": {
+      "ns_per_op": 45348.0,
+      "bytes_per_op": 22587,
+      "allocs_per_op": 141
+    },
+    "BenchmarkViewNormalAndNarrow/width-120": {
+      "ns_per_op": 71305.0,
+      "bytes_per_op": 37027,
+      "allocs_per_op": 145
+    },
+    "BenchmarkComposerBackspace/bytes-256": {
+      "ns_per_op": 273224.0,
+      "bytes_per_op": 119281,
+      "allocs_per_op": 357
+    },
+    "BenchmarkComposerBackspace/bytes-8192": {
+      "ns_per_op": 3517685.0,
+      "bytes_per_op": 656085,
+      "allocs_per_op": 5760
+    },
+    "BenchmarkComposerBackspace/bytes-65536": {
+      "ns_per_op": 27253163.0,
+      "bytes_per_op": 4622719,
+      "allocs_per_op": 45683
+    },
+    "BenchmarkTranscriptSelectionDragFrame": {
+      "ns_per_op": 451826.0,
+      "bytes_per_op": 200440,
+      "allocs_per_op": 237
+    }
+  },
+  "after": {
+    "BenchmarkTranscriptRefresh10K": {
+      "ns_per_op": 5848518.0,
+      "bytes_per_op": 8856447,
+      "allocs_per_op": 26
+    },
+    "BenchmarkViewNormalAndNarrow/width-40": {
+      "ns_per_op": 20420.0,
+      "bytes_per_op": 4576,
+      "allocs_per_op": 66
+    },
+    "BenchmarkViewNormalAndNarrow/width-120": {
+      "ns_per_op": 26542.0,
+      "bytes_per_op": 9849,
+      "allocs_per_op": 66
+    },
+    "BenchmarkComposerBackspace/bytes-256": {
+      "ns_per_op": 245890.0,
+      "bytes_per_op": 56773,
+      "allocs_per_op": 684
+    },
+    "BenchmarkComposerBackspace/bytes-8192": {
+      "ns_per_op": 2482289.0,
+      "bytes_per_op": 587648,
+      "allocs_per_op": 5002
+    },
+    "BenchmarkComposerBackspace/bytes-65536": {
+      "ns_per_op": 17778070.0,
+      "bytes_per_op": 4485188,
+      "allocs_per_op": 34052
+    },
+    "BenchmarkTranscriptSelectionDragFrame": {
+      "ns_per_op": 243379.0,
+      "bytes_per_op": 51757,
+      "allocs_per_op": 129
+    }
+  }
+}

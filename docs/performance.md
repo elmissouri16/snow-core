@@ -21,12 +21,20 @@ python3 scripts/check_benchmarks.py
 
 The checker uses only the Python standard library and rejects a Go toolchain
 that does not exactly match the version pinned in the limits file. Each
-configured benchmark runs once per sample, three times, on one logical CPU:
+configured benchmark runs three samples on one logical CPU. Expensive hydration
+fixtures use one iteration per sample:
 
 ```text
 go test <package> -run ^$ -bench <pattern> -benchmem \
   -benchtime=1x -count=3 -cpu=1
 ```
+
+The rendering group overrides `benchtime` to `500ms`, measuring steady frame
+reuse and enough composer edits to expose repeated work. It covers normal and
+narrow frames, 10,000-row transcript reflow, short/8 KiB/64 KiB composer edits,
+and selection frames. Allocation ceilings catch the Charm v2 regressions;
+timing ceilings retain platform headroom. Compare local latency samples against
+the prior checkout when changing rendering, not only against these broad limits.
 
 The median `B/op` and `allocs/op` values must remain below the reviewed ceilings
 in [`benchmarks/performance-limits.json`](../benchmarks/performance-limits.json).
@@ -49,6 +57,7 @@ The checked set focuses on recurring or historically expensive operations:
 
 - assistant-heavy and mixed user/tool 5,000-message TUI hydration plus mailbox
   ingestion;
+- normal/narrow frames, transcript reflow and selection, and composer editing;
 - lightweight SQLite branch hydration, 1,500-entry atomic batch append,
   cold/warm context projection, and compacted in-memory context projection;
 - 256-event subscriber delivery;

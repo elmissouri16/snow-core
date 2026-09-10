@@ -1,0 +1,27 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/tui
+cpu: Apple M3 Pro
+BenchmarkTranscriptRefresh10K-11            	     109	  10854274 ns/op	13468412 B/op	   10084 allocs/op
+BenchmarkTranscriptRefresh10K-11            	      94	  10781732 ns/op	13469260 B/op	   10084 allocs/op
+BenchmarkTranscriptRefresh10K-11            	      93	  10760086 ns/op	13468482 B/op	   10084 allocs/op
+BenchmarkViewNormalAndNarrow/width-40-11    	   26427	     45413 ns/op	   22587 B/op	     141 allocs/op
+BenchmarkViewNormalAndNarrow/width-40-11    	   26304	     45348 ns/op	   22574 B/op	     141 allocs/op
+BenchmarkViewNormalAndNarrow/width-40-11    	   26632	     45192 ns/op	   22614 B/op	     141 allocs/op
+BenchmarkViewNormalAndNarrow/width-120-11   	   16611	     71553 ns/op	   37027 B/op	     145 allocs/op
+BenchmarkViewNormalAndNarrow/width-120-11   	   16995	     70976 ns/op	   36952 B/op	     145 allocs/op
+BenchmarkViewNormalAndNarrow/width-120-11   	   16824	     71305 ns/op	   37053 B/op	     145 allocs/op
+BenchmarkComposerBackspace/bytes-256-11     	    3764	    273943 ns/op	  119305 B/op	     359 allocs/op
+BenchmarkComposerBackspace/bytes-256-11     	    3846	    271922 ns/op	  119121 B/op	     357 allocs/op
+BenchmarkComposerBackspace/bytes-256-11     	    3849	    273224 ns/op	  119281 B/op	     357 allocs/op
+BenchmarkComposerBackspace/bytes-8192-11    	     333	   3529968 ns/op	  656112 B/op	    5760 allocs/op
+BenchmarkComposerBackspace/bytes-8192-11    	     332	   3517685 ns/op	  656085 B/op	    5761 allocs/op
+BenchmarkComposerBackspace/bytes-8192-11    	     334	   3516949 ns/op	  654927 B/op	    5760 allocs/op
+BenchmarkComposerBackspace/bytes-65536-11   	      43	  27127806 ns/op	 4611699 B/op	   45682 allocs/op
+BenchmarkComposerBackspace/bytes-65536-11   	      43	  27253163 ns/op	 4622719 B/op	   45683 allocs/op
+BenchmarkComposerBackspace/bytes-65536-11   	      43	  27278391 ns/op	 4629437 B/op	   45683 allocs/op
+BenchmarkTranscriptSelectionDragFrame-11    	    2637	    451826 ns/op	  200312 B/op	     237 allocs/op
+BenchmarkTranscriptSelectionDragFrame-11    	    2674	    451451 ns/op	  200440 B/op	     237 allocs/op
+BenchmarkTranscriptSelectionDragFrame-11    	    2678	    453439 ns/op	  200913 B/op	     237 allocs/op
+PASS
+ok  	github.com/elmissouri16/snow-core/internal/tui	28.301s

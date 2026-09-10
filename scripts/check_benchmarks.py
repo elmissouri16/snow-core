@@ -114,6 +114,10 @@ def validate_config(config: Any) -> None:
             raise ValueError("each group needs a non-empty string package")
         if not isinstance(pattern, str) or not pattern.strip():
             raise ValueError("each group needs a non-empty string pattern")
+        if "benchtime" in group and (
+            not isinstance(group["benchtime"], str) or not group["benchtime"].strip()
+        ):
+            raise ValueError("group benchtime must be a non-empty string")
         benchmarks = group.get("benchmarks")
         if not isinstance(benchmarks, dict) or not benchmarks:
             raise ValueError(f"group {group.get('package')} needs benchmarks")
@@ -291,7 +295,7 @@ def main() -> int:
                 package,
                 group["pattern"],
                 expected_samples,
-                benchtime,
+                group.get("benchtime", benchtime),
                 timeout_seconds,
             )
             parsed = parse_benchmark_output(output)

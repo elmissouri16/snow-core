@@ -108,6 +108,29 @@ class EvaluateBenchmarkTests(unittest.TestCase):
 
 
 class ConfigurationAndRunnerTests(unittest.TestCase):
+    def test_group_benchtime_is_optional_and_validated(self) -> None:
+        group = {
+            "package": "./internal/tui", "pattern": "BenchmarkOne",
+            "benchmarks": {"BenchmarkOne": {"max_bytes_per_op": 1, "max_allocs_per_op": 1}},
+        }
+        config = {"version": 1, "go_version": "go1.27rc3", "groups": [group]}
+        check_benchmarks.validate_config(config)
+        group["benchtime"] = "500ms"
+        check_benchmarks.validate_config(config)
+        for invalid in (None, 500, "", " "):
+            group["benchtime"] = invalid
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "group benchtime"):
+                check_benchmarks.validate_config(config)
+
+    @mock.patch.object(check_benchmarks.subprocess, "run")
+    def test_runner_uses_duration_and_single_cpu(self, run: mock.Mock) -> None:
+        run.return_value = subprocess.CompletedProcess(args=["go"], returncode=0, stdout="")
+        check_benchmarks.run_benchmark_group(Path.cwd(), "go", "./internal/tui", "BenchmarkOne", 3, "500ms")
+        command = run.call_args.args[0]
+        self.assertIn("-benchtime=500ms", command)
+        self.assertIn("-cpu=1", command)
+        self.assertIn("-count=3", command)
+
     def test_validate_config_rejects_non_object_and_typed_group_fields(self) -> None:
         with self.assertRaisesRegex(ValueError, "JSON object"):
             check_benchmarks.validate_config([])

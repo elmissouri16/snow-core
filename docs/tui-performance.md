@@ -36,6 +36,11 @@ The versions below are load-bearing and must not drift during refactors.
 | `charm.land/lipgloss/v2` | `v2.0.6` | Frame styling and width-aware layout |
 | `github.com/charmbracelet/glamour` | `v1.0.0` | Markdown-to-ANSI rendering for finalized transcript content |
 
+The textarea component is a reproducible local snapshot of Bubbles v2.2.1 with
+a printable-ASCII wrapping optimization. Its Unicode path and input lifecycle
+are unchanged; the original upstream test suite is included. See the pinned
+[source, patch, and sync instructions](../internal/tui/textarea/UPSTREAM.md).
+
 ## Upstream examples consulted
 
 Bubble Tea's pager example composes a header, `viewport.Model`, and footer in
@@ -128,6 +133,14 @@ status updates that do not change the frame. Retained viewport strings and the
 frame input/output pair are each capped at 256 KiB; larger PTYs render without
 those caches. Content publication, resize,
 scroll, selection, and session replacement invalidate the relevant cache.
+
+The composer additionally retains at most 32 KiB of input/rendered output.
+Buffer, cursor, selection, focus, and size are cache keys; component updates
+(including cursor blink) and theme changes invalidate it. Transcript updates
+can reuse an untouched editor view. Layout updates textarea dimensions only
+when they change. Frame components are joined without pre-padding every row;
+the final frame boundary performs one ANSI-aware padding/clipping pass and
+wraps only when content actually overflows.
 
 New output follows only when the viewport is already at bottom. While the user
 reads earlier content, source state keeps updating without replacing the
@@ -231,25 +244,28 @@ repeated full-history JSON decoding.
 ### Charm v2 migration measurements
 
 Local medians on an Apple M3 Pro (Go 1.27rc3, three default-duration samples)
-compare the pre-migration checkout with the v2 implementation. Benchmarks
-exercise the root `View`, including composer editing and drag frames.
+compare a fresh run of pre-migration commit `8fad893` with the corrected v2
+implementation. Benchmarks exercise the root `View`, composer edits, and drag
+frames. [Raw samples and medians](../benchmarks/results/2026-09-10-charm-v2-rendering/)
+are checked in for review.
 
 | Fixture | Before | v2 |
 |---|---:|---:|
-| Reflow 10,000 transcript rows | 10.58 ms | 13.15 ms |
-| Render 40-column frame | 0.046 ms | 0.121 ms |
-| Render 120-column frame | 0.072 ms | 0.230 ms |
-| Backspace + frame, 256-byte composer | 0.278 ms | 0.759 ms |
-| Backspace + frame, 8 KiB composer | 3.53 ms | 5.28 ms |
-| Backspace + frame, 64 KiB composer | 27.55 ms | 37.12 ms |
-| Transcript selection drag frame | 0.448 ms | 1.117 ms |
+| Reflow 10,000 transcript rows | 10.78 ms | 5.85 ms |
+| Render 40-column frame | 0.045 ms | 0.020 ms |
+| Render 120-column frame | 0.071 ms | 0.027 ms |
+| Backspace + frame, 256-byte composer | 0.273 ms | 0.246 ms |
+| Backspace + frame, 8 KiB composer | 3.52 ms | 2.48 ms |
+| Backspace + frame, 64 KiB composer | 27.25 ms | 17.78 ms |
+| Transcript selection drag frame | 0.452 ms | 0.243 ms |
 
-These fixtures show higher CPU cost with v2, especially for very large composer
-values. Transcript reflow allocations fall from 10,084 to 26 per operation
-(13.47 MB to 8.86 MB). The unchanged repository benchmark guard passes, including
-5,000-message hydration at 87.8 MB / 121,626 allocations and mixed hydration at
-25.2 MB / 127,582 allocations. These are local measurements, not terminal latency
-guarantees; live terminal rendering still needs manual validation.
+All seven fixtures improve latency and allocated bytes. Transcript reflow
+allocations fall from 10,084 to 26 (13.47 MB to 8.86 MB). Short composer edits
+still allocate more individual objects (684 versus 358), while allocated bytes
+fall from 119 KB to 57 KB and latency improves 10%. Rendering now has its own
+allocation limits in the standard guard; all previous limits are unchanged.
+These are local measurements, not guarantees for every terminal/workload; live
+terminal rendering still needs manual validation.
 
 ### Commands and terminal checks
 

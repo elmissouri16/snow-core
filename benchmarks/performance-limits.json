@@ -27,6 +27,48 @@
       }
     },
     {
+      "package": "./internal/tui",
+      "pattern": "^Benchmark(TranscriptRefresh10K|ViewNormalAndNarrow|ComposerBackspace|TranscriptSelectionDragFrame)$",
+      "benchtime": "500ms",
+      "benchmarks": {
+        "BenchmarkTranscriptRefresh10K": {
+          "max_ns_per_op": 60000000,
+          "max_bytes_per_op": 10000000,
+          "max_allocs_per_op": 50
+        },
+        "BenchmarkViewNormalAndNarrow/width-40": {
+          "max_ns_per_op": 500000,
+          "max_bytes_per_op": 6500,
+          "max_allocs_per_op": 100
+        },
+        "BenchmarkViewNormalAndNarrow/width-120": {
+          "max_ns_per_op": 750000,
+          "max_bytes_per_op": 13000,
+          "max_allocs_per_op": 100
+        },
+        "BenchmarkComposerBackspace/bytes-256": {
+          "max_ns_per_op": 2500000,
+          "max_bytes_per_op": 75000,
+          "max_allocs_per_op": 900
+        },
+        "BenchmarkComposerBackspace/bytes-8192": {
+          "max_ns_per_op": 15000000,
+          "max_bytes_per_op": 650000,
+          "max_allocs_per_op": 5500
+        },
+        "BenchmarkComposerBackspace/bytes-65536": {
+          "max_ns_per_op": 120000000,
+          "max_bytes_per_op": 5000000,
+          "max_allocs_per_op": 38000
+        },
+        "BenchmarkTranscriptSelectionDragFrame": {
+          "max_ns_per_op": 3000000,
+          "max_bytes_per_op": 65000,
+          "max_allocs_per_op": 175
+        }
+      }
+    },
+    {
       "package": "./internal/session",
       "pattern": "^(BenchmarkSQLiteContextMessages|BenchmarkMemoryContextMessagesAfterCompaction|BenchmarkSQLiteAppendBatch1500|BenchmarkSQLiteBranchHydration5000)$",
       "benchmarks": {

@@ -59,6 +59,10 @@ jobs:
       - name: Test
         run: go test ./... -count=1
 
+      - name: Verify pinned textarea snapshot
+        if: runner.os == 'Linux'
+        run: go run scripts/sync_textarea.go -check -source "$(go list -m -f '{{.Dir}}' charm.land/bubbles/v2)"
+
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:

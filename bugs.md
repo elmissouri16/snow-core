@@ -2498,3 +2498,30 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   `go test ./...` pass. The unchanged benchmark guard passes: three-sample
   medians are 121,626 allocations / 87.8 MB for hydration and 127,582
   allocations / 25.2 MB for mixed hydration.
+
+## BUG-067: Charm v2 frame rendering is slower than v1
+
+- **Status:** Resolved; verified 2026-09-10.
+- **Surface:** Frame composition, composer edits, and transcript selection.
+- **Evidence:** The migration benchmarks regress from 46/72 microseconds to
+  121/230 microseconds for 40/120-column frames, 0.278 to 0.759 ms for short
+  composer edits, and 0.448 to 1.117 ms for selection frames. The repository
+  guard covers hydration but does not detect these rendering regressions.
+- **Investigation:** CPU/allocation profiles identify redundant full-frame
+  wrapping/alignment and unconditional textarea dimension updates. Preserve
+  terminal/Unicode behavior and compare against v1, not only broad ceilings.
+- **Resolution:** One final frame fit replaces repeated wrapping/alignment;
+  unchanged composer output is cached with bounded retention and explicit
+  cursor/theme invalidation. Layout avoids unchanged dimension setters. A
+  reproducible Bubbles v2.2.1 textarea snapshot changes only printable-ASCII
+  wrapping width measurement, preserving the original Unicode and lifecycle
+  paths. Its complete upstream tests, license, and source hash checks remain.
+- **Verification:** Fresh three-sample comparisons against pre-migration
+  `8fad893` improve all seven measured latencies and allocated-byte totals:
+  40/120-column frames are 55%/63% faster, selection 46% faster, and short,
+  8 KiB, and 64 KiB edits 10%/29%/35% faster. Raw results are checked in under
+  `benchmarks/results/2026-09-10-charm-v2-rendering`. `go test ./...`,
+  `go vet ./...`, `go test -race ./internal/tui/... -count=1`, all 58 Python
+  tests, snapshot verification, SDK example, and PTY/plugin smokes pass.
+  Existing benchmark limits are unchanged; new rendering limits pass and
+  reject the recorded pre-fix migration samples.
