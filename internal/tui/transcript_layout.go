@@ -691,8 +691,11 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Multiline and follow-up keys belong to the composer even when a
+	// completion menu is visible. Only completion bindings may accept an item.
+	composerMultilineKey := keyMatches(msg, m.keys.Newline) || keyMatches(msg, m.keys.FollowUp)
 	// --- Command palette: navigation keys are consumed while open ---
-	if m.compVisible {
+	if m.compVisible && !composerMultilineKey {
 		msg = normalizePickerKeyWithMap(msg, m.keys)
 		switch {
 		case msg.Code == tea.KeyUp:
@@ -728,7 +731,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// --- Agent Skill picker: Enter/Tab complete the current $skill token. ---
-	if m.skillVisible {
+	if m.skillVisible && !composerMultilineKey {
 		msg = normalizePickerKeyWithMap(msg, m.keys)
 		switch {
 		case msg.Code == tea.KeyUp, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):
@@ -752,7 +755,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// --- File mention picker: Enter/Tab insert a path, never submit the prompt ---
-	if m.mentionVisible {
+	if m.mentionVisible && !composerMultilineKey {
 		msg = normalizePickerKeyWithMap(msg, m.keys)
 		switch {
 		case msg.Code == tea.KeyUp, msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift):

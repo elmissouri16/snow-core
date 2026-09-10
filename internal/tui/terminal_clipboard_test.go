@@ -161,3 +161,16 @@ func TestShiftEnterNewlineAndSavedOverrides(t *testing.T) {
 		t.Fatalf("capture=%q err=%v", name, err)
 	}
 }
+
+func TestNewlineDoesNotAcceptComposerCompletion(t *testing.T) {
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEnter, Mod: tea.ModShift}, {Code: tea.KeyEnter, Mod: tea.ModAlt}} {
+		m := prepareScrollableModel(t)
+		m.editor.SetValue("/help")
+		m.editor.CursorEnd()
+		m.refreshPalette()
+		m.Update(key)
+		if m.pickHelp || m.editor.Value() != "/help\n" {
+			t.Fatalf("%s accepted completion: help=%v editor=%q", key, m.pickHelp, m.editor.Value())
+		}
+	}
+}

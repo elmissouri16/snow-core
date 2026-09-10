@@ -2468,3 +2468,16 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   restart, then completed a read-tool round trip with the correct random fixture
   contents. An installed PTY check confirmed Astra in the filtered picker,
   Ctrl+R refresh with preserved query, and model/reasoning selection.
+
+## BUG-065: Modified Enter accepts composer completions
+
+- **Status:** Resolved; verified 2026-09-10.
+- **Surface:** Composer slash, skill, and file completion overlays.
+- **Evidence:** With `/help` in the composer and completion open, Shift+Enter
+  reaches the overlay's Enter handler before the configured newline binding.
+  Alt+Enter follows the same path. The enhanced-key regression test
+  `TestNewlineDoesNotAcceptComposerCompletion` reproduces the issue.
+- **Resolution:** Composer newline/follow-up bindings bypass completion
+  acceptance while ordinary Enter/Tab retain completion behavior.
+- **Verification:** The regression failed before the fix; it and the focused
+  composer, completion, mention, and skill tests pass after the change.
