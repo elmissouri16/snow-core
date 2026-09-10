@@ -63,7 +63,8 @@ override that global shortcut. To use `Command+A`, configure the terminal's
 Snow profile to send the `Ctrl+A` control character instead. This mapping is
 terminal-specific; Snow then handles it exactly like physical `Ctrl+A`.
 
-Ghostty supports Shift+Enter through its enhanced keyboard protocol. Ctrl+J
+Ghostty supports Shift+Enter through its enhanced keyboard protocol. Theme
+colors follow the terminal background on focus and supported appearance changes. Ctrl+J
 and Alt+Enter remain available in terminals that cannot distinguish Shift+Enter;
 saved newline bindings keep their configured keys. Ghostty normally lets you
 hold Shift while dragging for terminal-native selection. F6 also switches modes.

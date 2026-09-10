@@ -1335,7 +1335,10 @@ The Bubble Tea v2 TUI is the interactive default. Declarative `tea.View` state
 owns alternate screen, focus reporting, and mouse capture; the v2 decoder and
 renderer negotiate enhanced keyboard, synchronized output, and Unicode widths.
 Bubbles v2 textareas use virtual cursors, and Lip Gloss v2 styles share the
-existing bounded geometry. Core and public SDK packages remain UI-independent.
+existing bounded geometry. Background reports and supported mode 2031
+notifications refresh built-in, custom, and plugin palettes while preserving
+interactive state; notification mode ownership is restored after renderer
+shutdown. Core and public SDK packages remain UI-independent.
 The TUI renders a transcript with
 markdown, streaming updates, model/provider pickers, model-aware `/thinking`
 effort selection, login/logout, permissions, sessions, slash completion, and

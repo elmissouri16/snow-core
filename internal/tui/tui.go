@@ -392,6 +392,10 @@ type Model struct {
 	trustSaving                   bool
 	lastErrorText                 string
 	themeName                     string
+	backgroundKnown               bool
+	backgroundDark                bool
+	themeModeReported             bool
+	themeModeOwned                bool
 	customThemes                  map[string]config.ThemeFile
 	keys                          tuiKeyMap
 	auxDiagnostics                []config.Diagnostic

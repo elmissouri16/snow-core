@@ -53,6 +53,9 @@ func (m *Model) dispatchMouse(msg tea.MouseMsg) tea.Cmd {
 
 func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	if handled, cmd := m.updateTerminalTheme(msg); handled {
+		return m, cmd
+	}
 
 	switch msg := msg.(type) {
 	case inlineExitMsg:

@@ -406,7 +406,10 @@ parameters.
 The four selectable built-in themes are Snow (`default`), Frost (`frost`),
 Ember (`ember`), and Aurora (`aurora`). Every built-in adapts its complete
 semantic palette to the terminal's reported light/dark background, including
-Markdown rendered inside the transcript. Snow keeps terminal backgrounds
+Markdown rendered inside the transcript. Snow queries the background on startup
+and focus, and follows appearance notifications when the terminal supports mode
+2031. It restores that mode on exit if Snow enabled it. Theme changes keep drafts,
+dialogs, and transcript position. Snow keeps terminal backgrounds
 transparent. Legacy names (`dark`, `light`, `high-contrast`, `nord`, `dracula`,
 and `gruvbox`) remain accepted for saved configurations and custom-theme
 inheritance but are hidden from the Settings cycle. Any other valid name refers

@@ -88,6 +88,20 @@ its scrollback. This
 split reflects the protocol: portable native drag/context menus and application
 wheel events cannot coexist.
 
+### Terminal appearance
+
+Bubble Tea owns background queries on startup, focus, and mode 2031 appearance
+notifications. Notifications trigger a query for the actual background color.
+The model explicitly resolves built-in, custom, and plugin light/dark palettes,
+invalidates plugin/Markdown/frame caches, and redraws durable transcript rows
+without changing drafts, modal state, scroll position, or live run counters.
+Repeated reports with the same light/dark classification do not rebuild content.
+
+Mode 2031 is queried before enabling notifications. Snow enables only a supported,
+reset mode, and resets it after `Program.Run` has stopped on quit, cancellation,
+or restart. A mode already enabled by the terminal is preserved. Terminals that
+do not answer retain the initial dark palette and focus-query fallback.
+
 ### Streaming and coalescing
 
 Agent callbacks enter an ordered mailbox. Adjacent text, thinking, and plan

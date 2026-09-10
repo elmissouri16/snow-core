@@ -81,10 +81,8 @@ func (m *Model) applyPluginTheme(theme protocol.PluginTheme) error {
 	}
 	err := applyCustomTUITheme(config.ThemeFile{Version: 1, Name: theme.ID, Colors: config.ThemeColors{Accent: color("accent"), Muted: color("muted"), Foreground: color("foreground"), Warning: color("warning"), Error: color("error"), Success: color("success"), Separator: color("separator")}})
 	if err == nil {
-		m.md = newMarkdownRenderer()
-		m.thinkingMD = newThinkingMarkdownRenderer()
-		m.transcriptDirty = true
-		m.refreshTranscript()
+		m.refreshThemeStyles()
+		m.rerenderThemedTranscript()
 	}
 	return err
 }

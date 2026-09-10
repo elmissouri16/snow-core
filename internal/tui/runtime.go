@@ -76,6 +76,7 @@ func run(ctx context.Context, opts app.Options, sessionPicker bool) (RunResult, 
 	model.startupResumeRequired = sessionPicker
 	p := tea.NewProgram(model, programOptions...)
 	_, runErr := p.Run()
+	runErr = errors.Join(runErr, model.restoreTerminalAppearance(os.Stdout))
 	cancel()
 	result := RunResult{RestartRequested: model.restartRequested}
 	if result.RestartRequested {
@@ -191,6 +192,7 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 		ctx = context.Background()
 	}
 	ctx, cancel := context.WithCancel(ctx)
+	terminalDark = true
 	_ = applyTUITheme("default")
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -227,6 +229,7 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 		cancel:                     cancel,
 		opts:                       opts,
 		themeName:                  "default",
+		backgroundDark:             true,
 		customThemes:               map[string]config.ThemeFile{},
 		keys:                       tuiKeys,
 		transcript:                 vp,
@@ -335,7 +338,7 @@ func (m *Model) Init() tea.Cmd {
 	// Resolve trust before app.New so an allow decision can load project input
 	// on this launch and a deny decision guarantees it is never read. The
 	// spinner pump starts lazily when a state that actually renders it begins.
-	return m.bootstrapCmd()
+	return tea.Batch(m.bootstrapCmd(), m.terminalThemeInit())
 }
 
 func (m *Model) bootstrapCmd() tea.Cmd {

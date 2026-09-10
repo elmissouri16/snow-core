@@ -516,6 +516,11 @@ func (m *Model) setTheme(name string, announce bool) error {
 }
 
 func (m *Model) refreshThemeStyles() {
+	if m.plugins != nil {
+		clear(m.plugins.cache)
+	}
+	m.managedFrameCacheValid = false
+	m.transcriptViewCacheValid = false
 	normalizeTextareaStyles(&m.editor)
 	normalizeTextareaStyles(&m.userInputEditor)
 	m.spinner.Style = lipgloss.NewStyle().Foreground(colorAccent)
@@ -526,6 +531,8 @@ func (m *Model) refreshThemeStyles() {
 }
 
 func (m *Model) rerenderThemedTranscript() {
+	restore := m.preserveThemeRuntimeState()
+	defer restore()
 	if m.app == nil || m.app.Agent == nil || m.inlineTranscript {
 		m.transcriptBaseDirty = true
 		m.transcriptDirty = true
