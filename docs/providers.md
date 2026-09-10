@@ -99,6 +99,12 @@ This login is separate from OpenAI API-key authentication. Run
 `snow logout chatgpt` to remove the credential stored by Snow. See the detailed
 [ChatGPT authentication reference][chatgpt-auth] for OAuth troubleshooting.
 
+The model picker uses your account's live Codex catalog, including GPT-6 Astra
+when available to that account. Opening `/model` refreshes catalogs older than
+15 minutes; **Ctrl+R** forces a refresh. If an announced model is missing,
+update Snow as well: OpenAI can gate catalog entries by client compatibility
+version.
+
 ## OpenAI-compatible endpoints
 
 Create a named profile for a persistent endpoint that uses a Bearer key. Snow

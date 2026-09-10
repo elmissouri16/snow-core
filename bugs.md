@@ -2434,3 +2434,37 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   An isolated installed-binary PTY verified seven filtered Zen matches, both
   missing models visible, a newer catalog timestamp after Ctrl+R, and responsive
   keyboard/resize behavior at 110 and 64 columns.
+
+## BUG-064: ChatGPT catalog compatibility hides GPT-6 Astra
+
+- **Status:** Resolved; verified 2026-09-10.
+- **Surface:** ChatGPT subscription model discovery and the shared model picker.
+- **Evidence:** Two read-only requests using the same Snow OAuth credential and
+  `originator=snow` returned different catalogs: `client_version=0.147.0`
+  omitted `gpt-6-astra`, while `client_version=0.153.4` returned it with
+  `visibility=list`. The latter matches the installed Codex client's catalog
+  compatibility version. Snow pins the older version in
+  `internal/provider/chatgpt/client.go`; refreshing its cache cannot reveal a
+  model omitted by that compatibility contract.
+- **Related defect:** ChatGPT had a 15-minute disk cache but did not expose its
+  expiry to the app's retained catalog snapshot, so an open process can keep
+  an old inventory until forced refresh or restart.
+- **Resolution:** Advanced the tested catalog contract to `0.153.4`; existing
+  version validation rejects caches from the old contract. The ChatGPT adapter
+  now publishes expiry and content revisions through the authenticated wrapper
+  to the app loader. Cache reads retain their original deadline, 304 responses
+  renew freshness, and outages keep only compatible same-account cached models
+  with a one-minute picker retry interval. No model allowlist or inferred
+  account entitlement was added.
+- **Verification:** `go test ./...`, `go vet ./...`, and
+  `go test -race ./internal/provider/chatgpt ./internal/provider ./internal/app
+  ./internal/tui ./internal/rpc ./pkg/snowsdk` passed. All 56 Python tests and
+  `python3 scripts/check_benchmarks.py` passed; the benchmark run required an
+  isolated `SNOW_HOME` after the sandbox blocked the default artifact directory.
+  Focused tests cover legacy-cache replacement, Astra capability mapping,
+  deadline propagation through the real auth wrapper/app loader, ETags, outage
+  retry, and account isolation. `./scripts/install-local.sh` installed the fix.
+  Installed-binary live checks selected Astra from discovery and a cached
+  restart, then completed a read-tool round trip with the correct random fixture
+  contents. An installed PTY check confirmed Astra in the filtered picker,
+  Ctrl+R refresh with preserved query, and model/reasoning selection.

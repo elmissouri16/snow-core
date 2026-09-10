@@ -141,10 +141,23 @@ the raw ID token.
 ## Authenticated model catalog
 
 `/model` uses authenticated
-`GET /backend-api/codex/models?client_version=0.147.0` discovery. Raw records
+`GET /backend-api/codex/models?client_version=0.153.4` discovery. Raw records
 are cached for 15 minutes under
 `~/.snow/cache/chatgpt-models/<origin-and-account-hash>.json` with versioned
 origin/account metadata, ETags, and mode `0600`.
+
+Opening `/model` reloads an expired ChatGPT catalog in the background. Press
+**Ctrl+R** in the picker to force discovery immediately. Cache reads do not
+extend the 15-minute lifetime; a failed refresh keeps only a compatible
+same-account cache and becomes retryable after one minute.
+
+The `client_version` value is Snow's tested Codex catalog compatibility level,
+not Snow's release number. OpenAI can omit newer models for older clients:
+GPT-6 Astra requires a newer catalog contract than Snow's former `0.147.0`
+request. Upgrading this contract invalidates older cached catalogs. New model
+IDs returned by the account catalog appear automatically; a release requiring
+a newer client contract can still require a Snow update. Account and workspace
+availability remain controlled by OpenAI.
 
 Only records with `visibility=list` or unset visibility are shown;
 `supported_in_api=false` does not hide subscription-only models. Snow maps each

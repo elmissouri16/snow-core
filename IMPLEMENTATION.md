@@ -585,6 +585,16 @@ are refreshed under the cross-process auth-store lock; a pre-stream 401
 permits one guarded forced refresh and retry. WebSocket continuation remains
 deferred.
 
+Discovery uses the tested Codex `client_version=0.153.4` contract, independently
+of Snow's release version. Older contracts can omit new models, including
+GPT-6 Astra; caches from other contract versions are invalidated. ChatGPT
+publishes its 15-minute catalog expiry and a revision counter through the
+authenticated provider wrapper to the shared app loader. Reading a disk cache
+preserves its original deadline; ETag revalidation renews freshness, and
+failed refreshes retain only a same-account compatible cache with a one-minute
+picker retry interval. `/model` reloads expired snapshots and Ctrl+R forces a
+refresh without changing the active selection.
+
 ### Fake
 
 `internal/provider/fake` is a deterministic scripted provider for tests,

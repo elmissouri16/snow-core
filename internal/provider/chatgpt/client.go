@@ -18,8 +18,10 @@ import (
 )
 
 const (
-	OAuthClientID               = "app_EMoamEEZ73f0CkXaXp7hrann"
-	CatalogCompatibilityVersion = "0.147.0"
+	OAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+	// This is the tested Codex catalog contract, not Snow's release version.
+	// Older versions can omit newly released models even for entitled accounts.
+	CatalogCompatibilityVersion = "0.153.4"
 	refreshSkew                 = 5 * time.Minute
 	maxAuthResponseBytes        = 1 << 20
 )
@@ -51,6 +53,8 @@ type Provider struct {
 	now               func() time.Time
 	modelsMu          sync.RWMutex
 	models            []modelRecord
+	catalogRefreshAt  time.Time
+	catalogRevision   uint64
 	authRefreshMu     sync.RWMutex
 	authRefresh       func(context.Context, auth.Credential) (auth.Credential, error)
 }

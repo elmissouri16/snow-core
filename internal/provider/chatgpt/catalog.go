@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ import (
 
 const (
 	catalogFreshness    = 15 * time.Minute
+	catalogRetryDelay   = time.Minute
 	catalogTimeout      = 5 * time.Second
 	maxCatalogBytes     = 8 << 20
 	catalogCacheVersion = 1
@@ -99,6 +101,21 @@ func (p *Provider) RefreshModels(ctx context.Context) ([]protocol.Model, error) 
 	return p.listModels(ctx, true)
 }
 
+// ModelCatalogStale lets the app expire its retained snapshot without network
+// I/O on the UI goroutine. Failed discovery is retried sooner than fresh data.
+func (p *Provider) ModelCatalogStale() bool {
+	p.modelsMu.RLock()
+	defer p.modelsMu.RUnlock()
+	return !p.now().Before(p.catalogRefreshAt)
+}
+
+// ModelCatalogRevision makes direct provider refreshes visible to app caches.
+func (p *Provider) ModelCatalogRevision() uint64 {
+	p.modelsMu.RLock()
+	defer p.modelsMu.RUnlock()
+	return p.catalogRevision
+}
+
 func (p *Provider) ListModelsWithCredential(ctx context.Context, credential auth.Credential) ([]protocol.Model, error) {
 	return p.listModelsCredential(ctx, credential, false)
 }
@@ -119,9 +136,9 @@ func (p *Provider) listModels(ctx context.Context, force bool) ([]protocol.Model
 			accountID = status.AccountID
 		}
 		if cached, ok := p.loadCatalogCache(accountID); ok && cached.ClientVersion == p.clientVersion {
-			return p.acceptRecords(cached.Models), err
+			return p.acceptRecords(cached.Models, p.now().Add(catalogRetryDelay)), err
 		}
-		return nil, err
+		return p.acceptRecords(nil, p.now().Add(catalogRetryDelay)), err
 	}
 	return p.listModelsCredential(ctx, resolved, force)
 }
@@ -137,7 +154,7 @@ func (p *Provider) listModelsCredential(ctx context.Context, credential auth.Cre
 	cache, cacheOK := p.loadCatalogCache(status.AccountID)
 	compatibleCache := cacheOK && cache.ClientVersion == p.clientVersion
 	if compatibleCache && !force && p.now().Sub(cache.FetchedAt) < catalogFreshness {
-		return p.acceptRecords(cache.Models), nil
+		return p.acceptRecords(cache.Models, cache.FetchedAt.Add(catalogFreshness)), nil
 	}
 	requestETag := ""
 	if compatibleCache {
@@ -146,9 +163,9 @@ func (p *Provider) listModelsCredential(ctx context.Context, credential auth.Cre
 	records, etag, notModified, err := p.fetchCatalog(ctx, credential, requestETag, true)
 	if err != nil {
 		if compatibleCache {
-			return p.acceptRecords(cache.Models), err
+			return p.acceptRecords(cache.Models, p.now().Add(catalogRetryDelay)), err
 		}
-		return nil, err
+		return p.acceptRecords(nil, p.now().Add(catalogRetryDelay)), err
 	}
 	if notModified {
 		if !compatibleCache {
@@ -157,11 +174,11 @@ func (p *Provider) listModelsCredential(ctx context.Context, credential auth.Cre
 		cache.FetchedAt = p.now().UTC()
 		cache.ClientVersion = p.clientVersion
 		_ = p.saveCatalogCache(status.AccountID, cache)
-		return p.acceptRecords(cache.Models), nil
+		return p.acceptRecords(cache.Models, cache.FetchedAt.Add(catalogFreshness)), nil
 	}
 	entry := catalogCache{Version: catalogCacheVersion, BackendOrigin: p.backendOrigin(), AccountID: status.AccountID, FetchedAt: p.now().UTC(), ETag: etag, ClientVersion: p.clientVersion, Models: records}
 	_ = p.saveCatalogCache(status.AccountID, entry)
-	return p.acceptRecords(records), nil
+	return p.acceptRecords(records, entry.FetchedAt.Add(catalogFreshness)), nil
 }
 
 func (p *Provider) storeCredential() (auth.Credential, bool) {
@@ -234,13 +251,17 @@ func (p *Provider) fetchCatalog(ctx context.Context, cred auth.Credential, etag 
 	return payload.Models, resp.Header.Get("ETag"), false, nil
 }
 
-func (p *Provider) acceptRecords(records []modelRecord) []protocol.Model {
+func (p *Provider) acceptRecords(records []modelRecord, refreshAt time.Time) []protocol.Model {
 	models := mapModelRecords(records)
 	// The authenticated response is account-scoped. Do not add bundled models
 	// missing from it: the Codex backend can reject a model for one ChatGPT
 	// account even when another local OpenCode/Pi account can invoke it.
 	p.modelsMu.Lock()
+	if !reflect.DeepEqual(p.models, records) {
+		p.catalogRevision++
+	}
 	p.models = slices.Clone(records)
+	p.catalogRefreshAt = refreshAt
 	p.modelsMu.Unlock()
 	return models
 }
