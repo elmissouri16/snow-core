@@ -1344,7 +1344,7 @@ bounded YAML custom themes and keybindings support global and trusted-project
 precedence with warnings.
 
 The active composer queues plain Enter as steering and Alt+Enter as a
-follow-up; Ctrl+J remains multiline, and abort clears/restores queued TUI
+follow-up; Shift+Enter and Ctrl+J remain multiline, and abort clears/restores queued TUI
 text. Queue delivery is bounded, one-at-a-time, after complete serial tool
 batches. Top-level Shift+Tab toggles Default/Plan mode (queued to `turn_done`
 while busy).
@@ -1384,7 +1384,10 @@ Slash-command/login transitions invalidate outstanding composer text and image
 paste results before the shared editor is reused. Blocking host requests preempt
 all centered cards and transcript context menus without discarding suspended
 modal state. `Ctrl+V` attaches supported
-clipboard images in the agent composer or falls back to textarea paste.
+clipboard images in the agent composer, then reads text with bounded host
+utilities. SSH and host text failures use OSC 52 with target/generation guards,
+a three-second timeout, and a retained canceled-request slot until its late reply
+is drained. Clipboard output uses Bubble Tea commands rather than frame content.
 
 ### Slash commands
 

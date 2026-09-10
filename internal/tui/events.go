@@ -53,6 +53,9 @@ func (m *Model) applyTextareaResult(result textareaResultMsg) (tea.Model, tea.Cm
 		m.layout()
 		return m, cmd
 	default:
+		if m.composerCoveredByModal() || m.pluginScreenView() != nil {
+			return m, nil
+		}
 		if keyMsg, ok := result.msg.(tea.PasteMsg); ok && m.collapseComposerPaste(keyMsg) {
 			m.resetInputHistoryNavigation()
 			cmd := m.refreshInputCompletions()

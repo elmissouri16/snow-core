@@ -66,19 +66,21 @@ func TestTranscriptMouseDragSelectsHighlightsAndCopies(t *testing.T) {
 	}
 }
 
-func TestTranscriptOSC52SequenceIsRenderedOnceThenCleared(t *testing.T) {
+func TestTranscriptOSC52UsesCommandOutsideFrame(t *testing.T) {
 	m := newTranscriptSelectionTestModel(t, []string{"copy me"})
-	message := transcriptSelectionCopiedMsg{characters: 7, sequence: "OSC52-SEQUENCE"}
+	const sequence = "OSC52-SEQUENCE"
+	message := transcriptSelectionCopiedMsg{characters: 7, terminalWrite: tea.Raw(sequence)}
 	_, cmd := m.Update(message)
-	if cmd == nil {
-		t.Fatal("OSC52 copy did not schedule one-render cleanup")
+	if cmd == nil || cmd() == nil {
+		t.Fatal("OSC52 copy did not return an output command")
 	}
-	if view := m.viewContent(); !strings.Contains(view[:min(len(view), 64)], message.sequence) {
-		t.Fatalf("OSC52 sequence missing from render prefix: %q", view)
+	for range 2 {
+		if view := m.viewContent(); strings.Contains(view, sequence) {
+			t.Fatal("clipboard command leaked into a frame")
+		}
 	}
-	_, _ = m.Update(cmd())
-	if view := m.viewContent(); strings.Contains(view, message.sequence) {
-		t.Fatalf("OSC52 sequence repeated after cleanup: %q", view)
+	if strings.Contains(m.lastStatus, "copied") || !strings.Contains(m.lastStatus, "sent") {
+		t.Fatalf("unacknowledged copy status = %q", m.lastStatus)
 	}
 }
 
@@ -377,8 +379,8 @@ func TestTranscriptCopyFallsBackToOSC52WhenHostClipboardFails(t *testing.T) {
 	if !ok {
 		t.Fatal("copy command returned the wrong message type")
 	}
-	if message.err != nil || message.sequence == "" {
-		t.Fatalf("clipboard fallback: err=%v sequence=%q", message.err, message.sequence)
+	if message.err != nil || message.terminalWrite == nil {
+		t.Fatalf("clipboard fallback: err=%v command=%v", message.err, message.terminalWrite != nil)
 	}
 }
 

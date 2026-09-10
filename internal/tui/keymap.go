@@ -53,7 +53,7 @@ type tuiKeyMap struct {
 var tuiKeys = tuiKeyMap{
 	Submit:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
 	FollowUp:       key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("alt+enter", "follow-up")),
-	Newline:        key.NewBinding(key.WithKeys("ctrl+j", "alt+enter"), key.WithHelp("ctrl+j", "newline")),
+	Newline:        key.NewBinding(key.WithKeys("shift+enter", "ctrl+j", "alt+enter"), key.WithHelp("shift+enter", "newline")),
 	Paste:          key.NewBinding(key.WithKeys("ctrl+v"), key.WithHelp("ctrl+v", "paste")),
 	Abort:          key.NewBinding(key.WithKeys("ctrl+c", "esc"), key.WithHelp("ctrl+c/esc", "abort")),
 	Quit:           key.NewBinding(key.WithKeys("ctrl+c", "ctrl+d"), key.WithHelp("ctrl+c/ctrl+d", "quit")),
@@ -212,7 +212,7 @@ func validKeyName(value string) bool {
 	if value == "" || strings.ContainsAny(value, " \t\r\n") {
 		return false
 	}
-	known := map[string]bool{"enter": true, "esc": true, "tab": true, "shift+tab": true, "up": true, "down": true, "left": true, "right": true, "home": true, "end": true, "pgup": true, "pgdown": true, "backspace": true, "delete": true}
+	known := map[string]bool{"enter": true, "esc": true, "tab": true, "shift+tab": true, "shift+enter": true, "up": true, "down": true, "left": true, "right": true, "home": true, "end": true, "pgup": true, "pgdown": true, "backspace": true, "delete": true}
 	if known[value] {
 		return true
 	}

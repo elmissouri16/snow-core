@@ -21,7 +21,7 @@ func newUserInputEditor() textarea.Model {
 	editor.SetWidth(72)
 	editor.SetHeight(3)
 	editor.KeyMap.InsertNewline = key.NewBinding(
-		key.WithKeys("alt+enter", "ctrl+j"),
+		key.WithKeys("shift+enter", "alt+enter", "ctrl+j"),
 		key.WithHelp("ctrl+j", "insert newline"),
 	)
 	editor.Blur()
@@ -160,7 +160,7 @@ func (m *Model) handleUserInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.userInputEditing {
-		if msg.Code == tea.KeyEnter && !msg.Mod.Contains(tea.ModAlt) {
+		if msg.Code == tea.KeyEnter && msg.Mod == 0 {
 			m.commitUserInputAnswer(m.userInputEditor.Value())
 			return m, nil
 		}
@@ -172,6 +172,8 @@ func (m *Model) handleUserInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.userInputError = ""
 			if m.pasteCmdOverride != nil {
 				cmd = m.pasteCmdOverride
+			} else {
+				return m, m.startClipboardTextRead()
 			}
 			cmd = routeTextareaCmd(textareaTargetUserInput, m.userInputRequest.ID, question.ID, cmd)
 		}

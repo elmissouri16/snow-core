@@ -166,19 +166,20 @@ func TestStaleTextFallbackDoesNotPasteIntoNextPrompt(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.imagePasteGeneration = 3
+	m.readClipboardText = func(context.Context) (string, error) { return "stale", nil }
 	_, cmd := m.Update(clipboardImageMsg{generation: 3, err: errClipboardHasNoImage})
 	if cmd == nil {
 		t.Fatal("no-image result did not start text fallback")
 	}
 	m.imagePasteGeneration++
-	result := cmd().(textareaResultMsg)
+	result := cmd().(localClipboardResultMsg)
 	_, _ = m.Update(result)
 	if m.editor.Value() != "" {
 		t.Fatalf("stale text fallback changed next prompt: %q", m.editor.Value())
 	}
 }
 
-func TestComposerTextClipboardFallsBackToTextareaPaste(t *testing.T) {
+func TestComposerTextClipboardFallsBackToHostTextRead(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
 	m.imagePasteCmdOverride = func() tea.Msg { return clipboardImageMsg{err: errClipboardHasNoImage} }
@@ -188,7 +189,7 @@ func TestComposerTextClipboardFallsBackToTextareaPaste(t *testing.T) {
 	}
 	_, fallback := m.Update(cmd())
 	if fallback == nil {
-		t.Fatal("non-image clipboard did not fall back to textarea paste")
+		t.Fatal("non-image clipboard did not fall back to a host text read")
 	}
 }
 

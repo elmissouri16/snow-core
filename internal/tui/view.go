@@ -279,10 +279,9 @@ func (m *Model) viewContent() string {
 	if m.width <= 0 || m.height <= 0 {
 		return "loading snow…"
 	}
-	clipboardSequence := m.transcriptSelectionClipboard
 	if m.height < minFullFrameHeight+m.runStatusHeight() || m.width < 4 {
 		if m.permPending {
-			return clipboardSequence + fitFrameBottom(m.renderPermissionPicker(), m.managedFrameWidth(), m.managedFrameHeight())
+			return fitFrameBottom(m.renderPermissionPicker(), m.managedFrameWidth(), m.managedFrameHeight())
 		}
 		return fitFrame(styleBrand.Render(" snow ")+styleHeaderDim.Render("terminal too small"), m.width, m.height)
 	}
@@ -290,15 +289,15 @@ func (m *Model) viewContent() string {
 		return m.renderTrustPrompt()
 	}
 	if m.permissionNeedsDedicatedFrame() {
-		return clipboardSequence + fitFrameBottom(m.renderPermissionPicker(), m.managedFrameWidth(), m.managedFrameHeight())
+		return fitFrameBottom(m.renderPermissionPicker(), m.managedFrameWidth(), m.managedFrameHeight())
 	}
 	// The fleet inspector owns the frame, except when a blocking host request
 	// must preempt it. Its renderer consumes only bounded in-memory snapshots.
 	if m.processFleetOpen && m.pluginScreenView() == nil && !m.permPending && !m.userInputPending {
-		return clipboardSequence + fitFrame(m.renderProcessFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
+		return fitFrame(m.renderProcessFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
 	}
 	if m.subagentFleetOpen && m.pluginScreenView() == nil && !m.permPending && !m.userInputPending {
-		return clipboardSequence + fitFrame(m.renderSubagentFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
+		return fitFrame(m.renderSubagentFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
 	}
 
 	status := m.currentHeaderStatus()
@@ -310,11 +309,11 @@ func (m *Model) viewContent() string {
 		// Modal pickers replace the live tail but remain bottom-anchored inside the
 		// same terminal-height frame, so closing one restores the composer without
 		// moving terminal-owned history.
-		return clipboardSequence + fitFrameBottom(overlay, frameWidth, m.managedFrameHeight())
+		return fitFrameBottom(overlay, frameWidth, m.managedFrameHeight())
 	}
 	if m.inlineInputOverlay() && overlay != "" && m.pluginScreenView() == nil {
 		frame := lipgloss.JoinVertical(lipgloss.Left, overlay, sep, m.renderEditor())
-		return clipboardSequence + fitFrameBottom(frame, frameWidth, m.managedFrameHeight())
+		return fitFrameBottom(frame, frameWidth, m.managedFrameHeight())
 	}
 	runStatus := m.renderRunStatus()
 
@@ -389,7 +388,7 @@ func (m *Model) viewContent() string {
 	} else if m.helpModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlayHelpModal(frame)
 	}
-	return clipboardSequence + frame
+	return frame
 }
 
 func (m *Model) renderTrustPrompt() string {

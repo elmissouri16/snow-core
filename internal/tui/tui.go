@@ -152,6 +152,7 @@ const (
 	textareaTargetUserInput
 	textareaTargetLoginProfile
 	textareaTargetLoginEndpoint
+	textareaTargetLoginSecret
 )
 
 type textareaResultMsg struct {
@@ -629,6 +630,9 @@ type Model struct {
 
 	// Tests replace clipboard commands without reading or writing the host clipboard.
 	pasteCmdOverride                 tea.Cmd
+	clipboardGeneration              uint64
+	terminalClipboard                *terminalClipboardRequest
+	readClipboardText                func(context.Context) (string, error)
 	imagePasteCmdOverride            tea.Cmd
 	imagePasteGeneration             uint64
 	promptImages                     []protocol.ContentBlock
@@ -653,8 +657,6 @@ type Model struct {
 	transcriptSelectionViewValid     bool
 	transcriptSelectionRendered      string
 	transcriptSelectionRenderedValid bool
-	transcriptSelectionClipboard     string
-	transcriptSelectionCopyID        uint64
 }
 
 type statusInfoItem struct {

@@ -171,14 +171,14 @@ func (m *Model) copyTranscriptSelectionCmd(text string) tea.Cmd {
 	copyText := m.copySelectionToClipboard
 	return func() tea.Msg {
 		message := transcriptSelectionCopiedMsg{characters: utf8.RuneCountInString(text)}
-		if copyText != nil {
+		if !remoteTerminal() && copyText != nil {
 			if err := copyText(text); err == nil {
 				return message
 			}
 		}
 		// OSC 52 remains a portable fallback when a host clipboard utility is
 		// unavailable (for example, a minimal Linux environment).
-		message.sequence = transcriptSelectionClipboardSequence(text)
+		message.terminalWrite = terminalClipboardWrite(text)
 		return message
 	}
 }

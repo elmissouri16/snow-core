@@ -101,6 +101,9 @@ func (m *Model) updateComposerEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			cmd = m.pasteCmdOverride
 			return m, tea.Batch(routeTextareaCmdGeneration(textareaTargetComposer, "", "", generation, cmd), mentionCmd)
 		}
+		if remoteTerminal() {
+			return m, m.startClipboardTextRead()
+		}
 		imageCmd := m.imagePasteCmdOverride
 		if imageCmd == nil {
 			imageCmd = func() tea.Msg {
@@ -301,6 +304,8 @@ func (m *Model) handleLoginProfileKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.editor.Err = nil
 		if m.pasteCmdOverride != nil {
 			cmd = m.pasteCmdOverride
+		} else {
+			return m, m.startClipboardTextRead()
 		}
 		return m, routeTextareaCmdGeneration(textareaTargetLoginProfile, "", "", m.loginFieldGeneration, cmd)
 	}
@@ -348,6 +353,8 @@ func (m *Model) handleLoginEndpointKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		m.editor.Err = nil
 		if m.pasteCmdOverride != nil {
 			cmd = m.pasteCmdOverride
+		} else {
+			return m, m.startClipboardTextRead()
 		}
 		return m, routeTextareaCmdGeneration(textareaTargetLoginEndpoint, "", "", m.loginFieldGeneration, cmd)
 	}
@@ -356,6 +363,9 @@ func (m *Model) handleLoginEndpointKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 
 // handleLoginKey captures a masked API key.
 func (m *Model) handleLoginKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if keyMatches(msg, m.keys.Paste) {
+		return m, m.startClipboardTextRead()
+	}
 	switch {
 	case msg.Code == tea.KeyEscape:
 		if !m.restorePreviousLoginStep() {

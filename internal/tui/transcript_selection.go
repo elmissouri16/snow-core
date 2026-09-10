@@ -2,15 +2,13 @@ package tui
 
 import (
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 const (
 	transcriptSelectionAutoScrollInterval = 8 * time.Millisecond
 	transcriptSelectionMultiClickInterval = 400 * time.Millisecond
-	// Bubble Tea throttles physical terminal writes to the configured frame rate.
-	// Keep OSC52 in the rendered frame long enough for at least one flush instead
-	// of clearing it in the same event-loop burst.
-	transcriptSelectionClipboardRenderGrace = 100 * time.Millisecond
 )
 
 type transcriptSelectionGranularity uint8
@@ -68,12 +66,10 @@ type transcriptSelectionState struct {
 type transcriptSelectionAutoScrollMsg uint64
 
 type transcriptSelectionCopiedMsg struct {
-	characters int
-	sequence   string
-	err        error
+	characters    int
+	terminalWrite tea.Cmd
+	err           error
 }
-
-type transcriptSelectionClipboardClearMsg uint64
 
 type transcriptWordSegment struct {
 	start int

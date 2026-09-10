@@ -36,7 +36,7 @@ Most keys can be changed in `keybindings.yaml` or `/keybindings`.
 | Key | Action |
 |---|---|
 | `Enter` | Submit a prompt or accept the active picker item |
-| `Alt+Enter` or `Ctrl+J` | Insert a newline |
+| `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` | Insert a newline (Shift+Enter needs enhanced terminal keys) |
 | `Up` / `Down` | Browse prompt history or picker items |
 | `Shift+Tab` | Toggle Default and Plan modes |
 | `Ctrl+T` | Cycle supported reasoning efforts |
@@ -62,6 +62,23 @@ before Snow receives a key event; a terminal application cannot portably
 override that global shortcut. To use `Command+A`, configure the terminal's
 Snow profile to send the `Ctrl+A` control character instead. This mapping is
 terminal-specific; Snow then handles it exactly like physical `Ctrl+A`.
+
+Ghostty supports Shift+Enter through its enhanced keyboard protocol. Ctrl+J
+and Alt+Enter remain available in terminals that cannot distinguish Shift+Enter;
+saved newline bindings keep their configured keys. Ghostty normally lets you
+hold Shift while dragging for terminal-native selection. F6 also switches modes.
+
+Ctrl+V first checks the local clipboard for an image in the composer, then reads
+text. Over SSH, it requests text from the terminal using OSC 52. A failed local
+text read uses the same fallback. Terminal permission/settings can prevent the
+reply; Snow times out after three seconds and terminal-native paste remains
+available. A late reply is discarded after changing editors or timing out.
+Because OSC 52 has no request IDs, another terminal query waits until that late
+reply is drained. Text clipboard reads are limited to 1 MiB.
+
+Copy uses a host clipboard utility locally and OSC 52 over SSH or as a fallback,
+with tmux/screen passthrough. A “sent” status means the command was written; the
+terminal does not acknowledge that it changed the clipboard.
 
 ## Steer active work
 
@@ -185,7 +202,7 @@ The model can request structured input when it needs a decision. In the TUI,
 Snow opens a centered question card, matching the model and settings panels.
 Select an answer or type in its bordered input field. Enter accepts, Escape
 declines, and Tab/Shift+Tab moves between questions while preserving drafts.
-Use Ctrl+V to paste and Ctrl+J for a new line. Answers are submitted separately
+Use Ctrl+V to paste and Shift+Enter or Ctrl+J for a new line. Answers are submitted separately
 from tool permission approval.
 
 Print and JSON modes have no interactive question broker and fail closed. SDK

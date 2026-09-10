@@ -208,10 +208,10 @@ func newModel(ctx context.Context, opts app.Options) *Model {
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
 	// Plain Enter is reserved for prompt submission by handleKey. Standard
-	// terminal input does not preserve Shift+Enter as a distinct key in the
-	// Bubble Tea v1 key model, so expose two reliable multiline bindings.
+	// input keeps Ctrl+J and Alt+Enter as fallbacks; enhanced terminals
+	// additionally report Shift+Enter without submitting the prompt.
 	ta.KeyMap.InsertNewline = key.NewBinding(
-		key.WithKeys("alt+enter", "ctrl+j"),
+		key.WithKeys("shift+enter", "alt+enter", "ctrl+j"),
 		key.WithHelp("alt+enter", "insert newline"),
 	)
 	ta.SetWidth(80)
@@ -395,6 +395,12 @@ func (m *Model) subscribe() error {
 // Update implements tea.Model and drains immutable transcript rows into native
 // terminal scrollback after each state transition in inline mode.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	owner := m.clipboardFocus()
+	defer func() {
+		if owner != m.clipboardFocus() {
+			m.cancelClipboardReads()
+		}
+	}()
 	wasSpinnerActive := m.spinnerActive()
 	model, cmd := m.update(msg)
 	updated, ok := model.(*Model)

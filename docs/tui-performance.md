@@ -165,6 +165,14 @@ Snow handles key presses only and routes bracketed paste as literal text to the
 visible editor. Byte-stream regression tests cover split escape and UTF-8 input;
 mouse-looking pasted text remains literal.
 
+Clipboard writes are Bubble Tea commands (`SetClipboard` or multiplexer-wrapped
+`Raw`), never control strings prefixed to `View`. Text reads are bounded host
+commands with OSC 52 fallback, or direct OSC 52 on SSH. One terminal query owns a
+target and generation; timeout/cancellation leaves a tombstone until its response
+is drained because the wire protocol provides no correlation ID. Unsolicited or
+stale replies cannot enter a different editor. Native bracketed paste remains
+available while that query is pending.
+
 Composer editing has a dedicated hot path: ordinary typing and deletion skip
 submission-only image, queue, goal, and whitespace processing. Once a pasted
 composer value already requires the six-row maximum, a bounded grapheme scan

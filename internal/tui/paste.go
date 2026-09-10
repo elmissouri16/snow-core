@@ -4,6 +4,7 @@ import tea "charm.land/bubbletea/v2"
 
 // Bracketed paste is text, never an action key. Route it to the visible editor.
 func (m *Model) handlePaste(msg tea.PasteMsg) tea.Cmd {
+	m.cancelClipboardReads()
 	if m.permPending {
 		return nil
 	}
@@ -23,6 +24,7 @@ func (m *Model) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	}
 	if m.loginMode {
 		m.secretBuf.WriteString(msg.Content)
+		m.loginError = ""
 		return nil
 	}
 	if m.loginProfileMode || m.loginEndpointMode {
@@ -32,6 +34,17 @@ func (m *Model) handlePaste(msg tea.PasteMsg) tea.Cmd {
 		}
 		_, cmd := m.applyTextareaResult(textareaResultMsg{target: target, pasteGeneration: m.loginFieldGeneration, msg: msg})
 		return cmd
+	}
+	if m.pickModel {
+		m.modelQuery += sanitizeTerminalLine(msg.Content)
+		m.modelIndex = 0
+		return nil
+	}
+	if m.plugins != nil && m.plugins.screen == "snow:plugins" && m.plugins.inspector != nil && !m.plugins.inspector.detail {
+		inspector := m.plugins.inspector
+		query := []rune(inspector.query + sanitizeTerminalLine(msg.Content))
+		inspector.query, inspector.index = string(query[:min(120, len(query))]), 0
+		return nil
 	}
 	if m.composerCoveredByModal() || m.pluginScreenView() != nil {
 		return nil

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/elmissouri16/snow-core/internal/app"
@@ -59,6 +58,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case inlineExitMsg:
 		m.inlineExiting = true
 		return m, tea.Quit
+	case localClipboardResultMsg:
+		return m, m.applyLocalClipboard(msg)
+	case tea.ClipboardMsg:
+		return m, m.applyTerminalClipboard(msg)
+	case terminalClipboardTimeoutMsg:
+		m.expireTerminalClipboard(uint64(msg))
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.clearTranscriptSelection()
 		m.width = msg.Width
@@ -74,20 +80,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastStatus = "copy failed: " + msg.err.Error()
 			return m, nil
 		}
+		if msg.terminalWrite != nil {
+			m.lastStatus = fmt.Sprintf("sent %d characters to terminal clipboard", msg.characters)
+			return m, msg.terminalWrite
+		}
 		m.lastStatus = fmt.Sprintf("copied %d characters", msg.characters)
-		if msg.sequence == "" {
-			return m, nil
-		}
-		m.transcriptSelectionCopyID++
-		id := m.transcriptSelectionCopyID
-		m.transcriptSelectionClipboard = msg.sequence
-		return m, tea.Tick(transcriptSelectionClipboardRenderGrace, func(time.Time) tea.Msg {
-			return transcriptSelectionClipboardClearMsg(id)
-		})
-	case transcriptSelectionClipboardClearMsg:
-		if uint64(msg) == m.transcriptSelectionCopyID {
-			m.transcriptSelectionClipboard = ""
-		}
 		return m, nil
 	case tea.PasteMsg:
 		return m, m.handlePaste(msg)
@@ -863,6 +860,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case textareaResultMsg:
 		return m.applyTextareaResult(msg)
 	case clipboardImageMsg:
+		if m.composerCoveredByModal() || m.pluginScreenView() != nil {
+			return m, nil
+		}
 		if msg.generation != 0 && msg.generation != m.imagePasteGeneration {
 			return m, nil
 		}
@@ -870,7 +870,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// A non-image clipboard is expected during ordinary text paste. Other
 			// failures (timeout, oversize, malformed image) must remain visible.
 			if errors.Is(msg.err, errClipboardHasNoImage) {
-				return m, routeTextareaCmdGeneration(textareaTargetComposer, "", "", msg.generation, textarea.Paste)
+				return m, m.startClipboardTextRead()
 			}
 			m.lastErrorText = "paste image: " + msg.err.Error()
 			m.pushLine(styleError.Render(m.lastErrorText))
