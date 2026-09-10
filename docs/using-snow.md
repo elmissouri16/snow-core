@@ -257,6 +257,14 @@ use `deny` or deliberately grant `allow` in a trusted external environment.
 
 ## Manage capabilities
 
+Use `/plugins` to enable or disable individual registered JavaScript plugins.
+Type to filter, choose a plugin with ↑/↓, and press Enter for its details.
+Use ↑/↓ and Enter for that plugin's actions; Escape returns to the list.
+You can also type
+`/plugins enable <id>` / `/plugins disable <id>`. Saved changes apply after
+restarting Snow; disabled plugins remain in the list. See [Plugins](plugins.md)
+for global/project scope and explicit launch-option behavior.
+
 Use dedicated guides for setup. Common inspection commands are:
 
 ```sh

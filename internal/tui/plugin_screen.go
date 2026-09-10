@@ -48,12 +48,18 @@ func (m *Model) renderPluginScreen() string {
 	if view == nil {
 		return ""
 	}
+	if view.ID == "snow:plugins" && m.plugins.inspector != nil && !m.plugins.inspector.detail {
+		return m.renderPluginInspectorList()
+	}
 	layout := m.pluginScreenLayout(*view)
 	width := layout.geometry.innerWidth
 	end := min(len(layout.lines), layout.offset+layout.bodyHeight)
 	status := ""
 	if layout.limit > 0 {
 		status = fmt.Sprintf("%d–%d of %d", layout.offset+1, end, len(layout.lines))
+	}
+	if view.ID == "snow:plugins" && m.plugins.inspector != nil {
+		status = "Details"
 	}
 	parts := []string{
 		renderPickerCardHeader(view.Title, status, width),
@@ -86,6 +92,18 @@ func (m *Model) renderPluginScreen() string {
 		}
 		if width < 36 {
 			hint = " Tab ↵ ↑↓ Esc "
+		}
+	}
+	if view.ID == "snow:plugins" && m.plugins.inspector != nil {
+		hint = " ↑↓ actions · Enter select · PgUp/Dn details · Esc back "
+		if width < 58 {
+			hint = " ↑↓ ↵ · Pg scroll · Esc back "
+		}
+		if width < 30 {
+			hint = " ↑↓ ↵ Pg Esc back "
+		}
+		if len(layout.actions) == 0 {
+			hint = " ↑↓ scroll · Esc back "
 		}
 	}
 	parts = append(parts, styleFooter.Render(truncateDisplayText(hint, width)))

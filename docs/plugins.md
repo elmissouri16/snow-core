@@ -37,6 +37,19 @@ trust. Project packages must remain inside the canonical trusted project root.
 Global/explicit packages may be elsewhere. Package paths and entry components
 cannot be symlinks.
 
+In the TUI, open `/plugins`, type to filter by plugin ID or name, and use
+↑/↓ to choose a plugin. Press Enter to open its details, then use ↑/↓ and
+Enter to select **Enable**, **Disable**, or one of that plugin's view, setting,
+or theme actions. Escape returns to the filtered list; Escape again closes it.
+Page Up/Down scroll long details, and Ctrl+U clears the filter. Diagnostics have
+their own list entry. You can also type
+`/plugins enable my-plugin` or `/plugins disable my-plugin`. Disabled
+registrations remain visible. The inspector distinguishes the saved enabled
+state from whether the plugin is loaded, and shows **restart required** when
+they differ. These controls save to the effective global or trusted-project
+registration; restart Snow to apply the change. Running tools, hooks, commands,
+dialogs, and child runtimes keep their current behavior until then.
+
 The [Go SDK](https://github.com/elmissouri16/snow-core/blob/main/docs/sdk-reference.md#javascript-extension-commands) provides
 `PluginStatuses()` and `SetPluginEnabled(ctx, id, enabled)`; RPC provides
 `plugin_statuses`, `plugin_enable`, and `plugin_disable`. Listing status does

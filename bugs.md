@@ -2341,3 +2341,37 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   tests, and `scripts/check_benchmarks.py` passed. The installed extension smoke
   pack passed per-plugin persistence and restart checks plus existing command,
   hook, dialog, storage, and selected-child execution checks.
+
+## BUG-062: Plugin management separates plugin navigation from its actions
+
+- **Status:** Resolved; verified 2026-09-09
+- **Surface:** TUI `/plugins` inspector
+- **Actual:** A long scrolling document repeats registrations and loaded plugin
+  details above an independently selected action list. Arrow keys scroll text,
+  while Tab selects unrelated offscreen plugins' actions. The title counts text
+  lines rather than plugins, and wrapped absolute paths dominate the list.
+- **Reproduction:** Open `/plugins` with several registered API 2 extensions;
+  scroll the document and observe that the selected toggle does not follow it.
+- **Remediation:** Use a searchable plugin picker and a per-plugin details/action
+  page. Keep arrow-key selection, return navigation, saved/running status,
+  restart feedback, and toggle failures visible without changing the composer.
+- **Required verification:** Filtering, selection, scoped actions, back navigation,
+  toggle persistence/errors, disabled and launch-controlled registrations,
+  diagnostics, narrow/short geometry, and an installed-binary keyboard flow.
+- **Resolution:** A searchable picker displays each plugin once. Enter opens
+  that plugin's details and actions; arrows choose plugins/actions and Escape
+  restores the prior list or owning plugin page. Saving blocks repeated
+  activation, errors identify the affected plugin, and restart feedback stays
+  in the panel. Long details retain page-key scrolling.
+- **Verification:** Focused regressions passed for filtering, no matches,
+  Unicode, scoped actions, nested views, dialogs, draft preservation, pending
+  saves, launch controls, diagnostics, and 20–140 column / 8–40 row frames in
+  both transcript modes. `go test ./...`, `go vet ./...`,
+  `go test -race ./internal/tui -count=1`, all 56 support-script tests, and
+  `python3 scripts/check_benchmarks.py` passed. Localhost-dependent Go suites
+  required execution outside the sandbox. Rendered wide/narrow panels were
+  inspected; final copy changes passed focused TUI tests, vet, and page tests.
+  `./scripts/install-local.sh` installed the checkout. An isolated installed
+  PTY verified filtering, enable/disable persistence, restart feedback, opening
+  Workspace Notes, returning to the same action/filter, resizing, and composer
+  input without starting an agent turn.

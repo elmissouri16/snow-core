@@ -31,6 +31,13 @@ func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.
 
 	switch cmd {
 	case "/plugins":
+		if len(args) > 0 {
+			if len(args) == 2 && (args[0] == "enable" || args[0] == "disable") {
+				return m, m.togglePlugin(args[1], args[0] == "enable")
+			}
+			m.pushLine(styleError.Render("Usage: /plugins [enable|disable <id>]"))
+			return m, nil
+		}
 		m.pluginInspector()
 	case "/quit", "/q":
 		return m, m.quitCmd()

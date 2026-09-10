@@ -247,6 +247,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pluginCommandDone:
 		m.finishPluginCommand(msg)
+	case pluginToggleDone:
+		m.finishPluginToggle(msg)
 	case userInputSettledMsg:
 		if msg.app == m.app && m.userInputRequest != nil && m.userInputRequest == msg.request {
 			m.clearUserInput()

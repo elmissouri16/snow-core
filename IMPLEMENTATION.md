@@ -1152,6 +1152,13 @@ External executable transport stays removed; legacy `plugins` declarations and
 `--plugin` remain inert/unsupported. `snow plugin` now manages local JavaScript
 registrations only. See `docs/plugins.md` for the contract and complete limits.
 
+The TUI, SDK, and RPC share app-owned individual JavaScript registration
+controls. Status separates saved enablement from the immutable loaded catalog,
+includes disabled declarations without reading packages, and reports pending
+restarts. Scoped atomic configuration updates preserve project precedence;
+explicit launch overrides remain controlled by launch options. Enablement
+changes take effect only on the next launch, preserving active plugin work.
+
 ## MCP
 
 `internal/mcp` uses the official `modelcontextprotocol/go-sdk` v1.7.0. It
@@ -1320,7 +1327,10 @@ model's thinking-effort step remains in the card. Standalone `/thinking` and
 its header control use the same centered fixed-frame card rather than consuming
 transcript/chrome layout. `/settings` uses the shared centered compositor; its
 selected-row window, save status, and errors update inside fixed geometry, and
-nested model selection or catalog failure returns to the settings card. `/help`
+nested model selection or catalog failure returns to the settings card.
+`/plugins` uses a searchable registration picker with arrow-key selection and
+per-plugin detail/action pages; Escape restores the filtered list and contributed
+views return to their owning plugin page. `/help`
 uses the compositor for a scrollable complete command and active-keybinding
 reference instead of appending that reference to the transcript. The complete
 TUI authentication flow also reuses that fixed-frame card:

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"errors"
-	"slices"
 	"strings"
 	"time"
 
@@ -42,17 +41,20 @@ type pluginRenderKey struct {
 	screenBody bool
 }
 type pluginUIState struct {
-	requests         chan pluginUIRequest
-	commands         []protocol.PluginCommand
-	specs            []commandSpec
-	views            []protocol.PluginView
-	infos            []protocol.PluginInfo
-	screen           string
-	scroll, selected int
-	pending          bool
-	cache            map[pluginRenderKey]string
-	generation       uint64
-	running          map[string]bool
+	requests          chan pluginUIRequest
+	commands          []protocol.PluginCommand
+	specs             []commandSpec
+	views             []protocol.PluginView
+	infos             []protocol.PluginInfo
+	screen            string
+	scroll, selected  int
+	pending           bool
+	cache             map[pluginRenderKey]string
+	generation        uint64
+	running           map[string]bool
+	managementError   string
+	managementPending bool
+	inspector         *pluginInspectorState
 }
 
 func (m *Model) attachPlugins() tea.Cmd {
@@ -243,38 +245,6 @@ func (m *Model) finishPluginCommand(done pluginCommandDone) {
 	m.layout()
 	m.refreshTranscript()
 }
-func (m *Model) pluginInspector() {
-	if m.plugins == nil {
-		m.pushLine(styleFooter.Render("No JavaScript plugins loaded."))
-		return
-	}
-	root := protocol.PluginNode{Type: "column"}
-	for _, info := range m.plugins.infos {
-		root.Children = append(root.Children, protocol.PluginNode{Type: "text", Text: info.Name + " · " + info.Version, Tone: "accent"}, protocol.PluginNode{Type: "text", Text: "Source: " + info.Scope + " · " + info.Path + "\nCapabilities: " + strings.Join(info.Capabilities, ", ")})
-		for _, command := range info.Commands {
-			root.Children = append(root.Children, protocol.PluginNode{Type: "text", Text: "/" + command.ID + " — " + command.Description})
-		}
-		for _, view := range info.Views {
-			root.Children = append(root.Children, protocol.PluginNode{Type: "button", Text: "Open " + view.ID + " (" + view.Placement + ")", Action: "open:" + view.ID})
-		}
-		for _, setting := range info.Settings {
-			root.Children = append(root.Children, protocol.PluginNode{Type: "button", Text: "Configure " + setting.Name + " (restart to apply)", Action: "setting:" + info.ID + ":" + setting.Name})
-		}
-		for _, theme := range info.Themes {
-			root.Children = append(root.Children, protocol.PluginNode{Type: "button", Text: "Theme: " + theme.Name, Action: "theme:" + theme.ID})
-		}
-	}
-	for _, diagnostic := range m.app.PluginDiagnostics() {
-		root.Children = append(root.Children, protocol.PluginNode{Type: "text", Text: diagnostic.Path + ": " + diagnostic.Message, Tone: "warning"})
-	}
-	view := protocol.PluginView{ID: "snow:plugins", Title: "Plugins", Placement: "screen", Content: &root}
-	m.plugins.views = slices.DeleteFunc(m.plugins.views, func(v protocol.PluginView) bool { return v.ID == view.ID })
-	m.plugins.views = append(m.plugins.views, view)
-	m.plugins.screen = view.ID
-	m.plugins.scroll = 0
-	m.plugins.selected = 0
-	clear(m.plugins.cache)
-}
 func (m *Model) pluginScreenView() *protocol.PluginView {
 	if m.plugins == nil || m.plugins.screen == "" {
 		return nil
@@ -291,11 +261,20 @@ func (m *Model) handlePluginKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return false, nil
 	}
 	if view := m.pluginScreenView(); view != nil {
+		if view.ID == "snow:plugins" && m.plugins.inspector != nil {
+			return m.handlePluginInspectorKey(msg)
+		}
 		actions := pluginActions(view.Content)
 		layout := m.pluginScreenLayout(*view)
 		m.plugins.scroll, m.plugins.selected = layout.offset, layout.selected
 		switch msg.Type {
 		case tea.KeyEsc:
+			if p := m.plugins.inspector; p != nil && p.returnView == view.ID {
+				p.returnView = ""
+				m.plugins.screen = "snow:plugins"
+				m.plugins.selected, m.plugins.scroll = p.returnSelected, p.returnScroll
+				return true, nil
+			}
 			m.plugins.screen = ""
 			return true, nil
 		case tea.KeyUp:
@@ -322,35 +301,6 @@ func (m *Model) handlePluginKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			if len(actions) > 0 {
 				action := actions[m.plugins.selected%len(actions)]
 				name := action.Action
-				if view.ID == "snow:plugins" {
-					if id, ok := strings.CutPrefix(name, "open:"); ok {
-						m.plugins.screen = id
-						m.plugins.scroll = 0
-						m.plugins.selected = 0
-						return true, nil
-					}
-					if id, ok := strings.CutPrefix(name, "theme:"); ok {
-						for _, info := range m.plugins.infos {
-							for _, theme := range info.Themes {
-								if theme.ID == id {
-									_ = m.applyPluginTheme(theme)
-									clear(m.plugins.cache)
-									m.plugins.screen = ""
-									return true, nil
-								}
-							}
-						}
-					}
-					if id, ok := strings.CutPrefix(name, "setting:"); ok {
-						pluginID, setting, _ := strings.Cut(id, ":")
-						active := m.app
-						m.plugins.screen = ""
-						return true, func() tea.Msg {
-							err := active.EditPluginSetting(context.Background(), pluginID, setting)
-							return pluginCommandDone{app: active, id: "settings", err: err}
-						}
-					}
-				}
 				if !strings.Contains(name, ":") {
 					name = view.PluginID + ":" + name
 				}

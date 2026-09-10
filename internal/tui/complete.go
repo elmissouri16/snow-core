@@ -46,7 +46,7 @@ var commands = []commandSpec{
 	{name: "/tree", desc: "navigate branches in this session"},
 	{name: "/thinking", desc: "choose reasoning effort", argHint: "[off|minimal|low|medium|high|xhigh|max|ultra]"},
 	{name: "/trust", desc: "show or set project trust", argHint: "[allow|deny]"},
-	{name: "/plugins", desc: "inspect JavaScript plugins, commands, and settings"},
+	{name: "/plugins", desc: "inspect or enable/disable JavaScript plugins", argHint: "[enable|disable <id>]"},
 }
 
 // completeCommand returns exact matches, then prefixes, then stable

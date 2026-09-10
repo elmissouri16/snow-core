@@ -412,8 +412,14 @@ cancels commands, and clears contributed views.
 Register views with one of `header`, `footer`, `above_input`, `sidebar`, or
 `screen`. Update a plugin-owned view with `ctx.ui.update({name, content})` and open
 it with `ctx.ui.open({name})`. `ctx.ui.close()` closes that plugin's screen.
-`/plugins` lists loaded extensions, capabilities, commands, diagnostics, views,
-themes, and editable settings.
+`/plugins` opens a searchable list of enabled and disabled registrations. Type
+to filter by ID or name, use ↑/↓ to choose a plugin, and press Enter for its
+details and actions. Within that page, ↑/↓ selects actions and Enter activates
+them; Page Up/Down scrolls long details. Escape returns to the filtered list.
+Each plugin page includes its toggle, loaded capabilities, commands, views,
+themes, and editable settings. Diagnostics have a separate list entry. `/plugins enable <id>` and `/plugins disable <id>` save
+the same changes. Restart Snow to apply them; the inspector shows saved and
+loaded state separately. See [plugin management](plugins.md) for scope rules.
 
 Component trees contain `text`, `markdown`, `row`, `column`, `list`, `table`,
 `progress`, `button`, `input`, `select`, and `checkbox` nodes. Text is sanitized;
