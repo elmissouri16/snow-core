@@ -2525,3 +2525,19 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   tests, snapshot verification, SDK example, and PTY/plugin smokes pass.
   Existing benchmark limits are unchanged; new rendering limits pass and
   reject the recorded pre-fix migration samples.
+
+## BUG-069: A late prompt error reopens a completed TUI turn
+
+- **Status:** Resolved; verified 2026-09-10.
+- **Surface:** TUI command results and root turn lifecycle projection.
+- **Reproduction:** Deliver a root `error`, its `turn_done`, then the matching
+  admitted `promptDoneMsg` error. The command-result reducer publishes another
+  local error event; `adoptTurn` sets the completed turn busy again. The
+  `TestLatePromptErrorKeepsTerminalCompletionSettled` regression fails before
+  the fix, with busy state and terminal heartbeat incorrectly restarted.
+- **Remediation:** Ignore the late result once an admitted turn has settled.
+  Its authoritative event stream already delivered the error. Preserve the
+  pre-admission failure path and handling while an admitted turn is still busy.
+- **Verification:** The delayed-error terminal regression failed before the fix.
+  It and the independent `TestLatePromptErrorDoesNotRestartSettledTurn` pass with
+  the fix, as do `go test ./...`, `go vet ./...`, and focused race checks.

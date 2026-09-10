@@ -400,6 +400,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.runGeneration || msg.err == nil {
 			return m, nil
 		}
+		// The event mailbox and command result race to the UI. Once an admitted
+		// turn has settled, its late error result must not adopt the old turn
+		// again; the authoritative stream already delivered its diagnostic.
+		if msg.admitted && !m.busy && m.activeTurnID == "" {
+			return m, nil
+		}
 		if !msg.admitted {
 			m.forgetNewestInputHistory(msg.historyText)
 			if len(msg.attachments) > 0 {
