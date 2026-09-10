@@ -35,6 +35,16 @@ func (m *Model) handlePaste(msg tea.PasteMsg) tea.Cmd {
 		_, cmd := m.applyTextareaResult(textareaResultMsg{target: target, pasteGeneration: m.loginFieldGeneration, msg: msg})
 		return cmd
 	}
+	if m.pickSession && m.sessionRenaming && !m.sessionDeleting {
+		name := []rune(m.sessionRenameInput + sanitizeTerminalLine(msg.Content))
+		m.sessionRenameInput = string(name[:min(72, len(name))])
+		return nil
+	}
+	if m.pickTree && !m.treeLoading && (m.branchAction == "rename" || m.branchAction == "fork") {
+		name := []rune(m.branchInput + sanitizeTerminalLine(msg.Content))
+		m.branchInput = string(name[:min(64, len(name))])
+		return nil
+	}
 	if m.pickModel {
 		m.modelQuery += sanitizeTerminalLine(msg.Content)
 		m.modelIndex = 0

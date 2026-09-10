@@ -34,6 +34,9 @@ func (m *Model) handleComposerSelectionKey(msg tea.KeyPressMsg) (handled bool, c
 	if !m.composerSelectAll {
 		return false, nil
 	}
+	if key.Matches(msg, m.editor.KeyMap.CopySelection) {
+		return true, m.copyTranscriptSelectionCmd(m.editor.Value())
+	}
 	m.composerSelectAll = false
 	deleteSelection := key.Matches(msg, m.editor.KeyMap.DeleteCharacterBackward) ||
 		key.Matches(msg, m.editor.KeyMap.DeleteCharacterForward) ||
@@ -65,6 +68,19 @@ func (m *Model) composerCoveredByModal() bool {
 }
 
 func (m *Model) updateComposerEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if key.Matches(msg, m.editor.KeyMap.CopySelection) {
+		text := m.editor.SelectedText()
+		if m.composerSelectAll {
+			text = m.editor.Value()
+		}
+		if text != "" {
+			return m, m.copyTranscriptSelectionCmd(text)
+		}
+		return m, nil
+	}
+	if keyMatches(msg, m.keys.Paste) && m.clipboardReadPending() {
+		return m, nil
+	}
 	m.editorViewCache = editorViewCache{}
 	// Forward to the editor, then refresh the palette from the new text. Keep
 	// the returned command: textarea uses it to read the clipboard for paste.
@@ -124,7 +140,7 @@ func (m *Model) updateComposerEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(imageCmd, mentionCmd)
 	}
-	return m, mentionCmd
+	return m, tea.Batch(cmd, mentionCmd)
 }
 
 func composerEditorKeyMayChange(msg tea.KeyPressMsg, keyMap textarea.KeyMap) bool {
@@ -424,7 +440,7 @@ func (m *Model) handleLoginKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.loginError = ""
 		}
 		return m, nil
-	case msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl):
+	case msg.String() == "ctrl+c":
 		m.cancelLoginFlow()
 		return m, nil
 	}

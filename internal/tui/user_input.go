@@ -134,7 +134,7 @@ func (m *Model) handleUserInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch {
-	case msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl):
+	case msg.String() == "ctrl+c":
 		if m.app != nil {
 			_ = m.app.RejectUserInput(m.userInputRequest.ID)
 		}
@@ -160,6 +160,12 @@ func (m *Model) handleUserInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.userInputEditing {
+		if key.Matches(msg, m.userInputEditor.KeyMap.CopySelection) {
+			if text := m.userInputEditor.SelectedText(); text != "" {
+				return m, m.copyTranscriptSelectionCmd(text)
+			}
+			return m, nil
+		}
 		if msg.Code == tea.KeyEnter && msg.Mod == 0 {
 			m.commitUserInputAnswer(m.userInputEditor.Value())
 			return m, nil

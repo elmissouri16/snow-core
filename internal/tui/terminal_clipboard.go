@@ -80,7 +80,7 @@ func remoteTerminal() bool { return os.Getenv("SSH_CONNECTION") != "" || os.Gete
 
 func (m *Model) startClipboardTextRead() tea.Cmd {
 	owner := m.clipboardOwner()
-	if !owner.active {
+	if !owner.active || m.clipboardReadPending() {
 		return nil
 	}
 	m.clipboardGeneration++
@@ -101,9 +101,18 @@ func (m *Model) startClipboardTextRead() tea.Cmd {
 	}
 }
 
+// Reject overlapping reads before changing either clipboard generation. OSC 52
+// has no request IDs, so even a canceled query must remain occupied until drained.
+func (m *Model) clipboardReadPending() bool {
+	if m.terminalClipboard == nil {
+		return false
+	}
+	m.lastStatus = "clipboard request still pending · use terminal paste"
+	return true
+}
+
 func (m *Model) requestTerminalClipboard(owner clipboardOwner, generation uint64) tea.Cmd {
-	if m.terminalClipboard != nil {
-		m.lastStatus = "clipboard request still pending · use terminal paste"
+	if m.clipboardReadPending() {
 		return nil
 	}
 	m.terminalClipboard = &terminalClipboardRequest{owner: owner, generation: generation}

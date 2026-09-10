@@ -67,7 +67,7 @@ func (m *Model) resetInputHistoryNavigation() {
 // drafts retain textarea arrow navigation. Once browsing starts, Up and Down
 // traverse every entry and Down past the newest entry restores the saved draft.
 func (m *Model) navigateInputHistory(msg tea.KeyPressMsg) (bool, tea.Cmd) {
-	if msg.Code != tea.KeyUp && msg.Code != tea.KeyDown {
+	if msg.String() != "up" && msg.String() != "down" {
 		return false, nil
 	}
 	if len(m.promptImages) > 0 || len(m.pastedTexts) > 0 {

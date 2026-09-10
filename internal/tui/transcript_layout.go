@@ -437,7 +437,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.trustSaving {
 			return m, nil
 		}
-		if msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl) || msg.Code == 'd' && msg.Mod.Contains(tea.ModCtrl) {
+		if msg.String() == "ctrl+c" || msg.Code == 'd' && msg.Mod.Contains(tea.ModCtrl) {
 			return m, m.quitCmd()
 		}
 		switch {
@@ -469,7 +469,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// always be restored cleanly.
 	if m.app == nil {
 		switch {
-		case msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl):
+		case msg.String() == "ctrl+c":
 			return m, m.quitCmd()
 		case msg.Code == 'd' && msg.Mod.Contains(tea.ModCtrl):
 			if m.editor.Value() == "" {
@@ -497,7 +497,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// Emergency Ctrl+C is resolved before any configurable action so a custom
 	// submit/accept binding can never shadow terminal recovery.
-	if msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl) {
+	if msg.String() == "ctrl+c" {
 		if m.plugins != nil {
 			cancelled := false
 			for id := range m.plugins.running {

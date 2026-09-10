@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/cursor"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -332,11 +333,26 @@ func TestComposerMultilineShortcutsDoNotSubmit(t *testing.T) {
 			m.editor.SetValue("first line")
 			m.editor.CursorEnd()
 
-			for i, key := range tt.keys {
-				_, cmd := m.handleKey(key)
-				if i == len(tt.keys)-1 && cmd != nil {
-					t.Fatal("multiline shortcut returned a prompt command")
+			var checkEditorCommand func(tea.Cmd)
+			checkEditorCommand = func(cmd tea.Cmd) {
+				t.Helper()
+				if cmd == nil {
+					return
 				}
+				switch msg := cmd().(type) {
+				case tea.BatchMsg:
+					for _, child := range msg {
+						checkEditorCommand(child)
+					}
+				case cursor.BlinkMsg:
+					// Editing restarts the virtual cursor without submitting.
+				default:
+					t.Fatalf("multiline shortcut returned non-editor message %T", msg)
+				}
+			}
+			for _, key := range tt.keys {
+				_, cmd := m.handleKey(key)
+				checkEditorCommand(cmd)
 			}
 			if m.busy {
 				t.Fatal("multiline shortcut submitted the prompt")

@@ -100,7 +100,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.layout()
 			return model, cmd
 		}
-		if m.pluginScreenView() != nil && !(msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl)) && !(msg.Code == 'd' && msg.Mod.Contains(tea.ModCtrl)) {
+		if m.pluginScreenView() != nil && msg.String() != "ctrl+c" && !(msg.Code == 'd' && msg.Mod.Contains(tea.ModCtrl)) {
 			_, cmd := m.handlePluginKey(msg)
 			return m, cmd
 		}
