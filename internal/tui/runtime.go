@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -47,6 +49,11 @@ func run(ctx context.Context, opts app.Options, sessionPicker bool) (RunResult, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Own signals through cancellation only. Bubble Tea's signal sender can
+	// block on its message channel after an external context ends the loop,
+	// deadlocking shutdown while it waits for that same sender to exit.
+	ctx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 	// Bubble Tea occupies stdout, so route debug logging to a file when
 	// requested (docs: tea.LogToFile pattern).
 	if f := os.Getenv("SNOW_DEBUG"); f != "" {
@@ -66,6 +73,7 @@ func run(ctx context.Context, opts app.Options, sessionPicker bool) (RunResult, 
 		// without making every raw cell-motion event a terminal write.
 		tea.WithFPS(120),
 		tea.WithContext(ctx),
+		tea.WithoutSignalHandler(),
 		tea.WithFilter(terminalStatusFilter),
 	}
 	uiCtx, cancel := context.WithCancel(ctx)

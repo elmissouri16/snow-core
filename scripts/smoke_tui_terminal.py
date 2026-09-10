@@ -163,7 +163,11 @@ class Terminal:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
+    parser.add_argument("--cancel-repetitions", type=int, default=3,
+                        help="additional signal-cancellation checks (default: 3)")
     args = parser.parse_args()
+    if args.cancel_repetitions < 1:
+        parser.error("--cancel-repetitions must be positive")
     binary = args.binary.resolve()
     cases = [("enhanced-quit", True, 2, False),
              ("enhanced-cancel", True, 2, True),
@@ -209,6 +213,17 @@ def main():
                 raise
             finally:
                 terminal.close()
+    # Cancellation used to race Bubble Tea's own signal sender and deadlock
+    # shutdown. Repeat it independently of input timing and check restoration.
+    for index in range(args.cancel_repetitions):
+        with tempfile.TemporaryDirectory(prefix="snow-cancel-") as directory:
+            terminal = Terminal(binary, Path(directory), True, 2)
+            try:
+                terminal.start()
+                terminal.finish(cancel=True)
+            finally:
+                terminal.close()
+    print(f"PASS repeated signal cancellation: {args.cancel_repetitions} restored PTYs")
     descriptors = pty.openpty()
     try:
         with tempfile.TemporaryDirectory(prefix="snow-handoff-") as directory:
