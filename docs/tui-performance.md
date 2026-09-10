@@ -133,6 +133,13 @@ New output follows only when the viewport is already at bottom. While the user
 reads earlier content, source state keeps updating without replacing the
 snapshot; returning to bottom catches up once.
 
+Width-only transcript wrapping uses `wrapTranscript`: ANSI-aware wrapping,
+batched writes with per-row style/link restoration, and shared padding. Avoid
+replacing it with `lipgloss.NewStyle().Width(width).Render(text)` over complete
+transcripts: Lip Gloss v2.0.6's wrapping writer allocates once per output byte
+and exceeds the existing hydration allocation ceilings. Bounded styled frame
+components continue to use Lip Gloss.
+
 ### Async domain work
 
 `Update` mutates domain state and schedules commands; `View` performs no domain
@@ -221,6 +228,31 @@ repeated full-history JSON decoding.
 
 ## Verification
 
+### Charm v2 migration measurements
+
+Local medians on an Apple M3 Pro (Go 1.27rc3, three default-duration samples)
+compare the pre-migration checkout with the v2 implementation. Benchmarks
+exercise the root `View`, including composer editing and drag frames.
+
+| Fixture | Before | v2 |
+|---|---:|---:|
+| Reflow 10,000 transcript rows | 10.58 ms | 13.15 ms |
+| Render 40-column frame | 0.046 ms | 0.121 ms |
+| Render 120-column frame | 0.072 ms | 0.230 ms |
+| Backspace + frame, 256-byte composer | 0.278 ms | 0.759 ms |
+| Backspace + frame, 8 KiB composer | 3.53 ms | 5.28 ms |
+| Backspace + frame, 64 KiB composer | 27.55 ms | 37.12 ms |
+| Transcript selection drag frame | 0.448 ms | 1.117 ms |
+
+These fixtures show higher CPU cost with v2, especially for very large composer
+values. Transcript reflow allocations fall from 10,084 to 26 per operation
+(13.47 MB to 8.86 MB). The unchanged repository benchmark guard passes, including
+5,000-message hydration at 87.8 MB / 121,626 allocations and mixed hydration at
+25.2 MB / 127,582 allocations. These are local measurements, not terminal latency
+guarantees; live terminal rendering still needs manual validation.
+
+### Commands and terminal checks
+
 For layout or lifecycle changes, run the following from the repository root,
 substituting the changed file names:
 
@@ -230,7 +262,17 @@ go test ./internal/tui -count=1
 go test -race ./internal/tui -count=1
 go test ./...
 go vet ./...
+python3 scripts/check_benchmarks.py
+go build -o ./snow ./cmd/snow
+python3 scripts/smoke_tui_terminal.py --binary ./snow
 ```
+
+The PTY smoke uses an isolated fake provider and explicit untrusted-project
+startup, with no credentials or network. It exercises enhanced/legacy input,
+OSC 52 queries, focus/background queries, resize, F6, normal quit, cancellation,
+mode ownership, and a second process on the restored PTY. It checks raw TTY
+settings and terminal escape restoration. This controlled protocol test does
+not replace visual checks in Ghostty or live SSH/tmux checks.
 
 Manual checks should cover wheel and keyboard scrolling,
 drag/double/triple-click selection and clipboard copy, edge auto-scroll, the F6

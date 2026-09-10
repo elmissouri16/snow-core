@@ -18,9 +18,9 @@ import (
 )
 
 // handleComposerSelectionKey implements select-all for the ordinary composer.
-// Bubbles' textarea does not expose a selection model, so Snow tracks the
-// whole-draft selection explicitly and applies normal replacement semantics to
-// the next text edit. Modal textareas are handled before this path.
+// Snow tracks whole-draft selection explicitly so selection remains scoped
+// to the composer and the next edit applies replacement semantics. Modal
+// textareas are handled before this path.
 func (m *Model) handleComposerSelectionKey(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
 	if msg.Code == 'a' && msg.Mod.Contains(tea.ModCtrl) {
 		// Selection belongs to one surface at a time. In app-mouse mode an old

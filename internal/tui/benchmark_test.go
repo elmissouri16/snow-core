@@ -209,7 +209,7 @@ func BenchmarkViewNormalAndNarrow(b *testing.B) {
 			m.refreshTranscriptForced()
 			b.ResetTimer()
 			for b.Loop() {
-				_ = m.viewContent()
+				_ = m.View()
 			}
 		})
 	}
@@ -246,7 +246,7 @@ func BenchmarkComposerBackspace(b *testing.B) {
 				}
 				_, _ = m.updateComposerEditor(tea.KeyPressMsg{Code: tea.KeyBackspace})
 				m.layout()
-				_ = m.viewContent()
+				_ = m.View()
 				remaining--
 			}
 		})
