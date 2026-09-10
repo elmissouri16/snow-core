@@ -103,7 +103,7 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 			if width > 0 {
 				// Wrapping is line-local, so appending the newly stable suffix is
 				// equivalent to reflowing the complete transcript at this width.
-				wrapped = lipgloss.NewStyle().Width(width).Render(wrapped)
+				wrapped = wrapTranscript(wrapped, width)
 			}
 			var base strings.Builder
 			base.Grow(len(m.transcriptBase) + len(wrapped) + 1)
@@ -121,7 +121,7 @@ func (m *Model) refreshTranscriptWithForce(force bool) {
 	}
 	live := m.liveText()
 	if live != "" && width > 0 {
-		live = lipgloss.NewStyle().Width(width).Render(live)
+		live = wrapTranscript(live, width)
 	}
 	baseContent := m.transcriptBase
 	if live != "" && !force && len(baseContent) > maxStreamingTranscriptSnapshotBytes {

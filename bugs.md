@@ -2481,3 +2481,20 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   acceptance while ordinary Enter/Tab retain completion behavior.
 - **Verification:** The regression failed before the fix; it and the focused
   composer, completion, mention, and skill tests pass after the change.
+
+## BUG-066: Charm v2 wrapping exceeds transcript allocation limits
+
+- **Status:** Resolved; verified 2026-09-10 on the migration branch.
+- **Surface:** Transcript hydration and width-dependent reflow.
+- **Evidence:** `BenchmarkSessionHydration5000` rose to 4,587,751 allocations
+  and 154.9 MB per operation; mixed hydration reached 979,337 allocations and
+  37.4 MB. Both exceed the unchanged benchmark guard. Profiling identifies
+  Lip Gloss v2.0.6 `WrapWriter.Write`, whose interface write allocates a byte
+  slice for each output byte.
+- **Resolution:** Transcript wrapping batches string writes and caches active
+  style/link sequences while retaining isolation per row, grapheme widths,
+  and padding. Open styles and links are closed at the end of the transcript.
+- **Verification:** Focused layout/terminal-state equivalence tests and
+  `go test ./...` pass. The unchanged benchmark guard passes: three-sample
+  medians are 121,626 allocations / 87.8 MB for hydration and 127,582
+  allocations / 25.2 MB for mixed hydration.
