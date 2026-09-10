@@ -1,0 +1,46 @@
+{
+  "baseline": {
+    "ascii": {
+      "ns/op": 2661944.0,
+      "B/op": 962349,
+      "allocs/op": 1914
+    },
+    "accents": {
+      "ns/op": 2713626.0,
+      "B/op": 962972,
+      "allocs/op": 1731
+    },
+    "cjk": {
+      "ns/op": 2484846.0,
+      "B/op": 966715,
+      "allocs/op": 1678
+    },
+    "emoji": {
+      "ns/op": 2508276.0,
+      "B/op": 1116381,
+      "allocs/op": 1074
+    }
+  },
+  "fixed": {
+    "ascii": {
+      "ns/op": 1769148.0,
+      "B/op": 768726,
+      "allocs/op": 1967
+    },
+    "accents": {
+      "ns/op": 1896161.0,
+      "B/op": 768167,
+      "allocs/op": 2240
+    },
+    "cjk": {
+      "ns/op": 1637671.0,
+      "B/op": 771929,
+      "allocs/op": 2500
+    },
+    "emoji": {
+      "ns/op": 2240600.0,
+      "B/op": 862722,
+      "allocs/op": 6078
+    }
+  }
+}

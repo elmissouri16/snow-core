@@ -1,0 +1,28 @@
+=== RUN   TestAuditBracketedPasteReachesNameFields
+=== RUN   TestAuditBracketedPasteReachesNameFields/session
+    recent_audit_test.go:37: visible session field received "", want pasted name
+=== RUN   TestAuditBracketedPasteReachesNameFields/branch
+    recent_audit_test.go:37: visible branch field received "", want pasted name
+--- FAIL: TestAuditBracketedPasteReachesNameFields (0.01s)
+    --- FAIL: TestAuditBracketedPasteReachesNameFields/session (0.01s)
+    --- FAIL: TestAuditBracketedPasteReachesNameFields/branch (0.00s)
+=== RUN   TestAuditManualCompactionAnnouncesCompletion
+    recent_audit_test.go:65: successful manual compaction title="Snow · 002 · Ready", want Done
+    recent_audit_test.go:68: manual compaction completed unfocused without a completion alert
+--- FAIL: TestAuditManualCompactionAnnouncesCompletion (0.00s)
+=== RUN   TestAuditManualCompactionFailureReportsFailed
+    recent_audit_test.go:114: failed manual compaction title="Snow · 002 · Ready", want Failed; error=agent: compact summary: audit summary unavailable
+    recent_audit_test.go:117: failed compaction did not alert unfocused terminal
+--- FAIL: TestAuditManualCompactionFailureReportsFailed (0.00s)
+=== RUN   TestAuditRepeatedClipboardRequestKeepsFirstValid
+    recent_audit_test.go:134: both paste attempts lost: value="", status="clipboard request still pending · use terminal paste"
+--- FAIL: TestAuditRepeatedClipboardRequestKeepsFirstValid (0.00s)
+=== RUN   TestAuditShiftUpDoesNotBrowseHistory
+    recent_audit_test.go:145: Shift+Up replaced draft with "old prompt"
+--- FAIL: TestAuditShiftUpDoesNotBrowseHistory (0.00s)
+=== RUN   TestAuditCopySelectedComposerDoesNotQuit
+    recent_audit_test.go:163: Ctrl+Shift+C quit Snow instead of copying the selected draft
+--- FAIL: TestAuditCopySelectedComposerDoesNotQuit (0.00s)
+FAIL
+FAIL	github.com/elmissouri16/snow-core/internal/tui	1.559s
+FAIL

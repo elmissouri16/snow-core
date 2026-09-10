@@ -1,0 +1,6 @@
+PASS enhanced-quit: input, resize, mode ownership, terminal restoration
+PASS enhanced-cancel: input, resize, mode ownership, terminal restoration
+PASS preenabled-mode: input, resize, mode ownership, terminal restoration
+PASS legacy-no-replies: input, resize, mode ownership, terminal restoration
+PASS repeated signal cancellation: 30 restored PTYs
+PASS same-PTY restart handoff simulation: second process starts with restored terminal state

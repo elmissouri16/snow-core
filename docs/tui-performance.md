@@ -37,7 +37,7 @@ The versions below are load-bearing and must not drift during refactors.
 | `github.com/charmbracelet/glamour` | `v1.0.0` | Markdown-to-ANSI rendering for finalized transcript content |
 
 The textarea component is a reproducible local snapshot of Bubbles v2.2.1 with
-a printable-ASCII wrapping optimization. Its Unicode path and input lifecycle
+printable-ASCII wrapping and visible-row rendering optimizations. Its Unicode path and input lifecycle
 are unchanged; the original upstream test suite is included. See the pinned
 [source, patch, and sync instructions](../internal/tui/textarea/UPSTREAM.md).
 
@@ -326,3 +326,18 @@ input, modal replacement, abort, and clean alternate-screen restoration on exit.
 - [Sessions](sessions.md)
 - [Architecture and roadmap](../IMPLEMENTATION.md)
 - [README](../README.md)
+
+### Stable-draft follow-up
+
+The shrinking-buffer backspace fixture missed sustained edits at a fixed draft
+size. `BenchmarkStableComposer` now inserts, renders, deletes, and renders at
+approximately 8 KiB for ASCII, accents, CJK, and emoji. The textarea styles only
+visible rows while preserving scroll bounds, selection coordinates, and viewport
+clamping after resize. Differential tests compare it with the unmodified pinned
+upstream component.
+
+Three alternating same-host true-color runs against v1 (`8fad893`) show fixed
+latency per edit pair of 1.769/1.896/1.638/2.241 ms respectively, improving
+11–34%; allocated bytes improve 20–23%. Allocation counts remain higher than
+v1. The new limits reject the pre-fix v2 samples without relaxing existing
+limits. See the [raw comparison and method](../benchmarks/results/2026-09-10-recent-changes-audit/fixes/README.md).

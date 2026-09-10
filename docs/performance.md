@@ -32,7 +32,8 @@ go test <package> -run ^$ -bench <pattern> -benchmem \
 The rendering group overrides `benchtime` to `500ms`, measuring steady frame
 reuse and enough composer edits to expose repeated work. It covers normal and
 narrow frames, 10,000-row transcript reflow, short/8 KiB/64 KiB composer edits,
-and selection frames. Allocation ceilings catch the Charm v2 regressions;
+selection frames, and stable 8 KiB insert/delete pairs using ASCII, accents, CJK,
+and emoji. Allocation ceilings catch the Charm v2 regressions;
 timing ceilings retain platform headroom. Compare local latency samples against
 the prior checkout when changing rendering, not only against these broad limits.
 

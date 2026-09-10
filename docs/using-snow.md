@@ -38,6 +38,7 @@ Most keys can be changed in `keybindings.yaml` or `/keybindings`.
 | `Enter` | Submit a prompt or accept the active picker item |
 | `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` | Insert a newline (Shift+Enter needs enhanced terminal keys) |
 | `Up` / `Down` | Browse prompt history or picker items |
+| `Shift+Up` / `Shift+Down` | Extend editor selection without recalling prompt history |
 | `Shift+Tab` | Toggle Default and Plan modes |
 | `Ctrl+T` | Cycle supported reasoning efforts |
 | `Alt+M` | Open the model picker |
@@ -47,6 +48,7 @@ Most keys can be changed in `keybindings.yaml` or `/keybindings`.
 | `Home` / `End` | Jump to the beginning or end |
 | `Ctrl+A` | Select only the current composer draft; typing, pasting, or deleting replaces it |
 | `Ctrl+C` | Copy a Ctrl+A-selected draft; otherwise quit while idle or abort active work |
+| `Ctrl+Shift+C` | Copy selected editor text when the terminal forwards the shortcut |
 | `Esc` | Close a modal or abort active work |
 | `Ctrl+D` | Quit when the composer is empty |
 | `F6` | Toggle Snow-managed and terminal-native mouse behavior |
@@ -72,7 +74,9 @@ hold Shift while dragging for terminal-native selection. F6 also switches modes.
 Snow also updates the tab/window title with the project and running/waiting
 status. In Ghostty, a progress bar above the split shows activity and pauses for
 approval or input. When you are in another tab/window, completion and requests
-for attention send a generic desktop notification and terminal bell. Change
+for attention send a generic desktop notification and terminal bell. Manual
+compaction also reports completion or failure; cancellation reports Stopped.
+Change
 **Terminal tab title**, **Terminal progress**, or **Terminal alerts** in
 `/settings`; alerts can be `off`, `unfocused` (default), or `always`.
 See [terminal integration settings](configuration.md#tui) for Ghostty controls
@@ -84,7 +88,9 @@ text read uses the same fallback. Terminal permission/settings can prevent the
 reply; Snow times out after three seconds and terminal-native paste remains
 available. A late reply is discarded after changing editors or timing out.
 Because OSC 52 has no request IDs, another terminal query waits until that late
-reply is drained. Text clipboard reads are limited to 1 MiB.
+reply is drained. Repeating Ctrl+V while a query is pending keeps the original
+reply valid. Text clipboard reads are limited to 1 MiB. Terminal-native paste
+also works in session rename and branch rename/fork name fields.
 
 Copy uses a host clipboard utility locally and OSC 52 over SSH or as a fallback,
 with tmux/screen passthrough. A “sent” status means the command was written; the

@@ -1,0 +1,9 @@
+=== RUN   TestAuditBracketedPasteReachesNameFields
+=== RUN   TestAuditBracketedPasteReachesNameFields/session
+=== RUN   TestAuditBracketedPasteReachesNameFields/branch
+--- PASS: TestAuditBracketedPasteReachesNameFields (0.01s)
+    --- PASS: TestAuditBracketedPasteReachesNameFields/session (0.01s)
+    --- PASS: TestAuditBracketedPasteReachesNameFields/branch (0.00s)
+=== RUN   TestAuditShiftUpDoesNotBrowseHistory
+--- PASS: TestAuditShiftUpDoesNotBrowseHistory (0.00s)
+PASS

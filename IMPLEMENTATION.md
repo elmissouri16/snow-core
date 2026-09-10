@@ -1338,14 +1338,18 @@ Bubbles v2 textareas use virtual cursors, and Lip Gloss v2 styles share the
 existing bounded geometry. Background reports and supported mode 2031
 notifications refresh built-in, custom, and plugin palettes while preserving
 interactive state; notification mode ownership is restored after renderer
-shutdown. Core and public SDK packages remain UI-independent.
+shutdown. The TUI owns OS signals through `signal.NotifyContext` and disables
+Bubble Tea's internal signal handler to avoid competing shutdown paths. Core
+and public SDK packages remain UI-independent.
 
 Terminal status stays in `internal/tui/terminal_status.go`. Declarative title
 and progress use the existing reducer's root work/approval/input state. Global
 preferences apply live through an app facade without changing agent/RPC/SDK
 contracts. Generic attention/desktop alerts are deduplicated and focus-gated;
 child completion, snapshots, stale turns, and goal continuations do not announce
-root completion. A generation-scoped, cancelable one-second progress keep-alive
+root completion. Manual compaction settles from its own completion event or
+command result, deduplicated by operation identity in `terminal_compaction.go`;
+pre-admission errors report failure, and cancellation reports Stopped. A generation-scoped, cancelable one-second progress keep-alive
 goes through a Bubble Tea program filter and `RawMsg` output, deriving state
 immediately before emission. Only these terminal-only messages reuse the last
 complete `tea.View`; all ordinary updates, including resize and focus, invalidate
@@ -1355,11 +1359,14 @@ title/progress state on quit, cancellation, and suspend.
 Frame composition performs one final padding/clipping pass and reuses a bounded
 composer view until input, cursor, selection, geometry, or styling changes.
 Textarea is a reproducible Bubbles v2.2.1 snapshot under `internal/tui/textarea`:
-its sole algorithm patch avoids string conversion/grapheme scans for printable
-ASCII wrapping. Unicode and input lifecycle logic remain upstream behavior;
+its wrapping patch avoids string conversion/grapheme scans for printable ASCII,
+and its view patch styles only visible rows while preserving viewport bounds.
+Unicode and input lifecycle logic remain upstream behavior;
 the original tests, license, source hashes, and sync script are retained.
 Fresh before/after measurements improve all seven rendering/editing fixtures
-against v1, and the standard benchmark gate now covers those paths. See
+against v1. The follow-up audit adds stable 8 KiB insertion/deletion fixtures for
+ASCII, accented text, CJK, and emoji; fixed latency improves 11–34% against v1.
+The standard benchmark gate covers both sets of fixtures. See
 [TUI performance](docs/tui-performance.md#charm-v2-migration-measurements).
 
 The TUI renders a transcript with

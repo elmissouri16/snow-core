@@ -1,0 +1,54 @@
+{
+  "ascii": {
+    "before": {
+      "ns/op": 2405378.0,
+      "B/op": 896465.0,
+      "allocs/op": 1802.0
+    },
+    "after": {
+      "ns/op": 4728650.0,
+      "B/op": 963487.0,
+      "allocs/op": 2832.0
+    },
+    "latency_change_pct": 96.59
+  },
+  "accents": {
+    "before": {
+      "ns/op": 2624876.0,
+      "B/op": 944394.0,
+      "allocs/op": 1630.0
+    },
+    "after": {
+      "ns/op": 4852256.0,
+      "B/op": 955311.0,
+      "allocs/op": 2966.0
+    },
+    "latency_change_pct": 84.86
+  },
+  "cjk": {
+    "before": {
+      "ns/op": 2442274.0,
+      "B/op": 947400.0,
+      "allocs/op": 1577.0
+    },
+    "after": {
+      "ns/op": 4139372.0,
+      "B/op": 960456.0,
+      "allocs/op": 3294.0
+    },
+    "latency_change_pct": 69.49
+  },
+  "emoji": {
+    "before": {
+      "ns/op": 2446949.0,
+      "B/op": 1098531.0,
+      "allocs/op": 974.0
+    },
+    "after": {
+      "ns/op": 3197081.0,
+      "B/op": 992740.0,
+      "allocs/op": 6305.0
+    },
+    "latency_change_pct": 30.66
+  }
+}

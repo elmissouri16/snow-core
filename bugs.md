@@ -2501,7 +2501,8 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
 
 ## BUG-067: Charm v2 frame rendering is slower than v1
 
-- **Status:** Resolved; verified 2026-09-10.
+- **Status:** Resolved; verified 2026-09-10, including sustained long-draft edits.
+- **Severity:** Medium (P2).
 - **Surface:** Frame composition, composer edits, and transcript selection.
 - **Evidence:** The migration benchmarks regress from 46/72 microseconds to
   121/230 microseconds for 40/120-column frames, 0.278 to 0.759 ms for short
@@ -2510,13 +2511,13 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
 - **Investigation:** CPU/allocation profiles identify redundant full-frame
   wrapping/alignment and unconditional textarea dimension updates. Preserve
   terminal/Unicode behavior and compare against v1, not only broad ceilings.
-- **Resolution:** One final frame fit replaces repeated wrapping/alignment;
+- **Initial resolution:** One final frame fit replaces repeated wrapping/alignment;
   unchanged composer output is cached with bounded retention and explicit
   cursor/theme invalidation. Layout avoids unchanged dimension setters. A
   reproducible Bubbles v2.2.1 textarea snapshot changes only printable-ASCII
   wrapping width measurement, preserving the original Unicode and lifecycle
   paths. Its complete upstream tests, license, and source hash checks remain.
-- **Verification:** Fresh three-sample comparisons against pre-migration
+- **Initial verification:** Fresh three-sample comparisons against pre-migration
   `8fad893` improve all seven measured latencies and allocated-byte totals:
   40/120-column frames are 55%/63% faster, selection 46% faster, and short,
   8 KiB, and 64 KiB edits 10%/29%/35% faster. Raw results are checked in under
@@ -2525,6 +2526,29 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   tests, snapshot verification, SDK example, and PTY/plugin smokes pass.
   Existing benchmark limits are unchanged; new rendering limits pass and
   reject the recorded pre-fix migration samples.
+- **Follow-up evidence:** The shrinking-buffer backspace fixture misses repeated
+  edits at a stable draft size. In an approximately 8 KiB composer at 120x40,
+  insert one character, lay out/render, delete it, and lay out/render again.
+  Three alternating baseline/current runs on one CPU, with matched true-color
+  styling and dark backgrounds, show median latency per edit pair of
+  2.495 -> 4.952 ms for ASCII (+98.5%), 2.707 -> 4.848 ms for
+  accented text (+79.1%), 2.478 -> 4.119 ms for CJK (+66.3%), and
+  2.516 -> 3.117 ms for emoji (+23.9%). Baseline is `8fad893`; current is
+  `344fbe4`. These are local model/render measurements, not terminal GPU timings.
+  Profiles attribute 53% of current sampled CPU to `textarea.(*Model).view`,
+  called from both component Update and View. The ASCII wrap optimization does
+  not eliminate that repeated rendering work.
+- **Follow-up resolution:** The textarea styles visible rows only, preserving
+  row counts, selection coordinates, and the viewport's bottom clamp. Update
+  and View ordering remain intact. Stable-size ASCII/accent/CJK/emoji editing
+  now has its own benchmark gate; old limits are unchanged.
+- **Follow-up verification:** Differential tests against the unmodified pinned
+  textarea pass for Unicode, cursor modes, selection, scrolling, narrow widths,
+  resize, dynamic height, styles, and placeholders. Three alternating matched-
+  color runs against v1 improve latency by 11–34% and allocated bytes by 20–23%.
+  Allocation counts remain higher than v1. All four pre-fix v2 samples fail the
+  new ceilings. Raw samples and details are in
+  `benchmarks/results/2026-09-10-recent-changes-audit/fixes/`.
 
 ## BUG-068: Ghostty cannot show Snow activity or background attention
 
@@ -2563,3 +2587,147 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
 - **Verification:** The delayed-error terminal regression failed before the fix.
   It and the independent `TestLatePromptErrorDoesNotRestartSettledTurn` pass with
   the fix, as do `go test ./...`, `go vet ./...`, and focused race checks.
+
+## BUG-070: Modified copy shortcut quits or aborts Snow
+
+- **Status:** Resolved; verified 2026-09-10 on `feat/ghostty-v2`.
+- **Severity:** Medium (P2).
+- **Surface:** Enhanced keyboard input and composer selection.
+- **Reproduction:** Type a draft, use Shift+Left to select text, then send
+  Ctrl+Shift+C from a terminal that forwards this chord to Snow. The v2 textarea
+  binds this chord to CopySelection, but the top-level emergency handler matches
+  any C key containing the Ctrl modifier. It returns Quit while idle and requests
+  abort while busy. The user-input dialog has the same broad modifier check.
+- **Impact:** Attempting to copy can close Snow and lose an unsent draft, or
+  interrupt a running turn. Terminal-native shortcuts can mask the defect when
+  the emulator consumes the chord before Snow receives it.
+- **Remediation:** Distinguish the emergency Ctrl+C chord from Ctrl+Shift+C and
+  route selection-copy commands through the clipboard handling path. Preserve
+  the emergency quit/abort behavior for actual Ctrl+C.
+- **Original reproduction:** `TestAuditCopySelectedComposerDoesNotQuit` decodes real
+  Shift+Left and Kitty Ctrl+Shift+C byte sequences; selection succeeds, then the
+  returned command is incorrectly `tea.QuitMsg`. Add idle, busy, and dialog
+  coverage when fixing. Audit reproduction source is retained in
+  `benchmarks/results/2026-09-10-recent-changes-audit/repro_tests.go.txt`.
+- **Verified fix:** Decoded Ctrl+Shift+C tests pass for idle, busy, dialog, whole-draft,
+  and SSH copy. Plain Ctrl+C emergency and existing selection tests also pass. Editor
+  commands, including cursor blink, are preserved.
+
+
+## BUG-071: Bracketed paste is discarded in session and branch name fields
+
+- **Status:** Resolved; verified 2026-09-10 on `feat/ghostty-v2`.
+- **Severity:** Medium (P2).
+- **Surface:** Session rename and branch rename/fork dialogs.
+- **Reproduction:** Open an editable name field and paste a short name through
+  the terminal. The new `handlePaste` routes several editors but falls through
+  to `composerCoveredByModal` for these fields, discarding the paste. Their
+  ordinary key handlers accept text correctly.
+- **Impact:** Names must be typed manually; terminal paste that worked before
+  the v2 migration no longer works in these dialogs.
+- **Remediation:** Route literal, single-line paste to `sessionRenameInput` and
+  `branchInput`, preserving the respective 72/64-rune bounds and modal ownership.
+- **Original reproduction:** `TestAuditBracketedPasteReachesNameFields` fails for both
+  name fields with fragmented bracketed-paste input on current HEAD. Equivalent
+  v1 paste messages pass on `8fad893`. Include rename and fork coverage in the fix.
+- **Verified fix:** Fragmented bracketed-paste tests pass for session rename and branch
+  rename/fork, Unicode limits and sanitization, plus non-editable delete/loading guards.
+
+
+## BUG-072: A repeated OSC 52 paste invalidates the outstanding request
+
+- **Status:** Resolved; verified 2026-09-10 on `feat/ghostty-v2`.
+- **Severity:** Medium (P2).
+- **Surface:** Ctrl+V over SSH, or terminal clipboard fallback.
+- **Reproduction:** Press Ctrl+V twice before the first terminal clipboard
+  response arrives. The second call advances `clipboardGeneration` (and the
+  composer's image-paste generation) before rejecting the overlapping query.
+  The only outstanding response now fails `clipboardRequestCurrent`, so neither
+  paste inserts text.
+- **Impact:** Repeating paste while waiting for a slow terminal response silently
+  loses the valid first paste. No replacement query is issued.
+- **Remediation:** Reject or coalesce the overlapping action before advancing
+  either generation, preserving the original owner and valid response. Keep
+  canceled-request tombstones and modal/generation fencing intact.
+- **Original reproduction:** `TestAuditRepeatedClipboardRequestKeepsFirstValid` confirms
+  that the second query is rejected and the first reply leaves the editor empty.
+  Cover composer and dialog reads, including local-to-terminal fallback.
+- **Verified fix:** Remote and local-fallback tests pass for composer and dialog owners.
+  Overlap is rejected before either generation changes; timeout, stale-owner, and
+  canceled-request tests remain passing.
+
+
+## BUG-073: Shift+Up enters composer history instead of selecting text
+
+- **Status:** Resolved; verified 2026-09-10 on `feat/ghostty-v2`.
+- **Severity:** Medium (P2).
+- **Surface:** Composer history and enhanced selection keys.
+- **Reproduction:** With at least one previous prompt, enter a single-line draft
+  and press Shift+Up. `navigateInputHistory` checks only the new key Code, so
+  Shift+Up is treated as plain Up and replaces the visible draft with history.
+  Shift+Down can similarly traverse an already active history selection.
+- **Impact:** Selection gestures unexpectedly recall old prompts; typing after
+  the gesture edits the recalled prompt instead of the current draft. The saved
+  history draft is still recoverable by navigating back before editing it.
+- **Remediation:** Limit history navigation to its intended unmodified arrow
+  keys and let modified selection/navigation chords reach the textarea.
+- **Original reproduction:** `TestAuditShiftUpDoesNotBrowseHistory` passes with v1's
+  distinct Shift+Up key on `8fad893` and fails after the migration. Preserve
+  ordinary history navigation and multiline selection in regression coverage.
+- **Verified fix:** Modified Up/Down tests preserve the current draft/history position
+  and multiline selection; ordinary history navigation tests continue passing.
+
+
+## BUG-074: Manual compaction errors leave terminal status at Ready
+
+- **Status:** Resolved; verified 2026-09-10 on `feat/ghostty-v2`.
+- **Severity:** Medium (P2).
+- **Surface:** Terminal titles, progress/error state, and background alerts.
+- **Reproduction:** Run `/compact` while unfocused with a failing summarizer and
+  `compaction.fallback=error`. Core reports `EvCompactionDone{IsError:true}` and
+  the command returns an error; it does not emit `EvError` or `EvTurnDone` for
+  this manual operation. Terminal status observes only the latter event kinds,
+  so it returns to Ready, clears progress, and sends no failure alert even though
+  the transcript reports the compaction failure. Successful manual compaction
+  also lacks the completed title/alert.
+- **Impact:** Background users cannot distinguish failed compaction from an idle
+  session using the new terminal integration.
+- **Remediation:** Settle manual compaction from its own authoritative lifecycle
+  and pre-admission error path. Preserve automatic compaction as an intermediate
+  phase and suppress success notifications for cancellation.
+- **Original reproduction:** `TestAuditManualCompactionFailureReportsFailed` runs the real
+  agent with a deterministic failing fake summarizer, reduces its actual events
+  and command result, and observes Ready with no alert. The corresponding
+  successful-compaction probe reproduces the missing completion state.
+- **Verified fix:** Real-agent successful/failing compaction tests pass, plus
+  result-before-event, duplicate/acknowledgement, pre-admission failure, cancellation,
+  automatic-phase, and stale-result coverage. Terminal settlements retain operation
+  identity.
+
+
+## BUG-075: Signal cancellation can deadlock terminal shutdown
+
+- **Status:** Resolved; verified 2026-09-10 on `feat/ghostty-v2`.
+- **Severity:** Medium (P2).
+- **Surface:** Bubble Tea v2 TUI shutdown after SIGTERM/SIGINT.
+- **Reproduction:** Start the fake-provider TUI in a PTY, wait for the composer,
+  and send SIGTERM. The isolated repeated probe hung on its fourth process;
+  the earlier full PTY matrix also intermittently timed out after cancellation.
+- **Evidence:** The captured Go stack places the main goroutine in
+  `Program.shutdown` / `channelHandlers.shutdown`, waiting for a signal handler
+  blocked on `p.msgs <- QuitMsg` in Bubble Tea v2.0.9 `tea.go:681`. Snow's CLI
+  signal context can cancel the event loop before that unguarded send completes.
+- **Remediation:** Disable Bubble Tea's internal signal handler and own signals
+  through a cancelable context for the TUI lifetime. Preserve standalone TUI
+  signal handling, ordinary key quit, external cancellation, and mode restoration.
+- **Verified fix:** The full fixed-binary PTY matrix passes, including 30 consecutive
+  signal cancellations with terminal restoration. The original failure was captured
+  before the fix; the TUI now uses context-owned signals with Bubble Tea signal handling
+  disabled.
+
+Verification for BUG-067 and BUG-070–075: `go test ./...`, `go vet ./...`,
+`go test -race ./internal/tui/... ./internal/app ./internal/config -count=1`,
+all 58 Python tests, textarea snapshot verification, and the complete benchmark
+guard pass. The fixed PTY matrix includes 30 consecutive signal cancellations.
+Logs and measurements are retained under
+`benchmarks/results/2026-09-10-recent-changes-audit/fixes/`.

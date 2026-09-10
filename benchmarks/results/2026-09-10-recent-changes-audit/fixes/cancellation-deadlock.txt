@@ -1,0 +1,80 @@
+Relevant goroutines captured by SIGQUIT after a 10-second SIGTERM exit timeout.
+Addresses and machine paths normalized; no provider credentials were used.
+
+goroutine 1 gp=<addr> m=nil [sync.WaitGroup.Wait]:
+runtime.gopark(<addr>?, <addr>?, <addr>?, <addr>?, <addr>?)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/proc.go:474 +<addr> fp=<addr> sp=<addr> pc=<addr>
+runtime.goparkunlock(...)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/proc.go:480
+runtime.semacquire1(<addr>, <addr>, <addr>, <addr>, <addr>)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/sema.go:192 +<addr> fp=<addr> sp=<addr> pc=<addr>
+sync.runtime_SemacquireWaitGroup(<addr>?, <addr>?)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/sema.go:114 +<addr> fp=<addr> sp=<addr> pc=<addr>
+sync.(*WaitGroup).Wait(<addr>)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/sync/waitgroup.go:206 +<addr> fp=<addr> sp=<addr> pc=<addr>
+charm.land/bubbletea/v2.(*channelHandlers).shutdown(<addr>)
+	<module-cache>/charm.land/bubbletea/v2@v2.0.9/tea.go:430 +<addr> fp=<addr> sp=<addr> pc=<addr>
+charm.land/bubbletea/v2.(*Program).shutdown.func1()
+	<module-cache>/charm.land/bubbletea/v2@v2.0.9/tea.go:1255 +<addr> fp=<addr> sp=<addr> pc=<addr>
+sync.(*Once).doSlow(<addr>?, <addr>?)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/sync/once.go:78 +<addr> fp=<addr> sp=<addr> pc=<addr>
+sync.(*Once).Do(...)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/sync/once.go:69
+charm.land/bubbletea/v2.(*Program).shutdown(<addr>?, <addr>?)
+	<module-cache>/charm.land/bubbletea/v2@v2.0.9/tea.go:1251 +<addr> fp=<addr> sp=<addr> pc=<addr>
+charm.land/bubbletea/v2.(*Program).Run(<addr>)
+	<module-cache>/charm.land/bubbletea/v2@v2.0.9/tea.go:1180 +<addr> fp=<addr> sp=<addr> pc=<addr>
+github.com/elmissouri16/snow-core/internal/tui.run({_, _}, {{<addr>, <addr>}, {<addr>, <addr>}, {<addr>, <addr>}, {<addr>, <addr>}, ...}, ...)
+	<checkout>/internal/tui/runtime.go:79 +<addr> fp=<addr> sp=<addr> pc=<addr>
+github.com/elmissouri16/snow-core/internal/tui.RunWithResult(...)
+	<checkout>/internal/tui/runtime.go:37
+main.runTUI({_, _}, {{<addr>, <addr>}, {<addr>, <addr>}, {<addr>, <addr>}, {<addr>, <addr>}, ...}, ...)
+	<checkout>/cmd/snow/cli.go:735 +<addr> fp=<addr> sp=<addr> pc=<addr>
+main.runInteractiveOptions(<addr>, <addr>, <addr>)
+	<checkout>/cmd/snow/cli.go:541 +<addr> fp=<addr> sp=<addr> pc=<addr>
+main.runInteractive(<addr>?, {<addr>?, <addr>?, <addr>?})
+	<checkout>/cmd/snow/cli.go:501 +<addr> fp=<addr> sp=<addr> pc=<addr>
+github.com/spf13/cobra.(*Command).execute(<addr>, {<addr>, <addr>, <addr>})
+	<module-cache>/github.com/spf13/cobra@v1.10.2/command.go:1015 +<addr> fp=<addr> sp=<addr> pc=<addr>
+github.com/spf13/cobra.(*Command).ExecuteC(<addr>)
+	<module-cache>/github.com/spf13/cobra@v1.10.2/command.go:1148 +<addr> fp=<addr> sp=<addr> pc=<addr>
+github.com/spf13/cobra.(*Command).Execute(...)
+	<module-cache>/github.com/spf13/cobra@v1.10.2/command.go:1071
+main.run()
+	<checkout>/cmd/snow/cli.go:101 +<addr> fp=<addr> sp=<addr> pc=<addr>
+main.main()
+	<checkout>/cmd/snow/cli.go:38 +<addr> fp=<addr> sp=<addr> pc=<addr>
+runtime.main()
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/proc.go:302 +<addr> fp=<addr> sp=<addr> pc=<addr>
+runtime.goexit({})
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/asm_arm64.s:1039 +<addr> fp=<addr> sp=<addr> pc=<addr>
+
+goroutine 72 gp=<addr> m=nil [chan send]:
+runtime.gopark(<addr>?, <addr>?, <addr>?, <addr>?, <addr>?)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/proc.go:474 +<addr> fp=<addr> sp=<addr> pc=<addr>
+runtime.chansend(<addr>, <addr>, <addr>, <addr>?)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/chan.go:283 +<addr> fp=<addr> sp=<addr> pc=<addr>
+runtime.chansend1(<addr>?, <addr>?)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/chan.go:161 +<addr> fp=<addr> sp=<addr> pc=<addr>
+charm.land/bubbletea/v2.(*Program).handleSignals.func1()
+	<module-cache>/charm.land/bubbletea/v2@v2.0.9/tea.go:681 +<addr> fp=<addr> sp=<addr> pc=<addr>
+runtime.goexit({})
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/asm_arm64.s:1039 +<addr> fp=<addr> sp=<addr> pc=<addr>
+created by charm.land/bubbletea/v2.(*Program).handleSignals in goroutine 1
+	<module-cache>/charm.land/bubbletea/v2@v2.0.9/tea.go:662 +<addr>
+
+goroutine 59 gp=<addr> m=nil [chan receive]:
+runtime.gopark(<addr>?, <addr>?, <addr>?, <addr>?, <addr>?)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/proc.go:474 +<addr> fp=<addr> sp=<addr> pc=<addr>
+runtime.chanrecv(<addr>, <addr>, <addr>)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/chan.go:667 +<addr> fp=<addr> sp=<addr> pc=<addr>
+runtime.chanrecv1(<addr>?, <addr>?)
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/chan.go:509 +<addr> fp=<addr> sp=<addr> pc=<addr>
+charm.land/bubbletea/v2.(*channelHandlers).shutdown.func1(<addr>?)
+	<module-cache>/charm.land/bubbletea/v2@v2.0.9/tea.go:426 +<addr> fp=<addr> sp=<addr> pc=<addr>
+charm.land/bubbletea/v2.(*channelHandlers).shutdown.gowrap2()
+	<module-cache>/charm.land/bubbletea/v2@v2.0.9/tea.go:428 +<addr> fp=<addr> sp=<addr> pc=<addr>
+runtime.goexit({})
+	<module-cache>/golang.org/toolchain@v0.0.1-go1.27rc3.darwin-arm64/src/runtime/asm_arm64.s:1039 +<addr> fp=<addr> sp=<addr> pc=<addr>
+created by charm.land/bubbletea/v2.(*channelHandlers).shutdown in goroutine 1
+	<module-cache>/charm.land/bubbletea/v2@v2.0.9/tea.go:425 +<addr>

@@ -1,0 +1,167 @@
+package tui
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/elmissouri16/snow-core/internal/agent"
+	"github.com/elmissouri16/snow-core/internal/provider/fake"
+	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
+)
+
+func TestAuditBracketedPasteReachesNameFields(t *testing.T) {
+	for _, field := range []string{"session", "branch"} {
+		t.Run(field, func(t *testing.T) {
+			m := prepareScrollableModel(t)
+			switch field {
+			case "session":
+				m.sessions = []session.SessionInfo{{ID: "session-fixture"}}
+				m.pickSession, m.sessionRenaming = true, true
+			case "branch":
+				m.branches = []protocol.SessionBranch{{ID: "branch-fixture", Active: true}}
+				m.pickTree, m.branchAction = true, "rename"
+			}
+			for _, msg := range decodeTerminalBytes(t, "\x1b[200~pasted name\x1b[201~") {
+				m.Update(msg)
+			}
+			got := m.sessionRenameInput
+			if field == "branch" {
+				got = m.branchInput
+			}
+			if got != "pasted name" {
+				t.Fatalf("visible %s field received %q, want pasted name", field, got)
+			}
+		})
+	}
+}
+
+func TestAuditManualCompactionAnnouncesCompletion(t *testing.T) {
+	m := prepareScrollableModel(t)
+	m.Update(tea.BlurMsg{})
+	events := make(chan protocol.AgentEvent, 32)
+	unsubscribe := m.app.Agent.Subscribe(func(ev protocol.AgentEvent) { events <- ev })
+	defer unsubscribe()
+	cmd := m.startCompact()
+	result := cmd()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	seen := false
+	for !seen {
+		select {
+		case ev := <-events:
+			m.Update(agentEventMsg{ev: ev})
+			seen = ev.Type == protocol.EvCompactionDone
+		case <-deadline.C:
+			t.Fatal("no core compaction completion event")
+		}
+	}
+	m.Update(result)
+	if title := m.View().WindowTitle; !strings.HasSuffix(title, " · Done") {
+		t.Errorf("successful manual compaction title=%q, want Done", title)
+	}
+	if alert := terminalTestAlert(m); alert == "" {
+		t.Error("manual compaction completed unfocused without a completion alert")
+	}
+}
+
+func TestAuditManualCompactionFailureReportsFailed(t *testing.T) {
+	m := prepareScrollableModel(t)
+	oldAgent := m.app.Agent
+	t.Cleanup(func() { oldAgent.Close() })
+	provider := fake.New([]fake.Step{{Kind: fake.StepError, Err: errors.New("audit summary unavailable")}})
+	a, err := agent.New(agent.Options{
+		Provider: provider, Registry: m.app.Registry, Session: m.app.Session, Permission: m.app.Perm,
+		Model:      m.app.Model,
+		Compaction: agent.CompactionOptions{RetainTokens: 1, MinRetainedTurns: 2, SummaryMaxTokens: 500, Fallback: "error"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.app.Agent = a
+	for i := range 6 {
+		msg := protocol.NewUserMessage(fmt.Sprintf("audit-%d", i), m.app.Session.BranchTip(), fmt.Sprintf("message %d", i))
+		if err := m.app.Session.Append(session.Entry{Type: session.EntryMessage, ID: msg.ID, Message: &msg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.Update(tea.BlurMsg{})
+	events := make(chan protocol.AgentEvent, 32)
+	unsubscribe := a.Subscribe(func(ev protocol.AgentEvent) { events <- ev })
+	defer unsubscribe()
+	result := m.startCompact()().(compactDoneMsg)
+	if result.err == nil {
+		t.Fatal("fixture did not fail compaction")
+	}
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	seen := false
+	for !seen {
+		select {
+		case ev := <-events:
+			m.Update(agentEventMsg{ev: ev})
+			seen = ev.Type == protocol.EvCompactionDone
+		case <-deadline.C:
+			t.Fatal("no core compaction completion event")
+		}
+	}
+	m.Update(result)
+	if title := m.View().WindowTitle; !strings.HasSuffix(title, " · Failed") {
+		t.Errorf("failed manual compaction title=%q, want Failed; error=%v", title, result.err)
+	}
+	if alert := terminalTestAlert(m); alert == "" {
+		t.Error("failed compaction did not alert unfocused terminal")
+	}
+}
+
+func TestAuditRepeatedClipboardRequestKeepsFirstValid(t *testing.T) {
+	m := remoteClipboardModel(t)
+	m.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+	if m.terminalClipboard == nil {
+		t.Fatal("no first request")
+	}
+	first := *m.terminalClipboard
+	m.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+	if m.terminalClipboard.generation != first.generation {
+		t.Fatal("test requires second request rejected")
+	}
+	m.Update(tea.ClipboardMsg{Selection: 'c', Content: "clipboard contents"})
+	if m.editor.Value() != "clipboard contents" {
+		t.Fatalf("both paste attempts lost: value=%q, status=%q", m.editor.Value(), m.lastStatus)
+	}
+}
+
+func TestAuditShiftUpDoesNotBrowseHistory(t *testing.T) {
+	m := prepareScrollableModel(t)
+	m.rememberInputHistory("old prompt")
+	m.editor.SetValue("current draft")
+	m.editor.CursorEnd()
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	if m.editor.Value() != "current draft" {
+		t.Fatalf("Shift+Up replaced draft with %q", m.editor.Value())
+	}
+}
+
+func TestAuditCopySelectedComposerDoesNotQuit(t *testing.T) {
+	m := prepareScrollableModel(t)
+	m.editor.SetValue("draft")
+	m.editor.CursorEnd()
+	for _, msg := range decodeTerminalBytes(t, "\x1b[1;2D") {
+		m.Update(msg)
+	}
+	if !m.editor.HasSelection() {
+		t.Fatal("Shift+Left did not select draft text")
+	}
+	for _, msg := range decodeTerminalBytes(t, "\x1b[99;6u") {
+		_, cmd := m.Update(msg)
+		if cmd != nil {
+			if _, quitting := cmd().(tea.QuitMsg); quitting {
+				t.Fatal("Ctrl+Shift+C quit Snow instead of copying the selected draft")
+			}
+		}
+	}
+}

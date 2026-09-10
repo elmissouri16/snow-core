@@ -1,0 +1,9 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/tui
+cpu: Apple M3 Pro
+BenchmarkAuditUnicodeComposer/ascii         	     235	   2405378 ns/op	  896465 B/op	    1802 allocs/op
+BenchmarkAuditUnicodeComposer/accents       	     212	   2624876 ns/op	  944394 B/op	    1630 allocs/op
+BenchmarkAuditUnicodeComposer/cjk           	     244	   2370781 ns/op	  947366 B/op	    1576 allocs/op
+BenchmarkAuditUnicodeComposer/emoji         	     236	   2425429 ns/op	 1098506 B/op	     974 allocs/op
+PASS
