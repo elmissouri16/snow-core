@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"charm.land/bubbles/v2/textarea"
 	"charm.land/lipgloss/v2"
+	"github.com/elmissouri16/snow-core/internal/tui/textarea"
 )
 
 // normalizeTextareaStyles removes Bubbles' default cursor-line and end-of-

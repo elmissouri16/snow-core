@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"github.com/elmissouri16/snow-core/internal/tui/textarea"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
