@@ -673,7 +673,7 @@ func (m *Model) setThinking(level protocol.ThinkingLevel, announce bool) error {
 }
 
 // startModelPick opens immediately from cached catalogs, then resolves missing
-// inactive catalogs asynchronously so ordinary startup does not wait for them.
+// or expired catalogs asynchronously so ordinary startup does not wait for them.
 func (m *Model) startModelPick() (tea.Model, tea.Cmd) {
 	if m.compatibleLoginPending {
 		m.lastStatus = "waiting for openai-compatible model discovery"

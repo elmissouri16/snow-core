@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/elmissouri16/snow-core/internal/auth"
@@ -66,9 +67,12 @@ type Provider struct {
 	streamIdleTimeout time.Duration
 	cacheRoot         string
 
-	catalogMu    sync.Mutex
-	cachedModels []protocol.Model
-	cachedAt     time.Time
+	catalogMu        sync.Mutex
+	cachedModels     []protocol.Model
+	cachedMetadata   map[string]modelsdev.Model
+	cachedAt         time.Time
+	catalogExpiresAt atomic.Int64
+	catalogRevision  atomic.Uint64
 }
 
 func New(cfg Config) (*Provider, error) {
@@ -86,9 +90,6 @@ func New(cfg Config) (*Provider, error) {
 	defaultModel := strings.TrimSpace(cfg.DefaultModel)
 	if defaultModel == "" {
 		defaultModel = DefaultModelID
-	}
-	if _, ok := freeModelByID(defaultModel); !ok {
-		return nil, fmt.Errorf("opencode-zen: default model %q is not in the maintained free catalog", defaultModel)
 	}
 	client := cfg.HTTPClient
 	if client == nil {
@@ -118,11 +119,14 @@ func New(cfg Config) (*Provider, error) {
 func (p *Provider) ID() string { return ProviderID }
 
 func (p *Provider) DefaultModel() protocol.Model {
-	spec, _ := freeModelByID(p.defaultModel)
-	return spec.Model.Clone()
+	if spec, ok := p.modelSpec(p.defaultModel); ok {
+		return spec.Model.Clone()
+	}
+	// App model selection validates this preference against discovered models.
+	return protocol.Model{Provider: ProviderID, ID: p.defaultModel}
 }
 
-// ModelCatalogAuthoritative rejects model IDs outside the maintained free
+// ModelCatalogAuthoritative rejects model IDs outside the verified free
 // catalog instead of allowing accidental paid Zen requests.
 func (*Provider) ModelCatalogAuthoritative() bool { return true }
 
@@ -138,9 +142,16 @@ func (p *Provider) resolveKey(credential auth.Credential) string {
 }
 
 func (p *Provider) Chat(ctx context.Context, credential auth.Credential, request protocol.ChatRequest) (protocol.EventStream, error) {
-	spec, ok := freeModelByID(request.Model.ID)
+	// Revalidate an expired discovered catalog before using a retained selection.
+	// Direct callers of bundled models retain the offline fallback behavior.
+	if p.catalogExpiresAt.Load() != 0 && p.ModelCatalogStale() {
+		if _, err := p.ListModelsWithCredential(ctx, credential); err != nil {
+			return eventErrorStream(err), nil
+		}
+	}
+	spec, ok := p.modelSpec(request.Model.ID)
 	if !ok {
-		return eventErrorStream(fmt.Errorf("opencode-zen: model %q is not in the maintained free catalog", request.Model.ID)), nil
+		return eventErrorStream(fmt.Errorf("opencode-zen: model %q is not in the verified free catalog", request.Model.ID)), nil
 	}
 	key := p.resolveKey(credential)
 	stream, err := p.chatAttempt(ctx, key, spec.Transport, request)

@@ -127,7 +127,7 @@ func (m *Model) renderModelPicker() string {
 	if geometry.detailHeight > 0 {
 		parts = append(parts, separator, m.renderModelDetails(models, geometry.innerWidth, geometry.detailHeight))
 	}
-	controls := truncateDisplayText(" type to filter · ↑/↓ navigate · PgUp/PgDn · Enter apply · Esc clear/close ", geometry.innerWidth)
+	controls := truncateDisplayText(" type to filter · ↑/↓ · Ctrl+R refresh · Enter apply · Esc clear/close ", geometry.innerWidth)
 	parts = append(parts, styleFooter.Render(controls))
 	return renderPickerCard(lipgloss.JoinVertical(lipgloss.Left, parts...), geometry)
 }

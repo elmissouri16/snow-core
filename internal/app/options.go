@@ -100,12 +100,16 @@ func (s *liveRuntimeSelection) ensureCatalog(ctx context.Context, providerID str
 			s.mu.Unlock()
 			return nil, fmt.Errorf("app: provider %q is unavailable", providerID)
 		}
+		revision := modelCatalogRevision(p)
 		if !force {
 			if models, loaded := s.catalogs[providerID]; loaded {
-				err := s.catalogErrors[providerID]
-				out := cloneModels(models)
-				s.mu.Unlock()
-				return out, err
+				expiring, ok := p.(interface{ ModelCatalogStale() bool })
+				if (!ok || !expiring.ModelCatalogStale()) && s.catalogRevisions[providerID] == revision {
+					err := s.catalogErrors[providerID]
+					out := cloneModels(models)
+					s.mu.Unlock()
+					return out, err
+				}
 			}
 		}
 		if load := s.catalogLoads[providerID]; load != nil {
@@ -163,7 +167,7 @@ func (s *liveRuntimeSelection) ensureCatalog(ctx context.Context, providerID str
 			}
 			continue
 		}
-		if force && len(models) == 0 {
+		if force && len(models) == 0 && (err != nil || !modelCatalogAuthoritative(p)) {
 			if s.catalogLoads[providerID] == load {
 				delete(s.catalogLoads, providerID)
 			}
@@ -172,6 +176,13 @@ func (s *liveRuntimeSelection) ensureCatalog(ctx context.Context, providerID str
 			return nil, err
 		}
 		s.catalogs[providerID] = cloneModels(models)
+		if s.catalogRevisions == nil {
+			s.catalogRevisions = make(map[string]uint64)
+		}
+		// Keep the pre-read revision: a direct adapter refresh after ListModels
+		// returns must not label this older result with a newer revision. A
+		// discovery performed by this call costs only one extra cached lookup.
+		s.catalogRevisions[providerID] = revision
 		if s.catalogErrors == nil {
 			s.catalogErrors = make(map[string]error)
 		}
@@ -183,6 +194,13 @@ func (s *liveRuntimeSelection) ensureCatalog(ctx context.Context, providerID str
 		s.mu.Unlock()
 		return cloneModels(models), err
 	}
+}
+
+func modelCatalogRevision(p provider.Provider) uint64 {
+	if versioned, ok := p.(interface{ ModelCatalogRevision() uint64 }); ok {
+		return versioned.ModelCatalogRevision()
+	}
+	return 0
 }
 
 func (s *liveRuntimeSelection) preloadCatalogs(ctx context.Context, providerIDs []string) error {
@@ -226,6 +244,10 @@ func requiredSubagentProviders(cfg config.SubagentConfig, activeProvider string)
 }
 
 func (s *liveRuntimeSelection) availableModels(ctx context.Context) ([]protocol.Model, error) {
+	return s.loadAvailableModels(ctx, false)
+}
+
+func (s *liveRuntimeSelection) loadAvailableModels(ctx context.Context, force bool) ([]protocol.Model, error) {
 	s.mu.RLock()
 	providerIDs := make([]string, 0, len(s.providers))
 	for id := range s.providers {
@@ -241,7 +263,7 @@ func (s *liveRuntimeSelection) availableModels(ctx context.Context) ([]protocol.
 	results := make(chan result, len(providerIDs))
 	for _, id := range providerIDs {
 		go func(providerID string) {
-			models, err := s.ensureCatalog(ctx, providerID, false)
+			models, err := s.ensureCatalog(ctx, providerID, force)
 			results <- result{id: providerID, models: models, err: err}
 		}(id)
 	}

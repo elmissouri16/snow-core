@@ -247,11 +247,11 @@ func enrichModelRecord(record openAIModelRecord, details modelsdev.Model) openAI
 	if record.SupportsVision == nil && (record.Capabilities == nil || record.Capabilities.Vision == nil) && len(record.Input) == 0 && record.Architecture == nil {
 		record.Input = slices.Clone(details.Modalities.Input)
 	}
-	if record.Pricing == nil && details.Cost != nil {
+	if record.Pricing == nil && details.Cost != nil && details.Cost.Input != nil && details.Cost.Output != nil {
 		record.Pricing = &protocol.ModelPricing{
 			Currency:             "USD",
-			InputPerMillion:      details.Cost.Input,
-			OutputPerMillion:     details.Cost.Output,
+			InputPerMillion:      *details.Cost.Input,
+			OutputPerMillion:     *details.Cost.Output,
 			CacheReadPerMillion:  details.Cost.CacheRead,
 			CacheWritePerMillion: details.Cost.CacheWrite,
 		}

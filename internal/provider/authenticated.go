@@ -119,6 +119,21 @@ func (p *Authenticated) RefreshModels(ctx context.Context) ([]protocol.Model, er
 	return p.transport.ListModels(ctx)
 }
 
+// ModelCatalogStale forwards adapter-owned cache expiry to app snapshots.
+func (p *Authenticated) ModelCatalogStale() bool {
+	if value, ok := p.transport.(interface{ ModelCatalogStale() bool }); ok {
+		return value.ModelCatalogStale()
+	}
+	return false
+}
+
+func (p *Authenticated) ModelCatalogRevision() uint64 {
+	if value, ok := p.transport.(interface{ ModelCatalogRevision() uint64 }); ok {
+		return value.ModelCatalogRevision()
+	}
+	return 0
+}
+
 func (p *Authenticated) ModelCatalogAuthoritative() bool {
 	if value, ok := p.transport.(interface{ ModelCatalogAuthoritative() bool }); ok {
 		return value.ModelCatalogAuthoritative()

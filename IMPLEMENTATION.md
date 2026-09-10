@@ -337,7 +337,7 @@ and lifecycle.
 | Provider | ID | Credential | Endpoint and behavior |
 |---|---|---|---|
 | OpenCode Go | `opencode-go` | API key | `https://opencode.ai/zen/go/v1`, OpenAI-compatible `/models` and `/chat/completions`, default `kimi-k2.6` |
-| OpenCode Zen | `opencode-zen` | optional API key or anonymous | `https://opencode.ai/zen/v1`; maintained free allowlist intersected with `/models`; model-specific `/chat/completions` or `/responses`; default `big-pickle` |
+| OpenCode Zen | `opencode-zen` | optional API key or anonymous | `https://opencode.ai/zen/v1`; live `/models` plus verified free models.dev metadata; model-specific `/chat/completions` or `/responses`; default `big-pickle` |
 | OpenAI-compatible | `openai-compatible` or named profile | optional API key per profile | one or more user-supplied API roots plus sibling `/models`; Responses preferred with Chat Completions fallback; no built-in endpoint |
 | ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | ChatGPT Codex Responses backend; browser/device login, refresh, authenticated cached catalog |
 | Fake | `fake` | none | deterministic scripted provider for tests and demos |
@@ -483,12 +483,18 @@ back to the pinned static default without failing startup or logging keys.
 promotional free routes. Credential resolution accepts an explicit key, the
 `opencode-zen` Snow auth entry, `OPENCODE_API_KEY`, or an empty anonymous
 credential; keyless requests omit `Authorization` completely. The provider
-intersects live `GET /models` availability with a maintained seven-model free
-allowlist and is catalog-authoritative, so paid, unknown, and deprecated IDs
-cannot be selected accidentally. `big-pickle` is the bundled default.
+intersects live `GET /models` availability with verified models.dev free-model
+metadata and is catalog-authoritative. New IDs require explicit zero input and
+output prices (including cache charges and advertised context tiers), supported
+text/tool capabilities, token limits, and a supported protocol. Paid, unknown,
+and deprecated IDs cannot be selected accidentally. A seven-model bundled
+catalog supplies offline fallback and local privacy/limit overrides;
+`big-pickle` remains the default.
 
-The local transport map sends Muse Spark Contributor Free to Responses/SSE and
-the remaining maintained models to Chat Completions/SSE. Both attach the same
+The models.dev provider package selects Responses/SSE (`@ai-sdk/openai`) or
+Chat Completions/SSE (`@ai-sdk/openai-compatible`), inheriting the provider-wide
+package when a model has no override. Snow does not execute these packages.
+Bundled models retain local transport fallback. Both transports attach the same
 stable opaque `X-Opencode-Session` conversation-affinity header and normalize
 into the shared provider event contract. Temporary HTTP 429 responses carry
 structured rate-limit advice and bounded `Retry-After`; the central agent policy
@@ -499,18 +505,31 @@ errors.
 On a canonical-endpoint Zen catalog refresh, the provider concurrently fetches
 live `/models` availability and the public models.dev `opencode` record under
 the bounded discovery context. A custom base URL disables that merge unless the
-internal provider config explicitly supplies a catalog URL. Only IDs in both
-the maintained free policy and live Zen availability are returned. `reasoning` and
+internal provider config explicitly supplies a catalog URL. New free models
+appear without a source update, while live pricing and deprecation override
+bundled policy. `reasoning` and
 `reasoning_options[type=effort].values` are normalized into model-level thinking
 metadata; no model-specific effort set is compiled into Snow. Metadata requests
-carry no Zen authorization. The v2 atomic 0600 catalog cache rehydrates current
-local transport/privacy/limit policy plus the last fetched reasoning metadata,
-and invalidates the older cache schema that contained pinned capability values.
-A failed metadata refresh uses verified cached reasoning when available and
-otherwise exposes no guessed effort controls. Advertised values serialize as
+carry no Zen authorization. The v3 atomic 0600 catalog cache stores the verified
+pricing, protocol, and capability evidence for newly discovered IDs and
+rehydrates policy on load. Older schemas are invalidated so existing installs
+discover the expanded catalog. Successful empty catalogs are persisted to avoid
+reviving withdrawn promotions on an offline restart. A failed metadata refresh
+uses verified cached metadata for IDs still advertised by `/models`; otherwise
+only bundled policy applies. Advertised values serialize as
 `reasoning_effort` for Chat Completions or `reasoning.effort` for Responses.
 Snow's `off` setting omits the override rather than claiming the provider
 disables inherent reasoning.
+
+Zen owns a 15-minute catalog expiry plus a revision counter, forwarded through
+the authenticated provider wrapper. App snapshots consult both, so opening the
+model picker refreshes expired data and observes catalog changes made before an
+inference request. Ctrl+R forces discovery through the same app catalog loader;
+the TUI preserves the filter and any still-available selected row. Browsing
+catalogs does not change the active model. Inference revalidates an expired
+catalog and rejects a selected ID that is no longer approved. Discovery failures
+retain the last verified snapshot and retry on a later lookup after one minute,
+without extending the on-disk snapshot's age.
 
 Big Pickle uses its stricter 160k input limit as the effective context and
 records 200k as its maximum. Successful terminal streams with no text or

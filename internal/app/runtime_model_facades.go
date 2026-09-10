@@ -38,10 +38,20 @@ func (a *App) ActiveModelsSnapshot() (string, protocol.Model, []protocol.Model) 
 // demand and refreshes the combined picker snapshot. Partial results are kept
 // when one inactive provider cannot be listed.
 func (a *App) LoadProviderCatalogs(ctx context.Context) ([]protocol.Model, error) {
+	return a.loadProviderCatalogs(ctx, false)
+}
+
+// RefreshProviderCatalogs bypasses adapter caches where supported and publishes
+// the refreshed picker snapshot without changing the selected model.
+func (a *App) RefreshProviderCatalogs(ctx context.Context) ([]protocol.Model, error) {
+	return a.loadProviderCatalogs(ctx, true)
+}
+
+func (a *App) loadProviderCatalogs(ctx context.Context, force bool) ([]protocol.Model, error) {
 	if a == nil || a.runtimeSelection == nil {
 		return nil, errors.New("app: provider catalogs unavailable")
 	}
-	_, loadErr := a.runtimeSelection.availableModels(ctx)
+	_, loadErr := a.runtimeSelection.loadAvailableModels(ctx, force)
 	// Publish one generation-consistent snapshot. Profile reconfiguration uses
 	// the same stateMu -> runtimeSelection.mu lock order, so an obsolete lazy
 	// load cannot restore the replaced provider's catalog in App mirrors.

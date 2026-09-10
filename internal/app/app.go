@@ -115,6 +115,7 @@ type liveRuntimeSelection struct {
 	catalogErrors     map[string]error
 	catalogLoads      map[string]*catalogLoad
 	catalogGeneration map[string]uint64
+	catalogRevisions  map[string]uint64
 }
 
 type catalogLoad struct {

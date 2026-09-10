@@ -654,7 +654,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.lastStatus = "some provider catalogs could not be loaded"
 		}
-		if len(msg.models) > 0 {
+		if len(msg.models) > 0 || msg.err == nil {
 			m.modelList = uniquePickerModels(msg.models, m.app.ProviderID)
 		}
 		if len(m.modelList) == 0 {

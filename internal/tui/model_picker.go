@@ -23,6 +23,17 @@ func (m *Model) handleModelPick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.Type {
+	case tea.KeyCtrlR:
+		if m.modelLoading || m.app == nil {
+			return m, nil
+		}
+		m.modelLoading = true
+		m.pickerGeneration++
+		generation := m.pickerGeneration
+		return m, func() tea.Msg {
+			models, err := m.app.RefreshProviderCatalogs(m.ctx)
+			return modelListMsg{generation: generation, models: models, err: err}
+		}
 	case tea.KeyRunes, tea.KeySpace:
 		text := string(msg.Runes)
 		if msg.Type == tea.KeySpace && text == "" {

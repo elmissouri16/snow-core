@@ -2375,3 +2375,62 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   PTY verified filtering, enable/disable persistence, restart feedback, opening
   Workspace Notes, returning to the same action/filter, resizing, and composer
   input without starting an agent turn.
+
+## BUG-063: Zen catalog discovery omits newly published free models
+
+- **Status:** Resolved; verified 2026-09-10
+- **Surface:** OpenCode Zen model discovery and TUI `/model`
+- **Expected:** Newly published, supported free Zen models become discoverable
+  without manually adding each model ID to a Snow release; paid models remain
+  excluded and transport/capability metadata must be verified.
+- **Original behavior:** `internal/provider/opencodezen/catalog.go` intersected live
+  `/models` IDs with the compiled `freeModels()` allowlist. Remote models.dev
+  records enrich reasoning only; they cannot introduce model IDs. Both
+  `muse-spark-1.3-contributor-free` and `ling-3.0-flash-fin-free` appear in the
+  [live Zen catalog](https://opencode.ai/zen/v1/models) and
+  [official guide](https://opencode.ai/docs/zen/) but are absent from the
+  allowlist. The resulting five maintained live models match the user's Snow
+  screenshot, while OpenCode shows seven.
+- **Reproduction:** Compare those two live IDs against `freeModels()` and the
+  `ListModelsWithCredential` loop over that list. A fresh cache or process still
+  cannot return either ID. The existing
+  `TestListModelsFiltersToMaintainedFreeCatalogAndOptionalAuth` also explicitly
+  expects IDs outside the local list to be discarded.
+- **Original refresh limitation:** The provider's 15-minute cache freshness was checked
+  on discovery calls, not by a timer. `liveRuntimeSelection.ensureCatalog`
+  reuses loaded catalogs without an expiry unless forced; Zen has no dedicated
+  forced-refresh method to bypass its own fresh cache.
+- **Impact:** Users cannot select newly offered free models even when upstream
+  discovery succeeds. Restarting or waiting for the provider cache to expire
+  does not address the missing-ID restriction.
+- **Remediation:** Discover supported free models from current upstream
+  availability and verified pricing/transport metadata, retain safe offline
+  policy overrides, and provide an expiry-aware refresh path through the app
+  and picker. Do not infer free access solely from an ID suffix.
+- **Required regression coverage:** Newly published free IDs without source
+  edits, paid/unknown-pricing exclusion, correct transport and limits,
+  unavailable promotions, offline cache behavior, expiry, forced refresh, and
+  picker propagation.
+- **Resolution:** Live availability now admits new IDs using explicit free
+  pricing, supported protocol/capability metadata, and deprecation filtering.
+  The v3 disk cache retains and revalidates that evidence, including successful
+  empty catalogs. Provider expiry and revisions propagate to app snapshots;
+  opening `/model` refreshes expired Zen data and Ctrl+R forces discovery while
+  retaining the filter and a still-available selected row. Inference checks
+  expired catalogs before using a retained selection.
+- **Verification:** `go test ./...`, `go vet ./...`, race checks for
+  `./internal/provider/...`, `./internal/subagent`, `./internal/agent`,
+  `./internal/app`, `./internal/session`, `./internal/rpc`, `./internal/tui`, and
+  `./pkg/snowsdk`, all 56 Python support-script tests, and
+  `python3 scripts/check_benchmarks.py` passed. Go tests used localhost mock
+  servers outside the sandbox and an isolated build cache; the benchmark guard
+  passed after using that writable cache. Focused regressions cover new IDs,
+  both protocols, unknown/paid/tiered pricing, cache persistence and expiry,
+  paid transitions, withdrawals, metadata outages, cancellation, app snapshot
+  propagation, and picker filter/selection/closure behavior.
+  `./scripts/install-local.sh` installed the checkout. An isolated installed
+  RPC smoke check discovered all seven current active free Zen models and
+  selected both missing IDs across process restarts using the v3 disk cache.
+  An isolated installed-binary PTY verified seven filtered Zen matches, both
+  missing models visible, a newer catalog timestamp after Ctrl+R, and responsive
+  keyboard/resize behavior at 110 and 64 columns.

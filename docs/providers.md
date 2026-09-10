@@ -49,6 +49,18 @@ snow --provider opencode-zen
 The `OPENCODE_API_KEY` environment variable and `--api-key` flag are also
 accepted for the current process.
 
+Snow discovers new free Zen models from the live model list and models.dev
+pricing, capabilities, and endpoint metadata. Paid, deprecated, and unsupported
+models are excluded. New models with missing pricing or endpoint metadata stay
+hidden until that information is available.
+
+Opening `/model` checks for an expired Zen catalog and refreshes it in the
+background; successful catalogs are cached for 15 minutes. Press **Ctrl+R** in
+the picker to refresh immediately. Your search and selected row are preserved
+when still available. This does not require restarting Snow. If discovery is
+offline, Snow uses its last verified cache, or its bundled fallback when no
+valid cache exists, and retries on a later lookup.
+
 ## OpenCode Go
 
 Store an OpenCode API key, then start Snow:

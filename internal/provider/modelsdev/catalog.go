@@ -24,6 +24,7 @@ type Catalog map[string]Provider
 
 // Provider contains the models published for one models.dev provider ID.
 type Provider struct {
+	NPM    string           `json:"npm"`
 	Models map[string]Model `json:"models"`
 }
 
@@ -31,12 +32,20 @@ type Provider struct {
 type Model struct {
 	ID               string            `json:"id"`
 	Name             string            `json:"name"`
+	Status           string            `json:"status,omitempty"`
+	Provider         ModelProvider     `json:"provider"`
 	Reasoning        *bool             `json:"reasoning"`
 	ReasoningOptions []ReasoningOption `json:"reasoning_options"`
 	ToolCall         *bool             `json:"tool_call"`
 	Limit            Limit             `json:"limit"`
 	Cost             *Cost             `json:"cost,omitempty"`
 	Modalities       Modalities        `json:"modalities"`
+}
+
+// ModelProvider selects the wire protocol, inheriting the provider-wide package
+// when the model does not override it. Snow never executes this package.
+type ModelProvider struct {
+	NPM string `json:"npm"`
 }
 
 // ReasoningOption describes one provider-selectable reasoning control.
@@ -48,20 +57,40 @@ type ReasoningOption struct {
 // Limit contains the total context and maximum output token counts.
 type Limit struct {
 	Context int `json:"context"`
+	Input   int `json:"input,omitzero"`
 	Output  int `json:"output"`
 }
 
 // Cost contains USD prices per million tokens.
 type Cost struct {
-	Input      float64 `json:"input"`
-	Output     float64 `json:"output"`
-	CacheRead  float64 `json:"cache_read"`
-	CacheWrite float64 `json:"cache_write"`
+	Input      *float64 `json:"input,omitempty"`
+	Output     *float64 `json:"output,omitempty"`
+	CacheRead  float64  `json:"cache_read"`
+	CacheWrite float64  `json:"cache_write"`
+	Over200K   *Cost    `json:"context_over_200k,omitempty"`
+	Tiers      []Cost   `json:"tiers,omitempty"`
+}
+
+// Free requires explicit zero input/output prices. Missing prices are unknown,
+// not free; a priced cache operation or long-context tier also excludes a model.
+func (c *Cost) Free() bool {
+	if c == nil || c.Input == nil || c.Output == nil ||
+		*c.Input != 0 || *c.Output != 0 || c.CacheRead != 0 || c.CacheWrite != 0 ||
+		(c.Over200K != nil && !c.Over200K.Free()) {
+		return false
+	}
+	for _, tier := range c.Tiers {
+		if !tier.Free() {
+			return false
+		}
+	}
+	return true
 }
 
 // Modalities lists supported input/output media types.
 type Modalities struct {
-	Input []string `json:"input"`
+	Input  []string `json:"input"`
+	Output []string `json:"output"`
 }
 
 // FetchProvider retrieves one provider's metadata without credentials. The
@@ -102,6 +131,12 @@ func FetchProvider(ctx context.Context, client *http.Client, catalogURL, provide
 	models := catalog[providerID].Models
 	if models == nil {
 		models = map[string]Model{}
+	}
+	for id, model := range models {
+		if model.Provider.NPM == "" {
+			model.Provider.NPM = catalog[providerID].NPM
+			models[id] = model
+		}
 	}
 	return models, true
 }

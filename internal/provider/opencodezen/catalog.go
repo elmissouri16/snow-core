@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	catalogCacheVersion = 2
+	catalogCacheVersion = 3
 	catalogMaxBytes     = 4 << 20
 	catalogFreshness    = 15 * time.Minute
 	modelsDevProviderID = "opencode"
@@ -27,7 +28,7 @@ type freeModelSpec struct {
 	Transport transportKind
 }
 
-// freeModels is the maintained promotional allowlist and local transport/privacy
+// freeModels is the bundled offline fallback and local transport/privacy
 // policy. Reasoning capability and selectable efforts are deliberately absent:
 // ListModels enriches them from OpenCode's current models.dev record instead of
 // pinning model-specific values in Snow. Big Pickle advertises a 200k total
@@ -134,11 +135,12 @@ type modelsPayload struct {
 }
 
 type catalogCache struct {
-	Version    int              `json:"version"`
-	BaseURL    string           `json:"base_url"`
-	CatalogURL string           `json:"catalog_url"`
-	FetchedAt  int64            `json:"fetched_at"`
-	Models     []protocol.Model `json:"models"`
+	Version    int                        `json:"version"`
+	BaseURL    string                     `json:"base_url"`
+	CatalogURL string                     `json:"catalog_url"`
+	FetchedAt  int64                      `json:"fetched_at"`
+	Models     []protocol.Model           `json:"models"`
+	Metadata   map[string]modelsdev.Model `json:"metadata,omitempty"`
 }
 
 type metadataResult struct {
@@ -151,24 +153,68 @@ func (p *Provider) ListModels(ctx context.Context) ([]protocol.Model, error) {
 }
 
 func (p *Provider) ListModelsWithCredential(ctx context.Context, credential auth.Credential) ([]protocol.Model, error) {
+	return p.listModels(ctx, credential, false)
+}
+
+func (p *Provider) RefreshModelsWithCredential(ctx context.Context, credential auth.Credential) ([]protocol.Model, error) {
+	return p.listModels(ctx, credential, true)
+}
+
+func (p *Provider) RefreshModels(ctx context.Context) ([]protocol.Model, error) {
+	return p.RefreshModelsWithCredential(ctx, auth.Credential{})
+}
+
+// ModelCatalogStale lets the app expire its snapshot without holding the
+// catalog mutex or starting a network request on the UI goroutine.
+func (p *Provider) ModelCatalogStale() bool {
+	return time.Now().UnixMilli() >= p.catalogExpiresAt.Load()
+}
+
+// ModelCatalogRevision changes when discovery publishes a snapshot, including
+// discovery performed by Chat before the app next opens its picker.
+func (p *Provider) ModelCatalogRevision() uint64 { return p.catalogRevision.Load() }
+
+func (p *Provider) listModels(ctx context.Context, credential auth.Credential, force bool) ([]protocol.Model, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	p.catalogMu.Lock()
 	defer p.catalogMu.Unlock()
 	now := time.Now()
-	if len(p.cachedModels) > 0 && now.Sub(p.cachedAt) <= catalogFreshness {
+	if !force && !p.cachedAt.IsZero() && !p.ModelCatalogStale() {
 		return cloneModels(p.cachedModels), nil
 	}
 	fallback := staticCatalog()
 	var cachedModels []protocol.Model
-	if cached, fresh := p.loadCatalogCache(now); len(cached) > 0 {
+	if !p.cachedAt.IsZero() {
+		cachedModels = p.cachedModels
+		fallback = cachedModels
+	} else if cached, fresh := p.loadCatalogCache(now); cached != nil {
 		cachedModels = cached
 		fallback = cached
-		if fresh {
-			p.cachedModels, p.cachedAt = cloneModels(cached), now
+		p.cachedModels = cloneModels(cached)
+		if fresh && !force {
+			p.cachedModels = cloneModels(cached)
+			p.catalogExpiresAt.Store(p.cachedAt.Add(catalogFreshness).UnixMilli())
+			p.catalogRevision.Add(1)
 			return cloneModels(cached), nil
 		}
 	}
-	if ctx == nil {
-		ctx = context.Background()
+	fallbackMetadata := p.cachedMetadata
+	failed := func() ([]protocol.Model, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		p.cachedModels, p.cachedMetadata = cloneModels(fallback), fallbackMetadata
+		p.cachedAt = now
+		// Avoid repeated offline lookups on every picker opening, but retry sooner
+		// than a successfully verified catalog. Never renew the disk snapshot.
+		p.catalogExpiresAt.Store(now.Add(time.Minute).UnixMilli())
+		p.catalogRevision.Add(1)
+		return cloneModels(fallback), nil
 	}
 	discoveryCtx, cancel := context.WithTimeout(ctx, p.discoveryTimeout)
 	defer cancel()
@@ -183,30 +229,36 @@ func (p *Provider) ListModelsWithCredential(ctx context.Context, credential auth
 	}
 	req, err := http.NewRequestWithContext(discoveryCtx, http.MethodGet, p.baseURL+"/models", nil)
 	if err != nil {
-		return cloneModels(fallback), nil
+		return failed()
 	}
 	if key := p.resolveKey(credential); key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return cloneModels(fallback), nil
+		return failed()
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return cloneModels(fallback), nil
+		return failed()
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, catalogMaxBytes+1))
 	if err != nil || len(data) > catalogMaxBytes {
-		return cloneModels(fallback), nil
+		return failed()
 	}
 	var payload modelsPayload
-	if json.Unmarshal(data, &payload) != nil {
-		return cloneModels(fallback), nil
+	if json.Unmarshal(data, &payload) != nil || payload.Data == nil {
+		return failed()
 	}
 	var dynamic metadataResult
 	if metadata != nil {
 		dynamic = <-metadata
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !dynamic.ok {
+		dynamic.models = fallbackMetadata
 	}
 	cachedByID := make(map[string]protocol.Model, len(cachedModels))
 	for _, model := range cachedModels {
@@ -217,28 +269,38 @@ func (p *Provider) ListModelsWithCredential(ctx context.Context, credential auth
 		available[record.ID] = true
 	}
 	models := make([]protocol.Model, 0, len(available))
+	ids := make([]string, 0, len(available))
 	for _, spec := range freeModels() {
-		if !available[spec.Model.ID] {
+		if available[spec.Model.ID] {
+			ids = append(ids, spec.Model.ID)
+			delete(available, spec.Model.ID)
+		}
+	}
+	ids = append(ids, slices.Sorted(maps.Keys(available))...)
+	verifiedMetadata := make(map[string]modelsdev.Model)
+	for _, id := range ids {
+		details, hasMetadata := dynamic.models[id]
+		spec, ok := catalogSpec(id, details, hasMetadata)
+		if !ok {
 			continue
 		}
 		model := spec.Model.Clone()
-		if details, ok := dynamic.models[model.ID]; ok {
-			applyReasoningMetadata(&model, details)
+		if hasMetadata {
+			verifiedMetadata[id] = details
 		} else if !dynamic.ok {
 			applyCachedReasoning(&model, cachedByID[model.ID])
 		}
 		models = append(models, model)
 	}
-	// A valid live response is authoritative even when no maintained free model
-	// remains available. Falling back here would resurrect expired promotions.
-	if len(models) == 0 {
-		return []protocol.Model{}, nil
-	}
-	p.cachedModels, p.cachedAt = cloneModels(models), now
+	// Persist successful empty catalogs too, so an offline restart cannot
+	// resurrect withdrawn promotions from an older snapshot.
+	p.cachedModels, p.cachedMetadata, p.cachedAt = cloneModels(models), verifiedMetadata, now
+	p.catalogExpiresAt.Store(now.Add(catalogFreshness).UnixMilli())
+	p.catalogRevision.Add(1)
 	// A configured metadata endpoint must succeed before replacing a previously
 	// verified disk snapshot. A custom gateway with enrichment disabled still
 	// caches its authoritative availability intersection.
-	if dynamic.ok || p.catalogURL == "" {
+	if dynamic.ok || p.catalogURL == "" || len(models) == 0 {
 		p.saveCatalogCache(models, now)
 	}
 	return cloneModels(models), nil
@@ -273,31 +335,37 @@ func (p *Provider) loadCatalogCache(now time.Time) ([]protocol.Model, bool) {
 		return nil, false
 	}
 	var cached catalogCache
-	if json.Unmarshal(data, &cached) != nil || cached.Version != catalogCacheVersion || cached.BaseURL != p.baseURL || cached.CatalogURL != p.catalogURL || len(cached.Models) == 0 {
+	if json.Unmarshal(data, &cached) != nil || cached.Version != catalogCacheVersion || cached.BaseURL != p.baseURL || cached.CatalogURL != p.catalogURL || cached.Models == nil {
 		return nil, false
 	}
-	// Treat cached records as availability IDs plus the last dynamically fetched
-	// reasoning metadata. Rehydrate transport, privacy, limits, and all other
-	// policy locally, and reject unknown or paid IDs completely.
+	// Revalidate new IDs from cached pricing/protocol evidence rather than
+	// trusting cached protocol.Model capabilities or an arbitrary model ID.
 	models := make([]protocol.Model, 0, len(cached.Models))
 	seen := make(map[string]bool, len(cached.Models))
 	for _, cachedModel := range cached.Models {
-		spec, ok := freeModelByID(cachedModel.ID)
+		details, hasMetadata := cached.Metadata[cachedModel.ID]
+		spec, ok := catalogSpec(cachedModel.ID, details, hasMetadata)
 		if !ok || cachedModel.Provider != ProviderID || seen[cachedModel.ID] {
 			return nil, false
 		}
 		seen[cachedModel.ID] = true
 		model := spec.Model.Clone()
-		applyCachedReasoning(&model, cachedModel)
+		if !hasMetadata {
+			applyCachedReasoning(&model, cachedModel)
+		}
 		models = append(models, model)
 	}
 	fetched := time.UnixMilli(cached.FetchedAt)
-	fresh := !fetched.After(now.Add(time.Minute)) && now.Sub(fetched) <= catalogFreshness
+	if fetched.After(now.Add(time.Minute)) || cached.FetchedAt <= 0 {
+		return nil, false
+	}
+	p.cachedAt, p.cachedMetadata = fetched, cached.Metadata
+	fresh := now.Sub(fetched) < catalogFreshness
 	return models, fresh
 }
 
 func (p *Provider) saveCatalogCache(models []protocol.Model, now time.Time) {
-	if p.cacheRoot == "" || len(models) == 0 {
+	if p.cacheRoot == "" {
 		return
 	}
 	if err := os.MkdirAll(p.cacheRoot, 0o700); err != nil {
@@ -307,6 +375,7 @@ func (p *Provider) saveCatalogCache(models []protocol.Model, now time.Time) {
 	data, err := json.Marshal(catalogCache{
 		Version: catalogCacheVersion, BaseURL: p.baseURL, CatalogURL: p.catalogURL,
 		FetchedAt: now.UnixMilli(), Models: cloneModels(models),
+		Metadata: p.cachedMetadata,
 	})
 	if err != nil || len(data) > catalogMaxBytes {
 		return

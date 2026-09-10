@@ -80,6 +80,10 @@ follow-up for work that can wait until the current response completes.
 
 Type `/` to open command completion. The essential commands are:
 
+In `/model`, type to search and press **Ctrl+R** to refresh provider catalogs.
+Opening the picker also refreshes expired Zen catalogs automatically. Cached
+models remain visible while discovery runs.
+
 | Command | Purpose |
 |---|---|
 | `/help` | Open commands and active keybindings |

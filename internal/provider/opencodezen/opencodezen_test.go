@@ -507,7 +507,7 @@ func TestChatUsesBearerAndRejectsUnknownModel(t *testing.T) {
 	drainText(t, stream)
 	stream, _ = p.Chat(context.Background(), auth.Credential{}, chatRequest("gpt-5.4"))
 	event, err := stream.Next(context.Background())
-	if err != nil || event.Type != protocol.EvStreamError || !strings.Contains(event.Err.Error(), "maintained free catalog") {
+	if err != nil || event.Type != protocol.EvStreamError || !strings.Contains(event.Err.Error(), "verified free catalog") {
 		t.Fatalf("event=%+v err=%v", event, err)
 	}
 }
