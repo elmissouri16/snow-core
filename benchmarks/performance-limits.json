@@ -69,6 +69,18 @@
       }
     },
     {
+      "package": "./internal/tui",
+      "pattern": "^BenchmarkTerminalHeartbeat$",
+      "benchtime": "500ms",
+      "benchmarks": {
+        "BenchmarkTerminalHeartbeat": {
+          "max_ns_per_op": 10000,
+          "max_bytes_per_op": 256,
+          "max_allocs_per_op": 8
+        }
+      }
+    },
+    {
       "package": "./internal/session",
       "pattern": "^(BenchmarkSQLiteContextMessages|BenchmarkMemoryContextMessagesAfterCompaction|BenchmarkSQLiteAppendBatch1500|BenchmarkSQLiteBranchHydration5000)$",
       "benchmarks": {

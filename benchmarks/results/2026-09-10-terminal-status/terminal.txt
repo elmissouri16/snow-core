@@ -1,0 +1,14 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/tui
+cpu: Apple M3 Pro
+BenchmarkTerminalStatusFrame/disabled         	   13695	     87536 ns/op	   18552 B/op	     259 allocs/op
+BenchmarkTerminalStatusFrame/disabled         	   13801	     86909 ns/op	   18552 B/op	     259 allocs/op
+BenchmarkTerminalStatusFrame/disabled         	   13807	     86737 ns/op	   18552 B/op	     259 allocs/op
+BenchmarkTerminalStatusFrame/enabled          	   13551	     88973 ns/op	   18552 B/op	     259 allocs/op
+BenchmarkTerminalStatusFrame/enabled          	   13716	     87390 ns/op	   18552 B/op	     259 allocs/op
+BenchmarkTerminalStatusFrame/enabled          	   13760	     87184 ns/op	   18552 B/op	     259 allocs/op
+BenchmarkTerminalHeartbeat                    	13356992	        90.44 ns/op	      72 B/op	       3 allocs/op
+BenchmarkTerminalHeartbeat                    	13856685	        88.04 ns/op	      72 B/op	       3 allocs/op
+BenchmarkTerminalHeartbeat                    	14092983	        88.62 ns/op	      72 B/op	       3 allocs/op
+PASS

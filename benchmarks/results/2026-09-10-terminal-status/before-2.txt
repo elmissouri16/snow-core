@@ -1,0 +1,12 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/elmissouri16/snow-core/internal/tui
+cpu: Apple M3 Pro
+BenchmarkTranscriptRefresh10K         	     164	   7046317 ns/op	 8856621 B/op	      26 allocs/op
+BenchmarkViewNormalAndNarrow/width-40 	   54748	     21890 ns/op	    4449 B/op	      66 allocs/op
+BenchmarkViewNormalAndNarrow/width-120         	   40384	     29944 ns/op	    9617 B/op	      66 allocs/op
+BenchmarkComposerBackspace/bytes-256           	    4088	    266896 ns/op	   55254 B/op	     683 allocs/op
+BenchmarkComposerBackspace/bytes-8192          	     452	   2605419 ns/op	  581713 B/op	    5008 allocs/op
+BenchmarkComposerBackspace/bytes-65536         	      57	  20087417 ns/op	 4442459 B/op	   34051 allocs/op
+BenchmarkTranscriptSelectionDragFrame          	    4567	    267848 ns/op	   51188 B/op	     128 allocs/op
+PASS

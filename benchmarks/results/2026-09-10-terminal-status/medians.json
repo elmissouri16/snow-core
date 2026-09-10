@@ -1,0 +1,100 @@
+[
+  {
+    "benchmark": "BenchmarkTranscriptRefresh10K",
+    "before": [
+      7046317.0,
+      8856621,
+      26
+    ],
+    "after": [
+      7040528.0,
+      8856627,
+      26
+    ],
+    "latency_change_percent": -0.08
+  },
+  {
+    "benchmark": "BenchmarkViewNormalAndNarrow/width-40",
+    "before": [
+      22507.0,
+      4449,
+      66
+    ],
+    "after": [
+      22007.0,
+      4449,
+      66
+    ],
+    "latency_change_percent": -2.22
+  },
+  {
+    "benchmark": "BenchmarkViewNormalAndNarrow/width-120",
+    "before": [
+      29944.0,
+      9618,
+      66
+    ],
+    "after": [
+      29777.0,
+      9618,
+      66
+    ],
+    "latency_change_percent": -0.56
+  },
+  {
+    "benchmark": "BenchmarkComposerBackspace/bytes-256",
+    "before": [
+      266896.0,
+      55302,
+      684
+    ],
+    "after": [
+      264297.0,
+      55335,
+      684
+    ],
+    "latency_change_percent": -0.97
+  },
+  {
+    "benchmark": "BenchmarkComposerBackspace/bytes-8192",
+    "before": [
+      2605419.0,
+      581713,
+      5008
+    ],
+    "after": [
+      2590412.0,
+      581734,
+      5008
+    ],
+    "latency_change_percent": -0.58
+  },
+  {
+    "benchmark": "BenchmarkComposerBackspace/bytes-65536",
+    "before": [
+      18894272.0,
+      4442459,
+      34051
+    ],
+    "after": [
+      18827573.0,
+      4440989,
+      34051
+    ],
+    "latency_change_percent": -0.35
+  },
+  {
+    "benchmark": "BenchmarkTranscriptSelectionDragFrame",
+    "before": [
+      266583.0,
+      51186,
+      128
+    ],
+    "after": [
+      258516.0,
+      51185,
+      128
+    ],
+    "latency_change_percent": -3.03
+  }
+]

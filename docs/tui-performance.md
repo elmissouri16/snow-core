@@ -107,6 +107,30 @@ reset mode, and resets it after `Program.Run` has stopped on quit, cancellation,
 or restart. A mode already enabled by the terminal is preserved. Terminals that
 do not answer retain the initial dark palette and focus-query fallback.
 
+### Terminal progress, titles, and alerts
+
+`terminal_status.go` derives bounded title/progress metadata from the existing
+root reducer. Titles rebuild only when project/state changes. Progress values
+are immutable shared objects, avoiding one allocation per streamed frame.
+Global settings and focus reports govern generic terminal attention/desktop
+notifications. Generation and request/turn identity checks reject delayed or
+duplicate work; canceled/continuing turns do not announce success.
+
+Ghostty expires OSC 9;4 progress without keep-alives. A cancelable one-second
+timer runs only during work or blocking input. The program filter resolves
+the current state immediately before renderer-serialized `RawMsg` output.
+These messages reuse the last complete View; the next ordinary update always
+invalidates that shortcut. Never put progress escape sequences into frame text
+or write to stdout from a separate timer goroutine.
+
+The real renderer regression verifies pulses without intervening frame writes
+and cleanup on quit/cancellation. `BenchmarkTerminalHeartbeat` is included in
+the normal performance gate. [Recorded comparisons](../benchmarks/results/2026-09-10-terminal-status/README.md)
+show no regression in the seven existing fixture medians; the live-app frame
+comparison has identical allocations with terminal metadata enabled/disabled.
+The heartbeat handler itself takes about 0.09 µs and 72 bytes per one-second
+pulse, excluding timer/terminal costs.
+
 ### Streaming and coalescing
 
 Agent callbacks enter an ordered mailbox. Adjacent text, thinking, and plan
