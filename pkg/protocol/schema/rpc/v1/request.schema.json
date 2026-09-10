@@ -74,6 +74,7 @@
             "trust_get",
             "usage",
             "plugins_list",
+            "plugin_statuses",
             "plugin_commands",
             "plugin_views"
           ]
@@ -1726,6 +1727,38 @@
           },
           "required": [
             "command"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "plugin_enable",
+            "plugin_disable"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id"
           ],
           "additionalProperties": false
         }

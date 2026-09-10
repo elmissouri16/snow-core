@@ -37,6 +37,18 @@ trust. Project packages must remain inside the canonical trusted project root.
 Global/explicit packages may be elsewhere. Package paths and entry components
 cannot be symlinks.
 
+The [Go SDK](https://github.com/elmissouri16/snow-core/blob/main/docs/sdk-reference.md#javascript-extension-commands) provides
+`PluginStatuses()` and `SetPluginEnabled(ctx, id, enabled)`; RPC provides
+`plugin_statuses`, `plugin_enable`, and `plugin_disable`. Listing status does
+not read packages or execute JavaScript. Enabling validates the package without
+executing it; full initialization still occurs on the next launch.
+
+Explicit `--js-plugin` / SDK `JavaScriptPlugins` inputs override registrations
+and are controlled through launch options (`can_toggle: false`). Remove that
+override and register the package to use saved toggles. With `--no-plugins`,
+saved toggles remain available, but no plugin runs in the current process;
+start without `--no-plugins` to load enabled registrations.
+
 `--no-plugins` disables Go and JavaScript plugins before packages are read or
 executed. There is no remote installer, automatic update, hot reload, or implicit
 package discovery. The retired executable `plugins` config key remains ignored,

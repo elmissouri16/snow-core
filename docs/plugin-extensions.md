@@ -543,16 +543,24 @@ changing a child's authority.
 
 ## SDK and RPC
 
-Go SDK methods are `Plugins`, `PluginCommands`, `PluginViews`,
+Go SDK methods are `Plugins`, `PluginStatuses`, `SetPluginEnabled(ctx, id, enabled)`, `PluginCommands`, `PluginViews`,
 `RunPluginCommand(ctx, id, input)`, `CancelPluginCommand(id)`, and `AttachPluginUI`.
 See the generated typings and [SDK reference](https://github.com/elmissouri16/snow-core/blob/main/docs/sdk-reference.md) for host boundaries.
-RPC exposes `plugins_list`, `plugin_commands`, `plugin_views`,
+RPC exposes `plugins_list`, `plugin_statuses`, `plugin_enable`, `plugin_disable`, `plugin_commands`, `plugin_views`,
 `plugin_command_run`, and `plugin_command_cancel`:
 
 ```json
 {"id":"review","type":"plugin_command_run","params":{"command":"review-team:run","input":"Review current changes"}}
 {"id":"cancel","type":"plugin_command_cancel","params":{"command":"review-team:run"}}
+{"id":"disable","type":"plugin_disable","params":{"id":"review-team"}}
 ```
+
+`PluginStatuses` / `plugin_statuses` include disabled registrations without
+executing JavaScript. Enable/disable saves the effective registration for the
+next launch and returns `enabled`, `loaded`, `can_toggle`, and
+`restart_required` alongside its ID, scope, and path. Loaded command and view
+inventories remain unchanged until restart. Explicit launch options cannot be
+changed by these persistent controls.
 
 The command reader remains active while commands wait. Ordinary agent and child
 events continue on the shared stream. `snow plugin run id:command -- input`

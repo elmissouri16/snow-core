@@ -133,6 +133,13 @@ Empty fields generally inherit global configuration.
 | `PermissionHandler` | Broker correlated permission decisions |
 | `UserInputHandler` | Broker model-requested user input |
 
+For individual registered JavaScript plugins, call `s.PluginStatuses()` and
+`s.SetPluginEnabled(ctx, "workspace-notes", false)` (or `true` to enable).
+The returned status distinguishes saved enablement from the running catalog;
+close and reopen the session to apply a change. See the
+[plugin SDK reference](https://github.com/elmissouri16/snow-core/blob/main/docs/sdk-reference.md#javascript-extension-commands) for
+scope and launch-option behavior.
+
 SDK permission handling fails closed: an omitted `PermissionMode` uses `deny`
 rather than inheriting the interactive CLI default. `AutoApprove` forces
 `allow` and should be used only inside a deliberately trusted or externally

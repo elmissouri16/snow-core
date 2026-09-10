@@ -310,6 +310,8 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 	for _, command := range KnownRPCCommands() {
 		value := RPCRequest{ID: "test", Type: command}
 		switch command {
+		case "plugin_enable", "plugin_disable":
+			value.Params = json.RawMessage(`{"id":"demo"}`)
 		case "plugin_command_run", "plugin_command_cancel":
 			value.Params = json.RawMessage(`{"command":"demo:run"}`)
 		case "auth_login_start":

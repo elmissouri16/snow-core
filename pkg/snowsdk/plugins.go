@@ -9,6 +9,27 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+// PluginStatuses includes disabled registrations and distinguishes saved state
+// from the currently loaded catalog. It does not execute plugin code.
+func (s *Session) PluginStatuses() ([]protocol.PluginStatus, error) {
+	a, err := s.activeApp()
+	if err != nil {
+		return nil, err
+	}
+	return a.PluginStatuses()
+}
+
+// SetPluginEnabled saves one registered JavaScript plugin's enabled state in
+// its effective global/project scope. Restart the session to apply the change.
+// Explicit Options.JavaScriptPlugins entries must be changed in launch options.
+func (s *Session) SetPluginEnabled(ctx context.Context, id string, enabled bool) (protocol.PluginStatus, error) {
+	a, err := s.activeApp()
+	if err != nil {
+		return protocol.PluginStatus{}, err
+	}
+	return a.SetPluginEnabled(ctx, id, enabled)
+}
+
 func (s *Session) Plugins() ([]protocol.PluginInfo, error) {
 	a, err := s.activeApp()
 	if err != nil {

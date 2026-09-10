@@ -5,16 +5,21 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"slices"
 
 	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
 	"github.com/elmissouri16/snow-core/internal/plugin/javascript"
 	"github.com/elmissouri16/snow-core/pkg/plugin"
 )
 
-func loadJavaScriptPlugins(ctx context.Context, manager *internalplugin.Manager, startup startupConfig, opts Options) error {
+func resolveJavaScriptPlugins(ctx context.Context, startup startupConfig, opts Options) ([]javascript.Declaration, error) {
 	explicit := maps.Clone(opts.JavaScriptPlugins)
 	if explicit == nil {
 		explicit = map[string]plugin.JavaScriptSpec{}
+	}
+	for id, spec := range explicit {
+		spec.Config = slices.Clone(spec.Config)
+		explicit[id] = spec
 	}
 	for _, path := range opts.JavaScriptPaths {
 		if !filepath.IsAbs(path) {
@@ -22,17 +27,17 @@ func loadJavaScriptPlugins(ctx context.Context, manager *internalplugin.Manager,
 		}
 		p, err := javascript.ReadPackage(ctx, path, "", nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if _, exists := explicit[p.Manifest.ID]; exists {
-			return fmt.Errorf("duplicate explicit JavaScript plugin %s", p.Manifest.ID)
+			return nil, fmt.Errorf("duplicate explicit JavaScript plugin %s", p.Manifest.ID)
 		}
 		explicit[p.Manifest.ID] = plugin.JavaScriptSpec{Path: path}
 	}
-	declarations, err := javascript.Resolve(startup.cfg.JavaScriptPlugins, startup.projectJavaScriptPlugins, explicit, filepath.Dir(startup.configPath), startup.projectInputRoot, startup.absCWD)
-	if err != nil {
-		return err
-	}
+	return javascript.Resolve(startup.cfg.JavaScriptPlugins, startup.projectJavaScriptPlugins, explicit, filepath.Dir(startup.configPath), startup.projectInputRoot, startup.absCWD)
+}
+
+func loadJavaScriptPlugins(ctx context.Context, manager *internalplugin.Manager, declarations []javascript.Declaration, startup startupConfig) error {
 	for _, d := range declarations {
 		if d.Disabled {
 			continue

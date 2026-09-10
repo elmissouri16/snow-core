@@ -9,6 +9,9 @@ import (
 )
 
 func (s *Server) handlePluginCommand(ctx context.Context, req Request) error {
+	if req.Type == "plugin_statuses" || req.Type == "plugin_enable" || req.Type == "plugin_disable" {
+		return s.handlePluginManagement(ctx, req)
+	}
 	var params struct {
 		Command string `json:"command"`
 		Input   string `json:"input"`
@@ -55,5 +58,39 @@ func (s *Server) handlePluginCommand(ctx context.Context, req Request) error {
 			s.write(response)
 		})
 	}
+	return nil
+}
+
+func (s *Server) handlePluginManagement(ctx context.Context, req Request) error {
+	var data any
+	if req.Type == "plugin_statuses" {
+		var params struct{}
+		if len(req.Params) > 0 {
+			if err := jsonv2.Unmarshal(req.Params, &params, jsonv2.RejectUnknownMembers(true)); err != nil {
+				return err
+			}
+		}
+		statuses, err := s.app.PluginStatuses()
+		if err != nil {
+			return err
+		}
+		data = statuses
+	} else {
+		var params struct {
+			ID string `json:"id"`
+		}
+		if err := jsonv2.Unmarshal(req.Params, &params, jsonv2.RejectUnknownMembers(true)); err != nil {
+			return err
+		}
+		if params.ID == "" {
+			return errors.New("plugin id is required")
+		}
+		status, err := s.app.SetPluginEnabled(ctx, params.ID, req.Type == "plugin_enable")
+		if err != nil {
+			return err
+		}
+		data = status
+	}
+	s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: data})
 	return nil
 }

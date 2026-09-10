@@ -14,6 +14,7 @@ import (
 	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
 	"github.com/elmissouri16/snow-core/internal/permission"
 	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
+	"github.com/elmissouri16/snow-core/internal/plugin/javascript"
 	managedprocess "github.com/elmissouri16/snow-core/internal/process"
 	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/session"
@@ -97,6 +98,8 @@ type App struct {
 	sessionQuery         *session.QueryEngine
 	artifacts            artifact.Store
 	extensions           *extensionServices
+	pluginDeclarations   []javascript.Declaration
+	pluginMutationMu     sync.Mutex
 }
 
 // SessionDeleteCleanupError reports that the durable session was deleted but

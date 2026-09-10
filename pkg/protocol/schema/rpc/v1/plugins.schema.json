@@ -319,6 +319,42 @@
         "effective"
       ],
       "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "loaded": {
+          "type": "boolean"
+        },
+        "can_toggle": {
+          "type": "boolean"
+        },
+        "restart_required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "scope",
+        "enabled",
+        "loaded",
+        "can_toggle",
+        "restart_required"
+      ],
+      "additionalProperties": false
     }
   }
 }

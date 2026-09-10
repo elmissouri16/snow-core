@@ -1279,6 +1279,14 @@
               "permission_mode_set",
               "permission_reject",
               "permission_reply",
+              "plugin_command_cancel",
+              "plugin_command_run",
+              "plugin_commands",
+              "plugin_disable",
+              "plugin_enable",
+              "plugin_statuses",
+              "plugin_views",
+              "plugins_list",
               "process_logs",
               "processes_list",
               "session_create",
@@ -1917,6 +1925,68 @@
             "is_error"
           ],
           "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "enum": [
+            "plugin_statuses"
+          ]
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "plugins.schema.json#/$defs/status"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "enum": [
+            "plugin_enable",
+            "plugin_disable"
+          ]
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "plugins.schema.json#/$defs/status"
         }
       },
       "required": [

@@ -2322,3 +2322,22 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   saved immediately, confirmation offers only No/Yes with No selected, and
   accepting No preserves the note. A fresh launch verified `/note` opens the
   add dialog directly and cancellation prints one concise message.
+
+## BUG-061: Successful plugin RPC responses match two schema branches
+
+- **Status:** Resolved; verified 2026-09-09
+- **Surface:** RPC version 1 response JSON Schema
+- **Actual:** The generic success branch does not exclude the five existing
+  plugin commands. Their successful responses also match their dedicated branch,
+  so strict `oneOf` validation rejects valid plugin responses.
+- **Reproduction:** Validate `plugins_list` with a valid `PluginInfo` array
+  against `response.schema.json`; validation reports two matching branches.
+- **Remediation:** Exclude plugin commands from the generic success branch and
+  retain dedicated response validation for both existing commands and the new
+  registration status and enable/disable controls.
+- **Regression:** `TestPluginManagementSchemas` validates all eight responses.
+- **Verification:** `TestPluginManagementSchemas`, `go test ./...`,
+  `go vet ./...`, affected app/TUI/RPC/SDK race checks, all 56 support-script
+  tests, and `scripts/check_benchmarks.py` passed. The installed extension smoke
+  pack passed per-plugin persistence and restart checks plus existing command,
+  hook, dialog, storage, and selected-child execution checks.

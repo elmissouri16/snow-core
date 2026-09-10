@@ -1971,8 +1971,9 @@ operations do not fabricate extra provider-facing tool pairs. Permission request
 may include `plugin: {plugin_id, tool_name, parent_tool_call_id, host_tool}`.
 The optional `host_tool` identifies a nested built-in operation. These fields are
 host-owned attribution, not authority supplied by the script. Runtime warnings
-and bounded plugin logs are available through `diagnostics`. Management remains
-in the CLI; no plugin-management RPC mutations are added. See [Plugins](plugins.md).
+and bounded plugin logs are available through `diagnostics`. Registration status
+and individual enable/disable controls are also available over RPC; adding or
+removing registrations remains in the CLI. See [Plugins](plugins.md).
 
 ## JavaScript extension commands
 
@@ -1983,3 +1984,22 @@ with `plugin_command_cancel` and `params: {"command":"id:name"}`. Execution is
 asynchronous so the reader can accept cancellation and interaction replies.
 See [JavaScript extensions](plugin-extensions.md) for capability and lifecycle
 rules. These commands are additive to RPC version 1.
+
+`plugin_statuses` lists effective registrations, including disabled entries,
+without reading their packages. `plugin_enable` and `plugin_disable` take
+`params: {"id":"plugin-id"}` and save to that registration's effective global
+or trusted-project scope. They return a status object:
+
+```json
+{"id":"off","type":"plugin_disable","params":{"id":"workspace-notes"}}
+{"id":"off","type":"response","command":"plugin_disable","success":true,"data":{"id":"workspace-notes","path":"/plugins/workspace-notes","scope":"global","enabled":false,"loaded":true,"can_toggle":true,"restart_required":true}}
+```
+
+Restart the Snow process to apply the saved state. Active tools, commands,
+hooks, dialogs, and children continue unchanged until then. `enabled` is the
+saved state; `loaded` describes this process. `restart_required` is true when
+they differ. `--no-plugins` still suppresses all runtime loading. Explicit
+`--js-plugin` inputs have `can_toggle: false`; change launch options or register
+the package and remove the override. Enabling validates package files without
+executing JavaScript. Missing IDs, invalid packages, and explicit overrides
+return a failed response without changing the registration.

@@ -782,3 +782,19 @@ API 2 adds `Session.Plugins()`, `PluginCommands()`, `PluginViews()`,
 handlers receive copied `protocol.PluginUIEvent` payloads and must dispatch to
 their own UI loop. The existing permission and user-input brokers remain
 separate and authoritative. See [JavaScript extensions](plugin-extensions.md).
+
+`Session.PluginStatuses() ([]protocol.PluginStatus, error)` lists effective
+JavaScript registrations, including disabled ones, without reading packages.
+`Session.SetPluginEnabled(ctx, id, enabled) (protocol.PluginStatus, error)` saves
+an individual registration in its effective global or trusted-project scope.
+Close and reopen the session to apply the change. Existing commands, hooks,
+tools, and child runtimes continue unchanged until then.
+
+Each status contains `ID`, `Path`, `Scope`, `Enabled` (saved state), `Loaded`
+(current runtime), `CanToggle`, and `RestartRequired`. `Options.JavaScriptPlugins`
+overrides are controlled by launch options and return `CanToggle: false`;
+set the individual spec's `Disabled` value before calling `Open`, or register
+the package and omit the override to use persistent controls. `NoPlugins`
+continues to suppress runtime loading. Both methods return an error after the
+session is closed. Enabling checks package files without executing JavaScript;
+full initialization happens when the next session opens.

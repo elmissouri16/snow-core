@@ -139,6 +139,34 @@ class Provider(http.server.BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
 
+def check_management(binary, workspace, env):
+    rpc = RPC(binary, workspace, env)
+    try:
+        statuses = rpc.request("plugin_statuses")
+        assert {p["id"] for p in statuses} == set(PACKAGES), statuses
+        assert all(p["enabled"] and p["loaded"] and p["can_toggle"]
+                   and not p["restart_required"] for p in statuses), statuses
+        status = rpc.request("plugin_disable", {"id": "workspace-notes"})
+        assert not status["enabled"] and status["loaded"] and status["restart_required"], status
+        assert "No notes yet" in rpc.command("workspace-notes:open"), "Running catalog changed before restart"
+    finally:
+        rpc.close()
+    rpc = RPC(binary, workspace, env)
+    try:
+        statuses = rpc.request("plugin_statuses")
+        for status in statuses:
+            expected = status["id"] != "workspace-notes"
+            assert status["enabled"] == expected and status["loaded"] == expected, status
+            assert not status["restart_required"], status
+        assert all(c["plugin_id"] != "workspace-notes" for c in rpc.request("plugin_commands"))
+        rpc.command("workspace-notes:open", failure=True)
+        status = rpc.request("plugin_enable", {"id": "workspace-notes"})
+        assert status["enabled"] and not status["loaded"] and status["restart_required"], status
+    finally:
+        rpc.close()
+    print("PASS: individual plugin enable/disable, disabled inventory, persistence, and restart boundaries.")
+
+
 def check_controls(binary, workspace, env):
     rpc = RPC(binary, workspace, env)
     try:
@@ -244,6 +272,7 @@ def main():
         config["subagents"] = {"roles": {"plugin_scout": {"description": "Read-only plugin scout",
             "tools": ["read", "grep", "glob", "plugin_project-helper-v2_files"]}}}
         config_path.write_text(json.dumps(config))
+        check_management(binary, workspace, env)
         check_controls(binary, workspace, env)
         check_provider(binary, workspace, env)
     print("Temporary configuration and fixture cleaned up. No model API used.")

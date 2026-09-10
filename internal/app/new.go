@@ -21,6 +21,7 @@ import (
 	internalmcp "github.com/elmissouri16/snow-core/internal/mcp"
 	"github.com/elmissouri16/snow-core/internal/permission"
 	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
+	"github.com/elmissouri16/snow-core/internal/plugin/javascript"
 	managedprocess "github.com/elmissouri16/snow-core/internal/process"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/skills"
@@ -452,13 +453,18 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		CWD: extensionCWD, SessionID: st.ID(),
 		MaxProgressBytes: cfg.ToolOutputLimit(), MaxOutputBytes: cfg.ToolOutputLimit(),
 	})
+	var pluginDeclarations []javascript.Declaration
 	if !opts.NoPlugins {
 		for _, p := range opts.GoPlugins {
 			if err := manager.LoadGo(p); err != nil {
 				return nil, fmt.Errorf("app: plugin: %w", err)
 			}
 		}
-		if err := loadJavaScriptPlugins(ctx, manager, startup, opts); err != nil {
+		pluginDeclarations, err = resolveJavaScriptPlugins(ctx, startup, opts)
+		if err != nil {
+			return nil, fmt.Errorf("app: JavaScript plugins: %w", err)
+		}
+		if err := loadJavaScriptPlugins(ctx, manager, pluginDeclarations, startup); err != nil {
 			return nil, fmt.Errorf("app: JavaScript plugins: %w", err)
 		}
 		if err := manager.Initialize(ctx); err != nil {
@@ -862,6 +868,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		Goal:               goalController,
 		Trust:              tr,
 		PluginManager:      manager,
+		pluginDeclarations: pluginDeclarations,
 		ProcessManager:     processManager,
 		MCPManager:         mcpManager,
 		MCPStatuses:        slices.Clone(mcpStatuses),
