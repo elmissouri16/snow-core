@@ -112,6 +112,33 @@
       }
     },
     {
+      "package": "./internal/tui",
+      "pattern": "^BenchmarkStableComposer$",
+      "benchtime": "500ms",
+      "benchmarks": {
+        "BenchmarkStableComposer/ascii": {
+          "max_ns_per_op": 8000000,
+          "max_bytes_per_op": 900000,
+          "max_allocs_per_op": 2400
+        },
+        "BenchmarkStableComposer/accents": {
+          "max_ns_per_op": 8000000,
+          "max_bytes_per_op": 900000,
+          "max_allocs_per_op": 2700
+        },
+        "BenchmarkStableComposer/cjk": {
+          "max_ns_per_op": 8000000,
+          "max_bytes_per_op": 900000,
+          "max_allocs_per_op": 3000
+        },
+        "BenchmarkStableComposer/emoji": {
+          "max_ns_per_op": 8000000,
+          "max_bytes_per_op": 970000,
+          "max_allocs_per_op": 7200
+        }
+      }
+    },
+    {
       "package": "./internal/agent",
       "pattern": "^BenchmarkEventBusDispatch256$",
       "benchmarks": {

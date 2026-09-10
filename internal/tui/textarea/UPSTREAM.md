@@ -5,11 +5,21 @@ from `charm.land/bubbles/v2 v2.2.1`. Copyright Charmbracelet, Inc.; the original
 MIT [license](LICENSE) is included. Other Bubbles components use the upstream
 module directly. This copy remains private to the TUI.
 
-The only algorithm change is in `wrap`: `runeTextWidth` uses the slice length
-for printable ASCII, avoiding repeated rune-to-string conversion and grapheme
-segmentation. All other runes use the original `uniseg.StringWidth` path.
-Update, cursor, selection, scrolling, paste, and Unicode wrapping logic are
-unchanged. Large composer edit benchmarks identified this as a CPU hot path.
+The `wrap` patch uses `runeTextWidth` for printable ASCII, avoiding repeated
+rune-to-string conversion and grapheme segmentation. All other runes retain
+the original `uniseg.StringWidth` path.
+
+The view patch styles only visible rows while preserving an empty row for each
+hidden row, including the trailing row used by the viewport. It predicts the
+viewport's bottom clamp after edits/resizes and preserves selection offsets for
+hidden segments. Update still prepares viewport content before scrolling; View
+renders at the resulting offset. The empty-placeholder check avoids building a
+full draft string when cursor position already rules it out. Cursor, selection,
+paste, and Unicode wrapping logic remain upstream.
+
+`visible_rows_test.go` compares against the unmodified upstream component,
+including Unicode, real/virtual cursors, narrow widths, resize, selection,
+scrolling, dynamic height, styles, and placeholders.
 
 Source declarations and the complete upstream test suite are split by feature
 to respect Snow's 1,000-line file limit. Generated files retain upstream idioms

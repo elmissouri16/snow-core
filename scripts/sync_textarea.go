@@ -40,7 +40,7 @@ func main() {
 		}
 	}
 	input := string(read("textarea/textarea.go"))
-	// The sole behavior-preserving optimization: printable ASCII rune slices
+	// Printable ASCII rune slices
 	// have width len(slice). Keep upstream's Unicode path for everything else.
 	for _, expression := range []string{"lines[row]", "word"} {
 		input = strings.ReplaceAll(input, "uniseg.StringWidth(string("+expression+"))", "runeTextWidth("+expression+")")
@@ -53,6 +53,36 @@ func runeTextWidth(value []rune) int {
     return len(value)
 }
 `
+	input = strings.Replace(input, `len(m.Value()) == 0 && m.row == 0 && m.col == 0 && m.Placeholder != ""`, `m.row == 0 && m.col == 0 && m.Placeholder != "" && len(m.Value()) == 0`, 1)
+	// Preserve every viewport row, but only style rows that it can display.
+	// Update still prepares content before scrolling, and View renders again at
+	// the resulting offset. Empty offscreen rows keep all scroll bounds intact.
+	input = strings.Replace(input, "\tdisplayLine := 0", `
+	// SetContent clamps an offset past the new bottom after edits/resizes.
+	// Render the rows at that resulting offset, including its trailing empty row.
+	visibleStart := min(m.viewport.YOffset(), max(0, m.totalVisualLines()+m.height+1-m.viewport.Height()))
+	visibleEnd := visibleStart + m.viewport.Height()
+	displayLine := 0`, 1)
+	input = strings.Replace(input, "\t\tfor wl, wrappedLine := range wrappedLines {", `
+		for wl, wrappedLine := range wrappedLines {
+			if displayLine < visibleStart || displayLine >= visibleEnd {
+				wrappedBase += len(wrappedLine)
+				// Match upstream's trimmed trailing space in selection coordinates.
+				if m.HasSelection() && len(wrappedLine) > 0 && wrappedLine[len(wrappedLine)-1] == ' ' && runeTextWidth(wrappedLine) > m.width {
+					wrappedBase--
+				}
+				s.WriteByte('\n')
+				displayLine++
+				continue
+			}`, 1)
+	input = strings.Replace(input, "\tfor range m.height {\n\t\ts.WriteString(m.promptView(displayLine))", `
+	for range m.height {
+		if displayLine < visibleStart || displayLine >= visibleEnd {
+			s.WriteByte('\n')
+			displayLine++
+			continue
+		}
+		s.WriteString(m.promptView(displayLine))`, 1)
 	splitSource(input, false)
 	splitSource(string(read("textarea/textarea_test.go")), true)
 	for _, name := range []string{"textarea/selection.go", "textarea/selection_test.go", "internal/runeutil/runeutil.go", "internal/runeutil/runeutil_test.go", "internal/memoization/memoization.go", "internal/memoization/memoization_test.go"} {

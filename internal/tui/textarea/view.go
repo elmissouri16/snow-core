@@ -14,7 +14,7 @@ import (
 )
 
 func (m *Model) view() string {
-	if len(m.Value()) == 0 && m.row == 0 && m.col == 0 && m.Placeholder != "" {
+	if m.row == 0 && m.col == 0 && m.Placeholder != "" && len(m.Value()) == 0 {
 		return m.placeholderView()
 	}
 	m.virtualCursor.TextStyle = m.activeStyle().computedCursorLine()
@@ -28,6 +28,10 @@ func (m *Model) view() string {
 		styles           = m.activeStyle()
 	)
 
+	// SetContent clamps an offset past the new bottom after edits/resizes.
+	// Render the rows at that resulting offset, including its trailing empty row.
+	visibleStart := min(m.viewport.YOffset(), max(0, m.totalVisualLines()+m.height+1-m.viewport.Height()))
+	visibleEnd := visibleStart + m.viewport.Height()
 	displayLine := 0
 	for l, line := range m.value {
 		wrappedLines := m.memoizedWrap(line, m.width)
@@ -44,6 +48,16 @@ func (m *Model) view() string {
 		wrappedBase := 0
 
 		for wl, wrappedLine := range wrappedLines {
+			if displayLine < visibleStart || displayLine >= visibleEnd {
+				wrappedBase += len(wrappedLine)
+				// Match upstream's trimmed trailing space in selection coordinates.
+				if m.HasSelection() && len(wrappedLine) > 0 && wrappedLine[len(wrappedLine)-1] == ' ' && runeTextWidth(wrappedLine) > m.width {
+					wrappedBase--
+				}
+				s.WriteByte('\n')
+				displayLine++
+				continue
+			}
 			prompt := m.promptView(displayLine)
 			s.WriteString(style.Render(prompt))
 			displayLine++
@@ -108,7 +122,13 @@ func (m *Model) view() string {
 
 	// Always show at least `m.Height` lines at all times.
 	// To do this we can simply pad out a few extra new lines in the view.
+
 	for range m.height {
+		if displayLine < visibleStart || displayLine >= visibleEnd {
+			s.WriteByte('\n')
+			displayLine++
+			continue
+		}
 		s.WriteString(m.promptView(displayLine))
 		displayLine++
 
