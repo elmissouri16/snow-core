@@ -217,7 +217,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 	// Ignore every delayed event from an older turn, not just its terminal
 	// boundary. Command results and mailbox delivery use separate Bubble Tea
 	// paths, so a newer turn can be admitted before an old batch is reduced.
-	if m.staleRootEvent(ev) {
+	if m.staleRootEvent(ev) || m.settledCompactionEvent(ev) {
 		return
 	}
 	if ev.Agent == nil && ev.RootEpoch > m.rootEventEpoch {
@@ -241,7 +241,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 	// Session updates describe persistence, not active provider work. In
 	// particular, a delayed update after a terminal compaction event must not
 	// resurrect the completed turn and restart the idle spinner.
-	if ev.Type != protocol.EvTurnDone && ev.Type != protocol.EvAborted && ev.Type != protocol.EvSessionUpdated {
+	if ev.Type != protocol.EvTurnDone && ev.Type != protocol.EvAborted && ev.Type != protocol.EvSessionUpdated && ev.Type != protocol.EvCompactionDone {
 		m.adoptTurn(ev)
 	}
 	m.observeTerminalEvent(ev)

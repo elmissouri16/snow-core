@@ -48,6 +48,7 @@ type terminalAttention struct {
 }
 
 type terminalStatus struct {
+	compaction     terminalCompactionSettlement
 	unfocused      bool
 	failed         bool
 	outcome        terminalActivity
@@ -140,6 +141,10 @@ func (m *Model) observeTerminalEvent(ev protocol.AgentEvent) {
 		return
 	}
 	switch ev.Type {
+	case protocol.EvCompactionDone:
+		if ev.Compaction == nil || !ev.Compaction.Automatic {
+			m.settleTerminalCompaction(ev.TurnID, ev.RootEpoch, ev.IsError, m.abortNoticePending)
+		}
 	case protocol.EvError:
 		m.terminal.failed = true
 		if !m.busy {

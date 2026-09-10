@@ -732,14 +732,20 @@ func (m *Model) startCompact() tea.Cmd {
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRun = cancel
-	m.beginOptimisticRun()
+	runGeneration := m.beginOptimisticRun()
 	m.compactGeneration++
 	generation := m.compactGeneration
 	m.compacting = true
 	m.compactStatus = "compacting context"
+	a := m.app.Agent
 	return func() tea.Msg {
-		result, err := m.app.Agent.Compact(ctx)
-		return compactDoneMsg{generation: generation, result: result, err: err}
+		_, beforeID, _ := a.ActiveTurn()
+		result, err := a.Compact(ctx)
+		origin, id, _ := a.ActiveTurn()
+		if origin != "compact" || id == beforeID {
+			id = "" // Rejected before admission; no compaction event follows.
+		}
+		return compactDoneMsg{generation: generation, runGeneration: runGeneration, turnID: id, epoch: a.RootEpoch(), result: result, err: err}
 	}
 }
 
@@ -756,6 +762,11 @@ func (m *Model) requestAbort() {
 	// Invalidate optimistic command completions before joining the agent. This
 	// also covers the goal worker's inter-turn delay, where no EvAborted event
 	// exists to release the UI projection.
+	if m.compacting && m.app != nil && m.app.Agent != nil {
+		if origin, id, running := m.app.Agent.ActiveTurn(); origin == "compact" && running {
+			m.settleTerminalCompaction(id, m.app.Agent.RootEpoch(), false, true)
+		}
+	}
 	m.runGeneration++
 	m.compactGeneration++
 	// Close queue admission and drain accepted input before cancelling the run.
@@ -774,6 +785,8 @@ func (m *Model) requestAbort() {
 	m.pendingInputs = protocol.InputQueue{}
 	m.restoreAbortedInputs(queue, fallbacks, draft)
 	m.setRunIdle()
+	m.resetTerminalRun()
+	m.terminal.outcome = terminalAborted
 	m.abortNoticePending = true
 	m.pushLine(styleError.Render("aborted"))
 }

@@ -98,9 +98,12 @@ type chatGPTAccountChoice struct {
 }
 
 type compactDoneMsg struct {
-	generation uint64
-	result     protocol.CompactionResult
-	err        error
+	runGeneration uint64
+	turnID        string
+	epoch         uint64
+	generation    uint64
+	result        protocol.CompactionResult
+	err           error
 }
 
 type promptDoneMsg struct {

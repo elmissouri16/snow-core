@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -361,15 +362,18 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pushLine(styleTool.Render("warning: dump contains full prompts, responses, thinking, tool data, errors, paths, and session state; review before sharing"))
 		return m, nil
 	case compactDoneMsg:
-		if msg.generation != m.compactGeneration {
+		if msg.generation != m.compactGeneration || (msg.runGeneration != 0 && msg.runGeneration != m.runGeneration) {
 			return m, nil
 		}
-		// EvCompactionDone is the authoritative lifecycle transition. This
-		// command result only reports the manual operation's summary/error; it
-		// must not unlock a newer operation or an automatic goal continuation.
+		// The stream and command result can arrive in either order. Only settle
+		// the current manual operation after the core has released admission;
+		// never unlock a newer operation or an automatic goal continuation.
 		if m.app != nil && m.app.Agent != nil && !m.app.Agent.IsRunning() {
 			m.setRunIdle()
 		}
+		// Results also cover failures before a lifecycle event can be emitted.
+		// The shared settlement fence deduplicates either delivery order.
+		m.settleTerminalCompaction(msg.turnID, msg.epoch, msg.err != nil, errors.Is(msg.err, context.Canceled))
 		m.refreshContextUsageFromSession()
 		m.layout()
 		if msg.err != nil {
