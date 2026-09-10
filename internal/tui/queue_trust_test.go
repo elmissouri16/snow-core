@@ -46,6 +46,7 @@ func TestBusyComposerChoosesSteerAndFollowUp(t *testing.T) {
 func TestQueueSettleFallbackStartsOnlyAfterTurnDone(t *testing.T) {
 	m := newModel(context.Background(), app.Options{})
 	buildAppForTest(t, m)
+	m.app.Cfg.TUI.TerminalProgress = false // Only turn/queue commands are relevant to this boundary assertion.
 	m.busy = true
 	pendingMode := protocol.ModePlan
 	m.pendingMode = &pendingMode

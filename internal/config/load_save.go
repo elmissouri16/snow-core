@@ -314,7 +314,7 @@ func Default() Config {
 		Processes:  DefaultProcesses(),
 		Retry:      DefaultRetry(),
 		Compaction: DefaultCompaction(),
-		TUI:        TUIConfig{Theme: "default", Mouse: true},
+		TUI:        TUIConfig{Theme: "default", Mouse: true, TerminalTitle: true, TerminalProgress: true, Notifications: "unfocused"},
 	}
 }
 
@@ -455,6 +455,9 @@ func Load(path string) (Config, error) {
 		return cfg, errors.New("config: fixed_context_budget_percent must be 10..50")
 	}
 	if err := ValidateTUITheme(cfg.TUI.Theme); err != nil {
+		return cfg, err
+	}
+	if err := ValidateTerminalNotifications(cfg.TUI.Notifications); err != nil {
 		return cfg, err
 	}
 	if err := cfg.Subagents.ValidateSubagents(); err != nil {

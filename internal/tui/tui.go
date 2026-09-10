@@ -288,14 +288,15 @@ type loginNavigationEntry struct {
 
 // Model is the TUI state.
 type Model struct {
-	plugins *pluginUIState
-	ctx     context.Context
-	cancel  context.CancelFunc
-	opts    app.Options
-	asyncIO bool
-	app     *app.App
-	width   int
-	height  int
+	terminal terminalStatus
+	plugins  *pluginUIState
+	ctx      context.Context
+	cancel   context.CancelFunc
+	opts     app.Options
+	asyncIO  bool
+	app      *app.App
+	width    int
+	height   int
 
 	transcript        viewport.Model
 	editor            textarea.Model
@@ -734,5 +735,8 @@ const (
 	settingsCheckNow
 	settingsUpdateNow
 	settingsKeybindings
+	settingsTerminalTitle
+	settingsTerminalProgress
+	settingsNotifications
 	settingsCount
 )

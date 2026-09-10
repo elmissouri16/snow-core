@@ -2526,6 +2526,28 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   Existing benchmark limits are unchanged; new rendering limits pass and
   reject the recorded pre-fix migration samples.
 
+## BUG-068: Ghostty cannot show Snow activity or background attention
+
+- **Status:** Resolved; verified 2026-09-10 on `feat/ghostty-v2`.
+- **Surface:** Terminal progress, tab titles, and background notifications.
+- **Evidence:** The v2 root View sets screen, focus, and mouse state but leaves
+  title/progress empty. No completion/request path emits terminal attention or
+  desktop notifications. A running Snow turn therefore has no external status
+  in another Ghostty tab. Ghostty supports the required title, OSC 9;4 progress,
+  OSC 9 desktop notification, and bell protocols.
+- **Remediation:** Add configurable global title/progress/alert preferences,
+  map accepted root state and serialized input requests, suppress stale/duplicate
+  alerts, and maintain progress while blocked without rebuilding the frame.
+  Verify progress clear/title cleanup on ordinary quit and cancellation.
+- **Verification:** Focused state, policy, identity, sanitization, responsive
+  settings, and real renderer tests pass. Consecutive paused-state heartbeats
+  write only the escape sequence. `go test ./...`, `go vet ./...`, full affected
+  race checks plus final focused race checks, all 58 Python tests, the benchmark
+  guard, and all PTY lifecycle scenarios pass. The seven controlled rendering
+  fixture medians do not regress; terminal metadata has identical frame
+  allocations enabled/disabled. Results are recorded in
+  `benchmarks/results/2026-09-10-terminal-status`.
+
 ## BUG-069: A late prompt error reopens a completed TUI turn
 
 - **Status:** Resolved; verified 2026-09-10.

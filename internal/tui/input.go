@@ -622,6 +622,7 @@ func (m *Model) startQueueFallback() tea.Cmd {
 }
 
 func (m *Model) beginOptimisticRun() uint64 {
+	m.resetTerminalRun()
 	m.runGeneration++
 	m.activeTurnID = ""
 	m.abortNoticePending = false

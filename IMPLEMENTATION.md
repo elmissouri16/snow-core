@@ -1340,6 +1340,18 @@ notifications refresh built-in, custom, and plugin palettes while preserving
 interactive state; notification mode ownership is restored after renderer
 shutdown. Core and public SDK packages remain UI-independent.
 
+Terminal status stays in `internal/tui/terminal_status.go`. Declarative title
+and progress use the existing reducer's root work/approval/input state. Global
+preferences apply live through an app facade without changing agent/RPC/SDK
+contracts. Generic attention/desktop alerts are deduplicated and focus-gated;
+child completion, snapshots, stale turns, and goal continuations do not announce
+root completion. A generation-scoped, cancelable one-second progress keep-alive
+goes through a Bubble Tea program filter and `RawMsg` output, deriving state
+immediately before emission. Only these terminal-only messages reuse the last
+complete `tea.View`; all ordinary updates, including resize and focus, invalidate
+that shortcut. Progress timers stop at idle, and Bubble Tea restores owned
+title/progress state on quit, cancellation, and suspend.
+
 Frame composition performs one final padding/clipping pass and reuses a bounded
 composer view until input, cursor, selection, geometry, or styling changes.
 Textarea is a reproducible Bubbles v2.2.1 snapshot under `internal/tui/textarea`:

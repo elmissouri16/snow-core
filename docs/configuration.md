@@ -183,7 +183,10 @@ A representative configuration:
   },
   "tui": {
     "theme": "default",
-    "mouse": true
+    "mouse": true,
+    "terminal_title": true,
+    "terminal_progress": true,
+    "notifications": "unfocused"
   },
   "debug": {
     "enabled": false
@@ -398,10 +401,46 @@ parameters.
 {
   "tui": {
     "theme": "default",
-    "mouse": true
+    "mouse": true,
+    "terminal_title": true,
+    "terminal_progress": true,
+    "notifications": "unfocused"
   }
 }
 ```
+
+`terminal_title` shows `Snow · project · Running`, waiting, or completion status
+in the terminal tab/window title. Only the working directory's bounded, sanitized
+base name is included. `terminal_progress` shows indeterminate activity while
+running, paused activity for approval/input, and an error state on failure.
+Successful completion or cancellation clears progress; the next interaction
+acknowledges the completed title/error state. Both options default to `true`.
+
+`notifications` controls desktop notifications and terminal attention bells:
+`unfocused` (default) alerts only after the terminal has reported losing focus,
+`always` also alerts while focused, and `off` disables both. Alerts announce root
+turn completion, failure, approval, or requested input using generic text. They
+do not include prompts, tool arguments, paths, or error details. Child completion,
+goal continuation, and canceled turns do not announce root success. Refocusing
+before a queued background alert is sent suppresses it.
+
+Change these global preferences live in `/settings` under **Terminal tab title**,
+**Terminal progress**, and **Terminal alerts**. Project configuration cannot
+override them. Terminal support and settings determine their visual presentation:
+Ghostty displays OSC 9;4 progress above each split, accepts OSC 9 notifications,
+and can mark an alerted tab title with a bell or bounce its Dock icon. Its
+`progress-style`, `desktop-notifications`, and `bell-features` settings still
+apply, as do OS notification permissions. A fixed Ghostty `title` overrides
+application title changes. Multiplexers may require their own forwarding support.
+
+Snow refreshes active progress once per second because Ghostty expires stale
+progress after about 15 seconds. These small terminal messages reuse the last
+frame; they do not rebuild the transcript. The timer stops when work and blocking
+input finish. Bubble Tea clears owned title/progress state on shutdown, including
+cancellation; the shell can then set its normal prompt title.
+
+See Ghostty's [progress protocol](https://ghostty.org/docs/vt/osc/conemu) and
+[terminal notification options](https://ghostty.org/docs/config/reference#desktop-notifications).
 
 The four selectable built-in themes are Snow (`default`), Frost (`frost`),
 Ember (`ember`), and Aurora (`aurora`). Every built-in adapts its complete

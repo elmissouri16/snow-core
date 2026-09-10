@@ -72,6 +72,7 @@ func TestHeaderThinkingAndModeHitTargets(t *testing.T) {
 
 func TestHeaderModeClickQueuesDuringActiveTurn(t *testing.T) {
 	m := modelPickerTestModel(t, 120, 30)
+	m.app.Cfg.TUI.TerminalProgress = false // Assert application commands independently of heartbeat timers.
 	m.busy = true
 	header := m.renderHeaderLayout(m.currentHeaderStatus())
 	_, cmd := m.Update(tea.MouseClickMsg{X: header.modeStart, Y: 0, Button: tea.MouseLeft})

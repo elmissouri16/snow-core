@@ -148,6 +148,7 @@ func (m *Model) setRunIdle() {
 }
 
 func (m *Model) fenceRootTurnProjection() {
+	m.resetTerminalRun()
 	m.setRunIdle()
 	m.rootTurnSequence = 0
 	m.rootEventEpoch = 0
@@ -162,6 +163,7 @@ func (m *Model) adoptTurn(ev protocol.AgentEvent) {
 		return
 	}
 	if ev.TurnID != m.activeTurnID {
+		m.resetTerminalRun()
 		m.turnUsageSeen = false
 	}
 	if ev.TurnSequence > m.rootTurnSequence {
@@ -242,6 +244,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 	if ev.Type != protocol.EvTurnDone && ev.Type != protocol.EvAborted && ev.Type != protocol.EvSessionUpdated {
 		m.adoptTurn(ev)
 	}
+	m.observeTerminalEvent(ev)
 	switch ev.Type {
 	case protocol.EvCompactionStarted:
 		m.busy = true

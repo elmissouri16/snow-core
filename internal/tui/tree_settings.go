@@ -434,6 +434,13 @@ func (m *Model) cycleSetting(direction int) {
 		if err == nil {
 			m.settingsStatus = "startup update checking " + onOff(m.app.Cfg.Updates.CheckOnStartup)
 		}
+	case settingsTerminalTitle:
+		err = m.app.UpdateTerminalSettings(app.TerminalSettingsUpdate{Title: new(!m.app.Cfg.TUI.TerminalTitle)})
+	case settingsTerminalProgress:
+		err = m.app.UpdateTerminalSettings(app.TerminalSettingsUpdate{Progress: new(!m.app.Cfg.TUI.TerminalProgress)})
+	case settingsNotifications:
+		next := cycleValue([]string{"off", "unfocused", "always"}, m.app.Cfg.TUI.Notifications, direction)
+		err = m.app.UpdateTerminalSettings(app.TerminalSettingsUpdate{Notifications: new(next)})
 	}
 	if err != nil {
 		m.settingsError = err.Error()

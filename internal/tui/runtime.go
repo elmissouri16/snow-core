@@ -66,6 +66,7 @@ func run(ctx context.Context, opts app.Options, sessionPicker bool) (RunResult, 
 		// without making every raw cell-motion event a terminal write.
 		tea.WithFPS(120),
 		tea.WithContext(ctx),
+		tea.WithFilter(terminalStatusFilter),
 	}
 	uiCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -398,6 +399,11 @@ func (m *Model) subscribe() error {
 // Update implements tea.Model and drains immutable transcript rows into native
 // terminal scrollback after each state transition in inline mode.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.updateTerminalOutput(msg); handled {
+		return m, cmd
+	}
+	m.terminal.reuseView = false
+	m.trackTerminalFocus(msg)
 	owner := m.clipboardFocus()
 	defer func() {
 		if owner != m.clipboardFocus() {
@@ -409,6 +415,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	updated, ok := model.(*Model)
 	if !ok {
 		return model, cmd
+	}
+	if statusCmd := updated.syncTerminalStatus(); statusCmd != nil {
+		cmd = tea.Batch(cmd, statusCmd)
 	}
 	// Bubble Tea renders after every message. Keep the timer chain stopped while
 	// idle so long-lived sessions do not continuously rebuild unchanged frames.

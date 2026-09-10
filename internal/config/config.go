@@ -53,8 +53,11 @@ type ProviderConfig struct {
 }
 
 type TUIConfig struct {
-	Theme string `json:"theme,omitempty"`
-	Mouse bool   `json:"mouse"`
+	Theme            string `json:"theme,omitempty"`
+	Mouse            bool   `json:"mouse"`
+	TerminalTitle    bool   `json:"terminal_title"`
+	TerminalProgress bool   `json:"terminal_progress"`
+	Notifications    string `json:"notifications"` // off|unfocused|always; global only
 }
 
 // DebugConfig controls the shared opt-in runtime diagnostics recorder. Dumps

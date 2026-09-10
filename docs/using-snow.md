@@ -69,6 +69,15 @@ and Alt+Enter remain available in terminals that cannot distinguish Shift+Enter;
 saved newline bindings keep their configured keys. Ghostty normally lets you
 hold Shift while dragging for terminal-native selection. F6 also switches modes.
 
+Snow also updates the tab/window title with the project and running/waiting
+status. In Ghostty, a progress bar above the split shows activity and pauses for
+approval or input. When you are in another tab/window, completion and requests
+for attention send a generic desktop notification and terminal bell. Change
+**Terminal tab title**, **Terminal progress**, or **Terminal alerts** in
+`/settings`; alerts can be `off`, `unfocused` (default), or `always`.
+See [terminal integration settings](configuration.md#tui) for Ghostty controls
+and notification permissions.
+
 Ctrl+V first checks the local clipboard for an image in the composer, then reads
 text. Over SSH, it requests text from the terminal using OSC 52. A failed local
 text read uses the same fallback. Terminal permission/settings can prevent the

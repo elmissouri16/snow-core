@@ -109,6 +109,7 @@ class Terminal:
         if b"untrusted" in self.output.lower():
             self.send(b"\r")  # Explicitly continue without project trust.
         self.until(lambda: b"Type a message" in self.plain_output(), "composer")
+        self.until(lambda: b"\x1b]2;Snow " in self.output, "terminal tab title")
         self.pump()
 
     def finish(self, cancel=False):
@@ -135,6 +136,8 @@ class Terminal:
             raise AssertionError(f"TTY settings were not restored: {expected!r} -> {restored!r}")
         if b"\x1b[?1049l" not in self.output:
             raise AssertionError("alternate screen was not restored")
+        if b"\x1b]2;\x07" not in self.output:
+            raise AssertionError("Snow terminal title was not cleared")
         for reset in (b"\x1b[?25h", b"\x1b[?2004l", b"\x1b[?1004l"):
             if reset not in self.output:
                 raise AssertionError(f"terminal mode not restored: {reset!r}")

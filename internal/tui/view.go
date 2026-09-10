@@ -263,12 +263,17 @@ func (m *Model) currentHeaderStatus() string {
 // View implements tea.Model as one full-window frame: sticky header, scrollable
 // transcript viewport, overlays/run status, composer, and footer.
 func (m *Model) View() tea.View {
+	if m.terminal.reuseView && m.terminal.viewReady {
+		return m.terminal.view
+	}
 	view := tea.NewView(m.viewContent())
 	view.AltScreen = !m.inlineTranscript
 	view.ReportFocus = true
 	if m.app != nil && m.app.Cfg.TUI.Mouse && !m.inlineTranscript {
 		view.MouseMode = tea.MouseModeCellMotion
 	}
+	m.applyTerminalStatus(&view)
+	m.terminal.view, m.terminal.viewReady = view, true
 	return view
 }
 
