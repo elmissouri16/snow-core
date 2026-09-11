@@ -5,6 +5,99 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.9] - 2026-09-11
+
+This alpha refreshes the terminal interface, adds branch-local plugin workflows
+and safe plugin reload, and makes plugin authoring references available without
+a bundled skill. It also improves live model discovery and input reliability.
+
+### Added
+
+- Branch-local plugin workflow state, intersected tool restrictions, pure
+  session/compaction gates, and session-change events shared by TUI, RPC, and
+  SDK consumers. Agent Profiles and Workflow Guard demonstrate these APIs.
+- Explicit reload of an already-loaded, enabled JavaScript plugin through
+  `/plugins reload <id>`, the plugin inspector, RPC, or the Go SDK. Reload
+  preserves persisted state and refuses busy sessions rather than cancelling work.
+- Deferred, read-only `snow_plugin_docs` with embedded API declarations,
+  fixtures, examples, and safe registered/loaded plugin inventory. References
+  work outside a source checkout and do not authorize plugin execution.
+- Persistent plugin and skill enablement controls, a searchable plugin
+  inspector, TypeScript authoring scaffolds and fixtures, and a cat-pet example.
+- Enhanced terminal keys, OSC 52 clipboard paste, automatic terminal-appearance
+  updates, and terminal activity/progress indicators and attention alerts.
+  Title/progress indicators default to enabled and notifications to `unfocused`;
+  use `/settings` or `tui.terminal_title`, `tui.terminal_progress`, and
+  `tui.notifications: "off"` to opt out (see [Configuration](docs/configuration.md)).
+
+### Changed
+
+- Migrate the terminal UI to Charm v2. Native selection, permission, process,
+  and subagent panels use centered, bounded cards with resize-aware selection
+  and drafts; composer completions remain attached to the input.
+- Refresh stale model catalogs in the picker. OpenCode Zen discovers new free
+  models using live catalog/pricing metadata; ChatGPT uses an updated Codex
+  compatibility version and exposes GPT-6 Astra when available to the account.
+- Reduce transcript/composer wrapping and layout work. Branch panels build the
+  parent index once per card rather than once per row.
+
+### Compatibility and migration
+
+- The built-in `snow-js-plugin` skill is removed in favor of `snow_plugin_docs`.
+  Old `skills.overrides.snow-js-plugin` policy has no effect unless a same-named
+  filesystem skill is installed. Explicit tool allowlists must include
+  `snow_plugin_docs` to use the new reference tool; `--no-skills` and
+  `--no-plugins` do not disable its read-only references.
+- Plugin and skill registration/enablement changes apply after restart. Plugin
+  reload only replaces an already-loaded, enabled JavaScript package and does
+  not install dependencies or build TypeScript. Existing API 1 plugins remain
+  supported; custom session stores need the optional workflow interface for
+  workflow operations, and custom registries need atomic replacement support
+  for reload.
+- The SQLite schema remains at version 12 and exact history stays append-only,
+  but older binaries do not enforce the new workflow tool restrictions when
+  resuming sessions. Back up session databases with Snow stopped before
+  upgrading. To roll back, restore that pre-upgrade backup and compatible plugin
+  packages; sharing a schema version does not make workflow policy backward
+  compatible. See [Plugin workflows](docs/plugin-workflows.md).
+- Source builds still require Go 1.27rc3; binary users do not need Go installed.
+
+### Fixed
+
+- Preserve modified Enter, selection, multiline history drafts, large paste,
+  and clipboard request ownership; copying no longer quits or aborts Snow.
+- Settle manual compaction accurately, ignore errors from completed turns,
+  alert on failed automatic goal compaction, and avoid signal-shutdown deadlocks.
+- Keep modal input from navigating the background transcript, and disable
+  permission approval when required review context cannot fit in the card.
+- Avoid plugin session-gate lock reentry, reject stale inactive-branch workflow
+  writes, and enforce aggregate workflow snapshot budgets.
+- Admit read-only plugin references in Plan Mode child roles without granting
+  additional execution or mutation authority.
+
+### Known alpha limitations
+
+- Compact session/branch panels can hide rename, delete, and fork key hints;
+  the shortcuts still work. Enlarge the terminal to see management hints.
+- Plugins remain trusted local code running with the user's OS privileges,
+  not a sandbox. Node/browser APIs and runtime npm loading are unavailable.
+- Binaries are not code-signed or notarized. Checksums verify asset integrity
+  against the published bundle, not an independent signature.
+
+### Validation
+
+- Local full Go tests, vet, support-script tests, benchmark regression guard,
+  standalone SDK tests/execution, and embedded-reference synchronization pass
+  in an isolated release worktree. Internal/SDK race checks and focused TUI
+  race tests also passed during pre-release feature verification.
+- Manual live inference passed for anonymous OpenCode Zen, OpenCode Go API-key
+  authentication, ChatGPT/Codex OAuth, and an authenticated OpenAI-compatible
+  endpoint. An additional local compatible profile could not complete model
+  discovery; it is not counted as a successful live check. No credentials or
+  provider-private response data are included in release evidence.
+- Publication requires successful CI and Documentation push runs for the exact
+  release commit, followed by the immutable-tag archive/checksum workflow.
+
 ## [0.1.0-alpha.8] - 2026-09-09
 
 This alpha adds local JavaScript extensions across the terminal, CLI, RPC, and
