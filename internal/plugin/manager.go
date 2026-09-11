@@ -47,6 +47,7 @@ type managedPlugin struct {
 
 // Manager owns plugin lifecycles, registrations, and observation delivery.
 type Manager struct {
+	deliveryMu    sync.RWMutex
 	lifecycleMu   sync.Mutex
 	mu            sync.Mutex
 	registry      tools.DescriptorRegistry
@@ -55,6 +56,7 @@ type Manager struct {
 	ids           map[string]bool
 	subs          map[publicplugin.EventType]map[int]publicplugin.EventHandler
 	nextSub       int
+	subOwners     map[int]string
 	initialized   bool
 	initializeErr error
 	ready         bool
@@ -75,7 +77,7 @@ func NewManager(reg tools.DescriptorRegistry, options ...ManagerOptions) *Manage
 	if opts.MaxOutputBytes <= 0 {
 		opts.MaxOutputBytes = defaultOutputBytes
 	}
-	return &Manager{registry: reg, options: opts, ids: make(map[string]bool), subs: make(map[publicplugin.EventType]map[int]publicplugin.EventHandler)}
+	return &Manager{registry: reg, options: opts, ids: make(map[string]bool), subs: make(map[publicplugin.EventType]map[int]publicplugin.EventHandler), subOwners: make(map[int]string)}
 }
 
 // LoadGo queues a statically linked Go plugin. It does not execute Register
@@ -165,6 +167,8 @@ func (m *Manager) Initialize(ctx context.Context) error {
 
 // Emit forwards a sanitized, observation-only event to interested plugins.
 func (m *Manager) Emit(ev protocol.AgentEvent) {
+	m.deliveryMu.RLock()
+	defer m.deliveryMu.RUnlock()
 	eventType := publicplugin.EventType(ev.Type)
 	m.mu.Lock()
 	if !m.ready || m.closed {
@@ -200,19 +204,23 @@ func (m *Manager) Subscribe(t publicplugin.EventType, fn publicplugin.EventHandl
 		return func() {}
 	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.subscribeLocked(t, fn, "")
+}
+
+func (m *Manager) subscribeLocked(t publicplugin.EventType, fn publicplugin.EventHandler, owner string) func() {
 	id := m.nextSub
 	m.nextSub++
 	if m.subs[t] == nil {
 		m.subs[t] = make(map[int]publicplugin.EventHandler)
 	}
 	m.subs[t][id] = fn
-	m.mu.Unlock()
+	m.subOwners[id] = owner
 	return func() {
 		m.mu.Lock()
-		if set := m.subs[t]; set != nil {
-			delete(set, id)
-		}
-		m.mu.Unlock()
+		defer m.mu.Unlock()
+		delete(m.subs[t], id)
+		delete(m.subOwners, id)
 	}
 }
 
@@ -310,7 +318,9 @@ func (r *scopedRegistrar) RegisterTool(def publicplugin.ToolDefinition) error {
 	return r.manager.registry.RegisterDescriptor(tools.ToolDescriptor{Schema: tool.schema, Tool: tool, Source: r.source, Owner: r.owner, PluginID: r.pluginID, OriginalName: def.Name, Risk: risk, Capabilities: slices.Clone(def.Capabilities)})
 }
 func (r *scopedRegistrar) Subscribe(t publicplugin.EventType, fn publicplugin.EventHandler) func() {
-	u := r.manager.Subscribe(t, fn)
+	r.manager.mu.Lock()
+	u := r.manager.subscribeLocked(t, fn, r.owner)
+	r.manager.mu.Unlock()
 	*r.cleanups = append(*r.cleanups, u)
 	return u
 }

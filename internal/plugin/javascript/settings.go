@@ -17,7 +17,7 @@ func validateExtensionManifest(m Manifest) error {
 	}
 	seen := map[string]bool{}
 	for _, capability := range m.Capabilities {
-		if !slices.Contains([]string{"commands", "hooks", "ui", "tools", "agent", "session", "goals", "subagents", "storage"}, capability) || seen[capability] {
+		if !slices.Contains([]string{"commands", "hooks", "ui", "tools", "agent", "session", "goals", "subagents", "storage", "workflow", "tool_policy"}, capability) || seen[capability] {
 			return fmt.Errorf("invalid or duplicate capability %q", capability)
 		}
 		seen[capability] = true

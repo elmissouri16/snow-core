@@ -1606,7 +1606,7 @@ After the `rpc_ready` handshake, frames other than `response` and
 | Streaming | `text_delta`, `thinking_delta`, `usage`, `provider_retry` |
 | Tools | `tool_start`, `tool_progress`, `tool_end`, `tool_routing` |
 | Interaction | `user_input_request`, `queue_updated` |
-| Lifecycle/state | `session_updated`, `run_stats_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
+| Lifecycle/state | `plugin_session_changed`, `session_updated`, `run_stats_updated`, `turn_done`, `error`, `aborted`, `model_changed`, `mode_changed` |
 | Plan | `plan_started`, `plan_delta`, `plan_completed`, `plan_update` |
 | Compaction | `compaction_started`, `compaction_done` |
 | Goals | `thread_goal_updated` |
@@ -1675,6 +1675,7 @@ tags.
 | Event type | Payload fields | Ordering |
 |---|---|---|
 | `session_updated` | correlation/state fields; `message` may hold detail | On session metadata changes |
+| `plugin_session_changed` | `plugin_session_changed` | After successful active session/branch transition and release of transition locks |
 | `run_stats_updated` | correlation fields | After a durable turn or provider-step marker is appended; consumers may refresh branch-local statistics |
 | `turn_done` | correlation/state fields; `usage` may be present | At the end of an agent turn |
 | `error` | `message` | On recoverable and non-fatal errors |
@@ -1688,6 +1689,11 @@ Expected retry waits do not emit `error`; final exhaustion emits one terminal
 error diagnostic. `error` events carry `message` only; `is_error` is not
 currently set on them. Error-path `compaction_done` events do set
 `is_error: true`.
+
+`plugin_session_changed` contains `old_session_id`, `new_session_id`,
+`old_branch_id`, `new_branch_id`, `reason`, and `generation`. Hosts are rebound
+to the new generation before notification; observer failures cannot roll back
+the transition. The event does not contain plugin workflow values.
 
 ### Plan events
 
@@ -2003,3 +2009,29 @@ they differ. `--no-plugins` still suppresses all runtime loading. Explicit
 the package and remove the override. Enabling validates package files without
 executing JavaScript. Missing IDs, invalid packages, and explicit overrides
 return a failed response without changing the registration.
+
+
+### Reload one loaded plugin
+
+| Command | Parameters | Success data |
+|---|---|---|
+| `plugin_reload` | `{"id":"plugin-id"}` | `PluginReloadResult` |
+
+```json
+{"id":"reload","type":"plugin_reload","params":{"id":"agent-profiles"}}
+{"id":"reload","type":"response","command":"plugin_reload","success":true,"data":{"plugin_id":"agent-profiles","applied":true,"generation":2,"fingerprint":"package-config-fingerprint"}}
+```
+
+The fingerprint above is illustrative. Only one already-loaded enabled API 1/2
+JavaScript plugin can be reloaded. Registration toggles still require restart.
+Reload is asynchronous so the reader remains available for broker replies that
+replacement readiness may await; normal outstanding-operation limits apply.
+
+Preparation/validation/busy errors return `success: false`, with the old plugin
+unchanged. Once the catalog commits, `success: true` and `applied: true` may
+include `diagnostics: [{"phase":"ready","message":"..."}]` or a cleanup
+phase. These are post-commit diagnostics, not rollback. Pause active goals,
+finish root/host/child work, and close children retaining the target plugin's
+tools before retrying a busy rejection. See
+[the canonical reload contract](plugin-workflows.md#reload-one-plugin) for trust,
+state preservation, stale-context invalidation, and all busy conditions.

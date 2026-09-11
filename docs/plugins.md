@@ -39,7 +39,8 @@ cannot be symlinks.
 
 In the TUI, open `/plugins`, type to filter by plugin ID or name, and use
 ↑/↓ to choose a plugin. Press Enter to open its details, then use ↑/↓ and
-Enter to select **Enable**, **Disable**, or one of that plugin's view, setting,
+Enter to select **Enable**, **Disable**, **Reload** for a loaded enabled JS
+plugin, or one of that plugin's view, setting,
 or theme actions. Escape returns to the filtered list; Escape again closes it.
 Page Up/Down scroll long details, and Ctrl+U clears the filter. Diagnostics have
 their own list entry. You can also type
@@ -63,9 +64,17 @@ saved toggles remain available, but no plugin runs in the current process;
 start without `--no-plugins` to load enabled registrations.
 
 `--no-plugins` disables Go and JavaScript plugins before packages are read or
-executed. There is no remote installer, automatic update, hot reload, or implicit
-package discovery. The retired executable `plugins` config key remains ignored,
+executed. There is no remote installer, automatic update, or implicit
+package discovery. `/plugins reload <id>` replaces one already-loaded, enabled
+JavaScript package while idle; registration enablement still requires restart.
+See [reload lifecycle and failure semantics](plugin-workflows.md#reload-one-plugin).
+The SDK exposes `ReloadPlugin(ctx, id)` and RPC exposes `plugin_reload`.
+The retired executable `plugins` config key remains ignored,
 and the old `--plugin` flag remains unsupported.
+
+For branch-local profiles, intersected tool restrictions, lifecycle guards, and
+mock-host tests, see [Plugin workflows and reload](plugin-workflows.md). These
+are additive API 2 features; the synchronous API 1 contract below is unchanged.
 
 ## Write an API 1 JavaScript plugin
 
@@ -181,7 +190,7 @@ plugin's observers for the session without blocking Snow's event bus. Calls,
 progress, and the final result retain the outer tool-call ID; nested operations
 do not add synthetic provider-facing tool pairs.
 
-JavaScript state is ephemeral. Reopening or resuming a session creates a fresh
+JavaScript globals are ephemeral. Reopening, resuming, or reloading creates a fresh
 runtime without replaying history. Shutdown stops admissions, cancels active
 work, and drains observations within the shutdown budget. Interrupted runtimes
 do not execute further callbacks.

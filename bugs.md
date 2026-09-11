@@ -2902,3 +2902,49 @@ probes, and the isolated benchmark guard pass. The temporary-binary PTY matrix
 passes with ten repeated signal cancellations and restored restart handoff.
 The initial concurrent benchmark timing miss and incorrectly invoked snapshot
 check are documented with their successful reruns in the fix report.
+
+## BUG-081: Pure plugin session gates reenter the session lock
+
+- **Status:** Resolved in the working tree; verified during workflow integration.
+- **Severity:** Medium (P2).
+- **Surface:** New API 2 `before_session_change` hooks.
+- **Reproduction/evidence:** Register a session gate and select or fork a branch.
+  The initial integration timed out: `invokeAsync` obtained the effectful host
+  environment through `sessionMu.RLock` while the transition held its exclusive
+  lock. Expected a bounded veto or successful transition, not a deadlock.
+- **Fix:** Pure hooks use the optional immutable `HookEnvironment` snapshot;
+  effectful callbacks retain ordinary host admission.
+- **Verification:** Session gate rejection/timeout/invalid-result and successful
+  branch-notification tests pass in `internal/app/plugin_session_lifecycle_test.go`;
+  full app and agent tests and race suites pass.
+
+## BUG-082: Workflow updates accept a stale inactive SQLite branch
+
+- **Status:** Resolved in the working tree; verified during workflow integration.
+- **Severity:** Medium (P2).
+- **Surface:** New branch workflow metadata writes through separate store handles.
+- **Reproduction/evidence:** Open two handles, fork/select a branch through one,
+  then update through the other handle's cached old branch and tip. The initial
+  implementation returned success and appended to the now-inactive branch;
+  expected `ErrConflict` without an append.
+- **Fix:** Verify durable branch activity and tip in the transaction, require
+  `active=1` in the branch CAS, and verify the session-meta update affected a row.
+- **Verification:** `TestWorkflowSQLiteStaleHandleAfterActiveBranchSwitch` failed
+  before the fix (`stale active branch: <nil>`) and passes after it. Full session
+  tests, session race tests, and vet pass.
+
+## BUG-083: Individually valid workflow hooks exceed their phase snapshot budget
+
+- **Status:** Resolved in the working tree; verified during workflow integration.
+- **Severity:** Medium (P2).
+- **Surface:** New API 2 `workflowKeys` registration and child hook hydration.
+- **Reproduction/evidence:** Register two same-phase hooks with 33 disjoint keys.
+  Initial registration succeeded, but root invocation failed the loader's 64-key
+  union bound. A separate child-enabled hook also unnecessarily loaded root-only
+  workflow keys. Expected early registration rejection and no child hydration.
+- **Fix:** Validate the distinct per-plugin/phase key union at registration;
+  skip workflow loading for child requests and retain per-handler input subsets.
+- **Verification:** New workflow-hook tests cover disjoint/overlapping unions,
+  phase independence, copied isolated values, explicit missing nulls, and mixed
+  root/child hooks with a poison loader. Plugin/JavaScript tests, race tests, and
+  vet pass.

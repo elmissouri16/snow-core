@@ -59,7 +59,7 @@ func (r *Runtime) enqueue(sub int, event plugin.Event) {
 		return
 	}
 	r.mu.Lock()
-	if r.closing || r.disabled != nil || r.observationsOff {
+	if r.closing || r.disabled != nil || r.observationsOff || r.frozen || r.retired {
 		r.mu.Unlock()
 		return
 	}
@@ -85,13 +85,14 @@ func (r *Runtime) pop() (observation, bool) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.queue) == 0 {
+	if len(r.queue) == 0 || r.frozen || r.retired {
 		return observation{}, false
 	}
 	event := r.queue[0]
 	r.queue[0] = observation{}
 	r.queue = r.queue[1:]
 	r.queueBytes -= event.bytes
+	r.active++ // Reserve delivery before releasing the queue lock.
 	return event, true
 }
 func (r *Runtime) deliver(event observation) {
@@ -99,11 +100,13 @@ func (r *Runtime) deliver(event observation) {
 }
 func (r *Runtime) deliverContext(ctx context.Context, event observation) {
 	if r.subscriptions[event.sub].disabled {
+		r.endReloadActivity()
 		return
 	}
 	if r.pkg.Manifest.APIVersion == 2 {
 		r.extension.observing = true
 		go func() {
+			defer r.endReloadActivity()
 			raw, err := jsonv2.Marshal(event.event)
 			if err == nil {
 				_, err = r.invokeAsync(ctx, string(event.event.Type), "observer", r.observerUses(), 5*time.Second, r.subscriptions[event.sub].handler, raw, nil)
@@ -119,6 +122,7 @@ func (r *Runtime) deliverContext(ctx context.Context, event observation) {
 		}()
 		return
 	}
+	defer r.endReloadActivity()
 	err := r.execute(work{ctx: ctx, budget: 100 * time.Millisecond, run: func() error {
 		raw, err := jsonv2.Marshal(event.event)
 		if err != nil {

@@ -34,6 +34,7 @@ PUBLIC_DOCUMENTS = (
     "mcp.md",
     "plugins.md",
     "plugin-extensions.md",
+    "plugin-workflows.md",
     "security.md",
     "sdk.md",
 )

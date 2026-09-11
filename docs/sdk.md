@@ -136,7 +136,11 @@ Empty fields generally inherit global configuration.
 For individual registered JavaScript plugins, call `s.PluginStatuses()` and
 `s.SetPluginEnabled(ctx, "workspace-notes", false)` (or `true` to enable).
 The returned status distinguishes saved enablement from the running catalog;
-close and reopen the session to apply a change. See the
+close and reopen the session to apply an enablement change. For code/settings
+changes to one already-loaded enabled JS plugin, use
+`s.ReloadPlugin(ctx, "workspace-notes")` while idle. An applied receipt may
+contain readiness/cleanup diagnostics; those do not mean rollback. See
+[reload semantics](plugin-workflows.md#reload-one-plugin) and the
 [plugin SDK reference](https://github.com/elmissouri16/snow-core/blob/main/docs/sdk-reference.md#javascript-extension-commands) for
 scope and launch-option behavior.
 

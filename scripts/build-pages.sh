@@ -70,6 +70,7 @@ for pages_public_document in \
 	docs/mcp.md \
 	docs/plugins.md \
 	docs/plugin-extensions.md \
+	docs/plugin-workflows.md \
 	docs/security.md \
 	docs/sdk.md
 do

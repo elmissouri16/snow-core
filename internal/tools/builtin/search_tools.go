@@ -89,6 +89,9 @@ func (s *SearchTools) Run(ctx context.Context, raw json.RawMessage, host tools.T
 			if host != nil && !tools.CanExposeMetadata(host.Permission(), desc) {
 				continue
 			}
+			if policy, ok := host.(tools.ToolEligibilityHost); ok && !policy.ToolAvailable(match.ID) {
+				continue
+			}
 			match.Description = boundRunes(match.Description, 240)
 			selected = append(selected, match)
 			if len(selected) == args.Limit {

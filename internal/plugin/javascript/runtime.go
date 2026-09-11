@@ -53,6 +53,10 @@ type Runtime struct {
 	queueBytes      int
 	observationsOff bool
 	logs            int
+	diagnosticFn    func(string, string)
+	active          int
+	frozen          bool
+	retired         bool
 	stopOnce        sync.Once
 	// Everything below is worker-owned.
 	registrar        plugin.Registrar
@@ -77,6 +81,7 @@ func New(p *Package, opts Options) *Runtime {
 		opts.MaxProgressBytes = 16 << 10
 	}
 	r := &Runtime{pkg: clonePackage(p), opts: opts, requests: make(chan work), wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}
+	r.diagnosticFn = opts.Diagnostic
 	r.extension = newExtensionState()
 	return r
 }
@@ -135,6 +140,10 @@ func (r *Runtime) worker() {
 }
 
 func (r *Runtime) submit(ctx context.Context, budget time.Duration, run func() error) error {
+	if err := r.beginReloadActivity(); err != nil {
+		return err
+	}
+	defer r.endReloadActivity()
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -310,8 +319,11 @@ func (r *Runtime) Close(ctx context.Context) error {
 }
 
 func (r *Runtime) diagnostic(level, message string) {
-	if r.opts.Diagnostic != nil {
-		r.opts.Diagnostic(level, boundText(message, MaxLogBytes))
+	r.mu.Lock()
+	fn := r.diagnosticFn
+	r.mu.Unlock()
+	if fn != nil {
+		fn(level, boundText(message, MaxLogBytes))
 	}
 }
 func boundText(s string, n int) string {

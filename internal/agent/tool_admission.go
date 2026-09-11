@@ -19,6 +19,9 @@ func (a *Agent) admitTool(ctx context.Context, name, callID string, raw json.Raw
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := a.pluginToolPolicy()(name); err != nil {
+		return nil, err
+	}
 	if (name == "ask_user" || name == "request_user_input") && !a.PluginInputAllowed() {
 		return nil, fmt.Errorf("interactive user input is unavailable during automatic goal turns")
 	}

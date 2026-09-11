@@ -1173,20 +1173,55 @@ can be selected per spawn, constrained by the role and persisted fingerprints. `
 
 Go handlers retain existing inline event delivery and privilege semantics.
 JavaScript observers enqueue sanitized copies without blocking event delivery.
-Plugin state is ephemeral, failures are diagnostic, and runtime interruption
-invalidates the plugin until the next launch. Goja does not provide heap quotas
+JavaScript globals are ephemeral; scoped KV and branch workflow state have
+separate persistence. Failures are diagnostic, and runtime interruption
+invalidates the plugin until explicit reload or the next launch. Goja does not provide heap quotas
 or OS containment. The public protocol remains standard-library-only.
 
 External executable transport stays removed; legacy `plugins` declarations and
 `--plugin` remain inert/unsupported. `snow plugin` now manages local JavaScript
-registrations only. See `docs/plugins.md` for the contract and complete limits.
+registrations and local authoring/check/test operations. See `docs/plugins.md`
+for the contract and complete limits.
 
 The TUI, SDK, and RPC share app-owned individual JavaScript registration
-controls. Status separates saved enablement from the immutable loaded catalog,
+controls. Status separates saved enablement from the current loaded catalog,
 includes disabled declarations without reading packages, and reports pending
 restarts. Scoped atomic configuration updates preserve project precedence;
 explicit launch overrides remain controlled by launch options. Enablement
 changes take effect only on the next launch, preserving active plugin work.
+
+Branch-aware API 2 workflow state uses optional `session.WorkflowStateStore`
+implementations for memory/SQLite and versioned `plugin_workflow_v1` metadata,
+without a schema bump. Complete ancestry projection preserves historical forks,
+compaction, and isolated siblings. Immediate atomic root-command updates compare
+branch/tip identity, bound live state and append-only history, and may replace
+one plugin's tool restriction in the same commit. `ctx.storage` remains separate
+and does not advance the conversation tip. App-owned immutable policy snapshots
+intersect loaded plugin restrictions with existing schema/routing/admission
+policies for root, nested host calls, and descendants.
+
+Pure root `before_session_change` and `before_compaction` gates accept only a
+block reason. Explicit `workflowKeys` preload fresh bounded owner values without
+granting hooks I/O. `plugin_session_changed` is a normalized post-commit event
+published after transition locks are released and new hosts are bound.
+
+Single-loaded-JS reload uses detached candidate registration and atomic owner
+replacement while preserving manager/registry identity. Root/goal/host/command
+and child lifecycle admission exclude incompatible work; children retaining the
+target's tools must be closed. Pre-commit failures preserve the old catalog;
+post-commit cleanup/readiness failures produce an applied receipt with bounded
+diagnostics. Generation invalidation prevents stale contexts from updating the
+replacement. TUI, SDK, and RPC call the app-owned reload facade. Enablement still
+requires restart, and Go/MCP/SDK-owned descriptors remain untouched.
+
+TypeScript scaffolds use synchronous default factories and a generated entry
+bundled to neutral IIFE JavaScript. `snow plugin test` executes actual Goja with
+an explicit ordered fake host, copied memory fixtures, lifecycle callbacks, and
+bounded assertions; it never installs dependencies or invokes real providers.
+The `agent-profiles` and `workflow-guard` examples include built JS and fixtures.
+See [Plugin workflows and reload](docs/plugin-workflows.md) for the canonical
+contracts and limits. Node compatibility, reload-all, remote distribution,
+provider registration, and new native modes remain outside this milestone.
 
 ## MCP
 

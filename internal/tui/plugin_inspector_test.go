@@ -47,19 +47,20 @@ func TestPluginInspectorSelectionOwnsActionsAndBackNavigation(t *testing.T) {
 		t.Fatal("opening details executed an action")
 	}
 	actions := pluginActions(m.pluginScreenView().Content)
-	if len(actions) != 3 || actions[0].Action != "disable:plugin-01" || actions[1].Action != "open:plugin-01:main" || actions[2].Action != "setting:plugin-01:focus" {
+	if len(actions) != 4 || actions[0].Action != "disable:plugin-01" || actions[1].Action != "reload:plugin-01" || actions[2].Action != "open:plugin-01:main" || actions[3].Action != "setting:plugin-01:focus" {
 		t.Fatalf("selected plugin did not own its actions: %+v", actions)
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.plugins.selected != 1 || m.plugins.scroll != 0 {
 		t.Fatal("arrow keys scrolled details instead of selecting an action")
 	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.plugins.screen != "plugin-01:main" {
 		t.Fatal("did not open the selected plugin view")
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.plugins.screen != "snow:plugins" || !m.plugins.inspector.detail || m.plugins.selected != 1 {
+	if m.plugins.screen != "snow:plugins" || !m.plugins.inspector.detail || m.plugins.selected != 2 {
 		t.Fatal("Escape did not return to plugin details")
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})

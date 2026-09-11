@@ -90,28 +90,29 @@ type ToolResult struct {
 type EventType = protocol.AgentEventType
 
 const (
-	EventSessionUpdated    = protocol.EvSessionUpdated
-	EventTextDelta         = protocol.EvTextDelta
-	EventThinkingDelta     = protocol.EvThinkingDelta
-	EventToolStart         = protocol.EvToolStart
-	EventToolProgress      = protocol.EvToolProgress
-	EventToolEnd           = protocol.EvToolEnd
-	EventToolRouting       = protocol.EvToolRouting
-	EventPermissionRequest = protocol.EvPermissionRequest
-	EventUserInputRequest  = protocol.EvUserInputRequest
-	EventUsage             = protocol.EvUsage
-	EventTurnDone          = protocol.EvTurnDone
-	EventError             = protocol.EvError
-	EventAborted           = protocol.EvAborted
-	EventModelChanged      = protocol.EvModelChanged
-	EventModeChanged       = protocol.EvModeChanged
-	EventPlanStarted       = protocol.EvPlanStarted
-	EventPlanDelta         = protocol.EvPlanDelta
-	EventPlanCompleted     = protocol.EvPlanCompleted
-	EventPlanUpdate        = protocol.EvPlanUpdate
-	EventCompactionStarted = protocol.EvCompactionStarted
-	EventCompactionDone    = protocol.EvCompactionDone
-	EventThreadGoalUpdated = protocol.EvThreadGoalUpdated
+	EventPluginSessionChanged = protocol.EvPluginSessionChanged
+	EventSessionUpdated       = protocol.EvSessionUpdated
+	EventTextDelta            = protocol.EvTextDelta
+	EventThinkingDelta        = protocol.EvThinkingDelta
+	EventToolStart            = protocol.EvToolStart
+	EventToolProgress         = protocol.EvToolProgress
+	EventToolEnd              = protocol.EvToolEnd
+	EventToolRouting          = protocol.EvToolRouting
+	EventPermissionRequest    = protocol.EvPermissionRequest
+	EventUserInputRequest     = protocol.EvUserInputRequest
+	EventUsage                = protocol.EvUsage
+	EventTurnDone             = protocol.EvTurnDone
+	EventError                = protocol.EvError
+	EventAborted              = protocol.EvAborted
+	EventModelChanged         = protocol.EvModelChanged
+	EventModeChanged          = protocol.EvModeChanged
+	EventPlanStarted          = protocol.EvPlanStarted
+	EventPlanDelta            = protocol.EvPlanDelta
+	EventPlanCompleted        = protocol.EvPlanCompleted
+	EventPlanUpdate           = protocol.EvPlanUpdate
+	EventCompactionStarted    = protocol.EvCompactionStarted
+	EventCompactionDone       = protocol.EvCompactionDone
+	EventThreadGoalUpdated    = protocol.EvThreadGoalUpdated
 )
 
 // Event is an observation delivered to an extension.

@@ -14,6 +14,7 @@ rules are covered in [Plugins](plugins.md).
 - [UI contributions](#ui-contributions)
 - [Hooks](#hooks)
 - [Storage, settings, and lifecycle](#storage-settings-and-lifecycle)
+- [Reload one plugin](#reload-one-plugin)
 - [Selected child tools](#selected-child-tools)
 - [SDK and RPC](#sdk-and-rpc)
 - [Troubleshooting](#troubleshooting)
@@ -34,6 +35,8 @@ walks through every category with ready-to-run packages:
 | `session-pilot` | `/pilot` | Models, sessions/branches, agent control, goal control |
 | `project-helper-v2` | `/source-scout question` | Custom tool cards and isolated selected child tools |
 | `review-team` | `/review-team focus` | Three reviewers, progress, cleanup, root synthesis |
+| `agent-profiles` | `/profile reviewer` | Branch selection, request guidance, intersected tool restrictions |
+| `workflow-guard` | `/workflow-guard on` | Branch-local state and pure lifecycle gates |
 
 `source-scout` requires a configured `plugin_scout` role whose `tools` include
 `read`, `grep`, `glob`, and `plugin_project-helper-v2_files`. The ordinary explorer
@@ -67,8 +70,10 @@ snow
 ```
 
 `--js-plugin` applies to one launch. `snow plugin add` persists a path reference.
-`--no-plugins` disables both JavaScript and Go plugins. Restart Snow after changing
-code, settings, or registrations. There is no hot reload or remote marketplace.
+`--no-plugins` disables both JavaScript and Go plugins. After editing and building
+an already-loaded, enabled package, use `/plugins reload <id>` while idle.
+Adding, removing, enabling, or disabling registrations still requires restart.
+There is no remote marketplace or automatic package installation.
 
 ## Create a plugin
 
@@ -83,6 +88,10 @@ Use `snow plugin init my-extension --typescript` for TypeScript source plus a
 single-bundle build configuration. Install the development dependencies listed
 in the generated README, then build `main.js`. Runtime loading never installs
 npm packages. The generated `snow.d.ts` describes the complete API 2 surface.
+The synchronous factory lives in `src/main.ts`; `src/entry.ts` bundles it into
+the existing Snow global. Run `snow plugin test . --fixtures tests/plugin.json`
+for actual-Goja tests with an explicit mock host. See
+[TypeScript authoring and fixture tests](plugin-workflows.md#author-and-test-typescript).
 
 A manifest selects the API and host capabilities:
 
@@ -382,6 +391,8 @@ its authority to another callback.
 | `ctx.goals` | `get`, `create`, `edit`, `pause`, `resume`, `clear` | `goals` for mutations |
 | `ctx.subagents` | `models`, `spawn`, `list`, `get`, `messages`, `message`, `followUp`, `wait`, `interrupt`, `close`, `resume` | `subagents` for controls |
 | `ctx.tools` | `call(name, arguments)` | declared tool in `host_tools` and `uses` |
+| `ctx.tools` | `list`, `restrict`, `clearRestriction` | `tool_policy` |
+| `ctx.workflow` | `get`, `set`, `delete`, `update` | `workflow`; combined restriction updates also require `tool_policy` |
 | `ctx.storage` | `get`, `set`, `delete` | `storage` |
 | `ctx.ui` | panels, screens, dialogs, editor, theme | `ui` |
 | `ctx.sleep` | cancellable milliseconds, at most 60,000 per call | none |
@@ -481,7 +492,9 @@ back to ordinary tool output. Renderers cannot call host APIs.
 
 Register hooks during startup with `snow.registerHook(phase, handler, options)`.
 Plugins run in ID order, with registration order inside each plugin. Hooks apply
-to root work by default; `{includeSubagents: true}` opts into child work.
+to root work by default; `{includeSubagents: true}` opts into child work for
+the original four phases. Lifecycle hooks and hooks requesting `workflowKeys`
+are root-only. See [fresh workflow inputs and lifecycle gates](plugin-workflows.md#read-fresh-workflow-state-in-hooks).
 
 | Phase | Allowed result |
 |---|---|
@@ -489,12 +502,15 @@ to root work by default; `{includeSubagents: true}` opts into child work.
 | `before_request` | `{context: [{text}]}` adds attributed request-only context |
 | `before_tool` | `{arguments}` replacement object or `{block}` reason |
 | `after_tool` | `{content}` replacement text blocks |
+| `before_session_change` | `{block}` reason only; root active-session/branch transitions |
+| `before_compaction` | `{block}` reason only; root manual and automatic compaction |
 
 Request-hook fragments use a protocol-valid `plugin-<id>` source; the audit
 record retains the original plugin ID. Empty context text is rejected.
 
 Hooks and renderers have a short execution budget and cannot perform host I/O.
-Use readiness/observer callbacks to maintain cached information. A failed hook
+Use `workflowKeys` for fresh branch state, or readiness/observer callbacks for
+non-authoritative cached information. A failed hook
 remains a gate rather than silently disappearing. A post-tool failure stops
 continuation after preserving the actual tool outcome, so completed effects are
 not represented as unexecuted. Hooks cannot rewrite tool names, alter error
@@ -511,8 +527,15 @@ from conversation trees. Ephemeral sessions use in-memory state. Values are
 bounded to 64 KiB, with 1 MiB and 1,024 keys per plugin/scope. Missing keys return
 null. A rejected quota write rolls back.
 
+Use `ctx.workflow` instead for values that must follow branch ancestry. Its
+atomic updates advance the conversation tip and can save a profile together
+with that plugin's tool restriction. Writes commit immediately, even if the
+command later fails. The [workflow and restriction guide](plugin-workflows.md)
+owns these APIs, quotas, and lifecycle semantics; `ctx.storage` is unchanged.
+
 Typed manifest settings are exposed as `snow.config`. `/plugins` edits an
-existing registration's settings; restart to apply. Plugins loaded solely with a
+existing registration's settings; reload the loaded plugin or restart to apply.
+Plugins loaded solely with a
 path flag must be registered before settings can be saved.
 
 API 2 uses one VM owner with promise continuation jobs. Awaiting a host operation
@@ -523,11 +546,25 @@ budget. At most 32 callbacks may be pending per runtime; commands permit 4,096
 host calls, other callbacks 64. Cancellation stops accepted host work before the
 invocation returns. These limits do not provide a Goja heap quota or an OS sandbox.
 
-`onReady` runs once after surface setup, never during `plugin check`. API 2
+`onReady` runs once per loaded runtime after surface setup, including a
+replacement runtime after reload, but never during `plugin check`. API 2
 observers receive the normalized event catalog and run in accepted order with
 bounded queues. Subscription errors disable that observer, while hook errors
 retain their gate. `onClose` remains synchronous. No Node globals, runtime module
 loading, browser APIs, timers, or implicit network/filesystem access are supplied.
+
+## Reload one plugin
+
+Use `/plugins reload <id>` or the inspector's Reload action after rebuilding an
+already-loaded, enabled JS package. API 1 and API 2 are supported. Adding,
+removing, enabling, or disabling registrations still requires restart.
+
+Reload refuses busy root/goal/command/host/child work rather than cancelling it.
+Close children retaining that plugin's tools first. Preparation errors preserve
+the old plugin; after the swap, readiness/cleanup errors produce an applied
+receipt with diagnostics, not a rollback. Saved KV/workflow state survives.
+See the [complete reload contract](plugin-workflows.md#reload-one-plugin) for
+SDK/RPC signatures, trust, generation invalidation, and failure handling.
 
 ## Selected child tools
 
@@ -549,10 +586,12 @@ changing a child's authority.
 
 ## SDK and RPC
 
-Go SDK methods are `Plugins`, `PluginStatuses`, `SetPluginEnabled(ctx, id, enabled)`, `PluginCommands`, `PluginViews`,
+Go SDK methods are `Plugins`, `PluginStatuses`, `SetPluginEnabled(ctx, id, enabled)`,
+`ReloadPlugin(ctx, id)`, `PluginCommands`, `PluginViews`,
 `RunPluginCommand(ctx, id, input)`, `CancelPluginCommand(id)`, and `AttachPluginUI`.
 See the generated typings and [SDK reference](https://github.com/elmissouri16/snow-core/blob/main/docs/sdk-reference.md) for host boundaries.
-RPC exposes `plugins_list`, `plugin_statuses`, `plugin_enable`, `plugin_disable`, `plugin_commands`, `plugin_views`,
+RPC exposes `plugins_list`, `plugin_statuses`, `plugin_enable`, `plugin_disable`,
+`plugin_reload`, `plugin_commands`, `plugin_views`,
 `plugin_command_run`, and `plugin_command_cancel`:
 
 ```json
@@ -565,7 +604,7 @@ RPC exposes `plugins_list`, `plugin_statuses`, `plugin_enable`, `plugin_disable`
 executing JavaScript. Enable/disable saves the effective registration for the
 next launch and returns `enabled`, `loaded`, `can_toggle`, and
 `restart_required` alongside its ID, scope, and path. Loaded command and view
-inventories remain unchanged until restart. Explicit launch options cannot be
+inventories are not changed by a saved enable/disable toggle. Explicit launch options cannot be
 changed by these persistent controls.
 
 The command reader remains active while commands wait. Ordinary agent and child
@@ -593,9 +632,9 @@ prove those callbacks work. In the TUI, inspect `/plugins` for loaded commands,
 capabilities, diagnostics, and views. Use `snow.log("info", "message")` for
 bounded plugin diagnostics; `console.log` is not available.
 
-After editing a package, restart Snow. Registration stores a path reference;
-it does not copy the package or reload a running VM. For TypeScript, rebuild the
-entry JavaScript before restarting. If the whole session fails to initialize,
+After editing a package, rebuild TypeScript if applicable, then run
+`/plugins reload ID` while idle or restart Snow. Registration stores a path
+reference; it does not copy packages or automatically rebuild them. If the whole session fails to initialize,
 `snow --no-plugins` starts without loading either JavaScript or Go plugins.
 Disable the faulty registration with `snow plugin disable ID` before starting
 normally again. Use `--project` when changing a project registration.
@@ -643,7 +682,7 @@ normally again. Use `--project` when changing a project registration.
 | `model is not in the configured catalog` | Select a provider/model returned by `ctx.models.list`; plugins cannot create provider implementations. |
 | Root session/goal control fails from a tool | Put mutations in an explicit command. Model-invoked tools and selected child tools have narrower authority. |
 | Command times out or runtime is disabled | Bound loops and output, await cancellable host work, and inspect diagnostics. Raising `timeoutMS` does not extend the one-second CPU slice. |
-| Hook failure keeps blocking work | Fix or disable the plugin and restart. Failed hooks retain their gate; they are not silently removed. |
+| Hook failure keeps blocking work | Fix/build and reload the plugin while idle, or disable it and restart. Failed hooks retain their gate; they are not silently removed. |
 
 ### Selected child tools
 
@@ -669,7 +708,8 @@ when trying `/source-scout`.
 ### Verify a fix
 
 1. Rebuild bundled JavaScript if needed, then run `snow plugin check ID`.
-2. Restart Snow and invoke the failing command with the same input and working
+2. Reload the loaded plugin while idle (or restart), then invoke the failing
+   command with the same input and working
    directory. Check the result and diagnostics, including failures.
 3. For state, read the value from a second process in the same project. For UI,
    also try a narrow terminal and cancellation. For hooks, send a real prompt;
@@ -702,6 +742,8 @@ Use `go test ./internal/plugin/javascript ./internal/tui -run '^$' -bench
 to measure the checkout on another machine.
 
 ## Related documents
+
+- [Plugin workflows and reload](plugin-workflows.md) — branch state, restrictions, lifecycle gates, tests
 
 - [Plugins](plugins.md): installation, trust, API 1, and Go plugins.
 - [Subagents](subagents.md): roles and child workflow controls.

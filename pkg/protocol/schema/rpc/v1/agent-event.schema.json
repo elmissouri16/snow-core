@@ -10,6 +10,7 @@
     "type": {
       "type": "string",
       "enum": [
+        "plugin_session_changed",
         "session_updated",
         "run_stats_updated",
         "text_delta",
@@ -417,6 +418,39 @@
     },
     "plugin_view": {
       "$ref": "plugins.schema.json#/$defs/node"
+    },
+    "plugin_session_changed": {
+      "type": "object",
+      "required": [
+        "old_session_id",
+        "new_session_id",
+        "old_branch_id",
+        "new_branch_id",
+        "reason",
+        "generation"
+      ],
+      "properties": {
+        "old_session_id": {
+          "type": "string"
+        },
+        "new_session_id": {
+          "type": "string"
+        },
+        "old_branch_id": {
+          "type": "string"
+        },
+        "new_branch_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

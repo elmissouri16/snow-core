@@ -10,40 +10,42 @@ import (
 type AgentEventType string
 
 const (
-	EvSessionUpdated    AgentEventType = "session_updated"
-	EvRunStatsUpdated   AgentEventType = "run_stats_updated"
-	EvTextDelta         AgentEventType = "text_delta"
-	EvThinkingDelta     AgentEventType = "thinking_delta"
-	EvToolStart         AgentEventType = "tool_start"
-	EvToolProgress      AgentEventType = "tool_progress"
-	EvToolEnd           AgentEventType = "tool_end"
-	EvToolRouting       AgentEventType = "tool_routing"
-	EvPermissionRequest AgentEventType = "permission_request"
-	EvUserInputRequest  AgentEventType = "user_input_request"
-	EvUsage             AgentEventType = "usage"
-	EvProviderRetry     AgentEventType = "provider_retry"
-	EvQueueUpdated      AgentEventType = "queue_updated"
-	EvTurnDone          AgentEventType = "turn_done"
-	EvError             AgentEventType = "error"
-	EvAborted           AgentEventType = "aborted"
-	EvModelChanged      AgentEventType = "model_changed"
-	EvModeChanged       AgentEventType = "mode_changed"
-	EvPlanStarted       AgentEventType = "plan_started"
-	EvPlanDelta         AgentEventType = "plan_delta"
-	EvPlanCompleted     AgentEventType = "plan_completed"
-	EvPlanUpdate        AgentEventType = "plan_update"
-	EvCompactionStarted AgentEventType = "compaction_started"
-	EvCompactionDone    AgentEventType = "compaction_done"
-	EvThreadGoalUpdated AgentEventType = "thread_goal_updated"
-	EvSubagentStarted   AgentEventType = "subagent_started"
-	EvSubagentStatus    AgentEventType = "subagent_status"
-	EvSubagentMessage   AgentEventType = "subagent_message"
-	EvSubagentActivity  AgentEventType = "subagent_activity"
+	EvPluginSessionChanged AgentEventType = "plugin_session_changed"
+	EvSessionUpdated       AgentEventType = "session_updated"
+	EvRunStatsUpdated      AgentEventType = "run_stats_updated"
+	EvTextDelta            AgentEventType = "text_delta"
+	EvThinkingDelta        AgentEventType = "thinking_delta"
+	EvToolStart            AgentEventType = "tool_start"
+	EvToolProgress         AgentEventType = "tool_progress"
+	EvToolEnd              AgentEventType = "tool_end"
+	EvToolRouting          AgentEventType = "tool_routing"
+	EvPermissionRequest    AgentEventType = "permission_request"
+	EvUserInputRequest     AgentEventType = "user_input_request"
+	EvUsage                AgentEventType = "usage"
+	EvProviderRetry        AgentEventType = "provider_retry"
+	EvQueueUpdated         AgentEventType = "queue_updated"
+	EvTurnDone             AgentEventType = "turn_done"
+	EvError                AgentEventType = "error"
+	EvAborted              AgentEventType = "aborted"
+	EvModelChanged         AgentEventType = "model_changed"
+	EvModeChanged          AgentEventType = "mode_changed"
+	EvPlanStarted          AgentEventType = "plan_started"
+	EvPlanDelta            AgentEventType = "plan_delta"
+	EvPlanCompleted        AgentEventType = "plan_completed"
+	EvPlanUpdate           AgentEventType = "plan_update"
+	EvCompactionStarted    AgentEventType = "compaction_started"
+	EvCompactionDone       AgentEventType = "compaction_done"
+	EvThreadGoalUpdated    AgentEventType = "thread_goal_updated"
+	EvSubagentStarted      AgentEventType = "subagent_started"
+	EvSubagentStatus       AgentEventType = "subagent_status"
+	EvSubagentMessage      AgentEventType = "subagent_message"
+	EvSubagentActivity     AgentEventType = "subagent_activity"
 )
 
 // KnownAgentEventTypes returns every normalized event type in protocol order.
 func KnownAgentEventTypes() []AgentEventType {
 	return []AgentEventType{
+		EvPluginSessionChanged,
 		EvSessionUpdated,
 		EvRunStatsUpdated,
 		EvTextDelta,
@@ -122,8 +124,9 @@ type AgentEvent struct {
 	Message    string `json:"message,omitempty"` // error / progress text / tool path
 	// ToolOutput is a bounded preview of a completed tool result for UIs and
 	// SDK consumers. The complete result remains in the session message.
-	PluginView *PluginNode `json:"plugin_view,omitempty"`
-	ToolOutput string      `json:"tool_output,omitempty"`
+	PluginSessionChanged *PluginSessionChanged `json:"plugin_session_changed,omitempty"`
+	PluginView           *PluginNode           `json:"plugin_view,omitempty"`
+	ToolOutput           string                `json:"tool_output,omitempty"`
 	// ToolDurationMS is populated on tool_end when timing is available.
 	ToolDurationMS int64 `json:"tool_duration_ms,omitzero"`
 	// ToolProgress carries structured progress emitted by a running tool.
@@ -161,6 +164,9 @@ type AgentEvent struct {
 // later SDK, plugin, RPC, or TUI observers.
 func (e AgentEvent) Clone() AgentEvent {
 	out := e
+	if e.PluginSessionChanged != nil {
+		out.PluginSessionChanged = new(*e.PluginSessionChanged)
+	}
 	out.PluginView = e.PluginView.Clone()
 	if e.ToolProgress != nil {
 		v := *e.ToolProgress

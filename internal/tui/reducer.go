@@ -244,6 +244,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pluginCommandDone:
 		m.finishPluginCommand(msg)
+	case pluginReloadDone:
+		m.finishPluginReload(msg)
+		return m, nil
 	case pluginToggleDone:
 		m.finishPluginToggle(msg)
 	case userInputSettledMsg:

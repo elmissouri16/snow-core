@@ -342,3 +342,26 @@ host APIs; post-tool failures preserve completed outcomes. Selected child tools
 use independent runtimes and stored package/config fingerprints. Scoped plugin
 state is a separate SQLite database, with bounded values and transactional quotas.
 See [the extension lifecycle](plugin-extensions.md#storage-settings-and-lifecycle).
+
+
+Branch-aware `ctx.workflow` records are separate from preference KV storage:
+they are append-only session metadata, excluded from provider context unless
+plugin code explicitly contributes a value as guidance or output. Atomic writes
+require an idle root command and commit immediately; later callback failure
+does not undo a completed update. Pure hooks receive only requested, bounded,
+plugin-owned workflow values. New lifecycle gates cannot perform host I/O,
+redirect transitions, or replace compaction boundaries/summaries.
+
+Plugin tool restrictions intersect rather than overwrite one another. They
+apply to schemas, deferred discovery, dispatch, nested calls, and descendants,
+without loosening Plan Mode, role policy, or permissions. Clearing one plugin's
+restriction never clears another's. They are not a universal restriction on
+non-tool host controls or arbitrary OS behavior. A loaded runtime failure
+retains its committed restriction; corrupt/unavailable projection fails closed.
+
+Single-plugin reload validates a detached candidate with host I/O disabled and
+preserves pinned roots and package fingerprints. It refuses active work rather
+than cancelling it. Committed generation changes invalidate stale callbacks;
+post-commit cleanup/readiness failures are diagnostics, not rollback. New
+readiness can perform declared host operations under ordinary permission rules.
+See [Plugin workflows and reload](plugin-workflows.md) for complete semantics.

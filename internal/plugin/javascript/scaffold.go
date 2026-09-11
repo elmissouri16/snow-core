@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/elmissouri16/snow-core/pkg/plugin"
 )
 
 //go:embed scaffold/snow.d.ts
 var TypeScriptDeclarations string
+
+//go:embed scaffold/fixtures.md
+var fixtureGuide string
 
 const starterScript = `/// <reference path="./snow.d.ts" />
 snow.registerView({name:"status",title:"Plugin status",placement:"footer"});
@@ -38,17 +42,33 @@ func Scaffold(path, id string, typescript bool) error {
 	if err != nil {
 		return err
 	}
-	files := map[string]string{"snow-plugin.json": string(raw) + "\n", "main.js": starterScript, "snow.d.ts": TypeScriptDeclarations, "README.md": fmt.Sprintf("# %s\n\nRegister: `snow plugin add .`\n\nValidate: `snow plugin check %s`\n\nRun: `snow plugin run %s:hello -- world` or `/%s:hello world` in the TUI.\n\nRestart Snow after editing a loaded plugin.\n", id, id, id, id)}
+	files := map[string]string{"snow-plugin.json": string(raw) + "\n", "main.js": starterScript, "snow.d.ts": TypeScriptDeclarations, "tests/plugin.json": starterFixtures, "tests/README.md": fixtureGuide, "README.md": fmt.Sprintf("# %s\n\nRegister: `snow plugin add .`\n\nValidate: `snow plugin check %s`\n\nRun: `snow plugin run %s:hello -- world` or `/%s:hello world` in the TUI.\n\nAfter editing a loaded plugin, use `/plugins reload %s` while idle (or restart Snow).\n\nMock-only tests: `snow plugin test . --fixtures tests/plugin.json`. Tests use actual Goja with an explicit fake host; they do not validate real permission, session, or tool dispatch behavior.\n", id, id, id, id, id)}
 	if typescript {
-		files["main.ts"] = starterScript
-		files["tsconfig.json"] = `{"compilerOptions":{"strict":true,"target":"ES2020","module":"ESNext","lib":["ES2020"],"noEmit":true},"files":["main.ts","snow.d.ts"]}`
-		files["package.json"] = `{"private":true,"scripts":{"build":"esbuild main.ts --bundle --format=iife --platform=neutral --outfile=main.js","check":"tsc --noEmit"}}`
-		files["README.md"] += "\nFor TypeScript, run `npm install --save-dev esbuild typescript`, edit main.ts, then `npm run check && npm run build`. Distribute main.js and snow-plugin.json. Node APIs are unavailable at runtime.\n"
+		files["src/main.ts"] = "export default function register(snow: SnowAPI): void {\n" + strings.TrimPrefix(starterScript, "/// <reference path=\"./snow.d.ts\" />\n") + "}\n"
+		files["src/entry.ts"] = "import register from \"./main\";\nregister(snow);\n"
+		files["tsconfig.json"] = `{"compilerOptions":{"strict":true,"target":"ES2020","module":"ESNext","moduleResolution":"Bundler","lib":["ES2020"],"noEmit":true},"include":["src/**/*.ts","snow.d.ts"]}`
+		files["package.json"] = `{"private":true,"scripts":{"build":"esbuild src/entry.ts --bundle --format=iife --platform=neutral --outfile=main.js","check":"tsc --noEmit","test":"npm run check && npm run build && snow plugin test . --fixtures tests/plugin.json"}}`
+		files["README.md"] += "\nFor TypeScript, explicitly run `npm install --save-dev esbuild typescript`, edit the synchronous default factory in `src/main.ts`, then `npm run check && npm run build`. `src/entry.ts` calls the factory with the existing Snow global. Run `npm test` to typecheck, bundle, and test using the installed Snow CLI. Distribute main.js and snow-plugin.json. Node APIs are unavailable at runtime; Snow never installs or builds dependencies on startup or reload.\n"
 	}
 	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(path, name)), 0755); err != nil {
+			return err
+		}
 		if err := os.WriteFile(filepath.Join(path, name), []byte(content), 0644); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
+const starterFixtures = `{
+ "version": 1,
+ "tests": [{"name":"greeting uses declared mock storage and UI","steps":[
+  {"kind":"command","name":"hello","input":"world","calls":[
+   {"operation":"storage.get","args":{"key":"visits"},"memory":true},
+   {"operation":"storage.set","args":{"key":"visits","value":1},"memory":true},
+   {"operation":"ui.update","args":{"name":"status","content":{"type":"text","text":"Hello world · visit 1","tone":"accent"}}}
+  ],"expect":{"content":[{"type":"text","text":"Hello world · visit 1"}]}}
+ ]}]
+}
+`

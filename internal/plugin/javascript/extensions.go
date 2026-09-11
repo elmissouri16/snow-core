@@ -23,9 +23,10 @@ type commandHandler struct {
 	fn   goja.Callable
 }
 type hookHandler struct {
-	phase    string
-	children bool
-	fn       goja.Callable
+	phase        string
+	children     bool
+	workflowKeys []string
+	fn           goja.Callable
 }
 type extensionState struct {
 	settled   []settledInvocation // worker-owned
@@ -164,24 +165,48 @@ func (r *Runtime) registerCommand(call goja.FunctionCall) goja.Value {
 func (r *Runtime) registerHook(call goja.FunctionCall) goja.Value {
 	r.requireRegistration("hooks")
 	phase := call.Argument(0).String()
-	if !slices.Contains([]string{"before_prompt", "before_request", "before_tool", "after_tool"}, phase) {
+	if !slices.Contains([]string{"before_prompt", "before_request", "before_tool", "after_tool", "before_session_change", "before_compaction"}, phase) {
 		r.fail(errors.New("unknown hook phase"))
 	}
 	fn, ok := goja.AssertFunction(call.Argument(1))
 	if !ok {
 		r.fail(errors.New("hook requires a handler"))
 	}
-	children := false
-	if object, ok := call.Argument(2).(*goja.Object); ok {
-		if value := object.Get("includeSubagents"); value != nil {
-			children = value.ToBoolean()
+	var options struct {
+		IncludeSubagents bool     `json:"includeSubagents"`
+		WorkflowKeys     []string `json:"workflowKeys"`
+	}
+	if value := call.Argument(2); !goja.IsUndefined(value) {
+		raw, err := r.encode(value, MaxManifestBytes)
+		if err != nil {
+			r.fail(err)
 		}
+		if err := jsonv2.Unmarshal(raw, &options, jsonv2.RejectUnknownMembers(true)); err != nil {
+			r.fail(err)
+		}
+	}
+	children := options.IncludeSubagents
+	keys := append(r.HookWorkflowKeys(phase), options.WorkflowKeys...)
+	slices.Sort(keys)
+	if len(options.WorkflowKeys) > 64 || len(slices.Compact(keys)) > 64 {
+		r.fail(errors.New("workflow hook key limit exceeded"))
+	}
+	for _, key := range options.WorkflowKeys {
+		if len(key) == 0 || len(key) > 128 || strings.ContainsRune(key, 0) {
+			r.fail(errors.New("invalid workflow hook key"))
+		}
+	}
+	if len(options.WorkflowKeys) > 0 {
+		r.requireRegistration("workflow")
+	}
+	if children && (len(options.WorkflowKeys) > 0 || phase == "before_session_change" || phase == "before_compaction") {
+		r.fail(errors.New("workflow and lifecycle hooks are root-only"))
 	}
 	if len(r.extension.hooks) >= 64 {
 		r.fail(errors.New("hook limit exceeded"))
 	}
 	if r.opts.ChildTools == nil {
-		r.extension.hooks = append(r.extension.hooks, hookHandler{phase: phase, children: children, fn: fn})
+		r.extension.hooks = append(r.extension.hooks, hookHandler{phase: phase, children: children, workflowKeys: options.WorkflowKeys, fn: fn})
 	}
 	return goja.Undefined()
 }
@@ -293,13 +318,36 @@ func (r *Runtime) HasHook(phase string, child bool) bool {
 	}
 	return false
 }
+func (r *Runtime) HookWorkflowKeys(phase string) []string {
+	var keys []string
+	for _, h := range r.extension.hooks {
+		if h.phase == phase {
+			keys = append(keys, h.workflowKeys...)
+		}
+	}
+	slices.Sort(keys)
+	return slices.Compact(keys)
+}
+
 func (r *Runtime) RunHook(ctx context.Context, request plugin.HookRequest) (plugin.HookResult, error) {
 	var combined plugin.HookResult
 	for _, h := range r.extension.hooks {
 		if h.phase != request.Phase || (request.Agent != nil && !h.children) {
 			continue
 		}
-		raw, err := jsonv2.Marshal(request)
+		input := request
+		input.Workflow = nil
+		if len(h.workflowKeys) > 0 {
+			input.Workflow = make(map[string]json.RawMessage, len(h.workflowKeys))
+			for _, key := range h.workflowKeys {
+				value := request.Workflow[key]
+				if value == nil {
+					value = json.RawMessage("null")
+				}
+				input.Workflow[key] = value
+			}
+		}
+		raw, err := jsonv2.Marshal(input)
 		if err != nil {
 			return combined, err
 		}

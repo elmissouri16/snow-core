@@ -53,6 +53,10 @@ func (t *asyncTracker) Exited() {
 }
 
 func (r *Runtime) invokeAsync(ctx context.Context, name, kind string, uses []string, budget time.Duration, fn goja.Callable, input json.RawMessage, tc *plugin.ToolContext) (json.RawMessage, error) {
+	if err := r.beginReloadActivity(); err != nil {
+		return nil, err
+	}
+	defer r.endReloadActivity()
 	if len(r.pkg.Manifest.HostTools) > 0 {
 		uses = append(slices.Clone(uses), "tools")
 	}
@@ -72,7 +76,13 @@ func (r *Runtime) invokeAsync(ctx context.Context, name, kind string, uses []str
 	r.extension.mu.RUnlock()
 	env := plugin.Environment{Kind: "root"}
 	if host != nil {
-		env = host.Environment()
+		// Pure transition gates execute while the app holds exclusive session
+		// admission. An immutable snapshot avoids reentering its session lock.
+		if snapshot, ok := host.(interface{ HookEnvironment() plugin.Environment }); kind == "hook" && ok {
+			env = snapshot.HookEnvironment()
+		} else {
+			env = host.Environment()
+		}
 	}
 	if r.opts.ChildTools != nil {
 		env.Kind = "child"
@@ -162,7 +172,8 @@ func (r *Runtime) asyncContext(op *invocation) (*goja.Object, error) {
 		"goals":     {"get", "create", "edit", "pause", "resume", "clear"},
 		"subagents": {"models", "spawn", "list", "get", "messages", "message", "followUp", "wait", "interrupt", "close", "resume"},
 		"storage":   {"get", "set", "delete"},
-		"tools":     {"call"},
+		"workflow":  {"get", "set", "delete", "update"},
+		"tools":     {"call", "list", "restrict", "clearRestriction"},
 		"ui":        {"update", "open", "close", "notify", "input", "select", "confirm", "form", "editorGet", "editorSet", "editorInsert", "theme"},
 	}
 	for group, methods := range groups {

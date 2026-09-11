@@ -19,7 +19,7 @@ import (
 func pluginCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "plugin", Short: "Manage local JavaScript plugin registrations", Args: cobra.NoArgs}
 	cmd.AddCommand(pluginInspectCmd("list"), pluginInspectCmd("get"), pluginInspectCmd("check"))
-	cmd.AddCommand(pluginRunCmd(), pluginInitCmd())
+	cmd.AddCommand(pluginRunCmd(), pluginInitCmd(), pluginTestCmd())
 	for _, action := range []string{"add", "enable", "disable", "remove"} {
 		cmd.AddCommand(pluginMutateCmd(action))
 	}

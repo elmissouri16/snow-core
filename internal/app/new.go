@@ -638,8 +638,9 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	if opts.CollaborationMode == "" && opts.SessionPath != "" {
 		initialMode = "" // restore the persisted active-branch mode
 	}
+	pluginHooks := &appPluginHooks{manager: manager}
 	ag, err = agent.New(agent.Options{
-		PluginHooks: manager,
+		PluginHooks: pluginHooks,
 		Provider:    prov,
 		Registry:    reg,
 		Session:     st,
@@ -806,7 +807,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 				childSystem += spec.Role.System + "\n"
 			}
 			childSystem += "</subagent>"
-			child, err := agent.New(agent.Options{PluginHooks: manager, Provider: childProvider, Registry: childReg, Session: childStore, Permission: childPerm, ToolHost: childHost,
+			child, err := agent.New(agent.Options{PluginHooks: pluginHooks, Provider: childProvider, Registry: childReg, Session: childStore, Permission: childPerm, ToolHost: childHost,
 				SystemPrompt: childSystem, ToolGuidance: runtimeToolGuidance(), FixedContextBudgetPercent: cfg.FixedContextBudgetPercent,
 				Model: childModel, Thinking: spec.State.Thinking, ReasoningSummary: reasoningSummary,
 				TextVerbosity: textVerbosity, CollaborationMode: protocol.ModeDefault, Identity: spec.State.Agent.Clone(),
@@ -900,6 +901,7 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	a.Debugger = diagnostics.New(cfg.Debug.Enabled)
 	ag.Subscribe(a.Debugger.Record)
 	extensionApp = a
+	pluginHooks.app = a
 	a.bindExtensions(startup.globalDir)
 	committed = true
 	guardCommitted = true

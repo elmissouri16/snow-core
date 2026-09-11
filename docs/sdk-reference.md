@@ -798,3 +798,28 @@ the package and omit the override to use persistent controls. `NoPlugins`
 continues to suppress runtime loading. Both methods return an error after the
 session is closed. Enabling checks package files without executing JavaScript;
 full initialization happens when the next session opens.
+
+
+### Reload a loaded JavaScript plugin
+
+`Session.ReloadPlugin(ctx, id) (protocol.PluginReloadResult, error)` replaces
+one already-loaded enabled API 1/2 package while idle. It does not enable or
+load a previously unloaded registration, reload Go plugins, build TypeScript,
+or cancel existing work. Pause active goals and close any child retaining the
+target plugin's tools before retrying a busy rejection.
+
+Before commit, an error preserves the old plugin. On commit, the result has
+`Applied: true`, `PluginID`, `Generation`, and `Fingerprint`. Optional
+`Diagnostics` entries (`Phase`, `Message`) describe post-commit cleanup or
+readiness failures; the method returns the applied receipt without claiming
+rollback. Surviving extensions are rebound, and old-generation host contexts
+are invalid. Readiness can use attached UI/input brokers, so do not block the
+host's broker loop while awaiting reload.
+
+The normalized event stream also includes `protocol.EvPluginSessionChanged`
+after a successful active session/branch transition. Its
+`PluginSessionChanged` payload contains old/new session/branch identity, reason,
+and generation, not private plugin state. See
+[Plugin workflows and reload](plugin-workflows.md) for the canonical reload,
+branch-state, hook, and tool-policy contracts. Custom session stores remain
+compatible; workflow operations require the optional workflow store interface.

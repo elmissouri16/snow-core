@@ -25,6 +25,7 @@ New to Snow? Follow [Getting started](getting-started.md), then
 - [MCP](mcp.md): connect local or remote tools and resources.
 - [Plugins](plugins.md): install JavaScript extensions or embed Go plugins.
 - [JavaScript extensions](plugin-extensions.md): TUI views, commands, hooks, and agent workflows.
+- [Plugin workflows and reload](plugin-workflows.md): branch state, composable restrictions, lifecycle guards, and mocked tests.
 - [Tool routing](tool-routing.md): discover tools only when needed.
 
 ## Build with Snow

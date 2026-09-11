@@ -30,6 +30,9 @@ func (r *Runtime) ChildPlugin(names []string) (plugin.Plugin, error) {
 		local = append(local, strings.TrimPrefix(name, "plugin_"+r.pkg.Manifest.ID+"_"))
 	}
 	opts := r.opts
+	r.mu.Lock()
+	opts.Diagnostic = r.diagnosticFn
+	r.mu.Unlock()
 	opts.ChildTools = local
 	return New(r.pkg, opts), nil
 }

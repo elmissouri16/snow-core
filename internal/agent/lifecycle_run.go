@@ -107,13 +107,14 @@ func (a *Agent) applyDiscoveryDetails(details any) {
 
 func (a *Agent) selectPermittedMatches(matches []tools.ToolMatch, limit int) []tools.ToolMatch {
 	selected := make([]tools.ToolMatch, 0, limit)
+	allowed := a.requestToolPolicy()
 	seen := make(map[string]bool, limit)
 	for _, match := range matches {
 		if seen[match.ID] {
 			continue
 		}
 		desc, ok := tools.Metadata(a.opts.Registry, match.ID)
-		if !ok || !desc.Deferred || !tools.CanExposeMetadata(a.opts.Permission, desc) {
+		if !ok || !desc.Deferred || !allowed(desc) || !tools.CanExposeMetadata(a.opts.Permission, desc) {
 			continue
 		}
 		seen[match.ID] = true
@@ -151,8 +152,9 @@ func (a *Agent) fallbackDeferred(query string, limit int) []tools.ToolMatch {
 		score float64
 	}
 	var rankedMatches []ranked
+	allowed := a.requestToolPolicy()
 	for _, desc := range tools.SelectMetadata(a.opts.Registry, func(desc tools.DescriptorMetadata) bool {
-		return desc.Deferred && tools.CanExposeMetadata(a.opts.Permission, desc)
+		return desc.Deferred && allowed(desc) && tools.CanExposeMetadata(a.opts.Permission, desc)
 	}) {
 		name := strings.ToLower(desc.Name)
 		originalName := strings.ToLower(desc.OriginalName)
@@ -260,7 +262,11 @@ func (a *Agent) requestToolPolicy() func(tools.DescriptorMetadata) bool {
 		origin = ""
 	}
 	a.mu.RUnlock()
+	pluginPolicy := a.pluginToolPolicy()
 	return func(desc tools.DescriptorMetadata) bool {
+		if pluginPolicy(desc.Name) != nil {
+			return false
+		}
 		if budgetReached {
 			return false
 		}

@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "tests": [
+    {
+      "name": "guard defaults off and blocks only while unfinished",
+      "steps": [
+        {
+          "kind": "ready",
+          "calls": [
+            {
+              "operation": "workflow.get",
+              "args": {
+                "key": "unfinished"
+              },
+              "memory": true
+            },
+            {
+              "operation": "ui.update",
+              "args": {
+                "name": "guard",
+                "content": {
+                  "type": "text",
+                  "text": "Workflow guard: off",
+                  "tone": "muted"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "kind": "hook",
+          "request": {
+            "phase": "before_compaction"
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "name": "workflow-guard",
+          "input": "on",
+          "calls": [
+            {
+              "operation": "workflow.set",
+              "args": {
+                "key": "unfinished",
+                "value": true
+              },
+              "memory": true
+            },
+            {
+              "operation": "ui.update",
+              "args": {
+                "name": "guard",
+                "content": {
+                  "type": "text",
+                  "text": "Workflow guard: on",
+                  "tone": "warning"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Workflow guard on. Run /workflow-guard off to allow session changes and compaction."
+              }
+            ]
+          }
+        },
+        {
+          "kind": "hook",
+          "request": {
+            "phase": "before_session_change"
+          },
+          "expect": {
+            "block": "This branch has unfinished work. Run /workflow-guard off before switching sessions/branches or compacting."
+          }
+        },
+        {
+          "kind": "hook",
+          "request": {
+            "phase": "before_compaction"
+          },
+          "expect": {
+            "block": "This branch has unfinished work. Run /workflow-guard off before switching sessions/branches or compacting."
+          }
+        },
+        {
+          "kind": "command",
+          "name": "workflow-guard",
+          "input": "off",
+          "calls": [
+            {
+              "operation": "workflow.set",
+              "args": {
+                "key": "unfinished",
+                "value": false
+              },
+              "memory": true
+            },
+            {
+              "operation": "ui.update",
+              "args": {
+                "name": "guard",
+                "content": {
+                  "type": "text",
+                  "text": "Workflow guard: off",
+                  "tone": "muted"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Workflow guard off."
+              }
+            ]
+          }
+        },
+        {
+          "kind": "hook",
+          "request": {
+            "phase": "before_session_change"
+          },
+          "expect": {}
+        },
+        {
+          "kind": "hook",
+          "request": {
+            "phase": "before_compaction"
+          },
+          "expect": {}
+        }
+      ]
+    },
+    {
+      "name": "restored guard refreshes existing UI",
+      "workflow": {
+        "unfinished": true
+      },
+      "steps": [
+        {
+          "kind": "event",
+          "event": {
+            "type": "plugin_session_changed",
+            "payload": {
+              "type": "plugin_session_changed",
+              "plugin_session_changed": {
+                "old_session_id": "fixture",
+                "new_session_id": "fixture",
+                "old_branch_id": "previous",
+                "new_branch_id": "fixture",
+                "reason": "select_branch",
+                "generation": 1
+              }
+            }
+          },
+          "calls": [
+            {
+              "operation": "workflow.get",
+              "args": {
+                "key": "unfinished"
+              },
+              "memory": true
+            },
+            {
+              "operation": "ui.update",
+              "args": {
+                "name": "guard",
+                "content": {
+                  "type": "text",
+                  "text": "Workflow guard: on",
+                  "tone": "warning"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "kind": "hook",
+          "request": {
+            "phase": "before_session_change"
+          },
+          "expect": {
+            "block": "This branch has unfinished work. Run /workflow-guard off before switching sessions/branches or compacting."
+          }
+        }
+      ]
+    }
+  ]
+}

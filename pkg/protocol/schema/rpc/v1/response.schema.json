@@ -1284,6 +1284,7 @@
               "plugin_commands",
               "plugin_disable",
               "plugin_enable",
+              "plugin_reload",
               "plugin_statuses",
               "plugin_views",
               "plugins_list",
@@ -1987,6 +1988,74 @@
         },
         "data": {
           "$ref": "plugins.schema.json#/$defs/status"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "plugin_reload"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "plugin_id": {
+              "type": "string"
+            },
+            "applied": {
+              "type": "boolean"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fingerprint": {
+              "type": "string"
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "phase": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "phase",
+                  "message"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "plugin_id",
+            "applied",
+            "generation",
+            "fingerprint"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

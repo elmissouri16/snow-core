@@ -417,7 +417,13 @@ func (m *Model) syncPluginGeneration() {
 		return
 	}
 	m.plugins.generation = generation
+	m.refreshPluginCatalog()
+	inspector := m.plugins.screen == "snow:plugins"
 	m.plugins.views = m.app.PluginViews()
 	m.plugins.screen = ""
 	clear(m.plugins.cache)
+	if inspector {
+		m.plugins.screen = "snow:plugins"
+		m.pluginInspector()
+	}
 }

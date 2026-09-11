@@ -58,6 +58,8 @@ func (a *App) bindPermissionSession(st session.Store) error {
 // SetSession switches the active durable conversation store. The old store is
 // closed only after the agent accepts the new store.
 func (a *App) SetSession(st session.Store) error {
+	var notification *protocol.PluginSessionChanged
+	defer a.publishPluginSessionChange(&notification)
 	unlockPlugins, pluginErr := a.lockPluginSession()
 	if pluginErr != nil {
 		return pluginErr
@@ -77,6 +79,15 @@ func (a *App) SetSession(st session.Store) error {
 		return fmt.Errorf("app: session is nil")
 	}
 	if err := a.Goal.ValidateStore(st); err != nil {
+		return err
+	}
+	if err := a.validatePluginSessionTarget(st); err != nil {
+		return err
+	}
+	change := a.pluginTransitionRequest("set_session", st)
+	ctx, cancel := pluginSessionChangeContext()
+	defer cancel()
+	if err := a.beforePluginSessionChange(ctx, change); err != nil {
 		return err
 	}
 	old := a.Session
@@ -136,6 +147,7 @@ func (a *App) SetSession(st session.Store) error {
 	a.Session = st
 	a.sessionHistory.Set(st)
 	a.pluginSessionChanged()
+	notification = a.pluginTransitionNotification(change)
 	g, _ := a.Goal.Get()
 	a.Agent.Publish(a.Agent.StateEvent())
 	a.Agent.Publish(protocol.AgentEvent{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: g, Cleared: g == nil}})
@@ -151,6 +163,8 @@ func (a *App) SetSession(st session.Store) error {
 }
 
 func (a *App) SelectBranch(branchID string) error {
+	var notification *protocol.PluginSessionChanged
+	defer a.publishPluginSessionChange(&notification)
 	unlockPlugins, pluginErr := a.lockPluginSession()
 	if pluginErr != nil {
 		return pluginErr
@@ -161,9 +175,20 @@ func (a *App) SelectBranch(branchID string) error {
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return errors.New("app: cannot switch branch while subagents are active")
 	}
+	if err := a.validatePluginBranchTarget(branchID); err != nil {
+		return err
+	}
+	change := a.pluginTransitionRequest("select_branch", a.Session)
+	change.NewBranchID = branchID
+	ctx, cancel := pluginSessionChangeContext()
+	defer cancel()
+	if err := a.beforePluginSessionChange(ctx, change); err != nil {
+		return err
+	}
 	err := a.Agent.SelectBranchAdmitted(branchID)
 	if err == nil {
 		a.pluginSessionChanged()
+		notification = a.pluginTransitionNotification(change)
 	}
 	return err
 }
@@ -173,6 +198,8 @@ func (a *App) ForkBranch(fromEntryID string) (protocol.SessionBranch, error) {
 }
 
 func (a *App) ForkBranchWithOptions(opts protocol.BranchForkOptions) (protocol.SessionBranch, error) {
+	var notification *protocol.PluginSessionChanged
+	defer a.publishPluginSessionChange(&notification)
 	unlockPlugins, pluginErr := a.lockPluginSession()
 	if pluginErr != nil {
 		return protocol.SessionBranch{}, pluginErr
@@ -183,9 +210,25 @@ func (a *App) ForkBranchWithOptions(opts protocol.BranchForkOptions) (protocol.S
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return protocol.SessionBranch{}, errors.New("app: cannot fork branch while subagents are active")
 	}
+	change := a.pluginTransitionRequest("fork_branch", a.Session)
+	change.NewBranchID = "" // allocated by the store only when the fork commits
+	change.FromEntryID = opts.FromEntryID
+	ctx, cancel := pluginSessionChangeContext()
+	defer cancel()
+	if a.PluginManager != nil && a.PluginManager.HasHook("before_session_change", false) {
+		from, err := a.validatePluginForkTarget(ctx, opts)
+		if err != nil {
+			return protocol.SessionBranch{}, err
+		}
+		change.FromEntryID = from
+	}
+	if err := a.beforePluginSessionChange(ctx, change); err != nil {
+		return protocol.SessionBranch{}, err
+	}
 	branch, err := a.Agent.ForkWithOptionsAdmitted(opts)
 	if err == nil {
 		a.pluginSessionChanged()
+		notification = a.pluginTransitionNotification(change)
 	}
 	return branch, err
 }

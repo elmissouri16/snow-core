@@ -13,6 +13,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/compact"
 	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/pkg/plugin"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -310,6 +311,17 @@ func (a *Agent) compactActiveContextMessages(ctx context.Context, trigger compac
 		}
 		a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Compaction: &result})
 		return result, nil
+	}
+
+	if a.opts.Identity == nil {
+		_, _, hookErr := a.pluginHook(ctx, plugin.HookRequest{Phase: "before_compaction", Compaction: &plugin.CompactionPlan{
+			Trigger: string(trigger), BoundaryID: plan.BoundaryID,
+			SummarizedMessages: result.SummarizedMessages, RetainedMessages: result.RetainedMessages,
+		}})
+		if hookErr != nil {
+			a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: hookErr.Error(), IsError: true, Compaction: &result})
+			return result, hookErr
+		}
 	}
 
 	retainedRefs, referenceVerificationErr := a.verifiedCompactedArtifactReferences(ctx, plan.CompactionCandidates)

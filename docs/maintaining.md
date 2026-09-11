@@ -59,6 +59,8 @@ To reduce drift, use these documents as the primary references:
 | Complete Go SDK behavior | [`sdk-reference.md`](sdk-reference.md) |
 | Foreign-process control | [`rpc.md`](rpc.md) |
 | JavaScript extension API | [`plugin-extensions.md`](plugin-extensions.md) and `pkg/plugin` |
+| Branch-aware JS workflows, restrictions, lifecycle, and reload | [`plugin-workflows.md`](plugin-workflows.md) |
+| JS fixture format and generated test guide | [`scaffold/fixtures.md`](../internal/plugin/javascript/scaffold/fixtures.md) |
 | Go plugin contract | [`plugins.md`](plugins.md) and `pkg/plugin` |
 | ChatGPT/Codex authentication | [`chatgpt-auth.md`](chatgpt-auth.md) |
 | ChatGPT adapter provenance | [`chatgpt-auth-research.md`](chatgpt-auth-research.md) |

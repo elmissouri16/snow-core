@@ -63,6 +63,7 @@ var rpcCommands = []string{
 	"plugin_commands",
 	"plugin_disable",
 	"plugin_enable",
+	"plugin_reload",
 	"plugin_statuses",
 	"plugin_views",
 	"plugins_list",

@@ -30,19 +30,23 @@ type pluginTransition struct {
 	fork   *protocol.BranchForkOptions
 }
 type extensionServices struct {
-	sessionMu   sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
-	ready       sync.Once
-	wg          sync.WaitGroup
-	mu          sync.Mutex
-	ui          PluginUIHandler
-	generation  atomic.Uint64
-	store       *internalplugin.StateStore
-	views       map[string]protocol.PluginView
-	commands    map[string]context.CancelFunc
-	children    map[string][]string
-	transitions map[string]pluginTransition
+	sessionMu    sync.RWMutex
+	ctx          context.Context
+	cancel       context.CancelFunc
+	ready        sync.Once
+	readyRunning bool
+	readyStarted bool
+	reloading    bool
+	wg           sync.WaitGroup
+	mu           sync.Mutex
+	ui           PluginUIHandler
+	generation   atomic.Uint64
+	toolPolicy   atomic.Pointer[pluginToolPolicySnapshot]
+	store        *internalplugin.StateStore
+	views        map[string]protocol.PluginView
+	commands     map[string]context.CancelFunc
+	children     map[string][]string
+	transitions  map[string]pluginTransition
 }
 type appExtensionHost struct {
 	app        *App
@@ -66,6 +70,7 @@ func (a *App) bindExtensions(globalDir string) {
 	s := &extensionServices{ctx: ctx, cancel: cancel, store: internalplugin.NewStateStore(statePath), views: map[string]protocol.PluginView{}, commands: map[string]context.CancelFunc{}, children: map[string][]string{}, transitions: map[string]pluginTransition{}}
 	s.generation.Store(1)
 	a.extensions = s
+	a.refreshPluginToolPolicy()
 	a.PluginManager.BindExtensions(func(info protocol.PluginInfo) plugin.ExtensionHost {
 		for _, view := range info.Views {
 			s.views[view.ID] = view
@@ -83,10 +88,17 @@ func (a *App) StartPluginExtensions() {
 	s := a.extensions
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.ctx.Err() != nil {
+	if s.ctx.Err() != nil || s.reloading {
 		return
 	}
-	s.ready.Do(func() { s.wg.Go(func() { a.PluginManager.ReadyExtensions(s.ctx) }) })
+	s.ready.Do(func() {
+		s.readyRunning = true
+		s.readyStarted = true
+		s.wg.Go(func() {
+			defer func() { s.mu.Lock(); s.readyRunning = false; s.mu.Unlock() }()
+			a.PluginManager.ReadyExtensions(s.ctx)
+		})
+	})
 }
 func (a *App) AttachPluginUI(handler PluginUIHandler) {
 	if a.extensions != nil {
@@ -140,6 +152,10 @@ func (a *App) RunPluginCommand(ctx context.Context, id, input string) (plugin.To
 	stop := context.AfterFunc(s.ctx, cancel)
 	defer func() { stop(); cancel() }()
 	s.mu.Lock()
+	if s.reloading {
+		s.mu.Unlock()
+		return plugin.ToolResult{}, errors.New("plugin reload in progress")
+	}
 	if _, exists := s.commands[id]; exists {
 		s.mu.Unlock()
 		return plugin.ToolResult{}, errors.New("plugin command already running")
@@ -245,6 +261,9 @@ func (h *appExtensionHost) Call(ctx context.Context, inv plugin.Invocation, oper
 	if len(raw) > h.app.Cfg.ToolOutputLimit() {
 		return nil, errors.New("plugin host input exceeds limit")
 	}
+	if strings.HasPrefix(operation, "workflow.") || operation == "tools.list" || operation == "tools.restrict" || operation == "tools.clearRestriction" {
+		return h.callWorkflow(ctx, inv, operation, raw)
+	}
 	if strings.HasPrefix(operation, "storage.") {
 		var arg struct {
 			Scope string `json:"scope"`
@@ -309,6 +328,7 @@ func (a *App) pluginSessionChanged() {
 	}
 	s := a.extensions
 	s.generation.Add(1)
+	a.refreshPluginToolPolicy()
 	s.mu.Lock()
 	for _, cancel := range s.commands {
 		cancel()

@@ -13,6 +13,7 @@ from the terminal.
 - [Compact a long conversation](#compact-a-long-conversation)
 - [Fork an independent session](#fork-an-independent-session)
 - [Fork into a Git worktree](#fork-into-a-git-worktree)
+- [Plugin workflow state](#plugin-workflow-state)
 - [Reuse earlier work](#reuse-earlier-work)
 - [Related documents](#related-documents)
 
@@ -125,6 +126,22 @@ existing destination. If setup fails, Snow rolls back the worktree and branch.
 
 The TUI `/fork` worktree option leaves the current TUI in the source and prints
 a `snow resume` command for the child.
+
+## Plugin workflow state
+
+API 2 plugins can save branch-local profiles, unfinished-work markers, and
+plugin-owned tool restrictions in append-only session metadata. Historical
+forks inherit only the selected ancestry; sibling changes remain isolated.
+Compaction preserves those values without sending raw workflow metadata to the
+provider. Independent session forks copy workflow entries on the selected path;
+ephemeral sessions keep them only in memory.
+
+These writes advance the branch tip. The separate `ctx.storage` KV database
+does not: ordinary plugin preferences remain global/project/session-scoped,
+not branch-aware. A plugin's active lifecycle guard may reject a session or
+branch change or compaction; use the plugin's explicit recovery/off command
+before retrying. See [Plugin workflows and reload](plugin-workflows.md) for
+persistence, bounds, and policy behavior.
 
 ## Reuse earlier work
 

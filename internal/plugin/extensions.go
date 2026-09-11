@@ -113,7 +113,16 @@ func (m *Manager) HasHook(phase string, child bool) bool {
 	return false
 }
 
+// WorkflowLoader supplies only the named plugin's requested branch values.
+type WorkflowLoader func(context.Context, string, []string) (map[string]json.RawMessage, error)
+
 func (m *Manager) RunHooks(ctx context.Context, request public.HookRequest) (public.HookRequest, []protocol.PluginTransform, error) {
+	return m.RunHooksWithWorkflow(ctx, request, nil)
+}
+
+func (m *Manager) RunHooksWithWorkflow(ctx context.Context, request public.HookRequest, load WorkflowLoader) (public.HookRequest, []protocol.PluginTransform, error) {
+	// Workflow data must never enter transformation audits or another plugin's input.
+	request.Workflow = nil
 	var changes []protocol.PluginTransform
 	extensions := m.extensionList()
 	slices.SortFunc(extensions, func(a, b public.Extension) int { return strings.Compare(a.ExtensionInfo().ID, b.ExtensionInfo().ID) })
@@ -126,7 +135,20 @@ func (m *Manager) RunHooks(ctx context.Context, request public.HookRequest) (pub
 		if err != nil {
 			return request, changes, err
 		}
-		change, err := e.RunHook(ctx, request)
+		input := request
+		if hook, ok := e.(public.WorkflowHooks); ok && request.Agent == nil {
+			keys := hook.HookWorkflowKeys(request.Phase)
+			if len(keys) > 0 {
+				if load == nil {
+					return request, changes, public.ErrUnavailable
+				}
+				input.Workflow, err = load(ctx, id, keys)
+				if err != nil {
+					return request, changes, fmt.Errorf("plugin %s workflow snapshot: %w", id, err)
+				}
+			}
+		}
+		change, err := e.RunHook(ctx, input)
 		if err != nil {
 			return request, changes, fmt.Errorf("plugin %s %s: %w", id, request.Phase, err)
 		}
@@ -134,6 +156,10 @@ func (m *Manager) RunHooks(ctx context.Context, request public.HookRequest) (pub
 			return request, changes, fmt.Errorf("plugin %s blocked %s: %s", id, request.Phase, boundUTF8(change.Block, 2048))
 		}
 		switch request.Phase {
+		case "before_session_change", "before_compaction":
+			if change.Text != nil || change.Arguments != nil || change.Content != nil || change.Context != nil {
+				return request, changes, errors.New("lifecycle gates can only block")
+			}
 		case "before_prompt":
 			if change.Arguments != nil || change.Content != nil || change.Context != nil {
 				return request, changes, errors.New("before_prompt can only change text")

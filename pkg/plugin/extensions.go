@@ -38,14 +38,40 @@ type ExtensionHost interface {
 }
 
 type HookRequest struct {
-	Phase     string                             `json:"phase"`
-	Text      string                             `json:"text,omitempty"`
-	Tool      string                             `json:"tool,omitempty"`
-	Arguments json.RawMessage                    `json:"arguments,omitempty"`
-	Content   []protocol.ContentBlock            `json:"content,omitempty"`
-	IsError   bool                               `json:"isError,omitzero"`
-	Context   []protocol.InternalContextFragment `json:"context,omitempty"`
-	Agent     *protocol.AgentRef                 `json:"agent,omitempty"`
+	Phase         string                             `json:"phase"`
+	Text          string                             `json:"text,omitempty"`
+	Tool          string                             `json:"tool,omitempty"`
+	Arguments     json.RawMessage                    `json:"arguments,omitempty"`
+	Content       []protocol.ContentBlock            `json:"content,omitempty"`
+	IsError       bool                               `json:"isError,omitzero"`
+	Context       []protocol.InternalContextFragment `json:"context,omitempty"`
+	Agent         *protocol.AgentRef                 `json:"agent,omitempty"`
+	Workflow      map[string]json.RawMessage         `json:"workflow,omitempty"`
+	SessionChange *SessionChange                     `json:"sessionChange,omitempty"`
+	Compaction    *CompactionPlan                    `json:"compaction,omitempty"`
+}
+
+// SessionChange describes a validated, not yet committed active transition.
+type SessionChange struct {
+	Operation    string `json:"operation"`
+	OldSessionID string `json:"oldSessionId"`
+	NewSessionID string `json:"newSessionId"`
+	OldBranchID  string `json:"oldBranchId"`
+	NewBranchID  string `json:"newBranchId,omitempty"`
+	FromEntryID  string `json:"fromEntryId,omitempty"`
+}
+
+// CompactionPlan contains safe counts, never provider-private conversation data.
+type CompactionPlan struct {
+	Trigger            string `json:"trigger"`
+	BoundaryID         string `json:"boundaryId"`
+	SummarizedMessages int    `json:"summarizedMessages"`
+	RetainedMessages   int    `json:"retainedMessages"`
+}
+
+// WorkflowHooks is optional; old Go extensions need not implement it.
+type WorkflowHooks interface {
+	HookWorkflowKeys(phase string) []string
 }
 
 type HookResult struct {
@@ -85,6 +111,10 @@ func CapabilityForOperation(op string) string {
 		return "storage"
 	case "ui.update", "ui.open", "ui.close", "ui.notify", "ui.input", "ui.select", "ui.confirm", "ui.form", "ui.editorGet", "ui.editorSet", "ui.editorInsert", "ui.theme":
 		return "ui"
+	case "workflow.get", "workflow.set", "workflow.delete", "workflow.update":
+		return "workflow"
+	case "tools.list", "tools.restrict", "tools.clearRestriction":
+		return "tool_policy"
 	case "tools.call":
 		return "tools"
 	case "sleep":

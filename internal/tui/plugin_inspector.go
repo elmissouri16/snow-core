@@ -156,6 +156,9 @@ func (m *Model) updatePluginInspectorView() {
 			} else {
 				addText("Controlled by launch options", "muted")
 			}
+			if s.Enabled && s.Loaded {
+				addAction("Reload", "reload:"+s.ID)
+			}
 			if info.Name != "" {
 				addText(info.Name+" · "+info.Version, "")
 			}
@@ -362,6 +365,8 @@ func (m *Model) handlePluginInspectorKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 func (m *Model) runPluginInspectorAction(action string) tea.Cmd {
 	kind, id, _ := strings.Cut(action, ":")
 	switch kind {
+	case "reload":
+		return m.reloadPlugin(id)
 	case "enable", "disable":
 		return m.togglePlugin(id, kind == "enable")
 	case "open":

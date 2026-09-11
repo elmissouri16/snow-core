@@ -273,6 +273,8 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		return s.handlePresentationCommand(ctx, req)
 	}
 	switch req.Type {
+	case "plugin_reload":
+		return s.handlePluginReload(ctx, req)
 	case "plugins_list", "plugin_statuses", "plugin_enable", "plugin_disable", "plugin_commands", "plugin_views", "plugin_command_run", "plugin_command_cancel":
 		return s.handlePluginCommand(ctx, req)
 	case "prompt":
