@@ -1,0 +1,336 @@
+{
+  "version": 1,
+  "note": "Snapshot of the listed checkout files; hashes, not a released-version compatibility guarantee.",
+  "files": [
+    {
+      "source": "docs/configuration.md",
+      "resource": "docs/configuration.md",
+      "sha256": "3b53f72246ef5edc4aa95f4c3faed5c8fc94cc646ba7098831db81ad0cfe5abd"
+    },
+    {
+      "source": "docs/goals.md",
+      "resource": "docs/goals.md",
+      "sha256": "7cadc2dc16dc1a786d060f67cff38329403e2454e6b0232fbe69b1835c6b8e54"
+    },
+    {
+      "source": "docs/plan-mode.md",
+      "resource": "docs/plan-mode.md",
+      "sha256": "0bc1e56eb91afdb4016d47ef69482b69105cb3128342408913f73b4ff2ba7158"
+    },
+    {
+      "source": "docs/plugin-extensions.md",
+      "resource": "docs/plugin-extensions.md",
+      "sha256": "3a47c53514159c91e9deaf902e03e5e29663866e57771381fa753dbd4792cef6"
+    },
+    {
+      "source": "docs/plugin-workflows.md",
+      "resource": "docs/plugin-workflows.md",
+      "sha256": "74f8d080b5e1351a620a330d30698467f0009be45a042ef878faad572871ebd8"
+    },
+    {
+      "source": "docs/plugins.md",
+      "resource": "docs/plugins.md",
+      "sha256": "616214ce10704152ac803a5061ff80ff79ce444ef2bdb593d67c189887ce3881"
+    },
+    {
+      "source": "docs/rpc.md",
+      "resource": "docs/rpc.md",
+      "sha256": "e220c134788a3bbe841f0428bfc1309b6af6e2ff7145ddec84b3df76daeb1f86"
+    },
+    {
+      "source": "docs/sdk-reference.md",
+      "resource": "docs/sdk-reference.md",
+      "sha256": "bbdcdc2728091aca1ddbab9eba9504d054b4279e414dad28cfdc537914b76d3e"
+    },
+    {
+      "source": "docs/sdk.md",
+      "resource": "docs/sdk.md",
+      "sha256": "3ac74369fdcd3fb6b878fe23b94c7b41d5c135dbe2de45186a412b896f02c592"
+    },
+    {
+      "source": "docs/security.md",
+      "resource": "docs/security.md",
+      "sha256": "d55d4f7fef5ef93c7cd25be42ae6a0e629c35e4cabd094ddb366c224fd714a43"
+    },
+    {
+      "source": "docs/sessions.md",
+      "resource": "docs/sessions.md",
+      "sha256": "06b9f652ad2e226e4b988da77d8d2e8bbbb93eaf7e855036a3cc8250e95a31e8"
+    },
+    {
+      "source": "docs/skills.md",
+      "resource": "docs/skills.md",
+      "sha256": "3d24a0849801770af5c0adfa16139bb3c6813c2c784f652113f68ed5a760a864"
+    },
+    {
+      "source": "docs/subagents.md",
+      "resource": "docs/subagents.md",
+      "sha256": "a0493ed2b5a642ba80b582a068a27bbf96a8fd62ba1d988405d0b79fc21f0585"
+    },
+    {
+      "source": "docs/tool-routing.md",
+      "resource": "docs/tool-routing.md",
+      "sha256": "3ea223efe718a13f97f3b5a8342cb96d7c72fcff21b44106ee35bc03546bed69"
+    },
+    {
+      "source": "docs/user-input.md",
+      "resource": "docs/user-input.md",
+      "sha256": "9f82ee558c206df884a319e087dcc1d4fd9c237308b8b1e55c319adbee6acbf1"
+    },
+    {
+      "source": "examples/plugins/README.md",
+      "resource": "examples/plugins/README.md",
+      "sha256": "2a6ef8cd59d29f37bc829cbd79617a0f042c59b1850967b2b643f999a76b2c02"
+    },
+    {
+      "source": "examples/plugins/TRY.md",
+      "resource": "examples/plugins/TRY.md",
+      "sha256": "a5a26201616f89d37a1d24fc7091d4d53158d57106a01df3d854338cacf64d81"
+    },
+    {
+      "source": "examples/plugins/agent-profiles/README.md",
+      "resource": "examples/plugins/agent-profiles/README.md",
+      "sha256": "2a3aab4862152613d1d4e708747ea2de726a904996a5f59a30f1091370de9a53"
+    },
+    {
+      "source": "examples/plugins/agent-profiles/main.js",
+      "resource": "examples/plugins/agent-profiles/main.js",
+      "sha256": "6c983578634d880bf4bf724a6572317f89eed86e32d58953cf507a090faca08a"
+    },
+    {
+      "source": "examples/plugins/agent-profiles/package.json",
+      "resource": "examples/plugins/agent-profiles/package.json",
+      "sha256": "6a2a4843f3763a54b6e0914ea8147d4d5feafa04b16a5e585db01f2c36b55364"
+    },
+    {
+      "source": "examples/plugins/agent-profiles/snow-plugin.json",
+      "resource": "examples/plugins/agent-profiles/snow-plugin.json",
+      "sha256": "9488f924872c6bf5ad9879b0df01abfaade82e288d7481194f503b378aab1114"
+    },
+    {
+      "source": "examples/plugins/agent-profiles/snow.d.ts",
+      "resource": "examples/plugins/agent-profiles/snow.d.ts",
+      "sha256": "e817b534dbabc1fd900ad925b2ddf508331e203431dc7cd25640007df1bbe74f"
+    },
+    {
+      "source": "examples/plugins/agent-profiles/src/entry.ts",
+      "resource": "examples/plugins/agent-profiles/src/entry.ts",
+      "sha256": "750f98c5f49cb8ca2b6cef9766231010f0c110f677b30c4c15979c8ee88332ec"
+    },
+    {
+      "source": "examples/plugins/agent-profiles/src/main.ts",
+      "resource": "examples/plugins/agent-profiles/src/main.ts",
+      "sha256": "ff99f9dfc5aee3fbd586c3abaa06ebd831ac1ac4931dc32d17b707ca9db6f29f"
+    },
+    {
+      "source": "examples/plugins/agent-profiles/tests/plugin.json",
+      "resource": "examples/plugins/agent-profiles/tests/plugin.json",
+      "sha256": "cc9be085b3abe222e7980048dbb8758cfbd659c9f055df3d3a3422da6a333e20"
+    },
+    {
+      "source": "examples/plugins/agent-profiles/tsconfig.json",
+      "resource": "examples/plugins/agent-profiles/tsconfig.json",
+      "sha256": "eb66c1a409fd7166a1b9a6bfb4b8e86bbfcaa06780ca802cedc33fe6a1431b93"
+    },
+    {
+      "source": "examples/plugins/extensions_smoke.py",
+      "resource": "examples/plugins/extensions_smoke.py",
+      "sha256": "467a93c24eb679dd42e83edd4b1c999a29ae3b292221ac2978fcacd3b2082cb8"
+    },
+    {
+      "source": "examples/plugins/git-review/main.js",
+      "resource": "examples/plugins/git-review/main.js",
+      "sha256": "e07ce896770fbf38149ce2326b7cefea2ea9e730a6207fe2fb00a93162c0d559"
+    },
+    {
+      "source": "examples/plugins/git-review/snow-plugin.json",
+      "resource": "examples/plugins/git-review/snow-plugin.json",
+      "sha256": "7b1b4715f39958605ea1fdce10b8ba8162cbc404180802229791fb1459c494dd"
+    },
+    {
+      "source": "examples/plugins/project-context/main.js",
+      "resource": "examples/plugins/project-context/main.js",
+      "sha256": "ef86b1e34b6d36b1c8d70b10b1c6bb915a235430eef4ad6a5ac6429418d3d6f3"
+    },
+    {
+      "source": "examples/plugins/project-context/snow-plugin.json",
+      "resource": "examples/plugins/project-context/snow-plugin.json",
+      "sha256": "5e78c6c4439f4e83dbf774bda2940e9c25df32fdd5e068260bd53486b278a4ae"
+    },
+    {
+      "source": "examples/plugins/project-helper-v2/main.js",
+      "resource": "examples/plugins/project-helper-v2/main.js",
+      "sha256": "1062a1662679796ddec40e15ffcfe3107ac68c39210586216a0fbc88fb1a2517"
+    },
+    {
+      "source": "examples/plugins/project-helper-v2/snow-plugin.json",
+      "resource": "examples/plugins/project-helper-v2/snow-plugin.json",
+      "sha256": "3ed32bbca2acceba6b575aeb4507597531e47ed725a2d3bda3e34a0e82b1cd62"
+    },
+    {
+      "source": "examples/plugins/project-helper/main.js",
+      "resource": "examples/plugins/project-helper/main.js",
+      "sha256": "95e0ab141af7c569bd36290e65211216d9a9249ee0c8b79e93c4976e154ccd7a"
+    },
+    {
+      "source": "examples/plugins/project-helper/snow-plugin.json",
+      "resource": "examples/plugins/project-helper/snow-plugin.json",
+      "sha256": "c7b24f0a16dc632592cd35105b2fe9bb764bd4ea9f89f576381e867e851de312"
+    },
+    {
+      "source": "examples/plugins/prompt-recipes/main.js",
+      "resource": "examples/plugins/prompt-recipes/main.js",
+      "sha256": "78bde6581149b72fa8591b6ce39113e7834f63d76945516df6b6c9a0fc9fb7a3"
+    },
+    {
+      "source": "examples/plugins/prompt-recipes/snow-plugin.json",
+      "resource": "examples/plugins/prompt-recipes/snow-plugin.json",
+      "sha256": "b8aa1a33eac1dd7adaef7422f5f5167f521a11ce12d9b0a6dd7ade1b8bda3ad6"
+    },
+    {
+      "source": "examples/plugins/review-team/main.js",
+      "resource": "examples/plugins/review-team/main.js",
+      "sha256": "1e71c0bfd55d1d1809b1c73aa1ee1f698a7c62f8ac52a23815dbdd4a391464d8"
+    },
+    {
+      "source": "examples/plugins/review-team/snow-plugin.json",
+      "resource": "examples/plugins/review-team/snow-plugin.json",
+      "sha256": "3bc119a824e99ef49d7103bdff9ccb214c02e745f37cad5350bbbc0ade009021"
+    },
+    {
+      "source": "examples/plugins/session-pilot/main.js",
+      "resource": "examples/plugins/session-pilot/main.js",
+      "sha256": "c916325a3ed8c30f3d637d662617a6abc23fdae9b33dc81b09ee53c04b3fef0b"
+    },
+    {
+      "source": "examples/plugins/session-pilot/snow-plugin.json",
+      "resource": "examples/plugins/session-pilot/snow-plugin.json",
+      "sha256": "1ab956e894845a3943a053e162ee26e1f1e3b08e8dcf5f4456978ddd373f577d"
+    },
+    {
+      "source": "examples/plugins/smoke.py",
+      "resource": "examples/plugins/smoke.py",
+      "sha256": "f51b87eac22c8015358ad5d62b2808e095b382ccf214282278bb9d0739bb4376"
+    },
+    {
+      "source": "examples/plugins/snow-v2.d.ts",
+      "resource": "examples/plugins/snow-v2.d.ts",
+      "sha256": "e817b534dbabc1fd900ad925b2ddf508331e203431dc7cd25640007df1bbe74f"
+    },
+    {
+      "source": "examples/plugins/snow.d.ts",
+      "resource": "examples/plugins/snow.d.ts",
+      "sha256": "9149b3fd39c92c21815c864523fb22d1300e1f5e3b1206c4eeb6dfa20ff123be"
+    },
+    {
+      "source": "examples/plugins/text-tools/main.js",
+      "resource": "examples/plugins/text-tools/main.js",
+      "sha256": "35d1b06b54f8fe6c6acb548da2f30c8b59dfab6d911a90a0f4d1edd3971129af"
+    },
+    {
+      "source": "examples/plugins/text-tools/snow-plugin.json",
+      "resource": "examples/plugins/text-tools/snow-plugin.json",
+      "sha256": "ce51997f0b4684a0f0517eda56469b89ca722b35aa121989a05305c38acbc86d"
+    },
+    {
+      "source": "examples/plugins/todo-radar/main.js",
+      "resource": "examples/plugins/todo-radar/main.js",
+      "sha256": "33fe7d311f44ac67d2ed40155c36345bf26a2718ec1b53f7bcde83f0cf310a36"
+    },
+    {
+      "source": "examples/plugins/todo-radar/snow-plugin.json",
+      "resource": "examples/plugins/todo-radar/snow-plugin.json",
+      "sha256": "bd19ec9d1f362bfc56fa9baae9e5ba49b4b4098b94e5c79a3ecadb900305495f"
+    },
+    {
+      "source": "examples/plugins/try.sh",
+      "resource": "examples/plugins/try.sh",
+      "sha256": "c39fba8b8ae00b152ef244ae36bf2accf42638ede648a706a1f42f20c07ba4e1"
+    },
+    {
+      "source": "examples/plugins/ui-studio/main.js",
+      "resource": "examples/plugins/ui-studio/main.js",
+      "sha256": "94ed3cce3f06801979f668d38492728480102f5c2d144f72a9c0ffe92d77eeae"
+    },
+    {
+      "source": "examples/plugins/ui-studio/snow-plugin.json",
+      "resource": "examples/plugins/ui-studio/snow-plugin.json",
+      "sha256": "0d5107017c94156c2b3d5ed8011bfeb7fbb570e6f644197ec98513f046b88fea"
+    },
+    {
+      "source": "examples/plugins/workflow-guard/README.md",
+      "resource": "examples/plugins/workflow-guard/README.md",
+      "sha256": "6143d3e20759825676d27f91a47605d725429e83f1001e3a8314cb85e226b377"
+    },
+    {
+      "source": "examples/plugins/workflow-guard/main.js",
+      "resource": "examples/plugins/workflow-guard/main.js",
+      "sha256": "515ef7978fceb7e0d918af392251f02a01045e1247b6c2e59f799b43a8314848"
+    },
+    {
+      "source": "examples/plugins/workflow-guard/package.json",
+      "resource": "examples/plugins/workflow-guard/package.json",
+      "sha256": "6a2a4843f3763a54b6e0914ea8147d4d5feafa04b16a5e585db01f2c36b55364"
+    },
+    {
+      "source": "examples/plugins/workflow-guard/snow-plugin.json",
+      "resource": "examples/plugins/workflow-guard/snow-plugin.json",
+      "sha256": "c3fd2047500bee65ce5a44e4477531a7ee9042729d4a7be689e4679e8784bf37"
+    },
+    {
+      "source": "examples/plugins/workflow-guard/snow.d.ts",
+      "resource": "examples/plugins/workflow-guard/snow.d.ts",
+      "sha256": "e817b534dbabc1fd900ad925b2ddf508331e203431dc7cd25640007df1bbe74f"
+    },
+    {
+      "source": "examples/plugins/workflow-guard/src/entry.ts",
+      "resource": "examples/plugins/workflow-guard/src/entry.ts",
+      "sha256": "750f98c5f49cb8ca2b6cef9766231010f0c110f677b30c4c15979c8ee88332ec"
+    },
+    {
+      "source": "examples/plugins/workflow-guard/src/main.ts",
+      "resource": "examples/plugins/workflow-guard/src/main.ts",
+      "sha256": "ac5c916d5cc77cd05a82dc30ad839c9218ae215f4f96876d6c031e867b5dd04a"
+    },
+    {
+      "source": "examples/plugins/workflow-guard/tests/plugin.json",
+      "resource": "examples/plugins/workflow-guard/tests/plugin.json",
+      "sha256": "7df7ea539785d507eb9e26c799ad8b5362561be90a20e49cee52785d787d0d45"
+    },
+    {
+      "source": "examples/plugins/workflow-guard/tsconfig.json",
+      "resource": "examples/plugins/workflow-guard/tsconfig.json",
+      "sha256": "eb66c1a409fd7166a1b9a6bfb4b8e86bbfcaa06780ca802cedc33fe6a1431b93"
+    },
+    {
+      "source": "examples/plugins/workspace-dashboard/main.js",
+      "resource": "examples/plugins/workspace-dashboard/main.js",
+      "sha256": "891e7d5b8d7e1bf23b6b39cd6e2dd19fcbff8ac02676506b3f9837b8279420ae"
+    },
+    {
+      "source": "examples/plugins/workspace-dashboard/snow-plugin.json",
+      "resource": "examples/plugins/workspace-dashboard/snow-plugin.json",
+      "sha256": "c14ef16e482d9d142bcfc0558b324a7fa69c15c3584baf674514d29f714b3bce"
+    },
+    {
+      "source": "examples/plugins/workspace-notes/main.js",
+      "resource": "examples/plugins/workspace-notes/main.js",
+      "sha256": "e21d22a792ee08438045787142293877dd5f20ce661ac8e123c235f2459c9ebe"
+    },
+    {
+      "source": "examples/plugins/workspace-notes/snow-plugin.json",
+      "resource": "examples/plugins/workspace-notes/snow-plugin.json",
+      "sha256": "b133e4e301535cfd786d76ee8ad29507b15f9ca93e981f8798ea18556bc0f8fe"
+    },
+    {
+      "source": "internal/plugin/javascript/scaffold/fixtures.md",
+      "resource": "api/fixtures.md",
+      "sha256": "6ed829781f8c6b616800a35bbb520bb2a4c000b47ddaa2c2134ee45e7a244072"
+    },
+    {
+      "source": "internal/plugin/javascript/scaffold/snow.d.ts",
+      "resource": "api/snow.d.ts",
+      "sha256": "e817b534dbabc1fd900ad925b2ddf508331e203431dc7cd25640007df1bbe74f"
+    }
+  ]
+}

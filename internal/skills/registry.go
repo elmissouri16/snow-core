@@ -24,8 +24,9 @@ import (
 	"github.com/elmissouri16/snow-core/internal/tools/builtin"
 )
 
-// Discover scans standard user and project paths. Higher-ranked project and
-// Snow-native locations deterministically override cross-client locations.
+// Discover loads built-in skills and scans standard user and project paths.
+// Filesystem locations override built-ins; higher-ranked project and Snow-native
+// locations deterministically override cross-client locations.
 func Discover(opts Options) *Registry {
 	maxSkills := opts.MaxSkills
 	if maxSkills <= 0 {
@@ -36,6 +37,7 @@ func Discover(opts Options) *Registry {
 		maxFile = defaultMaxSkillFile
 	}
 	r := &Registry{byName: make(map[string]Skill), allByName: make(map[string]Skill), maxFileSize: maxFile}
+	r.discoverBundled(maxFile)
 
 	home := opts.Home
 	if home == "" {
@@ -522,6 +524,14 @@ func (r *Registry) load(name string) (Skill, []byte, error) {
 	if !ok {
 		return Skill{}, nil, fmt.Errorf("unknown skill %q", name)
 	}
+	if skill.resources != nil {
+		data, err := readBundledResource(skill, "SKILL.md", r.maxFileSize)
+		if err != nil {
+			return Skill{}, nil, err
+		}
+		_, body, err := split(data)
+		return skill, body, err
+	}
 	root, err := openSkillRoot(skill)
 	if err != nil {
 		return Skill{}, nil, err
@@ -536,6 +546,9 @@ func (r *Registry) load(name string) (Skill, []byte, error) {
 }
 
 func (r *Registry) readResource(skill Skill, name string, maxBytes int64) ([]byte, error) {
+	if skill.resources != nil {
+		return readBundledResource(skill, name, maxBytes)
+	}
 	root, err := openSkillRoot(skill)
 	if err != nil {
 		return nil, err
@@ -545,6 +558,9 @@ func (r *Registry) readResource(skill Skill, name string, maxBytes int64) ([]byt
 }
 
 func listResources(ctx context.Context, skill Skill, limit int) ([]string, bool, error) {
+	if skill.resources != nil {
+		return listBundledResources(ctx, skill, limit)
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}

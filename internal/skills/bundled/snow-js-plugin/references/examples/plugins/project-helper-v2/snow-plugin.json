@@ -1,0 +1,1 @@
+{"id":"project-helper-v2","name":"Project helper v2","version":"0.1.0","api_version":2,"entry":"main.js","capabilities":["commands","ui","storage","hooks","subagents"],"host_tools":["glob"],"settings":[{"name":"pattern","title":"Source file pattern","type":"string","default":"**/*.go"}]}

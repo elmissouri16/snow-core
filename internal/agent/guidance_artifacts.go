@@ -458,7 +458,15 @@ func runSkillActivation(ctx context.Context, registry tools.Registry, host tools
 		return tools.SkillActivationDetails{}, errors.New("activate_skill is unavailable")
 	}
 	args, _ := json.Marshal(map[string]string{"name": name})
-	result, err := descriptor.Tool.Run(ctx, args, host)
+	// Only this path activates exact user $name mentions (or reloads an already
+	// active saved skill). Model tool dispatch must not grant explicit authority.
+	run := descriptor.Tool.Run
+	if explicit, ok := descriptor.Tool.(interface {
+		RunExplicitSkillActivation(context.Context, json.RawMessage, tools.ToolHost) (tools.ToolResult, error)
+	}); ok {
+		run = explicit.RunExplicitSkillActivation
+	}
+	result, err := run(ctx, args, host)
 	if err != nil {
 		return tools.SkillActivationDetails{}, err
 	}

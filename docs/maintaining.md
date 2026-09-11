@@ -77,6 +77,29 @@ To reduce drift, use these documents as the primary references:
 | Package architecture, dependency direction, and roadmap | [`IMPLEMENTATION.md`](../IMPLEMENTATION.md) |
 | Current implementation details | Source code and tests |
 
+## Plugin-builder skill snapshot
+
+`internal/skills/bundled/snow-js-plugin/` bundles canonical plugin guides, declarations,
+and examples for agents working outside the source checkout. Canonical sources
+remain authoritative; do not edit the generated copies under its
+`references/docs`, `references/api`, or `references/examples` directories.
+
+After changing a bundled source, run:
+
+```sh
+python3 internal/skills/bundled/snow-js-plugin/scripts/sync_resources.py
+python3 internal/skills/bundled/snow-js-plugin/scripts/sync_resources.py --check
+python3 -m unittest scripts.tests.test_plugin_skill -v
+```
+
+The source/hash manifest and normal Python tests detect snapshot drift. Review
+the handwritten `SKILL.md`, capability matrix, and example selector when supported
+behavior changes. This directory is embedded in the binary; do not keep a second
+`.agents/skills/` copy that shadows it. The built-in's enforced explicit-token
+activation policy is documented in
+[Agent Skills](skills.md#build-javascript-plugins-with-the-bundled-skill); it does
+not add a mention-only frontmatter field to filesystem skills.
+
 ## Related documents
 
 - [Documentation index](README.md)

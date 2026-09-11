@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "esbuild src/entry.ts --bundle --format=iife --platform=neutral --outfile=main.js",
+    "test": "npm run check && npm run build && snow plugin test . --fixtures tests/plugin.json"
+  }
+}

@@ -1,0 +1,305 @@
+{
+  "version": 1,
+  "tests": [
+    {
+      "name": "profiles atomically update instructions and restriction",
+      "steps": [
+        {
+          "kind": "ready",
+          "calls": [
+            {
+              "operation": "workflow.get",
+              "args": {
+                "key": "profile"
+              },
+              "memory": true
+            },
+            {
+              "operation": "ui.update",
+              "args": {
+                "name": "profile",
+                "content": {
+                  "type": "text",
+                  "text": "Profile: off",
+                  "tone": "muted"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "profile",
+          "input": "reviewer",
+          "calls": [
+            {
+              "operation": "workflow.update",
+              "args": {
+                "set": {
+                  "profile": "reviewer"
+                },
+                "toolRestriction": {
+                  "allow": [
+                    "read",
+                    "grep",
+                    "glob"
+                  ]
+                }
+              },
+              "memory": true
+            },
+            {
+              "operation": "ui.update",
+              "args": {
+                "name": "profile",
+                "content": {
+                  "type": "text",
+                  "text": "Profile: reviewer",
+                  "tone": "accent"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Profile reviewer selected for this branch (read-only tools)."
+              }
+            ]
+          }
+        },
+        {
+          "kind": "hook",
+          "request": {
+            "phase": "before_request"
+          },
+          "select": "/context/0/text",
+          "expect": "Review the requested code for correctness, security, and regressions. Inspect evidence before reporting prioritized, actionable findings. Do not modify files."
+        },
+        {
+          "kind": "command",
+          "name": "profile",
+          "input": "architect",
+          "calls": [
+            {
+              "operation": "workflow.update",
+              "args": {
+                "set": {
+                  "profile": "architect"
+                },
+                "toolRestriction": {
+                  "allow": [
+                    "read",
+                    "grep",
+                    "glob"
+                  ]
+                }
+              },
+              "memory": true
+            },
+            {
+              "operation": "ui.update",
+              "args": {
+                "name": "profile",
+                "content": {
+                  "type": "text",
+                  "text": "Profile: architect",
+                  "tone": "accent"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Profile architect selected for this branch (read-only tools)."
+              }
+            ]
+          }
+        },
+        {
+          "kind": "hook",
+          "request": {
+            "phase": "before_request"
+          },
+          "select": "/context/0/text",
+          "expect": "Analyze requirements and existing boundaries. Compare concrete alternatives, explain tradeoffs, and produce an implementation plan grounded in inspected source. Do not modify files."
+        },
+        {
+          "kind": "command",
+          "name": "profile",
+          "input": "debugger",
+          "calls": [
+            {
+              "operation": "workflow.update",
+              "args": {
+                "set": {
+                  "profile": "debugger"
+                },
+                "toolRestriction": {
+                  "allow": [
+                    "read",
+                    "grep",
+                    "glob"
+                  ]
+                }
+              },
+              "memory": true
+            },
+            {
+              "operation": "ui.update",
+              "args": {
+                "name": "profile",
+                "content": {
+                  "type": "text",
+                  "text": "Profile: debugger",
+                  "tone": "accent"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Profile debugger selected for this branch (read-only tools)."
+              }
+            ]
+          }
+        },
+        {
+          "kind": "hook",
+          "request": {
+            "phase": "before_request"
+          },
+          "select": "/context/0/text",
+          "expect": "Investigate the reported failure using read-only source inspection. Distinguish verified evidence from hypotheses, trace the failing path, and propose a focused regression test and fix. Do not run commands or modify files."
+        },
+        {
+          "kind": "command",
+          "name": "profile",
+          "input": "off",
+          "calls": [
+            {
+              "operation": "workflow.update",
+              "args": {
+                "set": {
+                  "profile": "off"
+                },
+                "toolRestriction": null
+              },
+              "memory": true
+            },
+            {
+              "operation": "ui.update",
+              "args": {
+                "name": "profile",
+                "content": {
+                  "type": "text",
+                  "text": "Profile: off",
+                  "tone": "muted"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Profile off; only this plugin's restriction was cleared."
+              }
+            ]
+          }
+        },
+        {
+          "kind": "hook",
+          "request": {
+            "phase": "before_request"
+          },
+          "expect": {}
+        }
+      ]
+    },
+    {
+      "name": "reloaded runtime reads saved selection",
+      "workflow": {
+        "profile": "reviewer"
+      },
+      "steps": [
+        {
+          "kind": "ready",
+          "calls": [
+            {
+              "operation": "workflow.get",
+              "args": {
+                "key": "profile"
+              },
+              "memory": true
+            },
+            {
+              "operation": "ui.update",
+              "args": {
+                "name": "profile",
+                "content": {
+                  "type": "text",
+                  "text": "Profile: reviewer",
+                  "tone": "accent"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "kind": "event",
+          "event": {
+            "type": "plugin_session_changed",
+            "payload": {
+              "type": "plugin_session_changed",
+              "plugin_session_changed": {
+                "old_session_id": "fixture",
+                "new_session_id": "fixture",
+                "old_branch_id": "previous",
+                "new_branch_id": "fixture",
+                "reason": "select_branch",
+                "generation": 1
+              }
+            }
+          },
+          "calls": [
+            {
+              "operation": "workflow.get",
+              "args": {
+                "key": "profile"
+              },
+              "memory": true
+            },
+            {
+              "operation": "ui.update",
+              "args": {
+                "name": "profile",
+                "content": {
+                  "type": "text",
+                  "text": "Profile: reviewer",
+                  "tone": "accent"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "invalid profile performs no host call",
+      "steps": [
+        {
+          "kind": "command",
+          "name": "profile",
+          "input": "toString",
+          "error": "Choose reviewer, architect, debugger, or off"
+        }
+      ]
+    }
+  ]
+}

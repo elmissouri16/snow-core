@@ -1,0 +1,9 @@
+{
+  "id": "prompt-recipes",
+  "name": "Prompt Recipes",
+  "version": "0.1.0",
+  "api_version": 2,
+  "entry": "main.js",
+  "capabilities": ["commands", "ui", "hooks"],
+  "settings": [{"name": "read_limit", "title": "Maximum lines per read in concise mode", "type": "number", "default": 120}]
+}

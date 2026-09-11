@@ -1,0 +1,11 @@
+{
+  "id": "ui-studio",
+  "name": "UI Studio",
+  "version": "0.1.0",
+  "api_version": 2,
+  "entry": "main.js",
+  "capabilities": ["commands", "ui", "storage"],
+  "settings": [
+    {"name": "title", "title": "Studio title", "type": "string", "default": "Your workspace, your UI"}
+  ]
+}

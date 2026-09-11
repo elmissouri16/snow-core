@@ -1256,8 +1256,20 @@ inspection output redacts credential-bearing values.
 
 `internal/skills` implements the open Agent Skills `SKILL.md` format. Startup
 discovery strictly validates standard metadata and loads only names and
-descriptions from standard user and trust-gated project paths under a 64 KiB
-catalog budget.
+descriptions from built-in assets and standard user and trust-gated project
+paths under a 64 KiB catalog budget.
+
+`internal/skills/bundled/snow-js-plugin` ships inside the executable through
+`go:embed`, with its complete authoring guides, API declarations, and examples.
+It has lowest precedence and reports a virtual `builtin:` address; resource
+reads use an immutable embedded filesystem without extraction. Ordinary user,
+configured, and trusted project overrides retain their existing precedence.
+The bundled builder is explicit-only: model tool dispatch cannot activate it;
+the exact `$snow-js-plugin` user directive uses an optional dedicated activation
+method, also used to rehydrate already-active saved skills. This policy is not
+a new frontmatter field for filesystem skills. Named disable policies and
+`--no-skills` still apply. The snapshot sync tool and Python parity tests keep
+bundled canonical docs/examples synchronized with the checkout.
 
 `activate_skill` loads escaped full instructions, the TUI autocompletes
 enabled leading `$skill-name` directives, and a directive activates before

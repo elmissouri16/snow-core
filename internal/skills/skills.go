@@ -27,6 +27,7 @@ type Skill struct {
 	License       string            `json:"license,omitempty"`
 	Compatibility string            `json:"compatibility,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
+	ExplicitOnly  bool              `json:"explicit_only,omitzero"`
 	AllowedTools  string            `json:"allowed_tools,omitempty"`
 	Location      string            `json:"location"`
 	Directory     string            `json:"directory"`
@@ -36,6 +37,7 @@ type Skill struct {
 	DisabledBy    string            `json:"disabled_by,omitempty"`
 	rank          int
 	identity      fs.FileInfo
+	resources     fs.FS // non-nil only for immutable, binary-embedded skills
 }
 
 // Diagnostic records malformed or shadowed skills without aborting startup.
@@ -86,6 +88,7 @@ type frontmatter struct {
 	License       string            `yaml:"license"`
 	Compatibility string            `yaml:"compatibility"`
 	Metadata      map[string]string `yaml:"metadata"`
+	ExplicitOnly  bool              `json:"explicit_only,omitzero"`
 	AllowedTools  string            `yaml:"allowed-tools"`
 }
 
