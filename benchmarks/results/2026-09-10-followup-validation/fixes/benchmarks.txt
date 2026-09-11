@@ -1,0 +1,45 @@
+
+==> ./internal/tui
+
+==> ./internal/tui
+
+==> ./internal/tui
+
+==> ./internal/session
+
+==> ./internal/tui
+
+==> ./internal/agent
+
+==> ./internal/provider/opencodego
+
+==> ./internal/provider/responsesapi
+
+Performance medians (timing ceilings are catastrophe guards):
+  BenchmarkMailboxIngestion                                       852,583 ns/op       399,168 B/op         47 allocs/op
+  BenchmarkSessionHydration5000                               255,735,417 ns/op    87,837,264 B/op    121,625 allocs/op
+  BenchmarkSessionHydrationMixed5000                           89,826,250 ns/op    25,158,392 B/op    127,582 allocs/op
+  BenchmarkTranscriptRefresh10K                                 6,788,119 ns/op     8,857,621 B/op         26 allocs/op
+  BenchmarkViewNormalAndNarrow/width-40                            21,842 ns/op         4,449 B/op         66 allocs/op
+  BenchmarkViewNormalAndNarrow/width-120                           28,678 ns/op         9,619 B/op         66 allocs/op
+  BenchmarkComposerBackspace/bytes-256                            241,087 ns/op        53,804 B/op        688 allocs/op
+  BenchmarkComposerBackspace/bytes-8192                         1,240,282 ns/op       481,013 B/op      4,596 allocs/op
+  BenchmarkComposerBackspace/bytes-65536                        7,523,294 ns/op     3,562,868 B/op     30,632 allocs/op
+  BenchmarkTranscriptSelectionDragFrame                           252,221 ns/op        51,209 B/op        129 allocs/op
+  BenchmarkTerminalHeartbeat                                           89 ns/op            72 B/op          3 allocs/op
+  BenchmarkSQLiteContextMessages/cold                          14,599,750 ns/op     5,469,864 B/op     21,628 allocs/op
+  BenchmarkSQLiteContextMessages/warm                              66,666 ns/op       599,936 B/op         26 allocs/op
+  BenchmarkMemoryContextMessagesAfterCompaction                    23,083 ns/op        82,232 B/op         20 allocs/op
+  BenchmarkSQLiteAppendBatch1500                               23,779,833 ns/op     3,389,360 B/op     48,092 allocs/op
+  BenchmarkSQLiteBranchHydration5000                           26,389,667 ns/op     4,590,144 B/op     35,044 allocs/op
+  BenchmarkStableComposer/ascii                                 1,921,346 ns/op       768,599 B/op      1,969 allocs/op
+  BenchmarkStableComposer/accents                               1,935,022 ns/op       768,196 B/op      2,241 allocs/op
+  BenchmarkStableComposer/cjk                                   1,590,726 ns/op       771,897 B/op      2,499 allocs/op
+  BenchmarkStableComposer/emoji                                 2,105,936 ns/op       862,557 B/op      6,076 allocs/op
+  BenchmarkEventBusDispatch256                                    238,916 ns/op       124,824 B/op        530 allocs/op
+  BenchmarkBuildChatRequest1500/plain                             887,416 ns/op     1,090,664 B/op      1,507 allocs/op
+  BenchmarkBuildChatRequest1500/tool-heavy                        541,833 ns/op       808,792 B/op      2,257 allocs/op
+  BenchmarkChatSSE600                                             624,791 ns/op        90,648 B/op      1,214 allocs/op
+  BenchmarkResponsesSSE600                                        744,625 ns/op        87,144 B/op      4,842 allocs/op
+
+Performance regression guard passed.

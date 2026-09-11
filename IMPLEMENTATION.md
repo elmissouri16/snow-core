@@ -1348,8 +1348,16 @@ preferences apply live through an app facade without changing agent/RPC/SDK
 contracts. Generic attention/desktop alerts are deduplicated and focus-gated;
 child completion, snapshots, stale turns, and goal continuations do not announce
 root completion. Manual compaction settles from its own completion event or
-command result, deduplicated by operation identity in `terminal_compaction.go`;
-pre-admission errors report failure, and cancellation reports Stopped. A generation-scoped, cancelable one-second progress keep-alive
+command result in `terminal_compaction.go`. Command identities captured during
+core admission and an epoch/sequence watermark fence delayed events across
+consecutive operations, including external successors. Pre-admission rejection
+has no operation identity and stays governed by command generations.
+Locally requested compaction defers alerts until its final command result so
+mailbox-cleanup errors override provisional stream success. Pre-admission errors
+report failure, and cancellation reports Stopped. Automatic goal-compaction
+failures announce once at the idle-core terminal goal boundary, without treating
+intermediate compaction success or goal snapshots as completed work.
+A generation-scoped, cancelable one-second progress keep-alive
 goes through a Bubble Tea program filter and `RawMsg` output, deriving state
 immediately before emission. Only these terminal-only messages reuse the last
 complete `tea.View`; all ordinary updates, including resize and focus, invalidate
@@ -1420,7 +1428,11 @@ modal state. `Ctrl+V` attaches supported
 clipboard images in the agent composer, then reads text with bounded host
 utilities. SSH and host text failures use OSC 52 with target/generation guards,
 a three-second timeout, and a retained canceled-request slot until its late reply
-is drained. Clipboard output uses Bubble Tea commands rather than frame content.
+is drained. Occupied clipboard retries are rejected before editor selection or
+attachment mutation. Collapsed paste uses ordinary textarea replacement semantics;
+recalled collapsed entries remain navigable, and programmatic composer replacement
+explicitly reconciles cursor scrolling without redundant per-frame setters.
+Clipboard output uses Bubble Tea commands rather than frame content.
 
 ### Slash commands
 

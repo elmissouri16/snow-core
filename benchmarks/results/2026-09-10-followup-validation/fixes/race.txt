@@ -1,0 +1,7 @@
+ok  	github.com/elmissouri16/snow-core/internal/tui	140.950s
+ok  	github.com/elmissouri16/snow-core/internal/tui/textarea	49.845s
+ok  	github.com/elmissouri16/snow-core/internal/tui/textarea/internal/memoization	7.809s
+ok  	github.com/elmissouri16/snow-core/internal/tui/textarea/internal/runeutil	8.160s
+ok  	github.com/elmissouri16/snow-core/internal/agent	17.117s
+ok  	github.com/elmissouri16/snow-core/internal/app	22.031s
+ok  	github.com/elmissouri16/snow-core/internal/config	26.191s

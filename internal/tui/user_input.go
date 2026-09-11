@@ -125,6 +125,11 @@ func (m *Model) handleUserInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	} else if keyMatches(msg, m.keys.Paste) {
 		msg = tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl}
 	}
+	// Textarea paste deletes a selection before returning its clipboard command.
+	// Keep the draft intact when an earlier terminal read still owns the slot.
+	if msg.Code == 'v' && msg.Mod.Contains(tea.ModCtrl) && m.clipboardReadPending() {
+		return m, nil
+	}
 	question := m.currentUserInputQuestion()
 	if !m.userInputEditing {
 		msg = normalizePickerKeyWithMap(msg, m.keys)

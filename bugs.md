@@ -2634,9 +2634,9 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   rename/fork, Unicode limits and sanitization, plus non-editable delete/loading guards.
 
 
-## BUG-072: A repeated OSC 52 paste invalidates the outstanding request
+## BUG-072: Repeated OSC 52 paste can invalidate a request or delete selected input
 
-- **Status:** Resolved; verified 2026-09-10 on `feat/ghostty-v2`.
+- **Status:** Resolved in the working tree; original and selection-loss regressions verified 2026-09-10.
 - **Severity:** Medium (P2).
 - **Surface:** Ctrl+V over SSH, or terminal clipboard fallback.
 - **Reproduction:** Press Ctrl+V twice before the first terminal clipboard
@@ -2655,6 +2655,19 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
 - **Verified fix:** Remote and local-fallback tests pass for composer and dialog owners.
   Overlap is rejected before either generation changes; timeout, stale-owner, and
   canceled-request tests remain passing.
+- **Follow-up evidence:** `TestFollowupBlockedClipboardPreservesSelection` starts
+  an SSH clipboard request, injects its timeout, selects a draft, and retries
+  Ctrl+V. The composer loses the entire selected `draft`; the dialog loses its
+  selected final character (`draft` becomes `draf`), although no read is started.
+  `handleComposerSelectionKey` clears text/attachments before the pending-read
+  guard; dialog textarea Update also deletes selection before rejecting the read.
+- **Verified follow-up fix:** Occupied clipboard retries are rejected before
+  composer, dialog, and login textarea selection mutation. Whole/partial selection,
+  text/image attachments, masked login input, owner and generation are preserved
+  across pending, timed-out, canceled, and different-owner reads, including remapped
+  paste bindings. `TestOccupiedClipboardRetryPreservesEditableSelection` and the
+  original retained follow-up probe pass. Tombstone and original generation fences
+  remain intact.
 
 
 ## BUG-073: Shift+Up enters composer history instead of selecting text
@@ -2678,9 +2691,9 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   and multiline selection; ordinary history navigation tests continue passing.
 
 
-## BUG-074: Manual compaction errors leave terminal status at Ready
+## BUG-074: Manual compaction settlement can report stale or incorrect status
 
-- **Status:** Resolved; verified 2026-09-10 on `feat/ghostty-v2`.
+- **Status:** Resolved in the working tree; original, delayed-operation, and real final-mailbox-error regressions verified 2026-09-10.
 - **Severity:** Medium (P2).
 - **Surface:** Terminal titles, progress/error state, and background alerts.
 - **Reproduction:** Run `/compact` while unfocused with a failing summarizer and
@@ -2703,6 +2716,33 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   result-before-event, duplicate/acknowledgement, pre-admission failure, cancellation,
   automatic-phase, and stale-result coverage. Terminal settlements retain operation
   identity.
+- **Follow-up evidence (real core events):** Complete two manual compactions and
+  reduce both command results before their subscribed lifecycle events. Acknowledge
+  completion with focus, then drain the events. The single retained settlement
+  belongs to the second operation, allowing the first operation's events to replay
+  and replace it; the second then replays too. The acknowledged Ready state becomes
+  Done again. `TestFollowupTwoCompactionResultsBeforeEvents` reproduces this on
+  `472097f` using real `Agent.Compact` calls, not fabricated operation identities.
+- **Follow-up evidence (injected final error):** A successful `EvCompactionDone`
+  followed by a matching `compactDoneMsg` containing an error stays Done because
+  `settleTerminalCompaction` returns on matching identity before comparing failure.
+  `TestFollowupCompactionFinalErrorOverridesSuccess` reproduces the reducer defect.
+  Core `Agent.Compact` joins deferred `finishTurnMailbox` failures after emitting
+  the lifecycle event, providing a source-traced path for conflicting outcomes;
+  an actual mailbox storage failure has not been injected end-to-end in this audit.
+- **Verified follow-up fix:** Compaction command results carry the identity captured
+  at core admission, and an epoch/sequence watermark fences all older settled
+  operations. Final errors upgrade provisional success; local notifications wait
+  for final cleanup. Deferral stays scoped to the local operation, including a
+  directly following external compaction. Old results cannot overwrite newer work
+  or undo focus acknowledgement. Zero-identity pre-admission errors still settle
+  after a session/branch fence.
+- **Verified follow-up regression:** Both retained probes now pass. Permanent tests
+  in `terminal_compaction_order_test.go` cover consecutive result-first operations,
+  external successors, cancellation, focus, and real mailbox-append failure during
+  `Agent.Compact` finalization in both delivery orders. The failure is injected at
+  the session Store seam while actual compaction/checkpoint persistence succeeds;
+  this is not a physical disk-failure test.
 
 
 ## BUG-075: Signal cancellation can deadlock terminal shutdown
@@ -2731,3 +2771,134 @@ all 58 Python tests, textarea snapshot verification, and the complete benchmark
 guard pass. The fixed PTY matrix includes 30 consecutive signal cancellations.
 Logs and measurements are retained under
 `benchmarks/results/2026-09-10-recent-changes-audit/fixes/`.
+
+## BUG-076: Collapsed prompt history prevents returning to the saved draft
+
+- **Status:** Resolved in the working tree; regression fixes verified 2026-09-10.
+- **Severity:** Medium (P2).
+- **Surface:** Composer history containing large prompts.
+- **Expected:** Up/Down traverse history and Down past the newest entry restores
+  the saved draft, including when recalled entries are displayed as attachments.
+- **Reproduction:** Remember a 4,096-character prompt, type `new draft`, press Up,
+  then Down. Up collapses the recalled prompt into a pasted-text attachment; Down
+  leaves that token as the current history item rather than restoring `new draft`.
+- **Cause/impact:** `navigateInputHistory` rejects arrows whenever `pastedTexts`
+  is nonempty, including attachments created by history recall itself. Users
+  cannot browse past large entries or recover the saved draft through navigation.
+- **Remediation:** Distinguish entering history with independent attachments from
+  continuing navigation through recall-generated attachments; retain the saved
+  draft until browsing ends.
+- **Original regression evidence:** `TestFollowupLargeHistoryRestoresDraft` failed
+  on `472097f`. Cover both rune/line collapse thresholds, older/newer
+  traversal, original-draft restoration, and independently edited attachments.
+- **Verified fix:** Active history browsing accepts recall-generated attachments,
+  while independent attachment drafts still block entry. Permanent regressions
+  cover both collapse thresholds, older/newer traversal, empty/nonempty saved
+  drafts, independent edits/images, and attachment deletion ending navigation.
+
+## BUG-077: Large bracketed paste does not replace a partial selection
+
+- **Status:** Resolved in the working tree; regression fixes verified 2026-09-10.
+- **Severity:** Medium (P2).
+- **Surface:** Composer paste collapsing and textarea selection.
+- **Expected:** Pasting replaces selected text and clears the selection regardless
+  of whether the body is large enough to become an attachment.
+- **Reproduction:** Type `abc`, select `c` using Shift+Left, and bracketed-paste
+  4,096 `x` characters. Expanded text has 4,099 characters and still ends in `c`,
+  instead of the expected 4,098 characters; the selection remains active. A
+  ten-character paste in the same fixture correctly replaces `c`.
+- **Cause/impact:** `collapseComposerPaste` inserts the attachment token through
+  `InsertString` without deleting or clearing the textarea selection. Submitted
+  text includes content the user intended to replace.
+- **Remediation:** Apply ordinary paste selection semantics before inserting the
+  collapsed token, then prune displaced attachments.
+- **Regression evidence:** The large subcase of
+  `TestFollowupLargePasteReplacesPartialSelection` failed on `472097f`; its small
+  control passed. Add multiline/partial selections, both collapse thresholds, attachment
+  replacement, and exact expanded submission assertions.
+- **Verified fix:** Collapsed tokens use the ordinary textarea paste path, replacing
+  and clearing partial/multiline selections before existing attachment pruning.
+  Permanent tests pass below/at rune and line thresholds, with Unicode and forward/
+  backward selections, exact expanded submission, and displaced attachment removal.
+
+## BUG-078: Recalled multiline prompts can leave the insertion point offscreen
+
+- **Status:** Resolved in the working tree; regression fixes verified 2026-09-10.
+- **Severity:** Medium (P2).
+- **Surface:** Composer history and optimized layout dimension updates.
+- **Expected:** Programmatic draft replacement keeps the insertion point visible.
+- **Reproduction:** Remember two distinct twenty-line prompts below the collapse
+  thresholds, then recall each with Up and render. After the second recall, the
+  cursor is on logical line 19 while the six-row viewport remains at offset 0.
+  The audit fixture also observes offset 0 after the first recall.
+- **Cause/impact:** `SetValue` resets the viewport to its top; `CursorEnd` does not
+  reconcile scrolling. `layout` now skips unchanged `SetHeight`, which formerly
+  supplied a scrolling side effect. Users see the beginning of the recalled
+  prompt instead of the location where typing will insert text.
+- **Remediation:** Explicitly reconcile scrolling after programmatic composer
+  replacement, without restoring redundant per-frame dimension setters. Check
+  first render as well as successive same-height replacements.
+- **Original regression evidence:** `TestFollowupHistoryKeepsCursorVisible` failed on `472097f`. Cover
+  wrapped/multiline history, narrow terminals, initial recall, restored drafts,
+  and consecutive values with unchanged dimensions.
+- **Verified fix:** Programmatic composer replacement explicitly reconciles layout,
+  wrapped content, and viewport scrolling once per replacement. No redundant
+  per-frame dimension setter was restored. Permanent tests cover initial and
+  consecutive same-height multiline/wrapped recall, narrow terminals, restored
+  wrapped drafts, and visibility before the first rendered frame.
+
+## BUG-079: Failed automatic goal compaction stops without a failure alert
+
+- **Status:** Resolved in the working tree; reducer and actual automatic-summarizer failure regressions verified 2026-09-10.
+- **Severity:** Medium (P2).
+- **Surface:** Background terminal notifications for goal continuation.
+- **Expected:** A terminal automatic-compaction failure sends exactly one generic
+  failure alert when notifications are enabled for an unfocused terminal.
+- **Reproduction:** While unfocused/busy, reduce automatic compaction start and
+  failed completion, followed by `EvError` and a blocked-goal update with idle
+  core state. The TUI settles to Failed, but emits no notification or bell.
+- **Cause/impact:** Automatic compaction completion is correctly not announced
+  as standalone success. However, `EvError` suppresses the alert while busy, and
+  the blocked-goal boundary clears busy without settling that pending failure.
+  No subsequent `EvTurnDone` exists for this boundary; background users miss
+  the stopped goal. This sequence is source-traced to `prompt_goal.go`'s
+  automatic-compaction error path; the audit injects its events at the reducer.
+- **Remediation:** Announce pending failure when a terminal goal update releases
+  busy state, preserving automatic intermediate success and cancellation rules.
+- **Original regression evidence:** `TestFollowupGoalCompactionFailureAlerts` failed on `472097f`. Add
+  exactly-once checks for repeated goal snapshots, focus/settings changes,
+  cancellation, and a real failing automatic summarizer.
+- **Verified fix:** The terminal goal boundary consumes pending error attention once
+  after core admission is released. Non-continuing goal metadata no longer resets
+  that pending error. Tests include actual automatic summarizer failure, repeated
+  snapshots, focus/settings changes, queued-alert invalidation, cancellation,
+  intermediate success, and a held core turn that must not settle prematurely.
+
+## BUG-080: Manual compaction admits work after agent shutdown
+
+- **Status:** Resolved in the working tree; verified 2026-09-10.
+- **Severity:** Low (P3).
+- **Surface:** Internal manual-compaction admission after `Agent.Close`.
+- **Reproduction:** Close an agent, then call `Compact` again. The old path changes
+  the admitted turn ID/sequence and briefly marks the closed agent running before
+  context loading returns `agent: closed`. Found while verifying zero-identity
+  pre-admission errors for BUG-074.
+- **Cause:** The manual admission block checks running/queued work but not `closed`.
+- **Verified fix:** Check `closed` under the existing admission-state mutex before
+  changing runtime state. `TestManualCompactionRejectsClosedAgentBeforeAdmission`
+  covers both ordinary and identity-returning calls, unchanged admission state,
+  and a zero returned identity on rejection. No second compaction loop was added.
+
+Follow-up reproduction sources, a portable Go-overlay runner, and failure output
+for BUG-072, BUG-074, and BUG-076–079 are retained under
+`benchmarks/results/2026-09-10-followup-validation/`. The original sources/output preserve the failures
+on `472097f`; all seven probes now pass. Broader permanent regressions are included
+in the ordinary suite. Fix verification is recorded in that directory's `fixes/`.
+
+Verification for BUG-072, BUG-074, and BUG-076–080: full Go suite and vet,
+TUI/textarea/agent/app/config race suite, final focused compaction race tests,
+all 58 Python tests, source-qualified textarea snapshot check, all seven original
+probes, and the isolated benchmark guard pass. The temporary-binary PTY matrix
+passes with ten repeated signal cancellations and restored restart handoff.
+The initial concurrent benchmark timing miss and incorrectly invoked snapshot
+check are documented with their successful reruns in the fix report.

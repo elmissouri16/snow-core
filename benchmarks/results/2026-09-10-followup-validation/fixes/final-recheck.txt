@@ -1,0 +1,73 @@
+ok  	github.com/elmissouri16/snow-core/cmd/snow	4.613s
+ok  	github.com/elmissouri16/snow-core/internal/agent	10.908s
+ok  	github.com/elmissouri16/snow-core/internal/app	14.239s
+ok  	github.com/elmissouri16/snow-core/internal/artifact	8.056s
+ok  	github.com/elmissouri16/snow-core/internal/auth	3.470s
+?   	github.com/elmissouri16/snow-core/internal/buildinfo	[no test files]
+ok  	github.com/elmissouri16/snow-core/internal/compact	2.676s
+ok  	github.com/elmissouri16/snow-core/internal/config	3.794s
+ok  	github.com/elmissouri16/snow-core/internal/context	3.430s
+ok  	github.com/elmissouri16/snow-core/internal/diagnostics	3.247s
+ok  	github.com/elmissouri16/snow-core/internal/goal	5.917s
+ok  	github.com/elmissouri16/snow-core/internal/mcp	11.224s
+ok  	github.com/elmissouri16/snow-core/internal/permission	3.200s
+ok  	github.com/elmissouri16/snow-core/internal/plan	2.742s
+ok  	github.com/elmissouri16/snow-core/internal/plugin	3.110s
+ok  	github.com/elmissouri16/snow-core/internal/plugin/javascript	3.387s
+ok  	github.com/elmissouri16/snow-core/internal/process	14.480s
+ok  	github.com/elmissouri16/snow-core/internal/procgroup	2.654s
+ok  	github.com/elmissouri16/snow-core/internal/provider	1.653s
+ok  	github.com/elmissouri16/snow-core/internal/provider/chatgpt	3.078s
+ok  	github.com/elmissouri16/snow-core/internal/provider/fake	2.103s
+ok  	github.com/elmissouri16/snow-core/internal/provider/modelsdev	1.911s
+ok  	github.com/elmissouri16/snow-core/internal/provider/openaicompat	1.904s
+ok  	github.com/elmissouri16/snow-core/internal/provider/opencodego	1.873s
+ok  	github.com/elmissouri16/snow-core/internal/provider/opencodezen	1.860s
+ok  	github.com/elmissouri16/snow-core/internal/provider/responsesapi	1.682s
+ok  	github.com/elmissouri16/snow-core/internal/rpc	4.559s
+ok  	github.com/elmissouri16/snow-core/internal/session	3.377s
+ok  	github.com/elmissouri16/snow-core/internal/shellanalysis	2.383s
+ok  	github.com/elmissouri16/snow-core/internal/skills	2.289s
+ok  	github.com/elmissouri16/snow-core/internal/subagent	3.658s
+ok  	github.com/elmissouri16/snow-core/internal/tempfile	2.555s
+ok  	github.com/elmissouri16/snow-core/internal/tools	2.502s
+ok  	github.com/elmissouri16/snow-core/internal/tools/builtin	4.519s
+ok  	github.com/elmissouri16/snow-core/internal/tools/router	1.787s
+ok  	github.com/elmissouri16/snow-core/internal/trust	1.799s
+ok  	github.com/elmissouri16/snow-core/internal/tui	21.988s
+ok  	github.com/elmissouri16/snow-core/internal/tui/textarea	8.496s
+ok  	github.com/elmissouri16/snow-core/internal/tui/textarea/internal/memoization	2.498s
+ok  	github.com/elmissouri16/snow-core/internal/tui/textarea/internal/runeutil	2.435s
+ok  	github.com/elmissouri16/snow-core/internal/update	4.113s
+ok  	github.com/elmissouri16/snow-core/internal/userinput	2.322s
+ok  	github.com/elmissouri16/snow-core/internal/worktree	3.438s
+ok  	github.com/elmissouri16/snow-core/pkg/mcp	2.351s
+?   	github.com/elmissouri16/snow-core/pkg/plugin	[no test files]
+ok  	github.com/elmissouri16/snow-core/pkg/protocol	1.923s
+ok  	github.com/elmissouri16/snow-core/pkg/snowsdk	2.608s
+ok  	github.com/elmissouri16/snow-core/internal/tui	3.206s
+ok  	github.com/elmissouri16/snow-core/internal/agent	3.396s
+=== RUN   TestFollowupBlockedClipboardPreservesSelection
+=== RUN   TestFollowupBlockedClipboardPreservesSelection/dialog=false
+=== RUN   TestFollowupBlockedClipboardPreservesSelection/dialog=true
+--- PASS: TestFollowupBlockedClipboardPreservesSelection (0.01s)
+    --- PASS: TestFollowupBlockedClipboardPreservesSelection/dialog=false (0.01s)
+    --- PASS: TestFollowupBlockedClipboardPreservesSelection/dialog=true (0.00s)
+=== RUN   TestFollowupLargeHistoryRestoresDraft
+--- PASS: TestFollowupLargeHistoryRestoresDraft (0.00s)
+=== RUN   TestFollowupLargePasteReplacesPartialSelection
+=== RUN   TestFollowupLargePasteReplacesPartialSelection/10
+=== RUN   TestFollowupLargePasteReplacesPartialSelection/4096
+--- PASS: TestFollowupLargePasteReplacesPartialSelection (0.01s)
+    --- PASS: TestFollowupLargePasteReplacesPartialSelection/10 (0.00s)
+    --- PASS: TestFollowupLargePasteReplacesPartialSelection/4096 (0.00s)
+=== RUN   TestFollowupHistoryKeepsCursorVisible
+--- PASS: TestFollowupHistoryKeepsCursorVisible (0.00s)
+=== RUN   TestFollowupGoalCompactionFailureAlerts
+--- PASS: TestFollowupGoalCompactionFailureAlerts (0.00s)
+=== RUN   TestFollowupTwoCompactionResultsBeforeEvents
+--- PASS: TestFollowupTwoCompactionResultsBeforeEvents (0.00s)
+=== RUN   TestFollowupCompactionFinalErrorOverridesSuccess
+--- PASS: TestFollowupCompactionFinalErrorOverridesSuccess (0.00s)
+PASS
+ok  	github.com/elmissouri16/snow-core/internal/tui	1.171s

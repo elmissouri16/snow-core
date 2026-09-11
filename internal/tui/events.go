@@ -240,8 +240,10 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 	}
 	// Session updates describe persistence, not active provider work. In
 	// particular, a delayed update after a terminal compaction event must not
-	// resurrect the completed turn and restart the idle spinner.
-	if ev.Type != protocol.EvTurnDone && ev.Type != protocol.EvAborted && ev.Type != protocol.EvSessionUpdated && ev.Type != protocol.EvCompactionDone {
+	// resurrect the completed turn and restart the idle spinner. Goal snapshots
+	// likewise describe state; only GoalContinuing below admits goal work. A
+	// blocked snapshot must not reset a pending inter-turn compaction failure.
+	if ev.Type != protocol.EvTurnDone && ev.Type != protocol.EvAborted && ev.Type != protocol.EvSessionUpdated && ev.Type != protocol.EvCompactionDone && ev.Type != protocol.EvThreadGoalUpdated {
 		m.adoptTurn(ev)
 	}
 	m.observeTerminalEvent(ev)
@@ -335,6 +337,7 @@ func (m *Model) handleAgentEvent(ev protocol.AgentEvent) {
 			if (m.goal == nil || m.goal.Status != protocol.GoalActive) &&
 				(m.app == nil || m.app.Agent == nil || !m.app.Agent.IsRunning()) {
 				m.setRunIdle()
+				m.settleTerminalFailure()
 			}
 		}
 		m.refreshTranscript()

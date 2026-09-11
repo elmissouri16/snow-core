@@ -101,6 +101,7 @@ type compactDoneMsg struct {
 	runGeneration uint64
 	turnID        string
 	epoch         uint64
+	sequence      uint64
 	generation    uint64
 	result        protocol.CompactionResult
 	err           error

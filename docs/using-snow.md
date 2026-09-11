@@ -75,7 +75,9 @@ Snow also updates the tab/window title with the project and running/waiting
 status. In Ghostty, a progress bar above the split shows activity and pauses for
 approval or input. When you are in another tab/window, completion and requests
 for attention send a generic desktop notification and terminal bell. Manual
-compaction also reports completion or failure; cancellation reports Stopped.
+compaction also reports completion or failure after final cleanup; cancellation
+reports Stopped without a completion alert. If automatic compaction fails and
+blocks a goal, Snow sends one generic failure alert.
 Change
 **Terminal tab title**, **Terminal progress**, or **Terminal alerts** in
 `/settings`; alerts can be `off`, `unfocused` (default), or `always`.
@@ -89,8 +91,15 @@ reply; Snow times out after three seconds and terminal-native paste remains
 available. A late reply is discarded after changing editors or timing out.
 Because OSC 52 has no request IDs, another terminal query waits until that late
 reply is drained. Repeating Ctrl+V while a query is pending keeps the original
-reply valid. Text clipboard reads are limited to 1 MiB. Terminal-native paste
-also works in session rename and branch rename/fork name fields.
+reply valid and preserves the selected text and attachments. Text clipboard reads
+are limited to 1 MiB. Terminal-native paste also works in session rename and
+branch rename/fork name fields.
+
+Large composer pastes collapse into inline attachments while preserving their exact
+text. Like a small paste, a large paste replaces the current selection. Up/Down
+history navigation works through collapsed entries, and Down past the newest entry
+restores the saved draft. Recalled multiline or wrapped prompts keep the insertion
+point visible.
 
 Copy uses a host clipboard utility locally and OSC 52 over SSH or as a fallback,
 with tmux/screen passthrough. A “sent” status means the command was written; the

@@ -1,0 +1,163 @@
+package tui
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/elmissouri16/snow-core/pkg/protocol"
+)
+
+func TestFollowupBlockedClipboardPreservesSelection(t *testing.T) {
+	for _, dialog := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dialog=%v", dialog), func(t *testing.T) {
+			m := remoteClipboardModel(t)
+			if dialog {
+				m.startUserInput(protocol.UserInputRequest{ID: "input", Questions: []protocol.UserInputQuestion{{ID: "q", Question: "Answer"}}})
+			}
+			m.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+			if m.terminalClipboard == nil {
+				t.Fatal("fixture did not start terminal read")
+			}
+			m.Update(terminalClipboardTimeoutMsg(m.terminalClipboard.generation))
+			if dialog {
+				m.userInputEditor.SetValue("draft")
+				m.userInputEditor.CursorEnd()
+				m.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift})
+				if !m.userInputEditor.HasSelection() {
+					t.Fatal("fixture has no selection")
+				}
+			} else {
+				m.editor.SetValue("draft")
+				m.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+			}
+			m.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+			got := m.editor.Value()
+			if dialog {
+				got = m.userInputEditor.Value()
+			}
+			if got != "draft" {
+				t.Fatalf("rejected clipboard read changed draft: got %q, want draft", got)
+			}
+		})
+	}
+}
+
+func TestFollowupLargeHistoryRestoresDraft(t *testing.T) {
+	m := prepareScrollableModel(t)
+	m.rememberInputHistory(strings.Repeat("x", largePasteRuneThreshold))
+	m.editor.SetValue("new draft")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if len(m.pastedTexts) != 1 {
+		t.Fatal("history fixture did not collapse")
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.editor.Value() != "new draft" {
+		t.Fatalf("Down did not restore draft: got %q, history index=%d", m.editor.Value(), m.inputHistoryIndex)
+	}
+}
+
+func TestFollowupLargePasteReplacesPartialSelection(t *testing.T) {
+	for _, size := range []int{10, largePasteRuneThreshold} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			m := prepareScrollableModel(t)
+			m.editor.SetValue("abc")
+			m.editor.CursorEnd()
+			m.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift})
+			if m.editor.SelectedText() != "c" {
+				t.Fatalf("selection fixture=%q", m.editor.SelectedText())
+			}
+			body := strings.Repeat("x", size)
+			m.Update(tea.PasteMsg{Content: body})
+			got := m.expandedPastedText(m.editor.Value())
+			if got != "ab"+body || m.editor.HasSelection() {
+				t.Fatalf("paste did not replace selection: expanded length=%d want=%d, suffix=%q, selection=%v", len(got), 2+len(body), got[max(0, len(got)-8):], m.editor.HasSelection())
+			}
+		})
+	}
+}
+
+func TestFollowupHistoryKeepsCursorVisible(t *testing.T) {
+	m := prepareScrollableModel(t)
+	m.rememberInputHistory(strings.Repeat("older line\n", 19) + "older end")
+	m.rememberInputHistory(strings.Repeat("newer line\n", 19) + "newer end")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m.View()
+	first := m.editor.ScrollYOffset()
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m.View()
+	if m.editor.Line() < m.editor.Height() {
+		t.Fatal("fixture's cursor fits in the first viewport")
+	}
+	if got := m.editor.ScrollYOffset(); got == 0 {
+		t.Fatalf("second long recall reset viewport to top: first offset=%d, second=%d, cursor line=%d, height=%d", first, got, m.editor.Line(), m.editor.Height())
+	}
+}
+
+func TestFollowupGoalCompactionFailureAlerts(t *testing.T) {
+	m := prepareScrollableModel(t)
+	m.Update(tea.BlurMsg{})
+	m.beginOptimisticRun()
+	for _, ev := range []protocol.AgentEvent{
+		{Type: protocol.EvCompactionStarted, TurnID: "auto"},
+		{Type: protocol.EvCompactionDone, TurnID: "auto", IsError: true, Compaction: &protocol.CompactionResult{Automatic: true}},
+		{Type: protocol.EvError, Message: "goal auto-compaction: fixture failed"},
+		{Type: protocol.EvThreadGoalUpdated, ThreadGoal: &protocol.ThreadGoalUpdate{Goal: &protocol.ThreadGoal{GoalID: "goal-fixture", Status: protocol.GoalBlocked, BlockedReason: "Automatic compaction failed"}}},
+	} {
+		m.Update(agentEventMsg{ev: ev})
+	}
+	if m.busy {
+		t.Fatal("fixture did not settle goal")
+	}
+	if got := terminalTestAlert(m); got == "" {
+		t.Fatalf("terminal goal failure produced no alert: activity=%v", m.terminalActivity())
+	}
+}
+
+func TestFollowupTwoCompactionResultsBeforeEvents(t *testing.T) {
+	m := prepareScrollableModel(t)
+	m.Update(tea.BlurMsg{})
+	events := make(chan protocol.AgentEvent, 64)
+	unsubscribe := m.app.Agent.Subscribe(func(ev protocol.AgentEvent) { events <- ev })
+	defer unsubscribe()
+	for range 2 {
+		result := m.startCompact()().(compactDoneMsg)
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		m.Update(result)
+	}
+	m.Update(tea.FocusMsg{})
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for done := 0; done < 2; {
+		select {
+		case ev := <-events:
+			m.Update(agentEventMsg{ev: ev})
+			if ev.Type == protocol.EvCompactionDone {
+				done++
+			}
+		case <-deadline.C:
+			t.Fatal("missing core compaction events")
+		}
+	}
+	if m.busy || m.compacting || m.terminalActivity() != terminalIdle {
+		t.Fatalf("delayed events reopened acknowledged compactions: busy=%v compacting=%v activity=%v", m.busy, m.compacting, m.terminalActivity())
+	}
+}
+
+func TestFollowupCompactionFinalErrorOverridesSuccess(t *testing.T) {
+	m := prepareScrollableModel(t)
+	m.Update(tea.BlurMsg{})
+	_ = m.startCompact()
+	m.Update(agentEventMsg{ev: protocol.AgentEvent{Type: protocol.EvCompactionDone, TurnID: "compact-fixture", TurnOrigin: "compact"}})
+	// Compact can return an error from deferred finishTurnMailbox after the
+	// successful lifecycle event; reproduce that reducer delivery order.
+	m.Update(compactDoneMsg{generation: m.compactGeneration, runGeneration: m.runGeneration, turnID: "compact-fixture", err: errors.New("mailbox persistence failed")})
+	if m.terminalActivity() != terminalFailed {
+		t.Fatalf("final result error lost to earlier success: activity=%v", m.terminalActivity())
+	}
+}

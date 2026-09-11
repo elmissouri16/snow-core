@@ -1,0 +1,33 @@
+=== RUN   TestFollowupBlockedClipboardPreservesSelection
+=== RUN   TestFollowupBlockedClipboardPreservesSelection/dialog=false
+    followup_validation_test.go:43: rejected clipboard read changed draft: got "", want draft
+=== RUN   TestFollowupBlockedClipboardPreservesSelection/dialog=true
+    followup_validation_test.go:43: rejected clipboard read changed draft: got "draf", want draft
+--- FAIL: TestFollowupBlockedClipboardPreservesSelection (0.01s)
+    --- FAIL: TestFollowupBlockedClipboardPreservesSelection/dialog=false (0.01s)
+    --- FAIL: TestFollowupBlockedClipboardPreservesSelection/dialog=true (0.00s)
+=== RUN   TestFollowupLargeHistoryRestoresDraft
+    followup_validation_test.go:59: Down did not restore draft: got "[Pasted text #1 · 4096 chars]", history index=0
+--- FAIL: TestFollowupLargeHistoryRestoresDraft (0.00s)
+=== RUN   TestFollowupLargePasteReplacesPartialSelection
+=== RUN   TestFollowupLargePasteReplacesPartialSelection/10
+=== RUN   TestFollowupLargePasteReplacesPartialSelection/4096
+    followup_validation_test.go:77: paste did not replace selection: expanded length=4099 want=4098, suffix="xxxxxxxc", selection=true
+--- FAIL: TestFollowupLargePasteReplacesPartialSelection (0.01s)
+    --- PASS: TestFollowupLargePasteReplacesPartialSelection/10 (0.00s)
+    --- FAIL: TestFollowupLargePasteReplacesPartialSelection/4096 (0.00s)
+=== RUN   TestFollowupHistoryKeepsCursorVisible
+    followup_validation_test.go:96: second long recall reset viewport to top: first offset=0, second=0, cursor line=19, height=6
+--- FAIL: TestFollowupHistoryKeepsCursorVisible (0.00s)
+=== RUN   TestFollowupGoalCompactionFailureAlerts
+    followup_validation_test.go:116: terminal goal failure produced no alert: activity=6
+--- FAIL: TestFollowupGoalCompactionFailureAlerts (0.00s)
+=== RUN   TestFollowupTwoCompactionResultsBeforeEvents
+    followup_validation_test.go:148: delayed events reopened acknowledged compactions: busy=false compacting=false activity=5
+--- FAIL: TestFollowupTwoCompactionResultsBeforeEvents (0.00s)
+=== RUN   TestFollowupCompactionFinalErrorOverridesSuccess
+    followup_validation_test.go:161: final result error lost to earlier success: activity=5
+--- FAIL: TestFollowupCompactionFinalErrorOverridesSuccess (0.00s)
+FAIL
+FAIL	github.com/elmissouri16/snow-core/internal/tui	1.007s
+FAIL

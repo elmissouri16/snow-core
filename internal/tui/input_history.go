@@ -70,11 +70,12 @@ func (m *Model) navigateInputHistory(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	if msg.String() != "up" && msg.String() != "down" {
 		return false, nil
 	}
-	if len(m.promptImages) > 0 || len(m.pastedTexts) > 0 {
+	browsing := m.inputHistoryIndex >= 0 && m.inputHistoryIndex < len(m.inputHistory)
+	// Recalled large entries have their own collapsed attachment. Only fresh
+	// attachment drafts block entry into history, not traversal already underway.
+	if len(m.promptImages) > 0 || (!browsing && len(m.pastedTexts) > 0) {
 		return false, nil
 	}
-
-	browsing := m.inputHistoryIndex >= 0 && m.inputHistoryIndex < len(m.inputHistory)
 	if msg.Code == tea.KeyUp {
 		if len(m.inputHistory) == 0 {
 			return false, nil

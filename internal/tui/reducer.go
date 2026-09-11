@@ -362,7 +362,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pushLine(styleTool.Render("warning: dump contains full prompts, responses, thinking, tool data, errors, paths, and session state; review before sharing"))
 		return m, nil
 	case compactDoneMsg:
-		if msg.generation != m.compactGeneration || (msg.runGeneration != 0 && msg.runGeneration != m.runGeneration) {
+		if msg.generation != m.compactGeneration || (msg.runGeneration != 0 && msg.runGeneration != m.runGeneration) || m.staleCompactionResult(msg) {
 			return m, nil
 		}
 		// The stream and command result can arrive in either order. Only settle
@@ -372,7 +372,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setRunIdle()
 		}
 		// Results also cover failures before a lifecycle event can be emitted.
-		// The shared settlement fence deduplicates either delivery order.
+		// Advance the fence even when two commands finish before their events.
+		m.fenceTerminalCompaction(msg.turnID, msg.epoch, msg.sequence)
+		m.terminal.compaction.pendingRunGeneration = 0
 		m.settleTerminalCompaction(msg.turnID, msg.epoch, msg.err != nil, errors.Is(msg.err, context.Canceled))
 		m.refreshContextUsageFromSession()
 		m.layout()

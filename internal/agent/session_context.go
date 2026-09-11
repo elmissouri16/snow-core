@@ -767,7 +767,11 @@ func rollbackFork(branches session.BranchStore, createdBranchID, oldBranchID str
 // the same compaction operation automatically at a configured context threshold.
 // The active provider is asked for a concise summary; the local summarizer is
 // used when that request fails, provided the context is still live.
-func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, retErr error) {
+func (a *Agent) Compact(ctx context.Context) (protocol.CompactionResult, error) {
+	return a.compact(ctx, nil)
+}
+
+func (a *Agent) compact(ctx context.Context, turn *TurnSnapshot) (result protocol.CompactionResult, retErr error) {
 	unlockAdmission, admissionErr := a.LockAdmissionContext(ctx)
 	if admissionErr != nil {
 		return result, admissionErr
@@ -805,6 +809,10 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 		}
 	}
 	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return protocol.CompactionResult{}, errors.New("agent: closed")
+	}
 	if a.running {
 		a.mu.Unlock()
 		return protocol.CompactionResult{}, errors.New("agent: cannot compact while running")
@@ -818,6 +826,9 @@ func (a *Agent) Compact(ctx context.Context) (result protocol.CompactionResult, 
 	a.queueAccepting = false
 	a.autoStop = false
 	a.admitTurnIdentityLocked("compact")
+	if turn != nil {
+		*turn = a.activeTurnSnapshotLocked()
+	}
 	a.turnWG.Add(1)
 	runCtx, cancel := context.WithCancel(ctx)
 	a.activeCancel = cancel

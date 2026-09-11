@@ -38,7 +38,9 @@ func (m *Model) collapseComposerPaste(msg tea.PasteMsg) bool {
 	}
 	attachment := m.newPastedTextAttachment(text)
 	m.pastedTexts = append(m.pastedTexts, attachment)
-	m.editor.InsertString(attachment.token)
+	// Use the same selection replacement path as a small paste, while keeping
+	// the large body out of textarea. handlePaste prunes replaced attachments.
+	_ = m.updateEditor(tea.PasteMsg{Content: attachment.token})
 	m.lastStatus = "attached " + attachment.token
 	return true
 }
@@ -141,6 +143,16 @@ func (m *Model) setComposerValueCollapsingLargeText(text string) {
 		m.editor.SetValue(text)
 	}
 	m.editor.CursorEnd()
+	m.refreshComposerEditorViewport()
+}
+
+// Reconcile after a programmatic replacement even when layout dimensions stay
+// unchanged. View rebuilds wrapped content; Update follows the insertion point.
+// Keep this off the per-frame rendering path.
+func (m *Model) refreshComposerEditorViewport() {
+	m.layout()
+	_ = m.editor.View()
+	_ = m.updateEditor(nil)
 }
 
 func (m *Model) removeLastPastedTextAttachment() bool {
@@ -179,6 +191,8 @@ func (m *Model) removePastedTextAttachment(index int) bool {
 	m.editor.SetValue(strings.Replace(m.editor.Value(), attachment.token, "", 1))
 	m.editor.CursorEnd()
 	m.pastedTexts = append(m.pastedTexts[:index], m.pastedTexts[index+1:]...)
+	m.resetInputHistoryNavigation()
+	m.refreshComposerEditorViewport()
 	m.lastStatus = "removed " + attachment.token
 	return true
 }

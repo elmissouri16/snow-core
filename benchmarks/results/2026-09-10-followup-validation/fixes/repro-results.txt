@@ -1,0 +1,24 @@
+=== RUN   TestFollowupBlockedClipboardPreservesSelection
+=== RUN   TestFollowupBlockedClipboardPreservesSelection/dialog=false
+=== RUN   TestFollowupBlockedClipboardPreservesSelection/dialog=true
+--- PASS: TestFollowupBlockedClipboardPreservesSelection (0.01s)
+    --- PASS: TestFollowupBlockedClipboardPreservesSelection/dialog=false (0.01s)
+    --- PASS: TestFollowupBlockedClipboardPreservesSelection/dialog=true (0.00s)
+=== RUN   TestFollowupLargeHistoryRestoresDraft
+--- PASS: TestFollowupLargeHistoryRestoresDraft (0.00s)
+=== RUN   TestFollowupLargePasteReplacesPartialSelection
+=== RUN   TestFollowupLargePasteReplacesPartialSelection/10
+=== RUN   TestFollowupLargePasteReplacesPartialSelection/4096
+--- PASS: TestFollowupLargePasteReplacesPartialSelection (0.01s)
+    --- PASS: TestFollowupLargePasteReplacesPartialSelection/10 (0.00s)
+    --- PASS: TestFollowupLargePasteReplacesPartialSelection/4096 (0.00s)
+=== RUN   TestFollowupHistoryKeepsCursorVisible
+--- PASS: TestFollowupHistoryKeepsCursorVisible (0.00s)
+=== RUN   TestFollowupGoalCompactionFailureAlerts
+--- PASS: TestFollowupGoalCompactionFailureAlerts (0.00s)
+=== RUN   TestFollowupTwoCompactionResultsBeforeEvents
+--- PASS: TestFollowupTwoCompactionResultsBeforeEvents (0.00s)
+=== RUN   TestFollowupCompactionFinalErrorOverridesSuccess
+--- PASS: TestFollowupCompactionFinalErrorOverridesSuccess (0.00s)
+PASS
+ok  	github.com/elmissouri16/snow-core/internal/tui	1.179s

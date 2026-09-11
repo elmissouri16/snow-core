@@ -22,6 +22,11 @@ import (
 // to the composer and the next edit applies replacement semantics. Modal
 // textareas are handled before this path.
 func (m *Model) handleComposerSelectionKey(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
+	// An occupied OSC 52 slot also includes canceled/timed-out reads. Reject
+	// before select-all replacement can destroy the draft or its attachments.
+	if keyMatches(msg, m.keys.Paste) && m.clipboardReadPending() {
+		return true, nil
+	}
 	if msg.Code == 'a' && msg.Mod.Contains(tea.ModCtrl) {
 		// Selection belongs to one surface at a time. In app-mouse mode an old
 		// transcript drag selection can otherwise remain highlighted beside the
@@ -281,6 +286,9 @@ func (m *Model) insertMention(path string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleLoginProfileKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.Code == 'v' && msg.Mod.Contains(tea.ModCtrl) && m.clipboardReadPending() {
+		return m, nil
+	}
 	switch {
 	case msg.Code == tea.KeyEscape:
 		if !m.restorePreviousLoginStep() {
@@ -330,6 +338,9 @@ func (m *Model) handleLoginProfileKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 }
 
 func (m *Model) handleLoginEndpointKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.Code == 'v' && msg.Mod.Contains(tea.ModCtrl) && m.clipboardReadPending() {
+		return m, nil
+	}
 	switch {
 	case msg.Code == tea.KeyEscape:
 		if !m.restorePreviousLoginStep() {
@@ -735,17 +746,13 @@ func (m *Model) startCompact() tea.Cmd {
 	runGeneration := m.beginOptimisticRun()
 	m.compactGeneration++
 	generation := m.compactGeneration
+	m.beginTerminalCompaction()
 	m.compacting = true
 	m.compactStatus = "compacting context"
 	a := m.app.Agent
 	return func() tea.Msg {
-		_, beforeID, _ := a.ActiveTurn()
-		result, err := a.Compact(ctx)
-		origin, id, _ := a.ActiveTurn()
-		if origin != "compact" || id == beforeID {
-			id = "" // Rejected before admission; no compaction event follows.
-		}
-		return compactDoneMsg{generation: generation, runGeneration: runGeneration, turnID: id, epoch: a.RootEpoch(), result: result, err: err}
+		result, turn, err := a.CompactWithTurn(ctx)
+		return compactDoneMsg{generation: generation, runGeneration: runGeneration, turnID: turn.ID, epoch: turn.Epoch, sequence: turn.Sequence, result: result, err: err}
 	}
 }
 
@@ -763,8 +770,9 @@ func (m *Model) requestAbort() {
 	// also covers the goal worker's inter-turn delay, where no EvAborted event
 	// exists to release the UI projection.
 	if m.compacting && m.app != nil && m.app.Agent != nil {
-		if origin, id, running := m.app.Agent.ActiveTurn(); origin == "compact" && running {
-			m.settleTerminalCompaction(id, m.app.Agent.RootEpoch(), false, true)
+		if turn := m.app.Agent.ActiveTurnSnapshot(); turn.Origin == "compact" && turn.Running {
+			m.fenceTerminalCompaction(turn.ID, turn.Epoch, turn.Sequence)
+			m.settleTerminalCompaction(turn.ID, turn.Epoch, false, true)
 		}
 	}
 	m.runGeneration++

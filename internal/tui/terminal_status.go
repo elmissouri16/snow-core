@@ -51,6 +51,8 @@ type terminalStatus struct {
 	compaction     terminalCompactionSettlement
 	unfocused      bool
 	failed         bool
+	failureAlerted bool
+	failurePending bool
 	outcome        terminalActivity
 	attention      terminalAttention
 	alert          string
@@ -128,6 +130,8 @@ func terminalWindowTitle(cwd string, activity terminalActivity) string {
 
 func (m *Model) resetTerminalRun() {
 	m.terminal.failed = false
+	m.terminal.failureAlerted = false
+	m.terminal.failurePending = false
 	m.terminal.outcome = terminalIdle
 	m.terminal.alert = ""
 	m.terminal.alertID++
@@ -143,12 +147,14 @@ func (m *Model) observeTerminalEvent(ev protocol.AgentEvent) {
 	switch ev.Type {
 	case protocol.EvCompactionDone:
 		if ev.Compaction == nil || !ev.Compaction.Automatic {
+			m.fenceTerminalCompaction(ev.TurnID, ev.RootEpoch, ev.TurnSequence)
 			m.settleTerminalCompaction(ev.TurnID, ev.RootEpoch, ev.IsError, m.abortNoticePending)
 		}
 	case protocol.EvError:
 		m.terminal.failed = true
+		m.terminal.failurePending = true
 		if !m.busy {
-			m.queueTerminalAlert("Snow encountered an error")
+			m.settleTerminalFailure()
 		}
 	case protocol.EvTurnDone:
 		settlement := m.terminalEventSettlement(ev)
@@ -166,8 +172,7 @@ func (m *Model) observeTerminalEvent(ev protocol.AgentEvent) {
 			return
 		}
 		if m.terminal.failed {
-			m.terminal.outcome = terminalFailed
-			m.queueTerminalAlert("Snow encountered an error")
+			m.settleTerminalFailure()
 		} else {
 			m.terminal.outcome = terminalDone
 			m.queueTerminalAlert("Snow finished")
@@ -177,6 +182,19 @@ func (m *Model) observeTerminalEvent(ev protocol.AgentEvent) {
 		m.terminal.settled, m.terminal.hasSettlement = m.terminalEventSettlement(ev), true
 		m.terminal.outcome = terminalAborted
 	}
+}
+
+// A goal worker may fail between turns, when no turn_done follows. Consume
+// failure attention at its terminal goal boundary, even if focus or settings
+// suppress delivery. Repeated snapshots must not announce it later.
+func (m *Model) settleTerminalFailure() {
+	if !m.terminal.failurePending || m.terminal.failureAlerted || m.abortNoticePending || m.terminal.outcome == terminalAborted {
+		return
+	}
+	m.terminal.failureAlerted = true
+	m.terminal.failurePending = false
+	m.terminal.outcome = terminalFailed
+	m.queueTerminalAlert("Snow encountered an error")
 }
 
 func (m *Model) terminalEventSettlement(ev protocol.AgentEvent) terminalSettlement {

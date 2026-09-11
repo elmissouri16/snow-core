@@ -1,0 +1,2 @@
+Installed /Users/el/.local/bin/snow
+0.1.0-dev
