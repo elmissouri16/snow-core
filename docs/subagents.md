@@ -49,6 +49,13 @@ Snow provides these built-in roles:
 | `general` | Inspection plus permission-gated shell tasks |
 | `implementer` | Focused implementation when mutation is enabled by policy |
 
+All three default roles can use the read-only deferred `snow_plugin_docs`
+reference tool when the parent exposes it. This includes offline API/examples
+and safe registered/loaded JavaScript plugin metadata, not permission to edit,
+load, or execute a plugin. Custom role tool allowlists can exclude it. The
+reference capability is also permitted for non-recursive read-only Plan Mode
+children.
+
 Roles are capability profiles, not writing styles. Put the assignment and
 expected output in the task itself. The retired `default` and `worker` names
 are not accepted.

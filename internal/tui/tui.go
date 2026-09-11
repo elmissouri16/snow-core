@@ -610,7 +610,8 @@ type Model struct {
 	forkIndex   int
 	forkLoading bool
 
-	// Read-only /mcp and /skills inventory picker state.
+	// Inventory picker state; Skills also supports persisted policy actions.
+	skillsPanel      skillsPanelState
 	pickInfo         bool
 	infoTitle        string
 	infoItems        []statusInfoItem
@@ -672,6 +673,7 @@ type Model struct {
 type statusInfoItem struct {
 	Label  string
 	Detail string
+	Skill  *app.SkillStatus
 }
 
 const transcriptClipboardTimeout = 2 * time.Second

@@ -15,19 +15,23 @@ type pickerCardGeometry struct {
 }
 
 func (m *Model) pickerCardGeometry() pickerCardGeometry {
+	return m.boundedCardGeometry(pickerCardMaxWidth, pickerCardMaxHeight)
+}
+
+func (m *Model) boundedCardGeometry(maxWidth, maxHeight int) pickerCardGeometry {
 	frameWidth := m.managedFrameWidth()
 	frameHeight := m.managedFrameHeight()
 	// Direct renderer tests and startup loading states can be evaluated before
 	// the first WindowSizeMsg. Use the component's maximum geometry until the
 	// real managed frame arrives.
 	if m.width <= 0 {
-		frameWidth = pickerCardMaxWidth + 4
+		frameWidth = maxWidth + 4
 	}
 	if m.height <= 0 {
-		frameHeight = pickerCardMaxHeight + 4
+		frameHeight = maxHeight + 4
 	}
-	outerWidth := min(pickerCardMaxWidth, max(1, frameWidth-4))
-	outerHeight := min(pickerCardMaxHeight, max(1, frameHeight-4))
+	outerWidth := min(maxWidth, max(1, frameWidth-4))
+	outerHeight := min(maxHeight, max(1, frameHeight-4))
 	// Very small terminals cannot retain the normal two-cell outer gutter. Use
 	// the complete managed dimension and preserve the required modal rows.
 	if outerWidth < 20 {
@@ -72,6 +76,12 @@ func renderPickerCardHeader(title, status string, width int) string {
 }
 
 func renderPickerCard(content string, geometry pickerCardGeometry) string {
+	// Lipgloss Width/Height are minimums, not clipping constraints. Fit content
+	// first so long labels or tiny windows cannot expand a modal past its frame.
+	if geometry.outerWidth < 3 || geometry.outerHeight < 3 {
+		return fitFrame(content, geometry.outerWidth, geometry.outerHeight)
+	}
+	content = fitFrame(content, geometry.outerWidth-2, geometry.outerHeight-2)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorAccent).

@@ -225,7 +225,7 @@ func TestPermissionRequestPreemptsExistingPicker(t *testing.T) {
 	request := protocol.PermissionRequest{Tool: "bash", Risk: "exec"}
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvPermissionRequest, Agent: &protocol.AgentRef{Path: "child"}, Permission: &protocol.Permission{Request: request}})
 
-	view := stripANSI(m.renderOverlays())
+	view := stripANSI(m.viewContent())
 	if !strings.Contains(view, "bash") || strings.Contains(view, "other") {
 		t.Fatalf("blocking permission overlay did not preempt model picker: %q", view)
 	}

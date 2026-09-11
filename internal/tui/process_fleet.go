@@ -31,14 +31,3 @@ type processFleetTickMsg struct {
 	generation uint64
 	tick       uint64
 }
-
-type processFleetLayout struct {
-	innerWidth   int
-	innerHeight  int
-	bodyHeight   int
-	listWidth    int
-	listHeight   int
-	detailWidth  int
-	detailHeight int
-	wide         bool
-}

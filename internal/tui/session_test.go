@@ -640,7 +640,7 @@ func TestSessionPickerScrollsAndFitsTerminal(t *testing.T) {
 		t.Fatalf("session window should be bounded: %d:%d", start, end)
 	}
 	view := stripANSI(m.viewContent())
-	if !strings.Contains(view, "sessions (20)") || !strings.Contains(view, "more sessions") || !strings.Contains(view, "session-10") {
+	if !strings.Contains(view, "sessions (20)") || !strings.Contains(view, "11 of 20") || !strings.Contains(view, "session-10") {
 		t.Fatalf("bounded session picker missing status, marker, or selection: %q", view)
 	}
 

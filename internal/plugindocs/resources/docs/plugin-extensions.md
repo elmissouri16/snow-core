@@ -8,6 +8,7 @@ rules are covered in [Plugins](plugins.md).
 ## On this page
 
 - [Try the examples](#try-the-examples)
+- [Create or update with embedded references](#create-or-update-with-embedded-references)
 - [Create a plugin](#create-a-plugin)
 - [Complete authoring examples](#complete-authoring-examples)
 - [Host context](#host-context)
@@ -74,6 +75,29 @@ snow
 an already-loaded, enabled package, use `/plugins reload <id>` while idle.
 Adding, removing, enabling, or disabling registrations still requires restart.
 There is no remote marketplace or automatic package installation.
+
+## Create or update with embedded references
+
+The deferred read-only `snow_plugin_docs` tool provides the current authoring
+workflow, API types, fixtures, capability maps, and fourteen examples even
+outside a Snow source checkout. Start with `overview`, then read `GUIDE.md` and
+the relevant types/examples. `list` and `search` paginate via `offset`/`limit`;
+`read` takes a resource-relative `path`, 1-based line `offset`, and line `limit`.
+Use `plugins` for safe runtime registration metadata, or `plugin_id` details;
+use ordinary rooted file tools for the actual package's files.
+
+For updates, preserve existing IDs, configuration, state, and behavior; inspect
+the manifest API/version and declared `host_tools`, matching declarations, build
+scripts, and fixtures before editing. Registrations, loaded inventory, and
+offline examples are distinct. Inspection never executes disabled paths and does
+not authorize silently enabling, registering, or reloading a plugin. The guide
+covers fixture limitations and explicit load/reload authority; neither the tool
+nor the runtime is an OS sandbox or a compatibility guarantee.
+
+This replaces the removed built-in plugin-builder skill, not a new skill alias.
+The tool allowlist controls reference access; `--no-skills` and `--no-plugins`
+do not disable the references. See [Plugin authoring references](plugins.md#plugin-authoring-references)
+for all actions and the old skill-policy compatibility note.
 
 ## Create a plugin
 

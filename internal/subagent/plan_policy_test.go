@@ -8,9 +8,31 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
+
+func TestDefaultExplorerPluginDocsPlanSafety(t *testing.T) {
+	defaults := config.DefaultSubagents().Roles["explorer"]
+	role := Role{Name: "explorer", Tools: defaults.Tools}
+	for _, beforeSpawn := range []bool{false, true} {
+		t.Run(map[bool]string{false: "transition with active child", true: "spawn in plan"}[beforeSpawn], func(t *testing.T) {
+			m, fixture := newPlanPolicyManagerWithDelay(t, map[string]Role{"explorer": role}, time.Second)
+			if beforeSpawn {
+				if err := fixture.root.SetMode(protocol.ModePlan); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := m.Spawn(t.Context(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "docs", Task: "inspect plugin references", Role: "explorer"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := m.ValidatePlanTransition(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestPlanRoleReadOnlyUsesResolvedTools(t *testing.T) {
 	tests := []struct {

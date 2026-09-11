@@ -375,32 +375,6 @@ func (m *Model) handleForkPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) renderForkPicker() string {
-	if !m.pickFork {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(styleHeaderDim.Render("Fork conversation") + "\n")
-	if m.forkLoading {
-		b.WriteString(styleCompletion.Render("  validating and creating fork…") + "\n")
-	} else {
-		for i, choice := range forkChoices {
-			if i == m.forkIndex {
-				b.WriteString(styleCompletionSelected.Render("› " + choice))
-			} else {
-				b.WriteString(styleCompletion.Render("  " + choice))
-			}
-			b.WriteString("\n")
-		}
-	}
-	hint := "(↑/↓ choose · Enter confirm · Esc cancel)"
-	if m.forkLoading {
-		hint = "creating safely; the current workspace remains active"
-	}
-	b.WriteString(styleFooter.Render(hint))
-	return b.String()
-}
-
 func (m *Model) currentSessions() ([]session.SessionInfo, error) {
 	return session.NewFileIndex(session.DefaultSessionsRoot()).List(m.app.CWD())
 }

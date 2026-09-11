@@ -1,6 +1,6 @@
 # Example selector
 
-Paths below are relative to `references/`. Every example includes its real
+Paths below are relative to the embedded resources directory. Every example includes its real
 `snow-plugin.json` and runnable `main.js`. Read both; declarations alone do not
 explain the effect and ownership choices. Do not load all examples into context.
 

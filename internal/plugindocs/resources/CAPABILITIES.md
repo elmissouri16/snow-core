@@ -2,7 +2,7 @@
 
 This is a routing guide, not a replacement for exact declarations. Read
 `api/snow.d.ts`, `docs/plugin-extensions.md`, and `docs/plugin-workflows.md` before
-implementing the selected features. Paths here are relative to `references/`.
+implementing the selected features. Paths here are relative to the embedded resources directory.
 
 | User needs | Implement with | Read/example |
 |---|---|---|

@@ -524,7 +524,10 @@ func TestModelPermissionPickerKeepsDecisionsVisibleAtNarrowWidth(t *testing.T) {
 	m.handleAgentEvent(event)
 
 	view := stripANSI(m.viewContent())
-	for _, want := range []string{"Allow once", "Deny"} {
+	if m.permissionApprovalEnabled() {
+		t.Fatal("narrow card enabled approval without sufficient review width")
+	}
+	for _, want := range []string{"Approval disabled", "Esc deny"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("narrow picker hid %q:\n%s", want, view)
 		}
@@ -544,9 +547,11 @@ func TestModelPermissionPickerOwnsSmallDefaultFramesSafely(t *testing.T) {
 	}{
 		{40, 3, false, false},
 		{40, 7, false, true},
-		{40, 8, true, false},
-		{40, 9, true, false},
-		{40, 12, true, false},
+		{40, 8, false, false},
+		{40, 9, false, false},
+		{40, 12, false, false},
+		{40, 20, true, false},
+		{80, 24, true, true},
 		{3, 12, false, false},
 	}
 	for _, tc := range tests {
@@ -586,7 +591,7 @@ func TestModelPermissionPickerOwnsSmallDefaultFramesSafely(t *testing.T) {
 					t.Fatalf("small permission frame omitted disabled state:\n%s", view)
 				}
 				if tc.truncated {
-					for _, want := range []string{"Command:", "analysis was truncated", "Approval disabled"} {
+					for _, want := range []string{"Command:", "Approval disabled", "Esc deny"} {
 						if !strings.Contains(view, want) {
 							t.Fatalf("truncated height-7 frame missing %q:\n%s", want, view)
 						}

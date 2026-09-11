@@ -20,7 +20,7 @@
     {
       "source": "docs/plugin-extensions.md",
       "resource": "docs/plugin-extensions.md",
-      "sha256": "3a47c53514159c91e9deaf902e03e5e29663866e57771381fa753dbd4792cef6"
+      "sha256": "080a8c813c38c9ecb388ec692e68c3f7de8f4aa4db9272d76706bcce2408b32a"
     },
     {
       "source": "docs/plugin-workflows.md",
@@ -30,7 +30,7 @@
     {
       "source": "docs/plugins.md",
       "resource": "docs/plugins.md",
-      "sha256": "616214ce10704152ac803a5061ff80ff79ce444ef2bdb593d67c189887ce3881"
+      "sha256": "5da4a5450e1c339b7118af433c75152a266fc5cf678cbb642fba3b0b2b940840"
     },
     {
       "source": "docs/rpc.md",
@@ -60,17 +60,17 @@
     {
       "source": "docs/skills.md",
       "resource": "docs/skills.md",
-      "sha256": "3d24a0849801770af5c0adfa16139bb3c6813c2c784f652113f68ed5a760a864"
+      "sha256": "eb59b110570ca3d3e642de42472087b342959275584d6bfe6421d4c10ab1586f"
     },
     {
       "source": "docs/subagents.md",
       "resource": "docs/subagents.md",
-      "sha256": "a0493ed2b5a642ba80b582a068a27bbf96a8fd62ba1d988405d0b79fc21f0585"
+      "sha256": "a7cba963ded5abc45d073c1fafa7054375b2289a9e0ea7593375afa34611f5d1"
     },
     {
       "source": "docs/tool-routing.md",
       "resource": "docs/tool-routing.md",
-      "sha256": "3ea223efe718a13f97f3b5a8342cb96d7c72fcff21b44106ee35bc03546bed69"
+      "sha256": "db72eafd43eb8e782c601931eb6154d2a0988eb3e63fbdf7edb0a236dc0a0ecf"
     },
     {
       "source": "docs/user-input.md",

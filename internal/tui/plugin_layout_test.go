@@ -86,14 +86,21 @@ func TestPluginChromeFitsResizesAndOverlays(t *testing.T) {
 					t.Run(fmt.Sprintf("inline=%v/%dx%d/overlay=%v", inline, width, height, overlay), func(t *testing.T) {
 						m.planPrompt = overlay
 						m.update(tea.WindowSizeMsg{Width: width, Height: height})
-						if got := m.transcript.Height() + m.chromeHeight(); !(inline && overlay) && got > height {
+						if got := m.transcript.Height() + m.chromeHeight(); got > height {
 							t.Fatalf("content needs %d rows, terminal has %d", got, height)
 						}
 						frame := m.viewContent()
 						if lipgloss.Height(frame) != height || lipgloss.Width(frame) > width-1 {
 							t.Fatalf("frame geometry %dx%d", lipgloss.Width(frame), lipgloss.Height(frame))
 						}
-						if !(inline && overlay) && !strings.Contains(stripANSI(frame), "permission:") {
+						if overlay {
+							// A centered card may cover the footer on a short frame,
+							// but closing it must reveal unchanged underlying chrome.
+							m.planPrompt = false
+							m.layout()
+							frame = m.viewContent()
+						}
+						if !strings.Contains(stripANSI(frame), "permission:") {
 							t.Fatal("plugin content clipped the core footer")
 						}
 					})

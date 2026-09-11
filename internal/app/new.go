@@ -22,6 +22,7 @@ import (
 	"github.com/elmissouri16/snow-core/internal/permission"
 	internalplugin "github.com/elmissouri16/snow-core/internal/plugin"
 	"github.com/elmissouri16/snow-core/internal/plugin/javascript"
+	"github.com/elmissouri16/snow-core/internal/plugindocs"
 	managedprocess "github.com/elmissouri16/snow-core/internal/process"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/skills"
@@ -116,6 +117,19 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	}
 	if err := builtin.RegisterProcessTools(reg, processManager, toolOpts); err != nil {
 		return nil, fmt.Errorf("app: managed process tools: %w", err)
+	}
+
+	// Reference access is independent of skill/plugin activation. Register before
+	// allowlist filtering and routing; bind live inventory only after app wiring.
+	var extensionApp *App
+	pluginDocs := plugindocs.New(plugindocs.Options{BuildVersion: buildVersion, MaxOutputBytes: cfg.ToolOutputLimit(), Inventory: func(ctx context.Context) ([]plugindocs.Plugin, error) {
+		if extensionApp == nil {
+			return nil, errors.New("plugin inventory is not ready")
+		}
+		return extensionApp.pluginDocsInventory(ctx)
+	}})
+	if err := reg.RegisterDescriptor(tools.ToolDescriptor{Schema: pluginDocs.Schema(), Tool: pluginDocs, Source: tools.SourceBuiltin, Owner: "builtin", Risk: permission.RiskRead, Effect: tools.EffectReadOnly}); err != nil {
+		return nil, fmt.Errorf("app: plugin references: %w", err)
 	}
 
 	// Agent Skills use metadata-only startup discovery. Project locations are
@@ -689,7 +703,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		perm.SetAsker(permBroker)
 	}
 
-	var extensionApp *App
 	if subManager != nil {
 		subManager.SetPluginToolSelection(func(role subagent.Role, names []string) (map[string]string, error) {
 			return manager.SelectChildTools(names, func(name string) bool {

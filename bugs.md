@@ -2948,3 +2948,147 @@ check are documented with their successful reruns in the fix report.
   phase independence, copied isolated values, explicit missing nulls, and mixed
   root/child hooks with a poison loader. Plugin/JavaScript tests, race tests, and
   vet pass.
+
+## BUG-084: Legacy TUI dialogs use composer space and leak background navigation
+
+- **Status:** Resolved in the working tree; verified with the checks below.
+- **Severity:** Medium (P2).
+- **Surface:** MCP/skills inspection, session/branch/fork pickers, permission
+  dialogs, and plan/goal confirmations in both transcript modes.
+- **Evidence/reproduction:** `/mcp` still renders at the lower-left above the
+  composer (user screenshot). Legacy dialogs participate in `renderOverlays`
+  and transcript height; terminal-based row budgets and top-clipping can hide
+  controls on short windows. With a fork picker or plan/goal confirmation open,
+  PageUp/Home and mouse events can reach the background transcript because the
+  reducer's modal guard omits these flows.
+- **Expected:** Native modal selections use centered, cell-bounded panels;
+  selection and controls follow resize without changing the underlying frame
+  geometry. Blocking permission requests keep input precedence and fail closed
+  when the card cannot expose the required review context. Composer completion
+  lists remain attached to the input rather than becoming modals.
+- **Remediation:** Shared selection-card layout and centered placement, card-based
+  list budgets, visible edit-field tails, permission-specific safety budgets,
+  and consistent modal keyboard/mouse ownership.
+- **Required regression coverage:** Inline/alternate-screen centering, narrow and
+  large windows, long Unicode lists, first/last selection, loading/empty/edit/
+  delete states, background input isolation, host-request precedence, and
+  permission approval rejection after shrinking below the review budget.
+- **Verification:** New selection-card and permission-popup tests pass, covering
+  20×8 through 240×70 full frames in both transcript modes and 1–35 column /
+  1–12 row component bounds. Regression tests include wide Unicode rename-field
+  tails and the branch-delete confirmation key in compact layouts. `go test ./...`,
+  `go vet ./...`, `go test -race ./internal/tui -count=1 -timeout=5m`, Python
+  script tests, and `python3 scripts/check_benchmarks.py` passed. The first
+  race-check invocation exceeded the shell's two-minute limit; the managed
+  rerun completed successfully. `./scripts/install-local.sh` installed the
+  verified checkout. Required review context and complete safety warnings are charged to
+  the same permission-card budget; undersized approval remains disabled.
+
+## BUG-085: Skills panel has no enable/disable action
+
+- **Status:** Resolved in the working tree; verified with the checks below.
+- **Severity:** Medium (P2).
+- **Surface:** Centered TUI `/skills` inventory.
+- **Evidence:** User screenshot shows only inspect/page/close controls.
+  `startSkillsInfo` builds label/detail-only rows and `handleInfoPick` closes
+  on Enter, despite existing named enable/disable policy writers used by the CLI.
+- **Remediation:** App-owned effective-policy status and named mutation facade,
+  Enter/Space toggle actions, persistent global/trusted-project policy writes,
+  visible save/errors/restart-required state, and unchanged immutable running
+  catalogs. Pending saves outlive panel dismissal so reopening cannot leave the
+  displayed state stale; unrelated panels never receive skill results.
+- **Required coverage:** Disable/re-enable persistence, policy precedence and
+  trust, unchanged live catalog, failed/canceled writes, responsive action hints,
+  pending/reopened panels, and preserved selection/composer draft.
+- **Verification:** `go test ./...`, `go vet ./...`, focused race tests for
+  `Test(SkillPolicy|SkillsPanel)` in app/TUI, all 62 Python tests, and the
+  benchmark guard pass. Panel tests cover 20×8 through 240×70 in both transcript
+  modes. Refreshed the bundled skill documentation snapshot after its drift
+  check correctly detected the canonical `docs/skills.md` change.
+
+## BUG-086: Compact session and branch panels hide management action hints
+
+- **Status:** Open; identified by source/handler audit, not yet fixed.
+- **Severity:** Medium (P2).
+- **Surface:** TUI `/sessions` and `/tree` browsing at narrow/short sizes.
+- **Reproduction:** Open either populated panel in a 40×12 terminal. The
+  selection card has an inner width below 40, so `selectionCardLayout` replaces
+  its footer with `↑↓ · Enter · Esc`. Session rename/delete and branch
+  fork/rename/delete hints disappear; their keyboard handlers still work.
+- **Evidence:** `internal/tui/native_selection_view.go` supplies management
+  hints only in the normal session/tree browsing footers;
+  `internal/tui/selection_card.go` replaces them with generic compact controls.
+  `handleSessionPick` and `handleTreePick` retain the management actions.
+- **Expected/remediation:** Provide action-preserving compact browsing footers
+  using the existing selection-card layout and configured branch keys. Preserve
+  frame bounds and selection; keep deletion confirmation and approval safety
+  behavior unchanged.
+- **Verification needed:** Responsive full-frame tests asserting management
+  hints remain visible in both transcript modes, plus selection/draft and
+  existing action tests. The audit's `go test ./internal/tui -count=1` passed,
+  but existing responsive tests do not assert these management hints.
+
+## BUG-087: Process and subagent fleet inspectors bypass centered panels
+
+- **Status:** Resolved in the working tree; verified with the checks below.
+- **Severity:** Medium (P2).
+- **Surface:** `/processes` and `/agent` inspectors in both transcript modes.
+- **Evidence/reproduction:** User screenshot shows the process inspector
+  stretched almost edge-to-edge and aligned at the frame's upper-left.
+  Both fleet layouts size themselves from the full terminal with no card cap;
+  `viewContent` returns their fitted output before reaching the centered modal
+  compositor. This also replaces the normal transcript/composer background.
+- **Remediation:** Reuse bounded card geometry and centered overlay placement;
+  share fleet-specific list/detail layout with a 120×28 outer-cell cap, wide
+  side-by-side and narrow stacked panes, bounded controls, and selected identity
+  fallback when only one list row fits. Preserve host-request precedence,
+  scrolling, refresh, selection, and the underlying draft/layout.
+- **Coverage:** New fleet panel regressions cover populated/empty/loading/error
+  states, 20×8 through 240×70 resizing, Unicode labels, both transcript modes,
+  centered border coordinates, host permission/question preemption, background
+  input isolation, and 1–35 column / 1–12 row component bounds.
+- **Verification:** `go test ./...`, `go vet ./...`,
+  `go test -race ./internal/tui -count=1 -timeout=5m` (109.727s), all 62 Python
+  tests, the benchmark guard, and `git diff --check` pass. Initial inline test
+  setup was corrected to mark settled history as committed native scrollback
+  before checking input isolation; no production behavior was relaxed.
+
+## BUG-088: Plugin-reference child capability omitted from Plan admission
+
+- **Status:** Resolved in the working tree.
+- **Severity:** Medium (P2).
+- **Surface:** Default explorer delegation and active-child Plan transitions.
+- **Evidence/reproduction:** During deferred plugin-reference integration, the
+  default explorer gained read-only `snow_plugin_docs`, but the separate
+  `planReadOnlyChildTools` admission list did not. Running
+  `go test ./internal/subagent -run TestDefaultExplorerPluginDocsPlanSafety -count=1`
+  failed both Plan-mode spawning and transitions with an active default explorer.
+- **Remediation:** Admit the read-only reference tool in the child Plan policy
+  without admitting Bash, mutation, unknown tools, or recursive delegation.
+- **Coverage:** Test the actual default explorer role for both Plan spawn and
+  active-child transitions, alongside existing capability-rejection tests.
+- **Verification:** Focused `go test ./internal/subagent -count=1`, full
+  `go test ./...`, `go vet ./...`, and race checks for plugin references,
+  skills, subagents, agent, app, session, RPC, and SDK pass. The existing
+  mutation, unknown-capability, and recursive-delegation rejection tests remain
+  unchanged and passing.
+
+## BUG-089: Branch selection cards rebuild the parent index for every row
+
+- **Status:** Resolved; verified with the checks below.
+- **Severity:** Medium (P2).
+- **Surface:** Branch picker rendering and page-size calculation.
+- **Evidence/reproduction:** `treeCard()` formats every branch and calls
+  `branchDepth` for each row; that helper rebuilds a full parent map per call.
+  Opening or paging a session with B branches therefore performs O(B²) parent
+  map insertions, even though ancestry traversal is capped at nine levels.
+- **Expected/impact:** Large branch lists should remain responsive; card assembly
+  should index parents once rather than repeatedly allocate the same map.
+- **Remediation:** Build one parent index per card and reuse it for bounded depth
+  traversal. Preserve missing-parent, cycle, and depth-cap behavior.
+- **Regression coverage and verification:** Depth edge cases and a large-branch
+  card benchmark cover 100, 1,000, and 10,000 branches. `go test ./internal/tui
+  -count=1`, `go test ./...`, and `go vet ./...` pass. Running
+  `go test ./internal/tui -run '^$' -bench '^BenchmarkBranchSelectionCard$'
+  -benchmem -count=1` measured approximately 23 µs, 227 µs, and 2.1 ms per card,
+  respectively, consistent with linear rather than quadratic scaling.

@@ -144,6 +144,7 @@ keeps UI dependencies out of core packages.
 | `internal/diagnostics` | Opt-in asynchronous normalized-event recorder, sanitization, and atomic private dump writer |
 | `internal/permission` | Ask/allow/deny service and remembered rules |
 | `internal/plugin` | Lifecycle manager and Go/JavaScript adapters |
+| `internal/plugindocs` | Deferred offline JavaScript plugin references and safe runtime-inventory tool |
 | `internal/process` | Session-bound app-owned background processes, output rings, readiness, and cleanup |
 | `internal/procgroup` | Shared Unix process-group configuration, signaling, and exit-state helpers |
 | `internal/mcp` | Official-SDK MCP manager and tool/resource bridges |
@@ -624,10 +625,12 @@ tool-call round trips through the real agent loop.
 | `session_search` | Search prior same-project sessions | read | Disposable SQLite FTS5 corpus over names, user/assistant text, and summaries |
 | `session_reference` | Import a bounded snapshot of a prior branch | read | At most three tip-pinned, untrusted snapshots per branch |
 | `webfetch` | Fetch a public HTTP(S) resource | network | Deferred schema; Surf Chrome 150; secure TLS; HTML to Markdown; SSRF, timeout, redirect, media-type, and output bounds |
+| `snow_plugin_docs` | Create/update plugin references and inspect available JavaScript plugins | read | Deferred schema; offline API/guide/example resources; bounded pagination; safe saved/loaded metadata without config values or package execution |
 
 `grep`, `glob`, `ask_user`, `update_plan`, `search_tools`, and session-history
 tools are registered in the default builtin registry. `webfetch`, session
-retrieval, artifact retrieval, and the managed-process lifecycle are deferred,
+retrieval, artifact retrieval, plugin-development references, and the
+managed-process lifecycle are deferred,
 so the normal app loads the small direct `search_tools` recovery schema while
 keeping their full schemas out of unrelated provider requests. `ask_user` has
 no discovery metadata: its full
@@ -1256,20 +1259,8 @@ inspection output redacts credential-bearing values.
 
 `internal/skills` implements the open Agent Skills `SKILL.md` format. Startup
 discovery strictly validates standard metadata and loads only names and
-descriptions from built-in assets and standard user and trust-gated project
+descriptions from standard user, explicitly configured, and trust-gated project
 paths under a 64 KiB catalog budget.
-
-`internal/skills/bundled/snow-js-plugin` ships inside the executable through
-`go:embed`, with its complete authoring guides, API declarations, and examples.
-It has lowest precedence and reports a virtual `builtin:` address; resource
-reads use an immutable embedded filesystem without extraction. Ordinary user,
-configured, and trusted project overrides retain their existing precedence.
-The bundled builder is explicit-only: model tool dispatch cannot activate it;
-the exact `$snow-js-plugin` user directive uses an optional dedicated activation
-method, also used to rehydrate already-active saved skills. This policy is not
-a new frontmatter field for filesystem skills. Named disable policies and
-`--no-skills` still apply. The snapshot sync tool and Python parity tests keep
-bundled canonical docs/examples synchronized with the checkout.
 
 `activate_skill` loads escaped full instructions, the TUI autocompletes
 enabled leading `$skill-name` directives, and a directive activates before
@@ -1289,8 +1280,37 @@ resumed state remains grandfathered and observable through `/context`. See
 
 Global and trust-gated project `skills.disabled`/`skills.overrides` policy can
 hide entries from prompts and activation without deleting their files. CLI
-`skills list|get|enable|disable`, SDK `SkillInventory`, and read-only TUI
-`/skills` expose that inventory.
+`skills list|get|enable|disable`, SDK `SkillInventory`, and TUI `/skills`
+expose that inventory. The Skills panel uses app-owned `SkillStatuses` and
+`SetSkillEnabled` to display/save named policy in the effective global or
+startup-trusted project scope. Enter/Space toggles saved enablement; generation-
+guarded asynchronous writes keep errors and status inside the panel. Saved policy
+and immutable runtime enablement are distinct: restart-required rows do not
+change live catalogs, tool schemas, active skills, or child agents.
+
+## Embedded plugin authoring references
+
+`internal/plugindocs` embeds `resources/` for the deferred read-only native
+`snow_plugin_docs` tool. Its `overview`, `list`, `search`, and `read` actions
+progressively expose the complete creation/update workflow, handwritten
+capability/example maps, and 66 synchronized canonical guide/type/example files.
+`read` uses resource-relative paths, a 1-based line `offset`, and line-count
+`limit`; `list` and `search` paginate results with 1-based `offset`/`limit`. `plugins` supplies safe runtime
+registration metadata or `plugin_id` details without reading/executing disabled
+packages. Registrations, loaded inventory, and offline examples stay distinct.
+Actual existing-package inspection and edits use ordinary rooted file tools.
+No action enables, modifies, executes, or reloads a plugin, and reference access
+does not authorize those effects or provide an OS sandbox.
+
+This replaces the built-in `snow-js-plugin` skill completely, without a legacy
+alias or policy migration. An old `skills.overrides.snow-js-plugin` entry is
+inert unless a user supplies an actual same-named filesystem skill. Tool
+allowlists control the new tool independently of skills/plugins configuration;
+`--no-skills` and `--no-plugins` do not disable read-only references. The bundle
+requires no checkout, extraction, or network access. Maintainer-only
+`internal/plugindocs/scripts/sync_resources.py` and
+`scripts/tests/test_plugin_docs.py` maintain source/hash parity. See
+`docs/plugins.md#plugin-authoring-references` and `docs/maintaining.md`.
 
 ## Tool routing
 
@@ -1450,6 +1470,26 @@ its header control use the same centered fixed-frame card rather than consuming
 transcript/chrome layout. `/settings` uses the shared centered compositor; its
 selected-row window, save status, and errors update inside fixed geometry, and
 nested model selection or catalog failure returns to the settings card.
+`selection_card.go` supplies reusable selection-following lists, wrapped detail
+rows, pinned controls, compact layouts, and cell-safe name-field tails for
+`/mcp`, `/skills`, `/sessions`, `/tree`, `/fork`, `/permissions`, and plan/goal
+confirmations. `native_selection_view.go` maps each flow's existing state to that
+component. These dialogs overlay the fitted frame in both transcript modes,
+without entering composer-overlay row budgets. Empty inventories and loading,
+rename, deletion-confirmation, and progress states stay inside the panel.
+Permission requests use a separate safety-aware card with the same compositor;
+complete wrapped safety messages, choices, and required concrete review rows
+share the approval gate's row budget. Insufficient space disables approval while
+Escape still denies. Shared `renderPickerCard` bounds content before applying
+borders, including borderless tiny-size fallback. Reducer keyboard/mouse guards
+prevent background navigation while a modal owns input. Command, skill, and file
+completions remain composer-attached, not centered modals.
+`fleet_panel.go` shares bounded list/detail geometry and rendering for `/agent`
+and `/processes`: 120×28 maximum outer cells, side-by-side panes when wide,
+stacked panes when narrow, and row-budgeted controls. Both inspectors use the
+same centered overlay compositor over the existing transcript/composer frame,
+not an early full-frame renderer. Host permissions, user questions, and plugin
+screens retain precedence; closing a fleet restores its unchanged background.
 `/plugins` uses a searchable registration picker with arrow-key selection and
 per-plugin detail/action pages; Escape restores the filtered list and contributed
 views return to their owning plugin page. `/help`

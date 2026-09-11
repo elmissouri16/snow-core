@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "tests": [
+    {
+      "name": "ready shows the small cat above the composer",
+      "steps": [
+        {
+          "kind": "ready",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(o.o)  Mochi: keeping you company\n > ^ <  /cat pet | feed | nap | hide", "tone": "accent"}}}],
+          "expect": null
+        }
+      ]
+    },
+    {
+      "name": "default show and normalized pet and feed commands",
+      "steps": [
+        {
+          "kind": "command", "name": "cat", "input": "",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(o.o)  Mochi: keeping you company\n > ^ <  /cat pet | feed | nap | hide", "tone": "accent"}}}],
+          "select": "/content/0/text",
+          "expect": " /\\_/\\\n(o.o)  Mochi: keeping you company\n > ^ <  /cat pet | feed | nap | hide"
+        },
+        {
+          "kind": "command", "name": "cat", "input": "  PET  ",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(^.^)  Mochi: purrr...\n > ^ <  /cat pet | feed | nap | hide", "tone": "success"}}}],
+          "select": "/content/0/text",
+          "expect": " /\\_/\\\n(^.^)  Mochi: purrr...\n > ^ <  /cat pet | feed | nap | hide"
+        },
+        {
+          "kind": "command", "name": "cat", "input": "feed",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(^w^)  Mochi: nom nom!\n > ^ <  /cat pet | feed | nap | hide", "tone": "success"}}}],
+          "select": "/content/0/text",
+          "expect": " /\\_/\\\n(^w^)  Mochi: nom nom!\n > ^ <  /cat pet | feed | nap | hide"
+        }
+      ]
+    },
+    {
+      "name": "nap survives turn completion until explicitly woken",
+      "steps": [
+        {
+          "kind": "command", "name": "cat", "input": "nap",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(-.-)  Mochi: zzz...\n > ^ <  /cat pet | feed | nap | hide", "tone": "muted"}}}],
+          "select": "/content/0/text",
+          "expect": " /\\_/\\\n(-.-)  Mochi: zzz...\n > ^ <  /cat pet | feed | nap | hide"
+        },
+        {"kind": "event", "event": {"type": "turn_done", "payload": {}}, "calls": [], "expect": null},
+        {
+          "kind": "command", "name": "cat", "input": "wake",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(o.o)  Mochi: keeping you company\n > ^ <  /cat pet | feed | nap | hide", "tone": "accent"}}}]
+        },
+        {
+          "kind": "event", "event": {"type": "turn_done", "payload": {}},
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(o.-)  Mochi: nice work!\n > ^ <  /cat pet | feed | nap | hide", "tone": "accent"}}}],
+          "expect": null
+        },
+        {
+          "kind": "event", "event": {"type": "turn_done", "payload": {}},
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(o.o)  Mochi: keeping you company\n > ^ <  /cat pet | feed | nap | hide", "tone": "accent"}}}],
+          "expect": null
+        }
+      ]
+    },
+    {
+      "name": "hidden cat stays hidden through events and interactions",
+      "steps": [
+        {
+          "kind": "command", "name": "cat", "input": "hide",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": ""}}}],
+          "select": "/content/0/text",
+          "expect": "Mochi is hidden. Use /cat show to bring the cat back."
+        },
+        {"kind": "event", "event": {"type": "turn_done", "payload": {}}, "calls": [], "expect": null},
+        {
+          "kind": "command", "name": "cat", "input": "pet",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": ""}}}],
+          "select": "/content/0/text",
+          "expect": "Mochi is hidden. Use /cat show to bring the cat back."
+        },
+        {
+          "kind": "command", "name": "cat", "input": "show",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(^.^)  Mochi: purrr...\n > ^ <  /cat pet | feed | nap | hide", "tone": "success"}}}],
+          "select": "/content/0/text",
+          "expect": " /\\_/\\\n(^.^)  Mochi: purrr...\n > ^ <  /cat pet | feed | nap | hide"
+        }
+      ]
+    },
+    {
+      "name": "help and invalid actions do not call the host or change state",
+      "steps": [
+        {
+          "kind": "command", "name": "cat", "input": "help", "calls": [],
+          "select": "/content/0/text", "expect": "Use /cat [show|pet|feed|nap|wake|hide|help]."
+        },
+        {"kind": "command", "name": "cat", "input": "dance", "calls": [], "error": "Use /cat [show|pet|feed|nap|wake|hide|help]."},
+        {"kind": "command", "name": "cat", "input": "constructor", "calls": [], "error": "Use /cat [show|pet|feed|nap|wake|hide|help]."},
+        {
+          "kind": "command", "name": "cat", "input": "show",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(o.o)  Mochi: keeping you company\n > ^ <  /cat pet | feed | nap | hide", "tone": "accent"}}}]
+        }
+      ]
+    },
+    {
+      "name": "failed UI update propagates and does not commit the new mood",
+      "steps": [
+        {
+          "kind": "command", "name": "cat", "input": "nap",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(-.-)  Mochi: zzz...\n > ^ <  /cat pet | feed | nap | hide", "tone": "muted"}}, "error": "display unavailable"}],
+          "error": "display unavailable"
+        },
+        {
+          "kind": "command", "name": "cat", "input": "show",
+          "calls": [{"operation": "ui.update", "args": {"name": "pet", "content": {"type": "text", "text": " /\\_/\\\n(o.o)  Mochi: keeping you company\n > ^ <  /cat pet | feed | nap | hide", "tone": "accent"}}}],
+          "select": "/content/0/text",
+          "expect": " /\\_/\\\n(o.o)  Mochi: keeping you company\n > ^ <  /cat pet | feed | nap | hide"
+        }
+      ]
+    }
+  ]
+}

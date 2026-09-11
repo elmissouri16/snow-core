@@ -17,6 +17,7 @@ var planReadOnlyChildTools = map[string]bool{
 	"activate_skill":      true,
 	"deactivate_skill":    true,
 	"read_skill_resource": true,
+	"snow_plugin_docs":    true,
 }
 
 // planRoleReadOnly evaluates the effective role allowlist rather than trusting

@@ -26,104 +26,79 @@ type permissionEffectGroup struct {
 	reasons []string
 }
 
-// renderPermissionPicker renders a compact, bounded allow/deny selector. The
-// decision rows and keyboard help are always retained at the bottom; details
-// consume only the rows left above them.
+// renderPermissionPicker returns the complete card block. The modal host owns
+// centering; both rendering and the approval gate use the same inner geometry.
 func (m *Model) renderPermissionPicker() string {
 	if !m.permPending || m.permRequest == nil {
 		return ""
 	}
-	req := m.permRequest
-	width := permissionContentWidth(m.width)
-	maxRows := m.permissionOverlayHeight()
-	if maxRows <= 0 {
-		return ""
+	geometry := m.permissionCardGeometry()
+	width, maxRows := geometry.innerWidth, geometry.innerHeight
+	if maxRows <= 0 || width <= 0 {
+		return renderPickerCard("", geometry)
 	}
-
-	choiceRows := m.permissionChoiceRows()
-	footer := styleFooter.Render("(↑/↓ choose, Enter confirm, Esc deny)")
-	if !m.permissionApprovalEnabled() {
-		footer = styleFooter.Render("(resize to review, Esc deny)")
+	enabled := m.permissionApprovalEnabled()
+	tail := m.permissionChoiceRows()
+	footer := "↑/↓ choose · Enter confirm · Esc deny"
+	if width < 40 {
+		footer = "↑↓ Enter · Esc deny"
 	}
-	tail := append(choiceRows, footer)
+	if !enabled {
+		footer = "Resize to review · Esc deny"
+		if width < 28 {
+			footer = "Resize · Esc deny"
+		}
+	}
+	tail = append(tail, styleFooter.Render(footer))
 	if len(tail) > maxRows {
-		tail = m.compactPermissionChoiceRows(maxRows)
+		tail = tail[:maxRows]
 	}
-	infoCapacity := max(0, maxRows-len(tail))
-
+	infoCapacity := maxRows - len(tail)
+	req := m.permRequest
 	label := "🔐 " + permissionInlineText(req.Tool) + " · " + permissionInlineText(string(req.Risk))
 	if m.permAgent != nil {
 		label += " · " + permissionInlineText(string(m.permAgent.Path))
 	}
-	label = styleTool.Render(label)
-
-	var warnings []string
-	if req.EffectsTruncated || req.CapabilitiesTruncated || req.PathsTruncated {
-		warnings = append(warnings, styleError.Render("Permission analysis was truncated; review the command directly."))
+	warnings := m.permissionSafetyRows(width)
+	detailBudget := max(0, infoCapacity-1-len(warnings))
+	// Disabled cards can still expose a command when possible, but never
+	// borrow rows from the disabled status and safe dismissal controls.
+	if !enabled && infoCapacity > 1 {
+		detailBudget = max(1, detailBudget)
 	}
-	if req.Unknown {
-		warnings = append(warnings, styleError.Render("Unknown child effects cannot be determined statically."))
-	}
-	executionWarning := ""
-	if shellPermissionTool(req.Tool) {
-		executionWarning = styleError.Render("Execution: unrestricted host process")
-	}
-
-	criticalCount := 1 + len(warnings)
-	if executionWarning != "" {
-		criticalCount++
-	}
-	if criticalCount > infoCapacity {
-		rows := make([]string, 0, maxRows)
-		for _, row := range append([]string{label}, append(warnings, executionWarning)...) {
-			if row != "" && len(rows) < infoCapacity {
-				rows = append(rows, row)
-			}
-		}
-		rows = append(rows, tail...)
-		return boundedPermissionRows(rows, width, maxRows)
-	}
-
-	detailBudget := infoCapacity - criticalCount
-	details := permissionRequestDetailRows(req, width, detailBudget)
-	remaining := detailBudget - len(details)
-
-	customReason := ""
-	if req.Reason != "" && !isInferredEffectSummary(req.Reason) {
-		customReason = permissionInlineText(req.Reason)
-	}
-	scope := ""
-	if req.ScopeLabel != "" && req.Rememberable {
-		scope = "Remembered scope: " + permissionInlineText(req.ScopeLabel)
-	}
-	var optional []string
-	for _, row := range []string{customReason, scope} {
-		if row != "" && remaining > 0 {
-			optional = append(optional, row)
-			remaining--
-		}
-	}
-
 	rows := make([]string, 0, maxRows)
-	rows = append(rows, label)
-	rows = append(rows, details...)
-	rows = append(rows, warnings...)
-	rows = append(rows, optional...)
-	if executionWarning != "" {
-		rows = append(rows, executionWarning)
+	if infoCapacity > 0 {
+		rows = append(rows, styleTool.Render(label))
+		rows = append(rows, permissionRequestDetailRows(req, width, detailBudget)...)
+		rows = append(rows, warnings...)
+		if len(rows) > infoCapacity {
+			rows = rows[:infoCapacity]
+		}
+		if len(rows) < infoCapacity && req.Reason != "" && !isInferredEffectSummary(req.Reason) {
+			rows = append(rows, permissionInlineText(req.Reason))
+		}
+		if len(rows) < infoCapacity && req.ScopeLabel != "" && req.Rememberable {
+			rows = append(rows, "Remembered scope: "+permissionInlineText(req.ScopeLabel))
+		}
 	}
 	rows = append(rows, tail...)
-	return boundedPermissionRows(rows, width, maxRows)
+	// Short requests should be compact cards, not a full-height box with the
+	// controls floating above unused space. The cap still owns review gating.
+	geometry.innerHeight = min(geometry.innerHeight, max(1, len(rows)))
+	geometry.outerHeight = min(geometry.outerHeight, geometry.innerHeight+2)
+	return renderPickerCard(boundedPermissionRows(rows, width, maxRows), geometry)
 }
 
 func (m *Model) permissionChoiceRows() []string {
 	if !m.permissionApprovalEnabled() {
-		return []string{styleError.Render("Approval disabled: resize terminal to review")}
+		return []string{styleError.Render("Approval disabled")}
 	}
+	width := m.permissionCardGeometry().innerWidth
 	rows := make([]string, 0, len(m.permissionPickerChoices()))
 	for _, option := range m.permissionPickerChoices() {
 		line := option.name
-		if option.hint != "" {
+		// Keep each action intact before spending width on its explanatory hint.
+		if option.hint != "" && xansi.StringWidth(line)+xansi.StringWidth(option.hint)+6 <= width {
 			line += "  (" + option.hint + ")"
 		}
 		if option.id == m.permChoice {
@@ -135,26 +110,31 @@ func (m *Model) permissionChoiceRows() []string {
 	return rows
 }
 
-func (m *Model) compactPermissionChoiceRows(maxRows int) []string {
-	if maxRows <= 0 {
+// Safety messages wrap instead of silently losing their meaning at narrow
+// widths. Their physical row count is also charged to the approval gate.
+func (m *Model) permissionSafetyRows(width int) []string {
+	if m.permRequest == nil || width <= 0 {
 		return nil
 	}
-	if !m.permissionApprovalEnabled() {
-		return []string{styleError.Render("Approval disabled: resize terminal to review")}
+	req := m.permRequest
+	var messages []string
+	if req.EffectsTruncated || req.CapabilitiesTruncated || req.PathsTruncated {
+		messages = append(messages, "Permission analysis was truncated; review the command directly.")
 	}
-	var labels []string
-	for _, option := range m.permissionPickerChoices() {
-		label := option.name
-		if option.id == m.permChoice {
-			label = "›" + label
+	if req.Unknown {
+		messages = append(messages, "Unknown child effects cannot be determined statically.")
+	}
+	if shellPermissionTool(req.Tool) {
+		messages = append(messages, "Execution: unrestricted host process")
+	}
+	var rows []string
+	for _, message := range messages {
+		wrapped := xansi.Hardwrap(xansi.Wordwrap(message, width, ""), width, true)
+		for line := range strings.SplitSeq(wrapped, "\n") {
+			rows = append(rows, styleError.Render(line))
 		}
-		labels = append(labels, label)
 	}
-	choices := styleCompletion.Render(strings.Join(labels, " | "))
-	if maxRows == 1 {
-		return []string{choices}
-	}
-	return []string{choices, styleFooter.Render("(←/→ choose, Enter confirm, Esc deny)")}
+	return rows
 }
 
 func permissionRequestDetailRows(req *protocol.PermissionRequest, width, budget int) []string {
@@ -236,41 +216,38 @@ func permissionPathRows(paths []string, width, budget int) []string {
 	return rows
 }
 
-func (m *Model) permissionNeedsDedicatedFrame() bool {
-	return m.permPending && !m.inlineTranscript && m.availableOverlayHeight() < permissionReviewMinHeight
-}
-
-func (m *Model) permissionOverlayHeight() int {
-	if m.inlineModalOverlay() || m.permissionNeedsDedicatedFrame() {
-		return min(max(1, m.managedFrameHeight()), inlineOverlayMaxHeight)
+func (m *Model) permissionCardGeometry() pickerCardGeometry {
+	geometry := m.pickerCardGeometry()
+	// Permission requests need more horizontal room than ordinary pickers for
+	// commands and effects, while retaining the shared gutters and height cap.
+	frameWidth := m.managedFrameWidth()
+	if m.width <= 0 {
+		frameWidth = permissionCardMaxWidth + 4
 	}
-	return min(m.availableOverlayHeight(), inlineOverlayMaxHeight)
+	geometry.outerWidth = min(permissionCardMaxWidth, max(1, frameWidth-4))
+	if geometry.outerWidth < 20 {
+		geometry.outerWidth = frameWidth
+	}
+	geometry.innerWidth = max(1, geometry.outerWidth-2)
+	return geometry
 }
 
 func (m *Model) permissionApprovalEnabled() bool {
-	if m.width < permissionReviewMinWidth || m.permissionOverlayHeight() < permissionReviewMinHeight || m.permRequest == nil {
+	geometry := m.permissionCardGeometry()
+	if m.width <= 0 || m.height <= 0 || geometry.innerWidth < permissionReviewMinWidth || geometry.innerHeight < permissionReviewMinHeight || m.permRequest == nil {
 		return false
 	}
-
-	// A Bash approval must expose at least one concrete command/effect row in
-	// addition to the tool label, safety warnings, every decision, and help.
-	// Otherwise a warning such as "review the command directly" could be paired
-	// with an invisible command on a short terminal.
-	if shellPermissionTool(m.permRequest.Tool) {
-		criticalRows := 2 // tool label and host-execution warning
-		if m.permRequest.EffectsTruncated || m.permRequest.CapabilitiesTruncated || m.permRequest.PathsTruncated {
-			criticalRows++
-		}
-		if m.permRequest.Unknown {
-			criticalRows++
-		}
-		decisionRows := len(m.permissionPickerChoices()) + 1 // choices and footer
-		if m.permissionOverlayHeight()-criticalRows-decisionRows < 1 {
-			return false
-		}
-		return permissionRequestHasReviewDetail(m.permRequest)
+	// Reserve exactly what the renderer consumes: label, complete wrapped
+	// warnings, every choice, controls, and a concrete review row when needed.
+	remaining := geometry.innerHeight - 1 - len(m.permissionSafetyRows(geometry.innerWidth)) - len(m.permissionPickerChoices()) - 1
+	req := m.permRequest
+	if shellPermissionTool(req.Tool) {
+		return remaining >= 1 && permissionRequestHasReviewDetail(req)
 	}
-	return true
+	if len(req.Effects) > 0 || len(req.Paths) > 0 {
+		return remaining >= 1
+	}
+	return remaining >= 0
 }
 
 func permissionRequestHasReviewDetail(req *protocol.PermissionRequest) bool {
@@ -281,13 +258,6 @@ func permissionRequestHasReviewDetail(req *protocol.PermissionRequest) bool {
 		Command string `json:"command"`
 	}
 	return jsonv2.Unmarshal(req.Args, &args) == nil && strings.TrimSpace(args.Command) != ""
-}
-
-func permissionContentWidth(terminalWidth int) int {
-	if terminalWidth <= 0 {
-		return permissionCardMaxWidth
-	}
-	return max(1, min(terminalWidth-1, permissionCardMaxWidth))
 }
 
 func groupPermissionEffects(effects []protocol.PermissionEffect) []permissionEffectGroup {

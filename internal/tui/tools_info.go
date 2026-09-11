@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -287,30 +286,8 @@ func (m *Model) startMCPInfo() (tea.Model, tea.Cmd) {
 	return m.startInfoPicker("MCP servers", items)
 }
 
-func (m *Model) startSkillsInfo() (tea.Model, tea.Cmd) {
-	var items []statusInfoItem
-	if m.app.Skills != nil {
-		for _, skill := range m.app.Skills.Inventory() {
-			state := "enabled"
-			if !skill.Enabled {
-				state = "disabled"
-			}
-			label := fmt.Sprintf("%s  ·  %s  ·  %s/%s", skill.Name, state, skill.Scope, skill.Source)
-			detail := skill.Description + " · " + skill.Location
-			if skill.DisabledBy != "" {
-				detail += " · " + skill.DisabledBy
-			}
-			items = append(items, statusInfoItem{Label: label, Detail: detail})
-		}
-	}
-	return m.startInfoPicker("Agent Skills", items)
-}
-
 func (m *Model) startInfoPicker(title string, items []statusInfoItem) (tea.Model, tea.Cmd) {
-	if len(items) == 0 {
-		m.pushLine(styleFooter.Render(strings.ToLower(title) + ": none configured or discovered"))
-		return m, nil
-	}
+	m.resetSkillsPanel()
 	m.pickInfo, m.infoTitle, m.infoItems, m.infoIndex = true, title, items, 0
 	m.infoLoading = false
 	m.compVisible = false
@@ -319,6 +296,11 @@ func (m *Model) startInfoPicker(title string, items []statusInfoItem) (tea.Model
 
 func (m *Model) handleInfoPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	msg = normalizePickerKeyWithMap(msg, m.keys)
+	if m.skillsPanel.active {
+		if handled, cmd := m.handleSkillsPanelKey(msg); handled {
+			return m, cmd
+		}
+	}
 	if m.infoLoading {
 		if msg.Code == tea.KeyEscape {
 			m.closeInfoPicker()
@@ -365,6 +347,7 @@ func (m *Model) handleInfoPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) closeInfoPicker() {
+	m.resetSkillsPanel()
 	m.pickInfo = false
 	m.infoLoading = false
 	m.infoTitle = ""
@@ -407,181 +390,6 @@ func (m *Model) inspectAgent(target string) tea.Cmd {
 	}
 	m.pushLine(styleFooter.Render(renderSubagentInspection(state, messages, messageErr, m.app.Cfg.Subagents.Durable, time.Now())))
 	return nil
-}
-
-func (m *Model) infoPickerVisibleItems() int {
-	visible := m.height - 14
-	if m.inlineModalOverlay() {
-		visible = m.availableOverlayHeight() - 3 // title, selected detail, hint
-	}
-	if visible < 1 {
-		visible = 1
-	}
-	if visible > len(m.infoItems) {
-		visible = len(m.infoItems)
-	}
-	return visible
-}
-
-func (m *Model) infoWindow() (start, end int) {
-	visible := m.infoPickerVisibleItems()
-	if len(m.infoItems) <= visible {
-		return 0, len(m.infoItems)
-	}
-	start = max(m.infoIndex-visible/2, 0)
-	if start+visible > len(m.infoItems) {
-		start = len(m.infoItems) - visible
-	}
-	return start, start + visible
-}
-
-func (m *Model) renderInfoPicker() string {
-	if !m.pickInfo {
-		return ""
-	}
-	if m.infoLoading {
-		return styleHeaderDim.Render(m.infoTitle + "\n  loading…")
-	}
-	if len(m.infoItems) == 0 {
-		return ""
-	}
-	start, end := m.infoWindow()
-	width := max(1, m.width-2)
-	var b strings.Builder
-	b.WriteString(styleHeaderDim.Render(truncateRunes(fmt.Sprintf("%s (%d)", m.infoTitle, len(m.infoItems)), width)) + "\n")
-	for i := start; i < end; i++ {
-		line := truncateRunes(m.infoItems[i].Label, max(8, m.width-4))
-		if i == m.infoIndex {
-			b.WriteString(styleCompletionSelected.Render("› " + line))
-		} else {
-			b.WriteString(styleCompletion.Render("  " + line))
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString(styleHeaderDim.Render(truncateRunes("  "+m.infoItems[m.infoIndex].Detail, width)) + "\n")
-	b.WriteString(styleFooter.Render(truncateRunes("(↑/↓ inspect · Enter/Esc close)", width)))
-	return b.String()
-}
-
-func (m *Model) sessionPickerBodyMin() int {
-	// Below this size the session selector takes priority over transcript
-	// history so the whole picker still fits in the terminal.
-	if m.height < 14 {
-		return 1
-	}
-	return 3
-}
-
-func (m *Model) sessionPickerMaxRows() int {
-	if m.inlineModalOverlay() {
-		return max(3, m.availableOverlayHeight())
-	}
-	rows := m.height - 8 - m.sessionPickerBodyMin()
-	if rows < 3 {
-		return 3
-	}
-	return rows
-}
-
-func (m *Model) sessionPickerVisibleItems() int {
-	total := len(m.sessions)
-	if total == 0 {
-		return 0
-	}
-	// Keep rows for the title and hint. Reserve two more rows for scroll
-	// markers when the terminal is tall enough to show them.
-	visible := m.sessionPickerMaxRows() - 2
-	if m.sessionPickerMaxRows() >= 5 && total > visible {
-		visible -= 2
-	}
-	if visible < 1 {
-		visible = 1
-	}
-	if visible > total {
-		visible = total
-	}
-	return visible
-}
-
-func (m *Model) sessionWindow() (start, end int) {
-	total := len(m.sessions)
-	visible := m.sessionPickerVisibleItems()
-	if total == 0 || total <= visible {
-		return 0, total
-	}
-	start = max(m.sessionIndex-visible/2, 0)
-	if start+visible > total {
-		start = total - visible
-	}
-	return start, start + visible
-}
-
-func (m *Model) sessionPickerRows() int {
-	if !m.pickSession {
-		return 0
-	}
-	if m.sessionLoading {
-		return 2
-	}
-	start, end := m.sessionWindow()
-	rows := 2 + end - start // title + entries + hint
-	if m.sessionPickerMaxRows() >= 5 {
-		if start > 0 {
-			rows++
-		}
-		if end < len(m.sessions) {
-			rows++
-		}
-	}
-	return rows
-}
-
-func (m *Model) renderSessionPicker() string {
-	if !m.pickSession {
-		return ""
-	}
-	if m.sessionLoading {
-		status := "loading sessions…"
-		if m.sessionDeleteInFlight {
-			status = "deleting session and subagent histories…"
-		}
-		return styleHeaderDim.Render("sessions\n  " + status)
-	}
-	start, end := m.sessionWindow()
-	var b strings.Builder
-	pickerWidth := max(1, m.width-2)
-	title := truncateRunes(fmt.Sprintf("sessions (%d)", len(m.sessions)), pickerWidth)
-	b.WriteString(styleHeaderDim.Render(title) + "\n")
-	showMarkers := m.sessionPickerMaxRows() >= 5
-	if showMarkers && start > 0 {
-		b.WriteString(styleHeaderDim.Render(truncateRunes("  ↑ more sessions", pickerWidth)) + "\n")
-	}
-	for i := start; i < end; i++ {
-		line := formatSessionPickerInfo(m.sessions[i], currentSessionID(m.app))
-		line = truncateRunes(line, max(8, m.width-4))
-		if i == m.sessionIndex {
-			b.WriteString(styleCompletionSelected.Render("› " + line))
-		} else {
-			b.WriteString(styleCompletion.Render("  " + line))
-		}
-		b.WriteString("\n")
-	}
-	if showMarkers && end < len(m.sessions) {
-		b.WriteString(styleHeaderDim.Render(truncateRunes("  ↓ more sessions", pickerWidth)) + "\n")
-	}
-	hint := "(↑/↓ choose · PgUp/PgDn scroll · Enter resume · r rename · d delete · Esc cancel)"
-	if m.sessionRenaming {
-		hint = "Rename session: " + m.sessionRenameInput + "_"
-	}
-	if m.sessionDeleting && m.sessionIndex >= 0 && m.sessionIndex < len(m.sessions) {
-		name := m.sessions[m.sessionIndex].Name
-		if name == "" {
-			name = shortSessionID(m.sessions[m.sessionIndex].ID)
-		}
-		hint = "Permanently delete " + strconv.Quote(name) + " and its subagent histories? Enter confirm · Esc cancel"
-	}
-	b.WriteString(styleFooter.Render(truncateRunes(hint, pickerWidth)))
-	return strings.TrimSuffix(b.String(), "\n")
 }
 
 func formatSessionPickerInfo(info session.SessionInfo, activeID string) string {

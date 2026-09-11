@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -16,11 +15,15 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-func branchDepth(branches []protocol.SessionBranch, branch protocol.SessionBranch) int {
-	parents := map[string]string{}
+func branchParents(branches []protocol.SessionBranch) map[string]string {
+	parents := make(map[string]string, len(branches))
 	for _, b := range branches {
 		parents[b.ID] = b.ParentID
 	}
+	return parents
+}
+
+func branchDepth(parents map[string]string, branch protocol.SessionBranch) int {
 	depth := 0
 	seen := map[string]bool{}
 	for parent := branch.ParentID; parent != "" && !seen[parent]; parent = parents[parent] {
@@ -31,113 +34,6 @@ func branchDepth(branches []protocol.SessionBranch, branch protocol.SessionBranc
 		}
 	}
 	return depth
-}
-
-func (m *Model) treePickerVisibleItems() int {
-	total := len(m.branches)
-	if total == 0 {
-		return 0
-	}
-	visible := m.height - 12
-	if m.inlineModalOverlay() {
-		visible = m.availableOverlayHeight() - 4 // title, two scroll markers, hint
-	}
-	if visible < 1 {
-		visible = 1
-	}
-	if visible > total {
-		visible = total
-	}
-	return visible
-}
-
-func (m *Model) treeWindow() (start, end int) {
-	total := len(m.branches)
-	visible := m.treePickerVisibleItems()
-	if total == 0 || total <= visible {
-		return 0, total
-	}
-	start = max(m.branchIndex-visible/2, 0)
-	if start+visible > total {
-		start = total - visible
-	}
-	return start, start + visible
-}
-
-func (m *Model) treePickerRows() int {
-	if !m.pickTree {
-		return 0
-	}
-	if m.treeLoading {
-		return 2
-	}
-	start, end := m.treeWindow()
-	rows := 2 + end - start
-	if start > 0 {
-		rows++
-	}
-	if end < len(m.branches) {
-		rows++
-	}
-	return rows
-}
-
-func (m *Model) renderTreePicker() string {
-	if !m.pickTree {
-		return ""
-	}
-	if m.treeLoading {
-		return styleHeaderDim.Render("branches\n  loading branches…")
-	}
-	start, end := m.treeWindow()
-	width := max(1, m.width-2)
-	var b strings.Builder
-	b.WriteString(styleHeaderDim.Render(truncateRunes(fmt.Sprintf("branches (%d)", len(m.branches)), width)) + "\n")
-	if start > 0 {
-		b.WriteString(styleHeaderDim.Render("  ↑ more branches") + "\n")
-	}
-	for i := start; i < end; i++ {
-		branch := m.branches[i]
-		marker := "  "
-		if branch.Active {
-			marker = "✓ "
-		}
-		name := branch.Name
-		if name == "" {
-			name = branch.ID
-		}
-		indent := strings.Repeat("  ", branchDepth(m.branches, branch))
-		connector := "└─ "
-		if branch.ParentID == "" {
-			connector = ""
-		}
-		line := fmt.Sprintf("%s%s%s%s  ·  %s  ·  %d messages", marker, indent, connector, name, shortSessionID(branch.ID), branch.Messages)
-		if branch.Preview != "" {
-			line += "  ·  " + branch.Preview
-		}
-		line = truncateRunes(line, max(8, m.width-4))
-		if i == m.branchIndex {
-			b.WriteString(styleCompletionSelected.Render("› " + line))
-		} else {
-			b.WriteString(styleCompletion.Render("  " + line))
-		}
-		b.WriteString("\n")
-	}
-	if end < len(m.branches) {
-		b.WriteString(styleHeaderDim.Render("  ↓ more branches") + "\n")
-	}
-	hint := fmt.Sprintf("(%s choose · %s switch · %s fork · %s rename · %s delete · %s cancel)", m.keys.PickerDown.Help().Key, m.keys.Accept.Help().Key, m.keys.BranchFork.Help().Key, m.keys.BranchRename.Help().Key, m.keys.BranchDelete.Help().Key, m.keys.Close.Help().Key)
-	if m.branchAction == "fork" {
-		hint = "Fork name (blank = automatic): " + m.branchInput + "_"
-	}
-	if m.branchAction == "rename" {
-		hint = "Rename: " + m.branchInput + "_"
-	}
-	if m.branchAction == "delete" {
-		hint = "Delete selected leaf branch? " + m.keys.Confirm.Help().Key + "/" + m.keys.Close.Help().Key
-	}
-	b.WriteString(styleFooter.Render(truncateRunes(hint, width)))
-	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // handlePermissionPick resolves an interactive permission request with
@@ -253,26 +149,6 @@ func (m *Model) setPermissionMode(mode permission.Mode, announce bool) error {
 		m.pushLine(styleFooter.Render("session permission mode: " + string(mode)))
 	}
 	return nil
-}
-
-func (m *Model) renderPermissionModePicker() string {
-	if !m.pickPermissionMode {
-		return ""
-	}
-	modes := []permission.Mode{permission.ModeAsk, permission.ModeAllow, permission.ModeDeny}
-	var b strings.Builder
-	b.WriteString(styleHeaderDim.Render("permissions") + "\n")
-	for i, mode := range modes {
-		line := string(mode)
-		if i == m.permissionModeIndex {
-			b.WriteString(styleCompletionSelected.Render("› " + line))
-		} else {
-			b.WriteString(styleCompletion.Render("  " + line))
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString(styleFooter.Render("(↑/↓ choose, Enter apply, Esc cancel)"))
-	return strings.TrimSuffix(b.String(), "\n")
 }
 
 func (m *Model) startSettings() (tea.Model, tea.Cmd) {

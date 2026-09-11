@@ -1,7 +1,7 @@
 # Tool Routing
 
-Snow keeps existing tools directly available and lets future tools opt into
-local progressive disclosure. Deferred tools remain fully registered and
+Most tools remain directly available; selected native tools and opt-in
+extensions use local progressive disclosure. Deferred tools remain fully registered and
 executable, but their JSON parameter schemas are sent to the model only when a
 Bleve BM25 search selects them, a lifecycle bundle is already active, or the
 model explicitly discovers them through `search_tools`.
@@ -10,6 +10,7 @@ model explicitly discovers them through `search_tools`.
 
 - [Registration](#registration)
 - [Built-in deferred web fetch](#built-in-deferred-web-fetch)
+- [Built-in deferred plugin documentation](#built-in-deferred-plugin-documentation)
 - [Runtime behavior](#runtime-behavior)
 - [Observability and limits](#observability-and-limits)
 
@@ -77,6 +78,37 @@ ranges, validates all DNS answers, and dials an approved address directly to
 prevent ordinary SSRF and DNS-rebinding bypasses. TLS verification, a 30-second
 maximum timeout, ten-redirect cap, existing tool-output cap, and an explicit
 untrusted-content boundary are always applied.
+
+## Built-in deferred plugin documentation
+
+`snow_plugin_docs` uses the `snow_plugin_development` namespace. It is a deferred
+read-only native tool for creating or updating
+compatible JavaScript plugins and inspecting available plugin registrations.
+Ordinary routing or `search_tools` reveals its schema when relevant; the full
+reference bundle is never injected into the prompt automatically. It reads
+immutable resources embedded from `internal/plugindocs/resources/` without
+network access or filesystem extraction.
+
+The actions are `overview`, `list`, `search`, `read`, and `plugins`. `list` and
+`search` paginate with `offset`/`limit`; `read` takes a resource-relative `path`
+(e.g. `GUIDE.md` or `api/snow.d.ts`), a 1-based line `offset`, and maximum line
+`limit`. `plugins` merges allowed JavaScript registrations with loaded JavaScript
+plugins, including loaded-only entries after a registration is removed. Optional
+`plugin_id` selects details. Saved `path`/`enabled` and `registered` describe
+registration state; `loaded_path`/`version`/`api_version` and command/tool metadata
+describe the loaded snapshot, which may differ until restart or reload. The
+inventory is not an offline example catalog, marketplace, or arbitrary package
+reader. It excludes configuration values, setting defaults, storage/workflow
+state, and dynamic UI contents. Listing never opens an unloaded package or
+enables/executes/reloads it. Use ordinary rooted file tools to inspect and edit
+the user's package.
+
+The tool replaces the removed built-in `snow-js-plugin` skill. No legacy alias or
+policy migration is provided: `skills.overrides.snow-js-plugin` is inert unless a
+user supplies an actual same-named filesystem skill. The tool allowlist, not
+skill policy, controls access. `--no-skills` and `--no-plugins` do not disable
+read-only references, nor does reading them authorize plugin execution. See
+[Plugin authoring references](plugins.md#plugin-authoring-references).
 
 ## Runtime behavior
 

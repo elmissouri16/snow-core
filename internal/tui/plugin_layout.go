@@ -9,7 +9,7 @@ import (
 // pluginChrome shares the same row allocation between measurement and drawing.
 // Core controls and overlays take precedence; hidden views remain in /plugins.
 func (m *Model) pluginChrome() map[string]string {
-	if m.plugins == nil || m.inlineModalOverlay() || m.inlineInputOverlay() {
+	if m.plugins == nil || m.inlineInputOverlay() {
 		return nil
 	}
 	remaining := m.managedFrameHeight() - m.fixedChromeRows() - m.editor.Height() - m.runStatusHeight() - minTranscriptHeight

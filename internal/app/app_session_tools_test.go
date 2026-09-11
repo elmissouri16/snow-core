@@ -403,7 +403,7 @@ func TestAppBuildsRouterAndRegistersSearchToolsForDeferredCatalog(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer a.Close()
-	if a.Router == nil || a.Router.DeferredCount() != 11 {
+	if a.Router == nil || a.Router.DeferredCount() != 12 {
 		t.Fatalf("router = %#v", a.Router)
 	}
 	if _, ok := a.Registry.Get("search_tools"); !ok {
@@ -422,7 +422,7 @@ func TestAppRegistersDeferredWebFetchByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	if a.Router == nil || a.Router.DeferredCount() != 10 {
+	if a.Router == nil || a.Router.DeferredCount() != 11 {
 		t.Fatalf("router = %#v", a.Router)
 	}
 	desc, ok := a.Registry.Descriptor("webfetch")

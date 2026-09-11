@@ -51,16 +51,6 @@ func (t *ActivateTool) Schema() tools.ToolSchema {
 }
 
 func (t *ActivateTool) Run(ctx context.Context, raw json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {
-	return t.activate(ctx, raw, false)
-}
-
-// RunExplicitSkillActivation is the agent's direct-mention/restoration path.
-// Model-facing dispatch must call Run, which enforces ExplicitOnly admission.
-func (t *ActivateTool) RunExplicitSkillActivation(ctx context.Context, raw json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {
-	return t.activate(ctx, raw, true)
-}
-
-func (t *ActivateTool) activate(ctx context.Context, raw json.RawMessage, explicit bool) (tools.ToolResult, error) {
 	var args struct {
 		Name string `json:"name"`
 	}
@@ -69,9 +59,6 @@ func (t *ActivateTool) activate(ctx context.Context, raw json.RawMessage, explic
 	}
 	if err := ctx.Err(); err != nil {
 		return tools.ErrorResult(err), nil
-	}
-	if skill, ok := t.Catalog.Get(args.Name); ok && skill.ExplicitOnly && !explicit {
-		return tools.ErrorResult(fmt.Errorf("activate_skill: skill %s requires an explicit $%s mention in the user prompt", skill.Name, skill.Name)), nil
 	}
 	skill, body, err := t.Catalog.load(args.Name)
 	if err != nil {
@@ -89,11 +76,7 @@ func (t *ActivateTool) activate(ctx context.Context, raw json.RawMessage, explic
 	_ = xml.EscapeText(&b, body)
 	b.WriteString("\n\nSkill directory: ")
 	_ = xml.EscapeText(&b, []byte(skill.Directory))
-	if skill.resources != nil {
-		b.WriteString("\nThis skill is embedded in Snow, not a filesystem directory. Read its relative resources with read_skill_resource; do not pass builtin: addresses to filesystem or shell tools.")
-	} else {
-		b.WriteString("\nRelative paths in this skill are relative to the skill directory.")
-	}
+	b.WriteString("\nRelative paths in this skill are relative to the skill directory.")
 	if len(resources) > 0 {
 		b.WriteString("\n<skill_resources>\n")
 		for _, resource := range resources {

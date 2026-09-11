@@ -297,44 +297,15 @@ func (m *Model) processFleetDetailLineCount() int {
 	return len(m.processFleetDetailLines(m.processFleetLayout().detailWidth))
 }
 
-func (m *Model) processFleetLayout() processFleetLayout {
-	width := max(20, m.managedFrameWidth()-4)
-	height := max(8, m.managedFrameHeight()-4)
-	layout := processFleetLayout{innerWidth: max(16, width-2), innerHeight: max(4, height-2)}
-	layout.bodyHeight = max(1, layout.innerHeight-2)
-	layout.wide = layout.innerWidth >= fleetWideMinWidth
-	if layout.wide {
-		layout.listWidth = max(30, layout.innerWidth*36/100)
-		layout.detailWidth = max(20, layout.innerWidth-layout.listWidth-1)
-		layout.listHeight = layout.bodyHeight
-		layout.detailHeight = layout.bodyHeight
-	} else {
-		layout.listWidth = layout.innerWidth
-		layout.detailWidth = layout.innerWidth
-		layout.listHeight = max(4, min(len(m.processFleetList)*2, layout.bodyHeight/2))
-		layout.detailHeight = max(1, layout.bodyHeight-layout.listHeight-1)
-	}
-	return layout
+func (m *Model) processFleetLayout() fleetPanelLayout {
+	return m.fleetPanelLayout(len(m.processFleetList), "↑/↓ or j/k select · PgUp/PgDn output · Home/End · r refresh · "+m.keys.Agents.Help().Key+" agents · Esc close")
 }
 
 func (m *Model) renderProcessFleetModal() string {
 	layout := m.processFleetLayout()
-	header := m.renderProcessFleetHeader(layout.innerWidth)
-	footer := styleFooter.Render(" ↑/↓ or j/k select · PgUp/PgDn output · Home/End · r refresh · " + m.keys.Agents.Help().Key + " agents · Esc close ")
-	var body string
-	if layout.wide {
-		left := lipgloss.NewStyle().Width(layout.listWidth).Height(layout.listHeight).MaxHeight(layout.listHeight).Render(m.renderProcessFleetList(layout.listWidth, layout.listHeight))
-		right := lipgloss.NewStyle().Width(layout.detailWidth).Height(layout.detailHeight).MaxHeight(layout.detailHeight).Render(m.renderProcessFleetDetail(layout.detailWidth, layout.detailHeight))
-		divider := styleSep.Render(strings.Repeat("│\n", max(0, layout.bodyHeight-1)) + "│")
-		body = lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
-	} else {
-		list := lipgloss.NewStyle().Width(layout.listWidth).Height(layout.listHeight).MaxHeight(layout.listHeight).Render(m.renderProcessFleetList(layout.listWidth, layout.listHeight))
-		sep := styleSep.Render(strings.Repeat("─", layout.innerWidth))
-		detail := lipgloss.NewStyle().Width(layout.detailWidth).Height(layout.detailHeight).MaxHeight(layout.detailHeight).Render(m.renderProcessFleetDetail(layout.detailWidth, layout.detailHeight))
-		body = lipgloss.JoinVertical(lipgloss.Left, list, sep, detail)
-	}
-	content := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Width(layout.innerWidth + 2).Height(layout.innerHeight + 2).Render(content)
+	return renderFleetPanel(layout, m.renderProcessFleetHeader(layout.innerWidth),
+		m.renderProcessFleetList(layout.listWidth, layout.listHeight),
+		m.renderProcessFleetDetail(layout.detailWidth, layout.detailHeight))
 }
 
 func (m *Model) renderProcessFleetHeader(width int) string {
@@ -371,7 +342,7 @@ func (m *Model) renderProcessFleetList(width, height int) string {
 		start = max(0, len(m.processFleetList)-visible)
 	}
 	rows := make([]string, 0, visible*rowsPerProcess)
-	for i := start; i < len(m.processFleetList) && len(rows)+rowsPerProcess <= height; i++ {
+	for i := start; i < len(m.processFleetList) && len(rows) < height; i++ {
 		state := m.processFleetList[i]
 		prefix := "  "
 		rowStyle := styleCompletion
@@ -381,10 +352,10 @@ func (m *Model) renderProcessFleetList(width, height int) string {
 		}
 		identity := processStateGlyph(state) + " " + state.Name
 		metadata := strings.Join(nonEmptyStrings([]string{state.Status, processReadyLabel(state), processExitLabel(state), shortProcessID(state.ProcessID)}), " · ")
-		rows = append(rows,
-			rowStyle.Render(prefix+truncateRunes(identity, max(1, width-2))),
-			rowStyle.Render("  "+truncateRunes(metadata, max(1, width-2))),
-		)
+		rows = append(rows, rowStyle.Render(truncateDisplayText(prefix+identity, width)))
+		if len(rows) < height {
+			rows = append(rows, rowStyle.Render(truncateDisplayText("  "+metadata, width)))
+		}
 	}
 	return strings.Join(rows, "\n")
 }

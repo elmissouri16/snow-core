@@ -11,6 +11,7 @@ Snow. For the portable file format, see the
 - [Choose a skill directory](#choose-a-skill-directory)
 - [Check installed skills](#check-installed-skills)
 - [Activate a skill](#activate-a-skill)
+- [JavaScript plugin references](#javascript-plugin-references-are-a-tool-not-a-skill)
 - [Enable or disable skills](#enable-or-disable-skills)
 - [Safety](#safety)
 - [Related documents](#related-documents)
@@ -96,40 +97,43 @@ Snow can also activate an applicable skill while handling a request. In the
 interactive TUI, run `/skills` to inspect available and active skills. Run
 `/skills clear` to clear active skills for the current session branch.
 
-## Build JavaScript plugins with the bundled skill
+## JavaScript plugin references are a tool, not a skill
 
-Snow ships `snow-js-plugin` inside the executable, including current API
-declarations, guides, fixtures, and fourteen real examples. It is available in
-any project without copying files, trusting a project skill directory, or
-fetching resources. It instructs the agent to build and verify a working plugin
-for the user's need, not just describe the API:
+For plugin creation, updates, and safe runtime registration inspection, Snow
+provides the deferred read-only `snow_plugin_docs` tool. See
+[Plugin authoring references](plugins.md#plugin-authoring-references) for actions
+and usage. No skill installation or activation is required.
 
-```text
-$snow-js-plugin Build a project-notes command with a selection dialog and persistent storage. Do not install it yet.
-```
-
-Use `snow skills get snow-js-plugin` to inspect it. Built-ins report
-`scope: builtin`, `source: builtin`, and a virtual `builtin:` location. Their
-resources are read through `read_skill_resource`; they are not OS paths and are
-not extracted to a cache or project directory.
-
-The bundled skill requires the exact whitespace-delimited `$snow-js-plugin`
-user token. Ordinary model `activate_skill` calls cannot automatically activate
-it. Once activated, it continues through follow-ups and session resume; clear it
-or request exit before unrelated work. This is built-in policy, not a new
-mention-only frontmatter field for filesystem skills. Building a plugin does
-not automatically authorize persistent registration or execution of its effects.
-
-Normal named enable/disable settings and `--no-skills` apply. Built-ins are
-lowest precedence: personal, explicitly configured, and trusted project skills
-with the same name can replace them. A replacement is an ordinary filesystem
-skill, not the bundled implementation; its activation follows ordinary skill
-rules. Untrusted project directories cannot shadow the built-in. Replacing the
-Snow executable updates bundled content for the next launch.
+The built-in `snow-js-plugin` skill has been removed. There is no legacy alias or
+automatic policy migration: an old `skills.overrides.snow-js-plugin` entry is
+inert unless you provide an actual same-named filesystem skill. Such a skill
+follows ordinary skill discovery, activation, and policy; it is not an alias for
+the tool. Control `snow_plugin_docs` with the tool allowlist instead.
+`--no-skills` and `--no-plugins` do not disable these read-only references.
 
 ## Enable or disable skills
 
-Enable or disable a personal skill without deleting its files:
+In the TUI, open `/skills`, select a skill with the arrow keys, and press
+**Enter or Space** to enable or disable its saved policy. The panel stays open
+and preserves the selection. Escape closes it. The action hint changes between
+`enable` and `disable`; saving errors appear in the panel without changing the
+shown setting.
+
+**Restart Snow to apply saved policy changes.** Rows display saved enablement;
+`(restart)` marks a difference from the running catalog, and the detail shows the
+current runtime state. Saving does not deactivate an active skill or alter
+running root/child agents, tool schemas, or completion lists. Use `/skills clear`
+when you want to clear branch-active instructions rather than change discovery
+policy.
+
+The detail identifies the policy scope. Personal and explicitly
+located skills normally save to global configuration. Project skills save to the
+startup-trusted project's configuration. An existing project named override or
+project-wide default also makes the action project-scoped, so the new setting
+is not silently masked by higher-precedence policy. Untrusted project policy is
+never read or written by this panel. File contents are never modified.
+
+From the CLI, enable or disable a personal skill without deleting its files:
 
 ```sh
 snow skills disable pdf-processing

@@ -468,48 +468,15 @@ func fleetActivityBytes(lines []string) int {
 	return total
 }
 
-func (m *Model) subagentFleetLayout() subagentFleetLayout {
-	width := max(20, m.managedFrameWidth()-4)
-	height := max(8, m.managedFrameHeight()-4)
-	layout := subagentFleetLayout{
-		innerWidth:  max(16, width-2),
-		innerHeight: max(4, height-2),
-	}
-	// The header and footer are each constrained to one rendered row.
-	layout.bodyHeight = max(1, layout.innerHeight-2)
-	layout.wide = layout.innerWidth >= fleetWideMinWidth
-	if layout.wide {
-		layout.listWidth = max(30, layout.innerWidth*38/100)
-		layout.detailWidth = max(20, layout.innerWidth-layout.listWidth-1)
-		layout.listHeight = layout.bodyHeight
-		layout.detailHeight = layout.bodyHeight
-	} else {
-		layout.listWidth = layout.innerWidth
-		layout.detailWidth = layout.innerWidth
-		layout.listHeight = max(4, min(len(m.subagentFleetList.Agents)*2, layout.bodyHeight/2))
-		layout.detailHeight = max(1, layout.bodyHeight-layout.listHeight-1)
-	}
-	return layout
+func (m *Model) subagentFleetLayout() fleetPanelLayout {
+	return m.fleetPanelLayout(len(m.subagentFleetList.Agents), "↑/↓ or j/k select · PgUp/PgDn detail · Home/End · r refresh · "+m.keys.Processes.Help().Key+" processes · Esc close")
 }
 
 func (m *Model) renderSubagentFleetModal() string {
 	layout := m.subagentFleetLayout()
-	header := m.renderSubagentFleetHeader(layout.innerWidth)
-	footer := styleFooter.Render(" ↑/↓ or j/k select · PgUp/PgDn detail · Home/End · r refresh · " + m.keys.Processes.Help().Key + " processes · Esc close ")
-	var body string
-	if layout.wide {
-		left := lipgloss.NewStyle().Width(layout.listWidth).Height(layout.listHeight).MaxHeight(layout.listHeight).Render(m.renderSubagentFleetList(layout.listWidth, layout.listHeight))
-		right := lipgloss.NewStyle().Width(layout.detailWidth).Height(layout.detailHeight).MaxHeight(layout.detailHeight).Render(m.renderSubagentFleetDetail(layout.detailWidth, layout.detailHeight))
-		divider := styleSep.Render(strings.Repeat("│\n", max(0, layout.bodyHeight-1)) + "│")
-		body = lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
-	} else {
-		list := lipgloss.NewStyle().Width(layout.listWidth).Height(layout.listHeight).MaxHeight(layout.listHeight).Render(m.renderSubagentFleetList(layout.listWidth, layout.listHeight))
-		sep := styleSep.Render(strings.Repeat("─", layout.innerWidth))
-		detail := lipgloss.NewStyle().Width(layout.detailWidth).Height(layout.detailHeight).MaxHeight(layout.detailHeight).Render(m.renderSubagentFleetDetail(layout.detailWidth, layout.detailHeight))
-		body = lipgloss.JoinVertical(lipgloss.Left, list, sep, detail)
-	}
-	content := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Width(layout.innerWidth + 2).Height(layout.innerHeight + 2).Render(content)
+	return renderFleetPanel(layout, m.renderSubagentFleetHeader(layout.innerWidth),
+		m.renderSubagentFleetList(layout.listWidth, layout.listHeight),
+		m.renderSubagentFleetDetail(layout.detailWidth, layout.detailHeight))
 }
 
 func (m *Model) renderSubagentFleetHeader(width int) string {
@@ -544,7 +511,7 @@ func (m *Model) renderSubagentFleetList(width, height int) string {
 		start = max(0, len(m.subagentFleetList.Agents)-visibleAgents)
 	}
 	var rows []string
-	for i := start; i < len(m.subagentFleetList.Agents) && len(rows)+rowsPerAgent <= height; i++ {
+	for i := start; i < len(m.subagentFleetList.Agents) && len(rows) < height; i++ {
 		state := m.subagentFleetList.Agents[i]
 		prefix := "  "
 		rowStyle := styleCompletion
@@ -560,10 +527,10 @@ func (m *Model) renderSubagentFleetList(width, height int) string {
 		// other. The selected style spans both rows to keep them visually paired.
 		identity := fleetStatusGlyph(state.Status) + " " + string(state.Agent.Path)
 		metadata := strings.Join(nonEmptyStrings([]string{string(state.Status), model, string(state.Agent.Role)}), " · ")
-		rows = append(rows,
-			rowStyle.Render(prefix+truncateRunes(identity, max(1, width-2))),
-			rowStyle.Render("  "+truncateRunes(metadata, max(1, width-2))),
-		)
+		rows = append(rows, rowStyle.Render(truncateDisplayText(prefix+identity, width)))
+		if len(rows) < height {
+			rows = append(rows, rowStyle.Render(truncateDisplayText("  "+metadata, width)))
+		}
 	}
 	return strings.Join(rows, "\n")
 }

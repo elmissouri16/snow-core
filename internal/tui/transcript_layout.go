@@ -311,29 +311,17 @@ func (m *Model) managedFrameWidth() int {
 	return max(1, m.width-1)
 }
 
-// inlineModalOverlay reports pickers that can temporarily own the entire fixed
-// inline frame. Replacing the transcript/composer tail keeps the renderer at a
-// constant height (so native scrollback is untouched) while giving modal lists
-// enough rows to show more than their selected item.
-func (m *Model) inlineModalOverlay() bool {
-	return m.inlineTranscript && (m.pickSession || m.pickTree || m.pickInfo ||
-		m.pickPermissionMode || m.permPending ||
-		m.confirmGoalReplace || m.planPrompt)
-}
-
 // Inline completion lists still need the composer for live filtering. They own
 // the rest of the same fixed frame while visible, hiding transcript/footer rows
 // instead of growing the normal-screen renderer.
 func (m *Model) inlineInputOverlay() bool {
-	return m.inlineTranscript && (m.compVisible || m.skillVisible || m.mentionVisible || m.mentionLoading)
+	return m.inlineTranscript && !m.composerCoveredByModal() && m.pluginScreenView() == nil &&
+		(m.compVisible || m.skillVisible || m.mentionVisible || m.mentionLoading)
 }
 
 // availableOverlayHeight is the maximum picker/palette area that leaves one
 // transcript row visible inside the fixed managed frame.
 func (m *Model) availableOverlayHeight() int {
-	if m.inlineModalOverlay() {
-		return min(m.managedFrameHeight(), inlineOverlayMaxHeight)
-	}
 	if m.inlineInputOverlay() {
 		return max(1, min(inlineOverlayMaxHeight, m.managedFrameHeight()-1-m.editor.Height())) // separator + composer
 	}

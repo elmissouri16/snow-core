@@ -31,6 +31,27 @@ The default TUI has:
 - a composer for prompts, slash commands, and completions; and
 - a footer with context, usage, key hints, and pending work.
 
+Selection dialogs open in centered panels: models, settings, login, MCP/skills
+inspection, sessions, branches, fork destinations, permission mode, and plan/goal
+confirmations. The process (`/processes`) and subagent (`/agent`) inspectors also
+use centered panels, capped at 120 columns by 28 rows. They retain side-by-side
+lists and details on wide terminals, stack them on narrower ones, and keep
+refresh/close controls inside the panel. Tool approvals use the same centered
+placement with a dedicated safety-review layout. Panels adapt to the terminal, keep the selected item in
+view, and use compact controls on small windows; large windows retain bounded
+card widths instead of stretching the list across the screen. Resizing preserves
+the selection and draft. Short windows may temporarily cover the composer/footer;
+closing the panel restores them. Background scrolling and clicks are blocked
+while a modal owns input.
+
+Tool approval is disabled if the card cannot show the required review context
+and safety warnings. Enlarge the window to review, or press Escape to deny.
+Slash-command, `$skill`, and `@file` completions remain attached to the composer
+so you can keep typing to filter them. In `/skills`, Enter or Space toggles the
+selected skill's saved enablement without closing the panel. Changes apply after
+restart; the card distinguishes saved policy from the running catalog. See
+[skill enable/disable controls](skills.md#enable-or-disable-skills).
+
 Most keys can be changed in `keybindings.yaml` or `/keybindings`.
 
 | Key | Action |

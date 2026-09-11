@@ -8,6 +8,60 @@ Start with [JavaScript extensions (API 2)](plugin-extensions.md) for UI and work
 plugins, scaffolding, typings, and examples. The synchronous authoring reference
 below documents API 1 compatibility.
 
+## Plugin authoring references
+
+Snow includes `snow_plugin_docs`, a **deferred, read-only native tool** for
+creating and updating compatible JavaScript plugins and inspecting available
+plugin registrations. Ask for the behavior you need, for example:
+
+```text
+Build a project-notes plugin with a selection dialog and persistent storage. Do not install it yet.
+Update my existing project-notes plugin to support filtering while preserving its saved notes and command IDs.
+```
+
+The agent can discover the tool automatically or through `search_tools`; no
+skill activation, source checkout, package installation, or network fetch is
+required. References ship inside the executable and update on the next launch
+of a replaced Snow binary.
+
+| Action | Purpose |
+|---|---|
+| `overview` | Orient to plugin authoring, updates, and available references. |
+| `list` | List resource paths, paginated with `offset` and `limit`. |
+| `search` | Search the references, paginated with `offset` and `limit`. |
+| `read` | Read `path` with a **1-based line** `offset` and maximum line `limit`. |
+| `plugins` | List safe runtime registration/loaded-JavaScript metadata or inspect one `plugin_id`. |
+
+Offsets start at 1 for every action (lines for `overview`/`read`, results for
+`list`/`search`/`plugins`); continue using the returned `next_offset`. Limits are
+1–1000, defaulting to 200 lines or 50 results, also bounded by the configured tool
+output cap (at most 64 KiB). `search` takes a case-insensitive literal `query`;
+`path` optionally filters `list`/`search` to a resource file or directory.
+
+Resource paths are relative to the embedded bundle, such as `GUIDE.md`,
+`CAPABILITIES.md`, `EXAMPLES.md`, `api/snow.d.ts`, `docs/plugins.md`, and
+`examples/plugins/workspace-notes/main.js`. They are not operating-system paths;
+ordinary rooted file tools inspect or edit your actual plugin package instead.
+The bundle contains the complete build/test/security workflow, current types,
+fixture format, related guides, and fourteen offline examples.
+
+When updating a plugin, inspect its registration and existing files first.
+Preserve IDs, configuration keys, state, and unrelated behavior; verify the
+manifest API/version, declared `host_tools`, per-handler `uses`, matching types,
+build, and fixtures. Runtime registrations are not the same as loaded inventory,
+and bundled examples are not installed plugins. Inventory does not execute
+disabled paths, enable registrations, or reload anything. A built or registered
+plugin is not necessarily loaded; persistent enablement and reload require
+separate authority. Neither documentation nor fixture success guarantees safety
+or compatibility, and Snow provides no OS sandbox.
+
+The former built-in `snow-js-plugin` skill is removed, with no legacy alias or
+policy migration. Old `skills.overrides.snow-js-plugin` settings are inert unless
+a user supplies an actual same-named skill. The tool allowlist controls
+`snow_plugin_docs`; skill policy does not. `--no-skills` and `--no-plugins` do not
+disable its read-only references. Plugin loading and execution remain separately
+subject to trust, permissions, and runtime configuration.
+
 ## Install a JavaScript plugin
 
 A local package contains `snow-plugin.json` and one bundled JavaScript entry

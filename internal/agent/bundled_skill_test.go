@@ -2,6 +2,8 @@ package agent
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,9 +14,17 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-func bundledSkillAgent(t *testing.T, p *scriptedProvider, st session.Store) *Agent {
+func pluginNamedSkillAgent(t *testing.T, p *scriptedProvider, st session.Store) *Agent {
 	t.Helper()
-	catalog := skills.Discover(skills.Options{Home: t.TempDir(), SnowHome: t.TempDir(), CWD: t.TempDir()})
+	home := t.TempDir()
+	dir := filepath.Join(home, ".agents", "skills", "snow-js-plugin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: snow-js-plugin\ndescription: User plugin workflow.\n---\nFollow the user plugin workflow."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog := skills.Discover(skills.Options{Home: home, SnowHome: t.TempDir(), CWD: t.TempDir()})
 	t.Cleanup(func() { _ = catalog.Close() })
 	registry := tools.NewRegistry()
 	if err := skills.RegisterTools(registry, catalog); err != nil {
@@ -28,7 +38,7 @@ func bundledSkillAgent(t *testing.T, p *scriptedProvider, st session.Store) *Age
 	return a
 }
 
-func TestBundledSkillRequiresExactUserMention(t *testing.T) {
+func TestPluginNamedSkillDirectActivationRequiresExactMention(t *testing.T) {
 	for _, tc := range []struct {
 		name, prompt string
 		active       bool
@@ -40,7 +50,7 @@ func TestBundledSkillRequiresExactUserMention(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
-			a := bundledSkillAgent(t, p, session.NewMemoryStore(session.Options{}))
+			a := pluginNamedSkillAgent(t, p, session.NewMemoryStore(session.Options{}))
 			if err := a.Prompt(t.Context(), tc.prompt); err != nil {
 				t.Fatal(err)
 			}
@@ -55,56 +65,51 @@ func TestBundledSkillRequiresExactUserMention(t *testing.T) {
 	}
 }
 
-func TestModelCannotAutoActivateBundledSkill(t *testing.T) {
+func TestModelCanActivatePluginNamedUserSkill(t *testing.T) {
 	p := &scriptedProvider{scripts: [][]protocol.StreamEvent{
 		{{Type: protocol.EvStreamToolCallDone, ToolCallID: "attempt", ToolName: "activate_skill", Arguments: json.RawMessage(`{"name":"snow-js-plugin"}`)}, {Type: protocol.EvStreamDone, StopReason: protocol.StopToolUse}},
 		{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}},
 	}}
 	st := session.NewMemoryStore(session.Options{})
-	a := bundledSkillAgent(t, p, st)
+	a := pluginNamedSkillAgent(t, p, st)
 	if err := a.Prompt(t.Context(), "Build a JavaScript plugin"); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.requests) != 2 {
 		t.Fatalf("requests=%d", len(p.requests))
 	}
-	for _, r := range p.requests {
-		if strings.Contains(r.System, `<skill_content name="snow-js-plugin">`) {
-			t.Fatal("model autoactivated builtin")
-		}
+	if strings.Contains(p.requests[0].System, `<skill_content name="snow-js-plugin">`) {
+		t.Fatal("skill active before activation")
+	}
+	if !strings.Contains(p.requests[1].System, `<skill_content name="snow-js-plugin">`) {
+		t.Fatal("model could not activate same-named user skill")
 	}
 	messages, err := st.Messages()
 	if err != nil {
 		t.Fatal(err)
 	}
-	denied := false
+	activated := false
 	for _, m := range messages {
 		if m.Role == protocol.RoleTool && m.ToolName == "activate_skill" {
-			denied = m.IsError
+			activated = !m.IsError
 		}
 	}
-	if !denied {
-		t.Fatal("model activation was not rejected")
-	}
-	if err := a.Prompt(t.Context(), "$snow-js-plugin Build the plugin"); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(p.requests[len(p.requests)-1].System, `<skill_content name="snow-js-plugin">`) {
-		t.Fatal("explicit activation after refusal failed")
+	if !activated {
+		t.Fatal("model activation was not persisted")
 	}
 }
 
-func TestExplicitBundledSkillRestoresOnResume(t *testing.T) {
+func TestPluginNamedUserSkillRestoresOnResume(t *testing.T) {
 	st := session.NewMemoryStore(session.Options{})
 	makeProvider := func() *scriptedProvider {
 		return &scriptedProvider{scripts: [][]protocol.StreamEvent{{{Type: protocol.EvStreamDone, StopReason: protocol.StopStop}}}}
 	}
-	first := bundledSkillAgent(t, makeProvider(), st)
+	first := pluginNamedSkillAgent(t, makeProvider(), st)
 	if err := first.Prompt(t.Context(), "$snow-js-plugin Build a plugin"); err != nil {
 		t.Fatal(err)
 	}
 	p := makeProvider()
-	resumed := bundledSkillAgent(t, p, st)
+	resumed := pluginNamedSkillAgent(t, p, st)
 	if err := resumed.Prompt(t.Context(), "Continue the plugin"); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +120,7 @@ func TestExplicitBundledSkillRestoresOnResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := makeProvider()
-	cleared := bundledSkillAgent(t, after, st)
+	cleared := pluginNamedSkillAgent(t, after, st)
 	if err := cleared.Prompt(t.Context(), "Continue"); err != nil {
 		t.Fatal(err)
 	}

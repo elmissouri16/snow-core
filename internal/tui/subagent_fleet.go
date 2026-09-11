@@ -26,14 +26,3 @@ type subagentFleetDetailMsg struct {
 	messageErr error
 	err        error
 }
-
-type subagentFleetLayout struct {
-	innerWidth   int
-	innerHeight  int
-	bodyHeight   int
-	detailWidth  int
-	detailHeight int
-	listWidth    int
-	listHeight   int
-	wide         bool
-}

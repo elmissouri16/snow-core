@@ -38,7 +38,8 @@ func (m *Model) dispatchMouse(msg tea.MouseMsg) tea.Cmd {
 		m.handleSubagentFleetMouse(msg)
 		return nil
 	}
-	if m.loginModalVisible() || m.keybindingsModalVisible() || m.settingsModalVisible() || m.helpModalVisible() || m.thinkingModalVisible() {
+	if m.composerCoveredByModal() {
+		m.closeTranscriptSelectionContextMenu()
 		return nil
 	}
 	if handled, cmd := m.handleHeaderMouse(msg); handled {
@@ -105,12 +106,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_, cmd := m.handlePluginKey(msg)
 			return m, cmd
 		}
-		if handled, cmd := m.applyTranscriptSelectionContextMenuKey(msg); handled {
+		if m.composerCoveredByModal() {
+			m.closeTranscriptSelectionContextMenu()
+		} else if handled, cmd := m.applyTranscriptSelectionContextMenuKey(msg); handled {
 			return m, cmd
 		}
 		// PageUp/PageDown/Home/End and explicit Ctrl+arrow bindings scroll the
 		// transcript when not in a picker.
-		if !m.loginModalVisible() && !m.keybindingsModalVisible() && !m.settingsModalVisible() && !m.helpModalVisible() && !m.pickModel && !m.pickThinking && !m.permPending && !m.userInputPending && !m.subagentFleetOpen && !m.processFleetOpen && !m.pickPermissionMode && !m.pickSession && !m.pickTree && !m.pickInfo && !m.compVisible && !m.skillVisible && !m.mentionVisible {
+		if !m.composerCoveredByModal() && !m.compVisible && !m.skillVisible && !m.mentionVisible {
 			switch {
 			case keyMatches(msg, m.keys.PageUp):
 				m.refreshTranscriptForced()
@@ -693,6 +696,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.processFleetOpen && msg.generation == m.processFleetGeneration && msg.tick == m.processFleetTickGeneration {
 			return m, m.refreshProcessFleet()
 		}
+		return m, nil
+	case skillPolicySavedMsg:
+		m.applySkillPolicySaved(msg)
+		m.layout()
 		return m, nil
 	case subagentInspectMsg:
 		if msg.generation != m.pickerGeneration {

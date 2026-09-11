@@ -8,6 +8,7 @@ import (
 
 	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/internal/permission"
+	"github.com/elmissouri16/snow-core/internal/plugindocs"
 	"github.com/elmissouri16/snow-core/internal/subagent"
 	"github.com/elmissouri16/snow-core/internal/tools"
 	"github.com/elmissouri16/snow-core/internal/tools/builtin"
@@ -25,6 +26,30 @@ func testChildParentRegistry(t *testing.T) *tools.SimpleRegistry {
 func hasRegisteredTool(reg tools.Registry, name string) bool {
 	_, ok := reg.Get(name)
 	return ok
+}
+
+func TestPluginDocsAvailableToReadOnlyChildren(t *testing.T) {
+	parent := testChildParentRegistry(t)
+	tool := plugindocs.New(plugindocs.Options{})
+	if err := parent.RegisterDescriptor(tools.ToolDescriptor{Schema: tool.Schema(), Tool: tool, Source: tools.SourceBuiltin, Owner: "builtin", Risk: permission.RiskRead, Effect: tools.EffectReadOnly}); err != nil {
+		t.Fatal(err)
+	}
+	for name, role := range config.DefaultSubagents().Roles {
+		child, _, err := cloneChildRegistry(parent, subagent.Role{Name: name, Tools: role.Tools}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasRegisteredTool(child, plugindocs.ToolName) {
+			t.Fatalf("%s missing plugin references", name)
+		}
+	}
+	child, _, err := cloneChildRegistry(parent, subagent.Role{Name: "limited", Tools: []string{"read"}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasRegisteredTool(child, plugindocs.ToolName) {
+		t.Fatal("role allowlist did not restrict plugin references")
+	}
 }
 
 func TestRuntimeToolGuidanceKeepsExistingChildLifecycleInstructions(t *testing.T) {

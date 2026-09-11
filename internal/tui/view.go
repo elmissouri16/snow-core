@@ -23,18 +23,11 @@ func (m *Model) renderOverlays() string {
 	// Blocking host requests are exclusive overlays and mirror keyboard
 	// precedence. Do not let an unrelated picker hide a request that is holding
 	// a root or child agent.
-	if m.permPending {
-		return m.renderPermissionPicker()
-	}
-	if m.userInputPending {
-		return "" // user input uses a centered card outside transcript geometry
+	if m.composerCoveredByModal() || m.pluginScreenView() != nil {
+		return "" // modal cards do not participate in transcript geometry
 	}
 	var overlays []string
-	if m.confirmGoalReplace {
-		overlays = append(overlays, styleHeader.Render("Replace unfinished goal?")+"\n"+styleCompletionSelected.Render("› Enter to replace")+"\n"+styleCompletion.Render("  Esc to cancel"))
-	} else if m.planPrompt {
-		overlays = append(overlays, m.renderPlanImplementationPrompt())
-	} else if m.planNudgeVisible() {
+	if m.planNudgeVisible() {
 		overlays = append(overlays, styleHeaderDim.Render("Tip: use /plan to explore and produce a decision-complete plan"))
 	}
 	if m.compVisible {
@@ -60,33 +53,8 @@ func (m *Model) renderOverlays() string {
 			overlays = append(overlays, r)
 		}
 	}
-	if m.pickFork {
-		if r := m.renderForkPicker(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
-	if m.pickSession {
-		if r := m.renderSessionPicker(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
-	if m.pickTree {
-		if r := m.renderTreePicker(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
-	if m.pickInfo {
-		if r := m.renderInfoPicker(); r != "" {
-			overlays = append(overlays, r)
-		}
-	}
 	if m.compacting {
 		overlays = append(overlays, m.renderCompactionProgress())
-	}
-	if m.pickPermissionMode {
-		if r := m.renderPermissionModePicker(); r != "" {
-			overlays = append(overlays, r)
-		}
 	}
 	if len(overlays) == 0 {
 		return ""
@@ -134,20 +102,12 @@ func (m *Model) planNudgeVisible() bool {
 }
 
 func (m *Model) renderPlanImplementationPrompt() string {
-	items := []string{"Yes, implement this plan", "Yes, clear context and implement", "No, stay in Plan mode"}
-	var b strings.Builder
-	b.WriteString(styleHeader.Render("Implement this plan?") + "\n")
-	for i, item := range items {
-		prefix, style := "  ", styleCompletion
-		if i == m.planPromptChoice {
-			prefix, style = "› ", styleCompletionSelected
-		}
-		b.WriteString(style.Render(prefix + item))
-		if i < len(items)-1 {
-			b.WriteByte('\n')
-		}
-	}
-	return b.String()
+	return m.renderSelectionCard(selectionCard{
+		title:    "Implement this plan?",
+		items:    []string{"Yes, implement this plan", "Yes, clear context and implement", "No, stay in Plan mode"},
+		selected: m.planPromptChoice,
+		footer:   "↑/↓ choose · Enter confirm · Esc cancel",
+	})
 }
 
 func (m *Model) handlePlanImplementationKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -253,8 +213,7 @@ func (m *Model) currentHeaderStatus() string {
 	// even when an ordinary modal remains suspended underneath.
 	if m.permPending {
 		status = "permission"
-	}
-	if m.userInputPending {
+	} else if m.userInputPending {
 		status = "input needed"
 	}
 	return status
@@ -286,36 +245,19 @@ func (m *Model) viewContent() string {
 	}
 	if m.height < minFullFrameHeight+m.runStatusHeight() || m.width < 4 {
 		if m.permPending {
-			return fitFrameBottom(m.renderPermissionPicker(), m.managedFrameWidth(), m.managedFrameHeight())
+			frame := fitFrame("", m.managedFrameWidth(), m.managedFrameHeight())
+			return m.overlayCenteredModal(frame, m.renderPermissionPicker())
 		}
 		return fitFrame(styleBrand.Render(" snow ")+styleHeaderDim.Render("terminal too small"), m.width, m.height)
 	}
 	if m.trustPending {
 		return m.renderTrustPrompt()
 	}
-	if m.permissionNeedsDedicatedFrame() {
-		return fitFrameBottom(m.renderPermissionPicker(), m.managedFrameWidth(), m.managedFrameHeight())
-	}
-	// The fleet inspector owns the frame, except when a blocking host request
-	// must preempt it. Its renderer consumes only bounded in-memory snapshots.
-	if m.processFleetOpen && m.pluginScreenView() == nil && !m.permPending && !m.userInputPending {
-		return fitFrame(m.renderProcessFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
-	}
-	if m.subagentFleetOpen && m.pluginScreenView() == nil && !m.permPending && !m.userInputPending {
-		return fitFrame(m.renderSubagentFleetModal(), m.managedFrameWidth(), m.managedFrameHeight())
-	}
-
 	status := m.currentHeaderStatus()
 	header := m.renderHeader(status)
 	frameWidth := m.managedFrameWidth()
 	sep := styleSep.Render(strings.Repeat("─", frameWidth))
 	overlay := m.renderOverlays()
-	if m.inlineModalOverlay() && overlay != "" && (m.pluginScreenView() == nil || m.permPending || m.userInputPending) {
-		// Modal pickers replace the live tail but remain bottom-anchored inside the
-		// same terminal-height frame, so closing one restores the composer without
-		// moving terminal-owned history.
-		return fitFrameBottom(overlay, frameWidth, m.managedFrameHeight())
-	}
 	if m.inlineInputOverlay() && overlay != "" && m.pluginScreenView() == nil {
 		frame := lipgloss.JoinVertical(lipgloss.Left, overlay, sep, m.renderEditor())
 		return fitFrameBottom(frame, frameWidth, m.managedFrameHeight())
@@ -371,16 +313,24 @@ func (m *Model) viewContent() string {
 			frame = overlayTranscriptSelectionContextMenu(frame, m.transcriptSelectionMenu)
 		}
 	}
-	if m.userInputPending && !m.permPending {
+	if m.permPending {
+		frame = m.overlayCenteredModal(frame, m.renderPermissionPicker())
+	} else if m.userInputPending {
 		frame = m.overlayCenteredModal(frame, m.renderUserInput())
 	} else if m.pluginScreenView() != nil && !m.permPending {
 		frame = m.overlayCenteredModal(frame, m.renderPluginScreen())
+	} else if m.processFleetOpen {
+		frame = m.overlayCenteredModal(frame, m.renderProcessFleetModal())
+	} else if m.subagentFleetOpen {
+		frame = m.overlayCenteredModal(frame, m.renderSubagentFleetModal())
 	} else if m.restartPromptVisible() {
 		frame = m.overlayRestartPrompt(frame)
 	} else if m.updateInstallProgressVisible() {
 		frame = m.overlayUpdateInstallProgress(frame)
 	} else if m.updateOfferVisible() {
 		frame = m.overlayUpdateOffer(frame)
+	} else if m.confirmGoalReplace || m.planPrompt {
+		frame = m.overlayCenteredModal(frame, m.renderSelectionModal())
 	} else if m.loginModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlayLoginModal(frame)
 	} else if m.modelModalVisible() && !m.permPending && !m.userInputPending {
@@ -393,6 +343,8 @@ func (m *Model) viewContent() string {
 		frame = m.overlaySettingsModal(frame)
 	} else if m.helpModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlayHelpModal(frame)
+	} else if m.selectionModalVisible() {
+		frame = m.overlayCenteredModal(frame, m.renderSelectionModal())
 	}
 	return frame
 }

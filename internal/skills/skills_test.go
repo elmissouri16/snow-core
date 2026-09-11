@@ -258,7 +258,7 @@ func TestOptionalFieldTypesAndCharacterLimits(t *testing.T) {
 	writeRaw("padded-compatibility", "name: padded-compatibility\ndescription: test\ncompatibility: '"+strings.Repeat(" ", 500)+"x'")
 	catalog := Discover(Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}})
 	defer catalog.Close()
-	if got := catalog.List(); len(got) != 1 || got[0].Source != "builtin" || len(catalog.Diagnostics()) < 8 {
+	if got := catalog.List(); len(got) != 0 || len(catalog.Diagnostics()) < 8 {
 		t.Fatalf("nonconformant optional fields loaded: skills=%+v diagnostics=%+v", catalog.List(), catalog.Diagnostics())
 	}
 }
@@ -279,8 +279,8 @@ func TestFrontmatterMayEndAtEOFAndCatalogDisclosesEverySkill(t *testing.T) {
 
 	catalog := Discover(Options{Home: t.TempDir(), SnowHome: t.TempDir(), ExtraDirs: []string{root}, MaxCatalogBytes: 1 << 20})
 	defer catalog.Close()
-	if len(catalog.List()) != 101 {
-		t.Fatalf("skills = %d, want 100 filesystem skills plus built-in", len(catalog.List()))
+	if len(catalog.List()) != 100 {
+		t.Fatalf("skills = %d, want 100 filesystem skills", len(catalog.List()))
 	}
 	prompt := catalog.CatalogPrompt()
 	if !strings.Contains(prompt, "skill-000") || !strings.Contains(prompt, "skill-099") || strings.Contains(prompt, "<truncated>") {
@@ -334,7 +334,7 @@ func TestPolicyKeepsDisabledSkillsInInventoryOnly(t *testing.T) {
 	if got := catalog.List(); len(got) != 1 || got[0].Name != "review" || !got[0].Enabled {
 		t.Fatalf("enabled list = %+v", got)
 	}
-	if got := catalog.Inventory(); len(got) != 3 || got[0].Name != "deploy" || got[0].Enabled || got[0].DisabledBy == "" {
+	if got := catalog.Inventory(); len(got) != 2 || got[0].Name != "deploy" || got[0].Enabled || got[0].DisabledBy == "" {
 		t.Fatalf("inventory = %+v", got)
 	}
 	if _, ok := catalog.Get("deploy"); ok {

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Refresh/check the portable skill's explicit, repository-owned resource snapshot.
+"""Refresh/check the embedded plugin documentation's explicit, repository-owned resource snapshot.
 
 Does not run examples, install packages, activate plugins, or change source files.
-From a copied skill, pass --repo /path/to/snow-core explicitly.
+Use --repo /path/to/snow-core to select canonical sources explicitly.
 """
 
 import argparse
@@ -74,14 +74,14 @@ def snapshot(repo):
     return files
 
 
-def sync(repo, skill, check=False):
+def sync(repo, bundle, check=False):
     files = snapshot(repo)
-    references = skill / "references"
+    resources = bundle / "resources"
     changed = []
     for relative, expected in files.items():
-        destination = references / relative
-        if not destination.resolve().is_relative_to(references.resolve()):
-            raise ValueError(f"resource escapes skill: {relative}")
+        destination = resources / relative
+        if not destination.resolve().is_relative_to(resources.resolve()):
+            raise ValueError(f"resource escapes bundle: {relative}")
         if destination.is_symlink():
             raise ValueError(f"symlink destination: {relative}")
         actual = destination.read_bytes() if destination.is_file() else None
@@ -95,10 +95,10 @@ def sync(repo, skill, check=False):
     # claims. Never remove files automatically; the maintainer reviews each one.
     stale = []
     for directory in ("api", "docs", "examples"):
-        root = references / directory
+        root = resources / directory
         if root.exists():
-            stale.extend(p.relative_to(references).as_posix() for p in root.rglob("*")
-                         if p.is_file() and p.relative_to(references).as_posix() not in files)
+            stale.extend(p.relative_to(resources).as_posix() for p in root.rglob("*")
+                         if p.is_file() and p.relative_to(resources).as_posix() not in files)
     if stale:
         raise ValueError("unexpected resources (review/remove explicitly): " + ", ".join(sorted(stale)))
     if check and changed:
@@ -110,7 +110,7 @@ def sync(repo, skill, check=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[5])
+    parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[3])
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     repo = args.repo.resolve()
