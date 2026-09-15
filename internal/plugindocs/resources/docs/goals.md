@@ -63,6 +63,57 @@ Use these TUI commands:
 Pressing Ctrl+C or Esc during automatic goal work aborts the turn and defers
 continuation. Use `/goal resume` when you are ready to continue.
 
+## Use goals in the local web manager
+
+The local manager exposes a narrower explicit workflow than the TUI commands.
+Activate a conversation and enable **Goal** in the composer. This is a local
+draft-mode toggle: it performs no inspection and starts no work. Type the objective
+in the same message box, then submit using **Start goal run** (or Ctrl/⌘+Enter).
+There is no separate objective editor, creation dialog, or consent checkbox.
+Submitting explicitly authorizes one goal run with the current model and session
+permissions. Goal objectives currently accept plain text, not attachments.
+
+Before admitting work, Snow inspects the exact live worker, durable session,
+branch, tip, goal identity, model, permissions, thinking and revision. A changed
+draft or scope cancels that submission instead of sending stale text or retargeting
+it. On confirmed admission, only an unchanged objective draft is cleared and
+Goal mode turns off. Concurrently typed text and unverified submissions are kept;
+no failed or uncertain write is automatically replayed. Toggling Goal off by
+itself never clears text, cancels a run, or resumes a saved goal.
+
+An existing goal's objective and run state appear above the composer. **Details**
+(or **Thread goal** in the conversation menu) opens read-only status and explicit
+Resume controls. For a new goal, Details also offers an optional positive token
+budget; objective entry still stays in the composer. Resume retains its separate
+exact-target review and confirmation. Activation, passive reads, branch restore
+and reconnection keep saved goals deferred; none automatically resume work.
+Start does not replace an unfinished goal, and the manager has no edit/replace/
+clear-goal workflow. Plan Mode rejects Start and Resume. An idle worker with no
+retained queue/review inputs is required. **Queue next is disabled in Goal draft
+mode and during goal work.**
+
+One native goal-run handle owns all serial automatic turns, retries, compaction
+and gaps between turns. **Stop cancels the entire run**, not just its current
+provider turn. A correlated run completion reports that execution ended; it does
+not assert that the objective is `complete`. Inspect the separate semantic goal
+status and deferred state before deciding whether to resume. Unknown outcomes
+are never automatically replayed.
+
+The fixed `managed-explicit-goals` worker profile suppresses goal tool schemas
+and rejects their dispatch during ordinary prompts. Within explicit goal work,
+get/update apply only to the owning goal; the model cannot create or replace a
+goal. This is still the existing agent loop, not a browser scheduler or autonomous
+multi-agent workflow. Plugins, MCP and subagents remain disabled. Skills are disabled by default;
+the **Enable installed skills** startup checkbox admits the normal worker catalog
+and remembers its setting per project, independently of goal controls and tool
+permissions. Changes apply on the next explicit start, not to a live run. Managed
+process tools are enabled but retain normal hard-policy and permission checks.
+
+The optional budget follows the accounting rules below and is **not a strict
+provider billing cap**. See [Using Snow](using-snow.md#start-or-resume-a-thread-goal)
+for the manager's controls and [RPC](https://github.com/elmissouri16/snow-core/blob/main/docs/rpc.md)
+for the typed integration contract.
+
 ## Use goals with Plan Mode
 
 Entering Plan Mode stops and waits for automatic goal work. Planning turns do

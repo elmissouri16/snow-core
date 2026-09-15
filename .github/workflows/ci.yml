@@ -15,6 +15,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  frontend:
+    name: Reproducible frontend assets (Node 24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: internal/web/frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.16.0'
+          cache: npm
+          cache-dependency-path: internal/web/frontend/package-lock.json
+
+      - name: Install locked frontend dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck frontend
+        run: npm run typecheck
+
+      - name: Test frontend source and asset verification
+        run: npm test
+
+      - name: Verify checked-in frontend assets and licenses
+        run: npm run check
+
+      - name: Set up Go for native React fixtures
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.0-rc.3'
+          check-latest: true
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Test native React pages
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)" || {
+            echo "Chrome/Chromium is required for native React page checks" >&2
+            exit 1
+          }
+          test -x "$chrome"
+          export SNOW_CHROME_BIN="$chrome"
+          "$SNOW_CHROME_BIN" --version
+          node scripts/tests/browser/react-pages/run.mjs
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

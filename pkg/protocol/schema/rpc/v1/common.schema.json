@@ -82,6 +82,10 @@
         },
         "cost": {
           "$ref": "#/$defs/cost"
+        },
+        "cost_currency_conflict": {
+          "type": "boolean",
+          "description": "True when aggregation encountered different currency labels. Sticky across further aggregation; cost is unavailable, not zero."
         }
       },
       "additionalProperties": false

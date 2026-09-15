@@ -3,9 +3,26 @@
   "$id": "https://snow-core.dev/schemas/rpc/v1/output.schema.json",
   "title": "Snow RPC stdout frame",
   "oneOf": [
-    {"$ref": "handshake.schema.json"},
-    {"$ref": "response.schema.json"},
-    {"$ref": "prompt-completed.schema.json"},
-    {"$ref": "agent-event.schema.json"}
+    {
+      "$ref": "handshake.schema.json"
+    },
+    {
+      "$ref": "response.schema.json"
+    },
+    {
+      "$ref": "prompt-completed.schema.json"
+    },
+    {
+      "$ref": "goal-run.schema.json#/$defs/completed"
+    },
+    {
+      "$ref": "agent-event.schema.json"
+    },
+    {
+      "$ref": "compaction-run.schema.json#/$defs/completed"
+    },
+    {
+      "$ref": "host-operations.schema.json#/$defs/completed"
+    }
   ]
 }

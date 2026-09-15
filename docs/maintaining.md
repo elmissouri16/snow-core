@@ -10,6 +10,8 @@ This index collects architecture, release procedures, and design history;
   interfaces, decisions, phased roadmap, verification, and open risks.
 - [Agent working guide](../AGENTS.md) — repository-specific coding rules,
   security constraints, and verification commands.
+- [Web frontend development](web-frontend.md) — pinned React/Vite tooling,
+  embedded assets, standalone workbench, verification, and migration boundaries.
 - [Release policy](releases.md) — alpha versioning, CI gates, artifacts,
   checksums, and rollback.
 - [Security reporting](../SECURITY.md) — private vulnerability disclosure and
@@ -21,6 +23,13 @@ This index collects architecture, release procedures, and design history;
 
 ## Internals and design history
 
+- [Web manager implementation plan](web-manager-implementation-plan.md) —
+  single-host manager over decoupled Snow RPC workers, DeepSeek Harness research,
+  remote-access security, UX specifications, and phased implementation gates.
+  Local management and explicit runtime execution are implemented; private remote
+  deployment remains planned. Start with the [commit checkpoint and remaining
+  work](web-manager-implementation-plan.md#commit-checkpoint-and-remaining-work)
+  rather than treating historical phase descriptions as current availability.
 - [Lazy MCP connection plan](lazy-mcp-implementation-plan.md): connection lifecycle
   and catalog design. Current setup is documented in [MCP](mcp.md).
 - [Retired plugin language research](plugin-js-python-research.md): historical
@@ -74,6 +83,7 @@ To reduce drift, use these documents as the primary references:
 | Performance allocation gates | [`performance.md`](performance.md) |
 | Feature-specific behavior | The matching guide in this directory |
 | Contributor workflow and must-load repository rules | [`AGENTS.md`](../AGENTS.md) |
+| Web frontend tooling, generated assets, and rendering ownership | [`web-frontend.md`](web-frontend.md) |
 | Package architecture, dependency direction, and roadmap | [`IMPLEMENTATION.md`](../IMPLEMENTATION.md) |
 | Current implementation details | Source code and tests |
 

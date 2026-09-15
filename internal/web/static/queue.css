@@ -1,0 +1,16 @@
+.queue-next-panel { flex: none; width: min(100%, var(--chat-content-width, 748px)); align-self: center; min-width: 0; margin: 0 auto 8px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.queue-next-heading, .queue-next-item-heading, .queue-next-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.queue-next-heading { justify-content: space-between; }
+.queue-next-heading h2 { margin: 0; font-size: 12px; line-height: 18px; font-weight: 600; }
+.queue-next-heading > span, .queue-next-item-state { color: var(--muted); font-size: 11px; }
+.queue-next-boundary { margin: 4px 0; font-size: 11px; line-height: 16px; }
+.queue-next-items { max-height: min(240px, 28dvh); overflow-y: auto; overscroll-behavior: contain; min-width: 0; }
+.queue-next-item { min-width: 0; padding: 8px 0; border-top: 1px solid var(--border); }
+.queue-next-source { margin: 4px 0; max-height: 64px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; line-height: 18px; }
+.queue-next-item textarea { display: block; width: 100%; min-width: 0; min-height: 72px; max-height: 160px; margin: 6px 0; resize: vertical; font: inherit; font-size: 12px; }
+.queue-next-actions button, .queue-next-panel > div > button { min-height: 28px; padding: 4px 8px; font-size: 12px; }
+.queue-next-item .error { margin: 4px 0; font-size: 12px; }
+.queue-next-button { flex: none; font-size: 12px; font-weight: 600; }
+.composer-footer:has(.queue-next-button:not([hidden])) { flex-wrap: wrap; }
+.composer-footer:has(.queue-next-button:not([hidden])) .composer-meta { flex: 1; min-width: 0; }
+@media (max-width: 767px) { .queue-next-panel { width: calc(100% - 24px); padding: 6px 10px; } }

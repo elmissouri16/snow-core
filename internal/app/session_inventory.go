@@ -41,6 +41,9 @@ func (a *App) ListSessions() ([]session.SessionInfo, error) {
 // makes it active through SetSession so every session-bound subsystem is
 // rebound consistently.
 func (a *App) CreateSession() (session.SessionInfo, error) {
+	if err := a.Agent.QueueControlTransitionReady(); err != nil {
+		return session.SessionInfo{}, err
+	}
 	index := session.NewFileIndex(session.DefaultSessionsRoot())
 	st, err := index.Create(a.cwd)
 	if err != nil {
@@ -56,6 +59,9 @@ func (a *App) CreateSession() (session.SessionInfo, error) {
 // Clients never supply a database path, and the opened identity is rechecked
 // before SetSession receives the store.
 func (a *App) OpenSession(sessionID string) (session.SessionInfo, error) {
+	if err := a.Agent.QueueControlTransitionReady(); err != nil {
+		return session.SessionInfo{}, err
+	}
 	index := session.NewFileIndex(session.DefaultSessionsRoot())
 	info, err := a.sessionInfoByID(sessionID)
 	if err != nil {

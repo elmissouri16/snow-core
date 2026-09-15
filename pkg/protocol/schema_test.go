@@ -87,6 +87,17 @@ func TestRPCSchemasResolveWithoutNetwork(t *testing.T) {
 		"auth-status.schema.json",
 		"context-report.schema.json",
 		"handshake.schema.json",
+		"history-control.schema.json",
+		"compaction-run.schema.json",
+		"managed-steer.schema.json",
+		"session-reasoning.schema.json",
+		"host-control.schema.json",
+		"host-api-key.schema.json",
+		"host-operations.schema.json",
+		"control-request.schema.json",
+		"control-output.schema.json",
+		"goal-run.schema.json",
+		"process-control.schema.json",
 		"mcp-server.schema.json",
 		"message.schema.json",
 		"model.schema.json",
@@ -310,6 +321,40 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 	for _, command := range KnownRPCCommands() {
 		value := RPCRequest{ID: "test", Type: command}
 		switch command {
+		case "history_branch_fork", "history_session_fork":
+			value.Params = json.RawMessage(`{"session_id":"session","source_branch_id":"main","source_tip_id":"","target_branch_id":"main","target_tip_id":"","name":"fork"}`)
+		case "history_branch_rename":
+			value.Params = json.RawMessage(`{"session_id":"session","source_branch_id":"main","source_tip_id":"","target_branch_id":"main","target_tip_id":"","old_name":"main","name":"renamed"}`)
+		case "compaction_start":
+			value.Params = json.RawMessage(`{"session_id":"session","branch_id":"main","expected_tip_id":""}`)
+		case "managed_steer":
+			value.Params = json.RawMessage(`{"session_id":"session","turn_id":"turn","root_epoch":1,"request_id":"steer","text":"next"}`)
+		case "session_reasoning_get":
+			value.Params = json.RawMessage(`{"session_id":"session"}`)
+		case "session_reasoning_set":
+			value.Params = json.RawMessage(`{"expected":{"session_id":"session","branch_id":"main","tip_id":"","provider":"fake","model":"fake-1","mode":"default","permission_mode":"deny","thinking":"off","reasoning_summary":"auto","text_verbosity":"low"},"field":"thinking","value":"off"}`)
+		case "branches_page":
+			value.Params = json.RawMessage(`{"session_id":"session"}`)
+		case "branch_messages_page":
+			value.Params = json.RawMessage(`{"session_id":"session","branch_id":"main","tip_id":"tip"}`)
+		case "branch_restore_prepare":
+			value.Params = json.RawMessage(`{"session_id":"session","source_branch_id":"main","source_tip_id":"tip","target_branch_id":"older","target_tip_id":"old-tip"}`)
+		case "branch_restore_commit":
+			value.Params = json.RawMessage(`{"session_id":"session","restore_token":"token"}`)
+		case "queue_list":
+			value.Params = json.RawMessage(`{"session_id":"session","turn_id":"turn"}`)
+		case "queue_enqueue":
+			value.Params = json.RawMessage(`{"session_id":"session","turn_id":"turn","revision":0,"text":"next"}`)
+		case "queue_update":
+			value.Params = json.RawMessage(`{"session_id":"session","turn_id":"turn","revision":0,"item_id":"item","text":"next"}`)
+		case "queue_remove":
+			value.Params = json.RawMessage(`{"session_id":"session","turn_id":"turn","revision":0,"item_id":"item"}`)
+		case "message_edit_prepare", "message_regenerate_prepare":
+			value.Params = json.RawMessage(`{"session_id":"session-1","entry_id":"user-1"}`)
+		case "message_regenerate_commit":
+			value.Params = json.RawMessage(`{"session_id":"session-1","edit_token":"opaque"}`)
+		case "message_edit_commit":
+			value.Params = json.RawMessage(`{"session_id":"session-1","edit_token":"opaque","text":"replacement"}`)
 		case "plugin_enable", "plugin_disable", "plugin_reload":
 			value.Params = json.RawMessage(`{"id":"demo"}`)
 		case "plugin_command_run", "plugin_command_cancel":
@@ -330,6 +375,9 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 			value.Message = "hello"
 		case "steer", "follow_up":
 			value.Message = "next"
+		case "session_set_model":
+			value.Provider = "fake"
+			value.Model = "fake-1"
 		case "set_model":
 			value.Provider = "fake"
 			value.Model = "fake-1"
@@ -338,6 +386,16 @@ func TestRPCRequestSchemaCoversKnownCommands(t *testing.T) {
 			value.Thinking = "off"
 		case "set_mode":
 			value.Mode = "default"
+		case "goal_inspect":
+			value.Params = json.RawMessage(`{"session_id":"session","branch_id":"main"}`)
+		case "goal_run":
+			value.Params = json.RawMessage(`{"action":"create","session_id":"session","branch_id":"main","expected_tip_id":"","expected_goal_id":"","objective":"ship"}`)
+		case "message_image":
+			value.Params = json.RawMessage(`{"session_id":"session","message_id":"user","index":1}`)
+		case "process_control_list":
+			value.Params = json.RawMessage(`{"session_id":"session"}`)
+		case "process_control_logs", "process_control_stop":
+			value.Params = json.RawMessage(`{"session_id":"session","process_id":"proc_0123456789abcdef0123456789abcdef"}`)
 		case "goal_create", "goal_set":
 			value.Params = json.RawMessage(`{"objective":"ship"}`)
 		case "goal_edit":

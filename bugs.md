@@ -1,5 +1,517 @@
 # Known bugs
 
+## BUG-219: Native runtime-control fixture reads HTTP bodies before they finish
+
+- **Status:** Resolved — the final four-cell native runtime-control matrix passes all 404 assertions.
+- **Evidence:** The extended no-op matrix reaches 90 passing assertions in 1280px/dark, then CDP rejects a steering receipt body read with `No data found for resource with given identifier`. `Network.responseReceived` announces headers, not a completed response body; the other three cells finish normally (393 assertions overall, one fixture failure).
+- **Fix:** Retain a bounded set of `Network.loadingFinished` IDs and wait for the matching event before inspecting a receipt body. This only waits for browser evidence; it never repeats an application request or changes any production admission path.
+
+## BUG-218: Activity privacy fixture intermittently matches a numeric sentinel
+
+- **Status:** Open — exact response collision not captured; unrelated to the composer implementation.
+- **Evidence:** One full `go test ./internal/web` run fails all four statuses in `TestManagerActivityGoalRunHTTPCountsExcludeGoalContentAndAuthority` on the literal `8765`; the immediate uncached full package rerun passes in 27.030s. The test searches the entire serialized Activity response for this four-digit sentinel, including public IDs and timestamps. Those fields can contain the same digits without exposing goal usage, but the failing response was not retained, so its exact source remains unverified.
+- **Follow-up:** Reproduce with deterministic public IDs/timestamps and inspect the typed public projection. Preserve field/content exclusion checks; do not silence a possible disclosure or merely retry away the failure. No Go source or test was changed for this UI task.
+
+## BUG-217: Wrapped composer controls scroll the header out of reach on short screens
+
+- **Status:** Resolved — the final full runtime-layout matrix passes all 84 reports.
+- **Evidence:** At 360×240, focusing the new two-row composer moves the conversation trigger from y=54 to y=4, behind the mobile topbar. Four header hit tests fail; header-origin Thinking also fails its bounded-picker check. The form is constrained but has no overflow owner; native focus scrolls the containing live region. Picker placement additionally trusts an offscreen composer anchor.
+- **Fix:** Give the existing composer form bounded vertical overflow and contained overscroll, clip the ordinary live region against native ancestor focus scrolling, and allow the already-scrollable manager-controls region to shrink before displacing the composer. Form overflow alone was insufficient; clipping alone kept the header but left controls out of reach. Clamp Thinking's vertical anchor and available height to viewport gutters. Keep the same form, editor, header and native focus owner; no controls or geometry assertions are removed.
+- **Verification:** Initial six-cell 360px/dark matrix has one failing cell with five assertions; intermediate partial fixes retain failures. Final six-cell diagnostic and full 84-report runtime-layout matrix exit 0. Native goal (332), runtime-control (396), and ordinary-workflow (432) assertions also pass on the final assets.
+
+## BUG-216: Goal admission accepts a snapshot in place of its native receipt
+
+- **Status:** Resolved — focused contracts and the full native goal matrix pass.
+- **Evidence:** The existing ACK predicate falls back to `result.goal`, accepts an unchanged revision, and does not correlate a new objective/budget. The extended existing contract test reproduces missing-receipt acceptance (5 pass, 1 fail).
+- **Fix:** Require the explicit native receipt, an advanced revision, a new exact goal identity and the submitted objective/budget. Objective comparison matches native Unicode whitespace normalization. Failed correlation retains the existing uncertain-outcome fence and draft; no replay is added.
+- **Verification:** `node --test scripts/tests/goal_frontend_contract.test.mjs` passes 6/6 after the fix, including fast completion's separate admission receipt. Native 320px/dark goal execution subsequently passes 82 assertions; final full execution passes 332 across four reports.
+
+## BUG-215: Goal composer preflight rejects its own inspection revision
+
+- **Status:** Resolved — full native goal matrix passes.
+- **Evidence:** After the toggle/menu checks pass, native Start never reaches the provider: the browser reports changed scope. `goal_inspect` publishes a new manager revision even when goal facts are unchanged, so comparing its result to the pre-read revision rejects every submission.
+- **Fix:** Permit exactly the inspection's single revision advance while retaining every captured goal/authority fact and the unchanged-draft guard. Admission uses the exact inspected revision; any additional revision or fact change still rejects the submission. No backend compare-and-swap rule is relaxed.
+- **Verification:** Native 320px/dark execution passes 82 assertions after the fix, including changed-draft rejection, one Start, serial turns, whole-run Stop, exact Resume and fast native ACK. Final full native execution passes 332 assertions across four reports.
+
+## BUG-214: Goal composer mode hides its retained details menu action
+
+- **Status:** Resolved — full native goal matrix passes.
+- **Evidence:** After the new local Goal toggle passes, all four native manager-execution cells stop at 43 passing assertions because the `goals` conversation-menu entry is absent. Menu discovery filters hidden launcher proxies, including the intentionally hidden Goal-details proxy.
+- **Fix:** The goal owner advertises whether its details proxy is supported. Menu discovery admits that specific supported secondary proxy without exposing a duplicate toolbar launcher or admitting unsupported controls. Busy/invalid state still disables the proxy.
+- **Verification:** Reproduction exits 1 with 172 passing assertions and four missing-target failures. Invocation-time availability was corrected as well as discovery; final native execution passes 332 assertions across four reports.
+
+## BUG-213: Goal composer browser fixture tries to serialize a React-owned DOM node
+
+- **Status:** Resolved — full native goal matrix passes.
+- **Evidence:** The new Goal editor-identity probe assigns the textarea to a browser global but returns that DOM node through CDP `returnByValue`. All four manager-execution cells stop at 40 passing assertions with `Object reference chain is too long`; no application JS error or goal execution occurs.
+- **Fix:** Keep the identity reference in the browser and return only a scalar from the setup probe. Identity comparisons remain in-browser; no assertions or runtime guards are removed.
+- **Verification:** Initial matrix exits 1: 160 passing assertions, four fixture failures. The later inline stopped-status probe was also moved before its own explicit Details-open action. Final native execution passes 332 assertions across four reports, with all identity, stopped-status and focus assertions retained.
+
+## BUG-212: Composer launcher fixture counts earlier inspection as compaction mutation
+
+- **Additional fixture correction:** New feedback-dismiss checks similarly counted unrelated background inventory/snapshot completions as dismissal requests. Keep exact hidden/focus assertions, and permit only the existing background-read allowlist across dismissal; panel/action requests still fail. The final runtime-layout matrix passes all 84 reports.
+
+- **Status:** Resolved — all 84 corrected runtime-layout reports pass.
+- **Evidence:** The new direct goal/reasoning launcher checks issue read-only inspection POSTs before the existing busy-compaction probe. That probe incorrectly checks all traffic since startup and fails `Busy compaction cannot submit or change the draft` in all six supported 320px cells; the other assertions and six unsupported cells pass.
+- **Fix:** Capture the request boundary immediately before the busy-compaction probe and still reject every POST within that probe. Do not exempt mutation endpoints or weaken draft/disabled-control checks.
+- **Verification:** Initial narrow matrix exits 1 (six of twelve cells fail). Corrected `harness-layout/run.mjs --runtime-only` exits 0 with all 84 reports passing, including direct composer launch, icon hit testing, native modal ownership, focus return and unchanged menu delegation at seven widths, three heights and both themes.
+
+## BUG-211: Direct compaction makes the composer jump between status layouts
+
+- **Status:** Resolved — whole-chat no-op checks pass, not only composer geometry.
+- **Whole-chat reproduction:** Extending the native 320px/dark no-op probe beyond composer bounds exposes a 38.09375px transcript top/height delta (99 assertions pass, one fails). Nodes remain mounted, with no recovery banner or sampled Working indicator. Changing compaction feedback text in the in-flow manager-controls region changes its wrapped height. The earlier composer-only assertion misses this.
+- **Current fix:** Render bounded, dismissible compaction feedback out of flow using the existing scroll owner's composer-clearance measurement; keep admission/Stop unchanged. Compaction does not show the ordinary chat Working indicator.
+- **Whole-chat verification:** Final native runtime-control matrix passes 404 assertions across four reports. The native no-op sampler records zero transcript top/height, content-height and scroll-offset deltas, without retiring message/editor nodes. Runtime-only layout passes all 84 reports, including bounded feedback and dismissal at 240px height. Frontend tests (132), typecheck/build/reproducibility, syntax and `go test ./internal/web` pass.
+- **Additional evidence:** The first composer-mode runtime matrix has 394 passing assertions and two desktop geometry failures: dock 98→138px, row delta 40px, footer unchanged at zero, stable editor identity, no Queue next. Keeping the last reported Thinking level visible alone does not fix the wrap: the wider labelled toolbar also crosses its threshold when Send expands into the Stop text pill. Send, pending admission and Stop now share a 34px icon footprint with exact ARIA/tooltips. Both subsequent and final four-cell native matrices pass all 396 assertions; the final ordinary-workflow regression also passes 432 assertions.
+- **Evidence:** The native 320px/dark runtime fixture samples animation frames from compact admission through Stop, completion and no-op. Its first trace shows 58.39px dock-height variation with stable action-row height and editor/button identities. Normalizing intentional ancestor scrolling and settling prior typing removes the misleading 210px raw top movement. Suppressing the redundant generic status alone still reproduces a 36px height/top jump: dock 154→190px, form 154px and editor 52px unchanged, footer 0→36px. `Queue next` was being presented for compaction's native `running` status, even though it is not an ordinary follow-up turn.
+- **Fix:** Project reservation/admission/native compaction as the queue's existing nonqueueable `compacting` state. Keep routine composer status screen-reader-only during compaction, which already owns inline status; show stopping there as well. Preserve visible connection/unknown-outcome warnings, existing native Stop and admission guards, and all retained queue-item controls. No remount, permanent spacer or backend change.
+- **Verification:** Initial and partial-fix narrow runs exit 1 with 87 passing assertions and the new geometry assertion failing. The bounded animation-frame regression now settles typing, normalizes deliberate scrolling, checks editor/button identity and dock/row geometry, and rejects any visible Queue next. The final `manager-runtime-controls/run.mjs` exits 0: 352 assertions across 320/1280 × dark/light, with zero height/top/row variation and stable identities in every report. `manager-workflows/run.mjs` passes 432 assertions, retaining ordinary queue delivery/review. `harness-layout/run.mjs --runtime-only` passes all 84 reports. All 132 frontend tests, TypeScript, reproducible assets, JS syntax, diff checks and `go test ./internal/web` pass.
+
+## BUG-210: Direct-action browser fixtures retain retired interaction assumptions
+
+- **Status:** Resolved — corrected runtime-controls, manager-execution and layout matrices pass.
+- **Evidence:** During the direct-compaction acceptance update, removing the former dialog-opening sequence also removed its `compact.focus()` reveal. The modified runtime-panel fixture repeatedly reports `Composer compaction icon is reachable at the current viewport` failures at 240px heights, while normal heights pass. The short-height composer intentionally has a bounded scroll owner; the assertion tested the offscreen row without scrolling or keyboard focus. The native runtime suite also reports four failures (one per report) from its obsolete requirement for a compaction dialog; its 340 remaining assertions pass.
+- **Additional evidence:** The subsequent composer goal/reasoning relocation rerun exposes the same obsolete four-dialog assertion in `manager-execution/tests.mjs`: 320 assertions pass and four fail. Goal admission, serial turns, Stop/Resume, focus/draft preservation and process controls pass; the retired compaction dialog alone is missing as intended. That shared assertion now requires the three real dialogs plus direct compaction icon/status owner. The corrected full `manager-execution/run.mjs` exits 0 with 324 assertions; all four reports pass, including the new composer-origin Goal opening and focus return.
+- **Fix:** Restore native focus before hit testing the direct-action icon; keep the real viewport/occlusion check. Require the three remaining React dialogs, composer compaction button and inline status instead of the removed compaction dialog. No product layout change or bypass of action/geometry checks.
+- **Verification:** The initial layout matrix was stopped after repeated failures. The corrected `harness-layout/run.mjs --runtime-only` exits 0 with all 84 reports passing. The corrected `manager-runtime-controls/run.mjs` first passes 344 assertions and then, with explicit conversation-menu compaction coverage, exits 0 with 348 assertions across four real-manager reports; exact scope, direct Apply/history actions, single compaction POST/provider call under repeated clicks, Stop, progress, native no-op and no retries are covered. React pages also pass 217 assertions across 30 scenarios; affected Go tests/vet and all 132 frontend package tests pass.
+
+## BUG-209: Composer compaction relocation loses menu-origin focus return
+
+- **Status:** Resolved — the complete runtime-panel matrix passes.
+- **Evidence:** After moving the compaction launcher into the composer, the existing runtime-panel matrix repeatedly times out at `compaction close/focus return`. Direct composer opening returns correctly, but opening through the conversation menu returns to the new composer icon rather than the menu launcher. The shared dialog helper's old manager-control ancestry heuristic no longer applies.
+- **Fix:** Preserve the already-focused conversation-menu launcher when that menu forwards its action; direct composer activation continues returning to its own icon. Keep the existing single dialog/controller, capability gating and explicit consent.
+- **Verification:** The initial matrix was stopped after repeated reproductions. After the fix, `node scripts/tests/browser/harness-layout/run.mjs --runtime-only` exits 0: all 84 reports pass across seven widths, dark/light, three heights and supported/unsupported fixtures. The extended existing fixture checks composer placement, accessible icon, no mutation on open/cancel, direct focus return, and retains the prior menu-origin focus assertions. All 132 frontend package tests, generated-asset reproducibility and `go test ./internal/web` also pass.
+
+## BUG-208: Workspace-action acceptance uses retired owners and premature mobile focus
+
+- **Status:** Resolved — all three production-bundle entry points pass.
+- **Evidence:** `workspace-actions/run.mjs` executes retired `shell.js` in a hand-built DOM; `grouped.mjs` executes retired `sidebar-sessions.js` and clones owned descendants. The exported-page browser gate initially reports 70 assertions with four failed scenarios: it focuses a row before the React drawer commit and app-owned initial-focus handoff.
+- **Fix:** Exercise the production generated module and menu host in native Chromium, retaining owner-intent counts, strict hit testing, modifier semantics, scope/race checks and bounded read-only inventory. Build empty external hosts for lifecycle remounts rather than cloning React descendants. Wait for mobile non-inert drawer readiness and the initial-focus handoff before aiming at its row. Current React cache/revalidation behavior is documented rather than asserting retired-script behavior.
+- **Verification:** Final parent runs pass `node scripts/tests/browser/workspace-actions/run.mjs` (25 assertions), `grouped.mjs` (26) and `SNOW_WORKSPACE_EVIDENCE=0 node scripts/tests/browser/workspace-actions/browser.mjs` (108 across four width/height reports, zero failed scenarios). Component request/diagnostic recording is bounded. Child verification also passed two exported matrices. These are mocked public transport checks, not real-worker/provider or committed mutation acceptance.
+
+## BUG-207: Manager workflow intermittently fails Archive pointer readiness
+
+- **Status:** Resolved — two consecutive full matrices pass after native document-readiness repair.
+- **Evidence:** Repeated full `manager-workflows` matrices stopped after rename/pin/unpin: the Archive confirmation hit test returned `hit:false` and `hitTag:INPUT`. An explicit disclosure-open wait exposed a missed summary click and navigation to the project heading's Organization link instead, in 1280/light. A focused cell and one full rerun passed, but the failure recurred. Organization submits native POST/redirect documents; selector presence alone can precede document load and scroll restoration, invalidating the next pointer coordinates.
+- **Fix:** Wait for the prior document's marker to disappear, the new document to reach `complete`, React readiness, and a painted-frame boundary after each native organization submission. Also require the Archive disclosure to be open before confirmation. Preserve one click per action, strict native hit testing, exactly five organization mutations and no provider work. Failure diagnostics now identify the hit element and document/disclosure readiness without logging input values or credentials.
+- **Verification:** The earlier disclosure-only wait did not fix the failure and is superseded. After the native-document readiness fix, two consecutive complete `node scripts/tests/browser/manager-workflows/run.mjs` runs pass 432 assertions each across 320/1280 × dark/light, with zero failures. Original native hit tests, mutation/provider counts, durable ancestry, trust, queue and history checks remain unchanged.
+
+## BUG-206: Standalone thumbnail regression still exercises the retired renderer
+
+- **Status:** Resolved — the existing native regression now passes against the generated React module.
+- **Evidence:** `internal/web/message_image_browser.test.mjs` previously read and executed `static/messages.js`, which the production manager no longer loads or routes. Its direct-image-URL and retained SSR-node assertions did not exercise the current authenticated fetch/Blob transport or React root lifetime.
+- **Fix:** Serve the production module, require the fixture cookie and exact raster Accept header on image reads, assert transport identity separately from Blob presentation, and retire/remount through the current React facade without mutating its owned descendants. Preserve scoped rejection, eight-image/global-queue bounds, timeout, failure and no-retry checks; add Blob revocation and uncaught-error/React-diagnostic checks.
+- **Verification:** `node --test internal/web/message_image_browser.test.mjs` passes both tests, including 130 native React assertions plus desktop/mobile sizing and server-side request/cancellation checks. All 132 frontend package tests and generated-asset/notices reproducibility also pass. The initial port covered standalone saved-history enhancement. Its follow-up now also passes 52 ColdWorkspace parent-owned assertions at 320/1280: real production parent composition, retained public history/disclosures, standalone-facade isolation, real HTMX canceled/committed requests, abort/Blob revocation on parent retirement, same-host restore and exact scope rejection. Pagehide/pageshow events are synthetic calls to the production lifecycle listeners, not proof of real bfcache eligibility.
+
+## BUG-205: Composer context range replacement overwrites the entire draft
+
+- **Status:** Resolved — the complete native composer-context matrix passes.
+- **Evidence:** The React context controller supplies a replacement substring plus start/end offsets, but `app.js` passes the substring directly to `updateDraft` and selects the old range. Selecting a file drops surrounding prose; selecting a folder leaves a range selection so token discovery cannot reopen.
+- **Remediation:** Assemble the replacement inside the existing draft, collapse the caret after the inserted substring, and keep the existing owner/admission guard and single draft revision update.
+- **Verification:** `node scripts/tests/browser/composer-context/run.mjs` passes all 1,044 assertions across 16 schedules, including exact surrounding-text preservation, nested directory discovery, caret/IME behavior, explicit selection and no automatic Send. Both legacy-text and edit/queue capability schedules pass at 320/1280 in dark/light.
+
+## BUG-204: Mention discovery can erase freshly typed React composer text
+
+- **Status:** Resolved — native input and complete composer-context schedules pass on the rebuilt bundle.
+- **Evidence:** Inserting `@no` into `Read  afterwards` starts a file read but immediately restores `Read  afterwards`; its completed listing remains stuck at “Loading files…”. The target-level context listener synchronously publishes suggestion ARIA before the React bubble input handler captures the new text, so the controlled textarea re-renders the previous value and invalidates the query.
+- **Remediation:** Capture the input value synchronously in React's capture phase, before the existing target-level discovery listener runs. Preserve the single discovery/admission owner, caret, IME and no-automatic-selection contracts.
+- **Verification:** The existing file-query regression now uses native `Input.insertText` and reproduces the lost token before the fix. After rebuilding, all 1,044 composer-context assertions across 16 schedules pass, including native input, caret, IME, file/skill discovery and retained drafts; all 132 package tests and reproducible assets/notices also pass.
+
+## BUG-202: Background sidebar catalogs can starve explicit cold-workspace navigation
+
+- **Status:** Resolved — focused admission/race checks and the complete real-worker live-stream scenario pass.
+- **Evidence:** Both expanded sidebar groups occupy the bounded catalog worker pool while the selected workspace requests saved history. The foreground page renders “Sessions are unavailable or the catalog is busy” with no saved messages. Current navigation does not preempt inventories; server preemption covers activation/deletion but not authenticated foreground catalog reads.
+- **Remediation:** Retire browser inventory reads before explicit navigation and use the existing same-project canceled-I/O admission boundary before foreground catalog reads. Preserve the worker-pool bound, cross-project independence and no automatic retry/activation.
+- **Verification:** The new `TestColdWorkspaceHistoryPreemptsItsSidebarRead` fails before the fix and passes afterward. Affected sidebar/recovery tests pass with `-race`, all 21 workspace-flow checks pass, `go test ./internal/web ./cmd/snow` and affected vet pass, and `live-stream/run.mjs` completes all 87 assertions with no automatic retries or activation.
+
+## BUG-203: Composer-context browser fixture does not model React image and file transports
+
+- **Status:** Resolved — authenticated thumbnail and full composer-context schedules pass.
+- **Evidence:** The shared recorder replaces all `fetch` calls, including the new bounded authenticated image fetch (previously a direct image-element read), so the real loopback image fixture receives no request. File-choice checks also stall at “Loading files…” after the transport port. The 16 reported cells stop before the full functional assertions; no production validation should be weakened to make them pass.
+- **Fix:** Delegate only the exact fixture image GET to native fetch and validate the resulting owner-created Blob preview, cookie-protected PNG decode and URL revocation. Caller-supplied Blob metadata remains rejected. The file-choice stall proved to be separate production input/range bugs (BUG-204 and BUG-205), not a reason to weaken the fixture's transport assertions.
+- **Verification:** The complete `composer-context/run.mjs` matrix passes all 1,044 assertions across 16 schedules. All four thumbnail cells execute 32 assertions each with authenticated real HTTP image requests, no extra mutation, no leaked object URLs and unchanged caller-metadata rejection.
+
+## BUG-201: Message replacement fixtures count Shell inventory reads as mutations
+
+- **Status:** Resolved — corrected Edit & resend and Regenerate native matrices pass.
+- **Evidence:** `message-edit/fixture.mjs` passes the Shell's `/access/browsers` and exact project sidebar inventory GETs into its CSRF/instance-bound POST checks. This records read-only startup traffic as forbidden mutations even while all edit replacement, draft and no-replay behavior checks pass. The regenerate fixture has the same missing read handlers.
+- **Remediation:** Model only the exact production inventory GETs separately from mutation accounting, as the existing Stop/Reuse fixture does. Keep unknown reads, malformed requests, POST field validation and mutation-count assertions strict.
+- **Verification:** `message-edit/run.mjs` passes 1,208 assertions and `message-regenerate/run.mjs` passes 1,748 assertions, each across all four 320/1280 × dark/light cells with zero failures. POST/identity/field and no-replay assertions remain unchanged.
+
+## BUG-200: Live-stream browser fixture bypasses the React rename input owner
+
+- **Status:** Resolved — native rename and the complete real-worker live-stream scenario pass.
+- **Evidence:** `scripts/tests/browser/live-stream/tests.mjs` assigns `#workflow-name.value` and submits without a native input event. The controlled React form retains its previous rename draft, so this does not exercise a user's rename. The real manager remains Ready/Live with no action error.
+- **Remediation:** Enter the name through native browser input before submitting; preserve the exact durable-name assertion and existing execution/no-replay checks.
+- **Verification:** `node scripts/tests/browser/live-stream/run.mjs` passes all 87 assertions. The fixture also avoids serializing a retained React DOM node through CDP and waits for the post-prompt SSE snapshot before suspending its isolated manager for the watchdog check; durable names, reconnect and no-replay assertions remain enforced.
+
+## BUG-199: Frontend test command omits Shell menu accessibility regressions
+
+- **Status:** Resolved — all 132 package tests pass, including the three existing menu ARIA regressions.
+- **Evidence:** `src/shell/menu-aria.test.ts` covers exact popup identity, revoked launcher authority and stable ARIA host references, but the explicit test list in `internal/web/frontend/package.json` omitted it. The previous 129-test command therefore never executed these migration regressions.
+- **Fix:** Include the existing test file in the package test command without adding a duplicate harness.
+- **Verification:** `(cd internal/web/frontend && npm test)` executes 132 tests with zero failures.
+
+## BUG-198: React chrome wrapper bypasses short-height warning layout
+
+- **Status:** Resolved — the complete seven-width × dark/light layout matrix passes all 2,058 reports.
+- **Evidence:** At 320×240, the disconnected composer ended at y≈291 outside the 240px viewport. The existing warning/uncertainty rules required direct children of `#live-session`; React's display-contents chrome root breaks that selector relationship despite preserving visual flow.
+- **Fix:** Match the existing unique warning IDs across the rendering boundary, restoring the bounded warning scroller and sticky composer without hiding warning text or weakening actions.
+- **Verification:** `node scripts/tests/browser/harness-layout/run.mjs` passes all 2,058 viewport/state reports, including disconnected-state controls at all three heights, seven widths and both themes. This verifies layout, not whole-product migration parity.
+
+## BUG-197: Question stress fixture exceeds the production input projection bound
+
+- **Status:** Resolved — the corrected fixture passes all 97 question assertions across 320×740/360/240.
+- **Evidence:** Sixteen questions with 32 options on each choices page and five repeated description sentences exceeded `projectInput`'s 64 KiB aggregate limit. The React validator correctly refused that impossible public projection; the old fixture bypassed Go's projection function.
+- **Fix:** Preserve all 16 questions and 32 choices per choices page, while retaining one wrapping description sentence per option within the aggregate bound. The existing Go exporter now rejects initial input fixtures that fail `projectInput`.
+- **Verification:** Native exporter and question checks ran via the current harness layout smoke. No production validation bound was loosened.
+
+## BUG-196: Intermediate React layout clamps steal transcript reader ownership
+
+- **Status:** Resolved — reader checks pass at all seven widths, both themes and all three heights in the complete layout matrix.
+- **Evidence:** Initial mounting briefly clamps the transcript before all composer roots finish, so a 4px geometry difference is mistaken for manual upward intent. Head eviction similarly clamps through intermediate commit layouts, recapturing the wrong anchor and moving surviving content by about 426px.
+- **Fix:** Initialize the reader after synchronous presentation setup, keep attention layout notifications separate from the parent update transaction, and retain the pre-update reader anchor instead of sampling intermediate commit clamps as user input.
+- **Verification:** Frontend build, all 132 package tests and reproducibility pass. The complete 2,058-report layout gate includes reader checks preserving initial following, incremental pinning, manual anchors, head eviction, attention resizing, copy focus and table scroll. The separate disconnected-state failure is also resolved (BUG-198).
+
+## BUG-195: Shell icons lose production sizing hooks during the React port
+
+- **Status:** Resolved — native Settings focus and short-height checks pass in the complete layout matrix.
+- **Evidence:** Shell `Icon` emits no CSS class, so the existing `.icon` and `.appearance-icon` sizing rules do not match. The native Tab target is a 140px-tall theme button extending to y=261 in a 240px viewport, despite its modal remaining within y=24…216. Appearance glyphs previously used the explicit 16px class.
+- **Remediation:** Preserve the default Shell icon hook and the appearance-specific hook in JSX; keep the existing production stylesheet dimensions rather than relaxing the viewport/focus assertion.
+- **Verification:** `node scripts/tests/browser/harness-layout/run.mjs` passes all 2,058 reports across seven widths, dark/light and normal/short heights; the previously failing native popup, inspector and Settings checks now pass.
+
+## BUG-194: Current-workspace menu navigates instead of opening its local inspector
+
+- **Status:** Resolved — local inspector actions pass across every width/theme/height in the complete layout matrix.
+- **Evidence:** Workspace settings / Remove registration from the current project's React menu starts document navigation rather than dispatching the existing presentation-only inspector action. The local Project tab and explicit removal confirmation do not open in the fixture; unexpected navigation also disrupts the subsequent composer checks. The retired menu used the guarded `snow:inspect-project` event when the current inspector matched the project.
+- **Remediation:** Preserve the existing local inspector event for an exact current-project match; retain ordinary navigation for other projects and stale-owner checks for all menu callbacks. Never submit removal automatically.
+- **Verification:** `node scripts/tests/browser/harness-layout/run.mjs` passes all 2,058 reports across seven widths, dark/light and normal/short heights; the previously failing native popup, inspector and Settings checks now pass.
+
+## BUG-193: React workspace picker omits its production typography class
+
+- **Status:** Resolved — the production workspace picker passes the complete seven-width × dark/light layout matrix.
+- **Evidence:** The production workspace picker opens through `ShellPopup`, but its portal lacks `shell-workspace-menu`. Existing `settings.css` rules for block name/path rows, truncation, muted path typography and heading spacing therefore do not match. The native home assertion cannot find the production-styled popup.
+- **Remediation:** Retain the workspace-specific class on the existing external portal host without restoring a legacy renderer or changing JSX child ownership.
+- **Verification:** `node scripts/tests/browser/harness-layout/run.mjs` passes all 2,058 reports across seven widths, dark/light and normal/short heights; the previously failing native popup, inspector and Settings checks now pass.
+
+## BUG-192: Cold workspace trust-management launcher has no React action owner
+
+- **Status:** Resolved — current production bundle passes the complete real-manager workflow matrix.
+- **Evidence:** After explicitly resuming and closing the exact saved conversation, opening Startup settings exposes Settings → Workspaces, but its native click does not open the dialog. The Cold React button retains only the old `data-settings-open` marker; the retired Shell renderer's document delegate no longer handles it.
+- **Fix:** Route the Cold button through the existing typed Shell settings controller, preserving the clicked element as the return-focus owner. No competing legacy renderer or automatic trust mutation was added.
+- **Verification:** Frontend build, all 129 tests, and reproducible assets/notices pass. `node scripts/tests/browser/manager-workflows/run.mjs` passes 432 assertions across all four 320/1280 × dark/light cells, including exact-session Resume, native disclosure/settings opening, explicit trust revocation and unchanged provider/mutation counts.
+
+## BUG-191: Cold workspace rejects Go's canonical history/recovery URLs
+
+- **Status:** Resolved — model regressions and complete real-manager workflow matrix verified.
+- **Evidence:** Explicit Close succeeds, but the Cold page fails validation instead of offering activation. Its validator requires `/?view=projects&…`; Go's `url.Values.Encode` emits pagination and recovery queries in sorted-key order, such as `/?offset=30&project=…&session=…&view=projects`. The same valid manager destination is rejected solely because of query ordering.
+- **Fix:** Validate the exact local route, allowed unique parameters, bounded offset and project identity independent of query order; retain external/ambiguous-navigation rejection.
+- **Verification:** All 129 frontend tests and reproducible build pass, including sorted pagination/recovery URL regressions. `node scripts/tests/browser/manager-workflows/run.mjs` passes 432 assertions across all four 320/1280 × dark/light cells. Its saved-session selection now uses the authoritative sidebar and waits for the requested workspace replacement before Resume rather than accepting a matching input in the previous workspace; Startup settings is opened before clicking its disclosure-contained trust launcher.
+
+## BUG-190: Background menu positioning scrolls a pending pointer target away
+
+- **Status:** Resolved — full native runtime-controls and menu/layout matrices pass.
+- **Evidence:** After native hit testing locates Thinking & response, a background Conversation repaint repositions the open menu and reveals its older focused row. The menu scroll changes before pointer dispatch, so Managed processes opens instead. No script error occurs; 320/light and 1280/dark time out awaiting preference inspection while `processes-dialog` is open.
+- **Remediation:** Separate geometry updates from keyboard-focus revelation. Background repaints must preserve the user's menu scroll; explicit focus/navigation and viewport resize may reveal the focused item.
+- **Verification:** `manager-runtime-controls/run.mjs` passes all 244 assertions across 320/1280 × dark/light. The complete 2,058-report layout matrix also passes the model, conversation and Settings menu/focus checks without relaxing pointer or viewport assertions.
+
+## BUG-189: Cold workspace rejects normal saved-session identifiers
+
+- **Status:** Resolved — public identifier regression and full native runtime-controls matrix verified.
+- **Evidence:** The React Cold validator required a UUID for `sessionID`, but Snow's session store generates timestamp-plus-random-suffix IDs. A saved conversation therefore rendered the safe-error fallback instead of its native Resume form. The real manager completed pairing and loaded the production module without script errors; passive browsing could not reach Resume.
+- **Fix:** Match the existing `runtimeIdentifier` contract: 1–128 ASCII letters, digits, hyphens or underscores, with empty allowed for New. Project UUID validation remains separate. Extend the existing model test with generated, fixture, underscore, UUID and invalid-path identifiers.
+- **Verification:** All 129 frontend tests and reproducible build check pass. `node scripts/tests/browser/manager-runtime-controls/run.mjs` passes 244 assertions across all four 320/1280 × dark/light cells, including passive saved-history browsing, explicit native Resume, exact session identity and no provider call before admission.
+
+## BUG-188: Script-enabled fallback disrupts the React workspace grid
+
+- **Status:** Resolved — full native Stop/Reuse matrix verified.
+- **Evidence:** The Shell fallback `<noscript>` used `.react-live-panel`, whose `display: contents` rule exposed its raw text with scripting enabled. It created an extra grid item and intercepted hit testing. At 1280×740/light the live session shrank into a 280×20px bottom region while the composer overflowed the viewport; all 26 stylesheets loaded and React readiness succeeded.
+- **Fix:** Remove React mount styling from the passive no-JavaScript fallback, retaining its navigation markup.
+- **Verification:** `node scripts/tests/browser/stop-reuse/run.mjs` passes 840 assertions, zero failures across all four 320/1280 × dark/light cells, including native composer/control geometry, hit testing, preserved drafts and exact mutation counts. Its fixture now handles the full Shell's exact read-only sidebar/browser inventory GETs separately from mutation accounting; mutation guards remain unchanged.
+
+## BUG-187: Frontend workbench rejects its fictional bootstrap
+
+- **Status:** Resolved — native development workbench reload verified.
+- **Evidence:** Organization mounted only its safe-error fallback because the fictional CSRF placeholder was not the required 64-character hexadecimal projection. Styles loaded and no backend requests occurred, but the component workbench was unusable.
+- **Fix:** Supply a clearly fictional all-zero hexadecimal placeholder without weakening production validation or connecting a backend.
+- **Verification:** Native Chrome at the isolated Vite workbench renders Organize workspaces, Active registrations, and Archived registrations with `data-react-mounted=true`, all 26 stylesheets loaded, no alert, and no fetch/XHR requests.
+
+## BUG-186: React Goal inspection drops modal keyboard focus
+
+- **Status:** Resolved — native focus regression and complete execution matrix verified.
+- **Evidence:** The native manager-execution suite opens Goal from the Session menu and waits for a confirmed-absent inspection. The dialog remains modal, but focus moves to `BODY` in all four 320/1280 × dark/light matrix cells. The failing run reports 384 passing assertions and four identical focus failures; a desktop/light repeat reproduces it.
+- **Fix:** Focus the stable, enabled Close control through its React-owned ref immediately after opening, before inspection disables Refresh. Explicit reads, native modal cancellation, parent-owned return focus, and exactly-once goal admission remain unchanged.
+- **Verification:** The rebuilt production bundle passes `node scripts/tests/browser/manager-execution/run.mjs`: 388 assertions, zero failures across 320/1280 × dark/light. All four cells retain modal focus and restore Close focus to the surviving session menu; existing Start/Resume/Stop and request-count assertions remain intact. Log: `/tmp/react-manager-execution-focus-fixed-full.log`.
+
+## BUG-185: Revoked deletion capability leaves an empty session menu launcher
+
+- **Status:** Resolved — focused native capability and focus regressions verified.
+- **Evidence:** After a saved row gained its ⋯ launcher, an inventory refresh with `delete_supported:false` left the non-current launcher visible, enabled and focused despite having no remaining actions. Opening it did nothing; no deletion was sent.
+- **Fix:** Reconcile capability loss immediately, hide/disable empty launchers, close only their own open popup, and restore focus to the surviving session link. Preserve current-session Rename where supported.
+- **Verification:** The native capability-revocation scenario reproduced the stale launcher. Final menu/deletion suite passes 257 assertions across 58 scenarios, including a repeated run: empty popup retirement, link focus restoration, detached callback rejection, current Rename preservation, cross-workspace popup isolation and revoked-confirmation focus. The integrated frontend suite passes 157 tests.
+
+## BUG-184: Session switching flashes unrelated history and a disconnected composer
+
+- **Status:** Resolved — real-manager painted-frame and delayed-inventory node/focus regressions verified.
+- **Evidence:** The real-manager browser probe recorded nine painted frames of the destination workspace's previous session and draft before switching to the clicked session. Same-workspace switch acknowledgement also applied a complete snapshot and immediately changed the UI to disconnected/Synchronizing before reconnecting its subscription. Sidebar reconciliation additionally rewrites the current row ID even when the requested target row already exists.
+- **Remediation:** Show a bounded opening state during cross-workspace validation instead of unrelated history; reveal real state for confirmations and failures. Retain the connected presentation only for a complete, identity-checked idle switch acknowledgement while connecting its new subscription. Keep admission controls disabled, reveal real subscription failures, preserve drafts, and retain immutable sidebar row identity/focus.
+- **Verification:** The existing 87-assertion real-manager journey passes. The final focused probe records 47 frames with zero intermediate-owner frames, layout flashes or empty-history frames; 15 focused unit regressions pass. Before the sidebar fix a deliberately delayed inventory exposed `{target:false,old:false,focus:false,busy:true}`. Final native checks preserve the target node, prior row identity and focus across two switches and one New action before inventory refresh settles. Logs: `/tmp/snow-switch-flicker-before.log`, `/tmp/snow-switch-sidebar-before.log`, `/tmp/snow-switch-sidebar-final.log`. The integrated frontend suite passes 157 tests, including deletion safety/transport contracts.
+
+## BUG-183: Background sidebar inventory rejects explicit workspace Start
+
+- **Status:** Resolved — concurrent admission and real-manager workflow verified.
+- **Evidence:** The real-manager browser journey twice expanded two cold workspace branches, then submitted Start. Both sidebar inventory requests and the explicit `/runtime/open` returned HTTP 409. The new inventory handler held the global project mutation mutex while awaiting catalog I/O.
+- **Remediation:** Independently bound background reads; explicit Start/Switch cancels same-workspace reads and waits only for canceled I/O teardown before admitting ownership. Other workspace reads do not block activation. Do not retry actions, overlap catalog reads with a new live owner, or hide the collision with fixture waits.
+- **Verification:** Deterministic concurrent two-workspace cancellation/admission tests, focused race tests, full web tests and web vet pass. The rebuilt real-manager native suite passes 87 assertions, including explicit Start during background inventory, same/cross-workspace switching, exact single-switch admission and cold Resume without automatic sending or model discovery.
+
+## BUG-182: Expanded sidebar obscures focused workspace controls in short windows
+
+- **Status:** Resolved — production-browser short-height regression verified.
+- **Evidence:** At 1280×240 and 320×240 the expanded sidebar's fixed controls reduced the project list to zero height; `.sidebar-bottom` covered a keyboard-focused workspace action.
+- **Remediation:** At heights up to 480px retain a 96px minimum list viewport and allow the expanded sidebar/drawer to scroll. Preserve the collapsed 56px rail's independent overflow behavior.
+- **Verification:** Native workspace-action geometry, focus and hit-testing checks pass 108 assertions across 1280×740, 1280×240, 320×740 and 320×240. Reproduction and corrected evidence: `/tmp/snow-grouped-workspace-integrated.log` and `/tmp/snow-grouped-workspace-short-fixed.log`.
+
+## BUG-181: Workspace navigation loses the session list and introduces catalog/start detours
+
+- **Status:** Resolved — grouped navigation, draft ownership and Start/Resume workflow verified.
+- **Evidence:** Opening a saved session returns from `projectData` with history but no session inventory; the sidebar renders children only for the selected workspace when `.Sessions` or `.Live` exists. A live workspace likewise supplies only its current row. Workspace chevrons are decorative links rather than independent disclosures. The user reports that creating and switching sessions feels like a maze.
+- **Remediation:** Keep independently expanded, bounded workspace session lists alongside a stable conversation/start/resume surface. Reuse runtime-free catalog reads and session-only live-owner inventory without model discovery; keep explicit trust, resume, guarded switching, draft ownership and mismatched direct-link protections.
+- **Verification:** The real-manager journey passes 87 assertions, including same/cross-workspace single-switch admission, draft restoration, no unexpected activation/model discovery/sends, and cold Resume. Frontend units pass 129 tests (20 new draft/intent/selection cases); grouped sidebar component checks pass 10 native assertions; workspace actions pass 11 Node tests and 108 native assertions. Layout passes 2,645 assertions/147 mobile reports and 5,998 assertions/294 desktop dark/light reports; fixture units pass 38 tests. Full conversation workflow passed 1,736 assertions and the permission/sidebar matrix passed 1,686 assertions during implementation. Affected Go tests/vet, focused sidebar admission race checks, syntax, resources and diff checks passed. Final web regressions distinguish catalog failures from genuine empty state and retain synchronized HTMX history pagination. Earlier markup/fixture failures and a browser deadline were corrected/rechecked; the actual Start/read collision and short-height defect are recorded separately as BUG-183 and BUG-182. Implementation follows `design-plans/workspace-session-flow.md`.
+
+## BUG-180: Sidebar navigation and row controls lose focus and list state
+
+- **Status:** Resolved — navigation, row-focus and unchanged-update regressions verified.
+- **Evidence:** The user reports erratic workspace/session-list focus. Whole-workspace HTMX swaps replace the sidebar, resetting list scroll and search, while `app.js` unconditionally focuses content. Sidebar links have independent request lifetimes, allowing older reads to finish after a newer selection. `syncNewSession` rewrites unchanged current-row text/attributes on runtime updates. Sidebar Rename launches through an intermediate header menu, so its dialog returns focus to that header instead of the row. Before-swap cleanup also retires live state when HTMX explicitly declines a failed response swap.
+- **Remediation:** Synchronize sidebar reads with latest-selection-wins semantics; preserve list/search state and actual desktop sidebar focus across successful swaps; avoid unchanged row mutations; reuse the conversation owner's rename admission with the original row launcher; skip teardown for rejected swaps. Retain mobile content focus, native focus indication, explicit activation and runtime identity/admission checks.
+- **Verification:** Native HTMX/SSE matrix passes 1,686 assertions across eight viewport/theme reports; final focused source recheck passes 219 assertions. New coverage verifies no unchanged sidebar mutations, row-specific Rename focus return, search/scroll/focus preservation, cancellation of older reads, no late response/history overwrite, no focus pullback after leaving the sidebar, and a still-live composer/subscription after a rejected navigation. Existing conversation workflow checks pass 1,736 assertions, mobile layout smoke passes 2,612 across 147 reports, frontend units pass 109 tests, and affected Go/syntax/resource/diff checks pass. Test iterations corrected an invalid DOM revision observation and waited for real HTMX settlement before exercising newly inserted links; earlier failed/timed-out logs remain under `/tmp/snow-sidebar-*`.
+
+## BUG-179: Collapsed desktop rail clips Settings in very short windows
+
+- **Status:** Resolved — scoped rail scrolling verified.
+- **Evidence:** At 1280×240, the collapsed rail is 240px high but Settings ends at Y=287 with the visible Snowflake. Reconstructing the prior brand-row CSS in the same isolated fixture still clips Settings at Y=282. The existing `overflow: visible` rail cannot scroll its fixed-height actions inside the overflow-hidden page.
+- **Remediation:** Let the collapsed desktop rail scroll vertically, retaining its 56px width, control sizes, separate home/expand actions and all bottom utilities. Expanded desktop and mobile retain existing scroll owners.
+- **Verification:** Native fixture inspection at 1280×240 confirms focused Settings scrolls fully into view at Y=198–234 (rail scrollTop 53). Existing layout checks extended with brand visibility/nonoverlap and short-rail focus/hit testing pass: 5,932 assertions across 294 desktop dark/light reports, plus 2,612 across 147 mobile smoke reports. Conversation workflow checks pass 1,736 assertions; affected Go tests, syntax/resource/diff checks pass. Initial added checks used an unsupported scoped-selector argument and an out-of-scope hit helper; corrected those test mistakes before the passing desktop run (`/tmp/snow-rail-desktop-verified.log`).
+
+## BUG-178: Live-stream browser test assumes identical idle and working button positions
+
+- **Status:** Resolved — corrected fixture passed native browser verification.
+- **Evidence:** The native test requires the working Stop button to cover the previous idle Send coordinates. Existing `composer-context.css` collapses the idle footer; the working/queue footer legitimately moves Stop up (observed center Y 833 versus Send Y 869). This fails before checking the actual duplicate-click safeguard.
+- **Remediation:** Keep the repeated click at the original Send position and its no-cancel assertion, then directly target Stop with click count 2 to verify its guard independently of footer geometry. Preserve subsequent ordinary Stop checks; no production layout or cancellation behavior changes.
+- **Verification:** `node scripts/tests/browser/live-stream/run.mjs` passes all 66 assertions, including original-position repeated input, directly targeted Stop click-count rejection and subsequent single-click cancellation. Earlier failure diagnostics are retained in `/tmp/snow-home-start-settled.log`; the passing run is `/tmp/snow-home-start-final.log`.
+
+## BUG-177: Home screen presents a permanently disabled composer
+
+- **Status:** Resolved — working start flow and draft handoff verified.
+- **Evidence:** The home template hard-disables `#home-prompt` and `.home-send`; the workspace picker navigates away instead of allowing a draft-and-start workflow. The user reports the screen is unusable and selected a working start screen as the desired correction.
+- **Remediation:** Enable a bounded tab-memory draft, explicit workspace selection and Continue navigation through existing activation. Preserve the draft through activation without auto-sending, bypassing trust, or overwriting an existing conversation draft.
+- **Verification:** Real-manager/worker/browser suite passes 66 assertions including draft-first workspace selection, Add workspace/registration, explicit activation, no automatic send, no draft or activation fields in URLs, and preservation of an existing composer draft. The registration test initially submitted before HTMX settled; it now waits for the production navigation lifecycle. Existing layout smoke passes 147 reports; conversation workflows pass 1,736 assertions and frontend units pass 109 tests. `go test ./internal/web`, `go vet ./internal/web`, syntax/resource/diff checks pass. The separate stale Stop-geometry assertion found during this run is tracked and verified as BUG-178.
+
+## BUG-176: Layout fixture bypasses its mock after settings moved to HTMX
+
+- **Status:** Resolved — layout transport adapter and fixture regressions verified.
+- **Evidence:** `harness-layout/run.mjs --smoke` fails model discovery/session-menu cases because its fixture intercepts `fetch` only, while the production settings/choices owner now uses HTMX XHR. The native HTTP/SSE matrix passes those workflows; telemetry layout cases also pass. The fixture never records or answers the new discovery transport.
+- **Remediation:** Route explicit handler-based HTMX requests through the layout fixture's existing strict public-response mock, preserving other HTMX behavior and request admission. Add fixture regressions; retain native-transport coverage as the production integration authority.
+- **Verification:** 28 layout-fixture unit tests pass, including the new HTMX adapter's exact response/status forwarding, stale-instance rejection, failure preservation, ordinary-navigation fallback and runtime-panel read allowlist. Fresh `node scripts/tests/browser/harness-layout/run.mjs --smoke` passes **2,612 assertions across 147 reports**, zero failures/unexpected requests. The earlier failed smoke is retained as investigation evidence in `/tmp/snow-telemetry-layout.log`; native HTTP/SSE remains independently covered.
+
+## BUG-175: Context popup wastes space on inspector padding and repeated explanations
+
+- **Status:** Resolved — compact summary, disclosure and no-op refresh behavior verified.
+- **Evidence:** The user's screenshot highlights an oversized unavailable-cost block and clipped explanatory footer. `telemetryContent` always renders two explanation blocks; global `dl > div` padding (14px per side) and borders accumulate with the popup's own 12px grid gap. Its refresh signature also includes unrelated session settings and model inventories.
+- **Remediation:** Use compact label/value rows, explicit Unknown rather than invented zero, and a Details/Back pane for accounting and approximation qualifications. Reset inherited spacing only within telemetry. Compare displayed telemetry independently of mutation state/inventories before reconciling; retain the shared menu lifetime and keyed DOM updates.
+- **Verification:** Native HTTP/SSE/browser matrix passes **1,664 assertions** across 320/1280 widths, 740/240 heights and dark/light. The screenshot's data produces a **182px desktop / 200px narrow** summary; short viewports retain bounded scrolling. Unchanged metrics and unrelated settings produce zero popup reconciliations or observed DOM mutations; changed values update text in retained nodes. Details/Back/Escape, unavailable versus verified-zero cost, tiny/large values, invalid currency, missing telemetry/window and no extra requests all pass. Conversation workflows pass **1,736 assertions**, layout smoke passes **2,612** (after BUG-176 fixture correction), 69 cost/frontend tests and 67 Python tests pass, and `go test ./...`, `go vet ./...`, benchmark guard, syntax/resource/diff checks pass. Initial telemetry-test setup incorrectly passed an unsupported helper option; changed it to deliver the fixture snapshot through SSE, then reran the full matrix. No general CPU/latency improvement is claimed beyond measured avoidance of menu work.
+
+## BUG-174: Idle settings and data refreshes flash labels, menus and panel content
+
+- **Status:** Resolved — expanded model/menu, process and Versions refresh paths verified.
+- **Follow-up evidence:** The first fix covered mode/permission mutations, not metadata reads. Model discovery's `metadata` lock still presented an idle composer as an active turn and cleared its known permission label. Conversation menus replaced all children on refresh, detaching the live search field and cached rows; loading/status changes resized the popup and dimmed all cached choices. Process polls recreated every row. Versions refresh cleared an existing preview before learning whether its data changed.
+- **Follow-up fix:** Separate verified display state from mutation admission; retain the idle layout and known labels under metadata locks. Use keyed shared-menu reconciliation with current action callbacks, a persistent search input, stable model-popup geometry and local loading feedback rather than a whole-list opacity pulse. Model discovery, selection and rename use the existing HTMX transport; mutation success requires a bound, advancing snapshot with the requested values. Process rows are keyed by handle. Versions retain display-only previews while immediately revoking selection/restore authority; explicit reinspection is required. Identity retirement, unknown outcomes and Files/Changes stale-preview clearing remain intentional.
+- **Follow-up verification:** Native HTMX/HTTP/SSE Chrome matrix passes **1,512 assertions** across eight width/height/theme cases, including held, identical, failed and retried discovery, retained row/search/scroll identity, frame-stable composer/scroll/known labels, stable opacity under disabled admission, no extra SSE/snapshot traffic and rejection of success-only model receipts. Conversation workflows pass **1,736 assertions**; real-manager/RPC/worker workflows pass **432**, including delayed/failed Versions refresh and explicit history-only restore. **66 frontend unit tests** include process-row retention, stale-latch preservation across version pagination and accurate retained preview page numbering. `go test ./...`, `go vet ./...`, 67 Python tests, benchmark guard, resource sync and diff checks pass. Initial test iterations caught a fixture selector/endpoint mismatch, the HTMX field allowlist missing model/name fields, and a multi-line error shifting list scroll; corrected and rerun. This is verified coverage of shared refresh owners, not a claim that every browser or intentional identity transition has zero visual change.
+- **Evidence:** User reports Default/Plan flicker and an oversized permission-help popup. `runtimeAction` unconditionally closes SSE, marks disconnected and shows Synchronizing after even a verified idle setting snapshot. Pending actions also turn the permission label into Unknown and reveal the normally hidden composer-state footer. The healthy connection row is removed from layout, so the temporary disconnected row shifts the conversation. Permission menus always show two long explanation paragraphs.
+- **Remediation:** Use HTMX's request API for bounded mode/permission settings without swapping the transcript or composer; retain the existing live subscription and reconcile verified same-instance snapshots without an artificial disconnect. Keep real failure/unknown-outcome, busy admission, CSRF and stale-response safeguards. Preserve known labels while busy and use compact, expandable permission help rather than removing authority warnings.
+- **Verification:** Production Chrome/HTMX 2.0.10 + native HTTP/SSE matrix passes **1,336 assertions** across 320/1280 widths, 740/240 heights and dark/light. Repeated Default/Plan changes produce zero additional SSE connections or snapshot GETs, no frame-sampled composer/scroll shift, no false disconnected/Unknown labels, and stable message/composer nodes and draft selection. Busy admission, malformed and interrupted receipts, replacement during an in-flight setting, and late retired replies remain fail-closed; settings failures do not display the unrelated navigation retry banner. Full conversation workflow matrix passes **1,736 assertions**; full Go tests/vet, 67 Python tests, 63 frontend tests, resource sync and diff checks pass. Earlier browser runs exposed fixture assumptions: a second Enter may legitimately reopen a now-ready trigger, the streaming page performs browser-inventory reads, and a pre-header socket reset can trigger browser-level HTTP retransmission. Tests now distinguish these from application replay and interrupt an already-started response. No claim of a cross-engine performance benchmark or new runtime authority.
+
+## BUG-173: Attachment chips lack thumbnails and sent images disappear from chat
+
+- **Status:** Resolved — compact thumbnails and live/saved image transport verified.
+- **Evidence:** User screenshot shows an image as a filename-only composer chip with a multi-line disclosure; after sending, the user bubble shows only text. The old `composer-context.js` painted labels but no image preview, `RuntimeManager.prompt` projected only text, and history projection skipped image blocks.
+- **Remediation:** Local 28px raster thumbnails with header/dimension checks, revocable Blob URLs, 11px filenames and a 10px disclosure. Live/saved user messages retain original-index image metadata and fetch bounded authenticated same-origin previews through the owning runtime or inactive catalog. General snapshots/SSE remain byte-free; image-bearing messages cannot silently use text-only Edit/reuse. Global sequential image loading avoids nonqueued reader saturation. RPC image reads run in a bounded asynchronous pool so stalled reads do not block Stop or interaction replies.
+- **Verification:** Expanded production-browser composer suite passes **2,088 assertions** (1,600 functional, 232 compact-layout, 256 thumbnails) across 320×900, 1280×900, 320×480 and 320×240, dark/light. Actual images decode; disclosure retains at least one 14px line in the shortest viewport. Sent previews measure 72px narrow / 96px desktop. Full Go tests/vet, focused image race tests, 163 frontend tests, composer sizing (252), conversation workflows (1,736), real-manager workflows (412), Python tests, benchmark guard and resource sync pass. Initial integration failures caught rejected-source fallback becoming pending, short disclosure collapse, and the outdated CLI capability assertion; fixed and rerun. Real RPC tests verify Abort remains dispatchable during a stalled image read and shutdown cancels/joins all reads. Browser image transport uses a bounded authenticated fixture, complemented by Go live/catalog transport and authorization tests; no real-provider or cross-engine certification. Screenshots/measurements: `dist/compact-composer/{draft-image,sent-image,thumbnail-measurements}-*`; final browser logs: `dist/thumbnail-*-final.log` and `dist/thumbnail-full-context.log`.
+
+## BUG-172: Composer context controls diverge from the requested compact reference
+
+- **Status:** Resolved — compact composition verified by production-browser geometry and focused behavior checks.
+- **Evidence:** User screenshots show a separate attachment/@/$ row and repeated helper text inflating the composer, a 420px-wide picker unrelated to composer width, and unrestricted skill descriptions filling almost the entire menu. Functional/layout-bound tests passed but did not establish visual fidelity to the supplied DeepSeek Harness reference.
+- **Remediation:** Restore a single bottom action row with plus/context menu and paperclip; retain Snow permission/mode/model/send owners. Make suggestions composer-width with compact icon/name rows and single-line skill summaries, preserving complete descriptions on demand and all read/admission safeguards. Remove idle instructional clutter, not actionable error/recovery state.
+- **Verification:** Fresh production-browser checks pass 1,600 functional and 232 visual assertions: 98px idle cards at 320×900 and 1280×900, one 42px action row, 56px skill rows and composer-aligned bounded popups; the 320×240 card shrinks to 78px. Screenshots and measurements are retained in `dist/compact-composer/`. Composer sizing passes 252 assertions, conversation workflows 1,736, and real-manager workflows 412. Frontend tests (151), full Go tests/vet, Python tests (67), benchmark guards and resource sync pass. Earlier browser attempts and the broad Harness matrix encountered runner/CDP timeouts; those incomplete runs are not passes. No claim of pixel-identical cross-browser rendering.
+
+## BUG-171: Queue mutation test can race the initial assistant text event
+
+- **Status:** Resolved — test-only synchronization verified.
+- **Evidence:** A full web-package run failed `TestQueueExplicitMutationsDoNotChangePromptOrOptimisticallyDeliver`: the captured admission snapshot preceded the fixture's `first answer` delta, so a later message-count comparison misclassified ordinary streaming as queued delivery. The fixture emits queue admission before that text delta. Thirty isolated runs and 100 runs with `GOMAXPROCS=2` did not reproduce the scheduling window; the original failure remains recorded in `/tmp/snow-composer-web-final.log`.
+- **Remediation:** Wait for both the existing queue admission and the fixture's first assistant text before capturing the comparison baseline. Preserve production admission and all assertions against optimistic delivery; add no timing sleeps or execution retries.
+- **Verification:** The affected test passes 100 consecutive runs after synchronization; all queue tests pass under the race detector. A fresh `go test ./...` (including `internal/web`) and `go vet ./...` pass. Production queue behavior is unchanged.
+
+## BUG-170: Web composer cannot attach files or mention project files and skills
+
+- **Status:** Resolved — attachments and mentions verified in runtime and browser integration.
+- **Evidence:** The web composer exposes only a text field and forwards only `RPCRequest.Message`, despite existing RPC text/image content support. No file/skill suggestion UI exists. Managed workers deliberately disable skills, so merely adding `$` completion would falsely imply activation support.
+- **Remediation:** Bounded in-memory image/UTF-8 attachments through existing prompt-content RPC; explicit `@` file selection through the existing pinned-root inspection service; exact `$name` insertion from a bounded worker catalog. Skills require explicit per-start opt-in, never reinterpret remembered manager trust or bypass CLI extension trust. Preserve draft/instance fencing, permission/question takeover, no replay and text-only queue/edit restrictions.
+- **Verification:** Composer-context browser matrix passes 16 reports / 1,600 assertions, including 320×240, dark/light, ordinary and Edit/Queue-capable templates. Covers exact content forwarding, eight labeled images, skill identity/opt-in, failed-switch rebinding, held-queue local removal, stale reads, explicit retries, takeover and no replay. Full responsive matrix passes 2,058 reports / 38,804 assertions; composer sizing passes 12 reports / 216 assertions; conversation workflows pass 1,736 assertions and native manager workflows pass 412. Full Go tests/vet, focused content/skills/queue race tests, 145 frontend tests, 67 Python tests, benchmark guard and embedded-document sync pass. Initial regressions exposed the new toolbar's CSS load order and text-only height/checkbox assumptions in existing browser tests; corrected without weakening permission or runtime fences. Browser fixtures do not establish physical-device, other-engine or live-provider compatibility.
+
+## BUG-169: Model picker adds a loading step and cannot search host models
+
+- **Status:** Resolved — direct discovery and searchable picker verified and installed.
+- **Evidence:** Clicking the model trigger initially renders “Load host models”; cached choices require another Model submenu click, and no search field exists.
+- **Remediation:** The explicit model-trigger click loads host choices when uncached and opens the list directly. Filter locally by provider, model ID and name; preserve selection authority, bounded inventory, stale-instance fencing, keyboard input/focus and responsive scrolling. Never discover merely from page load or automatically select a result.
+- **Verification:** Conversation workflow browser suite passes 1,736 assertions across seven widths and both themes, covering search, refresh/retry, pending-request deduplication, stale/disposed responses, IME key handling and exact provider/model mutations. Full responsive matrix passes 2,058 reports / 38,804 assertions, including 240px-high pickers; 320px dark screenshots pass all 147 reports. Full Go tests/vet, 118 frontend tests and 67 Python tests pass. Initial layout assertions incorrectly expected repeated discovery for already-cached fixture states; corrected to enforce cached reuse, without changing production admission.
+
+## BUG-168: Project activation repeats trust confirmation after every manager restart
+
+- **Status:** Resolved — remembered trust, revocation, and startup presentation verified.
+- **Evidence:** The activation form always renders an unchecked `confirm=activate` checkbox; the manager stores no project activation consent. Previously approved projects therefore present the full warning again after restart.
+- **Remediation:** Persist explicitly remembered consent against the exact registered folder identity, provide revocation, and render compact Start/Resume afterward. Require an explicit authenticated, CSRF-protected activation POST every time; do not auto-start, change tool permissions, or reuse CLI extension trust. Registration, archive/restore, and replacement folders must not silently acquire consent.
+- **Verification:** Registry tests cover real database reopen, migration defaults, identity changes, revocation, archive/restore/re-registration and storage failure. HTTP tests reject forged/stale trust, missing CSRF, duplicate/extra fields and unavailable folders; revocation leaves a running worker untouched. Native manager workflows pass 412 assertions across 320/1280 dark/light, including explicit trust, passive reload, exact saved-session Resume and Forget trust. The trust layout subset passes 56 reports / 1,718 assertions; full layout passes 2,058 reports / 38,762 assertions. Full Go/vet, targeted race, 118 JS tests, 67 Python checks and benchmark guard pass.
+
+## BUG-167: Transcript width drag strips can intercept desktop header actions
+
+- **Status:** Resolved — verified in responsive and native browser matrices.
+- **Evidence:** The native runtime-controls matrix at 1280px, dark and light, fails after a post-fork prompt because the header menu is covered by the right `.chat-width-handle`. Hit-test diagnostics show its cached fixed `top: 0px` while the live header occupies 0–76px. The 320px runs pass because width handles are absent there.
+- **Remediation:** Explicitly bound drag strips below the live header and above the composer, and keep header controls above those strips during asynchronous geometry updates. Verify native hit targets after real conversation layout changes.
+- **Verification:** Native runtime-controls: 208 assertions across 320/1280 dark/light pass, including the post-fork prompt followed by menu-launched compaction. The 84-report runtime matrix checks header hit testing after draft growth/clear and snapshot updates, plus drag-handle bounds. The 23-report width suite passes 253 assertions; the full 2,016-report layout matrix passes.
+
+## BUG-166: Steering capacity worker regression races native acceptance projection
+
+- **Status:** Resolved — test synchronization verified without changing admission.
+- **Evidence:** `go test ./internal/web -run '^TestSteerWorkerSharedCapacityBothDirections$' -count=10` failed 4/10 runs in the steering-first case at line 75; the same failure rate occurred with `GOMAXPROCS=2 -p 1`. ACK reconciliation can return before the acceptance event advances the public steering revision. The tight test loop reuses the earlier revision and is correctly rejected as stale.
+- **Scope:** Test reliability; this does not establish a regression in BUG-156's shared capacity limits.
+- **Remediation:** Before the next explicit test mutation, wait read-only for the native acceptance event's queue-revision advance and retain that fresh snapshot. Do not weaken exact-revision checks, sleep, or retry mutations.
+- **Verification:** The focused regression passes 100 runs normally and 100 runs with `GOMAXPROCS=2 -p 1`. `go test -race ./internal/web -run 'Test(Steer|Queue)' -count=10`, the full `go test ./...`, and `go vet ./...` pass.
+
+## BUG-165: Manager dialog text actions inherit icon geometry and collapsed navigation overflows
+
+- **Status:** Resolved — implementation and responsive verification complete.
+- **Evidence:** User screenshots show Versions Refresh/Close wrapping into vertical letters on desktop and Activity/Organize labels escaping the collapsed rail. `app.css` applies 24px type and a fixed 44px width to every `.dialog-heading .quiet`; text-action dialogs inherit it. Bare footer links in `pages.html` bypass the 56px collapsed navigation pattern.
+- **Impact:** Dialog headers consume excessive height and navigation labels collide with the conversation. Existing layout fixtures omit the newly enabled runtime panels, so earlier matrix passes did not cover these failures.
+- **Remediation:** Separate text actions from icon controls, reuse the existing Harness-inspired navigation/menu presentation, and exercise enabled runtime panels with rendered label, overflow, short-height and focus-return assertions. Preserve runtime admission and explicit confirmation boundaries. Native workflow tests now launch through the visible menu; live-stream native Stop targets the composer specifically rather than a closed dialog's zero-sized duplicate control.
+- **Verification:** Full layout matrix: 2,016 reports / 37,442 assertions, zero failures. The dedicated enabled/unsupported runtime matrix contributes 84 reports / 8,212 assertions at seven widths, two themes and 740/360/240px heights. A separate 320px dark screenshot run records all six open and scrolled dialogs at each height. Native execution, runtime-controls and Versions/workflows matrices pass. Fixture mocks and frontend controller/transport tests pass; full Go test/vet pass.
+
+## BUG-164: Ordinary prompt completion leaves manual compaction's branch-tip scope stale
+
+- **Status:** Resolved
+- **Evidence:** Native runtime-controls acceptance passes the post-fork approval/tool/reply sequence, but subsequent manual compaction captures the previous durable tip and fails before provider work. `TestWebRuntimeControlsBrowserPromptRefreshesCompactionScope` reproduces stale `snapshot.goal.tip_id` after ordinary completion.
+- **Remediation:** Refresh authoritative goal/branch-tip scope before advertising idle readiness, retaining captured epoch/ownership fences. Do not hide the defect with a second user inspection, consent rebasing, or mutation retry.
+- **Verification:** Focused completion projection and real-worker regressions pass, including race checks with queue and compaction fixtures. The native runtime-controls matrix passes 208 assertions across 320/1280 dark/light; manual compaction immediately after the post-fork prompt/tool/reply succeeds with the captured consent, without extra inspection or mutation retry.
+
+## BUG-162: Relative manager storage disables host workers
+
+- **Status:** Resolved
+- **Evidence:** `TestWebManagerDirectoryFreezesRelativeSnowHome` reproduced relative CLI composition even though the registry canonicalized its own storage. Worker backends require absolute manager directories.
+- **Remediation:** Normalize CLI manager storage and pass the registry's canonical directory to both CONTROL and project-operation worker backends, including direct server callers.
+- **Verification:** Focused CLI manager-directory tests and web worker-constructor/dispatch tests pass with private relative homes. Broader integrated verification is tracked separately.
+
+## BUG-163: Manager workers resolve different global configuration roots
+
+- **Status:** Resolved
+- **Evidence:** `TestWorkerEnvironmentAllManagerWorkersFreezeRelativeHome` reproduced runtime, catalog and project-job workers retaining relative `SNOW_HOME` while CONTROL workers captured the absolute operator root. Project CWD changes consequently selected a different global config/auth root.
+- **Remediation:** One inert `freezeWorkerEnvironment` captures absolute global and session roots for all four worker families, preserving unrelated environment and session override precedence. Resolution failures disable startup rather than inherit ambiguous paths; no configuration or credential reads are performed by this helper.
+- **Verification:** Focused environment, CONTROL, project-worker, runtime-activation and registry tests pass, including later environment/CWD changes, HOME fallbacks and unchanged unrelated environment.
+
+## BUG-161: CREATE unnecessarily requires an available Git executable
+
+- **Status:** Resolved
+- **Evidence:** Hostops construction and the real lazy CONTROL adapter rejected CREATE when the configured Git selection was absent or nonexecutable. A separate regression showed removal after construction still allowed clone-handle admission.
+- **Impact:** Empty-directory creation failed on hosts without Git, despite requiring no Git execution; clone availability was checked too early.
+- **Remediation:** Validate the fixed absolute Git executable at clone admission, before allocating an execution handle. CREATE retains helper validation but does not require Git; no PATH lookup or fallback is introduced, and rejected clones retain their prepared child.
+- **Verification:** `GOMAXPROCS=2 go test -p 1 ./internal/hostops -count=1`, `GOMAXPROCS=2 go test -p 1 ./internal/rpc -run '^TestControlHost' -count=1 -v`, and full-package helper tests pass. Regressions cover missing, nonexecutable, nonregular and relative Git selections, removal before clone admission, and refusal to use a matching PATH executable.
+
+## BUG-160: Uncertain steering receipts strand Stop and idle recovery
+
+- **Status:** Resolved
+- **Evidence:** `internal/web/runtime_steer_recovery.test.mjs` reproduces HTTP rejection/lost-response handling with production app and steering controllers. Shared uncertainty disables ordinary-root Stop, while the panel's independent uncertainty keeps its reservation after the root becomes idle.
+- **Impact:** The user cannot stop the still-owned root or recover Send/Close through the existing review controls, although no mutation is automatically retried.
+- **Remediation:** Retain exact pre-dispatch cancellation scope for same-root Stop after uncertainty; provide explicit idle read-only draft dismissal without claiming delivery, followed by separate shared review. Never let old uncertainty authorize Stop against a replacement root.
+- **Verification:** Integrated rejected/lost receipt tests and replacement project/session/instance/root fencing pass with the production controllers. The native runtime-controls matrix passes 208 assertions across 320/1280 dark/light, including real response loss after acceptance, captured-root Stop, idle draft dismissal, separate shared review, restored Send/Close and exactly one steering request without replay.
+
+## BUG-159: Successful project jobs register their destination without separate review
+
+- **Status:** Resolved
+- **Evidence:** `ProjectOperations.finish` changes an observed successful job to `awaiting_registration`, then immediately calls `registry.registerOperation` without an explicit browser registration request.
+- **Impact:** Successful create/clone implicitly adds a project despite the separate explicit-registration contract. It does not activate an agent.
+- **Remediation:** Leave successful jobs awaiting registration after cleanup; only an explicit reviewed revision-CAS Register action may insert the project. Reads, reconciliation and restart must not insert it.
+- **Verification:** New private CREATE/CLONE canaries reproduced implicit insertion before the fix. `GOMAXPROCS=2 go test -p 1 ./internal/web -run 'Test(ProjectOperation|OperationStore|WorkerProjectOperation)' -count=1` now passes: success, Get/List, reconciliation and manager/registry restart leave zero project rows; explicit HTTP registration inserts one without activation, redirect or reexecution. The 21 frontend contract tests pass, and only the explicit Register method calls `registerOperation`.
+
+## BUG-158: Rejected clone-helper descriptors can close the Go runtime poller
+
+- **Status:** Resolved
+- **Evidence:** The full-package `TestHostCloneHelperStrictBoundedPayloadAndPrivateFDs/missing-descriptors` reproduced `runtime: kevent on fd 3 failed with 9`. CLI package initialization had already allocated fd3 to the runtime poller; prematurely owning wrappers closed it while rejecting missing private descriptors. The smaller explicit-file build did not reproduce this initialization behavior.
+- **Impact:** Invoking the private helper without its required descriptors could crash that process instead of returning its fixed failure status.
+- **Remediation:** Validate both raw descriptor numbers with non-owning identity/type/access checks before creating owning wrappers, changing flags or closing anything. Rejected descriptors retain their identity and flags.
+- **Verification:** `GOMAXPROCS=2 go test -p 1 ./internal/hostops -count=1` and the full-package `GOMAXPROCS=2 go test -p 1 ./cmd/snow -run '^TestHostCloneHelper' -count=1 -v` pass all nine helper groups. `TestHostCloneHelperRejectsUnownedFDsAfterRuntimePollInit` checks missing, wrong, writable and swapped descriptors with active polling/timers and subsequent GC, including fixed redacted failure output.
+
+## BUG-157: Steering UI rejects a valid receipt after the root finishes
+
+- **Status:** Resolved
+- **Evidence:** A native completion or delivery can retire the live steering token before its HTTP acceptance receipt arrives. The panel required that retired token to remain present in the current and returned projections, rejecting a correctly correlated receipt.
+- **Impact:** Misleading unknown-outcome presentation despite native acceptance; delivery and acceptance remain distinct and no automatic retry is allowed.
+- **Remediation:** Validate against captured request/token/project/session/instance identity, preserve newer terminal delivery state and drafts, and reject replacement-instance responses.
+- **Verification:** `node --test internal/web/runtime_steer_frontend.test.mjs` passes eight groups, including completion-before-ACK, replacement-instance rejection and newer-root/draft preservation. `GOMAXPROCS=2 go test -p 1 ./internal/web -run 'Test(Steer|Queue)' -count=3` passes.
+
+## BUG-156: Queue next and native steering use inconsistent shared limits
+
+- **Status:** Resolved — core admission and full-byte-capacity availability projection are verified.
+- **Evidence:** `TestManagedSteerSharedQueueCountBothDirections`, `TestManagedSteerSharedQueueBytesBothDirections` and `TestManagedSteerSharedQueueUpdateSubtractsPendingBytes` exercise admission/update when the same root already owns accepted steering or queued/review input. Queue-next admission previously omitted accepted steering from its capacity accounting.
+- **Impact:** The combined input set could exceed the intended shared eight-item / 256-KiB limits; per-item bounds alone were insufficient.
+- **Remediation:** Account for all root-owned pending input in both admission directions and subtract the replaced item's bytes during updates; use matching browser availability calculations without adding steering to Queue-next items.
+- **Verification:** Core focused managed-steering/queue tests passed ten repeated runs. `GOMAXPROCS=2 go test -p 1 ./internal/web -run 'Test(Steer|Queue)' -count=3` passes, including shared capacity and compaction exclusion. Actual-worker testing then exposed a remaining projection bug at exactly 256 KiB: `CanSteer` tested empty text rather than the valid one-byte minimum. That projection is fixed, `TestSteerExactByteLimitRequiresCapacityForValidMinimum` passes, and the complete `GOMAXPROCS=2 go test -p 1 ./cmd/snow -run TestWebSteerRealWorker -count=3` passes with a read-only native revision barrier between explicit submissions.
+
+## BUG-155: Usage aggregation adds incompatible currency estimates
+
+- **Status:** Resolved
+- **Evidence:** `TestUsageAddRejectsMixedCurrencyCost` and `TestUsageAddMixedCurrencyConflictSurvivesJSONAndMissingCost` reproduce USD 1 plus EUR 1 becoming USD 2; later additions and JSON round-trips retain the fabricated single-currency amount.
+- **Impact:** Session cost estimates can misrepresent mixed-provider currency totals. Token accounting is unaffected. A UI disclaimer does not correct incompatible arithmetic.
+- **Remediation:** Preserve a serialized currency-conflict marker across aggregate operands and suppress monetary totals after conflict, while retaining token/request counts. Project the conflict as unknown in browser telemetry.
+- **Verification:** Protocol aggregation/serialization, schema and persistence-focused checks pass. Agent repricing honors the conflict marker and buffered edit/regenerate events retain it. `GOMAXPROCS=2 go test -p 1 -race ./internal/agent ./internal/web -run 'TestCostCurrencyConflict|TestRuntimeCost' -count=1 -timeout=90s` passed on the integrated checkout, including buffered-web projection and independent telemetry clones. Monetary conflict remains unknown after later same-currency or unpriced additions; token accounting is retained.
+
+## BUG-154: Switching process selection during a pending log read misbinds its cursor
+
+- **Status:** Resolved
+- **Evidence:** The Processes view previously changed its selected handle before checking whether another log request was pending. Selecting B during A's read could associate A's returned cursor with B's selection.
+- **Impact:** Misleading log selection/cursor presentation; server-side session/process ownership remains enforced.
+- **Remediation:** Reject selection changes while a request is busy and reset the complete log presentation when selecting a new process. Late retired-scope responses remain fenced.
+- **Verification:** `node --test scripts/tests/process_frontend_scope.test.mjs scripts/tests/goal_frontend_contract.test.mjs` passes all 11 groups, including pending-read selection/cursor and late-response regressions. The unchanged real production Goal/Process browser matrix also passes all 308 assertions.
+
+## BUG-153: New conversation retains old process-log labels
+
+- **Status:** Resolved
+- **Evidence:** The real production Goals/Processes browser matrix reproduced the same failure at 320/1280 pixels in dark/light themes: switching via New conversation clears handles, inventory and output, but leaves the log panel visible with the previous process heading and cursor/EOF label.
+- **Impact:** Stale presentation suggests the previous session's log remains selected; backend session ownership and empty replacement inventory remain correct.
+- **Remediation:** Reset the entire log presentation and controls on process-view initialization, disposal and scope replacement, not only the output body/list.
+- **Verification:** The pre-fix production matrix reached all four reports: 304 assertions passed, four scope-reset failures. After full initialization/disposal/scope reset, the unchanged `node scripts/tests/browser/manager-execution/run.mjs` passed 308 assertions with zero failures across all four reports, including native New conversation clearing the panel/heading/cursor. Five focused process lifecycle/cursor Node test groups also pass; they cover late responses and selecting another process while a log request is pending.
+
+## BUG-151: Version restoration can retire its new event epoch
+
+- **Status:** Resolved
+- **Evidence:** Restore emits new-epoch mode/session events before its ACK. Web event admission can advance `rootEpoch` during that transition, after which `publishVersionRestore` incorrectly retires that current (new) epoch instead of the outgoing one.
+- **Impact:** A subsequent explicitly started prompt or goal can lose legitimate text and attention events, including an approval it is waiting for. Restoration itself does not replay a prompt.
+- **Remediation:** Capture the outgoing epoch before dispatch and retire only that epoch. Validate both event-before-ACK and ACK-before-event orderings, including subsequent prompt/goal attention.
+- **Verification:** Deterministic pre-fix tests reproduced lost prompt and goal attention only for metadata-before-ACK. Both orderings, new-epoch prompt/goal attention and old-epoch rejection now pass (`go test ./internal/web -run TestVersionRestoreEpochOrderingKeepsNextPromptAndGoalAttention -count=20`, full Version tests and race). Actual-worker SQLite/RPC/HTTP restore plus subsequent Ask approval/denial passes `go test ./cmd/snow -run '^TestWebVersionsRealWorker' -count=5` and the same tests with `-race -count=1`.
+
+## BUG-150: Saved-session navigation silently selected another live session
+
+- **Status:** Resolved
+- **Evidence:** `projectData` returned the project's live snapshot before comparing the explicit saved-session query. A stale Activity or history link therefore displayed controls for a different current session rather than its named target.
+- **Impact:** Misleading conversation navigation within a registered project; opening a link did not itself switch sessions or execute work.
+- **Remediation:** Reject the mismatched navigation with a fixed notice and no activation or live controls. Explicit workspace/current-session navigation remains available; no catalog or runtime activation occurs.
+- **Verification:** `go test ./internal/web -run 'TestSavedSessionNavigation' -count=1` passed against the production handler, covering stale links, absence of controls, and valid current-session links.
+
+## BUG-149: Queue assets absent from production HTTP allowlist
+
+- **Status:** Resolved
+- **Evidence:** `TestHarnessHTTPAssetsAndLanding/queue.js` and `/queue.css` fail against the production handler. Templates reference both embedded assets, but the explicit static route allowlist omits them; exported browser fixtures serve them independently and missed the production integration gap.
+- **Impact:** Real manager pages cannot initialize/style the Queue next panel despite passing exported-fixture browser tests.
+- **Remediation:** Register both assets in the production allowlist and test every asset referenced by the actual page through that handler.
+- **Verification:** Reproduced with `go test ./internal/web -run '^TestHarnessHTTPAssetsAndLanding/queue' -count=1`. Fixed handler asset tests pass. `node scripts/tests/browser/manager-workflows/run.mjs` passed 256 assertions across four native production HTTP/RPC/browser reports, including HTTP 200, initialized Queue code/applied CSS, real queue admission/delivery, durable ancestry, and Stop/reload without replay.
+
 This is the canonical tracker for known reproducible defects in Snow. Keep
 architecture and roadmap work in `IMPLEMENTATION.md`; use this file for behavior
 that is observed or strongly evidenced to be defective.
@@ -3092,3 +3604,812 @@ check are documented with their successful reruns in the fix report.
   `go test ./internal/tui -run '^$' -bench '^BenchmarkBranchSelectionCard$'
   -benchmem -count=1` measured approximately 23 µs, 227 µs, and 2.1 ms per card,
   respectively, consistent with linear rather than quadratic scaling.
+
+## BUG-090: Web preview pairing rejects ordinary browser form submissions
+
+- **Status:** Resolved (verified in the initial web-shell implementation)
+- **Surface:** Local web manager pairing and authenticated forms
+- **Evidence:** Chrome 152 submits `Origin: null` for a same-origin HTML form
+  under `Referrer-Policy: no-referrer`; the strict Origin guard correctly rejects
+  it with HTTP 403. Synthetic HTTP tests supplied Origin explicitly and missed
+  this browser interaction. Reproduced using the real local preview, without
+  provider or agent execution.
+- **Expected:** Valid local pairing and CSRF-protected forms work in browsers;
+  foreign and null origins remain rejected.
+- **Remediation:** Use `Referrer-Policy: same-origin` to preserve same-origin
+  form Origin while suppressing cross-origin referrers. Keep exact Origin and
+  CSRF validation; do not accept null Origin as a workaround.
+- **Verification required:** Browser pairing, logout, additional-browser code
+  generation, header regression test, and the existing hostile-Origin tests.
+- **Verified:** Verified `TestPairingAndPages` and `TestOriginHostAndFormGuards`; Chrome 152 pairing, additional-code form submission, and logout passed with strict Origin validation.
+  `go test ./internal/web -count=1` and the affected race suite passed.
+
+## BUG-091: Web preview rejects the browser's default-port authority
+
+- **Status:** Resolved (verified in the initial web-shell implementation)
+- **Evidence:** Starting on port 80 retained `:80` in the expected Host/Origin,
+  while browsers omit HTTP's default port. Strict comparison then rejected
+  legitimate requests. Expected behavior is canonical same-origin matching.
+- **Remediation/verification:** Normalize the expected default-port origin,
+  retaining exact Host/Origin validation; test IPv4 and IPv6 port-80 authorities.
+- **Verified:** Verified `TestDefaultPortBrowserAuthority` for canonical IPv4 and IPv6 port-80 authorities. No privileged port-80 live listener was required.
+  `go test ./internal/web -count=1` and the affected race suite passed.
+
+## BUG-092: Pairing-code results use a POST-only browser history URL
+
+- **Status:** Resolved (verified in the initial web-shell implementation)
+- **Evidence:** Code generation rendered a full page at `/access/pair`, but that
+  route accepts only POST. Browser/HTMX history restoration performs GET and
+  receives 405 instead of the access page.
+- **Remediation/verification:** POST/redirect/GET to the canonical access page,
+  using a one-time in-memory result. Verify redirect, one-time display, and
+  browser back navigation; never place pairing credentials in URLs.
+- **Verified:** Verified `TestPairAnotherBrowserLogoutAndRestart`; Chrome 152 code generation redirects to the GET access URL, Back restores that page, and the one-time code is not redisplayed.
+  `go test ./internal/web -count=1` and the affected race suite passed.
+
+
+## BUG-093: Catalog scan limit did not bound directory enumeration
+
+- **Status:** Resolved
+- **Severity:** Medium
+- **Surface:** Runtime-free saved-session catalog (pre-release increment)
+- **Observed:** Implementation review and bounded-enumeration regression tests
+
+### Expected behavior
+
+The 4,096-entry inventory limit must bound directory reads and allocations, not
+only the number of callbacks processed after reading a directory.
+
+### Actual behavior and evidence
+
+The initial catalog used `fs.WalkDir`; it reads and sorts all entries in each
+directory before invoking child callbacks. Thus a very large session directory
+could exceed the intended read/allocation budget before the callback's limit or
+cancellation check ran. The normal small-directory catalog tests did not cover
+this pre-enumeration behavior.
+
+### Remediation and verification
+
+Catalog enumeration now uses batches of at most 64 entries, shares one inventory
+budget across directories, checks cancellation between batches and entries, and
+reads at most one additional entry to detect overflow. Instrumented tests cover
+batch bounds before visitation, shared budgets, interbatch cancellation, and
+child-directory exclusion. `go test ./internal/session ./internal/rpc -count=1`
+passed after the fix; agent verification additionally passed race and vet for
+these packages. No release containing the initial scan implementation was made.
+
+
+## BUG-094: Failed project registration retained a POST-only history URL
+
+- **Status:** Resolved
+- **Severity:** Low
+- **Surface:** Web manager project registration (pre-release increment)
+- **Evidence:** Initial error handling rendered a complete document directly at
+  `/projects/add`. Reload/history restoration could revisit a POST-only route or
+  ask to resubmit instead of restoring the Projects page. This repeats the
+  history failure pattern tracked for pairing-code generation in BUG-092.
+- **Fix:** Redirect failed registration to a canonical Projects GET with a fixed
+  public error token. Never place the submitted host path or arbitrary error text
+  in URLs; preserve the registry list and show a generic actionable error.
+- **Verification:** `TestFailedRegistrationUsesCanonicalGet` checks the redirect,
+  safe URL/body, restored error page, and absence of worker activation. Verified
+  with `go test ./internal/web -count=1` after the fix.
+
+## BUG-095: Live web projection discarded attributed root-agent events
+
+- **Status:** Resolved; production-shaped RPC fixture regressions and live CLI
+  interaction checks verified.
+- **Severity:** High (P1).
+- **Surface:** Web live-runtime event projection.
+- **Reproduction:** Send valid root-attributed (`AgentRef.Path == "/root"`) text,
+  permission and question events through the RPC subprocess fixture. The old
+  filter discarded every event with `Agent` metadata, including root events;
+  completion could return idle with no assistant text or interaction card.
+  Earlier fixtures omitted attribution and therefore missed this case.
+- **Fix:** Accept legacy untagged and validated root-attributed events, while
+  excluding child and malformed/inconsistent attribution. Fixtures now exercise
+  text, permission and input with root metadata and inject excluded child events.
+- **Verification:** `go test -race ./internal/web -run '^TestRuntime' -count=3`
+  and focused web/client tests pass. A rebuilt CLI with a corrected local
+  OpenAI-compatible fixture verifies streaming, escaped text, approved host writes,
+  question replies and Stop in Chrome. Initial empty CLI output was separately
+  traced to the smoke fixture serving Chat Completions frames on the Responses
+  endpoint; that observation alone was not evidence of this attribution defect.
+
+## BUG-096: Malformed UTF-8 could expand a bounded web text projection
+
+- **Status:** Resolved; focused regression verified.
+- **Severity:** Low (P3).
+- **Surface:** Web runtime text projection helper.
+- **Reproduction:** Pass invalid UTF-8 whose byte length is already within the
+  requested limit to `runtimeText`. The previous control-stripping map replaced
+  each invalid byte with a multi-byte replacement rune, exceeding the byte cap.
+- **Fix:** Remove malformed UTF-8 before applying byte limits and control
+  filtering; preserve valid Unicode and the declared output bound.
+- **Verification:** `TestRuntimeActivityMalformedTextStaysBounded` passes under
+  the race detector and covers the previously expanding input.
+
+## BUG-097: Changes refresh could display a stale selected diff
+
+- **Status:** Resolved; deterministic browser regression verified.
+- **Severity:** Medium (P2).
+- **Surface:** Web Files / Changes inspector.
+- **Reproduction:** Begin refreshing Changes, select a still-visible old row,
+  finish the list refresh, then deliver the old selection's delayed diff. The
+  per-request guard alone allowed that diff to replace the current preview.
+- **Fix:** Disable old rows during refresh and bind diff publication to both
+  the owning Changes-list generation and the current selection generation.
+  Refresh/tab leave clear selection and hide stale previews.
+- **Verification:** The isolated Chrome regression reproduced eight failing
+  assertions before the fix and passes all 14 afterward, including overlapping
+  refreshes and delayed responses before/after list replacement. Retained at
+  `scripts/tests/browser/inspection-race/run.mjs`.
+
+## BUG-098: Individually bounded model discovery could exceed RPC frame limits
+
+- **Status:** Resolved; encoded-size regression and affected package tests verified.
+- **Severity:** Medium (P2).
+- **Surface:** Explicit `models_discover` RPC used by the web conversation controls.
+- **Reproduction:** Return 512 models whose individually valid descriptions and
+  upgrade messages reach the field limits. The original result encoded to
+  5,132,421 bytes for plain metadata and 26,103,941 bytes for escape-heavy metadata,
+  exceeding the web client's 4,194,304-byte frame limit. Count/field bounds alone
+  could make discovery terminate an otherwise usable connection.
+- **Fix:** Budget fully escaped records against a 2 MiB result limit with a
+  conservative envelope reserve. Keep complete identities, stop before overflow,
+  and set `truncated:true`; never pre-encode the unbounded catalog.
+- **Verification:** `TestModelsDiscoverEncodedBudgetKeepsRPCUsable` failed before
+  the fix and passed afterward: 2,095,147 bytes/209 models for plain metadata and
+  2,090,475 bytes/41 models for escape-heavy metadata. The actual RPC writer emits
+  a decodable subsequent response. `go test ./internal/rpc ./pkg/protocol` passed;
+  the writer test does not claim a separate spawned web-worker smoke check.
+
+## BUG-099: Session-switch completion could overwrite a terminal worker status
+
+- **Status:** Resolved; deterministic lifecycle-boundary regressions verified.
+- **Severity:** Medium (P2).
+- **Surface:** Web runtime session switching.
+- **Reproduction:** Final switch telemetry completes, then worker EOF or manager
+  cancellation publishes a terminal state before the switch publishes its idle
+  snapshot. An unconditional publication could report success for a dead/closing
+  worker. This is a false-success status defect, not a shutdown escape.
+- **Fix:** Check context and terminal status under the same lock before rotating
+  the switch snapshot or publishing the final idle state.
+- **Verification:** `TestRuntimeWorkflowPublishSwitchPreservesTerminalState`
+  exercises actual worker EOF, cancellation and closing at the extracted
+  publication boundary without sleeps or production test hooks.
+  `go test ./internal/web` passed.
+
+## BUG-100: Reference-layout sidebar controls became unavailable at responsive widths
+
+- **Status:** Resolved; production-template browser regressions verified.
+- **Severity:** Low (P3).
+- **Surface:** Web workspace sidebar after the reference-layout redesign.
+- **Reproduction:** At 768–1279px, an older, more-specific CSS selector hides
+  Add workspace. Collapse the desktop sidebar and choose Search: the input stays
+  CSS-hidden. New session and Settings also lose their accessible names when the
+  rail hides their text and their SVGs remain decorative.
+- **Fix:** Override the exact legacy selector, expand the rail before opening
+  search, and give both icon-rail actions permanent accessible labels.
+- **Verification:** Production-CSS Chromium investigation reproduced all three
+  conditions. The production-template `harness-layout` browser suite passes at
+  360/768/1280/1512px, including Add workspace visibility, rail search focus and
+  permanent accessible action names.
+
+## BUG-101: Inactive saved-session lists could overlap runtime activation
+
+- **Status:** Resolved; long-list production-template browser regression verified.
+- **Severity:** Medium (P2).
+- **Surface:** Selected inactive project with many saved conversations.
+- **Reproduction:** Render 35 saved-session rows. The activation panel begins at
+  y437 while rows continue to y1728 because the flex container shrinks around its
+  overflow-visible contents. Scrolling can move activation out of view while
+  overlapping rows remain.
+- **Fix:** Prevent the inactive live-session container from shrinking; let the
+  inactive conversation pane own scrolling so activation follows saved history.
+  Also constrain the sidebar's grid minimum height so a long session tree cannot
+  expand the desktop row beyond the viewport.
+- **Verification:** Chromium first reproduced the overlap. The actual-template
+  35-session fixture then exposed a 1437.56px sidebar/grid row at a 740px viewport;
+  six assertions failed across desktop sizes before the grid-minimum fix.
+  All 28 state/viewport cases now pass (1,043 assertions), including nonoverlap,
+  full-height sidebar bounds and reachable activation after scrolling.
+
+
+- **Polish regression reverified:** New `#live-session` scroll ownership initially
+  overrode the inactive list flex fix. The later scoped inactive-list restoration
+  keeps saved rows nonshrinking and overflow visible. Final production matrix
+  again verifies all 35 rows, nonoverlapping activation and the canonical outer
+  scroll region at every width/theme.
+- **Superseded presentation:** BUG-181 intentionally replaces the central catalog
+  with grouped sidebar pagination and independently scrolling saved transcripts.
+  Start/Resume now occupies the composer seat, with bounded outer scrolling at
+  short heights. The obsolete inspection-layer catalog override was removed;
+  current nonoverlap/reachability checks live in the Harness workspace fixtures.
+
+## BUG-102: Saved message copy included code-block UI text
+
+- **Status:** Resolved; actual saved-template browser regression verified.
+- **Severity:** Medium (P2).
+- **Surface:** Inactive saved conversation containing assistant/plan Markdown.
+- **Reproduction:** Open a saved assistant message with a fenced code block and
+  use Copy message. The saved template had no escaped source node, so enhancement
+  captured decorated body text, including the Copy code button, instead of the
+  public Markdown source.
+- **Fix:** Supply the exact escaped public message text in `.message-source`, as
+  the live template does. Copy remains bounded and independent of rendered HTML.
+- **Verification:** Production-template `saved-markdown` browser cases at
+  360/768/1280/1512px confirm exact source including fences, `<public>` and `&`,
+  no copy-banner contamination, separate code-only copy, and no requests.
+
+## BUG-103: Settings close could restore another dialog's focus
+
+- **Status:** Resolved; native-dialog browser regression verified.
+- **Severity:** Low (P3).
+- **Surface:** Opening Settings after canceling Rename conversation.
+- **Reproduction:** Cancel Rename, open Settings, and close it. The generic
+  dialog listener retained one global return target; its asynchronous close event
+  could override Settings' own restoration and focus the session-menu trigger.
+- **Fix:** Store/clear return targets per dialog, bind generic listeners once,
+  and leave Settings' close/focus lifecycle to its shell owner.
+- **Verification:** Browser workflow tests close Rename before opening Settings,
+  then check X and native CDP Escape restoration before and after HTMX replacement
+  at all four widths. All 70 workflow assertions pass at each width.
+
+
+## BUG-104: Pending web questions compete with the normal composer
+
+- **Status:** Resolved; implementation and regression verification passed.
+- **Severity:** Medium (P2).
+- **Evidence:** User screenshot and current `live.html`/`app.js`: attention and normal
+  composer are separate visible seats. The entire question form scrolls, including
+  its submit button; all questions are expanded together. Harness's actual pending
+  question replaces the composer and keeps header/footer outside its scroll body.
+- **Expected:** One bounded attention/composer seat, reachable persistent actions,
+  question pagination retaining complete answer drafts, and safe permission warnings.
+- **Regression required:** Long/multiple questions, narrow/short viewports, collapse,
+  choices-only/custom input, fixed footer, busy/disconnected and unknown outcome.
+
+- **Verified fix:** One resident attention/composer seat now pages questions, retains exact answers/drafts, and keeps header/actions outside the scrolling body. Final production layout gate passed 1,806 reports / 25,628 assertions, including all sixteen answers, IME, ChoicesOnly, collapse, approvals and 240px/reduced viewports.
+
+## BUG-105: Return-to-latest overlaps attention and reader scrolling is overridden
+
+- **Status:** Resolved; implementation and regression verification passed.
+- **Severity:** Medium (P2).
+- **Evidence:** User screenshot plus `harness.css` fixed bottom176px; jump position
+  ignores attention height. `app.js` samples within100px each snapshot and scrolls
+  before attention changes; scroll listener only hides, never immediately reveals.
+- **Expected:** Measured seat clearance, immediate jump visibility, explicit
+  following versus manual reading, and stable anchors across streamed reflow.
+- **Regression required:** Tiny upward gestures, unchanged updates, resize,
+  attention arrival/collapse, own send, bounded trimming and session navigation.
+
+- **Verified fix:** SnowScroll owns explicit reader/follow state, stable row anchors and measured seat clearance. Final full browser matrix passed tiny/upward reader behavior, head trimming, attention arrival/collapse and explicit Jump without reader snap-back or overlay collision.
+
+## BUG-106: Browser conversation updates batch incremental RPC text
+
+- **Status:** Resolved; implementation and regression verification passed.
+- **Severity:** Medium (P2).
+- **Evidence:** `app.js` polls complete runtime snapshots two seconds after each
+  completed fetch; no push endpoint exists in the audited source. Runtime drainage
+  already accepts text deltas immediately. Short responses can first appear complete.
+- **Expected:** Bounded instance-bound public snapshot push without another agent
+  loop, automatic mutation replay, or exposure of private progress/reasoning.
+- **Regression required:** Real gated provider -> agent -> RPC -> runtime -> HTTP ->
+  production DOM; multiple prefixes visible while still running; stop, reconnect,
+  lifetime/auth/identity and slow-reader resource bounds.
+
+- **Verified fix:** Instance-bound, bounded full-snapshot SSE now coalesces updates at 75ms. Real gated provider → agent → RPC → HTTP → production DOM passed 28 assertions, including two visible prefixes before completion, Stop and genuine watchdog/reconnect without replay. Go/race tests additionally cover expiry, identity, limits and blocked net.Pipe writes releasing subscriptions without canceling the worker.
+
+## BUG-107: Mixed saved text and plan blocks share a presentation ID
+
+- **Status:** Resolved; implementation and regression verification passed.
+- **Severity:** Medium (P2).
+- **Evidence:** `runtime_events.go` loadHistory assigns the persisted message ID to
+  each emitted text/plan segment. `messages.js` explicitly skips duplicate IDs.
+  An assistant text/plan/text message loses the plan and trailing text on reconcile.
+- **Expected:** Stable distinct presentation block IDs without changing saved IDs.
+- **Regression required:** Interleaved text/plan/text through load and repeated DOM
+  reconciliation, with every public block visible in order.
+
+- **Verified fix:** Historical text/plan blocks now have distinct stable presentation IDs and original source correlation. Go identity tests and final browser matrix preserve all three saved text → plan → text blocks, order and node identities across reconciliation.
+
+## BUG-108: Live message positional keys shift when bounded history trims
+
+- **Status:** Resolved; implementation and regression verification passed.
+- **Severity:** Medium (P2).
+- **Evidence:** Live user/assistant projections omit IDs. Browser falls back to
+  array indices; removing the oldest row reuses focused controls for another message.
+- **Expected:** Stable projection IDs survive token growth and history trimming.
+- **Regression required:** Count/byte trimming preserves surviving node identities,
+  exact copy targets and reading anchors.
+
+- **Verified fix:** Live projection IDs remain stable across count/byte trimming; obsolete head rows are removed before ordering survivors. Go and full production browser checks preserve surviving rows, active Copy code element, exact updated clipboard target, horizontal table position and reader anchor.
+
+## BUG-109: Streaming Markdown replacement destroys code-copy focus
+
+- **Status:** Resolved; implementation and regression verification passed.
+- **Severity:** Medium (P2).
+- **Evidence:** Growing assistant text calls SnowMarkdown.render, replacing innerHTML
+  and focused code-copy descendants even while outer message identity is stable.
+- **Expected:** Unchanged code controls retain DOM identity/focus as later text grows.
+- **Regression required:** Focus and click code copy across incremental Markdown,
+  exact updated code text, stable table scroll, and safe final rendering.
+
+- **Verified fix:** Sanitized Markdown is reconciled into the live tree rather than replacing focused descendants. Final full browser matrix verifies code-copy identity/focus/exact updated content and real nonzero table scrollLeft across growth and head eviction, including desktop-width overflow.
+
+## BUG-110: Externally closed web runtime reconnects indefinitely
+
+- **Status:** Resolved; implementation and regression verification passed.
+- **Severity:** Medium (P2).
+- **Evidence:** Snapshot404 becomes generic Reconnecting in app.js; reload is offered
+  only for replaced-instance/login states, so an externally closed runtime retries.
+- **Expected:** Authoritative closed state with retained draft and explicit review;
+  never reopen a worker or replay a prompt from reconnection.
+- **Regression required:** External close, own close response/stream race, replaced
+  session, permission/auth failure and explicit review flow.
+
+- **Verified fix:** HTTP/SSE terminal closure now disables authority, retains the draft and offers explicit review instead of indefinite reconnect. Final 1,050-assertion workflow suite covers external 404/replacement, unknown outcomes and draft restoration; the real RPC/browser suite verifies own close and subsequent saved-history access.
+
+## BUG-111: Short viewport menus clip non-grouped content and picker footer
+
+- **Status:** Resolved; implementation and regression verification passed.
+- **Severity:** Medium (P2).
+- **Evidence:** menus.js clamps height to visualViewport minus96; menus.css hides
+  overflow except grouped lists. Mode/telemetry headings, rows and notes lack a
+  scroll region. Workspace Add action shares the long project-list scroll region.
+- **Expected:** All menu information/actions reachable; workspace Add fixed outside
+  list scrolling, following actual Harness Menu viewport/footer composition.
+- **Regression required:** Every menu pane at240px height, viewport shrink, keyboard
+  navigation, long100-project picker and discovery empty/error/truncated states.
+
+- **Verified fix:** Menus now own a shared content scroller and separate pinned workspace footer, with keyboard scroll containment. Final layout matrix passed every menu pane across all seven widths, both themes and short heights, including 100 workspaces and empty/error/disconnected host choices.
+
+## BUG-112: Settings cascade shrinks canonical sidebar New session controls
+
+- **Status:** Resolved; implementation and regression verification passed.
+- **Severity:** Low (P3).
+- **Evidence:** Last-loaded settings.css overrides expanded38px/collapsed36px
+  New session with34px despite canonical harness.css geometry.
+- **Expected:** Canonical expanded/collapsed dimensions, not a second size owner.
+- **Regression required:** Computed dimensions in both sidebar states and themes.
+
+- **Verified fix:** Removed the trailing Settings size override. Canonical New session controls remain 38px expanded / 36px collapsed; production computed geometry and final dark/light sidebar matrix passed.
+
+## BUG-113: Folder-picker actions fall below short viewports
+
+- **Status:** Resolved; production-template browser verification passed.
+- **Severity:** Medium (P2).
+- **Evidence:** At 360×240, the Select/Cancel footer occupied y418–471, outside
+  the modal. The generic dialog had no independent body/footer composition.
+- **Fix:** A bounded 680×500 maximum folder dialog, scrolling body, and fixed
+  explicit-action footer. Nothing selects/registers a folder from browsing alone.
+- **Verification:** Production folder populated/empty/limited/error cases in the
+  1,806-report layout gate passed at all seven widths, both themes, and 240/360/740
+  heights; full gate exit 0 before subsequent test-coverage additions.
+
+## BUG-114: Active conversation is missing or stale in the sidebar
+
+- **Status:** Resolved; production workflow verification passed.
+- **Severity:** Medium (P2).
+- **Evidence:** The sidebar catalog deliberately excludes the live session, but
+  the shell supplied no separate current row. Rename/switch could leave stale
+  navigation identity when relying only on an inactive catalog refresh.
+- **Fix:** One live-owned current row follows authoritative session identity and
+  title; duplicate catalog rows are hidden without altering the saved catalog.
+- **Verification:** Strengthened workflow assertions verify current ID, title,
+  title attribute, href/hx-get and uniqueness through rename, switch and switch
+  back: 75 assertions × seven widths × two themes passed.
+
+## BUG-115: Command acknowledgement briefly enables stale idle controls
+
+- **Status:** Resolved; delayed-response regression passed.
+- **Severity:** Medium (P2).
+- **Evidence:** While a POST ran, snapshots were withheld. Its acknowledgement
+  cleared busy state against the previous idle snapshot before a fresh read;
+  Send and model/switch controls could become enabled during a running turn.
+- **Fix:** Keep mutation controls inert in Synchronizing until a fresh,
+  instance-bound snapshot arrives. An acknowledgement does not invent running
+  or idle state; unknown outcomes retain their separate explicit-review gate.
+- **Verification:** Production workflow delays both POST response and next GET,
+  checks disabled controls in between, then verifies fast completion restores
+  idle correctly. Full 1,050-assertion workflow suite passed.
+
+## BUG-116: Retired event readers dispatch or retain retry timers
+
+- **Status:** Resolved; deterministic transport regressions passed.
+- **Severity:** Medium (P2).
+- **Evidence:** Reader ownership was checked before, not after, an awaited read.
+  A retiring reconnect-state callback could also schedule a retry after close,
+  abort or hiding the document.
+- **Fix:** Recheck read ownership after await and callback dispatch; recheck
+  disposal/visibility/ownership after reconnect callback before scheduling.
+- **Verification:** Production stream.js Node VM suite: 51/51 passed, including
+  late snapshot/closed frames, hidden/visible replacement, callback interruption,
+  watchdog/backoff, fragmented UTF-8/JSON, bounded frames and complete cleanup.
+
+## BUG-117: Attention resize callbacks cause observer feedback errors
+
+- **Status:** Resolved; assembled browser regressions passed.
+- **Severity:** Medium (P2).
+- **Evidence:** Real question/approval pages emitted ResizeObserver loop errors
+  while synchronous attention geometry writes called the scroll owner's layout.
+- **Fix:** Coalesce observer work in one identity-guarded animation frame; cancel
+  on disposal, make writes idempotent and notify only on meaningful changes.
+- **Verification:** Questions and both approval variants passed the uncaught-error
+  gate at all layout widths/themes/heights; no errors were filtered or ignored.
+
+## BUG-118: Short workflow dialogs lose canonical edge clearance
+
+- **Status:** Resolved; native dialog checks passed.
+- **Severity:** Low (P3).
+- **Evidence:** Mobile CSS allowed height viewport−20px: Rename occupied y10–230
+  in a 240px viewport instead of preserving 12px clearances.
+- **Fix:** Shared native workflow dialogs cap height to the lesser dynamic/visual
+  viewport minus 24px, retaining native vertical scrolling and focus behavior.
+- **Verification:** Rename/Switch/Close showModal checks at 320/390/768×240 all
+  measured y12–228; final actions remained reachable through scrolling/focus.
+  Full production Rename matrix passed without relaxing clearance assertions.
+
+## BUG-119: Missing toolbar container expands narrow Plan composer
+
+- **Status:** Resolved; unchanged geometry assertions passed.
+- **Severity:** Low (P3).
+- **Evidence:** At 320px the Plan composer grew to 141px. Missing toolbar inline
+  containment prevented compact model-trigger queries; inline groups added
+  baseline/wrapping height unlike the reference's explicit flex groups.
+- **Fix:** Restore toolbar inline-size container and leading/trailing flex groups.
+- **Verification:** Plan composer measures 98px at 320/390/768; all seven-width,
+  two-theme production geometry assertions passed. Controls/hints remain present.
+
+## BUG-120: Connection warnings push composer outside short viewport
+
+- **Status:** Resolved; production short-viewport checks passed.
+- **Severity:** Medium (P2).
+- **Evidence:** Nonshrinking warning chrome plus composer exceeded the live
+  region at 240px height while hidden overflow clipped the composer.
+- **Fix:** Error/uncertainty-bearing live regions alone gain bounded outer
+  scrolling and a sticky single composer seat; all warning text remains reachable.
+- **Verification:** Disconnected model cases passed across widths/themes/heights.
+  Additional actual-browser measurements at 320/390/768×240 confirmed the warning
+  end scrolls above the seat, composer bottom near y210, seat bottom y240.
+
+## BUG-121: Leaving Files permits an obsolete preview to publish
+
+- **Status:** Resolved; file-preview race regressions passed.
+- **Severity:** Medium (P2).
+- **Evidence:** File preview requests lacked the complete tab/list/selection
+  guards already used by diffs; a response could arrive after leaving Files.
+- **Fix:** Abort on tab departure and enforce project/instance/list/selection
+  ownership before rendering. Refresh disables obsolete navigation and rows.
+- **Verification:** Inspection suite retains the original 14 race assertions and
+  now passes 60 assertions at three viewport sizes in both themes, including
+  delayed file responses, stale refresh, tab departure and project replacement.
+
+## BUG-122: Tool-history ambiguity can select the wrong saved result
+
+- **Status:** Resolved; protocol and catalog regressions verified.
+- **Severity:** Medium (P2).
+- **Evidence:** During durable-history integration, duplicate result candidates
+  selected the first result, duplicate assistant IDs reused a map projection,
+  and omitted result rows could hide ambiguity. A mismatched result tool name
+  could also resolve the wrong call. Absolute block indexes changed presentation
+  identity when RPC removed a preceding provider-only block.
+- **Fix:** Reject ambiguous ownership/results before filtering; require result
+  name agreement (with explicit empty-name legacy compatibility), retain
+  tool-call ordinals for identity, and mark incompletely read owner intervals
+  unresolved with omission notices.
+- **Verification:** `go test ./pkg/protocol ./internal/session ./internal/rpc`
+  passed, including `TestProjectHistoryToolsRejectsAmbiguousResultsBeforeFiltering`,
+  `TestProjectHistoryToolsDuplicateOwnerIDsAreOmitted`,
+  `TestProjectHistoryToolsIdentityUsesToolCallOrdinal`, and catalog interval,
+  result-name, duplicate-result, and actual matching-row omission regressions.
+
+## BUG-123: Generic message paging loses unresolved public tool history
+
+- **Status:** Resolved; public-paging and real RPC/browser regressions verified.
+- **Severity:** Medium (P2).
+- **Evidence:** Legacy paired-snapshot paging deliberately excludes incomplete
+  trailing calls. Using that page directly for web history hid an unresolved
+  saved call after activation, or showed an existing result as absent when a
+  page ended immediately before it.
+- **Fix:** Add capability-gated `public_history` paging without changing the
+  legacy contract. Include incomplete trailing owners and project each page's
+  tools through its complete final ownership interval within the cursor
+  snapshot. Clients trust the authoritative tool map even when empty.
+- **Verification:** Public RPC paging tests cover trailing calls, page-end
+  results, ambiguity, boundaries, mode-bound cursors, and complete frame limits.
+  The real local fake-provider/RPC/browser suite passed 36 assertions, including
+  persisted public output and stable owning-tool identity across explicit close,
+  saved catalog read, and same-session reactivation without prompt replay.
+
+## BUG-124: EOF races discard acknowledged admission or revive failed workers
+
+- **Status:** Resolved; deterministic lifecycle regressions verified.
+- **Severity:** Medium (P2).
+- **Evidence:** A received successful RPC response processed after EOF retained
+  `admission_unknown`. Late negative responses could overwrite terminal failed
+  status with idle. The response/EOF gate reproduces the successful-response
+  ordering without timing sleeps.
+- **Fix:** Record correlated admission independently from runtime liveness;
+  preserve definitive completion evidence and terminal worker status. Persist
+  intent before dispatch and keep conservative recovery hints across restart.
+  Lost workers and explicit close no longer label unconfirmed tools canceled.
+- **Verification:** Full `go test ./internal/web` passed. Focused race tests
+  exercised before/after-ack EOF, late responses, completion-before-ack,
+  definitive cancellation, failed-worker isolation, and ten repeated gated EOF
+  runs. Registry/restart tests retain pairing and hints, start zero workers on
+  reads, and require fresh explicit activation without replay.
+
+## BUG-125: Interrupted-tool repair appears as a definitive execution failure
+
+- **Status:** Resolved; real SQLite and permission-workflow regressions verified.
+- **Severity:** Medium (P2).
+- **Evidence:** After a committed assistant tool call loses its result, session
+  resume appends an error-shaped bookkeeping message to balance provider-facing
+  history. Public projection classified that synthetic message as `failed`, even
+  when a write might already have committed. The real SQLite regression failed
+  before the fix both before/after a modeled side effect, in direct and inactive
+  catalog history.
+- **Fix:** Newly synthesized interruption records persist explicit
+  `tool_outcome_unknown` provenance. Public projection retains `unresolved`, with
+  no definitive result ID or output; bounded catalog decode and active public
+  RPC paging preserve this provenance. Provider-facing error semantics remain
+  unchanged. No legacy text inference, backfill, or automatic replay is added.
+- **Verification:** `TestSQLiteResumeInterruptedToolHistoryStaysUnresolved`
+  passes with append-only parent/branch-tip and close/reopen/idempotence checks.
+  Protocol, agent, session, and RPC tests/vet/race passed. The real permission
+  browser workflow also kills isolated workers before and after an actual builtin
+  write, then checks truthful public history and unchanged execution counts on
+  explicit resume.
+
+## BUG-126: Permission browser runner can leave misleading success artifacts
+
+- **Status:** Resolved; expected-failure artifact regression verified.
+- **Severity:** Low (P3, verification harness).
+- **Evidence:** The new runner initially published its successful report before
+  fixture shutdown/temporary cleanup, and a later failed run could leave that
+  older report intact. Process exit status failed correctly, but the artifact
+  could be mistaken for evidence of a successful current run.
+- **Fix:** Invalidate prior success before compilation, record failed runs, and
+  publish success only after successful manager teardown and cleanup. Separate
+  output directories keep the fault-injection regression's seeded artifacts
+  isolated from normal verification evidence.
+- **Verification:** `node scripts/tests/browser/permission-workflow/failure-report.mjs`
+  forces a missing-browser prerequisite, checks nonzero exit/no success output,
+  and verifies replacement of a seeded stale report with failed status. The
+  normal workflow passes with a final `passed` report and completed cleanup.
+
+## BUG-127: Canceled web turns silently return to Ready without an outcome
+
+- **Status:** Resolved; real-worker browser regression and final gates verified.
+- **Severity:** Medium (P2).
+- **Evidence:** A live session and its manager recovery hint both recorded a
+  canceled turn without assistant text. Production rendering hid recovery copy
+  for idle/canceled state and showed only Ready. The isolated real-worker browser
+  regression failed with `empty canceled turn must display an explicit outcome`.
+- **Fix:** Render explicit cancellation feedback from the observed recovery
+  state, preserve it on explicit resume, and clear it when another turn starts.
+  Keep draft/send authority unchanged and never retry automatically.
+- **Verification:** The 51-assertion real-worker browser workflow verifies
+  empty/partial cancellations, intentional Stop, subsequent streaming, resume,
+  no replay, and short-viewport feedback. Full Go/vet, affected race, existing
+  conversation/permission/stream-client suites, and Python/benchmark gates pass.
+  Stored history does not establish which browser input caused the live cancel.
+
+## BUG-128: Provider-originated abort can produce completed RPC status
+
+- **Status:** Resolved — invocation-local terminal evidence and real-worker recovery verified.
+- **Severity:** Medium (P2).
+- **Evidence:** A local fake provider emitting `EvStreamDone/StopAborted` with a
+  live caller context persists an aborted assistant and emits `EvAborted`, but
+  the RPC completion was `completed`. `server.go` classified cancellation only
+  from the prompt context/returned error; the agent's provider-abort path returns
+  nil. A real-worker browser fixture waiting for canceled recovery instead timed
+  out with Ready/Live and no error. Before the fix, the new protocol regression
+  reproduced `completed` instead of `canceled` for ordinary prompts, Edit & resend
+  and Regenerate (the regeneration setup first needed a text-bearing reply).
+- **Remediation:** Capture explicit provider-abort evidence synchronously in the
+  owning invocation's context, independent of event delivery or mutable history.
+  Ordinary/content/mode prompts and admitted edits/regeneration pass this outcome
+  to shared RPC completion. A nil-returning terminal provider abort now reports
+  `canceled`; actual persistence/accounting errors retain failure precedence.
+  Go prompt return semantics, automatic-goal behavior and existing caller-context
+  cancellation classification are unchanged. Fresh captures isolate later turns.
+- **Verification:** Focused agent/RPC/CLI regressions pass: legacy Go errors,
+  rejected/unrelated-event isolation, all four ordinary content/mode variants,
+  edit/regeneration, schema-valid completion, completion-error precedence and
+  subsequent normal completion. `TestWebProviderAbortRealWorker` uses the actual
+  subprocess App/Agent/RPC/client/manager path and reaches canceled recovery with
+  no Stop request, then completes one explicit next prompt without automatic
+  retry. Full Go tests/vet, affected-package race tests (agent/app/RPC/web,
+  process/RPC clients, SDK and CLI), Python tests, benchmark guard, resource sync
+  and SDK example pass on Go 1.27rc3. The stream-client Node VM suite passes
+  51/51 tests. This is local
+  fake-provider and manager-projection evidence, not a fresh browser-engine,
+  live-provider or private-network certification.
+- **Scope:** Not established as the cause of the reported live case, whose
+  manager already recorded canceled, not completed. No real-provider replay.
+
+## BUG-129: Double-clicking Send can cancel its newly admitted turn
+
+- **Status:** Resolved; real-worker browser regression and final gates verified.
+- **Severity:** Medium (P2).
+- **Evidence:** Send and Stop occupy the same position. Native browser pointer
+  events targeting Send followed by click-count 2 at that position target the
+  replacement Stop and issue a real abort. The isolated real-worker regression
+  failed with `double-clicking Send must not cancel the turn via its replacement
+  Stop button`. This mechanism is reproduced; historical browser input was not
+  retained, so it is not proof of the reported user's exact trigger.
+- **Fix:** Ignore multi-click continuation on Stop (`detail > 1`), while retaining
+  intentional single-click and keyboard/programmatic Stop activation.
+- **Verification:** Real CDP pointer events with click-count 2 hit-test the enabled
+  replacement Stop at unchanged coordinates without sending an abort; native
+  single-click Stop still cancels, and subsequent turns stream and complete.
+  The 51-assertion real-worker workflow and final regression gates pass. The
+  scripted count proves handler behavior, not historical physical input timing.
+
+
+## BUG-130: Multiline web drafts stay in a fixed one-line editor
+
+- **Status:** Resolved — production-template composer tests passed 216 assertions; full layout matrix passed 1,890 reports / 26,524 assertions with zero failures.
+- **Surface:** Activated web conversation composer
+- **Evidence:** The previous textarea height was fixed at 36px with no content-height updater. Two explicit short lines require 52px under the reference 24px line height and 4px top inset, but remained in a 36px viewport.
+- **Impact:** Multiline drafts were unnecessarily hidden behind editor scrolling, diverging from the reference composer layout.
+- **Remediation:** The existing scroll owner measures the same textarea on input, restored drafts, programmatic clear, attention restoration and viewport changes. Preserve selection, focus, reader anchors and the measured seat/336px cap; do not change submission.
+- **Regression:** Production-template composer-layout checks exercise growth, shrink, 240px heights, restored drafts, selection, scroll position and no mutation. The full harness matrix also checks 16px transcript vertical insets and long-draft Send reachability.
+
+## BUG-131: Latest user message actions disappear after an assistant reply
+
+- **Status:** Resolved — production-template composer tests passed 216 assertions; full layout matrix passed 1,890 reports / 26,524 assertions with zero failures.
+- **Surface:** Hover-capable web conversation message actions
+- **Evidence:** The old recency selector hid user actions whenever any later message existed. Reference recency depends on a later user message, not an assistant reply.
+- **Remediation:** Scope user-action recency to later user siblings; retain assistant recency, focus/hover disclosure and non-hover visibility.
+- **Regression:** Production-template composer-layout checks verify latest-user and latest-assistant opacity, older-user/assistant hiding and keyboard reveal.
+
+## BUG-132: Restart recovery test assumes insertion order for tied registrations
+
+- **Status:** Resolved
+- **Surface:** `TestRuntimeRestartRecoveryWithRegistryAndExplicitReopen`
+- **Evidence:** The full Go gate failed when two adjacent registrations shared a timestamp and UUID order differed from insertion order. Registry listing deliberately orders by `(created_at, id)`; the test compared that list against insertion order and incorrectly reported changed registrations.
+- **Remediation:** Compare the persisted List projection immediately before shutdown with List after reopening; retain exact ordered project equality and all restart/no-replay checks. Production ordering is unchanged.
+- **Verification:** Focused test passed 30 consecutive runs, then `go test ./...`, `go vet ./...`, and `go test -race ./internal/web ./cmd/snow` passed.
+
+
+## BUG-133: New-conversation links navigate before the guarded workflow
+
+- **Status:** Resolved
+- **Surface:** Web sidebar New conversation links with actual HTMX listeners
+- **Evidence:** Direct production-browser checks reproduced a navigation GET at 1280/320px widths and 740/240px heights before the document-bubble guard ran. During work this dismissed the Stop/New confirmation; while disconnected it navigated instead of failing closed. No mutation POST was observed. Mocked shell routing alone did not reproduce target-level HTMX dispatch.
+- **Remediation:** Intercept current-project and global guarded New links in capture phase, before HTMX. Close an open mobile drawer through its existing presentation owner, then forward to the existing session workflow. Keep modifier-key and other-project browsing unchanged; do not duplicate switching authority.
+- **Verification:** `node scripts/tests/browser/workspace-actions/browser.mjs` passed 108 assertions across all four layouts after reproducing eight failing scenarios before the fix. Active New retains the real confirmation, Cancel sends nothing, disconnected New does not navigate, and removal remains explicitly unchecked. Twelve focused shell routing tests also passed.
+
+## BUG-134: Width-handle wheel input does not scroll the transcript
+
+- **Status:** Resolved
+- **Surface:** Browser-local conversation width handles
+- **Evidence:** Native Chrome wheel input scrolls 120px over the transcript center, but the same input over the hit-tested left width handle dispatches a real wheel event without changing transcript scrollTop. Fixed-position descendants do not join the native overflow scroll chain merely through DOM ancestry. The initial focused run passed 226 assertions with one failing scenario.
+- **Remediation:** Keep fixed handles out of scroll-range calculation, but route their wheel input through the existing `SnowScroll` owner. Preserve upward reader intent, pixel/line/page deltas and Ctrl+wheel zoom; do not add a competing scroll controller.
+- **Verification:** `SNOW_CHAT_WIDTH_EVIDENCE=1 node scripts/tests/browser/chat-width/run.mjs` passed 253 assertions across 23 reports, independently repeated after the fix. Native wheel works over both handles; native upward wheel releases following immediately and retains the reader anchor. Separately labeled synthetic tests verify line/page conversion, Ctrl+wheel exclusion and already-prevented input preserving both scroll position and following after bubbling. The original wheel-intent listener now also respects event cancellation.
+
+## BUG-135: Layout test samples attention geometry before its baseline settles
+
+- **Status:** Resolved (test synchronization; no production change)
+- **Surface:** Browser layout matrix approval/question initialization
+- **Evidence:** A screenshot-free full matrix intermittently failed the fixed-footer assertion for truncated approvals at 320×360/light and 768×240/light. The test awaited transport readiness and fonts, but neither guarantees the attention owner's asynchronous layout has settled before capturing its baseline. A focused diagnostic rerun passed; no production defect was established. The failed full run remains recorded rather than being treated as a pass.
+- **Remediation:** Require a bounded, stable attention-seat geometry baseline before scrolling, while retaining the strict post-scroll fixed-footer and positive-scroll assertions. Record before/after footer, body and seat measurements for approval diagnostics; fail if baseline never settles.
+- **Verification:** The final matrix passed 1,890 reports / 26,524 assertions. Additional 320px/light and 768px/light runs passed 270 reports / 3,756 assertions, including both previously failing short-height cases, with the strict footer checks intact. The real permission workflow separately passed 74 assertions. Approval reports now retain concrete before/after measurements for future diagnosis.
+
+## BUG-136: Re-enhancing saved tool history loses its omission notice
+
+- **Status:** Resolved
+- **Surface:** Saved tool history presentation
+- **Evidence:** After the browser retained the bounded 64-call projection, repeated `SnowMessages.enhance()` recomputed omission from that already-trimmed DOM and hid the count-truncation notice.
+- **Fix:** Preserve the existing omission indication while enhancing retained public history; do not pretend the bounded DOM is complete history.
+- **Verification:** The focused tool-row browser suite includes repeated enhancement of over-limit saved history. Independent final-source runs passed 360 assertions across 12 reports, including a repeat capturing open/closed screenshot evidence under `dist/tool-row-evidence/`.
+
+## BUG-137: Web startup override prevents restoration of saved permission policy
+
+- **Status:** Resolved
+- **Surface:** Editable web session permission policy
+- **Evidence:** The original worker launch passes `--permission ask`, setting the app's explicit permission override. Session binding then skips persisted policy and decisions. Synthetic workflow fixtures restored a policy map and did not exercise this real startup behavior. Selecting Deny/Allow, switching away and back, or explicitly reopening therefore cannot meet the new persistence contract with those launch options.
+- **Remediation:** Separate the new-session Ask default from an explicit CLI override. Preserve ordinary explicit CLI override semantics, and verify real worker/app restoration with the exact web launch options rather than a synthetic policy map.
+- **Verification:** `TestWebPolicyRealWorkerRestoresPersistedModes` first reproduced both Deny and Allow restoring as Ask, then passed after the launch override was removed. It exercises emitted worker arguments, production option parsing, the real app/RPC/session path and actual read/write authorization in temporary projects with a fake provider. It covers new-session Ask, switch-back/restart restoration, read-risk access, Deny rejecting writes, Allow executing writes, and Ask requiring an explicit reply. The independent aggregate `go test ./...`, `go vet ./...`, and affected `go test -race ./internal/web ./cmd/snow` gates also passed.
+
+## BUG-138: New permission chip wraps the 320px composer toolbar
+
+- **Status:** Resolved
+- **Surface:** Narrow live composer with permission, collaboration, model and context controls
+- **Evidence:** The first full layout matrix found 14 failures at 320px: the toolbar wrapped and increased the idle composer from approximately 98px to 138px. No controls were removed to hide the regression.
+- **Fix:** Reduce narrow inter-control gaps and use the shorter visible Plan label at narrow container widths, retaining the full collaboration mode in the accessible name and tooltip. Permission labels already collapse to the shield at narrow widths.
+- **Verification:** The 320px/light repeat passed 135 reports / 1,800 assertions. The full final screenshot matrix passed 1,890 reports / 26,524 assertions with no failures (`dist/tools-policy-final/`). Existing composer, workspace, conversation, width, permission-execution and live-stream suites also passed.
+
+## BUG-139: Live tools from multiple prompts accumulate after the final answer
+
+- **Status:** Resolved
+- **Surface:** Web live conversation timeline
+- **Evidence:** User screenshots show two file searches from the first request and a write from the second request together below the second final answer. `projectActivity` retains a runtime-wide activity list without a chronological message/step anchor; the browser always renders it after the transcript. Styling the rows did not fix their ordering or ownership.
+- **Remediation:** Emit bounded, stable live tool-step markers at the actual event position and bind activities to those markers. Render matched groups inline, preserving ordering across text, consecutive calls and later prompts. Preserve authoritative saved history association and show unassociated legacy/orphan activity truthfully rather than guessing an owner.
+- **Verification:** `TestWebToolTimelineRealWorkerMultiplePrompts` passes actual manager/app/RPC read/write/read turns with a reused provider call ID and unchanged saved chronology after close/reopen; the race-enabled test also passed ten repetitions. Independent browser coverage passes 288 assertions / eight reports, including two turns, interleaved text/tools, stable disclosures/focus, bounds, fallback and saved ownership. Final layout: 1,890 reports / 26,524 assertions / zero failures. Existing tool-row, conversation, composer, inspection, workspace, width, permission-policy, real permission-execution and live-stream browser checks passed, as did full Go/vet, affected race, Python and benchmark gates. Sampled two-turn screenshot evidence is under `dist/tool-timeline-evidence/`; layout evidence is under `dist/tool-timeline-layout/`.
+
+## BUG-140: Stop cannot request cancellation during prompt admission
+
+- **Status:** Resolved
+- **Surface:** Web composer/attention Stop controls and prompt admission
+- **Evidence:** The prompt POST marks the browser action busy; Stop remains hidden until a running snapshot, then disabled while the POST is pending and until refresh. The backend also holds its nonqueued operation gate through the RPC admission acknowledgment, so merely enabling the legacy Abort button would fail with busy. Ordinary post-admission Stop already exists.
+- **Remediation:** Add explicit per-turn cancellation identity and a narrowly scoped cancellation-intent path, separate from prompt mutation state. A verified running turn can receive one cancellation request during admission; dispatch remains serialized and revalidates the same turn before aborting. Duplicate/stale intent must never stop a later prompt, imply rollback, or report idle before definitive completion.
+- **Integration finding:** A full-suite real-worker run exposed a second ordering race: `prompt_completed` can arrive before the abort RPC acknowledgment releases the control gate. Clearing the cancellation latch at completion advertised Send as ready too early, and the next explicit prompt was rejected as busy. Cancellation must stay pending until both completion and cancellation dispatch retire; tests must not hide this with sleeps or mutation retries.
+- **Verification:** `TestWebCancelRealWorkerDuringAdmission` passes ten race-enabled repetitions with delayed admission and a separately buffered abort acknowledgment, letting completion pass before that acknowledgment. It verifies pending readiness, one abort per turn and stale-token rejection without sleeps or retries. Deterministic backend tests cover cancellation-dispatch retirement, replacement and shutdown. Independent browser checks pass 840 assertions / four reports; the full layout passes 1,932 reports / 27,298 assertions / zero failures. Existing conversation/composer/inspection/workspace, tool, permission, actual live-stream and width suites all pass on the final implementation. Full Go/vet, affected race, Python and benchmark gates passed. Evidence: `dist/stop-reuse-evidence/` and `dist/stop-reuse-final-layout/`.
+
+## BUG-141: First-run layout evidence reporting masks fixture errors
+
+- **Status:** Resolved
+- **Surface:** Browser layout test runner
+- **Evidence:** Adding the explicit cancellation and saved-user exports triggered the runner's strict manifest check. With a new output directory, its final report write threw `ENOENT`, hiding the original manifest failure.
+- **Remediation:** Create the evidence directory before entering the export/manifest operation. Keep explicit legacy/cancel workflow fixtures separate, and include the saved-user surface in the layout manifest.
+- **Verification:** `python3 -m unittest discover -s scripts/tests -p 'test_harness_layout_errors.py' -v` passes a deterministic empty-manifest fixture with a nonexistent evidence directory. It preserves the original manifest error and writes an empty failure report without launching Chrome or using the network.
+
+## BUG-142: Message editing appends a copy instead of replacing the continuation
+
+- **Status:** Resolved
+- **Surface:** Web user-message editing
+- **Evidence:** The existing Edit & continue action copies text into a normal prompt and appends it at the end. The user clarified that editing should replace the selected user message on the visible active path, remove its following replies from view, and regenerate in the same chat.
+- **Remediation:** Resolve authoritative editable source rather than trusting displayed text or local IDs. Add a typed, bound prepare/commit operation with atomic history-transition and replacement-turn admission. Preserve the original append-only history internally and the session identity/title, replace the public active-path projection, and retire stale browser/event authority. Never automatically retry, create another chat, or claim that earlier tool effects were undone.
+- **Verification:** Core memory/SQLite tests verify exact identity, preserved original branches, first/middle/latest replacement, turn counts, stale/replayed tokens, atomic admission, plugin veto/lock-safe notification, cancellation, rollback and durable-write-then-error uncertainty. History traversal is preflight-bounded before whole-path cloning/decoding. The independent real app/RPC worker verifies provider context, same chat/title and reopen, with ten race repetitions; a real-tool test confirms removed Write rows do not undo the file or change permission authority. Native Chrome passes 1,208 assertions in four reports; full layout passes 1,932 reports / 27,298 assertions / zero failures. Existing Stop, chronology, tools, permission, live-stream, workspace and layout workflows pass. Final Go/vet, affected race, Python (67 tests), benchmarks, resource sync and isolated fake-provider SDK example pass. A temporary bundled-document drift failure was corrected before the final gate. Evidence: `dist/message-edit-evidence/` and `dist/message-edit-final-layout/`.
+
+## BUG-143: Mixed plan replies advertise unsupported live regeneration
+
+- **Status:** Resolved
+- **Surface:** Live assistant regeneration eligibility
+- **Evidence:** A single assistant response with text, a structured plan, then trailing text promotes the trailing live row to `CanRegenerate`. Core preparation rejects the same plan-bearing assistant message, and reopening removes the action. Splitting presentation rows does not establish an independently regeneratable assistant response.
+- **Remediation:** Retain plan-bearing eligibility across the owning assistant response, including buffered replacement events, and reset it only at a valid subsequent response boundary. Match live eligibility to saved/core validation without guessing persisted ownership from text or display positions.
+- **Verification:** Direct and buffered text/plan/text regressions pass, including a subsequent plain reply after a new tool boundary and duplicate old tool events. The actual app/RPC worker verifies mixed Plan Mode regeneration and reopened ineligibility; plain replies remain eligible. Core and saved Web projection now share the local-shape predicate, with additional live/saved whitespace regressions. The actual worker suite passes three race repetitions; independent native regeneration passes 1,748 assertions across four reports.
+
+## BUG-144: Successful regeneration drops keyboard focus onto the page body
+
+- **Status:** Resolved
+- **Surface:** Regeneration confirmation and replacement acknowledgment
+- **Evidence:** Native Chrome first/latest regeneration removes the selected action after success and leaves `document.activeElement` on the body. The failure repeats at 320/1280 pixels in dark/light themes; typing in the composer during the pending operation avoids it.
+- **Remediation:** After verified projection replacement, supply a surviving focus target only when prior focus was lost. Preserve active typing, composer contents and native selection; do not steal focus from a control deliberately chosen during the request.
+- **Verification:** The initial native suite recorded eight focus failures. A surviving-composer fallback now applies only after verified replacement strands focus on the body; active typing and native selection remain intact. Independent final native verification passes 1,748 assertions / four viewport-theme reports / zero failures. Evidence is retained under `dist/regenerate-evidence/`; the full layout matrix also passes 27,298 assertions.
+
+## BUG-145: Reopened plain replies lose regeneration eligibility metadata
+
+- **Status:** Resolved
+- **Surface:** Public saved-history projection and regeneration
+- **Evidence:** The public messages-page projection omits assistant stop reason. Web eligibility correctly refuses to guess it, so reopening a chat removes Regenerate from otherwise eligible completed plain replies. Initial reopen tests checked timeline persistence but not positive regeneration eligibility.
+- **Remediation:** Preserve bounded safe terminal/eligibility metadata without exposing raw errors or private content. Verify an actual reopened reply can prepare and commit a regeneration, and that error, partial, tool and plan-bearing replies do not gain false eligibility.
+- **Verification:** The parent first reproduced lost eligibility in an actual reopened worker. Public-projection tests now verify known stop enums and failure bits, private/raw-error redaction, unsupported-content suppression, source immutability and byte budgets. Actual first/middle/latest/identical worker cases reopen, select an exact saved assistant, prepare and commit again, and verify exact original provider context with no duplicated prompt. The worker suite passes three race repetitions; source-only independent review found no remaining projection issue.
+
+## BUG-146: Goal rejection test races automatic goal execution
+
+- **Status:** Resolved
+- **Surface:** Historical-revision regression fixture
+- **Evidence:** The full affected race gate failed `TestMessageEditRejectsNonterminalGoalWithoutChangingDeferral` with “read-only preparation changed goal/history.” The fixture calls `App.CreateGoal`, which starts automatic goal execution, then compares branch tips across preparation while that independent runner can append history.
+- **Remediation:** Establish deterministic nonterminal/deferred goal state without starting unrelated background execution. Keep strong assertions that rejected preparation preserves both history and goal deferral; do not hide the race with sleeps or retries.
+- **Verification:** The original fixture reproduced twice in 100 race repetitions. The fixed fixture creates the goal without continuation and exercises both deferral states, specifically requires nonterminal-goal rejection, compares the complete goal/messages/branch tip/deferral, and requires an idle agent. All 100 post-fix race repetitions, the app package suite and vet pass. This is a test-fixture defect, not evidence that rejected preparation mutates history.
+
+## BUG-147: Switching chats strands retained queue work
+
+- **Status:** Resolved (verified)
+- **Surface:** Queue review and session transitions
+- **Evidence:** Source review identifies enqueue → cancel → retained review → session switch: core review state remains and blocks new prompts, while Web clears the old queue projection/token. A focused Web test also reproduced rejected ordinary Prompt resetting root state before the core rejection, stranding the same discard authority. The user can no longer remove retained items through their original authority.
+- **Remediation:** Reject session/branch transitions before mutation while controlled pending or review work remains, preserving accessible explicit review/removal. Do not silently discard the projection or retarget retained requests into another session.
+- **Verification:** Focused core/Web transition and rejected-Prompt authority tests pass. Actual-worker Stop/failure retention, rejected session creation, explicit removal and fresh-prompt checks pass. Final full Go/vet and broad internal/CLI/public-package race checks pass.
+
+## BUG-148: Queue UI retained stale root rows and skipped fresh validation
+
+- **Status:** Resolved (verified)
+- **Surface:** Browser queue projection and local admission controls
+- **Evidence:** The initial native matrix reported 820 passing assertions and 16 failures across four reports. Root-token rotation with a reset public queue revision retained an old pending row; same-token/revision snapshots skipped fresh validation for duplicate IDs, unsupported item states and updated capacity. These were projection/admission-attempt defects; no backend root or CAS boundary bypass was demonstrated.
+- **Remediation:** Treat public queue revisions as token-scoped, retire old-root acknowledgments, and validate each newly received queue object and its bounds before enabling actions. Keep whole-snapshot revision ordering independent from per-queue control revisions.
+- **Verification:** Final independent native Chrome matrix passes 1,124 assertions across four reports (320/1280, dark/light), including all four original cases and final starting/uncertain states. Existing Edit, Regenerate, Stop, tools, permissions and streaming suites pass; the layout matrix passes 27,298 assertions across 1,932 reports. Evidence: `dist/queue-next-evidence/` and `dist/queue-next-final-layout/`.
+
+## BUG-152: Branch-restore mode test races an empty automatic worker
+
+- **Status:** Resolved (verified; fixture synchronization only)
+- **Evidence:** `go test ./internal/app -run '^TestBranchRestoreTargetModeIsBoundAndAppliedWithoutExecution$' -count=30` reproduced intermittent failures at `branch_restore_test.go:356`: `agent: branch restore requires an idle agent`. Both stores can fail; SQLite reproduced frequently.
+- **Cause:** The fixture switches to Default mode immediately before restore preparation. Legacy `SetMode(Default)` schedules `ContinueGoal`, which briefly owns `autoRunning` even when no goal exists. The new restore admission correctly rejects that temporary worker instead of preempting it.
+- **Impact:** Nondeterministic verification failure; the rejected restore does not mutate the active version. A single full-suite rerun can pass and does not establish stability.
+- **Remediation:** The version-restore fixture explicitly calls `Agent.WaitGoal(t.Context())` after changing to Default mode, joining the legacy automatic worker before preparation. Strict restore admission and explicit goal-run ownership remain unchanged. Avoiding empty legacy workers would be a separate behavior change.
+- **Verification:** After the fixture-only synchronization fix, `go test ./internal/app -run '^TestBranchRestoreTargetModeIsBoundAndAppliedWithoutExecution$' -count=50` passed (1.592s), and `go test -race ./internal/app -run '^TestBranchRestoreTargetModeIsBoundAndAppliedWithoutExecution$' -count=10` passed (3.838s). Both commands exercise Memory and SQLite cases.

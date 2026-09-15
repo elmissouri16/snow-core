@@ -445,15 +445,15 @@ func (b *eventBus) Publish(ev protocol.AgentEvent) {
 		removeAt := -1
 		for i, item := range b.items {
 			queued, ok := item.(protocol.AgentEvent)
-			if ok && coalescibleBusEvent(queued.Type) {
+			if ok && queued.QueueControl == nil && coalescibleBusEvent(queued.Type) {
 				removeAt = i
 				break
 			}
 		}
-		if removeAt < 0 && protectedBusEvent(copyEvent.Type) {
+		if removeAt < 0 && (copyEvent.QueueControl != nil || protectedBusEvent(copyEvent.Type)) {
 			for i, item := range b.items {
 				queued, ok := item.(protocol.AgentEvent)
-				if ok && !protectedBusEvent(queued.Type) {
+				if ok && queued.QueueControl == nil && !protectedBusEvent(queued.Type) {
 					removeAt = i
 					break
 				}
@@ -468,7 +468,7 @@ func (b *eventBus) Publish(ev protocol.AgentEvent) {
 			b.mu.Unlock()
 			return
 		}
-		if !protectedBusEvent(copyEvent.Type) {
+		if copyEvent.QueueControl == nil && !protectedBusEvent(copyEvent.Type) {
 			b.mu.Unlock()
 			return
 		}

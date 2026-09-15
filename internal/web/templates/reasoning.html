@@ -1,0 +1,22 @@
+{{define "reasoning"}}
+<div data-react-live-panel="reasoning" class="react-live-panel">
+<button type="button" class="quiet" data-reasoning-open aria-haspopup="dialog" aria-controls="reasoning-dialog" disabled>Reasoning settings…</button>
+<dialog id="reasoning-dialog" class="reasoning-dialog runtime-dialog" aria-labelledby="reasoning-heading" aria-describedby="reasoning-boundary">
+  <div class="dialog-heading"><h2 id="reasoning-heading">Thinking &amp; response</h2><button type="button" class="quiet" data-reasoning-refresh>Refresh settings</button><button type="button" class="quiet icon-button" data-reasoning-close aria-label="Close reasoning" title="Close">{{template "icon-close"}}</button></div><div class="runtime-dialog-body">
+  <p id="reasoning-boundary" class="fine">Inspection does not send a prompt. Available choices come from the worker’s model capabilities, not a model-name guess. Settings changes require an idle session without active goals or pending/review queue items.</p>
+  <p data-reasoning-notice class="fine" role="status" aria-live="polite">Refresh to inspect the current session.</p>
+  <section aria-labelledby="reasoning-current-heading"><h3 id="reasoning-current-heading">Current session — effective values</h3>
+    <dl class="reasoning-facts"><dt>Project / session</dt><dd data-reasoning-identity>Not inspected</dd><dt>Model / permissions</dt><dd data-reasoning-authority>Not inspected</dd><dt>Collaboration mode</dt><dd data-reasoning-mode>Not inspected</dd><dt>Thinking</dt><dd data-reasoning-thinking>Not inspected</dd><dt>Reasoning summary</dt><dd data-reasoning-summary>Not inspected</dd><dt>Text verbosity</dt><dd data-reasoning-verbosity>Not inspected</dd></dl>
+    <p class="fine">These are effective runtime values, not saved defaults. Changes apply only to this runtime: no host or project configuration is written. Default and Plan retain independent thinking preferences. These overrides are not saved as configuration or new session metadata.</p>
+  </section>
+  <section aria-labelledby="reasoning-session-heading"><h3 id="reasoning-session-heading">Update this session’s runtime</h3>
+    <p class="fine">Only the selected preference is changed; other response preferences, model selection, permissions and extension settings are untouched. Thinking changes only the current collaboration mode’s preference. No prompt or goal starts.</p>
+    <label for="reasoning-field">Preference</label><select id="reasoning-field" data-reasoning-field disabled><option value="">Refresh to load supported preferences</option></select>
+    <label for="reasoning-value">New value</label><select id="reasoning-value" data-reasoning-value disabled></select>
+    <div class="dialog-actions"><button type="button" class="button" data-reasoning-review disabled>Review session update…</button></div>
+  </section>
+  <section data-reasoning-confirmation class="reasoning-confirmation" aria-labelledby="reasoning-confirm-heading" hidden><h3 id="reasoning-confirm-heading">Confirm this session-only update?</h3><p data-reasoning-confirm-target></p><label class="reasoning-consent"><input type="checkbox" data-reasoning-consent> I confirm the displayed project, session, mode, model, permissions, branch and session-only scope.</label><div class="dialog-actions"><button type="button" class="quiet" data-reasoning-cancel>Cancel</button><button type="button" class="button primary" data-reasoning-confirm disabled>Apply session-only update</button></div></section>
+</div></dialog>
+
+</div>
+{{end}}

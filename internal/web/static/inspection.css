@@ -1,0 +1,148 @@
+/* Read-only adaptation of Harness FilesBody, DirectoryBrowser and ToolRow.
+ * Uses Snow's shared theme tokens; load after harness.css and scroll.css.
+ * No editor, mutation, private trajectory or progress affordances implied. */
+.project-inspector:not([hidden]) {
+  display: flex; flex-direction: column; flex: 0 0 340px; width: 340px;
+  min-height: 0; min-width: 0; padding: 0; overflow: hidden;
+  border-left: 1px solid var(--line); background: var(--sidebar);
+  font-size: 13px; line-height: 1.5;
+}
+.project-inspector > .section-heading {
+  flex: none; min-height: 38px; margin: 0; padding: 4px 8px 4px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.inspection-heading { font-size: 13px; font-weight: 500; }
+.inspection-icon { display: block; flex: none; width: 16px; height: 16px; color: var(--muted); }
+.project-inspector > .section-heading button, .inspection-up {
+  width: 28px; min-height: 28px; height: 28px; padding: 5px; border: 0; border-radius: 50%;
+}
+.project-inspector .inspector-tabs { display: flex; flex: none; gap: 4px; margin: 0; padding: 0 8px; border-bottom: 1px solid var(--line); }
+.project-inspector .inspector-tabs button {
+  flex: 1; min-height: 38px; margin: 0; padding: 6px 8px; border: 0;
+  border-radius: 6px 6px 0 0; background: transparent; color: var(--muted); font-size: 13px;
+}
+.project-inspector .inspector-tabs button[aria-selected=true] { color: var(--text); background: var(--raised); box-shadow: inset 0 -2px var(--accent); }
+.project-inspector .inspection-boundary { flex: none; margin: 0; padding: 5px 16px; font-size: 10px; line-height: 1.5; }
+.project-inspector [role=tabpanel] {
+  flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain;
+  scrollbar-gutter: stable; scrollbar-width: thin; padding: 0 10px 16px;
+}
+.project-inspector :focus-visible { outline-offset: -2px; }
+.project-inspector h2 { font-size: 13px; font-weight: 500; line-height: 20px; letter-spacing: 0; margin: 0; }
+.project-inspector .inspection-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 38px; margin: 0;
+}
+.inspection-toolbar > button { flex: none; min-height: 28px; padding: 4px 6px; font-size: 12px; gap: 5px; }
+.project-inspector .inspection-location { justify-content: flex-start; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.inspection-breadcrumbs { flex: 1; min-width: 0; display: flex; gap: 4px; align-items: center; overflow-x: auto; scrollbar-width: thin; white-space: nowrap; }
+.inspection-breadcrumbs .inspection-crumb { flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; display: block; min-height: 28px; padding: 4px 3px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.inspection-breadcrumbs .inspection-crumb[aria-current] { color: var(--text); opacity: 1; cursor: default; }
+.inspection-crumb-separator { flex: none; color: var(--muted); }
+.project-inspector [role=status], .project-inspector [role=alert], .project-inspector [role=tabpanel] > .fine { margin: 8px 4px; font-size: 12px; line-height: 1.6; }
+.project-inspector [role=status]:empty { display: none; }
+.project-inspector [role=status][data-state=loading]::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--accent); }
+.project-inspector [role=alert] { padding: 8px; border-left: 2px solid var(--danger); border-radius: 3px; background: color-mix(in srgb, var(--danger) 7%, transparent); }
+.project-inspector .inspection-list { display: block; list-style: none; padding: 0; margin: 8px 0; }
+.project-inspector .inspection-list li { padding: 0; margin: 0; }
+.project-inspector .inspection-list button {
+  display: flex; align-items: center; justify-content: flex-start; gap: 6px;
+  width: 100%; min-height: 32px; padding: 5px 8px; border: 0; border-radius: 10px;
+  color: var(--text); background: transparent; text-align: left; font: inherit;
+}
+.project-inspector .inspection-list button:hover { background: var(--raised); }
+.project-inspector .inspection-list button[aria-current=true] { background: var(--accent-soft); box-shadow: inset 2px 0 var(--accent); }
+.project-inspector .inspection-list button[aria-busy=true] { background: var(--raised); }
+.project-inspector .inspection-list[aria-busy=true] { opacity: .65; }
+.inspection-entry-name, .inspection-path { display: flex; align-items: baseline; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+.inspection-directory { flex: 0 100000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.inspection-basename { display: inline-flex; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.inspection-stem { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inspection-extension { flex: none; max-width: 5em; overflow: hidden; text-overflow: ellipsis; }
+.project-inspector .inspection-entry-kind { flex: 0 0 auto; max-width: 38%; font-size: 10px; line-height: 1.5; color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
+.project-inspector [data-files-more] { width: 100%; margin-top: 4px; font-size: 12px; }
+.project-inspector .inspection-preview { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--line); }
+.inspection-preview-heading { margin-bottom: 5px; }
+.project-inspector .inspection-preview h3 { font-size: 12px; font-weight: 500; line-height: 20px; letter-spacing: 0; margin: 0 0 4px; }
+.project-inspector .inspection-preview p { margin: 0 0 10px; font-size: 11px; }
+.project-inspector .inspection-code {
+  max-height: none; max-width: 100%; margin: 0; padding: 10px 0;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  font-size: 12px; line-height: 20px; white-space: pre; overflow: auto; tab-size: 4;
+}
+.project-inspector [data-file-content] { padding: 10px; }
+.inspection-diff-line { display: block; min-width: max-content; min-height: 20px; padding: 0 10px; }
+.inspection-diff-added { color: var(--success); background: color-mix(in srgb, var(--success) 9%, transparent); }
+.inspection-diff-removed { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.inspection-diff-hunk { color: var(--accent); background: var(--accent-soft); }
+.inspection-diff-meta { color: var(--muted); }
+.project-inspector .inspection-project-name { margin: 12px 4px; overflow-wrap: anywhere; }
+.project-inspector dl { margin: 12px 4px; }
+.project-inspector dl > div { margin: 0; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.project-inspector dt { font-size: 11px; color: var(--muted); }
+.project-inspector dd { margin: 4px 0 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.project-inspector .remove-project { margin: 20px 4px 0; }
+.project-inspector .remove-project summary { padding: 5px 0; font-size: 12px; color: var(--muted); cursor: pointer; }
+.project-inspector .remove-project p { margin: 8px 0; }
+.project-inspector .remove-project form { display: flex; flex-direction: column; gap: 8px; }
+/* One compact public disclosure row, rather than a second message-card stack.
+ * Raw arguments and private trajectory data are deliberately absent. */
+.tool-timeline { margin: 20px 0 8px; }
+.tool-timeline .section-heading { margin-bottom: 8px; }
+/* Event-step groups are transcript siblings, not assistant message bubbles. */
+.live-transcript > .runtime-tool-group { width: 100%; max-width: none; margin: 0; min-width: 0; }
+.runtime-tool-group > .activity-list { gap: 2px; }
+.activity-provenance { margin-bottom: 4px; color: var(--muted); font-size: 11px; line-height: 18px; }
+.tool-timeline .activity-list { gap: 2px; }
+/* The live ID is included in :is so these shared rules also override the
+ * older saved-message/live styles without separate, drifting row layouts. */
+:is(#live-activities, .tool-timeline) .tool-activity { min-width: 0; border: 0; border-radius: 0; background: transparent; overflow: hidden; }
+:is(#live-activities, .tool-timeline) .tool-activity > summary {
+  display: flex; flex-wrap: nowrap; align-items: center; gap: 0; height: 24px;
+  min-height: 24px; min-width: 0; padding: 0; overflow: hidden;
+  font-size: 13px; line-height: 24px; list-style: none; cursor: pointer;
+  color: var(--muted);
+}
+.tool-activity > summary::-webkit-details-marker { display: none; }
+:is(#live-activities, .tool-timeline) .tool-activity > summary::after,
+:is(#live-activities, .tool-timeline) .activity-tool::before { content: none; }
+:is(#live-activities, .tool-timeline) .activity-leading { position: relative; display: flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; margin-right: 6px; }
+:is(#live-activities, .tool-timeline) .activity-leading .inspection-icon { width: 14px; height: 14px; }
+:is(#live-activities, .tool-timeline) .activity-chevron { position: absolute; opacity: 0; }
+:is(#live-activities, .tool-timeline) .tool-activity:not(.activity-no-output) > summary:is(:hover, :focus-visible) .activity-kind,
+:is(#live-activities, .tool-timeline) .tool-activity[open] .activity-kind { opacity: 0; }
+:is(#live-activities, .tool-timeline) .tool-activity:not(.activity-no-output) > summary:is(:hover, :focus-visible) .activity-chevron,
+:is(#live-activities, .tool-timeline) .tool-activity[open] .activity-chevron { opacity: 1; }
+:is(#live-activities, .tool-timeline) .tool-activity[open] .activity-chevron { transform: rotate(90deg); }
+:is(#live-activities, .tool-timeline) .activity-tool { flex: 0 1 auto; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; font-family: inherit; font-size: 13px; font-weight: 400; }
+:is(#live-activities, .tool-timeline) summary:has(.activity-summary:not([hidden])) .activity-tool { max-width: 45%; }
+:is(#live-activities, .tool-timeline) .activity-separator { flex: none; width: 2px; height: 2px; margin: 0 8px; border-radius: 50%; background: var(--muted); }
+:is(#live-activities, .tool-timeline) .activity-summary { display: block; flex: 1 1 auto; min-width: 0; padding: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 13px; }
+:is(#live-activities, .tool-timeline) .activity-status { flex: none; margin-left: 8px; border: 0; padding: 0; font-size: 11px; line-height: 20px; white-space: nowrap; color: var(--muted); }
+/* Successful outcomes remain in the accessibility tree, without a repeated
+ * Completed badge. Unknown, rejected, running and failed remain visible. */
+:is(#live-activities, .tool-timeline) .activity-status-quiet { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+:is(#live-activities, .tool-timeline) .activity-summary[hidden],
+:is(#live-activities, .tool-timeline) .activity-separator[hidden] { display: none; }
+:is(#live-activities, .tool-timeline) .tool-activity.activity-no-output > summary { cursor: default; }
+:is(#live-activities, .tool-timeline) .tool-activity > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+:is(#live-activities, .tool-timeline) .activity-body { min-width: 0; margin: 4px 0 8px 22px; padding: 0; border: 0; }
+:is(#live-activities, .tool-timeline) .activity-output { max-width: 100%; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 12px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: 320px; }
+:is(#live-activities, .tool-timeline) .activity-truncated { margin: 6px 0 0; }
+:is(#live-activities, .tool-timeline) .activity-error .activity-summary,
+:is(#live-activities, .tool-timeline) .activity-error .activity-status { color: var(--danger); }
+:is(#live-activities, .tool-timeline) .tool-activity[data-status=running] .activity-status,
+:is(#live-activities, .tool-timeline) .tool-activity[data-status=permission] .activity-status { color: var(--accent); }
+@media (min-width: 768px) and (max-width: 1100px) {
+  .project-layout:has(.project-inspector:not([hidden])) { flex-direction: column; overflow: hidden; min-height: 0; }
+  .project-layout:has(.project-inspector:not([hidden])) .conversation-pane { flex: 1 1 55%; min-height: 0; overflow: hidden; }
+  .project-layout:has(.project-inspector:not([hidden])) .project-inspector { flex: 0 1 45%; width: 100%; min-height: 0; border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 767px) {
+  .project-inspector:not([hidden]) { position: fixed; inset: 48px 0 auto; width: 100%; height: max(0px, calc(min(100dvh, var(--snow-visual-height, 100dvh)) - 48px)); padding: 0; z-index: 15; border-left: 0; box-shadow: var(--shadow); }
+  .project-inspector [role=tabpanel] { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+}
+@media (max-height: 420px) {
+  .project-inspector > .section-heading { min-height: 30px; padding-top: 1px; padding-bottom: 1px; }
+  .project-inspector .inspector-tabs button { min-height: 30px; padding-top: 3px; padding-bottom: 3px; }
+  .project-inspector .inspection-boundary { padding-top: 2px; padding-bottom: 2px; }
+}

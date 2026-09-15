@@ -1,0 +1,19 @@
+{{define "manager-activity"}}
+<div data-react-page="activity" data-react-props="{{activityReactProps .RegistryEnabled .Error}}">
+<section class="manager-activity" data-manager-activity aria-labelledby="manager-activity-title">
+  <header class="workspace-heading"><div><span class="eyebrow">ACROSS YOUR PROJECTS</span><h1 id="manager-activity-title">Activity &amp; attention</h1></div><span class="pill">Read-only</span></header>
+  <p class="manager-activity-intro">See what is running on this host and what needs your attention. Open the exact conversation to review an approval, answer a question, stop work, or inspect retained queue items.</p>
+  <div class="manager-activity-connection"><p data-manager-activity-fresh role="status">Connecting this browser to the activity summary…</p><button type="button" class="quiet" data-manager-activity-refresh disabled>Refresh summary</button></div>
+  <p class="fine" data-manager-activity-time></p>
+  <p class="manager-activity-note fine">Host-running is not browser-connected. Leaving this page or losing the browser connection does not stop admitted work. Refreshing only reads current state; it never activates workers or replays work.</p>
+  {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+  {{if not .RegistryEnabled}}<p class="error">The project registry is unavailable. Activity cannot be loaded.</p>{{end}}
+  <div class="manager-activity-counts" data-manager-activity-counts aria-label="Project activity counts"></div>
+  <h2 class="manager-activity-projects-title">Registered projects</h2>
+  <p data-manager-activity-empty hidden>No projects registered yet. <a class="text-link" href="/?view=projects">Choose a host folder in Projects</a> to get started. No agent starts until you explicitly activate it.</p>
+  <div class="manager-activity-cards" data-manager-activity-cards></div>
+  <a class="button" href="/login" data-manager-activity-login hidden>Pair this browser again</a>
+  <noscript><p>Activity summaries require JavaScript. You can still <a class="text-link" href="/?view=projects">open Projects</a> and review individual conversations. No work has been started.</p></noscript>
+</section>
+</div>
+{{end}}

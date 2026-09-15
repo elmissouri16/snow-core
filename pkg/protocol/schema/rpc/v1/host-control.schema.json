@@ -1,0 +1,810 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/host-control.schema.json",
+  "title": "Snow host control",
+  "$defs": {
+    "defaults_getParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "global"
+            },
+            "cwd": {
+              "const": ""
+            }
+          },
+          "required": [
+            "scope"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "project"
+            },
+            "cwd": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "scope",
+            "cwd"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "defaults_updateParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "global"
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "global": {
+              "type": "object",
+              "properties": {
+                "provider_model": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "set"
+                        },
+                        "value": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "model": {
+                              "type": "string",
+                              "minLength": 0,
+                              "maxLength": 256
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "model"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "reset"
+                        }
+                      },
+                      "required": [
+                        "op"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "thinking": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "set"
+                        },
+                        "value": {
+                          "enum": [
+                            "off",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "ultra"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "reset"
+                        }
+                      },
+                      "required": [
+                        "op"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "reasoning_summary": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "set"
+                        },
+                        "value": {
+                          "enum": [
+                            "off",
+                            "auto",
+                            "concise",
+                            "detailed"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "reset"
+                        }
+                      },
+                      "required": [
+                        "op"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "text_verbosity": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "set"
+                        },
+                        "value": {
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "reset"
+                        }
+                      },
+                      "required": [
+                        "op"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "cwd": {
+              "const": ""
+            }
+          },
+          "required": [
+            "scope",
+            "revision",
+            "global"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "project"
+            },
+            "cwd": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "project": {
+              "type": "object",
+              "properties": {
+                "provider_model": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "set"
+                        },
+                        "value": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "model": {
+                              "type": "string",
+                              "minLength": 0,
+                              "maxLength": 256
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "model"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "reset"
+                        }
+                      },
+                      "required": [
+                        "op"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "thinking": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "set"
+                        },
+                        "value": {
+                          "enum": [
+                            "off",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "ultra"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "const": "reset"
+                        }
+                      },
+                      "required": [
+                        "op"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "scope",
+            "cwd",
+            "revision",
+            "project"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "defaults": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "global"
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "applies_to": {
+              "const": "future_runtime"
+            },
+            "global": {
+              "type": "object",
+              "properties": {
+                "provider_model": {
+                  "type": "object",
+                  "properties": {
+                    "explicit": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "minLength": 0,
+                              "maxLength": 128
+                            },
+                            "model": {
+                              "type": "string",
+                              "minLength": 0,
+                              "maxLength": 256
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "model"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "effective": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 0,
+                          "maxLength": 256
+                        }
+                      },
+                      "required": [
+                        "provider",
+                        "model"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "source": {
+                      "enum": [
+                        "builtin",
+                        "global",
+                        "project"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "explicit",
+                    "effective",
+                    "source"
+                  ],
+                  "additionalProperties": false
+                },
+                "thinking": {
+                  "type": "object",
+                  "properties": {
+                    "explicit": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "off",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "ultra"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "effective": {
+                      "enum": [
+                        "off",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "ultra"
+                      ]
+                    },
+                    "source": {
+                      "enum": [
+                        "builtin",
+                        "global",
+                        "project"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "explicit",
+                    "effective",
+                    "source"
+                  ],
+                  "additionalProperties": false
+                },
+                "reasoning_summary": {
+                  "type": "object",
+                  "properties": {
+                    "explicit": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "off",
+                            "auto",
+                            "concise",
+                            "detailed"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "effective": {
+                      "enum": [
+                        "off",
+                        "auto",
+                        "concise",
+                        "detailed"
+                      ]
+                    },
+                    "source": {
+                      "enum": [
+                        "builtin",
+                        "global",
+                        "project"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "explicit",
+                    "effective",
+                    "source"
+                  ],
+                  "additionalProperties": false
+                },
+                "text_verbosity": {
+                  "type": "object",
+                  "properties": {
+                    "explicit": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "effective": {
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high"
+                      ]
+                    },
+                    "source": {
+                      "enum": [
+                        "builtin",
+                        "global",
+                        "project"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "explicit",
+                    "effective",
+                    "source"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "provider_model",
+                "thinking",
+                "reasoning_summary",
+                "text_verbosity"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "scope",
+            "revision",
+            "applies_to",
+            "global"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "project"
+            },
+            "cwd": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "applies_to": {
+              "const": "future_runtime"
+            },
+            "project": {
+              "type": "object",
+              "properties": {
+                "provider_model": {
+                  "type": "object",
+                  "properties": {
+                    "explicit": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "minLength": 0,
+                              "maxLength": 128
+                            },
+                            "model": {
+                              "type": "string",
+                              "minLength": 0,
+                              "maxLength": 256
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "model"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "effective": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 0,
+                          "maxLength": 256
+                        }
+                      },
+                      "required": [
+                        "provider",
+                        "model"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "source": {
+                      "enum": [
+                        "builtin",
+                        "global",
+                        "project"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "explicit",
+                    "effective",
+                    "source"
+                  ],
+                  "additionalProperties": false
+                },
+                "thinking": {
+                  "type": "object",
+                  "properties": {
+                    "explicit": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "off",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "ultra"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "effective": {
+                      "enum": [
+                        "off",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "ultra"
+                      ]
+                    },
+                    "source": {
+                      "enum": [
+                        "builtin",
+                        "global",
+                        "project"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "explicit",
+                    "effective",
+                    "source"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "provider_model",
+                "thinking"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "scope",
+            "cwd",
+            "revision",
+            "applies_to",
+            "project"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "provider_status": {
+      "type": "object",
+      "properties": {
+        "provider_id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "state": {
+          "enum": [
+            "configured",
+            "expired",
+            "unavailable"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "credential_missing",
+            "auth_store_unavailable",
+            "anonymous_access",
+            "credential_invalid",
+            "credential_expired",
+            "credential_present"
+          ]
+        },
+        "checked_locally": {
+          "const": true
+        }
+      },
+      "required": [
+        "provider_id",
+        "state",
+        "reason",
+        "checked_locally"
+      ],
+      "additionalProperties": false
+    },
+    "provider_status_listParams": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "provider_status_list": {
+      "type": "object",
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/provider_status"
+          }
+        },
+        "checked_locally": {
+          "const": true
+        }
+      },
+      "required": [
+        "providers",
+        "checked_locally"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

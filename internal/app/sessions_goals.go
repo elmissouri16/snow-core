@@ -11,12 +11,12 @@ import (
 	"github.com/elmissouri16/snow-core/internal/artifact"
 	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/internal/config"
-	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
 	"github.com/elmissouri16/snow-core/internal/permission"
 	managedprocess "github.com/elmissouri16/snow-core/internal/process"
 	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
 	"github.com/elmissouri16/snow-core/internal/session"
+	"github.com/elmissouri16/snow-core/internal/sessiondelete"
 	"github.com/elmissouri16/snow-core/internal/worktree"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -58,6 +58,9 @@ func (a *App) bindPermissionSession(st session.Store) error {
 // SetSession switches the active durable conversation store. The old store is
 // closed only after the agent accepts the new store.
 func (a *App) SetSession(st session.Store) error {
+	if err := a.Agent.QueueControlTransitionReady(); err != nil {
+		return err
+	}
 	var notification *protocol.PluginSessionChanged
 	defer a.publishPluginSessionChange(&notification)
 	unlockPlugins, pluginErr := a.lockPluginSession()
@@ -72,6 +75,9 @@ func (a *App) SetSession(st session.Store) error {
 	defer a.stateMu.Unlock()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
+	if err := a.Agent.QueueControlTransitionReady(); err != nil {
+		return err
+	}
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return errors.New("app: cannot switch session while subagents are active")
 	}
@@ -163,6 +169,9 @@ func (a *App) SetSession(st session.Store) error {
 }
 
 func (a *App) SelectBranch(branchID string) error {
+	if err := a.Agent.QueueControlTransitionReady(); err != nil {
+		return err
+	}
 	var notification *protocol.PluginSessionChanged
 	defer a.publishPluginSessionChange(&notification)
 	unlockPlugins, pluginErr := a.lockPluginSession()
@@ -172,6 +181,9 @@ func (a *App) SelectBranch(branchID string) error {
 	defer unlockPlugins()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
+	if err := a.Agent.QueueControlTransitionReady(); err != nil {
+		return err
+	}
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return errors.New("app: cannot switch branch while subagents are active")
 	}
@@ -198,6 +210,9 @@ func (a *App) ForkBranch(fromEntryID string) (protocol.SessionBranch, error) {
 }
 
 func (a *App) ForkBranchWithOptions(opts protocol.BranchForkOptions) (protocol.SessionBranch, error) {
+	if err := a.Agent.QueueControlTransitionReady(); err != nil {
+		return protocol.SessionBranch{}, err
+	}
 	var notification *protocol.PluginSessionChanged
 	defer a.publishPluginSessionChange(&notification)
 	unlockPlugins, pluginErr := a.lockPluginSession()
@@ -207,6 +222,9 @@ func (a *App) ForkBranchWithOptions(opts protocol.BranchForkOptions) (protocol.S
 	defer unlockPlugins()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
+	if err := a.Agent.QueueControlTransitionReady(); err != nil {
+		return protocol.SessionBranch{}, err
+	}
 	if a.Subagents != nil && a.Subagents.HasActive() {
 		return protocol.SessionBranch{}, errors.New("app: cannot fork branch while subagents are active")
 	}
@@ -410,30 +428,12 @@ func (a *App) DeleteSession(path, expectedID string) error {
 	if err != nil {
 		return err
 	}
-	ownedIDs, err := index.DeleteWithIDs(a.cwd, path, expectedID)
-	if err != nil && len(ownedIDs) == 0 {
-		return err
+	deleter, _ := a.artifacts.(artifact.SessionDeleter)
+	err = sessiondelete.Delete(context.Background(), index, a.cwd, path, expectedID, config.GlobalDir(), deleter)
+	if cleanup, ok := errors.AsType[*sessiondelete.CleanupError](err); ok {
+		return &SessionDeleteCleanupError{Err: cleanup.Err}
 	}
-	var cleanupErrs []error
-	if err != nil {
-		cleanupErrs = append(cleanupErrs, err)
-	}
-	if deleter, ok := a.artifacts.(artifact.SessionDeleter); ok {
-		for _, id := range ownedIDs {
-			if err := deleter.DeleteSession(context.Background(), id); err != nil {
-				cleanupErrs = append(cleanupErrs, err)
-			}
-		}
-	}
-	for _, id := range ownedIDs {
-		if err := goalpkg.DeleteSessionData(config.GlobalDir(), id); err != nil {
-			cleanupErrs = append(cleanupErrs, err)
-		}
-	}
-	if cleanupErr := errors.Join(cleanupErrs...); cleanupErr != nil {
-		return &SessionDeleteCleanupError{Err: cleanupErr}
-	}
-	return nil
+	return err
 }
 
 func indexedSessionPath(index *session.FileIndex, cwd, path, expectedID string) (string, error) {
@@ -557,6 +557,9 @@ func (a *App) CreateGoal(objective string, budget *int64, replace bool) (*protoc
 	defer a.stateMu.Unlock()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
+	if err := a.Agent.ManagedGoalMutationAllowedAdmitted(); err != nil {
+		return nil, err
+	}
 	if err := a.requireGoalCapabilities(); err != nil {
 		return nil, err
 	}
@@ -585,6 +588,9 @@ func (a *App) EditGoal(objective string) (*protocol.ThreadGoal, error) {
 	defer a.stateMu.Unlock()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
+	if err := a.Agent.ManagedGoalMutationAllowedAdmitted(); err != nil {
+		return nil, err
+	}
 	g, e := a.Goal.Get()
 	if e != nil {
 		return nil, e
@@ -627,6 +633,9 @@ func (a *App) PauseGoal() (*protocol.ThreadGoal, error) {
 	defer a.stateMu.Unlock()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
+	if err := a.Agent.ManagedGoalMutationAllowedAdmitted(); err != nil {
+		return nil, err
+	}
 	if err := a.Agent.StopGoal(context.Background(), true); err != nil {
 		return nil, err
 	}
@@ -638,6 +647,9 @@ func (a *App) ResumeGoal() (*protocol.ThreadGoal, error) {
 	defer a.stateMu.Unlock()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
+	if err := a.Agent.ManagedGoalMutationAllowedAdmitted(); err != nil {
+		return nil, err
+	}
 	g, err := a.Goal.Get()
 	if err != nil {
 		return nil, err
@@ -675,6 +687,9 @@ func (a *App) ClearGoal() error {
 	defer a.stateMu.Unlock()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
+	if err := a.Agent.ManagedGoalMutationAllowedAdmitted(); err != nil {
+		return err
+	}
 	if err := a.Agent.StopGoal(context.Background(), true); err != nil {
 		return err
 	}
@@ -694,6 +709,9 @@ func (a *App) ContinueGoal() error {
 	defer a.stateMu.Unlock()
 	unlockAdmission := a.Agent.LockAdmission()
 	defer unlockAdmission()
+	if err := a.Agent.ManagedGoalMutationAllowedAdmitted(); err != nil {
+		return err
+	}
 	if err := a.requireGoalCapabilities(); err != nil {
 		return err
 	}

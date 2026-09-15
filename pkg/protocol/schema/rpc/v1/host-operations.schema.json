@@ -1,0 +1,317 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/host-operations.schema.json",
+  "title": "Snow host operations",
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        "device": {
+          "type": "string",
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "inode": {
+          "type": "string",
+          "maxLength": 20,
+          "pattern": "^[1-9][0-9]*$"
+        }
+      },
+      "required": [
+        "path",
+        "device",
+        "inode"
+      ],
+      "additionalProperties": false
+    },
+    "project_prepareParams": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        },
+        "parent": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/"
+            },
+            "device": {
+              "type": "string",
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "inode": {
+              "type": "string",
+              "maxLength": 20,
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          "required": [
+            "path",
+            "device",
+            "inode"
+          ],
+          "additionalProperties": false
+        },
+        "leaf": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+          "not": {
+            "enum": [
+              ".",
+              ".."
+            ]
+          }
+        }
+      },
+      "required": [
+        "operation_id",
+        "parent",
+        "leaf"
+      ],
+      "additionalProperties": false
+    },
+    "project_clone_startParams": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        },
+        "child": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/"
+            },
+            "device": {
+              "type": "string",
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "inode": {
+              "type": "string",
+              "maxLength": 20,
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          "required": [
+            "path",
+            "device",
+            "inode"
+          ],
+          "additionalProperties": false
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^https://[^/?#@\\\\\\s]+/[^?#\\\\\\s]+$"
+        }
+      },
+      "required": [
+        "operation_id",
+        "child",
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "project_cancelParams": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        }
+      },
+      "required": [
+        "operation_id"
+      ],
+      "additionalProperties": false
+    },
+    "prepared": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        },
+        "parent": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/"
+            },
+            "device": {
+              "type": "string",
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "inode": {
+              "type": "string",
+              "maxLength": 20,
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          "required": [
+            "path",
+            "device",
+            "inode"
+          ],
+          "additionalProperties": false
+        },
+        "child": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/"
+            },
+            "device": {
+              "type": "string",
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "inode": {
+              "type": "string",
+              "maxLength": 20,
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          "required": [
+            "path",
+            "device",
+            "inode"
+          ],
+          "additionalProperties": false
+        },
+        "leaf": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+          "not": {
+            "enum": [
+              ".",
+              ".."
+            ]
+          }
+        }
+      },
+      "required": [
+        "operation_id",
+        "parent",
+        "child",
+        "leaf"
+      ],
+      "additionalProperties": false
+    },
+    "canceled": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        }
+      },
+      "required": [
+        "operation_id"
+      ],
+      "additionalProperties": false
+    },
+    "completed": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "project_completed"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        },
+        "child": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/"
+            },
+            "device": {
+              "type": "string",
+              "maxLength": 20,
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "inode": {
+              "type": "string",
+              "maxLength": 20,
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          "required": [
+            "path",
+            "device",
+            "inode"
+          ],
+          "additionalProperties": false
+        },
+        "status": {
+          "enum": [
+            "succeeded",
+            "failed",
+            "canceled",
+            "timed_out",
+            "output_limit",
+            "cleanup_failed"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "operation_id",
+        "child",
+        "status"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

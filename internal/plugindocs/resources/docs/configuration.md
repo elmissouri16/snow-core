@@ -12,6 +12,7 @@ and the supported global/project fields.
 
 - [Paths](#paths)
 - [Precedence](#precedence)
+- [Local web manager settings scopes](#local-web-manager-settings-scopes)
 - [Global config.json](#global-configjson)
 - [Providers](#providers)
 - [TUI](#tui)
@@ -129,6 +130,55 @@ and changes take effect on the next launch.
 
 The SDK intentionally defaults `PermissionMode` to `deny` when omitted. See
 [SDK permissions](sdk.md#handle-permissions-and-input).
+
+## Local web manager settings scopes
+
+The local manager distinguishes three kinds of configuration rather than treating
+all settings as live changes:
+
+| Control | Stored scope | Effect |
+|---|---|---|
+| Global host defaults | Operator `config.json` | Provider/model, thinking, reasoning summary and text verbosity for future workers |
+| Project host defaults | Canonical project entry in global `project_selections` | Provider/model and thinking for future workers targeting that registered project |
+| Current-session reasoning | Active runtime memory only | Capability-supported thinking, reasoning summary or text verbosity for the inspected current session; no config or new session-history metadata write |
+
+Project defaults here are operator-owned selections, **not** expanded authority
+for `<project>/.snow/config.json`. Loading/saving is explicit. The runtime-free
+control startup runs before app/agent/session/provider initialization and does
+not load project extensions, refresh OAuth credentials or perform discovery.
+A bounded local response identifies explicit/effective values, their source and
+a revision; set/reset saves use that revision under the shared config lock,
+preserve unrelated settings and fail closed on conflicts. Defaults apply only
+to **future workers**, not the current worker or a newly created conversation
+inside it. Restart a worker deliberately to use changed defaults.
+
+Current-session reasoning instead requires an idle, fully inspected session,
+branch/tip, provider/model, mode and permission state. Only affirmative local
+model capabilities supply options; unknown support is not permission to offer a
+control. Default and Plan maintain independent thinking preferences. These
+in-memory overrides are not restart-persistent defaults and do not change tool
+permissions or collaboration mode.
+
+Local provider status exposes configured/expired/unavailable metadata. It does
+not establish that credentials or a model work over the network. The optional
+write-only API-key control requires actual direct numeric-loopback HTTPS,
+authentication, exact Origin and CSRF, a five-minute single-use provider
+inspection, and explicit save/replacement confirmation. A metadata revision is
+checked under the same auth-file lock used by legacy auth writers; successful
+writes are atomic and mode 0600. No key export/delete, browser OAuth, automatic
+refresh or provider request is performed. Writes affect future workers only;
+uncertain results require a fresh inspection, never automatic resubmission.
+
+Local TLS is startup configuration, not project/browser-editable configuration:
+`--web-tls-cert` and `--web-tls-key` must both name clean absolute regular PEM
+files, at most 1 MiB each and without symlink components. TLS 1.2 or newer and
+Secure cookies are used. `--web-listen` still requires a numeric loopback address;
+DNS/LAN/proxy listeners, certificate generation and trust installation are not
+provided. Without TLS, use interactive `snow login` on the host for credentials.
+See [the local manager guide](using-snow.md#try-the-local-web-manager-shell) for
+the launch example and security/operation limits. Runtime/configuration CLI
+flags remain rejected in web mode; the allowed local TLS flags are not a way to
+supply arbitrary worker options.
 
 ## Global config.json
 

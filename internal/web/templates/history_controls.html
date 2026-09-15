@@ -1,0 +1,24 @@
+{{define "history-controls"}}{{if .HistoryControlEnabled}}
+<section data-history-controls class="history-controls" aria-labelledby="history-controls-heading" hidden>
+<h3 id="history-controls-heading">Use this saved history</h3>
+<p class="fine">Fork a branch here, create a detached conversation, or rename the selected branch. These are conversation-history actions, not filesystem undo: no workspace files or worktrees are created or restored, and no prompts or tools are replayed.</p>
+<p data-history-notice class="fine" role="status" aria-live="polite"></p>
+<form data-history-form autocomplete="off">
+<label for="history-control-name">New branch or conversation name</label>
+<input id="history-control-name" data-history-name name="history_name_draft" type="text" maxlength="256" autocomplete="off" enterkeyhint="done" placeholder="Name for the selected action" required>
+<p class="fine">Branch names: up to 64 characters. Conversation names: up to 72. Both allow up to 256 UTF-8 bytes; no surrounding spaces or control characters.</p>
+<div class="dialog-actions history-control-actions">
+<button type="button" class="button" data-history-review="history-branch-fork" disabled>Fork branch here…</button>
+<button type="button" class="button" data-history-review="history-session-fork" disabled>Fork detached conversation…</button>
+<button type="button" class="quiet" data-history-review="history-branch-rename" disabled>Rename selected branch…</button>
+</div>
+<section data-history-confirmation class="history-control-confirmation" aria-labelledby="history-confirm-heading" hidden>
+<h4 id="history-confirm-heading">Confirm this history action</h4>
+<p data-history-target></p>
+<p>No workspace files are undone, no tools are replayed, and no message is sent. Forking a branch activates it; forking a detached conversation does not open it. Your unsent composer draft is kept.</p>
+<label class="history-control-consent"><input type="checkbox" data-history-consent> I confirm this action on the exact saved branch and tip shown above.</label>
+<div class="dialog-actions"><button type="button" class="quiet" data-history-cancel>Cancel</button><button type="submit" class="button primary" data-history-confirm disabled>Confirm history action</button></div>
+</section>
+</form>
+</section>
+{{end}}{{end}}

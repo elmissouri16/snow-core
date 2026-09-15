@@ -1,0 +1,29 @@
+{{define "host-settings"}}
+<div data-react-page="host-settings" data-react-props="{{hostSettingsReactProps .CSRF .HostSettingsEnabled .HostAPIKeyEnabled .Projects}}">
+<section class="settings-group host-settings" data-host-settings data-enabled="{{.HostSettingsEnabled}}">
+  <h4>Current session</h4>
+  <p>Host defaults below do not change the active worker or a new conversation created inside that worker. Use the conversation’s reasoning controls for current-session settings.</p>
+  <h4>Host defaults</h4>
+  <p>Changes apply only to future worker activation. Loading uses a short-lived, runtime-free host control worker, not an agent. Availability is checked locally, never verified with a provider network request.</p>
+  <input type="hidden" data-host-csrf value="{{.CSRF}}">
+  <div class="host-settings-target">
+    <label>Defaults scope <select data-host-scope {{if not .HostSettingsEnabled}}disabled{{end}}><option value="global">Global defaults</option><option value="project">Project defaults</option></select></label>
+    <label data-host-project-label hidden>Registered project <select data-host-project {{if not .HostSettingsEnabled}}disabled{{end}}><option value="">Choose a registered project</option>{{range .Projects}}{{if .Available}}<option value="{{.ID}}">{{.Name}}</option>{{end}}{{end}}</select></label>
+    <button type="button" class="button" data-host-load {{if not .HostSettingsEnabled}}disabled{{end}}>Load host settings</button>
+  </div>
+  <p class="fine" data-host-status role="status" aria-live="polite">Not loaded. Opening General does not read host defaults or start a worker.</p>
+  <form data-host-form hidden>
+    <div data-host-fields></div>
+    <button type="submit" class="button primary" data-host-save>Save defaults for future workers</button>
+  </form>
+  <h4>Provider status</h4>
+  <p>Local credential presence or expiry does not establish network access or model availability.</p>
+  <button type="button" class="button" data-host-providers-load {{if not .HostSettingsEnabled}}disabled{{end}}>Load provider status</button>
+  <p data-host-providers-status class="fine" role="status"></p><ul data-host-providers-list></ul>
+  <h4>Connect providers on the Snow host</h4>
+  <p>Do not put passwords or API keys in CLI arguments. In a terminal on the Snow host, run the appropriate interactive login, then check local authentication:</p>
+  <ul class="host-login-instructions"><li><code>snow login opencode-go</code></li><li><code>snow login opencode-zen</code></li><li><code>snow login chatgpt</code></li><li><code>snow login openai-compatible</code></li><li><code>snow auth check</code></li></ul>
+  {{template "host-api-key" .}}
+</section>
+</div>
+{{end}}

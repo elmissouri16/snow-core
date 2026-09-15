@@ -231,11 +231,12 @@ func (a *Agent) SetMode(mode protocol.CollaborationMode) error {
 	// A mode switch is never an implicit abort of an admitted turn.
 	a.mu.RLock()
 	running := a.running
+	ownedGoal := a.goalRun != nil
 	wasAutomatic := a.autoRunning
 	previousMode := a.mode
 	automaticGoalTurn := wasAutomatic && a.turnOrigin == "goal"
 	a.mu.RUnlock()
-	if running && !automaticGoalTurn {
+	if ownedGoal || (running && !automaticGoalTurn) {
 		return errors.New("agent: cannot switch collaboration mode while running")
 	}
 	if parsed != previousMode && a.opts.ModeTransitionGuard != nil {
@@ -263,7 +264,7 @@ func (a *Agent) SetMode(mode protocol.CollaborationMode) error {
 		skillsCleared = cleared
 	}
 	a.mu.Lock()
-	if a.running {
+	if a.running || a.goalRun != nil {
 		a.mu.Unlock()
 		return resumeAfterFailure(errors.New("agent: cannot switch collaboration mode while running"))
 	}
@@ -307,8 +308,13 @@ func (a *Agent) SetThinking(level protocol.ThinkingLevel) error {
 	if err != nil {
 		return err
 	}
+	unlock := a.LockAdmission()
+	defer unlock()
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.goalRun != nil {
+		return errors.New("agent: cannot change thinking while an explicit goal run owns the runtime")
+	}
 	if !a.model.SupportsThinkingLevel(parsed) {
 		return unsupportedThinkingError(a.model, parsed)
 	}
@@ -329,7 +335,13 @@ func (a *Agent) SetReasoningSummary(summary protocol.ReasoningSummary) error {
 	if err != nil {
 		return err
 	}
+	unlock := a.LockAdmission()
+	defer unlock()
 	a.mu.Lock()
+	if a.goalRun != nil {
+		a.mu.Unlock()
+		return errors.New("agent: cannot change request settings while an explicit goal run owns the runtime")
+	}
 	a.opts.ReasoningSummary = parsed
 	a.mu.Unlock()
 	return nil
@@ -348,7 +360,13 @@ func (a *Agent) SetTextVerbosity(verbosity protocol.TextVerbosity) error {
 	if err != nil {
 		return err
 	}
+	unlock := a.LockAdmission()
+	defer unlock()
 	a.mu.Lock()
+	if a.goalRun != nil {
+		a.mu.Unlock()
+		return errors.New("agent: cannot change request settings while an explicit goal run owns the runtime")
+	}
 	a.opts.TextVerbosity = parsed
 	a.mu.Unlock()
 	return nil
@@ -425,9 +443,13 @@ func (a *Agent) setSessionAdmitted(st session.Store, publish bool) error {
 		return err
 	}
 	a.mu.Lock()
-	if a.running {
+	if a.running || a.goalRun != nil {
 		a.mu.Unlock()
 		return errors.New("agent: cannot switch session while running")
+	}
+	if len(a.queueControl.review) > 0 {
+		a.mu.Unlock()
+		return errors.New("agent: discard held queued work before switching session")
 	}
 	mode, err := loadCollaborationMode(st)
 	if err != nil {
@@ -464,7 +486,7 @@ func (a *Agent) SetProvider(p provider.Provider) error {
 	defer unlock()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.running {
+	if a.running || a.goalRun != nil {
 		return errors.New("agent: cannot change provider while running")
 	}
 	a.opts.Provider = p
@@ -490,7 +512,7 @@ func (a *Agent) SetProviderAndModel(p provider.Provider, m protocol.Model) error
 		return err
 	}
 	a.mu.Lock()
-	if a.running {
+	if a.running || a.goalRun != nil {
 		a.mu.Unlock()
 		unlock()
 		return errors.New("agent: cannot change provider and model while running")
@@ -536,7 +558,7 @@ func (a *Agent) SetProviderModelThinking(p provider.Provider, m protocol.Model, 
 		return err
 	}
 	a.mu.Lock()
-	if a.running {
+	if a.running || a.goalRun != nil {
 		a.mu.Unlock()
 		unlock()
 		return errors.New("agent: cannot change provider, model, and thinking while running")
@@ -579,7 +601,7 @@ func (a *Agent) SetModel(m protocol.Model) error {
 		return err
 	}
 	a.mu.Lock()
-	if a.running {
+	if a.running || a.goalRun != nil {
 		a.mu.Unlock()
 		unlock()
 		return errors.New("agent: cannot change model while running")
@@ -687,37 +709,7 @@ func (a *Agent) ClearPendingInputs() protocol.InputQueue {
 }
 
 func (a *Agent) enqueueRootInput(kind protocol.QueuedInputKind, text string) (protocol.QueuedInput, error) {
-	if kind != protocol.QueuedInputSteer && kind != protocol.QueuedInputFollowUp {
-		return protocol.QueuedInput{}, fmt.Errorf("agent: invalid queued input kind %q", kind)
-	}
-	if strings.TrimSpace(text) == "" {
-		return protocol.QueuedInput{}, errors.New("agent: queued input is empty")
-	}
-	if len(text) > maxQueuedInputBytes {
-		return protocol.QueuedInput{}, fmt.Errorf("agent: queued input exceeds %d bytes", maxQueuedInputBytes)
-	}
-	a.queuePublishMu.Lock()
-	defer a.queuePublishMu.Unlock()
-	a.mu.Lock()
-	if a.closed {
-		a.mu.Unlock()
-		return protocol.QueuedInput{}, errors.New("agent: closed")
-	}
-	if !a.running || !a.queueAccepting {
-		a.mu.Unlock()
-		return protocol.QueuedInput{}, ErrNotRunning
-	}
-	if len(a.queuedInputs) >= maxPendingRootInputs {
-		a.mu.Unlock()
-		return protocol.QueuedInput{}, fmt.Errorf("agent: queued input limit %d reached", maxPendingRootInputs)
-	}
-	a.queueSequence++
-	item := protocol.QueuedInput{ID: newID(), Kind: kind, Text: text, Order: a.queueSequence}
-	a.queuedInputs = append(a.queuedInputs, item)
-	snapshot := a.inputQueueLocked()
-	a.mu.Unlock()
-	a.publishInputQueue(snapshot)
-	return item, nil
+	return a.enqueueRootInputBound(kind, text, nil)
 }
 
 func (a *Agent) inputQueueLocked() protocol.InputQueue {
@@ -750,16 +742,19 @@ func (a *Agent) closeInputQueue(clear bool) protocol.InputQueue {
 	a.queuePublishMu.Lock()
 	defer a.queuePublishMu.Unlock()
 	a.mu.Lock()
+	beforeCount := len(a.queuedInputs)
 	a.queueAccepting = false
+	a.holdQueueControlLocked()
 	cleared := protocol.InputQueue{}
 	changed := clear && len(a.queuedInputs) > 0
 	if changed {
 		cleared = a.inputQueueLocked()
 		a.queuedInputs = nil
+		a.publishDiscardedRootInputsLocked(cleared)
 	}
 	snapshot := a.inputQueueLocked()
 	a.mu.Unlock()
-	if changed {
+	if changed || beforeCount != len(snapshot.Items) {
 		a.publishInputQueue(snapshot)
 	}
 	return cleared
@@ -810,6 +805,9 @@ func (a *Agent) Publish(ev protocol.AgentEvent) { a.publish(ev) }
 func (a *Agent) publish(ev protocol.AgentEvent) {
 	if ev.Agent == nil {
 		a.mu.RLock()
+		if ev.GoalRunID == "" && a.goalRun != nil {
+			ev.GoalRunID = a.goalRun.id
+		}
 		if ev.RootEpoch == 0 {
 			ev.RootEpoch = a.rootEpoch
 		}

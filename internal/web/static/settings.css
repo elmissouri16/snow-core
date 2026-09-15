@@ -1,0 +1,169 @@
+/* Settings composition adapted from Harness SettingsRoot / AppearanceRow.
+ * Copyright (c) 2026 DeepSeek. MIT license; see HARNESS-NOTICE.txt.
+ * Settings, navigation, registration and read-only shell surfaces. */
+.settings-dialog {
+  width: 800px;
+  max-width: calc(100vw - 48px);
+  height: min(800px, calc(100vh - 48px));
+  height: min(800px, calc(100dvh - 48px));
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 32px;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 0 0 .5px #ffffff0f, 0 16px 64px #0003;
+}
+.settings-dialog::backdrop { background: #0000003d; backdrop-filter: blur(3px); }
+.settings-layout { display: flex; height: 100%; }
+.settings-nav { flex: none; display: flex; flex-direction: column; gap: 18px; width: 188px; padding: 22px 12px 0; }
+.settings-nav h2 { padding: 0 12px; margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: 0; }
+.settings-nav-list { display: flex; flex-direction: column; gap: 4px; }
+.settings-nav-list button { justify-content: flex-start; gap: 8px; height: 40px; min-height: 40px; padding: 9px 16px 9px 12px; border: 0; border-radius: 12px; background: transparent; font-size: 14px; line-height: 22px; font-weight: 400; text-align: left; white-space: nowrap; }
+.settings-nav-list button:hover, .settings-nav-list button[aria-current=true] { background: var(--raised); }
+.settings-nav-list .icon { width: 16px; height: 16px; flex: none; }
+.settings-column { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.settings-header { flex: none; display: flex; justify-content: flex-end; height: 54px; padding: 20px 14px 8px 10px; }
+.settings-close { width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 28px; background: transparent; }
+.settings-close .icon { width: 14px; height: 14px; }
+.settings-options { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 24px; }
+.settings-section-title { margin: 0 0 12px; font-size: 16px; line-height: 24px; font-weight: 500; }
+.settings-group { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-bottom: .5px solid var(--line); }
+.settings-group:last-child { border-bottom: 0; }
+.settings-group h4 { margin: 0; font-size: 14px; line-height: 22px; font-weight: 400; }
+.settings-group p { margin: 0; font-size: 13px; line-height: 21px; }
+.settings-group p.fine { font-size: 12px; }
+.settings-appearance { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+.settings-appearance button { flex: 1 1 150px; display: flex; flex-direction: column; gap: 4px; padding: 20px 32px; border: .5px solid var(--line); border-radius: 20px; background: transparent; font-size: 14px; line-height: 22px; font-weight: 400; }
+.settings-appearance button:hover { background: var(--raised); }
+.settings-appearance button[aria-pressed=true] { border-color: #adb2b8; background: var(--raised); }
+.appearance-icon { flex: none; width: 16px; height: 16px; }
+.settings-host { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; color: var(--muted); font-size: 12px; margin-top: 12px; }
+.settings-host .version { margin-left: auto; }
+.settings-workspace-list { display: flex; flex-direction: column; gap: 4px; }
+.settings-workspace-list a { display: flex; gap: 10px; align-items: center; padding: 10px; border-radius: 12px; }
+.settings-workspace-list a:hover { background: var(--raised); }
+.settings-workspace-list a > span { flex: 1; }
+.settings-workspace-list strong, .settings-workspace-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-workspace-list strong { font-weight: 500; }
+.settings-workspace-list small { color: var(--muted); font-size: 12px; }
+.settings-workspace-list .icon { flex: none; width: 16px; height: 16px; }
+.settings-workspace-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0 12px; }
+.settings-dialog .settings-content { max-width: none; padding: 0; }
+.settings-dialog .settings-panel { padding: 16px 0; margin: 0; border: 0; border-bottom: .5px solid var(--line); border-radius: 0; background: transparent; }
+.settings-dialog .settings-panel:last-child { border-bottom: 0; }
+.settings-dialog .settings-panel h2 { font-size: 14px; line-height: 22px; font-weight: 500; }
+.settings-dialog .settings-panel p, .settings-dialog .settings-panel dl { font-size: 13px; }
+.settings-dialog .settings-panel dl > div { display: block; }
+.settings-dialog .settings-panel dd { margin: 4px 0 12px; }
+.sidebar-settings-trigger { display: flex; justify-content: flex-start; gap: 8px; width: 100%; height: 42px; min-height: 42px; padding: 0 8px; border: 0; border-radius: 12px; background: transparent; font-size: 14px; font-weight: 400; }
+.sidebar-settings-trigger:hover { background: var(--raised); }
+.sidebar-utility { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 8px; border-radius: 10px; font-size: 13px; color: var(--muted); }
+.sidebar-utility span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-utility:hover, .sidebar-utility[aria-current=page] { background: var(--raised); color: var(--text); }
+.sidebar-utility .icon { width: 18px; height: 18px; }
+.sidebar .sidebar-heading { height: 32px; min-height: 32px; margin-bottom: 4px; }
+.sidebar .project-link { min-height: 32px; padding: 5px 7px; }
+.shell-session-row { display: flex; align-items: center; border-radius: 10px; }
+.shell-session-row:hover, .shell-session-row:has(a[aria-current=page]) { background: var(--raised); }
+.session-tree .shell-session-row a { flex: 1; height: 34px; min-height: 34px; padding: 6px 8px; font-size: 13px; }
+.shell-session-more { flex: none; width: 28px; height: 28px; min-height: 28px; padding: 0; margin-right: 3px; border-radius: 8px; font-size: 20px; line-height: 1; }
+.session-delete-dialog { max-height: calc(100dvh - 24px); overflow-y: auto; }
+.session-delete-dialog > p, .session-delete-dialog > label { margin: 12px 20px; }
+.session-delete-name { font-weight: 600; overflow-wrap: anywhere; }
+.session-delete-dialog .dialog-actions { display: flex; justify-content: flex-end; padding: 12px 20px; }
+.session-delete-dialog .checkbox-label { display: flex; align-items: flex-start; gap: 8px; }
+@media (min-width: 768px) {
+  .sidebar-collapsed .sidebar-settings-trigger { width: 36px; height: 36px; min-height: 36px; padding: 0; justify-content: center; border-radius: 50%; }
+  .sidebar-collapsed .sidebar-settings-trigger span, .sidebar-collapsed .sidebar-utility span { display: none; }
+  .sidebar-collapsed .sidebar-utility { width: 36px; height: 36px; min-height: 36px; margin: 0 auto 4px; padding: 0; justify-content: center; }
+}
+@media (max-width: 599px) {
+  .settings-layout { flex-direction: column; }
+  .settings-nav { width: 100%; padding: 20px 16px 0; gap: 12px; }
+  .settings-nav h2 { padding-left: 4px; }
+  .settings-nav-list { flex-direction: row; gap: 4px; overflow-x: auto; padding: 2px; }
+  .settings-nav-list button { padding: 9px 10px; flex: none; font-size: 12px; }
+  .settings-nav-list .icon { display: none; }
+  .settings-header { height: 42px; padding: 7px 16px; }
+  .settings-options { padding: 0 18px 24px; }
+  .settings-appearance button { flex-basis: 90px; padding: 16px; }
+  .settings-host .version { width: 100%; margin-left: 0; }
+}
+
+.shell-workspace-menu a { display: flex; align-items: center; gap: 9px; }
+.shell-workspace-menu a > span:last-child { flex: 1; min-width: 0; }
+.shell-workspace-menu strong, .shell-workspace-menu small { display: block; }
+.shell-workspace-menu strong { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-workspace-menu small { color: var(--muted); font-size: 11px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-workspace-menu .icon { flex: none; width: 16px; height: 16px; }
+.shell-workspace-menu .picker-heading { display: block; padding: 8px 10px 4px; font-size: 12px; color: var(--muted); }
+
+
+/* Host directory browser: one scrollable body and a pinned explicit selection
+ * footer, as in Harness DirectoryBrowser. The host-backed form stays separate. */
+#folder-picker { width: min(680px, calc(100vw - 32px)); max-width: calc(100vw - 32px); height: min(500px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 0; border-radius: 24px; }
+#folder-picker[open] { display: flex; flex-direction: column; overflow: hidden; }
+#folder-picker .dialog-heading { flex: none; align-items: center; margin: 0; padding: 16px 14px 12px 24px; }
+#folder-picker .dialog-heading h2 { font-size: 16px; line-height: 24px; }
+#folder-picker .dialog-heading .quiet { flex: none; width: 28px; height: 28px; min-height: 28px; padding: 0; border-radius: 8px; }
+#folder-picker .dialog-heading .icon { width: 16px; height: 16px; }
+.folder-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 12px; }
+#folder-picker .folder-list { max-height: none; overflow: visible; }
+#folder-picker .dialog-actions { flex: none; flex-wrap: wrap; gap: 8px; margin: 0; padding: 12px 24px 16px; }
+.session-tree .shell-session-row a[aria-current=page] { color: var(--text); }
+.session-tree .shell-session-row .icon { flex: none; }
+
+/* Native workflow confirmations keep their content scrollable at zoom/short
+ * heights. This shared class overrides app.css's mobile 10px-only clearance;
+ * the separately composed host folder picker retains its own 16px margin. */
+.folder-dialog { max-height: max(0px, calc(min(100dvh, var(--snow-visual-height, 100dvh)) - 24px)); max-width: calc(100vw - 24px); overflow-y: auto; overscroll-behavior: contain; }
+
+/* Workspace row actions follow Harness ProjectRowItem's sibling action slot.
+ * Keep link navigation separate from runtime workflow and metadata actions. */
+.shell-project-row { display: flex; align-items: center; min-width: 0; border-radius: 8px; }
+.shell-project-row:hover, .shell-project-row:focus-within, .shell-project-row:has(.project-link.selected) { background: var(--raised); }
+.shell-project-row .project-link { flex: 1; min-width: 0; }
+.shell-project-actions { display: flex; flex: none; align-items: center; gap: 2px; padding-right: 3px; }
+.sidebar .shell-project-action { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 8px; background: transparent; }
+.sidebar .shell-project-action:hover, .sidebar .shell-project-action[aria-expanded=true] { background: color-mix(in srgb, var(--raised), var(--text) 7%); }
+.shell-project-action .icon { width: 16px; height: 16px; }
+button.shell-project-action { font-size: 20px; line-height: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .shell-project-actions { opacity: 0; pointer-events: none; }
+  .shell-project-row:hover .shell-project-actions, .shell-project-row:focus-within .shell-project-actions, .shell-project-actions:has([aria-expanded=true]) { opacity: 1; pointer-events: auto; }
+}
+@media (min-width: 768px) {
+  .sidebar-collapsed .shell-project-actions { display: none; }
+}
+
+/* Independent workspace disclosure; selection belongs to the conversation,
+ * not to the expanded parent. Leave the native focus ring distinct from both. */
+.sidebar .workspace-disclosure { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; min-height: 28px; padding: 6px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
+.workspace-disclosure .icon { width: 16px; height: 16px; transform: rotate(-90deg); }
+.workspace-disclosure[aria-expanded=true] .icon { transform: rotate(0deg); }
+.sidebar .workspace-disclosure:hover { color: var(--text); background: color-mix(in srgb, var(--raised), var(--text) 7%); }
+.shell-project-row:has(.project-link.selected) { background: transparent; }
+.shell-project-row .project-link.selected { background: transparent; color: var(--text); }
+.shell-project-row:hover, .shell-project-row:focus-within { background: var(--raised); }
+.session-tree[data-workspace-sessions] { margin-left: 27px; }
+.session-tree [data-sidebar-session-status] { color: var(--muted); font-size: 12px; line-height: 18px; margin: 6px 8px; overflow-wrap: anywhere; }
+.session-tree [data-sidebar-session-more] { justify-content: flex-start; color: var(--muted); font-size: 12px; min-height: 30px; padding: 4px 8px; }
+@media (min-width: 768px) {
+  .sidebar-collapsed .workspace-disclosure { display: none; }
+}
+.shell-workspace-menu-heading { padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.shell-workspace-menu-heading strong, .shell-workspace-menu-heading small { display: block; overflow-wrap: anywhere; }
+.shell-workspace-menu-heading strong { font-size: 13px; font-weight: 500; }
+.shell-workspace-menu-heading small { color: var(--muted); font-size: 11px; line-height: 16px; margin-top: 3px; }
+
+/* At short heights the fixed brand/actions/utilities exhaust the list's flex
+ * budget. Keep a real list viewport and let the expanded shell scroll instead
+ * of placing focused rows beneath the utility stack. The 56px rail retains its
+ * existing independent overflow owner. */
+@media (max-height: 480px) {
+  .app-layout:not(.sidebar-collapsed) .sidebar { overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain; }
+  .app-layout:not(.sidebar-collapsed) .project-tree { min-height: 96px; flex-shrink: 0; }
+}

@@ -10,10 +10,13 @@ secrets. Source code and tests are the immediate behavioral authority.
 powers the interactive TUI, print/JSON/RPC modes, and the embeddable Go SDK. Do
 not duplicate turn or tool-loop logic in a surface.
 
-The project is intentionally not a graphical application, whole-process
-sandbox, general memory database, or autonomous multi-agent workflow engine. Keep the
-agent loop understandable, providers and tools behind interfaces, and UI
-dependencies out of core packages.
+The project is not a whole-process sandbox, general memory database, or
+autonomous multi-agent workflow engine. An optional web manager surface is
+permitted, but graphical dependencies stay out of core packages. Keep the agent
+loop understandable and providers/tools behind interfaces. The web manager
+reuses Snow RPC through a client boundary; it must not embed agent logic or
+import app/agent/session internals. Startup and passive browsing start no runtimes;
+explicit browser activation launches workers through the RPC client boundary.
 
 Before a change, read `README.md` plus the relevant source and tests. Use
 `IMPLEMENTATION.md` for architecture, package maps, decisions, and roadmap;
@@ -23,6 +26,23 @@ for the expanded threat model, and `docs/releases.md` for release gates. When
 documentation differs from current code and tests, verify behavior in code and
 update the canonical document.
 
+## Simplicity and scope
+
+- Always choose the simplest correct solution that fits the current request.
+  Reuse existing code and patterns; keep changes small and local.
+- Do not overengineer: avoid speculative abstractions, extra dependencies,
+  generic frameworks, unrelated refactors, or features for hypothetical needs.
+  Add complexity only when a concrete requirement makes it necessary.
+- Do not write tests automatically for every edit. Reuse or extend existing
+  coverage first; add a focused test only when needed to cover a meaningful
+  behavior change, reproduce a defect, or protect a critical invariant that
+  existing tests do not cover. Avoid duplicate tests, implementation-detail
+  assertions, and new test harnesses when a simpler check is sufficient.
+- Keep verification proportional to the change and its risk. Documentation,
+  copy, and styling-only edits do not need new tests by default. Preserve
+  security checks, required release gates, and regression coverage for changed
+  behavior; simplicity is not a reason to weaken safeguards.
+
 ## Architecture constraints
 
 ```text
@@ -31,6 +51,8 @@ app → agent → {provider, tools, session, permission, context, compact}
 provider adapters → auth + protocol
 tui → app facades + protocol
 snowsdk → app + protocol; never bubbletea
+cmd/snow → web (optional shell; no app construction)
+web manager → client boundary → RPC workers → app (explicit activation only)
 ```
 
 - Do not make `agent`, `provider`, `session`, `tools`, or `pkg/protocol` import
@@ -100,7 +122,8 @@ snowsdk → app + protocol; never bubbletea
    entry until its fix is verified. Report security-sensitive defects through
    `SECURITY.md` rather than disclosing them in the public tracker.
 2. Check `git status`; do not overwrite or revert unrelated work.
-3. Preserve package boundaries and add focused tests for behavior changes.
+3. Preserve package boundaries and follow the simplicity, scope, and testing
+   guidance above; add tests only where existing coverage is insufficient.
 4. Update the canonical guide when behavior, security, providers, public APIs,
    configuration, or roadmap status changes.
 5. Format and verify the affected code. Do not claim a check passed unless it

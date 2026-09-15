@@ -14,19 +14,31 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.ContentBlock, requestedMode *protocol.CollaborationMode) (retErr error) {
+func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.ContentBlock, requestedMode *protocol.CollaborationMode) error {
+	return a.promptTransaction(ctx, text, attachments, requestedMode, nil)
+}
+
+func (a *Agent) promptTransaction(ctx context.Context, text string, attachments []protocol.ContentBlock, requestedMode *protocol.CollaborationMode, edit *messageEditTransaction) (retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	unlockAdmission, admissionErr := a.LockAdmissionContext(ctx)
-	if admissionErr != nil {
-		return admissionErr
+	var unlockAdmission func()
+	if edit == nil {
+		var admissionErr error
+		unlockAdmission, admissionErr = a.LockAdmissionContext(ctx)
+		if admissionErr != nil {
+			return admissionErr
+		}
+	} else {
+		// The App owns both admission and the plugin session guard until the
+		// replacement user is durable and its public acknowledgement is written.
+		unlockAdmission = edit.release
 	}
 	admissionHeld := true
 	skillsCleared := 0
 	reentrantEventCallback := a.bus.InCallback()
 	defer func() {
-		if admissionHeld {
+		if admissionHeld && edit == nil {
 			unlockAdmission()
 		}
 		if skillsCleared > 0 {
@@ -44,7 +56,8 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	// unsupported prompt must not stop an automatic goal and leave it idle.
 	a.mu.RLock()
 	closed, running, wasAutomatic := a.closed, a.running, a.autoRunning
-	pendingRecovery := len(a.queuedInputs) > 0
+	ownedRun := a.goalRun != nil
+	pendingRecovery := len(a.queuedInputs) > 0 || len(a.queueControl.review) > 0
 	modeBeforeAdmission := a.mode
 	prospectiveMode := a.mode
 	if requestedMode != nil {
@@ -56,6 +69,9 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	if closed {
 		return fmt.Errorf("%w: agent closed", ErrPromptRejected)
 	}
+	if ownedRun {
+		return fmt.Errorf("%w: explicit goal run owns agent admission", ErrPromptRejected)
+	}
 	if running && !wasAutomatic {
 		return fmt.Errorf("%w: agent already running", ErrPromptRejected)
 	}
@@ -65,6 +81,9 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	transformed, pluginChanges, hookErr := a.pluginHook(ctx, plugin.HookRequest{Phase: "before_prompt", Text: text})
 	if hookErr != nil {
 		return errors.Join(ErrPromptRejected, hookErr)
+	}
+	if edit != nil && (transformed.Text != text || len(pluginChanges) != 0) {
+		return errors.Join(ErrPromptRejected, errors.New("message edit does not support plugin-transformed prompts"))
 	}
 	text = transformed.Text
 	if strings_trim(text) == "" && len(attachments) == 0 {
@@ -93,6 +112,15 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 		skillsCleared = cleared
 	}
 
+	if edit != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := edit.transition(); err != nil {
+			return errors.Join(ErrPromptRejected, err)
+		}
+	}
+
 	// Claim the running flag BEFORE applying the attached mode or appending so
 	// concurrent callers cannot observe a half-applied transition.
 	a.mu.Lock()
@@ -104,7 +132,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 		a.mu.Unlock()
 		return errors.New("agent: already running")
 	}
-	if len(a.queuedInputs) > 0 {
+	if len(a.queuedInputs) > 0 || len(a.queueControl.review) > 0 {
 		a.mu.Unlock()
 		return fmt.Errorf("%w: undelivered queued input was accepted while automatic work stopped; call ClearPendingInputs first", ErrPromptRejected)
 	}
@@ -169,7 +197,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	a.admitTurnIdentityLocked("user")
 	a.goalAtTurn = nil
 	a.budgetWrap = false
-	if a.turnMode != protocol.ModePlan && a.opts.Goal != nil {
+	if !a.opts.ManagedExplicitGoals && a.turnMode != protocol.ModePlan && a.opts.Goal != nil {
 		if g, _ := a.opts.Goal.Get(); g != nil && g.Status == protocol.GoalActive {
 			a.goalAtTurn = g
 			if a.goalTurnID != g.GoalID {
@@ -185,8 +213,10 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	modeChanged := requestedMode != nil
 	mode := a.mode
 	a.mu.Unlock()
-	unlockAdmission()
-	admissionHeld = false
+	if edit == nil {
+		unlockAdmission()
+		admissionHeld = false
+	}
 	if skillsCleared > 0 {
 		a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 		skillsCleared = 0
@@ -194,7 +224,9 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	if modeChanged {
 		a.publish(protocol.AgentEvent{Type: protocol.EvModeChanged, Mode: &protocol.CollaborationModeState{Mode: mode, ReasoningEffort: level}})
 	}
-	a.prepareToolRouting(ctx, text)
+	if edit == nil {
+		a.prepareToolRouting(ctx, text)
+	}
 
 	// Ensure we stop running on any exit. Operational failures leave accepted
 	// queued input closed but recoverable through PendingInputs/ClearPendingInputs.
@@ -220,7 +252,7 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 		if continuing {
 			a.ContinueGoal()
 		}
-		if !reentrantEventCallback {
+		if !reentrantEventCallback && !admissionHeld {
 			a.drainEventsBestEffort()
 		}
 	}()
@@ -258,8 +290,27 @@ func (a *Agent) prompt(ctx context.Context, text string, attachments []protocol.
 	}
 	a.mailboxPersistMu.Unlock()
 	if appendErr != nil {
-		return fmt.Errorf("agent: append user message: %w", appendErr)
+		appendErr = fmt.Errorf("agent: append user message: %w", appendErr)
+		if edit != nil {
+			return edit.inputFailed(userMsg.ID, appendErr)
+		}
+		return appendErr
 	}
+	if edit != nil {
+		a.mu.RLock()
+		turnID := a.turnID
+		a.mu.RUnlock()
+		// The callback is the public projection boundary. Even a failed write now
+		// leaves the admitted replacement branch in place; transport is ambiguous.
+		ackErr := edit.persisted(turnID, userMsg.ID)
+		unlockAdmission()
+		admissionHeld = false
+		if ackErr != nil {
+			return ackErr
+		}
+		a.prepareToolRouting(ctx, text)
+	}
+	a.queueControlRootReady(userMsg.ID)
 	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	if err := a.activateExplicitSkillMentions(runCtx, text); err != nil {
 		return fmt.Errorf("agent: activate explicit skill: %w", err)
@@ -303,6 +354,10 @@ func (a *Agent) markTurnIdleLocked() {
 
 func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error) {
 	a.mu.Lock()
+	if a.opts.ManagedExplicitGoals && a.goalRun == nil {
+		a.mu.Unlock()
+		return errors.New("agent: goal turn requires explicit owner")
+	}
 	if a.closed {
 		a.mu.Unlock()
 		return errors.New("agent: closed")
@@ -311,7 +366,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 		a.mu.Unlock()
 		return errors.New("agent: already running")
 	}
-	if len(a.queuedInputs) > 0 {
+	if len(a.queuedInputs) > 0 || len(a.queueControl.review) > 0 {
 		a.mu.Unlock()
 		return errors.New("agent: undelivered queued input is waiting for recovery; call ClearPendingInputs first")
 	}
@@ -328,6 +383,10 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 		a.mu.Unlock()
 		return err
 	}
+	if a.goalRun != nil && g != nil && g.GoalID != a.goalRun.goalID {
+		a.mu.Unlock()
+		return errors.New("agent: goal run no longer owns the active goal")
+	}
 	if g == nil || (!budgetWrap && g.Status != protocol.GoalActive) || (budgetWrap && g.Status != protocol.GoalBudgetLimited) {
 		a.mu.Unlock()
 		return errors.New("agent: no continuable active goal")
@@ -343,7 +402,7 @@ func (a *Agent) internalTurn(ctx context.Context, budgetWrap bool) (retErr error
 	}
 	a.running = true
 	a.queuedInputs = nil
-	a.queueAccepting = true
+	a.queueAccepting = a.goalRun == nil
 	a.turnWG.Add(1)
 	a.turnMode = a.mode
 	a.admitTurnIdentityLocked("goal")
@@ -634,7 +693,7 @@ func (a *Agent) ResetGoalAudit() {
 
 func (a *Agent) ContinueGoal() {
 	a.mu.Lock()
-	if a.closed || a.mode == protocol.ModePlan || a.opts.Goal == nil {
+	if a.opts.ManagedExplicitGoals || a.closed || a.mode == protocol.ModePlan || a.opts.Goal == nil {
 		a.mu.Unlock()
 		return
 	}
@@ -649,76 +708,7 @@ func (a *Agent) ContinueGoal() {
 	a.autoDone = make(chan struct{})
 	done := a.autoDone
 	a.autoWG.Go(func() {
-		a.mu.Lock()
-		wrap := a.budgetWrap
-		a.budgetWrap = false
-		stopped := a.autoStop
-		a.mu.Unlock()
-		if stopped {
-			a.finishAutoWorker(done)
-			return
-		}
-		for {
-			a.mu.RLock()
-			stopped = a.autoStop
-			a.mu.RUnlock()
-			if stopped {
-				break
-			}
-			if err := a.internalTurn(context.Background(), wrap); err != nil {
-				break
-			}
-			a.mu.Lock()
-			crossed := a.budgetWrap
-			reported := a.budgetReportDone
-			a.budgetWrap = false
-			a.mu.Unlock()
-			if crossed && !wrap && !reported {
-				wrap = true
-				continue
-			}
-			g, err := a.opts.Goal.Get()
-			if err != nil || g == nil || g.Status != protocol.GoalActive {
-				break
-			}
-			compacted, compactErr := a.autoCompactGoalBoundary(context.Background())
-			a.mu.Lock()
-			crossed = a.budgetWrap
-			a.budgetWrap = false
-			stopped = a.autoStop
-			a.mu.Unlock()
-			if stopped {
-				break
-			}
-			if crossed && !wrap {
-				wrap = true
-				continue
-			}
-			if compactErr != nil {
-				a.mu.RLock()
-				stopped = a.autoStop
-				a.mu.RUnlock()
-				if stopped || errors.Is(compactErr, context.Canceled) {
-					break
-				}
-				a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal auto-compaction: " + compactErr.Error()})
-				if deferErr := a.opts.Goal.Defer(true); deferErr != nil {
-					a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal auto-compaction deferral: " + deferErr.Error()})
-				} else if _, statusErr := a.opts.Goal.SetStatusWithReason(g.GoalID, protocol.GoalBlocked, false, "Automatic compaction failed: "+compactErr.Error()); statusErr != nil {
-					a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "goal auto-compaction status: " + statusErr.Error()})
-				}
-				break
-			} else if compacted {
-				g, err = a.opts.Goal.Get()
-				if err != nil || g == nil || g.Status != protocol.GoalActive {
-					break
-				}
-			}
-			// Yield between autonomous requests even when a provider returns
-			// immediately; productive goals remain unbounded but cannot hot-spin.
-			time.Sleep(automaticTurnDelay)
-			wrap = false
-		}
+		_ = a.runAutomaticGoal(context.Background())
 		a.finishAutoWorker(done)
 	})
 	a.mu.Unlock()
@@ -750,6 +740,7 @@ func (a *Agent) stopWork(ctx context.Context, deferGoal, anyTurn bool) error {
 	a.autoStop = true
 	a.autoPending = false
 	cancel := a.activeCancel
+	owner := a.goalRun
 	done := a.autoDone
 	activeDone := a.activeDone
 	goal := a.goalAtTurn.Clone()
@@ -761,6 +752,9 @@ func (a *Agent) stopWork(ctx context.Context, deferGoal, anyTurn bool) error {
 	}
 	controller := a.opts.Goal
 	a.mu.Unlock()
+	if owner != nil {
+		owner.Cancel()
+	}
 	if anyTurn {
 		a.closeInputQueue(true)
 	}

@@ -5,6 +5,272 @@
   "oneOf": [
     {
       "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "queue_remove"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "queue-control.schema.json#/$defs/state"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "queue_update"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "queue-control.schema.json#/$defs/state"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "queue_enqueue"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "queue-control.schema.json#/$defs/state"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "queue_list"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "queue-control.schema.json#/$defs/state"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "message_regenerate_commit"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "message-edit.schema.json#/$defs/committed"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "message_regenerate_prepare"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "message-regenerate.schema.json#/$defs/prepared"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "message_edit_commit"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "message-edit.schema.json#/$defs/committed"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "message_edit_prepare"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "message-edit.schema.json#/$defs/prepared"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "session_set_model"
+        },
+        "success": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "models_discover"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "model-discovery.schema.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
       "required": [
         "type",
         "success",
@@ -31,6 +297,8 @@
           "type": "string",
           "enum": [
             "canceled",
+            "message_edit_unknown",
+            "message_edit_rejected",
             "conflict",
             "destination_exists",
             "git_dirty",
@@ -40,7 +308,23 @@
             "not_git_repository",
             "session_busy",
             "subagents_active",
-            "unsupported"
+            "unsupported",
+            "queue_rejected",
+            "queue_stale",
+            "queue_unknown",
+            "branch_versions_rejected",
+            "branch_restore_rejected",
+            "branch_restore_unknown",
+            "goal_run_rejected",
+            "goal_run_unknown",
+            "history_control_rejected",
+            "history_control_unknown",
+            "compaction_rejected",
+            "compaction_unknown",
+            "managed_steer_rejected",
+            "managed_steer_stale",
+            "session_reasoning_rejected",
+            "session_reasoning_outcome_unknown"
           ]
         },
         "data": {}
@@ -368,6 +652,20 @@
             "has_more"
           ],
           "properties": {
+            "history_tools": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "$ref": "catalog-output.schema.json#/$defs/historyTool"
+                }
+              }
+            },
+            "history_tools_truncated": {
+              "type": "boolean"
+            },
             "messages": {
               "type": "array",
               "items": {
@@ -389,6 +687,37 @@
             },
             "has_more": {
               "type": "boolean"
+            },
+            "history_images": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000
+                    },
+                    "mime_type": {
+                      "enum": [
+                        "",
+                        "image/png",
+                        "image/jpeg",
+                        "image/gif",
+                        "image/webp"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "mime_type"
+                  ],
+                  "additionalProperties": false
+                }
+              }
             }
           },
           "allOf": [
@@ -1271,7 +1600,12 @@
               "keybindings_update",
               "mcp_servers",
               "messages_list",
+              "message_edit_prepare",
+              "message_edit_commit",
+              "message_regenerate_prepare",
+              "message_regenerate_commit",
               "messages_page",
+              "models_discover",
               "models_list",
               "pending_inputs",
               "pending_inputs_clear",
@@ -1296,6 +1630,7 @@
               "session_info",
               "session_open",
               "session_rename",
+              "session_set_model",
               "session_worktree_fork",
               "sessions_list",
               "settings_get",
@@ -1307,7 +1642,28 @@
               "themes_list",
               "trust_get",
               "trust_set",
-              "usage"
+              "usage",
+              "queue_list",
+              "queue_enqueue",
+              "queue_update",
+              "queue_remove",
+              "branches_page",
+              "branch_messages_page",
+              "branch_restore_prepare",
+              "branch_restore_commit",
+              "goal_inspect",
+              "goal_run",
+              "process_control_list",
+              "process_control_logs",
+              "process_control_stop",
+              "history_branch_fork",
+              "history_session_fork",
+              "history_branch_rename",
+              "compaction_start",
+              "managed_steer",
+              "session_reasoning_get",
+              "session_reasoning_set",
+              "message_image"
             ]
           }
         },
@@ -2054,6 +2410,524 @@
             "applied",
             "generation",
             "fingerprint"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "branches_page"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "branch-versions.schema.json#/$defs/branches_page"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "branch_messages_page"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "branch-versions.schema.json#/$defs/branch_messages_page"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "branch_restore_prepare"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "branch-versions.schema.json#/$defs/branch_restore_prepare"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "branch_restore_commit"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "branch-versions.schema.json#/$defs/branch_restore_commit"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "goal_inspect"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "goal-run.schema.json#/$defs/inspection"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "goal_run"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "goal-run.schema.json#/$defs/accepted"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "process_control_list"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "process-control.schema.json#/$defs/list"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "process_control_logs"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "process-control.schema.json#/$defs/logs"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "process_control_stop"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "process-control.schema.json#/$defs/stop"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "history_branch_fork"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "history-control.schema.json#/$defs/branch_fork"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "history_session_fork"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "history-control.schema.json#/$defs/session_fork"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "history_branch_rename"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "history-control.schema.json#/$defs/branch_rename"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "compaction_start"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "compaction-run.schema.json#/$defs/accepted"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "managed_steer"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "managed-steer.schema.json#/$defs/accepted"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "session_reasoning_get"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "session-reasoning.schema.json#/$defs/inspection"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "session_reasoning_set"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "session-reasoning.schema.json#/$defs/inspection"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "message_image"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "message_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "mime_type": {
+              "enum": [
+                "image/png",
+                "image/jpeg",
+                "image/gif",
+                "image/webp"
+              ]
+            },
+            "data": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "maxLength": 2796204
+            }
+          },
+          "required": [
+            "session_id",
+            "message_id",
+            "index",
+            "mime_type",
+            "data"
           ],
           "additionalProperties": false
         }

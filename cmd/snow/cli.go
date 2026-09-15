@@ -35,6 +35,9 @@ import (
 )
 
 func main() {
+	if handled, code := runHostCloneHelperEarly(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "snow:", err)
 		os.Exit(1)
@@ -43,17 +46,22 @@ func main() {
 
 func run() error {
 	root := &cobra.Command{
-		Use:           "snow",
-		Short:         "snow — a minimal modular coding-agent harness in Go",
-		Args:          cobra.NoArgs,
-		Version:       version,
-		RunE:          runInteractive,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Use:               "snow",
+		Short:             "snow — a minimal modular coding-agent harness in Go",
+		Args:              cobra.NoArgs,
+		Version:           version,
+		RunE:              runInteractive,
+		PersistentPreRunE: validateWebFlags,
+		SilenceUsage:      true,
+		SilenceErrors:     true,
 	}
 
 	root.PersistentFlags().StringP("prompt", "p", "", "run in print mode with this prompt")
-	root.PersistentFlags().String("mode", "", "output mode: print|json|rpc")
+	root.PersistentFlags().String("mode", "", "output mode: print|json|rpc|web (web is a local shell preview)")
+	root.PersistentFlags().String("web-listen", "127.0.0.1:7331", "local web preview address (numeric loopback only)")
+	root.PersistentFlags().String("web-tls-cert", "", "optional absolute TLS certificate path for the loopback manager (requires --web-tls-key)")
+	root.PersistentFlags().String("web-tls-key", "", "optional absolute TLS private-key path for the loopback manager (requires --web-tls-cert)")
+	root.PersistentFlags().String("rpc-startup", "eager", "RPC startup: eager|catalog|control (catalog and control never activate an agent)")
 	root.PersistentFlags().String("collaboration-mode", "", "collaboration mode: default|plan")
 	root.PersistentFlags().String("provider", "", "provider id or named OpenAI-compatible profile")
 	root.PersistentFlags().String("model", "", "model id")
@@ -61,6 +69,7 @@ func run() error {
 	root.PersistentFlags().String("permission", "", "permission mode: ask|allow|deny")
 	root.PersistentFlags().String("session", "", "SQLite session database path to resume")
 	root.PersistentFlags().Bool("no-session", false, "ephemeral in-memory session")
+	root.PersistentFlags().Bool("managed-explicit-goals", false, "require correlated explicit goal runs (manager RPC workers)")
 	root.PersistentFlags().String("base-url", "", "provider base URL override")
 	root.PersistentFlags().String("config", "", "config file path")
 	root.PersistentFlags().String("auth", "", "auth file path")
@@ -357,6 +366,7 @@ func buildOptions(cmd *cobra.Command) (app.Options, error) {
 	opts.Permission, _ = cmd.Flags().GetString("permission")
 	opts.SessionPath, _ = cmd.Flags().GetString("session")
 	opts.NoSession, _ = cmd.Flags().GetBool("no-session")
+	opts.ManagedExplicitGoals, _ = cmd.Flags().GetBool("managed-explicit-goals")
 	opts.BaseURL, _ = cmd.Flags().GetString("base-url")
 	opts.ConfigPath, _ = cmd.Flags().GetString("config")
 	opts.AuthPath, _ = cmd.Flags().GetString("auth")
@@ -513,6 +523,29 @@ func runInteractiveOptions(cmd *cobra.Command, sessionPicker, requireExistingSes
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	mode, _ := cmd.Flags().GetString("mode")
+	if mode == "web" {
+		if sessionPicker || requireExistingSession {
+			return errors.New("web: session resume is unavailable in the local shell preview")
+		}
+		return runWeb(ctx, cmd)
+	}
+	if mode != "" && mode != "print" && mode != "json" && mode != "rpc" {
+		return fmt.Errorf("unknown mode %q (want print, json, rpc, or web)", mode)
+	}
+	startup, _ := cmd.Flags().GetString("rpc-startup")
+	if startup == "control" {
+		if sessionPicker || requireExistingSession {
+			return errors.New("control: session resume is not supported")
+		}
+		return runControl(ctx, cmd)
+	}
+	if startup == "catalog" {
+		if sessionPicker || requireExistingSession {
+			return errors.New("catalog: session resume is not supported")
+		}
+		return runCatalog(ctx, cmd)
+	}
 	opts, err := buildOptions(cmd)
 	if err != nil {
 		return err
@@ -525,11 +558,7 @@ func runInteractiveOptions(cmd *cobra.Command, sessionPicker, requireExistingSes
 		opts.NoSession = true
 	}
 	opts.RequireExistingSession = requireExistingSession
-	mode, _ := cmd.Flags().GetString("mode")
 	prompt, _ := cmd.Flags().GetString("prompt")
-	if mode != "" && mode != "print" && mode != "json" && mode != "rpc" {
-		return fmt.Errorf("unknown mode %q (want print, json, or rpc)", mode)
-	}
 
 	if mode == "rpc" {
 		return rpc.Main(ctx, opts)

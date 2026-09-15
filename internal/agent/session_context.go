@@ -15,7 +15,7 @@ import (
 
 // SessionIdentityAdmitted returns the active identity while the caller holds
 // the admission lock. Unlike IdleSessionAdmitted it does not alter automatic
-// goal continuation state.
+// goal continuation state. An explicit goal owner remains busy between turns.
 func (a *Agent) SessionIdentityAdmitted() (id, path string, running bool, err error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -23,9 +23,9 @@ func (a *Agent) SessionIdentityAdmitted() (id, path string, running bool, err er
 		return "", "", false, errors.New("agent: closed")
 	}
 	if a.opts.Session == nil {
-		return "", "", a.running, errors.New("agent: session is nil")
+		return "", "", a.running || a.goalRun != nil, errors.New("agent: session is nil")
 	}
-	return a.opts.Session.ID(), a.opts.Session.Path(), a.running, nil
+	return a.opts.Session.ID(), a.opts.Session.Path(), a.running || a.goalRun != nil, nil
 }
 
 func (a *Agent) withSessionRead(read func(session.Store) error) error {
@@ -449,6 +449,7 @@ func repairInterruptedToolCallsReport(store session.Store, registry tools.Regist
 		text := interruptedToolResultText(risk)
 		message := protocol.NewToolResultMessage(newID(), parent, call.ToolCallID, call.Name,
 			[]protocol.ContentBlock{protocol.NewTextBlock(text)}, true)
+		message.ToolOutcomeUnknown = true
 		entries = append(entries, session.Entry{Type: session.EntryMessage, ID: message.ID, ParentID: parent, Message: &message})
 		parent = message.ID
 	}
@@ -492,6 +493,9 @@ func (a *Agent) Branches() (result []protocol.SessionBranch, err error) {
 }
 
 func (a *Agent) stopAutomaticForControl(ctx context.Context, operation string) error {
+	if err := a.QueueControlTransitionReady(); err != nil {
+		return err
+	}
 	a.mu.RLock()
 	running := a.running
 	automatic := a.autoRunning
@@ -681,7 +685,7 @@ func (a *Agent) RenameSession(title string) error {
 
 func (a *Agent) RenameSessionAdmitted(title string) error {
 	a.mu.RLock()
-	running := a.running
+	running := a.running || a.goalRun != nil
 	store := a.opts.Session
 	a.mu.RUnlock()
 	if running {
@@ -706,7 +710,7 @@ func (a *Agent) RenameBranch(branchID, name string) (protocol.SessionBranch, err
 
 func (a *Agent) RenameBranchAdmitted(branchID, name string) (protocol.SessionBranch, error) {
 	a.mu.RLock()
-	running := a.running
+	running := a.running || a.goalRun != nil
 	a.mu.RUnlock()
 	if running {
 		return protocol.SessionBranch{}, errors.New("agent: cannot rename branch while running")
@@ -730,7 +734,7 @@ func (a *Agent) DeleteBranch(branchID string) error {
 
 func (a *Agent) DeleteBranchAdmitted(branchID string) error {
 	a.mu.RLock()
-	running := a.running
+	running := a.running || a.goalRun != nil
 	a.mu.RUnlock()
 	if running {
 		return errors.New("agent: cannot delete branch while running")
@@ -746,7 +750,12 @@ func (a *Agent) DeleteBranchAdmitted(branchID string) error {
 	return nil
 }
 
-func rollbackFork(branches session.BranchStore, createdBranchID, oldBranchID string) error {
+func rollbackFork(branches session.BranchStore, createdBranchID, oldBranchID string) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			retErr = errors.Join(ErrBranchRollback, retErr)
+		}
+	}()
 	if createdBranchID == "" || oldBranchID == "" {
 		return errors.New("agent: cannot roll back incomplete fork")
 	}
@@ -771,92 +780,8 @@ func (a *Agent) Compact(ctx context.Context) (protocol.CompactionResult, error) 
 	return a.compact(ctx, nil)
 }
 
-func (a *Agent) compact(ctx context.Context, turn *TurnSnapshot) (result protocol.CompactionResult, retErr error) {
-	unlockAdmission, admissionErr := a.LockAdmissionContext(ctx)
-	if admissionErr != nil {
-		return result, admissionErr
-	}
-	admissionHeld := true
-	defer func() {
-		if admissionHeld {
-			unlockAdmission()
-		}
-	}()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	deferActiveGoal := false
-	if a.opts.Goal != nil {
-		goal, err := a.opts.Goal.Get()
-		if err != nil {
-			return protocol.CompactionResult{}, fmt.Errorf("agent: inspect goal before compact: %w", err)
-		}
-		deferActiveGoal = goal != nil && goal.Status == protocol.GoalActive
-	}
-	if err := a.stopAutomaticForControl(ctx, "compact"); err != nil {
-		if deferActiveGoal && a.opts.Goal != nil {
-			_ = a.opts.Goal.Defer(true)
-		}
-		return protocol.CompactionResult{}, err
-	}
-	// Manual compaction is an explicit control boundary. Suppress every active
-	// goal, not only one whose automatic worker happened to be running at this
-	// instant; later readiness or mode transitions must not
-	// silently restart work after the summary completes.
-	if deferActiveGoal && a.opts.Goal != nil {
-		if err := a.opts.Goal.Defer(true); err != nil {
-			return protocol.CompactionResult{}, fmt.Errorf("agent: pause goal after compact: %w", err)
-		}
-	}
-	a.mu.Lock()
-	if a.closed {
-		a.mu.Unlock()
-		return protocol.CompactionResult{}, errors.New("agent: closed")
-	}
-	if a.running {
-		a.mu.Unlock()
-		return protocol.CompactionResult{}, errors.New("agent: cannot compact while running")
-	}
-	if len(a.queuedInputs) > 0 {
-		a.mu.Unlock()
-		return protocol.CompactionResult{}, errors.New("agent: undelivered queued input is waiting for recovery; call ClearPendingInputs first")
-	}
-	a.running = true
-	a.queuedInputs = nil
-	a.queueAccepting = false
-	a.autoStop = false
-	a.admitTurnIdentityLocked("compact")
-	if turn != nil {
-		*turn = a.activeTurnSnapshotLocked()
-	}
-	a.turnWG.Add(1)
-	runCtx, cancel := context.WithCancel(ctx)
-	a.activeCancel = cancel
-	a.activeDone = make(chan struct{})
-	a.mu.Unlock()
-	unlockAdmission()
-	admissionHeld = false
-	defer func() {
-		wasCanceled := runCtx.Err() != nil
-		cancel()
-		retErr = errors.Join(retErr, a.finishTurnMailbox(func() {
-			a.running = false
-			a.queueAccepting = false
-			a.activeCancel = nil
-			a.goalAtTurn = nil
-			if a.activeDone != nil {
-				close(a.activeDone)
-				a.activeDone = nil
-			}
-		}))
-		a.turnWG.Done()
-		if deferActiveGoal && wasCanceled && a.opts.Goal != nil {
-			_ = a.opts.Goal.Defer(true)
-		}
-	}()
-	ctx = runCtx
-
-	return a.compactActiveContext(ctx, compactionManual)
+func (a *Agent) compact(ctx context.Context, turn *TurnSnapshot) (protocol.CompactionResult, error) {
+	return a.compactManualCaptured(ctx, turn)
 }
 
 func isCompactionCheckpointText(text string) bool {

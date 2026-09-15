@@ -1,0 +1,5 @@
+{{define "project-inspection"}}
+<aside id="project-inspector" class="inspector project-inspector" aria-label="Project inspector" data-project="{{.Project.ID}}" data-available="{{.Project.Available}}" hidden>
+<div data-react-inspection class="react-live-panel" data-react-props="{{inspectionReactProps .Project .CSRF .Live}}"></div>
+</aside>
+{{end}}

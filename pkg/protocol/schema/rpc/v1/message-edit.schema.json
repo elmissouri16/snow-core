@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/message-edit.schema.json",
+  "title": "Snow atomic historical user edit",
+  "$defs": {
+    "prepareParams": {
+      "type": "object",
+      "required": [
+        "session_id"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "entry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "entry_id"
+          ],
+          "not": {
+            "required": [
+              "turn_id"
+            ]
+          }
+        },
+        {
+          "required": [
+            "turn_id"
+          ],
+          "not": {
+            "required": [
+              "entry_id"
+            ]
+          }
+        }
+      ]
+    },
+    "commitParams": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "edit_token",
+        "text"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "edit_token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "prepared": {
+      "type": "object",
+      "required": [
+        "edit_token",
+        "session_id",
+        "source_branch_id",
+        "source_tip_id",
+        "entry_id",
+        "turn_id",
+        "text",
+        "expires_at"
+      ],
+      "properties": {
+        "edit_token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_tip_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "entry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536,
+          "pattern": "^[^\\x00]*$"
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "committed": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "source_branch_id",
+        "source_tip_id",
+        "entry_id",
+        "branch_id",
+        "turn_id",
+        "user_entry_id",
+        "history"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_tip_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "entry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "user_entry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "history": {
+          "type": "object",
+          "required": [
+            "messages",
+            "start",
+            "total",
+            "has_more"
+          ],
+          "properties": {
+            "history_tools": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "$ref": "catalog-output.schema.json#/$defs/historyTool"
+                }
+              }
+            },
+            "history_tools_truncated": {
+              "type": "boolean"
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "message.schema.json"
+              },
+              "maxItems": 128,
+              "minItems": 1
+            },
+            "next_cursor": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "has_more": {
+              "const": false
+            },
+            "history_images": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000
+                    },
+                    "mime_type": {
+                      "enum": [
+                        "",
+                        "image/png",
+                        "image/jpeg",
+                        "image/gif",
+                        "image/webp"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "mime_type"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "has_more": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "has_more"
+                ]
+              },
+              "then": {
+                "required": [
+                  "next_cursor"
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

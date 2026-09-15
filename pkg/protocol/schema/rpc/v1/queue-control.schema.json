@@ -1,0 +1,310 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/queue-control.schema.json",
+  "title": "Snow explicit follow-up queue control",
+  "$defs": {
+    "queue_listParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id",
+        "turn_id"
+      ],
+      "additionalProperties": false
+    },
+    "queue_enqueueParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id",
+        "turn_id",
+        "revision",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "queue_updateParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id",
+        "turn_id",
+        "revision",
+        "item_id",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "queue_removeParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id",
+        "turn_id",
+        "revision",
+        "item_id"
+      ],
+      "additionalProperties": false
+    },
+    "item": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536,
+          "pattern": "^[^\\x00]*$"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "delivering",
+            "held",
+            "delivery_unknown"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "change": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "root_admitted",
+            "reply",
+            "enqueued",
+            "updated",
+            "removed",
+            "selected",
+            "delivered",
+            "retained",
+            "delivery_unknown",
+            "closed",
+            "steer_accepted",
+            "discarded"
+          ]
+        },
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "user_entry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "previous_user_entry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "preceding_reply_entry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "reply_entry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "span_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "steer_accepted",
+                  "discarded",
+                  "delivered"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "item_id"
+            ]
+          }
+        }
+      ]
+    },
+    "state": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "accepting": {
+          "type": "boolean"
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/item"
+          }
+        },
+        "review_items": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/item"
+          }
+        },
+        "change": {
+          "$ref": "#/$defs/change"
+        }
+      },
+      "required": [
+        "session_id",
+        "turn_id",
+        "revision",
+        "accepting",
+        "items",
+        "review_items",
+        "change"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,331 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/catalog-output.schema.json",
+  "title": "Runtime-free catalog output",
+  "oneOf": [
+    {
+      "$ref": "handshake.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "catalog_sessions"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "$ref": "session-summary.schema.json"
+              }
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "next_offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "has_more": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "sessions",
+            "offset",
+            "next_offset",
+            "has_more"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "catalog_messages"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "messages": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "assistant"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "timestamp": {
+                    "type": "integer"
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  },
+                  "tools": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "items": {
+                      "$ref": "#/$defs/historyTool"
+                    }
+                  },
+                  "images": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "index": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000
+                        },
+                        "mime_type": {
+                          "enum": [
+                            "",
+                            "image/png",
+                            "image/jpeg",
+                            "image/gif",
+                            "image/webp"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "index",
+                        "mime_type"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "role",
+                  "text",
+                  "timestamp",
+                  "truncated"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "next_offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "has_more": {
+              "type": "boolean"
+            },
+            "tools_truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "messages",
+            "offset",
+            "next_offset",
+            "has_more"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "type": "string"
+        },
+        "success": {
+          "const": false
+        },
+        "error": {
+          "type": "string"
+        },
+        "error_code": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "success",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "catalog_image"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "message_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "mime_type": {
+              "enum": [
+                "image/png",
+                "image/jpeg",
+                "image/gif",
+                "image/webp"
+              ]
+            },
+            "data": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "maxLength": 2796204
+            }
+          },
+          "required": [
+            "session_id",
+            "message_id",
+            "index",
+            "mime_type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "historyTool": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^history-[a-f0-9]{64}$"
+        },
+        "owner_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "result_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "tool": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "status": {
+          "enum": [
+            "unresolved",
+            "completed",
+            "failed"
+          ]
+        },
+        "output": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "output_available": {
+          "type": "boolean"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "owner_id",
+        "tool",
+        "status",
+        "output",
+        "output_available",
+        "truncated"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

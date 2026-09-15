@@ -1,0 +1,49 @@
+{{define "project-operations"}}
+<details class="project-operations" data-project-operations data-enabled="{{.ProjectOperationsEnabled}}">
+  <summary>Create / clone projects &amp; operations</summary>
+  <div class="project-operations-content">
+    <input type="hidden" data-op-csrf value="{{.CSRF}}">
+    <p class="fine">Create a new folder or clone an anonymous HTTPS repository on the Snow host. After completion, separately review and confirm registration. Registration never activates an agent or opens a conversation.</p>
+    <p class="project-operations-authority">Host-user OS authority: this is not confined to Snow’s startup folder or a filesystem sandbox. Creation writes a directory; cloning also accesses the network and downloads files. No disk quota is provided. SSH and embedded credentials are not supported.</p>
+    {{if not .ProjectOperationsEnabled}}<p class="error">Project operations are unavailable in this manager. No alternative command or activation will be attempted.</p>{{end}}
+    <fieldset class="project-operation-draft" data-op-draft {{if not .ProjectOperationsEnabled}}disabled{{end}}>
+      <legend>New destination</legend>
+      <label>Absolute parent folder on the Snow host
+        <input data-op-parent type="text" maxlength="4096" placeholder="/absolute/host/folder" autocomplete="off" autocapitalize="none" spellcheck="false">
+      </label>
+      <div class="project-operation-actions"><button type="button" class="button" data-op-browse>Browse host folders</button><button type="button" class="button" data-op-select>Select parent</button></div>
+      <section class="project-operation-folders" data-op-folders hidden aria-label="Browse host parent folders">
+        <p class="fine">Browsing only reads directories. Choosing a path fills the draft; select it explicitly to grant creation in that parent.</p>
+        <div class="project-operation-actions"><button type="button" class="quiet" data-op-home>Home</button><button type="button" class="quiet" data-op-up disabled>Up</button><button type="button" class="quiet" data-op-folder-close>Close folder list</button></div>
+        <p class="mono" data-op-folder-path></p>
+        <ul data-op-folder-list aria-label="Host folders"></ul>
+        <div class="project-operation-actions"><button type="button" class="button" data-op-folder-more hidden>Next folder batch</button><button type="button" class="button" data-op-folder-use disabled>Use this path in draft</button></div>
+      </section>
+      <p class="fine" data-op-grant role="status">No parent selected. A selection lasts five minutes and authorizes only one request.</p>
+      <div class="project-operation-fields">
+        <label>Operation<select data-op-kind><option value="create">Create empty folder</option><option value="clone">Clone anonymous HTTPS repository</option></select></label>
+        <label>New folder name<input data-op-name type="text" maxlength="128" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="new-project"></label>
+      </div>
+      <p class="fine">One name only, 1–128 UTF-8 bytes. No slashes, backslashes, control characters, surrounding whitespace, “.” or “..”. The destination must not already exist.</p>
+      <label data-op-remote-label hidden>Anonymous HTTPS repository URL<input data-op-remote type="text" maxlength="512" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="https://example.com/team/repository.git" aria-describedby="project-operation-remote-help"></label>
+      <p id="project-operation-remote-help" class="fine" data-op-remote-help hidden>No username, password, token query, fragment, SSH or local path. Rejected URLs are not retained as drafts.</p>
+      <button type="button" class="button primary" data-op-review disabled>Review destination &amp; effects…</button>
+    </fieldset>
+    <section class="project-operation-review" data-op-confirmation hidden aria-label="Confirm project operation">
+      <h3 data-op-confirm-title>Review operation</h3>
+      <p class="mono" data-op-confirm-detail></p>
+      <p data-op-confirm-effects></p>
+      <label class="project-operation-checkbox"><input type="checkbox" data-op-confirm-check> I reviewed this exact destination and the stated effects.</label>
+      <div class="project-operation-actions"><button type="button" class="quiet" data-op-back>Back without changing anything</button><button type="button" class="primary" data-op-confirm disabled>Confirm operation</button></div>
+    </section>
+    <p class="project-operation-status" data-op-status role="status" aria-live="polite">No operation submitted. Closing this panel never cancels accepted work.</p>
+    <div class="project-operation-uncertain" data-op-uncertain hidden><p data-op-uncertain-text></p><button type="button" class="button" data-op-check>Check recorded request (read only)</button></div>
+    <section class="project-operation-inventory" aria-label="Durable project operations">
+      <div class="section-heading"><h3>Operations</h3><button type="button" class="button" data-op-refresh>Refresh operations</button></div>
+      <p class="fine">One operation runs at a time; there is no queue. Up to 128 retained records. Pages contain at most 32 records and 64 KiB. Partial destinations are retained; dismissing a record never deletes files.</p>
+      <ul data-op-list class="project-operation-list"></ul>
+      <div class="project-operation-actions"><button type="button" class="quiet" data-op-first hidden>First page</button><button type="button" class="button" data-op-next hidden>Next page</button><span class="fine" data-op-page></span></div>
+    </section>
+  </div>
+</details>
+{{end}}

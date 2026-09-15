@@ -5,12 +5,12 @@
     {
       "source": "docs/configuration.md",
       "resource": "docs/configuration.md",
-      "sha256": "3b53f72246ef5edc4aa95f4c3faed5c8fc94cc646ba7098831db81ad0cfe5abd"
+      "sha256": "06e3860dc0315c1d9eb48d28c4658a9d3684fb011339855e118715ce1b55d378"
     },
     {
       "source": "docs/goals.md",
       "resource": "docs/goals.md",
-      "sha256": "7cadc2dc16dc1a786d060f67cff38329403e2454e6b0232fbe69b1835c6b8e54"
+      "sha256": "9608150b3edbda3d4a8a581675dd3be0b4c3feaff5cf84ab4134bc8b09a3e853"
     },
     {
       "source": "docs/plan-mode.md",
@@ -35,7 +35,7 @@
     {
       "source": "docs/rpc.md",
       "resource": "docs/rpc.md",
-      "sha256": "e220c134788a3bbe841f0428bfc1309b6af6e2ff7145ddec84b3df76daeb1f86"
+      "sha256": "4bbd2f30364db93a2ada97b97c7cd80b8993dda3afd871004e28514480b074b6"
     },
     {
       "source": "docs/sdk-reference.md",
@@ -50,7 +50,7 @@
     {
       "source": "docs/security.md",
       "resource": "docs/security.md",
-      "sha256": "d55d4f7fef5ef93c7cd25be42ae6a0e629c35e4cabd094ddb366c224fd714a43"
+      "sha256": "352bbceace1f9125587235cc5fabd4e8513d9c30defc2e9c4c3cb645f1d64e2e"
     },
     {
       "source": "docs/sessions.md",
@@ -60,7 +60,7 @@
     {
       "source": "docs/skills.md",
       "resource": "docs/skills.md",
-      "sha256": "eb59b110570ca3d3e642de42472087b342959275584d6bfe6421d4c10ab1586f"
+      "sha256": "b73dfbe9eb104cb15e92dc05fe8613705ab125ed783230d93d92f7191713e6a6"
     },
     {
       "source": "docs/subagents.md",

@@ -654,13 +654,14 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	}
 	pluginHooks := &appPluginHooks{manager: manager}
 	ag, err = agent.New(agent.Options{
-		PluginHooks: pluginHooks,
-		Provider:    prov,
-		Registry:    reg,
-		Session:     st,
-		Permission:  perm,
-		ToolHost:    host,
-		Router:      router,
+		ManagedExplicitGoals: opts.ManagedExplicitGoals,
+		PluginHooks:          pluginHooks,
+		Provider:             prov,
+		Registry:             reg,
+		Session:              st,
+		Permission:           perm,
+		ToolHost:             host,
+		Router:               router,
 		DeferredBundles: []agent.DeferredBundle{{
 			Members: builtin.ManagedProcessToolNames(), Sticky: processManager.HasRecords,
 		}},

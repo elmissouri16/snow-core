@@ -1,0 +1,336 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/control-output.schema.json",
+  "title": "Snow control output",
+  "oneOf": [
+    {
+      "$ref": "handshake.schema.json"
+    },
+    {
+      "$ref": "host-operations.schema.json#/$defs/completed"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "defaults_get"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "host-control.schema.json#/$defs/defaults"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "defaults_update"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "host-control.schema.json#/$defs/defaults"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "provider_status_list"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "host-control.schema.json#/$defs/provider_status_list"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "api_key_inspect"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "host-api-key.schema.json#/$defs/status"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "api_key_set"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "host-api-key.schema.json#/$defs/status"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "project_prepare"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "host-operations.schema.json#/$defs/prepared"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "project_clone_start"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "host-operations.schema.json#/$defs/prepared"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "project_cancel"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "$ref": "host-operations.schema.json#/$defs/canceled"
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "Acknowledges confirmed inactive-session deletion and managed cleanup. Uncertain or partial outcomes use an error response, never deleted:false success.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "const": "session_delete"
+        },
+        "success": {
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "deleted": {
+              "const": true
+            }
+          },
+          "required": [
+            "session_id",
+            "deleted"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "command",
+        "success",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "response"
+        },
+        "command": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4096
+        },
+        "success": {
+          "const": false
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "error_code": {
+          "enum": [
+            "invalid",
+            "unsupported",
+            "unavailable",
+            "revision_conflict",
+            "canceled",
+            "busy",
+            "exists",
+            "identity_changed"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "success",
+        "error",
+        "error_code"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

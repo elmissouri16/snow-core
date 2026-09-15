@@ -1,0 +1,11 @@
+.managed-processes {border:1px solid var(--line);border-radius:10px;margin:12px 0;min-width:0;}
+.managed-processes summary {cursor:pointer;padding:12px;font-weight:600;}
+.managed-process-body {padding:0 12px 12px;min-width:0;}
+.process-toolbar,.process-row {display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.process-toolbar {justify-content:space-between;}
+[data-process-list] {list-style:none;padding:0;margin:12px 0;max-height:280px;overflow:auto;}
+.process-row {padding:8px 0;border-top:1px solid var(--line);}
+.process-row .process-identity {flex:1;min-width:120px;overflow-wrap:anywhere;}
+.process-row small {display:block;font-family:monospace;}
+[data-process-output] {max-height:300px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;padding:10px;border:1px solid var(--line);border-radius:6px;}
+.managed-processes button:focus-visible,.managed-processes summary:focus-visible {outline:2px solid var(--accent, #88aaff);outline-offset:3px;}

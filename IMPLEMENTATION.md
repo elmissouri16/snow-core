@@ -69,7 +69,8 @@ keeps UI dependencies out of core packages.
 
 ### Non-goals
 
-- No graphical UI or Electron/IPC contract in the Go runtime.
+- No graphical dependencies or Electron contract in the agent core. The
+  optional web surface stays outside it and reuses RPC rather than agent logic.
 - No built-in process or per-extension sandbox. Bash, Go plugins, stdio
   MCP servers, and subagents execute with the user's OS privileges; operators
   provide external containment when needed.
@@ -150,8 +151,11 @@ keeps UI dependencies out of core packages.
 | `internal/mcp` | Official-SDK MCP manager and tool/resource bridges |
 | `internal/skills` | Agent Skills parser, catalog, and activation tools |
 | `internal/provider` | `Provider` interface, registry, and adapters |
-| `internal/rpc` | JSONL stdin/stdout control plane |
+| `internal/rpc` | JSONL stdin/stdout control plane; eager, runtime-free catalog and allowlisted local control startup |
+| `internal/hostcontrol` | Runtime-free allowlisted defaults/provider-status/API-key service over local config/auth helpers; no app/provider/session initialization |
+| `internal/hostops` | Runtime-free descriptor-pinned CREATE and explicitly released anonymous HTTPS clone; fixed Git/helper, process-group/liveness supervision; no activation or manager DB |
 | `internal/session` | SQLite/in-memory stores, topology, and session index |
+| `internal/sessiondelete` | Shared inactive-session indexed deletion and managed artifact/goal cleanup; no app or provider construction |
 | `internal/subagent` | Root manager, context projection, roles, V2 tools |
 | `internal/tools` | `Tool`/`Registry`/`ToolHost` interfaces and BM25 router |
 | `internal/trust` | `~/.snow/trust.json` project decisions |
@@ -168,6 +172,35 @@ keeps UI dependencies out of core packages.
 | `pkg/protocol` | Dependency-light public messages/events/models |
 | `pkg/protocol/schema` | Network-free Draft 2020-12 wire schemas |
 | `pkg/snowsdk` | Public embeddable API; no TUI dependency |
+| `pkg/agentclient/rpc` | Bounded JSONL client over an owned deadline-capable connection; no process launcher |
+| `internal/web` | Local-only HTMX manager, private project registry, RPC catalog/control/live-worker adapters, optional numeric-loopback TLS, durable host-operation admission, instance-bound public-snapshot SSE, sanitized Markdown, durable owner-bound public tool history, explicit recovery hints without replay, bounded read-only file/Git inspector; no app/agent/session imports or second agent loop |
+
+### Web frontend package and build
+
+`internal/web/frontend` is the private React 19.3/TypeScript 7/Vite 8 browser
+package; `package.json` and `package-lock.json` pin its dependencies. It has no
+Node production server, Next.js layer, or additional UI library. React owns only
+explicitly mounted page/panel subtrees, including the conversation/composer,
+transcript, sidebar, workspace pages and runtime panels. Go templates, HTMX
+ancestor navigation and the serial browser network/admission controller retain
+their separate responsibilities; source integration is not whole-product native
+acceptance. Shared classic helpers retain snapshot transport and popup geometry,
+not a second renderer inside React roots. Cost presentation belongs to the typed
+conversation model; the obsolete script is no longer loaded or routed. No frontend dependency
+enters core Go packages, the SDK, or the TUI.
+
+Node >=22.12.0 is needed to develop these sources; frontend CI pins 24.16.0.
+`npm ci --ignore-scripts`, `npm run build`, `npm test` and `npm run check` run
+inside that package. Build typechecks and emits the checked-in
+`internal/web/static/generated/app.js` and runtime third-party notices. Check
+rebuilds into a temporary directory and compares the complete generated tree by
+name and byte content without repairing it. Ordinary Go 1.27rc3 builds, including
+release cross-builds, embed the checked-in assets without Node. The Go route
+allowlist and same-origin security boundary remain authoritative. Source changes
+require regeneration, a Go rebuild/install and an explicit manager/worker restart;
+existing processes do not reload the new binary or embedded assets automatically.
+See [Web frontend development](docs/web-frontend.md) for commands, ownership,
+workbench limitations and the distinction between source ports and native evidence.
 
 ## Dependency direction and runtime data flow
 
@@ -177,6 +210,10 @@ app → agent → {provider, tools, session, permission, context, compact}
 provider adapters → auth + protocol
 tui → app facades + protocol
 snowsdk → app + protocol; never bubbletea
+cmd/snow → web (local-only shell, no app construction)
+cmd/snow → rpc control → {hostcontrol → config/auth, hostops} (no app)
+web → agentclient process/RPC → external workers (no hostcontrol/hostops internals)
+agentclient/rpc → protocol (transport client, no runtime internals)
 ```
 
 `agent`, `provider`, `session`, `tools`, and `pkg/protocol` never import the
@@ -1704,6 +1741,54 @@ go build -o ./snow ./cmd/snow
 govulncheck ./...
 ```
 
+Web transport and presentation checks use repository runners with no npm
+dependencies or external services. The stream-client suite requires Node 22+
+only; browser fixtures additionally require an installed Chrome/Chromium:
+
+```sh
+node --check internal/web/static/app.js
+node --check internal/web/static/visibility.js
+node --check internal/web/static/markdown.js
+node --check internal/web/static/stream.js
+node --check internal/web/static/attention.js
+node --check internal/web/static/scroll.js
+node scripts/tests/browser/stream-client/run.mjs
+node scripts/tests/browser/live-stream/run.mjs
+node scripts/tests/browser/permission-workflow/run.mjs
+node scripts/tests/browser/inspection-race/run.mjs
+node scripts/tests/browser/conversation-workflow/run.mjs
+node scripts/tests/browser/queue-next/run.mjs
+node scripts/tests/browser/harness-layout/run.mjs
+```
+
+Set `SNOW_CHROME_BIN` when Chrome is not at one of the runner's fixed system
+locations. The fixture runs headlessly with an ephemeral profile and fails closed
+on missing results or failed assertions; these are separate from the Go/Python
+suite. `stream-client` executes the production parser/lifecycle in a deterministic
+Node VM, including retired-reader races; it is not a browser or RPC test.
+`live-stream` uses a gated fake provider through the real app/agent/session,
+external RPC worker, RuntimeManager, HTTP/SSE and Chrome, without replacing fetch
+or manufacturing snapshots. It checks incremental prefixes before completion,
+Stop, stalled-stream recovery without POST replay, a real question/tool result,
+and exact persisted history. It does not claim a real permission-approval turn.
+`permission-workflow` separately drives actual builtin writes through the real
+permission broker, RPC, and browser in two temporary projects. It checks Allow
+once/Deny, colliding worker-local approval IDs, stale instance/duplicate replies,
+foreground transport loss while approval is pending, independent-project
+execution, and worker death before/after a committed write. Durable counters,
+file bytes, saved catalog output and explicit resume establish no replay in these
+scenarios. Newly synthesized interrupted-tool records remain publicly unresolved
+rather than claiming an execution failure. This is local fake-provider evidence,
+not remote-provider, arbitrary mutation-tool, or detached-side-effect coverage.
+`harness-layout` exports actual Go templates/assets; the latest recorded local
+run passed all 1,932 viewport/state reports across seven widths, two themes and
+normal/short heights. Its strict mocked public DTOs cover attention paging/approval,
+reader anchoring, menus and inspector geometry; screenshots are evidence, not
+pixel-hash assertions. The fixture now admits the exact existing read-only startup
+`GET /access/browsers`, without allowing other unexpected reads or mutations;
+17 fixture tests passed. This corrects a missing mock, not production behavior.
+A reduced smoke/width run or partial report is not a substitute for this matrix.
+
 After a verified feature change, refresh the user-local binary with
 `./scripts/install-local.sh`.
 
@@ -1779,6 +1864,244 @@ next heading.
 | 4 — Extensibility and UX | Agent Skills, MCP client, themes and keybindings, persistent ChatGPT catalog cache, fork/tree navigation, macOS/Linux platform guard, plugin permission gate, opt-in BM25 tool routing |
 
 ### Known gaps / next work
+
+#### Optional web manager: bounded local management and explicit execution
+
+For this accumulated source checkpoint, start with the canonical
+[remaining-work checklist](docs/web-manager-implementation-plan.md#commit-checkpoint-and-remaining-work).
+It separates completed local controls from private remote deployment, outstanding
+frontend acceptance work, known defects, release gates and running-manager
+adoption. Earlier verification totals below retain their milestone scope.
+
+[Web manager research and implementation plan](docs/web-manager-implementation-plan.md)
+records the single-user, single-host HTMX design and phased verification gates.
+`snow --mode web` now includes an authenticated host-side directory browser,
+persistent project registration, saved text history, and explicitly activated
+RPC-backed live conversations. The responsive workspace uses project/session
+navigation, a conversation center, and a mounted composer. Browser credentials
+and reusable pairing codes persist privately for up to 30 days across restarts.
+The private SQLite registry retains up to 100 canonical roots with identity checks
+and an exclusive manager lifetime lock. Removal retains project/session files.
+
+`pkg/agentclient/rpc` supplies bounded framing/handshake/correlation over an owned
+connection; `pkg/agentclient/process` adds deadline-capable stdio and direct-child
+cleanup. Catalog reads use at most two nonqueued short-lived workers. Dedicated
+`--mode rpc --rpc-startup catalog` dispatches before runtime/configuration and
+uses a read-only session facade; ordinary eager RPC behavior remains unchanged.
+Catalog browsing does not activate a session or initialize providers/plugins. It
+omits active/unleased/recovery-dependent/unsupported databases and projects
+bounded current-branch text, including pre-compaction history.
+
+Explicit activation owns at most two live project workers. Fixed CLI policy uses
+an Ask new-session baseline and the fixed `managed-explicit-goals` profile.
+Plugins/MCP/skills/subagents/debug remain disabled; managed-process tools are
+enabled. Ordinary prompts neither expose nor dispatch goal tools; only explicitly
+admitted native goal work can get/update the owning goal. New or resumed durable sessions support serial text
+prompts, definitive completion, Stop, allow-once/deny decisions and typed question
+replies. Worker-instance identities bind controls and read-only subscriptions.
+Saved goals are deferred rather than auto-resumed. Browser disconnects do not
+cancel work; manager shutdown closes direct workers. The web package imports no
+app/agent/session internals and implements no second turn loop.
+
+Explicit **Queue next** uses typed `queue_next` RPC controls and the existing
+agent follow-up loop, not a manager scheduler. The pending-work panel supports
+revision-bound editing/removal before delivery starts, distinct from the draft.
+Eight pending/review items share a 256 KiB budget (64 KiB each). Atomic input-span
+and user-entry persistence preserves exact historical Edit/Regenerate ownership
+within one admitted root and one correlated completion. Durable delivery creates
+chat rows; acknowledgments and source events have separate ordering fences.
+Stop/failure retains unsent work for explicit review, and unknown outcomes never
+trigger retries. Retained work blocks fresh prompts and session/branch transitions
+before authority changes; closing remains explicit live-only discard. Healthy
+starting delivery is locked, distinct from uncertain delivery. Current tool
+permission gates apply independently to every queued continuation.
+
+The current local-management source increment adds the following bounded
+contracts. These increments have production HTTP/RPC/browser coverage and pass
+the integrated Go, race, vet, Python and benchmark gates. This verifies the bounded
+local scope below, not a release or completion of the entire target roadmap:
+
+- **Activity:** read-only counts/navigation across at most 100 registered projects,
+  sampled from registry/recovery metadata and live memory, without catalog reads,
+  activation, transcript/goal content or command authority. Running and attention
+  counts overlap; stale saved-session navigation cannot select another live chat.
+- **Organization:** manager-only project labels/pins/archive/restore and session
+  pin/archive flags. Restore retains registration identity and requires canonical
+  path plus device/inode, no active duplicate, and the 100-project cap. Session
+  flags require fresh catalog membership and are capped at 1,000/project and
+  10,000 total; search/archived filtering is loaded-page-only. Live projects cannot
+  be archived or have saved sessions organized. No project/session files are deleted.
+- **Versions:** live-worker branch pages (100) and public history pages (64),
+  read-only until explicit Restore. Two-minute single-use preparation binds exact
+  session/source/target branch/tip; commit uses idle source/target CAS, rejects goal
+  conflicts/retained queues, preserves model/permission authority and applies the
+  target branch's authoritative saved mode. No provider replay or filesystem undo.
+- **Goals:** explicit Start/Resume binds source worker/session/branch/tip/goal,
+  plus a web-only expected snapshot revision CAS. One correlated native handle
+  owns many serial turns/retries/compaction and whole-run Stop. Semantic goal
+  status is distinct from run completion; an optional budget is not a billing cap.
+  No unfinished-goal replacement, ordinary-prompt goal dispatch, Plan admission,
+  queue splicing or automatic restored-goal continuation. Retained queue/review
+  work blocks admission; Queue next is disabled during goal runs.
+- **Processes:** the fixed bundle permits ordinary permissioned process tools;
+  typed operator controls provide list (128), bounded logs (32 KiB/page) and Stop,
+  never arbitrary launch. Exact session and opaque process handles are mandatory.
+  Stop requires Default mode, actual configured hard InvocationPolicy and current
+  noninteractive permission authorization. Undecided Ask fails closed without a
+  second broker. Switching/shutdown stops managed processes, not guaranteed
+  arbitrary detached effects.
+
+The existing historical Edit & resend, Regenerate and explicit Queue next remain
+on the shared agent admission path. See the canonical user/security guides for
+limits. Verification includes 388 production Queue/Activity/organization/Versions
+browser assertions and 308 production Goal/Process assertions, plus 1,932 shell
+layout reports. Goal/Process fixtures bootstrap the fictional model through the
+real HTTP API; their native activation UI is not claimed. Local installation uses
+`./scripts/install-local.sh`; it does not hot-update a running manager or workers,
+which must be restarted before exercising the new build.
+
+The optional `RuntimeSubscriber`/`RuntimeSubscription` seam atomically registers
+an observer and snapshots under the runtime lock. One-slot wakeups coalesce
+revisions; no per-token queue, replay ring or manager event stream is introduced.
+`GET /projects/{p}/runtime/events?instance_id=...` emits LF-delimited SSE with
+full display-safe public snapshots, initially and on newer revisions at 75 ms.
+The handler admits 16 streams globally/four per browser; runtimes admit 32
+subscribers. Encoded snapshot JSON is capped at 4 MiB, heartbeat is 10 seconds,
+authority is rechecked periodically every five seconds (not immediate revocation),
+frame writes have five-second deadlines, and connection lifetime is ten minutes.
+Rendering/writes stay outside the RPC drain and runtime lock. This is a private
+web transport, not an RPC/provider protocol change.
+
+The browser uses native fetch SSE without the HTMX SSE extension. Legacy backends
+advertised without subscription support (or returning 501) retain two-second
+snapshot polling; other failures reconnect GET with backoff, never replay POST.
+Hidden tabs pause, terminal close/auth states require review/sign-in, and controls
+remain disabled after mutations until a fresh bound snapshot reconciles state.
+
+The activated worker now supplies explicit bounded `models_discover` catalogs,
+usage/context counts with recorded-cost estimates, and current-CWD session choices. The additive
+`session_set_model` command selects a cached provider/model pair without rewriting
+operator-owned host/project settings; legacy `set_model` remains unchanged.
+Conversation creation/opening reuses the worker, requires explicit confirmation
+before stopping active work, waits for definitive completion, rotates control
+identities and fences retired-session events. Nonqueued controls revalidate the
+identity after lock acquisition. Unknown transitions fail closed rather than
+retargeting old authority. Rename and authoritative `set_mode` controls run while
+idle. Browser drafts and uncertain-outcome guards survive workspace navigation
+in tab memory, never browser disk; reconnects do not replay mutations or adopt
+replacement instances without review.
+
+Public assistant and proposed-plan text uses bounded, cached goldmark rendering with an independent
+bluemonday allowlist; existing dependencies are reused, with no remote assets.
+Live activity uses the additive `AgentEvent.ToolResult` public-text preview rather
+than private/UI `ToolOutput`, bounds output and correlation storage, preserves
+expansion during snapshot reconciliation, and settles canceled operations. Saved tool history and
+images remain excluded.
+
+Presentation modules keep the normal composer mounted while question/approval
+attention takes over its non-scrolling seat. Questions page through the complete
+validated batch with exact answers and tab-memory drafts; Stop cancels the whole
+turn. Truncated approvals cannot be allowed and host authority stays explicit.
+Reader-owned scrolling anchors identified message/activity rows across updates,
+head trimming and attention resizing; explicit Jump/accepted send or deliberate
+scrolling into the tail resumes following. Seat geometry is measured, including
+visual-viewport changes. Viewport-clamped menus separate scrolling choices from
+a fixed footer; responsive inspector panes remain public, bounded read-only text
+views rather than editors or fabricated backend controls.
+
+The Files / Changes inspector reads registered host projects without activating
+workers. Pinned no-follow file reads and credential-name exclusions bound previews.
+Git uses a fixed executable, isolated temporary control metadata/index and a clean
+environment; no project/global configuration, filters or original-index writes.
+Unsupported layouts explicitly report unavailable. This is not a process sandbox:
+Git still reads the live worktree/object store, with pre/post metadata checks.
+
+The expanded local source increment adds the following without changing that
+single-loop ownership. Recorded local Go, browser and supporting gates verify
+these paths; their exact scope is listed below. Local verification is not reusable
+CI/release approval, remote/live-provider coverage or an installed/running-binary
+update.
+
+- Browser inventory uses independent public IDs and permits targeted durable
+  revocation. Open SSE authority is still periodic at five seconds, not immediate;
+  revocation stops browser authority, not agent execution.
+- Optional local TLS requires two clean absolute PEM paths, each bounded to
+  1 MiB with no symlink components, TLS 1.2 minimum and Secure cookies. Numeric
+  loopback, exact Host/Origin and CSRF remain mandatory; no DNS/LAN/proxy mode,
+  certificate generation or trust installation is added.
+- `--rpc-startup control` dispatches before app construction. `WorkerControl`
+  uses at most two short-lived workers and a nonqueued write gate for allowlisted
+  global/project defaults and local-only provider status. Project selections live
+  in operator global config; locked revision-CAS updates affect future workers,
+  not active workers or conversations newly created inside them. API-key entry
+  is actual-HTTPS-only, write-only, inspected per provider with a five-minute
+  single-use browser grant, explicit consent and auth-metadata CAS under the
+  legacy auth lock. No export/delete, network validation/refresh or OAuth.
+- All four worker families capture absolute operator `SNOW_HOME` and independent
+  session roots through inert `freezeWorkerEnvironment` before project/job CWD
+  changes. Resolution errors disable startup; no config/auth reads or inherited
+  relative fallback occur. CLI manager storage is absolute, and CONTROL/project
+  backends receive the registry’s canonical directory.
+- Current-session reasoning uses typed local capability inspection and full
+  authority CAS, not legacy persistent settings setters or discovery. Its
+  overrides stay in runtime memory, with independent Default/Plan thinking.
+  Ordinary branch fork activates the new branch; detached-session fork does not
+  open its result. Fork/rename use source/target tip/name CAS in store transactions,
+  preserve append-only history, and never replay tools or create worktrees.
+- Manual compaction reserves a captured native run for provider work; progress
+  does not release ownership before terminal completion. Whole-run Stop and Plan
+  Mode are supported; exact history and current collaboration mode are preserved.
+  Native Steer targets ordinary work, distinct from Queue next; accepted is not
+  delivered and a late/failed POST can already have delivered. Shared pending/
+  review limits are eight inputs, 64 KiB each and 256 KiB total. Uncertain steering
+  retains exact-captured-root Stop, never replacement-root cancellation. Idle
+  Keep draft and dismiss preserves uncertainty/text and releases the panel;
+  separate shared Reviewed acknowledgement releases Send/Close without replay.
+  Ordinary completion performs authoritative `goal_inspect` before releasing
+  idle readiness, refreshing the durable tip under captured ownership/epoch
+  fences so immediate manual compaction does not require a corrective inspection.
+- Recorded cost is a currency-labeled estimate, not billing. Mixed/invalid
+  currencies remain unknown; known priced subtotals do not establish completeness
+  when other usage is unpriced.
+- `ProjectOperations` durably admits one CREATE/anonymous-HTTPS-clone job, with
+  128 retained rows and 32-row pages. The OS-user folder browser issues a
+  five-minute browser/manager-bound parent-identity grant, not startup-root
+  confinement. The worker returns pinned child identity after mkdir; the manager
+  durably acknowledges it before clone starts. CREATE does not require Git;
+  clone admission checks the fixed absolute executable before handle allocation,
+  with no PATH search/fallback. Fixed Git/descriptor helper,
+  process-group and liveness supervision use a ten-minute operation timeout,
+  64 KiB output budget and two-second TERM grace, not disk/network-byte quotas.
+  Reconcile observes only, Cancel awaits cleanup evidence, and Dismiss removes
+  settled metadata, never host files. No automatic restart/retry or activation.
+  Successful completion stops at `awaiting_registration`; only a separate
+  explicitly reviewed Register request inserts the project, with operation
+  revision/identity checks. Success, Get/List, reconciliation and restart never
+  register automatically, and registration never activates or opens a session.
+
+The native browser-access, runtime-controls and host-controls matrices passed
+all 12 reports (616 assertions) across 320/1280 px and dark/light. Runtime coverage
+includes lost steering receipts and immediate post-fork/prompt compaction. The
+host desktop failure was corrected in the fixture’s native keyboard driver, not
+product behavior. Fresh native workflow/execution baselines passed 388/380
+assertions across four reports each; the full layout passed 1,932 reports, and
+conversation workflow passed 1,288 assertions across 14 width/theme reports.
+Latest full Go tests/vet and the full internal race suite passed after the
+completion-scope fix. The complete CLI/public-package race suites also passed
+in a separate final command; this is not one combined all-package race invocation.
+Supporting checks passed 67 Python tests, the benchmark guard and 112 Node tests. The
+[expanded-controls acceptance evidence](docs/web-manager-implementation-plan.md#expanded-controls-acceptance-evidence)
+separates authored coverage from executed passes. These private, fictional-provider
+fixtures do not exercise live providers or user data, establish reusable CI/release
+approval, or update installed binaries. Using the verified checkout requires a
+local build/install and manager/worker restart, separate from source verification.
+
+Remote HTTPS, trusted proxy/tunnel deployment, automatic worker recovery and
+saved media rendering remain planned. Worktree forks, browser OAuth, extension
+enablement, general Git writes, editors, PTYs and preview fleets remain outside
+this manager increment. Durable public tool history is available, not a private-tool replay. See
+[Using Snow](docs/using-snow.md#try-the-local-web-manager-shell) for exact current
+behavior, limits and OS-privilege warnings.
 
 #### Effect-aware Bash permission preflight
 

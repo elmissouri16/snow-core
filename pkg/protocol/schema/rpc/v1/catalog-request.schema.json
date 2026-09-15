@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/catalog-request.schema.json",
+  "title": "Runtime-free catalog requests",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "type": {
+          "const": "catalog_sessions"
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 50
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "type": {
+          "const": "catalog_messages"
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 50
+            },
+            "session_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "include_tools": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "session_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "type": {
+          "const": "catalog_image"
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "message_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            }
+          },
+          "required": [
+            "session_id",
+            "index",
+            "message_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

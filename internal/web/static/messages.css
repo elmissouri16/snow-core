@@ -1,0 +1,157 @@
+/* Adapted from Harness ui-chat MessageItem/AssistantMarkdown/MessageIconActions
+ * and ui-primitives MarkdownText/CodeBlock (MIT; see HARNESS-NOTICE.txt).
+ * Parent harness.css owns conversation-column/transcript/composer geometry.
+ */
+.live-transcript, .catalog-history { display: flex; flex-direction: column; gap: 16px; }
+.catalog-message.conversation-message {
+  display: flex; flex-direction: column; align-items: stretch; gap: 0;
+  width: 100%; max-width: 100%; min-width: 0; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: transparent;
+  font-size: 14px; line-height: 24px; color: var(--text);
+}
+.conversation-message .message-label { display: none; }
+.conversation-message .message-body { min-width: 0; overflow-wrap: anywhere; }
+.catalog-message.conversation-message.user-message { align-items: flex-end; gap: 6px; }
+.conversation-message.user-message > .message-body {
+  max-width: min(calc(var(--chat-content-width, 748px) * .702), 82%);
+  border: 0; border-radius: 22px; padding: 10px 16px; margin: 0;
+  background: var(--raised); color: var(--text);
+  font-family: inherit; font-size: 14px; line-height: 22px;
+  white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+}
+/* Sent attachments stay outside message-body so streamed text never replaces them. */
+.conversation-message .message-images {
+  display: flex; flex-wrap: wrap; gap: 6px; max-width: 100%; margin: 0 0 6px;
+}
+.conversation-message.user-message .message-images { justify-content: flex-end; }
+.conversation-message .message-image {
+  position: relative; flex: 0 0 96px; width: 96px; height: 96px; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--raised);
+}
+.conversation-message .message-image-preview {
+  display: block; width: 100%; height: 100%; object-fit: cover;
+}
+.conversation-message .message-image-fallback {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: 6px; color: var(--muted); font-size: 11px; line-height: 16px; text-align: center;
+}
+.conversation-message :is(.message-image-preview, .message-image-fallback, .message-body)[hidden] { display: none; }
+@media (max-width: 600px) {
+  .conversation-message .message-image { flex-basis: 72px; width: 72px; height: 72px; }
+}
+.conversation-message .message-truncated { font-size: 11px; line-height: 18px; color: var(--muted); margin: 6px 0 0; }
+.conversation-message .message-actions { display: flex; align-items: center; gap: 8px; min-height: 28px; margin: 16px 0 0 -6px; }
+.conversation-message.user-message .message-actions { margin: 0 -6px 0 0; justify-content: flex-end; }
+.conversation-message .message-copy {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 28px; min-width: 28px; height: 28px; min-height: 28px;
+  padding: 6px; border: 0; border-radius: 28px; background: transparent;
+  color: var(--muted); cursor: pointer;
+}
+.conversation-message .message-copy svg { width: 15px; height: 15px; }
+.conversation-message .message-copy:hover { background: var(--raised); color: var(--text); }
+.conversation-message .message-copy:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.conversation-message .message-copy-feedback { font-size: 11px; line-height: 18px; color: var(--muted); }
+@media (hover: hover) {
+  /* Older rows retain every action; hover and keyboard focus reveal them. */
+  .conversation-message:where(.user-message):has(~ .user-message) .message-actions,
+  .conversation-message:where(:not(.user-message)):has(~ .conversation-message) .message-actions { opacity: 0; transition: opacity 80ms ease; }
+  .conversation-message:hover .message-actions, .conversation-message:focus-within .message-actions { opacity: 1; }
+}
+.conversation-message .markdown-body { font-family: inherit; font-size: 14px; line-height: 24px; color: var(--text); }
+.conversation-message .markdown-body strong { font-weight: 600; }
+.conversation-message .markdown-body :is(h1,h2,h3) { margin: 32px 0 16px; font-weight: 600; }
+.conversation-message .markdown-body h1 { font-size: 21px; line-height: 30px; }
+.conversation-message .markdown-body h2 { font-size: 19px; line-height: 28px; }
+.conversation-message .markdown-body h3 { font-size: 18px; line-height: 26px; }
+.conversation-message .markdown-body h4 { font-size: 16px; line-height: 24px; margin: 16px 0; }
+.conversation-message .markdown-body :is(h5,h6) { font-size: 14px; line-height: 24px; font-weight: 600; margin: 16px 0; }
+.conversation-message .markdown-body :is(h1,h2,h3,h4,h5,h6) strong { font-weight: inherit; }
+.conversation-message .markdown-body p { margin: 16px 0; color: inherit; }
+.conversation-message .markdown-body :is(h4,h5,h6) + :is(ul,ol) { margin-top: 8px; }
+.conversation-message .markdown-body :is(h4,h5,h6):has(+ :is(ul,ol)) { margin-bottom: 8px; }
+.conversation-message .markdown-body a { color: var(--focus); font-weight: 500; text-decoration: none; }
+.conversation-message .markdown-body a:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
+.conversation-message .markdown-body a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.conversation-message .markdown-body :is(ul,ol) { margin: 16px 0; padding-left: 18px; }
+.conversation-message .markdown-body li { padding-left: 0; }
+.conversation-message .markdown-body li:not(:first-child) { margin-top: 6px; }
+.conversation-message .markdown-body li > :is(ul,ol) { margin-top: 4px; }
+.conversation-message .markdown-body li::marker { line-height: 24px; color: var(--muted); }
+.conversation-message .markdown-body :is(ul,ol) ol { list-style-position: inside; padding-left: 0; }
+.conversation-message .markdown-body :is(ul,ol) ol li p { display: inline; }
+.conversation-message .markdown-body li > p { margin: 8px 0; }
+.conversation-message .markdown-body li > :first-child { margin-top: 0; }
+.conversation-message .markdown-body li > :last-child:not(.code-block) { margin-bottom: 0; }
+.conversation-message .markdown-body hr { border: 0; height: .5px; margin: 32px 0; background: var(--line); }
+.conversation-message .markdown-body blockquote { border-left: 2px solid var(--muted); margin: 16px 0 0; padding: 0 0 0 14px; color: inherit; }
+.conversation-message .markdown-body :not(pre) > code { font-family: ui-monospace,SFMono-Regular,Consolas,monospace; font-size: .875em; background: var(--raised); border: .5px solid var(--line); border-radius: 6px; padding: 0 5px; }
+.conversation-message .markdown-body > :first-child { margin-top: 0; }
+.conversation-message .markdown-body > :last-child { margin-bottom: 0; }
+.conversation-message .markdown-body .code-block { position: relative; margin: 16px 0; border-radius: 12px; background: var(--surface); color: var(--text); }
+.conversation-message .markdown-body .code-block:not(:last-child) { margin-bottom: 11px; }
+.conversation-message .code-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 14px; border-radius: 12px 12px 0 0; background: var(--raised); font-size: 11px; line-height: 18px; }
+.conversation-message .code-language { font-family: ui-monospace,SFMono-Regular,Consolas,monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-message .code-banner .copy-code { border: 0; min-height: 18px; margin: 0; padding: 0; border-radius: 4px; background: transparent; font-size: 11px; line-height: 18px; color: inherit; }
+.conversation-message .code-banner .copy-code:hover { text-decoration: underline; }
+.catalog-message.conversation-message .message-body pre { font-family: ui-monospace,SFMono-Regular,Consolas,monospace; font-size: 12px; line-height: 20px; border: 0; border-radius: 12px; padding: 16px; margin: 16px 0; white-space: pre-wrap; word-break: break-all; overflow: auto; max-height: 480px; }
+.catalog-message.conversation-message .code-block pre { margin: 0; border-radius: 0 0 12px 12px; }
+.conversation-message .markdown-body pre code { font: inherit; padding: 0; border: 0; background: none; }
+.conversation-message .message-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; margin: 16px 0; }
+.conversation-message .markdown-body table { display: table; width: max-content; min-width: 100%; max-width: none; margin: 0; font-size: 14px; line-height: 24px; border-collapse: collapse; }
+.conversation-message .markdown-body :is(th,td) { padding: 8px 12px; border: .5px solid var(--line); max-width: 440px; overflow-wrap: anywhere; }
+/* Activities have no public owning-turn attribution. Keep the separate bounded
+ * public timeline in server order; do not imitate private turn/reasoning groups. */
+#live-activities.tool-timeline { margin: 16px auto 8px; }
+#live-activities .section-heading { margin-bottom: 6px; }
+#live-activities h2 { font-size: 13px; line-height: 24px; font-weight: 400; color: var(--muted); }
+#live-activities .activity-list { gap: 0; }
+#live-activities .tool-activity { border: 0; border-bottom: .5px solid var(--line); border-radius: 0; background: transparent; }
+#live-activities .tool-activity > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 33px; padding: 4px 0; font-size: 13px; line-height: 24px; }
+#live-activities .activity-tool { font-family: inherit; flex: 0 1 auto; overflow-wrap: anywhere; }
+#live-activities .activity-status { margin-left: auto; font-size: 11px; line-height: 20px; padding: 0; }
+#live-activities .activity-summary { font-size: 12px; color: var(--muted); flex: 1 0 100%; padding-left: 16px; }
+#live-activities .activity-body { padding: 0 0 8px 16px; border: 0; }
+#live-activities .activity-output { margin-top: 4px; font-size: 12px; line-height: 20px; }
+/* Harness's turn-level signal spans first-token wait, tools and streaming.
+ * Only public running state is displayed; no invented elapsed time/reasoning. */
+#live-turn-status { flex: none; width: min(var(--chat-content-width), calc(100% - 64px)); margin: 0 auto 16px; height: 26px; font-size: 14px; line-height: 26px; font-weight: 500; color: var(--accent); }
+#live-turn-status { background: linear-gradient(90deg, var(--accent) 0%, var(--accent) 40%, var(--text) 50%, var(--accent) 60%, var(--accent) 100%); background-size: 250% 100%; background-position: 100% 0; background-clip: text; -webkit-background-clip: text; color: transparent; animation: snow-turn-status 1.8s linear infinite; }
+@keyframes snow-turn-status { to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .conversation-message .message-actions { transition: none; } #live-turn-status { animation: none; background: none; color: var(--accent); } }
+@media (forced-colors: active) { #live-turn-status { animation: none; background: none; color: CanvasText; } }
+
+/* Durable disclosures belong to the assistant article, not the live timeline.
+ * Reuse activity primitives with locally scoped compact transcript geometry. */
+.conversation-message .message-tools { width: 100%; min-width: 0; max-width: 100%; margin: 8px 0 0; gap: 0; }
+.conversation-message .message-tools .tool-activity { border: 0; border-bottom: .5px solid var(--line); border-radius: 0; background: transparent; }
+.conversation-message .message-tools .tool-activity > summary { min-height: 33px; padding: 4px 0; gap: 4px 8px; }
+.conversation-message .message-tools .tool-activity > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.conversation-message .message-tools .activity-tool { min-width: 0; max-width: none; white-space: normal; overflow-wrap: anywhere; }
+.conversation-message .message-tools .activity-status { margin-left: auto; font-size: 11px; line-height: 20px; }
+.recovery-notice { flex: 0 1 auto; min-height: 0; max-height: min(180px, 30dvh); overflow: auto; overflow-wrap: anywhere; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.recovery-notice p { margin: 0 0 6px; }
+.recovery-notice[hidden] { display: none; }
+.conversation-message .message-tools .activity-body { min-width: 0; margin: 4px 0 8px 16px; padding: 0; }
+.conversation-message .message-tools .activity-output { min-width: 0; max-width: 100%; margin: 0; font-size: 12px; line-height: 20px; }
+.conversation-message .message-tools .history-tool-limit { margin: 4px 0; }
+
+/* Reuse is a copy in the normal composer, not an in-place history editor. */
+.conversation-message :is(.message-reuse, .message-edit, .message-regenerate) {
+  border: 0; background: transparent; color: var(--muted); padding: 4px 8px;
+  min-height: 28px; border-radius: 6px; font: inherit; font-size: 12px;
+}
+.conversation-message :is(.message-reuse, .message-edit, .message-regenerate):hover:not(:disabled) { background: var(--raised); color: var(--text); }
+.conversation-message :is(.message-reuse, .message-edit, .message-regenerate):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.conversation-message :is(.message-reuse, .message-edit, .message-regenerate):disabled { opacity: .5; cursor: not-allowed; }
+:is(.message-reuse-notice, .message-edit-notice) { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 14px 0; font-size: 12px; line-height: 18px; color: var(--muted); }
+:is(.message-reuse-notice, .message-edit-notice) button { flex: none; font-size: 12px; }
+/* Send, admission and Stop share one footprint. A text Stop pill used to wrap
+ * the newly labelled toolbar during compaction; names remain in ARIA/tooltips. */
+.composer .composer-send.composer-stop, .composer .composer-send.is-sending { width: 34px; min-width: 34px; height: 34px; min-height: 34px; padding: 6px; border-radius: 50%; }
+.composer-send-progress { animation: composer-send-progress 1s linear infinite; }
+@keyframes composer-send-progress { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .composer-send-progress { animation: none; } }
+
+.message-edit-notice { color: var(--text); }
+.conversation-message[data-editing="true"] > .message-body { outline: 1px solid var(--focus); outline-offset: 2px; }

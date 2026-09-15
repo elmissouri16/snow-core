@@ -1,0 +1,80 @@
+window.testComposerRaces = async assert => {
+  "use strict";
+  const {$, tick, wait, posts, latest, visible, draft, key, chips, clear, upload, textFile, status, reading, rows, choose, files, skills, send, accept, swap} = contextTest;
+  const original = File.prototype.arrayBuffer;
+  let release;
+  File.prototype.arrayBuffer = function() {
+    if (this.name === "delayed.txt") return new Promise(resolve => { release = () => original.call(this).then(resolve); });
+    return original.call(this);
+  };
+  try {
+    const before = posts().length;
+    upload([textFile("delayed.txt")]); await wait(() => !!release);
+    assert(chips().length === 1 && reading(), "pending File.arrayBuffer is visible as a reading chip");
+    chips()[0].click(); await release(); await tick(100);
+    assert(chips().length === 0 && posts().length === before, "late local read cannot resurrect a removed file or upload it");
+    release = null; upload([textFile("delayed.txt")]); await wait(() => !!release);
+    const oldRelease = release;
+    await swap({session_id: "session-two", session_name: "Second task"});
+    await oldRelease(); await tick(100);
+    assert(chips().length === 0, "late file read from disposed session cannot enter another session");
+    upload([textFile("second.txt", "second content")]); await wait(() => chips().length === 1 && !reading()); draft("second draft");
+    await swap({session_id: "session-one", session_name: "First task"});
+    assert(!$("[data-composer-context-items]").textContent.includes("second.txt") && /interrupted/i.test(status()), "returning to old session keeps interrupted read explicitly failed, never adopts second session file");
+    await clear(); upload([textFile("first.txt", "first content")]); await wait(() => chips().length === 1 && !reading()); draft("first draft");
+    await swap({session_id: "session-two", session_name: "Second task"});
+    assert(chips().length === 1 && $("[data-composer-context-items]").textContent.includes("second.txt") && $("#live-prompt").value === "second draft", "ready attachments and text restore independently per session");
+    await swap({project_id: "project-two", session_id: "session-two", instance_id: "instance-two"});
+    assert(chips().length === 0 && $("#live-prompt").value === "", "same session name in another project cannot share context draft");
+    await swap({project_id: "00000000-0000-4000-8000-000000000002", session_id: "session-one", instance_id: "instance-one"});
+    assert(chips().length === 1 && $("[data-composer-context-items]").textContent.includes("first.txt") && $("#live-prompt").value === "first draft", "original project/session retains its own ready draft");
+    send(); await wait(() => latest("prompt-content") && !latest("prompt-content").settled);
+    draft("typed while acceptance pending"); await accept("prompt-content");
+    assert(chips().length === 0 && $("#live-prompt").value === "typed while acceptance pending", "accepted captured attachments clear without erasing text typed during admission");
+    const accepted = posts("prompt-content").length; await swap();
+    assert(chips().length === 0 && posts("prompt-content").length === accepted, "workspace reload never restores or replays accepted context");
+    await clear(); upload([textFile("outgoing.txt")]); await wait(() => chips().length === 1 && !reading()); draft("outgoing");
+    send(); await wait(() => posts("prompt-content").length === accepted + 1);
+    const pendingPrompt = latest("prompt-content"), oldSnapshot = {...fixture.snapshot};
+    await swap({session_id: "session-two", instance_id: "instance-two"});
+    // Explicit workspace replacement authorizes this different instance; the old
+    // acknowledgement may not erase its independently restored ready context.
+    pendingPrompt.resolve(oldSnapshot); await tick(100);
+    assert($("[data-composer-context-items]").textContent.includes("second.txt") && $("#live-prompt").value === "second draft", "late accepted send from disposed composer cannot clear another draft");
+    assert(posts("prompt-content").length === accepted + 1, "late acknowledgement never starts an automatic resend");
+    await clear();
+
+    const listCount = posts("files").length;
+    draft("@"); await wait(() => posts("files").length === listCount + 1);
+    const staleListing = latest("files");
+    draft("plain text after query"); staleListing.resolve(files()); await tick(100);
+    assert(!visible($("[data-composer-mentions]")) && chips().length === 0, "late listing cannot reopen an abandoned caret query");
+    draft("@"); await wait(() => posts("files").length === listCount + 2);
+    latest("files").resolve(files()); await wait(() => rows().length === 3);
+    const fileCount = posts("file").length;
+    $("#live-prompt").setSelectionRange(0, 0); choose("notes.txt"); await tick();
+    assert(posts("file").length === fileCount && chips().length === 0, "changed caret fences selection even before another input event");
+    key("Escape"); draft("@"); await tick();
+    choose("notes.txt"); await wait(() => posts("file").length === fileCount + 1);
+    const staleFile = latest("file"); draft("query changed while file read pending");
+    staleFile.resolve({path: "notes.txt", text: "old content", size: 11, truncated: false}); await tick(100);
+    assert($("#live-prompt").value === "query changed while file read pending" && /changed|failed/i.test(status()), "late project file cannot replace a changed draft and reports failure");
+    await clear();
+    const skillCount = posts("skills").length; draft("$"); await wait(() => posts("skills").length === skillCount + 1);
+    const staleSkills = latest("skills"), oldSkills = skills();
+    await swap({session_id: "session-three", instance_id: "instance-three"});
+    staleSkills.resolve(oldSkills); await tick(100);
+    assert(!visible($("[data-composer-mentions]")) && $("#live-prompt").value === "", "disposed skill response cannot reopen or populate replacement composer");
+    draft("$"); await wait(() => posts("skills").length === skillCount + 2);
+    latest("skills").resolve(skills({instance_id: "foreign-instance"})); await tick(100);
+    assert(rows().every(row => !row.querySelector(".composer-mention-name")?.textContent.includes("$")) && /could not|invalid|unavailable/i.test($("[data-composer-mentions]").textContent), "foreign-instance skills are rejected with explicit feedback");
+    const mutations = posts().filter(request => /\/runtime\/(prompt|prompt-content|activate|queue)/.test(request.url)).length;
+    const retryCount = posts("skills").length;
+    assert(!!$("[data-composer-skills-retry]") && retryCount === skillCount + 2, "failed skills expose explicit Retry without an automatic request loop");
+    $("[data-composer-skills-retry]").click(); await wait(() => posts("skills").length === retryCount + 1);
+    latest("skills").resolve(skills()); await wait(() => rows().some(row => row.textContent.includes("$review")));
+    assert(latest("skills").fields.instance_id === "instance-three" && $("#live-prompt").value === "$", "explicit skills Retry rebinds current instance and still never inserts a skill");
+    assert(posts().filter(request => /\/runtime\/(prompt|prompt-content|activate|queue)/.test(request.url)).length === mutations, "stale discovery cannot authorize Send, activation or queue mutations");
+    await clear();
+  } finally { File.prototype.arrayBuffer = original; }
+};

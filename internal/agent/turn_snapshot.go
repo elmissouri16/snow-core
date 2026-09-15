@@ -30,7 +30,7 @@ func (a *Agent) ActiveTurnSnapshot() TurnSnapshot {
 // the identity captured at admission rather than sampling a possibly newer
 // operation afterward. A pre-admission rejection returns a zero identity.
 func (a *Agent) CompactWithTurn(ctx context.Context) (result protocol.CompactionResult, turn TurnSnapshot, err error) {
-	result, err = a.compact(ctx, &turn)
+	result, err = a.compactManualCaptured(ctx, &turn)
 	turn.Running = false
 	return
 }

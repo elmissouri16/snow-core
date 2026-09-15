@@ -1,0 +1,28 @@
+/* Compact composer picker; native popover owns light-dismiss and the top layer. */
+.composer-context-button.reasoning-trigger { display: inline-flex; align-items: center; gap: 4px; width: auto; max-width: 190px; padding-inline: 7px; border-radius: 8px; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; }
+.reasoning-trigger [data-reasoning-current] { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.composer-context-button.reasoning-trigger svg { flex: none; width: 12px; height: 12px; }
+.reasoning-picker { position: fixed; inset: auto; margin: 0; box-sizing: border-box; max-width: calc(100vw - 16px); overflow: auto; overscroll-behavior: contain; padding: 6px; border: 0; border-radius: 14px; background: var(--menu-surface); color: var(--text); box-shadow: 0 0 0 .5px var(--menu-stroke), 0 3px 8px rgb(0 0 0 / .04), 0 0 20px rgb(0 0 0 / .05); }
+.reasoning-picker-heading { margin: 0; padding: 5px 8px; font-size: 12px; font-weight: 600; }
+.reasoning-picker .reasoning-picker-notice { margin: 0; padding: 0 8px 6px; font-size: 11px; line-height: 16px; color: var(--muted); overflow-wrap: anywhere; }
+.reasoning-picker button { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 7px 9px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 13px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.reasoning-picker button:hover:not(:disabled), .reasoning-picker button[aria-checked=true] { background: var(--menu-hover); }
+.reasoning-picker button:disabled { opacity: .45; cursor: default; }
+.reasoning-picker button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.reasoning-picker-secondary { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line); }
+@container (max-width: 360px) { .composer-context-button.reasoning-trigger { gap: 3px; max-width: 135px; padding-inline: 4px; font-size: 11px; } }
+
+.reasoning-dialog { width: min(42rem, calc(100vw - 1.5rem)); max-width: calc(100vw - 1.5rem); max-height: calc(100dvh - 2rem); overflow: auto; box-sizing: border-box; }
+.reasoning-dialog .dialog-heading, .reasoning-dialog .dialog-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.reasoning-dialog h2 { flex: 1 1 12rem; }
+.reasoning-dialog section { margin-block: 1.25rem; }
+.reasoning-dialog label:not(.reasoning-consent) { display: block; margin-block: .75rem .3rem; }
+.reasoning-dialog select { width: 100%; min-height: 2.75rem; font: inherit; color: inherit; background: var(--surface, Canvas); border: 1px solid var(--line); border-radius: .4rem; padding: .5rem; }
+.reasoning-facts { display: grid; grid-template-columns: minmax(7rem, 1fr) minmax(0, 2fr); gap: .4rem .8rem; }
+.reasoning-facts dd { margin: 0; overflow-wrap: anywhere; }
+.reasoning-confirmation { padding: .85rem; border: 1px solid var(--line); border-radius: .5rem; overflow-wrap: anywhere; }
+.reasoning-consent { display: flex; align-items: flex-start; gap: .6rem; padding-block: .7rem; }
+.reasoning-consent input { flex: 0 0 auto; width: 1.2rem; height: 1.2rem; }
+.reasoning-dialog button { min-height: 2.75rem; }
+.reasoning-dialog :focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+@media (max-width: 420px) { .reasoning-facts { grid-template-columns: 1fr; } .reasoning-facts dd { margin-bottom: .5rem; } .reasoning-dialog .dialog-actions > button { flex: 1 1 100%; } }

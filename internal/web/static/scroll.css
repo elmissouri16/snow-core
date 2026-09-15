@@ -1,0 +1,106 @@
+/* Stable native transcript scrollport and measured composer clearance.
+ * Adapted from Harness ChatView/ConversationRoot; see HARNESS-NOTICE.txt.
+ * Load AFTER harness.css. Attention's forms remain owned by attention.css.
+ */
+.app-layout { height: min(100dvh, var(--snow-visual-height, 100dvh)); min-height: 0; }
+.conversation-layout, .conversation-pane { min-height: 0; }
+/* The transcript and composer own scrolling. Hidden overflow still permits
+ * native focus to scroll this ancestor and bury its header under the topbar. */
+#live-session { position: relative; flex: 1 1 0; min-height: 0; overflow: clip; }
+#live-stream {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  /* The row+offset ledger owns anchoring; browser anchoring would double it. */
+  overflow-anchor: none;
+  scroll-behavior: auto;
+}
+#live-transcript { overflow: visible; }
+#live-composer-seat {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 0;
+  width: 100%;
+  max-height: var(--scroll-seat-limit, 55dvh);
+  z-index: 7;
+}
+#live-composer-seat > .composer-stack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(var(--scroll-seat-limit, 55dvh) - max(8px, env(safe-area-inset-bottom)));
+}
+#live-composer-seat .composer {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Wrapped controls scroll inside their bounded card, not the live region:
+   * native focus must never scroll the conversation header behind the topbar. */
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+#live-composer-seat .composer textarea {
+  flex: 1 1 auto;
+  min-height: 36px;
+  max-height: min(336px, max(36px, calc(var(--scroll-seat-limit, 55dvh) - 96px)));
+  overflow-y: auto;
+}
+#live-composer-seat .composer-actions, #live-composer-seat .composer-footer { flex: 0 0 auto; }
+/* Takeover stays in this single seat, not a second transcript overlay. The
+ * application must still hide/disable the normal card authoritatively. */
+#live-composer-seat > .live-attention {
+  max-height: calc(var(--scroll-seat-limit, 55dvh) - max(8px, env(safe-area-inset-bottom)));
+  margin-bottom: max(8px, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#live-session > #jump-latest,
+#live-session > [data-react-reader-controls] > #jump-latest {
+  position: absolute;
+  left: auto;
+  right: var(--scroll-jump-right, 24px);
+  bottom: var(--scroll-jump-bottom, 16px);
+  transform: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 2px 10px #00000024;
+  z-index: 8;
+}
+#jump-latest svg { width: 18px; height: 18px; pointer-events: none; }
+#jump-latest:hover { background: var(--raised); }
+#jump-latest:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+@media (max-width: 767px) {
+  .app-layout { height: max(0px, calc(min(100dvh, var(--snow-visual-height, 100dvh)) - 48px)); }
+}
+/* Short landscapes prioritize real title/actions and the usable input. Do
+ * not hide Stop, approval controls or composer-state to manufacture space. */
+@media (max-height: 420px) {
+  #live-session .live-header {
+    height: 40px;
+    min-height: 40px;
+    padding: 4px 12px;
+    align-items: center;
+  }
+  #live-composer-seat .composer { gap: 4px; }
+  #live-composer-seat .composer textarea {
+    height: 28px;
+    min-height: 24px;
+    max-height: min(336px, max(24px, calc(var(--scroll-seat-limit, 55dvh) - 96px)));
+  }
+  #live-composer-seat .composer-actions { gap: 4px; min-height: 34px; }
+  #live-composer-seat .composer-hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #live-stream { scroll-behavior: auto; }
+  #jump-latest { transition: none; }
+}

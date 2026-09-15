@@ -1,0 +1,30 @@
+{{define "runtime-activation"}}
+<section class="runtime-activation activation-panel workspace-session-start{{if .Project.Trusted}} activation-trusted{{end}}" aria-labelledby="activation-heading">
+  <h2 id="activation-heading">{{if .SessionID}}Paused · resume to continue{{else}}Start a session{{end}}</h2>
+  <form method="post" action="/projects/{{.Project.ID}}/runtime/open" data-runtime-open hx-push-url="true" hx-params="none">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    {{if .SessionID}}<input type="hidden" name="session_id" value="{{.SessionID}}">{{end}}
+    <label class="visually-hidden" for="workspace-prompt">Session draft</label>
+    <textarea id="workspace-prompt" class="activation-draft" rows="2" maxlength="65536" data-draft-project="{{.Project.ID}}" data-draft-session="{{.SessionID}}" data-draft-name="{{.Project.Name}}" placeholder="What would you like to work on?" aria-describedby="workspace-draft-help" disabled></textarea>
+    <p class="fine" id="workspace-draft-help">Drafts stay in this tab. {{if .SessionID}}Resume{{else}}Start{{end}}, then review and send.</p>
+    {{if .Project.Trusted}}
+    <input type="hidden" name="confirm" value="trusted">
+    {{else}}
+    <p class="activation-boundary">Starting loads this workspace’s configuration and instructions. Tools run with your host account’s privileges, not in a sandbox. Browsing does not start an agent.</p>
+    <input type="hidden" name="remember_trust" value="project">
+    <label class="checkbox-label"><input name="confirm" type="checkbox" value="activate" required> I trust this workspace. Remember my choice for future starts in this manager.</label>
+    <p class="fine">Trust does not grant tools Allow permissions. Forget it in Settings → Workspaces.</p>
+    {{end}}
+    {{if .SessionID}}<p class="fine">Resuming restores saved session permissions. A saved Allow policy skips tool approval prompts.</p>{{end}}
+    <label class="checkbox-label"><input name="enable_skills" type="checkbox" value="runtime" aria-describedby="activation-skills-help"{{if .Project.SkillsEnabled}} checked{{end}}> Enable installed skills</label>
+    <details class="activation-model-help"><summary>Startup settings</summary>
+      <p class="fine" id="activation-skills-help">The skills choice is remembered for this workspace when you start. Project skills still require separate CLI extension trust.</p>
+      <p class="fine">Uses the host’s configured provider and model. Change models while idle after starting. If the default cannot start, configure it on the host first.</p>
+      {{if .Project.Trusted}}<p class="fine">Workspace trust remembered. Manage it in <button type="button" class="quiet" data-settings-open="workspaces">Settings → Workspaces</button>.</p>{{end}}
+    </details>
+    <p class="error" data-action-error role="alert" hidden></p>
+    <div class="form-footer"><span class="fine">{{if not .SessionID}}New sessions start in Ask{{end}}</span><button class="primary" type="submit">{{if .SessionID}}Resume session{{else if .Project.Trusted}}Start session{{else}}Trust &amp; start{{end}} <span aria-hidden="true">→</span></button></div>
+  </form>
+  <noscript><p class="fine">Live controls need JavaScript. Workspace registration and saved history remain available without it.</p></noscript>
+</section>
+{{end}}

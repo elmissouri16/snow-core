@@ -46,14 +46,15 @@ type Server struct {
 	readyOnce                     sync.Once
 	snowVersion                   string
 	// cancel aborts the in-flight prompt.
-	cancel     context.CancelFunc
-	promptDone chan struct{}
-	promptWG   sync.WaitGroup
-	waitSlots  chan struct{}
-	authMu     sync.Mutex
-	authJobs   map[string]*authLoginJob
-	authWG     sync.WaitGroup
-	authSerial atomic.Uint64
+	cancel         context.CancelFunc
+	promptDone     chan struct{}
+	promptWG       sync.WaitGroup
+	waitSlots      chan struct{}
+	imageReadSlots chan struct{}
+	authMu         sync.Mutex
+	authJobs       map[string]*authLoginJob
+	authWG         sync.WaitGroup
+	authSerial     atomic.Uint64
 }
 
 // ServerOptions configures RPC transport metadata.

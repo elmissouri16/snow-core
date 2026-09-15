@@ -50,6 +50,12 @@ func (f *FileIndex) CreateFork(cwd string, source Store, opts protocol.SessionFo
 	if err != nil {
 		return nil, protocol.SessionForkResult{}, err
 	}
+	return f.createForkSnapshot(cwd, snapshot, opts)
+}
+
+// createForkSnapshot publishes an already captured immutable source. It never
+// reads the source store or acquires its locks during child materialization.
+func (f *FileIndex) createForkSnapshot(cwd string, snapshot forkSnapshot, opts protocol.SessionForkOptions) (Store, protocol.SessionForkResult, error) {
 	if err := ValidateForkBoundary(snapshot.entries); err != nil {
 		return nil, protocol.SessionForkResult{}, err
 	}

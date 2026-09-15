@@ -1,0 +1,115 @@
+/* Composer takeover geometry from Harness QuestionComposer/ApprovalPanel.
+ * app.js owns runtime authority; this sheet never hides authority/review UI.
+ * See HARNESS-NOTICE.txt. Load after app.css and harness.css. */
+/* Only a warning-saturated viewport uses an outer scroll fallback: review and
+ * host-authority text stay intact, and card actions never clip inside the seat. */
+.live-session.attention-constrained { overflow-y: auto; overscroll-behavior: contain; }
+.composer-seat { flex: none; min-height: 0; width: 100%; position: relative; }
+.composer-seat[data-attention="true"] { display: flex; flex-direction: column; max-height: var(--attention-seat-height, 60dvh); }
+#live-composer-seat > .attention-frame {
+  display: flex; justify-content: center; flex: 0 1 auto; min-height: 0;
+  width: 100%; margin: 0; padding: 6px 32px 10px;
+  border: 0; border-radius: 0; background: transparent; overflow: hidden;
+  max-height: min(60vh, 520px, var(--attention-seat-height, 60vh));
+  max-height: min(60dvh, 520px, var(--attention-seat-height, 60dvh));
+}
+.attention-frame .attention-card {
+  display: flex; flex-direction: column; min-height: 0; width: 100%;
+  max-width: var(--chat-content-width, 820px); margin: 0; padding: 0 0 10px;
+  border: 0; border-radius: 20px; background: var(--composer, var(--raised));
+  box-shadow: 0 0 0 .5px var(--line), 0 4px 16px #00000008, 0 0 24px #00000008;
+  color: var(--text); overflow: hidden;
+}
+.attention-card, .attention-card * { box-sizing: border-box; }
+.attention-card .attention-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; flex-shrink: 0; padding: 20px 16px 0 24px;
+}
+.attention-heading { flex: 1; min-width: 0; }
+.attention-eyebrow { margin-bottom: 5px; color: var(--muted); font-size: 11px; line-height: 16px; font-weight: 400; }
+.attention-card .attention-title { margin: 0; color: var(--text); font-size: 16px; line-height: 22px; font-weight: 500; letter-spacing: normal; overflow-wrap: anywhere; }
+/* Full question text remains in the scrolling body. A verbose question header
+ * cannot evict the answer actions on a short viewport. */
+.attention-heading .attention-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.attention-header-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.attention-card button { min-height: 32px; font-size: 12px; line-height: 18px; padding: 6px 10px; border-radius: 10px; white-space: nowrap; }
+.attention-card .attention-icon { display: grid; place-items: center; width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 50%; font-size: 20px; }
+.attention-card .attention-stop { font-size: 11px; padding: 4px 6px; }
+.attention-card .attention-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.attention-card .attention-question { min-width: 0; margin: 0; padding: 0; border: 0; }
+.attention-card .attention-detail { margin: 8px 24px; color: var(--text); font-size: 14px; line-height: 24px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.attention-options { display: flex; flex-direction: column; gap: 1px; margin: 8px 0 0; padding: 4px 12px; }
+.attention-card .attention-option, .attention-card .attention-custom {
+  position: relative; display: flex; align-items: flex-start; gap: 8px; flex: none;
+  width: 100%; min-height: 40px; margin: 0; padding: 8px 12px 8px 8px;
+  border: 1px solid transparent; border-radius: 12px; color: inherit; text-align: left;
+  background: transparent; cursor: pointer;
+}
+.attention-option:hover:has(input:not(:disabled)), .attention-option:has(input:checked),
+.attention-custom:hover:has(textarea:not(:disabled)), .attention-custom:focus-within,
+.attention-custom-active, .attention-custom:has(input:checked) { background: var(--line); }
+.attention-card .attention-option:has(input:checked), .attention-card .attention-custom:focus-within,
+.attention-card .attention-custom-active, .attention-card .attention-custom:has(input:checked) { border-color: var(--line); }
+/* Native radios keep the form, tab order, arrow-key semantics, and exact answer
+ * values. Their 20px numbered seats carry the selected and focus treatment. */
+.attention-card input.attention-radio { position: absolute; width: 20px; height: 20px; min-height: 20px; margin: 2px 0 0; padding: 0; opacity: 0; z-index: 1; }
+.attention-number { display: grid; place-items: center; flex: 0 0 20px; width: 20px; height: 20px; margin-top: 2px; border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 500; line-height: 18px; }
+.attention-radio:checked + .attention-number, .attention-radio:checked + label .attention-number { color: var(--canvas); background: var(--text); }
+.attention-option:has(input:focus-visible), .attention-custom:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
+.attention-option:has(input:disabled), .attention-custom:has(textarea:disabled) { cursor: default; opacity: .6; }
+.attention-option-copy { min-width: 0; flex: 1; }
+.attention-option-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; }
+.attention-option-label { color: var(--text); font-size: 14px; line-height: 24px; font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+.attention-badge { padding: 0 4px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: 11px; line-height: 18px; font-weight: 600; }
+.attention-description { display: block; color: var(--muted); font-size: 14px; line-height: 24px; font-weight: 400; white-space: pre-wrap; overflow-wrap: anywhere; }
+.attention-card .attention-custom-label { flex: none; margin: 0; cursor: text; }
+.attention-answer-field { display: grid; flex: 1; min-width: 0; }
+.attention-card .attention-answer-field > * {
+  grid-area: 1 / 1; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0;
+  font: inherit; font-size: 14px; line-height: 24px; font-weight: 400;
+  white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+}
+.attention-answer-mirror { visibility: hidden; max-height: 144px; overflow: hidden; }
+.attention-card textarea.attention-answer { width: 100%; height: 100%; min-height: 24px; max-height: 144px; resize: none; overflow-y: auto; background: transparent; color: var(--text); outline: none; box-shadow: none; }
+.attention-card .attention-custom-block { min-height: 64px; margin: 0 12px; width: calc(100% - 24px); padding: 8px 12px; border: .5px solid var(--line); border-radius: 10px; background: var(--surface); }
+/* Free-text answers use their compound field's edge, not an inner textarea ring. */
+.attention-card .attention-custom:has(textarea:focus) { outline: 1px solid var(--focus); outline-offset: -1px; }
+.attention-card .attention-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; margin-top: 12px; padding: 0 10px 0 18px; }
+.attention-pager { display: flex; align-items: center; gap: 6px; flex: none; }
+.attention-progress { padding: 0 4px; color: var(--muted); font-size: 14px; line-height: 24px; font-weight: 500; white-space: nowrap; word-spacing: -2px; }
+.attention-card .attention-feedback { margin: 8px 24px 0; color: var(--danger); font-size: 12px; line-height: 18px; }
+.attention-card.attention-collapsed .attention-header { padding-bottom: 4px; }
+.attention-card.attention-permission { border: 1px solid var(--warning); }
+.attention-warning { flex: none; padding: 10px 16px; background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--warning); font-size: 13px; line-height: 18px; }
+.attention-card .attention-permission-body { display: flex; flex-direction: column; gap: 6px; max-height: 336px; padding: 12px 16px 0; }
+.attention-permission-body p, .attention-permission-body pre { flex: none; margin: 0; color: var(--muted); font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.attention-card .attention-authority-warning { color: var(--warning); }
+.attention-card .attention-authority { flex: none; margin: 8px 16px 0; color: var(--warning); font-size: 12px; line-height: 18px; }
+.attention-card .attention-permission-actions { justify-content: flex-end; gap: 8px; padding: 0 16px; }
+.attention-permission-actions .attention-stop { margin-right: auto; }
+@media (max-width: 720px) {
+  #live-composer-seat > .attention-frame { padding-left: 16px; padding-right: 16px; }
+  .attention-frame .attention-card { border-radius: 16px; }
+  .attention-card .attention-header { gap: 8px; padding: 10px 12px 0 18px; }
+  .attention-card .attention-title { font-size: 15px; line-height: 21px; }
+  .attention-options { padding: 4px 8px; }
+  .attention-card .attention-option, .attention-card .attention-custom { padding: 8px 6px; }
+  .attention-card .attention-detail { margin-left: 18px; margin-right: 18px; }
+  .attention-card .attention-footer { padding: 0 10px; gap: 6px; }
+  .attention-card .attention-custom-block { margin: 0 10px; width: calc(100% - 20px); }
+  /* Prevent mobile Safari focus zoom without making option copy oversized. */
+  .attention-card .attention-answer-field > * { font-size: 16px; }
+}
+/* Also compact against visualViewport/available seat height when the on-screen
+ * keyboard does not change CSS viewport media queries. */
+.attention-compact > .conversation-stream { padding-top: 0; padding-bottom: 0; }
+.attention-compact #live-composer-seat > .attention-frame { padding-top: 2px; padding-bottom: 4px; max-height: min(76dvh, 520px, var(--attention-seat-height, 76dvh)); }
+.attention-compact .attention-frame .attention-card { padding-bottom: 4px; }
+.attention-compact .attention-card .attention-header { padding-top: 4px; align-items: center; }
+.attention-compact .attention-eyebrow { margin: 0; font-size: 10px; line-height: 12px; }
+.attention-compact .attention-heading .attention-title { -webkit-line-clamp: 1; font-size: 14px; line-height: 18px; }
+.attention-compact .attention-card .attention-footer { margin-top: 4px; }
+.attention-compact .attention-card button { min-height: 28px; padding-top: 4px; padding-bottom: 4px; }
+.attention-compact .attention-warning { padding: 4px 12px; font-size: 12px; line-height: 16px; }
+.attention-compact .attention-card .attention-authority { margin: 4px 12px 0; font-size: 11px; line-height: 15px; }
+.attention-compact .attention-card .attention-permission-body { padding-top: 4px; }

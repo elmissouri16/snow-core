@@ -37,7 +37,7 @@ func (a *Agent) recordCompactionUsage(reported *protocol.Usage) error {
 	if usage.Total == 0 {
 		usage.Total = usage.Input + usage.Output
 	}
-	if usage.Cost == nil {
+	if usage.Cost == nil && !usage.CostCurrencyConflict {
 		usage.Cost = usage.CostFor(a.Model().Pricing)
 	}
 	wire, err := json.Marshal(usage)

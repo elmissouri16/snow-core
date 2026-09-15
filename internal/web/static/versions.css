@@ -1,0 +1,20 @@
+.versions-dialog { width: min(960px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: min(800px, calc(100dvh - 32px)); overflow: auto; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--text); }
+.versions-dialog::backdrop { background: rgb(0 0 0 / .5); }
+.versions-dialog > .dialog-heading { gap: 12px; }
+.versions-dialog h2 { font-size: 18px; margin: 0; }
+.versions-dialog h3 { font-size: 14px; margin: 0 0 8px; }
+.versions-columns { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr); gap: 20px; min-width: 0; }
+.versions-list-region, .versions-preview { min-width: 0; }
+.versions-list { display: grid; gap: 8px; max-height: 400px; overflow: auto; }
+.version-choice { width: 100%; min-width: 0; text-align: left; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; }
+.version-choice[aria-pressed="true"] { border-color: var(--accent); }
+.version-choice span, .version-choice code { display: block; overflow-wrap: anywhere; }
+.version-choice code, .version-tip { font-size: 10px; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+.version-choice span { font-size: 12px; }
+.versions-preview-messages { max-height: min(380px, 42dvh); overflow: auto; overscroll-behavior: contain; margin: 10px 0; }
+.version-preview-message { padding: 10px 0; border-top: 1px solid var(--line); }
+.version-preview-message > strong { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+.version-preview-message > pre { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; line-height: 1.5; }
+.version-restore-confirmation { padding: 12px; border: 1px solid var(--line); border-radius: 8px; margin-top: 12px; font-size: 12px; }
+.version-restore-confirmation .dialog-actions { flex-wrap: wrap; }
+@media (max-width: 640px) { .versions-dialog { padding: 14px; } .versions-columns { grid-template-columns: minmax(0, 1fr); gap: 14px; } .versions-list { max-height: 160px; } .versions-preview-messages { max-height: 28dvh; } }

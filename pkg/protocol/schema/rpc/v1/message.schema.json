@@ -142,8 +142,16 @@
     "is_error": {
       "type": "boolean"
     },
+    "tool_outcome_unknown": {
+      "type": "boolean",
+      "description": "Explicit synthetic interruption-recovery provenance, not an observed tool result. True keeps public history unresolved without result_id or output, overriding is_error and public_tool_result. Absence preserves legacy semantics; never infer from content."
+    },
     "tool_display": {
       "$ref": "#/$defs/toolDisplay"
+    },
+    "public_tool_result": {
+      "$ref": "agent-event.schema.json#/properties/tool_result",
+      "description": "Explicit public-text provenance captured at tool completion. Absence means unavailable (including legacy history) or suppressed, never permission to derive historical output from content, tool_display, or plugin metadata. Not projected into provider requests."
     },
     "plugin_details": {},
     "plugin_transforms": {

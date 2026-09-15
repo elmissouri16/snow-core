@@ -1,0 +1,21 @@
+/* Harness ConversationRoot width handles; see HARNESS-NOTICE.txt.
+ * Fixed descendants do not contribute to scroll height. SnowWidth measures
+ * geometry; SnowScroll owns the explicit handle-wheel bridge and reader state. */
+.conversation-stream > [data-react-width-controls] > .chat-width-handle {
+  position: fixed; z-index: 8; margin: 0; padding: 0; border: 0;
+  max-width: none; cursor: col-resize; touch-action: none; outline: none;
+}
+.chat-width-handle::after {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 3px;
+  border-radius: 3px; pointer-events: none; opacity: 0;
+  background: linear-gradient(to bottom,
+    transparent calc(var(--width-pointer-y, 50%) - 52px),
+    var(--muted) calc(var(--width-pointer-y, 50%) - 12px),
+    var(--muted) calc(var(--width-pointer-y, 50%) + 12px),
+    transparent calc(var(--width-pointer-y, 50%) + 52px));
+}
+.chat-width-handle[data-chat-width-handle=left]::after { right: 16px; }
+.chat-width-handle[data-chat-width-handle=right]::after { left: 16px; }
+.chat-width-handle:hover::after, .chat-width-handle[data-dragging]::after { opacity: 1; }
+.chat-width-handle:focus-visible::after { opacity: 1; background: var(--focus); }
+.chat-width-dragging, .chat-width-dragging * { cursor: col-resize !important; user-select: none !important; }

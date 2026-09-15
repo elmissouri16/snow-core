@@ -118,6 +118,9 @@ type Usage struct {
 	Total          int   `json:"total_tokens"`
 	Requests       int   `json:"requests,omitzero"`
 	Cost           *Cost `json:"cost,omitempty"`
+	// CostCurrencyConflict is sticky across aggregation and persistence. When
+	// true, Cost is unavailable because different currency labels were combined.
+	CostCurrencyConflict bool `json:"cost_currency_conflict,omitzero"`
 }
 
 // Clone returns an independent usage value.
@@ -137,7 +140,7 @@ func (u *Usage) Clone() *Usage {
 // as one request when aggregating a provider usage record.
 func (u Usage) Add(v Usage) Usage {
 	priorRequests := u.Requests
-	if priorRequests == 0 && (u.Input != 0 || u.Output != 0 || u.Reasoning != 0 || u.CacheRead != 0 || u.CacheReadKnown || u.CacheWrite != 0 || u.Total != 0 || u.Cost != nil) {
+	if priorRequests == 0 && (u.Input != 0 || u.Output != 0 || u.Reasoning != 0 || u.CacheRead != 0 || u.CacheReadKnown || u.CacheWrite != 0 || u.Total != 0 || u.Cost != nil || u.CostCurrencyConflict) {
 		priorRequests = 1
 	}
 	vRequests := v.Requests
@@ -167,8 +170,14 @@ func (u Usage) Add(v Usage) Usage {
 	u.Requests = priorRequests + vRequests
 	// u is a value receiver but its Cost pointer aliases the caller's record;
 	// clone before summing so Add never mutates the caller's data. A missing
-	// cost on one record keeps the accumulated cost instead of dropping it.
-	if u.Cost != nil {
+	// cost on one record keeps the accumulated cost instead of dropping it,
+	// unless either record already represents an ambiguous currency aggregate.
+	// Compare literal currency labels: missing currency is not implicitly USD.
+	u.CostCurrencyConflict = u.CostCurrencyConflict || v.CostCurrencyConflict ||
+		(u.Cost != nil && v.Cost != nil && u.Cost.Currency != v.Cost.Currency)
+	if u.CostCurrencyConflict {
+		u.Cost = nil
+	} else if u.Cost != nil {
 		u.Cost = u.Cost.Clone()
 		if v.Cost != nil {
 			u.Cost.Input += v.Cost.Input
@@ -264,6 +273,19 @@ type Message struct {
 	ToolDisplay      *ToolDisplay      `json:"tool_display,omitempty"`
 	PluginTransforms []PluginTransform `json:"plugin_transforms,omitempty"`
 	PluginDetails    json.RawMessage   `json:"plugin_details,omitempty"`
+
+	// ToolOutcomeUnknown marks a synthetic interruption recovery record, not an
+	// observed tool result. IsError may still balance provider tool-call history,
+	// but public history must remain unresolved and suppress any public preview.
+	// Absence preserves legacy semantics; never infer this flag from Content.
+	ToolOutcomeUnknown bool `json:"tool_outcome_unknown,omitzero"`
+
+	// PublicToolResult is the explicit public-text preview captured at tool
+	// completion, independent of private display and plugin metadata. Nil means
+	// unavailable (including legacy history) or suppressed; consumers must never
+	// infer public historical output from Content, ToolDisplay, or plugin data.
+	// This presentation provenance is not part of provider request projections.
+	PublicToolResult *ToolResultPreview `json:"public_tool_result,omitempty"`
 }
 
 // Clone returns an independent message, including mutable block payloads and
@@ -279,6 +301,9 @@ func (m Message) Clone() Message {
 	}
 	out.Usage = m.Usage.Clone()
 	out.ToolDisplay = m.ToolDisplay.Clone()
+	if m.PublicToolResult != nil {
+		out.PublicToolResult = new(*m.PublicToolResult)
+	}
 	out.PluginDetails = slices.Clone(m.PluginDetails)
 	out.PluginTransforms = slices.Clone(m.PluginTransforms)
 	for i := range out.PluginTransforms {

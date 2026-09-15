@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/message-regenerate.schema.json",
+  "title": "Snow atomic assistant reply regeneration",
+  "$defs": {
+    "prepareParams": {
+      "type": "object",
+      "required": [
+        "session_id"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "entry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "entry_id"
+          ],
+          "not": {
+            "required": [
+              "turn_id"
+            ]
+          }
+        },
+        {
+          "required": [
+            "turn_id"
+          ],
+          "not": {
+            "required": [
+              "entry_id"
+            ]
+          }
+        }
+      ]
+    },
+    "commitParams": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "edit_token"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "edit_token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "prepared": {
+      "type": "object",
+      "required": [
+        "edit_token",
+        "session_id",
+        "source_branch_id",
+        "source_tip_id",
+        "entry_id",
+        "turn_id",
+        "text",
+        "expires_at",
+        "reply_entry_id"
+      ],
+      "properties": {
+        "edit_token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_tip_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "entry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536,
+          "pattern": "^[^\\x00]*$"
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reply_entry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

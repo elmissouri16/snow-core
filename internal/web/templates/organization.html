@@ -1,0 +1,39 @@
+{{define "organization"}}
+<div data-react-page="organization" data-react-props="{{organizationReactProps .CSRF .Error .Organization}}">
+<section class="organization-panel" aria-labelledby="organization-heading">
+<header class="workspace-heading"><div><h1 id="organization-heading">Organize workspaces</h1><p class="fine">Manager labels, pins and archives only. Nothing here starts an agent or deletes project files or saved conversations.</p></div><a class="button" href="/?view=projects">Back to workspaces</a></header>
+{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+{{with .Organization}}
+<div class="organization-grid">
+<section class="organization-card" aria-labelledby="organization-active-heading"><h2 id="organization-active-heading">Active registrations</h2><p class="fine">Up to 100 registrations. Close a live conversation before archiving its workspace. Unpinning does not hide work.</p>
+<ul class="organization-list">{{range .Projects}}<li class="organization-item">
+<div class="organization-item-heading"><a href="/?view=organization&amp;project={{.ID}}"><strong>{{.Name}}</strong></a>{{if .Pinned}}<span class="organization-badge">Pinned</span>{{end}}{{if not .Available}}<span class="organization-badge">{{.State}}</span>{{end}}</div>
+<p class="fine mono organization-path">{{.Path}}</p>
+<form method="post" action="/projects/{{.ID}}/organization/rename" class="organization-rename"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label for="organization-name-{{.ID}}">Workspace label</label><input id="organization-name-{{.ID}}" name="name" value="{{.Name}}" maxlength="128" required><button class="button" type="submit">Save label</button></form>
+<div class="organization-actions"><form method="post" action="/projects/{{.ID}}/organization/{{if .Pinned}}unpin{{else}}pin{{end}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="quiet" type="submit">{{if .Pinned}}Unpin workspace{{else}}Pin workspace{{end}}</button></form>
+<details class="organization-confirm"><summary>Archive workspace…</summary><p class="fine">Hide this registration from active workspaces, retaining all files and sessions. Restore it explicitly below; the original folder identity must still match.</p><form method="post" action="/projects/{{.ID}}/organization/archive"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="confirm" value="archive"><button class="button" type="submit">Confirm archive of {{.Name}}</button></form></details></div>
+</li>{{else}}<li class="fine">No active registrations.</li>{{end}}</ul>
+</section>
+<section class="organization-card" aria-labelledby="organization-archive-heading"><h2 id="organization-archive-heading">Archived registrations</h2><p class="fine">Includes registrations previously removed from the manager. At most 25 entries per page; bounded navigation ends at offset 10,000. Restore preserves the exact registration ID and never activates a conversation.</p>
+<ul class="organization-list">{{range .Archived.Projects}}<li class="organization-item"><div class="organization-item-heading"><strong>{{.Name}}</strong><span class="organization-badge">Archived</span>{{if .Pinned}}<span class="organization-badge">Pinned</span>{{end}}</div><p class="fine mono organization-path">{{.Path}}</p>{{if not .Available}}<p class="fine">{{.Issue}} Restore requires the original folder.</p>{{end}}
+<form method="post" action="/projects/{{.ID}}/organization/restore"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="confirm" value="restore"><button class="button" type="submit" {{if not .Available}}disabled{{end}}>Restore {{.Name}}</button></form></li>{{else}}<li class="fine">No archived registrations on this page.</li>{{end}}</ul>
+{{if .ArchivedNextURL}}<a class="button" href="{{.ArchivedNextURL}}">Next archived registrations →</a>{{end}}
+</section>
+</div>
+{{if .Project}}<section class="organization-card organization-sessions" aria-labelledby="organization-sessions-heading" data-organization-sessions>
+<h2 id="organization-sessions-heading">Saved conversations · {{.Project.Name}}</h2>
+{{if .Live}}<p class="notice">This workspace has a live conversation. <a href="/?view=projects&amp;project={{.Project.ID}}">Return to live work</a> and close it before organizing saved conversations. Live work is never hidden by an archive.</p>
+{{else}}<p class="fine">This is a bounded, read-only catalog page, not a complete inventory. Live, locked or unsupported sessions may be absent. Pins and archives are manager-only metadata; original conversation IDs and transcripts stay unchanged.</p>
+<div class="organization-filters"><label for="organization-title-filter">Search titles on this loaded page only<input id="organization-title-filter" type="search" maxlength="128" autocomplete="off" data-organization-filter aria-describedby="organization-search-help"></label><label class="organization-checkbox"><input type="checkbox" checked data-organization-archived> Show archived conversations on this loaded page</label></div>
+<p class="fine" id="organization-search-help">Loaded-page search does not search other pages, transcript contents or every saved session.</p><p class="fine" role="status" aria-live="polite" data-organization-status></p>
+<ul class="organization-list">{{range .Sessions}}<li class="organization-item" data-organization-session data-archived="{{.Archived}}"><div class="organization-item-heading"><a href="/?view=projects&amp;project={{$.Organization.Project.ID}}&amp;session={{.ID}}" data-organization-title><strong>{{if .Name}}{{.Name}}{{else}}Untitled session{{end}}</strong></a>{{if .Pinned}}<span class="organization-badge">Pinned</span>{{end}}{{if .Archived}}<span class="organization-badge">Archived</span>{{end}}</div><p class="fine">{{.Updated}}</p>
+<div class="organization-actions"><form method="post" action="/projects/{{$.Organization.Project.ID}}/sessions/organization/{{if .Pinned}}unpin{{else}}pin{{end}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="session_id" value="{{.ID}}"><input type="hidden" name="offset" value="{{$.Organization.Offset}}"><button class="quiet" type="submit">{{if .Pinned}}Unpin conversation{{else}}Pin conversation{{end}}</button></form>
+{{if .Archived}}<form method="post" action="/projects/{{$.Organization.Project.ID}}/sessions/organization/restore"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="session_id" value="{{.ID}}"><input type="hidden" name="offset" value="{{$.Organization.Offset}}"><input type="hidden" name="confirm" value="restore"><button class="button" type="submit">Restore conversation</button></form>
+{{else}}<form method="post" action="/projects/{{$.Organization.Project.ID}}/sessions/organization/archive"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="session_id" value="{{.ID}}"><input type="hidden" name="offset" value="{{$.Organization.Offset}}"><input type="hidden" name="confirm" value="archive"><button class="button" type="submit" title="Archive in the manager only. Saved history is kept; Restore reverses this.">Archive conversation</button></form>{{end}}</div>
+</li>{{else}}<li class="fine">No supported saved conversations on this page.</li>{{end}}</ul>
+{{if .NextURL}}<a class="button" href="{{.NextURL}}">Next catalog page →</a>{{end}}
+{{end}}</section>{{else}}<p class="fine">Select an active workspace above to organize a loaded page of its saved conversations.</p>{{end}}
+{{end}}
+</section>
+</div>
+{{end}}

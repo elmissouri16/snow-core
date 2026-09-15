@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/session-reasoning.schema.json",
+  "title": "Snow session reasoning",
+  "$defs": {
+    "session_reasoning_getParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "additionalProperties": false
+    },
+    "session_reasoning_setParams": {
+      "type": "object",
+      "properties": {
+        "expected": {
+          "$ref": "#/$defs/state"
+        },
+        "field": {
+          "enum": [
+            "thinking",
+            "reasoning_summary",
+            "text_verbosity"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "expected",
+        "field",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "state": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "mode": {
+          "enum": [
+            "default",
+            "plan"
+          ]
+        },
+        "permission_mode": {
+          "enum": [
+            "ask",
+            "allow",
+            "deny"
+          ]
+        },
+        "thinking": {
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ]
+        },
+        "reasoning_summary": {
+          "enum": [
+            "auto",
+            "concise",
+            "detailed",
+            "off"
+          ]
+        },
+        "text_verbosity": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "branch_id",
+        "tip_id",
+        "provider",
+        "model",
+        "mode",
+        "permission_mode",
+        "thinking",
+        "reasoning_summary",
+        "text_verbosity"
+      ],
+      "additionalProperties": false
+    },
+    "inspection": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "mode": {
+          "enum": [
+            "default",
+            "plan"
+          ]
+        },
+        "permission_mode": {
+          "enum": [
+            "ask",
+            "allow",
+            "deny"
+          ]
+        },
+        "thinking": {
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ]
+        },
+        "reasoning_summary": {
+          "enum": [
+            "auto",
+            "concise",
+            "detailed",
+            "off"
+          ]
+        },
+        "text_verbosity": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "thinking_levels": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "off",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ]
+          }
+        },
+        "reasoning_summaries": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "auto",
+              "concise",
+              "detailed",
+              "off"
+            ]
+          }
+        },
+        "text_verbosities": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        }
+      },
+      "required": [
+        "session_id",
+        "branch_id",
+        "tip_id",
+        "provider",
+        "model",
+        "mode",
+        "permission_mode",
+        "thinking",
+        "reasoning_summary",
+        "text_verbosity",
+        "thinking_levels",
+        "reasoning_summaries",
+        "text_verbosities"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

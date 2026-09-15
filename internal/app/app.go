@@ -99,6 +99,8 @@ type App struct {
 	artifacts            artifact.Store
 	extensions           *extensionServices
 	pluginDeclarations   []javascript.Declaration
+	branchRestores       map[string]branchRestoreAuthorization // guarded by agent admission
+	messageEdits         map[string]messageEditAuthorization   // guarded by agent admission
 	pluginMutationMu     sync.Mutex
 }
 
@@ -125,9 +127,11 @@ type catalogLoad struct {
 
 // Options control app assembly.
 type Options struct {
-	CWD          string
-	ConfigPath   string
-	BuildVersion string
+	// ManagedExplicitGoals requires an admitted correlated run for autonomous goal work.
+	ManagedExplicitGoals bool
+	CWD                  string
+	ConfigPath           string
+	BuildVersion         string
 	// Updater overrides the release updater for tests and embedded TUI hosts.
 	// Constructing App never invokes it; only explicit app calls perform work.
 	Updater                 UpdateService

@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/host-api-key.schema.json",
+  "title": "Snow host api key",
+  "$defs": {
+    "api_key_inspectParams": {
+      "type": "object",
+      "properties": {
+        "provider_id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        }
+      },
+      "required": [
+        "provider_id"
+      ],
+      "additionalProperties": false
+    },
+    "api_key_setParams": {
+      "type": "object",
+      "properties": {
+        "provider_id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^(missing|[a-f0-9]{64})$"
+        },
+        "secret": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "confirm_replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider_id",
+        "expected_revision",
+        "secret",
+        "confirm_replace"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "provider_id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "api_key_supported": {
+          "type": "boolean"
+        },
+        "replace_required": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^(missing|[a-f0-9]{64})$"
+        },
+        "status": {
+          "$ref": "host-control.schema.json#/$defs/provider_status"
+        },
+        "checked_locally": {
+          "const": true
+        },
+        "applies_to": {
+          "const": "future_runtime"
+        }
+      },
+      "required": [
+        "provider_id",
+        "api_key_supported",
+        "replace_required",
+        "revision",
+        "status",
+        "checked_locally",
+        "applies_to"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -114,6 +114,18 @@ type ProviderRetry struct {
 	MaxElapsedMS int64  `json:"max_elapsed_ms"`
 }
 
+// ToolResultPreview is public tool-result text, bounded to 8 KiB of valid UTF-8
+// with terminal control characters removed (except newline and tab). It contains
+// only explicit text blocks from the tool-result message, never private display
+// details, thinking, provider continuity, images, arguments, or plugin metadata.
+// A nil preview means unavailable or suppressed for private tool results; an
+// empty Text is a valid public result. Public text is not automatically scrubbed
+// for credentials or other task-output secrets. Consumers must render it as text.
+type ToolResultPreview struct {
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated"`
+}
+
 // AgentEvent is a single event delivered to subscribers.
 type AgentEvent struct {
 	Type AgentEventType `json:"type"`
@@ -127,6 +139,9 @@ type AgentEvent struct {
 	PluginSessionChanged *PluginSessionChanged `json:"plugin_session_changed,omitempty"`
 	PluginView           *PluginNode           `json:"plugin_view,omitempty"`
 	ToolOutput           string                `json:"tool_output,omitempty"`
+	// ToolResult is the strict public-text preview on tool_end. ToolOutput is
+	// the legacy UI preview and may instead contain private display details.
+	ToolResult *ToolResultPreview `json:"tool_result,omitempty"`
 	// ToolDurationMS is populated on tool_end when timing is available.
 	ToolDurationMS int64 `json:"tool_duration_ms,omitzero"`
 	// ToolProgress carries structured progress emitted by a running tool.
@@ -141,6 +156,7 @@ type AgentEvent struct {
 	Compaction    *CompactionResult       `json:"compaction,omitempty"`
 	Permission    *Permission             `json:"permission,omitempty"`
 	UserInput     *UserInputRequest       `json:"user_input,omitempty"`
+	QueueControl  *QueueControl           `json:"queue_control,omitempty"`
 	Queue         *InputQueue             `json:"queue,omitempty"`
 	ThreadGoal    *ThreadGoalUpdate       `json:"thread_goal,omitempty"`
 	// Agent correlates ordinary child stream/tool/usage events. Root events keep
@@ -148,6 +164,7 @@ type AgentEvent struct {
 	Agent        *AgentRef      `json:"agent,omitempty"`
 	Subagent     *SubagentState `json:"subagent,omitempty"`
 	AgentMessage *AgentMessage  `json:"agent_message,omitempty"`
+	GoalRunID    string         `json:"goal_run_id,omitempty"`
 	TurnID       string         `json:"turn_id,omitempty"`
 	TurnOrigin   string         `json:"turn_origin,omitempty"`
 	TurnSequence uint64         `json:"turn_sequence,omitzero"`
@@ -164,6 +181,9 @@ type AgentEvent struct {
 // later SDK, plugin, RPC, or TUI observers.
 func (e AgentEvent) Clone() AgentEvent {
 	out := e
+	if e.ToolResult != nil {
+		out.ToolResult = new(*e.ToolResult)
+	}
 	if e.PluginSessionChanged != nil {
 		out.PluginSessionChanged = new(*e.PluginSessionChanged)
 	}
@@ -220,6 +240,7 @@ func (e AgentEvent) Clone() AgentEvent {
 		out.UserInput = &v
 	}
 	out.Queue = e.Queue.Clone()
+	out.QueueControl = e.QueueControl.Clone()
 	out.ThreadGoal = e.ThreadGoal.Clone()
 	out.Agent = e.Agent.Clone()
 	out.Subagent = e.Subagent.Clone()

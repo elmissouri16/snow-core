@@ -57,6 +57,24 @@
     "tool_output": {
       "type": "string"
     },
+    "tool_result": {
+      "description": "Strict public tool-result text only; legacy tool_output may contain private display details. Text is bounded to 8192 UTF-8 bytes by the producer, not automatically scrubbed for task-output secrets.",
+      "type": "object",
+      "required": [
+        "text",
+        "truncated"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "tool_duration_ms": {
       "type": "integer",
       "minimum": 0
@@ -451,6 +469,13 @@
         }
       },
       "additionalProperties": false
+    },
+    "queue_control": {
+      "$ref": "queue-control.schema.json#/$defs/state"
+    },
+    "goal_run_id": {
+      "type": "string",
+      "description": "Correlates native events emitted by an explicitly owned goal run with its acceptance and goal_run_completed frame."
     }
   },
   "additionalProperties": false

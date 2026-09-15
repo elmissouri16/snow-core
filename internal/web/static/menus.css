@@ -1,0 +1,56 @@
+/* Adapted from Harness Menu / ModelSelect / ContextMeter; see upstream notice. */
+:root { --menu-surface: #353638; --menu-hover: rgb(255 255 255 / .07); --menu-stroke: rgb(255 255 255 / .06); }
+:root[data-theme=light] { --menu-surface: #fff; --menu-hover: rgb(0 0 0 / .045); --menu-stroke: rgb(0 0 0 / .04); }
+.snow-menu { position: fixed; z-index: 1100; box-sizing: border-box; display: flex; flex-direction: column; width: max-content; min-width: min(240px, calc(100vw - 24px)); max-width: min(420px, calc(100vw - 24px)); max-height: min(360px, calc(100dvh - 96px)); overflow: hidden; padding: 4px; border: 0; border-radius: 20px; background: var(--menu-surface); color: var(--text); box-shadow: 0 0 0 .5px var(--menu-stroke), 0 3px 8px rgb(0 0 0 / .04), 0 0 20px rgb(0 0 0 / .05); }
+.snow-menu:focus { outline: none; }
+.snow-menu-content { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.snow-menu-content > * { flex-shrink: 0; }
+.snow-menu-header { flex: none; }
+.model-picker-menu { width: min(380px, calc(100vw - 24px)); height: min(360px, calc(100dvh - 24px)); }
+.model-picker-menu > .snow-menu-content { flex: 1; }
+.model-picker-menu [data-workflow-load-status] { min-height: 30px; }
+.model-search-header { padding: 4px; }
+.model-search { box-sizing: border-box; width: 100%; min-width: 0; height: 40px; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--menu-hover); color: var(--text); font: inherit; font-size: 14px; }
+.snow-menu-footer { flex: none; display: flex; flex-direction: column; margin-top: 4px; padding-top: 4px; border-top: .5px solid var(--line); }
+.snow-menu-row { display: flex; align-items: center; justify-content: flex-start; flex: none; gap: 8px; width: 100%; min-height: 40px; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 14px; font-weight: 400; line-height: 22px; text-align: left; cursor: pointer; }
+.snow-menu-row:hover:not(:disabled), .snow-menu-row:focus-visible { background: var(--menu-hover); outline: none; }
+.snow-menu-row:disabled { opacity: .4; cursor: default; }
+/* A local loading notice supplies feedback; don't flash the whole cached list. */
+.model-picker-menu[aria-busy=true] .snow-menu-row:disabled { opacity: 1; cursor: progress; }
+#live-session[data-refreshing] .task-menu-trigger:disabled { opacity: 1; cursor: progress; }
+.snow-menu-row-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snow-menu-row-value { min-width: 0; max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.snow-menu-row .icon { flex: none; width: 16px; height: 16px; }
+.snow-menu-check { display: flex; flex: none; width: 16px; align-items: center; }
+.snow-menu-group-label { position: sticky; top: 0; z-index: 1; margin: 0; padding: 5px 10px 3px; background: var(--menu-surface); color: var(--muted); font-size: 12px; font-weight: 500; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snow-menu-content > .snow-menu-group-label { position: static; }
+.snow-menu-groups { min-height: 0; }
+.snow-menu-group + .snow-menu-group { margin-top: 4px; }
+.snow-menu-note { flex: none; margin: 0; padding: 6px 10px; color: var(--muted); font-size: 12px; line-height: 18px; max-width: 380px; overflow-wrap: anywhere; }
+.snow-menu-separator { flex: none; height: .5px; margin: 4px 6px; background: var(--line); }
+.snow-menu-dense .snow-menu-row { min-height: 34px; padding-block: 5px; }
+.task-menu-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; height: 28px; min-height: 28px; padding: 0 8px; border: 0; border-radius: 24px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; line-height: 20px; white-space: nowrap; }
+.task-menu-trigger:hover:not(:disabled), .task-menu-trigger[aria-expanded=true] { background: var(--menu-hover); color: var(--text); }
+.task-menu-trigger:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
+.task-menu-trigger .icon { flex: none; width: 14px; height: 14px; }
+.model-menu-trigger { max-width: min(360px, 45cqw); }
+.model-menu-trigger #live-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-menu-trigger .model-trigger-icon { display: block; }
+.context-menu-trigger { flex: none; width: 28px; padding: 4px; }
+.context-ring { width: 18px; height: 18px; transform: rotate(-90deg); fill: none; stroke-width: 2; }
+.context-ring-track { stroke: currentColor; opacity: .25; }
+.context-ring-value { stroke: currentColor; stroke-dasharray: 0 100; }
+.context-menu-trigger[data-unknown=true] .context-ring-track { stroke-dasharray: 2 2; }
+.telemetry-menu { min-width: min(280px, calc(100vw - 24px)); }
+.telemetry-menu h2 { font-size: 14px; line-height: 22px; font-weight: 500; margin: 4px 10px; }
+.telemetry-menu dl { display: grid; gap: 12px; margin: 10px; }
+.telemetry-menu dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: baseline; gap: 4px 12px; padding: 0; border: 0; }
+.telemetry-menu dt { margin: 0; color: var(--muted); font-size: 12px; line-height: 18px; }
+.telemetry-menu dd { margin: 0; text-align: right; font-size: 13px; line-height: 20px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.telemetry-menu .session-cost-note { grid-column: 1 / -1; margin: 0; }
+.telemetry-menu [data-known=false] { color: var(--muted); }
+.permission-policy-trigger { flex: none; }
+.mode-short { display: none; }
+.permission-policy-dialog .checkbox-label { margin: 16px 0; align-items: flex-start; }
+@container (max-width: 460px) { .permission-policy-trigger [data-permission-policy-label] { display: none; } }
+@container (max-width: 360px) { [data-mode-label] { display: none; } .mode-short { display: inline; } .composer-leading, .composer-trailing { gap: 4px; } .model-menu-trigger .model-trigger-icon { display: block; } .model-menu-trigger #live-model { display: none; } }

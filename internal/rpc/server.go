@@ -15,10 +15,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/elmissouri16/snow-core/internal/agent"
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/diagnostics"
-	"github.com/elmissouri16/snow-core/internal/session"
-	"github.com/elmissouri16/snow-core/internal/worktree"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -79,7 +78,7 @@ func NewWithOptions(ctx context.Context, a *app.App, in io.Reader, out io.Writer
 		independentOutputBound = true
 	}
 	_, deadlineOutput := out.(interface{ SetWriteDeadline(time.Time) error })
-	return &Server{in: input, inputInterruptible: interruptible, inputIndependentInterruptible: independentInputInterrupt, inputDeadline: inputDeadline, out: out, outputBounded: independentOutputBound || deadlineOutput, outputIndependentBound: independentOutputBound, app: a, writeFailed: make(chan struct{}), snowVersion: opts.SnowVersion, waitSlots: make(chan struct{}, maxConcurrentWaits), authJobs: make(map[string]*authLoginJob)}
+	return &Server{in: input, inputInterruptible: interruptible, inputIndependentInterruptible: independentInputInterrupt, inputDeadline: inputDeadline, out: out, outputBounded: independentOutputBound || deadlineOutput, outputIndependentBound: independentOutputBound, app: a, writeFailed: make(chan struct{}), snowVersion: opts.SnowVersion, waitSlots: make(chan struct{}, maxConcurrentWaits), imageReadSlots: make(chan struct{}, maxConcurrentImageReads), authJobs: make(map[string]*authLoginJob)}
 }
 
 func (s *Server) interruptInput() {
@@ -187,6 +186,24 @@ func (s *Server) Serve(ctx context.Context) error {
 			_ = s.write(Response{ID: req.ID, Type: "response", Command: "invalid", Success: false, Error: "invalid JSON: " + err.Error()})
 			continue
 		}
+		if isManagedRuntimeCommand(req.Type) || isSessionReasoningCommand(req.Type) {
+			if err := validateManagedRuntimeFrame([]byte(line), req); err != nil {
+				_ = s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error(), ErrorCode: rpcErrorCode(err)})
+				continue
+			}
+		}
+		if isGoalControlCommand(req.Type) {
+			if err := validateGoalControlFrame([]byte(line)); err != nil {
+				_ = s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error(), ErrorCode: rpcErrorCode(err)})
+				continue
+			}
+		}
+		if isMessageRevisionPrepare(req.Type) || isMessageRevisionCommit(req.Type) || isQueueControlCommand(req.Type) || isBranchVersionCommand(req.Type) {
+			if err := validateMessageEditFrame([]byte(line)); err != nil {
+				_ = s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error(), ErrorCode: messageEditFrameErrorCode(req.Type)})
+				continue
+			}
+		}
 		if err := s.handle(serveCtx, req); err != nil {
 			_ = s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error(), ErrorCode: rpcErrorCode(err)})
 		}
@@ -218,41 +235,12 @@ finish:
 	return errors.Join(terminalErr, writeErr)
 }
 
-func rpcErrorCode(err error) string {
-	switch {
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return "canceled"
-	case errors.Is(err, session.ErrDestinationExists), errors.Is(err, worktree.ErrDestinationExists):
-		return "destination_exists"
-	case errors.Is(err, worktree.ErrNotRepository):
-		return "not_git_repository"
-	case errors.Is(err, worktree.ErrDirty):
-		return "git_dirty"
-	case errors.Is(err, worktree.ErrUnsafeDestination), errors.Is(err, session.ErrInvalidForkBoundary):
-		return "invalid"
-	case errors.Is(err, session.ErrNotFound):
-		return "not_found"
-	}
-	message := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(message, "subagents are active"):
-		return "subagents_active"
-	case strings.Contains(message, "while running"), strings.Contains(message, "active session"):
-		return "session_busy"
-	case strings.Contains(message, "does not support"):
-		return "unsupported"
-	case strings.Contains(message, "already exists"), strings.Contains(message, "conflict"):
-		return "conflict"
-	case strings.HasPrefix(message, "worktree:"), strings.Contains(message, "git "):
-		return "git_failure"
-	default:
-		return "invalid"
-	}
-}
-
 func (s *Server) handle(ctx context.Context, req Request) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if isProcessControlCommand(req.Type) {
+		return s.handleProcessControl(ctx, req)
 	}
 	if isSubagentCommand(req.Type) {
 		return s.handleSubagentCommand(ctx, req)
@@ -273,12 +261,30 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		return s.handlePresentationCommand(ctx, req)
 	}
 	switch req.Type {
+	case "session_reasoning_get", "session_reasoning_set":
+		return s.handleSessionReasoning(ctx, req)
+	case "history_branch_fork", "history_session_fork", "history_branch_rename":
+		return s.handleHistoryControl(ctx, req)
+	case "compaction_start":
+		return s.handleCompactionStart(ctx, req)
+	case "managed_steer":
+		return s.handleManagedSteer(req)
 	case "plugin_reload":
 		return s.handlePluginReload(ctx, req)
 	case "plugins_list", "plugin_statuses", "plugin_enable", "plugin_disable", "plugin_commands", "plugin_views", "plugin_command_run", "plugin_command_cancel":
 		return s.handlePluginCommand(ctx, req)
+	case "goal_inspect":
+		return s.handleGoalInspect(ctx, req)
+	case "goal_run":
+		return s.handleGoalRun(ctx, req)
 	case "prompt":
 		return s.handlePrompt(ctx, req)
+	case "branches_page", "branch_messages_page", "branch_restore_prepare", "branch_restore_commit":
+		return s.handleBranchVersions(ctx, req)
+	case "queue_list", "queue_enqueue", "queue_update", "queue_remove":
+		return s.handleQueueControl(req)
+	case "message_edit_prepare", "message_edit_commit", "message_regenerate_prepare", "message_regenerate_commit":
+		return s.handleMessageEdit(ctx, req)
 	case "abort":
 		// Cancel the RPC prompt context before waiting for Agent.Abort. Abort may
 		// let the agent goroutine settle synchronously; canceling afterward races
@@ -411,6 +417,8 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: g})
 		return nil
+	case "models_discover":
+		return s.handleModelDiscovery(ctx, req)
 	case "models_list":
 		providerID, model, models := s.app.ActiveModelsSnapshot()
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: protocol.RPCModelList{Provider: providerID, Current: model.ID, Models: models}})
@@ -521,6 +529,8 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		}
 		s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true})
 		return nil
+	case "message_image":
+		return s.handleMessageImage(ctx, req)
 	case "messages_page":
 		return s.handleMessagesPage(req)
 	case "messages_list":
@@ -591,6 +601,8 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		return s.handleSkills(req)
 	case "skills_clear":
 		return s.handleSkillsClear(req)
+	case "session_set_model":
+		return s.handleSessionSetModel(ctx, req)
 	case "set_model":
 		if req.Model == "" {
 			return errors.New("set_model requires model")
@@ -752,6 +764,7 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 	// abort, and user-input commands. A second prompt never implicitly cancels
 	// accepted work: callers must choose steer, follow_up, or abort.
 	promptCtx, cancel := context.WithCancel(ctx)
+	promptCtx, outcome := agent.CapturePromptOutcome(promptCtx)
 	done := make(chan struct{})
 	s.promptLifecycleMu.Lock()
 	defer s.promptLifecycleMu.Unlock()
@@ -771,6 +784,7 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 		return err
 	}
 	s.promptWG.Go(func() {
+		defer cancel()
 		var err error
 		switch {
 		case len(req.Content) > 0 && requestedMode != nil:
@@ -782,27 +796,34 @@ func (s *Server) handlePrompt(ctx context.Context, req Request) error {
 		default:
 			err = s.app.Agent.Prompt(promptCtx, req.Message)
 		}
-		canceled := promptCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-		if err != nil && !canceled {
-			_ = s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error()})
-		}
-		completed := protocol.RPCPromptCompleted{
-			Type:      protocol.RPCTypePromptCompleted,
-			RequestID: req.ID,
-			Status:    protocol.RPCPromptCompletedStatus,
-		}
-		if canceled {
-			completed.Status = protocol.RPCPromptCanceledStatus
-		} else if err != nil {
-			completed.Status = protocol.RPCPromptFailedStatus
-			completed.Error = err.Error()
-		}
-		s.promptLifecycleMu.Lock()
-		s.releasePrompt(done)
-		_ = s.write(completed)
-		s.promptLifecycleMu.Unlock()
+		s.completePrompt(req, promptCtx, done, err, outcome)
 	})
 	return nil
+}
+
+// completePrompt is shared by ordinary prompts and atomically admitted edits.
+func (s *Server) completePrompt(req Request, promptCtx context.Context, done chan struct{}, err error, outcome *agent.PromptOutcome) {
+	// Preserve actual failures (including persistence/accounting failures) even
+	// if the provider aborted. Never infer an abort from a request or old history.
+	canceled := promptCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || (err == nil && outcome.ProviderAborted())
+	if err != nil && (!canceled || errors.Is(err, app.ErrMessageEditOutcomeUnknown)) {
+		_ = s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: false, Error: err.Error(), ErrorCode: rpcErrorCode(err)})
+	}
+	completed := protocol.RPCPromptCompleted{
+		Type:      protocol.RPCTypePromptCompleted,
+		RequestID: req.ID,
+		Status:    protocol.RPCPromptCompletedStatus,
+	}
+	if canceled {
+		completed.Status = protocol.RPCPromptCanceledStatus
+	} else if err != nil {
+		completed.Status = protocol.RPCPromptFailedStatus
+		completed.Error = err.Error()
+	}
+	s.promptLifecycleMu.Lock()
+	s.releasePrompt(done)
+	_ = s.write(completed)
+	s.promptLifecycleMu.Unlock()
 }
 
 func (s *Server) releasePrompt(done chan struct{}) {

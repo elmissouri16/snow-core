@@ -93,6 +93,23 @@ Mention an installed skill with its exact `$name` token in a prompt:
 $pdf-processing extract the tables from report.pdf
 ```
 
+In the optional web manager, select **Enable installed skills** when explicitly
+starting a runtime. The choice is saved per project on this manager and preselects
+the checkbox on later starts and resumes, including after manager restarts.
+New and existing projects default to disabled until you opt in. Uncheck it on
+startup to disable skills and save that preference, or change **Settings →
+Workspaces → Installed skills** for future starts. Settings are shared by this
+manager's paired browsers; changing them does not alter a running worker.
+Archiving/removing the registration clears the preference.
+
+Type `$` in the composer to browse the worker's enabled/disabled skill catalog
+and insert an exact mention. Picking a suggestion does not activate or execute
+it: activation occurs when you send the prompt. Enabling the catalog permits
+normal applicable skill activation too, not just explicit mentions. The saved
+preference is separate from project activation consent and does not grant CLI
+extension trust or change tool permissions. Project skills still follow the
+existing trust rules above.
+
 Snow can also activate an applicable skill while handling a request. In the
 interactive TUI, run `/skills` to inspect available and active skills. Run
 `/skills clear` to clear active skills for the current session branch.

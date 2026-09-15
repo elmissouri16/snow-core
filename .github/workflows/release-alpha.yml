@@ -147,6 +147,19 @@ jobs:
             ./cmd/snow
           chmod 0755 "dist/$root/snow"
           cp LICENSE README.md "dist/$root/"
+          # Preserve the installer's three-file archive contract. Only the
+          # archive copy gains notices; the repository's LICENSE stays intact.
+          for notice in \
+            internal/web/static/HARNESS-NOTICE.txt \
+            internal/web/static/vendor/htmx-LICENSE \
+            internal/web/static/generated/THIRD-PARTY-NOTICES.txt; do
+            printf '\n\n===== %s =====\n\n' "${notice##*/}" >> "dist/$root/LICENSE"
+            cat "$notice" >> "dist/$root/LICENSE"
+          done
+          test "$(wc -c < "dist/$root/LICENSE")" -le 1048576 || {
+            echo "release LICENSE exceeds the installer's 1 MiB limit" >&2
+            exit 1
+          }
           tar --sort=name --owner=0 --group=0 --numeric-owner \
             --mtime="@${SOURCE_DATE_EPOCH:-0}" \
             -C dist -cf - "$root" | gzip -n -9 > "dist/${root}.tar.gz"

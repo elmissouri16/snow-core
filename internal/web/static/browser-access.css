@@ -1,0 +1,11 @@
+.browser-inventory-heading,.browser-inventory-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.browser-inventory-heading{justify-content:space-between}
+.browser-inventory-list{list-style:none;padding:0;margin:16px 0;display:grid;gap:12px}
+.browser-inventory-list li{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-bottom:1px solid var(--line)}
+.browser-inventory-list li>div{min-width:0;display:grid;gap:6px;overflow-wrap:anywhere}
+.browser-inventory-list small{display:block;color:var(--muted);line-height:1.5}
+.browser-inventory-list button{flex-shrink:0}
+.browser-revoke-confirm{border:1px solid var(--line);border-radius:8px;padding:16px;margin-top:16px}
+.browser-revoke-confirm[hidden]{display:none}
+.browser-inventory [data-browser-status]{overflow-wrap:anywhere}
+@media(max-width:600px){.browser-inventory-list li{align-items:flex-start;flex-direction:column}.browser-inventory-list button{width:100%}.browser-inventory-actions>*{flex:1}}

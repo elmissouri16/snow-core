@@ -18,16 +18,24 @@ const (
 // permission broker. The opaque scope key is deliberately not exposed.
 func PublicRequest(req Request) protocol.PermissionRequest {
 	effectCount := min(len(req.Effects), maxPublicEffects)
+	effectsTruncated := len(req.Effects) > effectCount
+	boundEffectField := func(value string, limit int) string {
+		bounded := boundRunes(value, limit)
+		if bounded != value {
+			effectsTruncated = true
+		}
+		return bounded
+	}
 	effects := make([]protocol.PermissionEffect, effectCount)
 	for i, effect := range req.Effects[:effectCount] {
 		effects[i] = protocol.PermissionEffect{
-			Type:       boundRunes(effect.Type, maxPublicFieldRunes),
-			Capability: boundRunes(string(effect.Capability), maxPublicFieldRunes),
-			Operation:  boundRunes(effect.Operation, maxPublicFieldRunes),
-			Resource:   boundRunes(effect.Resource, maxPublicReasonRunes),
-			Command:    boundRunes(effect.Command, maxPublicFieldRunes),
-			Reason:     boundRunes(effect.Reason, maxPublicReasonRunes),
-			Confidence: boundRunes(effect.Confidence, maxPublicFieldRunes),
+			Type:       boundEffectField(effect.Type, maxPublicFieldRunes),
+			Capability: boundEffectField(string(effect.Capability), maxPublicFieldRunes),
+			Operation:  boundEffectField(effect.Operation, maxPublicFieldRunes),
+			Resource:   boundEffectField(effect.Resource, maxPublicReasonRunes),
+			Command:    boundEffectField(effect.Command, maxPublicFieldRunes),
+			Reason:     boundEffectField(effect.Reason, maxPublicReasonRunes),
+			Confidence: boundEffectField(effect.Confidence, maxPublicFieldRunes),
 			Dynamic:    effect.Dynamic,
 		}
 	}
@@ -56,7 +64,7 @@ func PublicRequest(req Request) protocol.PermissionRequest {
 		Capabilities:          capabilities,
 		Unknown:               req.Unknown,
 		Rememberable:          req.Rememberable,
-		EffectsTruncated:      len(req.Effects) > effectCount,
+		EffectsTruncated:      effectsTruncated,
 		CapabilitiesTruncated: len(req.Capabilities) > capabilityCount,
 		PathsTruncated:        len(req.Paths) > pathCount,
 		ScopeLabel:            boundRunes(req.ScopeLabel, maxPublicReasonRunes),

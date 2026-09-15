@@ -23,12 +23,13 @@ const (
 )
 
 type messagesPageCursor struct {
-	Version      int    `json:"version"`
-	Next         int    `json:"next"`
-	Total        int    `json:"total"`
-	FirstAnchor  string `json:"first"`
-	LastAnchor   string `json:"last"`
-	BeforeAnchor string `json:"before"`
+	PublicHistory bool   `json:"public_history,omitzero"`
+	Version       int    `json:"version"`
+	Next          int    `json:"next"`
+	Total         int    `json:"total"`
+	FirstAnchor   string `json:"first"`
+	LastAnchor    string `json:"last"`
+	BeforeAnchor  string `json:"before"`
 }
 
 func (s *Server) handleMessagesPage(req Request) error {
@@ -55,7 +56,9 @@ func (s *Server) handleMessagesPage(req Request) error {
 	if err != nil {
 		return err
 	}
-	messages = publicMessages(messages)
+	if !params.PublicHistory {
+		messages = publicMessages(messages)
+	}
 	page, err := buildMessagesPage(req.ID, messages, params)
 	if err != nil {
 		return err
@@ -65,20 +68,24 @@ func (s *Server) handleMessagesPage(req Request) error {
 }
 
 func buildMessagesPage(requestID string, messages []protocol.Message, params protocol.RPCMessagesPageParams) (protocol.RPCMessagesPage, error) {
-	cursor, err := decodeMessagesPageCursor(params.Cursor, messages)
+	cursor, err := decodeMessagesPageCursor(params.Cursor, messages, params.PublicHistory)
 	if err != nil {
 		return protocol.RPCMessagesPage{}, err
 	}
 	start := cursor.Next
 	total := cursor.Total
 	if params.Cursor == "" {
-		total = stableMessagesSnapshotTotal(messages)
+		total = len(messages)
+		if !params.PublicHistory {
+			total = stableMessagesSnapshotTotal(messages)
+		}
 		for i := range total {
 			if messages[i].ID == "" {
 				return protocol.RPCMessagesPage{}, errors.New("messages_page history contains a message without an id")
 			}
 		}
 		cursor = snapshotMessagesCursor(messages, 0, total)
+		cursor.PublicHistory = params.PublicHistory
 	}
 	if start == total {
 		return protocol.RPCMessagesPage{Messages: []protocol.Message{}, Start: start, Total: total}, nil
@@ -88,7 +95,10 @@ func buildMessagesPage(requestID string, messages []protocol.Message, params pro
 	imageCount := 0
 	var selected protocol.RPCMessagesPage
 	for end < total && end-start < params.Limit {
-		nextImages := imageCount + historyImageCount(messages[end])
+		nextImages := imageCount
+		if !params.PublicHistory {
+			nextImages += historyImageCount(messages[end])
+		}
 		if nextImages > maxMessagesPageImages {
 			if end == start {
 				return protocol.RPCMessagesPage{}, fmt.Errorf("messages_page entry at offset %d exceeds the %d image page limit", start, maxMessagesPageImages)
@@ -140,6 +150,24 @@ func makeMessagesPage(messages []protocol.Message, snapshot messagesPageCursor, 
 		Total:    total,
 		HasMore:  end < total,
 	}
+	if snapshot.PublicHistory {
+		for _, message := range page.Messages {
+			if images := protocol.ProjectMessageImages(message); len(images) > 0 {
+				if page.HistoryImages == nil {
+					page.HistoryImages = make(map[string][]protocol.RPCMessageImage)
+				}
+				page.HistoryImages[message.ID] = images
+			}
+		}
+		page.Messages = publicHistoryMessages(page.Messages)
+		// Complete the final selected owner interval, not just the visible page:
+		// later results (including duplicate IDs) affect definitive ownership.
+		intervalEnd := end
+		for intervalEnd < total && messages[intervalEnd].Role != protocol.RoleUser && messages[intervalEnd].Role != protocol.RoleAssistant {
+			intervalEnd++
+		}
+		page.HistoryTools, page.HistoryToolsTruncated = protocol.ProjectHistoryTools(messages[start:intervalEnd])
+	}
 	if page.HasMore {
 		next := snapshot
 		next.Next = end
@@ -170,7 +198,7 @@ func encodeMessagesPageCursor(cursor messagesPageCursor) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(encoded), nil
 }
 
-func decodeMessagesPageCursor(encoded string, messages []protocol.Message) (messagesPageCursor, error) {
+func decodeMessagesPageCursor(encoded string, messages []protocol.Message, publicHistory bool) (messagesPageCursor, error) {
 	if encoded == "" {
 		return messagesPageCursor{}, nil
 	}
@@ -187,6 +215,9 @@ func decodeMessagesPageCursor(encoded string, messages []protocol.Message) (mess
 	}
 	if cursor.Version != messagesPageCursorVersion || cursor.Total < 1 || cursor.Next < 1 || cursor.Next >= cursor.Total {
 		return messagesPageCursor{}, errors.New("messages_page cursor is invalid")
+	}
+	if cursor.PublicHistory != publicHistory {
+		return messagesPageCursor{}, errors.New("messages_page cursor does not match the public_history mode")
 	}
 	if cursor.Total > len(messages) {
 		return messagesPageCursor{}, errors.New("messages_page snapshot is no longer available")

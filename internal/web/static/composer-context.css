@@ -1,0 +1,71 @@
+/* Composer context follows Harness InputBar / Menu material and geometry.
+ * See HARNESS-NOTICE.txt. Load after scroll.css; keep its single action row. */
+#live-composer { position: relative; }
+[data-composer-context-items][hidden], [data-composer-context-status][hidden], [data-composer-mentions][hidden] { display: none; }
+
+/* Optional context occupies space only once a file has actually been chosen. */
+[data-composer-context-items] { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; max-height: min(132px, 18dvh); overflow: auto; padding: 6px 12px; overscroll-behavior: contain; flex: 0 1 auto; }
+#live-composer:has([data-composer-context-items]:not([hidden])) { gap: 6px; }
+.composer-context-chip { display: flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; padding: 2px 3px 2px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--menu-hover); color: var(--text); font-size: 11px; line-height: 16px; }
+.composer-context-thumbnail { display: block; flex: none; width: 28px; height: 28px; overflow: hidden; border-radius: 6px; }
+.composer-context-thumbnail img { display: block; width: 28px; height: 28px; object-fit: cover; }
+.composer-context-label { min-width: 0; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-context-detail { min-width: 0; max-width: 300px; color: var(--muted); overflow-wrap: anywhere; }
+.composer-context-remove { flex: none; display: grid; place-items: center; min-width: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: inherit; font-size: 18px; cursor: pointer; }
+.composer-context-remove:hover:not(:disabled) { background: var(--menu-hover); }
+.composer-context-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.composer-context-remove:disabled { opacity: .4; cursor: default; }
+.composer-context-chip.is-error { border-style: dashed; }
+.composer-context-chip.is-error .composer-context-detail, [data-composer-context-status].is-error { color: var(--text); }
+[data-composer-context-status] { margin: 0; padding: 0 12px 2px; color: var(--muted); font-size: 10px; line-height: 14px; overflow-wrap: anywhere; flex: 0 1 auto; min-height: 16px; max-height: 42px; overflow-y: auto; overscroll-behavior: contain; }
+[data-composer-context-status].is-error { font-size: 11px; line-height: 16px; }
+
+/* Two circle controls in the existing leading group, not another toolbar. */
+.composer-context-tools { display: flex; align-items: center; gap: 12px; flex: none; min-width: 0; }
+.composer-context-button { display: grid; place-items: center; flex: none; width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 50%; background: var(--menu-hover); color: var(--text); cursor: pointer; }
+.composer-context-button:hover:not(:disabled), .composer-context-button[aria-expanded=true] { background: var(--line); }
+.composer-context-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.composer-context-button:disabled { opacity: .4; cursor: default; }
+.composer-context-button svg { width: 16px; height: 16px; }
+
+/* The menu follows the card edges, rather than a disconnected 420px dialog.
+ * JS owns fixed viewport placement; textarea retains focus and selection. */
+[data-composer-mentions] { position: fixed; z-index: 30; box-sizing: border-box; top: 8px; left: 8px; width: calc(100% - 16px); max-height: min(320px, calc(100dvh - 16px)); overflow: auto; overscroll-behavior: contain; padding: 4px; border: 0; border-radius: 20px; background: var(--menu-surface); color: var(--text); box-shadow: 0 0 0 .5px var(--menu-stroke), 0 3px 8px rgb(0 0 0 / .04), 0 0 20px rgb(0 0 0 / .05); }
+.composer-mention-option { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 40px; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
+.composer-mention-option:hover, .composer-mention-option[aria-selected=true] { background: var(--menu-hover); }
+.composer-mention-option[aria-disabled=true] { opacity: .55; cursor: default; }
+.composer-mention-icon { display: grid; place-items: center; flex: none; width: 16px; height: 20px; color: var(--muted); }
+.composer-mention-icon svg { width: 16px; height: 16px; }
+.composer-context-menu-icon { flex: none; width: 16px; color: var(--muted); text-align: center; }
+.composer-mention-heading { padding: 6px 10px; color: var(--muted); font-size: 12px; line-height: 18px; }
+.composer-mention-chevron { flex: none; color: var(--muted); font-size: 20px; line-height: 20px; }
+.composer-mention-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.composer-mention-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 22px; }
+.composer-mention-description { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; line-height: 18px; }
+.composer-mention-folder-hint { flex: none; visibility: hidden; color: var(--muted); font-size: 12px; line-height: 18px; }
+.composer-mention-option[aria-selected=true] .composer-mention-folder-hint, .composer-mention-option:hover .composer-mention-folder-hint { visibility: visible; }
+.composer-mention-note { color: var(--muted); font-size: 12px; line-height: 18px; padding: 6px 10px; overflow-wrap: anywhere; }
+
+/* Keep idle instructional text available without another visual chrome row.
+ * Actionable connection/outcome state and explicit Queue next stay visible. */
+#composer-hint, #composer-state.is-idle { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.composer-footer:has(#composer-state.is-idle):not(:has([data-queue-next]:not([hidden]))) { min-height: 0; margin: 0; padding: 0; }
+@container (max-width: 460px) {
+  .composer-context-tools { gap: 4px; }
+  .composer-leading, .composer-trailing { gap: 4px; }
+}
+/* Compact redundant chevrons before allowing the action row to wrap. */
+@container (max-width: 360px) {
+  .permission-policy-trigger, .model-menu-trigger { flex: none; width: 28px; padding: 0; }
+  .permission-policy-trigger > .icon:last-child, .model-menu-trigger > .icon:last-child { display: none; }
+  [data-mode-menu] { padding-inline: 2px; font-size: 12px; }
+}
+@media (max-width: 479px) {
+  .composer-context-chip.is-error { flex-wrap: wrap; }
+  .composer-context-chip.is-error .composer-context-detail { order: 3; flex-basis: 100%; }
+  .composer-mention-folder-hint { display: none; }
+}
+@media (max-height: 420px) {
+  [data-composer-context-items] { max-height: 38px; padding-block: 2px; }
+  [data-composer-context-status] { min-height: 14px; max-height: 28px; padding-block: 0; }
+}

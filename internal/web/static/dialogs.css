@@ -1,0 +1,74 @@
+/* Runtime panels adapt Harness Modal header/body chrome (r24, 16/24 title,
+ * 28px close, 24px body inset). Snow retains its own widths and confirmations.
+ * Copyright (c) 2026 DeepSeek. MIT license; see HARNESS-NOTICE.txt. */
+.runtime-dialog {
+  --dialog-width: 600px;
+  --dialog-viewport-height: min(100dvh, var(--snow-visual-height, 100dvh));
+  bottom: max(0px, calc(100dvh - var(--dialog-viewport-height)));
+  width: min(var(--dialog-width), calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
+  max-height: calc(var(--dialog-viewport-height) - 48px);
+  margin: auto; padding: 0; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 24px;
+  background: var(--surface); color: var(--text); box-shadow: var(--shadow);
+  font-size: 14px; line-height: 22px;
+}
+.runtime-dialog[open] { display: flex; flex-direction: column; }
+.runtime-dialog::backdrop { background: #0006; backdrop-filter: blur(2px); }
+.runtime-dialog > .dialog-heading {
+  display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin: 0; padding: 18px 14px 12px 24px;
+}
+.runtime-dialog > .dialog-heading h2 {
+  flex: 1 1 160px; min-width: 0; margin: 0;
+  font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+.runtime-dialog > .dialog-heading .quiet { flex: none; width: auto; min-height: 28px; font-size: 13px; line-height: 22px; padding: 3px 8px; white-space: nowrap; }
+.runtime-dialog > .dialog-heading .icon-button { order: 2; width: 28px; height: 28px; padding: 5px; border-radius: 8px; }
+.runtime-dialog > .dialog-heading .icon { width: 18px; height: 18px; }
+.runtime-dialog-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 24px 24px; scrollbar-width: thin; }
+.runtime-dialog-body > :last-child { margin-bottom: 0; }
+.runtime-dialog .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.runtime-dialog .dialog-actions > button { max-width: 100%; }
+.runtime-dialog :focus-visible { outline-offset: -2px; }
+.versions-dialog { --dialog-width: 960px; }
+.goals-dialog { --dialog-width: 660px; }
+.reasoning-dialog { --dialog-width: 620px; }
+.processes-dialog { --dialog-width: 640px; }
+.runtime-dialog .versions-columns { grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr); }
+.runtime-dialog .version-choice { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px; border-color: var(--line); border-radius: 10px; }
+.runtime-dialog .version-choice[aria-pressed=true] { border-color: var(--accent); background: var(--raised); }
+.runtime-dialog .version-preview-message, .runtime-dialog .version-restore-confirmation { border-color: var(--line); }
+.runtime-dialog .managed-processes { margin: 0; border: 0; }
+.runtime-dialog .managed-processes > summary { display: none; }
+.runtime-dialog .managed-process-body { padding: 0; }
+.runtime-dialog .process-row, .runtime-dialog [data-process-output] { border-color: var(--line); }
+.runtime-dialog .process-row { font-size: 13px; line-height: 18px; padding-block: 10px; }
+.runtime-dialog .process-row small { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.runtime-dialog .process-row button { flex: none; min-height: 32px; }
+/* Hide launcher chrome only. Active goal/compaction/steering status remains in
+ * the conversation; no containing region is hidden or moved out of its owner. */
+.manager-menu-enabled > button { display: none; }
+.live-manager-controls { flex: 0 1 auto; min-height: 0; max-height: min(180px, 25dvh); overflow: auto; overscroll-behavior: contain; }
+.react-live-panel, [data-react-conversation], [data-react-composer-queue],
+[data-composer-context-root], [data-composer-context-tools-root],
+#live-chrome-view, #live-composer-notices-view, #live-composer-editor-view,
+#live-composer-actions-view, #live-composer-status-view, #live-turn-status-view,
+#live-regenerate-dialog-view, [data-react-reader-controls], [data-react-inspection],
+[data-react-processes], [data-react-width-controls], #shell-navigation-root, #shell-react-root { display: contents; }
+.live-manager-controls :is(.goal-inline-status, .compaction-inline, .steer-history):not([hidden]) { margin: 0 16px 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; }
+@media (max-width: 640px) {
+  .runtime-dialog { width: calc(100vw - 24px); max-width: calc(100vw - 24px); max-height: calc(var(--dialog-viewport-height) - 24px); border-radius: 20px; }
+  .runtime-dialog > .dialog-heading { padding: 12px 12px 10px 16px; }
+  .runtime-dialog > .dialog-heading h2 { flex-basis: calc(100% - 44px); }
+  .runtime-dialog > .dialog-heading .icon-button { order: 0; }
+  .runtime-dialog > .dialog-heading > button:not(.icon-button) { order: 1; }
+  .runtime-dialog-body { padding: 0 16px 16px; }
+  .runtime-dialog .versions-columns { grid-template-columns: minmax(0, 1fr); }
+  .runtime-dialog .versions-list { max-height: 160px; }
+}
+@media (max-height: 400px) {
+  .runtime-dialog { max-height: calc(var(--dialog-viewport-height) - 16px); }
+  .runtime-dialog > .dialog-heading { padding-block: 8px; }
+}

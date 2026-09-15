@@ -1,0 +1,15 @@
+/* Steering is distinct from pending follow-up work and the transcript. */
+.steer-dialog { box-sizing: border-box; width: min(38rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; }
+.steer-dialog header, .steer-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+.steer-dialog h2 { margin: 0; }
+.steer-dialog p { line-height: 1.5; }
+.steer-dialog textarea { display: block; box-sizing: border-box; width: 100%; min-height: 8rem; max-height: 40dvh; resize: vertical; font: inherit; }
+.steer-dialog label { display: block; margin-bottom: .5rem; font-weight: 600; }
+.steer-dialog footer { margin-top: 1rem; }
+.steer-history { margin-block: .75rem; padding: .75rem; border: 1px solid var(--line); border-radius: .75rem; min-width: 0; }
+.steer-history h3 { margin: 0; font-size: .9rem; }
+.steer-history ol { padding-left: 1.25rem; }
+.steer-history li + li { margin-top: .75rem; }
+.steer-history pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow: auto; font: inherit; }
+.steer-history [data-steer-state] { font-size: .85rem; font-weight: 600; }
+@media (max-width: 420px) { .steer-dialog { width: calc(100vw - 1rem); padding: .875rem; } .steer-dialog footer button { flex: 1 1 auto; } }

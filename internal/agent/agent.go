@@ -79,11 +79,13 @@ type ToolGuidance struct {
 
 // Options configures an Agent.
 type Options struct {
-	PluginHooks PluginHooks
-	Provider    provider.Provider
-	Registry    tools.Registry
-	Session     session.Store
-	Permission  permission.Service
+	// ManagedExplicitGoals permits autonomous goal turns only within an explicitly admitted run.
+	ManagedExplicitGoals bool
+	PluginHooks          PluginHooks
+	Provider             provider.Provider
+	Registry             tools.Registry
+	Session              session.Store
+	Permission           permission.Service
 	// InvocationPolicy applies non-interactive hard policy after optional tool
 	// preflight and before the ordinary permission broker.
 	InvocationPolicy          permission.InvocationPolicy
@@ -210,6 +212,7 @@ type Agent struct {
 	queuedInputs   []protocol.QueuedInput
 	queueSequence  uint64
 	queueAccepting bool
+	queueControl   queueControlState
 	// activeSkills are re-appended to the system instructions on every provider
 	// request so manual compaction cannot silently discard activated guidance.
 	activeSkills       map[string]string
@@ -221,6 +224,8 @@ type Agent struct {
 	activeDone         chan struct{}
 	autoRunning        bool
 	autoStop           bool
+	goalRun            *GoalRunHandle
+	compactionRun      *CompactionRunHandle
 	autoPending        bool
 	autoEmpty          int
 	autoEmptyGoal      string

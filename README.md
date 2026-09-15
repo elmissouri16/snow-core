@@ -76,11 +76,69 @@ snow --mode json --permission deny -p "summarize recent changes"
 
 For applications, use the [Go SDK](docs/sdk.md) and its
 [runnable example](examples/sdk), or control a long-lived process through
-[JSONL RPC](docs/rpc.md). All surfaces share tools, permissions, and sessions.
+[JSONL RPC](docs/rpc.md). All execution surfaces share tools, permissions, and
+sessions. The optional [local web manager preview](docs/using-snow.md#try-the-local-web-manager-shell)
+starts with `snow --mode web`: browse folders on the Snow host, register projects,
+read saved sessions, and explicitly activate RPC-backed conversations with live
+Markdown answers and plans, a public tool timeline, stop controls, approvals and
+questions. Explicit **Queue next** follow-ups have an editable pending-work panel;
+Stop or failure retains unsent work for review rather than automatically replaying it. Live updates use an instance-bound, read-only SSE subscription;
+reconnects fetch a fresh public snapshot rather than replaying commands. Pending
+questions and approvals take over the composer seat without losing its draft,
+and reader-controlled scrolling keeps earlier text anchored during updates.
+Host-backed model choices, conversation creation/renaming/switching,
+authoritative Plan Mode controls and usage/context indicators share that worker.
+Click the model selector to load a searchable, provider-grouped list directly;
+filter by name, model ID or provider without a separate loading step.
+The composer accepts bounded text/image attachments, `@` project-file selection
+and `$` installed-skill suggestions. Skills require explicit per-start opt-in;
+file contents are sent only with your prompt, not when merely browsing choices.
+A read-only Files / Changes inspector shows bounded host file previews and Git
+diffs without activating an agent. Browser pairing survives restarts; reconnects
+never automatically replay work. Read-only **Activity** summarizes registered
+projects without granting controls. **Organize workspaces** provides manager-only
+labels, pins and archives; **Versions** previews saved conversation branches and
+offers explicit idle Restore, not filesystem undo. Explicit **Start goal / Resume
+goal** runs a branch-bound Thread Goal through the same serial agent loop, with
+whole-run Stop and optional token budgets (not billing caps). A **Processes**
+inspector lists managed handles, bounded logs and permission-gated Stop. Runtime
+panels open from the header’s conversation-actions menu, with persistent Close
+controls and internally scrolling bodies; Activity/Organize retain icon controls
+in collapsed navigation. Process tools are enabled in the fixed worker profile;
+plugins, MCP and subagents remain disabled. Skills are disabled unless explicitly
+enabled when starting that worker. Historical **Edit & resend**, **Regenerate** and ordinary **Queue next**
+remain available under their admission rules; Queue next is disabled during goal
+runs. Project activation trust can be explicitly remembered across manager
+restarts; later visits show compact Start/Resume controls, never auto-start.
+Forget trust in Settings → Workspaces. This does not change tool permissions or
+CLI extension trust. After installing an updated build, restart the manager and
+its workers: reloading a browser does not update the running executable.
+The current source also adds browser inventory/targeted revocation, optional
+numeric-loopback TLS, runtime-free global/project defaults and local provider
+status, and HTTPS-only write-only API-key setup. Explicit current-session
+reasoning, branch/detached-conversation forks and rename, manual compaction,
+native Steer (distinct from Queue next), and recorded-cost estimates reuse the
+existing worker. Durable host create/anonymous-HTTPS-clone operations retain
+explicit cancellation/review and separate registration, and never activate agents.
+Empty-directory creation does not require Git. Lost steering receipts preserve
+drafts and exact-run Stop, with explicit idle review rather than automatic retry.
+Native browser-access, runtime-control and host-control matrices have passed
+(12 reports, 616 assertions), alongside fresh local workflow/execution, layout
+and conversation checks. These verify the bounded local source, not remote or
+live-provider compatibility, reusable CI or release readiness. Using an updated
+checkout requires a local build/install and manager/worker restart; verification
+does not update existing user processes. Remote access is not connected
+yet; both HTTP and optional HTTPS support direct numeric loopback only.
 
 ## Development
 
 Source builds require the Go 1.27 line; the available toolchain is Go 1.27rc3.
+Ordinary Go builds use checked-in, embedded web assets and do not require Node.
+Editing the React frontend requires Node >=22.12.0 (CI pins 24.16.0) and npm.
+See [Web frontend development](docs/web-frontend.md) for the pinned React 19.3,
+TypeScript 7 and Vite 8 toolchain, generated-asset workflow, standalone workbench,
+and in-progress migration boundaries.
+
 From the repository root:
 
 ```sh
@@ -88,13 +146,44 @@ go build -o snow ./cmd/snow
 go test ./...
 go vet ./...
 python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
+# Web transport unit tests (Node 22+; no browser or network):
+node scripts/tests/browser/stream-client/run.mjs
+# Web end-to-end and layout checks (Node 22+ and installed Chrome/Chromium):
+node scripts/tests/browser/live-stream/run.mjs
+node scripts/tests/browser/harness-layout/run.mjs
 ```
+
+After frontend edits, explicitly rebuild and verify the generated tree before
+building Go:
+
+```sh
+(cd internal/web/frontend && npm ci --ignore-scripts && npm run build && npm test && npm run check)
+go build -o snow ./cmd/snow
+```
+
+`npm run check` builds into a temporary directory and compares filenames and
+bytes; it never repairs checked-in assets. Review and commit the generated bundle
+and third-party notices with their source changes. Rebuilding does not update a
+running web manager: install the verified binary and explicitly restart the
+manager/workers before testing that build. The React migration is not yet complete;
+source-level ports and earlier native-browser evidence are not acceptance of the
+latest generated artifact.
 
 Read [AGENTS.md](AGENTS.md) for repository rules and affected-area checks.
 [Architecture and roadmap](IMPLEMENTATION.md) explains package boundaries and
 remaining work. [Maintainer guides](docs/maintaining.md) covers releases,
 performance, documentation, and design history. Provider tests use local mocks;
-real-provider checks remain manual.
+real-provider checks remain manual. The live-stream fixture drives the real
+agent/RPC/HTTP/browser path with a gated fake provider on loopback. The layout
+runner passed all 2,058 viewport/state reports across light/dark, seven widths,
+and normal/short heights in the recorded local run, including 84 enabled/unsupported
+runtime-panel reports and 42 remembered-trust startup reports. It checks readable button labels, open dialogs, scrollable
+bodies, collapsed navigation and visible header hit targets. It uses strict mocked
+public DTOs with production templates/assets, not live-provider or whole-product
+parity evidence. Reduced smoke runs do not replace that gate. See the
+[local acceptance evidence](docs/web-manager-implementation-plan.md#expanded-controls-acceptance-evidence)
+for the distinct executed suites. Set `SNOW_CHROME_BIN` for a nonstandard browser location.
 
 ## Related documents
 

@@ -45,11 +45,15 @@ func (a *Agent) Close() {
 	a.closed = true
 	a.queueAccepting = false
 	cancel := a.activeCancel
+	owner := a.goalRun
 	if a.autoRunning {
 		a.autoStop = true
 	}
 	a.mu.Unlock()
 	unlockAdmission()
+	if owner != nil {
+		owner.Cancel()
+	}
 	if cancel != nil {
 		cancel()
 	}
@@ -264,7 +268,7 @@ func (a *Agent) requestToolPolicy() func(tools.DescriptorMetadata) bool {
 	a.mu.RUnlock()
 	pluginPolicy := a.pluginToolPolicy()
 	return func(desc tools.DescriptorMetadata) bool {
-		if pluginPolicy(desc.Name) != nil {
+		if !a.managedGoalToolAllowed(desc.Name) || pluginPolicy(desc.Name) != nil {
 			return false
 		}
 		if budgetReached {
@@ -566,6 +570,7 @@ func (a *Agent) run(ctx context.Context) error {
 			// start a fresh request; repeated failures consume the finite queue.
 			// Internal persistence/accounting errors are never masked this way.
 			if isProviderFailure(err) {
+				a.holdQueueControl()
 				canContinue := a.opts.MaxTurns == 0 || turn < a.opts.MaxTurns
 				queued, ok, limited := a.takeQueuedInput(true, canContinue)
 				if limited {
@@ -622,6 +627,7 @@ func (a *Agent) run(ctx context.Context) error {
 		case protocol.StopStop, protocol.StopLength:
 			naturalStop = true
 		case protocol.StopAborted:
+			recordPromptProviderAbort(ctx)
 			return nil
 		case protocol.StopError:
 			return errors.New("agent: provider stopped with error")
@@ -696,6 +702,7 @@ func (a *Agent) takeQueuedInput(naturalStop, canContinue bool) (item protocol.Qu
 		return protocol.QueuedInput{}, false, true
 	}
 	item = a.queuedInputs[index]
+	a.queueControlSelectingLocked(item.ID)
 	a.mu.Unlock()
 	return item, true, false
 }
@@ -739,14 +746,10 @@ func (a *Agent) deliverQueuedInput(ctx context.Context, item protocol.QueuedInpu
 	item.Text = effective.Text
 	msg := protocol.NewUserMessage(newID(), "", item.Text)
 	msg.PluginTransforms = changes
-	a.mailboxPersistMu.Lock()
-	err := a.opts.Session.Append(session.Entry{
-		Type: session.EntryMessage, ID: msg.ID, ParentID: "", Message: &msg,
-	})
-	a.mailboxPersistMu.Unlock()
+	spanID, err := a.persistQueuedInput(ctx, item, msg)
 	if err != nil {
 		a.queuePublishMu.Unlock()
-		return fmt.Errorf("agent: append queued %s input: %w", item.Kind, err)
+		return err
 	}
 	a.mu.Lock()
 	// Re-find after persistence defensively, although queue mutation is excluded
@@ -759,6 +762,7 @@ func (a *Agent) deliverQueuedInput(ctx context.Context, item protocol.QueuedInpu
 		a.queuedInputs = a.queuedInputs[:len(a.queuedInputs)-1]
 		break
 	}
+	a.queueControlDeliveredLocked(item, msg, spanID)
 	snapshot := a.inputQueueLocked()
 	a.mu.Unlock()
 	a.publishInputQueue(snapshot)

@@ -1,0 +1,463 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/branch-versions.schema.json",
+  "title": "Bounded branch versions and explicit idle restore",
+  "$defs": {
+    "branches_pageParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "additionalProperties": false
+    },
+    "branch_messages_pageParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "tip_id": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "cursor": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "session_id",
+        "branch_id",
+        "tip_id"
+      ],
+      "additionalProperties": false
+    },
+    "branch_restore_prepareParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "source_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "source_tip_id": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        },
+        "target_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "target_tip_id": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        }
+      },
+      "required": [
+        "session_id",
+        "source_branch_id",
+        "source_tip_id",
+        "target_branch_id",
+        "target_tip_id"
+      ],
+      "additionalProperties": false
+    },
+    "branch_restore_commitParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "restore_token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        }
+      },
+      "required": [
+        "session_id",
+        "restore_token"
+      ],
+      "additionalProperties": false
+    },
+    "version": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        },
+        "parent_id": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        },
+        "forked_from_id": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        },
+        "tip_id": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "updated_at": {
+          "type": "integer"
+        },
+        "active": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "parent_id",
+        "forked_from_id",
+        "tip_id",
+        "created_at",
+        "updated_at",
+        "active"
+      ],
+      "additionalProperties": false
+    },
+    "branches_page": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "active_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "active_tip_id": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        },
+        "branches": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/version"
+          }
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "session_id",
+        "active_branch_id",
+        "active_tip_id",
+        "branches"
+      ],
+      "additionalProperties": false
+    },
+    "branch_messages_page": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "tip_id": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        },
+        "messages": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "message.schema.json"
+          }
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "history_tools": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "catalog-output.schema.json#/$defs/historyTool"
+            }
+          }
+        },
+        "history_tools_truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "session_id",
+        "branch_id",
+        "tip_id",
+        "messages",
+        "start",
+        "total"
+      ],
+      "additionalProperties": false
+    },
+    "branch_restore_prepare": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "source_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "source_tip_id": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        },
+        "target_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "target_tip_id": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        },
+        "restore_token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "session_id",
+        "source_branch_id",
+        "source_tip_id",
+        "target_branch_id",
+        "target_tip_id",
+        "restore_token",
+        "expires_at"
+      ],
+      "additionalProperties": false
+    },
+    "branch_restore_commit": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\u0000]+$"
+        },
+        "tip_id": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\u0000]*$"
+        },
+        "history": {
+          "$ref": "#/$defs/branch_messages_page"
+        },
+        "settings": {
+          "type": "object",
+          "required": [
+            "provider",
+            "model",
+            "thinking",
+            "reasoning_summary",
+            "text_verbosity",
+            "permission_mode",
+            "debug_enabled",
+            "subagents_enabled",
+            "subagents_max_concurrent",
+            "subagents_max_agents",
+            "skills_enabled",
+            "subagents_restart_required",
+            "skills_restart_required",
+            "restart_required",
+            "update_check_on_startup",
+            "theme"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "thinking": {
+              "type": "string"
+            },
+            "reasoning_summary": {
+              "type": "string"
+            },
+            "text_verbosity": {
+              "type": "string"
+            },
+            "permission_mode": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "allow",
+                "deny"
+              ]
+            },
+            "debug_enabled": {
+              "type": "boolean"
+            },
+            "subagents_enabled": {
+              "type": "boolean"
+            },
+            "subagents_max_concurrent": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "subagents_max_agents": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "skills_enabled": {
+              "type": "boolean"
+            },
+            "subagents_restart_required": {
+              "type": "boolean"
+            },
+            "skills_restart_required": {
+              "type": "boolean"
+            },
+            "restart_required": {
+              "type": "boolean"
+            },
+            "update_check_on_startup": {
+              "type": "boolean"
+            },
+            "theme": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "additionalProperties": false
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "plan"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "branch_id",
+        "tip_id",
+        "history",
+        "settings",
+        "mode"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

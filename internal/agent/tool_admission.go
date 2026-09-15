@@ -19,6 +19,9 @@ func (a *Agent) admitTool(ctx context.Context, name, callID string, raw json.Raw
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := a.checkManagedGoalToolCall(name, raw); err != nil {
+		return nil, err
+	}
 	if err := a.pluginToolPolicy()(name); err != nil {
 		return nil, err
 	}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/model-discovery.schema.json",
+  "title": "Snow bounded cross-provider model discovery",
+  "description": "At most 512 models within a 2 MiB encoded-result budget; truncation retains complete model records and is reported by truncated.",
+  "type": "object",
+  "required": ["models", "partial", "truncated"],
+  "properties": {
+    "models": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "allOf": [
+          {"$ref": "model.schema.json"},
+          {
+            "properties": {
+              "provider": {"minLength": 1, "maxLength": 128},
+              "id": {"maxLength": 512},
+              "display_name": {"maxLength": 512},
+              "description": {"maxLength": 4096},
+              "thinking_levels": {"maxItems": 8},
+              "upgrade": {
+                "properties": {
+                  "model": {"minLength": 1, "maxLength": 512},
+                  "message": {"maxLength": 4096}
+                }
+              },
+              "pricing": {"properties": {"currency": {"maxLength": 16}}}
+            }
+          }
+        ]
+      }
+    },
+    "partial": {"type": "boolean"},
+    "truncated": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

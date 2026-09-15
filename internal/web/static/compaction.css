@@ -1,0 +1,16 @@
+/* Transient feedback must not resize the transcript, including native no-ops.
+ * Reuse the scroll owner's measured composer clearance instead of guessing it. */
+#live-session .compaction-inline:not([hidden]) { position: absolute; z-index: 8; bottom: max(8px, min(calc(var(--scroll-jump-bottom, 16px) + 42px), calc(100% - 48px - min(120px, 20dvh)))); left: 50%; transform: translateX(-50%); display: flex; align-items: flex-start; gap: 8px; width: min(calc(100% - 32px), var(--composer-width, 852px)); max-height: min(120px, 20dvh); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 4px 16px #00000018; }
+.compaction-inline p { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.compaction-inline .icon-button { flex: none; width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 4px; }
+.compaction-dialog{width:min(38rem,calc(100vw - 2rem));max-height:calc(100dvh - 2rem);overflow:auto}
+.compaction-dialog .dialog-heading{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
+.compaction-dialog .dialog-heading h2{flex:1;margin:0}
+.compaction-dialog .compaction-facts{display:grid;grid-template-columns:minmax(6rem,auto) minmax(0,1fr);gap:.5rem .9rem}
+.compaction-facts dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.compaction-consent{display:flex;align-items:flex-start;gap:.65rem;margin:1rem 0}
+.compaction-consent input{flex:none;margin-top:.2rem;min-width:1.1rem;min-height:1.1rem}
+.compaction-inline{font-size:.85rem;overflow-wrap:anywhere}
+.compaction-dialog .dialog-actions{display:flex;flex-wrap:wrap;gap:.65rem}
+.compaction-dialog button{min-height:2.75rem}
+@media(max-width:480px){.compaction-dialog .compaction-facts{grid-template-columns:minmax(0,1fr)}.compaction-dialog .dialog-actions>*{flex:1 1 100%}}

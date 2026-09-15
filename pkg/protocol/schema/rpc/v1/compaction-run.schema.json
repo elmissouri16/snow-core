@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/compaction-run.schema.json",
+  "title": "Snow compaction run",
+  "$defs": {
+    "compaction_startParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "expected_tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id",
+        "branch_id",
+        "expected_tip_id"
+      ],
+      "additionalProperties": false
+    },
+    "accepted": {
+      "type": "object",
+      "properties": {
+        "compaction_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "turn_origin": {
+          "const": "compact"
+        },
+        "root_epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "turn_sequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "compaction_id",
+        "session_id",
+        "branch_id",
+        "turn_id",
+        "turn_origin",
+        "root_epoch",
+        "turn_sequence"
+      ],
+      "additionalProperties": false
+    },
+    "completed": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "compaction_completed"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "compaction_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "turn_origin": {
+          "const": "compact"
+        },
+        "root_epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "turn_sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "noop",
+            "fallback",
+            "canceled",
+            "failed"
+          ]
+        },
+        "summarized_messages": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retained_messages": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "used_fallback": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "compaction_id",
+        "session_id",
+        "branch_id",
+        "turn_id",
+        "turn_origin",
+        "root_epoch",
+        "turn_sequence",
+        "status",
+        "summarized_messages",
+        "retained_messages",
+        "used_fallback"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

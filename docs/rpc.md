@@ -89,6 +89,283 @@ prompt with `echo ... | snow --mode rpc` closes stdin immediately and begins
 orderly shutdown, which cancels active RPC work. Use a persistent subprocess
 client for interactive use.
 
+### Go transport client
+
+`pkg/agentclient/rpc` supplies a dependency-light client for an **already
+connected**, owned `net.Conn`. It is separate from the embedded agent SDK and
+imports only standard-library packages and `pkg/protocol`. `New(ctx, conn,
+Options)` validates the handshake and starts a bounded reader. `Call` generates
+request IDs and returns the first correlated `RPCResponse`; remote rejection
+is `Success == false`, not a transport error. Consume `Events()` continuously
+for normalized agent events and `RPCPromptCompleted` notifications. A prompt
+acknowledgement is not completion.
+
+Defaults are 16 MiB per encoded frame, 64 queued notifications, 64 pending
+calls, and ten-second handshake/write limits. Callers must bound response
+waits with contexts. Overflow terminates the client explicitly with
+`ErrEventOverflow`; `Done`, `Err`, and `Close` expose termination. Canceling a
+response wait does not abort remote work; canceling an in-progress write closes
+the transport because a partial frame cannot be safely resumed. Never blindly
+retry a possibly executed command.
+
+The supplied connection must honor concurrent operations, deadlines and Close.
+The client does not launch `snow`, supervise/reap processes, supply a stdio
+adapter, implement browser authentication or enable a TCP RPC listener.
+`pkg/agentclient/process` supplies the optional owned stdio adapter: `Start(ctx,
+Options{Executable, Args, Dir, Env, RPC, ShutdownTimeout})` returns a worker with
+`Client` and concurrent/idempotent `Close`. It executes a direct argument vector,
+never a shell, and discards stderr. Nil Env inherits; a nonnil slice replaces it.
+Cancellation, child exit, RPC termination or Close sends EOF, allows a bounded
+shutdown grace (default one second), kills if necessary and reaps the direct
+child. Final stdout draining is also bounded by that grace. This is not a
+sandbox, process-group supervisor or detached-worker guarantee. Normal RPC
+startup remains eager; callers explicitly select any catalog startup below.
+
+### Runtime-free read-only catalog
+
+```sh
+cd /absolute/project
+snow --mode rpc --rpc-startup catalog
+```
+
+This dedicated opt-in mode dispatches before runtime construction and loads no
+configuration, credentials, instructions, MCP, plugins or providers. It accepts
+only the root command and these two flags; execution/runtime flags are rejected.
+It creates no session files or directories. `--rpc-startup eager` is the default
+ordinary RPC behavior, not lazy activation.
+
+The first frame is `rpc_ready` with `runtime_free_catalog`,
+`catalog_sessions`, `catalog_messages`, `catalog_public_tools`, `catalog_image`,
+and `history_images` capabilities. All other commands,
+including prompts and mutations, return `unsupported`. Requests are:
+
+```json
+{"id":"list","type":"catalog_sessions","params":{"offset":0,"limit":25}}
+{"id":"history","type":"catalog_messages","params":{"session_id":"saved-id","offset":0,"limit":25}}
+```
+
+Lists return `{sessions, offset, next_offset, has_more}` with path-free existing
+session summaries. History returns `{messages, offset, next_offset, has_more}`;
+messages contain only `id`, `role`, `text`, `timestamp`, `truncated`. The saved
+current branch is projected chronologically, including exact pre-compaction
+history. Only user/assistant text is returned; no thinking, tool calls/results,
+image bytes, private metadata or provider continuity by default. User rows may
+include public `images` metadata as described below. Text is untrusted display data.
+
+When `catalog_public_tools` is advertised, `catalog_messages` accepts additive
+`"include_tools": true`. Assistant rows can then contain `tools`, and the page
+can contain `tools_truncated`. User/assistant offsets and empty-text assistant
+rows keep their existing pagination meaning. Each public tool has `id`,
+`owner_id`, optional `result_id`, `tool`, `status`, `output`, `output_available`,
+and `truncated`. Stable presentation IDs derive from assistant identity and
+tool-call ordinal, not reusable provider call IDs. Unique calls/results match
+only within their owning assistant interval; duplicate identities, mismatched
+names, missing results, and incompletely read intervals remain unresolved.
+Statuses are `completed`, `failed`, or `unresolved`—never inferred running or
+canceled. Output comes exclusively from persisted `public_tool_result`; legacy
+or private output is unavailable, without fallback to raw tool content or
+metadata. Output is inert untrusted text, not Markdown or HTML.
+New synthetic interruption-recovery messages carry `tool_outcome_unknown: true`.
+This explicit provenance overrides error/success flags and any preview: public
+history keeps the call `unresolved`, with no `result_id` or available output.
+These records balance provider-facing history without establishing whether an
+external effect occurred. Existing unmarked records are not backfilled or
+classified by inspecting private tool-message text.
+
+Tool history keeps the most recent 64 calls per page, 128 bytes per name,
+8 KiB output per tool and 128 KiB aggregate output; oversized identities are
+rejected rather than shortened. Catalog tool decoding additionally allows 8 MiB
+aggregate raw messages and 256 result rows. Following results at a page boundary
+are read from the same verified branch; omitted interval data invalidates that
+owner's definitive result projection. `tools_truncated` marks omissions, so an
+unresolved display does not prove that no result exists in exact history. The
+complete one-MiB encoded response bound still applies, including escaping.
+
+When `history_images` is advertised, saved user rows additionally include optional
+`images: [{"index": 1, "mime_type": "image/png"}]`. Indices refer to the original
+content-block positions, not image ordinals; at most eight image descriptors
+are returned per user, with indices bounded to 0–10,000. MIME labels are limited
+to PNG, JPEG, GIF and WebP; unsupported declarations have an empty MIME label and
+cannot be retrieved. No filename is inferred from text, tool labels or metadata.
+Assistant/tool/provider-private images are never projected. Metadata selection
+is independent of the text decode cap, so a large multipart message may have
+truncated text while retaining its bounded image descriptors.
+
+`catalog_image` is a separate explicit read, never a history/snapshot field:
+
+```json
+{"id":"image","type":"catalog_image","params":{"session_id":"saved-id","message_id":"user-id","index":1}}
+```
+
+Its result is `{session_id, message_id, index, mime_type, data}`, where `data` is
+base64-encoded raster bytes. All three selectors are required; `index` must be
+an explicit nonnegative integer. IDs are bounded to 4,096 UTF-8 bytes. Only an
+exact visible current-branch user message in the same project may be read, using
+the existing catalog root, lease and immutable-database guards. Turn aliases,
+paths, URLs, SVG and private blocks are rejected. The selected image must have a
+supported matching signature and declared MIME type, at most 2 MiB of raw data,
+positive dimensions no larger than 16,384 per axis, and at most 40 million pixels.
+Image dimensions are checked without decompressing a pixel buffer. The complete
+encoded response is bounded to 4 MiB **only for this dedicated image command**;
+ordinary catalog pages retain their 1 MiB limit. Errors return no partial bytes.
+
+Only inactive supported SQLite sessions under this CWD's existing session layout
+are visible. Active, unleased, recovery/WAL-dependent, corrupt/foreign/child,
+empty nondurable and >64 MiB databases are omitted. Missing session roots return
+an empty catalog without initialization. Reads require an existing safe lifetime
+lease and immutable read-only SQLite; they never create or change files. Session
+root selection remains `SNOW_SESSIONS_DIR` or `~/.snow/sessions`, independent of
+`SNOW_HOME`.
+
+Limits: 32 entries by default, 50 maximum, offset/traversal 10,000, inventory
+4,096 filesystem entries, five-second operation context, four-MiB raw message
+decode and 256 KiB aggregate display text. Encoded pages are capped at one MiB,
+including JSON escaping; pages shorten and individual text truncation is explicit.
+Pagination is best effort under concurrent inventory changes. The dedicated
+`catalog-request.schema.json` and `catalog-output.schema.json` schemas describe
+this mode; normal eager command/capability inventories intentionally exclude it.
+
+## Runtime-free host control
+
+`snow --mode rpc --rpc-startup control` starts a separate bounded, serial host
+control loop, not an eager agent runtime. It does not construct an App, Agent,
+new session, provider, tools, or extensions. Its baseline `rpc_ready` advertises
+only `runtime_free_control`, `defaults_control`, and `provider_status`, with
+`max_input_bytes:65536`. Responses are also bounded to 64 KiB. Optional
+`host_api_key_control` appears only when its trusted service is composed.
+A composed host-operation service adds `host_operations`,
+`host_project_create_v1`, and `host_project_clone_v1`. Always inspect this handshake;
+normal eager commands and capabilities are not a fallback in control mode.
+A composed inactive-session deletion service adds `inactive_session_delete_v1`;
+the CLI composes this service, while embedders can omit it.
+
+Cold requests use only `id`, `type`, and command-specific `params`. Unknown
+members, duplicate members, explicit null input values, and oversized frames
+are rejected. Request IDs are at most 128 bytes; strings and params have further
+command-specific bounds. The launch working directory is pinned on the host;
+request parameters cannot select arbitrary filesystem authority. Dedicated
+`control-request.schema.json` and `control-output.schema.json` roots describe
+this mode. Control-only commands are intentionally excluded from the eager
+`KnownRPCCommands()` inventory. The capability-gated `session_delete` command
+shares the existing eager command's immutable-ID request/result shape, but not
+its runtime or admission ownership.
+
+### Optional inactive-session deletion
+
+`inactive_session_delete_v1` permits exactly this explicit mutation:
+
+```json
+{"id":"delete-cold-1","type":"session_delete","params":{"session_id":"immutable-saved-session-id"}}
+```
+
+Success data is `{"session_id":"immutable-saved-session-id","deleted":true}`.
+Only inactive sessions indexed under the pinned launch working directory can be
+deleted; browser/client input never selects an on-disk path. Unknown parameters,
+foreign IDs, changed folder identities, or a database held open by another
+process are rejected. Existing database identity, exclusive ownership, child
+session, and quarantine checks remain authoritative. Managed artifact and goal
+data are cleaned through the same deletion helper used by the eager app.
+
+This operation does not load configuration/auth, construct a runtime, contact
+providers, create a replacement session, or infer deletion from an inventory
+read. A failure after admission may reflect partial cleanup or an uncertain
+outcome, not unchanged storage. Re-read and review before any new explicit
+request; do not automatically retry it. Runtime-free **catalog** mode remains
+read-only and rejects `session_delete`.
+
+### Operator defaults and local provider status
+
+| Command | `params` | Success `data` |
+|---|---|---|
+| `defaults_get` | `scope:"global"`, or `scope:"project"` and the exact launch `cwd` | Scoped defaults projection and opaque `revision` |
+| `defaults_update` | Same scope/binding, required reviewed `revision`, and `global` or `project` patch | Updated scoped defaults projection |
+| `provider_status_list` | None or `{}` | `providers` and `checked_locally:true` |
+
+```json
+{"id":"defaults-1","type":"defaults_get","params":{"scope":"global"}}
+{"id":"defaults-2","type":"defaults_update","params":{"scope":"global","revision":"opaque-reviewed-revision","global":{"thinking":{"op":"set","value":"high"},"text_verbosity":{"op":"reset"}}}}
+{"id":"status-1","type":"provider_status_list"}
+```
+
+Global defaults support `provider_model`, `thinking`, `reasoning_summary`, and
+`text_verbosity`; project defaults support only `provider_model` and `thinking`.
+`provider_model` is a pair with `provider` and `model`, not a provider-discovery
+request. Each patch member is `{"op":"set","value":...}` or `{"op":"reset"}`;
+reset must omit `value`, and omitted operations leave values unchanged. Each
+returned default has nullable `explicit`, an `effective` value, and `source`
+(`builtin`, `global`, or `project`). Opaque revisions fence concurrent changes,
+including same-value updates. A conflict returns `revision_conflict`; inspect
+again before making a new explicit change.
+
+Responses carry `applies_to:"future_runtime"`. Updating host defaults does not
+reconfigure an existing worker, even when that worker opens a new conversation.
+It does not write project configuration files, activate a project, or grant
+permissions.
+
+Provider status records contain only `provider_id`, `state` (`configured`,
+`expired`, or `unavailable`), a fixed `reason`, and `checked_locally:true`.
+Reasons are `credential_missing`, `auth_store_unavailable`, `anonymous_access`,
+`credential_invalid`, `credential_expired`, or `credential_present`. Local
+inspection is not remote authentication: it performs no OAuth refresh,
+provider request, model discovery, or credential export, and returns no account,
+endpoint, environment, expiration, or header data.
+
+### Optional write-only API-key control
+
+`host_api_key_control` adds `api_key_inspect` and `api_key_set` for explicitly
+trusted local transports. These are not legacy login or OAuth commands.
+
+| Command | Required `params` |
+|---|---|
+| `api_key_inspect` | `provider_id` |
+| `api_key_set` | `provider_id`, `expected_revision`, `secret`, explicit boolean `confirm_replace` |
+
+Inspection and successful writes both return `provider_id`,
+`api_key_supported`, `replace_required`, `revision`, `status`,
+`checked_locally:true`, and `applies_to:"future_runtime"`. Revisions are
+`missing` or 64 lowercase hexadecimal characters derived from auth-file
+metadata, not credential contents. Writes require that exact reviewed revision;
+replacement requires explicit confirmation when indicated. Only locally
+configured API-key providers are eligible; ChatGPT OAuth is not an API-key
+write target. The submitted credential is input-only: never log, echo, retain
+in a public event, or put it into a URL or diagnostics. Browser adapters must
+apply their trusted transport and CSRF gates before parsing a secret body.
+The response never contains either the old or new key. Existing workers are
+not silently reloaded, and a lost acknowledgement must not trigger automatic
+resubmission.
+
+### Optional two-phase host project operations
+
+`host_operations` adds explicit filesystem operations without activating an
+agent or exposing an arbitrary command runner. The accompanying
+`host_project_create_v1` and `host_project_clone_v1` capabilities identify the
+explicit create/clone handlers; they do not certify Git executable or network
+availability:
+
+| Command | Required `params` | Success `data` |
+|---|---|---|
+| `project_prepare` | `operation_id`, reviewed `parent` identity, `leaf` | `operation_id`, `parent`, created `child` identity, `leaf` |
+| `project_clone_start` | `operation_id`, exact prepared `child`, reviewed anonymous HTTPS `url` | Same prepared metadata, acknowledging gated execution |
+| `project_cancel` | `operation_id` | `operation_id` acknowledging cancellation request |
+
+These commands require nonempty correlated request IDs. Directory identities
+contain canonical absolute `path` plus decimal-string `device` and `inode`
+values; strings avoid JavaScript integer precision loss. `leaf` is one bounded,
+non-special path component, not a path. Prepare creates the child without a
+network request or process launch. The caller must durably record the returned
+child identity before asking to clone. Clone execution is released only after
+its acceptance frame has been successfully written.
+
+Only anonymous HTTPS clone URLs are supported: no SSH, user information,
+query, fragment, credential, shell option, or generic command. This restriction
+is not a network sandbox. Completion is the separate `project_completed` frame
+with `request_id`, `operation_id`, `child`, and `status`: `succeeded`, `failed`,
+`canceled`, `timed_out`, `output_limit`, or `cleanup_failed`. It carries no Git
+output, raw provider/filesystem errors, credentials, or PIDs. Cancel acceptance
+is not proof of completed cleanup. A terminal result does not prove that the
+pathname still names the original child: reconcile identity before registering
+a project. Do not automatically replay prepare/clone after uncertain output.
+
 ## Protocol handshake
 
 ```json
@@ -101,19 +378,25 @@ client for interactive use.
     "authentication",
     "branch_management",
     "compaction",
+    "compaction_run",
     "context_report",
     "debug_diagnostics",
     "diagnostics",
     "goals",
+    "history_control",
+    "goal_run",
     "managed_processes",
+    "managed_steer",
     "mcp_servers",
     "messages_list",
     "messages_page",
+    "model_discovery",
     "models_list",
     "multimodal_prompts",
     "pending_inputs",
     "permission_interaction",
     "permission_mode",
+    "process_control",
     "project_init",
     "project_trust",
     "prompt_completion",
@@ -121,6 +404,8 @@ client for interactive use.
     "session_forks",
     "session_info",
     "session_management",
+    "session_model_selection",
+    "session_reasoning",
     "settings",
     "skills",
     "subagent_messages",
@@ -392,7 +677,14 @@ follows after the prompt fully unwinds:
 ```
 
 Failure and cancellation use `status: "failed"` (with `error`) or
-`status: "canceled"`. For compatibility, a failed prompt also retains the
+`status: "canceled"`. An explicit terminal provider abort also reports `canceled`,
+even when the caller context is still live and the Go prompt call returns nil.
+This uses synchronous evidence from that invocation, not a requested Abort,
+delayed event, or historical assistant status. Persistence/accounting errors
+still report `failed` unless the existing context-cancellation rules apply.
+The same classification applies to Edit & resend and Regenerate completions;
+it does not change the Go prompt error contract or automatic-goal behavior.
+For compatibility, a failed prompt also retains the
 older same-ID `success: false` response immediately before
 `prompt_completed`. New clients must resolve prompt futures from exactly one
 `prompt_completed` frame, not from `turn_done` or the admission response.
@@ -440,6 +732,47 @@ Success response:
 }
 ```
 
+### `queue_list`, `queue_enqueue`, `queue_update`, `queue_remove`
+
+Workers advertising `queue_next` offer revision-checked follow-up controls in
+addition to the existing `steer` / `follow_up` commands. They reuse the same
+admitted root operation and agent loop. Follow-ups start only after a natural
+reply stop; there is still one correlated `prompt_completed` for the whole run.
+
+```json
+{"id":"q-view","type":"queue_list","params":{"session_id":"session","turn_id":"admitted-root-id"}}
+{"id":"q-add","type":"queue_enqueue","params":{"session_id":"session","turn_id":"admitted-root-id","revision":7,"text":"Then check the tests"}}
+{"id":"q-edit","type":"queue_update","params":{"session_id":"session","turn_id":"admitted-root-id","revision":8,"item_id":"queued-item-id","text":"Then check only the affected tests"}}
+{"id":"q-remove","type":"queue_remove","params":{"session_id":"session","turn_id":"admitted-root-id","revision":9,"item_id":"queued-item-id"}}
+```
+
+All commands bind the exact session and admitted root marker. Mutations require
+the current revision; revisions advance across roots. `queue_list` is read-only.
+Enqueue requires a durably admitted user-origin run, open queue admission and no
+nonterminal goal. Original text must be nonempty NUL-free UTF-8, at most 64 KiB.
+Pending and review items share an eight-item / 256 KiB aggregate limit.
+
+Responses contain `QueueControl`: `session_id`, `turn_id`, `revision`,
+`accepting`, `items`, `review_items` and an attributed `change`. Item states are
+`pending`, `delivering`, `held` or `delivery_unknown`. Updates cannot alter an
+item whose delivery has started. Remove can explicitly discard a retained
+review item; it never reverses persisted input or tool effects.
+
+Normalized queue updates distinguish durable delivery from removal, closure and
+uncertainty. Successful delivery includes exact user-entry and input-span IDs;
+reply identities come from successful assistant persistence, never nearby text
+or a guessed branch tip. Queued inputs are durably paired with versioned span
+metadata so exact-entry editing/regeneration remains available inside a multi-
+input run without inventing new root turns or changing turn accounting.
+
+`queue_rejected` means no mutation; `queue_stale` requires a fresh state read
+before another explicit action. `queue_unknown`, lost acknowledgments and
+ambiguous persistence outcomes are not safe to retry. A disappearing item alone
+is never evidence that it was delivered. Accepted unsent controlled items become
+bounded review-only state after cancellation/failure/limits and are not resumed
+automatically. Reconcile retained work before changing sessions or starting a
+new root operation. This live queue is not a durable restart scheduler.
+
 ### `abort`
 
 ```json
@@ -454,7 +787,9 @@ Success response:
 | `id` | string | No | Correlation ID |
 | `type` | string | Yes | Must be `abort` |
 
-Cancels admitted root work and clears undelivered queued input. If goal work
+Cancels admitted root work and clears legacy undelivered queued input. Controlled
+`queue_next` items are instead retained for explicit review; they never restart
+automatically. If goal work
 was active, it remains deferred across ordinary `prompt` commands until an
 explicit `goal_resume` or `goal_continue`. The command is acknowledged even
 when no prompt is active.
@@ -506,6 +841,47 @@ active provider catalog:
 
 An unavailable or empty discovered catalog is a successful empty list;
 explicitly configured compatible model IDs may still work.
+
+### `models_discover`
+
+```json
+{"id":"discover-1","type":"models_discover"}
+```
+
+The `model_discovery` capability advertises explicit discovery across currently
+available host providers. This calls the existing lazy provider-catalog facade
+with a five-second child context, without changing the selected provider/model.
+Unlike `models_list`, it is not limited to the active provider and can contact
+provider services. It does not run automatically during catalog startup.
+
+The successful `data` payload is `protocol.RPCModelDiscovery`:
+
+```json
+{"models":[],"partial":false,"truncated":false}
+```
+
+Results retain available catalogs if another provider fails or the discovery
+budget expires (`partial:true`). At most 512 bounded model records are returned, within a 2 MiB encoded-result
+budget that accounts for JSON escaping and reserves envelope overhead. Invalid
+identities, oversized metadata and records exceeding that budget are
+omitted/clipped with `truncated:true`. Provider error text, credentials and account inventory are not
+returned. Runtime-free catalog mode rejects this command and omits its capability.
+
+### `session_set_model`
+
+```json
+{"id":"session-model-1","type":"session_set_model","provider":"opencode-go","model":"kimi-k2.6"}
+```
+
+The `session_model_selection` capability advertises model selection for the
+current conversation without rewriting host configuration or the operator-owned
+project selection. Supply an exact provider/model pair from an available cached
+catalog; call `models_discover` first to populate inactive-provider choices.
+Selection uses the existing admitted provider/model/effort transaction and is
+rejected while work is active or the pair is unavailable. Read `session_info`
+afterward for the effective model and compatible thinking level. Catalog startup
+rejects this mutation. The legacy `set_model` command below retains its durable
+project-selection behavior.
 
 ### `set_model`
 
@@ -737,6 +1113,50 @@ invalidated when the session is rebound or Snow restarts. These RPC commands do
 not start or stop processes; model-facing process tools retain their normal
 permission checks.
 
+### Session-bound managed-process controls
+
+The additive `process_control` capability exposes `process_control_list`,
+`process_control_logs`, and `process_control_stop`. These do not change the
+legacy `managed_processes` commands above. Every request names the current
+`session_id`; stale bindings and unknown handles are rejected. Process handles
+are runtime-only opaque `proc_` identifiers followed by 32 lowercase hexadecimal
+characters, never operating-system PIDs.
+
+```json
+{"id":"fleet-1","type":"process_control_list","params":{"session_id":"session-1"}}
+{"id":"page-1","type":"process_control_logs","params":{"session_id":"session-1","process_id":"proc_0123456789abcdef0123456789abcdef","cursor":0,"max_bytes":32768}}
+{"id":"stop-1","type":"process_control_stop","params":{"session_id":"session-1","process_id":"proc_0123456789abcdef0123456789abcdef","grace_ms":1000}}
+```
+
+| Command | Success `data` |
+|---|---|
+| `process_control_list` | `session_id`, `processes` (at most 128 records), `truncated` |
+| `process_control_logs` | `session_id`, `process_id`, `status`, `output`, `next_cursor`, `omitted_bytes`, `eof` |
+| `process_control_stop` | `session_id`, `process` (the updated public process state) |
+
+A process record includes `process_id`, `name`, `status`, `started_at`, and
+optional `finished_at`, `exit_code`, `signal`, `reason`, and `ready`. Status is
+`running`, `stopped`, or `exited`. Inventory omits command lines, environment,
+raw PIDs, and worker stderr. Log output is task output, not guaranteed free of
+secrets: display it only to authorized readers.
+
+Log `cursor` is an optional nonnegative byte offset; omission starts at the
+beginning of retained output. `max_bytes` may be omitted or zero for the default,
+or an integer from 4 through 32768. Pages preserve UTF-8 and report bytes lost
+from retention through `omitted_bytes`. The JSON Schema character bound does
+not replace the producer's UTF-8 byte bound. Stop `grace_ms` may be omitted or
+an integer from 0 through 5000. Unknown parameter fields and explicit null
+parameter values are rejected.
+
+Stop is available only in Default collaboration mode and must pass current
+`process_stop` execution permission and policy checks. This noninteractive
+control does not create a permission question: unresolved `ask` fails closed,
+and neither operator intent nor tool visibility overrides `deny` or Plan Mode.
+No process-launch command exists in this namespace. A successful stop is a
+normal correlated `response`, not a new agent turn. After a lost acknowledgement,
+refresh inventory instead of automatically replaying a stop. Session switching
+or restart invalidates old handles.
+
 ### Project initialization
 
 `project_init` takes no parameters and starts the core-owned project
@@ -825,6 +1245,95 @@ ID, path, branches, or history. Inactive sessions are resolved by ID and remain
 inactive. The response `data` contains `session_id` and the
 normalized `name`. The command may be rejected while conflicting
 root/subagent work is active.
+
+### `message_edit_prepare` / `message_edit_commit`
+
+Workers advertising `message_edit` support historical plain-text user editing
+within the same session. Preparation is read-only:
+
+```json
+{"id":"edit-source","type":"message_edit_prepare","params":{"session_id":"current-session","entry_id":"persisted-user-id"}}
+```
+
+Supply exactly one of `entry_id` or `turn_id`. A turn selector must identify the
+persisted user-origin turn marker and its unique directly owned user message;
+local display IDs, text matching and caller-supplied parents are not selectors.
+The response includes `edit_token`, `session_id`, `source_branch_id`,
+`source_tip_id`, `entry_id`, `turn_id`, complete `text`, and Unix-millisecond
+`expires_at`. Preparations expire after two minutes; the pool is bounded to 64.
+Sources must be on the active path with a verified safe retained prefix.
+Edit-history reads are bounded to 100,000 entries and 32 MiB, with cancellation
+and preflight checks before whole-path decoding or cloning. Unsupported stores
+have no unbounded fallback. Attachments, transformed/internal inputs, active goals/subagents and recovered
+queued input are not supported by this initial operation.
+
+Explicitly commit once:
+
+```json
+{"id":"edit-run","type":"message_edit_commit","params":{"session_id":"current-session","edit_token":"prepared-token","text":"Revised request"}}
+```
+
+Both original and replacement input must be nonempty valid UTF-8, at most 64 KiB.
+The single-use token is revalidated against the same session, branch, tip and
+source. Unknown fields are rejected. Input validation and plugin hooks precede
+branch activation, and the replacement turn is claimed under the same admission
+lock. The original append-only history remains on the former branch; the new
+active path retains the prefix, replaces the selected user and omits its suffix.
+No new session/chat is created, the session-wide title is retained, and prior tool
+side effects are not undone.
+
+Unlike ordinary prompt admission, successful edit ACK data follows durable
+replacement input and precedes replacement provider execution. It contains the
+source identity fields, new `branch_id`, `turn_id`, `user_entry_id`, and a bounded
+public `history` page ending with the replacement. `history.start > 0` means an
+older prefix was omitted by the response bound. Replace the public projection
+rather than appending this page to the old conversation. Buffer bounded incoming
+events across the acknowledgment and retire previous turn/instance authority.
+Completion remains the normal correlated `prompt_completed` lifecycle.
+
+Only `error_code: "message_edit_rejected"` proves that no replacement was committed
+and any attempted branch transition was restored. `message_edit_unknown`, a
+transport/write failure, or an unrecognized failure code must not be interpreted
+as unchanged history. Once replacement input may be durable, keep its branch and
+reconcile explicitly; never automatically replay the request. A provider failure
+following a successful ACK leaves the new continuation active.
+
+### `message_regenerate_prepare` / `message_regenerate_commit`
+
+Workers advertising `message_regenerate` can restart a completed reply from its
+original user prompt. The read-only preparation selects an assistant, not a user:
+
+```json
+{"id":"regen-source","type":"message_regenerate_prepare","params":{"session_id":"current-session","entry_id":"persisted-assistant-id"}}
+```
+
+Supply exactly one of `entry_id` or `turn_id`. An entry must be the final terminal,
+text-bearing assistant reply of its exact persisted user-origin turn. A turn
+selector identifies that same final reply. Tool prefaces, plans, private-only
+output, ambiguous multi-user turns and unsafe or unsupported original prompts are
+rejected. Selection uses the bounded active-path history reader, not display
+positions, adjacent user text or a client-supplied prompt.
+
+The response extends `RPCMessageEditPrepared` with `reply_entry_id`; its inherited
+`entry_id` identifies the owning user and `text` is the unchanged original prompt.
+The token is action-bound, single-use and shares editing's two-minute expiry and
+64-token pool. Editing and regeneration tokens cannot be exchanged.
+
+Commit without a `text` field:
+
+```json
+{"id":"regen-run","type":"message_regenerate_commit","params":{"session_id":"current-session","edit_token":"prepared-regeneration-token"}}
+```
+
+The server revalidates the reply and uses its original server-held user input.
+This reuses editing's atomic history transition/admission, public-history ACK,
+correlated `prompt_completed`, and `message_edit_rejected` / `message_edit_unknown`
+outcome distinction. It restarts the **whole owning turn**, including earlier text
+and tool work, rather than only rewriting its final text fragment. The new active
+path contains one unchanged-text user prompt and the new continuation; the former
+path remains internally retained in the same session. Tools may run again under
+the current permission policy, and prior side effects are not undone. Do not
+convert a failed regeneration into a normal prompt or automatically replay it.
 
 ### `branch_fork`
 
@@ -1125,6 +1634,65 @@ and never appears in cursor data or responses. `messages_list` remains available
 for compatible clients and small snapshots; bounded clients should prefer the
 `messages_page` capability.
 
+Workers advertising `messages_public_history` also accept
+`"public_history": true` in `messages_page` params. This opt-in allowlists
+identities, explicit user/assistant text and plans, tool-call identity/name, and
+explicit public-result metadata. It excludes arguments, images, thinking,
+provider continuity, plugin/display metadata, and raw tool-result content.
+Assistant lifecycle metadata retains recognized `stop_reason` values and a safe
+`is_error` bit, never raw error text. A terminal claim is withheld if dropping
+unsupported original content or tool metadata would falsely promote the reply
+to regeneration eligibility. This metadata is included in the page byte budget;
+source ownership still requires authoritative regeneration preparation.
+Unlike legacy paired-snapshot mode, it includes trailing assistant calls without
+results. `history_tools` maps owning assistant IDs to the bounded public tool
+DTO described above; `history_tools_truncated` marks omissions. An empty map may
+be omitted: clients must treat it as authoritative rather than infer results
+from the partial message page. Projection looks ahead through the final owner's
+complete result interval within the cursor snapshot, without crossing a new
+user/assistant boundary. This prevents a page boundary from inventing an
+unresolved result that exists immediately afterward. Cursor mode is bound;
+switching between public and legacy mode requires starting a new snapshot.
+Both modes retain the existing complete-frame/escaping/LF limits and default
+legacy behavior remains unchanged.
+
+### Read a live worker's durable user image
+
+Workers advertising `history_images` add `history_images` to
+`messages_page` with `public_history:true`: a map keyed by durable user message
+ID, containing the same bounded `{index,mime_type}` descriptors as the catalog.
+These descriptors are derived from original user blocks before public-history
+projection removes image content. The map carries no bytes, labels or filenames
+and is included in the normal page wire budget. Missing metadata must not
+trigger a raw-message fallback. Legacy non-public history behavior is unchanged.
+Clients must capability-check these additive features before using strict older
+workers; no new parameters are required on ordinary history requests.
+
+Workers advertising `message_image` accept either exact durable message identity
+or the persisted user-origin turn identity returned by prompt acceptance:
+
+```json
+{"id":"image","type":"message_image","params":{"session_id":"active-id","message_id":"user-id","index":1}}
+{"id":"image","type":"message_image","params":{"session_id":"active-id","turn_id":"accepted-turn-id","index":1}}
+```
+
+Exactly one of `message_id` and `turn_id` is required. Turn resolution requires
+one exact adjacent user in that persisted root input span; follow-up spans,
+ambiguous users, other branches and client-invented IDs are not aliases. Both
+forms return `{session_id,message_id,index,mime_type,data}` with the resolved
+durable message ID. The same raster/ID/index/2 MiB data/4 MiB frame limits apply.
+The live getter reads only its worker-owned session under admission, never
+through the inactive catalog, and starts no runtime/provider work or mutation.
+Reads are cancellation-aware, time-bounded and use bounded stored history.
+At most four `message_image` reads may be outstanding per worker. They dispatch
+asynchronously so admission/history waits do not block `abort` or interaction
+replies; responses may arrive out of request order and must be matched by ID.
+Excess concurrent reads fail immediately without queueing. EOF, cancellation
+and transport failure cancel outstanding reads, and worker shutdown joins them.
+General public snapshots/pages still contain no image bytes. Image metadata does
+not grant edit/reuse eligibility: historical text editing retains its existing
+original-message, text-only authoritative checks.
+
 ## Diagnostic capture commands
 
 The `debug_diagnostics` capability controls the shared bounded recorder.
@@ -1348,6 +1916,186 @@ Token budgets must be positive. When pricing is available, goal DTOs include
 optional `estimated_costs` grouped by currency; these are catalog/provider
 estimates, not invoices. Goal state also streams through
 `thread_goal_updated`.
+
+### Explicit goal inspection and owned runs
+
+The additive `goal_run` capability exposes `goal_inspect` and `goal_run` without
+changing the legacy `goals` commands above. Both require a nonempty request `id`
+and strict `params`; unrelated envelope fields are rejected.
+
+`goal_inspect` reads the active branch's authoritative projection. Supply
+`session_id` and optionally `branch_id`; omitting the branch selects the current
+active branch, not an arbitrary saved branch. A supplied binding must match.
+Inspection never starts work or clears a deferred goal.
+
+```json
+{"id":"inspect-1","type":"goal_inspect","params":{"session_id":"session-1","branch_id":"main"}}
+{"id":"inspect-1","type":"response","command":"goal_inspect","success":true,"data":{"session_id":"session-1","branch_id":"main","tip_id":"tip-1","goal":null,"deferred":false}}
+```
+
+Inspection always returns `session_id`, `branch_id`, `tip_id`, `goal` (a
+`ThreadGoal` or explicit `null`), and `deferred`. Optional `budget_remaining`
+is a nonnegative integer, present only for a budgeted goal; omission means no
+token-budget limit, not zero remaining tokens. Optional `goal_run_id` identifies
+an owned run currently in progress.
+
+`goal_run` explicitly creates or resumes one serial owned run against the exact
+reviewed session, branch, tip, and goal identity:
+
+```json
+{"id":"run-1","type":"goal_run","params":{"action":"create","session_id":"session-1","branch_id":"main","expected_tip_id":"tip-1","expected_goal_id":"","objective":"Ship and verify the parser","token_budget":20000}}
+{"id":"run-1","type":"response","command":"goal_run","success":true,"data":{"goal_run_id":"run-opaque","goal_id":"goal-1","session_id":"session-1","branch_id":"main"}}
+{"type":"text_delta","text":"Inspecting the parser","goal_run_id":"run-opaque"}
+{"type":"goal_run_completed","request_id":"run-1","goal_run_id":"run-opaque","goal_id":"goal-1","status":"finished","goal_status":"paused"}
+```
+
+| Parameter | Contract |
+|---|---|
+| `action` | Required: `create` or `resume` |
+| `session_id`, `branch_id` | Required nonempty current binding |
+| `expected_tip_id` | Required exact current tip; empty explicitly asserts an empty tip |
+| `expected_goal_id` | Required exact current goal ID; empty explicitly asserts no goal, never “whichever goal exists” |
+| `objective` | Required for create, nonblank and at most 32 Ki Unicode characters; forbidden for resume |
+| `token_budget` | Optional positive integer for create; omit for unlimited (nil in the Go DTO); forbidden for resume |
+
+Create cannot replace an unfinished goal. Resume requires a nonterminal goal
+with remaining budget when budgeted; an active goal must have been deferred for
+review. Neither action bypasses admission, collaboration-mode, permission,
+active-turn, or active-subagent checks. Refresh and review changed bindings
+rather than silently substituting the latest tip or goal identity.
+
+```json
+{"id":"run-2","type":"goal_run","params":{"action":"resume","session_id":"session-1","branch_id":"main","expected_tip_id":"tip-2","expected_goal_id":"goal-1"}}
+```
+
+The success response acknowledges acceptance, **not completion**. Native agent
+events from the owned run carry optional `goal_run_id`; use it to distinguish
+this execution from other activity. `goal_run_completed` carries required
+`type`, `request_id`, `goal_run_id`, `goal_id`, and `status`, with optional
+`goal_status` and `error`. Execution status is `finished`, `failed`, or
+`canceled`; `finished` does not mean the objective was achieved. The separate
+`goal_status` remains one of `active`, `paused`, `blocked`, `usage_limited`,
+`budget_limited`, or `complete`. This terminal envelope is distinct from
+`prompt_completed`; `abort` cancels the active owned run through the shared
+lifecycle.
+
+A rejected admission reports `error_code:"goal_run_rejected"` before mutation.
+An ambiguous goal write or acceptance result reports
+`error_code:"goal_run_unknown"` when a response can still be delivered.
+Do not automatically retry create/resume after a lost acknowledgement or an
+uncertain mutation result. Reconnect, inspect authoritative goal and branch
+state, and obtain a fresh explicit action. Merely inspecting or reconnecting
+must not be treated as permission to resume a deferred goal.
+
+The machine-readable contracts are in `goal-run.schema.json` and
+`process-control.schema.json`, referenced by the normal request/response/output
+schema roots under `pkg/protocol/schema/rpc/v1/`.
+
+## Explicit managed runtime controls
+
+These additive commands use a strict envelope containing exactly `id`, `type`,
+and `params`. A nonempty correlated ID is required. Compare-and-swap fields
+must be present even when their asserted value is empty; omitted tips are not
+wildcards. Unknown params and unrelated legacy root fields are rejected from
+the original JSON frame, including explicitly empty extras. These controls do
+not weaken serial admission, collaboration mode, or permission boundaries.
+
+### History control
+
+`history_control` adds `history_branch_fork`, `history_session_fork`, and
+`history_branch_rename`. All require `session_id`, `source_branch_id`,
+`source_tip_id`, `target_branch_id`, `target_tip_id`, and `name`. Rename also
+requires the reviewed `old_name`. Source identifies the active cursor; target
+identifies an exact saved branch tip, never an arbitrary historical message.
+The source and target may be the same branch. Tip assertions may explicitly be
+empty. Names are bounded to 256 UTF-8 bytes by the producer.
+
+```json
+{"id":"fork-1","type":"history_branch_fork","params":{"session_id":"session-1","source_branch_id":"main","source_tip_id":"tip-1","target_branch_id":"main","target_tip_id":"tip-1","name":"Alternative"}}
+```
+
+Branch fork returns metadata only: `session_id`, `branch_id`, `tip_id`,
+`branch`, `mode`, `reasoning_effort`, and `root_epoch`. Rename returns
+`session_id`, `branch_id`, `tip_id`, `branch`, and `root_epoch`. Reload messages
+through `branch_messages_page` and its public projection, not raw serialized
+history. Session fork returns the new detached `session_id`, `name`, `branch`,
+`source_session_id`, `source_branch_id`, `source_tip_id`, `mode`, and the
+unchanged parent `root_epoch`. It allocates and closes a detached child; it has
+no destination-path, worktree, or activate option. It does not switch the live
+parent to the child.
+
+Read-only admission failures report `history_control_rejected`; uncertain
+mutations or acknowledgements report `history_control_unknown`. Refresh
+history and identities after uncertainty instead of automatically retrying.
+
+### Owned compaction
+
+`compaction_run` adds `compaction_start` with required `session_id`, `branch_id`,
+and `expected_tip_id`. It compares the exact reviewed idle branch, including an
+explicit empty-tip assertion, before reserving a serial operation.
+
+```json
+{"id":"compact-1","type":"compaction_start","params":{"session_id":"session-1","branch_id":"main","expected_tip_id":"tip-1"}}
+```
+
+The accepted response contains `compaction_id`, `session_id`, `branch_id`,
+`turn_id`, `turn_origin:"compact"`, `root_epoch`, and `turn_sequence`. Acceptance
+precedes provider execution. The terminal `compaction_completed` frame carries
+these same identities plus `type`, `request_id`, `status`,
+`summarized_messages`, `retained_messages`, and `used_fallback`. Status is
+`completed`, `noop`, `fallback`, `canceled`, or `failed`. Native
+`compaction_started`/`compaction_done` events are progress, not the terminal
+execution boundary. The terminal frame contains no summary or private provider
+error. Cancellation or failure can still incur usage or save a marker; refresh
+authoritative history before a new explicit action. Failures distinguish
+`compaction_rejected` from `compaction_unknown`; neither lost acknowledgement
+nor reconnect authorizes automatic replay.
+
+### Managed native steering
+
+`managed_steer` adds a command of the same name with required `session_id`,
+`turn_id`, `root_epoch`, `request_id`, and literal `text`. It admits input only
+for that exact running ordinary-user root, not an owned goal or compaction run.
+The text is nonblank NUL-free UTF-8 of at most 64 KiB. Steering shares the
+manager queue budget (eight items and 256 KiB total), including retained review
+work; it does not use a second scheduler or `queue_enqueue` fallback.
+
+```json
+{"id":"steer-rpc-1","type":"managed_steer","params":{"session_id":"session-1","turn_id":"turn-1","root_epoch":4,"request_id":"steer-1","text":"Keep the public API unchanged"}}
+```
+
+Success contains `session_id`, `turn_id`, `root_epoch`, `request_id`, native
+`item_id`, and `status:"accepted"`. Admission is **not delivery**. The
+`queue_control.change` projection in `queue_updated` reports `steer_accepted`,
+`delivered`, or `discarded` with that native `item_id`. Disappearance alone
+proves neither delivery nor discard; native steering may still be delivered
+after provider failure. `managed_steer_stale` reports a changed root;
+`managed_steer_rejected` reports other admission failures. Request IDs correlate
+observations, not durable replay keys. Never automatically retry ambiguous
+steering responses.
+
+### Session-local reasoning preferences
+
+`session_reasoning` adds `session_reasoning_get` and `session_reasoning_set`.
+Get requires only the exact active `session_id`; it returns effective values
+and supported choices from already-loaded model metadata without discovery,
+provider requests, goal continuation, defaults persistence, or session opening.
+These controls require idle admission.
+
+Get and set return the full current state: `session_id`, `branch_id`, `tip_id`,
+`provider`, `model`, `mode`, `permission_mode`, `thinking`, `reasoning_summary`,
+and `text_verbosity`, plus arrays `thinking_levels`, `reasoning_summaries`, and
+`text_verbosities`. Set requires an `expected` object containing all ten current
+state fields (including explicit empty `tip_id` when applicable), a `field`
+(`thinking`, `reasoning_summary`, or `text_verbosity`), and a `value` advertised
+by the current model. It changes exactly one effective preference. Thinking
+changes the current collaboration mode's override; no host/project defaults,
+conversation history, or new turn is written or started.
+
+A stale or invalid operation returns `session_reasoning_rejected`; uncertain
+outcomes return `session_reasoning_outcome_unknown`. Inspect again before a
+fresh explicit action. Legacy settings commands are not a fallback for this
+nonpersisting contract.
 
 ## Subagent commands
 
@@ -1630,8 +2378,14 @@ emitted.
   with the process.
 - `root_epoch`: process-local root session/branch reconciliation generation
   stamped on every root event, including events outside a turn.
-- `tool_output`: bounded preview only; full results remain in session
-  storage.
+- `tool_output`: legacy bounded UI preview; it can include private display
+  details such as an edit diff. Do not treat it as an explicitly public result.
+- `tool_result`: optional `{text, truncated}` on `tool_end`, containing at most
+  8 KiB of valid UTF-8 from the tool message's explicit public text blocks only.
+  Thinking, provider continuity, images, arguments and plugin/display metadata
+  are excluded; private-detail results suppress this field entirely. Controls
+  other than newline/tab are stripped. Full results remain in session storage.
+  Older workers can omit this additive field; consumers must tolerate absence.
 
 `permission_request` is emitted while an ask-mode tool authorization blocks for
 a trusted host decision. `user_input_request` is a separate model-question
@@ -1659,7 +2413,7 @@ tags.
 |---|---|---|
 | `tool_start` | `tool_call_id`, `tool_name` | Before tool execution |
 | `tool_progress` | `tool_progress` | During long-running tool execution |
-| `tool_end` | `tool_call_id`, `tool_name`, `tool_output?`, `tool_duration_ms?`, `is_error?` | After tool completion |
+| `tool_end` | `tool_call_id`, `tool_name`, `tool_output?`, `tool_result?`, `tool_duration_ms?`, `is_error?` | After tool completion |
 | `tool_routing` | `tool_routing` | When deferred-tool discovery selects tools |
 
 ### Interaction events

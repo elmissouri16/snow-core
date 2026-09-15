@@ -381,9 +381,9 @@ func (a *Agent) compactActiveContextMessages(ctx context.Context, trigger compac
 		completionNotes = append(completionNotes, "working-state checkpoint saved; exact compacted tool transcript is unavailable")
 	}
 	message = strings.Join(completionNotes, "; ")
-	// Persisted session mutation is observable before the terminal compaction
-	// boundary. Keeping EvCompactionDone last prevents consumers from settling
-	// the turn and then being resurrected by a trailing attributed update.
+	// Persisted context mutation precedes the final compaction progress event.
+	// EvCompactionDone is not operation completion: captured manual handles
+	// remain running until subsequent mailbox cleanup has also finished.
 	a.publish(protocol.AgentEvent{Type: protocol.EvSessionUpdated})
 	a.publish(protocol.AgentEvent{Type: protocol.EvCompactionDone, Message: message, Compaction: &result})
 	return result, nil
@@ -618,7 +618,7 @@ func (a *Agent) RunMailbox(ctx context.Context) (retErr error) {
 		a.mu.Unlock()
 		return errors.New("agent: closed")
 	}
-	if a.running {
+	if a.running || a.goalRun != nil {
 		a.mu.Unlock()
 		return errors.New("agent: already running")
 	}

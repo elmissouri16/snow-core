@@ -44,6 +44,8 @@ Start with [AGENTS.md](../AGENTS.md) for the change workflow, or
 [Architecture and roadmap](../IMPLEMENTATION.md) for the codebase structure.
 The [maintainer index](maintaining.md) holds release procedures, performance
 checks, documentation ownership, and historical research.
+For browser UI changes, use [Web frontend development](web-frontend.md) for the
+React/Vite build, embedded assets, workbench, and migration ownership boundaries.
 
 Source code and tests define current behavior. Design plans and research record
 past decisions and may describe work that has since changed.

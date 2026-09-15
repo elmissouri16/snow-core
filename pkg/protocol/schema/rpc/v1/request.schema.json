@@ -54,6 +54,7 @@
             "mcp_servers",
             "messages_list",
             "messages_page",
+            "models_discover",
             "models_list",
             "pending_inputs",
             "pending_inputs_clear",
@@ -85,6 +86,9 @@
     "messagesPageParams": {
       "type": "object",
       "properties": {
+        "public_history": {
+          "type": "boolean"
+        },
         "cursor": {
           "type": "string",
           "maxLength": 4096
@@ -373,6 +377,109 @@
     }
   },
   "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "message_regenerate_commit"
+        },
+        "params": {
+          "$ref": "message-regenerate.schema.json#/$defs/commitParams"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "message_regenerate_prepare"
+        },
+        "params": {
+          "$ref": "message-regenerate.schema.json#/$defs/prepareParams"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "message_edit_commit"
+        },
+        "params": {
+          "$ref": "message-edit.schema.json#/$defs/commitParams"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "message_edit_prepare"
+        },
+        "params": {
+          "$ref": "message-edit.schema.json#/$defs/prepareParams"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "provider",
+        "model"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "session_set_model"
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "additionalProperties": false
+    },
     {
       "$ref": "#/$defs/noParams"
     },
@@ -1790,6 +1897,491 @@
             "id"
           ],
           "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "queue_list"
+        },
+        "params": {
+          "$ref": "queue-control.schema.json#/$defs/queue_listParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "queue_enqueue"
+        },
+        "params": {
+          "$ref": "queue-control.schema.json#/$defs/queue_enqueueParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "queue_update"
+        },
+        "params": {
+          "$ref": "queue-control.schema.json#/$defs/queue_updateParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "queue_remove"
+        },
+        "params": {
+          "$ref": "queue-control.schema.json#/$defs/queue_removeParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "branches_page"
+        },
+        "params": {
+          "$ref": "branch-versions.schema.json#/$defs/branches_pageParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "branch_messages_page"
+        },
+        "params": {
+          "$ref": "branch-versions.schema.json#/$defs/branch_messages_pageParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "branch_restore_prepare"
+        },
+        "params": {
+          "$ref": "branch-versions.schema.json#/$defs/branch_restore_prepareParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "branch_restore_commit"
+        },
+        "params": {
+          "$ref": "branch-versions.schema.json#/$defs/branch_restore_commitParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "goal_inspect"
+        },
+        "params": {
+          "$ref": "goal-run.schema.json#/$defs/goal_inspectParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "goal_run"
+        },
+        "params": {
+          "$ref": "goal-run.schema.json#/$defs/goal_runParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "process_control_list"
+        },
+        "params": {
+          "$ref": "process-control.schema.json#/$defs/process_control_listParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "process_control_logs"
+        },
+        "params": {
+          "$ref": "process-control.schema.json#/$defs/process_control_logsParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "const": "process_control_stop"
+        },
+        "params": {
+          "$ref": "process-control.schema.json#/$defs/process_control_stopParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "history_branch_fork"
+        },
+        "params": {
+          "$ref": "history-control.schema.json#/$defs/history_branch_forkParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "history_session_fork"
+        },
+        "params": {
+          "$ref": "history-control.schema.json#/$defs/history_session_forkParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "history_branch_rename"
+        },
+        "params": {
+          "$ref": "history-control.schema.json#/$defs/history_branch_renameParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "compaction_start"
+        },
+        "params": {
+          "$ref": "compaction-run.schema.json#/$defs/compaction_startParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "managed_steer"
+        },
+        "params": {
+          "$ref": "managed-steer.schema.json#/$defs/managed_steerParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "session_reasoning_get"
+        },
+        "params": {
+          "$ref": "session-reasoning.schema.json#/$defs/session_reasoning_getParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "type": {
+          "const": "session_reasoning_set"
+        },
+        "params": {
+          "$ref": "session-reasoning.schema.json#/$defs/session_reasoning_setParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "type": {
+          "const": "message_image"
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "message_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "turn_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "session_id",
+            "index"
+          ],
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "message_id"
+              ],
+              "not": {
+                "required": [
+                  "turn_id"
+                ]
+              }
+            },
+            {
+              "required": [
+                "turn_id"
+              ],
+              "not": {
+                "required": [
+                  "message_id"
+                ]
+              }
+            }
+          ]
         }
       },
       "required": [

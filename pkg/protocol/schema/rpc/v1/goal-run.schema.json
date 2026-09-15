@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/goal-run.schema.json",
+  "title": "Snow explicit owned goal runs",
+  "$defs": {
+    "goal_runParams": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "enum": [
+            "create",
+            "resume"
+          ]
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "expected_tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "expected_goal_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32768
+        },
+        "token_budget": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "action",
+        "session_id",
+        "branch_id",
+        "expected_tip_id",
+        "expected_goal_id"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "create"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "objective"
+            ]
+          },
+          "else": {
+            "properties": {
+              "expected_goal_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[^\\x00]*$"
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "objective"
+                  ]
+                },
+                {
+                  "required": [
+                    "token_budget"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "goal_inspectParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "additionalProperties": false
+    },
+    "accepted": {
+      "type": "object",
+      "properties": {
+        "goal_run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "goal_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "goal_run_id",
+        "goal_id",
+        "session_id",
+        "branch_id"
+      ],
+      "additionalProperties": false
+    },
+    "inspection": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.schema.json#/$defs/threadGoal"
+            }
+          ]
+        },
+        "deferred": {
+          "type": "boolean"
+        },
+        "budget_remaining": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "goal_run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id",
+        "branch_id",
+        "tip_id",
+        "goal",
+        "deferred"
+      ],
+      "additionalProperties": false
+    },
+    "completed": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "goal_run_completed"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "goal_run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "goal_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "status": {
+          "enum": [
+            "finished",
+            "canceled",
+            "failed"
+          ]
+        },
+        "goal_status": {
+          "enum": [
+            "active",
+            "paused",
+            "blocked",
+            "usage_limited",
+            "budget_limited",
+            "complete"
+          ]
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "goal_run_id",
+        "goal_id",
+        "status"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

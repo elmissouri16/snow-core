@@ -1,0 +1,3 @@
+.session-cost [data-workflow-cost] { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.session-cost [data-known="false"] { color: var(--muted); }
+.session-cost-note { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 17px; overflow-wrap: anywhere; }

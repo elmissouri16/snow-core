@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/control-request.schema.json",
+  "title": "Snow control request",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "defaults_get"
+        },
+        "params": {
+          "$ref": "host-control.schema.json#/$defs/defaults_getParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "defaults_update"
+        },
+        "params": {
+          "$ref": "host-control.schema.json#/$defs/defaults_updateParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "provider_status_list"
+        },
+        "params": {
+          "$ref": "host-control.schema.json#/$defs/provider_status_listParams"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "api_key_inspect"
+        },
+        "params": {
+          "$ref": "host-api-key.schema.json#/$defs/api_key_inspectParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "api_key_set"
+        },
+        "params": {
+          "$ref": "host-api-key.schema.json#/$defs/api_key_setParams"
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "project_prepare"
+        },
+        "params": {
+          "$ref": "host-operations.schema.json#/$defs/project_prepareParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "project_clone_start"
+        },
+        "params": {
+          "$ref": "host-operations.schema.json#/$defs/project_clone_startParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "project_cancel"
+        },
+        "params": {
+          "$ref": "host-operations.schema.json#/$defs/project_cancelParams"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "Optional inactive_session_delete_v1 capability: deletes only an inactive session indexed under the worker launch-selected project; never activates a runtime.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "session_delete"
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          },
+          "required": [
+            "session_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "params"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

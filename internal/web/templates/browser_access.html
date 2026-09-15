@@ -1,0 +1,19 @@
+{{define "browser-inventory"}}
+<div data-react-page="browser-access" data-react-props="{{browserInventoryReactProps .CSRF}}">
+<section class="settings-panel browser-inventory" data-browser-inventory aria-label="Paired browsers">
+  <div class="browser-inventory-heading"><h2>Paired browsers</h2><button class="button quiet" type="button" data-browser-refresh>Refresh</button></div>
+  <p>Revoke one browser without signing out the others. Labels are approximate browser-family hints, not verified device identities. Use the reference to distinguish similar browsers.</p>
+  <p class="fine">Created and last seen times are shown in your local time. Last seen is approximate after a restart: activity is saved when browser access changes. Access expires at most 30 days after pairing. Live event streams recheck access every 5 seconds; revocation does not stop a running agent.</p>
+  <input type="hidden" data-browser-csrf value="{{.CSRF}}">
+  <p data-browser-status role="status" aria-live="polite">Loading paired browsers…</p>
+  <ul class="browser-inventory-list" data-browser-list></ul>
+  <div class="browser-revoke-confirm" data-browser-confirm hidden>
+    <h3>Revoke this browser?</h3>
+    <p data-browser-confirm-description></p>
+    <p>This removes only the selected browser's access. The pairing code is unchanged; anyone holding it can pair again. Rotate the pairing code separately if needed.</p>
+    <div class="browser-inventory-actions"><button class="button" type="button" data-browser-cancel>Cancel</button><button class="button danger" type="button" data-browser-revoke>Confirm revoke browser</button></div>
+  </div>
+  <noscript><p>Enable JavaScript to list and individually revoke browsers. The existing Sign out and Revoke all controls remain separate.</p></noscript>
+</section>
+</div>
+{{end}}

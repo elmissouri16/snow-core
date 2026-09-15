@@ -1,0 +1,24 @@
+/* Cross-project metadata only; inherits the existing workspace palette. */
+.manager-activity{width:min(100%,1120px);margin:0 auto;padding:28px 32px 48px;overflow-wrap:anywhere}
+.manager-activity .workspace-heading{padding:0;margin-bottom:16px;gap:12px}
+.manager-activity-intro{max-width:78ch;margin-bottom:16px}
+.manager-activity-connection{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding-top:12px}
+.manager-activity-connection p{margin:0;color:var(--text)}
+.manager-activity[data-freshness=error] .manager-activity-connection p,.manager-activity[data-freshness=paused] .manager-activity-connection p{color:var(--warning)}
+.manager-activity-note{max-width:92ch;margin:12px 0 22px}
+.manager-activity-counts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 28px}
+.manager-activity-count{margin:0;border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;background:var(--sidebar)}
+.manager-activity-count dt{font-size:12px;color:var(--muted)}
+.manager-activity-count dd{font-size:24px;font-weight:600;line-height:1.4;margin:3px 0 0;font-variant-numeric:tabular-nums}
+.manager-activity-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.manager-activity-card{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius);padding:18px;background:var(--surface)}
+.manager-activity-card[data-attention=true]{border-color:var(--warning)}
+.manager-activity-card h3{font-size:16px;margin-bottom:8px}
+.manager-activity-card p{font-size:13px;margin-bottom:10px}
+.manager-activity-card .manager-activity-state{color:var(--text);font-weight:550}
+.manager-activity-card .manager-activity-details{margin-bottom:16px}
+.manager-activity-card .manager-activity-link{align-self:flex-start;margin-top:auto;max-width:100%;text-align:left}
+.manager-activity-card .manager-activity-session{font-size:11px;margin-top:12px;margin-bottom:0}
+.manager-activity-time{font-variant-numeric:tabular-nums}
+@media(max-width:767px){.manager-activity{padding:22px 20px 36px}.manager-activity-counts{grid-template-columns:repeat(2,minmax(0,1fr))}.manager-activity-cards{grid-template-columns:minmax(0,1fr)}.manager-activity-connection{align-items:flex-start;flex-wrap:wrap}.manager-activity .workspace-heading{flex-wrap:wrap}}
+@media(max-width:360px){.manager-activity{padding-inline:14px}.manager-activity-count{padding:10px}.manager-activity-card{padding:14px}}

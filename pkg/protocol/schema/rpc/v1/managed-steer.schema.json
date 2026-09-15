@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/managed-steer.schema.json",
+  "title": "Snow managed steer",
+  "$defs": {
+    "managed_steerParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "root_epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id",
+        "turn_id",
+        "root_epoch",
+        "request_id",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "accepted": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "root_epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "status": {
+          "const": "accepted"
+        }
+      },
+      "required": [
+        "session_id",
+        "turn_id",
+        "root_epoch",
+        "request_id",
+        "item_id",
+        "status"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

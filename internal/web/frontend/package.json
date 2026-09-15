@@ -1,0 +1,28 @@
+{
+  "name": "snow-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node --experimental-strip-types --test src/activity/summary.test.ts src/organization/model.test.mjs src/browser-access/model.test.ts src/host-api-key/model.test.ts src/host-settings/model.test.ts src/reasoning/model.test.ts src/compaction/model.test.ts src/goals/model.test.ts src/versions/model.test.ts src/conversation/model.test.ts src/steer/model.test.ts src/queue/model.test.ts src/composer-context/model.test.ts src/attention/model.test.ts src/messages/model.test.ts src/inspection/model.test.ts src/processes/model.test.ts src/shell/model.test.ts src/shell/controller.test.ts src/shell/menu-aria.test.ts src/workspace/model.test.ts src/workspace/operationController.test.ts scripts/assets.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
+  }
+}

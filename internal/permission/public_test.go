@@ -3,6 +3,8 @@ package permission
 import (
 	"strings"
 	"testing"
+
+	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func TestPublicRequestProjectsAndBoundsAnalysis(t *testing.T) {
@@ -33,5 +35,67 @@ func TestPublicRequestProjectsAndBoundsAnalysis(t *testing.T) {
 	}
 	if len([]rune(got.Reason)) > maxPublicReasonRunes+1 || len([]rune(got.Paths[0])) > maxPublicReasonRunes+1 || len([]rune(got.Effects[0].Resource)) > maxPublicReasonRunes+1 {
 		t.Fatalf("public fields were not bounded: %+v", got)
+	}
+}
+
+func TestPublicRequestEffectFieldBounds(t *testing.T) {
+	fields := []struct {
+		name   string
+		limit  int
+		effect func(string) Effect
+		value  func(protocol.PermissionEffect) string
+	}{
+		{"type", maxPublicFieldRunes, func(v string) Effect { return Effect{Type: v} }, func(e protocol.PermissionEffect) string { return e.Type }},
+		{"capability", maxPublicFieldRunes, func(v string) Effect { return Effect{Capability: Capability(v)} }, func(e protocol.PermissionEffect) string { return e.Capability }},
+		{"operation", maxPublicFieldRunes, func(v string) Effect { return Effect{Operation: v} }, func(e protocol.PermissionEffect) string { return e.Operation }},
+		{"resource", maxPublicReasonRunes, func(v string) Effect { return Effect{Resource: v} }, func(e protocol.PermissionEffect) string { return e.Resource }},
+		{"command", maxPublicFieldRunes, func(v string) Effect { return Effect{Command: v} }, func(e protocol.PermissionEffect) string { return e.Command }},
+		{"reason", maxPublicReasonRunes, func(v string) Effect { return Effect{Reason: v} }, func(e protocol.PermissionEffect) string { return e.Reason }},
+		{"confidence", maxPublicFieldRunes, func(v string) Effect { return Effect{Confidence: v} }, func(e protocol.PermissionEffect) string { return e.Confidence }},
+	}
+	for _, field := range fields {
+		t.Run(field.name, func(t *testing.T) {
+			for _, character := range []string{"x", "界"} {
+				t.Run(character, func(t *testing.T) {
+					for _, size := range []struct {
+						name      string
+						count     int
+						truncated bool
+					}{
+						{"empty", 0, false},
+						{"below", field.limit - 1, false},
+						{"exact", field.limit, false},
+						{"over", field.limit + 1, true},
+					} {
+						t.Run(size.name, func(t *testing.T) {
+							input := strings.Repeat(character, size.count)
+							effect := field.effect(input)
+							effect.Dynamic = true
+							// A later complete effect must not clear an earlier truncation.
+							got := PublicRequest(Request{Effects: []Effect{effect, {Type: "x"}}})
+							if got.EffectsTruncated != size.truncated {
+								t.Errorf("EffectsTruncated = %v, want %v", got.EffectsTruncated, size.truncated)
+							}
+							if len(got.Effects) != 2 {
+								t.Fatal("effect count changed")
+							}
+							want := input
+							if size.truncated {
+								want = strings.Repeat(character, field.limit) + "…"
+							}
+							if field.value(got.Effects[0]) != want {
+								t.Error("effect field did not preserve the expected rune bound")
+							}
+							if !got.Effects[0].Dynamic || got.Effects[1].Type != "x" {
+								t.Error("unrelated effect fields changed")
+							}
+							if got.CapabilitiesTruncated || got.PathsTruncated {
+								t.Error("unrelated truncation flags changed")
+							}
+						})
+					}
+				})
+			}
+		})
 	}
 }

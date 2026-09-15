@@ -1,0 +1,298 @@
+/* Harness-reference workspace composition; see HARNESS-NOTICE.txt.
+ * Hero and docked conversations have separate geometry. Menus, messages and
+ * Settings have cohesive stylesheets; app.css owns shared runtime forms.
+ */
+:root { --rail-width: 280px; --chat-width: 820px; --composer: #2c2c2e; --nav-button: #43454a; }
+:root[data-theme=light] { --composer: #fff; --nav-button: #e8e9ed; }
+body { overflow: hidden; }
+button, .button, input, select { min-height: 36px; font-weight: 400; }
+button, .button { padding: 6px 12px; }
+.primary { color: #fff; }
+.icon { display: block; width: 20px; height: 20px; flex: none; }
+.snow-icon { display: block; width: 27px; height: 27px; flex: none; }
+.sr-only, .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.icon-button { width: 32px; height: 32px; min-height: 32px; padding: 5px; border: 0; background: transparent; border-radius: 8px; }
+.topbar.mobile-topbar { display: none; }
+.app-layout { grid-template-columns: var(--rail-width) minmax(0,1fr); height: 100dvh; }
+.sidebar { width: auto; min-height: 0; position: relative; inset: auto; visibility: visible; z-index: 20; padding: 6px 12px 10px; overflow: visible; box-shadow: none; }
+.sidebar-brand-row { height: 60px; flex: none; display: flex; align-items: center; gap: 8px; padding-left: 4px; }
+.brand { gap: 9px; }
+.brand-mark { display: flex; align-items: center; }
+.brand-name { font-size: 24px; font-weight: 650; letter-spacing: -.6px; gap: 9px; }
+.brand-label { font-size: 10px; font-weight: 550; color: var(--sidebar); background: var(--text); padding: 1px 4px; border: 0; border-radius: 2px; letter-spacing: .3px; line-height: 1.2; }
+.sidebar-collapse { margin-left: auto; padding: 5px; width: 28px; min-height: 28px; border: 0; background: transparent; color: var(--muted); border-radius: 7px; }
+.sidebar-new-session { display: flex; align-items: center; justify-content: center; flex: none; gap: 6px; margin: 8px 2px 14px; height: 38px; background: var(--nav-button); border: .5px solid var(--line); border-radius: 12px; font-size: 14px; font-weight: 500; }
+.sidebar-new-session:hover { background: color-mix(in srgb, var(--nav-button), var(--text) 7%); }
+.sidebar-new-session[aria-disabled=true] { opacity: .5; cursor: not-allowed; }
+.sidebar-heading { height: 32px; padding: 0 4px; margin-bottom: 8px; align-items: center; gap: 6px; }
+.sidebar-title { font-size: 14px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.sidebar-tools { display: flex; gap: 2px; margin-left: auto; }
+.sidebar-tools button, .sidebar-tools a { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; min-height: 30px; padding: 5px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); }
+.sidebar-heading .add-project-link { display: inline-flex; }
+.sidebar-tools button:hover, .sidebar-tools a:hover { color: var(--text); background: var(--raised); }
+.sidebar-search { margin: 0 2px 8px; }
+.sidebar-search input { min-height: 32px; padding: 5px 9px; font-size: 12px; background: var(--raised); border: 0; }
+.project-tree { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; gap: 2px; scrollbar-width: thin; }
+.project-group { flex: none; }
+.project-link { align-items: center; padding: 8px 7px; border: 0; border-radius: 8px; min-height: 38px; gap: 7px; }
+.project-link.selected { background: var(--raised); }
+.project-link strong { font-size: 14px; line-height: 22px; font-weight: 400; }
+.project-link-text { flex: 1; min-width: 0; }
+.project-link-text strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.project-link-path { display: none; }
+.folder-icon { color: var(--muted); font-size: 0; }
+.folder-icon .icon, .project-chevron .icon { width: 16px; height: 16px; }
+.project-chevron { color: var(--muted); }
+.project-link .unavailable { display: block; font-size: 10px; color: var(--warning); }
+.session-tree { margin: 2px 0 8px 16px; padding-left: 9px; border-left: 1px solid var(--line); }
+.session-tree a { display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 7px 9px; border-radius: 7px; color: var(--muted); }
+.session-tree a:hover, .session-tree a.selected { background: var(--raised); color: var(--text); }
+.session-tree .icon { width: 15px; height: 15px; }
+.session-tree span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-empty { padding: 10px 8px; }
+.sidebar-empty p { font-size: 12px; }
+.sidebar-bottom { padding: 10px 0 0; margin-top: auto; flex: none; }
+.sidebar-settings { position: relative; }
+.sidebar-settings > summary { list-style: none; display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 6px; cursor: pointer; border-radius: 12px; font-size: 14px; }
+.sidebar-settings > summary:hover { background: var(--raised); }
+.settings-menu { position: absolute; z-index: 40; bottom: 48px; left: 0; width: 254px; padding: 8px; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); background: var(--surface); }
+.sidebar-bottom .settings-menu nav { padding: 0; border: 0; gap: 0; }
+.sidebar-bottom .settings-menu a, .settings-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 10px; border: 0; font-size: 13px; color: var(--text); background: transparent; justify-content: flex-start; border-radius: 8px; }
+.settings-menu button:hover { background: var(--raised); }
+.settings-menu form { margin: 0; }
+.settings-menu .sidebar-host { padding: 10px; font-size: 10px; border-top: 1px solid var(--line); margin-top: 6px; }
+.workspace { min-height: 0; overflow: hidden; background: var(--canvas); }
+.workspace-heading { min-height: 48px; height: 48px; padding: 8px 22px; border: 0; font-size: 13px; gap: 10px; }
+.workspace-heading h1 { font-size: 14px; font-weight: 500; letter-spacing: 0; }
+.workspace-heading .eyebrow, .workspace-heading .host-label { display: none; }
+.sidebar-restore { display: none; }
+.home-heading { position: absolute; left: 0; top: 0; width: 100%; pointer-events: none; }
+.home-heading button { pointer-events: auto; }
+.home-workspace { justify-content: center; }
+.home-landing { width: min(calc(100% - 48px), var(--chat-width)); margin: 0 auto; padding-bottom: 32px; transform: translate(-5px, -.5px); }
+.home-title { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 23px; }
+.home-title-mark .snow-icon { width: 34px; height: 34px; }
+.home-title h1 { font-size: 26px; line-height: 32px; font-weight: 500; letter-spacing: 0; }
+.preview-pill { align-self: center; font: 13px/18px ui-monospace, SFMono-Regular, monospace; border-radius: 8px; padding: 1px 8px; background: #35435f; color: #f0f3ff; }
+.home-controls { display: flex; align-items: center; gap: 4px; margin: 0 0 8px 4px; font-size: 13px; }
+.workspace-picker { position: relative; }
+.workspace-picker > summary { display: flex; align-items: center; gap: 5px; list-style: none; cursor: pointer; border-radius: 16px; padding: 4px 8px; min-height: 28px; font-size: 13px; line-height: 20px; font-weight: 500; }
+.workspace-picker > summary:hover { background: var(--raised); }
+.workspace-picker > summary .icon { width: 17px; height: 17px; }
+.workspace-picker-menu { position: absolute; z-index: 30; left: 0; bottom: calc(100% + 8px); width: min(330px, calc(100vw - 48px)); max-height: 300px; overflow-y: auto; background: var(--surface); padding: 6px; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+.picker-heading { font-size: 11px; color: var(--muted); padding: 8px 10px; }
+.workspace-picker-menu a { display: flex; align-items: center; gap: 9px; padding: 8px 10px; min-height: 36px; border-radius: 8px; font-size: 13px; }
+.workspace-picker-menu a:hover { background: var(--raised); }
+.workspace-picker-menu .picker-add { border-top: 1px solid var(--line); margin-top: 5px; border-radius: 0 0 8px 8px; }
+.workspace-picker-menu .icon { width: 16px; height: 16px; }
+.home-control-divider { display: none; }
+.home-mode { display: flex; align-items: center; gap: 5px; min-height: 28px; padding: 4px 8px; font-size: 13px; line-height: 20px; }
+.home-mode .icon { width: 17px; height: 17px; }
+.home-mode-alternative { display: none; }
+.composer { background: var(--composer); border: 0; border-radius: 22px; box-shadow: none; padding: 8px 8px 8px 14px; margin: 0; position: relative; bottom: auto; }
+.composer textarea { display: block; min-height: 52px; height: 52px; max-height: 180px; padding: 4px 6px 0 0; font-size: 14px; line-height: 24px; border-radius: 0; color: var(--text); }
+.composer textarea::placeholder { color: #868b95; opacity: 1; }
+.composer textarea:focus { outline: none; }
+/* The compound field owns focus; its textarea must not draw a second edge. */
+.composer:focus-within { outline: 1px solid var(--focus); outline-offset: -1px; }
+.composer-actions { min-height: 34px; margin-top: 12px; gap: 10px; }
+.composer-actions .primary, .composer-send, .home-send { width: 34px; min-width: 34px; min-height: 34px; height: 34px; border-radius: 50%; padding: 6px; background: var(--accent); color: #fff; border: 0; margin-left: auto; }
+.composer-actions .primary .icon, .home-send .icon { width: 22px; height: 22px; }
+.home-composer { min-height: 114px; }
+.home-composer .home-send { width: auto; padding: 0 14px; border-radius: 20px; font-size: 13px; }
+.home-draft-notice { margin-bottom: 12px; }
+.home-draft-preview { max-height: 96px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.home-draft-notice .dialog-actions { flex-wrap: wrap; }
+.home-composer-hint { display: flex; align-items: center; gap: 16px; color: var(--muted); font-size: 11px; }
+.home-composer-hint .icon { width: 20px; height: 20px; }
+.home-privacy { margin: 10px 0 -28px; min-height: 18px; font-size: 10px; text-align: center; color: var(--muted); opacity: .65; }
+/* Populated conversation: shared upstream width axis, not hero dimensions.
+ * Adapted from ui-conversation/ConversationRoot and InputBar; see HARNESS-NOTICE.txt. */
+.conversation-layout, .conversation-pane, .live-session { min-height: 0; }
+.conversation-pane { --chat-content-width: clamp(680px, calc(var(--conversation-column-width, 1200px) * .64), 920px); --composer-width: calc(var(--chat-content-width) + 32px); min-width: 0; }
+.conversation-stream { padding: 16px 32px; scrollbar-width: thin; scrollbar-gutter: stable; }
+.conversation-stream > * { max-width: var(--chat-content-width, 820px); margin-left: auto; margin-right: auto; }
+.live-transcript { width: 100%; }
+.workspace-heading.live-header { border-bottom: .5px solid var(--line); padding: 10px 28px 0 20px; height: 76px; min-height: 76px; gap: 12px; align-items: flex-start; }
+/* Fixed transcript drag strips must never intercept session controls, even
+ * during the frame between a layout change and width-owner measurement. */
+.live-header { position: relative; z-index: 9; }
+.live-header .conversation-title { min-height: 30px; }
+.live-header .live-controls { flex: none; }
+.live-header .live-controls > button { min-height: 28px; }
+.connection-line:has(#live-connection[data-connected=true]) { display: none; }
+.conversation-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.conversation-title strong { font-size: 14px; line-height: 20px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-controls { display: flex; align-items: center; gap: 8px; }
+.live-status, .pill { border: 0; font-size: 11px; background: transparent; padding: 2px 5px; }
+.connection-line { padding: 0 28px; min-height: 18px; font-size: 11px; }
+.connection-line #live-connection { color: var(--muted); }
+.composer-stack { flex: none; position: relative; z-index: 7; width: min(calc(100% - 32px), var(--composer-width, 852px)); margin: 0 auto max(8px, env(safe-area-inset-bottom)); }
+.composer-stack::before { content: ''; position: absolute; top: -24px; left: -16px; right: -16px; height: 24px; background: linear-gradient(transparent, var(--canvas)); pointer-events: none; }
+.composer-stack .composer { display: flex; flex-direction: column; gap: 12px; padding: 8px 0 0; border-radius: 22px; box-shadow: 0 0 0 .5px var(--line), 0 4px 16px #00000008, 0 0 24px #00000008; }
+.composer-stack .composer textarea { height: 36px; min-height: 36px; max-height: 336px; padding: 4px 8px 0 14px; font-size: 14px; line-height: 24px; resize: none; }
+.composer-stack .composer-actions { container-type: inline-size; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 2px 8px 6px; min-height: 42px; margin: 0; }
+/* Reference InputBar.row is the size container for compact task triggers;
+ * explicit flex groups avoid inline-button baseline height and early wraps. */
+.composer-leading, .composer-trailing { display: flex; align-items: center; min-width: 0; gap: 12px; }
+.composer-trailing { flex: none; margin-left: auto; }
+.composer-stack .composer:focus-within { box-shadow: 0 0 0 .5px var(--line), 0 4px 16px #00000008, 0 0 24px #00000008; }
+.composer-hint { margin: 4px 8px 0; font-size: 10px; text-align: center; color: var(--muted); }
+.composer-meta { font-size: 10px; color: var(--muted); }
+.runtime-idle { display: flex; align-items: center; justify-content: center; flex-direction: column; min-height: 100%; padding: 40px 20px; }
+.runtime-idle h2 { font-size: 24px; font-weight: 500; letter-spacing: -.5px; }
+.runtime-idle p { font-size: 13px; max-width: 430px; }
+.runtime-idle .empty-mark { margin-bottom: 14px; }
+.live-attention, .unknown-outcome { width: min(calc(100% - 48px), var(--chat-width)); margin: 0 auto 12px; border-radius: 14px; padding: 14px 16px; max-height: 40dvh; }
+.unknown-outcome { background: var(--accent-soft); border: 1px solid var(--line); }
+.live-error { width: min(calc(100% - 48px), var(--chat-width)); margin: 6px auto; }
+/* Failure/uncertainty adds real explanatory chrome above the transcript.
+ * At short heights that chrome cannot all shrink. Keep it in a bounded outer
+ * scroller instead of clipping the last warning or pushing actions offscreen. */
+#live-session:has(#live-error:not([hidden]), #live-turn-outcome:not([hidden]), #live-unknown:not([hidden])) { overflow-y: auto; overscroll-behavior-y: contain; }
+#live-session :is(#live-error, #live-turn-outcome) { flex: none; }
+#live-session:has(#live-error:not([hidden]), #live-turn-outcome:not([hidden]), #live-unknown:not([hidden])) > #live-stream { flex: 1 0 64px; }
+#live-session:has(#live-error:not([hidden]), #live-turn-outcome:not([hidden]), #live-unknown:not([hidden])) > #live-composer-seat { position: sticky; bottom: 0; background: var(--canvas); }
+.jump-latest { position: absolute; bottom: 176px; left: 50%; transform: translateX(-50%); min-height: 30px; font-size: 11px; border-radius: 18px; z-index: 6; box-shadow: var(--shadow); }
+.project-chat-heading { height: 42px; min-height: 42px; }
+.project-chat-heading .icon { width: 18px; height: 18px; }
+.project-chat-heading > div { display: flex; align-items: center; gap: 8px; }
+/* Cold/saved conversations share one seat: history scrolls independently of
+ * explicit Start/Resume, including when shared live-session ID styles apply. */
+.inactive-conversation { overflow: hidden; }
+.inactive-conversation > .conversation-pane { overflow: hidden; }
+#workspace .inactive-conversation #live-session.project-session-list:not([data-runtime]) { flex: 1 1 0; min-height: 64px; overflow: hidden; }
+.inactive-conversation .conversation-stream { flex: 1 1 0; min-height: 64px; overflow-y: auto; overscroll-behavior-y: contain; }
+.project-session-list { width: min(100%, var(--chat-width)); margin: 0 auto; }
+:is(.runtime-activation, .workspace-session-start).activation-panel { width: min(calc(100% - 48px), var(--chat-width)); padding: 20px; margin: auto auto 24px; border: 1px solid var(--line); border-radius: 22px; background: var(--composer); }
+.activation-panel h2 { font-size: 20px; font-weight: 500; }
+.activation-panel .activation-boundary { font-size: 12px; margin-bottom: 14px; }
+.activation-panel .activation-model-help { margin: 8px 0; }
+.activation-panel .activation-model-help summary { min-height: 24px; color: var(--muted); }
+.activation-panel .form-footer { gap: 16px; }
+:is(.runtime-activation, .workspace-session-start).activation-trusted { background: var(--surface); padding: 16px 20px; }
+.activation-trusted .activation-trust-status { color: var(--muted); font-size: 13px; margin: 4px 0 12px; }
+.activation-trusted .activation-trust-help { margin: 10px 0 0; }
+.activation-trust-help .quiet { font: inherit; padding: 0; min-height: 28px; display: inline; text-decoration: underline; }
+.project-trust-list { list-style: none; padding: 0; margin: 0; }
+.project-trust-list li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.project-trust-list li > span { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.project-trust-list small { display: block; color: var(--muted); font-size: 12px; }
+.project-trust-list form { flex: none; margin: 0; }
+.project-trust-list .button { white-space: nowrap; min-height: 36px; }
+.project-trust-list:has(li) + .project-trust-empty { display: none; }
+.project-inspector:not([hidden]) { position: relative; top: auto; bottom: auto; right: auto; width: 340px; padding: 18px; box-shadow: none; z-index: 10; background: var(--sidebar); }
+.project-layout:has(.project-inspector:not([hidden])) .conversation-stream { padding-left: 24px; padding-right: 24px; }
+.project-inspector .section-heading { min-height: 28px; }
+.inspector-tabs { margin-top: 4px; }
+.projects-content, .settings-content { overflow-y: auto; width: 100%; max-width: 900px; margin: 0 auto; padding: 28px 40px 48px; }
+.projects-content h2, .settings-content h2 { font-size: 19px; font-weight: 500; }
+.catalog-row { padding: 12px 5px; border-color: var(--line); }
+.catalog-row strong { font-weight: 500; }
+.project-empty { padding: 24px 0; }
+.add-project-panel { padding-top: 24px; }
+.folder-dialog { border-radius: 18px; background: var(--surface); padding: 22px; }
+.folder-dialog .dialog-heading h2 { font-size: 20px; font-weight: 500; }
+.folder-path { border-radius: 10px; background: var(--raised); }
+.folder-list button::before { content: none; }
+.login-body { background: var(--canvas); overflow: auto; }
+.login-card { border: 0; background: transparent; max-width: 430px; padding: 24px; }
+.login-card h1 { font-size: 28px; font-weight: 500; }
+.login-card .eyebrow { display: none; }
+.login-card .brand { margin-bottom: 36px; }
+.login-card .brand-label { background: var(--text); color: var(--canvas); }
+.login-card input { border-radius: 12px; background: var(--raised); height: 44px; }
+.login-card button { border-radius: 12px; min-height: 40px; }
+
+@media (min-width: 768px) {
+  .mobile-nav-toggle, .mobile-nav-close { display: none; }
+  .sidebar-collapsed { --rail-width: 56px; }
+  .sidebar-collapsed .sidebar { padding: 6px; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
+  .sidebar-collapsed .sidebar-brand-row { flex-direction: column; justify-content: center; height: auto; min-height: 60px; padding: 0; }
+  .sidebar-collapsed .sidebar-brand-row .brand { justify-content: center; gap: 0; }
+  .sidebar-collapsed .sidebar-brand-row .brand-name, .sidebar-collapsed .sidebar-brand-row .brand-label, .sidebar-collapsed .sidebar-new-session span, .sidebar-collapsed .sidebar-title, .sidebar-collapsed .project-tree, .sidebar-collapsed .sidebar-search, .sidebar-collapsed .sidebar-settings > summary > span { display: none; }
+  .sidebar-collapsed .sidebar-collapse { margin: 0; }
+  .sidebar-collapsed .sidebar-new-session { margin: 8px 3px 10px; height: 36px; padding: 8px; background: transparent; border: 0; }
+  .sidebar-collapsed .sidebar-heading { height: auto; padding: 0; }
+  .sidebar-collapsed .sidebar-tools { flex-direction: column; margin: 0 auto; gap: 8px; }
+  .sidebar-collapsed .sidebar-tools [data-sidebar-view-toggle] { display: none; }
+  .sidebar-collapsed .sidebar-settings > summary { justify-content: center; padding: 0; }
+  .sidebar-collapsed .settings-menu { left: 0; }
+  .sidebar-collapsed .sidebar-restore { display: none; }
+}
+@media (max-width: 1100px) and (min-width: 768px) {
+  .project-inspector:not([hidden]) { width: 280px; }
+  .project-layout:has(.project-inspector:not([hidden])) { flex-direction: column; overflow-y: auto; }
+  .project-layout:has(.project-inspector:not([hidden])) .conversation-pane { flex: none; min-height: 500px; }
+  .project-layout:has(.project-inspector:not([hidden])) .project-inspector { width: 100%; min-height: 320px; flex: none; border-top: 1px solid var(--line); }
+  .home-title h1 { font-size: 24px; }
+}
+@media (max-width: 767px) {
+  .app-layout { display: flex; height: calc(100dvh - 48px); }
+  .topbar.mobile-topbar { display: flex; height: 48px; padding: 0 12px; border: 0; background: var(--canvas); gap: 10px; }
+  .mobile-topbar .brand-name { font-size: 18px; }
+  .mobile-topbar .brand-label { display: none; }
+  .mobile-topbar .snow-icon { width: 22px; height: 22px; }
+  .mobile-nav-toggle, .mobile-nav-close { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; min-height: 32px; padding: 5px; }
+  .sidebar { position: fixed; inset: 0 auto 0 0; width: min(280px, calc(100vw - 48px)); visibility: hidden; z-index: 25; padding: 6px 12px 10px; box-shadow: var(--shadow); }
+  .sidebar.nav-open { visibility: visible; }
+  .sidebar-collapse { display: none; }
+  .sidebar-brand-row .brand-label { display: inline; }
+  .sidebar-brand-row .brand-name { font-size: 22px; }
+  .sidebar-brand-row .mobile-nav-close { margin-left: auto; }
+  .sidebar-heading .add-project-link { display: inline-flex; }
+  .nav-backdrop:not([hidden]) { position: fixed; display: block; inset: 0; z-index: 24; background: #0007; border: 0; border-radius: 0; width: 100%; height: 100%; }
+  .workspace { flex: 1; }
+  .workspace-heading { min-height: 40px; height: 40px; padding: 4px 16px; }
+  .home-heading { height: 0; min-height: 0; }
+  .home-landing { width: calc(100% - 32px); padding-bottom: 44px; transform: none; }
+  .home-title { gap: 7px; margin-bottom: 26px; flex-wrap: wrap; }
+  .home-title h1 { font-size: 21px; line-height: 30px; letter-spacing: -.4px; }
+  .home-title-mark .snow-icon { width: 28px; height: 28px; }
+  .preview-pill { font-size: 10px; line-height: 16px; padding: 1px 6px; }
+  .home-controls { margin-left: 0; flex-wrap: wrap; }
+  .workspace-picker > summary, .home-mode { font-size: 12px; padding: 4px 5px; }
+  .composer { border-radius: 20px; }
+  .composer textarea { font-size: 16px; }
+  .home-composer textarea { font-size: 14px; }
+  .home-privacy { margin-bottom: -30px; padding: 0 12px; }
+  .home-composer-hint { font-size: 10px; }
+  .composer-hint { display: block; font-size: 9px; }
+  .conversation-stream { padding: 16px 32px; }
+  .composer-stack .composer textarea { font-size: 16px; }
+  .live-header { padding: 3px 16px; min-height: 30px; flex-wrap: wrap; }
+  .live-header strong { max-width: 150px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .connection-line { padding: 0 16px; min-height: 16px; font-size: 9px; }
+  .runtime-idle { padding: 28px 8px; }
+  .runtime-idle h2 { font-size: 21px; }
+  .live-attention, .unknown-outcome, .live-error { width: calc(100% - 24px); }
+  .live-attention { padding: 12px; max-height: 40dvh; }
+  .live-attention input, .live-attention textarea { font-size: 16px; }
+  .project-inspector:not([hidden]) { position: fixed; inset: 48px 0 0; width: 100%; padding: 16px; z-index: 15; box-shadow: var(--shadow); }
+  :is(.runtime-activation, .workspace-session-start).activation-panel { width: calc(100% - 24px); padding: 16px; margin-bottom: 12px; }
+  .activation-panel h2 { font-size: 19px; }
+  .projects-content, .settings-content { padding: 20px 18px 36px; }
+  .folder-dialog { width: calc(100% - 24px); padding: 18px; }
+}
+
+/* Cold Start/Resume occupies the same conversation-width composer seat.
+ * Trust and blockers stay in the normal scroll flow, including short windows. */
+.workspace-session-start { flex: none; max-height: min(620px, calc(100dvh - 180px)); overflow-y: auto; overscroll-behavior-y: contain; width: min(calc(100% - 48px), var(--chat-width)); margin: auto auto 24px; }
+.workspace-session-start .activation-draft { display: block; width: 100%; min-height: 88px; max-height: 240px; resize: vertical; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: transparent; color: var(--text); }
+.workspace-session-start .form-footer { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: center; padding-top: 8px; background: var(--composer); }
+.workspace-session-start.activation-trusted .form-footer { background: var(--surface); }
+.workspace-session-start .activation-boundary, .workspace-session-start .error, .workspace-session-start .notice { overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .workspace-session-start { width: calc(100% - 24px); margin-bottom: 12px; }
+}
+
+/* A short viewport cannot show the complete trust form beside even a minimal
+ * transcript. Use a bounded outer seat scroller instead of clipping controls
+ * into a tiny inner panel; keep history's own scroll region bounded. */
+@media (max-height: 480px) {
+  .inactive-conversation > .conversation-pane { overflow-y: auto; overscroll-behavior-y: contain; }
+  #workspace .inactive-conversation #live-session.project-session-list:not([data-runtime]),
+  .inactive-conversation > .conversation-pane > .conversation-stream { flex: 0 0 96px; }
+  .inactive-conversation .workspace-session-start { max-height: none; overflow: visible; }
+  .workspace-session-start .form-footer { position: static; }
+}

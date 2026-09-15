@@ -1,0 +1,319 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/history-control.schema.json",
+  "title": "Snow history control",
+  "$defs": {
+    "history_branch_forkParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "source_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "source_tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "target_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "target_tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id",
+        "source_branch_id",
+        "source_tip_id",
+        "target_branch_id",
+        "target_tip_id",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "history_session_forkParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "source_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "source_tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "target_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "target_tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id",
+        "source_branch_id",
+        "source_tip_id",
+        "target_branch_id",
+        "target_tip_id",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "history_branch_renameParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "source_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "source_tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "target_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "target_tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "old_name": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "session_id",
+        "source_branch_id",
+        "source_tip_id",
+        "target_branch_id",
+        "target_tip_id",
+        "old_name",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "branch_fork": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch": {
+          "$ref": "branch-versions.schema.json#/$defs/version"
+        },
+        "root_epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mode": {
+          "enum": [
+            "default",
+            "plan"
+          ]
+        },
+        "reasoning_effort": {
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "branch_id",
+        "tip_id",
+        "branch",
+        "root_epoch",
+        "mode",
+        "reasoning_effort"
+      ],
+      "additionalProperties": false
+    },
+    "branch_rename": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch": {
+          "$ref": "branch-versions.schema.json#/$defs/version"
+        },
+        "root_epoch": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "session_id",
+        "branch_id",
+        "tip_id",
+        "branch",
+        "root_epoch"
+      ],
+      "additionalProperties": false
+    },
+    "session_fork": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "branch": {
+          "$ref": "branch-versions.schema.json#/$defs/version"
+        },
+        "source_session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "source_branch_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "source_tip_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\x00]*$"
+        },
+        "mode": {
+          "enum": [
+            "default",
+            "plan"
+          ]
+        },
+        "root_epoch": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "session_id",
+        "name",
+        "branch",
+        "source_session_id",
+        "source_branch_id",
+        "source_tip_id",
+        "mode",
+        "root_epoch"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

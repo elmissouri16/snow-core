@@ -1,0 +1,9 @@
+.history-controls { border-top: 1px solid var(--line); margin-top: 1rem; padding-top: 1rem; min-width: 0; }
+.history-controls p, .history-controls h3, .history-controls h4 { overflow-wrap: anywhere; }
+.history-controls input[type="text"] { display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-block: .4rem; font: inherit; padding: .6rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); }
+.history-control-actions { flex-wrap: wrap; }
+.history-control-actions button { white-space: normal; overflow-wrap: anywhere; min-height: 44px; }
+.history-control-confirmation { margin-top: 1rem; padding: .85rem; border: 1px solid var(--line); border-radius: var(--radius, 8px); }
+.history-control-consent { display: flex; align-items: flex-start; gap: .6rem; line-height: 1.5; }
+.history-control-consent input { flex: 0 0 auto; margin-top: .25rem; }
+@media (max-width: 520px) { .history-control-actions { display: grid; grid-template-columns: minmax(0, 1fr); } .history-control-confirmation .dialog-actions { flex-wrap: wrap; } .history-controls input[type="text"] { font-size: 16px; } }

@@ -26,10 +26,15 @@ var rpcCommands = []string{
 	"auth_providers",
 	"branch_delete",
 	"branch_fork",
+	"branch_messages_page",
 	"branch_rename",
+	"branch_restore_commit",
+	"branch_restore_prepare",
 	"branch_select",
 	"branches_list",
+	"branches_page",
 	"compact",
+	"compaction_start",
 	"context",
 	"debug_clear",
 	"debug_disable",
@@ -43,14 +48,26 @@ var rpcCommands = []string{
 	"goal_create",
 	"goal_edit",
 	"goal_get",
+	"goal_inspect",
 	"goal_pause",
 	"goal_resume",
+	"goal_run",
 	"goal_set",
+	"history_branch_fork",
+	"history_branch_rename",
+	"history_session_fork",
 	"keybindings_get",
 	"keybindings_update",
+	"managed_steer",
 	"mcp_servers",
+	"message_edit_commit",
+	"message_edit_prepare",
+	"message_image",
+	"message_regenerate_commit",
+	"message_regenerate_prepare",
 	"messages_list",
 	"messages_page",
+	"models_discover",
 	"models_list",
 	"pending_inputs",
 	"pending_inputs_clear",
@@ -67,16 +84,26 @@ var rpcCommands = []string{
 	"plugin_statuses",
 	"plugin_views",
 	"plugins_list",
+	"process_control_list",
+	"process_control_logs",
+	"process_control_stop",
 	"process_logs",
 	"processes_list",
 	"project_init",
 	"prompt",
+	"queue_enqueue",
+	"queue_list",
+	"queue_remove",
+	"queue_update",
 	"session_create",
 	"session_delete",
 	"session_fork",
 	"session_info",
 	"session_open",
+	"session_reasoning_get",
+	"session_reasoning_set",
 	"session_rename",
+	"session_set_model",
 	"session_worktree_fork",
 	"sessions_list",
 	"set_mode",
@@ -118,15 +145,26 @@ var rpcCapabilities = []string{
 	"active_input",
 	"authentication",
 	"branch_management",
+	"branch_versions",
 	"compaction",
+	"compaction_run",
 	"context_report",
 	"debug_diagnostics",
 	"diagnostics",
+	"goal_run",
 	"goals",
+	"history_control",
+	"history_images",
 	"managed_processes",
+	"managed_steer",
 	"mcp_servers",
+	"message_edit",
+	"message_image",
+	"message_regenerate",
 	"messages_list",
 	"messages_page",
+	"messages_public_history",
+	"model_discovery",
 	"models_list",
 	"multimodal_prompts",
 	"pending_inputs",
@@ -134,13 +172,17 @@ var rpcCapabilities = []string{
 	"permission_mode",
 	"plugin_extensions",
 	"presentation_settings",
+	"process_control",
 	"project_init",
 	"project_trust",
 	"prompt_completion",
+	"queue_next",
 	"response_controls",
 	"session_forks",
 	"session_info",
 	"session_management",
+	"session_model_selection",
+	"session_reasoning",
 	"settings",
 	"skills",
 	"subagent_messages",
@@ -528,19 +570,27 @@ type RPCMessagesList struct {
 // RPCMessagesPageParams selects one bounded branch-history page. Cursor is an
 // opaque server-issued snapshot position; clients must not inspect or modify it.
 type RPCMessagesPageParams struct {
-	Cursor   string `json:"cursor,omitempty"`
-	Limit    int    `json:"limit,omitzero"`
-	MaxBytes int    `json:"max_bytes,omitzero"`
+	// PublicHistory opts into restricted messages and explicit public tool history.
+	// Cursors are bound to this mode; it cannot change during pagination.
+	PublicHistory bool   `json:"public_history,omitzero"`
+	Cursor        string `json:"cursor,omitempty"`
+	Limit         int    `json:"limit,omitzero"`
+	MaxBytes      int    `json:"max_bytes,omitzero"`
 }
 
 // RPCMessagesPage is one ordered page from a stable append-only branch
 // projection. The next cursor is present exactly when HasMore is true.
 type RPCMessagesPage struct {
-	Messages   []Message `json:"messages"`
-	NextCursor string    `json:"next_cursor,omitempty"`
-	Start      int       `json:"start"`
-	Total      int       `json:"total"`
-	HasMore    bool      `json:"has_more"`
+	HistoryImages map[string][]RPCMessageImage `json:"history_images,omitempty"`
+	// HistoryTools is keyed by owning assistant ID and only populated in public
+	// history mode. Missing entries never authorize raw-message output fallback.
+	HistoryTools          map[string][]RPCHistoryTool `json:"history_tools,omitempty"`
+	HistoryToolsTruncated bool                        `json:"history_tools_truncated,omitzero"`
+	Messages              []Message                   `json:"messages"`
+	NextCursor            string                      `json:"next_cursor,omitempty"`
+	Start                 int                         `json:"start"`
+	Total                 int                         `json:"total"`
+	HasMore               bool                        `json:"has_more"`
 }
 
 // RPCSubagentMessagesParams selects one bounded public child-history page.

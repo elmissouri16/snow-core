@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow-core.dev/schemas/rpc/v1/process-control.schema.json",
+  "title": "Snow session-bound managed process controls",
+  "description": "No process launch, command, environment, raw PID or worker stderr fields. Logs are at most 32768 UTF-8 bytes; schema maxLength counts characters. Stop obeys current Default collaboration mode and noninteractive process_stop exec permission. Cursor omission starts at the beginning of retained output. Mutations must never be automatically retried after a lost acknowledgement.",
+  "$defs": {
+    "process_control_listParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "additionalProperties": false
+    },
+    "process_control_logsParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        },
+        "process_id": {
+          "type": "string",
+          "pattern": "^proc_[a-f0-9]{32}$"
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_bytes": {
+          "type": "integer",
+          "anyOf": [
+            {
+              "const": 0
+            },
+            {
+              "minimum": 4,
+              "maximum": 32768
+            }
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "process_id"
+      ],
+      "additionalProperties": false
+    },
+    "process_control_stopParams": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        },
+        "process_id": {
+          "type": "string",
+          "pattern": "^proc_[a-f0-9]{32}$"
+        },
+        "grace_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        }
+      },
+      "required": [
+        "session_id",
+        "process_id"
+      ],
+      "additionalProperties": false
+    },
+    "process": {
+      "type": "object",
+      "properties": {
+        "process_id": {
+          "type": "string",
+          "pattern": "^proc_[a-f0-9]{32}$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "status": {
+          "enum": [
+            "running",
+            "stopped",
+            "exited"
+          ]
+        },
+        "started_at": {
+          "type": "integer"
+        },
+        "finished_at": {
+          "type": "integer"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "signal": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "ready": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "process_id",
+        "name",
+        "status",
+        "started_at"
+      ],
+      "additionalProperties": false
+    },
+    "list": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        },
+        "processes": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/process"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "session_id",
+        "processes",
+        "truncated"
+      ],
+      "additionalProperties": false
+    },
+    "logs": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        },
+        "process_id": {
+          "type": "string",
+          "pattern": "^proc_[a-f0-9]{32}$"
+        },
+        "status": {
+          "enum": [
+            "running",
+            "stopped",
+            "exited"
+          ]
+        },
+        "output": {
+          "type": "string",
+          "maxLength": 32768
+        },
+        "next_cursor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "omitted_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eof": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "session_id",
+        "process_id",
+        "status",
+        "output",
+        "next_cursor",
+        "omitted_bytes",
+        "eof"
+      ],
+      "additionalProperties": false
+    },
+    "stop": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[!-.0-\\[\\]-~]+$"
+        },
+        "process": {
+          "$ref": "#/$defs/process"
+        }
+      },
+      "required": [
+        "session_id",
+        "process"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

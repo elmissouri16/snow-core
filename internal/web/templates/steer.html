@@ -1,0 +1,19 @@
+{{define "steer"}}
+<section id="live-steer-history" class="steer-history" aria-label="Current-run steering" hidden>
+  <h3>Current-run steering</h3>
+  <p class="muted">Acceptance is not delivery. Only native delivery or discard confirms the outcome.</p>
+  <ol data-steer-items></ol>
+</section>
+<dialog id="live-steer-dialog" class="steer-dialog runtime-dialog" aria-labelledby="steer-heading" aria-describedby="steer-explanation">
+  <div class="dialog-heading"><h2 id="steer-heading">Steer current run</h2><button type="button" class="quiet icon-button" data-steer-close aria-label="Close steering and keep draft" title="Close">{{template "icon-close"}}</button></div>
+  <form class="runtime-dialog-body" data-steer-form>
+    <p id="steer-explanation">Send a correction or direction into the current run. Snow delivers literal text at a safe boundary after the current assistant response or tool batch, not in the middle of a tool. Provider failure can still be followed by delivery.</p>
+    <p class="muted"><strong>Queue next</strong> is different: it schedules a natural follow-up after current work. Steering does not create a separate queued follow-up or an optimistic chat message.</p>
+    <label for="live-steer-text">Direction for this run</label>
+    <textarea id="live-steer-text" data-steer-text rows="6" placeholder="For the current task, focus on…" aria-describedby="steer-draft-hint" spellcheck="true"></textarea>
+    <p id="steer-draft-hint" class="muted">Up to 64 KiB. Enter adds a line; Ctrl/⌘ + Enter sends. Closing keeps this draft in this tab.</p>
+    <p data-steer-error role="status" aria-live="polite" hidden></p>
+    <footer><button type="button" class="quiet" data-steer-review hidden>Review current run again</button><button type="submit" data-steer-submit>Send steering</button></footer>
+  </form>
+</dialog>
+{{end}}

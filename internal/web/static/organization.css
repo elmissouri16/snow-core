@@ -1,0 +1,27 @@
+.organization-panel { width: 100%; max-width: 78rem; margin-inline: auto; padding: clamp(1rem, 3vw, 2rem); overflow-wrap: anywhere; }
+.organization-panel .workspace-heading { gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+.organization-panel h2 { font-size: 1rem; margin: 0 0 .75rem; }
+.organization-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; margin-block: 1.5rem; }
+.organization-card { min-width: 0; border: 1px solid var(--border, #80808055); border-radius: .75rem; padding: 1rem; }
+.organization-list { list-style: none; padding: 0; margin: 0; }
+.organization-item { border-top: 1px solid var(--border, #80808055); padding-block: 1rem; }
+.organization-item[hidden] { display: none; }
+.organization-item-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: .5rem; }
+.organization-badge { display: inline-block; border: 1px solid var(--border, #80808055); border-radius: 999px; padding: .1rem .5rem; font-size: .75rem; }
+.organization-path { overflow-wrap: anywhere; white-space: normal; margin-block: .5rem; }
+.organization-rename { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; }
+.organization-rename label { grid-column: 1 / -1; font-size: .8rem; }
+.organization-panel input:not([type="hidden"]):not([type="checkbox"]) { min-width: 0; width: 100%; box-sizing: border-box; }
+.organization-actions { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: baseline; margin-top: .75rem; }
+.organization-actions form { margin: 0; }
+.organization-confirm { max-width: 100%; }
+.organization-confirm summary { cursor: pointer; padding-block: .5rem; }
+.organization-confirm[open] { flex-basis: 100%; }
+.organization-confirm summary:focus-visible, .organization-panel a:focus-visible, .organization-panel button:focus-visible, .organization-panel input:is([type=checkbox], [type=radio]):focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.organization-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: end; gap: 1rem; margin-top: 1rem; }
+.organization-filters label { display: grid; gap: .5rem; font-size: .875rem; }
+.organization-filters .organization-checkbox { display: flex; align-items: center; min-height: 2.75rem; }
+.organization-checkbox input { flex: 0 0 auto; width: 1.1rem; height: 1.1rem; }
+.organization-panel button, .organization-panel .button { min-height: 2.5rem; white-space: normal; }
+@media (max-width: 760px) { .organization-grid, .organization-filters { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 400px) { .organization-rename { grid-template-columns: minmax(0, 1fr); } .organization-actions { align-items: stretch; flex-direction: column; } }

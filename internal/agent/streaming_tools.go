@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	goalpkg "github.com/elmissouri16/snow-core/internal/goal"
@@ -155,7 +156,7 @@ streamLoop:
 				if normalized.Total == 0 {
 					normalized.Total = normalized.Input + normalized.Output
 				}
-				if normalized.Cost == nil {
+				if normalized.Cost == nil && !normalized.CostCurrencyConflict {
 					normalized.Cost = normalized.CostFor(a.Model().Pricing)
 				}
 				usage = &normalized
@@ -388,6 +389,7 @@ func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBl
 	}); err != nil {
 		return fmt.Errorf("agent: persist assistant: %w", err)
 	}
+	a.queueControlReply(msg)
 	if usage != nil {
 		a.mu.Lock()
 		a.turnUsage = a.turnUsage.Add(*usage)
@@ -547,8 +549,54 @@ func canonicalToolArguments(raw json.RawMessage) string {
 	return string(encoded)
 }
 
+// publicToolResultPreview is deliberately independent of toolResultText and the
+// legacy display preview: those may include thinking and private tool details.
+func publicToolResultPreview(msg protocol.Message, details []any) *protocol.ToolResultPreview {
+	if msg.Role != protocol.RoleTool {
+		return nil
+	}
+	for _, detail := range details {
+		switch detail.(type) {
+		case tools.PrivateDetails, *tools.PrivateDetails:
+			// Even a typed nil marker suppresses public result publication.
+			return nil
+		}
+	}
+	const limit = 8 << 10
+	var text strings.Builder
+	preview := &protocol.ToolResultPreview{}
+	appendText := func(value string) bool {
+		for len(value) > 0 {
+			r, size := utf8.DecodeRuneInString(value)
+			value = value[size:]
+			if (r == utf8.RuneError && size == 1) || (unicode.IsControl(r) && r != '\n' && r != '\t') {
+				continue
+			}
+			if size > limit-text.Len() {
+				preview.Truncated = true
+				return false
+			}
+			text.WriteRune(r)
+		}
+		return true
+	}
+	for _, block := range msg.Content {
+		if block.Type != protocol.BlockText || block.Text == "" {
+			continue
+		}
+		if text.Len() > 0 && !appendText("\n") {
+			break
+		}
+		if !appendText(block.Text) {
+			break
+		}
+	}
+	preview.Text = text.String()
+	return preview
+}
+
 // appendToolResult persists a tool_result message and emits its events.
-// Details are private tool metadata used only for UI-facing previews.
+// Details control public-preview suppression and private UI-facing previews.
 func (a *Agent) appendToolResult(parent string, msg protocol.Message, details ...any) error {
 	started, display := a.takeToolDisplay(msg.ToolCallID)
 	output := toolResultText(msg.Content)
@@ -590,6 +638,9 @@ func (a *Agent) appendToolResult(parent string, msg protocol.Message, details ..
 			}
 		}
 	}
+	// Capture explicit public provenance while the private-details marker is
+	// still available; historical content alone cannot establish this policy.
+	msg.PublicToolResult = publicToolResultPreview(msg, details)
 	messageEntry := session.Entry{
 		Type:     session.EntryMessage,
 		ID:       msg.ID,
@@ -630,6 +681,7 @@ func (a *Agent) appendToolResult(parent string, msg protocol.Message, details ..
 		ToolName:       msg.ToolName,
 		IsError:        msg.IsError,
 		ToolOutput:     preview,
+		ToolResult:     msg.PublicToolResult,
 		ToolDurationMS: durationMS,
 		PluginView:     msg.ToolDisplay.Plugin.Clone(),
 	}
