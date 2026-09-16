@@ -1,13 +1,31 @@
 # Known bugs
 
+## BUG-227: Local Web Manager URL redirects away from localhost in LAN mode
+
+- **Status:** Resolved — localhost and LAN now serve the same manager directly on independent exact origins.
+- **Severity:** Medium
+- **Surface:** Ordinary `snow --mode web` on a host with a private LAN address
+- **Evidence:** Snow printed `http://127.0.0.1:7331` as the Local URL, but every GET/HEAD immediately redirected to the private LAN origin. Same-machine use therefore changed address and unnecessarily depended on the LAN origin instead of serving the manager on the listener the user selected.
+- **Fix:** Serve one shared shell directly from both listeners, with fixed per-listener Host/Origin boundaries, origin-specific cookie names and persisted session-profile binding. Legacy unscoped browser sessions are revoked during the one-time schema migration instead of being transferred ambiguously between origins. Runtime and agent ownership remain singular.
+- **Verification:** `TestTrustedLANRunActivatesLANAndLocalhost` pairs both real origins independently, rejects crossed Host/Origin requests at the actual listeners, reads the same durable browser inventory from each origin and overlaps authenticated requests. Focused unit coverage rejects renamed local/LAN session-token replay while accepting each token only on its issuing profile. `go test -race ./internal/web ./cmd/snow -count=1` passes.
+
+## BUG-226: Desktop conversation-header height overrides compact mobile layout
+
+- **Status:** Resolved — compact and wrapped mobile header checks pass across the targeted mobile matrix.
+- **Severity:** Low
+- **Surface:** Web Manager activated conversations at widths up to 767px
+- **Evidence:** The rendered mobile header contains one compact row of title/status/actions but retains a large empty lower area. `harness.css` fixes `.workspace-heading.live-header` at 76px; the mobile `.workspace-heading` and `.live-header` declarations have lower specificity and cannot replace both that height and minimum height. Browser layout/workflow checks also encode 76px at every width.
+- **Remediation:** Give the exact live-header owner content-sized mobile geometry with the existing 40px mobile floor, preserving 76px on desktop and allowing genuine content wrapping to expand. Update responsive browser assertions and canonical composition documentation.
+- **Verification:** The complete conversation workflow passes 1,750 assertions across seven widths and both themes, including 40px one-row mobile headers, bounded contents and unchanged 76px desktop headers. The targeted runtime-layout subset passes all 3,714 assertions across 36 reports at 320px, 360px and 390px, both themes and 740/360/240px heights, covering enabled and unsupported runtime panels. `go test ./internal/web` passes. The broader layout smoke's new header assertions pass, but its run remains nonzero because unrelated model/session fixture and reader-anchor regressions reopened BUG-176 and BUG-196.
+
 ## BUG-225: Automatic trusted-LAN mode initially disabled localhost access
 
 - **Status:** Resolved — dual-listener integration and race checks pass.
 - **Severity:** Medium
 - **Surface:** Ordinary `snow --mode web` on a host with a private LAN address
 - **Evidence:** The first zero-setup LAN implementation bound only the selected private address, so `http://127.0.0.1:7331` stopped working even though same-machine and same-LAN access are both required.
-- **Fix:** Trusted-LAN startup now binds the selected private address and `127.0.0.1` on the same port. Localhost accepts only exact-Host GET/HEAD requests and redirects them to the canonical LAN origin, preserving the existing single-origin Host/Origin/CSRF boundary. Offline startup still serves loopback directly.
-- **Verification:** `TestTrustedLANRunActivatesLANAndLocalhost` starts both real listeners on one ephemeral port, verifies the localhost redirect and direct LAN health response, and shuts both down; focused race tests pass.
+- **Fix:** Trusted-LAN startup binds the selected private address and `127.0.0.1` on the same port and serves one shared manager directly on both exact origins. Each listener retains independent Host/Origin/CSRF and local/LAN cookie boundaries. Offline startup still serves loopback directly.
+- **Verification:** `TestTrustedLANRunActivatesLANAndLocalhost` starts both real listeners on one ephemeral port, verifies direct `200 ok` health responses, independent pairing, exact cross-listener rejection, shared durable inventory and concurrent authenticated reads, then shuts both down. Focused boundary coverage rejects foreign/cross-origin requests and renamed cross-profile session-token replay.
 
 ## BUG-224: Trusted-LAN HTTP initially reused HTTPS browser cookie names
 
@@ -221,7 +239,8 @@
 
 ## BUG-196: Intermediate React layout clamps steal transcript reader ownership
 
-- **Status:** Resolved — reader checks pass at all seven widths, both themes and all three heights in the complete layout matrix.
+- **Status:** Open — two reader-anchor assertions regressed in fresh BUG-226 layout verification; unrelated to the header geometry correction.
+- **Regression evidence:** A serial 390px/dark layout smoke passes all `stream` cells at 360px and 240px heights but fails `Question arrival and seat resize preserve manual reader anchor` and `Collapsing attention preserves manual reader ownership and visible anchor` at 740px. The same run's base `chat` compact-header assertions pass.
 - **Evidence:** Initial mounting briefly clamps the transcript before all composer roots finish, so a 4px geometry difference is mistaken for manual upward intent. Head eviction similarly clamps through intermediate commit layouts, recapturing the wrong anchor and moving surviving content by about 426px.
 - **Fix:** Initialize the reader after synchronous presentation setup, keep attention layout notifications separate from the parent update transaction, and retain the pre-update reader anchor instead of sampling intermediate commit clamps as user input.
 - **Verification:** Frontend build, all 132 package tests and reproducibility pass. The complete 2,058-report layout gate includes reader checks preserving initial following, incremental pinning, manual anchors, head eviction, attention resizing, copy focus and table scroll. The separate disconnected-state failure is also resolved (BUG-198).
@@ -361,7 +380,8 @@
 
 ## BUG-176: Layout fixture bypasses its mock after settings moved to HTMX
 
-- **Status:** Resolved — layout transport adapter and fixture regressions verified.
+- **Status:** Open — reproduced again during BUG-226 verification; unrelated to the mobile header change.
+- **Regression evidence:** A fresh serial `node scripts/tests/browser/harness-layout/run.mjs --smoke` run consistently fails all `chat-model-root`, `chat-model-groups`, and `chat-sessions` cells at 390px/dark: model controls do not settle and the session menu does not receive the expected host DTOs. The base `chat` header/layout assertions, including BUG-226's new compact geometry checks, pass.
 - **Evidence:** `harness-layout/run.mjs --smoke` fails model discovery/session-menu cases because its fixture intercepts `fetch` only, while the production settings/choices owner now uses HTMX XHR. The native HTTP/SSE matrix passes those workflows; telemetry layout cases also pass. The fixture never records or answers the new discovery transport.
 - **Remediation:** Route explicit handler-based HTMX requests through the layout fixture's existing strict public-response mock, preserving other HTMX behavior and request admission. Add fixture regressions; retain native-transport coverage as the production integration authority.
 - **Verification:** 28 layout-fixture unit tests pass, including the new HTMX adapter's exact response/status forwarding, stale-instance rejection, failure preservation, ordinary-navigation fallback and runtime-panel read allowlist. Fresh `node scripts/tests/browser/harness-layout/run.mjs --smoke` passes **2,612 assertions across 147 reports**, zero failures/unexpected requests. The earlier failed smoke is retained as investigation evidence in `/tmp/snow-telemetry-layout.log`; native HTTP/SSE remains independently covered.

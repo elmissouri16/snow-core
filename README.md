@@ -119,10 +119,14 @@ management stay on the Snow host rather than in the browser. Ordinary
 `snow --mode web` needs no networking setup:
 when a private host address is available, Snow automatically binds its first
 active private IPv4 address (or IPv6 ULA) on port 7331 and also binds
-`127.0.0.1:7331`. It prints both URLs; localhost safely redirects to the exact
-`http://<private-ip>:7331` browser origin. With no private address it serves
-numeric loopback directly. Pairing-code authentication remains required, but normal LAN traffic is
-plain HTTP and can be observed by other devices on that network; use this only on
+`127.0.0.1:7331`. It serves the same manager directly on both exact origins and
+prints organized access, pairing and security sections with both URLs. Local
+browsing remains on localhost; LAN devices use `http://<private-ip>:7331`.
+Interactive terminals that are wide enough also show a compact QR code for
+opening that LAN URL from another device; the pairing code stays separate and is never embedded in the QR code.
+With no private address it serves numeric loopback directly. Pairing-code
+authentication remains required, but normal LAN traffic is plain HTTP and can be
+observed by other devices on that network; use this only on
 a trusted home/work LAN, never public Wi-Fi or the Internet. Snow has no Web
 Manager TLS, certificate, saved-network-profile, DNS, or trusted-proxy path and
 does not modify firewalls or routers. A private IP is not authentication. Explicit current-session

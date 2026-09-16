@@ -557,11 +557,10 @@ func TestWebPermissionFixture(t *testing.T) {
 
 func permissionFixturePair(t *testing.T, ctx context.Context, output string) (string, string) {
 	t.Helper()
-	lines := strings.Split(output, "\n")
-	if len(lines) < 3 {
-		t.Fatal("invalid fixture startup")
+	origin, ok := fixtureOrigin(output)
+	if !ok {
+		t.Fatal("fixture listener unavailable")
 	}
-	origin := lines[1]
 	code, ok := fixturePairingCode(output)
 	if !ok {
 		t.Fatal("missing local pairing credential")

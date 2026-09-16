@@ -29,6 +29,7 @@ const (
 type browserSession struct {
 	ID             string
 	Label          string
+	Profile        string
 	CSRF           string
 	Created        time.Time
 	LastUsed       time.Time
@@ -70,7 +71,7 @@ func (s *shell) issuePairingLocked() string {
 }
 
 func (s *shell) browser(r *http.Request) (browserSession, bool) {
-	cookie, err := r.Cookie(s.sessionCookieName())
+	cookie, err := r.Cookie(s.sessionCookieName(r))
 	if err != nil || len(cookie.Value) != 64 {
 		return browserSession{}, false
 	}
@@ -81,7 +82,7 @@ func (s *shell) browser(r *http.Request) (browserSession, bool) {
 		return browserSession{}, false
 	}
 	s.expireSessionsLocked()
-	browser, ok := s.access.sessions[key]
+	browser, ok := s.sessionForRequestLocked(r, key)
 	if ok {
 		// Absolute and idle limits are both 30 days, so reads need not rewrite
 		// storage: the durable Created deadline always expires no later.
@@ -105,18 +106,27 @@ func localCookie(name, value string, maxAge int) *http.Cookie {
 		SameSite: http.SameSiteStrictMode, MaxAge: maxAge}
 }
 
-func (s *shell) sessionCookieName() string {
-	if s.network.profile == "trusted-lan-http" {
+func (s *shell) sessionCookieName(r *http.Request) string {
+	if s.requestBoundary(r).network.profile == "trusted-lan-http" {
 		return lanSessionCookie
 	}
 	return sessionCookie
 }
 
-func (s *shell) pairCookieName() string {
-	if s.network.profile == "trusted-lan-http" {
+func (s *shell) pairCookieName(r *http.Request) string {
+	if s.requestBoundary(r).network.profile == "trusted-lan-http" {
 		return lanPairCookie
 	}
 	return pairCookie
+}
+
+func validBrowserProfile(profile string) bool {
+	return profile == "local" || profile == "trusted-lan-http"
+}
+
+func (s *shell) sessionForRequestLocked(r *http.Request, key [32]byte) (browserSession, bool) {
+	browser, ok := s.access.sessions[key]
+	return browser, ok && browser.Profile == s.requestBoundary(r).network.profile
 }
 
 func (s *shell) localCookie(name, value string, maxAge int) *http.Cookie {
@@ -135,7 +145,7 @@ func (s *shell) pairCSRF() string {
 func (s *shell) validPairCSRF(r *http.Request) bool {
 	s.access.mu.Lock()
 	defer s.access.mu.Unlock()
-	cookie, err := r.Cookie(s.pairCookieName())
+	cookie, err := r.Cookie(s.pairCookieName(r))
 	value := r.PostForm.Get("csrf")
 	if err != nil || len(value) != 129 || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(value)) != 1 {
 		return false
@@ -199,12 +209,15 @@ func (s *shell) login(w http.ResponseWriter, r *http.Request) {
 			accessUnavailable(w)
 			return
 		}
-		s.render(w, http.StatusUnauthorized, "login", pageData{CSRF: r.PostForm.Get("csrf"), NetworkProfile: s.network.profile, Error: "That code is invalid or expired. Ask a paired browser to rotate the code, or check the manager startup output."})
+		s.render(w, http.StatusUnauthorized, "login", pageData{CSRF: r.PostForm.Get("csrf"), NetworkProfile: s.requestBoundary(r).network.profile, Error: "That code is invalid or expired. Ask a paired browser to rotate the code, or check the manager startup output."})
 		return
 	}
 	s.expireSessionsLocked()
-	if previous, err := r.Cookie(s.sessionCookieName()); err == nil {
-		delete(s.access.sessions, sha256.Sum256([]byte(previous.Value)))
+	if previous, err := r.Cookie(s.sessionCookieName(r)); err == nil {
+		key := sha256.Sum256([]byte(previous.Value))
+		if _, ok := s.sessionForRequestLocked(r, key); ok {
+			delete(s.access.sessions, key)
+		}
 	}
 	if len(s.access.sessions) >= maxBrowsers {
 		if !s.saveAccessLocked(r.Context()) {
@@ -215,13 +228,13 @@ func (s *shell) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := randomToken()
-	s.access.sessions[sha256.Sum256([]byte(token))] = browserSession{ID: s.newBrowserIDLocked(), Label: browserLabel(r.UserAgent()), CSRF: randomToken(), Created: now, LastUsed: now}
+	s.access.sessions[sha256.Sum256([]byte(token))] = browserSession{ID: s.newBrowserIDLocked(), Label: browserLabel(r.UserAgent()), Profile: s.requestBoundary(r).network.profile, CSRF: randomToken(), Created: now, LastUsed: now}
 	if !s.saveAccessLocked(r.Context()) {
 		accessUnavailable(w)
 		return
 	}
-	http.SetCookie(w, s.localCookie(s.sessionCookieName(), token, int(browserLifetime/time.Second)))
-	http.SetCookie(w, s.localCookie(s.pairCookieName(), "", -1))
+	http.SetCookie(w, s.localCookie(s.sessionCookieName(r), token, int(browserLifetime/time.Second)))
+	http.SetCookie(w, s.localCookie(s.pairCookieName(r), "", -1))
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -274,7 +287,7 @@ func (s *shell) authorizeFormLimit(w http.ResponseWriter, r *http.Request, maxBy
 	}
 	// Admit the completed form against current durable browser authority. This
 	// gate ends before handler work; it does not cancel already admitted work.
-	cookie, err := r.Cookie(s.sessionCookieName())
+	cookie, err := r.Cookie(s.sessionCookieName(r))
 	if err != nil {
 		http.Error(w, "Pair this browser to continue", http.StatusUnauthorized)
 		return browserSession{}, false
@@ -287,7 +300,7 @@ func (s *shell) authorizeFormLimit(w http.ResponseWriter, r *http.Request, maxBy
 		return browserSession{}, false
 	}
 	s.expireSessionsLocked()
-	current, ok := s.access.sessions[key]
+	current, ok := s.sessionForRequestLocked(r, key)
 	if !ok || current.ID != browser.ID || subtle.ConstantTimeCompare([]byte(current.CSRF), []byte(browser.CSRF)) != 1 {
 		s.access.mu.Unlock()
 		http.Error(w, "Pair this browser to continue", http.StatusUnauthorized)
@@ -303,7 +316,7 @@ func (s *shell) logout(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorizeForm(w, r); !ok {
 		return
 	}
-	cookie, _ := r.Cookie(s.sessionCookieName())
+	cookie, _ := r.Cookie(s.sessionCookieName(r))
 	s.access.mu.Lock()
 	delete(s.access.sessions, sha256.Sum256([]byte(cookie.Value)))
 	saved := s.saveAccessLocked(r.Context())
@@ -312,7 +325,7 @@ func (s *shell) logout(w http.ResponseWriter, r *http.Request) {
 		accessUnavailable(w)
 		return
 	}
-	http.SetCookie(w, s.localCookie(s.sessionCookieName(), "", -1))
+	http.SetCookie(w, s.localCookie(s.sessionCookieName(r), "", -1))
 	w.Header().Set("Clear-Site-Data", "\"cache\", \"storage\"")
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
@@ -321,10 +334,10 @@ func (s *shell) pair(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorizeForm(w, r); !ok {
 		return
 	}
-	cookie, _ := r.Cookie(s.sessionCookieName())
+	cookie, _ := r.Cookie(s.sessionCookieName(r))
 	key := sha256.Sum256([]byte(cookie.Value))
 	s.access.mu.Lock()
-	browser, ok := s.access.sessions[key]
+	browser, ok := s.sessionForRequestLocked(r, key)
 	if !s.checkAccessLocked(r.Context()) {
 		s.access.mu.Unlock()
 		accessUnavailable(w)
@@ -349,7 +362,7 @@ func (s *shell) pair(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *shell) takePairingCode(r *http.Request) string {
-	cookie, err := r.Cookie(s.sessionCookieName())
+	cookie, err := r.Cookie(s.sessionCookieName(r))
 	if err != nil {
 		return ""
 	}
@@ -360,7 +373,7 @@ func (s *shell) takePairingCode(r *http.Request) string {
 		return ""
 	}
 	s.expireSessionsLocked()
-	browser, ok := s.access.sessions[key]
+	browser, ok := s.sessionForRequestLocked(r, key)
 	if !ok {
 		return ""
 	}
@@ -390,8 +403,8 @@ func (s *shell) revokeAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.expireSessionsLocked()
-	cookie, _ := r.Cookie(s.sessionCookieName())
-	if _, ok := s.access.sessions[sha256.Sum256([]byte(cookie.Value))]; !ok {
+	cookie, _ := r.Cookie(s.sessionCookieName(r))
+	if _, ok := s.sessionForRequestLocked(r, sha256.Sum256([]byte(cookie.Value))); !ok {
 		s.access.mu.Unlock()
 		s.requireLogin(w, r)
 		return
@@ -404,7 +417,7 @@ func (s *shell) revokeAll(w http.ResponseWriter, r *http.Request) {
 		accessUnavailable(w)
 		return
 	}
-	http.SetCookie(w, s.localCookie(s.sessionCookieName(), "", -1))
+	http.SetCookie(w, s.localCookie(s.sessionCookieName(r), "", -1))
 	w.Header().Set("Clear-Site-Data", "\"cache\", \"storage\"")
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }

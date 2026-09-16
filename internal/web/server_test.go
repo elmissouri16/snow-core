@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -37,8 +39,9 @@ func TestTrustedLANRunActivatesLANAndLocalhost(t *testing.T) {
 	defer cancel()
 	output := make(startupOutput, 1)
 	done := make(chan error, 1)
+	managerDir := filepath.Join(t.TempDir(), "manager")
 	go func() {
-		done <- Run(ctx, Options{Listen: netip.AddrPortFrom(addresses[0], 0).String(), Version: "test"}, output)
+		done <- Run(ctx, Options{Listen: netip.AddrPortFrom(addresses[0], 0).String(), ManagerDir: managerDir, Version: "test"}, output)
 	}()
 	var startup string
 	select {
@@ -48,17 +51,21 @@ func TestTrustedLANRunActivatesLANAndLocalhost(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for trusted-LAN startup")
 	}
-	var lanURL, localURL string
+	var lanURL, localURL, pairingCode string
 	for line := range strings.SplitSeq(startup, "\n") {
-		if value, ok := strings.CutPrefix(line, "LAN URL: "); ok {
-			lanURL = value
+		line = strings.TrimSpace(line)
+		if value, ok := strings.CutPrefix(line, "LAN URL:"); ok {
+			lanURL = strings.TrimSpace(value)
 		}
-		if value, ok := strings.CutPrefix(line, "Local URL: "); ok {
-			localURL, _, _ = strings.Cut(value, " ")
+		if value, ok := strings.CutPrefix(line, "Local URL:"); ok {
+			localURL, _, _ = strings.Cut(strings.TrimSpace(value), " ")
+		}
+		if value, ok := strings.CutPrefix(line, "Pairing code:"); ok {
+			pairingCode = strings.TrimSpace(value)
 		}
 	}
-	if lanURL == "" || localURL == "" {
-		t.Fatalf("startup did not print both URLs: %q", startup)
+	if lanURL == "" || localURL == "" || pairingCode == "" {
+		t.Fatalf("startup did not print both URLs and pairing code: %q", startup)
 	}
 	client := &http.Client{
 		Transport:     &http.Transport{},
@@ -69,9 +76,10 @@ func TestTrustedLANRunActivatesLANAndLocalhost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	localBody, err := io.ReadAll(response.Body)
 	_ = response.Body.Close()
-	if response.StatusCode != http.StatusTemporaryRedirect || response.Header.Get("Location") != lanURL+"/healthz" {
-		t.Fatalf("localhost response = %d, %q", response.StatusCode, response.Header.Get("Location"))
+	if err != nil || response.StatusCode != http.StatusOK || string(localBody) != "ok\n" || response.Header.Get("Location") != "" {
+		t.Fatalf("localhost response = %d, %q, %q, %v", response.StatusCode, response.Header.Get("Location"), localBody, err)
 	}
 	response, err = client.Get(lanURL + "/healthz")
 	if err != nil {
@@ -82,6 +90,139 @@ func TestTrustedLANRunActivatesLANAndLocalhost(t *testing.T) {
 	if err != nil || response.StatusCode != http.StatusOK || string(body) != "ok\n" {
 		t.Fatalf("LAN response = %d, %q, %v", response.StatusCode, body, err)
 	}
+	parsedLocal, err := url.Parse(localURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsedLAN, err := url.Parse(lanURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, crossed := range []struct {
+		name   string
+		method string
+		url    string
+		host   string
+		origin string
+	}{
+		{name: "localhost Host on LAN listener", method: http.MethodGet, url: lanURL + "/healthz", host: parsedLocal.Host},
+		{name: "LAN Host on localhost listener", method: http.MethodHead, url: localURL + "/healthz", host: parsedLAN.Host},
+		{name: "localhost mutation on LAN listener", method: http.MethodPost, url: lanURL + "/login", host: parsedLocal.Host, origin: localURL},
+		{name: "LAN mutation on localhost listener", method: http.MethodPost, url: localURL + "/login", host: parsedLAN.Host, origin: lanURL},
+	} {
+		request, err := http.NewRequestWithContext(t.Context(), crossed.method, crossed.url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Host = crossed.host
+		if crossed.origin != "" {
+			request.Header.Set("Origin", crossed.origin)
+		}
+		request.Header.Set("X-Forwarded-Host", crossed.host)
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatalf("%s: %v", crossed.name, err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusForbidden {
+			t.Errorf("%s response = %d", crossed.name, response.StatusCode)
+		}
+	}
+	sessions := make(map[string]*http.Cookie)
+	for _, endpoint := range []struct {
+		name        string
+		origin      string
+		pairCookie  string
+		sessionName string
+	}{
+		{name: "localhost", origin: localURL, pairCookie: pairCookie, sessionName: sessionCookie},
+		{name: "LAN", origin: lanURL, pairCookie: lanPairCookie, sessionName: lanSessionCookie},
+	} {
+		response, err := client.Get(endpoint.origin + "/login")
+		if err != nil {
+			t.Fatalf("%s pairing page: %v", endpoint.name, err)
+		}
+		_ = response.Body.Close()
+		var pairCSRF *http.Cookie
+		for _, cookie := range response.Cookies() {
+			if cookie.Name == endpoint.pairCookie {
+				pairCSRF = cookie
+			}
+		}
+		if response.StatusCode != http.StatusOK || pairCSRF == nil {
+			t.Fatalf("%s pairing page = %d, %+v", endpoint.name, response.StatusCode, response.Cookies())
+		}
+		form := url.Values{"csrf": {pairCSRF.Value}, "code": {pairingCode}}
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint.origin+"/login", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Origin", endpoint.origin)
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.AddCookie(pairCSRF)
+		response, err = client.Do(request)
+		if err != nil {
+			t.Fatalf("%s pairing: %v", endpoint.name, err)
+		}
+		_ = response.Body.Close()
+		var sessionIssued *http.Cookie
+		for _, cookie := range response.Cookies() {
+			if cookie.Name == endpoint.sessionName && cookie.Value != "" {
+				sessionIssued = cookie
+			}
+		}
+		if response.StatusCode != http.StatusSeeOther || sessionIssued == nil {
+			t.Fatalf("%s pairing = %d, %+v", endpoint.name, response.StatusCode, response.Cookies())
+		}
+		sessions[endpoint.name] = sessionIssued
+	}
+	for name, origin := range map[string]string{"localhost": localURL, "LAN": lanURL} {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, origin+"/access/browsers", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.AddCookie(sessions[name])
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatalf("%s shared inventory: %v", name, err)
+		}
+		body, readErr := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		var inventory browserInventory
+		decodeErr := json.Unmarshal(body, &inventory)
+		if readErr != nil || decodeErr != nil || response.StatusCode != http.StatusOK || len(inventory.Browsers) != 2 {
+			t.Fatalf("%s shared inventory = %d, %d browsers, read %v, decode %v", name, response.StatusCode, len(inventory.Browsers), readErr, decodeErr)
+		}
+	}
+	type readResult struct {
+		name string
+		err  error
+	}
+	results := make(chan readResult, len(sessions))
+	for name, origin := range map[string]string{"localhost": localURL, "LAN": lanURL} {
+		go func() {
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, origin+"/", nil)
+			if err == nil {
+				request.AddCookie(sessions[name])
+				var response *http.Response
+				response, err = client.Do(request)
+				if err == nil {
+					_ = response.Body.Close()
+					if response.StatusCode != http.StatusOK {
+						err = fmt.Errorf("status %d", response.StatusCode)
+					}
+				}
+			}
+			results <- readResult{name: name, err: err}
+		}()
+	}
+	for range sessions {
+		result := <-results
+		if result.err != nil {
+			t.Errorf("concurrent %s authenticated read: %v", result.name, result.err)
+		}
+	}
+	client.CloseIdleConnections()
 	cancel()
 	select {
 	case err := <-done:

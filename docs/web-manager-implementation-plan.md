@@ -53,7 +53,7 @@ runtime-only responsive matrix passes 84 reports.
 
 | Work | Next action / completion boundary |
 |---|---|
-| Private remote operation (Phase 4) | Ordinary unconfigured `snow --mode web` now selects the first active private IPv4 address (otherwise an IPv6 ULA), binds both it and `127.0.0.1` on port 7331, and serves exact-origin trusted-LAN HTTP with pairing and no certificate/proxy/setup step. Localhost safely redirects to the LAN origin; offline hosts serve loopback directly. This transport is explicitly unencrypted and unsupported on public networks. TLS, certificate/CA, saved-profile, DNS-origin, trusted-proxy, Tailscale forwarding, browser API-key entry, and hidden network overrides were removed. Wildcard/public/DNS listeners remain unavailable. Complete real same-LAN phone/desktop and Tailscale acceptance before release claims. |
+| Private remote operation (Phase 4) | Ordinary unconfigured `snow --mode web` now selects the first active private IPv4 address (otherwise an IPv6 ULA), binds both it and `127.0.0.1` on port 7331, and serves the shared manager directly on both exact origins with pairing and no certificate/proxy/setup step. Local and LAN origins use separate exact Host/Origin boundaries and host-only cookie names; offline hosts serve loopback directly. This transport is explicitly unencrypted and unsupported on public networks. TLS, certificate/CA, saved-profile, DNS-origin, trusted-proxy, Tailscale forwarding, browser API-key entry, and hidden network overrides were removed. Wildcard/public/DNS listeners remain unavailable. Complete real same-LAN phone/desktop and Tailscale acceptance before release claims. |
 | Resource limits and recovery | Finish the Phase 4 aggregate-admission, slow-client, process/stream bounds, manager/worker-death and restart-reconciliation acceptance work. Preserve the current two-live-project cap and never replay prompts, approvals or uncertain jobs automatically. Existing local guards are not proof of the complete remote reliability gate. |
 | Frontend migration/coverage reconciliation | The production frontend now uses React islands plus the first-party bounded `SnowNavigation` controller; the former third-party navigation runtime and retired classic scripts are removed. Continue auditing browser and source-extractor entrypoints for React parity, and map production-manager coverage for grouped cross-project navigation/lifecycle and committed workspace New/Stop/removal journeys. Component/exported-page fixtures alone do not certify those mutations. See [frontend boundaries](web-frontend.md). |
 | Known reproducible defects | Resolve [BUG-218](../bugs.md#bug-218-activity-privacy-fixture-intermittently-matches-a-numeric-sentinel) by capturing/deterministically reproducing the numeric-sentinel collision without weakening privacy checks. Fix [BUG-086](../bugs.md#bug-086-compact-session-and-branch-panels-hide-management-action-hints): compact TUI session/tree panels omit management-key hints. Keep these open until their fixes are verified. |
@@ -85,10 +85,11 @@ printed the unencrypted transport warning, returned `200 ok` for the exact Host,
 rejected a foreign Host with `403`, and issued the distinct non-Secure LAN pairing
 cookie. Pairing output was redacted, and the temporary process/state were removed.
 The follow-up localhost correction starts the private and `127.0.0.1` listeners
-on the same port; a real-listener integration verifies a `307` localhost redirect
-to the canonical LAN health URL, `200 ok` directly on that LAN URL, joined
+on the same port and serves the shared manager directly on both. Real-listener
+integration verifies `200 ok` independently on both health URLs, joined
 cancellation, and fail-closed cleanup when the localhost port is unavailable.
-Focused race coverage also passes. The final cleanup removed the obsolete
+Focused exact-origin coverage verifies separate local/LAN pairing cookies and
+cross-origin rejection. The final cleanup removed the obsolete
 TLS/certificate/profile/proxy and browser API-key paths; all 127 remaining
 frontend tests, typecheck, and the reproducible production build pass. The
 post-cleanup native host-control matrix passed 176 assertions across four
@@ -109,8 +110,8 @@ with in-memory browser pairing, same-origin/CSRF checks, a third-party
 server-rendered navigation runtime, Overview/Projects/Browser access, light/dark
 theme, and a clearly labeled static conversation fixture. That runtime has since
 been replaced by the bounded first-party React-compatible workspace navigator.
-The current source automatically serves exact-origin
-trusted-LAN HTTP plus a same-port localhost redirect when a private address is
+The current source automatically serves the shared manager directly on exact
+trusted-LAN and same-port localhost HTTP origins when a private address is
 available, with loopback-only HTTP fallback when offline. Public Internet,
 HTTPS/TLS, certificates, generated CAs, saved network profiles, DNS origins,
 trusted proxies, forwarding-header authority, wildcard listeners, hidden
@@ -923,10 +924,10 @@ snow --mode web
 ```
 
 Snow selects the first active private IPv4 address, otherwise an IPv6 ULA, and
-binds it on port 7331. It also binds `127.0.0.1:7331`; safe localhost GET/HEAD
-requests redirect to the canonical LAN origin. With no private address, Snow
-serves loopback HTTP directly. Startup fails rather than silently choosing a
-wildcard, public, DNS-named, malformed, or different port.
+binds it on port 7331. It also binds `127.0.0.1:7331` and serves the shared
+manager directly on both exact origins with separate local/LAN browser cookies.
+With no private address, Snow serves loopback HTTP directly. Startup fails
+rather than silently choosing a wildcard, public, DNS-named, malformed, or different port.
 
 There is no `snow web` configuration command, saved network profile, generated
 certificate/CA, TLS option, public-origin override, trusted-proxy mode, or hidden
@@ -1019,8 +1020,10 @@ Current composition:
   transcript width is `clamp(680px, column × .64, 920px)`; composer width is
   transcript width plus 32px, bounded by 16px side clearance. Its docked editor
   has a 36px floor, a 22px card radius, and an inside-card toolbar. Send/Stop
-  occupies one circular 34px seat. One 76px session header replaces stacked
-  project/session headers. No desktop global top bar or unsupported tabs.
+  occupies one circular 34px seat. One session header replaces stacked
+  project/session headers: it is 76px on desktop and content-sized on mobile
+  with a 40px single-row floor, expanding only when its contents genuinely wrap.
+  There is no desktop global top bar or unsupported tabs.
 - Independent model, Default/Plan, conversation-actions and context panels
   replace the mixed settings form. Model choices are provider-grouped and apply
   exact identities directly; opening alone never starts provider discovery.
@@ -1873,10 +1876,13 @@ shared structured dialogs explicitly and report unsupported UI capabilities.
 
 ### Trusted-LAN HTTP
 
-`snow --mode web` exposes one exact private-IP HTTP origin plus a localhost
-redirect listener on the same port. It never binds `0.0.0.0`, `::`, a public or
-multicast address, a DNS name, or a zone-qualified IPv6 address. Forwarding
-headers carry no origin, identity, permission, or rate-limit authority.
+`snow --mode web` exposes one exact private-IP HTTP origin plus an exact
+localhost origin on the same port, both serving the shared manager directly.
+Each listener enforces its own Host/Origin boundary and separate host-only cookie
+names backed by profile-bound persisted sessions. Legacy unscoped sessions are
+revoked during the one-time schema migration. Snow never binds `0.0.0.0`, `::`, a public or multicast address, a DNS
+name, or a zone-qualified IPv6 address. Forwarding headers carry no origin,
+identity, permission, or rate-limit authority.
 
 The transport is deliberately unencrypted. The pairing code, cookies, prompts,
 responses, and tool output can be observed by other parties on the network. Use
@@ -1916,14 +1922,15 @@ Use browser pairing rather than credentials in query strings:
 There is no `snow web` recovery/configuration command. Pairing codes and session
 cookies never appear in URLs, SSE data, browser history, or exports, and a
 caller-provided device label is never treated as identity. Forwarded headers
-have no authority. Every request uses the exact configured private-IP origin;
-the localhost listener only redirects GET/HEAD requests to that origin. In the
-offline loopback fallback, loopback HTTP is the exact configured origin.
+have no authority. Private-IP and localhost listeners each use their own exact
+origin and separate local/LAN cookie names while sharing manager/runtime state.
+Pairing one browser origin does not authenticate the other. In the offline
+loopback fallback, loopback HTTP is the only exact configured origin.
 
 ## Threat model and operational bounds
 
-> Current HTTP-only trusted-LAN threat bounds. The exact private-IP origin,
-> same-port localhost redirect, offline loopback fallback, periodic stream
+> Current HTTP-only trusted-LAN threat bounds. The exact private-IP and direct
+> same-port localhost origins, offline loopback fallback, periodic stream
 > reauthorization, and current capabilities are canonical above and in
 > `docs/security.md`. The table below includes historical target estimates rather
 > than shipped limits (for example, current workers are two,
@@ -2133,10 +2140,11 @@ not yet the remote release.
 ### Phase 4: private remote operation and resource limits
 
 Status: automatic trusted-LAN HTTP is implemented. Ordinary startup selects one
-assigned private address, binds it and localhost on port 7331, redirects safe
-localhost reads to the canonical LAN origin, and falls back to loopback when
-offline. Exact Host/Origin, CSRF, pairing, revocation, per-peer throttling,
-bounded HTTP servers, and fail-closed dual-listener lifecycle remain covered.
+assigned private address, binds it and localhost on port 7331, serves the shared
+manager directly on both exact origins, and falls back to loopback when offline.
+Exact per-listener Host/Origin, origin-specific cookies, CSRF, pairing,
+revocation, per-peer throttling, bounded HTTP servers, and fail-closed
+dual-listener lifecycle remain covered.
 
 The earlier TLS/certificate/generated-CA/saved-profile/DNS/trusted-proxy design
 was removed rather than retained as unused complexity. Real-device acceptance
@@ -2316,7 +2324,7 @@ Recommended defaults to accept or change before phase 1:
 | Worker topology | One lazy-activated worker per active project/session, bounded runtime-free catalog pool; separate root agents, not manager subagents. |
 | Appearance | Snow-neutral light/dark/system, three-pane desktop and phone-first task flow. |
 | Parallel work | Four distinct-project roots; one root per project; no implicit fleet scheduling. |
-| Remote access | Automatic trusted-LAN HTTP plus Snow pairing; localhost redirect and offline loopback fallback. |
+| Remote access | Automatic trusted-LAN HTTP plus Snow pairing; direct exact-origin localhost service and offline loopback fallback. |
 | Filesystem authority | Launch-configured roots; create/register/remove, no destructive workspace deletion. |
 | Credential setup | Host-terminal or control-RPC only; browser API-key and OAuth entry excluded. |
 | Terminal/editor | Safe files/diffs/process logs first; no PTY or full IDE in v1. |

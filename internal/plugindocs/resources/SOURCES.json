@@ -5,7 +5,7 @@
     {
       "source": "docs/configuration.md",
       "resource": "docs/configuration.md",
-      "sha256": "1dd97aba7b49466e7b25644947c02f89160a118a9f5c6c96b304afe516aa5bc8"
+      "sha256": "e03cb32451f69418a8e40dc8ec61b99618f30977344a3b38f2134e0c7e7760df"
     },
     {
       "source": "docs/goals.md",
@@ -50,7 +50,7 @@
     {
       "source": "docs/security.md",
       "resource": "docs/security.md",
-      "sha256": "cc097d63a8c88224978b3c902e8801e645b3ede2c83495ea7ab9fb3b44039ea9"
+      "sha256": "3ae515568f105872cbf6fa7d23a69ca2039694be0efde82c70624c7495ed3356"
     },
     {
       "source": "docs/sessions.md",

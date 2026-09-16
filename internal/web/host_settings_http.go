@@ -146,7 +146,7 @@ func hostPatch(values url.Values) (protocol.HostDefaultsUpdateRequest, bool) {
 func (s *shell) updateHostSettings(w http.ResponseWriter, r *http.Request) {
 	// Also enforce exact origin here: handlers remain fail-closed when embedded
 	// without the outer mux's same-origin middleware.
-	if r.Header.Get("Origin") != s.origin || len(r.Header.Values("Origin")) != 1 {
+	if r.Header.Get("Origin") != s.requestBoundary(r).origin || len(r.Header.Values("Origin")) != 1 {
 		http.Error(w, "Same-origin request required", http.StatusForbidden)
 		return
 	}

@@ -31,6 +31,14 @@ type requestNetworkPolicy struct {
 	profile string
 }
 
+type requestBoundary struct {
+	origin  string
+	host    string
+	network requestNetworkPolicy
+}
+
+type requestBoundaryKey struct{}
+
 func (o Options) deployment() (deployment, error) {
 	address := o.Listen
 	if address == "" {

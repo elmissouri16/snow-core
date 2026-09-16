@@ -44,10 +44,10 @@ Use these basic rules:
 ### Local web manager preview
 
 `snow --mode web` starts an authenticated manager and automatically binds the first active private IPv4
-address (otherwise an IPv6 ULA) and `127.0.0.1` on port 7331 using HTTP. The
-localhost listener accepts only exact-host GET/HEAD requests and redirects them
-to the canonical LAN origin; with no private address Snow serves numeric
-loopback directly. This trusted-LAN transport is deliberately
+address (otherwise an IPv6 ULA) and `127.0.0.1` on port 7331 using HTTP. Both
+exact origins serve the shared manager directly with origin-specific Host,
+Origin, CSRF and host-only cookie handling; with no private address Snow serves
+numeric loopback directly. This trusted-LAN transport is deliberately
 zero-setup and unencrypted: another device able to observe LAN traffic may read
 the pairing code, browser cookie, prompts, responses, or tool output. Use it only
 on a trusted private network, never public Wi-Fi or the Internet. The Web
@@ -291,9 +291,14 @@ UI paging, recommended labels and collapse never grant authority or send answers
 Do not publish the manager to the public Internet. The ordinary
 **trusted-LAN HTTP** profile binds one assigned private address and exact
 `http://<address>:7331` origin automatically, plus an exact `127.0.0.1:7331`
-listener that only redirects safe reads to that LAN origin. It never binds a
-wildcard, public, multicast, DNS-named, or zone-qualified address. Pairing and exact Host/Origin
-checks remain active, but cookies are non-Secure because the transport is HTTP.
+origin serving the same manager state directly. Each listener enforces its own
+Host/Origin boundary and uses separate host-only local/LAN cookie names backed by
+profile-bound stored session authority; pairing on one browser origin does not
+authenticate the other. Legacy unscoped session records are revoked during the
+one-time schema migration rather than guessed or transferred. Snow never binds a
+wildcard, public, multicast, DNS-named, or zone-qualified address. Pairing and
+exact Host/Origin checks remain active, but cookies are non-Secure because the
+transport is HTTP.
 The Web Manager has no TLS, certificate, generated CA, saved-network-profile,
 DNS-origin, trusted-proxy, Tailscale forwarding, or public-Internet deployment
 mode. Forwarding headers never become network or browser authority. HTTPS cannot

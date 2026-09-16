@@ -287,8 +287,11 @@ func startRealProjectHTTP(t *testing.T, root string) *realProjectHTTP {
 	go func() {
 		scanner := bufio.NewScanner(stdout)
 		var lines []string
-		for len(lines) < 4 && scanner.Scan() {
+		for len(lines) < 64 && scanner.Scan() {
 			lines = append(lines, scanner.Text())
+			if _, ok := fixturePairingCode(strings.Join(lines, "\n")); ok {
+				break
+			}
 		}
 		startup <- strings.Join(lines, "\n")
 	}()

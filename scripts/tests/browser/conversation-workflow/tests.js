@@ -47,8 +47,10 @@
   try {
     await wait(() => $("#live-connection").textContent === "Live");
     await window.testSavedHistoryTools(assert);
-    assert(document.querySelectorAll(".workspace-heading").length === 1 && !!$("#live-session .workspace-heading"), "live runtime owns the only workspace header");
-    assert(Math.abs($("#live-session .workspace-heading").getBoundingClientRect().height - 76) <= 2, "single live header is 76px at every supported width");
+    const liveHeader = $("#live-session .workspace-heading"), liveHeaderRect = liveHeader?.getBoundingClientRect();
+    assert(document.querySelectorAll(".workspace-heading").length === 1 && !!liveHeader, "live runtime owns the only workspace header");
+    assert(Math.abs(liveHeaderRect.height - (innerWidth < 768 ? 40 : 76)) <= 2, "single live header uses compact mobile and 76px desktop geometry");
+    assert([liveHeader.querySelector(".conversation-title"), ...liveHeader.querySelectorAll(".live-controls > button")].every(node => { const box = node.getBoundingClientRect(); return box.top >= liveHeaderRect.top - 1 && box.bottom <= liveHeaderRect.bottom + 1; }), "live header title, status and controls remain within its responsive bounds");
     assert(!!$("#live-composer [data-runtime-abort]") && !$(".workspace-heading [data-runtime-abort]") && document.querySelectorAll("[data-runtime-abort]").length === 1, "Stop exists only once inside the composer, never in the header");
     assert(!visible($(".connection-line")) && $("#live-connection").dataset.connected === "true", "healthy connection line is hidden without removing accessible runtime state");
     assert(visible($("#live-send")) && !visible($("[data-runtime-abort]")) && $("[data-runtime-abort]").disabled, "idle composer displays Send and hides disabled Stop");

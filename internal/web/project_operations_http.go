@@ -68,7 +68,7 @@ func (h *projectOperationHTTP) ready(w http.ResponseWriter, r *http.Request) boo
 func (h *projectOperationHTTP) form(w http.ResponseWriter, r *http.Request, allowed ...string) (browserSession, bool) {
 	// Keep the check local too: tests and future route composition must not rely
 	// solely on outer middleware to enforce exact configured browser origin.
-	if r.Header.Get("Origin") != h.shell.origin || len(r.Header.Values("Origin")) != 1 {
+	if r.Header.Get("Origin") != h.shell.requestBoundary(r).origin || len(r.Header.Values("Origin")) != 1 {
 		http.Error(w, "Invalid browser origin", http.StatusForbidden)
 		return browserSession{}, false
 	}

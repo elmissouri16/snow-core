@@ -157,15 +157,15 @@ func TestWebHostControlsBrowserFixture(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal("fixture manager startup bound")
 		}
-		lines := strings.Split(startup, "\n")
-		if len(lines) < 3 {
-			t.Fatal("private fixture startup frame")
+		origin, ok := fixtureOrigin(startup)
+		if !ok {
+			t.Fatal("private fixture listener unavailable")
 		}
 		code, ok := fixturePairingCode(startup)
 		if !ok {
 			t.Fatal("private pairing credential unavailable")
 		}
-		return lines[1], code
+		return origin, code
 	}
 	origin, code := start(web.Options{Listen: "127.0.0.1:0", Version: "host-controls-browser", ManagerDir: filepath.Join(root, "manager"), Executable: filepath.Join(root, "worker"), SessionsRoot: filepath.Join(root, "sessions")})
 	ready, err := json.Marshal(map[string]string{"origin": origin, "code": code, "project": project.ID, "directory": root})

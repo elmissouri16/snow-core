@@ -94,16 +94,24 @@ func Run(ctx context.Context, opts Options, output io.Writer) error {
 	}
 	// The pairing secret is a deliberate operator credential, never a URL
 	// parameter, access log entry, diagnostic field, or provider event.
-	profile, listenerNotice, networkNotice := "local preview", "", "Remote access is disabled."
-	switch deployment.mode {
-	case deploymentTrustedLANHTTP:
+	profile, localURL := "local preview", ""
+	trustedLAN := deployment.mode == deploymentTrustedLANHTTP
+	if trustedLAN {
 		profile = "trusted-LAN HTTP"
-		listenerNotice = "LAN URL: " + origin + "\nLocal URL: http://" + loopbackListener.Addr().String() + " (redirects to the LAN URL)\n"
-		networkNotice = "Traffic is unencrypted; use only on a trusted LAN. Pairing is still required, and interface/firewall policy remains operator-managed."
+		localURL = "http://" + loopbackListener.Addr().String()
 	}
 	privateAddresses, addressErr := hostPrivateAddresses()
-	addressNotice := privateAddressNotice(deployment, privateAddresses, addressErr)
-	if _, err := fmt.Fprintf(output, "Snow Manager %s — %s\n%s\n%s%sPairing code (reusable until %s or rotated; survives restart): %s\nNo agent starts until explicit activation. %s Snow has no process sandbox.\n", safeVersion(opts.Version), profile, shell.origin, listenerNotice, addressNotice, shell.access.pairExpires.UTC().Format(time.RFC3339), shell.initialCode, networkNotice); err != nil {
+	if err := writeStartup(output, startupDetails{
+		version:        safeVersion(opts.Version),
+		profile:        profile,
+		origin:         shell.origin,
+		localURL:       localURL,
+		addressNotice:  privateAddressNotice(deployment, privateAddresses, addressErr),
+		pairingCode:    shell.initialCode,
+		pairingExpires: shell.access.pairExpires.UTC().Format(time.RFC3339),
+		trustedLAN:     trustedLAN,
+		showQRCode:     trustedLAN && outputSupportsQRCode(output, shell.origin),
+	}); err != nil {
 		return err
 	}
 	shell.initialCode = ""
@@ -112,9 +120,12 @@ func Run(ctx context.Context, opts Options, output io.Writer) error {
 		listener: listener,
 	}}
 	if loopbackListener != nil {
-		localOrigin := "http://" + loopbackListener.Addr().String()
+		localHandler, err := shell.handlerForOrigin(localURL, requestNetworkPolicy{profile: "local"})
+		if err != nil {
+			return err
+		}
 		servers = append(servers, serverBinding{
-			server:   managerHTTPServer(ctx, localRedirectHandler(localOrigin, origin)),
+			server:   managerHTTPServer(ctx, localHandler),
 			listener: loopbackListener,
 		})
 	}
@@ -181,19 +192,6 @@ func loopbackAddressFor(address net.Addr) (string, error) {
 		return "", fmt.Errorf("web: derive localhost listener: %w", err)
 	}
 	return net.JoinHostPort("127.0.0.1", port), nil
-}
-
-func localRedirectHandler(localOrigin, publicOrigin string) http.Handler {
-	localHost := strings.TrimPrefix(localOrigin, "http://")
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if r.Host != localHost || r.URL.IsAbs() || r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.Error(w, "Unexpected localhost request", http.StatusForbidden)
-			return
-		}
-		http.Redirect(w, r, publicOrigin+r.URL.RequestURI(), http.StatusTemporaryRedirect)
-	})
 }
 
 func safeVersion(version string) string {

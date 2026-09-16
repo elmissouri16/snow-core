@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -73,15 +72,15 @@ func TestWebAccessFixture(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("fixture startup deadline")
 	}
-	lines := strings.Split(output, "\n")
-	if len(lines) < 3 {
-		t.Fatal("invalid private startup frame")
+	origin, ok := fixtureOrigin(output)
+	if !ok {
+		t.Fatal("private fixture listener unavailable")
 	}
 	code, ok := fixturePairingCode(output)
 	if !ok {
 		t.Fatal("private pairing credential unavailable")
 	}
-	ready, err := json.Marshal(map[string]string{"origin": lines[1], "code": code})
+	ready, err := json.Marshal(map[string]string{"origin": origin, "code": code})
 	if err != nil {
 		t.Fatal("private fixture frame unavailable")
 	}

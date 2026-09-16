@@ -29,6 +29,7 @@ type accessStore struct {
 type storedBrowser struct {
 	ID       string    `json:"id,omitempty"`
 	Label    string    `json:"label,omitempty"`
+	Profile  string    `json:"profile,omitempty"`
 	Hash     string    `json:"hash"`
 	CSRF     string    `json:"csrf"`
 	Created  time.Time `json:"created"`
@@ -84,14 +85,14 @@ func (s *shell) restoreAccess(ctx context.Context, registry *Registry) error {
 		s.access.sessions = make(map[[32]byte]browserSession)
 		for _, browser := range state.Browsers {
 			hash, _ := hex.DecodeString(browser.Hash)
-			s.access.sessions[[32]byte(hash)] = browserSession{ID: browser.ID, Label: browser.Label, CSRF: browser.CSRF, Created: browser.Created, LastUsed: browser.LastUsed}
+			s.access.sessions[[32]byte(hash)] = browserSession{ID: browser.ID, Label: browser.Label, Profile: browser.Profile, CSRF: browser.CSRF, Created: browser.Created, LastUsed: browser.LastUsed}
 		}
-		migrated := state.Version == 1
+		migrated := state.Version < 3
 		if migrated {
-			for hash, browser := range s.access.sessions {
-				browser.ID, browser.Label = s.newBrowserIDLocked(), "Paired browser"
-				s.access.sessions[hash] = browser
-			}
+			// Older stores cannot prove whether a token belonged to localhost or
+			// the LAN origin. Revoke those sessions rather than let a renamed
+			// cookie replay authority across the new origin boundary.
+			clear(s.access.sessions)
 		}
 		before := len(s.access.sessions)
 		s.expireSessionsLocked()
@@ -119,7 +120,7 @@ func validAccessToken(value string) bool {
 }
 
 func (state storedAccess) valid() bool {
-	if (state.Version != 1 && state.Version != 2) || !validAccessToken(state.Key) || !validAccessToken(state.PairCode) || state.PairExpires.IsZero() || state.Attempts < 0 || state.Attempts > maxPairingAttempts || (state.Attempts > 0 && state.Window.IsZero()) || len(state.Browsers) > maxBrowsers {
+	if (state.Version != 1 && state.Version != 2 && state.Version != 3) || !validAccessToken(state.Key) || !validAccessToken(state.PairCode) || state.PairExpires.IsZero() || state.Attempts < 0 || state.Attempts > maxPairingAttempts || (state.Attempts > 0 && state.Window.IsZero()) || len(state.Browsers) > maxBrowsers {
 		return false
 	}
 	seen := make(map[string]bool)
@@ -129,10 +130,12 @@ func (state storedAccess) valid() bool {
 			return false
 		}
 		if state.Version == 1 {
-			if browser.ID != "" || browser.Label != "" {
+			if browser.ID != "" || browser.Label != "" || browser.Profile != "" {
 				return false
 			}
 		} else if !validBrowserID(browser.ID) || !validBrowserLabel(browser.Label) || ids[browser.ID] {
+			return false
+		} else if state.Version == 2 && browser.Profile != "" || state.Version == 3 && !validBrowserProfile(browser.Profile) {
 			return false
 		}
 		ids[browser.ID] = true
@@ -142,9 +145,9 @@ func (state storedAccess) valid() bool {
 }
 
 func (a *accessState) snapshot() storedAccess {
-	state := storedAccess{Version: 2, Key: hex.EncodeToString(a.key[:]), PairCode: a.pairCode, PairExpires: a.pairExpires, Window: a.window, Attempts: a.attempts}
+	state := storedAccess{Version: 3, Key: hex.EncodeToString(a.key[:]), PairCode: a.pairCode, PairExpires: a.pairExpires, Window: a.window, Attempts: a.attempts}
 	for hash, browser := range a.sessions {
-		state.Browsers = append(state.Browsers, storedBrowser{ID: browser.ID, Label: browser.Label, Hash: hex.EncodeToString(hash[:]), CSRF: browser.CSRF, Created: browser.Created, LastUsed: browser.LastUsed, Expires: browser.Created.Add(browserLifetime)})
+		state.Browsers = append(state.Browsers, storedBrowser{ID: browser.ID, Label: browser.Label, Profile: browser.Profile, Hash: hex.EncodeToString(hash[:]), CSRF: browser.CSRF, Created: browser.Created, LastUsed: browser.LastUsed, Expires: browser.Created.Add(browserLifetime)})
 	}
 	return state
 }

@@ -260,7 +260,7 @@ button, .button { padding: 6px 12px; }
   .composer-hint { display: block; font-size: 9px; }
   .conversation-stream { padding: 16px 32px; }
   .composer-stack .composer textarea { font-size: 16px; }
-  .live-header { padding: 3px 16px; min-height: 30px; flex-wrap: wrap; }
+  .workspace-heading.live-header { height: auto; min-height: 40px; padding: 4px 16px; align-items: center; flex-wrap: wrap; }
   .live-header strong { max-width: 150px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .connection-line { padding: 0 16px; min-height: 16px; font-size: 9px; }
   .runtime-idle { padding: 28px 8px; }

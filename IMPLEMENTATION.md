@@ -2036,10 +2036,12 @@ update.
   revocation. Open SSE authority is still periodic at five seconds, not immediate;
   revocation stops browser authority, not agent execution.
 - Ordinary `snow --mode web` selects the first active private IPv4 address
-  (otherwise an IPv6 ULA), binds it and `127.0.0.1` on port 7331, and derives
-  the exact same-port `http://<private-ip>:7331` origin. The localhost listener
-  redirects exact-Host GET/HEAD requests to that canonical LAN origin; an
-  offline host serves numeric loopback directly. Pairing, exact Host/Origin,
+  (otherwise an IPv6 ULA), binds it and `127.0.0.1` on port 7331, and serves the
+  shared manager directly on both exact same-port origins. Each listener retains
+  its own Host/Origin boundary and separate local/LAN host-only cookie names with
+  profile-bound persisted session authority; legacy unscoped sessions are
+  revoked during schema migration. An offline host serves numeric loopback
+  directly. Pairing, exact Host/Origin,
   CSRF, revocation, strict host-only cookies, the persisted 20/minute global
   limiter, and bounded per-peer 10/minute throttling remain enforced. Transport
   and cookies are intentionally unencrypted/non-Secure and therefore limited to
@@ -2117,8 +2119,8 @@ local build/install and manager/worker restart, separate from source verificatio
 
 Broader real-device private-network acceptance, automatic worker recovery and
 saved media rendering remain planned. The Web Manager now has one bounded
-network contract: automatic trusted-LAN HTTP plus a same-port localhost redirect,
-with loopback-only fallback when offline. TLS, certificates/generated CAs, saved
+network contract: automatic trusted-LAN HTTP plus a same-port direct localhost
+origin, with loopback-only fallback when offline. TLS, certificates/generated CAs, saved
 network profiles, DNS origins, trusted proxies/Tailscale forwarding, hidden
 network overrides, and browser API-key entry were removed; this is not a
 public-Internet deployment contract. Worktree forks, browser OAuth, extension

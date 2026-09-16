@@ -54,7 +54,7 @@ async function exportFixture(directory) {
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   return {server, unexpected, url: `http://127.0.0.1:${server.address().port}/workflow.html`};
 }
-const expectedAssertions = 124;
+const expectedAssertions = 125;
 const timeoutMS = 240000;
 
 function chromeBinary() {

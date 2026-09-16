@@ -110,6 +110,32 @@ func newShellWithNetwork(origin, version string, network requestNetworkPolicy) (
 }
 
 func (s *shell) handler() http.Handler {
+	return s.handlerForBoundary(requestBoundary{origin: s.origin, host: s.host, network: s.network})
+}
+
+func (s *shell) handlerForOrigin(origin string, network requestNetworkPolicy) (http.Handler, error) {
+	canonicalOrigin := canonicalBrowserOrigin
+	if network.profile == "trusted-lan-http" {
+		canonicalOrigin = canonicalTrustedLANOrigin
+	}
+	canonical, host, err := canonicalOrigin(origin)
+	if err != nil {
+		return nil, err
+	}
+	if network.profile == "" {
+		network.profile = "local"
+	}
+	return s.handlerForBoundary(requestBoundary{origin: canonical, host: host, network: network}), nil
+}
+
+func (s *shell) requestBoundary(r *http.Request) requestBoundary {
+	if boundary, ok := r.Context().Value(requestBoundaryKey{}).(requestBoundary); ok {
+		return boundary
+	}
+	return requestBoundary{origin: s.origin, host: s.host, network: s.network}
+}
+
+func (s *shell) handlerForBoundary(boundary requestBoundary) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.home)
 	mux.HandleFunc("GET /login", s.loginPage)
@@ -183,14 +209,15 @@ func (s *shell) handler() http.Handler {
 		// blob: is only for local composer object-URL previews; saved/sent images
 		// use authenticated same-origin reads. Data and external images stay blocked.
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'")
-		source, admitted := s.network.admit(r)
-		if !admitted || r.Host != s.host || r.URL.IsAbs() || len(r.Header.Values("Origin")) > 1 {
+		source, admitted := boundary.network.admit(r)
+		if !admitted || r.Host != boundary.host || r.URL.IsAbs() || len(r.Header.Values("Origin")) > 1 {
 			http.Error(w, "Unexpected host or origin", http.StatusForbidden)
 			return
 		}
-		r = r.WithContext(context.WithValue(r.Context(), requestSourceKey{}, source))
+		ctx := context.WithValue(r.Context(), requestSourceKey{}, source)
+		r = r.WithContext(context.WithValue(ctx, requestBoundaryKey{}, boundary))
 		origin := r.Header.Get("Origin")
-		if origin != "" && origin != s.origin || r.Method != http.MethodGet && r.Method != http.MethodHead && origin != s.origin {
+		if origin != "" && origin != boundary.origin || r.Method != http.MethodGet && r.Method != http.MethodHead && origin != boundary.origin {
 			http.Error(w, "Same-origin request required", http.StatusForbidden)
 			return
 		}
@@ -223,8 +250,8 @@ func (s *shell) loginPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	csrf := s.pairCSRF()
-	http.SetCookie(w, s.localCookie(s.pairCookieName(), csrf, 5*60))
-	s.render(w, http.StatusOK, "login", pageData{CSRF: csrf, NetworkProfile: s.network.profile})
+	http.SetCookie(w, s.localCookie(s.pairCookieName(r), csrf, 5*60))
+	s.render(w, http.StatusOK, "login", pageData{CSRF: csrf, NetworkProfile: s.requestBoundary(r).network.profile})
 }
 
 func (s *shell) home(w http.ResponseWriter, r *http.Request) {
@@ -248,7 +275,7 @@ func (s *shell) home(w http.ResponseWriter, r *http.Request) {
 	if isWorkspaceNavigation(r) {
 		name = "workspace"
 	}
-	data := pageData{View: view, CSRF: browser.CSRF, NetworkProfile: s.network.profile, HostSettingsEnabled: s.hostSettings != nil}
+	data := pageData{View: view, CSRF: browser.CSRF, NetworkProfile: s.requestBoundary(r).network.profile, HostSettingsEnabled: s.hostSettings != nil}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	if err := s.projectData(ctx, r.URL.Query(), &data); err != nil {

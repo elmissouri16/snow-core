@@ -148,16 +148,15 @@ func TestBrowserInventoryPrivateProjectionAndExactRevokeRestart(t *testing.T) {
 	}
 }
 
-func TestBrowserInventoryLegacyMigration(t *testing.T) {
+func TestBrowserInventoryLegacyMigrationRevokesUnscopedSessions(t *testing.T) {
 	manager := filepath.Join(t.TempDir(), "manager")
 	s, registry := persistentShell(t, manager)
 	cookie := pairBrowser(t, s, s.initialCode)
-	csrf, pairing := csrfFor(t, s, cookie), s.initialCode
+	pairing := s.initialCode
 	state := s.access.snapshot()
-	state.Version = 1
+	state.Version = 2
 	for i := range state.Browsers {
-		state.Browsers[i].ID = ""
-		state.Browsers[i].Label = ""
+		state.Browsers[i].Profile = ""
 	}
 	data, err := json.Marshal(state)
 	if err != nil {
@@ -175,9 +174,11 @@ func TestBrowserInventoryLegacyMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, registry = persistentShell(t, manager)
-	migrated := inventoryFor(t, s, cookie).Browsers[0]
-	if !validBrowserID(migrated.ID) || migrated.Label != "Paired browser" || csrfFor(t, s, cookie) != csrf || s.initialCode != pairing {
-		t.Fatal("migration lost credentials or inventory metadata")
+	if _, ok := s.browser(browserRequest(cookie)); ok || len(s.access.sessions) != 0 {
+		t.Fatal("legacy unscoped browser retained authority")
+	}
+	if s.initialCode != pairing {
+		t.Fatal("migration rotated reusable pairing code")
 	}
 	after, err := os.Lstat(path)
 	if err != nil || after.Mode().Perm() != 0o600 || os.SameFile(before, after) {
@@ -187,15 +188,12 @@ func TestBrowserInventoryLegacyMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(data, &state); err != nil || state.Version != 2 || state.Browsers[0].ID != migrated.ID {
-		t.Fatal("schema migration not saved")
+	if err := json.Unmarshal(data, &state); err != nil || state.Version != 3 || len(state.Browsers) != 0 {
+		t.Fatal("scoped schema migration not saved")
 	}
-	if err := registry.Close(); err != nil {
-		t.Fatal(err)
-	}
-	s, _ = persistentShell(t, manager)
-	if inventoryFor(t, s, cookie).Browsers[0].ID != migrated.ID {
-		t.Fatal("restart changed migrated public ID")
+	paired := pairBrowser(t, s, pairing)
+	if _, ok := s.browser(browserRequest(paired)); !ok {
+		t.Fatal("migration prevented re-pairing")
 	}
 }
 

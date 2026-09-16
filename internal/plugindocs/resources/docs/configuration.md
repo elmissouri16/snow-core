@@ -166,10 +166,10 @@ operations; the browser does not accept provider credentials.
 
 Web networking is automatic and not project- or browser-editable.
 `snow --mode web` chooses the first active private IPv4 address, then an IPv6
-ULA, binds that address plus `127.0.0.1` on port 7331, and serves HTTP. The
-localhost listener accepts only exact-Host GET/HEAD requests and redirects them
-to the exact LAN origin. If no private address exists, Snow serves numeric
-loopback HTTP directly.
+ULA, binds that address plus `127.0.0.1` on port 7331, and serves the shared
+manager directly on both exact HTTP origins. Localhost and LAN requests retain
+separate Host/Origin checks and host-only cookie names. If no private address
+exists, Snow serves numeric loopback HTTP directly.
 
 Only assigned numeric loopback or private addresses are accepted. Public,
 multicast, unspecified, wildcard, DNS-named, zone-qualified, malformed, and

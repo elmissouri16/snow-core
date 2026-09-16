@@ -13,8 +13,10 @@ type startupWriter struct{ ready chan string }
 
 func (w startupWriter) Write(data []byte) (int, error) {
 	for line := range strings.SplitSeq(string(data), "\n") {
-		if strings.HasPrefix(line, "http://") {
-			w.ready <- line
+		line = strings.TrimSpace(line)
+		if value, ok := strings.CutPrefix(line, "Local URL:"); ok {
+			origin, _, _ := strings.Cut(strings.TrimSpace(value), " ")
+			w.ready <- origin
 		}
 	}
 	return len(data), nil

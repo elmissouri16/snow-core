@@ -311,8 +311,11 @@
     } else if (fixture.snapshot) {
       const heading = $("#live-session .workspace-heading");
       check(document.querySelectorAll(".workspace-heading").length === 1 && !!heading, "Activated conversation has one workspace header, owned by the live session");
-      measurements.liveHeader = rect(heading).toJSON();
-      check(near(rect(heading).height, 76), "Single live workspace header retains the 76px reference height");
+      const headingRect = rect(heading), titleRect = rect(heading.querySelector(".conversation-title")), controlsRect = rect(heading.querySelector(".live-controls"));
+      const mobileHeaderFits = near(headingRect.height, 40) || controlsRect.top >= titleRect.bottom - 1 || titleRect.top >= controlsRect.bottom - 1;
+      measurements.liveHeader = headingRect.toJSON();
+      check(desktop ? near(headingRect.height, 76) : headingRect.height >= 40 && mobileHeaderFits, "Single live workspace header uses compact or content-wrapped mobile geometry and 76px desktop geometry");
+      check([heading.querySelector(".conversation-title"), ...heading.querySelectorAll(".live-controls > button")].every(node => { const box = rect(node); return box.top >= headingRect.top - 1 && box.bottom <= headingRect.bottom + 1; }), "Live header title, status and controls remain within its responsive bounds");
       check(!!heading.querySelector("[data-inspector-toggle]") && !!heading.querySelector("[data-runtime-close]"), "Single header owns Files / Changes and Close runtime controls");
       check(!!$("#live-composer-seat [data-runtime-abort]") && !heading.querySelector("[data-runtime-abort]") && [...document.querySelectorAll("[data-runtime-abort]")].filter(visible).length <= 1, "Stop has one visible seat owner and no duplicate header control");
       check(!visible($(".connection-line")) && $("#live-connection").dataset.connected === "true", "Healthy live connection does not create an extra header/status row");

@@ -285,18 +285,27 @@ snow --mode web
 No networking setup or extra flag is required. If Snow finds an active private
 IPv4 address, it binds that address and `127.0.0.1` on port 7331; otherwise it
 uses an IPv6 ULA plus IPv4 localhost, and with no private address it serves
-localhost directly. Startup prints both usable URLs, for example:
+localhost directly. Startup groups access, pairing, and security details instead
+of printing one long diagnostic paragraph. It prints both usable URLs, for example:
 
 ```text
-Local URL: http://127.0.0.1:7331
-LAN URL: http://192.168.1.50:7331
+Access
+  LAN URL:   http://192.168.1.50:7331
+  Local URL: http://127.0.0.1:7331
 ```
 
-The localhost listener redirects to the canonical LAN URL so both entry points
-work without weakening exact Host/Origin checks. Open either URL on the Snow host,
-or the LAN URL from another device, and enter the pairing code from
-the terminal. There are no certificates, CA installation, DNS, or proxy steps in
-the normal workflow. Pairing authenticates the browser, but HTTP does **not**
+When startup is attached to a terminal that is wide enough, it also prints a
+compact QR code for the LAN URL. Scan it from another device on the same
+network, then enter the separately printed pairing code in the browser. The pairing credential is never embedded in
+the URL or QR code. Shell-redirected or file-captured output remains plain text
+and omits the QR code.
+
+Both listeners serve the same manager directly while enforcing their own exact
+Host/Origin boundary. Local browsing remains on `127.0.0.1`; LAN devices use the
+private-address URL. Cookies are host-only and use separate local/LAN names, so a
+browser that switches between the two origins must pair each origin separately
+with the printed code. There are no certificates, CA installation, DNS, or
+proxy steps in the normal workflow. Pairing authenticates the browser, but HTTP does **not**
 encrypt the pairing code, session cookie, prompts, responses, or tool output.
 Use this only on a trusted home/work LAN; do not use it on public Wi-Fi or expose
 port 7331 through a router. Snow does not modify firewall or router settings.
@@ -310,7 +319,10 @@ Open the printed URL and enter the pairing code from the terminal. The code is
 reusable for up to **30 days**, survives manager restarts, and expires at the time
 printed on startup. Browser access can rotate it immediately without signing out
 existing browsers. Paired browsers also survive restarts, with 30-day absolute
-and idle limits and at most eight browsers. Sign out revokes the current browser;
+and idle limits and at most eight browsers. The first upgrade to direct localhost
+service revokes older unscoped browser sessions once because their stored tokens
+cannot prove whether they belonged to the local or LAN origin; the persisted
+pairing code remains valid for re-pairing. Sign out revokes the current browser;
 **Revoke all browsers** revokes every browser and rotates the code. Restart to
 print that replacement code. Credentials are stored privately under
 `$SNOW_HOME/manager/access.json`; keep this file and terminal captures private.
@@ -1191,9 +1203,10 @@ foreground server.
 
 Do not expose the manager to the public Internet. The only private-network
 contract is exact-origin HTTP on one assigned private address plus a same-port
-localhost redirect listener; an offline host serves loopback HTTP directly.
-There is no TLS, certificate, saved-profile, named-origin, trusted-proxy, or
-forwarding-header mode. Cookies are host-only, HttpOnly, SameSite=Strict, and
+localhost origin serving the shared manager directly; an offline host serves
+loopback HTTP directly. Each origin has exact Host/Origin checks and separate
+host-only cookie names. There is no TLS, certificate, saved-profile,
+named-origin, trusted-proxy, or forwarding-header mode. Cookies are host-only, HttpOnly, SameSite=Strict, and
 non-Secure because the supported transports are HTTP. Host-side folder selection
 and private network addressing do not expand network or browser authority.
 
