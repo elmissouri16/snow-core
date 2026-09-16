@@ -196,9 +196,9 @@ test("retired panels fence late mutation receipts without aborting or replaying 
   assert.equal(calls.length, 1);
 });
 
-test("panel lifecycle is wired at replacement, failure/closed/auth, HTMX swap and page exit", () => {
+test("panel lifecycle is wired at replacement, failure/closed/auth, native swap and page exit", () => {
   for (const [start, end] of [["  function connectionState(", "  function startUpdates("], ["  function setupLive()", "  function setupQueue("], ["  function applySnapshot(", "  function updateControls()"]]) assert.match(app.slice(app.indexOf(start), app.indexOf(end)), /disposeLivePanels\(\)/);
-  assert.match(app, /htmx:beforeCleanupElement[\s\S]*?event\.detail\.elt\?\.id === "workspace"[\s\S]*?disposeLivePanels\(\)/);
+  assert.match(app, /snow:navigation-before-swap[\s\S]*?event\.detail\?\.target\?\.id === "workspace"[\s\S]*?disposeLivePanels\(\)/);
   assert.match(app, /pagehide[\s\S]*?disposeLivePanels\(\)/);
 });
 

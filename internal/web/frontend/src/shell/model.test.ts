@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {canDelete, sessionRows, validateInventory, validateShellBootstrap, boundedText} from './model.ts';
 const project = '12345678-1234-1234-1234-123456789012';
 const bootstrap = () => ({csrf: 'csrf', version: 'test', view: 'projects', project, session: 's1',
-  hostSettingsEnabled: true, apiKeyEnabled: false, tls: false, pairingCode: '',
+  hostSettingsEnabled: true, networkProfile: 'local', pairingCode: '',
   projects: [{id: project, name: 'Example', path: '/workspace', available: true, trustRemembered: true, skillsEnabled: false, pinned: true}],
   sessions: [{session_id: 's1', name: 'One'}], live: null});
 const inventory = () => ({project_id: project, instance_id: '', sessions: [{session_id: 's1', name: 'One'}], available: true, delete_supported: true, active_session_id: '', next_offset: 1, has_more: true});
@@ -11,6 +11,7 @@ test('shell bootstrap projects public metadata only; validates bounds and identi
   const result = validateShellBootstrap({...bootstrap(), privateState: 'not projected'});
   assert.equal(result.projects[0].trustRemembered, true);
   assert.equal('privateState' in result, false);
+  assert.equal(validateShellBootstrap({...bootstrap(), networkProfile: 'trusted-lan-http'}).networkProfile, 'trusted-lan-http');
   assert.throws(() => validateShellBootstrap({...bootstrap(), csrf: 'x'.repeat(513)}));
   assert.throws(() => validateShellBootstrap({...bootstrap(), projects: [...bootstrap().projects, ...bootstrap().projects]}));
   assert.throws(() => validateShellBootstrap({...bootstrap(), projects: [{...bootstrap().projects[0], name: 'é'.repeat(100)}]}));

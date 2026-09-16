@@ -405,6 +405,7 @@ func (a *Agent) run(ctx context.Context) error {
 	retryRecovery := false
 	syntheticOnlyBatches := 0
 	stepID := ""
+	persistedInternalContext := make(map[string]bool)
 	for {
 		if a.opts.MaxTurns > 0 && turn >= a.opts.MaxTurns {
 			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: "max turns reached"})
@@ -432,6 +433,7 @@ func (a *Agent) run(ctx context.Context) error {
 			// Pressure compaction is best-effort for direct user work. A provider
 			// request may still fit, and overflow recovery gets one final chance.
 		} else if compacted {
+			clear(persistedInternalContext)
 			msgs, err = a.contextMessagesCurrent()
 			if err != nil {
 				return fmt.Errorf("agent: reload compacted context: %w", err)
@@ -470,6 +472,17 @@ func (a *Agent) run(ctx context.Context) error {
 			pluginText += fragment.Text + "\n"
 		}
 		internalContext = append(pluginRequest.Context, internalContext...)
+		pendingInternalContext := internalContext[:0]
+		for _, fragment := range internalContext {
+			if err := fragment.Validate(); err != nil {
+				return fmt.Errorf("agent: validate internal context: %w", err)
+			}
+			if reusableInternalContext(fragment) && persistedInternalContext[internalContextPersistenceKey(fragment)] {
+				continue
+			}
+			pendingInternalContext = append(pendingInternalContext, fragment)
+		}
+		internalContext = pendingInternalContext
 		req := protocol.ChatRequest{
 			Model:                   a.Model(),
 			Messages:                providerMessages(msgs),
@@ -513,6 +526,13 @@ func (a *Agent) run(ctx context.Context) error {
 		providerAttempts++
 		reportOnly := a.beginGoalReport()
 		stop, err := a.streamTurnWithErrors(ctx, req, false)
+		if err == nil || providerFailureActivity(err) {
+			for _, fragment := range req.InternalContext {
+				if reusableInternalContext(fragment) {
+					persistedInternalContext[internalContextPersistenceKey(fragment)] = true
+				}
+			}
+		}
 		if err != nil && (reportOnly || a.goalBudgetReached()) {
 			a.publish(protocol.AgentEvent{Type: protocol.EvError, Message: err.Error()})
 			return err
@@ -521,12 +541,13 @@ func (a *Agent) run(ctx context.Context) error {
 			if !overflowRecovered && a.autoThresholdPercent() > 0 && ctx.Err() == nil && provider.IsContextWindowExceeded(err) {
 				if !providerFailureActivity(err) {
 					parent := a.opts.Session.BranchTip()
-					if persistErr := a.persistAssistant(newID(), parent, nil, protocol.StopError, nil, err.Error()); persistErr != nil {
+					if persistErr := a.persistAssistant(newID(), parent, nil, protocol.StopError, nil, err.Error(), nil); persistErr != nil {
 						return errors.Join(err, persistErr)
 					}
 				}
 				result, compactErr := a.compactActiveContext(ctx, compactionOverflow)
 				if compactErr == nil && result.SummarizedMessages > 0 {
+					clear(persistedInternalContext)
 					overflowRecovered = true
 					a.mu.Lock()
 					a.latestContextTokens = 0
@@ -779,6 +800,27 @@ func (a *Agent) deliverQueuedInput(ctx context.Context, item protocol.QueuedInpu
 	}
 	a.prepareToolRouting(ctx, item.Text)
 	return nil
+}
+
+func reusableInternalContext(fragment protocol.InternalContextFragment) bool {
+	return fragment.Source == "goal" || fragment.Source == "collaboration-mode" || strings.HasPrefix(fragment.Source, "plugin-")
+}
+
+func internalContextPersistenceKey(fragment protocol.InternalContextFragment) string {
+	if fragment.Source == "goal" {
+		switch {
+		case strings.HasPrefix(fragment.Text, "The goal token budget has been reached."):
+			return "goal\x00budget"
+		case strings.HasPrefix(fragment.Text, "The persisted goal objective was updated."):
+			return "goal\x00objective-updated"
+		default:
+			return "goal\x00active"
+		}
+	}
+	if fragment.Source == "collaboration-mode" {
+		return fragment.Source
+	}
+	return fragment.Source + "\x00" + fragment.Text
 }
 
 func (a *Agent) requestAffinityKey(purpose string) string {

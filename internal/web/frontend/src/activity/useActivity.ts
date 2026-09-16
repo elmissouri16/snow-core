@@ -103,8 +103,8 @@ export function useActivity(root: RefObject<HTMLElement | null>, registryEnabled
         endAccess();
         return;
       }
-      // Synchronous fencing starts with request admission, not with a later React
-      // cleanup. Never treat an HTMX target inside this island as its owner.
+      // Synchronous fencing starts with request admission, not with later React
+      // cleanup. Never treat a navigation target inside this island as its owner.
       if (detail.target instanceof Element && root.current && detail.target.contains(root.current)) {
         navigationTarget = detail.target;
         syncVisibility();
@@ -116,10 +116,10 @@ export function useActivity(root: RefObject<HTMLElement | null>, registryEnabled
       navigationTarget = null;
       syncVisibility();
     };
-    document.addEventListener("htmx:beforeRequest", beforeNavigation);
-    document.addEventListener("htmx:beforeSwap", beforeNavigation);
-    document.addEventListener("htmx:afterRequest", afterNavigation);
-    document.addEventListener("htmx:afterSettle", afterNavigation);
+    document.addEventListener("snow:navigation-start", beforeNavigation);
+    document.addEventListener("snow:navigation-before-swap", beforeNavigation);
+    document.addEventListener("snow:navigation-end", afterNavigation);
+    document.addEventListener("snow:navigation-after-swap", afterNavigation);
     document.addEventListener("visibilitychange", syncVisibility);
     document.addEventListener("submit", submit, true);
     window.addEventListener("pagehide", pagehide);
@@ -135,10 +135,10 @@ export function useActivity(root: RefObject<HTMLElement | null>, registryEnabled
       abort();
       refreshRef.current = () => {};
       observer.disconnect();
-      document.removeEventListener("htmx:beforeRequest", beforeNavigation);
-      document.removeEventListener("htmx:beforeSwap", beforeNavigation);
-      document.removeEventListener("htmx:afterRequest", afterNavigation);
-      document.removeEventListener("htmx:afterSettle", afterNavigation);
+      document.removeEventListener("snow:navigation-start", beforeNavigation);
+      document.removeEventListener("snow:navigation-before-swap", beforeNavigation);
+      document.removeEventListener("snow:navigation-end", afterNavigation);
+      document.removeEventListener("snow:navigation-after-swap", afterNavigation);
       document.removeEventListener("visibilitychange", syncVisibility);
       document.removeEventListener("submit", submit, true);
       window.removeEventListener("pagehide", pagehide);

@@ -150,6 +150,9 @@ func buildContextReportWithSchemaBytes(req protocol.ChatRequest, latestRequest b
 		}
 		baseCategory := messageBaseCategory(message)
 		metadataBytes := len(message.Role) + len(message.ToolName) + len(message.ToolCallID)
+		if message.Role == protocol.RoleInternal {
+			metadataBytes += len(message.InternalContextSource) + len("<snow_internal_context source=\"\">\n\n</snow_internal_context>")
+		}
 		add(baseCategory, metadataBytes, 1)
 		for _, block := range message.Content {
 			if block.Type == protocol.BlockThinking {
@@ -233,6 +236,8 @@ func messageBaseCategory(message protocol.Message) string {
 		return "Tool results"
 	case protocol.RoleAgent:
 		return "Agent messages"
+	case protocol.RoleInternal:
+		return "Internal steering"
 	default:
 		return "Other messages"
 	}

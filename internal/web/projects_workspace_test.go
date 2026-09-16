@@ -273,7 +273,7 @@ func TestWorkspaceCatalogFailureIsNotRenderedAsEmptySession(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSavedHistoryPaginationUsesSynchronizedWorkspaceNavigation(t *testing.T) {
+func TestWorkspaceSavedHistoryPaginationUsesNativeWorkspaceNavigation(t *testing.T) {
 	s, cookie, _ := projectShell(t)
 	project, err := s.registry.Add(t.Context(), "workspace", t.TempDir())
 	if err != nil {
@@ -286,9 +286,9 @@ func TestWorkspaceSavedHistoryPaginationUsesSynchronizedWorkspaceNavigation(t *t
 	response := request(t, s, "GET", "/?view=projects&project="+project.ID+"&session=saved", nil, cookie)
 	nextURL := "/?" + url.Values{"view": {"projects"}, "project": {project.ID}, "session": {"saved"}, "offset": {"25"}}.Encode()
 	escaped := html.EscapeString(nextURL)
-	link := `<a class="button" href="` + escaped + `" hx-get="` + escaped + `" hx-target="#workspace" hx-swap="outerHTML" hx-push-url="true" hx-sync="#project-navigation:replace">Next page →</a>`
+	link := `<a class="button" href="` + escaped + `" data-snow-navigation="">Next page →</a>`
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), link) {
-		t.Fatal("saved history pagination lost matching canonical href and synchronized workspace swap")
+		t.Fatal("saved history pagination lost its canonical native workspace navigation")
 	}
 	response = request(t, s, "GET", nextURL, nil, cookie)
 	if response.Code != http.StatusOK || !slices.Equal(catalog.readIDs, []string{"saved", "saved"}) || !slices.Equal(catalog.readOffsets, []int{0, 25}) || len(catalog.listed) != 0 || len(backend.calls) != 0 {

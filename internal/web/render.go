@@ -7,11 +7,12 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
 
-//go:embed templates/*.html static/* static/vendor/*
+//go:embed templates/*.html static/*
 var assets embed.FS
 
 var templates = template.Must(template.New("web").Funcs(template.FuncMap{
@@ -32,6 +33,7 @@ type shell struct {
 	origin         string
 	host           string
 	version        string
+	network        requestNetworkPolicy
 	initialCode    string
 	access         accessState
 	now            func() time.Time
@@ -40,7 +42,6 @@ type shell struct {
 	runtimes       RuntimeBackend
 	hostSettings   HostSettingsBackend
 	operations     *ProjectOperations
-	hostAPIKeys    hostAPIKeyState
 	projectControl sync.Mutex // Serial admission of activation versus registration removal.
 	sidebarReads   sidebarReadAdmission
 	inspectSlots   chan struct{}
@@ -48,8 +49,7 @@ type shell struct {
 }
 
 type pageData struct {
-	TLS                      bool
-	HostAPIKeyEnabled        bool
+	NetworkProfile           string
 	ReasoningEnabled         bool
 	HistoryControlEnabled    bool
 	CompactionEnabled        bool
@@ -86,13 +86,25 @@ type pageData struct {
 }
 
 func newShell(origin, version string) (*shell, error) {
-	canonical, host, err := canonicalLoopbackOrigin(origin)
+	return newShellWithNetwork(origin, version, requestNetworkPolicy{})
+}
+
+func newShellWithNetwork(origin, version string, network requestNetworkPolicy) (*shell, error) {
+	canonicalOrigin := canonicalBrowserOrigin
+	if network.profile == "trusted-lan-http" {
+		canonicalOrigin = canonicalTrustedLANOrigin
+	}
+	canonical, host, err := canonicalOrigin(origin)
 	if err != nil {
 		return nil, err
 	}
-	s := &shell{origin: canonical, host: host, version: safeVersion(version), now: time.Now, inspectSlots: make(chan struct{}, 4), imageSlots: make(chan struct{}, 4)}
+	if network.profile == "" {
+		network.profile = "local"
+	}
+	s := &shell{origin: canonical, host: host, version: safeVersion(version), network: network, now: time.Now, inspectSlots: make(chan struct{}, 4), imageSlots: make(chan struct{}, 4)}
 	_, _ = rand.Read(s.access.key[:])
 	s.access.sessions = make(map[[32]byte]browserSession)
+	s.access.sourceAttempts = make(map[string]pairingAttemptWindow)
 	s.initialCode = s.issuePairingLocked()
 	return s, nil
 }
@@ -113,7 +125,6 @@ func (s *shell) handler() http.Handler {
 	s.registerProcessControlRoutes(mux)
 	s.registerBrowserAccessRoutes(mux)
 	s.registerHostSettingsRoutes(mux)
-	s.registerHostAPIKeyRoutes(mux)
 	s.registerProjectOperationRoutes(mux, s.operations)
 	mux.HandleFunc("GET /projects/{project}/sidebar-sessions", s.sidebarSessions)
 	mux.HandleFunc("POST /projects/{project}/sessions/{session}/delete", s.deleteSession)
@@ -143,7 +154,6 @@ func (s *shell) handler() http.Handler {
 		"goals.css":            "text/css; charset=utf-8",
 		"processes.css":        "text/css; charset=utf-8", "browser-access.css": "text/css; charset=utf-8",
 		"host-settings.css":      "text/css; charset=utf-8",
-		"host-api-key.css":       "text/css; charset=utf-8",
 		"reasoning.css":          "text/css; charset=utf-8",
 		"history-controls.css":   "text/css; charset=utf-8",
 		"compaction.css":         "text/css; charset=utf-8",
@@ -152,7 +162,6 @@ func (s *shell) handler() http.Handler {
 		"attention.css": "text/css; charset=utf-8", "scroll.css": "text/css; charset=utf-8", "conversation-width.css": "text/css; charset=utf-8", "stream.js": "text/javascript; charset=utf-8", "inspection.css": "text/css; charset=utf-8",
 		"composer-context.css": "text/css; charset=utf-8",
 		"settings.css":         "text/css; charset=utf-8", "HARNESS-NOTICE.txt": "text/plain; charset=utf-8",
-		"vendor/htmx-2.0.10.min.js": "text/javascript; charset=utf-8",
 	} {
 		data, err := assets.ReadFile("static/" + name)
 		if err != nil {
@@ -174,11 +183,12 @@ func (s *shell) handler() http.Handler {
 		// blob: is only for local composer object-URL previews; saved/sent images
 		// use authenticated same-origin reads. Data and external images stay blocked.
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'")
-		// Never trust proxy headers; this first increment is direct loopback only.
-		if r.Host != s.host || r.URL.IsAbs() || len(r.Header.Values("Origin")) > 1 {
+		source, admitted := s.network.admit(r)
+		if !admitted || r.Host != s.host || r.URL.IsAbs() || len(r.Header.Values("Origin")) > 1 {
 			http.Error(w, "Unexpected host or origin", http.StatusForbidden)
 			return
 		}
+		r = r.WithContext(context.WithValue(r.Context(), requestSourceKey{}, source))
 		origin := r.Header.Get("Origin")
 		if origin != "" && origin != s.origin || r.Method != http.MethodGet && r.Method != http.MethodHead && origin != s.origin {
 			http.Error(w, "Same-origin request required", http.StatusForbidden)
@@ -193,9 +203,14 @@ func (s *shell) handler() http.Handler {
 	})
 }
 
+const workspaceNavigationHeader = "X-Snow-Navigation"
+
+func isWorkspaceNavigation(r *http.Request) bool {
+	return r.Header.Get(workspaceNavigationHeader) == "workspace"
+}
+
 func (s *shell) requireLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("HX-Redirect", "/login")
+	if isWorkspaceNavigation(r) || strings.HasPrefix(r.Header.Get("Accept"), "application/json") {
 		http.Error(w, "Pair this browser to continue", http.StatusUnauthorized)
 		return
 	}
@@ -208,8 +223,8 @@ func (s *shell) loginPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	csrf := s.pairCSRF()
-	http.SetCookie(w, s.localCookie(pairCookie, csrf, 5*60))
-	s.render(w, http.StatusOK, "login", pageData{CSRF: csrf})
+	http.SetCookie(w, s.localCookie(s.pairCookieName(), csrf, 5*60))
+	s.render(w, http.StatusOK, "login", pageData{CSRF: csrf, NetworkProfile: s.network.profile})
 }
 
 func (s *shell) home(w http.ResponseWriter, r *http.Request) {
@@ -228,12 +243,12 @@ func (s *shell) home(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Vary", "HX-Request, HX-History-Restore-Request")
+	w.Header().Set("Vary", workspaceNavigationHeader)
 	name := "page"
-	if r.Header.Get("HX-Request") == "true" && r.Header.Get("HX-History-Restore-Request") != "true" {
+	if isWorkspaceNavigation(r) {
 		name = "workspace"
 	}
-	data := pageData{View: view, CSRF: browser.CSRF, TLS: r.TLS != nil, HostSettingsEnabled: s.hostSettings != nil, HostAPIKeyEnabled: r.TLS != nil && s.hostAPIKeyEnabled()}
+	data := pageData{View: view, CSRF: browser.CSRF, NetworkProfile: s.network.profile, HostSettingsEnabled: s.hostSettings != nil}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	if err := s.projectData(ctx, r.URL.Query(), &data); err != nil {

@@ -1,12 +1,10 @@
 import {useLayoutEffect, useState} from "react";
-import {APIKeyPanel} from "../host-api-key/APIKeyPanel";
 import {choices, draftRows, parseDefaults, parseProviders, request, saveBody} from "./model.ts";
 import type {DraftRow, LoadedDefaults, Operation, ProviderModel, ProviderStatus, Target} from "./model.ts";
 
 export interface HostSettingsPanelProps {
   csrf: string;
   enabled: boolean;
-  apiKeyEnabled: boolean;
   projects: {id: string; name: string}[];
 }
 type Pending = "load" | "save" | "providers" | null;
@@ -52,7 +50,7 @@ function DefaultRow({row, locked, update}: {row: DraftRow; locked: boolean; upda
   </div>;
 }
 
-export function HostSettingsPanel({csrf, enabled, apiKeyEnabled, projects}: HostSettingsPanelProps) {
+export function HostSettingsPanel({csrf, enabled, projects}: HostSettingsPanelProps) {
   const [view, setView] = useState(initialView);
   // This owner holds lifecycle/admission tokens only; all editable and displayed
   // state belongs to React. Synchronous admission also rejects duplicate events
@@ -191,6 +189,5 @@ export function HostSettingsPanel({csrf, enabled, apiKeyEnabled, projects}: Host
     <h4>Connect providers on the Snow host</h4>
     <p>Do not put passwords or API keys in CLI arguments. In a terminal on the Snow host, run the appropriate interactive login, then check local authentication:</p>
     <ul className="host-login-instructions">{["snow login opencode-go", "snow login opencode-zen", "snow login chatgpt", "snow login openai-compatible", "snow auth check"].map(command => <li key={command}><code>{command}</code></li>)}</ul>
-    <APIKeyPanel csrf={csrf} enabled={apiKeyEnabled} />
   </section>;
 }

@@ -1,4 +1,4 @@
-// Real HTMX navigation over exported production markup. No worker or provider.
+// Native workspace navigation over exported production markup. No worker or provider.
 export async function sidebarChecks({state, evaluate, wait, click, key, navigate}) {
   const results = [], failures = [];
   const check = (value, label) => { results.push(label); if (!value) failures.push(label); };
@@ -15,11 +15,11 @@ export async function sidebarChecks({state, evaluate, wait, click, key, navigate
     await key('Escape','Escape',27);
     check(await evaluate(`document.activeElement===document.querySelector('[data-shell-live-session] [data-shell-session-menu]')`), 'Closing sidebar Rename returns focus to its row, not the conversation header');
 
-    // Navigate through the existing HTMX owner into the long production catalog.
-    await evaluate(`window.htmx.ajax('GET','/sidebar.html',{target:'#workspace',swap:'outerHTML',select:'#workspace'})`);
+    // Navigate through the production owner into the long production catalog.
+    await evaluate(`window.SnowNavigation.visit('/?fixture=sidebar',{history:'none'})`);
     await wait(`document.querySelectorAll('[data-sidebar-project]').length===100`, 'long sidebar mounted');
     await click('[data-sidebar-search-toggle]');
-    await evaluate(`document.querySelector('[data-sidebar-search]').value='Workspace';document.querySelector('[data-sidebar-search]').dispatchEvent(new Event('input',{bubbles:true}));const a=document.querySelector('[data-sidebar-project="00000000-0000-4000-8000-000000000150"] .project-link');a.scrollIntoView({block:'center'});a.focus({preventScroll:true});window.sidebarScroll=document.querySelector('.project-tree').scrollTop;window.sidebarSwaps=0;window.sidebarSettles=0;document.addEventListener('htmx:afterSwap',e=>{if(e.detail.target?.id==='workspace')sidebarSwaps++});document.addEventListener('htmx:afterSettle',e=>{if(e.detail.target?.id==='workspace')sidebarSettles++})`);
+    await evaluate(`document.querySelector('[data-sidebar-search]').value='Workspace';document.querySelector('[data-sidebar-search]').dispatchEvent(new Event('input',{bubbles:true}));const a=document.querySelector('[data-sidebar-project="00000000-0000-4000-8000-000000000150"] .project-link');a.scrollIntoView({block:'center'});a.focus({preventScroll:true});window.sidebarScroll=document.querySelector('.project-tree').scrollTop;window.sidebarSwaps=0;window.sidebarSettles=0;document.addEventListener('snow:navigation-after-swap',e=>{if(e.detail.target?.id==='workspace')sidebarSwaps++});document.addEventListener('snow:navigation-end',e=>{if(e.detail.target?.id==='workspace')sidebarSettles++})`);
     await click('[data-sidebar-project="00000000-0000-4000-8000-000000000150"] .project-link');
     await wait('sidebarSwaps===1 && sidebarSettles>=1', 'sidebar navigation completed');
     check(await evaluate(`document.activeElement.closest('[data-sidebar-project]')?.dataset.sidebarProject==='00000000-0000-4000-8000-000000000150'`), 'Desktop sidebar navigation keeps focus on the corresponding destination row');
@@ -50,7 +50,7 @@ export async function sidebarChecks({state, evaluate, wait, click, key, navigate
     // A rejected read must not dispose the still-mounted live conversation.
     await navigate({streaming: true});
     const opens=state.streamOpens; state.holdNavigation=true;
-    await evaluate(`void window.htmx.ajax('GET','/',{target:'#workspace',swap:'outerHTML'}).catch(()=>{})`);
+    await evaluate(`void window.SnowNavigation.visit('/',{history:'none'}).catch(()=>{})`);
     for (let i=0; i<100 && !state.releaseNavigation; i++) await new Promise(resolve=>setTimeout(resolve,20));
     if (!state.releaseNavigation) throw new Error('Rejected navigation was not held');
     state.releaseNavigation(503); state.releaseNavigation=null;
@@ -58,7 +58,7 @@ export async function sidebarChecks({state, evaluate, wait, click, key, navigate
     state.update({session_name:'Still connected'}); state.push();
     await wait(`document.querySelector('[data-live-title]')?.textContent==='Still connected'`, 'failed read preserves the mounted live subscription');
     check(state.streamOpens===opens && await evaluate(`!document.querySelector('#live-send').disabled`), 'Rejected navigation does not retire the live session or disable its composer');
-    await evaluate(`window.htmx.ajax('GET','/',{target:'#workspace',swap:'outerHTML',select:'#workspace'})`);
+    await evaluate(`window.SnowNavigation.visit('/?fixture=sidebar',{history:'none'})`);
     await wait(`document.querySelectorAll('[data-sidebar-project]').length===100`, 'content navigation fallback');
     check(await evaluate(`document.activeElement.id==='workspace-content'`), 'Non-sidebar navigation still focuses the content region');
     check(state.errors.length===0, 'Sidebar checks use bounded local transport without invalid runtime requests');

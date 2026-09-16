@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json/v2"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -314,8 +315,9 @@ func TestAccessPersistenceRateLimitSurvivesRestart(t *testing.T) {
 	now := s.now()
 	s.now = func() time.Time { return now }
 	preauth := request(t, s, "GET", "/login", nil).Result().Cookies()[0]
-	for range 20 {
-		if w := request(t, s, "POST", "/login", url.Values{"csrf": {preauth.Value}, "code": {"wrong"}}, preauth); w.Code != http.StatusUnauthorized {
+	for attempt := range maxPairingAttempts {
+		source := fmt.Sprintf("192.0.2.%d:1234", attempt/maxPairingAttemptsPerSource+1)
+		if w := requestFrom(t, s, source, "POST", "/login", url.Values{"csrf": {preauth.Value}, "code": {"wrong"}}, preauth); w.Code != http.StatusUnauthorized {
 			t.Fatalf("attempt: %d", w.Code)
 		}
 	}
@@ -329,7 +331,7 @@ func TestAccessPersistenceRateLimitSurvivesRestart(t *testing.T) {
 			t.Fatalf("limit lost: %d", w.Code)
 		}
 	}
-	if s.access.attempts != 20 {
+	if s.access.attempts != maxPairingAttempts {
 		t.Fatal("attempt counter unbounded")
 	}
 	s.now = func() time.Time { return now.Add(time.Minute) }

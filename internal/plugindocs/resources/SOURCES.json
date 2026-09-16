@@ -5,7 +5,7 @@
     {
       "source": "docs/configuration.md",
       "resource": "docs/configuration.md",
-      "sha256": "06e3860dc0315c1d9eb48d28c4658a9d3684fb011339855e118715ce1b55d378"
+      "sha256": "1dd97aba7b49466e7b25644947c02f89160a118a9f5c6c96b304afe516aa5bc8"
     },
     {
       "source": "docs/goals.md",
@@ -35,7 +35,7 @@
     {
       "source": "docs/rpc.md",
       "resource": "docs/rpc.md",
-      "sha256": "4bbd2f30364db93a2ada97b97c7cd80b8993dda3afd871004e28514480b074b6"
+      "sha256": "d9a1fd19b001e44a1b538bfc1f9aa8df1b8c17f8fce7a9c778734ba55a8228bd"
     },
     {
       "source": "docs/sdk-reference.md",
@@ -50,7 +50,7 @@
     {
       "source": "docs/security.md",
       "resource": "docs/security.md",
-      "sha256": "352bbceace1f9125587235cc5fabd4e8513d9c30defc2e9c4c3cb645f1d64e2e"
+      "sha256": "cc097d63a8c88224978b3c902e8801e645b3ede2c83495ea7ab9fb3b44039ea9"
     },
     {
       "source": "docs/sessions.md",

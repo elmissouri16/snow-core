@@ -231,8 +231,11 @@ func TestProjectActivationColdDraftIsUnnamedDisabledAndPassive(t *testing.T) {
 		t.Fatal("cold draft activation form is absent")
 	}
 	attrs = attributes(form)
-	if attrs["method"] != "post" || attrs["action"] != "/projects/"+project.ID+"/runtime/open" || attrs["hx-params"] != "none" {
+	if attrs["method"] != "post" || attrs["action"] != "/projects/"+project.ID+"/runtime/open" {
 		t.Fatalf("cold composer must use explicit activation, not prompt submission: %v", attrs)
+	}
+	if _, ok := attrs["data-runtime-open"]; !ok {
+		t.Fatalf("cold composer is missing the native activation owner: %v", attrs)
 	}
 	if !strings.Contains(response.Body.String(), "Start, then review and send.") {
 		t.Fatal("separate Start and Send explanation is absent")

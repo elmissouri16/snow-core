@@ -26,6 +26,15 @@ export function record(value: unknown): value is Record<string, unknown> { retur
 export function validID(id: unknown): id is string {
   return typeof id === 'string' && id.length > 0 && id.trim() === id && encoder.encode(id).length <= 256 && !/[\x00-\x1f\x7f]/.test(id);
 }
+export function randomRequestID(source: Pick<Crypto, 'getRandomValues'> & Partial<Pick<Crypto, 'randomUUID'>> = globalThis.crypto): string {
+  if (typeof source.randomUUID === 'function') return source.randomUUID();
+  const value = new Uint8Array(16);
+  source.getRandomValues(value);
+  value[6] = (value[6] & 0x0f) | 0x40;
+  value[8] = (value[8] & 0x3f) | 0x80;
+  const hex = Array.from(value, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 export function validProjection(raw: unknown, api: Pick<API, 'validText'>): raw is Projection {
   if (!record(raw) || typeof raw.live_steer_token !== 'string' || (raw.live_steer_token !== '' && !validID(raw.live_steer_token)) || !Number.isSafeInteger(raw.revision) || (raw.revision as number) < 0 || typeof raw.can_steer !== 'boolean' || !Array.isArray(raw.items) || raw.items.length > 8) return false;
   if (raw.can_steer && (!validID(raw.live_steer_token) || (raw.revision as number) <= 0)) return false;

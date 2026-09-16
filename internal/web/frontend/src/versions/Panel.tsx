@@ -80,7 +80,7 @@ function HistoryPanel({h, selected, safe, changed}: {h: HistoryView | null; sele
     </form>
     {h?.inventory && <div className="fine" data-history-inventory="">
       <p>{h.inventory.text}</p>
-      {!!h.inventory.rows.length && <ul>{h.inventory.rows.map((row, index) => <li key={`${row.url}:${index}`}><a href={row.url} hx-get={row.url} hx-target="#workspace" hx-swap="outerHTML" hx-push-url="true">Open saved conversation: {row.name || 'Untitled'}</a></li>)}</ul>}
+      {!!h.inventory.rows.length && <ul>{h.inventory.rows.map((row, index) => <li key={`${row.url}:${index}`}><a href={row.url} data-snow-navigation="">Open saved conversation: {row.name || 'Untitled'}</a></li>)}</ul>}
     </div>}
   </section>;
 }

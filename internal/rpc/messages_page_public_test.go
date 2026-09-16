@@ -194,6 +194,25 @@ func TestPublicMessagesPageRejectsHardFrameOverflowIncludingTools(t *testing.T) 
 	}
 }
 
+func TestPublicHistoryOmitsInternalContextMessages(t *testing.T) {
+	messages := []protocol.Message{
+		protocol.NewUserMessage("user", "", "public"),
+		{ID: "internal", ParentID: "user", Role: protocol.RoleInternal, InternalContextSource: "goal", Content: []protocol.ContentBlock{protocol.NewTextBlock("PRIVATE_GOAL_STEERING")}},
+		protocol.NewAssistantMessage("assistant", "internal", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("answer")}, protocol.StopStop, nil),
+	}
+	projected := publicHistoryMessages(messages)
+	if len(projected) != 2 || projected[0].ID != "user" || projected[1].ID != "assistant" {
+		t.Fatalf("public history retained internal context: %+v", projected)
+	}
+	wire, err := json.Marshal(projected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "PRIVATE_GOAL_STEERING") || strings.Contains(string(wire), `"role":"internal"`) {
+		t.Fatalf("public history leaked internal context: %s", wire)
+	}
+}
+
 func TestPublicMessagesPagePreservesUnknownToolOutcome(t *testing.T) {
 	for _, isError := range []bool{false, true} {
 		for _, preview := range []*protocol.ToolResultPreview{nil, {Text: "PRIVATE_UNKNOWN_PREVIEW", Truncated: true}} {

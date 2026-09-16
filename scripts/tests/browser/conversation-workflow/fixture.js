@@ -1,7 +1,12 @@
 (() => {
   "use strict";
   const copy = value => JSON.parse(JSON.stringify(value));
-  const json = value => new Response(JSON.stringify(copy(value)), {headers: {'Content-Type': 'application/json'}});
+  const response = (body, type, url) => {
+    const value = new Response(body, {headers: {'Content-Type': type}});
+    Object.defineProperty(value, 'url', {value: new URL(url, location.href).href});
+    return value;
+  };
+  const json = (value, url) => response(JSON.stringify(copy(value)), 'application/json', url);
   // Production-shaped DTOs; no credentials, provider calls, or disk prompts.
   const snapshot = {
     project_id: "00000000-0000-4000-8000-000000000002", instance_id: "instance-one", session_id: "session-one", session_name: "First task",
@@ -30,43 +35,44 @@
     const request = {url: String(url), options, fields: Object.fromEntries(new URLSearchParams(options.body))};
     fixture.requests.push(request);
     const target = new URL(request.url, location.origin);
+    if (options.method === "GET" && new Headers(options.headers).get('X-Snow-Navigation') === 'workspace')
+      return Promise.resolve(response(workspaceMarkup(), 'text/html', request.url));
     if (options.method === "GET" && target.pathname === "/access/browsers" && !target.search)
-      return Promise.resolve(json({limit: 8, browsers: []}));
+      return Promise.resolve(json({limit: 8, browsers: []}, request.url));
     if (options.method === "GET" && target.pathname === `/projects/${snapshot.project_id}/sidebar-sessions` && target.search === '?offset=0')
       return Promise.resolve(json({project_id: snapshot.project_id, instance_id: snapshot.instance_id, active_session_id: snapshot.session_id,
-        available: true, delete_supported: false, sessions: choices.sessions, has_more: false, next_offset: 0}));
+        available: true, delete_supported: false, sessions: choices.sessions, has_more: false, next_offset: 0}, request.url));
     if (options.method === "GET" && target.pathname === `/projects/${snapshot.project_id}/runtime/events`) return Promise.resolve({ok: false, status: 501});
     if (options.method === "GET") {
       if (target.pathname !== `/projects/${snapshot.project_id}/runtime` || target.search) throw new Error('Unexpected read: ' + target.pathname);
       if (fixture.closed) return Promise.resolve({ok: false, status: 404});
       if (fixture.offline) return Promise.reject(new TypeError("Network disconnected"));
       if (fixture.unauthorized) return Promise.resolve({ok: false, status: 401});
-      if (fixture.deferPoll) return new Promise(resolve => { request.resolve = data => resolve(json(data)); fixture.deferredPolls.push(request); });
+      if (fixture.deferPoll) return new Promise(resolve => { request.resolve = data => resolve(json(data, request.url)); fixture.deferredPolls.push(request); });
       return Promise.resolve({ok: true, json: async () => copy(fixture.snapshot)});
     }
     return new Promise((resolve, reject) => {
-      request.resolve = data => { request.settled = true; resolve(json(data)); };
+      request.resolve = data => { request.settled = true; resolve(json(data, request.url)); };
       request.reject = () => { request.settled = true; reject(new TypeError("Reply lost")); };
     });
   };
-  // Exercise production HTMX lifecycle without an HTTP server or network. New
+  // Exercise the production native lifecycle without a server or network. New
   // workspace markup represents an explicitly reviewed server response.
   const workspace = document.querySelector("#workspace").outerHTML;
-  window.htmx = {process: () => {}, ajax: async (method, url, options) => {
-    if (method === "POST" && options?.handler) {
-      const response = await window.fetch(url, {method, body: new URLSearchParams(options.values)});
-      options.handler(options.source, {xhr: {status: response.ok ? 200 : response.status, responseURL: url,
-        responseText: JSON.stringify(await response.json()), getResponseHeader: () => "application/json"}});
-      return;
-    }
-    const old = document.querySelector("#workspace");
-    old.dispatchEvent(new CustomEvent("htmx:beforeSwap", {bubbles: true, detail: {target: old}}));
-    old.dispatchEvent(new CustomEvent("htmx:beforeCleanupElement", {bubbles: true, detail: {elt: old}}));
+  const workspaceMarkup = () => {
     const container = document.createElement("div"); container.innerHTML = workspace;
-    const replacement = container.firstElementChild;
-    const region = replacement.querySelector("#live-session");
+    const region = container.querySelector("#live-session");
     Object.assign(region.dataset, {project: fixture.snapshot.project_id, instance: fixture.snapshot.instance_id, session: fixture.snapshot.session_id, revision: String(fixture.snapshot.revision), status: fixture.snapshot.status});
+    return container.firstElementChild.outerHTML;
+  };
+  window.testNavigate = async () => {
+    const old = document.querySelector("#workspace");
+    window.dispatchEvent(new PageTransitionEvent("pagehide", {persisted: true}));
+    document.dispatchEvent(new CustomEvent("snow:navigation-before-swap", {detail: {target: old, source: null, requestConfig: {path: "/", method: "GET"}}}));
+    const container = document.createElement("div"); container.innerHTML = workspaceMarkup();
+    const replacement = container.firstElementChild;
     old.replaceWith(replacement);
-    replacement.dispatchEvent(new CustomEvent("htmx:afterSwap", {bubbles: true, detail: {target: replacement}}));
-  }};
+    window.dispatchEvent(new PageTransitionEvent("pageshow", {persisted: true}));
+    document.dispatchEvent(new CustomEvent("snow:navigation-after-swap", {detail: {target: replacement, source: null, requestConfig: {path: "/", method: "GET"}}}));
+  };
 })();

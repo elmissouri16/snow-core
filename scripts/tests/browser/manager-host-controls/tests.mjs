@@ -1,13 +1,11 @@
-import {randomUUID} from 'node:crypto';
 import {readFile, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {setTimeout as delay} from 'node:timers/promises';
 import {page, publicRequest} from './page.mjs';
 import {operations} from './operations.mjs';
 
 export async function exercise({client, ready, width, theme, artifacts}) {
   const results = [], failures = [], requests = [], responses = [], sessions = new Set();
-  const secrets = [ready.code, ready.httpCode, ...Array.from({length: 4}, () => 'FICTIONAL_HOST_KEY_' + randomUUID())];
+  const secrets = [ready.code];
   const check = (ok, label) => { results.push(label); if (!ok) failures.push(label); };
   const posts = suffix => requests.filter(r => r.method === 'POST' && r.path.endsWith(suffix));
   let unsafeNetwork = false, pageErrors = 0;
@@ -35,17 +33,9 @@ export async function exercise({client, ready, width, theme, artifacts}) {
     await writeFile(join(artifacts, `${width}-${theme}-${label}.png`), Buffer.from(data.data, 'base64'), {mode: 0o600});
   };
   try {
-    const {browserContextId: insecureContext} = await client.send('Target.createBrowserContext');
-    const h = await newPage(insecureContext, ready.httpOrigin);
-    await h.login(ready.httpCode); await h.settings();
-    check(await h.evaluate(`${h.q('[data-host-api-key]')}.dataset.enabled==='false' && ${h.q('[data-api-key-form]')}.hidden && ${h.q('[data-api-key-secret]')}.disabled && ${h.q('[data-api-key-save]')}.disabled && ${h.q('[data-api-key-inspect]')}.disabled`), 'Direct HTTP visibly disables API-key inspection, input and submission');
-    check(!requests.some(r => r.path.endsWith('/api-key')), 'Opening HTTP Settings makes no API-key request');
-    await capture('http-disabled', h);
-    await client.send('Target.disposeBrowserContext', {browserContextId: insecureContext});
-
     const {browserContextId: context} = await client.send('Target.createBrowserContext');
     const p = await newPage(context, ready.origin); await p.login(ready.code);
-    check(await p.evaluate("location.protocol==='https:' && document.querySelector('#workspace')!==null"), 'Native form pairing succeeds over real direct TLS without injected cookies');
+    check(await p.evaluate("location.protocol==='http:' && document.querySelector('#workspace')!==null"), 'Native form pairing succeeds over direct loopback HTTP without injected cookies');
     await p.navigate(`/?view=projects&project=${ready.project}`);
     await p.wait(`!!${p.q('[data-runtime-open]')}`, 'explicit activation review');
     await p.click('[data-runtime-open] input[name="confirm"]'); await p.click('[data-runtime-open] button[type="submit"]');
@@ -77,44 +67,13 @@ export async function exercise({client, ready, width, theme, artifacts}) {
     check(after?.instance_id === initial?.instance_id && after?.model === initial?.model && after?.thinking === initial?.thinking, 'Host global/project writes leave the existing worker identity, model and thinking unchanged');
     await capture('defaults', p);
 
-    const provider = 'opencode-go';
-    const keyPath = `/settings/providers/${provider}/api-key`;
-    const inspect = async tab => {
-      await tab.replace('[data-api-key-provider]', provider); await tab.click('[data-api-key-inspect]');
-      await tab.wait(`${tab.q('[data-api-key-status]')}.textContent.startsWith('Inspection complete.')`, 'explicit exact-provider key inspection');
-    };
-    const submit = async (tab, key, replacement) => {
-      await tab.replace('[data-api-key-secret]', key);
-      if (replacement) await tab.click('[data-api-key-replace]');
-      await tab.click('[data-api-key-confirm]'); await tab.click('[data-api-key-save]');
-    };
-    await inspect(p);
-    check(await p.evaluate(`${p.q('[data-api-key-secret]')}.type==='password' && ${p.q('[data-api-key-target]')}.textContent.startsWith(${JSON.stringify(provider)})`), 'Fresh exact-provider inspection enables a masked write-only password field');
-    const beforeConsent = posts(keyPath).length;
-    await p.replace('[data-api-key-secret]', secrets[2]); await p.click('[data-api-key-save]');
-    await p.wait(`${p.q('[data-api-key-secret]')}.value===''`, 'missing-consent secret clearing');
-    check(posts(keyPath).length === beforeConsent, 'Missing explicit host consent clears the key without dispatching a write');
-    await submit(p, secrets[2], false); await p.wait(`${p.q('[data-api-key-status]')}.textContent.startsWith('Key saved locally')`, 'write-only key success');
-    check(await p.evaluate(`${p.q('[data-api-key-secret]')}.value==='' && ${p.q('[data-api-key-form]')}.hidden && ${p.q('[data-api-key-save]')}.disabled`) && await privacy(p), 'Successful save clears and retires the key, with no DOM/URL/browser-draft echo');
-    await inspect(p);
-    check(await p.evaluate(`!${p.q('[data-api-key-replace-label]')}.hidden && !${p.q('[data-api-key-replace]')}.checked`), 'Existing credential requires separate explicit replacement consent');
-    // A second native tab consumes the browser's inspection. The original tab
-    // then submits its stale inspection through the real UI and receives 409.
-    const second = await newPage(context, ready.origin); await second.navigate('/'); await second.wait(`!!${second.q('#workspace')}`, 'second tab shares native pairing'); await second.settings();
-    await inspect(second); await submit(second, secrets[3], true); await second.wait(`${second.q('[data-api-key-status]')}.textContent.startsWith('Key saved locally')`, 'second-tab explicit replacement');
-    await submit(p, secrets[4], true);
-    await p.wait(`${p.q('[data-api-key-status]')}.textContent.startsWith('Save outcome is unknown or was rejected')`, 'consumed inspection rejected');
-    check(responses.some(r => r.path === keyPath && r.status === 409), 'Reused inspection is refused by the production HTTPS handler');
-    check(await p.evaluate(`${p.q('[data-api-key-secret]')}.value==='' && ${p.q('[data-api-key-save]')}.disabled`) && await privacy(p), 'Failed write clears the secret, disables retry and retains no draft or echoed key');
-    const writes = posts(keyPath).length;
-    await p.closeSettings(); await p.settings(); await delay(120);
-    check(posts(keyPath).length === writes && await p.evaluate(`${p.q('[data-api-key-secret]')}.value===''`), 'Closing/reopening Settings never retries an uncertain key submission');
-    await capture('api-key-cleared', p); await p.closeSettings();
+    check(await p.evaluate("!document.querySelector('[data-host-api-key]')"), 'Removed browser API-key controls are absent from Settings');
+    await p.closeSettings();
     await operations({p, ready, check, posts, capture});
     check(!unsafeNetwork && !pageErrors, 'Observed requests remain numeric-loopback and native flows produce no page exceptions');
     check(!await readFile(join(ready.directory, 'provider-count'), 'utf8').catch(() => ''), 'Host controls and project operations never call even the fictional model provider');
     const wire = await readFile(join(ready.directory, 'rpc-wire'), 'utf8').catch(() => '');
-    check(secrets.every(secret => !wire.includes(secret)) && !wire.includes('FICTIONAL_GIT_OUTPUT_MUST_NEVER_BE_PUBLIC'), 'Recorded CONTROL output contains neither API-key canaries nor Git output');
+    check(secrets.every(secret => !wire.includes(secret)) && !wire.includes('FICTIONAL_GIT_OUTPUT_MUST_NEVER_BE_PUBLIC'), 'Recorded CONTROL output contains no pairing credential or Git output');
     check(await privacy(p), 'Final document, URL and persistent browser drafts contain no private fixture canary');
     return {results, failures};
   } catch (error) {

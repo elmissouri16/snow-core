@@ -68,7 +68,7 @@ export function useBrowserInventory(root: RefObject<HTMLElement | null>, csrf: s
       try {
         response = await fetch(target ? `/access/browsers/${encodeURIComponent(target.id)}/revoke` : "/access/browsers", {
           method: target ? "POST" : "GET", credentials: "same-origin", cache: "no-store", redirect: "error", signal: controller.signal,
-          headers: target ? {Accept: "application/json", "HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"} : {Accept: "application/json"},
+          headers: target ? {Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded"} : {Accept: "application/json"},
           ...(target ? {body: new URLSearchParams({csrf, confirm: "revoke"})} : {}),
         });
         if (!active(epoch)) return;
@@ -163,10 +163,10 @@ export function useBrowserInventory(root: RefObject<HTMLElement | null>, csrf: s
     observer.observe(document.documentElement, {childList: true, subtree: true});
     document.addEventListener("submit", submit, true);
     document.addEventListener(accessEndedEvent, accessEnded);
-    document.addEventListener("htmx:beforeRequest", beforeNavigation);
-    document.addEventListener("htmx:beforeSwap", beforeNavigation);
-    document.addEventListener("htmx:afterRequest", afterNavigation);
-    document.addEventListener("htmx:afterSettle", afterNavigation);
+    document.addEventListener("snow:navigation-start", beforeNavigation);
+    document.addEventListener("snow:navigation-before-swap", beforeNavigation);
+    document.addEventListener("snow:navigation-end", afterNavigation);
+    document.addEventListener("snow:navigation-after-swap", afterNavigation);
     window.addEventListener("pagehide", pagehide);
     window.addEventListener("pageshow", pageshow);
     setView(initial);
@@ -178,10 +178,10 @@ export function useBrowserInventory(root: RefObject<HTMLElement | null>, csrf: s
       observer.disconnect();
       document.removeEventListener("submit", submit, true);
       document.removeEventListener(accessEndedEvent, accessEnded);
-      document.removeEventListener("htmx:beforeRequest", beforeNavigation);
-      document.removeEventListener("htmx:beforeSwap", beforeNavigation);
-      document.removeEventListener("htmx:afterRequest", afterNavigation);
-      document.removeEventListener("htmx:afterSettle", afterNavigation);
+      document.removeEventListener("snow:navigation-start", beforeNavigation);
+      document.removeEventListener("snow:navigation-before-swap", beforeNavigation);
+      document.removeEventListener("snow:navigation-end", afterNavigation);
+      document.removeEventListener("snow:navigation-after-swap", afterNavigation);
       window.removeEventListener("pagehide", pagehide);
       window.removeEventListener("pageshow", pageshow);
     };

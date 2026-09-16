@@ -61,10 +61,7 @@ export function HomePage({ projects, error }: HomeProps) {
                     data-home-project-name={p.name}
                     data-home-project-available={String(p.available)}
                     href={projectURL(p.id)}
-                    hx-get={projectURL(p.id)}
-                    hx-target="#workspace"
-                    hx-swap="outerHTML"
-                    hx-push-url="true"
+                    data-snow-navigation=""
                   >
                     <span className="folder-icon">
                       <Icon kind="folder" />
@@ -83,10 +80,7 @@ export function HomePage({ projects, error }: HomeProps) {
                 <a
                   className="picker-add"
                   href="/?view=projects#add-project"
-                  hx-get="/?view=projects"
-                  hx-target="#workspace"
-                  hx-swap="outerHTML"
-                  hx-push-url="/?view=projects#add-project"
+                  data-snow-navigation=""
                 >
                   <Icon kind="plus" />
                   <span>Add workspace</span>
@@ -120,7 +114,6 @@ export function HomePage({ projects, error }: HomeProps) {
             <button
               className="home-send"
               type="submit"
-              hx-push-url="true"
               disabled={!draft.homeEnabled || draft.pending}
             >
               Continue
@@ -161,10 +154,7 @@ export function DraftNotice() {
         <a
           className="button quiet"
           href={notice.url}
-          hx-get={notice.url}
-          hx-target="#workspace"
-          hx-swap="outerHTML"
-          hx-push-url="true"
+          data-snow-navigation=""
         >
           Edit draft
         </a>

@@ -233,7 +233,9 @@ func ForkArtifactIDs(store Store) ([]string, error) {
 	for i := len(branch) - 1; i >= 0; i-- {
 		entry := branch[i]
 		collect(entry.Summary)
-		collect(entry.Value)
+		if entry.Type != EntryInternalContext {
+			collect(entry.Value)
+		}
 		if entry.Message == nil {
 			continue
 		}

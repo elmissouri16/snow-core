@@ -2,8 +2,6 @@ package web
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"io"
 	"net/http"
 	"strings"
@@ -58,21 +56,5 @@ func TestRunServesAndJoinsShutdown(t *testing.T) {
 		}
 	case <-time.After(7 * time.Second):
 		t.Fatal("shutdown did not join server")
-	}
-}
-
-func TestVendoredHTMXMatchesReviewedAsset(t *testing.T) {
-	for name, want := range map[string]string{
-		"htmx-2.0.10.min.js": "71ea67185bfa8c98c39d31717c6fce5d852370fcdfd129db4543774d3145c0de",
-		"htmx-LICENSE":       "d3d2456f76414f2456104660ebd65aff1c04cd7966b942bdabd63f3cdb316a38",
-	} {
-		data, err := assets.ReadFile("static/vendor/" + name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		hash := sha256.Sum256(data)
-		if hex.EncodeToString(hash[:]) != want {
-			t.Fatalf("%s differs from reviewed upstream asset", name)
-		}
 	}
 }

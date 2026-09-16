@@ -7,6 +7,9 @@ import {projectURL} from './model';
 import {NavigationLink} from './Sidebar';
 import {Icon} from './Icons';
 const CSRF = ({value}: {value: string}) => <input type="hidden" name="csrf" value={value} />;
+const networkDescription = (data: ShellBootstrap) => data.networkProfile === 'trusted-lan-http'
+  ? 'Direct HTTP on this host’s private LAN address. Traffic is unencrypted; use only on a trusted LAN.'
+  : 'Direct numeric-loopback HTTP. Remote access is disabled.';
 export function BrowserAccess({data}: {data: ShellBootstrap}) {
   return <div className="settings-content">
     <BrowserInventory csrf={data.csrf} />
@@ -15,7 +18,7 @@ export function BrowserAccess({data}: {data: ShellBootstrap}) {
       {data.pairingCode && <div className="pairing-result" role="status"><label htmlFor="pairing-code">Reusable · expires in 30 days</label><input id="pairing-code" type="text" value={data.pairingCode} readOnly autoComplete="off" spellCheck={false} /><p className="fine">Treat this code as a credential. It is never placed in a URL or saved in browser storage.</p></div>}
     </section>
     <section className="settings-panel"><h2>Access boundaries</h2><dl>
-      <div><dt>Network</dt><dd>{data.tls ? 'Direct numeric-loopback HTTPS only. LAN and proxy access are not enabled.' : 'Direct loopback HTTP only. LAN, TLS, and proxy access are not enabled.'}</dd></div>
+      <div><dt>Network</dt><dd>{networkDescription(data)}</dd></div>
       <div><dt>Browser lifetime</dt><dd>Paired browsers stay connected for up to 30 days. Up to 8 browsers may be paired.</dd></div>
       <div><dt>Restart behavior</dt><dd>Pairing survives Snow restarts. Signing out revokes this browser's access.</dd></div>
       <div><dt>Host authority</dt><dd>Snow has no process sandbox. Agent workers run with the host user's privileges.</dd></div>
@@ -54,8 +57,8 @@ export function Settings({controller: c, view}: {controller: ShellController; vi
             <div className="settings-group"><h4>Appearance</h4><div className="settings-appearance" role="group" aria-label="Appearance">
               {(['light', 'dark'] as const).map(theme => <button key={theme} type="button" data-theme-choice={theme} aria-pressed={view.theme === theme} onClick={event => { event.stopPropagation(); c.theme(theme); }}><Icon name={theme} className="appearance-icon" />{theme === 'light' ? 'Light' : 'Dark'}</button>)}
             </div><p className="fine">Saved in this browser. Does not change the host’s terminal theme.</p></div>
-            <HostSettingsPanel csrf={data.csrf} enabled={data.hostSettingsEnabled} apiKeyEnabled={data.apiKeyEnabled && data.tls} projects={data.projects.map(({id, name}) => ({id, name}))} />
-            <div className="settings-group"><h4>On your machine</h4><p>Snow runs tools with your host account’s privileges, not in a process sandbox. Opening Settings does not start a worker or contact a model provider.</p><p>Live browser conversations require explicit project activation and use permission prompts. Provider configuration, plugins and host permissions are managed on the host, not here.</p><p className="fine"><a href="/static/HARNESS-NOTICE.txt">Third-party notices</a></p><div className="settings-host"><span className="status-dot" />{data.tls ? 'Direct HTTPS connection' : 'Direct loopback connection'}<span className="version">Snow {data.version}</span></div></div>
+            <HostSettingsPanel csrf={data.csrf} enabled={data.hostSettingsEnabled} projects={data.projects.map(({id, name}) => ({id, name}))} />
+            <div className="settings-group"><h4>On your machine</h4><p>Snow runs tools with your host account’s privileges, not in a process sandbox. Opening Settings does not start a worker or contact a model provider.</p><p>Live browser conversations require explicit project activation and use permission prompts. Provider configuration, plugins and host permissions are managed on the host, not here.</p><p className="fine"><a href="/static/HARNESS-NOTICE.txt">Third-party notices</a></p><div className="settings-host"><span className="status-dot" />Direct HTTP connection<span className="version">Snow {data.version}</span></div></div>
           </section>
           <section id="settings-workspaces" data-settings-panel="workspaces" aria-labelledby="settings-workspaces-title" hidden={view.settings !== 'workspaces'}>
             <h3 id="settings-workspaces-title" className="settings-section-title">Workspaces</h3><p>Registered folders on this host. Choosing a workspace only opens its saved view; it does not activate an agent.</p>

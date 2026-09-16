@@ -37,7 +37,7 @@ func contextMessagesFromEntriesAt(entries []Entry, lastCompaction, boundaryPos i
 	}
 	for i := start; i < len(entries); i++ {
 		entry := &entries[i]
-		if entry.Type == EntryMessage && entry.Message != nil {
+		if entry.Type == EntryMessage && entry.Message != nil || validInternalContextEntry(entry) {
 			messageCount++
 		}
 	}
@@ -52,10 +52,14 @@ func contextMessagesFromEntriesAt(entries []Entry, lastCompaction, boundaryPos i
 	}
 	for i := start; i < len(entries); i++ {
 		entry := &entries[i]
-		if entry.Type != EntryMessage || entry.Message == nil {
+		switch {
+		case entry.Type == EntryMessage && entry.Message != nil:
+			sources = append(sources, contextProjectionSource{message: entry.Message})
+		case validInternalContextEntry(entry):
+			sources = append(sources, contextProjectionSource{internalContext: entry})
+		default:
 			continue
 		}
-		sources = append(sources, contextProjectionSource{message: entry.Message})
 		if len(sources) == contextProjectionChunkMessages {
 			builder.appendChunk(sources)
 			sources = sources[:0]
@@ -121,9 +125,17 @@ func latestContextCompaction(entries []Entry) (lastCompaction, boundaryPos int) 
 	return lastCompaction, boundaryPos
 }
 
+func validInternalContextEntry(entry *Entry) bool {
+	if entry == nil || entry.Type != EntryInternalContext {
+		return false
+	}
+	return (protocol.InternalContextFragment{Source: entry.Key, Text: entry.Value}).Validate() == nil
+}
+
 type contextProjectionSource struct {
-	message    *protocol.Message
-	checkpoint *Entry
+	message         *protocol.Message
+	checkpoint      *Entry
+	internalContext *Entry
 }
 
 type contextProjectionShape struct {
@@ -181,9 +193,10 @@ func newContextProjectionBuilder(messageCount int) *contextProjectionBuilder {
 func (b *contextProjectionBuilder) appendChunk(sources []contextProjectionSource) {
 	shape := contextProjectionShape{}
 	for _, source := range sources {
-		if source.checkpoint != nil {
+		switch {
+		case source.checkpoint != nil, source.internalContext != nil:
 			shape.blocks++
-		} else {
+		default:
 			shape.addMessage(source.message)
 		}
 	}
@@ -198,12 +211,30 @@ func (b *contextProjectionBuilder) appendChunk(sources []contextProjectionSource
 	b.usageAt, b.costAt, b.displayAt, b.progressAt = 0, 0, 0, 0
 
 	for _, source := range sources {
-		if source.checkpoint != nil {
+		switch {
+		case source.checkpoint != nil:
 			b.appendCheckpoint(source.checkpoint)
-		} else {
+		case source.internalContext != nil:
+			b.appendInternalContext(source.internalContext)
+		default:
 			b.appendMessage(source.message)
 		}
 	}
+}
+
+func (b *contextProjectionBuilder) appendInternalContext(entry *Entry) {
+	message := &b.messages[b.messageAt]
+	b.messageAt++
+	*message = protocol.Message{
+		ID:                    entry.ID,
+		ParentID:              entry.ParentID,
+		Role:                  protocol.RoleInternal,
+		InternalContextSource: entry.Key,
+	}
+	blockAt := b.blockAt
+	b.blockAt++
+	b.blocks[blockAt] = protocol.NewTextBlock(entry.Value)
+	message.Content = b.blocks[blockAt:b.blockAt:b.blockAt]
 }
 
 func (b *contextProjectionBuilder) appendCheckpoint(entry *Entry) {

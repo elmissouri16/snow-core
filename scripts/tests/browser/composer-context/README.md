@@ -103,7 +103,7 @@ completion or failure; screenshots and JSON remain in `dist/compact-composer/`.
 
 The suite directly loads `../conversation-workflow/fixture.js`, reusing its
 production-shaped snapshot DTOs, in-memory fetch recorder, accelerated poll timer
-and HTMX before/after-swap shim. Only these public transports are mocked. Local
+and native before/after-replacement shim. Only these public transports are mocked. Local
 files use real browser `File`, `File.arrayBuffer`, `DataTransfer`, clipboard/drop
 events and native textarea selection. A narrowly scoped `File.arrayBuffer`
 interceptor holds selected reads to exercise races and is restored in `finally`.

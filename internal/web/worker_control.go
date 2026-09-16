@@ -73,11 +73,6 @@ func (c *WorkerControl) call(ctx context.Context, scope, id, command string, par
 	case "defaults_get", "defaults_update":
 	case "provider_status_list":
 		capability = "provider_status"
-	case "api_key_inspect", "api_key_set":
-		capability = protocol.RPCAPIKeyControlCapability
-		if scope != "global" || id != "" {
-			return ErrHostControlInvalid
-		}
 	default:
 		return ErrHostControlInvalid
 	}
@@ -85,7 +80,7 @@ func (c *WorkerControl) call(ctx context.Context, scope, id, command string, par
 		return ErrHostControlUnavailable
 	}
 	timeout := 3 * time.Second
-	if command == "defaults_update" || command == "api_key_set" {
+	if command == "defaults_update" {
 		timeout = 5 * time.Second
 		if !c.writes.TryLock() {
 			return ErrHostControlBusy
@@ -146,14 +141,11 @@ func (c *WorkerControl) call(ctx context.Context, scope, id, command string, par
 		return ErrHostControlInvalid
 	}
 	response, err := worker.Client.Call(ctx, protocol.RPCRequest{Type: command, Params: encoded})
-	if command == "api_key_set" {
-		clear(encoded)
-	}
 	if err != nil {
 		return ErrHostControlUnavailable
 	}
 	if !response.Success {
-		if command == "defaults_update" || command == "api_key_set" {
+		if command == "defaults_update" {
 			return ErrHostControlConflict
 		}
 		return ErrHostControlUnavailable

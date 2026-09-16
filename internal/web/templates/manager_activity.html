@@ -10,10 +10,10 @@
   {{if not .RegistryEnabled}}<p class="error">The project registry is unavailable. Activity cannot be loaded.</p>{{end}}
   <div class="manager-activity-counts" data-manager-activity-counts aria-label="Project activity counts"></div>
   <h2 class="manager-activity-projects-title">Registered projects</h2>
-  <p data-manager-activity-empty hidden>No projects registered yet. <a class="text-link" href="/?view=projects">Choose a host folder in Projects</a> to get started. No agent starts until you explicitly activate it.</p>
+  <p data-manager-activity-empty hidden>No projects registered yet. <a class="text-link" href="/?view=projects" data-snow-navigation>Choose a host folder in Projects</a> to get started. No agent starts until you explicitly activate it.</p>
   <div class="manager-activity-cards" data-manager-activity-cards></div>
   <a class="button" href="/login" data-manager-activity-login hidden>Pair this browser again</a>
-  <noscript><p>Activity summaries require JavaScript. You can still <a class="text-link" href="/?view=projects">open Projects</a> and review individual conversations. No work has been started.</p></noscript>
+  <noscript><p>Activity summaries require JavaScript. You can still <a class="text-link" href="/?view=projects" data-snow-navigation>open Projects</a> and review individual conversations. No work has been started.</p></noscript>
 </section>
 </div>
 {{end}}

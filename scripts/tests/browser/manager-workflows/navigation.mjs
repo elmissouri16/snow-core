@@ -15,7 +15,7 @@ export function navigationChecks({ready,directory,click,key,insert,evaluate,wait
   };
   const form = action => `form[action="/projects/${ready.project}/organization/${action}"]`;
   const submit = async action => {
-    // Organization uses native POST/redirect documents, not an HTMX swap.
+    // Organization uses native POST/redirect documents, not an in-place workspace swap.
     // React can expose the next form before load/scroll restoration finishes;
     // do not aim the next pointer action from that intermediate layout.
     await evaluate('window.managerOrganizationSubmitting = true');

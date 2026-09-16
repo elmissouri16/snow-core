@@ -1,5 +1,5 @@
 {{define "host-settings"}}
-<div data-react-page="host-settings" data-react-props="{{hostSettingsReactProps .CSRF .HostSettingsEnabled .HostAPIKeyEnabled .Projects}}">
+<div data-react-page="host-settings" data-react-props="{{hostSettingsReactProps .CSRF .HostSettingsEnabled .Projects}}">
 <section class="settings-group host-settings" data-host-settings data-enabled="{{.HostSettingsEnabled}}">
   <h4>Current session</h4>
   <p>Host defaults below do not change the active worker or a new conversation created inside that worker. Use the conversation’s reasoning controls for current-session settings.</p>
@@ -23,7 +23,6 @@
   <h4>Connect providers on the Snow host</h4>
   <p>Do not put passwords or API keys in CLI arguments. In a terminal on the Snow host, run the appropriate interactive login, then check local authentication:</p>
   <ul class="host-login-instructions"><li><code>snow login opencode-go</code></li><li><code>snow login opencode-zen</code></li><li><code>snow login chatgpt</code></li><li><code>snow login openai-compatible</code></li><li><code>snow auth check</code></li></ul>
-  {{template "host-api-key" .}}
 </section>
 </div>
 {{end}}

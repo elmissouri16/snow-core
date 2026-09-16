@@ -53,3 +53,33 @@ func TestMapMessageRendersCompactionCheckpointAsUserInput(t *testing.T) {
 		t.Fatalf("checkpoint content=%#v", mapped.Content)
 	}
 }
+
+func TestDurableInternalContextMatchesEphemeralMessage(t *testing.T) {
+	provider := &Provider{defaultModel: "m", providerID: "opencode-go"}
+	fragment := protocol.InternalContextFragment{Source: "goal", Text: "continue the durable objective"}
+	ephemeralBody, err := provider.buildBody(protocol.ChatRequest{
+		Model: protocol.Model{ID: "m"}, InternalContext: []protocol.InternalContextFragment{fragment},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	durableBody, err := provider.buildBody(protocol.ChatRequest{
+		Model: protocol.Model{ID: "m"}, Messages: []protocol.Message{{
+			Role: protocol.RoleInternal, InternalContextSource: fragment.Source,
+			Content: []protocol.ContentBlock{protocol.NewTextBlock(fragment.Text)},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ephemeral, durable openAIChatRequest
+	if err := json.Unmarshal(ephemeralBody, &ephemeral); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(durableBody, &durable); err != nil {
+		t.Fatal(err)
+	}
+	if len(ephemeral.Messages) != 1 || len(durable.Messages) != 1 || ephemeral.Messages[0].Role != "user" || durable.Messages[0].Role != "user" || ephemeral.Messages[0].Content != durable.Messages[0].Content {
+		t.Fatalf("durable=%+v, ephemeral=%+v", durable.Messages, ephemeral.Messages)
+	}
+}

@@ -28,8 +28,7 @@ function harness() {
       if (prompt && "workspaceText" in value) prompt.value = value.workspaceText;
     },
     updateOpening() {}, updateFlowError: message => errors.push(message)
-  }, SnowShell: {navigation(open) { events.get("snow:shell-command")?.({detail: {type: "navigation", open}}); }}, htmx: {ajax: async (...args) => { reads.push(args); }},
-    SnowLiveView: {updateDraft(text) { const prompt = nodes.get("#live-prompt"); if (!prompt) return false; prompt.value = text; return true; }},
+  }, SnowShell: {navigation(open) { events.get("snow:shell-command")?.({detail: {type: "navigation", open}}); }}, SnowNavigation: {visit: async (...args) => { reads.push(args); }},    SnowLiveView: {updateDraft(text) { const prompt = nodes.get("#live-prompt"); if (!prompt) return false; prompt.value = text; return true; }},
     SnowConversation: {select: async detail => { actions.push(detail); return true; }}};
   let saved = 0;
   const context = vm.createContext({document, window, Element, location: new URL("http://snow.test/"), localStorage: {getItem() {}}, matchMedia: () => ({}),
@@ -99,7 +98,7 @@ test("same-workspace explicit selection delegates once to conversation admission
 test("cross-workspace intent waits for connected mounted owner and is consumed once", async () => {
   const h = harness(), next = {...owner("beta", "current", "beta-worker"), connected: false};
   h.setLive(owner());
-  h.window.htmx.ajax = async () => h.setLive(next);
+  h.window.SnowNavigation.visit = async () => h.setLive(next);
   await h.selectWorkspaceSession({project: "beta", session: "saved", instance: "beta-worker"});
   assert.equal(h.actions.length, 0); assert.ok(h.intent());
   next.connected = true; await h.consumeWorkspaceIntent(); await h.consumeWorkspaceIntent();
@@ -114,7 +113,7 @@ test("replacement owner rejects remembered mutation intent instead of replaying 
 
 test("superseding workspace navigation discards pending intent", async () => {
   const h = harness(); h.setIntent({project: "beta", session: "saved", trigger: {}});
-  h.events.get("htmx:beforeRequest")({detail: {target: {id: "workspace"}, elt: {}}});
+  h.events.get("snow:navigation-start")({detail: {target: {id: "workspace"}, source: {}}});
   h.setLive(owner("beta")); await h.consumeWorkspaceIntent();
   assert.equal(h.actions.length, 0); assert.equal(h.intent(), null);
 });
@@ -133,17 +132,16 @@ test("React shell navigation dispatches one read and preempts an older session i
   assert.equal(h.intent(), null);
   assert.equal(preemptions, 1);
   assert.equal(h.reads.length, 1);
-  const [method, url, options] = h.reads[0];
-  assert.equal(method, "GET"); assert.equal(url, "/?view=projects&project=beta&new=1");
-  assert.equal(options.source, source); assert.equal(options.target, "#workspace");
-  assert.equal(options.swap, "outerHTML"); assert.equal(options.push, "true");
+  const [url, options] = h.reads[0];
+  assert.equal(url, "/?view=projects&project=beta&new=1");
+  assert.equal(options.source, source); assert.equal(options.history, "push");
   h.setLive(owner("beta")); await h.consumeWorkspaceIntent();
   assert.equal(h.actions.length, 0, "preempted session intent cannot replay after mount");
 });
 
 test("cold New is a read-only explicit empty-state navigation", async () => {
   const h = harness(); await h.selectWorkspaceSession({project: "alpha"}, true);
-  assert.equal(h.reads.length, 1); assert.equal(h.reads[0][0], "GET"); assert.match(h.reads[0][1], /&new=1$/);
+  assert.equal(h.reads.length, 1); assert.match(h.reads[0][0], /&new=1$/);
   assert.equal(h.actions.length, 0); assert.equal(h.intent(), null);
 });
 

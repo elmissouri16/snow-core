@@ -27,9 +27,11 @@ import { width } from './width/index';
 import { ReactShell, validateShellBootstrap, shell, sidebarSessions, sessionActions } from './shell/index';
 import { HomePage, WorkspaceCatalog, ColdWorkspace, LoginPage, DraftNotice, Opening,
   workspace, projectOperations, validateHomeProps, validateCatalogProps, validateColdProps, validateLoginProps } from './workspace/index';
+import { workspaceNavigation } from './navigation';
 
-// Only the marked subtree is React-owned. HTMX may replace its ancestor, but
-// never renders inside a mounted root. No provider/runtime code lives here.
+// Only the marked subtree is React-owned. The native workspace navigator may
+// replace its ancestor, but never renders inside a mounted root. No
+// provider/runtime code lives here.
 const roots = new Map<HTMLElement, Root>();
 const savedHistories = new WeakMap<HTMLElement, {project: string; session: string; projection: SavedHistoryProjection | null}>();
 const maxBootstrapLength = 1024 * 1024;
@@ -94,7 +96,7 @@ function page(element: HTMLElement): ReactNode {
     }
     case 'host-settings': {
       if (!props || typeof props !== 'object' || !('csrf' in props) || typeof props.csrf !== 'string' || props.csrf.length > 512 ||
-          !('enabled' in props) || typeof props.enabled !== 'boolean' || !('apiKeyEnabled' in props) || typeof props.apiKeyEnabled !== 'boolean' ||
+          !('enabled' in props) || typeof props.enabled !== 'boolean' ||
           !('projects' in props) || !Array.isArray(props.projects) || props.projects.length > 100) throw new Error('Invalid host settings');
       const ids = new Set<string>();
       const projects = props.projects.map((project: unknown) => {
@@ -104,7 +106,7 @@ function page(element: HTMLElement): ReactNode {
         ids.add(project.id);
         return {id: project.id, name: project.name};
       });
-      return <HostSettingsPanel csrf={props.csrf} enabled={props.enabled} apiKeyEnabled={props.apiKeyEnabled} projects={projects} />;
+      return <HostSettingsPanel csrf={props.csrf} enabled={props.enabled} projects={projects} />;
     }
     default:
       throw new Error('Unsupported page');
@@ -130,17 +132,13 @@ function mount() {
   });
 }
 
-function cleanup(event: Event) {
-  const target = (event as CustomEvent<{elt?: Element}>).detail?.elt;
-  if (!(target instanceof Element)) return;
+function cleanup(target: Element) {
   for (const [element, root] of roots) {
     if (target === element || target.contains(element)) { root.unmount(); roots.delete(element); }
   }
 }
 
-// beforeCleanupElement only fires for a real swap, not a canceled/error reply.
-document.addEventListener('htmx:beforeCleanupElement', cleanup);
-for (const type of ['htmx:afterSwap', 'htmx:historyRestore']) document.addEventListener(type, mount);
+workspaceNavigation.configure({beforeReplace: cleanup, afterReplace: mount});
 window.addEventListener('pageshow', mount);
 window.addEventListener('pagehide', () => {
   for (const root of roots.values()) root.unmount();
@@ -157,5 +155,6 @@ Object.assign(window, {SnowReasoning: reasoning, SnowCompaction: compaction, Sno
   SnowLiveView: LiveViewBridge, SnowMessages: messages, SnowVisibility: visibility,
   SnowInspection: inspection, SnowProcesses: processes, SnowAttention: attention, SnowScroll: reader, SnowWidth: width,
   SnowShell: shell, SnowSidebarSessions: sidebarSessions, SnowSessionActions: sessionActions,
-  SnowWorkspace: workspace, SnowProjectOperations: projectOperations, SnowReactReady: true});
+  SnowWorkspace: workspace, SnowProjectOperations: projectOperations, SnowNavigation: workspaceNavigation,
+  SnowReactReady: true});
 document.dispatchEvent(new Event('snow:react-ready'));

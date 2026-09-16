@@ -7,7 +7,7 @@ import {projectURL} from './model';
 import {menuLauncherARIA} from './menu-aria';
 function ordinary(event: MouseEvent) { return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey; }
 export function NavigationLink({href, navigate, children, ...props}: {href: string; navigate: Navigate; children: ReactNode} & Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'href' | 'onClick'>) {
-  return <a {...props} href={href} hx-push-url={href} hx-sync="#project-navigation:replace" onClick={event => { if (!ordinary(event)) return; event.preventDefault(); event.stopPropagation(); void navigate(href, event.currentTarget); }}>{children}</a>;
+  return <a {...props} href={href} data-snow-navigation="" onClick={event => { if (!ordinary(event)) return; event.preventDefault(); event.stopPropagation(); void navigate(href, event.currentTarget); }}>{children}</a>;
 }
 function Session({c, group, row}: {c: ShellController; group: Group; row: SessionRow}) {
   const link = useRef<HTMLAnchorElement>(null), trigger = useRef<HTMLButtonElement>(null);
@@ -34,7 +34,7 @@ function Session({c, group, row}: {c: ShellController; group: Group; row: Sessio
   const selected = current || !live && c.snapshot.bootstrap?.project === group.project && c.snapshot.bootstrap.session === row.session_id;
   const instance = live?.project === group.project ? live.instance : group.instance;
   return <div className="shell-session-row" data-shell-session={row.session_id} data-shell-live-session={current ? '' : undefined}>
-    <a ref={link} href={projectURL(group.project, {session: row.session_id})} hx-push-url={projectURL(group.project, {session: row.session_id})} hx-sync="#project-navigation:replace" data-shell-session-open="" data-project={group.project} data-instance={instance} aria-current={selected ? 'page' : undefined}
+    <a ref={link} href={projectURL(group.project, {session: row.session_id})} data-snow-navigation="" data-shell-session-open="" data-project={group.project} data-instance={instance} aria-current={selected ? 'page' : undefined}
       onClick={event => {
         if (!ordinary(event)) return;
         event.preventDefault(); event.stopPropagation(); c.navigation(false);
@@ -66,7 +66,7 @@ function Branch({c, project, group, hidden}: {c: ShellController; project: Shell
       <NavigationLink className={`project-link${selected ? ' selected' : ''}`} href={projectURL(project.id)} navigate={(href, source) => { c.navigation(false); return c.navigate(href, source); }} title={project.path} aria-current={selected ? 'page' : undefined}>
         <span className="folder-icon" aria-hidden="true"><Icon name="folder" /></span><span className="project-link-text"><strong>{project.name}</strong><span className="project-link-path">{project.path}</span>{!project.available && <span className="unavailable">Folder unavailable</span>}</span>
       </NavigationLink>
-      <span className="shell-project-actions"><a className="quiet shell-project-action" data-shell-project-new="" href={projectURL(project.id, {new: '1'})} hx-push-url={projectURL(project.id, {new: '1'})} hx-sync="#project-navigation:replace" aria-label={`New session in ${project.name}`} title={`New session in ${project.name}`}
+      <span className="shell-project-actions"><a className="quiet shell-project-action" data-shell-project-new="" href={projectURL(project.id, {new: '1'})} data-snow-navigation="" aria-label={`New session in ${project.name}`} title={`New session in ${project.name}`}
         aria-disabled={c.snapshot.live?.project === project.id && c.snapshot.live.newDisabled ? 'true' : undefined}
         onClick={event => { if (!ordinary(event)) return; event.preventDefault(); event.stopPropagation(); if (c.snapshot.live?.project === project.id && c.snapshot.live.newDisabled) return; c.preemptInventory(); c.navigation(false); document.dispatchEvent(new CustomEvent('snow:session-new', {detail: {project: project.id, trigger: event.currentTarget}})); }}><Icon name="new" /></a>
         <button type="button" className="quiet shell-project-action" data-shell-project-menu="" aria-label={`Workspace actions for ${project.name}`} aria-haspopup="menu" {...menuLauncherARIA(c.snapshot.menu, 'project', project.id)} title="Workspace actions"
@@ -99,7 +99,7 @@ export function Sidebar({controller: c, view}: {controller: ShellController; vie
         <button className="quiet sidebar-collapse" type="button" data-sidebar-collapse="" aria-label={view.collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-controls="project-navigation" aria-expanded={!view.collapsed} onClick={event => { event.stopPropagation(); c.collapse(); }}><Icon name="panel" /></button>
         <button className="quiet mobile-nav-close" type="button" data-nav-close="" aria-label="Close project navigation" onClick={event => { event.stopPropagation(); c.navigation(false); }}><Icon name="close" /></button>
       </div>
-      <a className="sidebar-new-session" href={data.project ? projectURL(data.project, {new: '1'}) : '/'} hx-push-url={data.project ? projectURL(data.project, {new: '1'}) : '/'} hx-sync="#project-navigation:replace" data-shell-new-session="" aria-label="New session" aria-disabled={view.live?.newDisabled || undefined}
+      <a className="sidebar-new-session" href={data.project ? projectURL(data.project, {new: '1'}) : '/'} data-snow-navigation="" data-shell-new-session="" aria-label="New session" aria-disabled={view.live?.newDisabled || undefined}
         onClick={event => { if (!ordinary(event)) return; event.preventDefault(); event.stopPropagation(); if (view.live?.newDisabled) return; c.preemptInventory(); c.navigation(false); if (data.project) document.dispatchEvent(new CustomEvent('snow:session-new', {detail: {project: data.project, trigger: event.currentTarget}})); else void navigate('/', event.currentTarget); }}><Icon name="new" /><span>New session</span></a>
       <div className="sidebar-heading"><span className="sidebar-title">Workspaces</span><div className="sidebar-tools">
         <button className="quiet" type="button" data-sidebar-search-toggle="" aria-label="Search workspaces" aria-controls="sidebar-search" aria-expanded={view.searchOpen} onClick={event => { event.stopPropagation(); if (view.collapsed) c.collapse(); c.publish({searchOpen: !view.searchOpen, query: view.searchOpen ? '' : view.query}); }}><Icon name="search" /></button>

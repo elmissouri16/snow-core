@@ -173,7 +173,7 @@ keeps UI dependencies out of core packages.
 | `pkg/protocol/schema` | Network-free Draft 2020-12 wire schemas |
 | `pkg/snowsdk` | Public embeddable API; no TUI dependency |
 | `pkg/agentclient/rpc` | Bounded JSONL client over an owned deadline-capable connection; no process launcher |
-| `internal/web` | Local-only HTMX manager, private project registry, RPC catalog/control/live-worker adapters, optional numeric-loopback TLS, durable host-operation admission, instance-bound public-snapshot SSE, sanitized Markdown, durable owner-bound public tool history, explicit recovery hints without replay, bounded read-only file/Git inspector; no app/agent/session imports or second agent loop |
+| `internal/web` | HTTP-only trusted-LAN plus localhost manager, private project registry, RPC catalog/control/live-worker adapters, exact Host/Origin and pairing boundaries, durable host-operation admission, instance-bound public-snapshot SSE, sanitized Markdown, durable owner-bound public tool history, explicit recovery hints without replay, bounded read-only file/Git inspector; no TLS/proxy/profile stack, app/agent/session imports, or second agent loop |
 
 ### Web frontend package and build
 
@@ -181,10 +181,10 @@ keeps UI dependencies out of core packages.
 package; `package.json` and `package-lock.json` pin its dependencies. It has no
 Node production server, Next.js layer, or additional UI library. React owns only
 explicitly mounted page/panel subtrees, including the conversation/composer,
-transcript, sidebar, workspace pages and runtime panels. Go templates, HTMX
-ancestor navigation and the serial browser network/admission controller retain
-their separate responsibilities; source integration is not whole-product native
-acceptance. Shared classic helpers retain snapshot transport and popup geometry,
+transcript, sidebar, workspace pages and runtime panels. Go templates, the
+first-party bounded workspace navigator and the serial browser network/admission
+controller retain their separate responsibilities; source integration is not
+whole-product native acceptance. Shared classic helpers retain snapshot transport and popup geometry,
 not a second renderer inside React roots. Cost presentation belongs to the typed
 conversation model; the obsolete script is no longer loaded or routed. No frontend dependency
 enters core Go packages, the SDK, or the TUI.
@@ -1036,7 +1036,17 @@ a 10-minute stream-silence watchdog, and a 100 KiB project-context cap.
 5. Per-request collaboration-mode instructions from embedded
    `internal/plan/system.md` and activated-skill instructions.
 6. Goal-bearing turns receive separate trailing internal context rendered from
-   embedded templates under `internal/goal/`; this is not system context.
+   embedded templates under `internal/goal/`; this is not system context. When a
+   provider attempt produces an assistant boundary, Snow atomically stores each
+   sent fragment immediately before that owning response as provider-only
+   `internal_context` entries. `ContextMessages()` restores those private items
+   in exact request order so later ChatGPT/Codex prompts extend the prior cache
+   prefix; ordinary history, RPC, SDK, TUI, catalog, and web projections omit
+   them. Within one high-level turn, unchanged recurring goal, mode, and plugin
+   fragments are sent once and then supplied by durable history; a successful
+   compaction clears that request-local suppression so active steering is
+   reasserted. No-activity retries keep using the original ephemeral request
+   and do not persist duplicate steering.
 
 Configured prompt files are bounded by `context_cap_bytes`; project prompt
 paths are trust-gated, confined to the canonical project root, and reject
@@ -1874,7 +1884,7 @@ frontend acceptance work, known defects, release gates and running-manager
 adoption. Earlier verification totals below retain their milestone scope.
 
 [Web manager research and implementation plan](docs/web-manager-implementation-plan.md)
-records the single-user, single-host HTMX design and phased verification gates.
+records the single-user, single-host browser design, its historical transport milestones, and phased verification gates.
 `snow --mode web` now includes an authenticated host-side directory browser,
 persistent project registration, saved text history, and explicitly activated
 RPC-backed live conversations. The responsive workspace uses project/session
@@ -1972,7 +1982,7 @@ frame writes have five-second deadlines, and connection lifetime is ten minutes.
 Rendering/writes stay outside the RPC drain and runtime lock. This is a private
 web transport, not an RPC/provider protocol change.
 
-The browser uses native fetch SSE without the HTMX SSE extension. Legacy backends
+The browser uses native fetch SSE. Legacy backends
 advertised without subscription support (or returning 501) retain two-second
 snapshot polling; other failures reconnect GET with backoff, never replay POST.
 Hidden tabs pause, terminal close/auth states require review/sign-in, and controls
@@ -2025,18 +2035,27 @@ update.
 - Browser inventory uses independent public IDs and permits targeted durable
   revocation. Open SSE authority is still periodic at five seconds, not immediate;
   revocation stops browser authority, not agent execution.
-- Optional local TLS requires two clean absolute PEM paths, each bounded to
-  1 MiB with no symlink components, TLS 1.2 minimum and Secure cookies. Numeric
-  loopback, exact Host/Origin and CSRF remain mandatory; no DNS/LAN/proxy mode,
-  certificate generation or trust installation is added.
+- Ordinary `snow --mode web` selects the first active private IPv4 address
+  (otherwise an IPv6 ULA), binds it and `127.0.0.1` on port 7331, and derives
+  the exact same-port `http://<private-ip>:7331` origin. The localhost listener
+  redirects exact-Host GET/HEAD requests to that canonical LAN origin; an
+  offline host serves numeric loopback directly. Pairing, exact Host/Origin,
+  CSRF, revocation, strict host-only cookies, the persisted 20/minute global
+  limiter, and bounded per-peer 10/minute throttling remain enforced. Transport
+  and cookies are intentionally unencrypted/non-Secure and therefore limited to
+  a trusted LAN. Public, multicast, unspecified, wildcard, DNS-named,
+  zone-qualified, malformed, and noncanonical listeners fail closed. The Web
+  Manager has no TLS, certificate, generated-CA, saved-profile, DNS-origin,
+  trusted-proxy, forwarding-header, or hidden network-override path. Snow does
+  not change firewall/router policy, and forwarded headers never select origin,
+  identity, permission, or rate-limit authority.
 - `--rpc-startup control` dispatches before app construction. `WorkerControl`
   uses at most two short-lived workers and a nonqueued write gate for allowlisted
   global/project defaults and local-only provider status. Project selections live
   in operator global config; locked revision-CAS updates affect future workers,
-  not active workers or conversations newly created inside them. API-key entry
-  is actual-HTTPS-only, write-only, inspected per provider with a five-minute
-  single-use browser grant, explicit consent and auth-metadata CAS under the
-  legacy auth lock. No export/delete, network validation/refresh or OAuth.
+  not active workers or conversations newly created inside them. The browser
+  does not expose API-key entry or provider OAuth; those remain explicit
+  host-terminal or control-RPC operations.
 - All four worker families capture absolute operator `SNOW_HOME` and independent
   session roots through inert `freezeWorkerEnvironment` before project/job CWD
   changes. Resolution errors disable startup; no config/auth reads or inherited
@@ -2096,8 +2115,13 @@ fixtures do not exercise live providers or user data, establish reusable CI/rele
 approval, or update installed binaries. Using the verified checkout requires a
 local build/install and manager/worker restart, separate from source verification.
 
-Remote HTTPS, trusted proxy/tunnel deployment, automatic worker recovery and
-saved media rendering remain planned. Worktree forks, browser OAuth, extension
+Broader real-device private-network acceptance, automatic worker recovery and
+saved media rendering remain planned. The Web Manager now has one bounded
+network contract: automatic trusted-LAN HTTP plus a same-port localhost redirect,
+with loopback-only fallback when offline. TLS, certificates/generated CAs, saved
+network profiles, DNS origins, trusted proxies/Tailscale forwarding, hidden
+network overrides, and browser API-key entry were removed; this is not a
+public-Internet deployment contract. Worktree forks, browser OAuth, extension
 enablement, general Git writes, editors, PTYs and preview fleets remain outside
 this manager increment. Durable public tool history is available, not a private-tool replay. See
 [Using Snow](docs/using-snow.md#try-the-local-web-manager-shell) for exact current

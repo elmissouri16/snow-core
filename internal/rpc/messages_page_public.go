@@ -6,8 +6,11 @@ import "github.com/elmissouri16/snow-core/pkg/protocol"
 // projection. Do not clone whole messages or blocks: even public block kinds can
 // carry private payloads. Nil tool provenance never permits a content fallback.
 func publicHistoryMessages(messages []protocol.Message) []protocol.Message {
-	out := make([]protocol.Message, len(messages))
-	for i, message := range messages {
+	out := make([]protocol.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == protocol.RoleInternal {
+			continue
+		}
 		projected := protocol.Message{
 			ID: message.ID, ParentID: message.ParentID, Role: message.Role,
 			Content: []protocol.ContentBlock{},
@@ -51,7 +54,7 @@ func publicHistoryMessages(messages []protocol.Message) []protocol.Message {
 		if projected.IsRegeneratableReply() && !message.IsRegeneratableReply() {
 			projected.StopReason = ""
 		}
-		out[i] = projected
+		out = append(out, projected)
 	}
 	return out
 }

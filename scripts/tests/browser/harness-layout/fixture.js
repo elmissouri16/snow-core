@@ -15,6 +15,7 @@
   fixture.update = fields => { Object.assign(fixture.snapshot, fields, {revision: fixture.snapshot.revision + 1}); };
   fixture.folderMode = "populated";
   const sidebarCatalogs = new Map();
+  const browserFetch = typeof window.fetch === "function" ? window.fetch.bind(window) : null;
   // Only accepted, exact startup inventory reads are excluded from interaction
   // counts. All requests remain recorded, including rejected inventory requests.
   fixture.nonInventoryRequests = () => fixture.requests.filter(request => request.kind !== "browser-inventory" && request.kind !== "sidebar-inventory");
@@ -25,6 +26,7 @@
   const fail = message => { fixture.errors.push(message); return response({error: message}, 409); };
   window.fetch = (input, options = {}) => {
     const url = new URL(String(input), location.href);
+    if (options.headers?.["X-Snow-Navigation"] === "workspace" && browserFetch) return browserFetch(input, options);
     const method = options.method || "GET";
     const fields = Object.fromEntries(new URLSearchParams(options.body));
     const record = {path: url.pathname, method, fields};
@@ -147,18 +149,4 @@
     if (action === "inspect/diff") return response({available: true, reason: "", path: fields.path, kind: fields.kind, text: "diff --git a/README.md b/README.md\n-old\n+public fixture change\n", truncated: false});
     return fail(`Unmocked API request: ${action}`);
   };
-  // Settings/choices use HTMX rather than fetch. Keep this layout-only fixture
-  // on its existing strict response mock; native HTTP/XHR is covered separately.
-  window.addEventListener("DOMContentLoaded", () => {
-    const ajax = window.htmx?.ajax;
-    if (!ajax) return;
-    window.htmx.ajax = async (method, url, options) => {
-      if (method !== "POST" || !options?.handler) return ajax(method, url, options);
-      const reply = await window.fetch(url, {method, body: new URLSearchParams(options.values),
-        credentials: "same-origin", cache: "no-store", redirect: "error",
-        headers: {"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", Accept: "application/json"}});
-      options.handler(options.source, {xhr: {status: reply.status, responseURL: url,
-        responseText: await reply.text(), getResponseHeader: name => reply.headers.get(name)}});
-    };
-  }, {once: true});
 })();

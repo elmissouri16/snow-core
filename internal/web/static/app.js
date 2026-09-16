@@ -67,14 +67,14 @@
   async function continueHome() {
     const form = $("#home-composer");
     if (form.dataset.pending || homeNavigationForm === form) return;
-    if (!window.htmx) { window.SnowWorkspace?.updateDraft({privacy: "Workspace navigation is unavailable. Copy your draft before reloading."}); return; }
+    if (!window.SnowNavigation) { window.SnowWorkspace?.updateDraft({privacy: "Workspace navigation is unavailable. Copy your draft before reloading."}); return; }
     homeDraft.text = $("#home-prompt").value;
     if (new TextEncoder().encode(homeDraft.text).length > 65536) { window.SnowWorkspace?.updateDraft({privacy: "Shorten your draft to at most 64 KiB before continuing."}); return; }
     if (!homeDraft.project) { $(".workspace-picker > summary")?.click(); return; }
     homeDraft.pending = true; homeNavigationForm = form;
     const button = $(".home-send"); window.SnowWorkspace?.updateDraft({pending: true});
     try {
-      await window.htmx.ajax("GET", projectLocation(homeDraft.project), {source: button, target: "#workspace", swap: "outerHTML"});
+      await window.SnowNavigation.visit(projectLocation(homeDraft.project), {source: button, history: "push"});
     } catch (_) {
       if (form.isConnected) window.SnowWorkspace?.updateDraft({privacy: "Could not open this workspace. Your draft is kept; try again."});
     } finally {
@@ -82,7 +82,7 @@
       if (form.isConnected) window.SnowWorkspace?.updateDraft({pending: false});
     }
   }
-  // Select locally before HTMX's target-level listener can navigate away.
+  // Select locally before delegated workspace navigation can navigate away.
   document.addEventListener("click", event => {
     if (!(event.target instanceof Element) || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !$("#home-prompt")) return;
     const picker = event.target.closest(".workspace-picker > summary");
@@ -128,13 +128,13 @@
   }
   async function selectWorkspaceSession(detail, isNew = false) {
     const {project, trigger} = detail || {}, session = isNew ? "" : detail?.session;
-    if (typeof project !== "string" || !project || project.length > 128 || typeof session !== "string" || session.length > 128 || !window.htmx) return;
+    if (typeof project !== "string" || !project || project.length > 128 || typeof session !== "string" || session.length > 128 || !window.SnowNavigation) return;
     const intent = {...detail, project, session};
     workspaceIntent = intent;
     if (live?.project === project) { void consumeWorkspaceIntent(); return; }
     try {
       intent.url = projectLocation(project) + (isNew ? "&new=1" : "");
-      await window.htmx.ajax("GET", intent.url, {source: trigger, target: "#workspace", swap: "outerHTML", push: "true"});
+      await window.SnowNavigation.visit(intent.url, {source: trigger, history: "push"});
       if (workspaceIntent !== intent) return;
       if (!live || live.project !== project) {
         workspaceIntent = null;
@@ -155,11 +155,11 @@
   });
   document.addEventListener("snow:session-select", event => { void selectWorkspaceSession(event.detail); });
   document.addEventListener("snow:session-new", event => { void selectWorkspaceSession(event.detail, true); });
-  document.body.addEventListener("htmx:beforeRequest", event => {
-    if (event.detail?.target?.id === "workspace" && workspaceIntent && event.detail.elt !== workspaceIntent.trigger) workspaceIntent = null;
+  document.addEventListener("snow:navigation-start", event => {
+    if (event.detail?.target?.id === "workspace" && workspaceIntent && event.detail.source !== workspaceIntent.trigger) workspaceIntent = null;
   });
-  async function navigateWorkspace(href, source, event) {
-    if (!window.htmx?.ajax || typeof href !== "string" || href.length > 8192) return false;
+  async function navigateWorkspace(href, source, event, history = "push") {
+    if (!window.SnowNavigation?.visit || typeof href !== "string" || href.length > 8192) return false;
     let target;
     try { target = new URL(href, location.href); } catch (_) { return false; }
     if (target.origin !== location.origin || target.pathname !== "/" || target.username || target.password) return false;
@@ -176,27 +176,28 @@
     workspaceIntent = null;
     window.SnowShell?.preemptInventory();
     try {
-      // Bundled HTMX 2.0.10 supports context.push; retain a link's explicit
-      // fragment/false override, otherwise push the resolved request URL.
-      // Synchronization is inherited from JSX's transport-only hx-sync attrs.
-      await window.htmx.ajax("GET", target.pathname + target.search + target.hash, {
-        source, event, target: "#workspace", swap: "outerHTML", push: source.getAttribute("hx-push-url") || "true"
-      });
+      await window.SnowNavigation.visit(target.pathname + target.search + target.hash, {source, history});
       return true;
-    } catch (_) { workspaceFlowError("Could not open this workspace. Your draft is kept."); return false; }
+    } catch (error) {
+      if (error?.name !== "AbortError") workspaceFlowError("Could not open this workspace. Your draft is kept.");
+      return false;
+    }
   }
   document.addEventListener("snow:shell-navigate", event => {
     void navigateWorkspace(event.detail?.href, event.detail?.source);
   });
-  // Capture prevents a previously processed SSR link's target listener from
-  // dispatching a second request. React roots themselves are never processed.
+  // One delegated owner handles ordinary same-tab workspace links. Modified
+  // clicks retain native anchor behavior for new tabs/windows and downloads.
   document.addEventListener("click", event => {
     if (event.defaultPrevented || !(event.target instanceof Element) || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    const link = event.target.closest('a[hx-get][hx-target="#workspace"]');
-    if (!link || !link.closest('[data-react-page], [data-react-workspace], [data-react-live-panel], [data-react-inspection], #home-draft-notice') || link.hasAttribute("download") || link.target && link.target !== "_self") return;
+    const link = event.target.closest('a[data-snow-navigation]');
+    if (!link || link.hasAttribute("download") || link.target && link.target !== "_self" || !window.SnowNavigation?.visit) return;
+    let target;
+    try { target = new URL(link.href, location.href); } catch (_) { return; }
+    if (target.origin !== location.origin || target.pathname !== "/" || target.username || target.password) return;
     event.preventDefault(); event.stopPropagation();
-    void navigateWorkspace(link.getAttribute("hx-get"), link, event);
-  }, {capture: true});
+    void navigateWorkspace(target.href, link, event);
+  });
   function syncThemeChoices() {
     window.SnowShell?.setTheme(root.dataset.theme);
   }
@@ -306,43 +307,40 @@
       inspectProject(locationState.searchParams.get("project"), locationState.hash === "#remove-project");
     }
   }
-  // HTMX owns idle-setting POSTs, timing and request lifecycle. The existing
-  // snapshot reconciler owns the result: never swap JSON into the conversation,
-  // process response HTML/redirect headers, or serialize the prompt form.
+  // Settings use the same bounded native JSON transport as other runtime
+  // controls. The snapshot reconciler owns the result; never navigate, swap
+  // response HTML, follow redirects, or serialize the prompt form.
   async function settingsRequest(url, fields, signal) {
-    const source = $("#live-settings-transport"), endpoint = new URL(url, location.href);
-    if (!source || !window.htmx?.ajax || signal.aborted || endpoint.origin !== location.origin) throw new Error("Settings transport unavailable");
-    let value, failure, xhr;
-    const maxBytes = 4 * 1024 * 1024;
-    const abort = () => xhr?.abort();
-    const before = event => {
-      if (event.detail.elt !== source) return;
-      xhr = event.detail.xhr;
-      xhr.addEventListener("progress", event => { if (event.loaded > maxBytes) xhr.abort(); });
-      if (signal.aborted) { event.preventDefault(); xhr.abort(); }
-    };
-    source.addEventListener("htmx:beforeRequest", before);
+    const endpoint = new URL(url, location.href), controller = new AbortController();
+    if (endpoint.origin !== location.origin) throw new Error("Settings transport unavailable");
+    const abort = () => controller.abort();
+    if (signal.aborted) controller.abort();
     signal.addEventListener("abort", abort, {once: true});
+    const timer = setTimeout(abort, 15000);
     try {
-      await window.htmx.ajax("POST", endpoint.href, {
-        source, target: source, swap: "none", values: fields,
-        headers: {Accept: "application/json"},
-        handler: (_element, response) => {
-          const reply = response.xhr;
-          if (reply.status < 200 || reply.status >= 300) { failure = new Error("Settings request failed"); failure.status = reply.status; return; }
-          try {
-            if (signal.aborted || reply.responseURL !== endpoint.href || !/^application\/json(?:;|$)/i.test(reply.getResponseHeader("Content-Type") || "") || reply.responseText.length > maxBytes || new TextEncoder().encode(reply.responseText).length > maxBytes) throw new Error("Unverified settings response");
-            value = JSON.parse(reply.responseText);
-          } catch (error) { failure = error; }
-        }
+      const response = await fetch(endpoint.href, {
+        method: "POST", credentials: "same-origin", cache: "no-store", redirect: "error", signal: controller.signal,
+        headers: {"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "Accept": "application/json"},
+        body: new URLSearchParams(fields)
       });
-      if (failure) throw failure;
-      if (!value || signal.aborted) throw new Error("Settings outcome unavailable");
-      return value;
-    } finally {
-      source.removeEventListener("htmx:beforeRequest", before);
-      signal.removeEventListener("abort", abort);
-    }
+      if (!response.ok) { const error = new Error("Settings request failed"); error.status = response.status; throw error; }
+      if (response.url !== endpoint.href || !/^application\/json(?:;|$)/i.test(response.headers.get("Content-Type") || "")) throw new Error("Unverified settings response");
+      if (!response.body) throw new Error("Settings response unavailable");
+      const reader = response.body.getReader(), chunks = []; let size = 0;
+      try {
+        while (true) {
+          const {done, value} = await reader.read(); if (done) break;
+          size += value.byteLength;
+          if (size > 4 * 1024 * 1024) { controller.abort(); throw new Error("Settings response too large"); }
+          chunks.push(value);
+        }
+        const bytes = new Uint8Array(size); let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        const value = JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(bytes));
+        if (!value || typeof value !== "object" || signal.aborted) throw new Error("Settings outcome unavailable");
+        return value;
+      } finally { reader.releaseLock(); }
+    } finally { clearTimeout(timer); signal.removeEventListener("abort", abort); }
   }
   async function request(url, body, signal, timeout = 10000, maxBytes = 0) {
     const controller = new AbortController();
@@ -1307,7 +1305,7 @@
   function reloadWorkspace(project, session = "") {
     saveDraft();
     const location = projectLocation(project) + (session ? `&session=${encodeURIComponent(session)}` : "&live=1");
-    if (window.htmx) window.htmx.ajax("GET", location, {target: "#workspace", swap: "outerHTML"});
+    if (window.SnowNavigation) void window.SnowNavigation.visit(location, {history: "none"}).catch(() => liveError("Could not reload this workspace. Copy any unsent draft before reloading this page."));
     else liveError("Workspace navigation is unavailable. Copy any unsent draft before reloading this page.");
   }
   function projectLocation(project) { return `/?view=projects&project=${encodeURIComponent(project)}`; }
@@ -1397,27 +1395,26 @@
       if (await runtimeAction("close")) reloadWorkspace(project, session);
     } else if (button.matches("[data-permission]")) { await runtimeAction("permission", {request_id: button.dataset.requestId, decision: button.dataset.permission}); }
   });
-  async function registerProject(form, event) {
+  async function registerProject(form) {
     if (registeringProjects.has(form) || !form.isConnected) return;
-    if (!window.htmx?.ajax) { workspaceFlowError("Workspace registration is unavailable. Your draft is kept; copy it before reloading."); return; }
+    if (!window.SnowNavigation?.submit) { workspaceFlowError("Workspace registration is unavailable. Your draft is kept; copy it before reloading."); return; }
     // Registration returns redirected HTML, not a JSON admission receipt.
-    // Capture the existing csrf/path/name controls before any busy-state change.
-    const fields = new FormData(form);
+    // Capture the exact controls once and never replay an uncertain POST.
+    const fields = new URLSearchParams(new FormData(form));
     registeringProjects.add(form);
     try {
-      await window.htmx.ajax("POST", "/projects/add", {
-        source: form, event, values: fields, target: "#workspace", select: "#workspace", swap: "outerHTML", push: "true"
-      });
-    } catch (_) { /* Existing HTMX error events own feedback; never replay registration. */ }
-    finally { registeringProjects.delete(form); }
+      await window.SnowNavigation.submit(form.action, fields, {source: form, history: "push"});
+    } catch (error) {
+      if (error?.name !== "AbortError") workspaceFlowError("Registration outcome is unknown. Your draft is kept; review the workspace list before trying again.");
+    } finally { registeringProjects.delete(form); }
   }
-  // A capture-only registration owner also suppresses an obsolete SSR HTMX
-  // target listener. Other forms still reach their existing React/delegated owners.
+  // A capture-only registration owner prevents native submission when the
+  // first-party navigator is available. Other forms keep their existing owners.
   document.addEventListener("submit", event => {
     const form = event.target;
-    if (!(form instanceof HTMLFormElement) || form.id !== "add-project-form") return;
+    if (!(form instanceof HTMLFormElement) || form.id !== "add-project-form" || !window.SnowNavigation?.submit) return;
     event.preventDefault(); event.stopPropagation();
-    void registerProject(form, event);
+    void registerProject(form);
   }, {capture: true});
   document.addEventListener("submit", async event => {
     const form = event.target;
@@ -1446,7 +1443,8 @@
         // An admitted start may finish after navigation; retain its receipt but
         // never pull a newer workspace view back to the old form.
         if (!form.isConnected || workspace !== $("#workspace")) return;
-        await window.htmx.ajax("GET", projectLocation(snapshot.project_id) + "&live=1", {source: form, target: "#workspace", swap: "outerHTML"});
+        if (!window.SnowNavigation) throw new Error("Workspace navigation unavailable");
+        await window.SnowNavigation.visit(projectLocation(snapshot.project_id) + "&live=1", {source: form, history: "push"});
       } catch (_) {
         delete form.dataset.pending;
         if (form.isConnected && workspace === $("#workspace")) window.SnowWorkspace?.updateActivation({busy: false, error: "Could not confirm activation. No retry was queued. Refresh to check whether the runtime opened, or check the provider configuration in the terminal."});
@@ -1556,27 +1554,21 @@
   });
   narrow.addEventListener("change", () => { syncSidebarCollapse(); requestNav(false, false); const panel = $("#project-inspector"); if (panel && !panel.hidden) $("[data-inspector-toggle]", panel).click(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden && live && !live.subscription) { clearTimeout(pollTimer); pollTimer = setTimeout(startUpdates, 0); } });
-  document.body.addEventListener("htmx:beforeCleanupElement", event => {
-    // Retire only a committed replacement. beforeSwap can still be canceled by
-    // a later listener; destroying its React views there would blank a live owner.
-    if (event.detail.elt?.id === "workspace") { saveDraft(); disposeLivePanels(); window.SnowGoals?.dispose(); window.SnowVersions?.dispose(); window.SnowQueue?.dispose(); live?.controller.abort(); clearTimeout(pollTimer); folderRequest?.abort(); window.SnowProcesses?.dispose(); window.SnowInspection?.dispose(); window.SnowConversation?.dispose(); window.SnowMessages?.dispose(); window.SnowScroll?.dispose(); window.SnowWidth?.dispose(); window.SnowAttention?.dispose(); window.SnowLiveView?.dispose(); live = null; window.SnowWorkspace?.reset(); requestNav(false, false); }
+  document.addEventListener("snow:navigation-before-swap", event => {
+    if (event.detail?.target?.id === "workspace") { saveDraft(); disposeLivePanels(); window.SnowGoals?.dispose(); window.SnowVersions?.dispose(); window.SnowQueue?.dispose(); live?.controller.abort(); clearTimeout(pollTimer); folderRequest?.abort(); window.SnowProcesses?.dispose(); window.SnowInspection?.dispose(); window.SnowConversation?.dispose(); window.SnowMessages?.dispose(); window.SnowScroll?.dispose(); window.SnowWidth?.dispose(); window.SnowAttention?.dispose(); window.SnowLiveView?.dispose(); live = null; window.SnowWorkspace?.reset(); requestNav(false, false); }
   });
-  document.body.addEventListener("htmx:afterSwap", event => {
+  document.addEventListener("snow:navigation-after-swap", event => {
     syncThemeChoices();
-    if (event.detail.target?.id === "workspace") {
+    if (event.detail?.target?.id === "workspace") {
       navigation();
       if (narrow.matches || !$("#project-navigation")?.contains(document.activeElement)) $("#workspace-content")?.focus({preventScroll: true});
     }
     if ($("#connection-error")) $("#connection-error").hidden = true;
   });
-  for (const name of ["htmx:sendError", "htmx:timeout", "htmx:responseError"]) document.body.addEventListener(name, event => {
-    // Settings own an explicit unknown-outcome notice, not the navigation
-    // banner claiming nothing was sent and suggesting a retry.
-    if (event.detail?.elt?.id === "live-settings-transport") return;
-    if ($("#connection-error")) $("#connection-error").hidden = false;
+  document.addEventListener("snow:navigation-error", event => {
+    if (!event.detail?.aborted && $("#connection-error")) $("#connection-error").hidden = false;
   });
   window.addEventListener("pagehide", () => { pageAway = true; saveDraft(); disposeLivePanels(); window.SnowProcesses?.dispose(); window.SnowInspection?.dispose(); window.SnowGoals?.dispose(); window.SnowVersions?.dispose(); window.SnowQueue?.dispose(); live?.controller.abort(); clearTimeout(pollTimer); window.SnowMessages?.dispose(); window.SnowScroll?.dispose(); window.SnowWidth?.dispose(); window.SnowAttention?.dispose(); window.SnowConversation?.dispose(); window.SnowLiveView?.dispose(); live = null; });
-  document.body.addEventListener("htmx:historyRestore", navigation);
   document.addEventListener("snow:react-ready", navigation);
   window.addEventListener("pageshow", event => {
     if (!pageAway && !event.persisted) return;

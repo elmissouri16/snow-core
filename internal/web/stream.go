@@ -78,7 +78,7 @@ func (s *shell) runtimeEventsHandlerPolicy(policy streamPolicy) http.Handler {
 			http.Error(w, "Expected runtime instance required", http.StatusBadRequest)
 			return
 		}
-		cookie, _ := r.Cookie(sessionCookie) // Already authenticated above.
+		cookie, _ := r.Cookie(s.sessionCookieName()) // Already authenticated above.
 		release, ok := limiter.acquire(sha256.Sum256([]byte(cookie.Value)))
 		if !ok {
 			w.Header().Set("Retry-After", "5")

@@ -1,4 +1,4 @@
-// Production Go templates + assets, actual browser/HTMX, mocked public transport.
+// Production Go templates + assets, actual browser/native navigation, mocked public transport.
 // No manager, worker, provider, npm install, or external application requests.
 import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
@@ -130,7 +130,7 @@ try {
         return r.width > 0 && r.height > 0 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1 && (hit === node || node.contains(hit));
       };
       window.navigationRequests = [];
-      document.addEventListener('htmx:beforeRequest', event => navigationRequests.push(event.detail.requestConfig.path));
+      document.addEventListener('snow:navigation-start', event => navigationRequests.push(event.detail.requestConfig.path));
     `;
     for (const width of [1280, 320]) for (const height of [740, 240]) {
       const start = assertions, label = `${width}x${height}`;

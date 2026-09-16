@@ -43,11 +43,10 @@ async function run(width, theme, binary) {
         });
         manager.stderr.resume(); manager.once('error', () => reject(Error('Fixture launch failed'))); manager.once('exit', () => reject(Error('Fixture exited before ready')));
       });
-      for (const [name, scheme] of [['origin', 'https:'], ['httpOrigin', 'http:']]) {
-        const u = new URL(ready[name]); if (u.protocol !== scheme || u.hostname !== '127.0.0.1' || !u.port || u.port === '7331') throw Error('Invalid isolated fixture listener');
-      }
-      if (ready.directory !== directory || !/^[A-Za-z0-9+/]{43}=$/.test(ready.spki)) throw Error('Invalid private fixture scope');
-      chrome = spawn(chromeBinary(), ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-sync', '--no-first-run', '--no-default-browser-check', `--ignore-certificate-errors-spki-list=${ready.spki}`, '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', `--user-data-dir=${join(directory, 'chrome')}`, 'about:blank'], {stdio: ['ignore', 'ignore', 'pipe']});
+      const origin = new URL(ready.origin);
+      if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || !origin.port || origin.port === '7331') throw Error('Invalid isolated fixture listener');
+      if (ready.directory !== directory) throw Error('Invalid private fixture scope');
+      chrome = spawn(chromeBinary(), ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-sync', '--no-first-run', '--no-default-browser-check', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', `--user-data-dir=${join(directory, 'chrome')}`, 'about:blank'], {stdio: ['ignore', 'ignore', 'pipe']});
       chromeExited = exited(chrome); client = await connect(await debuggingURL(chrome));
       const result = await exercise({client, ready, width, theme, artifacts});
       console.log(JSON.stringify({width, height: 740, theme, ...result})); return result;

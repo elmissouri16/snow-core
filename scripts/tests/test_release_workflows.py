@@ -138,7 +138,6 @@ class ReleaseWorkflowTests(unittest.TestCase):
         build = step_block(workflow, "Build release binary")
         sources = (
             "internal/web/static/HARNESS-NOTICE.txt",
-            "internal/web/static/vendor/htmx-LICENSE",
             "internal/web/static/generated/THIRD-PARTY-NOTICES.txt",
         )
         for source in sources:

@@ -93,7 +93,7 @@ func (s *shell) registerBrowserAccessRoutes(mux *http.ServeMux) {
 }
 
 func (s *shell) browserInventory(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(sessionCookie)
+	cookie, err := r.Cookie(s.sessionCookieName())
 	if err != nil || len(cookie.Value) != 64 {
 		http.Error(w, "Pair this browser to continue", http.StatusUnauthorized)
 		return
@@ -152,7 +152,7 @@ func (s *shell) revokeBrowser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Confirm revoking this browser", http.StatusBadRequest)
 		return
 	}
-	cookie, _ := r.Cookie(sessionCookie)
+	cookie, _ := r.Cookie(s.sessionCookieName())
 	actorKey := sha256.Sum256([]byte(cookie.Value))
 	s.access.mu.Lock()
 	if !s.checkAccessLocked(r.Context()) {
@@ -180,7 +180,7 @@ func (s *shell) revokeBrowser(w http.ResponseWriter, r *http.Request) {
 		s.access.mu.Unlock()
 		signedOut := key == actorKey
 		if signedOut {
-			http.SetCookie(w, s.localCookie(sessionCookie, "", -1))
+			http.SetCookie(w, s.localCookie(s.sessionCookieName(), "", -1))
 			w.Header().Set("Clear-Site-Data", "\"cache\", \"storage\"")
 		}
 		w.Header().Set("Cache-Control", "no-store")

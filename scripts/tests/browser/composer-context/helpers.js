@@ -56,7 +56,7 @@
   };
   const update = fields => Object.assign(fixture.snapshot, fields, {revision: fixture.snapshot.revision + 1});
   const ready = () => wait(() => $("#live-connection")?.textContent === "Live", "live connection");
-  const swap = async fields => { update(fields || {}); await window.htmx.ajax(); await ready(); await tick(); };
+  const swap = async fields => { update(fields || {}); await window.testNavigate(); await ready(); await tick(); };
   const send = () => $("#live-composer").requestSubmit();
   const accept = async action => { update({status: "idle"}); latest(action).resolve(fixture.snapshot); await ready(); await tick(); };
   const files = (path = ".", entries = [

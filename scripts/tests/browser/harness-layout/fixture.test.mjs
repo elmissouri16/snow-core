@@ -7,7 +7,13 @@ const source = readFileSync(new URL('./fixture.js', import.meta.url), 'utf8');
 function fixture({roots = 1, snapshot = null, name = "home", groups = []} = {}) {
   const listeners = new Map();
   const window = {__harnessConfig: {name, snapshot}, addEventListener(type, fn) { listeners.set(type, fn); }, setTimeout};
-  const document = {querySelectorAll(selector) { if (selector === '[data-sidebar-project]') return groups; assert.equal(selector, '[data-browser-inventory]'); return Array(roots).fill({}); }};
+  const document = {
+    querySelector(selector) {
+      assert.equal(selector, '[data-react-page="shell"]');
+      return {dataset: {reactProps: JSON.stringify({projects: groups.map(group => ({id: group.dataset.sidebarProject})), sessions: [], project: ''})}};
+    },
+    querySelectorAll(selector) { if (selector === '[data-sidebar-project]') return groups; assert.equal(selector, '[data-browser-inventory]'); return Array(roots).fill({}); }
+  };
   vm.runInNewContext(source, {window, document, navigator: {}, localStorage: {setItem() {}}, location: {href: 'http://127.0.0.1:12345/home.html', origin: 'http://127.0.0.1:12345'}, structuredClone, URL, URLSearchParams, Response});
   return {state: window.harnessFixture, fetch: window.fetch, window, ready: () => listeners.get('DOMContentLoaded')?.()};
 }
@@ -134,39 +140,25 @@ test('unsupported runtime fixture refuses even known panel reads', async () => {
   for (const [action, fields] of publicReads) assert.equal((await f.fetch('/projects/00000000-0000-4000-8000-000000000001/' + action, postOptions({...scope, ...fields}))).status, 409);
 });
 
-test('layout HTMX discovery uses the same scoped public fixture as fetch', async () => {
+test('layout native discovery uses the same scoped public fixture as other requests', async () => {
   const f = fixture({name: 'chat', snapshot: {project_id: '00000000-0000-4000-8000-000000000001', instance_id: 'instance-one', session_id: 'session-one'}});
-  let fallbacks = 0;
-  f.window.htmx = {ajax: () => { fallbacks++; }};
-  f.ready();
   const url = 'http://127.0.0.1:12345/projects/00000000-0000-4000-8000-000000000001/runtime/choices';
-  const source = {};
-  let received;
-  const send = values => f.window.htmx.ajax('POST', url, {source, values, handler: (element, response) => {
-    assert.equal(element, source); received = response.xhr;
-  }});
-  await send({csrf: 'fixture-only-not-a-credential', instance_id: 'instance-one'});
-  assert.equal(received.status, 200);
-  assert.equal(received.responseURL, url);
-  assert.equal(received.getResponseHeader('Content-Type'), 'application/json');
-  assert.equal(JSON.parse(received.responseText).models.length, 30);
+  const send = values => f.fetch(url, postOptions(values));
+  let response = await send({csrf: 'fixture-only-not-a-credential', instance_id: 'instance-one'});
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Content-Type'), 'application/json');
+  assert.equal((await response.json()).models.length, 30);
   assert.equal(f.state.requests.length, 1);
-  await send({csrf: 'fixture-only-not-a-credential', instance_id: 'retired-instance'});
-  assert.equal(received.status, 409, 'adapter cannot bypass instance admission');
-  await f.window.htmx.ajax('GET', '/workspace', {});
-  assert.equal(fallbacks, 1, 'ordinary HTMX remains with its original owner');
+  response = await send({csrf: 'fixture-only-not-a-credential', instance_id: 'retired-instance'});
+  assert.equal(response.status, 409, 'native transport cannot bypass instance admission');
 });
 
-test('layout HTMX adapter preserves discovery failures and runtime read allowlist', async () => {
+test('layout native discovery preserves failures and runtime read allowlist', async () => {
   for (const name of ['model-unavailable', 'runtime-goals']) {
     const f = fixture({name, snapshot: {project_id: '00000000-0000-4000-8000-000000000001', instance_id: 'instance-one', session_id: 'session-one'}});
-    f.window.htmx = {ajax() { throw Error('unexpected network'); }};
-    f.ready();
-    let status;
-    await f.window.htmx.ajax('POST', 'http://127.0.0.1:12345/projects/00000000-0000-4000-8000-000000000001/runtime/choices', {
-      values: {csrf: 'fixture-only-not-a-credential', instance_id: 'instance-one'}, handler: (_, response) => { status = response.xhr.status; }
-    });
-    assert.equal(status, name === 'model-unavailable' ? 503 : 409);
+    const response = await f.fetch('http://127.0.0.1:12345/projects/00000000-0000-4000-8000-000000000001/runtime/choices',
+      postOptions({csrf: 'fixture-only-not-a-credential', instance_id: 'instance-one'}));
+    assert.equal(response.status, name === 'model-unavailable' ? 503 : 409);
     assert.equal(f.state.requests.length, 1);
   }
 });

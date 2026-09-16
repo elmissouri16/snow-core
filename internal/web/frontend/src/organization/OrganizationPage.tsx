@@ -15,7 +15,7 @@ function ActiveProject({ project, csrf }: { project: Project; csrf: string }) {
   const nameID = `organization-name-${project.id}`;
   return <li className="organization-item" id={`organization-active-${project.id}`}>
     <div className="organization-item-heading">
-      <a href={`/?view=organization&project=${project.id}`}><strong>{project.name}</strong></a>
+      <a href={`/?view=organization&project=${project.id}`} data-snow-navigation=""><strong>{project.name}</strong></a>
       {project.pinned && <Badge>Pinned</Badge>}
       {!project.available && <Badge>{project.state}</Badge>}
     </div>
@@ -72,7 +72,7 @@ function SessionRow({ session, project, csrf, offset, hidden }: {
   return <li className="organization-item" id={`organization-session-${project.id}-${session.id}`}
     data-organization-session="" data-archived={String(session.archived)} hidden={hidden}>
     <div className="organization-item-heading">
-      <a href={`/?view=projects&project=${project.id}&session=${session.id}`} data-organization-title="">
+      <a href={`/?view=projects&project=${project.id}&session=${session.id}`} data-snow-navigation="" data-organization-title="">
         <strong>{session.name || 'Untitled session'}</strong>
       </a>
       {session.pinned && <Badge>Pinned</Badge>}{session.archived && <Badge>Archived</Badge>}
@@ -127,7 +127,7 @@ function SessionCatalog({ project, sessions, offset, nextURL, csrf }: {
         csrf={csrf} offset={offset} hidden={!matches(session)} />)}
       {sessions.length === 0 && <li className="fine">No supported saved conversations on this page.</li>}
     </ul>
-    {next && <a className="button" href={next}>Next catalog page →</a>}
+    {next && <a className="button" href={next} data-snow-navigation="">Next catalog page →</a>}
   </>;
 }
 
@@ -139,7 +139,7 @@ export function OrganizationPage({ csrf, error, organization }: OrganizationProp
       <div><h1 id="organization-heading">Organize workspaces</h1>
         <p className="fine">Manager labels, pins and archives only. Nothing here starts an agent or deletes project files or saved conversations.</p>
       </div>
-      <a className="button" href="/?view=projects">Back to workspaces</a>
+      <a className="button" href="/?view=projects" data-snow-navigation="">Back to workspaces</a>
     </header>
     {error && <p className="error" role="alert">{error}</p>}
     {organization && <>
@@ -159,14 +159,14 @@ export function OrganizationPage({ csrf, error, organization }: OrganizationProp
             {organization.archived.map(project => <ArchivedProject key={project.id} project={project} csrf={csrf} />)}
             {organization.archived.length === 0 && <li className="fine">No archived registrations on this page.</li>}
           </ul>
-          {archivedNext && <a className="button" href={archivedNext}>Next archived registrations →</a>}
+          {archivedNext && <a className="button" href={archivedNext} data-snow-navigation="">Next archived registrations →</a>}
         </section>
       </div>
       {organization.project ? <section className="organization-card organization-sessions"
         aria-labelledby="organization-sessions-heading" data-organization-sessions="" data-organization-ready="true">
         <h2 id="organization-sessions-heading">Saved conversations · {organization.project.name}</h2>
         {organization.live ? <p className="notice">This workspace has a live conversation.{' '}
-          <a href={`/?view=projects&project=${organization.project.id}`}>Return to live work</a>{' '}
+          <a href={`/?view=projects&project=${organization.project.id}`} data-snow-navigation="">Return to live work</a>{' '}
           and close it before organizing saved conversations. Live work is never hidden by an archive.
         </p> : <SessionCatalog key={`${organization.project.id}:${organization.offset}`}
           project={organization.project} sessions={organization.sessions} offset={organization.offset}

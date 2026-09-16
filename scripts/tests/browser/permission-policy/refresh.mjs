@@ -38,12 +38,12 @@ export async function refreshChecks({state, evaluate, wait, click, navigate, wid
   await evaluate('refreshProbe.run=false');
   const m = await evaluate('({frames:refreshProbe.frames.length,stable:refreshProbe.frames.every(f=>Math.abs(f.y-refreshProbe.base.y)<1&&Math.abs(f.h-refreshProbe.base.height)<1&&Math.abs(f.scroll-refreshProbe.scroll)<1&&f.policy==="Ask"&&f.connection==="Live")})');
   check(m.frames>3 && m.stable, `All discovery frames preserve composer geometry, scroll and known labels: ${JSON.stringify(m)}`);
-  check(state.reads===reads && state.streamOpens===streams && state.requests.every(r=>r.path.endsWith('/choices')&&r.htmx==='true'), "Discovery uses real HTMX with no prompt, mutation, stream reconnect or extra snapshot GET");
+  check(state.reads===reads && state.streamOpens===streams && state.requests.every(r=>r.path.endsWith('/choices')&&r.accept==='application/json'), "Discovery uses bounded native JSON with no prompt, mutation, stream reconnect or extra snapshot GET");
   await evaluate('refreshProbe.content.scrollTop=0');
   await click('[data-model-id="model-0"]');
   await delay(100);
   await wait('document.querySelector("#live-model").textContent === "Model 00"', `model selection; requests=${JSON.stringify(state.requests)}; errors=${JSON.stringify(state.errors)}; ui=${await evaluate('JSON.stringify({label:document.querySelector("#live-model").textContent,error:document.querySelector("#live-error").textContent,unknown:!document.querySelector("#live-unknown").hidden})')}`);
-  check(state.requests.filter(r=>r.path.endsWith('/model')).length===1 && state.streamOpens===streams && state.reads===reads, "A retained model row invokes the current validated HTMX selection without reconnecting");
+  check(state.requests.filter(r=>r.path.endsWith('/model')).length===1 && state.streamOpens===streams && state.reads===reads, "A retained model row invokes the current validated native selection without reconnecting");
   state.next = 'model-success-only';
   await click('[data-model-menu]'); await click('[data-model-id="model-1"]');
   await wait('!document.querySelector("#live-unknown").hidden');

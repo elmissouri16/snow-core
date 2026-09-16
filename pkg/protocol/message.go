@@ -20,6 +20,9 @@ const (
 	RoleTool      Role = "tool_result"
 	RoleSystem    Role = "system" // rare; prefer context assembly
 	RoleCustom    Role = "custom" // extensions / harness notes
+	// RoleInternal is durable provider-only steering. Session public-history
+	// projections must omit it; provider adapters render it as user-role input.
+	RoleInternal Role = "internal"
 	// RoleAgent is an attributed collaboration mailbox message. Providers render
 	// it as a sealed compatibility envelope rather than an ordinary user prompt.
 	RoleAgent Role = "agent"
@@ -258,6 +261,10 @@ type Message struct {
 	Role      Role           `json:"role"`
 	Content   []ContentBlock `json:"content"`
 	Timestamp int64          `json:"ts"` // unix ms
+
+	// InternalContextSource identifies trusted host-generated provider-only
+	// steering. It is valid only with RoleInternal and is never public history.
+	InternalContextSource string `json:"internal_context_source,omitempty"`
 
 	// Assistant metadata
 	Provider   string     `json:"provider,omitempty"`

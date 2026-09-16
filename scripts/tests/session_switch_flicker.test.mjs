@@ -60,7 +60,7 @@ function flowHarness() {
   const document={documentElement:{dataset:{}},body:{addEventListener(){}},querySelector:selector=>nodes.get(selector),querySelectorAll:()=>[],addEventListener:(name,fn)=>events.set(name,fn)};
   // Opening is a React projection; the controller still owns which mounted
   // region may be uncovered, including a superseding navigation.
-  const window={htmx:{},SnowWorkspace:{
+  const window={SnowNavigation:{},SnowWorkspace:{
     updateDraft(){},
     updateOpening({visible}){if(!visible)nodes.delete("#workspace-opening");}
   },SnowShell:{navigation(open){events.get("snow:shell-command")?.({detail:{type:"navigation",open}});}}};

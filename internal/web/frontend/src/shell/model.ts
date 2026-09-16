@@ -9,7 +9,7 @@ export interface LiveSelection {
 }
 export interface ShellBootstrap {
   csrf: string; version: string; view: string; project: string; session: string;
-  hostSettingsEnabled: boolean; apiKeyEnabled: boolean; tls: boolean; pairingCode: string;
+  hostSettingsEnabled: boolean; networkProfile: 'local' | 'trusted-lan-http'; pairingCode: string;
   projects: ShellProject[]; sessions: SessionRow[]; live: LiveSelection | null;
 }
 export type ShellCommand = {type: 'theme'; theme: 'light' | 'dark'} | {type: 'collapse'; collapsed: boolean} | {type: 'navigation'; open: boolean};
@@ -54,11 +54,12 @@ export function validateShellBootstrap(value: unknown): ShellBootstrap {
     ids.add(id);
     return {id, name, path: text(row.path, 4096), available: flag(row.available), trustRemembered: flag(row.trustRemembered), skillsEnabled: flag(row.skillsEnabled), pinned: flag(row.pinned)};
   });
-  const project = text(data.project, 36), live = validateLive(data.live);
+  const project = text(data.project, 36), live = validateLive(data.live), networkProfile = text(data.networkProfile, 32);
   if (project && !ids.has(project) || live && (live.project !== project || !ids.has(live.project))) throw new Error('Invalid selected project');
+  if (networkProfile !== 'local' && networkProfile !== 'trusted-lan-http') throw new Error('Invalid network profile');
   return {csrf: text(data.csrf, 512), version: text(data.version, 128), view: text(data.view, 32), project,
     session: text(data.session, 256), projects, sessions: sessionRows(data.sessions), live,
-    hostSettingsEnabled: flag(data.hostSettingsEnabled), apiKeyEnabled: flag(data.apiKeyEnabled), tls: flag(data.tls), pairingCode: text(data.pairingCode, 128)};
+    hostSettingsEnabled: flag(data.hostSettingsEnabled), networkProfile, pairingCode: text(data.pairingCode, 128)};
 }
 export interface Inventory {
   project: string; instance: string; rows: SessionRow[]; available: boolean;

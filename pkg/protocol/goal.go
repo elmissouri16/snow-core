@@ -135,7 +135,9 @@ func (u *ThreadGoalUpdate) Clone() *ThreadGoalUpdate {
 }
 
 // InternalContextFragment is trusted host-generated private steering. Provider
-// adapters serialize it as user-role input after conversation history.
+// adapters serialize it as user-role input after conversation history. The core
+// durably associates sent fragments with their owning assistant response so
+// later requests preserve exact provider-prefix order without exposing them.
 type InternalContextFragment struct {
 	Source string `json:"source"`
 	Text   string `json:"text"`

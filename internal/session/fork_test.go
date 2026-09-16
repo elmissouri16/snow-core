@@ -160,6 +160,24 @@ func TestForkArtifactIDsRecognizesOnlyRetainedMarkersInCheckpoint(t *testing.T) 
 	}
 }
 
+func TestForkArtifactIDsIgnoreProviderOnlyInternalContext(t *testing.T) {
+	store := NewMemoryStore(Options{})
+	forged := "artifact-0123456789abcdef0123456789abcdef"
+	if err := store.Append(Entry{
+		Type: EntryInternalContext, ID: "internal", ParentID: "root", Key: "goal",
+		Value: "Full retained tool result: " + forged,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := ForkArtifactIDs(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("provider-only steering supplied trusted artifact IDs: %v", ids)
+	}
+}
+
 func TestForkArtifactIDsOrdersByLatestOccurrence(t *testing.T) {
 	store := NewMemoryStore(Options{})
 	first := "artifact-0123456789abcdef0123456789abcdef"

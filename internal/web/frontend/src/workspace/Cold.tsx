@@ -68,8 +68,6 @@ export function Activation({
         method="post"
         action={`/projects/${project.id}/runtime/open`}
         data-runtime-open
-        hx-push-url="true"
-        hx-params="none"
       >
         <input type="hidden" name="csrf" value={csrf} />
         {sessionID && (
@@ -228,10 +226,7 @@ export function ColdConversation(props: ColdProps & { history?: ReactNode }) {
           {recoveryURL && (
             <a
               href={recoveryURL}
-              hx-get={recoveryURL}
-              hx-target="#workspace"
-              hx-swap="outerHTML"
-              hx-push-url="true"
+              data-snow-navigation=""
             >
               Review the last opened saved conversation
             </a>
@@ -245,11 +240,7 @@ export function ColdConversation(props: ColdProps & { history?: ReactNode }) {
             <a
               className="button"
               href={nextURL}
-              hx-get={nextURL}
-              hx-target="#workspace"
-              hx-swap="outerHTML"
-              hx-push-url="true"
-              hx-sync="#project-navigation:replace"
+              data-snow-navigation=""
             >
               Next page →
             </a>

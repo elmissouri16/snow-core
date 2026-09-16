@@ -26,7 +26,7 @@
   const sidebarCurrent = (id, title) => {
     const row = $("[data-shell-live-session]"), link = row?.querySelector("a"), label = link?.querySelector("span");
     const currentRows = [...document.querySelectorAll('[data-shell-session]')].filter(node => !node.hidden && node.querySelector('a[aria-current="page"]'));
-    return row?.dataset.shellSession === id && currentRows.length === 1 && currentRows[0] === row && label?.textContent === title && label.title === title && new URL(link.getAttribute("href"), "http://fixture.invalid").searchParams.get("session") === id && link.getAttribute("hx-push-url") === link.getAttribute("href") && !link.hasAttribute("hx-get");
+    return row?.dataset.shellSession === id && currentRows.length === 1 && currentRows[0] === row && label?.textContent === title && label.title === title && new URL(link.getAttribute("href"), "http://fixture.invalid").searchParams.get("session") === id && link.hasAttribute("data-snow-navigation");
   };
   const load = async () => {
     menu("model");
@@ -206,17 +206,17 @@
     assert($("#live-send").disabled && $("#live-prompt").value === "Unsent first-session draft", "unknown prompt outcome retains draft but blocks duplicate send despite idle polls");
     $("#live-composer").dispatchEvent(new Event("submit", {bubbles: true, cancelable: true}));
     assert(posts("prompt").length === promptCount, "unknown-outcome guard blocks synthetic submit too");
-    await htmx.ajax();
+    await testNavigate();
     await wait(() => !$("[data-runtime-reviewed]").disabled);
-    assert(!$("#live-unknown").hidden && $("#live-send").disabled && $("#live-prompt").value === "Unsent first-session draft", "HTMX navigation preserves draft and unknown-outcome guard in memory");
+    assert(!$("#live-unknown").hidden && $("#live-send").disabled && $("#live-prompt").value === "Unsent first-session draft", "Native navigation preserves draft and unknown-outcome guard in memory");
     $("[data-runtime-reviewed]").click();
     assert(!$("#live-send").disabled && posts("prompt").length === promptCount, "explicit review unlocks sending without replaying prompt");
 
     menu("model");
     const disposedChoices = latest("choices"), beforeDisposal = posts("choices").length;
-    await htmx.ajax();
+    await testNavigate();
     await wait(() => !$("#live-send").disabled);
-    assert(posts("choices").length === beforeDisposal, "passive HTMX replacement does not repeat an abandoned discovery request");
+    assert(posts("choices").length === beforeDisposal, "passive native replacement does not repeat an abandoned discovery request");
     await load();
     disposedChoices.resolve({...fixture.choices, models: [{provider: "disposed-provider", id: "disposed-model", name: "Disposed result"}]});
     await tick(100);
@@ -280,10 +280,10 @@
     $("#project-inspector [data-inspector-toggle]").click();
     assert(!$(".conversation-pane").inert && $("#project-inspector").hidden && document.activeElement === $(".workspace-heading [data-inspector-toggle]"), "closing inspector restores conversation interaction and trigger focus");
     // Prior workflow dialogs must not steal focus from Settings. Run both close
-    // paths before and after a genuine production HTMX workspace lifecycle.
-    for (const lifecycle of ["initial", "after HTMX replacement"]) {
+    // paths before and after a genuine production native workspace lifecycle.
+    for (const lifecycle of ["initial", "after native replacement"]) {
       if (lifecycle !== "initial") {
-        await htmx.ajax();
+        await testNavigate();
         await wait(() => $("#live-connection").textContent === "Live" && !$("#live-send").disabled);
       }
       for (const dismiss of ["Close button", "native Escape"]) {

@@ -22,9 +22,8 @@ async function exportFixture(directory) {
   const urls = [];
   for (const name of ["workflow", "workflow-queue"]) {
   let html = await readFile(join(directory, name + ".html"), "utf8");
-  html = html.replace(/<script src="\/static\/vendor\/htmx[^>]*><\/script>/, "");
   html = html.replaceAll('"/static/', '"' + pathToFileURL(join(directory, "static")).href + '/');
-  // The fixture only replaces public transport and HTMX; all page markup and
+  // The fixture only replaces public transport; all page markup and
   // production script order are exported on this run, never copied by hand.
   html = html.replace("</body>", `<pre id="test-result" hidden></pre><script src="${new URL("../conversation-workflow/fixture.js", import.meta.url).href}"></script><script src="${new URL("helpers.js", import.meta.url).href}"></script><script src="${new URL("attachments.js", import.meta.url).href}"></script><script src="${new URL("mentions.js", import.meta.url).href}"></script><script src="${new URL("races.js", import.meta.url).href}"></script><script src="${new URL("recovery.js", import.meta.url).href}"></script><script src="${new URL("limits.js", import.meta.url).href}"></script><script src="${new URL("visuals.js", import.meta.url).href}"></script><script src="${new URL("thumbnails.js", import.meta.url).href}"></script><script defer src="${new URL("tests.js", import.meta.url).href}"></script></body>`);
   await writeFile(join(directory, name + ".html"), html, {mode: 0o600});

@@ -90,7 +90,7 @@ try {
       const rootView = view === 'host-settings' || view === 'browser-access' ? 'shell' : view;
       await wait(`document.querySelector('[data-react-page="${rootView}"]')?.dataset.reactMounted === 'true'`, `React committed ${view}`);
       await wait('document.querySelector("[data-react-page=shell]")?.dataset.reactMounted === "true" && !!document.querySelector("[data-settings-open]")', 'Production React shell committed');
-      await wait('!!window.htmx', 'Production HTMX initialized');
+      await wait('!!window.SnowNavigation', 'Production native navigation initialized');
     };
     const click = async selector => {
       const rect = await evaluate(`(() => {const e=document.querySelector(${JSON.stringify(selector)}); if(!e) throw Error('Missing click target'); e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
@@ -118,8 +118,8 @@ try {
       assert(mock.state.allErrors.length === 0, `Unexpected fixture requests across all scenarios: ${mock.state.allErrors.join('; ')}`);
       assert(exceptions.length === 0, `Uncaught browser errors: ${exceptions.join('\n')}`);
       assert(external.length === 0, `Unexpected external requests: ${external.join(', ')}`);
-      assert(scripts.includes('/static/generated/app.js') && scripts.includes('/static/vendor/htmx-2.0.10.min.js'), 'Shipped React module and HTMX present');
-      assert((shell.match(/<link rel="stylesheet"/g) || []).length === 26, 'Exact 26 production stylesheets retained in exported head order');
+      assert(scripts.includes('/static/generated/app.js') && scripts.includes('/static/app.js'), 'Shipped React module and first-party controller own navigation');
+      assert((shell.match(/<link rel="stylesheet"/g) || []).length === 25, 'Exact 25 production stylesheets retained in exported head order');
     });
     console.log(`${assertions} assertions executed; ${failures} failures across ${reports} React page scenarios.`);
     if (evidence) console.log(`Evidence: ${evidence}`);

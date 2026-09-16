@@ -19,7 +19,7 @@ browser dependencies do not enter core Go packages, the SDK or the TUI.
 | Path | Responsibility |
 |---|---|
 | `internal/web/frontend/src/` | React views, typed models and panel controllers |
-| `internal/web/frontend/src/main.tsx` | Page roots, HTMX cleanup/remount lifecycle, live-panel facade readiness |
+| `internal/web/frontend/src/main.tsx` | Page roots, native navigation cleanup/remount lifecycle, live-panel facade readiness |
 | `internal/web/frontend/vite.config.ts` | Browser build and standalone workbench configuration |
 | `internal/web/frontend/scripts/` | Typechecked build, runtime notices and read-only asset comparison |
 | `internal/web/static/generated/` | Checked-in production bundle and runtime notices; generated, not hand-edited |
@@ -121,16 +121,18 @@ popup geometry and keyboard focus. Cost formatting now belongs to the typed
 conversation model; the retired `costs.js` is no longer loaded or routed, while
 its stylesheet is retained. Go still owns
 public projection, document shells, empty mount hosts and non-React outer form
-metadata, with HTMX replacing ancestors through the existing navigation path.
-These are not competing legacy renderers to port wholesale into React. Shared
+metadata, with the first-party `SnowNavigation` controller replacing the bounded
+`#workspace` ancestor through the existing server-rendered fragment path. These
+are not competing legacy renderers to port wholesale into React. Shared
 menu hosts must not rewrite JSX-owned launcher attributes or reconcile their
 children. Merely bundling React does not transfer ownership of a view.
 
 Page roots are marked with `data-react-page`; live panels use explicit mount
-points and view facades. React owns descendants of a mounted root. Go/HTMX may
-replace its ancestor, but must not also render inside that React-owned subtree.
-`main.tsx` unmounts roots before real HTMX cleanup, remounts after swaps/history
-restoration and signals `snow:react-ready` for the classic controller. Keep
+points and view facades. React owns descendants of a mounted root. Go and the
+native navigator may replace its ancestor, but must not also render inside that
+React-owned subtree. `main.tsx` unmounts roots before a committed native
+replacement, remounts afterward and signals `snow:react-ready` for the classic
+controller. Keep
 bootstrap validation, detached-root disposal and safe failure presentation.
 
 React rendering does not become admission authority. The existing serial
@@ -155,6 +157,21 @@ without a second confirmation. Required transport fields remain unchanged;
 UI simplification is not removal of server checks or implicit consent grants.
 Retain necessary input dialogs and confirmations for active-history replacement,
 permanent deletion, interruption of work, permissions, trust and external access.
+
+`SnowNavigation` is the only in-document workspace replacement owner. It accepts
+same-origin GET destinations at `/` and the registration POST at `/projects/add`,
+sends `X-Snow-Navigation: workspace`, follows the registration redirect, bounds
+HTML to 8 MiB with fatal UTF-8 decoding, requires exactly one `#workspace`, and
+rejects non-HTML/error/cross-origin responses. A newer navigation aborts its older
+read. Before replacement it synchronously unmounts React roots and dispatches the
+imperative cleanup lifecycle; afterward it pushes or replaces URL history,
+remounts roots, and dispatches completion. Push navigation resets the document
+to the destination top (or fragment); each outgoing history entry stores bounded
+tab-local scroll coordinates, and Back/Forward refetches the URL before restoring
+that entry instead of caching DOM snapshots. Ordinary SSR links and registration
+forms retain browser `href`/`action` fallbacks when the module is unavailable;
+React-owned links run their guarded callback before the bubble-phase generic
+`data-snow-navigation` delegate.
 
 Explicit workspace navigation retires the tab's background sidebar reads before
 request dispatch. The server also preempts same-project sidebar catalog reads
@@ -190,7 +207,7 @@ migration run established these local baselines:
 
 | Command under `scripts/tests/browser/` | Executed scope |
 |---|---|
-| `react-pages/run.mjs` | 216 assertions, 30 page/settings/lifecycle scenarios |
+| `react-pages/run.mjs` | 202 assertions, 28 page/settings/lifecycle scenarios, including private-IP crypto fallback, push/reset, stored-scroll and hash traversal, rapid Back→Forward supersession, and failed-supersession URL/DOM repair |
 | `harness-layout/run.mjs` | All 2,058 reports: seven widths, dark/light, normal and short heights |
 | `conversation-workflow/run.mjs` | 1,736 assertions across 14 width/theme reports |
 | `message-edit/run.mjs` | 1,208 assertions across four width/theme reports |
@@ -212,8 +229,8 @@ row/root cancellation, Blob revocation and standalone saved-history remounts.
 It now also executes 52 parent-owned ColdWorkspace assertions at 320/1280:
 actual production page composition, retained Markdown/tool/copy state, immunity
 to standalone-facade disposal, held-read abort and Blob revocation on parent
-retirement, exact session-scope rejection, and canceled/committed real HTMX
-requests. Repeated pagehide/pageshow restoration is driven through the production
+retirement, exact session-scope rejection, and rejected/committed native
+workspace requests. Repeated pagehide/pageshow restoration is driven through the production
 listeners with synthetic lifecycle events; this is not proof of actual browser
 bfcache eligibility. The fixture supplies bounded public SSR/bootstrap data and
 raster responses; it does not run a manager, worker or provider.
@@ -307,7 +324,7 @@ native receipt must correlate the new objective/budget before clearing that draf
 Existing goal status/Details and exact-target Resume remain separate. Thinking
 is a native anchored level popover with immediate capability-derived selection;
 response summary/verbosity remain in its secondary dialog. Neither feature adds
-an agent loop, transport owner, automatic replay or HTMX navigation replacement.
+an agent loop, transport owner, automatic replay or alternate navigation replacement.
 
 The accepted native matrices pass: `manager-execution/run.mjs` **332 assertions /
 four reports**, `manager-runtime-controls/run.mjs` **396 / four**, and
@@ -377,5 +394,5 @@ gate and manual provider requirements, before publishing.
 
 Release cross-builds consume checked-in assets with Go only. The archive keeps
 its existing three files: `snow`, `README.md` and `LICENSE`. Packaging appends
-Harness, HTMX and generated runtime notices to the archive's copy of `LICENSE`,
+Harness and generated runtime notices to the archive's copy of `LICENSE`,
 without changing the repository license or adding a fourth archive file.

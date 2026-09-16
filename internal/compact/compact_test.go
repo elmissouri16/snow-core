@@ -69,6 +69,30 @@ func TestPlannerKeepsToolCallsWithResultsAcrossAutonomousTurns(t *testing.T) {
 	}
 }
 
+func TestPlannerCompactsCompletedGoalCyclesWithDurableInternalSteering(t *testing.T) {
+	messages := make([]protocol.Message, 0, 10)
+	parent := "root"
+	for i := range 3 {
+		internalID := fmtID(i) + "-internal"
+		messages = append(messages, protocol.Message{
+			ID: internalID, ParentID: parent, Role: protocol.RoleInternal, InternalContextSource: "goal",
+			Content: []protocol.ContentBlock{protocol.NewTextBlock("continue goal")},
+		})
+		callID := fmtID(i) + "-call"
+		assistant := protocol.NewAssistantMessage(fmtID(i)+"-assistant", internalID, "test", "model", []protocol.ContentBlock{{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"}}, protocol.StopToolUse, nil)
+		messages = append(messages, assistant)
+		result := protocol.NewToolResultMessage(fmtID(i)+"-result", assistant.ID, callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false)
+		messages = append(messages, result)
+		parent = result.ID
+	}
+	messages = append(messages, protocol.NewAssistantMessage("terminal", parent, "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("turn complete")}, protocol.StopStop, nil))
+
+	plan := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 2, AllowGoalToolCycles: true})
+	if plan.KeepFrom != 3 || plan.BoundaryID != "aid-result" || messages[plan.KeepFrom].Role != protocol.RoleInternal || !toolPairingBalancedAt(messages, plan.KeepFrom) {
+		t.Fatalf("durable-steering goal-cycle plan=%+v", plan)
+	}
+}
+
 func TestPlannerCompactsCompletedGoalCyclesAfterTerminalResponse(t *testing.T) {
 	messages := make([]protocol.Message, 0, 7)
 	for i := range 3 {

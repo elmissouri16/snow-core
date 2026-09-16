@@ -56,9 +56,9 @@ from sidebar inventories.
   Final totals are exactly **5 session intents, 2 inspection requests and 3
   navigation callbacks**, with no automatic replay or mutation.
 
-Current navigation anchors have `hx-push-url` and `hx-sync` **metadata only**.
-There is no `hx-get`, `hx-post` or competing HTMX descendant processing. The app
-owns activation/stop confirmation; these component tests do not replace it.
+Current navigation anchors retain their real `href` values and carry only the
+`data-snow-navigation` marker. The app's first-party navigator owns ancestor
+replacement; activation/stop confirmation remains with the existing controller.
 
 ### Grouped inventory (`grouped.mjs`)
 
@@ -76,9 +76,10 @@ The lifecycle expectations deliberately reflect the current React contract:
 - Explicit invalidation refreshes; collapse/reopen during a pending read does
   not create concurrent reads. Invalidation is the explicit superseding operation
   used to exercise out-of-order replies, including replies after abort.
-- Real ancestor replacement dispatches `htmx:beforeCleanupElement`, removes the
-  external host, creates **empty** replacement hosts, and dispatches
-  `htmx:afterSwap`. Cached rows/disclosures persist, but every expanded inventory
+- Real ancestor replacement unmounts React, dispatches
+  `snow:navigation-before-swap`, removes the external host, creates **empty**
+  replacement hosts, and dispatches `snow:navigation-after-swap`. Cached
+  rows/disclosures persist, but every expanded inventory
   is revalidated once (two, then three reads in this schedule). The retired
   script's zero-read root-cloning expectation is not current React behavior.
 - The 100-row paging control remains a hidden keyed element, not an absent node.
@@ -88,8 +89,9 @@ transport owner, and does not claim manager-backed navigation or layout parity.
 
 ## Exported production-page integration (`browser.mjs`)
 
-Exports the actual Go page and embedded assets, including real HTMX. It asserts
-that the page loads the generated React module and no retired shell scripts. A
+Exports the actual Go page and embedded assets, including the real native
+workspace navigator. It asserts that the page loads the generated React module
+and no retired shell scripts. A
 bounded loopback server serves only exported assets and an exact-project
 canonical URL alias; the existing harness-layout fixture mocks public runtime
 transport before scripts run. No fabricated other-project selected view is served.

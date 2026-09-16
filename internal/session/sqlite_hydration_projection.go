@@ -233,6 +233,8 @@ func knownHydrationEntryType(value []byte) EntryType {
 		return EntryCompaction
 	case bytes.Equal(value, []byte(EntryMeta)):
 		return EntryMeta
+	case bytes.Equal(value, []byte(EntryInternalContext)):
+		return EntryInternalContext
 	default:
 		return EntryType(string(value))
 	}
@@ -250,6 +252,8 @@ func knownHydrationRole(value []byte) protocol.Role {
 		return protocol.RoleSystem
 	case bytes.Equal(value, []byte(protocol.RoleCustom)):
 		return protocol.RoleCustom
+	case bytes.Equal(value, []byte(protocol.RoleInternal)):
+		return protocol.RoleInternal
 	case bytes.Equal(value, []byte(protocol.RoleAgent)):
 		return protocol.RoleAgent
 	default:

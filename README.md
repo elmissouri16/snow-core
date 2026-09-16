@@ -113,9 +113,19 @@ restarts; later visits show compact Start/Resume controls, never auto-start.
 Forget trust in Settings → Workspaces. This does not change tool permissions or
 CLI extension trust. After installing an updated build, restart the manager and
 its workers: reloading a browser does not update the running executable.
-The current source also adds browser inventory/targeted revocation, optional
-numeric-loopback TLS, runtime-free global/project defaults and local provider
-status, and HTTPS-only write-only API-key setup. Explicit current-session
+The current source also adds browser inventory/targeted revocation, runtime-free
+global/project defaults and local provider status. Provider login and API-key
+management stay on the Snow host rather than in the browser. Ordinary
+`snow --mode web` needs no networking setup:
+when a private host address is available, Snow automatically binds its first
+active private IPv4 address (or IPv6 ULA) on port 7331 and also binds
+`127.0.0.1:7331`. It prints both URLs; localhost safely redirects to the exact
+`http://<private-ip>:7331` browser origin. With no private address it serves
+numeric loopback directly. Pairing-code authentication remains required, but normal LAN traffic is
+plain HTTP and can be observed by other devices on that network; use this only on
+a trusted home/work LAN, never public Wi-Fi or the Internet. Snow has no Web
+Manager TLS, certificate, saved-network-profile, DNS, or trusted-proxy path and
+does not modify firewalls or routers. A private IP is not authentication. Explicit current-session
 reasoning, branch/detached-conversation forks and rename, manual compaction,
 native Steer (distinct from Queue next), and recorded-cost estimates reuse the
 existing worker. Durable host create/anonymous-HTTPS-clone operations retain
@@ -127,8 +137,11 @@ Native browser-access, runtime-control and host-control matrices have passed
 and conversation checks. These verify the bounded local source, not remote or
 live-provider compatibility, reusable CI or release readiness. Using an updated
 checkout requires a local build/install and manager/worker restart; verification
-does not update existing user processes. Remote access is not connected
-yet; both HTTP and optional HTTPS support direct numeric loopback only.
+does not update existing user processes. Public-Internet access remains unsupported.
+Automatic LAN HTTP is intentionally unencrypted and restricted to one assigned
+private interface. Encrypted Web Manager deployment was removed and is
+unsupported; broader real-device/network acceptance remains separate from
+loopback tests.
 
 ## Development
 

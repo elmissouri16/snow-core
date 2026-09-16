@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
@@ -14,6 +17,114 @@ import (
 )
 
 const testOrigin = "http://127.0.0.1:7331"
+
+type startupOutput chan string
+
+func (w startupOutput) Write(p []byte) (int, error) {
+	w <- string(p)
+	return len(p), nil
+}
+
+func TestTrustedLANRunActivatesLANAndLocalhost(t *testing.T) {
+	addresses, err := hostPrivateAddresses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(addresses) == 0 {
+		t.Skip("host has no assigned private address")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	output := make(startupOutput, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{Listen: netip.AddrPortFrom(addresses[0], 0).String(), Version: "test"}, output)
+	}()
+	var startup string
+	select {
+	case startup = <-output:
+	case err := <-done:
+		t.Fatalf("Run returned before startup: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for trusted-LAN startup")
+	}
+	var lanURL, localURL string
+	for line := range strings.SplitSeq(startup, "\n") {
+		if value, ok := strings.CutPrefix(line, "LAN URL: "); ok {
+			lanURL = value
+		}
+		if value, ok := strings.CutPrefix(line, "Local URL: "); ok {
+			localURL, _, _ = strings.Cut(value, " ")
+		}
+	}
+	if lanURL == "" || localURL == "" {
+		t.Fatalf("startup did not print both URLs: %q", startup)
+	}
+	client := &http.Client{
+		Transport:     &http.Transport{},
+		Timeout:       2 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	response, err := client.Get(localURL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusTemporaryRedirect || response.Header.Get("Location") != lanURL+"/healthz" {
+		t.Fatalf("localhost response = %d, %q", response.StatusCode, response.Header.Get("Location"))
+	}
+	response, err = client.Get(lanURL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || string(body) != "ok\n" {
+		t.Fatalf("LAN response = %d, %q, %v", response.StatusCode, body, err)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("trusted-LAN server did not stop")
+	}
+}
+
+func TestTrustedLANRunFailsClosedWhenLocalhostPortIsBusy(t *testing.T) {
+	addresses, err := hostPrivateAddresses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(addresses) == 0 {
+		t.Skip("host has no assigned private address")
+	}
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, port, err := net.SplitHostPort(busy.Addr().String())
+	if err != nil {
+		_ = busy.Close()
+		t.Fatal(err)
+	}
+	privateAddress := net.JoinHostPort(addresses[0].String(), port)
+	err = Run(t.Context(), Options{Listen: privateAddress, Version: "test"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "listen on localhost") {
+		_ = busy.Close()
+		t.Fatalf("Run error = %v", err)
+	}
+	if err := busy.Close(); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", privateAddress)
+	if err != nil {
+		t.Fatalf("private listener remained open after localhost failure: %v", err)
+	}
+	_ = listener.Close()
+}
 
 func testShell(t *testing.T) *shell {
 	t.Helper()
@@ -26,11 +137,17 @@ func testShell(t *testing.T) *shell {
 
 func request(t *testing.T, s *shell, method, path string, form url.Values, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
+	return requestFrom(t, s, "192.0.2.1:1234", method, path, form, cookies...)
+}
+
+func requestFrom(t *testing.T, s *shell, remoteAddr, method, path string, form url.Values, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
 	var body io.Reader
 	if form != nil {
 		body = strings.NewReader(form.Encode())
 	}
 	r := httptest.NewRequest(method, testOrigin+path, body)
+	r.RemoteAddr = remoteAddr
 	// Incoming server requests use origin form, not proxy absolute form.
 	r.URL.Scheme, r.URL.Host = "", ""
 	if method == http.MethodPost {
@@ -154,7 +271,7 @@ func TestPairingExpiryRateLimitAndBrowserExpiry(t *testing.T) {
 	s.now = func() time.Time { return start }
 	page := request(t, s, "GET", "/login", nil)
 	csrf := page.Result().Cookies()[0]
-	for range 20 {
+	for range maxPairingAttemptsPerSource {
 		w := request(t, s, "POST", "/login", url.Values{"csrf": {csrf.Value}, "code": {"wrong"}}, csrf)
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("invalid code = %d", w.Code)
@@ -163,6 +280,10 @@ func TestPairingExpiryRateLimitAndBrowserExpiry(t *testing.T) {
 	w := request(t, s, "POST", "/login", url.Values{"csrf": {csrf.Value}, "code": {s.initialCode}}, csrf)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("rate limit = %d", w.Code)
+	}
+	w = requestFrom(t, s, "192.0.2.2:1234", "POST", "/login", url.Values{"csrf": {csrf.Value}, "code": {s.initialCode}}, csrf)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("independent source blocked = %d", w.Code)
 	}
 	s.now = func() time.Time { return start.Add(31 * 24 * time.Hour) }
 	w = request(t, s, "POST", "/login", url.Values{"csrf": {csrf.Value}, "code": {s.initialCode}}, csrf)
@@ -175,6 +296,20 @@ func TestPairingExpiryRateLimitAndBrowserExpiry(t *testing.T) {
 	s.now = func() time.Time { return start.Add(31 * 24 * time.Hour) }
 	if w := request(t, s, "GET", "/", nil, cookie); w.Code != http.StatusSeeOther {
 		t.Fatalf("expired browser = %d", w.Code)
+	}
+}
+
+func TestPairingSourceWindowsStayBounded(t *testing.T) {
+	s := testShell(t)
+	start := s.now()
+	for i := range maxPairingSources + 25 {
+		now := start.Add(time.Duration(i) * time.Minute)
+		if !s.access.admitPairingAttempt(now, fmt.Sprintf("source-%d", i)) {
+			t.Fatal("fresh source was unexpectedly blocked")
+		}
+	}
+	if len(s.access.sourceAttempts) != maxPairingSources {
+		t.Fatalf("source limiter retained %d entries", len(s.access.sourceAttempts))
 	}
 }
 
@@ -215,26 +350,36 @@ func TestPairAnotherBrowserLogoutAndFreshShell(t *testing.T) {
 func TestFragmentsAssetsAndUnknownRoutes(t *testing.T) {
 	s := testShell(t)
 	cookie := pairBrowser(t, s, s.initialCode)
-	for _, restore := range []bool{false, true} {
+	for _, fragment := range []bool{false, true} {
 		r := httptest.NewRequest("GET", "/?view=projects", nil)
 		r.Host = "127.0.0.1:7331"
 		r.AddCookie(cookie)
-		r.Header.Set("HX-Request", "true")
-		if restore {
-			r.Header.Set("HX-History-Restore-Request", "true")
+		if fragment {
+			r.Header.Set(workspaceNavigationHeader, "workspace")
 		}
 		w := httptest.NewRecorder()
 		s.handler().ServeHTTP(w, r)
-		if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "<!doctype html>") != restore {
-			t.Fatalf("restore=%v response = %d", restore, w.Code)
+		if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "<!doctype html>") == fragment {
+			t.Fatalf("fragment=%v response = %d", fragment, w.Code)
+		}
+		if got := w.Header().Get("Vary"); got != workspaceNavigationHeader {
+			t.Fatalf("Vary = %q, want %q", got, workspaceNavigationHeader)
 		}
 	}
-	for _, path := range []string{"/static/app.css", "/static/app.js", "/static/vendor/htmx-2.0.10.min.js", "/healthz"} {
+	unauthorized := httptest.NewRequest("GET", "/?view=projects", nil)
+	unauthorized.Host = "127.0.0.1:7331"
+	unauthorized.Header.Set(workspaceNavigationHeader, "workspace")
+	unauthorizedResponse := httptest.NewRecorder()
+	s.handler().ServeHTTP(unauthorizedResponse, unauthorized)
+	if unauthorizedResponse.Code != http.StatusUnauthorized || unauthorizedResponse.Header().Get("Location") != "" {
+		t.Fatalf("unauthorized navigation = %d location %q", unauthorizedResponse.Code, unauthorizedResponse.Header().Get("Location"))
+	}
+	for _, path := range []string{"/static/app.css", "/static/app.js", "/static/generated/app.js", "/healthz"} {
 		if w := request(t, s, "GET", path, nil); w.Code != http.StatusOK {
 			t.Fatalf("public asset %s = %d", path, w.Code)
 		}
 	}
-	for _, path := range []string{"/static/", "/templates/pages.html", "/static/vendor/htmx-LICENSE", "/?view=unknown"} {
+	for _, path := range []string{"/static/", "/templates/pages.html", "/static/not-served.js", "/?view=unknown"} {
 		if w := request(t, s, "GET", path, nil, cookie); w.Code != http.StatusNotFound {
 			t.Fatalf("unknown %s = %d", path, w.Code)
 		}
@@ -242,7 +387,7 @@ func TestFragmentsAssetsAndUnknownRoutes(t *testing.T) {
 }
 
 func TestListenValidationAndCanceledStart(t *testing.T) {
-	for _, address := range []string{"0.0.0.0:7331", ":7331", "192.168.0.1:7331", "localhost:7331", "[::]:7331", "127.0.0.1:99999"} {
+	for _, address := range []string{"0.0.0.0:7331", ":7331", "localhost:7331", "[::]:7331", "127.0.0.1:99999"} {
 		if err := (Options{Listen: address}).Validate(); err == nil {
 			t.Errorf("accepted non-local/invalid address %s", address)
 		}

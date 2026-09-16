@@ -28,8 +28,9 @@ type workspaceCatalogFrontendProps struct {
 }
 
 type loginFrontendProps struct {
-	CSRF  string `json:"csrf"`
-	Error string `json:"error"`
+	CSRF           string `json:"csrf"`
+	Error          string `json:"error"`
+	NetworkProfile string `json:"networkProfile"`
 }
 
 type workspaceColdFrontendProps struct {
@@ -75,15 +76,15 @@ func workspaceCatalogReactProps(data pageData) (string, error) {
 	return marshalReactProps(workspaceCatalogFrontendProps{homeFrontendProps: projects, CSRF: data.CSRF, RegistryEnabled: data.RegistryEnabled, ProjectOperationsEnabled: data.ProjectOperationsEnabled})
 }
 
-func loginReactProps(csrf, publicError string) (string, error) {
-	return marshalReactProps(loginFrontendProps{CSRF: csrf, Error: publicError})
+func loginReactProps(csrf, publicError, networkProfile string) (string, error) {
+	return marshalReactProps(loginFrontendProps{CSRF: csrf, Error: publicError, NetworkProfile: cmp.Or(networkProfile, "local")})
 }
 
 func workspaceColdReactProps(data pageData) (string, error) {
 	if data.Project == nil || data.Live != nil {
 		return "", errors.New("React cold workspace requires an inactive project")
 	}
-	props := workspaceColdFrontendProps{CSRF: data.CSRF, Error: data.Error, Project: workspaceProjectProjection(*data.Project), SessionID: data.SessionID, SessionTitle: "Session", RuntimeEnabled: data.RuntimeEnabled, HasHistory: data.History != nil, NextURL: data.NextURL, RecoveryURL: data.RecoveryURL}
+	props := workspaceColdFrontendProps{CSRF: data.CSRF, Error: data.Error, NetworkProfile: cmp.Or(data.NetworkProfile, "local"), Project: workspaceProjectProjection(*data.Project), SessionID: data.SessionID, SessionTitle: "Session", RuntimeEnabled: data.RuntimeEnabled, HasHistory: data.History != nil, NextURL: data.NextURL, RecoveryURL: data.RecoveryURL}
 	if data.Sessions != nil {
 		if i := slices.IndexFunc(data.Sessions.Sessions, func(session SessionSummary) bool { return session.ID == data.SessionID }); i >= 0 {
 			props.SessionTitle = cmp.Or(data.Sessions.Sessions[i].Name, "Untitled session")

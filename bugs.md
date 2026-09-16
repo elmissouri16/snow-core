@@ -1,5 +1,58 @@
 # Known bugs
 
+## BUG-225: Automatic trusted-LAN mode initially disabled localhost access
+
+- **Status:** Resolved — dual-listener integration and race checks pass.
+- **Severity:** Medium
+- **Surface:** Ordinary `snow --mode web` on a host with a private LAN address
+- **Evidence:** The first zero-setup LAN implementation bound only the selected private address, so `http://127.0.0.1:7331` stopped working even though same-machine and same-LAN access are both required.
+- **Fix:** Trusted-LAN startup now binds the selected private address and `127.0.0.1` on the same port. Localhost accepts only exact-Host GET/HEAD requests and redirects them to the canonical LAN origin, preserving the existing single-origin Host/Origin/CSRF boundary. Offline startup still serves loopback directly.
+- **Verification:** `TestTrustedLANRunActivatesLANAndLocalhost` starts both real listeners on one ephemeral port, verifies the localhost redirect and direct LAN health response, and shuts both down; focused race tests pass.
+
+## BUG-224: Trusted-LAN HTTP initially reused HTTPS browser cookie names
+
+- **Status:** Resolved — transport-specific pairing/login coverage passes.
+- **Severity:** Medium
+- **Surface:** Web Manager browser authentication after migration from the subsequently removed HTTPS/profile implementation to private-IP HTTP
+- **Evidence:** The initial automatic trusted-LAN HTTP increment reused `snow_manager_local_session` and `snow_manager_local_pair_csrf`. A previously stored Secure cookie can conflict with a non-Secure replacement of the same name.
+- **Fix:** Trusted-LAN HTTP consistently uses distinct session and pairing-CSRF cookie names across login, browser inventory/revocation, rendering, logout, and streaming. Loopback names remain separate, and the unused HTTPS/profile stack was subsequently removed.
+- **Verification:** A focused integration test pairs and logs in over the trusted-LAN profile while an old Secure local cookie is present, then verifies that only non-Secure LAN-specific cookies are read, issued, and cleared.
+
+## BUG-223: Native browser owners assume private-IP HTTP exposes `crypto.randomUUID`
+
+- **Status:** Resolved — frontend tests, typecheck, production build, and native browser fallback pass.
+- **Severity:** Medium
+- **Surface:** Web Manager native steering and first-party navigation on automatic trusted-LAN HTTP
+- **Evidence:** Private-IP HTTP is not a browser secure context, and `crypto.randomUUID()` may be unavailable there. Steering originally created its request ID before its guarded request path, so submitting a draft could throw without sending it. The initial first-party navigation implementation later repeated that assumption while assigning the current history entry, which could fail the entire React/navigation module during page initialization.
+- **Fix:** Both owners prefer `randomUUID()` and otherwise construct an RFC 4122 version-4-shaped UUID from `crypto.getRandomValues()`, the Web Crypto primitive browsers expose to insecure contexts.
+- **Verification:** The focused steering unit test removes `randomUUID`, supplies deterministic `getRandomValues`, and verifies the version/variant UUID shape. The production React browser gate now also removes `Crypto.prototype.randomUUID`, mounts the page, and completes first-party navigation through the fallback; its complete run passes 202 assertions across 28 scenarios.
+
+## BUG-222: Web real-worker fixtures parse the pairing code by line number
+
+- **Status:** Resolved — the focused parser regression and previously failing real-worker compaction fixture pass.
+- **Severity:** Low
+- **Surface:** CLI Web Manager real-worker/browser test harnesses after startup diagnostics change
+- **Evidence:** After startup began printing a bounded private-IP notice, an otherwise unrelated `go test ./cmd/snow -skip '^TestWebProjectOperationsRealWorkerDeathRestartNoReplay$' -count=1` run failed real-worker fixtures with `fixture pairing did not issue a browser cookie`. Four fixture bootstrap paths assumed the pairing credential was always startup line 3, so they submitted the new address notice as the code. The isolated `TestWebCompactionRealWorkerProgressAndNextPrompt` reproduced the failure.
+- **Fix:** Parse the private startup frame for the exact `Pairing code (` line instead of a positional line. Keep the origin framing and credential suppression unchanged.
+- **Verification:** `TestFixturePairingCodeIgnoresAddressNotices` and the previously failing isolated real-worker compaction test pass. Broader package verification is recorded with the secure automatic-LAN increment.
+
+## BUG-221: Worker-loss project-operation fixture leaves fictional Git observable
+
+- **Status:** Open — reproduced again in the same `manager_death_false` cell during automatic trusted-LAN HTTP verification; unrelated to the network-profile change.
+- **Severity:** Medium
+- **Surface:** Web Manager real-worker project-operation cancellation fixture
+- **Evidence:** `go test ./...` failed `TestWebProjectOperationsRealWorkerDeathRestartNoReplay/manager_death_false` after the fixture killed its worker, reporting `fictional Git remained active after cancellation/worker loss`. An immediate isolated uncached rerun of that exact cell failed identically after its eight-second deadline. The assertion requires both an unchanged tick file and `kill(pid, 0)` returning `ESRCH`; the current evidence does not yet distinguish a still-running child from an exited but unreaped process. The latest full-suite rerun reproduced the same assertion while every other package passed.
+- **Follow-up:** Capture the fictional Git process state and process-group ownership after worker SIGKILL, then ensure worker-loss cleanup terminates and reaps the complete operation process group without replaying, registering, or adopting the uncertain clone. Preserve the tick and process-existence checks rather than extending the timeout or retrying away the failure.
+
+## BUG-220: Long goal prompts stop extending the ChatGPT cache prefix
+
+- **Status:** Resolved — exact-prefix, retry, resume/fork, compaction, provider-mapping, and public-history regressions pass.
+- **Severity:** Medium
+- **Surface:** ChatGPT/Codex prompt caching during Thread Goals and other recurring private steering
+- **Evidence:** The TUI correctly renders `cached_tokens / input_tokens`, but consecutive long-goal requests were shaped as `history, ephemeral steering` and then `history, new assistant/tool work, next steering`. OpenAI prompt caching requires an exact prefix, so reuse stopped at the history that preceded the first private suffix and the cached percentage declined as goal work accumulated. A focused Responses request reproduction found only the original history item shared where the next request should have extended the prior input.
+- **Fix:** Store every sent private steering fragment as a provider-only `internal_context` entry immediately before its owning assistant response. Provider context restores those entries as hidden `RoleInternal` inputs, so each successful request becomes an exact extension of the previous input/output sequence. Unchanged recurring fragments are sent once per high-level turn rather than once per provider/tool step, and are reasserted after compaction. Ordinary history and public RPC/web/TUI/SDK projections omit the entries; no-activity retries do not persist duplicates, internal text is excluded from compaction summaries and fork artifact trust scans, and compaction retains internal steering with the following assistant/tool cycle.
+- **Verification:** Focused session/provider/agent/compaction/RPC tests pass; `go test ./...`, `go vet ./...`, the affected race suite, all 70 Python maintenance tests, and `python3 scripts/check_benchmarks.py` pass. One full-suite run hit an unrelated `worker_unavailable` timing failure in `TestWebProjectOperationsRealCreateActualRoot`; the isolated uncached test and two subsequent full-suite runs pass.
+
 ## BUG-219: Native runtime-control fixture reads HTTP bodies before they finish
 
 - **Status:** Resolved — the final four-cell native runtime-control matrix passes all 404 assertions.
@@ -315,7 +368,9 @@
 
 ## BUG-175: Context popup wastes space on inspector padding and repeated explanations
 
-- **Status:** Resolved — compact summary, disclosure and no-op refresh behavior verified.
+- **Status:** Open — the compact presentation remains fixed, but the later React conversation owner regressed the verified no-op refresh behavior.
+- **Regression evidence:** The current permission-policy browser matrix consistently fails only the two no-op reconciliation assertions. Its probe observes three redundant `aria-busy="false"` attribute writes for identical/unrelated snapshots; a changed context value retains every `<dd>` and performs only the expected text mutation plus another redundant attribute write. `conversation/controller.tsx` unconditionally writes `aria-busy` and calls the React root render for every snapshot, while the stale probe still counts the former `SnowMenus.reconcile` path and therefore reports zero renders even for the legitimate keyed text patch. Neither file is part of the first-party navigation migration.
+- **Required follow-up:** Restore the displayed-telemetry signature/no-op guard in the React owner, conditionally write `aria-busy`, and make the browser probe assert retained node identity and exact DOM mutations rather than calls to the superseded vanilla renderer.
 - **Evidence:** The user's screenshot highlights an oversized unavailable-cost block and clipped explanatory footer. `telemetryContent` always renders two explanation blocks; global `dl > div` padding (14px per side) and borders accumulate with the popup's own 12px grid gap. Its refresh signature also includes unrelated session settings and model inventories.
 - **Remediation:** Use compact label/value rows, explicit Unknown rather than invented zero, and a Details/Back pane for accounting and approximation qualifications. Reset inherited spacing only within telemetry. Compare displayed telemetry independently of mutation state/inventories before reconciling; retain the shared menu lifetime and keyed DOM updates.
 - **Verification:** Native HTTP/SSE/browser matrix passes **1,664 assertions** across 320/1280 widths, 740/240 heights and dark/light. The screenshot's data produces a **182px desktop / 200px narrow** summary; short viewports retain bounded scrolling. Unchanged metrics and unrelated settings produce zero popup reconciliations or observed DOM mutations; changed values update text in retained nodes. Details/Back/Escape, unavailable versus verified-zero cost, tiny/large values, invalid currency, missing telemetry/window and no extra requests all pass. Conversation workflows pass **1,736 assertions**, layout smoke passes **2,612** (after BUG-176 fixture correction), 69 cost/frontend tests and 67 Python tests pass, and `go test ./...`, `go vet ./...`, benchmark guard, syntax/resource/diff checks pass. Initial telemetry-test setup incorrectly passed an unsupported helper option; changed it to deliver the fixture snapshot through SSE, then reran the full matrix. No general CPU/latency improvement is claimed beyond measured avoidance of menu work.
@@ -667,11 +722,23 @@ Verified on the current checkout with:
 
 ## BUG-009: Long automatic goals can become uncompactionable
 
-- **Status:** Resolved
+- **Status:** Reopened — recurrence reported; fix later
 - **Severity:** High
 - **Surface:** Automatic goal continuation and context compaction
-- **Observed:** User-provided TUI screenshot showing a blocked goal after 172
-  provider/tool steps
+- **Observed:** User-provided TUI screenshots showing blocked goals after 172
+  provider/tool steps and, after the verified fix, after 1,865 steps
+
+### Recurrence evidence (2026-09-16)
+
+A user-provided TUI screenshot shows the same automatic-compaction blocker after
+approximately 54.4 million tokens, 18 goal turns, and 1,865 steps:
+`goal auto-compaction: context threshold reached but no complete older turns are
+available to compact`. The affected Snow session is
+`1789498071676-n1htaery` (branch `main`; goal
+`goal-9bdeb55e1bb1bb3ad8f6572dd01bde9b`). This is evidence of a recurrence, not
+yet a deterministic reproduction; preserve the exact session history for later
+planner-boundary investigation. Do not treat the older resolution evidence below
+as verification of this newer failing history shape.
 
 ### Expected behavior
 
@@ -4278,11 +4345,12 @@ these packages. No release containing the initial scan implementation was made.
 
 ## BUG-133: New-conversation links navigate before the guarded workflow
 
-- **Status:** Resolved
-- **Surface:** Web sidebar New conversation links with actual HTMX listeners
-- **Evidence:** Direct production-browser checks reproduced a navigation GET at 1280/320px widths and 740/240px heights before the document-bubble guard ran. During work this dismissed the Stop/New confirmation; while disconnected it navigated instead of failing closed. No mutation POST was observed. Mocked shell routing alone did not reproduce target-level HTMX dispatch.
-- **Remediation:** Intercept current-project and global guarded New links in capture phase, before HTMX. Close an open mobile drawer through its existing presentation owner, then forward to the existing session workflow. Keep modifier-key and other-project browsing unchanged; do not duplicate switching authority.
-- **Verification:** `node scripts/tests/browser/workspace-actions/browser.mjs` passed 108 assertions across all four layouts after reproducing eight failing scenarios before the fix. Active New retains the real confirmation, Cancel sends nothing, disconnected New does not navigate, and removal remains explicitly unchecked. Twelve focused shell routing tests also passed.
+- **Status:** Resolved — native-navigation follow-up verified.
+- **Surface:** Web sidebar New conversation links and the generic workspace-link delegate
+- **Evidence:** Direct production-browser checks originally reproduced a navigation GET at 1280/320px widths and 740/240px heights before the document-bubble guard ran. During work this dismissed the Stop/New confirmation; while disconnected it navigated instead of failing closed. No mutation POST was observed. Mocked shell routing alone did not reproduce target-level third-party dispatch. After that runtime was removed, retaining the capture-phase workaround caused the inverse conflict: the generic first-party delegate intercepted every React link before guarded New, session-selection, and current-project inspector callbacks. The exported-page gate reproduced 12 failures.
+- **Remediation:** The historical third-party runtime required a capture-phase interception. The first-party navigator does not. Run the generic `data-snow-navigation` owner in document bubble phase, allowing React callbacks to prevent/stop ordinary clicks first; plain server-rendered links still reach the generic owner. Preserve modifier-key and native fallback behavior, close mobile navigation through its presentation owner, and do not duplicate switch or inspector authority.
+- **Native-history follow-up:** A pending Back navigation changes the address before its workspace response commits. If a marked link from the still-visible old DOM superseded that read and then failed, both requests could terminate while the destination URL remained over the old DOM. Native traversal now keys bounded scroll state to committed DOM/history-entry IDs and a terminal owner reloads whenever the current entry ID does not match the committed DOM ID. This does not reload an ordinary failed request whose URL and DOM still agree, a superseded request with a newer owner, or the intentional pairing redirect.
+- **Verification:** `node scripts/tests/browser/workspace-actions/browser.mjs` passes 108 assertions across all four layouts after reproducing the 12 native-migration failures. Active New retains the real confirmation, Cancel sends nothing, disconnected New does not navigate, current-project removal remains explicitly unchecked and presentation-only, and ordinary links still navigate. The production React gate passes 202 assertions across 28 scenarios, including rapid successful Back→Forward, stored/hash scroll restoration, and a held Back superseded by a failing stale-DOM link that must reconcile through an ordinary document load. The focused shell routing tests also pass.
 
 ## BUG-134: Width-handle wheel input does not scroll the transcript
 

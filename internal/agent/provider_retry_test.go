@@ -22,14 +22,16 @@ type retryStartupProvider struct {
 	failures   int
 	calls      int
 	retryAfter time.Duration
+	requests   []protocol.ChatRequest
 }
 
 func (*retryStartupProvider) ID() string                                           { return "retry-startup" }
 func (*retryStartupProvider) ListModels(context.Context) ([]protocol.Model, error) { return nil, nil }
-func (p *retryStartupProvider) Chat(ctx context.Context, _ protocol.ChatRequest) (protocol.EventStream, error) {
+func (p *retryStartupProvider) Chat(ctx context.Context, request protocol.ChatRequest) (protocol.EventStream, error) {
 	p.mu.Lock()
 	p.calls++
 	call := p.calls
+	p.requests = append(p.requests, request)
 	p.mu.Unlock()
 	if call <= p.failures {
 		return nil, &providerpkg.AdvisedError{Err: errors.New("temporary outage"), Advice: providerpkg.RetryAdvice{Kind: providerpkg.RetryTransient, RetryAfter: p.retryAfter}}
@@ -70,6 +72,44 @@ func TestProviderRetryRecoversRepeatedStartupFailuresAndEmitsNonterminalEvents(t
 	stats, err := a.RunStats()
 	if err != nil || stats != (session.AgentRunStats{Turns: 1, Steps: 1}) {
 		t.Fatalf("retry run stats=%+v err=%v, want one turn and one logical step", stats, err)
+	}
+}
+
+func TestInternalContextPersistsOnceAfterNoActivityRetry(t *testing.T) {
+	provider := &retryStartupProvider{failures: 1}
+	agent, store := setup(t, provider, nil, permission.ModeDeny)
+	request := protocol.ChatRequest{
+		Model: agent.Model(),
+		InternalContext: []protocol.InternalContextFragment{{Source: "goal", Text: "continue once"}},
+	}
+	if _, err := agent.streamTurnWithErrors(t.Context(), request, false); err == nil {
+		t.Fatal("expected startup failure")
+	}
+	context, err := store.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(context) != 0 {
+		t.Fatalf("failed no-activity request persisted context: %+v", context)
+	}
+	if _, err := agent.streamTurnWithErrors(t.Context(), request, false); err != nil {
+		t.Fatal(err)
+	}
+	context, err = store.ContextMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	internal := 0
+	for _, message := range context {
+		if message.Role == protocol.RoleInternal {
+			internal++
+		}
+	}
+	if internal != 1 {
+		t.Fatalf("persisted internal context messages=%d, want 1 after retry success", internal)
+	}
+	if len(provider.requests) != 2 || len(provider.requests[0].InternalContext) != 1 || len(provider.requests[1].InternalContext) != 1 {
+		t.Fatalf("retry requests=%+v", provider.requests)
 	}
 }
 

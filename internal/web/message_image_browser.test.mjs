@@ -11,11 +11,10 @@ import {chromeBinary, debuggingURL, connect} from "../../scripts/tests/browser/l
 
 const js = await readFile(new URL("./static/generated/app.js", import.meta.url), "utf8");
 const css = await readFile(new URL("./static/messages.css", import.meta.url), "utf8");
-const htmx = await readFile(new URL("./static/vendor/htmx-2.0.10.min.js", import.meta.url), "utf8");
 const coldProject = '00000000-0000-4000-8000-000000000001';
 const escapeHTML = value => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 function coldPage() {
-  const props = {csrf: 'fixture-csrf', error: '', project: {id: coldProject, name: 'Saved workspace', path: '/fixture', available: true, trusted: false, skillsEnabled: false}, sessionID: 'saved', sessionTitle: 'Saved conversation', runtimeEnabled: true, hasHistory: true, nextURL: '', recoveryMessage: '', recoveryURL: ''};
+  const props = {csrf: 'fixture-csrf', error: '', networkProfile: 'local', project: {id: coldProject, name: 'Saved workspace', path: '/fixture', available: true, trusted: false, skillsEnabled: false}, sessionID: 'saved', sessionTitle: 'Saved conversation', runtimeEnabled: true, hasHistory: true, nextURL: '', recoveryMessage: '', recoveryURL: ''};
   const text = '**Saved Markdown** <script>not executable</script>';
   const rows = ['cold-loaded', 'cold-held', 'cold-queued'].map(id => `<article class="catalog-message user-message" data-message-id="${id}" data-message-role="user"><div class="message-images"><div class="message-image" data-image-index="0" data-image-mime="image/png"><img class="message-image-preview" data-image-url="/projects/${coldProject}/sessions/saved/images/${id}/0" hidden></div></div><span class="message-source" hidden>${id}</span></article>`).join('');
   return `<div id="workspace"><div id="cold-root" data-react-page="workspace-cold" data-react-props="${escapeHTML(JSON.stringify(props))}"><section class="catalog-history" data-project="${coldProject}" data-session="saved"><div data-react-messages><article class="catalog-message" data-message-id="saved-text" data-message-role="assistant"><div class="message-body"><strong>Saved Markdown</strong> &lt;script&gt;not executable&lt;/script&gt;</div><span class="message-source" hidden>${escapeHTML(text)}</span><div class="message-tools"><details class="history-tool" data-history-tool-id="saved-tool" data-tool-name="read" data-status="completed" data-output-available="true"><pre class="activity-output">saved tool output</pre></details></div></article>${rows}</div></section></div></div>`;
@@ -57,12 +56,15 @@ test("native React thumbnails and parent-owned ColdWorkspace saved-history lifet
       res.end(`<!doctype html><style>:root{--text:#111;--muted:#555;--raised:#eee;--border:#ccc}*{box-sizing:border-box}${css}</style><div id="live-session" data-project="p" data-instance="i" data-session="s" data-runtime="true" data-message-edit-enabled="true"><div id="transcript" data-react-messages></div></div><script type="module" src="/static/generated/app.js"></script>`);
     } else if (req.url === '/cold') {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.end(`<!doctype html><style>${css}</style>${coldPage()}<script defer src="/static/vendor/htmx-2.0.10.min.js"></script><script type="module" src="/static/generated/app.js"></script>`);
-    } else if (req.url === '/cold-next') {
+      res.end(`<!doctype html><style>${css}</style>${coldPage()}<script type="module" src="/static/generated/app.js"></script>`);
+    } else if (req.url === '/?fixture=cancel') {
+      if (req.headers['x-snow-navigation'] !== 'workspace') { res.writeHead(400); res.end(); return; }
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.end('<p>Invalid fragment</p>');
+    } else if (req.url === '/?fixture=next') {
+      if (req.headers['x-snow-navigation'] !== 'workspace') { res.writeHead(400); res.end(); return; }
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.end('<div id="workspace"><p id="departed">Departed saved workspace</p></div>');
-    } else if (req.url === '/static/vendor/htmx-2.0.10.min.js') {
-      res.setHeader('Content-Type', 'text/javascript'); res.end(htmx);
     } else if (req.url === "/static/generated/app.js") {
       res.setHeader("Content-Type", "text/javascript; charset=utf-8"); res.end(js);
     } else if (req.url.startsWith("/projects/")) {
@@ -121,7 +123,7 @@ test("native React thumbnails and parent-owned ColdWorkspace saved-history lifet
       await client.send('Emulation.setDeviceMetricsOverride', {width, height: 900, deviceScaleFactor: 1, mobile: false}, sessionId);
       await client.send('Page.navigate', {url: origin + '/cold'}, sessionId);
       for (let n = 0; n < 150; n++) {
-        const ready = await client.send('Runtime.evaluate', {expression: 'window.SnowReactReady === true && !!window.htmx && document.querySelector("#cold-root")?.dataset.reactMounted === "true"', returnByValue: true}, sessionId);
+        const ready = await client.send('Runtime.evaluate', {expression: 'window.SnowReactReady === true && !!window.SnowNavigation && document.querySelector("#cold-root")?.dataset.reactMounted === "true"', returnByValue: true}, sessionId);
         if (ready.result.value) break;
         await delay(20);
       }
@@ -367,11 +369,9 @@ async function exerciseCold() {
   check((await status()).canceled.length === before.canceled.length && (await status()).active.some(url => url.includes('/cold-held/')), 'standalone disposal does not cancel the parent-held image read');
   check(await fetch(originalURL).then(response => response.ok), 'standalone disposal leaves the parent Blob URL alive');
   check(!parent.querySelector('[data-message-edit]:not([hidden]), [data-message-reuse]:not([hidden]), [data-message-regenerate]:not([hidden])'), 'saved history cannot acquire live mutation controls');
-  const cancel = event => { event.detail.shouldSwap = false; };
-  document.addEventListener('htmx:beforeSwap', cancel, {once: true});
-  await window.htmx.ajax('GET', '/cold-next', {target: '#workspace', swap: 'outerHTML'});
-  check(parent.isConnected && image() === originalImage && tool.open, 'canceled real HTMX navigation preserves the exact parent owner');
-  check((await status()).canceled.length === before.canceled.length, 'canceled swap does not retire the image read');
+  await window.SnowNavigation.visit('/?fixture=cancel', {history: 'none'}).then(() => { throw Error('invalid fragment accepted'); }, () => {});
+  check(parent.isConnected && image() === originalImage && tool.open, 'rejected native navigation preserves the exact parent owner');
+  check((await status()).canceled.length === before.canceled.length, 'rejected navigation does not retire the image read');
   // Exercise the production page lifecycle listeners, not a fabricated React root.
   window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}));
   await wait(async () => (await status()).canceled.length === before.canceled.length + 1);
@@ -379,7 +379,6 @@ async function exerciseCold() {
   check(await fetch(originalURL).then(() => false, () => true), 'parent pagehide revokes its Blob URL');
   const readsBeforeRestore = (await status()).requests.length;
   for (let n = 0; n < 3; n++) window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
-  document.dispatchEvent(new CustomEvent('htmx:historyRestore'));
   await wait(async () => image()?.closest('.message-image').dataset.imageState === 'loaded' && (await status()).active.some(url => url.includes('/cold-held/')));
   check(parent.querySelector('[data-message-id="saved-text"]')?._snowCopyText === savedRow._snowCopyText, 'same-host lifecycle restore retains the opaque public history projection');
   check(image() !== originalImage && image().src !== originalURL, 'restored parent obtains fresh image ownership');
@@ -387,12 +386,12 @@ async function exerciseCold() {
   check(parent.querySelectorAll('[data-react-saved-history]').length === 1 && !parent.querySelector('[data-react-messages]'), 'restoration never creates nested message roots');
   const restoredURL = image().src;
   let cleanedBeforeDetach = false;
-  document.addEventListener('htmx:beforeCleanupElement', event => {
-    if (event.detail.elt?.id === 'workspace') cleanedBeforeDetach = parent.isConnected && !parent.children.length;
+  document.addEventListener('snow:navigation-before-swap', event => {
+    if (event.detail.target?.id === 'workspace') cleanedBeforeDetach = parent.isConnected && !parent.children.length;
   }, {once: true});
-  await window.htmx.ajax('GET', '/cold-next', {target: '#workspace', swap: 'outerHTML'});
+  await window.SnowNavigation.visit('/?fixture=next', {history: 'none'});
   await wait(async () => (await status()).canceled.length === before.canceled.length + 2);
-  check(cleanedBeforeDetach && !parent.isConnected && !!document.querySelector('#departed'), 'real HTMX cleanup unmounts parent before detaching its ancestor');
+  check(cleanedBeforeDetach && !parent.isConnected && !!document.querySelector('#departed'), 'native cleanup unmounts parent before detaching its ancestor');
   check(await fetch(restoredURL).then(() => false, () => true), 'committed ancestor replacement revokes the restored Blob');
   check(!(await status()).requests.some(url => url.includes('/cold-queued/')), 'retired queued parent image is never fetched');
   const afterDeparture = (await status()).requests.length;
@@ -401,7 +400,7 @@ async function exerciseCold() {
   const props = JSON.parse(parent.dataset.reactProps); props.sessionID = 'different-session';
   parent.dataset.reactProps = JSON.stringify(props);
   document.querySelector('#workspace').append(parent);
-  document.dispatchEvent(new CustomEvent('htmx:afterSwap'));
+  window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
   check(parent.dataset.reactMounted === 'true' && !history() && !parent.querySelector('[data-message-id]'), 'changed session identity rejects the old same-host history projection');
   await new Promise(resolve => setTimeout(resolve, 60));
   check((await status()).requests.length === afterDeparture, 'scope mismatch never rereads old image routes');

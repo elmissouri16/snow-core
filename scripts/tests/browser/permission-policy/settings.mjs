@@ -1,4 +1,4 @@
-// Native HTMX/XHR + production SSE/DOM owners, against bounded HTTP snapshots.
+// Native fetch + production SSE/DOM owners, against bounded HTTP snapshots.
 import {setTimeout as delay} from "node:timers/promises";
 
 export async function settingsChecks({state, evaluate, wait, click, navigate, width, height, theme}) {
@@ -27,7 +27,7 @@ export async function settingsChecks({state, evaluate, wait, click, navigate, wi
     state.next = "hold";
     await select(mode);
     for (let i=0;i<100&&!state.held;i++) await delay(10);
-    check(modeRequests().length === count + 1 && modeRequests().at(-1)?.htmx === "true", "Mode selection sends exactly one real HTMX request with bounded fields");
+    check(modeRequests().length === count + 1 && modeRequests().at(-1)?.accept === "application/json", "Mode selection sends exactly one native JSON request with bounded fields");
     await assert('document.querySelector("#live-send").disabled && document.querySelector("[data-permission-policy-menu]").disabled', "Pending setting keeps competing mutations disabled");
     await assert(`document.querySelector('[data-mode-label]').textContent === ${JSON.stringify(mode === "plan" ? "Default" : "Plan Mode")}`, "Mode label waits for authoritative acknowledgement");
     await delay(120);
@@ -64,7 +64,7 @@ export async function settingsChecks({state, evaluate, wait, click, navigate, wi
   state.next = "lost";
   await select("plan");
   await wait('!document.querySelector("#live-unknown").hidden', `lost mode response; requests=${JSON.stringify(modeRequests())}`);
-  await assert('document.querySelector("#live-send").disabled', "Lost HTMX response retains explicit unknown-outcome review even if SSE saw acceptance");
+  await assert('document.querySelector("#live-send").disabled', "Lost native response retains explicit unknown-outcome review even if SSE saw acceptance");
   await delay(150);
   check(modeRequests().length === 1, "Accepted setting with a lost response is never replayed");
   await assert('document.querySelector("#connection-error").hidden', "Lost settings response never shows the workspace banner suggesting a retry");
@@ -75,7 +75,7 @@ export async function settingsChecks({state, evaluate, wait, click, navigate, wi
   if (!state.held) throw new Error("Replacement test has no held mode request");
   state.terminate("replaced");
   await wait('!document.querySelector("[data-runtime-reload]").hidden');
-  await assert('document.querySelector("#live-send").disabled && document.querySelector("[data-permission-policy-menu]").disabled', "Terminal SSE replacement immediately revokes controls during a pending HTMX setting");
+  await assert('document.querySelector("#live-send").disabled && document.querySelector("[data-permission-policy-menu]").disabled', "Terminal SSE replacement immediately revokes controls during a pending native setting");
   state.held("plan"); await delay(120);
   await assert('document.querySelector("[data-mode-label]").textContent === "Default" && document.querySelector("#live-send").disabled', "Late old-lifetime settings response cannot change the replacement UI or restore authority");
   check(modeRequests().length === 1, "Replacement never replays the retired settings request");

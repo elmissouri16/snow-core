@@ -16,7 +16,7 @@ export async function component(run) {
   const bundle = assets.get('/static/generated/app.js');
   console.log(`Production React module: ${bundle.length} bytes; sha256 ${createHash('sha256').update(bundle).digest('hex')}`);
   const bootstrap = {csrf: 'fixture-public-csrf', version: 'fixture', view: 'projects', project: ids[0], session: 'a1',
-    hostSettingsEnabled: false, apiKeyEnabled: false, tls: false, pairingCode: '', live: null,
+    hostSettingsEnabled: false, networkProfile: 'local', pairingCode: '', live: null,
     projects: ids.map((id, i) => ({id, name: ['Alpha', 'Beta', 'Gamma'][i], path: '/fixture/' + i, available: true, trustRemembered: false, skillsEnabled: false, pinned: false})),
     sessions: [{session_id: 'a1', name: 'First'}]};
   const setup = `
@@ -29,12 +29,12 @@ export async function component(run) {
       request.resolve(new Response(JSON.stringify({project_id:request.url.split('/')[2],instance_id:instance,sessions:rows,available:true,has_more:false,...extra}),{headers:{'Content-Type':'application/json'}}));};
     document.addEventListener('snow:session-new',e=>intents.push({type:'new',...e.detail}));
     document.addEventListener('snow:session-select',e=>intents.push({type:'select',...e.detail}));
-    document.addEventListener('snow:shell-navigate',e=>navigation.push({href:e.detail.href,source:e.detail.source,push:e.detail.source?.getAttribute('hx-push-url'),sync:e.detail.source?.getAttribute('hx-sync')}));
+    document.addEventListener('snow:shell-navigate',e=>navigation.push({href:e.detail.href,source:e.detail.source,native:e.detail.source?.hasAttribute('data-snow-navigation')}));
     document.addEventListener('snow:inspect-project',e=>inspections.push(e.detail));
     window.mountHost=()=>{ const host=document.createElement('main');host.id='workspace';host.dataset.project=bootstrap.project;host.dataset.session=bootstrap.session;
       host.innerHTML='<div id="shell-navigation-root"></div><div id="shell-react-root" data-react-page="shell"></div>';
       host.querySelector('[data-react-page]').dataset.reactProps=JSON.stringify(bootstrap);document.body.append(host); };
-    window.swap=()=>{const old=document.querySelector('#workspace');document.dispatchEvent(new CustomEvent('htmx:beforeCleanupElement',{detail:{elt:old}}));old.remove();mountHost();document.dispatchEvent(new Event('htmx:afterSwap'));};
+    window.swap=()=>{const old=document.querySelector('#workspace');window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));document.dispatchEvent(new CustomEvent('snow:navigation-before-swap',{detail:{target:old}}));old.remove();mountHost();window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));document.dispatchEvent(new CustomEvent('snow:navigation-after-swap',{detail:{target:document.querySelector('#workspace')}}));};
     window.$=s=>document.querySelector(s);window.group=i=>$('[data-sidebar-project="'+ids[i]+'"]');window.row=s=>$('[data-shell-session="'+s+'"]');
     window.newLink=i=>group(i).querySelector('[data-shell-project-new]');window.more=i=>group(i).querySelector('[data-shell-project-menu]');
     window.turns=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));

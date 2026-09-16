@@ -47,11 +47,12 @@ export function ShellPopup({controller: c, menu}: {controller: ShellController; 
       <div className="shell-workspace-menu-heading"><strong>{project.name}</strong><small>{project.path}</small></div>
       {[false, true].map(remove => {
         const href = projectURL(project.id, {inspect: 'project', ...(c.snapshot.bootstrap?.project === project.id && c.snapshot.bootstrap.session ? {session: c.snapshot.bootstrap.session} : {})}) + (remove ? '#remove-project' : '');
-        return <a key={String(remove)} className="snow-menu-row" role="menuitem" href={href} hx-push-url={href} hx-sync="#project-navigation:replace" onClick={event => {
+        return <a key={String(remove)} className="snow-menu-row" role="menuitem" href={href} data-snow-navigation="" onClick={event => {
           if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
           event.preventDefault(); event.stopPropagation(); if (!valid()) return;
+          const localInspector = document.getElementById('project-inspector')?.dataset.project === project.id;
           c.closeMenu(false);
-          if (document.getElementById('project-inspector')?.dataset.project === project.id) {
+          if (localInspector) {
             document.dispatchEvent(new CustomEvent('snow:inspect-project', {detail: {project: project.id, remove, trigger: menu.trigger}}));
           } else {
             c.navigation(false); void c.navigate(href, event.currentTarget);
@@ -61,12 +62,12 @@ export function ShellPopup({controller: c, menu}: {controller: ShellController; 
     </>}
     {menu.kind === 'workspace' && <>
       <span className="picker-heading">Workspaces</span>
-      {c.snapshot.bootstrap?.projects.map(project => <a key={project.id} className="snow-menu-row" role="menuitem" data-home-project={project.id} data-home-project-name={project.name} data-home-project-available={String(project.available)} href={projectURL(project.id)} hx-push-url={projectURL(project.id)} hx-sync="#project-navigation:replace" onClick={event => {
+      {c.snapshot.bootstrap?.projects.map(project => <a key={project.id} className="snow-menu-row" role="menuitem" data-home-project={project.id} data-home-project-name={project.name} data-home-project-available={String(project.available)} href={projectURL(project.id)} data-snow-navigation="" onClick={event => {
         if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
         event.preventDefault(); if (!valid()) return; c.closeMenu(false); void c.navigate(projectURL(project.id), event.currentTarget);
       }}><span title={`${project.name} · ${project.path}`}><strong>{project.name}</strong><small>{project.path}</small>{!project.available && <small>Folder unavailable</small>}</span></a>)}
       {!c.snapshot.bootstrap?.projects.length && <p className="fine">No workspaces registered yet.</p>}
-      <a className="snow-menu-row picker-add" role="menuitem" href="/?view=projects#add-project" hx-push-url="/?view=projects#add-project" hx-sync="#project-navigation:replace" onClick={event => {
+      <a className="snow-menu-row picker-add" role="menuitem" href="/?view=projects#add-project" data-snow-navigation="" onClick={event => {
         if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
         event.preventDefault(); if (!valid()) return; c.closeMenu(false); void c.navigate('/?view=projects#add-project', event.currentTarget);
       }}>Add workspace</a>

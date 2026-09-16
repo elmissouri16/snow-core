@@ -103,7 +103,7 @@ Pending-to-acknowledged identity changes may replace the image node while keepin
 the message row; unchanged streaming text must retain the current image node
 and Blob source. Saved SSR is captured once and replaced by React, not enhanced
 in place. The integrated suite now additionally runs 52 parent-composed
-ColdWorkspace assertions at 320/1280 through the production module: real HTMX
+ColdWorkspace assertions at 320/1280 through the production module: native navigation
 canceled/committed requests, standalone-facade isolation, parent cancellation and
 Blob revocation, exact scope rejection, and same-host remount idempotence. Page
 lifecycle events are synthetic calls to the production listeners, not a claim

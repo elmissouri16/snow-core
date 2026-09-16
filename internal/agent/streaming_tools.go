@@ -30,7 +30,7 @@ func (a *Agent) streamTurnWithErrors(ctx context.Context, req protocol.ChatReque
 	stream, err := provider.Chat(ctx, req)
 	if err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-			if perr := a.persistAssistant(asstID, parent, nil, protocol.StopAborted, nil, ""); perr != nil {
+			if perr := a.persistAssistant(asstID, parent, nil, protocol.StopAborted, nil, "", req.InternalContext); perr != nil {
 				return protocol.StopAborted, perr
 			}
 			a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
@@ -70,7 +70,7 @@ streamLoop:
 				stop = protocol.StopAborted
 				collector.Interrupt()
 				content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
-				if perr := a.persistAssistant(asstID, parent, content, stop, usage, ""); perr != nil {
+				if perr := a.persistAssistant(asstID, parent, content, stop, usage, "", req.InternalContext); perr != nil {
 					return protocol.StopAborted, perr
 				}
 				a.publish(protocol.AgentEvent{Type: protocol.EvAborted})
@@ -83,7 +83,7 @@ streamLoop:
 			collector.Interrupt()
 			content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
 			if activity {
-				if perr := a.persistAssistant(asstID, parent, content, stop, usage, err.Error()); perr != nil {
+				if perr := a.persistAssistant(asstID, parent, content, stop, usage, err.Error(), req.InternalContext); perr != nil {
 					return protocol.StopError, perr
 				}
 			}
@@ -184,7 +184,7 @@ streamLoop:
 			collector.Interrupt()
 			content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
 			if activity {
-				if perr := a.persistAssistant(asstID, parent, content, stop, usage, errMsg); perr != nil {
+				if perr := a.persistAssistant(asstID, parent, content, stop, usage, errMsg, req.InternalContext); perr != nil {
 					return protocol.StopError, perr
 				}
 			}
@@ -202,7 +202,7 @@ streamLoop:
 		protocolErr := fmt.Errorf("provider emitted invalid terminal stop reason %q", stop)
 		collector.Interrupt()
 		content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
-		if perr := a.persistAssistant(asstID, parent, content, protocol.StopError, usage, protocolErr.Error()); perr != nil {
+		if perr := a.persistAssistant(asstID, parent, content, protocol.StopError, usage, protocolErr.Error(), req.InternalContext); perr != nil {
 			return protocol.StopError, perr
 		}
 		if publishErrors {
@@ -220,7 +220,7 @@ streamLoop:
 		if stop == protocol.StopError {
 			errMsg = "provider stopped with error"
 		}
-		if perr := a.persistAssistant(asstID, parent, content, stop, usage, errMsg); perr != nil {
+		if perr := a.persistAssistant(asstID, parent, content, stop, usage, errMsg, req.InternalContext); perr != nil {
 			return stop, perr
 		}
 		if stop == protocol.StopAborted {
@@ -261,7 +261,7 @@ streamLoop:
 	if protocolErr != nil {
 		collector.Interrupt()
 		content = assistantResponseContentWithProviderData(thinkingBuf.String(), providerData, collector.Blocks())
-		if perr := a.persistAssistant(asstID, parent, content, protocol.StopError, usage, protocolErr.Error()); perr != nil {
+		if perr := a.persistAssistant(asstID, parent, content, protocol.StopError, usage, protocolErr.Error(), req.InternalContext); perr != nil {
 			return protocol.StopError, perr
 		}
 		if publishErrors {
@@ -298,7 +298,7 @@ streamLoop:
 			content = append(content, persisted)
 		}
 	}
-	if err := a.persistAssistant(asstID, parent, content, persistedStop, usage, ""); err != nil {
+	if err := a.persistAssistant(asstID, parent, content, persistedStop, usage, "", req.InternalContext); err != nil {
 		return persistedStop, err
 	}
 	collector.PublishCompleted()
@@ -351,6 +351,9 @@ func estimateRequestTokensWithSchemaBytes(messages []protocol.Message, system st
 	bytes := len(system) + schemaBytes
 	for _, message := range messages {
 		bytes += len(message.Role) + len(message.ToolName) + len(message.ToolCallID)
+		if message.Role == protocol.RoleInternal {
+			bytes += len(message.InternalContextSource) + len("<snow_internal_context source=\"\">\n\n</snow_internal_context>")
+		}
 		for _, block := range message.Content {
 			bytes += len(block.Text) + len(block.Arguments) + len(block.Data) + len(block.Name) + len(block.ToolCallID)
 		}
@@ -373,21 +376,50 @@ func contextTokensForCompaction(usage protocol.Usage) int {
 
 func (a *Agent) persistAbortedBoundary() error {
 	parent := a.opts.Session.BranchTip()
-	return a.persistAssistant(newID(), parent, nil, protocol.StopAborted, nil, "")
+	return a.persistAssistant(newID(), parent, nil, protocol.StopAborted, nil, "", nil)
 }
 
-func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBlock, stop protocol.StopReason, usage *protocol.Usage, errMsg string) error {
-	msg := protocol.NewAssistantMessage(id, parent, a.Model().Provider, a.Model().ID, content, stop, usage)
+func (a *Agent) persistAssistant(id, parent string, content []protocol.ContentBlock, stop protocol.StopReason, usage *protocol.Usage, errMsg string, internalContext []protocol.InternalContextFragment) error {
+	entries := make([]session.Entry, 0, len(internalContext)+1)
+	nextParent := parent
+	for _, fragment := range internalContext {
+		if err := fragment.Validate(); err != nil {
+			return fmt.Errorf("agent: persist internal context: %w", err)
+		}
+		contextID := newID()
+		entries = append(entries, session.Entry{
+			Type:     session.EntryInternalContext,
+			ID:       contextID,
+			ParentID: nextParent,
+			Key:      fragment.Source,
+			Value:    fragment.Text,
+		})
+		nextParent = contextID
+	}
+	msg := protocol.NewAssistantMessage(id, nextParent, a.Model().Provider, a.Model().ID, content, stop, usage)
 	if errMsg != "" {
 		msg.Error = errMsg
 	}
-	if err := a.opts.Session.Append(session.Entry{
+	entries = append(entries, session.Entry{
 		Type:     session.EntryMessage,
 		ID:       id,
-		ParentID: parent,
+		ParentID: nextParent,
 		Message:  &msg,
-	}); err != nil {
-		return fmt.Errorf("agent: persist assistant: %w", err)
+	})
+	var persistErr error
+	if len(entries) == 1 {
+		persistErr = a.opts.Session.Append(entries[0])
+	} else if batch, ok := a.opts.Session.(session.BatchStore); ok {
+		persistErr = batch.AppendBatch(entries)
+	} else {
+		for _, entry := range entries {
+			if persistErr = a.opts.Session.Append(entry); persistErr != nil {
+				break
+			}
+		}
+	}
+	if persistErr != nil {
+		return fmt.Errorf("agent: persist assistant: %w", persistErr)
 	}
 	a.queueControlReply(msg)
 	if usage != nil {

@@ -25,7 +25,7 @@ function fixture(draft = initialDraft()) {
     const prompt = nodes.get('#workspace-prompt');
     if (prompt && 'workspaceEnabled' in value) prompt.disabled = !value.workspaceEnabled;
     if (prompt && 'workspaceText' in value) prompt.value = value.workspaceText;
-  }}, htmx: {ajax: (...args) => { actions.push(args); throw new Error('Deletion event must not navigate or send'); }}};
+  }}, SnowNavigation: {visit: (...args) => { actions.push(args); throw new Error('Deletion event must not navigate or send'); }}};
   const context = vm.createContext({document, window, matchMedia: () => ({}), localStorage: {getItem() {}},
     Element: class {}, TextEncoder, URL, encodeURIComponent,
     projectLocation: project => `/?view=projects&project=${encodeURIComponent(project)}`});

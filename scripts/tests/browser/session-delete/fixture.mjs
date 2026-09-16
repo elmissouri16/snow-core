@@ -31,11 +31,12 @@ export function installFixture() {
   if (config.get('activeField') === 'number') inventories.a.active_session_id = 1;
   if (config.get('available') === 'false') inventories.a.available = false;
   const bootstrap = {csrf: 'fixture-csrf-not-a-secret', version: 'fixture', view: 'projects', project: projects.a,
-    session: root.dataset.session, hostSettingsEnabled: false, apiKeyEnabled: false, tls: false, pairingCode: '',
+    session: root.dataset.session, hostSettingsEnabled: false, networkProfile: 'local', pairingCode: '',
     projects: Object.entries(projects).map(([name, id]) => ({id, name: `Workspace ${name}`, path: `/fictional/${name}`, available: true, trustRemembered: false, skillsEnabled: false, pinned: false})),
     sessions: [], live: instance ? {project: projects.a, session: 'active', instance, title: 'Active conversation', renameAvailable: true, renameDisabled: false, newDisabled: false} : null};
   document.querySelector('[data-react-page="shell"]').dataset.reactProps = JSON.stringify(bootstrap);
   const requests = [], pending = [], navigation = [], events = [], violations = [], renames = [];
+  const browserFetch = window.fetch.bind(window);
   const heldProjects = new Set(), inventoryPending = [];
   const nativeSetTimeout = window.setTimeout.bind(window), nativeClearTimeout = window.clearTimeout.bind(window);
   const deadlines = new Map(); let timerID = -1;
@@ -47,6 +48,7 @@ export function installFixture() {
   const violation = message => { violations.push(message); throw new Error(message); };
   window.fetch = (input, options = {}) => {
     const url = new URL(String(input), location.origin), method = options.method || 'GET';
+    if (config.get('navigation') === 'native' && options.headers?.['X-Snow-Navigation'] === 'workspace') return browserFetch(input, options);
     const request = {url: url.pathname + url.search, method, credentials: options.credentials,
       headers: options.headers, body: String(options.body ?? ''), aborted: false};
     requests.push(request);
@@ -70,17 +72,18 @@ export function installFixture() {
       options.signal.addEventListener('abort', () => { request.aborted = true; reject(new DOMException('Controlled timeout', 'AbortError')); }, {once: true});
     });
   };
-  const nativeHTMX = config.get('htmx') === 'native' ? window.htmx : null;
-  const nativeAjax = nativeHTMX?.ajax.bind(nativeHTMX);
-  window.htmx = nativeHTMX || {process() {}};
-  window.htmx.ajax = async (method, url, options) => {
-    navigation.push({method, url, target: options.target, swap: options.swap,
-      source: options.source?.closest('[data-sidebar-project]')?.dataset.sidebarProject || options.source?.id,
-      push: options.source?.getAttribute('hx-push-url'), sync: options.source?.closest('[hx-sync]')?.getAttribute('hx-sync')});
-    if (method !== 'GET' || !/^\/\?view=projects&project=00000000-0000-4000-8000-00000000000[12]&new=1$/.test(url)) violation('Unexpected navigation: ' + method + ' ' + url);
-    if (nativeAjax) return nativeAjax(method, url, options);
+  const installNavigationRecorder = () => {
+    const native = window.SnowNavigation;
+    window.SnowNavigation = {...native, visit: async (url, options = {}) => {
+      navigation.push({method: 'GET', url,
+        source: options.source?.closest('[data-sidebar-project]')?.dataset.sidebarProject || options.source?.id,
+        history: options.history});
+      if (!/^\/\?view=projects&project=00000000-0000-4000-8000-00000000000[12]&new=1$/.test(url)) violation('Unexpected navigation: GET ' + url);
+      if (config.get('navigation') === 'native') return native.visit(url, options);
+    }};
   };
   document.addEventListener('snow:react-ready', async () => {
+    installNavigationRecorder();
     window.SnowConversation = {rename: trigger => renames.push(trigger)};
     const other = [...document.querySelectorAll('[data-sidebar-project]')].find(row => row.dataset.sidebarProject === projects.b);
     other?.querySelector('[data-workspace-toggle]')?.click();
@@ -117,9 +120,11 @@ export function installFixture() {
         props.live = null; next.querySelector('#live-session')?.remove();
       }
       shellRoot.dataset.reactProps = JSON.stringify(props);
-      old.dispatchEvent(new CustomEvent('htmx:beforeCleanupElement', {bubbles: true, detail: {elt: old}}));
+      window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}));
+      document.dispatchEvent(new CustomEvent('snow:navigation-before-swap', {detail: {target: old, source: null, requestConfig: {path: '/', method: 'GET'}}}));
       old.replaceWith(next);
-      next.dispatchEvent(new CustomEvent('htmx:afterSwap', {bubbles: true, detail: {elt: next, target: next}}));
+      window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+      document.dispatchEvent(new CustomEvent('snow:navigation-after-swap', {detail: {target: next, source: null, requestConfig: {path: '/', method: 'GET'}}}));
       await this.idle();
     },
     holdInventory: project => heldProjects.add(project),
@@ -157,6 +162,6 @@ export function installFixture() {
   };
 }
 
-export function fixtureHTML(css, source, htmx, appPrefix) {
-  return `<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="htmx-config" content='{"historyCacheSize":0,"allowScriptTags":false,"includeIndicatorStyles":false}'>${css.map(path => `<link rel="stylesheet" href="${path}">`).join('')}<title>Fictional React deletion component fixture</title></head><body><input type="hidden" name="csrf" value="fixture-csrf-not-a-secret"><div id="workspace" class="app-layout" data-project="00000000-0000-4000-8000-000000000001" data-session="saved-two"><div id="shell-navigation-root"></div><div id="shell-react-root" data-react-page="shell"></div><main class="workspace" id="workspace-content"><textarea id="fixture-draft">Unrelated unsent draft</textarea></main></div><script>${htmx}</script><script>(${installFixture.toString()})();</script><script>${source}</script><script>${appPrefix}</script><script type="module" src="/static/generated/app.js"></script></body></html>`;
+export function fixtureHTML(css, source, appPrefix) {
+  return `<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${css.map(path => `<link rel="stylesheet" href="${path}">`).join('')}<title>Fictional React deletion component fixture</title></head><body><input type="hidden" name="csrf" value="fixture-csrf-not-a-secret"><div id="workspace" class="app-layout" data-project="00000000-0000-4000-8000-000000000001" data-session="saved-two"><div id="shell-navigation-root"></div><div id="shell-react-root" data-react-page="shell"></div><main class="workspace" id="workspace-content"><textarea id="fixture-draft">Unrelated unsent draft</textarea></main></div><script>(${installFixture.toString()})();</script><script>${source}</script><script>${appPrefix}</script><script type="module" src="/static/generated/app.js"></script></body></html>`;
 }

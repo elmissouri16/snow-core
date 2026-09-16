@@ -328,9 +328,10 @@ metadata, not credential contents. Writes require that exact reviewed revision;
 replacement requires explicit confirmation when indicated. Only locally
 configured API-key providers are eligible; ChatGPT OAuth is not an API-key
 write target. The submitted credential is input-only: never log, echo, retain
-in a public event, or put it into a URL or diagnostics. Browser adapters must
-apply their trusted transport and CSRF gates before parsing a secret body.
-The response never contains either the old or new key. Existing workers are
+in a public event, or put it into a URL or diagnostics. These commands are for
+trusted same-user local stdio/control-RPC clients only and must never be exposed
+through the Web Manager HTTP surface. The response never contains either the
+old or new key. Existing workers are
 not silently reloaded, and a lost acknowledgement must not trigger automatic
 resubmission.
 

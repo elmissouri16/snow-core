@@ -98,21 +98,27 @@ func completeTurnStarts(msgs []protocol.Message) []int {
 	if len(msgs) > 0 && msgs[0].Role == protocol.RoleCustom {
 		first = 1
 	}
-	if first < len(msgs) && msgs[first].Role == protocol.RoleAssistant {
-		starts = append(starts, first)
-	}
 	for i := first; i < len(msgs); i++ {
 		msg := msgs[i]
 		switch msg.Role {
 		case protocol.RoleUser, protocol.RoleAgent:
 			starts = append(starts, i)
 		case protocol.RoleAssistant:
-			if i > first && terminalAssistant(msgs[i-1]) {
-				starts = append(starts, i)
+			stepStart := internalStepStart(msgs, first, i)
+			if stepStart == first || stepStart > first && terminalAssistant(msgs[stepStart-1]) {
+				starts = append(starts, stepStart)
 			}
 		}
 	}
-	return starts
+	return slices.Compact(starts)
+}
+
+func internalStepStart(msgs []protocol.Message, floor, assistant int) int {
+	start := assistant
+	for start > floor && msgs[start-1].Role == protocol.RoleInternal {
+		start--
+	}
+	return start
 }
 
 func terminalAssistant(message protocol.Message) bool {
@@ -143,7 +149,7 @@ func goalToolCycleStarts(msgs []protocol.Message, turnStarts []int) []int {
 		return turnStarts
 	}
 	goalStart := turnStarts[len(turnStarts)-1]
-	if msgs[goalStart].Role != protocol.RoleAssistant {
+	if msgs[goalStart].Role != protocol.RoleAssistant && msgs[goalStart].Role != protocol.RoleInternal {
 		return turnStarts
 	}
 	return appendToolCycleStarts(msgs, turnStarts, goalStart)
@@ -160,8 +166,9 @@ func appendToolCycleStarts(msgs []protocol.Message, starts []int, from int) []in
 		if msg.Role != protocol.RoleAssistant || (msg.StopReason != protocol.StopToolUse && msg.StopReason != protocol.StopPending) {
 			continue
 		}
-		if msgs[i-1].Role == protocol.RoleTool || msgs[i-1].Role == protocol.RoleCustom {
-			withCycles = append(withCycles, i)
+		stepStart := internalStepStart(msgs, from, i)
+		if stepStart > 0 && (msgs[stepStart-1].Role == protocol.RoleTool || msgs[stepStart-1].Role == protocol.RoleCustom) {
+			withCycles = append(withCycles, stepStart)
 		}
 	}
 	return withCycles
@@ -598,6 +605,9 @@ func DefaultSummarizer(ctx context.Context, msgs []protocol.Message) (string, er
 	var failurePins []pinnedFailure
 	fileSymbolSeen := make(map[string]bool)
 	for _, m := range msgs {
+		if m.Role == protocol.RoleInternal {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}

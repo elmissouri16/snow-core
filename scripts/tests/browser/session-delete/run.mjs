@@ -19,8 +19,7 @@ const app = await readFile(new URL('internal/web/static/app.js', root), 'utf8');
 const cut = app.indexOf('  function syncThemeChoices(');
 assert.ok(cut > app.indexOf('document.addEventListener("snow:shell-navigate"'), 'Production prefix includes the real navigation delegate');
 const appPrefix = app.slice(0, cut) + '\n})();';
-const htmx = await readFile(new URL('internal/web/static/vendor/htmx-2.0.10.min.js', root), 'utf8');
-const html = fixtureHTML(css, menus, htmx, appPrefix);
+const html = fixtureHTML(css, menus, appPrefix);
 const temporary = await mkdtemp(join(tmpdir(), 'snow-session-delete-'));
 let chrome, client, sessionId, assertions = 0, scenarios = 0;
 const failures = [], exceptions = [], serverViolations = [], nativeRequests = [], nativeWaiters = [];
@@ -33,7 +32,7 @@ const server = createServer((request, response) => {
     response.writeHead(200, {'Content-Type': url.pathname.endsWith('.js') ? 'application/javascript' : 'text/css', 'Cache-Control': 'no-store'}); response.end(files.get(url.pathname)); return;
   }
   if (request.method === 'GET' && url.pathname === '/favicon.ico') { response.writeHead(204); response.end(); return; }
-  if (request.method === 'GET' && /^\/\?view=projects&project=00000000-0000-4000-8000-00000000000[12]&new=1$/.test(request.url) && request.headers['hx-request'] === 'true') {
+  if (request.method === 'GET' && /^\/\?view=projects&project=00000000-0000-4000-8000-00000000000[12]&new=1$/.test(request.url) && request.headers['x-snow-navigation'] === 'workspace') {
     // Strict fixture navigation is deliberately held until an assertion releases it.
     const pending = {url: request.url, response, closed: false};
     response.on('close', () => { pending.closed = true; });
@@ -98,7 +97,7 @@ try {
   function awaitNavigation(index) {
     if (nativeRequests[index]) return Promise.resolve(nativeRequests[index]);
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => { nativeWaiters.splice(nativeWaiters.indexOf(ready), 1); reject(new Error('Native HTMX navigation deadline')); }, 3000);
+      const timeout = setTimeout(() => { nativeWaiters.splice(nativeWaiters.indexOf(ready), 1); reject(new Error('Native navigation deadline')); }, 3000);
       const ready = () => { if (nativeRequests[index]) { clearTimeout(timeout); resolve(nativeRequests[index]); } else nativeWaiters.push(ready); };
       nativeWaiters.push(ready);
     });
@@ -108,27 +107,27 @@ try {
     pending.response.writeHead(200, {'Content-Type': 'text/html', 'Cache-Control': 'no-store'});
     pending.response.end(`<div id="workspace" class="app-layout" data-project="${project}" data-session="" data-fixture-empty="true"><aside id="project-navigation" class="sidebar"><nav class="project-tree"></nav></aside><main class="workspace"><h1>Fictional new conversation in ${project}</h1><textarea>Unsent new conversation</textarea></main></div>`);
   }
-  await run('native HTMX cold success pushes exact new=1 URL', {viewed: 'saved-one', htmx: 'native'}, async () => {
+  await run('native cold success pushes exact new=1 URL', {viewed: 'saved-one', navigation: 'native'}, async () => {
     const index = nativeRequests.length;
     await evaluate('await f.open(); await f.confirm(); f.succeed();');
     const pending = await awaitNavigation(index);
     assert.equal(pending.url, '/?view=projects&project=00000000-0000-4000-8000-000000000001&new=1'); assertions++;
     releaseNavigation(pending, 'a');
     await evaluate('await f.until(() => !!document.querySelector("[data-fixture-empty]"), "native new state swap");');
-    await check('location.search === "?view=projects&project=00000000-0000-4000-8000-000000000001&new=1" && f.$("#workspace").dataset.session === ""', 'Actual HTMX pushes session-free empty-state URL');
-    await check('f.posts().length === 1 && f.events.length === 1 && f.navigation.length === 1', 'Actual HTMX navigation adds no activation, send or duplicate delete');
+    await check('location.search === "?view=projects&project=00000000-0000-4000-8000-000000000001&new=1" && f.$("#workspace").dataset.session === ""', 'Native navigation pushes the session-free empty-state URL');
+    await check('f.posts().length === 1 && f.events.length === 1 && f.navigation.length === 1', 'Native navigation adds no activation, send or duplicate delete');
   });
-  await run('native superseding navigation wins over delayed deletion navigation', {viewed: 'saved-one', htmx: 'native'}, async () => {
+  await run('native superseding navigation wins over delayed deletion navigation', {viewed: 'saved-one', navigation: 'native'}, async () => {
     const index = nativeRequests.length;
     await evaluate('await f.open(); await f.confirm(); f.succeed();');
     const deletionNavigation = await awaitNavigation(index);
-    await evaluate('void htmx.ajax("GET", "/?view=projects&project=00000000-0000-4000-8000-000000000002&new=1", {source: f.newLink("b"), target: "#workspace", swap: "outerHTML"}).catch(() => {});');
+    await evaluate('void SnowNavigation.visit("/?view=projects&project=00000000-0000-4000-8000-000000000002&new=1", {source: f.newLink("b"), history: "push"}).catch(() => {});');
     const superseding = await awaitNavigation(index + 1);
     releaseNavigation(superseding, 'b');
     await evaluate('await f.until(() => f.$("#workspace").dataset.project === f.project("b"), "superseding new state");');
     // The canceled older response is released after the newer swap: it cannot win.
     releaseNavigation(deletionNavigation, 'a');
-    await check('location.search === "?view=projects&project=00000000-0000-4000-8000-000000000002&new=1" && f.$("#workspace").dataset.project === f.project("b")', 'Shared navigation hx-sync protects the newer workspace and history');
+    await check('location.search === "?view=projects&project=00000000-0000-4000-8000-000000000002&new=1" && f.$("#workspace").dataset.project === f.project("b")', 'Native supersession protects the newer workspace and history');
     assert.ok(deletionNavigation.closed, 'Superseded native request was canceled before its stale response'); assertions++;
     await check('f.posts().length === 1 && f.events.length === 1', 'Superseding navigation never replays deletion');
   });

@@ -10,34 +10,24 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/netip"
 	"strings"
 	"time"
 )
 
-// Options configures the local-only manager. Live agents require explicit
-// project activation; remote access remains deliberately unavailable.
+// Options configures the manager network boundary. Live agents still require
+// explicit project activation in every network mode.
 type Options struct {
 	Listen       string
 	Version      string
 	ManagerDir   string // Empty keeps the shell runtime-free and non-persistent.
 	Executable   string // Absolute, operator-selected Snow binary; never project PATH.
 	SessionsRoot string // Resolve once before a worker changes CWD.
-	TLSCertFile  string // Optional absolute operator-supplied PEM certificate path.
-	TLSKeyFile   string // Required with TLSCertFile; never reloaded while serving.
 }
 
 // Validate checks configuration without starting a listener or a runtime.
 func (o Options) Validate() error {
-	address := o.Listen
-	if address == "" {
-		address = "127.0.0.1:7331"
-	}
-	endpoint, err := netip.ParseAddrPort(address)
-	if err != nil || !endpoint.Addr().IsLoopback() || endpoint.Addr().Zone() != "" {
-		return errors.New("web: --web-listen must be a numeric loopback address and port (for example 127.0.0.1:7331); remote access is not enabled")
-	}
-	return o.validateTLSPaths()
+	_, err := o.deployment()
+	return err
 }
 
 // Run serves until canceled. Starting this shell performs no agent, provider,
@@ -46,28 +36,38 @@ func Run(ctx context.Context, opts Options, output io.Writer) error {
 	if err := opts.Validate(); err != nil {
 		return err
 	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	tlsConfig, err := loadTLSConfig(ctx, opts)
+	deployment, err := opts.deployment()
 	if err != nil {
 		return err
 	}
-	address := opts.Listen
-	if address == "" {
-		address = "127.0.0.1:7331"
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", address)
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", deployment.listen.String())
 	if err != nil {
 		return fmt.Errorf("web: listen: %w", err)
 	}
 	defer listener.Close()
-	scheme := "http"
-	if tlsConfig != nil {
-		scheme = "https"
+	var loopbackListener net.Listener
+	if deployment.mode == deploymentTrustedLANHTTP {
+		loopbackAddress, err := loopbackAddressFor(listener.Addr())
+		if err != nil {
+			return err
+		}
+		loopbackListener, err = (&net.ListenConfig{}).Listen(ctx, "tcp", loopbackAddress)
+		if err != nil {
+			return fmt.Errorf("web: listen on localhost: %w", err)
+		}
+		defer loopbackListener.Close()
 	}
-	origin := scheme + "://" + listener.Addr().String()
-	shell, err := newShell(origin, opts.Version)
+	origin := deployment.publicOrigin
+	if deployment.mode == deploymentTrustedLANHTTP {
+		origin = "http://" + listener.Addr().String()
+	}
+	if origin == "" {
+		origin = "http://" + listener.Addr().String()
+	}
+	shell, err := newShellWithNetwork(origin, opts.Version, deployment.policy())
 	if err != nil {
 		return err
 	}
@@ -92,47 +92,108 @@ func Run(ctx context.Context, opts Options, output io.Writer) error {
 		shell.operations = operations
 		defer operations.Close()
 	}
-	// The pairing secret is a deliberate local operator credential, never a URL
+	// The pairing secret is a deliberate operator credential, never a URL
 	// parameter, access log entry, diagnostic field, or provider event.
-	if _, err := fmt.Fprintf(output, "Snow Manager %s — local preview\n%s\nPairing code (reusable until %s or rotated; survives restart): %s\nNo agent starts until explicit activation. Remote access is disabled. Snow has no process sandbox.\n", safeVersion(opts.Version), shell.origin, shell.access.pairExpires.UTC().Format(time.RFC3339), shell.initialCode); err != nil {
+	profile, listenerNotice, networkNotice := "local preview", "", "Remote access is disabled."
+	switch deployment.mode {
+	case deploymentTrustedLANHTTP:
+		profile = "trusted-LAN HTTP"
+		listenerNotice = "LAN URL: " + origin + "\nLocal URL: http://" + loopbackListener.Addr().String() + " (redirects to the LAN URL)\n"
+		networkNotice = "Traffic is unencrypted; use only on a trusted LAN. Pairing is still required, and interface/firewall policy remains operator-managed."
+	}
+	privateAddresses, addressErr := hostPrivateAddresses()
+	addressNotice := privateAddressNotice(deployment, privateAddresses, addressErr)
+	if _, err := fmt.Fprintf(output, "Snow Manager %s — %s\n%s\n%s%sPairing code (reusable until %s or rotated; survives restart): %s\nNo agent starts until explicit activation. %s Snow has no process sandbox.\n", safeVersion(opts.Version), profile, shell.origin, listenerNotice, addressNotice, shell.access.pairExpires.UTC().Format(time.RFC3339), shell.initialCode, networkNotice); err != nil {
 		return err
 	}
 	shell.initialCode = ""
-	server := &http.Server{
-		TLSConfig: tlsConfig,
-		Handler:   shell.handler(), BaseContext: func(net.Listener) context.Context { return ctx }, ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second,
-		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10,
+	servers := []serverBinding{{
+		server:   managerHTTPServer(ctx, shell.handler()),
+		listener: listener,
+	}}
+	if loopbackListener != nil {
+		localOrigin := "http://" + loopbackListener.Addr().String()
+		servers = append(servers, serverBinding{
+			server:   managerHTTPServer(ctx, localRedirectHandler(localOrigin, origin)),
+			listener: loopbackListener,
+		})
+	}
+	return serveHTTP(ctx, servers)
+}
+
+type serverBinding struct {
+	server   *http.Server
+	listener net.Listener
+}
+
+func managerHTTPServer(ctx context.Context, handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler: handler,
+		BaseContext: func(net.Listener) context.Context {
+			return ctx
+		},
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 << 10,
 		// Do not log attacker-controlled URLs, request fields or credentials.
 		ErrorLog: log.New(io.Discard, "", 0),
 	}
-	finished := make(chan struct{})
-	shutdownDone := make(chan struct{})
-	go func() {
-		defer close(shutdownDone)
-		select {
-		case <-ctx.Done():
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := server.Shutdown(shutdownCtx); err != nil {
-				_ = server.Close()
-			}
-		case <-finished:
-		}
-	}()
-	if tlsConfig != nil {
-		// Empty paths deliberately prevent ServeTLS from reading certificate files.
-		// The bounded, identity-checked PEM pair is already loaded in TLSConfig.
-		err = server.ServeTLS(listener, "", "")
-	} else {
-		err = server.Serve(listener)
+}
+
+func serveHTTP(ctx context.Context, bindings []serverBinding) error {
+	results := make(chan error, len(bindings))
+	for _, binding := range bindings {
+		go func() {
+			results <- binding.server.Serve(binding.listener)
+		}()
 	}
-	close(finished)
-	<-shutdownDone
-	if errors.Is(err, http.ErrServerClosed) {
+	remaining := len(bindings)
+	var firstErr error
+	select {
+	case firstErr = <-results:
+		remaining--
+	case <-ctx.Done():
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, binding := range bindings {
+		if err := binding.server.Shutdown(shutdownCtx); err != nil {
+			_ = binding.server.Close()
+		}
+	}
+	for range remaining {
+		err := <-results
+		if firstErr == nil || errors.Is(firstErr, http.ErrServerClosed) {
+			firstErr = err
+		}
+	}
+	if firstErr == nil || errors.Is(firstErr, http.ErrServerClosed) {
 		return nil
 	}
-	return err
+	return firstErr
+}
+
+func loopbackAddressFor(address net.Addr) (string, error) {
+	_, port, err := net.SplitHostPort(address.String())
+	if err != nil {
+		return "", fmt.Errorf("web: derive localhost listener: %w", err)
+	}
+	return net.JoinHostPort("127.0.0.1", port), nil
+}
+
+func localRedirectHandler(localOrigin, publicOrigin string) http.Handler {
+	localHost := strings.TrimPrefix(localOrigin, "http://")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if r.Host != localHost || r.URL.IsAbs() || r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "Unexpected localhost request", http.StatusForbidden)
+			return
+		}
+		http.Redirect(w, r, publicOrigin+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+	})
 }
 
 func safeVersion(version string) string {

@@ -30,12 +30,13 @@ suite bound, bounded request bodies/assets and explicit browser/server teardown.
 - The existing `TestExportHarnessVisualFixtures` exports the **production Go
   template shell and embedded static files** without constructing a registry,
   manager, worker, provider or catalog. The fixture retains that shell's head,
-  script/stylesheet order, navigation and HTMX ancestor attributes.
+  script/stylesheet order and native workspace navigation boundary.
 - The executable frontend is the exact shipped `/static/generated/app.js` React
-  bundle, real HTMX 2.0.10 and the other production scripts. All **26 production
-  stylesheets** remain in their exported order. Legacy `manager-activity.js`, `organization.js`, `host-settings.js`,
-  `host-api-key.js` and `browser-access.js` must not appear in the head; nothing mocks or patches React,
-  HTMX, `fetch`, timers, DOM APIs or production event handlers.
+  bundle and the other production scripts. All production stylesheets remain in
+  their exported order. Legacy `manager-activity.js`, `organization.js`,
+  `host-settings.js`, `host-api-key.js` and `browser-access.js` must not appear in
+  the head; nothing mocks or patches React, `SnowNavigation`, `fetch`, timers, DOM
+  APIs or production event handlers.
 - Because the existing Go exporter does not provide Activity/Organization page
   fixtures, this runner replaces only the exported workspace main content with
   an escaped `data-react-page`/`data-react-props` bootstrap root, and sets its
@@ -61,7 +62,7 @@ suite bound, bounded request bodies/assets and explicit browser/server teardown.
 
 ## Verified scope
 
-Current complete run: **216 assertions across 30 scenarios** (including fixture
+Current complete run: **202 assertions across 28 scenarios** (including fixture
 transport invariants and asset checks).
 
 ### Activity
@@ -116,7 +117,7 @@ transport invariants and asset checks).
 - The masked uncontrolled password clears before validation/dispatch, including
   missing consent and replacement-consent failures. Each save consumes authority;
   success requires reinspection and uncertain/auth failure never retries. Provider
-  changes, dialog close and actual HTMX unmount clear retained password nodes.
+  changes, dialog close and actual native ancestor unmount clear retained password nodes.
   A partially streamed inspection aborted on close cannot reopen the form later.
 - A bounded, read-only traversal checks that the fixture password is absent from
   React's reachable enumerable fiber/state/props graph while typed and during a
@@ -128,22 +129,22 @@ transport invariants and asset checks).
 - Browser inventory preserves literal malicious labels, safe Cancel/Refresh
   focus, exact single-browser CSRF/confirmation POSTs and synchronous duplicate
   admission fencing. Malformed inventories and mismatched receipts cannot remove
-  unrelated rows or retain revoke authority. Canceled HTMX swaps preserve roots
-  and listeners but retire confirmation authority until explicit Refresh.
+  unrelated rows or retain revoke authority. Rejected native navigations preserve
+  roots and listeners but retire confirmation authority until explicit Refresh.
   Interrupted revocations never replay; HTTP 401 routes to the fixture pairing
   page without mutation.
 
 ### Ownership, navigation and presentation
 
-- Real production HTMX links replace the workspace ancestor Activity →
+- Real production native links replace the workspace ancestor Activity →
   Organization → Activity; browser Back/Forward restore the appropriate React
-  page. Held navigation bodies abort, old roots unmount at real
-  `htmx:beforeCleanupElement`, and departed Activity stops polling.
-- Canceling a real `htmx:beforeSwap` response preserves the original mounted root
-  and working listeners. A later successful navigation still cleans it up.
-- Explicit cleanup and repeated `pageshow`, `htmx:afterSwap` and
-  `htmx:historyRestore` notifications cannot add duplicate React/poll owners.
-  `pagehide` aborts and unmounts a retained root, which remounts on `pageshow`.
+  page. Held navigation bodies abort, old roots unmount before
+  `snow:navigation-before-swap`, and departed Activity stops polling.
+- Rejecting an invalid fragment preserves the original mounted root and working
+  listeners. A later successful navigation still cleans it up.
+- Explicit cleanup and repeated `pageshow` notifications cannot add duplicate
+  React/poll owners. `pagehide` aborts and unmounts a retained root, which
+  remounts on `pageshow`.
   Page-transition events are deliberately dispatched, **not a claim of browser
   BFCache eligibility or a genuine OS suspend/resume test**.
 - Activity and Organization are measured at 1440px and 390px in dark/light
@@ -182,7 +183,7 @@ itself still constructs no manager or worker.
 - `fixture.mjs` — fake public props/DTOs and strictly allowlisted HTTP transport.
 - `activity.mjs` — Activity data, polling, cancellation and validation checks.
 - `organization.mjs` — React state/identity, safe bootstrap and native form checks.
-- `lifecycle.mjs` — real HTMX/history journeys, ownership cleanup and representative
+- `lifecycle.mjs` — real native-navigation/history journeys, ownership cleanup and representative
   production-CSS measurements.
 - `settings.mjs` — phase-two fixture contracts and native host defaults, write-only
   API-key and browser-inventory state/ownership checks.

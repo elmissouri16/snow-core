@@ -5,7 +5,7 @@ import {createRoot} from 'react-dom/client';
 import type {Root} from 'react-dom/client';
 import {SteerPanel} from './SteerPanel.tsx';
 import type {Actions, Presentation} from './SteerPanel.tsx';
-import {accepted, authority, bindReviewed, blocking as ownsDraft, canDismissUnknown, canSteer as admissible, initialState, sameIdentity, setText, stale, update, validReceipt} from './model.ts';
+import {accepted, authority, bindReviewed, blocking as ownsDraft, canDismissUnknown, canSteer as admissible, initialState, randomRequestID, sameIdentity, setText, stale, update, validReceipt} from './model.ts';
 import type {API, Identity, Operation, Snapshot, State, Store, UI} from './model.ts';
 
 type View = {
@@ -167,7 +167,7 @@ async function submit(current: View): Promise<boolean> {
   const {state: s, api} = current, {store} = s;
   if (!bound(current) || !admissible(s) || s.composing || !api.validText(store.text) || stale(s) || !s.projection) return false;
   const operation: Operation = Object.freeze({identity: current.identity, token: s.projection.live_steer_token, revision: s.projection.revision,
-    request: crypto.randomUUID(), text: store.text, draftRevision: store.revision});
+    request: randomRequestID(), text: store.text, draftRevision: store.revision});
   store.busy = operation; store.error = ''; store.rejected = false; changed(current);
   try {
     if (!bound(current) || store.busy !== operation) return false;

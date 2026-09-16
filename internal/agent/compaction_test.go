@@ -14,6 +14,21 @@ import (
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
+func TestCompactionSummaryMessagesOmitProviderOnlySteering(t *testing.T) {
+	messages := []protocol.Message{
+		protocol.NewUserMessage("user", "", "public objective"),
+		{ID: "internal", Role: protocol.RoleInternal, InternalContextSource: "goal", Content: []protocol.ContentBlock{protocol.NewTextBlock("private repeated steering")}},
+		protocol.NewAssistantMessage("assistant", "internal", "test", "model", []protocol.ContentBlock{protocol.NewTextBlock("result")}, protocol.StopStop, nil),
+	}
+	projected := compactionSummaryMessages(messages)
+	if len(projected) != 2 || projected[0].ID != "user" || projected[1].ID != "assistant" {
+		t.Fatalf("compaction summary messages=%+v", projected)
+	}
+	if len(messages) != 3 || messages[1].Role != protocol.RoleInternal {
+		t.Fatalf("filter mutated exact source history: %+v", messages)
+	}
+}
+
 func TestManualCompactUsesSummaryAndPreservesHistory(t *testing.T) {
 	prov := &scriptedProvider{scripts: [][]protocol.StreamEvent{{
 		{Type: protocol.EvStreamTextDelta, Text: "model summary"},

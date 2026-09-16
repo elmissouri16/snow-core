@@ -14,11 +14,16 @@ import (
 )
 
 const (
-	sessionCookie   = "snow_manager_local_session"
-	pairCookie      = "snow_manager_local_pair_csrf"
-	maxBrowsers     = 8
-	browserLifetime = 30 * 24 * time.Hour
-	pairingLifetime = 30 * 24 * time.Hour
+	sessionCookie               = "snow_manager_local_session"
+	pairCookie                  = "snow_manager_local_pair_csrf"
+	lanSessionCookie            = "snow_manager_lan_session"
+	lanPairCookie               = "snow_manager_lan_pair_csrf"
+	maxBrowsers                 = 8
+	maxPairingAttempts          = 20
+	maxPairingAttemptsPerSource = 10
+	maxPairingSources           = 128
+	browserLifetime             = 30 * 24 * time.Hour
+	pairingLifetime             = 30 * 24 * time.Hour
 )
 
 type browserSession struct {
@@ -31,17 +36,23 @@ type browserSession struct {
 	PairingExpires time.Time
 }
 
+type pairingAttemptWindow struct {
+	window   time.Time
+	attempts int
+}
+
 type accessState struct {
-	mu          sync.Mutex
-	key         [32]byte
-	pairHash    [32]byte
-	pairExpires time.Time
-	pairCode    string
-	store       *accessStore
-	failed      bool
-	sessions    map[[32]byte]browserSession
-	window      time.Time
-	attempts    int
+	mu             sync.Mutex
+	key            [32]byte
+	pairHash       [32]byte
+	pairExpires    time.Time
+	pairCode       string
+	store          *accessStore
+	failed         bool
+	sessions       map[[32]byte]browserSession
+	window         time.Time
+	attempts       int
+	sourceAttempts map[string]pairingAttemptWindow
 }
 
 func randomToken() string {
@@ -59,7 +70,7 @@ func (s *shell) issuePairingLocked() string {
 }
 
 func (s *shell) browser(r *http.Request) (browserSession, bool) {
-	cookie, err := r.Cookie(sessionCookie)
+	cookie, err := r.Cookie(s.sessionCookieName())
 	if err != nil || len(cookie.Value) != 64 {
 		return browserSession{}, false
 	}
@@ -94,12 +105,22 @@ func localCookie(name, value string, maxAge int) *http.Cookie {
 		SameSite: http.SameSiteStrictMode, MaxAge: maxAge}
 }
 
-// localCookie derives transport policy only from the configured listener origin,
-// never from forwarded headers or other browser-controlled request fields.
+func (s *shell) sessionCookieName() string {
+	if s.network.profile == "trusted-lan-http" {
+		return lanSessionCookie
+	}
+	return sessionCookie
+}
+
+func (s *shell) pairCookieName() string {
+	if s.network.profile == "trusted-lan-http" {
+		return lanPairCookie
+	}
+	return pairCookie
+}
+
 func (s *shell) localCookie(name, value string, maxAge int) *http.Cookie {
-	cookie := localCookie(name, value, maxAge)
-	cookie.Secure = strings.HasPrefix(s.origin, "https://")
-	return cookie
+	return localCookie(name, value, maxAge)
 }
 
 func (s *shell) pairCSRF() string {
@@ -114,7 +135,7 @@ func (s *shell) pairCSRF() string {
 func (s *shell) validPairCSRF(r *http.Request) bool {
 	s.access.mu.Lock()
 	defer s.access.mu.Unlock()
-	cookie, err := r.Cookie(pairCookie)
+	cookie, err := r.Cookie(s.pairCookieName())
 	value := r.PostForm.Get("csrf")
 	if err != nil || len(value) != 129 || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(value)) != 1 {
 		return false
@@ -167,26 +188,22 @@ func (s *shell) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	if !now.Before(s.access.window.Add(time.Minute)) {
-		s.access.window, s.access.attempts = now, 0
-	}
-	if s.access.attempts >= 20 {
+	if !s.access.admitPairingAttempt(now, requestSource(r.Context())) {
 		w.Header().Set("Retry-After", "60")
 		http.Error(w, "Too many pairing attempts; try again in a minute", http.StatusTooManyRequests)
 		return
 	}
-	s.access.attempts++
 	candidate := sha256.Sum256([]byte(strings.TrimSpace(r.PostForm.Get("code"))))
 	if !now.Before(s.access.pairExpires) || subtle.ConstantTimeCompare(candidate[:], s.access.pairHash[:]) != 1 {
 		if !s.saveAccessLocked(r.Context()) {
 			accessUnavailable(w)
 			return
 		}
-		s.render(w, http.StatusUnauthorized, "login", pageData{CSRF: r.PostForm.Get("csrf"), Error: "That code is invalid or expired. Ask a paired browser to rotate the code, or check the manager startup output."})
+		s.render(w, http.StatusUnauthorized, "login", pageData{CSRF: r.PostForm.Get("csrf"), NetworkProfile: s.network.profile, Error: "That code is invalid or expired. Ask a paired browser to rotate the code, or check the manager startup output."})
 		return
 	}
 	s.expireSessionsLocked()
-	if previous, err := r.Cookie(sessionCookie); err == nil {
+	if previous, err := r.Cookie(s.sessionCookieName()); err == nil {
 		delete(s.access.sessions, sha256.Sum256([]byte(previous.Value)))
 	}
 	if len(s.access.sessions) >= maxBrowsers {
@@ -203,9 +220,39 @@ func (s *shell) login(w http.ResponseWriter, r *http.Request) {
 		accessUnavailable(w)
 		return
 	}
-	http.SetCookie(w, s.localCookie(sessionCookie, token, int(browserLifetime/time.Second)))
-	http.SetCookie(w, s.localCookie(pairCookie, "", -1))
+	http.SetCookie(w, s.localCookie(s.sessionCookieName(), token, int(browserLifetime/time.Second)))
+	http.SetCookie(w, s.localCookie(s.pairCookieName(), "", -1))
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (a *accessState) admitPairingAttempt(now time.Time, source string) bool {
+	if a.sourceAttempts == nil {
+		a.sourceAttempts = make(map[string]pairingAttemptWindow)
+	}
+	if !now.Before(a.window.Add(time.Minute)) {
+		a.window, a.attempts = now, 0
+	}
+	window := a.sourceAttempts[source]
+	if !now.Before(window.window.Add(time.Minute)) {
+		window = pairingAttemptWindow{window: now}
+	}
+	if a.attempts >= maxPairingAttempts || window.attempts >= maxPairingAttemptsPerSource {
+		return false
+	}
+	if _, exists := a.sourceAttempts[source]; !exists && len(a.sourceAttempts) >= maxPairingSources {
+		oldestSource := ""
+		var oldest time.Time
+		for candidate, attempt := range a.sourceAttempts {
+			if oldestSource == "" || attempt.window.Before(oldest) {
+				oldestSource, oldest = candidate, attempt.window
+			}
+		}
+		delete(a.sourceAttempts, oldestSource)
+	}
+	a.attempts++
+	window.attempts++
+	a.sourceAttempts[source] = window
+	return true
 }
 
 func (s *shell) authorizeForm(w http.ResponseWriter, r *http.Request) (browserSession, bool) {
@@ -227,7 +274,7 @@ func (s *shell) authorizeFormLimit(w http.ResponseWriter, r *http.Request, maxBy
 	}
 	// Admit the completed form against current durable browser authority. This
 	// gate ends before handler work; it does not cancel already admitted work.
-	cookie, err := r.Cookie(sessionCookie)
+	cookie, err := r.Cookie(s.sessionCookieName())
 	if err != nil {
 		http.Error(w, "Pair this browser to continue", http.StatusUnauthorized)
 		return browserSession{}, false
@@ -256,7 +303,7 @@ func (s *shell) logout(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorizeForm(w, r); !ok {
 		return
 	}
-	cookie, _ := r.Cookie(sessionCookie)
+	cookie, _ := r.Cookie(s.sessionCookieName())
 	s.access.mu.Lock()
 	delete(s.access.sessions, sha256.Sum256([]byte(cookie.Value)))
 	saved := s.saveAccessLocked(r.Context())
@@ -265,7 +312,7 @@ func (s *shell) logout(w http.ResponseWriter, r *http.Request) {
 		accessUnavailable(w)
 		return
 	}
-	http.SetCookie(w, s.localCookie(sessionCookie, "", -1))
+	http.SetCookie(w, s.localCookie(s.sessionCookieName(), "", -1))
 	w.Header().Set("Clear-Site-Data", "\"cache\", \"storage\"")
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
@@ -274,7 +321,7 @@ func (s *shell) pair(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorizeForm(w, r); !ok {
 		return
 	}
-	cookie, _ := r.Cookie(sessionCookie)
+	cookie, _ := r.Cookie(s.sessionCookieName())
 	key := sha256.Sum256([]byte(cookie.Value))
 	s.access.mu.Lock()
 	browser, ok := s.access.sessions[key]
@@ -302,7 +349,7 @@ func (s *shell) pair(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *shell) takePairingCode(r *http.Request) string {
-	cookie, err := r.Cookie(sessionCookie)
+	cookie, err := r.Cookie(s.sessionCookieName())
 	if err != nil {
 		return ""
 	}
@@ -343,7 +390,7 @@ func (s *shell) revokeAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.expireSessionsLocked()
-	cookie, _ := r.Cookie(sessionCookie)
+	cookie, _ := r.Cookie(s.sessionCookieName())
 	if _, ok := s.access.sessions[sha256.Sum256([]byte(cookie.Value))]; !ok {
 		s.access.mu.Unlock()
 		s.requireLogin(w, r)
@@ -357,7 +404,7 @@ func (s *shell) revokeAll(w http.ResponseWriter, r *http.Request) {
 		accessUnavailable(w)
 		return
 	}
-	http.SetCookie(w, s.localCookie(sessionCookie, "", -1))
+	http.SetCookie(w, s.localCookie(s.sessionCookieName(), "", -1))
 	w.Header().Set("Clear-Site-Data", "\"cache\", \"storage\"")
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }

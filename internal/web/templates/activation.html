@@ -1,7 +1,7 @@
 {{define "runtime-activation"}}
 <section class="runtime-activation activation-panel workspace-session-start{{if .Project.Trusted}} activation-trusted{{end}}" aria-labelledby="activation-heading">
   <h2 id="activation-heading">{{if .SessionID}}Paused · resume to continue{{else}}Start a session{{end}}</h2>
-  <form method="post" action="/projects/{{.Project.ID}}/runtime/open" data-runtime-open hx-push-url="true" hx-params="none">
+  <form method="post" action="/projects/{{.Project.ID}}/runtime/open" data-runtime-open>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     {{if .SessionID}}<input type="hidden" name="session_id" value="{{.SessionID}}">{{end}}
     <label class="visually-hidden" for="workspace-prompt">Session draft</label>

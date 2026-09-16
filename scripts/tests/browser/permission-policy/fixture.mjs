@@ -24,12 +24,15 @@ export function transport(files, fixture) {
       const path = new URL(request.url, "http://localhost").pathname;
       const body = files.get(path);
       if (path === "/" && body && request.method === "GET") {
-        const entry = {query: new URL(request.url, "http://localhost").search, aborted: false};
+        const url = new URL(request.url, "http://localhost");
+        const entry = {query: url.search, aborted: false, native: request.headers["x-snow-navigation"] === "workspace"};
         (state.navigation ||= []).push(entry);
         if (state.navigation.length > 1000) throw new Error("Unexpected navigation loop");
         response.on("close", () => { entry.aborted = !response.writableEnded; });
-        // Exported documents include the shell; mirror production's workspace-only swap.
-        const reply = (status = 200) => { response.writeHead(status, {"Content-Type": "text/html", "Cache-Control": "no-store", "HX-Reselect": "#workspace"}); response.end(body); };
+        // Exported documents include the shell; mirror production's workspace-only native response.
+        const page = url.searchParams.get("fixture") === "sidebar" ? files.get("/sidebar.html") : body;
+        const workspace = page?.match(/<div id="workspace"[\s\S]*<\/div>\s*<\/body>/)?.[0].replace(/\s*<\/body>$/, "") || page;
+        const reply = (status = 200) => { response.writeHead(status, {"Content-Type": "text/html", "Cache-Control": "no-store"}); response.end(entry.native ? workspace : page); };
         if (state.holdNavigation) { state.holdNavigation = false; state.releaseNavigation = reply; }
         else reply();
         return;
@@ -68,20 +71,20 @@ export function transport(files, fixture) {
         if (Buffer.byteLength(text) > 128 * 1024) throw new Error("Request body exceeds fixture bound");
       }
       const params = new URLSearchParams(text), fields = Object.fromEntries(params);
-      state.requests.push({path, method: request.method, fields, htmx: request.headers["hx-request"]});
+      state.requests.push({path, method: request.method, fields, accept: request.headers.accept});
       if (state.requests.length > 1000) throw new Error("Unexpected mutation loop");
       if (request.method !== "POST" || fields.csrf !== "test-csrf" || fields.instance_id !== state.snapshot.instance_id) throw new Error(`Missing explicit instance/CSRF-bound POST: ${request.method} ${path}`);
       if (path === prefix + "/choices") {
-        if (Object.keys(fields).sort().join(",") !== "csrf,instance_id" || request.headers["hx-request"] !== "true") throw new Error("Invalid HTMX discovery request");
+        if (Object.keys(fields).sort().join(",") !== "csrf,instance_id" || request.headers.accept !== "application/json") throw new Error("Invalid native discovery request");
         state.held = (choices, status = 200) => { state.held = null; json(response, choices, status); }; return;
       }
       if (path === prefix + "/model") {
-        if (Object.keys(fields).sort().join(",") !== "csrf,instance_id,model,provider" || request.headers["hx-request"] !== "true") throw new Error("Invalid HTMX model request");
+        if (Object.keys(fields).sort().join(",") !== "csrf,instance_id,model,provider" || request.headers.accept !== "application/json") throw new Error("Invalid native model request");
         if (state.next === "model-success-only") { state.next = null; json(response, {success: true}); return; }
         state.update({provider: fields.provider, model: fields.model}); json(response, state.snapshot); return;
       }
       if (path === prefix + "/mode") {
-        if (state.snapshot.status !== "idle" || !["default", "plan"].includes(fields.mode) || Object.keys(fields).sort().join(",") !== "csrf,instance_id,mode" || request.headers["hx-request"] !== "true") throw new Error("Invalid HTMX mode request");
+        if (state.snapshot.status !== "idle" || !["default", "plan"].includes(fields.mode) || Object.keys(fields).sort().join(",") !== "csrf,instance_id,mode" || request.headers.accept !== "application/json") throw new Error("Invalid native mode request");
         const behavior = state.next; state.next = null;
         if (behavior === "hold") {
           state.held = mode => { state.held = null; state.update({mode}); json(response, state.snapshot); }; return;

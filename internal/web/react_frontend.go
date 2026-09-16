@@ -52,10 +52,9 @@ type organizationFrontendSession struct {
 }
 
 type hostSettingsFrontendProps struct {
-	CSRF          string                        `json:"csrf"`
-	Enabled       bool                          `json:"enabled"`
-	APIKeyEnabled bool                          `json:"apiKeyEnabled"`
-	Projects      []hostSettingsFrontendProject `json:"projects"`
+	CSRF     string                        `json:"csrf"`
+	Enabled  bool                          `json:"enabled"`
+	Projects []hostSettingsFrontendProject `json:"projects"`
 }
 
 type hostSettingsFrontendProject struct {
@@ -97,8 +96,8 @@ func inspectionReactProps(project *Project, csrf string, live *RuntimeSnapshot) 
 	return marshalReactProps(props)
 }
 
-func hostSettingsReactProps(csrf string, enabled, apiKeyEnabled bool, projects []Project) (string, error) {
-	props := hostSettingsFrontendProps{CSRF: csrf, Enabled: enabled, APIKeyEnabled: apiKeyEnabled}
+func hostSettingsReactProps(csrf string, enabled bool, projects []Project) (string, error) {
+	props := hostSettingsFrontendProps{CSRF: csrf, Enabled: enabled}
 	for _, project := range projects {
 		if project.Available {
 			props.Projects = append(props.Projects, hostSettingsFrontendProject{ID: project.ID, Name: project.Name})

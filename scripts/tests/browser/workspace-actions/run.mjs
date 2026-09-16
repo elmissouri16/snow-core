@@ -28,11 +28,11 @@ await component(async ({evaluate,check,click,key,settle,ids})=>{
   await evaluate(`SnowSidebarSessions.invalidate(ids[0]);reply(pending.length-1,[{session_id:'a1',name:'First'}]);`);await settle();
   await click('[data-shell-session="a1"] [data-shell-session-open]');
   await check('intents.length===5 && navigation.length===1 && new URL(navigation[0].href,location.href).searchParams.get("session")==="a1"','Cold inventory link navigates saved session without owner selection');
-  await check('navigation[0].source===row("a1").querySelector("a") && navigation[0].push.includes("session=a1") && navigation[0].sync==="#project-navigation:replace"','Navigation callback carries actual source and transport-only metadata');
+  await check('navigation[0].source===row("a1").querySelector("a") && navigation[0].native===true','Navigation callback carries the actual source and native navigation marker');
   await click(selector(0,'menu'));
   await check('$(".snow-menu").parentElement===document.body && more(0).getAttribute("aria-expanded")==="true"','React project popup uses real shared body portal');
   await check('JSON.stringify([...$(".snow-menu").querySelectorAll("[role=menuitem]")].map(x=>x.textContent))===JSON.stringify(["Workspace settings…","Remove registration…"])','Workspace menu offers only supported actions');
-  await check('[...$(".snow-menu").querySelectorAll("a")].every(x=>!x.hasAttribute("hx-get") && !x.hasAttribute("hx-post") && x.getAttribute("hx-push-url")===x.getAttribute("href") && x.getAttribute("href").includes("session=a1"))','Only current workspace popup retains bootstrap saved session; no competing HTMX handlers');
+  await check('[...$(".snow-menu").querySelectorAll("a")].every(x=>x.hasAttribute("data-snow-navigation") && x.getAttribute("href").includes("session=a1"))','Only current workspace popup retains bootstrap saved session through native navigation markers');
   await key('Escape');
   await check('!$(".snow-menu") && document.activeElement===more(0)','Escape cleans up and restores launcher focus');
   await evaluate(`const inspector=document.createElement('section');inspector.id='project-inspector';inspector.dataset.project=ids[0];document.body.append(inspector);`);
@@ -43,7 +43,7 @@ await component(async ({evaluate,check,click,key,settle,ids})=>{
   await click(selector(1,'menu'));
   await check('[...$(".snow-menu").querySelectorAll("a")].every((x,i)=>x.getAttribute("href")==="/?view=projects&project="+ids[1]+"&inspect=project"+(i?"#remove-project":""))','Other workspace settings/removal URLs are canonical and session-free');
   await key('End');await key('Enter');
-  await check('navigation.length===2 && navigation[1].href.endsWith("&inspect=project#remove-project") && navigation[1].push===navigation[1].href && inspections.length===2','Other workspace Remove delegates one navigation with exact fragment metadata');
+  await check('navigation.length===2 && navigation[1].href.endsWith("&inspect=project#remove-project") && navigation[1].native===true && inspections.length===2','Other workspace Remove delegates one navigation with exact fragment metadata');
   await click(selector(0,'menu'));
   await evaluate(`window.retiredNew=newLink(0);window.retiredItem=$('.snow-menu [role=menuitem]');swap();`);await settle();
   // Detached anchors still have browser defaults; isolate those from retired React intents.

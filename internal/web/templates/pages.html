@@ -1,16 +1,18 @@
-{{define "head"}}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"historyCacheSize":0,"historyRestoreAsHxRequest":false,"selfRequestsOnly":true,"timeout":10000}'><title>Snow · Workspace</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/harness.css"><link rel="stylesheet" href="/static/messages.css"><link rel="stylesheet" href="/static/queue.css"><link rel="stylesheet" href="/static/menus.css"><link rel="stylesheet" href="/static/settings.css"><link rel="stylesheet" href="/static/attention.css"><link rel="stylesheet" href="/static/scroll.css"><link rel="stylesheet" href="/static/composer-context.css"><link rel="stylesheet" href="/static/conversation-width.css"><link rel="stylesheet" href="/static/inspection.css"><script src="/static/menus.js" defer></script><link rel="stylesheet" href="/static/costs.css"><link rel="stylesheet" href="/static/reasoning.css"><link rel="stylesheet" href="/static/history-controls.css"><link rel="stylesheet" href="/static/compaction.css"><link rel="stylesheet" href="/static/steer.css"><link rel="stylesheet" href="/static/host-api-key.css"><link rel="stylesheet" href="/static/project-operations.css"><link rel="stylesheet" href="/static/host-settings.css"><link rel="stylesheet" href="/static/browser-access.css"><script src="/static/stream.js" defer></script><link rel="stylesheet" href="/static/manager-activity.css"><link rel="stylesheet" href="/static/organization.css"><link rel="stylesheet" href="/static/versions.css"><link rel="stylesheet" href="/static/processes.css"><script type="module" src="/static/generated/app.js"></script><link rel="stylesheet" href="/static/goals.css"><link rel="stylesheet" href="/static/dialogs.css"><script src="/static/app.js" defer></script><script src="/static/vendor/htmx-2.0.10.min.js" defer></script>{{end}}
+{{define "head"}}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><title>Snow · Workspace</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/harness.css"><link rel="stylesheet" href="/static/messages.css"><link rel="stylesheet" href="/static/queue.css"><link rel="stylesheet" href="/static/menus.css"><link rel="stylesheet" href="/static/settings.css"><link rel="stylesheet" href="/static/attention.css"><link rel="stylesheet" href="/static/scroll.css"><link rel="stylesheet" href="/static/composer-context.css"><link rel="stylesheet" href="/static/conversation-width.css"><link rel="stylesheet" href="/static/inspection.css"><script src="/static/menus.js" defer></script><link rel="stylesheet" href="/static/costs.css"><link rel="stylesheet" href="/static/reasoning.css"><link rel="stylesheet" href="/static/history-controls.css"><link rel="stylesheet" href="/static/compaction.css"><link rel="stylesheet" href="/static/steer.css"><link rel="stylesheet" href="/static/project-operations.css"><link rel="stylesheet" href="/static/host-settings.css"><link rel="stylesheet" href="/static/browser-access.css"><script src="/static/stream.js" defer></script><link rel="stylesheet" href="/static/manager-activity.css"><link rel="stylesheet" href="/static/organization.css"><link rel="stylesheet" href="/static/versions.css"><link rel="stylesheet" href="/static/processes.css"><script type="module" src="/static/generated/app.js"></script><link rel="stylesheet" href="/static/goals.css"><link rel="stylesheet" href="/static/dialogs.css"><script src="/static/app.js" defer></script>{{end}}
 {{define "brand"}}<span class="brand-mark" aria-hidden="true">{{template "icon-snow"}}</span><span class="brand-name">snow</span><span class="brand-label">WORKSPACE</span>{{end}}
-{{define "login"}}<!doctype html><html lang="en"><head>{{template "head" .}}</head><body class="login-body" hx-history="false"><div data-react-page="login" class="react-live-panel" data-react-props="{{loginReactProps .CSRF .Error}}"><main class="login-card"><div class="brand">{{template "brand"}}</div><span class="eyebrow">ONE OPERATOR. ONE HOST.</span><h1>Your work, right here.</h1><p class="lede">Pair this browser with the pairing code from the terminal where Snow is running.</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}<form method="post" action="/login"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="code">Pairing code</label><input id="code" name="code" type="password" required maxlength="128" autocomplete="off" spellcheck="false" autofocus><button class="primary" type="submit">Connect to this host <span aria-hidden="true">→</span></button></form><p class="fine">The pairing code is reusable for up to 30 days, or until rotated. Paired browsers stay connected across Snow restarts. Credentials stay out of URLs and browser history.</p><div class="local-note"><span class="status-dot"></span>Direct local connection</div></main></div><footer class="login-footer">Snow {{.Version}} · Your host stays in control.</footer></body></html>{{end}}
+{{define "network-label"}}{{if eq .NetworkProfile "trusted-lan-http"}}Trusted-LAN HTTP{{else}}Direct loopback HTTP{{end}}{{end}}
+{{define "network-description"}}{{if eq .NetworkProfile "trusted-lan-http"}}Direct HTTP on this host’s private LAN address. Traffic is unencrypted; use only on a trusted LAN.{{else}}Direct numeric-loopback HTTP. Remote access is disabled.{{end}}{{end}}
+{{define "login"}}<!doctype html><html lang="en"><head>{{template "head" .}}</head><body class="login-body"><div data-react-page="login" class="react-live-panel" data-react-props="{{loginReactProps .CSRF .Error .NetworkProfile}}"><main class="login-card"><div class="brand">{{template "brand"}}</div><span class="eyebrow">ONE OPERATOR. ONE HOST.</span><h1>Your work, right here.</h1><p class="lede">Pair this browser with the pairing code from the terminal where Snow is running.</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}<form method="post" action="/login"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="code">Pairing code</label><input id="code" name="code" type="password" required maxlength="128" autocomplete="off" spellcheck="false" autofocus><button class="primary" type="submit">Connect to this host <span aria-hidden="true">→</span></button></form><p class="fine">The pairing code is reusable for up to 30 days, or until rotated. Paired browsers stay connected across Snow restarts. Credentials stay out of URLs and browser history.</p><div class="local-note"><span class="status-dot"></span>{{template "network-label" .}}</div></main></div><footer class="login-footer">Snow {{.Version}} · Your host stays in control.</footer></body></html>{{end}}
 
 {{define "page"}}
 <!doctype html>
 <html lang="en">
 <head>{{template "head" .}}</head>
-<body hx-history="false">
+<body>
   <a class="skip-link" href="#workspace-content">Skip to workspace</a>
   <header class="topbar mobile-topbar">
     <button class="quiet mobile-nav-toggle" type="button" aria-label="Open project navigation" aria-controls="project-navigation" aria-expanded="false" data-nav-toggle>{{template "icon-panel"}}</button>
-    <a href="/" class="brand" aria-label="Snow workspace home">{{template "brand"}}</a>
+    <a href="/" class="brand" aria-label="Snow workspace home" data-snow-navigation>{{template "brand"}}</a>
   </header>
   {{template "workspace" .}}
   <div id="connection-error" class="connection-error" role="alert" hidden>Could not reach Snow. Check the terminal, then retry. Your draft has not been sent.</div>
@@ -19,9 +21,9 @@
 {{end}}
 
 {{define "navigation"}}
-<aside id="project-navigation" class="sidebar" aria-label="Projects and workspace" hx-sync="this:replace">
+<aside id="project-navigation" class="sidebar" aria-label="Projects and workspace">
   <div class="sidebar-brand-row">
-    <a href="/" hx-get="/" hx-target="#workspace" hx-swap="outerHTML" hx-push-url="true" class="brand" aria-label="Snow workspace home">{{template "brand"}}</a>
+    <a href="/" data-snow-navigation="" class="brand" aria-label="Snow workspace home">{{template "brand"}}</a>
     <button class="quiet sidebar-collapse" type="button" data-sidebar-collapse aria-label="Collapse sidebar" aria-controls="project-navigation" aria-expanded="true">{{template "icon-panel"}}</button>
     <button class="quiet mobile-nav-close" type="button" data-nav-close aria-label="Close project navigation">{{template "icon-close"}}</button>
   </div>
@@ -38,30 +40,30 @@
     <label class="visually-hidden" for="workspace-search">Search registered workspaces</label>
     <input id="workspace-search" type="search" placeholder="Search workspaces…" autocomplete="off" maxlength="200" data-sidebar-search>
   </div>
-  <nav class="project-tree" aria-label="Project navigation" hx-target="#workspace" hx-swap="outerHTML" hx-push-url="true">
+  <nav class="project-tree" aria-label="Project navigation">
     {{range .Projects}}
     <div class="project-group" data-sidebar-project="{{.ID}}">
       <div class="shell-project-row">
       <button type="button" class="quiet shell-project-action workspace-disclosure" data-workspace-toggle aria-label="Sessions in {{.Name}}" aria-expanded="{{if $.Project}}{{if eq $.Project.ID .ID}}true{{else}}false{{end}}{{else}}false{{end}}" aria-controls="workspace-sessions-{{.ID}}">{{template "icon-chevron"}}</button>
-      <a class="project-link{{if $.Project}}{{if eq $.Project.ID .ID}} selected{{end}}{{end}}" href="/?view=projects&amp;project={{.ID}}" hx-get="/?view=projects&amp;project={{.ID}}" title="{{.Path}}" {{if $.Project}}{{if eq $.Project.ID .ID}}aria-current="page"{{end}}{{end}}>
+      <a class="project-link{{if $.Project}}{{if eq $.Project.ID .ID}} selected{{end}}{{end}}" href="/?view=projects&amp;project={{.ID}}" data-snow-navigation="" title="{{.Path}}" {{if $.Project}}{{if eq $.Project.ID .ID}}aria-current="page"{{end}}{{end}}>
         <span class="folder-icon" aria-hidden="true">{{template "icon-folder"}}</span>
         <span class="project-link-text"><strong>{{.Name}}</strong><span class="project-link-path">{{.Path}}</span>{{if not .Available}}<span class="unavailable">Folder unavailable</span>{{end}}</span>
       </a>
       <span class="shell-project-actions">
-        <a class="quiet shell-project-action" data-shell-project-new href="/?view=projects&amp;project={{.ID}}&amp;new=1" hx-get="/?view=projects&amp;project={{.ID}}&amp;new=1" aria-label="New session in {{.Name}}" title="New session in {{.Name}}">{{template "icon-chat-plus"}}</a>
+        <a class="quiet shell-project-action" data-shell-project-new href="/?view=projects&amp;project={{.ID}}&amp;new=1" data-snow-navigation="" aria-label="New session in {{.Name}}" title="New session in {{.Name}}">{{template "icon-chat-plus"}}</a>
         <button type="button" class="quiet shell-project-action" data-shell-project-menu aria-label="Workspace actions for {{.Name}}" aria-haspopup="menu" aria-expanded="false" title="Workspace actions">⋯</button>
       </span>
       </div>
       <div class="session-tree" id="workspace-sessions-{{.ID}}" data-workspace-sessions{{if $.Project}}{{if ne $.Project.ID .ID}} hidden{{end}}{{else}} hidden{{end}}>
       {{if $.Project}}{{if eq $.Project.ID .ID}}
         {{if $.Live}}<div class="shell-session-row" data-shell-session="{{$.Live.SessionID}}" data-shell-live-session>
-          <a href="/?view=projects&amp;project={{$.Project.ID}}&amp;session={{$.Live.SessionID}}" hx-get="/?view=projects&amp;project={{$.Project.ID}}&amp;session={{$.Live.SessionID}}" aria-current="page">{{template "icon-chat"}}<span title="{{$.Live.SessionName}}">{{if $.Live.SessionName}}{{$.Live.SessionName}}{{else}}New conversation{{end}}</span></a>
+          <a href="/?view=projects&amp;project={{$.Project.ID}}&amp;session={{$.Live.SessionID}}" data-snow-navigation="" aria-current="page">{{template "icon-chat"}}<span title="{{$.Live.SessionName}}">{{if $.Live.SessionName}}{{$.Live.SessionName}}{{else}}New conversation{{end}}</span></a>
           {{if $.WorkflowEnabled}}<button type="button" class="quiet shell-session-more" data-shell-session-menu aria-label="Current conversation actions" aria-haspopup="menu" hidden disabled>⋯</button>{{end}}
         </div>{{end}}
         {{if $.Sessions}}{{range $.Sessions.Sessions}}
         {{if or (not $.Live) (ne .ID $.Live.SessionID)}}
         <div class="shell-session-row" data-shell-session="{{.ID}}">
-          <a href="/?view=projects&amp;project={{$.Project.ID}}&amp;session={{.ID}}" hx-get="/?view=projects&amp;project={{$.Project.ID}}&amp;session={{.ID}}" {{if eq $.SessionID .ID}}aria-current="page"{{end}}>{{template "icon-chat"}}<span title="{{if .Name}}{{.Name}}{{else}}Untitled session{{end}}">{{if .Name}}{{.Name}}{{else}}Untitled session{{end}}</span></a>
+          <a href="/?view=projects&amp;project={{$.Project.ID}}&amp;session={{.ID}}" data-snow-navigation="" {{if eq $.SessionID .ID}}aria-current="page"{{end}}>{{template "icon-chat"}}<span title="{{if .Name}}{{.Name}}{{else}}Untitled session{{end}}">{{if .Name}}{{.Name}}{{else}}Untitled session{{end}}</span></a>
           {{if $.WorkflowEnabled}}{{if $.Live}}<button type="button" class="quiet shell-session-more" data-shell-session-menu aria-label="Current conversation actions" aria-haspopup="menu" hidden disabled>⋯</button>{{end}}{{end}}
         </div>
         {{end}}{{end}}{{end}}
@@ -74,8 +76,8 @@
     <p class="sidebar-search-empty fine" data-sidebar-search-empty hidden>No matching workspaces.</p>
   </nav>
   <div class="sidebar-bottom">
-    <a class="sidebar-utility" href="/?view=activity" hx-get="/?view=activity" hx-target="#workspace" hx-swap="outerHTML" hx-push-url="true" aria-label="Activity &amp; attention" title="Activity &amp; attention" {{if eq .View "activity"}}aria-current="page"{{end}}>{{template "icon-activity"}}<span>Activity &amp; attention</span></a>
-    <a class="sidebar-utility" href="/?view=organization" hx-get="/?view=organization" hx-target="#workspace" hx-swap="outerHTML" hx-push-url="true" aria-label="Organize workspaces" title="Organize workspaces" {{if eq .View "organization"}}aria-current="page"{{end}}>{{template "icon-folder"}}<span>Organize workspaces</span></a>
+    <a class="sidebar-utility" href="/?view=activity" data-snow-navigation="" aria-label="Activity &amp; attention" title="Activity &amp; attention" {{if eq .View "activity"}}aria-current="page"{{end}}>{{template "icon-activity"}}<span>Activity &amp; attention</span></a>
+    <a class="sidebar-utility" href="/?view=organization" data-snow-navigation="" aria-label="Organize workspaces" title="Organize workspaces" {{if eq .View "organization"}}aria-current="page"{{end}}>{{template "icon-folder"}}<span>Organize workspaces</span></a>
     <div class="sidebar-settings"><button class="sidebar-settings-trigger" type="button" data-settings-open aria-label="Settings" aria-haspopup="dialog" aria-controls="settings-dialog">{{template "icon-settings"}}<span>Settings</span></button></div>
     <noscript><a href="/?view=access">Browser access</a> · <a href="/?view=projects">Workspaces</a></noscript>
   </div>
@@ -96,15 +98,15 @@
       <summary aria-haspopup="menu">{{template "icon-folder"}}<span data-home-workspace-label>Choose workspace</span>{{template "icon-chevron"}}</summary>
       <div class="workspace-picker-menu">
         <span class="picker-heading">Workspaces</span>
-        {{range .Projects}}<a data-home-project="{{.ID}}" data-home-project-name="{{.Name}}" data-home-project-available="{{.Available}}" href="/?view=projects&amp;project={{.ID}}" hx-get="/?view=projects&amp;project={{.ID}}" hx-target="#workspace" hx-swap="outerHTML" hx-push-url="true"><span class="folder-icon">{{template "icon-folder"}}</span><span title="{{.Name}} · {{.Path}}"><strong>{{.Name}}</strong><small>{{.Path}}</small>{{if not .Available}}<small>Folder unavailable</small>{{end}}</span></a>{{else}}<p class="fine">No workspaces registered yet.</p>{{end}}
-        <div class="snow-menu-footer"><a class="picker-add" href="/?view=projects#add-project" hx-get="/?view=projects" hx-target="#workspace" hx-swap="outerHTML" hx-push-url="/?view=projects#add-project">{{template "icon-plus"}}<span>Add workspace</span></a></div>
+        {{range .Projects}}<a data-home-project="{{.ID}}" data-home-project-name="{{.Name}}" data-home-project-available="{{.Available}}" href="/?view=projects&amp;project={{.ID}}" data-snow-navigation=""><span class="folder-icon">{{template "icon-folder"}}</span><span title="{{.Name}} · {{.Path}}"><strong>{{.Name}}</strong><small>{{.Path}}</small>{{if not .Available}}<small>Folder unavailable</small>{{end}}</span></a>{{else}}<p class="fine">No workspaces registered yet.</p>{{end}}
+        <div class="snow-menu-footer"><a class="picker-add" href="/?view=projects#add-project" data-snow-navigation="">{{template "icon-plus"}}<span>Add workspace</span></a></div>
       </div>
     </details>
   </div>
   <form id="home-composer" class="composer home-composer">
     <label class="visually-hidden" for="home-prompt">Draft a message to Snow</label>
     <textarea id="home-prompt" rows="2" maxlength="65536" disabled placeholder="What would you like to work on?" aria-describedby="home-privacy"></textarea>
-    <div class="composer-actions home-composer-actions"><span class="home-composer-hint">Draft first. Choose where to work.</span><button class="home-send" type="submit" hx-push-url="true" disabled>Continue</button></div>
+    <div class="composer-actions home-composer-actions"><span class="home-composer-hint">Draft first. Choose where to work.</span><button class="home-send" type="submit" disabled>Continue</button></div>
   </form>
   <p id="home-privacy" class="home-privacy fine" role="status">Choose a workspace, then start or resume. Your draft stays in this tab until you send it; reloading clears it.</p>
   <noscript><p class="fine">Drafting needs JavaScript. Choose a workspace above to browse it.</p></noscript>
@@ -121,7 +123,7 @@
     {{else if eq .View "projects"}}{{template "projects" .}}
     {{else if eq .View "activity"}}{{template "manager-activity" .}}
     {{else if eq .View "organization"}}{{template "organization" .}}
-    {{else if eq .View "access"}}<header class="workspace-heading"><div><span class="eyebrow">HOST SETTINGS</span><h1>Browser access</h1></div><span class="pill">Loopback only</span></header>{{template "browser-access" .}}
+    {{else if eq .View "access"}}<header class="workspace-heading"><div><span class="eyebrow">HOST SETTINGS</span><h1>Browser access</h1></div><span class="pill">{{template "network-label" .}}</span></header>{{template "browser-access" .}}
 
     {{end}}
   </main>

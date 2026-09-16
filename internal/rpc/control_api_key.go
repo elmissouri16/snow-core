@@ -14,8 +14,8 @@ import (
 const controlAPIKeyCapability = protocol.RPCAPIKeyControlCapability
 
 // APIKeyControlService is optional and write-only for credentials. These calls
-// are trusted local stdio operations. The browser-facing host must enforce its
-// numeric-loopback TLS/CSRF gate before parsing any submitted secret body.
+// are trusted same-user local stdio/control-RPC operations and must never be
+// exposed through the Web Manager HTTP surface.
 type APIKeyControlService interface {
 	InspectAPIKey(context.Context, protocol.HostAPIKeyInspectRequest) (protocol.HostAPIKeyStatusResponse, error)
 	SetAPIKey(context.Context, protocol.HostAPIKeySetRequest) (protocol.HostAPIKeyStatusResponse, error)

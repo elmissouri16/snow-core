@@ -133,7 +133,7 @@
     window.visualViewport?.addEventListener("resize", reposition, options);
     window.visualViewport?.addEventListener("scroll", reposition, options);
     if (window.ResizeObserver) { menu.observer = new ResizeObserver(reposition); menu.observer.observe(panel); menu.observer.observe(trigger); }
-    document.addEventListener("htmx:beforeSwap", () => close({restoreFocus: false}), options);
+    document.addEventListener("snow:navigation-before-swap", () => close({restoreFocus: false}), options);
   }
   // Menu owners supply fresh descriptions, but unchanged controls remain live.
   // Keys are local to each parent and each menu lifetime, never across sessions.

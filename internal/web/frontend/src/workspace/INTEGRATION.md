@@ -73,8 +73,9 @@ Live opening / cold inspector follow-up:
 - `updateInspector(open)` projects the cold header button's `aria-expanded`.
 - `snow:workspace-mounted` only requests canonical draft projection from app;
   do not attach HTTP or runtime setup to this notification. `Opening` and
-  `DraftNotice` do not dispatch it or add networking. Existing hx link attributes
-  remain metadata for the single delegated ancestor navigation owner.
+  `DraftNotice` do not dispatch it or add networking. Navigation links retain
+  real `href` values and use `data-snow-navigation` for the single delegated
+  ancestor navigation owner.
 
 
 Home picker / registration transport follow-up:
@@ -84,16 +85,14 @@ Home picker / registration transport follow-up:
   either. The shell helper supplies its stable SHELL_MENU_ID when open.
 - #add-project-form MUST retain enhanced in-document submission when JavaScript
   is active. Its native method=post action=/projects/add remains the no-JS
-  fallback, not parity for the ordinary draft-carry workflow. Original template
-  explicitly set hx-post=/projects/add, hx-target=#workspace, hx-select=#workspace,
-  hx-swap=outerHTML, hx-push-url=true. React preserves those exact attributes.
-- With child htmx.process removed, app's single delegated submit handler must
-  intercept ONLY #add-project-form, capture FormData before disabling/changing
-  controls, and issue the existing HTMX POST once from that form source with
-  csrf/path/name fields. Do not use the JSON request helper: this endpoint returns
-  HTML through a 303 redirect, not a JSON receipt. Preserve #workspace selection,
-  ancestor-only swap, redirect URL/history and existing HTMX error handling.
-  Do not manually issue another registration after any timeout or error.
+  fallback, not parity for the ordinary draft-carry workflow.
+- App's single delegated submit handler must intercept ONLY #add-project-form,
+  capture FormData before disabling/changing controls, and call
+  `SnowNavigation.submit` once from that form source with csrf/path/name fields.
+  Do not use the JSON request helper: this endpoint returns HTML through a 303
+  redirect, not a JSON receipt. Preserve unique `#workspace` selection,
+  ancestor-only replacement, redirect URL/history, response bounds, and explicit
+  unknown-outcome feedback. Never replay registration after a timeout or error.
 - Backend projects.go:addProject redirects successful registration to
   /?view=projects&project=<id>&new=1 and failures to
   /?view=projects&notice=register_failed. Registration never activates a worker.

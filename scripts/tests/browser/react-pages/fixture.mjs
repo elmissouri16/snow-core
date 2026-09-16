@@ -1,5 +1,5 @@
 // Only public DTOs and HTTP are simulated. The shell and all executable assets
-// come from the production Go exporter; React/HTMX are never replaced or patched.
+// come from the production Go exporter; React and native navigation are never replaced or patched.
 import {createServer} from 'node:http';
 import {extname} from 'node:path';
 
@@ -43,8 +43,8 @@ export function transport(files, shell) {
   state.page = (view, props) => {
     const settingsPage = view === 'host-settings' || view === 'browser-access';
     const content = settingsPage ? '<p>Isolated settings fixture workspace</p>' : root(view, props ?? (view === 'activity' ? {registryEnabled: true, error: ''} : state.organization));
-    // Keep the production shell/head, asset order, navigation, and HTMX ancestor
-    // attributes; only fixture presentation data and the owned root are supplied.
+    // Keep the production shell/head, asset order, and navigation boundary;
+    // only fixture presentation data and the owned root are supplied.
     let html = shell.replace('data-view="overview"', `data-view="${view}"`)
       .replace(/<main id="workspace-content"[^>]*>[\s\S]*?<\/main>/, `<main id="workspace-content" class="workspace" tabindex="-1">${content}</main>`);
     // Settings is now an ordinary React child of the one production shell root.
@@ -57,10 +57,8 @@ export function transport(files, shell) {
       const bootstrap = JSON.parse(decode(encoded));
       bootstrap.view = settingsPage ? 'overview' : view;
       if (settingsPage) {
-        const settings = state.hostProps || {csrf, enabled: true, apiKeyEnabled: true, projects: [{id: projectID, name: malicious}]};
-        // Model an HTTPS-capable host for write-only key UI tests. This isolated
-        // HTTP mock receives fictional canaries only; real TLS gates have their own suite.
-        Object.assign(bootstrap, {csrf: settings.csrf, hostSettingsEnabled: settings.enabled, apiKeyEnabled: settings.apiKeyEnabled, tls: settings.tls ?? true,
+        const settings = state.hostProps || {csrf, enabled: true, projects: [{id: projectID, name: malicious}]};
+        Object.assign(bootstrap, {csrf: settings.csrf, hostSettingsEnabled: settings.enabled,
           project: '', session: '', sessions: [], live: null,
           projects: settings.projects.map(project => ({...project, path: '/fixture/workspaces/alpha', available: true, trustRemembered: false, skillsEnabled: false, pinned: false}))});
       }
@@ -73,7 +71,7 @@ export function transport(files, shell) {
   state.release = () => { for (const release of state.held.splice(0)) release(); };
   state.reset = () => {
     state.release(); state.requests = []; state.errors = []; state.next = null;
-    state.current = summary(); state.organization = structuredClone(organization); state.maxActive = state.active; state.aborts = 0; state.resetSettings?.();
+    state.current = summary(); state.organization = structuredClone(organization); state.maxActive = state.active; state.aborts = 0; state.invalidNextNavigation = false; state.holdNextNavigation = false; state.resetSettings?.();
   };
   const json = (response, value, status = 200) => {
     response.writeHead(status, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'}); response.end(JSON.stringify(value));
@@ -95,8 +93,20 @@ export function transport(files, shell) {
         if (url.searchParams.has('malformed')) props = state.badProps;
         const html = state.page(view, props);
         response.writeHead(200, {'Content-Type': 'text/html', 'Cache-Control': 'no-store'});
-        // Production HTMX route responds with the workspace, not another head.
-        response.end(request.headers['hx-request'] ? html.match(/<div id="workspace"[\s\S]*<\/div>\s*<\/body>/)?.[0].replace(/\s*<\/body>$/, '') || html : html); return;
+        const nativeNavigation = request.headers['x-snow-navigation'] === 'workspace';
+        if (nativeNavigation && state.invalidNextNavigation) {
+          state.invalidNextNavigation = false;
+          response.end('<p>Invalid fixture fragment</p>');
+          return;
+        }
+        // Production native navigation receives only the replaceable workspace.
+        const body = nativeNavigation ? html.match(/<div id="workspace"[\s\S]*<\/div>\s*<\/body>/)?.[0].replace(/\s*<\/body>$/, '') || html : html;
+        if (nativeNavigation && state.holdNextNavigation) {
+          state.holdNextNavigation = false;
+          state.held.push(() => { if (!response.destroyed) response.end(body); });
+          return;
+        }
+        response.end(body); return;
       }
       if (path === '/access/browsers' && request.method === 'GET') { json(response, {browsers: [], limit: 8}); return; } // Shared production settings dialog reads a public empty inventory.
       if (path === '/activity' && request.method === 'GET') {

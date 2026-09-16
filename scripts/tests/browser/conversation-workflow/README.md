@@ -19,7 +19,7 @@ passing skipped check.
 The fixture uses production-shaped form requests, `RuntimeSnapshot`, and
 `RuntimeChoices` DTOs, including server-sanitized public message HTML. All
 requests are intercepted in memory. Only polling timers are shortened. The
-HTMX test shim exercises the real before/after-swap events without a server;
+A native-navigation test shim exercises the real before/after-replacement lifecycle without a server;
 its `process` hook is a no-op because link rebinding is outside this shim.
 File-origin history updates omit the app URL because `file://` cannot adopt an
 HTTP-origin route.
@@ -28,7 +28,7 @@ HTTP-origin route.
 both light and dark (1,736 assertions total). Height is 740px at width 360
 and 900px otherwise:
 
-- Passive page load and HTMX replacement never discover models. Explicitly
+- Passive page load and native workspace replacement never discover models. Explicitly
   clicking the model trigger opens the searchable list directly and authorizes
   exactly one instance/CSRF-bound discovery POST when inventory is absent;
   closing/reopening during that request never duplicates it. There is no
@@ -51,7 +51,7 @@ and 900px otherwise:
 - Instance/CSRF binding, authoritative mode changes, public plan Markdown,
   telemetry availability, and preservation of the public tool timeline.
 - Rename, New, idle switching, native stop confirmation, nonce rotation,
-  independent session drafts, and memory preservation across HTMX navigation.
+  independent session drafts, and memory preservation across native navigation.
 - Offline/login-required status, no action replay, unknown mutation outcomes
   requiring explicit review, stale canceled poll delivery, and passive
   replacement requiring review/reload rather than silent retargeting.
@@ -60,7 +60,7 @@ and 900px otherwise:
   replaces Send only during active turns, stays disabled when unsafe/pending,
   sends an explicit identity-bound abort, and preserves the unsent draft.
 - Rename cancellation followed by Settings Close/native Escape restores the
-  Settings trigger rather than the session trigger, including after HTMX replacement.
+  Settings trigger rather than the session trigger, including after native replacement.
 - External 404 becomes terminal Runtime closed with visible explicit review;
   restoring transport cannot auto-reopen, resume authority, or replay an action.
 - A delayed prompt POST disables duplicate Send immediately. Even an already

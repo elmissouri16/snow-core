@@ -28,7 +28,7 @@ func inventoryRequest(s *shell, cookie *http.Cookie, method, path string, values
 	r.Host = s.host
 	r.Header.Set("Origin", s.origin)
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.Header.Set("HX-Request", "true")
+	r.Header.Set("Accept", "application/json")
 	if cookie != nil {
 		r.AddCookie(cookie)
 	}

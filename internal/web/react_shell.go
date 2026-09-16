@@ -37,8 +37,7 @@ type shellFrontendProps struct {
 	Project             string                 `json:"project"`
 	Session             string                 `json:"session"`
 	HostSettingsEnabled bool                   `json:"hostSettingsEnabled"`
-	APIKeyEnabled       bool                   `json:"apiKeyEnabled"`
-	TLS                 bool                   `json:"tls"`
+	NetworkProfile      string                 `json:"networkProfile"`
 	PairingCode         string                 `json:"pairingCode"`
 	Projects            []shellFrontendProject `json:"projects"`
 	Sessions            []shellFrontendSession `json:"sessions"`
@@ -52,7 +51,7 @@ func shellReactProps(data pageData) (string, error) {
 	if len(data.Projects) > MaxProjects {
 		return "", errors.New("React shell project limit exceeded")
 	}
-	props := shellFrontendProps{CSRF: data.CSRF, Version: data.Version, View: data.View, Session: data.SessionID, HostSettingsEnabled: data.HostSettingsEnabled, APIKeyEnabled: data.HostAPIKeyEnabled, TLS: data.TLS, PairingCode: data.PairingCode}
+	props := shellFrontendProps{CSRF: data.CSRF, Version: data.Version, View: data.View, Session: data.SessionID, HostSettingsEnabled: data.HostSettingsEnabled, NetworkProfile: cmp.Or(data.NetworkProfile, "local"), PairingCode: data.PairingCode}
 	for _, project := range data.Projects {
 		props.Projects = append(props.Projects, shellFrontendProject{ID: project.ID, Name: project.Name, Path: project.Path, Available: project.Available, TrustRemembered: project.TrustRemembered, SkillsEnabled: project.SkillsEnabled, Pinned: project.Pinned})
 	}

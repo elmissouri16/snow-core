@@ -15,17 +15,17 @@ bounded loopback fixture server; both are cleaned up on success and failure.
 
 ## What runs
 
-`run.mjs` reads the current production `menus.js`, `session-actions.js`,
-`sidebar-sessions.js`, `shell.js`, vendored HTMX, and the CSS files in production
-`pages.html` load order once at startup. `fixture.mjs` supplies a small real-DOM sidebar
+`run.mjs` reads the current production `menus.js`, generated React bundle,
+`app.js` navigation prefix, and the CSS files in production `pages.html` load
+order once at startup. `fixture.mjs` supplies a small real-DOM sidebar
 projection, fictional inventory, and deferred deletion responses. The fixture
 uses the real shared-menu implementation and shell routing—not a menu adapter.
 Its current live row includes the existing Rename ellipsis, and a recording-only
 `SnowConversation.rename` boundary verifies that Rename keeps its real launcher.
-It mirrors the
-navigation's inherited `hx-sync="this:replace"`, the project tree's HTMX target,
-and the New anchor's `hx-get` / `hx-push-url` attributes. Native geometry and focus
-checks use actual browser elements and production CSS, not a VM's geometry model.
+It mirrors the first-party latest-navigation-wins controller, the fixed
+`#workspace` replacement boundary, and each New anchor's real `href` plus
+`data-snow-navigation` marker. Native geometry and focus checks use actual browser
+elements and production CSS, not a VM's geometry model.
 
 This is a **component/transport contract suite**, not a Go-template export or a
 real-manager end-to-end deletion test. Existing manager, backend, and exported-page
@@ -36,8 +36,8 @@ are not modified or executed by this runner.
 All `fetch` traffic is strictly mocked: only exact fictional sidebar inventory
 GETs and deletion POSTs are accepted. Other transport or session-selection/new
 intents fail the scenario. Most navigation is recorded without changing the page.
-Two integration scenarios use **real vendored HTMX and native XMLHttpRequest**
-against exact, held loopback fixture routes, never manager endpoints:
+Two integration scenarios use the **real first-party `SnowNavigation` fetch
+controller** against exact, held loopback fixture routes, never manager endpoints:
 
 1. A confirmed cold viewed-session deletion swaps in an empty conversation and
    pushes `/?view=projects&project=a&new=1` into browser history.
@@ -100,8 +100,9 @@ The native suite currently has **257 assertions across 58 scenarios**:
   inventory, trigger detachment, or popup dismissal. No callback may authorize a
   different row merely because it retains a former Delete menu item.
 - Confirmation from a replaced workspace, changed project/session/instance,
-  now-active target, revoked capability, or missing CSRF cannot mutate. HTMX `beforeSwap` cancels
-  unsubmitted confirmation. A late receipt cannot navigate a superseding root.
+  now-active target, revoked capability, or missing CSRF cannot mutate. Native
+  pre-replacement cleanup cancels unsubmitted confirmation. A late receipt cannot
+  navigate a superseding root.
 - Native ellipsis → popup → confirmation keyboard/focus, menu/row hit testing,
   long-name wrapping, horizontal bounds and scrollable acknowledgement/submit
   controls at **1280×740, 1280×240, 320×740,

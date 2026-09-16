@@ -58,6 +58,7 @@ test('public bootstrap selects fields and rejects malformed project ownership', 
     project,
     csrf: 'csrf',
     error: '',
+    networkProfile: 'local',
     sessionID: '',
     sessionTitle: '',
     runtimeEnabled: true,
@@ -88,9 +89,12 @@ test('public bootstrap selects fields and rejects malformed project ownership', 
     `/?view=projects&project=${id}\\evil`,
   ])
     assert.throws(() => validateColdProps({ ...cold, nextURL }));
+  assert.throws(() =>
+    validateLoginProps({ csrf: 'csrf', error: '', networkProfile: 'trusted-proxy' }),
+  );
   assert.deepEqual(
-    validateLoginProps({ csrf: 'csrf', error: '', code: 'never project this' }),
-    { csrf: 'csrf', error: '' },
+    validateLoginProps({ csrf: 'csrf', error: '', networkProfile: 'trusted-lan-http', code: 'never project this' }),
+    { csrf: 'csrf', error: '', networkProfile: 'trusted-lan-http' },
   );
 });
 test('destination leaves and remotes retain original safety boundaries', () => {

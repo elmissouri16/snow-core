@@ -119,7 +119,7 @@ func validAccessToken(value string) bool {
 }
 
 func (state storedAccess) valid() bool {
-	if (state.Version != 1 && state.Version != 2) || !validAccessToken(state.Key) || !validAccessToken(state.PairCode) || state.PairExpires.IsZero() || state.Attempts < 0 || state.Attempts > 20 || (state.Attempts > 0 && state.Window.IsZero()) || len(state.Browsers) > maxBrowsers {
+	if (state.Version != 1 && state.Version != 2) || !validAccessToken(state.Key) || !validAccessToken(state.PairCode) || state.PairExpires.IsZero() || state.Attempts < 0 || state.Attempts > maxPairingAttempts || (state.Attempts > 0 && state.Window.IsZero()) || len(state.Browsers) > maxBrowsers {
 		return false
 	}
 	seen := make(map[string]bool)

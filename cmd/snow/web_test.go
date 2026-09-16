@@ -18,10 +18,8 @@ func TestCLIWebRejectsUnsupportedFlagsBeforeStartup(t *testing.T) {
 		{"--mode", "web", "-p", "hello"},
 		{"--mode", "web", "--mcp", "/missing/manifest.json"},
 		{"--mode", "web", "--config", "/missing/config.json"},
-		{"--mode", "web", "--web-listen", "0.0.0.0:7331"},
 		{"--mode", "web", "resume", "/missing/session.db"},
 		{"--mode", "web", "login", "chatgpt"},
-		{"--web-listen", "127.0.0.1:7331"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			home, sessions := t.TempDir(), t.TempDir()
@@ -54,7 +52,6 @@ func TestWebDispatchDoesNotLoadProjectOrRuntime(t *testing.T) {
 	}
 	cmd := &cobra.Command{Use: "snow"}
 	cmd.Flags().String("mode", "web", "")
-	cmd.Flags().String("web-listen", "127.0.0.1:0", "")
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	cmd.SetContext(ctx)

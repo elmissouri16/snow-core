@@ -77,7 +77,7 @@ func TestWebAccessFixture(t *testing.T) {
 	if len(lines) < 3 {
 		t.Fatal("invalid private startup frame")
 	}
-	_, code, ok := strings.Cut(lines[2], "): ")
+	code, ok := fixturePairingCode(output)
 	if !ok {
 		t.Fatal("private pairing credential unavailable")
 	}

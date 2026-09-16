@@ -214,8 +214,18 @@ entry. An initial model response and each continuation after tool results are
 separate steps; transport retries and overflow recovery reuse the same step,
 and compaction or auxiliary provider requests add no step. Together these
 markers provide the TUI's branch-local `turns:<n> · steps:<n>` projection.
-Branch rewinds and forks naturally include only the selected ancestry. For the
-prefix of a session created before each marker existed, Snow conservatively
+When a provider request reaches an assistant boundary, Snow also stores every
+private steering fragment sent with that request as `internal_context` entries
+immediately before the response in the same batch. `ContextMessages()`
+synthesizes those entries as provider-only `RoleInternal` inputs, preserving the
+exact input/output sequence needed for prompt-prefix caching. `Messages()`,
+catalogs, transcript hydration, RPC, SDK, TUI, and web history omit their text.
+A provider start failure with no activity stores neither the response nor its
+steering, so a retry does not duplicate the suffix. Unchanged recurring
+fragments are sent once per high-level turn and then reused from that durable
+history; compaction permits one fresh reassertion. Branch rewinds, forks, and
+saved-session resume naturally preserve only the selected internal ancestry.
+For the prefix of a session created before each marker existed, Snow conservatively
 infers user turns from durable user messages and steps from durable assistant
 messages. It does not guess pre-marker automatic-goal boundaries that message
 shapes cannot identify. Explicit markers are authoritative from their first

@@ -27,7 +27,7 @@ raw pageState in props. Parent Go projects exactly these public fields:
 interface ShellBootstrap {
  csrf: string; version: string; view: string;
  project: string; session: string;
- hostSettingsEnabled: boolean; apiKeyEnabled: boolean; tls: boolean;
+ hostSettingsEnabled: boolean;
  pairingCode: string;
  projects: Array<{id: string; name: string; path: string; available: boolean;
    trustRemembered: boolean; skillsEnabled: boolean; pinned: boolean}>;
@@ -75,11 +75,13 @@ Session intent event contract unchanged: snow:session-select detail
 snow:session-deleted {project,session,instance}. Cold session links use navigate
 only. New-session commands retain existing app owner, drafts, confirmation and
 instance guard. The shell never starts/resumes/switches/sends itself. New and
-select handlers stop bubbling, and links have NO hx-get / HTMX processing; transport-only hx-push-url and hx-sync describe the explicit callback request; disable any
-external capture listener that would duplicate those commands.
+select handlers stop bubbling, and links expose ordinary `href` values plus the
+`data-snow-navigation` marker. The explicit callback delegates to the first-party
+workspace navigator; disable any external capture listener that would duplicate
+those commands.
 
-Navigation callbacks may replace the HTMX ancestor only. They must never call
-htmx.process inside shell hosts. Keep shell root and navigation portal stable
+Navigation callbacks may replace the `#workspace` ancestor only. They must never
+process or mutate descendants inside shell hosts. Keep shell root and navigation portal stable
 across purely live snapshot updates to preserve keyed nodes, focus and drafts.
 On actual ancestor replacement unmount BEFORE replacing hosts. Tab-only branch,
 query and scroll state is retained in memory, never browser storage; no query or
@@ -126,10 +128,13 @@ The external React Home picker summary must subscribe to shell state and spread
 `menuLauncherARIA(snapshot.menu, 'workspace')`; it must not rely on SnowMenus
 writing its ARIA. No mutation of React launcher attributes is permitted.
 
-Native JSX navigation sources carry ONLY `hx-push-url={destination}` and
-`hx-sync="#project-navigation:replace"` as metadata for the app's explicit
-`snow:shell-navigate` / htmx.ajax callback. There is no hx-get, hx-post, hx-trigger,
-or htmx.process. Project popup navigation now passes the actual anchor as source
-(not its launcher), so fragment/history destinations remain correct. The callback
-must read these attrs synchronously before popup unmount. Existing session intent
-sources retain the same transport metadata without adding HTMX listeners.
+Native JSX navigation sources retain real `href` values and carry only the
+`data-snow-navigation` marker for delegated ordinary-click handling. Explicit
+React callbacks dispatch `snow:shell-navigate`, and the app calls
+`SnowNavigation.visit` with the actual anchor as its source (not the popup
+launcher), so fragment/history destinations remain correct. The generic
+`data-snow-navigation` delegate runs in bubble phase so React's guarded callback
+can prevent and stop the event first; a capture-phase delegate would bypass New,
+selection and local-inspector admission. Modified clicks and native fallbacks
+remain browser-owned. Existing session intent sources use the
+same first-party navigation contract without adding competing listeners.

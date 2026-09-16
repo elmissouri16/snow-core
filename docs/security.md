@@ -43,10 +43,17 @@ Use these basic rules:
 
 ### Local web manager preview
 
-`snow --mode web` starts an authenticated, direct-numeric-loopback HTTP manager
-with optional explicitly configured local TLS. Browsing
-host directories, registering projects and reading the inactive catalog do not
-activate an agent. The host-directory picker lists only directories on the Snow
+`snow --mode web` starts an authenticated manager and automatically binds the first active private IPv4
+address (otherwise an IPv6 ULA) and `127.0.0.1` on port 7331 using HTTP. The
+localhost listener accepts only exact-host GET/HEAD requests and redirects them
+to the canonical LAN origin; with no private address Snow serves numeric
+loopback directly. This trusted-LAN transport is deliberately
+zero-setup and unencrypted: another device able to observe LAN traffic may read
+the pairing code, browser cookie, prompts, responses, or tool output. Use it only
+on a trusted private network, never public Wi-Fi or the Internet. The Web
+Manager has no TLS, certificate, saved-profile, DNS-origin, or trusted-proxy
+mode. Browsing host directories, registering projects
+and reading the inactive catalog do not activate an agent. The host-directory picker lists only directories on the Snow
 host, not the accessing device; host OS permissions apply, without a separate
 filesystem sandbox. Directory enumeration and pagination are bounded.
 
@@ -281,15 +288,23 @@ Attention takeovers preserve prompt/question drafts in bounded tab memory and
 use the existing permission/question brokers. Stop cancels the whole turn;
 UI paging, recommended labels and collapse never grant authority or send answers.
 
-Do not publish this preview through a reverse proxy, LAN listener or mesh-VPN
-tunnel. Remote TLS and trusted proxy handling are not implemented. Host-side
-folder selection is not evidence that remote deployment is supported.
+Do not publish the manager to the public Internet. The ordinary
+**trusted-LAN HTTP** profile binds one assigned private address and exact
+`http://<address>:7331` origin automatically, plus an exact `127.0.0.1:7331`
+listener that only redirects safe reads to that LAN origin. It never binds a
+wildcard, public, multicast, DNS-named, or zone-qualified address. Pairing and exact Host/Origin
+checks remain active, but cookies are non-Secure because the transport is HTTP.
+The Web Manager has no TLS, certificate, generated CA, saved-network-profile,
+DNS-origin, trusted-proxy, Tailscale forwarding, or public-Internet deployment
+mode. Forwarding headers never become network or browser authority. HTTPS cannot
+be served without a certificate; clients must use the printed explicit `http://`
+URL. Traffic, including pairing/session credentials and agent content, is
+unprotected from observers on the LAN. Use this only on a trusted home/work LAN.
 
-Local TLS requires both `--web-tls-cert` and `--web-tls-key`, clean absolute
-paths to bounded regular PEM files (1 MiB each), with no symlink components.
-Minimum TLS is 1.2; invalid inputs fail closed. Snow does not generate certificates,
-install trust or add DNS/LAN/public-origin/proxy support. TLS protects this direct
-local browser transport, not Snow's tools from the host user.
+The configured numeric origin—not DNS resolution or an arbitrary Host header—
+sets the exact browser Host/Origin policy. Pairing, CSRF, revocation, per-project
+runtime identity, permission checks, and no-replay rules remain authoritative.
+Snow does not change DNS, mDNS, Tailscale, firewall, router, or client settings.
 
 Runtime-free host controls dispatch before `app.New` using a separate control
 startup. Allowlisted global/project defaults and coarse local provider status
@@ -297,35 +312,33 @@ use local config/auth helpers only: no provider initialization, discovery,
 network credential validation/refresh, OAuth or extension loading. Defaults
 apply to future workers and use locked revision-checked atomic updates, not a
 raw config editor or live-worker policy override. At most two short control
-workers run; settings/key writes have a separate nonqueued serialization gate.
-
-API-key entry additionally requires an **actual TLS request**, exact numeric-
-loopback HTTPS origin/Host, browser authentication, explicit Origin and CSRF on
-POST. Forwarded headers cannot simulate this authority. A provider-specific
-metadata inspection grants one write for five minutes, bound to this browser;
-explicit save and required replacement confirmations are checked. The key
-limit is 4 KiB (16 KiB form-body limit). The write consumes inspection authority
-even on uncertainty, compares the auth-file metadata revision under the existing
-legacy auth lock, and atomically writes mode 0600. Revisions derive from file
-metadata, not credential bytes. No credential value is exported in status/errors;
-no OAuth, key deletion, automatic refresh or provider network call is offered.
-Existing workers are not reloaded. Keep API keys out of logs, URLs, screenshots
-and CLI arguments; use interactive host login when HTTPS entry is unavailable.
+workers run; settings writes have a separate nonqueued serialization gate. The
+browser does not accept provider API keys or perform provider OAuth; credentials
+remain explicit host-terminal or control-RPC operations.
 
 Pairing uses a random reusable code, valid for up to 30 days or until rotated,
-with bounded persisted attempts and at most eight browser sessions. Browser
+with a persisted 20-attempt global minute window, an in-memory ten-attempt
+minute window per admitted source, at most 128 retained source windows,
+and at most eight browser sessions. Requests key the source from the actual
+peer; forwarding values never select a rate-limit bucket. Per-source windows reset on manager restart
+without persisting client addresses; the global window persists, so restart does
+not clear the aggregate bound. Browser
 credentials also have 30-day absolute/idle limits and survive restarts. A private,
 bounded, atomically replaced `access.json` under manager storage keeps token
 **hashes**, CSRF values, signing key, expiry metadata and the deliberately
 reprintable pairing code. Unsafe/corrupt/replaced storage or failed writes deny
 access rather than silently reset it. Grants/revocations persist before success.
 
-Cookies are HttpOnly and SameSite=Strict, Secure on configured HTTPS and
-intentionally non-Secure only on loopback HTTP. Exact Host and same Origin are required for mutations, with CSRF
-form tokens. Forwarded headers confer no authority. Same-origin referrer policy
+Cookies are host-only, HttpOnly, SameSite=Strict, and intentionally non-Secure
+because both loopback and trusted-LAN transports are HTTP. Exact Host and same
+Origin are required for mutations, with CSRF form tokens. Same-origin referrer policy
 preserves ordinary form Origin while suppressing cross-origin referrers.
-Authenticated content is no-store; HTMX evaluation/script processing and history
-caching are disabled under a self-only CSP. Display data remains untrusted text.
+Authenticated content is no-store under a self-only CSP. The first-party
+workspace navigator accepts same-origin manager URLs only, sends credentials
+without caching, bounds responses, requires valid UTF-8 `text/html` with exactly
+one `#workspace`, and stores URLs—not DOM snapshots—in browser history. Parsed
+response scripts are never executed. Display data remains untrusted text, and
+untrusted content cannot grant delegated `data-snow-navigation` authority.
 
 Browser inventory projects independent random public IDs, coarse labels and
 creation/approximate-last-used/expiry metadata, not cookies, hashes, raw
@@ -354,7 +367,10 @@ Catalog mode rejects prompts and mutations. At most two short-lived workers read
 safely leased, inactive SQLite databases through read-only immutable connections,
 without creating leases, schemas or sidecars. Active, unleased, recovery-dependent,
 invalid and oversized databases are omitted. Saved conversation projections
-exclude tools, thinking, images and provider-private continuity. A separate live
+exclude tools, thinking, images, provider-private continuity, and durable
+provider-only internal steering. Internal steering remains in the private
+append-only session ancestry solely to preserve provider prompt order across
+requests and resume. A separate live
 timeline consumes only the explicit public `tool_result` text field, never legacy
 `tool_output` previews, arguments or private display/plugin metadata. Private-detail
 results suppress that field. Live updates consume normalized RPC events with

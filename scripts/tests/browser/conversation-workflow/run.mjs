@@ -20,8 +20,7 @@ async function exportFixture(directory) {
     child.once("close", code => code === 0 ? resolve() : reject(new Error(`Go fixture export failed: ${output}`)));
   });
   let html = await readFile(join(directory, "workflow.html"), "utf8");
-  html = html.replace(/<script src="\/static\/vendor\/htmx[^>]*><\/script>/, "");
-  // The fixture only replaces public transport and HTMX; all page markup and
+  // The fixture only replaces public transport; all page markup and
   // production script order are exported on this run, never copied by hand.
   html = html.replace("</body>", `<pre id="test-result" hidden></pre><script src="/fixture.js"></script><script src="/history-tools.js"></script><script type="module" src="/tests.js"></script></body>`);
   await writeFile(join(directory, "workflow.html"), html, {mode: 0o600});

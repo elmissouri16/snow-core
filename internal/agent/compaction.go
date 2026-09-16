@@ -272,7 +272,7 @@ func compactionTailIsActive(messages []protocol.Message) bool {
 	}
 	last := messages[len(messages)-1]
 	switch last.Role {
-	case protocol.RoleUser, protocol.RoleAgent, protocol.RoleTool:
+	case protocol.RoleUser, protocol.RoleAgent, protocol.RoleTool, protocol.RoleInternal:
 		return true
 	case protocol.RoleAssistant:
 		return last.StopReason == protocol.StopToolUse || last.StopReason == protocol.StopPending
@@ -389,6 +389,15 @@ func (a *Agent) compactActiveContextMessages(ctx context.Context, trigger compac
 	return result, nil
 }
 
+func compactionSummaryMessages(messages []protocol.Message) []protocol.Message {
+	if !slices.ContainsFunc(messages, func(message protocol.Message) bool { return message.Role == protocol.RoleInternal }) {
+		return messages
+	}
+	return slices.DeleteFunc(slices.Clone(messages), func(message protocol.Message) bool {
+		return message.Role == protocol.RoleInternal
+	})
+}
+
 func (a *Agent) summarizeForCompaction(ctx context.Context, msgs []protocol.Message) (string, error) {
 	p := a.currentProvider()
 	contract := `Create a factual working-state checkpoint for a coding agent, not a conversational recap. Return bounded Markdown using exactly these headings, in this order:
@@ -423,7 +432,7 @@ Preserve exact identifiers, paths, artifact IDs, commands, test outcomes, failur
 	}
 	req := protocol.ChatRequest{
 		Model:                   model,
-		Messages:                providerMessages(msgs),
+		Messages:                providerMessages(compactionSummaryMessages(msgs)),
 		System:                  contract,
 		MaxTokens:               maxTokens,
 		Thinking:                protocol.ThinkingOff,

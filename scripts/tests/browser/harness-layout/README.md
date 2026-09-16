@@ -59,11 +59,10 @@ No authentication, project registration, real catalog scan, provider request, wo
 or agent tool is started. A pre-document CDP script mocks the public HTTP DTOs;
 it rejects unexpected requests and requires explicit CSRF/instance-bound
 workflow requests. The production polling, Markdown, navigation, workflow,
-attention, and inspection JavaScript still runs. Handler-based HTMX settings
-requests are adapted to that same scoped response mock after page startup; other
-HTMX navigation is unchanged. This layout suite does not verify native XHR or
-HTMX field serialization—`../permission-policy/run.mjs` covers that integration
-with actual HTTP and SSE. Fixture unit tests retain failed-discovery responses
+attention, inspection, settings and native navigation JavaScript still runs.
+The same strict fixture handles bounded native JSON reads and writes. This layout
+suite does not certify real HTTP serialization—`../permission-policy/run.mjs`
+covers that integration with actual HTTP and SSE. Fixture unit tests retain failed-discovery responses
 and reject stale instances and runtime-panel discovery outside the allowlist.
 
 The embedded Browser access inventory intentionally performs one public metadata

@@ -160,25 +160,33 @@ in-memory overrides are not restart-persistent defaults and do not change tool
 permissions or collaboration mode.
 
 Local provider status exposes configured/expired/unavailable metadata. It does
-not establish that credentials or a model work over the network. The optional
-write-only API-key control requires actual direct numeric-loopback HTTPS,
-authentication, exact Origin and CSRF, a five-minute single-use provider
-inspection, and explicit save/replacement confirmation. A metadata revision is
-checked under the same auth-file lock used by legacy auth writers; successful
-writes are atomic and mode 0600. No key export/delete, browser OAuth, automatic
-refresh or provider request is performed. Writes affect future workers only;
-uncertain results require a fresh inspection, never automatic resubmission.
+not establish that credentials or a model work over the network. Provider login,
+OAuth, and API-key management remain explicit host-terminal or control-RPC
+operations; the browser does not accept provider credentials.
 
-Local TLS is startup configuration, not project/browser-editable configuration:
-`--web-tls-cert` and `--web-tls-key` must both name clean absolute regular PEM
-files, at most 1 MiB each and without symlink components. TLS 1.2 or newer and
-Secure cookies are used. `--web-listen` still requires a numeric loopback address;
-DNS/LAN/proxy listeners, certificate generation and trust installation are not
-provided. Without TLS, use interactive `snow login` on the host for credentials.
-See [the local manager guide](using-snow.md#try-the-local-web-manager-shell) for
-the launch example and security/operation limits. Runtime/configuration CLI
-flags remain rejected in web mode; the allowed local TLS flags are not a way to
-supply arbitrary worker options.
+Web networking is automatic and not project- or browser-editable.
+`snow --mode web` chooses the first active private IPv4 address, then an IPv6
+ULA, binds that address plus `127.0.0.1` on port 7331, and serves HTTP. The
+localhost listener accepts only exact-Host GET/HEAD requests and redirects them
+to the exact LAN origin. If no private address exists, Snow serves numeric
+loopback HTTP directly.
+
+Only assigned numeric loopback or private addresses are accepted. Public,
+multicast, unspecified, wildcard, DNS-named, zone-qualified, malformed, and
+noncanonical listeners are rejected. Exact Host and Origin checks, CSRF,
+pairing, revocation, strict host-only cookies, global pairing-attempt limits, and
+per-source throttling remain mandatory. Forwarding headers are never network or
+browser authority.
+
+Trusted-LAN HTTP is unencrypted. Use it only on a trusted home/work LAN, never
+public Wi-Fi or the Internet. The Web Manager has no TLS, certificate, generated
+CA, saved network profile, DNS-origin, or trusted-proxy mode and does not alter
+firewalls or routers. There are no `snow web` setup commands or hidden
+`--web-*` networking flags.
+
+See [the manager guide](using-snow.md#try-the-local-web-manager-shell) for the
+zero-setup workflow. Ordinary runtime/configuration CLI flags remain rejected in
+Web mode and cannot supply worker options.
 
 ## Global config.json
 

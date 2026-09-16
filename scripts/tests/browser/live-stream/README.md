@@ -42,8 +42,8 @@ The runner currently checks 87 assertions:
 
 - The home composer accepts a draft, selects a workspace locally, and continues
   through explicit activation without sending a prompt. Add workspace preserves
-  the draft through real registration/redirects and HTMX navigation; interactions
-  wait for HTMX settlement before submitting newly inserted forms or navigating
+  the draft through real registration/redirects and native navigation; interactions
+  wait for the native navigation lifecycle before submitting newly inserted forms or navigating
   again after runtime closure.
 - Activation transfers a startup draft into an empty composer without reloading.
   An existing draft is preserved; Use draft works only after explicitly clearing
@@ -58,7 +58,7 @@ The runner currently checks 87 assertions:
   switches back to the first through the guarded runtime owner without replacing
   the center or sidebar. A pending startup draft never leaks into the second
   session, and the first session retains its own draft on return.
-- Cross-workspace selection uses real HTMX: browse the other cold workspace,
+- Cross-workspace selection uses the real native navigator: browse the other cold workspace,
   then select a non-current saved session under the first, still-live workspace.
   The browser first mounts that workspace's existing owner and restores its draft,
   then performs exactly one deliberate switch to the requested session. Both

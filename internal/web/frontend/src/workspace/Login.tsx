@@ -1,6 +1,7 @@
 import type { LoginProps } from './model';
 import { Icon } from './Icons';
-export function LoginPage({ csrf, error }: LoginProps) {
+export function LoginPage({ csrf, error, networkProfile }: LoginProps) {
+  const networkLabel = networkProfile === 'trusted-lan-http' ? 'Trusted-LAN HTTP' : 'Direct loopback HTTP';
   return (
     <main className="login-card">
       <div className="brand">
@@ -45,7 +46,7 @@ export function LoginPage({ csrf, error }: LoginProps) {
       </p>
       <div className="local-note">
         <span className="status-dot" />
-        Direct local connection
+        {networkLabel}
       </div>
     </main>
   );

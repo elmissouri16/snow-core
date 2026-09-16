@@ -5,19 +5,8 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/base64"
 	json "encoding/json/v2"
-	"encoding/pem"
 	"fmt"
-	"math/big"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -92,70 +81,8 @@ func hostControlsBrowserControl(root string) int {
 	return 0
 }
 
-// The certificate is never installed in the OS trust store. Chrome receives
-// only this ephemeral key's SPKI digest, scoped to its private fixture profile.
-func hostControlsBrowserCertificate(root string) (certPath, keyPath, spki string, err error) {
-	private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return "", "", "", err
-	}
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Private Snow fixture"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)}}
-	public := &private.PublicKey
-	der, err := x509.CreateCertificate(rand.Reader, template, template, public, private)
-	if err != nil {
-		return "", "", "", err
-	}
-	key, err := x509.MarshalPKCS8PrivateKey(private)
-	if err != nil {
-		return "", "", "", err
-	}
-	encoded, err := x509.MarshalPKIXPublicKey(public)
-	if err != nil {
-		return "", "", "", err
-	}
-	digest := sha256.Sum256(encoded)
-	certPath, keyPath = filepath.Join(root, "fixture-cert.pem"), filepath.Join(root, "fixture-key.pem")
-	if err = os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600); err != nil {
-		return
-	}
-	if err = os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0600); err != nil {
-		return
-	}
-	return certPath, keyPath, base64.StdEncoding.EncodeToString(digest[:]), nil
-}
-
-func TestHostControlsBrowserCertificate(t *testing.T) {
-	root := t.TempDir()
-	cert, key, digest, err := hostControlsBrowserCertificate(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(cert)
-	if err != nil {
-		t.Fatal(err)
-	}
-	block, _ := pem.Decode(data)
-	if block == nil {
-		t.Fatal("fixture certificate encoding")
-	}
-	parsed, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sum := sha256.Sum256(parsed.RawSubjectPublicKeyInfo)
-	if digest != base64.StdEncoding.EncodeToString(sum[:]) || parsed.VerifyHostname("127.0.0.1") != nil || parsed.VerifyHostname("example.com") == nil {
-		t.Fatal("fixture certificate scope")
-	}
-	for _, path := range []string{cert, key} {
-		info, err := os.Stat(path)
-		if err != nil || info.Mode().Perm() != 0600 {
-			t.Fatal("fixture certificate permissions")
-		}
-	}
-}
-
-// Opt-in private IPC. Both real HTTP and HTTPS listeners use ephemeral numeric
-// loopback ports, independent private registries and no injected browser cookie.
+// Opt-in private IPC. The real HTTP listener uses an ephemeral numeric
+// loopback port, a private registry, and no injected browser cookie.
 func TestWebHostControlsBrowserFixture(t *testing.T) {
 	root := os.Getenv(hostControlsBrowserEnv)
 	if root == "" {
@@ -169,7 +96,7 @@ func TestWebHostControlsBrowserFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal("fixture root unavailable")
 	}
-	for _, dir := range []string{"home", "home/.snow", "project-a", "parent", "http-manager"} {
+	for _, dir := range []string{"home", "home/.snow", "project-a", "parent"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -207,10 +134,6 @@ func TestWebHostControlsBrowserFixture(t *testing.T) {
 	if err := registry.Close(); err != nil {
 		t.Fatal(err)
 	}
-	cert, key, spki, err := hostControlsBrowserCertificate(root)
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(t.Context(), 220*time.Second)
 	defer cancel()
 	start := func(options web.Options) (string, string) {
@@ -238,15 +161,14 @@ func TestWebHostControlsBrowserFixture(t *testing.T) {
 		if len(lines) < 3 {
 			t.Fatal("private fixture startup frame")
 		}
-		_, code, ok := strings.Cut(lines[2], "): ")
+		code, ok := fixturePairingCode(startup)
 		if !ok {
 			t.Fatal("private pairing credential unavailable")
 		}
 		return lines[1], code
 	}
-	origin, code := start(web.Options{Listen: "127.0.0.1:0", Version: "host-controls-browser", ManagerDir: filepath.Join(root, "manager"), Executable: filepath.Join(root, "worker"), SessionsRoot: filepath.Join(root, "sessions"), TLSCertFile: cert, TLSKeyFile: key})
-	httpOrigin, httpCode := start(web.Options{Listen: "127.0.0.1:0", Version: "host-controls-http-disabled", ManagerDir: filepath.Join(root, "http-manager"), Executable: filepath.Join(root, "worker-must-not-start"), SessionsRoot: filepath.Join(root, "http-sessions")})
-	ready, err := json.Marshal(map[string]string{"origin": origin, "code": code, "httpOrigin": httpOrigin, "httpCode": httpCode, "spki": spki, "project": project.ID, "directory": root})
+	origin, code := start(web.Options{Listen: "127.0.0.1:0", Version: "host-controls-browser", ManagerDir: filepath.Join(root, "manager"), Executable: filepath.Join(root, "worker"), SessionsRoot: filepath.Join(root, "sessions")})
+	ready, err := json.Marshal(map[string]string{"origin": origin, "code": code, "project": project.ID, "directory": root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +189,7 @@ func TestWebHostControlsBrowserFixture(t *testing.T) {
 }
 
 // Normal, browser-free smoke: starts the complete opt-in fixture in a private
-// subprocess and verifies its actual TLS handshake against only its own cert.
+// subprocess and verifies its actual private HTTP listener.
 func TestHostControlsBrowserPrivateStartup(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -321,32 +243,17 @@ func TestHostControlsBrowserPrivateStartup(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("private fixture startup bound")
 	}
-	data, err := os.ReadFile(filepath.Join(root, "fixture-cert.pem"))
+	client := &http.Client{Transport: &http.Transport{}, Timeout: 3 * time.Second}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, frame["origin"]+"/login", nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("private listener URL")
 	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(data) {
-		t.Fatal("private fixture certificate unavailable")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal("private fixture listener unavailable")
 	}
-	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}, Proxy: nil}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 3 * time.Second}
-	for _, key := range []string{"origin", "httpOrigin"} {
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, frame[key]+"/login", nil)
-		if err != nil {
-			t.Fatal("private listener URL")
-		}
-		response, err := client.Do(request)
-		if err != nil {
-			t.Fatal("private fixture listener unavailable")
-		}
-		_ = response.Body.Close()
-		if response.StatusCode != http.StatusOK {
-			t.Fatal("private fixture pairing page unavailable")
-		}
-		if key == "origin" && (response.TLS == nil || len(response.TLS.VerifiedChains) == 0) {
-			t.Fatal("private TLS handshake did not verify")
-		}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.TLS != nil {
+		t.Fatal("private HTTP pairing page unavailable")
 	}
 }

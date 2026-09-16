@@ -44,7 +44,7 @@ func reactPageProps(t *testing.T, markup, page string) string {
 func TestReactWorkspaceAndShellBootstrap(t *testing.T) {
 	const hostile = `"><script>alert('x')</script><img src=x onerror="alert(1)">&雪`
 	project := Project{ID: "00000000-0000-0000-0000-000000000001", Name: hostile, Path: hostile, Available: true, Trusted: true, TrustRemembered: true, SkillsEnabled: true, Pinned: true, Issue: "private-issue", device: "private-device", inode: "private-inode"}
-	data := pageData{Projects: []Project{project}, Project: &project, CSRF: hostile, Version: "fixture-version", View: "projects", SessionID: "00000000-0000-0000-0000-000000000002", Error: hostile, RegistryEnabled: true, RuntimeEnabled: true, HostSettingsEnabled: true, HostAPIKeyEnabled: true, TLS: true, PairingCode: "fixture-pair-code", ProjectOperationsEnabled: true,
+	data := pageData{Projects: []Project{project}, Project: &project, CSRF: hostile, Version: "fixture-version", View: "projects", SessionID: "00000000-0000-0000-0000-000000000002", Error: hostile, RegistryEnabled: true, RuntimeEnabled: true, HostSettingsEnabled: true, PairingCode: "fixture-pair-code", ProjectOperationsEnabled: true,
 		Sessions: &CatalogSessions{Sessions: []SessionSummary{{ID: "00000000-0000-0000-0000-000000000002", Name: hostile}}},
 		History:  &CatalogMessages{Messages: []HistoryMessage{{ID: "message", Role: "assistant", Text: "public-SSR-history-not-JSON"}}},
 	}
@@ -115,7 +115,7 @@ func TestReactWorkspaceAndShellBootstrap(t *testing.T) {
 	if err := json.Unmarshal([]byte(props), &shell, json.RejectUnknownMembers(true)); err != nil {
 		t.Fatal(err)
 	}
-	if shell.CSRF != hostile || !shell.TLS || !shell.APIKeyEnabled || !shell.HostSettingsEnabled || shell.PairingCode != data.PairingCode || len(shell.Projects) != 1 || !shell.Projects[0].TrustRemembered || len(shell.Sessions) != 1 {
+	if shell.CSRF != hostile || !shell.HostSettingsEnabled || shell.PairingCode != data.PairingCode || len(shell.Projects) != 1 || !shell.Projects[0].TrustRemembered || len(shell.Sessions) != 1 {
 		t.Fatal("shell public projection mismatch")
 	}
 	if shell.Live == nil || shell.Live.Title != hostile || !shell.Live.RenameAvailable || !shell.Live.RenameDisabled || !shell.Live.NewDisabled {
@@ -143,7 +143,7 @@ func TestReactWorkspaceBootstrapBounds(t *testing.T) {
 	if _, err := shellReactProps(pageData{Projects: projects}); err == nil {
 		t.Fatal("shell project limit missing")
 	}
-	if _, err := loginReactProps("csrf", strings.Repeat("x", maxReactPropsBytes)); err == nil {
+	if _, err := loginReactProps("csrf", strings.Repeat("x", maxReactPropsBytes), "local"); err == nil {
 		t.Fatal("login bootstrap byte limit missing")
 	}
 	if _, err := shellReactProps(pageData{PairingCode: strings.Repeat("x", 129)}); err == nil {

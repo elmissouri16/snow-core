@@ -102,7 +102,7 @@ export async function deletionTests(h) {
   await run('viewed cold target opens new state, never activates or sends', {viewed: 'saved-one'}, async () => {
     await e('await f.open(); await f.confirm(); f.succeed(); await f.succeeded()');
     await check('f.posts().length === 1 && new URLSearchParams(f.posts()[0].body).get("instance_id") === ""', 'Cold deletion explicitly carries empty instance ownership');
-    await check('JSON.stringify(f.navigation) === JSON.stringify([{method: "GET", url: "/?view=projects&project=00000000-0000-4000-8000-000000000001&new=1", target: "#workspace", swap: "outerHTML", source: "00000000-0000-4000-8000-000000000001", push: "/?view=projects&project=00000000-0000-4000-8000-000000000001&new=1", sync: "#project-navigation:replace"}])', 'Cold success delegates empty-state navigation through the real New anchor contract');
+    await check('JSON.stringify(f.navigation) === JSON.stringify([{method: "GET", url: "/?view=projects&project=00000000-0000-4000-8000-000000000001&new=1", source: "00000000-0000-4000-8000-000000000001", history: "push"}])', 'Cold success delegates empty-state navigation through the real New anchor contract');
   });
   const invalidReceipts = [
     ['project', {project_id: '00000000-0000-4000-8000-000000000002'}], ['session', {session_id: 'saved-two'}],

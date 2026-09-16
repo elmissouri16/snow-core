@@ -87,6 +87,14 @@ func (p *Provider) buildBody(req protocol.ChatRequest) ([]byte, error) {
 		oreq.Messages = append(oreq.Messages, openAIMessage{Role: "system", Content: req.System})
 	}
 	for _, m := range req.Messages {
+		if m.Role == protocol.RoleInternal {
+			fragment := protocol.InternalContextFragment{Source: m.InternalContextSource, Text: textContent(m)}
+			if err := fragment.Validate(); err != nil {
+				return nil, err
+			}
+			oreq.Messages = append(oreq.Messages, openAIMessage{Role: "user", Content: renderInternalFragment(fragment)})
+			continue
+		}
 		om, ok := mapMessage(m)
 		if !ok {
 			continue

@@ -267,7 +267,7 @@ reference](https://github.com/elmissouri16/snow-core/blob/main/docs/user-input.m
 | Print | `snow -p "prompt"` | Human-readable one-shot output |
 | JSON | `snow --mode json -p "prompt"` | One normalized event per JSONL line |
 | RPC | `snow --mode rpc` | Long-lived control from another process |
-| Web preview | `snow --mode web` | Local authenticated manager shell; no agent execution |
+| Web manager | `snow --mode web` | Authenticated manager shell; startup itself runs no agent |
 
 Supplying `-p` selects print behavior unless `--mode json` or `--mode rpc` is
 set. Print and JSON modes require a nonblank prompt. RPC keeps standard input
@@ -280,9 +280,31 @@ The complete RPC contract remains available in the repository's
 
 ```sh
 snow --mode web
-# Optional port override (numeric loopback addresses only):
-snow --mode web --web-listen 127.0.0.1:7441
 ```
+
+No networking setup or extra flag is required. If Snow finds an active private
+IPv4 address, it binds that address and `127.0.0.1` on port 7331; otherwise it
+uses an IPv6 ULA plus IPv4 localhost, and with no private address it serves
+localhost directly. Startup prints both usable URLs, for example:
+
+```text
+Local URL: http://127.0.0.1:7331
+LAN URL: http://192.168.1.50:7331
+```
+
+The localhost listener redirects to the canonical LAN URL so both entry points
+work without weakening exact Host/Origin checks. Open either URL on the Snow host,
+or the LAN URL from another device, and enter the pairing code from
+the terminal. There are no certificates, CA installation, DNS, or proxy steps in
+the normal workflow. Pairing authenticates the browser, but HTTP does **not**
+encrypt the pairing code, session cookie, prompts, responses, or tool output.
+Use this only on a trusted home/work LAN; do not use it on public Wi-Fi or expose
+port 7331 through a router. Snow does not modify firewall or router settings.
+Guest-Wi-Fi client isolation, VLANs, or a host firewall may still block access.
+
+The Web Manager has no HTTPS, certificate, saved-profile, DNS-origin, or
+trusted-proxy mode. Browsers that force HTTPS must allow this explicit `http://`
+private-IP URL; accepting HTTPS without a certificate is not possible.
 
 Open the printed URL and enter the pairing code from the terminal. The code is
 reusable for up to **30 days**, survives manager restarts, and expires at the time
@@ -292,6 +314,9 @@ and idle limits and at most eight browsers. Sign out revokes the current browser
 **Revoke all browsers** revokes every browser and rotates the code. Restart to
 print that replacement code. Credentials are stored privately under
 `$SNOW_HOME/manager/access.json`; keep this file and terminal captures private.
+Pairing attempts are capped globally at 20 per minute and at ten per admitted
+network source, with bounded in-memory source tracking. The persisted global cap
+survives restarts; client addresses do not.
 
 After installing an updated Snow build, stop and restart the foreground manager
 and activate fresh workers. A browser reload or reconnect does not replace an
@@ -328,24 +353,7 @@ Title search and archived filtering apply to the **loaded page only**, not every
 session or transcript; they do not change catalog pagination. A pin is metadata,
 not a guarantee that every pinned conversation has been loaded.
 
-#### Optional local HTTPS and browser inventory
-
-HTTP remains the default. To use **direct numeric-loopback HTTPS**, supply your
-own certificate and private key together:
-
-```sh
-snow --mode web --web-listen 127.0.0.1:7441 \
-  --web-tls-cert /absolute/path/loopback-cert.pem \
-  --web-tls-key /absolute/path/loopback-key.pem
-```
-
-Both paths must be absolute and clean, with bounded regular PEM files and no
-symlink components; each input is limited to 1 MiB. TLS requires version 1.2 or
-newer. Snow does not generate certificates, install browser/OS trust, accept DNS
-listener names, or enable LAN/proxy/tunnel access. Arrange a certificate valid
-for the numeric loopback address and trusted by your browser yourself. HTTPS
-cookies are Secure; both transports retain HttpOnly, SameSite=Strict, exact
-Host/Origin checks and CSRF protection. Supplying only one TLS flag fails closed.
+#### Browser inventory
 
 **Browser access** lists paired browsers using independent public IDs, coarse
 browser labels, creation/last-seen/expiry times and a current-browser marker.
@@ -355,7 +363,7 @@ SSE stream rechecks authority approximately every five seconds, not immediately.
 Revoking access does **not** stop agent work. Use the worker's explicit Stop/Close
 controls separately when that is your intent.
 
-#### Host defaults, local provider status and API-key entry
+#### Host defaults and local provider status
 
 In **Settings → General**, explicitly load **Host defaults** or inspect local
 provider status. Opening Settings alone does neither. These operations use a
@@ -372,20 +380,10 @@ settings apply to **future workers**, not the current worker or a new conversati
 created within it. Local provider status is only configured/expired/unavailable
 metadata; it is not a network or credential-validity test.
 
-**Write-only API key** is available only over the manager's actual direct
-numeric-loopback HTTPS connection. Select an existing supported provider/profile
-and explicitly inspect its local status before entering a key. That inspection
-is a browser-bound, single-use grant valid for five minutes. Saving requires
-explicit host-save confirmation and, when applicable, replacement confirmation;
-a stale auth-file revision rejects the write. Keys are limited to 4 KiB and are
-never returned by the status/save response. A write consumes the inspection even
-if its outcome is uncertain: inspect again rather than automatically resending.
-Existing workers must be restarted to use changed credentials.
-
-There is no key export/delete, provider network verification/refresh or browser
-OAuth flow. ChatGPT continues to use interactive `snow login chatgpt` on the host.
-HTTP users must also use host-side interactive login rather than entering keys
-in the browser. See [configuration scopes](configuration.md#local-web-manager-settings-scopes).
+The browser does not accept provider API keys or run provider OAuth. Use the
+appropriate interactive `snow login ...` or other host-side credential workflow,
+then restart workers deliberately when changed credentials must take effect. See
+[configuration scopes](configuration.md#local-web-manager-settings-scopes).
 
 #### Workspace layout
 
@@ -942,11 +940,11 @@ already-pending tool request. The menu keeps one short boundary note; **Details*
 opens the complete policy explanation, with Back/Escape returning to the choices.
 
 Default/Plan, permission-policy, model-selection and conversation-name changes
-use HTMX's request API without swapping the conversation or composer. A verified
-idle change retains the healthy live subscription, draft, selection and scroll
-position; known labels remain stable while controls are briefly locked. Explicit
-model discovery also uses HTMX and keeps cached choices, search focus and list
-scroll while refreshing. Menus update existing rows instead of rebuilding their
+use bounded same-origin native JSON requests without swapping the conversation or
+composer. A verified idle change retains the healthy live subscription, draft,
+selection and scroll position; known labels remain stable while controls are
+briefly locked. Explicit model discovery uses the same native transport and keeps
+cached choices, search focus and list scroll while refreshing. Menus update existing rows instead of rebuilding their
 contents; the model popup keeps a stable size through loading and retry.
 
 Process inventory refreshes retain unchanged rows and controls. Versions refresh
@@ -966,7 +964,7 @@ message; runtime-only activity is not falsely assigned to a saved message.
 
 Live updates use one read-only SSE connection to the existing RPC event
 projection, sending coalesced full public snapshots about every 75 ms when
-changed. This is native browser `fetch` streaming, not the HTMX SSE extension.
+changed. This is native browser `fetch` streaming.
 The stream is bound to the activation/session instance and does not start work.
 Legacy backends without subscription support retain two-second snapshot polling
 (the SSE endpoint returns 501); other stream failures never trigger polling
@@ -1155,7 +1153,8 @@ with **zero live workers**. Review the indicated saved conversation and activate
 it deliberately. Recovery hints are navigation metadata, never execution
 authority or an exactly-once guarantee.
 
-HTMX and styles are embedded; no Node server or CDN is needed. The workspace uses
+The React bundle, first-party workspace navigator, and styles are embedded; no
+Node server, CDN, or third-party navigation runtime is needed. The workspace uses
 project/session navigation beside the conversation, with mobile drawers and a
 mounted composer. The separate preview fixture remains explicitly static.
 
@@ -1183,18 +1182,20 @@ inspections run without queuing, with a five-second command/snapshot budget,
 host worktree and object store with OS privileges; metadata checks are not a
 filesystem sandbox against another process changing files concurrently.
 
-Directory deletion, Git worktree forks, image history, automatic worker
-recovery and remote HTTPS/mesh-VPN proxy support remain unimplemented.
-Runtime/configuration CLI flags are rejected in web mode; choose
-provider/model during explicit activation instead. The mode cannot be combined
-with subcommands, and `--web-listen` is rejected outside web mode. Use Ctrl+C to
-stop the foreground server.
+Directory deletion, Git worktree forks, image history and automatic worker
+recovery remain unimplemented. Runtime/configuration CLI flags are rejected in
+Web mode; choose provider/model during explicit activation instead. The mode
+cannot be combined with subcommands. Legacy `--web-*` networking flags and the
+`snow web` configuration subcommands were removed. Use Ctrl+C to stop the
+foreground server.
 
-Do not expose this preview through a proxy or tunnel. Only direct numeric-loopback
-HTTP or explicitly configured local HTTPS is supported, with exact Host/Origin checks and no trusted forwarding headers.
-Cookies are HttpOnly and SameSite=Strict, with Secure additionally set on HTTPS.
-Local TLS does not enable remote deployment. Host-side folder selection does not
-change this deployment restriction.
+Do not expose the manager to the public Internet. The only private-network
+contract is exact-origin HTTP on one assigned private address plus a same-port
+localhost redirect listener; an offline host serves loopback HTTP directly.
+There is no TLS, certificate, saved-profile, named-origin, trusted-proxy, or
+forwarding-header mode. Cookies are host-only, HttpOnly, SameSite=Strict, and
+non-Secure because the supported transports are HTTP. Host-side folder selection
+and private network addressing do not expand network or browser authority.
 
 The web package uses public process/RPC clients, not runtime/session internals or
 a second agent loop. Shutdown reaps direct workers, not arbitrary detached tool

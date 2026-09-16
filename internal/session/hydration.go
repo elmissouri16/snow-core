@@ -99,6 +99,11 @@ func summarizeHydrationEntry(entry Entry) entryHydrationRecord {
 		record.summary.CompactionActive = true
 		record.summary.CompactionCheckpointChars = compactedCheckpointContextChars(entry.Summary)
 	}
+	if validInternalContextEntry(&entry) {
+		record.summary.Role = protocol.RoleInternal
+		record.summary.ContextChars = internalContextEntryChars(entry.Key, entry.Value)
+		return record
+	}
 	if entry.Type == EntryMeta && entry.Key == MetaToolTranscript {
 		var transcript protocol.ToolTranscript
 		if json.Unmarshal([]byte(entry.Value), &transcript) == nil && transcript.ToolName != "" {
@@ -274,6 +279,11 @@ func legacyToolResultWasDispatched(isError bool, messageText string) bool {
 	return !strings.Contains(text, " is unavailable in ")
 }
 
+func internalContextEntryChars(source, text string) int {
+	return len(protocol.RoleInternal) + len(protocol.BlockText) + len(source) + len(text) +
+		len(`<snow_internal_context source="">\n\n</snow_internal_context>`) + 16
+}
+
 func compactedCheckpointContextChars(summary string) int {
 	return len(protocol.RoleCustom) + 8 + len(protocol.BlockText) +
 		len(compactedCheckpointPrefix) + len(summary) + 8
@@ -306,7 +316,7 @@ func summarizeBranchContextUsage(entries []BranchEntrySummary) BranchContextUsag
 	if lastCompaction >= 0 {
 		chars := entries[lastCompaction].CompactionCheckpointChars
 		for i := boundaryPos + 1; i < len(entries); i++ {
-			if entries[i].Type == EntryMessage {
+			if contextBearingEntry(entries[i]) {
 				chars += entries[i].ContextChars
 			}
 		}
@@ -323,7 +333,7 @@ func summarizeBranchContextUsage(entries []BranchEntrySummary) BranchContextUsag
 	if lastUsage >= 0 {
 		context := BranchContextUsage{Usage: entries[lastUsage].Usage.Clone()}
 		for i := lastUsage + 1; i < len(entries); i++ {
-			if entries[i].Type != EntryMessage {
+			if !contextBearingEntry(entries[i]) {
 				continue
 			}
 			context.HasTrailingMessages = true
@@ -333,11 +343,15 @@ func summarizeBranchContextUsage(entries []BranchEntrySummary) BranchContextUsag
 	}
 	context := BranchContextUsage{}
 	for i := range entries {
-		if entries[i].Type == EntryMessage {
+		if contextBearingEntry(entries[i]) {
 			context.EstimatedChars += entries[i].ContextChars
 		}
 	}
 	return context
+}
+
+func contextBearingEntry(entry BranchEntrySummary) bool {
+	return entry.Type == EntryMessage || entry.Type == EntryInternalContext
 }
 
 func latestHydrationCompaction(entries []BranchEntrySummary) (lastCompaction, boundaryPos int) {

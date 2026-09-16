@@ -151,7 +151,6 @@ jobs:
           # archive copy gains notices; the repository's LICENSE stays intact.
           for notice in \
             internal/web/static/HARNESS-NOTICE.txt \
-            internal/web/static/vendor/htmx-LICENSE \
             internal/web/static/generated/THIRD-PARTY-NOTICES.txt; do
             printf '\n\n===== %s =====\n\n' "${notice##*/}" >> "dist/$root/LICENSE"
             cat "$notice" >> "dist/$root/LICENSE"

@@ -225,3 +225,22 @@ func TestMessageInputClonesProviderContinuity(t *testing.T) {
 		t.Fatalf("provider continuity alias leaked into MessageInput: %s", wire)
 	}
 }
+
+func TestDurableInternalContextMatchesEphemeralInput(t *testing.T) {
+	fragment := protocol.InternalContextFragment{Source: "goal", Text: "continue the durable objective"}
+	model := protocol.Model{ID: "model"}
+	ephemeral, err := buildRequestBody(protocol.ChatRequest{Model: model, InternalContext: []protocol.InternalContextFragment{fragment}}, RequestOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	durable, err := buildRequestBody(protocol.ChatRequest{Model: model, Messages: []protocol.Message{{
+		Role: protocol.RoleInternal, InternalContextSource: fragment.Source,
+		Content: []protocol.ContentBlock{protocol.NewTextBlock(fragment.Text)},
+	}}}, RequestOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(durable.Input, ephemeral.Input) {
+		t.Fatalf("durable input=%#v, ephemeral input=%#v", durable.Input, ephemeral.Input)
+	}
+}

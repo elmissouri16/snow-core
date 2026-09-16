@@ -7,7 +7,7 @@
  *   ...reconcile all DOM, including controls and #live-composer-seat...
  *   SnowScroll.afterUpdate()
  *   SnowScroll.follow()       // explicit Jump, or the operator's accepted send
- *   SnowScroll.dispose()      // BEFORE HTMX detaches the old workspace
+ *   SnowScroll.dispose()      // before native navigation detaches the old workspace
  *
  * #live-stream is the sole transcript scrollport; #live-transcript is content.
  * #live-composer-seat is a non-scrolling sibling wrapping BOTH attention and

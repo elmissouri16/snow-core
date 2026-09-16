@@ -150,10 +150,7 @@ export function WorkspaceCatalog({
                       key={p.id}
                       className="catalog-row"
                       href={projectURL(p.id)}
-                      hx-get={projectURL(p.id)}
-                      hx-target="#workspace"
-                      hx-swap="outerHTML"
-                      hx-push-url="true"
+                      data-snow-navigation=""
                     >
                       <span className="row-icon" aria-hidden="true">
                         <Icon kind="folder" />
@@ -203,11 +200,6 @@ export function WorkspaceCatalog({
                 method="post"
                 action="/projects/add"
                 id="add-project-form"
-                hx-post="/projects/add"
-                hx-target="#workspace"
-                hx-select="#workspace"
-                hx-swap="outerHTML"
-                hx-push-url="true"
               >
                 <input type="hidden" name="csrf" value={csrf} />
                 <label htmlFor="project-path">Folder on the Snow host</label>

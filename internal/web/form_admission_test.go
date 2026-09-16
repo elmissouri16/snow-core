@@ -1,7 +1,6 @@
 package web
 
 import (
-	"context"
 	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
@@ -9,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 func formAdmissionFixtureChange(s *shell, cookie *http.Cookie, mode string) {
@@ -90,75 +87,33 @@ func TestFormAuthorizationAdmission(t *testing.T) {
 }
 
 func TestHostMutationAdmission(t *testing.T) {
-	for _, endpoint := range []string{"defaults", "api-key"} {
-		for _, mode := range []string{"current", "removed", "expired", "identity", "token", "storage"} {
-			t.Run(endpoint+"/"+mode, func(t *testing.T) {
-				s, cookie, backend := apiKeyTestShell(t)
-				path := "/settings/host"
-				values := url.Values{"csrf": {"csrf-fixture"}, "scope": {"global"}, "expected_revision": {strings.Repeat("a", 64)}, "thinking_op": {"set"}, "thinking": {"high"}}
-				if endpoint == "api-key" {
-					path = "/settings/providers/openai-compatible/api-key"
-					values = apiKeyForm()
-					if w := apiKeyRequest(s, cookie, http.MethodGet, "openai-compatible", nil); w.Code != http.StatusOK {
-						t.Fatal("fixture inspection failed")
-					}
-				}
-				body := &accessMutationReader{Reader: strings.NewReader(values.Encode()), mutate: func() {
-					formAdmissionFixtureChange(s, cookie, mode)
-				}}
-				r := httptest.NewRequest(http.MethodPost, s.origin+path, body)
-				r.URL.Scheme, r.URL.Host = "", ""
-				r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-				r.Header.Set("Origin", s.origin)
-				r.AddCookie(cookie)
-				w := httptest.NewRecorder()
-				s.handler().ServeHTTP(w, r)
-				wantWrites := 0
-				if mode == "current" {
-					wantWrites = 1
-				}
-				if w.Code != formAdmissionStatus(mode) || backend.writes+backend.sets != wantWrites {
-					t.Fatal("host admission result mismatch")
-				}
-				if strings.Contains(w.Body.String(), apiKeyCanary) || strings.Contains(w.Body.String(), cookie.Value) || strings.Contains(w.Body.String(), values.Get("csrf")) {
-					t.Fatal("host response hygiene mismatch")
-				}
-				if endpoint == "api-key" && (r.PostForm.Get("secret") != "" || r.Form.Get("secret") != "") {
-					t.Fatal("host form hygiene mismatch")
-				}
-			})
-		}
-	}
-}
-
-type admittedAPIKeyFixture struct {
-	apiKeyFake
-	onAdmission func()
-}
-
-func (f *admittedAPIKeyFixture) SetAPIKey(ctx context.Context, input protocol.HostAPIKeySetRequest) (protocol.HostAPIKeyStatusResponse, error) {
-	f.onAdmission()
-	if err := ctx.Err(); err != nil {
-		return protocol.HostAPIKeyStatusResponse{}, err
-	}
-	return f.apiKeyFake.SetAPIKey(ctx, input)
-}
-
-func TestHostMutationAdmittedCompletion(t *testing.T) {
-	s, cookie, _ := apiKeyTestShell(t)
-	backend := &admittedAPIKeyFixture{onAdmission: func() { formAdmissionFixtureChange(s, cookie, "removed") }}
-	s.hostSettings = backend
-	if w := apiKeyRequest(s, cookie, http.MethodGet, "openai-compatible", nil); w.Code != http.StatusOK {
-		t.Fatal("fixture inspection failed")
-	}
-	w := apiKeyRequest(s, cookie, http.MethodPost, "openai-compatible", apiKeyForm())
-	if w.Code != http.StatusOK || backend.sets != 1 || !backend.sawSecret {
-		t.Fatal("admitted completion mismatch")
-	}
-	if _, ok := s.browser(browserRequest(cookie)); ok {
-		t.Fatal("fixture authority state mismatch")
-	}
-	if strings.Contains(w.Body.String(), apiKeyCanary) {
-		t.Fatal("completion response hygiene mismatch")
+	for _, mode := range []string{"current", "removed", "expired", "identity", "token", "storage"} {
+		t.Run(mode, func(t *testing.T) {
+			s := testShell(t)
+			backend := &hostSettingsFake{}
+			s.hostSettings = backend
+			cookie := pairBrowser(t, s, s.initialCode)
+			values := url.Values{"csrf": {csrfFor(t, s, cookie)}, "scope": {"global"}, "expected_revision": {strings.Repeat("a", 64)}, "thinking_op": {"set"}, "thinking": {"high"}}
+			body := &accessMutationReader{Reader: strings.NewReader(values.Encode()), mutate: func() {
+				formAdmissionFixtureChange(s, cookie, mode)
+			}}
+			r := httptest.NewRequest(http.MethodPost, s.origin+"/settings/host", body)
+			r.URL.Scheme, r.URL.Host = "", ""
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			r.Header.Set("Origin", s.origin)
+			r.AddCookie(cookie)
+			w := httptest.NewRecorder()
+			s.handler().ServeHTTP(w, r)
+			wantWrites := 0
+			if mode == "current" {
+				wantWrites = 1
+			}
+			if w.Code != formAdmissionStatus(mode) || backend.writes != wantWrites {
+				t.Fatal("host admission result mismatch")
+			}
+			if strings.Contains(w.Body.String(), cookie.Value) || strings.Contains(w.Body.String(), values.Get("csrf")) {
+				t.Fatal("host response hygiene mismatch")
+			}
+		})
 	}
 }

@@ -33,7 +33,7 @@ function ProjectCard({project}: {project: ActivityProject}) {
       <h3>{project.name || "Registered project"}</h3>
       <p className="manager-activity-state">{stateLabels[project.runtime_state]}</p>
       <p className="manager-activity-details">{details.join(" ")}</p>
-      <a className="button manager-activity-link" href={projectLink(project.project_id, project.session_id)}
+      <a className="button manager-activity-link" href={projectLink(project.project_id, project.session_id)} data-snow-navigation=""
         aria-label={`${project.session_id ? "Open conversation" : "Open project"} in ${project.name || "registered project"}`}>
         {project.session_id ? "Open this conversation →" : "Open project →"}
       </a>
@@ -67,7 +67,7 @@ export function ActivityPage({registryEnabled, error}: ActivityPageProps) {
       </div>
       <h2 className="manager-activity-projects-title">Registered projects</h2>
       <p data-manager-activity-empty="" hidden={!view.summary || view.summary.projects.length !== 0}>
-        No projects registered yet. <a className="text-link" href="/?view=projects">Choose a host folder in Projects</a> to get started. No agent starts until you explicitly activate it.
+        No projects registered yet. <a className="text-link" href="/?view=projects" data-snow-navigation="">Choose a host folder in Projects</a> to get started. No agent starts until you explicitly activate it.
       </p>
       <div className="manager-activity-cards" data-manager-activity-cards="">
         {view.summary?.projects.map(project => <ProjectCard key={project.project_id} project={project} />)}

@@ -9,15 +9,18 @@
 > inspection/Stop with the process-tool bundle enabled. Extensions and subagents
 > remain disabled. The integrated Go/race/vet/Python/benchmark and production
 > browser gates verify this bounded local increment, not the entire target roadmap.
-> A subsequent local-source increment adds optional loopback TLS, host control,
+> A subsequent local-source increment added loopback TLS alongside host control,
 > reasoning/history/compaction/steering, cost estimates and durable CREATE/clone.
-> Its recorded local gates now include all three new native matrices and fresh
+> That TLS path was later superseded and removed by the HTTP-only LAN contract
+> described below. Its recorded local gates include all three native matrices and fresh
 > native baseline/layout/conversation checks. These are not reusable CI/release
 > approval or live-provider coverage; earlier totals retain their milestone scope.
-> Remote TLS/proxies and automatic recovery remain future work. The next increment
-> is [the staged Phase 4 handoff](#phase-4-private-remote-operation-and-resource-limits),
-> including [optional `snow.local` LAN naming](#snowlocal-and-other-lan-names-proposed).
-> Neither that hostname nor remote deployment is enabled by this plan. Current behavior
+> The source now implements a deliberately small Phase 4 network boundary:
+> automatic exact-origin trusted-LAN HTTP on one private interface plus localhost
+> on the same port, with an offline loopback fallback. The obsolete TLS,
+> certificate/CA, saved-profile, DNS-origin, trusted-proxy, forwarding-header,
+> browser API-key, and hidden network-override paths were removed. Automatic
+> recovery and broader real-device acceptance remain future work. Current behavior
 > and limits are canonical in [Using Snow](using-snow.md#try-the-local-web-manager-shell)
 > and the [security guide](security.md#local-web-manager-preview).
 
@@ -50,9 +53,9 @@ runtime-only responsive matrix passes 84 reports.
 
 | Work | Next action / completion boundary |
 |---|---|
-| Private remote operation (Phase 4) | Freeze public-origin/trusted-proxy rules, then separately implement and verify Tailscale Serve and direct-LAN TLS. Optional `snow.local` naming remains proposed. Keep numeric-loopback defaults; do not expose today's manager remotely. Follow the [ordered handoff](#phase-4-private-remote-operation-and-resource-limits), not the older illustrative deployment recipes. |
+| Private remote operation (Phase 4) | Ordinary unconfigured `snow --mode web` now selects the first active private IPv4 address (otherwise an IPv6 ULA), binds both it and `127.0.0.1` on port 7331, and serves exact-origin trusted-LAN HTTP with pairing and no certificate/proxy/setup step. Localhost safely redirects to the LAN origin; offline hosts serve loopback directly. This transport is explicitly unencrypted and unsupported on public networks. TLS, certificate/CA, saved-profile, DNS-origin, trusted-proxy, Tailscale forwarding, browser API-key entry, and hidden network overrides were removed. Wildcard/public/DNS listeners remain unavailable. Complete real same-LAN phone/desktop and Tailscale acceptance before release claims. |
 | Resource limits and recovery | Finish the Phase 4 aggregate-admission, slow-client, process/stream bounds, manager/worker-death and restart-reconciliation acceptance work. Preserve the current two-live-project cap and never replay prompts, approvals or uncertain jobs automatically. Existing local guards are not proof of the complete remote reliability gate. |
-| Frontend migration/coverage reconciliation | Audit retained browser and source-extractor entrypoints that still exercise retired classic renderers. Their passes do not establish React parity. Map actual production-manager coverage for grouped cross-project navigation/lifecycle and committed workspace New/Stop/removal journeys, and fill uncovered cases; the component/exported-page fixtures alone do not certify those mutations. See [frontend boundaries](web-frontend.md). HTMX navigation and the existing transport owner intentionally remain. |
+| Frontend migration/coverage reconciliation | The production frontend now uses React islands plus the first-party bounded `SnowNavigation` controller; the former third-party navigation runtime and retired classic scripts are removed. Continue auditing browser and source-extractor entrypoints for React parity, and map production-manager coverage for grouped cross-project navigation/lifecycle and committed workspace New/Stop/removal journeys. Component/exported-page fixtures alone do not certify those mutations. See [frontend boundaries](web-frontend.md). |
 | Known reproducible defects | Resolve [BUG-218](../bugs.md#bug-218-activity-privacy-fixture-intermittently-matches-a-numeric-sentinel) by capturing/deterministically reproducing the numeric-sentinel collision without weakening privacy checks. Fix [BUG-086](../bugs.md#bug-086-compact-session-and-branch-panels-hide-management-action-hints): compact TUI session/tree panels omit management-key hints. Keep these open until their fixes are verified. |
 | Capabilities not delivered by this increment | Automatic worker recovery and saved media rendering remain planned. Browser OAuth, extension/subagent enablement, worktree forks, general Git writes, editors, PTYs, preview fleets and workspace destruction are not provided by the current manager; several require separate scope approval rather than filling in a missing button. |
 | Release and real-environment acceptance | Run the reusable CI gate and the canonical [release runbook](releases.md#next-release-runbook), including changelog/artifacts and secret-free manual provider smoke. Real private-network phone/desktop journeys, other browser-engine/device acceptance and release approval are not established by loopback fixtures. Do not publish or move a tag as part of this checkpoint. |
@@ -75,6 +78,24 @@ passed with the available Go 1.27rc3 toolchain:
 - `python3 scripts/check_benchmarks.py`.
 - Changed/new Go files remain within the 1,000-line limit.
 
+The zero-setup LAN implementation makes ordinary startup exact-origin
+trusted-LAN HTTP automatically: a managed installed-binary start selected
+`192.168.100.156:7331`,
+printed the unencrypted transport warning, returned `200 ok` for the exact Host,
+rejected a foreign Host with `403`, and issued the distinct non-Secure LAN pairing
+cookie. Pairing output was redacted, and the temporary process/state were removed.
+The follow-up localhost correction starts the private and `127.0.0.1` listeners
+on the same port; a real-listener integration verifies a `307` localhost redirect
+to the canonical LAN health URL, `200 ok` directly on that LAN URL, joined
+cancellation, and fail-closed cleanup when the localhost port is unavailable.
+Focused race coverage also passes. The final cleanup removed the obsolete
+TLS/certificate/profile/proxy and browser API-key paths; all 127 remaining
+frontend tests, typecheck, and the reproducible production build pass. The
+post-cleanup native host-control matrix passed 176 assertions across four
+width/theme reports, and the React-pages matrix passed 192 assertions across 26
+scenarios. The latest `go test ./...` rerun passed every package, including the cell tracked as the
+intermittent [BUG-221](../bugs.md#bug-221-worker-loss-project-operation-fixture-leaves-fictional-git-observable); that single pass does not by itself close the recorded intermittent defect.
+
 These checks do not retroactively rerun every browser suite or establish race,
 live-provider, physical-device, reusable-CI or release acceptance for this exact
 checkpoint. The full race suites, standalone SDK example, vulnerability scan and
@@ -83,11 +104,17 @@ open despite subsequent passing Go runs; its failing response was not captured.
 
 ## Current implementation status
 
-The first increment originally implemented `snow --mode web` and numeric-loopback
-`--web-listen`: in-memory one-time browser pairing, same-origin/CSRF checks,
-embedded HTMX, Overview/Projects/Browser access, light/dark theme, and a clearly
-labeled static conversation fixture. That increment was direct loopback HTTP only. Later optional TLS remains
-loopback-only; do not expose either transport through a proxy, LAN or mesh VPN.
+The first increment originally implemented `snow --mode web` on numeric loopback
+with in-memory browser pairing, same-origin/CSRF checks, a third-party
+server-rendered navigation runtime, Overview/Projects/Browser access, light/dark
+theme, and a clearly labeled static conversation fixture. That runtime has since
+been replaced by the bounded first-party React-compatible workspace navigator.
+The current source automatically serves exact-origin
+trusted-LAN HTTP plus a same-port localhost redirect when a private address is
+available, with loopback-only HTTP fallback when offline. Public Internet,
+HTTPS/TLS, certificates, generated CAs, saved network profiles, DNS origins,
+trusted proxies, forwarding-header authority, wildcard listeners, hidden
+network overrides, and browser API-key entry are unsupported and absent.
 
 The second increment adds a private SQLite registry (100 existing canonical
 project roots, persisted identity, single-manager lifetime lock, metadata-only
@@ -185,8 +212,9 @@ conversation with the measured Harness-style landing and conversation workspace:
 280px full-height sidebar, dark canvas, an approximately 820px centered composer,
 compact controls, and bottom Settings. Snow branding, real host folder selection,
 explicit activation and permission boundaries are retained. `harness.css` owns
-this composition after shared `app.css`; `shell.js` owns local navigation only.
-Production-template browser fixtures cover responsive geometry and interaction,
+this composition after shared `app.css`; the React shell and first-party
+workspace navigator own local navigation. Production-template browser fixtures
+cover responsive geometry and interaction,
 complementing the deeper request-ordering/race suites. No runtime feature or
 network exposure is added by this redesign.
 
@@ -195,8 +223,8 @@ network exposure is added by this redesign.
 `design-plans/workspace-session-flow.md` replaces the catalog-first web navigation
 with one conversation surface and independent workspace/session groups. The
 workspace-name link navigates; its disclosure only expands a lazy session list.
-Several groups remain expanded across HTMX swaps, with existing search, scroll,
-focus and no-op reconciliation preserved. Registration selects explicit `new=1`
+Several groups remain expanded across native workspace replacements, with
+existing search, scroll, focus and no-op reconciliation preserved. Registration selects explicit `new=1`
 without creating a session; an ordinary cold workspace prefers a valid tab-memory
 `last_session` hint, then its most recently updated saved session. Explicit saved
 links retain their existing live-owner mismatch rejection. No GET switches or
@@ -486,14 +514,12 @@ every broader roadmap, reusable CI or release gate. The canonical operator instr
 in [Using Snow](using-snow.md#try-the-local-web-manager-shell); configuration
 ownership is in [Configuration](configuration.md#local-web-manager-settings-scopes).
 
-- **Browser inventory and local TLS:** paired-browser rows contain independent
+- **Browser inventory and HTTP boundary:** paired-browser rows contain independent
   public IDs, coarse labels, approximate activity/expiry metadata and a current
   marker. Targeted revocation is durable and leaves agent work running; SSE
-  notices it on the periodic five-second recheck, not immediately. Optional
-  `--web-tls-cert`/`--web-tls-key` require both clean absolute regular PEM paths,
-  at most 1 MiB each, no symlink components, TLS 1.2 minimum and Secure cookies.
-  This enables only direct numeric-loopback HTTPS. No DNS listener, LAN/proxy
-  trust, certificate generation or trust-store installation is supplied.
+  notices it on the periodic five-second recheck, not immediately. Automatic
+  trusted-LAN HTTP plus localhost is the only network path; there is no TLS,
+  certificate, profile, proxy, forwarding-header, or browser API-key layer.
 - **Runtime-free host control:** control startup dispatches before app creation.
   `internal/hostcontrol` uses local config/auth helpers for global defaults,
   operator-owned project selections and local provider status. Explicit reads
@@ -506,12 +532,6 @@ ownership is in [Configuration](configuration.md#local-web-manager-settings-scop
   session roots before changing CWD, without config/auth reads. Resolution errors
   disable startup. Manager storage is absolute; CONTROL/project-job backends use
   the registry’s canonical directory.
-- **HTTPS-only write-only keys:** actual TLS plus exact Host/Origin, paired-browser
-  auth, CSRF and explicit consent gate a provider-specific write. Inspection
-  grants five-minute single-use authority; metadata revision CAS shares the
-  legacy auth lock and atomic 0600 replacement. Key limit is 4 KiB, form limit
-  16 KiB. No returned secret, key export/delete, network refresh/validation or
-  browser OAuth is available. An uncertain write consumes inspection authority.
 - **Current reasoning/history:** effective current-session reasoning is inspected
   locally using affirmative model capabilities and exact session/branch/tip/
   provider/model/mode/permission/revision CAS. Updates are in-memory, not config
@@ -597,7 +617,7 @@ changes. The newer integrated module also passes the 324-assertion Goal/Process
 matrix (the old CSRF fixture startup blocker is cleared), the 432-assertion
 manager-workflow matrix after native document-readiness repair, and the ported
 thumbnail regression with 130 standalone plus 52 ColdWorkspace parent-owned
-React assertions. The parent checks cover real HTMX cancellation/replacement,
+React assertions. The parent checks cover rejected/committed native navigation,
 read/Blob lifetime and scope rejection; page restoration uses synthetic lifecycle
 events, not actual bfcache eligibility. Workspace-action routing, grouped inventory
 and exported-page checks now execute the production module as well (BUG-208),
@@ -744,8 +764,11 @@ Confirmed requirements:
   connect from desktop, tablet, or phone.
 - Projects can be registered, created, renamed, and removed through the UI.
 - Removing a project keeps its directory and saved conversations by default.
-- The application uses HTMX and must feel deliberately designed, not like a
-  basic administration table or a terminal pasted into a webpage.
+- The delivered application uses server-rendered HTML plus the bounded
+  first-party `SnowNavigation` controller and React-owned interaction islands;
+  it must feel deliberately designed, not like a basic administration table or
+  a terminal pasted into a webpage. The earlier HTMX target retained below is
+  historical research, not an active dependency or contract.
 - Access works locally, on a LAN, and through a mesh VPN such as Tailscale.
 - Use existing Snow RPC workers behind small backend interfaces. Keep the
   manager decoupled from agent internals and support independent project agents.
@@ -753,8 +776,9 @@ Confirmed requirements:
 Recommended technical choices:
 
 - Go `net/http`, `html/template`, embedded static assets, semantic CSS tokens,
-  HTMX and a small external JavaScript enhancement layer. The original target
-  included its SSE extension; delivered live updates instead use native fetch SSE.
+  React-owned interaction islands, and a small first-party navigation/controller
+  layer. The original target used HTMX and its SSE extension; both are absent
+  from the delivered browser stack, whose live updates use native fetch SSE.
 - A separate manager SQLite database for project/UI metadata; existing Snow
   session stores remain authoritative for conversations and branch history.
 - A thin `internal/manager` service over backend interfaces; its initial Snow
@@ -820,9 +844,10 @@ relying on it as the sole isolation boundary [D12].
 
 ### HTMX suitability and constraints
 
-This is historical library research, not the installed streaming stack. Current
-navigation uses embedded HTMX; live subscriptions use native fetch SSE without
-its SSE extension, as described in the current implementation contract.
+This is historical library research, not the installed browser stack. The
+third-party runtime described below was later removed. Current navigation uses
+the bounded first-party `SnowNavigation` fetch controller, while live
+subscriptions use native fetch SSE.
 
 Official documentation confirms that HTMX is designed around server-rendered
 HTML responses, targeted swaps, normal forms, navigation history, and optional
@@ -881,7 +906,7 @@ rows are not allowed to hold up the core vertical slice indefinitely.
 | Files and Git changes | Read-only bounded preview in alpha | Untracked status and diff review in v1; staging/commit optional later. |
 | Managed processes | List/logs in alpha | Explicit stop action in v1; no arbitrary browser shell. |
 | Skills/MCP/plugins | Show inventory and failures | Safe existing controls in v1; TUI-only plugin views need explicit unsupported states. |
-| Provider credentials | Existing host configuration in alpha | Write-only API-key setup in v1; browser OAuth is separately gated. |
+| Provider credentials | Existing host configuration only | Browser API-key and OAuth entry are excluded; use host-terminal or control-RPC workflows. |
 | Mobile, keyboard, accessible dialogs, themes | Required foundations | Must pass the v1 acceptance journeys, not a post-release polish promise. |
 | Permanent workspace deletion | Excluded | Separate future proposal, never bundled into Remove project. |
 | Multi-user/host fleet, cron, autonomous workflows | Excluded | Separate product decisions. |
@@ -889,59 +914,26 @@ rows are not allowed to hold up the core vertical slice indefinitely.
 
 ## Launch and configuration contract
 
-Historical target flags and remote setup follow. The current manager accepts
-numeric-loopback listen plus paired local TLS flags only; host defaults use the
-runtime-free scoped controls above. There is no startup allowed-root sandbox,
-public-origin override or trusted-proxy/LAN deployment in this implementation.
-
 ### Mode selection
 
-Proposed local launch:
+The only Web Manager launch contract is:
 
 ```sh
-snow --mode web --web-root "$HOME/projects"
+snow --mode web
 ```
 
-Proposed defaults and flags:
+Snow selects the first active private IPv4 address, otherwise an IPv6 ULA, and
+binds it on port 7331. It also binds `127.0.0.1:7331`; safe localhost GET/HEAD
+requests redirect to the canonical LAN origin. With no private address, Snow
+serves loopback HTTP directly. Startup fails rather than silently choosing a
+wildcard, public, DNS-named, malformed, or different port.
 
-| Flag/config key | Decision |
-|---|---|
-| `--mode web` | Start the foreground HTTP manager; no TUI, stdin prompt loop, or throwaway agent session. |
-| `--web-listen` | Default `127.0.0.1:7331`; explicit address, not silent port hopping. |
-| `--web-public-url` | Canonical browser origin, default `http://127.0.0.1:7331`; HTTPS required for remote origin. |
-| `--web-root` | Repeatable allowed workspace parent roots; default invoking directory, displayed prominently. |
-| `--web-workspace-root` | Where New project creates folders; default first allowed root. |
-| `--web-tls-cert`, `--web-tls-key` | Optional direct TLS; both required together. |
-| `--web-trusted-proxy` | Explicit source CIDR allowlist for proxy interpretation; default none. |
-| `--web-max-active-sessions` | Default 4 root runtimes across distinct, non-overlapping projects. |
-| `--web-open` | Opt-in local browser launch; default false, especially under SSH/headless use. |
-
-Store persistent values in an operator-owned `web` configuration section;
-explicit flags win. Project-local configuration cannot change listener,
-origins, authentication, trusted proxies, allowed roots, or limits. Settings
-changes to these fields require a restart and remain host-admin operations.
-
-Validate incompatible flags before opening a socket or launching a worker:
-
-- Reject `-p`, `--session`, `--no-session`, print/JSON-only usage flags, and
-  `snow resume --mode web`/`snow fork --mode web` combinations.
-- Existing provider/model/tools/permission/subagent flags become runtime
-  defaults for sessions created by this manager, not an eager root session.
-- Resolve explicit config/auth/extension paths against the launch directory
-  once; do not accidentally reinterpret them against each project's CWD.
-- Never mutate process CWD or environment when switching projects.
-- Reject unknown modes as today; help text and completion list `web`.
-- Use the linked effective build version for manager metadata and validate the
-  worker handshake. Workers retain `app.Options.BuildVersion` propagation; the
-  manager must not construct app options or import app solely for versioning.
-- Port collision, invalid TLS material, and forbidden bind/origin combinations
-  produce actionable errors and leave no partially started runtimes.
-
-At startup print the mode, version, URL, allowed roots, persistent storage
-location, and the absence of a process sandbox. Do not print provider secrets.
-Pairing material is a separately controlled credential described below.
-No Node runtime, frontend dev server, cloud account, or Tailscale dependency
-is required to run the shipped binary.
+There is no `snow web` configuration command, saved network profile, generated
+certificate/CA, TLS option, public-origin override, trusted-proxy mode, or hidden
+`--web-*` networking flag. Ordinary runtime/provider/configuration flags remain
+invalid in Web mode. Browser pairing, exact Host/Origin checks, CSRF, revocation,
+and normal permission boundaries remain mandatory. Traffic is unencrypted and
+this mode is suitable only for a trusted private LAN.
 
 ## Information architecture and journeys
 
@@ -1047,8 +1039,8 @@ Current composition:
   unsupported job scheduling. Text Refresh/Stop actions never inherit icon widths.
   Active goal/compaction/steering summaries remain in a bounded conversation
   status region. Focus returns to the visible menu trigger, not a hidden launcher.
-- Sidebar read navigation uses a shared HTMX replacement scope so newer choices
-  cancel older reads without canceling runtime operations. Successful workspace
+- Sidebar read navigation uses the first-party navigator's shared supersession
+  scope so newer choices cancel older reads without canceling runtime operations. Successful workspace
   swaps retain the sidebar search/filter and scroll position, and restore an
   actually focused desktop list row before the app's content-focus fallback.
   Mobile still moves focus into content. Rejected swaps do not retire live state.
@@ -1175,7 +1167,7 @@ desktop top bar, attachment queue, or agent panel. Current responsive behavior:
   obscuring interactive controls in a nonmodal overlay.
 - Below 768px: one primary pane, 48px mobile bar, modal navigation drawer and
   full-height Files/Changes sheet. The composer respects safe-area insets.
-- Inspector starts closed. Desktop rail preference survives HTMX swaps in tab
+- Inspector starts closed. Desktop rail preference survives native workspace replacements in tab
   memory and is clamped to the current viewport; resizing closes open drawers.
 
 ### Component acceptance rules
@@ -1205,7 +1197,7 @@ behavior; permissions expose public effect summaries, never raw arguments.
 - If the reader scrolls away from the bottom, streaming must not pull them
   back. Show Jump to latest and preserve the history anchor on pagination.
 - Keep drafts per project/session in tab-scoped `sessionStorage`, not server
-  logs or persistent HTMX history. Label draft recovery; clear on explicit
+  logs or persistent DOM-snapshot history. Label draft recovery; clear on explicit
   send/discard/logout. This storage is convenience, not a secrecy boundary.
 - Copy controls are accessible and report success without moving focus.
 - Confirmations return focus to their invoking control; Escape closes
@@ -1266,8 +1258,8 @@ this production adapter initially, alongside a fake for independent UI tests.
 Proposed dependency direction:
 
 ```text
-Browser: server-rendered HTML + HTMX + SSE
-                   │ HTTPS
+Browser: server-rendered HTML + React islands + SnowNavigation + SSE
+                   │ exact-origin HTTP
                    ▼
 internal/web ──→ internal/manager ──→ backend interfaces / public DTOs
                        │                       ▲
@@ -1337,7 +1329,7 @@ internal/web/interactions.go    permission/question HTTP actions
 internal/web/events.go          SSE transport, not agent execution
 internal/web/render.go          templates and safe presentation
 internal/web/templates/         layout, pages, reusable fragments
-internal/web/static/            vendored HTMX/SSE, CSS, external JS, licenses
+internal/web/static/            generated React, first-party controllers, CSS, notices
 internal/manager/manager.go     backend injection and manager lifecycle
 internal/manager/projects.go    registration/create/remove/restore
 internal/manager/workers.go     backend handles, slots and worker supervision
@@ -1467,7 +1459,7 @@ Proposed schema responsibilities:
 | Project | UUID, display name, canonical path, allowed-root identity, created/updated timestamps, pin/order, removed timestamp, imported vs manager-created origin. |
 | Session presentation | Project ID + durable session ID, archive timestamp, UI ordering; no copied conversation or mutable replacement transcript. |
 | Browser session | Hash of random session credential, created/last-used/absolute expiry, revoked timestamp, operator-provided device label. |
-| Pairing challenge | Hashed one-time credential, creation/expiry/used state; no credential in URLs or public logs. |
+| Pairing code | Reusable random code and expiry in the private mode-0600 access store so foreground startup can reprint it after restart; no credential in URLs or public logs. |
 | Submission receipt | Browser request key, project/session/branch identity, payload digest, admitted/rejected/uncertain outcome, associated durable input ID where available. |
 | Manager operation | Explicit create/clone operation ID, state and bounded error, reconciliation marker; not an agent workflow engine. |
 | UI preferences | Theme, panel sizes, compact display; no provider credentials. |
@@ -1864,16 +1856,13 @@ plugin configuration wholesale to the browser. Use explicit allowlisted DTOs.
 Global changes do not silently hot-reconfigure other running projects; show
 which changes apply next session or require explicit idle-runtime reload.
 
-For API-key entry in v1, use a password-style write-only field, HTTPS, no echoed
-value, no localStorage, and the existing atomic `0600` auth service. Connection
-tests are explicit network operations with bounded, redacted errors. Startup
-continues to work with credentials already configured on the host.
-
-OAuth needs a separate remote-browser flow review. A host loopback callback is
-not automatically reachable from a remote phone. Initial UI can give exact
-host CLI instructions; do not embed credentials, copy browser cookies, or
-invent a callback tunnel. Only add browser OAuth once the provider's supported
-flow and Snow's auth service can be reused safely.
+Provider API-key and OAuth entry are excluded from the browser. Keep credential
+setup in explicit host-terminal workflows or the separately documented
+control-RPC API-key contract, using the existing atomic mode-0600 auth service.
+The Web UI may provide exact host CLI instructions and bounded local provider
+status, but must not accept credentials, run connection tests, copy browser
+cookies, or invent an OAuth callback tunnel. Startup continues to work with
+credentials already configured on the host.
 
 MCP/skill/plugin controls must retain current enablement, trust, reload and
 restart semantics. Render inventories and failures safely. A plugin's terminal
@@ -1882,169 +1871,62 @@ shared structured dialogs explicitly and report unsupported UI capabilities.
 
 ## Remote access and browser authentication
 
-### Local operation
+### Trusted-LAN HTTP
 
-The default is `127.0.0.1:7331` with authentication still required. Localhost
-alone does not protect against malicious websites making requests to a local
-service. Validate Host/Origin and protect all state-changing requests.
+`snow --mode web` exposes one exact private-IP HTTP origin plus a localhost
+redirect listener on the same port. It never binds `0.0.0.0`, `::`, a public or
+multicast address, a DNS name, or a zone-qualified IPv6 address. Forwarding
+headers carry no origin, identity, permission, or rate-limit authority.
 
-### Tailscale and other mesh VPNs
+The transport is deliberately unencrypted. The pairing code, cookies, prompts,
+responses, and tool output can be observed by other parties on the network. Use
+it only on a trusted home/work LAN, never public Wi-Fi or the Internet. Snow does
+not configure firewalls, routers, DNS, mDNS, VPNs, browser HTTPS policy, or client
+network isolation.
 
-Proposed Snow launch, using an example tailnet hostname:
-
-```sh
-snow --mode web \
-  --web-root "$HOME/projects" \
-  --web-public-url https://my-host.example-tailnet.ts.net \
-  --web-trusted-proxy 127.0.0.1/32
-```
-
-In a separate terminal, the currently documented Tailscale command is:
-
-```sh
-tailscale serve 7331
-```
-
-This leaves Snow on loopback and lets Serve terminate HTTPS. The operator must
-have Tailscale installed, an authorized device, suitable tailnet access policy,
-and the required DNS/certificate configuration. Verify the exact forwarded
-Host/header behavior in the integration gate; do not loosen origin validation
-until a proxy test passes. Persistent Serve/service configuration is a later
-operator guide, not an installation action Snow performs automatically.
-
-Use **Serve**, not **Funnel**. Keep browser pairing even behind Serve. Do not
-trust `Tailscale-User-*` as app identity in v1. Other mesh VPNs can reach a
-specific VPN-bound HTTPS listener or an operator-managed HTTPS reverse proxy;
-no Tailscale SDK should be needed in Snow.
-
-### Direct LAN
-
-Historical remote proposal only. Implemented local TLS remains numeric-loopback
-and does not make this LAN/public-origin configuration available.
-
-Proposed direct TLS launch:
-
-```sh
-snow --mode web \
-  --web-root "$HOME/projects" \
-  --web-listen 192.168.1.50:7331 \
-  --web-public-url https://snow.home.arpa:7331 \
-  --web-tls-cert /path/to/cert.pem \
-  --web-tls-key /path/to/key.pem
-```
-
-The hostname is illustrative: the operator must provide DNS/hosts resolution
-and a certificate trusted by the connecting devices. Alternatively use a
-trusted HTTPS reverse proxy forwarding to loopback. Do not recommend clicking
-through certificate warnings or sending an auth token over plain LAN HTTP.
-
-Startup refuses a non-loopback plaintext listener. Binding `0.0.0.0`/`[::]`
-requires explicit TLS/public-origin configuration and a warning that every
-interface is exposed. Recommend a specific LAN/VPN interface and firewall
-policy. An allowed private IP does not make Snow a sandbox or make all network
-peers trusted. Internet exposure remains unsupported in the initial release.
-
-### snow.local and other LAN names (proposed)
-
-**Feasible, but not implemented:** `https://snow.local:7331` can identify the
-manager on a local network after the direct-LAN security gate. Name resolution,
-network reachability, HTTPS trust and Snow browser pairing are four separate
-requirements. Merely adding a DNS/hosts entry does not make today's
-numeric-loopback-only listener accept the hostname or remote connections.
-
-| Name | Resolution and reach | HTTPS requirement |
-|---|---|---|
-| `snow.local` | mDNS on the same local link; an operator-configured host responder must own and announce the name. No assumption of routed/VLAN/guest-Wi-Fi or tailnet propagation. | Certificate with `snow.local` in its DNS SAN, signed by a private CA trusted by each connecting device/browser. No public-CA certificate for this internal name. |
-| `snow.home.arpa` | Operator-managed home-network DNS; useful when mDNS is unreliable or multiple subnets must resolve a stable name. Client DNS configuration must actually use that resolver. | Private-CA certificate and per-client trust, as above. |
-| An operator-owned registered domain | Operator-managed DNS, optionally split-horizon to the LAN address. | A public certificate can use domain validation (for example DNS-01) without making the manager publicly reachable; certificate/DNS automation stays operator-owned. |
-| `host.tailnet-name.ts.net` | Tailscale MagicDNS and an authorized connected tailnet device. This is not an alias for `snow.local`. | Tailscale Serve provisions HTTPS for its tailnet hostname; use that exact origin. |
-
-Implementation-sized LAN naming work:
-
-1. **Explicit origin, not name-based trust.** Configure a single HTTPS public
-   origin (scheme, exact hostname, port) independently of the numeric bind
-   address. Reject mismatched Host/Origin, unknown names, malformed authorities
-   and forged forwarding headers. Do not wildcard-allow `*.local`, trust a name
-   because it resolves privately, or resolve a caller-supplied hostname to decide
-   authority. Name discovery never grants permission or starts a runtime.
-2. **Start with operator-managed mDNS.** Document configuring a host responder
-   to publish `snow.local` on selected LAN interfaces, without Snow renaming the
-   machine, changing router DNS/firewalls, installing a daemon, or requiring
-   elevated privileges. Publishing a DNS-SD service label called “Snow” alone
-   does not establish the hostname's address records. Detect/report name
-   conflicts; never silently rename to `snow-2.local` while retaining the old
-   certificate or allowed origin. Optional Snow-managed discovery needs a later
-   bounded, explicitly opted-in lifecycle adapter; no new core-agent dependency.
-3. **Trust and ports are explicit.** The operator supplies a matching certificate
-   and key and installs the private CA's public certificate on each client by an
-   explicit trusted process. Never distribute a CA private key, auto-install
-   trust roots, or recommend clicking through certificate warnings. Port 7331
-   remains part of the URL; bare `https://snow.local` needs an operator-managed
-   HTTPS listener/proxy on 443, not an unrequested privileged Snow launch.
-4. **Failure paths stay safe.** Multicast filtering, Wi-Fi client isolation,
-   conflicting names, stale A/AAAA records, VPN routing, IPv6 scope and differing
-   OS/browser resolvers can prevent access. Give distinct resolution,
-   reachability and certificate diagnostics; offer configured `home.arpa` DNS
-   or the separate tailnet URL, never an automatic plaintext fallback.
-5. **Acceptance before availability.** Verify name resolution and trusted HTTPS
-   from real supported phone/desktop clients on the same LAN, including a
-   network with blocked multicast and a duplicate-name case. Check exact-origin
-   pairing/CSRF, Secure cookies, SSE reconnect, revocation and no replay across
-   address changes/restarts. Unit/loopback fixtures cannot certify mDNS support
-   or device trust-store setup. Cross-subnet mDNS reflection is not a default.
-
-Recommendation: support `snow.local` as an optional same-link convenience after
-explicit LAN TLS/origin support. Prefer `snow.home.arpa` for managed home DNS,
-and the native `*.ts.net` URL for private remote access without manually
-installing a local CA. None of these names is an authentication boundary.
-
-Sources checked for this handoff: [RFC 6762 (mDNS)](https://www.rfc-editor.org/rfc/rfc6762.html),
-[RFC 8375 (`home.arpa`)](https://www.rfc-editor.org/rfc/rfc8375.html),
-[local certificate trust guidance](https://letsencrypt.org/docs/certificates-for-localhost/),
-and [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve/).
-These establish design prerequisites, not a tested Snow remote deployment.
+HTTPS cannot be accepted without a certificate. Rather than retaining an unused
+certificate/proxy framework, the Web Manager exposes no TLS, generated-CA,
+saved-profile, named-origin, trusted-proxy, Tailscale forwarding, or browser
+API-key path. Provider credentials remain host-terminal or control-RPC concerns.
 
 ### Pairing and session lifecycle
 
-Use one-time browser pairing rather than credentials in query strings:
+Use browser pairing rather than credentials in query strings:
 
-1. Create a cryptographically random 256-bit challenge with a five-minute TTL.
-   Store only its hash. In an interactive host launch, display it in a clearly
-   marked credential section; in non-interactive mode write a mode-0600 pairing
-   file and print only its path, not a reusable secret into service logs.
-2. The operator enters it into a same-origin pairing form. Rate-limit attempts
-   globally and per source, validate Origin, and compare hashed secrets safely.
-3. Atomically consume the challenge and issue a new random browser-session
-   credential. Never reuse the pairing token as the cookie value.
-4. Persist only the cookie credential's hash and metadata. Set HttpOnly,
-   SameSite=Strict, path=/, no Domain; Secure for HTTPS. A distinctly named
-   loopback HTTP cookie is the only local development exception.
-5. Start with a 24-hour idle expiry and seven-day absolute expiry; show expiry
-   in Browser access. Provide explicit logout/revocation and close active
-   streams immediately when the session becomes invalid.
-6. A paired browser may create a short-lived new pairing challenge through a
-   deliberate CSRF-protected action. Host-only recovery/rotation must also be
-   possible without a functioning browser, via a narrowly scoped CLI helper.
+1. Create a cryptographically random reusable pairing code with a 30-day expiry.
+   Persist the code in the private mode-0600 access store so foreground startup
+   can reprint it after restart; derive its comparison hash in memory. Print the
+   code and exact expiry only at foreground startup. Never put it in a URL,
+   access log, event, diagnostic, or export.
+2. The operator enters it into the exact-origin pairing form. Rate-limit attempts
+   globally and per admitted network source, validate Host and Origin, and
+   compare hashed secrets safely.
+3. Issue a separate random browser-session credential. Never reuse the pairing
+   code as the cookie value.
+4. Persist only the cookie credential's hash and metadata. Set a host-only,
+   HttpOnly, SameSite=Strict, path=/, non-Secure cookie: HTTP is the only
+   supported transport, and there is no HTTPS exception or deployment profile.
+5. Enforce the implemented 30-day idle and absolute limits and the eight-browser
+   cap. Sign out revokes the current browser; Browser access can revoke one
+   selected browser or all browsers. Active streams periodically recheck access.
+6. A paired browser may deliberately rotate the pairing code through a
+   CSRF-protected action without signing out existing browsers. Revoke-all also
+   rotates the code; restart the foreground manager to print the replacement.
 
-Approve the exact recovery helper syntax in phase 0, for example
-`snow web pair` and `snow web revoke --all`, without making `snow web` a second
-runtime implementation. Pairing challenges and session cookies never appear
-in access logs, URLs, SSE data, diagnostics, browser history, or exports.
-Do not automatically regenerate a public pairing credential on every login
-failure or trust a caller-provided device label as identity.
-
-Proxy handling uses configured peer CIDRs and the configured public origin.
-Ignore forwarded headers from other sources. Require the expected Host and
-Origin, set secure cookies based on trusted deployment configuration, and use
-same-origin absolute redirects. Local proxy access is not an authentication
-bypass, and forged forwarding headers do not expand allowed origins.
+There is no `snow web` recovery/configuration command. Pairing codes and session
+cookies never appear in URLs, SSE data, browser history, or exports, and a
+caller-provided device label is never treated as identity. Forwarded headers
+have no authority. Every request uses the exact configured private-IP origin;
+the localhost listener only redirects GET/HEAD requests to that origin. In the
+offline loopback fallback, loopback HTTP is the exact configured origin.
 
 ## Threat model and operational bounds
 
-> Historical remote target and proposed bounds. The preview remains
-> **direct-loopback only**; current limits, periodic stream reauthorization and
-> capabilities are in the current contract above and `docs/security.md`.
-> This table is not shipped configuration (for example, current workers are two,
+> Current HTTP-only trusted-LAN threat bounds. The exact private-IP origin,
+> same-port localhost redirect, offline loopback fallback, periodic stream
+> reauthorization, and current capabilities are canonical above and in
+> `docs/security.md`. The table below includes historical target estimates rather
+> than shipped limits (for example, current workers are two,
 > pairing/browser limits are 30 days, and SSE uses no replay ring).
 
 This is a remote control plane capable of authorizing host-level commands.
@@ -2062,8 +1944,8 @@ Required defenses:
 - CSRF token on every unsafe method, including pairing/logout/settings;
   validate same-origin Origin and Fetch Metadata where available. Do not rely
   on SameSite alone. No state changes on GET, permissive CORS or JSONP.
-- Exact Host/public-origin validation to resist DNS rebinding. Reject malformed,
-  duplicate/conflicting forwarded header interpretations and unsupported origins.
+- Exact Host/public-origin validation to resist DNS rebinding. Forwarded headers
+  have no authority; reject unsupported direct Host and Origin values.
 - Render text with `html/template`; sanitize Markdown through a reviewed
   allowlist, with raw HTML disabled. Strip scripts, event attributes, dangerous
   URL schemes and HTMX attributes from all model/repository/plugin content.
@@ -2250,84 +2132,26 @@ not yet the remote release.
 
 ### Phase 4: private remote operation and resource limits
 
-Owned areas: listener/proxy deployment policy, global runtime/process/child
-admission, browser-access management and operator guides.
+Status: automatic trusted-LAN HTTP is implemented. Ordinary startup selects one
+assigned private address, binds it and localhost on port 7331, redirects safe
+localhost reads to the canonical LAN origin, and falls back to loopback when
+offline. Exact Host/Origin, CSRF, pairing, revocation, per-peer throttling,
+bounded HTTP servers, and fail-closed dual-listener lifecycle remain covered.
 
-Deliver tested Tailscale Serve and direct-LAN TLS paths, browser revocation,
-trusted-proxy rules, slow-client handling, aggregate attention, concurrency
-across projects, resource limits, restart reconciliation and mobile smoke.
+The earlier TLS/certificate/generated-CA/saved-profile/DNS/trusted-proxy design
+was removed rather than retained as unused complexity. Real-device acceptance
+must use the explicit HTTP URL and a trusted LAN; browser HTTPS-only settings are
+client policy, not a server feature.
 
-Exit: real private-network phone/desktop journeys pass with fake/local-mocked
-providers; no unauthorized route/stream access; no orphan work on shutdown;
-no misleading public-internet or sandbox claim. External exposure starts only
-after this gate, not during phase 1 scaffolding.
-
-#### Next delivery order and bounded ownership
-
-Several Phase 5 controls have already landed locally; do not rebuild them or
-interpret the historical numbered phases as an accurate feature inventory.
-The next work is private deployment and reliability, not another settings panel.
-
-1. **BUG-128 fixed; consolidate the local baseline.** Ordinary, Edit & resend
-   and Regenerate RPC completion now classify an explicit provider abort using
-   invocation-local evidence, preserving the Go error contract and real-failure
-   precedence. Focused protocol and actual subprocess-manager regressions pass:
-   canceled recovery requires no Stop or replay, and a fresh explicit prompt
-   completes normally. See [BUG-128](../bugs.md#bug-128-provider-originated-abort-can-produce-completed-rpc-status)
-   for verification scope. Current skill opt-in is reconciled above; attachment
-   coverage remains in the current status/operator guide. Retain the distinction
-   between integrated local verification, reusable CI, installation and release
-   approval. This fix is not remote-network or new browser-engine certification.
-2. **Freeze the deployment trust contract before opening a listener.** Owned
-   areas: `cmd/snow/web.go`, web listener/middleware/auth/TLS configuration,
-   corresponding CLI/security tests, `docs/configuration.md` and
-   `docs/security.md`. Keep default numeric loopback unchanged. Define exact
-   public-origin parsing, numeric bind addresses, trusted proxy peers, allowed
-   forwarding-header form and rejection rules. Reject invalid combinations
-   before registry/runtime startup. The illustrative `--web-public-url` and
-   `--web-trusted-proxy` flags elsewhere in this document remain proposals until
-   this contract lands.
-3. **Implement and verify the Tailscale Serve path first.** Keep the backend
-   loopback-only; require explicit public HTTPS origin and trusted-proxy
-   configuration. Verify real Serve Host/header behavior rather than guessing
-   it. Untrusted peers/headers must never confer HTTPS, origin or browser
-   identity. Define cookie security and redirect origin from the trusted
-   deployment contract; keep Snow pairing/CSRF and revocation authoritative,
-   and do not use Tailscale identity headers as an authentication shortcut.
-   Add negative tests for direct-backend/forged-header access and independent
-   project/worker isolation. Explicitly audit write-only API-key controls:
-   today's actual-TLS-only gate must stay disabled behind plaintext proxy
-   backends unless a separately tested trusted-transport contract replaces it.
-   An `X-Forwarded-Proto: https` header alone never unlocks secret writes.
-4. **Add direct-LAN TLS, then optional LAN naming.** Start with a selected numeric
-   LAN interface, an exact HTTPS origin and operator-supplied trusted TLS files.
-   Refuse remote plaintext, and do not silently widen a loopback bind. Deliver
-   the [`snow.local` handoff](#snowlocal-and-other-lan-names-proposed) with
-   operator-managed mDNS first; local DNS and certificate trust are independent
-   setup tasks. No automatic firewall, hostname, certificate-store or router
-   changes. Treat direct LAN and Serve as separate tested deployment profiles.
-5. **Complete resource/recovery and private-network acceptance gates.** Preserve
-   the current two-live-project cap until an explicit bounded-admission change
-   is tested; the historical four-root target is not the current default.
-   Exercise slow SSE clients, bounded streams/processes/readers, independent
-   workers, pending questions/approvals, revocation, manager/worker death and
-   restart reconciliation. Never replay prompts, decisions or uncertain
-   CREATE/clone jobs automatically. Run actual phone/desktop journeys using
-   fake/local providers, then update canonical operator limits and the release
-   checklist. Loopback mocks and earlier browser totals cannot substitute for
-   these network/device checks.
-
-Each item is a separately verified increment. Do not run parallel mutators over
-shared admission, transport or auth files. Until the relevant profile passes
-its gate, keep its external listener/proxy configuration unavailable; no
-Tailscale service, mDNS advertisement or remote listener is started by this plan.
+Remaining Phase 4 work is limited to aggregate resource accounting, recovery,
+and broader device/network acceptance—not alternate network transports.
 
 ### Phase 5: standard Snow control coverage
 
 Deliver model/reasoning/permission/session-default controls, Plan Mode review,
 branch/fork/compaction, goal controls and usage, subagent controls, managed
 process stop/logs, read-only Git review, extension inventory and supported
-controls, session archiving, write-only API-key setup, and bounded clone jobs.
+controls, session archiving, and bounded clone jobs.
 
 Exit: each supported action maps to a typed, capability-gated RPC operation
 backed by the existing runtime and has a busy/unsupported/failed state. No UI
@@ -2492,9 +2316,9 @@ Recommended defaults to accept or change before phase 1:
 | Worker topology | One lazy-activated worker per active project/session, bounded runtime-free catalog pool; separate root agents, not manager subagents. |
 | Appearance | Snow-neutral light/dark/system, three-pane desktop and phone-first task flow. |
 | Parallel work | Four distinct-project roots; one root per project; no implicit fleet scheduling. |
-| Remote access | HTTPS + Snow pairing; loopback behind Tailscale Serve preferred. |
+| Remote access | Automatic trusted-LAN HTTP plus Snow pairing; localhost redirect and offline loopback fallback. |
 | Filesystem authority | Launch-configured roots; create/register/remove, no destructive workspace deletion. |
-| Credential setup | Existing host credentials first; write-only API key in v1; remote OAuth separately reviewed. |
+| Credential setup | Host-terminal or control-RPC only; browser API-key and OAuth entry excluded. |
 | Terminal/editor | Safe files/diffs/process logs first; no PTY or full IDE in v1. |
 | Git | Status/diff and bounded clone in v1; commit/push/worktree features later. |
 | Session ownership | Read-only inspection across surfaces, exclusive participating-runtime execution lease. |

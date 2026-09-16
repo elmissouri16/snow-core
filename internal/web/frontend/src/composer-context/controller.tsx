@@ -408,7 +408,7 @@ export function init({root, key, instance, request, changed = () => {}, error = 
     flushSync(() => view.unmount());
     suggestions({expanded: false});
   }
-  root.ownerDocument.addEventListener('htmx:beforeSwap', () => closePlusMenu(false), options);
+  root.ownerDocument.addEventListener('snow:navigation-before-swap', () => closePlusMenu(false), options);
   root.ownerDocument.addEventListener('pointerdown', event => {
     if (plusMenu && event.target instanceof Node && !refs.menu.current?.contains(event.target) && !refs.trigger.current?.contains(event.target)) closePlusMenu(false);
   }, options);

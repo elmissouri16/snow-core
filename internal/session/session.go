@@ -29,9 +29,10 @@ type Header struct {
 type EntryType string
 
 const (
-	EntryMessage    EntryType = "message"
-	EntryCompaction EntryType = "compaction"
-	EntryMeta       EntryType = "meta"
+	EntryMessage         EntryType = "message"
+	EntryCompaction      EntryType = "compaction"
+	EntryMeta            EntryType = "meta"
+	EntryInternalContext EntryType = "internal_context"
 
 	// MetaToolTranscript stores branch-scoped, provider-excluded presentation
 	// metadata for harness tool activity without a matching tool-result message.
@@ -59,7 +60,7 @@ type Entry struct {
 	// Compaction
 	Summary          string `json:"summary,omitempty"`
 	CompactedThrough string `json:"compacted_through,omitempty"`
-	// Meta
+	// Meta / provider-only internal context
 	Key   string `json:"key,omitempty"`
 	Value string `json:"value,omitempty"`
 }

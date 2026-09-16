@@ -19,6 +19,7 @@ export interface CatalogProps extends HomeProps {
 export interface LoginProps {
   csrf: string;
   error: string;
+  networkProfile: 'local' | 'trusted-lan-http';
 }
 export interface ColdProps extends LoginProps {
   project: Project;
@@ -69,8 +70,9 @@ export function validateHomeProps(value: unknown): HomeProps {
   return { projects, error: string(v.error, 4096) };
 }
 export function validateLoginProps(value: unknown): LoginProps {
-  const v = record(value);
-  return { csrf: string(v.csrf, 512), error: string(v.error, 4096) };
+  const v = record(value), networkProfile = string(v.networkProfile, 32);
+  if (networkProfile !== 'local' && networkProfile !== 'trusted-lan-http') throw Error('Invalid network profile');
+  return { csrf: string(v.csrf, 512), error: string(v.error, 4096), networkProfile };
 }
 export function validateCatalogProps(value: unknown): CatalogProps {
   const v = record(value);

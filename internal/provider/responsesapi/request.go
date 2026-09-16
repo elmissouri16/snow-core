@@ -260,6 +260,15 @@ func responseInput(msg protocol.Message, providerID string) ([]any, error) {
 
 func appendResponseInput(out []any, msg protocol.Message, providerID string, cloneProviderData bool) ([]any, error) {
 	switch msg.Role {
+	case protocol.RoleInternal:
+		fragment := protocol.InternalContextFragment{Source: msg.InternalContextSource, Text: messageText(msg)}
+		if err := fragment.Validate(); err != nil {
+			return nil, err
+		}
+		out = append(out, &responseSingleMessageInput{
+			Content: [1]responseInputContent{{Text: renderInternalFragment(fragment), Type: "input_text"}},
+			Role:    "user",
+		})
 	case protocol.RoleUser, protocol.RoleAgent:
 		contentCount := userInputContentCount(msg.Content)
 		if contentCount == 1 {
@@ -369,6 +378,10 @@ func requestInputCount(messages []protocol.Message, internalCount int, providerI
 
 func responseInputItemCount(msg protocol.Message, providerID string) int {
 	switch msg.Role {
+	case protocol.RoleInternal:
+		if messageTextPresent(msg.Content) {
+			return 1
+		}
 	case protocol.RoleUser, protocol.RoleAgent:
 		if userInputContentCount(msg.Content) > 0 {
 			return 1

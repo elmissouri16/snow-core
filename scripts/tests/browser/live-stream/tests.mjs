@@ -55,7 +55,7 @@ export async function exercise({client, sessionId, ready, directory, artifacts, 
   const projectRow = `[data-sidebar-project="${ready.project}"]`;
   const sessionLink = id => `${projectRow} [data-shell-session="${id}"] [data-shell-session-open]`;
   const settledNavigation = async (action, expression, label) => {
-    await evaluate("window.workspaceFlowSettled=false; document.addEventListener('htmx:afterSettle',()=>window.workspaceFlowSettled=true,{once:true})");
+    await evaluate("window.workspaceFlowSettled=false; document.addEventListener('snow:navigation-end',()=>window.workspaceFlowSettled=true,{once:true})");
     await action();
     await wait(`(${expression}) && window.workspaceFlowSettled`, label);
   };
@@ -80,7 +80,7 @@ export async function exercise({client, sessionId, ready, directory, artifacts, 
     await evaluate(`window.homeLifetimeMarker = 1; document.querySelector('#home-prompt').value=${JSON.stringify(startupDraft)}; document.querySelector('#home-prompt').dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('#home-composer').requestSubmit()`);
     await wait('!!document.querySelector(".shell-workspace-menu")', "Continue without workspace opens picker");
     const addedPath = join(directory, 'home-added-project'); await mkdir(addedPath);
-    await evaluate("window.homeNavSettled=false; document.addEventListener('htmx:afterSettle',()=>window.homeNavSettled=true,{once:true})");
+    await evaluate("window.homeNavSettled=false; document.addEventListener('snow:navigation-end',()=>window.homeNavSettled=true,{once:true})");
     await click('.shell-workspace-menu .picker-add');
     await wait('!!document.querySelector("#add-project-form") && window.homeNavSettled', 'Add workspace navigation settled');
     assert(await evaluate("window.homeLifetimeMarker === 1"), 'Add workspace link preserves document');
@@ -113,7 +113,7 @@ export async function exercise({client, sessionId, ready, directory, artifacts, 
     await wait('document.querySelector("#live-status")?.textContent === "Ready" && document.querySelector("#live-connection")?.textContent === "Live"', "real worker activation", 20000);
     assert(await evaluate(`document.querySelector('#live-prompt')?.value === ${JSON.stringify(startupDraft)} && window.homeLifetimeMarker === 1 && !document.querySelector('#home-draft-notice')`), "activation transfers startup draft without reloading or duplicating it");
     assert(postCount() === 0 && await callCount() === 0, "startup draft is never auto-sent");
-    await evaluate("window.htmx.ajax('GET','/',{target:'#workspace',swap:'outerHTML'})");
+    await evaluate("window.SnowNavigation.visit('/',{history:'none'})");
     await wait('document.querySelector("#home-prompt")?.disabled === false', 'home from live conversation');
     await evaluate("document.querySelector('#home-prompt').value='Second startup draft'; document.querySelector('#home-prompt').dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('#home-composer').requestSubmit()");
     await click(`.shell-workspace-menu [data-home-project="${ready.project}"]`);
@@ -158,9 +158,9 @@ export async function exercise({client, sessionId, ready, directory, artifacts, 
     assert(await evaluate(`!document.querySelector('#live-session[data-runtime=true]') && document.querySelector('#workspace-prompt')?.dataset.draftProject === ${JSON.stringify(otherProject)} && document.querySelector('#workspace-prompt').value === '' && document.querySelector('#workspace-prompt').disabled`) && (await snapshot()).session_id === secondSession, 'cold workspace does not steal the pending draft or change the remote live owner');
     await wait(`!!document.querySelector(${JSON.stringify(sessionLink(firstSession))}) && document.querySelector(${JSON.stringify(projectRow + ' [data-workspace-toggle]')})?.getAttribute('aria-expanded') === 'true'`, 'non-current saved session remains selectable under the other live workspace');
     const crossSwitchesBefore = requests.filter(r=>r.method === 'POST' && r.path.endsWith('/switch')).length;
-    await evaluate("window.crossWorkspaceMount=null; document.body.addEventListener('htmx:afterSwap',()=>{const live=document.querySelector('#live-session[data-runtime=true]'); window.crossWorkspaceMount=live && {project:live.dataset.project,session:live.dataset.session,draft:document.querySelector('#live-prompt')?.value};},{once:true})");
+    await evaluate("window.crossWorkspaceMount=null; document.addEventListener('snow:navigation-after-swap',()=>{const live=document.querySelector('#live-session[data-runtime=true]'); window.crossWorkspaceMount=live && {project:live.dataset.project,session:live.dataset.session,draft:document.querySelector('#live-prompt')?.value};},{once:true})");
     await settledNavigation(() => click(sessionLink(firstSession)), `document.querySelector('#live-session')?.dataset.session === ${JSON.stringify(firstSession)} && document.querySelector('#live-status')?.textContent === 'Ready'`, 'cross-workspace saved link mounts its owner then switches to the requested session');
-    assert(await evaluate(`window.crossWorkspaceMount?.project === ${JSON.stringify(ready.project)} && window.crossWorkspaceMount.session === ${JSON.stringify(secondSession)} && window.crossWorkspaceMount.draft === ${JSON.stringify(secondDraft)} && window.homeLifetimeMarker === 1`), 'real HTMX first mounts the existing second-session owner and restores its draft without a document reload');
+    assert(await evaluate(`window.crossWorkspaceMount?.project === ${JSON.stringify(ready.project)} && window.crossWorkspaceMount.session === ${JSON.stringify(secondSession)} && window.crossWorkspaceMount.draft === ${JSON.stringify(secondDraft)} && window.homeLifetimeMarker === 1`), 'native navigation first mounts the existing second-session owner and restores its draft without a document reload');
     assert(requests.filter(r=>r.method === 'POST' && r.path.endsWith('/switch')).length === crossSwitchesBefore + 1 && requests.filter(r=>r.method === 'POST' && r.path.endsWith('/runtime/open')).length === opensBeforeCross, 'cross-workspace selection performs exactly one deliberate switch and no new activation');
     assert(await evaluate(`document.querySelector('#live-prompt').value === ${JSON.stringify(startupDraft)} && document.querySelector('#home-draft-notice')?.textContent.includes('Second startup draft') && document.querySelector('[data-home-draft-use]').disabled`), 'cross-workspace return preserves the first session draft and pending startup conflict');
     assert(postCount() === 0 && await callCount() === 0 && !requests.some(r=>/\/(?:models|choices)$/.test(r.path)), 'cross-workspace reads and owner switching never send drafts, call the provider, or discover models');

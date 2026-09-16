@@ -25,11 +25,11 @@ are whole-file metadata revisions, not hashes of secret content. Every legacy
 atomic auth writer changes the inode and invalidates outstanding revisions.
 Unrelated profile mutations also require rereading and explicitly retrying.
 
-The method itself is callable only by explicitly trusted same-user local
-transports. Public transport owns the mandatory numeric-loopback TLS + CSRF gate
-**before body parsing**; HTTP must not accept submitted keys. Request objects
-are secret input: never log/echo/record their JSON. Printf-style formatting is
-redacted, but JSON serialization intentionally remains possible for trusted RPC.
+The method itself is callable only by explicitly trusted same-user local stdio
+or control-RPC transports. It must never be exposed through the Web Manager HTTP
+surface; HTTP must not accept submitted keys. Request objects are secret input:
+never log/echo/record their JSON. Printf-style formatting is redacted, but JSON
+serialization intentionally remains possible for trusted local RPC.
 Responses always state `future_runtime`; restart existing workers to consume
 changed credentials. Configured means present locally, never remotely verified.
 

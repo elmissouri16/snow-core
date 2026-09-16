@@ -57,10 +57,7 @@ func run() error {
 	}
 
 	root.PersistentFlags().StringP("prompt", "p", "", "run in print mode with this prompt")
-	root.PersistentFlags().String("mode", "", "output mode: print|json|rpc|web (web is a local shell preview)")
-	root.PersistentFlags().String("web-listen", "127.0.0.1:7331", "local web preview address (numeric loopback only)")
-	root.PersistentFlags().String("web-tls-cert", "", "optional absolute TLS certificate path for the loopback manager (requires --web-tls-key)")
-	root.PersistentFlags().String("web-tls-key", "", "optional absolute TLS private-key path for the loopback manager (requires --web-tls-cert)")
+	root.PersistentFlags().String("mode", "", "output mode: print|json|rpc|web (web automatically serves localhost and the private LAN)")
 	root.PersistentFlags().String("rpc-startup", "eager", "RPC startup: eager|catalog|control (catalog and control never activate an agent)")
 	root.PersistentFlags().String("collaboration-mode", "", "collaboration mode: default|plan")
 	root.PersistentFlags().String("provider", "", "provider id or named OpenAI-compatible profile")

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {accepted, authority, bindReviewed, blocking, canDismissUnknown, canSteer, initialState, sameIdentity, setText, stale, update, validID, validProjection, validReceipt} from './model.ts';
+import {accepted, authority, bindReviewed, blocking, canDismissUnknown, canSteer, initialState, randomRequestID, sameIdentity, setText, stale, update, validID, validProjection, validReceipt} from './model.ts';
 import type {Identity, Item, Operation, Projection, Snapshot, Store, UI} from './model.ts';
 
 const identity: Identity = {project_id: 'project', instance_id: 'instance', session_id: 'session'};
@@ -14,6 +14,15 @@ const receipt = () => ({...identity, revision: 2, steer: {...projection(), revis
 function state(store: Store = {text: 'literal\ncorrection', revision: 2}) {
   const value = initialState(store); update(value, snapshot(), ui, api, identity); return value;
 }
+
+test('request IDs remain available when randomUUID is unavailable on private-IP HTTP', () => {
+  const id = randomRequestID({getRandomValues: value => {
+    const bytes = value as unknown as Uint8Array;
+    for (let i = 0; i < bytes.length; i++) bytes[i] = i;
+    return value;
+  }});
+  assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
+});
 
 test('bounded projections accept only native public states and distinct correlated IDs', () => {
   for (const status of ['accepted', 'delivered', 'discarded', 'uncertain'] as const) assert.equal(validProjection({...projection(), items: [item(status)]}, api), true);

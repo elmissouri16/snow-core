@@ -562,7 +562,7 @@ func permissionFixturePair(t *testing.T, ctx context.Context, output string) (st
 		t.Fatal("invalid fixture startup")
 	}
 	origin := lines[1]
-	_, code, ok := strings.Cut(lines[2], "): ")
+	code, ok := fixturePairingCode(output)
 	if !ok {
 		t.Fatal("missing local pairing credential")
 	}
